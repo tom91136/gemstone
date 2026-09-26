@@ -27,17 +27,16 @@ final class UnifiedMemoryProgressSuite extends munit.FunSuite {
     case "hsa"       => List("region", "pool", "locked")
     case "levelzero" => List("shared", "host")
     case "opencl"    => List("svm", "usm_host", "usm_shared")
-    case "sycl"      => List("shared", "host")
   }
 
   for {
-    api         <- List("cuda", "hip", "hsa", "levelzero", "opencl", "sycl")
+    api         <- List("cuda", "hip", "hsa", "levelzero", "opencl")
     atomicWidth <- if (atomicsOnly) List(32, 64) else List(0, 32, 64)
     fenced      <- if (atomicWidth != 0) List(false, true) else List(false)
     workItems   <- if (atomicWidth != 0 && !fenced) List(1, 128) else List(1)
     scenario    <- if (atomicWidth != 0) List((false, true, false)) ++
       (if (!fenced && workItems == 1) List((false, false, true)) else Nil)
-    else (if (api == "opencl" || api == "sycl") List(false) else List(false, true)).map((_, false, false)) ++
+    else (if (api == "opencl") List(false) else List(false, true)).map((_, false, false)) ++
       List((false, true, false))
     hostProbe <- if (scenario._3) List("submission", "overlap", "compare") else List("none")
     if hostProbe != "compare" || atomicWidth == 32
@@ -73,13 +72,17 @@ final class UnifiedMemoryProgressSuite extends munit.FunSuite {
         )
       else GemstoneRPCServer.start(TaskLimits(10000000, 64), environment)) {
         server =>
-          val syclLibraries  = directory.resolve("gemstone_memory_sycl.library-path")
-          val extraLibraries =
-            if (api == "sycl" && Files.isRegularFile(syclLibraries)) Files.readString(syclLibraries) else ""
-          val libraryPath =
-            List(directory.toString, extraLibraries, sys.env.getOrElse("LD_LIBRARY_PATH", "")).mkString(":")
+          val libraryPath = List(directory.toString, sys.env.getOrElse("LD_LIBRARY_PATH", "")).mkString(":")
+          val probes      =
+            (if (ordinary) Vector.empty else Vector("rpc_only")) ++
+              (if (hostProbe == "overlap") Vector("overlap") else Vector.empty) ++
+              (if (hostProbe == "compare") Vector("compare") else Vector.empty) ++
+              (if (submission) Vector("submission") else Vector.empty) ++
+              (if (workItems > 1) Vector("multilane") else Vector.empty) ++
+              (if (fenced) Vector("fence") else Vector.empty) ++
+              (if (atomicProbe) Vector("atomic") else Vector.empty)
           val base = Map(
-            "GEMSTONE_MEMORY_RPC_ONLY"        -> "1",
+            "GEMSTONE_MEMORY_PROBE"           -> probes.mkString(","),
             "GEMSTONE_MEMORY_ALLOCATION_KIND" -> allocationKind,
             "GEMSTONE_RPC_PORT"               -> server.port.value.toString,
             "GEMSTONE_RPC_CLIENT"             -> server.client.value.toString,
@@ -87,31 +90,21 @@ final class UnifiedMemoryProgressSuite extends munit.FunSuite {
             "ZE_ENABLE_ALT_DRIVERS"           -> directory.resolve("libze_gemstone.so.1").toString,
             "ZE_ENABLE_LOADER_DEBUG_TRACE"    -> "0",
             "OCL_ICD_VENDORS"                 -> vendors.toString,
-            "OCL_ICD_FILENAMES"               -> directory.resolve("libOpenCL_gemstone.so.1").toString,
-            "ONEAPI_DEVICE_SELECTOR"          -> "opencl:*"
-          )
-          val paging = if (ordinary) Map("GEMSTONE_CUDA_SYSTEM_PAGING" -> "1", "GEMSTONE_HSA_SYSTEM_PAGING" -> "1")
-          else Map.empty[String, String]
+            "OCL_ICD_FILENAMES"               -> directory.resolve("libOpenCL_gemstone.so.1").toString
+          ) ++
+            (if (atomicProbe) Map("GEMSTONE_MEMORY_ATOMIC_BITS" -> atomicWidth.toString)
+             else Map.empty[String, String]) ++
+            (if (concurrent) Map("GEMSTONE_MEMORY_CONCURRENCY_DIRECTORY" -> checkpoint.directory.toString)
+             else Map.empty[String, String])
+          val paging    = if (ordinary) Map("GEMSTONE_SYSTEM_PAGING" -> "1") else Map.empty[String, String]
           val arguments = Vector(client.toString) ++ (if (ordinary) Vector("ordinary") else Vector.empty)
           val result    = NativeTestProcess.run(
             arguments.map(_.refineUnsafe[NoNul]).refineUnsafe[MinLength[1]],
             directory,
             Environment(
-              (if (ordinary) base - "GEMSTONE_MEMORY_RPC_ONLY" else base) ++ paging ++
-                (if (hostProbe == "overlap") Map("GEMSTONE_MEMORY_OVERLAP_PROBE" -> "1")
-                 else Map.empty[String, String]) ++
-                (if (hostProbe == "compare") Map("GEMSTONE_MEMORY_COMPARE_PROBE" -> "1")
-                 else Map.empty[String, String]) ++
-                (if (submission) Map("GEMSTONE_MEMORY_SUBMISSION_PROBE" -> "1") else Map.empty[String, String]) ++
-                (if (workItems > 1) Map("GEMSTONE_MEMORY_MULTILANE_PROBE" -> "1") else Map.empty[String, String]) ++
-                (if (fenced) Map("GEMSTONE_MEMORY_FENCE_PROBE" -> "1") else Map.empty[String, String]) ++
-                (if (atomicProbe)
-                   Map("GEMSTONE_MEMORY_ATOMIC_PROBE" -> "1", "GEMSTONE_MEMORY_ATOMIC_BITS" -> atomicWidth.toString)
-                 else Map.empty[String, String]) ++
-                (if (concurrent) Map("GEMSTONE_MEMORY_CONCURRENCY_DIRECTORY" -> checkpoint.directory.toString)
-                 else Map.empty[String, String]),
+              base ++ paging,
               if (ordinary) Set.empty
-              else Set("GEMSTONE_CUDA_SYSTEM_PAGING", "GEMSTONE_HSA_SYSTEM_PAGING", "UR_ADAPTERS_FORCE_LOAD")
+              else Set("GEMSTONE_SYSTEM_PAGING", "UR_ADAPTERS_FORCE_LOAD")
             ),
             120.seconds
           )

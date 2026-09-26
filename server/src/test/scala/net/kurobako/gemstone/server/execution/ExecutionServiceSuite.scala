@@ -1,15 +1,16 @@
 package net.kurobako.gemstone.server.execution
 
 import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
 import net.kurobako.gemstone.isa.{KernelMetadata as ISAKernelMetadata, KernelName as ISAKernelName, ProgramSymbols}
-import net.kurobako.gemstone.memory.AllocationKind
+import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress}
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.vm.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import java.util.concurrent.{CountDownLatch, FutureTask, TimeUnit}
 import scala.util.Using
 
@@ -49,7 +50,7 @@ final class ExecutionServiceSuite extends munit.FunSuite {
             _ <- memory.write(region, offset, Vec[Byte](42)).left.map(RuntimeBackend.Error.Execution(_))
             _ <- services.observer.observe(
               control.observation,
-              Event.Print("done", Vec(Event.PrintArgument.Integer(Vec(42L), 32, true)))
+              Event.Print("done %d", Vec(Event.PrintArgument.Integer(Vec(42L), 32)))
             ).left.map(error => RuntimeBackend.Error.Execution(Fault.Observer(error.message)))
           } yield Result(control.usedInstructions)
         case _ => Left(RuntimeBackend.Error.Execution(Fault.InvalidTask("memory argument is required")))
@@ -73,7 +74,7 @@ final class ExecutionServiceSuite extends munit.FunSuite {
 
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
       assertEquals(service.read(allocation, 2, 1), Right(Vec[Byte](42)))
-      assertEquals(service.completionPrints(completion).map(_.map(_.format)), Right(Vec("done")))
+      assertEquals(service.completionPrints(completion), Right("done 42"))
       assertEquals(service.completionDirtyRanges(completion), Right(Vec(DirtyRange(allocation, 2L, 1))))
     }
     assert(backend.programClosed.get())
@@ -290,6 +291,48 @@ final class ExecutionServiceSuite extends munit.FunSuite {
         assertEquals(observed.get(first.value), 11.toByte)
         assertEquals(observed.get(second.value), 22.toByte)
       }
+    }
+  }
+
+  test("pointer-bearing scalar arguments are relocated from registered allocation addresses") {
+    val captured = AtomicReference(Vec.empty[KernelTask.PointerRelocation])
+    final class RelocationBackend extends RuntimeBackend {
+      override val encoding: String                                          = ExecutionServiceSuite.this.encoding
+      override def load(services: RuntimeBackend.Services, image: Vec[Byte]) = Right(RelocationProgram(services))
+      private final class RelocationProgram(services: RuntimeBackend.Services) extends RuntimeBackend.Program {
+        override def symbols: Either[RuntimeBackend.Error, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
+        override def kernel(name: ISAKernelName): Either[RuntimeBackend.Error, ISAKernelMetadata] =
+          ISAKernelMetadata.validated(
+            8,
+            1,
+            Vec(ISAKernelMetadata.Parameter(8, 0, ISAKernelMetadata.ParameterKind.Scalar, containsPointers = true))
+          ).left.map(RuntimeBackend.Error.Invalid(_))
+        override val globals: Option[RuntimeBackend.Program.Globals]                 = None
+        override def execute(task: KernelTask, memory: Memory, control: TaskControl) = {
+          captured.set(task.pointerRelocations)
+          Right(Result(control.usedInstructions))
+        }
+        override def close(): Unit = ()
+      }
+    }
+    Using.resource(ExecutionService(List(RelocationBackend()))) { service =>
+      val target = service.registerAllocation(64, AllocationKind.Device).toOption.get
+      assertEquals(service.registerAllocationAddress(target, GuestAddress(0x1000L)), Right(()))
+      val program = service.load(encoding, Vec[Byte](1)).toOption.get
+      val scalar  = Vec.from(LittleEndian.toVec(0x1008L, ScalarByteWidth.Qword))
+      val task    = KernelTask.validated(
+        ISAKernelName("relocate"),
+        LaunchGeometry.Dimensions.One,
+        LaunchGeometry.Dimensions.One,
+        Vec(KernelTask.Argument.Scalar(scalar)),
+        discoverArgumentRelocations = true
+      ).toOption.get
+      val completion = service.launch(program, task).toOption.get
+      assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
+      assertEquals(
+        captured.get(),
+        Vec(KernelTask.PointerRelocation(KernelTask.RelocationSource.Argument(0), 0L, MemoryRegion(target.value), 8L))
+      )
     }
   }
 

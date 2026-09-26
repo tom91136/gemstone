@@ -1873,6 +1873,108 @@ private[amdgpu] object VMCompiler {
       }
     } yield Decoded(operation, 8)
 
+  private def vmemLoad(
+      global: Boolean,
+      dest: Int,
+      address: Int,
+      scalar: Option[Int],
+      bytes: Int :| Interval.Closed[1, 16],
+      offset: Int,
+      coherent: Boolean
+  ): Instruction =
+    if (global)
+      Instruction.GlobalLoad(
+        dest = dest,
+        address = address,
+        scalarAddress = scalar,
+        bytes = bytes,
+        offset = offset,
+        coherent = coherent
+      )
+    else Instruction.FlatLoad(dest = dest, address = address, bytes = bytes, offset = offset, coherent = coherent)
+
+  private def vmemLoadSigned(
+      global: Boolean,
+      dest: Int,
+      address: Int,
+      scalar: Option[Int],
+      bytes: Int :| Interval.Closed[1, 2],
+      offset: Int
+  ): Instruction =
+    if (global)
+      Instruction.GlobalLoadSigned(
+        dest = dest,
+        address = address,
+        scalarAddress = scalar,
+        bytes = bytes,
+        offset = offset
+      )
+    else Instruction.FlatLoadSigned(dest = dest, address = address, bytes = bytes, offset = offset)
+
+  private def vmemLoadD16(
+      global: Boolean,
+      dest: Int,
+      address: Int,
+      scalar: Option[Int],
+      offset: Int,
+      high: Boolean
+  ): Instruction =
+    if (global)
+      Instruction.GlobalLoadD16(dest = dest, address = address, scalarAddress = scalar, offset = offset, high = high)
+    else Instruction.VFlatLoadD16(dest = dest, address = address, offset = offset, high = high)
+
+  private def vmemStore(
+      global: Boolean,
+      address: Int,
+      scalar: Option[Int],
+      src: Int,
+      bytes: Int :| Interval.Closed[1, 16],
+      offset: Int
+  ): Instruction =
+    if (global)
+      Instruction.GlobalStore(address = address, scalarAddress = scalar, src = src, bytes = bytes, offset = offset)
+    else Instruction.FlatStore(address = address, src = src, bytes = bytes, offset = offset)
+
+  private def vmemStoreD16(
+      global: Boolean,
+      address: Int,
+      scalar: Option[Int],
+      src: Int,
+      bytes: Int :| Interval.Closed[1, 2],
+      offset: Int
+  ): Instruction =
+    if (global)
+      Instruction.GlobalStoreD16High(
+        address = address,
+        scalarAddress = scalar,
+        src = src,
+        bytes = bytes,
+        offset = offset
+      )
+    else Instruction.FlatStoreD16High(address = address, src = src, bytes = bytes, offset = offset)
+
+  private def vmemCompareSwap(
+      global: Boolean,
+      dest: Int,
+      address: Int,
+      scalar: Option[Int],
+      src: Int,
+      bytes: Int :| Interval.Closed[4, 8],
+      compareOffset: Int,
+      offset: Int,
+      returnValue: Boolean
+  ): Instruction =
+    Instruction.GlobalAtomicCompareSwap(
+      dest = dest,
+      address = address,
+      scalarAddress = if (global) scalar else None,
+      compareSrc = src + compareOffset,
+      swapSrc = src,
+      bytes = bytes,
+      offset = offset,
+      returnValue = returnValue
+    )
+
   private def decodeGlobalOrFlat(
       bytes: Array[Byte],
       offset: Int,
@@ -1903,139 +2005,37 @@ private[amdgpu] object VMCompiler {
         val scalar = Option.when(!Decoding.isAbsentScalarOffset(scalarAddress))(scalarAddress)
         opcodeDefinition("GLOBAL", Bits.unsignedIntField(word, 18, IntFieldWidth(7)), target).flatMap {
           case GlobalLoadDword =>
-            Right(Instruction.GlobalLoad(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = scalar,
-              bytes = 4,
-              offset = memoryOffset,
-              coherent = returnValue
-            ))
+            Right(vmemLoad(true, destination, vectorAddress, scalar, 4, memoryOffset, returnValue))
           case GlobalLoadDwordx2 =>
-            Right(Instruction.GlobalLoad(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = scalar,
-              bytes = 8,
-              offset = memoryOffset,
-              coherent = returnValue
-            ))
+            Right(vmemLoad(true, destination, vectorAddress, scalar, 8, memoryOffset, returnValue))
           case GlobalLoadDwordx3 =>
-            Right(Instruction.GlobalLoad(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = scalar,
-              bytes = 12,
-              offset = memoryOffset,
-              coherent = returnValue
-            ))
+            Right(vmemLoad(true, destination, vectorAddress, scalar, 12, memoryOffset, returnValue))
           case GlobalLoadDwordx4 =>
-            Right(Instruction.GlobalLoad(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = scalar,
-              bytes = 16,
-              offset = memoryOffset,
-              coherent = returnValue
-            ))
+            Right(vmemLoad(true, destination, vectorAddress, scalar, 16, memoryOffset, returnValue))
           case GlobalLoadUbyte =>
-            Right(Instruction.GlobalLoad(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = scalar,
-              bytes = 1,
-              offset = memoryOffset,
-              coherent = returnValue
-            ))
+            Right(vmemLoad(true, destination, vectorAddress, scalar, 1, memoryOffset, returnValue))
           case GlobalLoadSbyte =>
-            Right(Instruction.GlobalLoadSigned(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = scalar,
-              bytes = 1,
-              offset = memoryOffset
-            ))
+            Right(vmemLoadSigned(true, destination, vectorAddress, scalar, 1, memoryOffset))
           case GlobalLoadSshort =>
-            Right(Instruction.GlobalLoadSigned(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = scalar,
-              bytes = 2,
-              offset = memoryOffset
-            ))
+            Right(vmemLoadSigned(true, destination, vectorAddress, scalar, 2, memoryOffset))
           case GlobalLoadShortD16 =>
-            Right(Instruction.GlobalLoadD16(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = scalar,
-              offset = memoryOffset,
-              high = false
-            ))
+            Right(vmemLoadD16(true, destination, vectorAddress, scalar, memoryOffset, false))
           case GlobalLoadShortD16Hi =>
-            Right(Instruction.GlobalLoadD16(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = scalar,
-              offset = memoryOffset,
-              high = true
-            ))
+            Right(vmemLoadD16(true, destination, vectorAddress, scalar, memoryOffset, true))
           case GlobalLoadUshort =>
-            Right(Instruction.GlobalLoad(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = scalar,
-              bytes = 2,
-              offset = memoryOffset,
-              coherent = returnValue
-            ))
+            Right(vmemLoad(true, destination, vectorAddress, scalar, 2, memoryOffset, returnValue))
           case GlobalStoreDword =>
-            Right(Instruction.GlobalStore(
-              address = vectorAddress,
-              scalarAddress = scalar,
-              src = dataRegister,
-              bytes = 4,
-              offset = memoryOffset
-            ))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 4, memoryOffset))
           case GlobalStoreDwordx2 =>
-            Right(Instruction.GlobalStore(
-              address = vectorAddress,
-              scalarAddress = scalar,
-              src = dataRegister,
-              bytes = 8,
-              offset = memoryOffset
-            ))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 8, memoryOffset))
           case GlobalStoreDwordx3 =>
-            Right(Instruction.GlobalStore(
-              address = vectorAddress,
-              scalarAddress = scalar,
-              src = dataRegister,
-              bytes = 12,
-              offset = memoryOffset
-            ))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 12, memoryOffset))
           case GlobalStoreDwordx4 =>
-            Right(Instruction.GlobalStore(
-              address = vectorAddress,
-              scalarAddress = scalar,
-              src = dataRegister,
-              bytes = 16,
-              offset = memoryOffset
-            ))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 16, memoryOffset))
           case GlobalStoreByte =>
-            Right(Instruction.GlobalStore(
-              address = vectorAddress,
-              scalarAddress = scalar,
-              src = dataRegister,
-              bytes = 1,
-              offset = memoryOffset
-            ))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 1, memoryOffset))
           case GlobalStoreShort =>
-            Right(Instruction.GlobalStore(
-              address = vectorAddress,
-              scalarAddress = scalar,
-              src = dataRegister,
-              bytes = 2,
-              offset = memoryOffset
-            ))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 2, memoryOffset))
           case GlobalAtomicAdd =>
             Right(Instruction.GlobalAtomicAdd(
               dest = destination,
@@ -2077,189 +2077,84 @@ private[amdgpu] object VMCompiler {
               returnValue = returnValue
             ))
           case GlobalAtomicCmpswap | GlobalAtomicCmpswapB32 =>
-            Right(Instruction.GlobalAtomicCompareSwap(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = scalar,
-              compareSrc = dataRegister + 1,
-              swapSrc = dataRegister,
-              bytes = 4,
-              offset = memoryOffset,
-              returnValue = returnValue
+            Right(vmemCompareSwap(
+              true,
+              destination,
+              vectorAddress,
+              scalar,
+              dataRegister,
+              4,
+              1,
+              memoryOffset,
+              returnValue
             ))
           case GlobalAtomicCmpswapX2 =>
-            Right(Instruction.GlobalAtomicCompareSwap(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = scalar,
-              compareSrc = dataRegister + 2,
-              swapSrc = dataRegister,
-              bytes = 8,
-              offset = memoryOffset,
-              returnValue = returnValue
+            Right(vmemCompareSwap(
+              true,
+              destination,
+              vectorAddress,
+              scalar,
+              dataRegister,
+              8,
+              2,
+              memoryOffset,
+              returnValue
             ))
           case GlobalStoreByteD16Hi =>
-            Right(Instruction.GlobalStoreD16High(
-              address = vectorAddress,
-              scalarAddress = scalar,
-              src = dataRegister,
-              bytes = 1,
-              offset = memoryOffset
-            ))
+            Right(vmemStoreD16(true, vectorAddress, scalar, dataRegister, 1, memoryOffset))
           case GlobalStoreShortD16Hi =>
-            Right(Instruction.GlobalStoreD16High(
-              address = vectorAddress,
-              scalarAddress = scalar,
-              src = dataRegister,
-              bytes = 2,
-              offset = memoryOffset
-            ))
+            Right(vmemStoreD16(true, vectorAddress, scalar, dataRegister, 2, memoryOffset))
           case other => Left(s"$other GLOBAL execution is not implemented")
         }
       } else if (scalarAddress == 0 || Decoding.isAbsentScalarOffset(scalarAddress)) {
         opcodeDefinition("FLAT", Bits.unsignedIntField(word, 18, IntFieldWidth(7)), target).flatMap {
           case FlatLoadUbyte =>
-            Right(Instruction.FlatLoad(
-              dest = destination,
-              address = vectorAddress,
-              bytes = 1,
-              offset = memoryOffset,
-              coherent = returnValue
-            ))
+            Right(vmemLoad(false, destination, vectorAddress, None, 1, memoryOffset, returnValue))
           case FlatLoadSbyte =>
-            Right(Instruction.FlatLoadSigned(
-              dest = destination,
-              address = vectorAddress,
-              bytes = 1,
-              offset = memoryOffset
-            ))
+            Right(vmemLoadSigned(false, destination, vectorAddress, None, 1, memoryOffset))
           case FlatLoadShortD16 =>
-            Right(Instruction.VFlatLoadD16(
-              dest = destination,
-              address = vectorAddress,
-              offset = memoryOffset,
-              high = false
-            ))
+            Right(vmemLoadD16(false, destination, vectorAddress, None, memoryOffset, false))
           case FlatLoadShortD16Hi =>
-            Right(Instruction.VFlatLoadD16(
-              dest = destination,
-              address = vectorAddress,
-              offset = memoryOffset,
-              high = true
-            ))
+            Right(vmemLoadD16(false, destination, vectorAddress, None, memoryOffset, true))
           case FlatLoadSshort =>
-            Right(Instruction.FlatLoadSigned(
-              dest = destination,
-              address = vectorAddress,
-              bytes = 2,
-              offset = memoryOffset
-            ))
+            Right(vmemLoadSigned(false, destination, vectorAddress, None, 2, memoryOffset))
           case FlatLoadUshort =>
-            Right(Instruction.FlatLoad(
-              dest = destination,
-              address = vectorAddress,
-              bytes = 2,
-              offset = memoryOffset,
-              coherent = returnValue
-            ))
+            Right(vmemLoad(false, destination, vectorAddress, None, 2, memoryOffset, returnValue))
           case FlatLoadDword =>
-            Right(Instruction.FlatLoad(
-              dest = destination,
-              address = vectorAddress,
-              bytes = 4,
-              offset = memoryOffset,
-              coherent = returnValue
-            ))
+            Right(vmemLoad(false, destination, vectorAddress, None, 4, memoryOffset, returnValue))
           case FlatLoadDwordx2 =>
-            Right(Instruction.FlatLoad(
-              dest = destination,
-              address = vectorAddress,
-              bytes = 8,
-              offset = memoryOffset,
-              coherent = returnValue
-            ))
+            Right(vmemLoad(false, destination, vectorAddress, None, 8, memoryOffset, returnValue))
           case FlatLoadDwordx3 =>
-            Right(Instruction.FlatLoad(
-              dest = destination,
-              address = vectorAddress,
-              bytes = 12,
-              offset = memoryOffset,
-              coherent = returnValue
-            ))
+            Right(vmemLoad(false, destination, vectorAddress, None, 12, memoryOffset, returnValue))
           case FlatLoadDwordx4 =>
-            Right(Instruction.FlatLoad(
-              dest = destination,
-              address = vectorAddress,
-              bytes = 16,
-              offset = memoryOffset,
-              coherent = returnValue
-            ))
+            Right(vmemLoad(false, destination, vectorAddress, None, 16, memoryOffset, returnValue))
           case FlatStoreShort =>
-            Right(Instruction.FlatStore(
-              address = vectorAddress,
-              src = dataRegister,
-              bytes = 2,
-              offset = memoryOffset
-            ))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, 2, memoryOffset))
           case FlatStoreByte =>
-            Right(Instruction.FlatStore(
-              address = vectorAddress,
-              src = dataRegister,
-              bytes = 1,
-              offset = memoryOffset
-            ))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, 1, memoryOffset))
           case FlatStoreByteD16Hi =>
-            Right(Instruction.FlatStoreD16High(
-              address = vectorAddress,
-              src = dataRegister,
-              bytes = 1,
-              offset = memoryOffset
-            ))
+            Right(vmemStoreD16(false, vectorAddress, None, dataRegister, 1, memoryOffset))
           case FlatStoreShortD16Hi =>
-            Right(Instruction.FlatStoreD16High(
-              address = vectorAddress,
-              src = dataRegister,
-              bytes = 2,
-              offset = memoryOffset
-            ))
+            Right(vmemStoreD16(false, vectorAddress, None, dataRegister, 2, memoryOffset))
           case FlatStoreDword =>
-            Right(Instruction.FlatStore(
-              address = vectorAddress,
-              src = dataRegister,
-              bytes = 4,
-              offset = memoryOffset
-            ))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, 4, memoryOffset))
           case FlatStoreDwordx2 =>
-            Right(Instruction.FlatStore(
-              address = vectorAddress,
-              src = dataRegister,
-              bytes = 8,
-              offset = memoryOffset
-            ))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, 8, memoryOffset))
           case FlatStoreDwordx3 =>
-            Right(Instruction.FlatStore(
-              address = vectorAddress,
-              src = dataRegister,
-              bytes = 12,
-              offset = memoryOffset
-            ))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, 12, memoryOffset))
           case FlatStoreDwordx4 =>
-            Right(Instruction.FlatStore(
-              address = vectorAddress,
-              src = dataRegister,
-              bytes = 16,
-              offset = memoryOffset
-            ))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, 16, memoryOffset))
           case FlatAtomicCmpswap | FlatAtomicCmpswapB32 =>
-            Right(Instruction.GlobalAtomicCompareSwap(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = None,
-              compareSrc = dataRegister + 1,
-              swapSrc = dataRegister,
-              bytes = 4,
-              offset = memoryOffset,
-              returnValue = returnValue
+            Right(vmemCompareSwap(
+              false,
+              destination,
+              vectorAddress,
+              None,
+              dataRegister,
+              4,
+              1,
+              memoryOffset,
+              returnValue
             ))
           case FlatAtomicSwap | FlatAtomicSwapB32 =>
             Right(Instruction.GlobalAtomicSwap(
@@ -2307,15 +2202,16 @@ private[amdgpu] object VMCompiler {
               returnValue = returnValue
             ))
           case FlatAtomicCmpswapX2 =>
-            Right(Instruction.GlobalAtomicCompareSwap(
-              dest = destination,
-              address = vectorAddress,
-              scalarAddress = None,
-              compareSrc = dataRegister + 2,
-              swapSrc = dataRegister,
-              bytes = 8,
-              offset = memoryOffset,
-              returnValue = returnValue
+            Right(vmemCompareSwap(
+              false,
+              destination,
+              vectorAddress,
+              None,
+              dataRegister,
+              8,
+              2,
+              memoryOffset,
+              returnValue
             ))
           case other => Left(s"$other FLAT execution is not implemented")
         }
@@ -2500,21 +2396,12 @@ private[amdgpu] object VMCompiler {
   private def inlineConstant(encoding: Int, literal: Option[Long]): Either[String, InstructionSource] =
     if (encoding >= 128 && encoding <= 192) Right(InstructionSource.Constant(encoding - 128L))
     else if (encoding >= 193 && encoding <= 208) Right(InstructionSource.Constant(192L - encoding))
-    else if (encoding >= 240 && encoding <= 248)
+    else if (
+      encoding >= Decoding.InlineFloatingFirst
+      && encoding < Decoding.InlineFloatingFirst + Decoding.InlineFloatingConstants.size
+    )
       Right(
-        InstructionSource.Constant(
-          Vec(
-            0x3f000000L,
-            0xbf000000L,
-            0x3f800000L,
-            0xbf800000L,
-            0x40000000L,
-            0xc0000000L,
-            0x40800000L,
-            0xc0800000L,
-            0x3e22f983L
-          )(encoding - 240)
-        )
+        InstructionSource.Constant(Decoding.InlineFloatingConstants(encoding - Decoding.InlineFloatingFirst))
       )
     else if (encoding == Decoding.LiteralSource)
       literal.map(raw => InstructionSource.Literal(raw)).toRight("missing literal dword")
@@ -2524,12 +2411,7 @@ private[amdgpu] object VMCompiler {
     SubDwordSelection.values.lift(encoding).toRight(s"unknown SDWA selection $encoding")
 
   private def subDwordDestinationUnused(encoding: Int): Either[String, SubDwordDestinationUnused] =
-    encoding match {
-      case 0 => Right(SubDwordDestinationUnused.Pad)
-      case 1 => Right(SubDwordDestinationUnused.SignExtend)
-      case 2 => Right(SubDwordDestinationUnused.Preserve)
-      case _ => Left(s"unknown SDWA destination-unused mode $encoding")
-    }
+    SubDwordDestinationUnused.values.lift(encoding).toRight(s"unknown SDWA destination-unused mode $encoding")
   private def requireBytes(bytes: Array[Byte], offset: Int, size: Int): Either[String, Unit] =
     Either.cond(
       ByteRange.contains(bytes.length, offset.toLong, size.toLong),
@@ -2538,5 +2420,5 @@ private[amdgpu] object VMCompiler {
     )
 
   private def unsignedWord(bytes: Array[Byte], offset: Int): Long =
-    LittleEndian.decode(bytes, offset, ScalarByteWidth(4))
+    LittleEndian.decode(bytes, offset, ScalarByteWidth.Dword)
 }

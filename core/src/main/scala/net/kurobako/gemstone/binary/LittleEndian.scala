@@ -27,16 +27,13 @@ private[gemstone] object LittleEndian {
   }
 
   def decodeInt32(bytes: Array[Byte], offset: Int): Int =
-    decode(bytes, offset, ScalarByteWidth(4)).toInt
+    decode(bytes, offset, ScalarByteWidth.Dword).toInt
 
   def decodeInt32(bytes: Vec[Byte], offset: Int): Int =
-    decode(bytes, offset, ScalarByteWidth(4)).toInt
+    decode(bytes, offset, ScalarByteWidth.Dword).toInt
 
   def decodeUnsignedInt16(bytes: Array[Byte], offset: Int): Int =
-    decode(bytes, offset, ScalarByteWidth(2)).toInt
-
-  def decodeUnsignedInt16(bytes: Vec[Byte], offset: Int): Int =
-    decode(bytes, offset, ScalarByteWidth(2)).toInt
+    decode(bytes, offset, ScalarByteWidth.Word).toInt
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   inline def write(value: Long, size: ScalarByteWidth)(inline writeByte: (Int, Byte) => Unit): Unit = {
@@ -50,6 +47,13 @@ private[gemstone] object LittleEndian {
   def write(value: Long, bytes: Array[Byte], offset: Int, size: ScalarByteWidth): Unit = {
     requireRange(bytes.length, offset, size)
     write(value, size)((index, byte) => bytes(offset + index) = byte)
+  }
+
+  /** Decode, replace with `update(previous)`, and return the previous value. */
+  def atomicModify(bytes: Array[Byte], offset: Int, size: ScalarByteWidth)(update: Long => Long): Long = {
+    val previous = decode(bytes, offset, size)
+    write(update(previous), bytes, offset, size)
+    previous
   }
 
   def toArray(value: Long, size: ScalarByteWidth): Array[Byte] = {

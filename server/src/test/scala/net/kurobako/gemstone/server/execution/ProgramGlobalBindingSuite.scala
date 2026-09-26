@@ -19,7 +19,7 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
     0x800a810aL, 0x7e000280L, 0x7e02020aL, 0xdc708000L, 0x00040100L, 0xbf8c0f70L, 0xc0020284L, 0x00000000L, 0xbf8cc07fL,
     0x7e02020aL, 0xdc708000L, 0x00060100L, 0x880a0804L, 0x880b0905L, 0x870a0b0aL, 0xbf06800aL, 0x850a8081L, 0x7e02020aL,
     0x7e000284L, 0xdc708000L, 0x00060100L, 0xbf810000L
-  ).flatMap(value => LittleEndian.toVec(value, ScalarByteWidth(4)))
+  ).flatMap(value => LittleEndian.toVec(value, ScalarByteWidth.Dword))
   private val global                                      = AllocationId(1)
   private val output                                      = AllocationId(2)
   private def service()                                   = ExecutionService(RuntimeBackend.defaults)
@@ -32,7 +32,7 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
       service: ExecutionService,
       id: AllocationId,
       offset: Long :| Positive0,
-      size: ScalarByteWidth = ScalarByteWidth(4)
+      size: ScalarByteWidth = ScalarByteWidth.Dword
   ): Long =
     service.read(id, offset, size.nonNegative)
       .map(bytes => LittleEndian.decode(bytes, 0, size)).toOption.get
@@ -52,7 +52,7 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
     Using.resource(service()) { s =>
       val program = setup(s)
       assertEquals(
-        s.writeGlobal(program, GlobalName("device_global"), 0, LittleEndian.toVec(41, ScalarByteWidth(4))),
+        s.writeGlobal(program, GlobalName("device_global"), 0, LittleEndian.toVec(41, ScalarByteWidth.Dword)),
         Right(())
       )
       assertEquals(s.bindGlobal(program, GlobalName("device_global"), global, 8), Right(()))
@@ -62,13 +62,13 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
       assertEquals(read(s, output, 0), 42L)
       assertEquals(read(s, output, 4), 1L)
       assertEquals(s.releaseCompletion(first), Right(()))
-      assertEquals(s.write(global, 8, LittleEndian.toVec(70, ScalarByteWidth(4))), Right(()))
+      assertEquals(s.write(global, 8, LittleEndian.toVec(70, ScalarByteWidth.Dword)), Right(()))
       val synthetic = 0x400000000000L + 8L
-      val second    = launch(s, program, KernelTask.Argument.Scalar(LittleEndian.toVec(synthetic, ScalarByteWidth(8))))
+      val second = launch(s, program, KernelTask.Argument.Scalar(LittleEndian.toVec(synthetic, ScalarByteWidth.Qword)))
       assertEquals(read(s, global, 8), 71L)
       assertEquals(read(s, output, 0), 71L)
       assertEquals(s.releaseCompletion(second), Right(()))
-      val third = launch(s, program, KernelTask.Argument.Scalar(LittleEndian.toVec(0x3000, ScalarByteWidth(8))))
+      val third = launch(s, program, KernelTask.Argument.Scalar(LittleEndian.toVec(0x3000, ScalarByteWidth.Qword)))
       assertEquals(read(s, global, 8), 72L)
       assertEquals(read(s, output, 4), 1L)
       assert(s.completionDirtyRanges(third).toOption.get.exists(_.allocation == global))
@@ -86,18 +86,18 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
       val b  = use(service())
       val pa = setup(a); val pb = setup(b)
       assertEquals(a.bindGlobal(pa, GlobalName("device_global"), global, 8), Right(()))
-      assertEquals(a.write(global, 8, LittleEndian.toVec(99, ScalarByteWidth(4))), Right(()))
+      assertEquals(a.write(global, 8, LittleEndian.toVec(99, ScalarByteWidth.Dword)), Right(()))
       assertEquals(a.bindGlobal(pa, GlobalName("device_alias"), global, 8), Right(()))
       assertEquals(a.bindGlobal(pa, GlobalName("device_global"), global, 8), Right(()))
       assertEquals(read(a, global, 8), 99L, "alias/idempotent bind must not reset live storage")
       assertEquals(
-        a.writeGlobal(pa, GlobalName("device_alias"), 0, LittleEndian.toVec(123, ScalarByteWidth(4))),
+        a.writeGlobal(pa, GlobalName("device_alias"), 0, LittleEndian.toVec(123, ScalarByteWidth.Dword)),
         Right(())
       )
       assertEquals(read(a, global, 8), 123L)
       assertEquals(a.bindGlobal(pa, GlobalName("device_pointer"), output, 0), Right(()))
       assertEquals(
-        read(a, output, 0, ScalarByteWidth(8)),
+        read(a, output, 0, ScalarByteWidth.Qword),
         0x3000L,
         "initializer must contain relocated ELF global address"
       )
@@ -193,11 +193,11 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
     Array.copy(sectionNames, 0, bytes, sectionNameOffset, sectionNames.length)
     Array.copy(symbolNames, 0, bytes, symbolNameOffset, symbolNames.length)
     val _ = code.copyToArray(bytes, textOffset, code.size)
-    LittleEndian.write(16L, bytes, readOnlyOffset, ScalarByteWidth(4))
-    LittleEndian.write(8L, bytes, readOnlyOffset + 4, ScalarByteWidth(4))
-    LittleEndian.write(16L, bytes, readOnlyOffset + 8, ScalarByteWidth(4))
-    LittleEndian.write(0x80L, bytes, readOnlyOffset + 52, ScalarByteWidth(4))
-    LittleEndian.write(0x08L, bytes, readOnlyOffset + 56, ScalarByteWidth(2))
+    LittleEndian.write(16L, bytes, readOnlyOffset, ScalarByteWidth.Dword)
+    LittleEndian.write(8L, bytes, readOnlyOffset + 4, ScalarByteWidth.Dword)
+    LittleEndian.write(16L, bytes, readOnlyOffset + 8, ScalarByteWidth.Dword)
+    LittleEndian.write(0x80L, bytes, readOnlyOffset + 52, ScalarByteWidth.Dword)
+    LittleEndian.write(0x08L, bytes, readOnlyOffset + 56, ScalarByteWidth.Word)
     Array.copy(target, 0, bytes, readOnlyOffset + 64, target.length)
 
     def section(
@@ -244,9 +244,9 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
     section(7, 46, 1, 0x4000L, gotOffset, 8, alignment = 8)
     section(8, 51, 4, 0x5000L, relocationOffset, 24, link = 3, alignment = 8, entrySize = 24)
     // R_AMDGPU_ABS64 for device_global (symbol 3) stored into the .got slot.
-    LittleEndian.write(0x4000L, bytes, relocationOffset, ScalarByteWidth(8))
-    LittleEndian.write((3L << 32) | 3L, bytes, relocationOffset + 8, ScalarByteWidth(8))
-    LittleEndian.write(0L, bytes, relocationOffset + 16, ScalarByteWidth(8))
+    LittleEndian.write(0x4000L, bytes, relocationOffset, ScalarByteWidth.Qword)
+    LittleEndian.write((3L << 32) | 3L, bytes, relocationOffset + 8, ScalarByteWidth.Qword)
+    LittleEndian.write(0L, bytes, relocationOffset + 16, ScalarByteWidth.Qword)
     bytes
   }
 }

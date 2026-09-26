@@ -1,5 +1,4 @@
 find_package(OpenCL REQUIRED)
-find_program(opencl_cts_spirv_as spirv-as REQUIRED)
 
 # Keep the catalogue useful without compiling the multi-day numerical, image,
 # vector, and exhaustive conversion categories.

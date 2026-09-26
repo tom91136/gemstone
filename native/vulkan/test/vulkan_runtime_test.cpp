@@ -11,12 +11,6 @@
 #include <vulkan/vulkan.h>
 
 namespace {
-std::vector<uint8_t> spirvBytes(const std::vector<uint32_t> &words) {
-  std::vector<uint8_t> bytes(words.size() * sizeof(uint32_t));
-  std::memcpy(bytes.data(), words.data(), bytes.size());
-  return bytes;
-}
-
 int collectVulkanLibraries(dl_phdr_info *info, size_t, void *data) {
   if (info->dlpi_name && std::strstr(info->dlpi_name, "libvulkan.so"))
     static_cast<std::vector<std::string> *>(data)->emplace_back(info->dlpi_name);
@@ -74,11 +68,11 @@ TEST_CASE("Vulkan instance lookup preserves unavailable functions") {
 }
 
 TEST_CASE("Vulkan llvmpipe profile remains selectable without an ICD") {
-  REQUIRE(setenv("GEMSTONE_VULKAN_PROFILE", "llvmpipe", 1) == 0);
+  REQUIRE(setenv("GEMSTONE_PROFILE", "llvmpipe", 1) == 0);
   VkPhysicalDeviceProperties properties{};
   vkGetPhysicalDeviceProperties(VK_NULL_HANDLE, &properties);
   REQUIRE(std::string(properties.deviceName).find("llvmpipe") != std::string::npos);
-  REQUIRE(unsetenv("GEMSTONE_VULKAN_PROFILE") == 0);
+  REQUIRE(unsetenv("GEMSTONE_PROFILE") == 0);
 }
 
 TEST_CASE("Vulkan exposes the allocator buffer plumbing") {
@@ -197,126 +191,6 @@ TEST_CASE("Vulkan rejects asynchronous semaphore waits for emulated dispatches")
   REQUIRE(vkQueueSubmit(VK_NULL_HANDLE, 1, &info, VK_NULL_HANDLE) == VK_ERROR_FEATURE_NOT_PRESENT);
 }
 
-TEST_CASE("Vulkan compute workgroup size comes from the selected SPIR-V entry point") {
-  const auto fixed = spirvBytes({
-      0x07230203,
-      0x00010000,
-      0,
-      64,
-      0,
-      (5u << 16) | 15u,
-      5,
-      7,
-      0x6e69616d,
-      0,
-      (6u << 16) | 16u,
-      7,
-      17,
-      8,
-      2,
-      1,
-  });
-  REQUIRE(gemstoneVulkanLocalSize(fixed, "main", {}) == std::array<uint32_t, 3>{8, 2, 1});
-
-  const auto specialized = spirvBytes({
-      0x07230203,
-      0x00010000,
-      0,
-      64,
-      0,
-      (5u << 16) | 15u,
-      5,
-      7,
-      0x6e69616d,
-      0,
-      (4u << 16) | 71u,
-      20,
-      1,
-      9,
-      (4u << 16) | 71u,
-      21,
-      1,
-      10,
-      (4u << 16) | 71u,
-      22,
-      1,
-      11,
-      (4u << 16) | 50u,
-      3,
-      20,
-      1,
-      (4u << 16) | 50u,
-      3,
-      21,
-      1,
-      (4u << 16) | 50u,
-      3,
-      22,
-      1,
-      (6u << 16) | 331u,
-      7,
-      38,
-      20,
-      21,
-      22,
-  });
-  REQUIRE(gemstoneVulkanLocalSize(specialized, "main", {{9, 4}, {10, 3}, {11, 2}}) == std::array<uint32_t, 3>{4, 3, 2});
-
-  const auto workgroupBuiltin = spirvBytes({
-      0x07230203,
-      0x00010000,
-      0,
-      64,
-      0,
-      (5u << 16) | 15u,
-      5,
-      7,
-      0x6e69616d,
-      0,
-      (6u << 16) | 16u,
-      7,
-      17,
-      1,
-      1,
-      1,
-      (4u << 16) | 71u,
-      20,
-      1,
-      0,
-      (4u << 16) | 71u,
-      21,
-      1,
-      1,
-      (4u << 16) | 71u,
-      22,
-      1,
-      2,
-      (4u << 16) | 71u,
-      30,
-      11,
-      25,
-      (4u << 16) | 50u,
-      3,
-      20,
-      1,
-      (4u << 16) | 50u,
-      3,
-      21,
-      1,
-      (4u << 16) | 50u,
-      3,
-      22,
-      1,
-      (6u << 16) | 51u,
-      4,
-      30,
-      20,
-      21,
-      22,
-  });
-  REQUIRE(gemstoneVulkanLocalSize(workgroupBuiltin, "main", {{0, 4}, {1, 3}, {2, 2}}) == std::array<uint32_t, 3>{4, 3, 2});
-}
-
 TEST_CASE("Vulkan descriptor mirror applies array writes and copies") {
   GemstoneVulkanDescriptorState state;
   const auto source = reinterpret_cast<VkDescriptorSet>(0x1000);
@@ -387,6 +261,9 @@ TEST_CASE("Vulkan dispatch uses persistent memory and preserves descriptor alias
   REQUIRE(setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0);
   REQUIRE(setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0);
   fixture.expect({1, 1, 1, 0, 0});
+  fixture.kernelWorkGroup({1, 1, 1});
+  fixture.kernelBindings({0, 1});
+  fixture.kernelMetadata(16, 2, {{8, 0, 2, 0}, {8, 8, 2, 0}});
   fixture.expectAllocationArguments({{0, 0}, {0, 4}});
   const uint32_t deviceWrite = 0x12345678;
   std::vector<uint8_t> deviceBytes(sizeof(deviceWrite));
@@ -509,31 +386,6 @@ TEST_CASE("Vulkan dispatch uses persistent memory and preserves descriptor alias
   vkDestroyShaderModule(VK_NULL_HANDLE, module, nullptr);
   REQUIRE(unsetenv("GEMSTONE_RPC_CLIENT") == 0);
   REQUIRE(unsetenv("GEMSTONE_RPC_PORT") == 0);
-}
-
-TEST_CASE("Vulkan descriptor reflection is scoped to the selected entry point") {
-  const auto module = spirvBytes({
-      0x07230203, 0x00010400,
-      0,          64,
-      0,          (6u << 16) | 15u,
-      5,          7,
-      0x73726966, 0x00000074,
-      20,         (6u << 16) | 15u,
-      5,          8,
-      0x6f636573, 0x0000646e,
-      21,         (4u << 16) | 71u,
-      20,         33,
-      3,          (4u << 16) | 71u,
-      20,         34,
-      0,          (4u << 16) | 71u,
-      21,         33,
-      5,          (4u << 16) | 71u,
-      21,         34,
-      0,
-  });
-  REQUIRE(gemstoneVulkanDescriptorBindings(module, "first") == std::optional(std::vector<uint32_t>{3}));
-  REQUIRE(gemstoneVulkanDescriptorBindings(module, "second") == std::optional(std::vector<uint32_t>{5}));
-  REQUIRE_FALSE(gemstoneVulkanDescriptorBindings(module, "missing"));
 }
 
 TEST_CASE("Vulkan descriptor pool capacity is restored by reset") {

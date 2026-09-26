@@ -73,107 +73,84 @@ final class DynamicAddressMemory(
   }
 
   override def readInt8(address: GuestAddress): Either[MemoryError, Byte] =
-    state.lock.withLock {
-      dynamicRange(address, 1).map { case (bytes, offset) => Right(bytes(offset)) }
-    }.getOrElse(delegate.readInt8(address))
+    route(address, 1)((bytes, offset) => bytes(offset), None, delegate.readInt8(address))
 
   override def readInt32(address: GuestAddress): Either[MemoryError, Int] =
-    state.lock.withLock {
-      dynamicRange(address, 4).map { case (bytes, offset) =>
-        Right(LittleEndian.decodeInt32(bytes, offset))
-      }
-        .orElse(
-          Option.when(overlapsDynamic(address, 4))(
-            super.readLittleEndian(address, MemoryValueByteWidth(4)).map(_.toInt)
-          )
-        )
-    }.getOrElse(delegate.readInt32(address))
+    route(address, 4)(
+      (bytes, offset) => LittleEndian.decodeInt32(bytes, offset),
+      Some(super.readLittleEndian(address, MemoryValueByteWidth.Dword).map(_.toInt)),
+      delegate.readInt32(address)
+    )
 
   override def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit] =
-    state.lock.withLock {
-      dynamicRange(address, 1) match {
-        case Some((bytes, offset)) =>
-          bytes(offset) = value
-          Some(Right(()))
-        case None => None
-      }
-    }.getOrElse(delegate.writeInt8(address, value))
+    route(address, 1)((bytes, offset) => bytes(offset) = value, None, delegate.writeInt8(address, value))
 
   override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
-    state.lock.withLock {
-      dynamicRange(address, 4) match {
-        case Some((bytes, offset)) =>
-          LittleEndian.write(value.toLong, bytes, offset, ScalarByteWidth(4))
-          Some(Right(()))
-        case None =>
-          if (overlapsDynamic(address, 4))
-            Some(super.writeLittleEndian(address, value.toLong, MemoryValueByteWidth(4)))
-          else None
-      }
-    }.getOrElse(delegate.writeInt32(address, value))
+    route(address, 4)(
+      (bytes, offset) => LittleEndian.write(value.toLong, bytes, offset, ScalarByteWidth.Dword),
+      Some(super.writeLittleEndian(address, value.toLong, MemoryValueByteWidth.Dword)),
+      delegate.writeInt32(address, value)
+    )
 
   override def readBytes(address: GuestAddress, size: Int :| Positive0): Either[MemoryError, Vec[Byte]] =
-    state.lock.withLock {
-      dynamicRange(address, size).map { case (bytes, offset) =>
-        Right(Vec.unsafeFromArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size)))
-      }.orElse(Option.when(overlapsDynamic(address, size))(super.readBytes(address, size)))
-    }.getOrElse(delegate.readBytes(address, size))
+    route(address, size)(
+      (bytes, offset) => Vec.unsafeFromArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size)),
+      Some(super.readBytes(address, size)),
+      delegate.readBytes(address, size)
+    )
 
   override def writeBytes(address: GuestAddress, bytes: Vec[Byte]): Either[MemoryError, Unit] =
-    state.lock.withLock {
-      dynamicRange(address, bytes.nonNegativeSize) match {
-        case Some((destination, offset)) =>
-          val _ = bytes.copyToArray(destination, offset, bytes.size)
-          Some(Right(()))
-        case None =>
-          if (overlapsDynamic(address, bytes.nonNegativeSize)) Some(super.writeBytes(address, bytes))
-          else None
-      }
-    }.getOrElse(delegate.writeBytes(address, bytes))
+    route(address, bytes.nonNegativeSize)(
+      (destination, offset) => { val _ = bytes.copyToArray(destination, offset, bytes.size) },
+      Some(super.writeBytes(address, bytes)),
+      delegate.writeBytes(address, bytes)
+    )
 
   override def readLittleEndian(address: GuestAddress, size: MemoryValueByteWidth): Either[MemoryError, Long] =
-    state.lock.withLock {
-      dynamicRange(address, size.value).map { case (bytes, offset) =>
-        Right(LittleEndian.decode(bytes, offset, size.scalarByteWidth))
-      }.orElse(
-        Option.when(overlapsDynamic(address, size.value))(super.readLittleEndian(address, size))
-      )
-    }.getOrElse(delegate.readLittleEndian(address, size))
+    route(address, size.value)(
+      (bytes, offset) => LittleEndian.decode(bytes, offset, size.scalarByteWidth),
+      Some(super.readLittleEndian(address, size)),
+      delegate.readLittleEndian(address, size)
+    )
 
   override def writeLittleEndian(
       address: GuestAddress,
       value: Long,
       size: MemoryValueByteWidth
   ): Either[MemoryError, Unit] =
-    state.lock.withLock {
-      dynamicRange(address, size.value) match {
-        case Some((bytes, offset)) =>
-          LittleEndian.write(value, bytes, offset, size.scalarByteWidth)
-          Some(Right(()))
-        case None =>
-          if (overlapsDynamic(address, size.value))
-            Some(super.writeLittleEndian(address, value, size))
-          else None
-      }
-    }.getOrElse(delegate.writeLittleEndian(address, value, size))
+    route(address, size.value)(
+      (bytes, offset) => LittleEndian.write(value, bytes, offset, size.scalarByteWidth),
+      Some(super.writeLittleEndian(address, value, size)),
+      delegate.writeLittleEndian(address, value, size)
+    )
 
   override def atomicModifyLittleEndian(
       address: GuestAddress,
       size: MemoryValueByteWidth
   )(update: Long => Long): Either[MemoryError, Long] =
+    route(address, size.value)(
+      (bytes, offset) => LittleEndian.atomicModify(bytes, offset, size.scalarByteWidth)(update),
+      Some(super.atomicModifyLittleEndian(address, size)(update)),
+      delegate.atomicModifyLittleEndian(address, size)(update)
+    )
+
+  /** Routes a fixed-size access to the overlay, then to the delegate when the range is entirely external. A range that
+    * straddles the overlay and the delegate is handled by `straddle`.
+    */
+  private def route[A](
+      address: GuestAddress,
+      size: Int
+  )(
+      overlay: (Array[Byte], Int) => A,
+      straddle: => Option[Either[MemoryError, A]],
+      delegated: => Either[MemoryError, A]
+  ): Either[MemoryError, A] =
     state.lock.withLock {
-      dynamicRange(address, size.value) match {
-        case Some((bytes, offset)) =>
-          val width    = size.scalarByteWidth
-          val previous = LittleEndian.decode(bytes, offset, width)
-          LittleEndian.write(update(previous), bytes, offset, width)
-          Some(Right(previous))
-        case None =>
-          if (overlapsDynamic(address, size.value))
-            Some(super.atomicModifyLittleEndian(address, size)(update))
-          else None
+      dynamicRange(address, size) match {
+        case Some((bytes, offset)) => Some(Right(overlay(bytes, offset)))
+        case None                  => if (overlapsDynamic(address, size)) straddle else None
       }
-    }.getOrElse(delegate.atomicModifyLittleEndian(address, size)(update))
+    }.getOrElse(delegated)
 
   /** Called while holding State's lock. Mixed ranges retain byte-wise overlay routing; wholly delegated words reach the
     * delegate as one transaction even while unrelated device allocations exist.
@@ -195,10 +172,9 @@ final class DynamicAddressMemory(
     Option(mutableAllocations.floorEntry(address.value)).flatMap { entry =>
       val bytes    = entry.getValue
       val relative = address.value - entry.getKey
-      Option.when(
-        size >= 0 && size <= bytes.length &&
-          java.lang.Long.compareUnsigned(relative, bytes.length.toLong - size.toLong) <= 0
-      )(bytes -> relative.toInt)
+      Option.when(AddressRanges.containsUnsigned(entry.getKey, bytes.length.toLong, address.value, size.toLong))(
+        bytes -> relative.toInt
+      )
     }
 }
 

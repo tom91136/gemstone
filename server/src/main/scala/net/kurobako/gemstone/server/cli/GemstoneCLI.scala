@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.server.cli
 
 import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.launcher.EnvironmentNames
 import net.kurobako.gemstone.launcher.Launcher
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.server.GemstoneRPCServer
@@ -50,7 +51,9 @@ object GemstoneCLI {
   )
 
   def main(arguments: Array[String]): Unit = command.parse(Vec.from(arguments)) match {
-    case Left(help)    => throw IllegalArgumentException(help.toString)
+    case Left(help) =>
+      Console.err.println(help)
+      sys.exit(if (help.errors.isEmpty) 0 else 2)
     case Right(action) => action match {
         case Action.Inspect(file) => Console.println(RPCJournal.inspect(file))
         case Action.Replay(file)  =>
@@ -70,8 +73,8 @@ object GemstoneCLI {
 
   private def replayEndpoint(header: RPCJournal.Header): RPCReplay.Target = {
     val profile = header.executionProfile.getOrElse(throw IllegalArgumentException("capture has no execution profile"))
-    val environment = (sys.env - "GEMSTONE_RECORD").updated(
-      "GEMSTONE_EXECUTION_PARALLELISM",
+    val environment = (sys.env - EnvironmentNames.Record).updated(
+      EnvironmentNames.ExecutionParallelism,
       profile.parallelism.toString
     )
     val limits  = TaskLimits(profile.maxInstructions, profile.quantum)
@@ -80,9 +83,8 @@ object GemstoneCLI {
   }
 
   private def serve(portFile: Option[Path], endpointFile: Option[Path], record: Option[Path]): Unit = {
-    val environment = record.fold(sys.env)(path => sys.env.updated("GEMSTONE_RECORD", path.toString))
-    val limits      = ExecutionService.limits(environment)
-      .fold(message => throw IllegalArgumentException(message), value => value)
+    val environment = record.fold(sys.env)(path => sys.env.updated(EnvironmentNames.Record, path.toString))
+    val limits      = ExecutionService.requireLimits(environment)
     Using.resource(GemstoneRPCServer.start(limits, environment)) { running =>
       portFile.foreach { file =>
         Option(file.getParent).foreach(Files.createDirectories(_))

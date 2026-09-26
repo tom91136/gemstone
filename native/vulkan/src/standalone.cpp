@@ -13,7 +13,6 @@
 #include <optional>
 #include <string>
 #include <thread>
-#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -23,10 +22,11 @@
 #include <unistd.h>
 
 #include "gemstone_execution_rpc.hpp"
+#include <gemstone/trace.hpp>
 
+#include "client.hpp"
 #include "completion.hpp"
 #include "runtime.hpp"
-#include "specialization.hpp"
 
 void GemstoneVulkanDescriptorState::update(uint32_t writeCount, const VkWriteDescriptorSet *writes, uint32_t copyCount,
                                            const VkCopyDescriptorSet *copies) {
@@ -64,90 +64,6 @@ bool GemstoneVulkanDescriptorState::hasArrayElements(VkDescriptorSet set, uint32
   if (group == buffers.end()) return false;
   const auto value = group->second.lower_bound({binding, 1});
   return value != group->second.end() && value->first.first == binding;
-}
-
-std::array<uint32_t, 3> gemstoneVulkanLocalSize(const std::vector<uint8_t> &image, std::string_view entry,
-                                                const std::unordered_map<uint32_t, uint32_t> &specializations) {
-  const std::array<uint32_t, 3> fallback{1, 1, 1};
-  if (image.size() < 20 || image.size() % 4 != 0) return fallback;
-  const size_t count = image.size() / 4;
-  const auto word = [&](size_t index) {
-    uint32_t value = 0;
-    std::memcpy(&value, image.data() + index * 4, 4);
-    return value;
-  };
-  if (word(0) != 0x07230203) return fallback;
-  std::optional<uint32_t> entryId;
-  std::optional<uint32_t> workgroupBuiltin;
-  std::unordered_map<uint32_t, uint32_t> specIds;
-  std::unordered_map<uint32_t, uint32_t> constants;
-  std::unordered_map<uint32_t, std::array<uint32_t, 3>> composites;
-  for (size_t index = 5; index < count;) {
-    const size_t length = word(index) >> 16;
-    const uint32_t opcode = word(index) & 0xffffu;
-    if (length == 0 || length > count - index) return fallback;
-    if (opcode == 15 && length >= 4) {
-      std::string name;
-      for (size_t offset = index + 3; offset < index + length; ++offset) {
-        const uint32_t chars = word(offset);
-        for (unsigned byte = 0; byte < 4; ++byte) {
-          const char ch = static_cast<char>(chars >> (byte * 8));
-          if (ch == '\0') break;
-          name.push_back(ch);
-        }
-        if ((chars & 0xff000000u) == 0 || (chars & 0x00ff0000u) == 0 || (chars & 0x0000ff00u) == 0 || (chars & 0x000000ffu) == 0) break;
-      }
-      if (name == entry) entryId = word(index + 2);
-    }
-    if (opcode == 71 && length >= 4 && word(index + 2) == 1) specIds[word(index + 1)] = word(index + 3);
-    if (opcode == 71 && length >= 4 && word(index + 2) == 11 && word(index + 3) == 25) workgroupBuiltin = word(index + 1);
-    if ((opcode == 43 || opcode == 50) && length >= 4) constants[word(index + 2)] = word(index + 3);
-    if ((opcode == 44 || opcode == 51) && length >= 6) composites[word(index + 2)] = {word(index + 3), word(index + 4), word(index + 5)};
-    index += length;
-  }
-  if (!entryId) return fallback;
-  const auto resolve = [&](uint32_t id) -> std::optional<uint32_t> {
-    const auto specId = specIds.find(id);
-    if (specId != specIds.end())
-      if (const auto value = specializations.find(specId->second); value != specializations.end()) return value->second;
-    const auto constant = constants.find(id);
-    if (constant == constants.end()) return std::nullopt;
-    return constant->second;
-  };
-  if (workgroupBuiltin) {
-    const auto composite = composites.find(*workgroupBuiltin);
-    if (composite != composites.end()) {
-      std::array<uint32_t, 3> result{};
-      bool complete = true;
-      for (size_t axis = 0; axis < 3; ++axis) {
-        const auto value = resolve(composite->second[axis]);
-        if (!value) {
-          complete = false;
-          break;
-        }
-        result[axis] = *value;
-      }
-      if (complete) return result;
-    }
-  }
-  for (size_t index = 5; index < count;) {
-    const size_t length = word(index) >> 16;
-    const uint32_t opcode = word(index) & 0xffffu;
-    if (length == 0 || length > count - index) return fallback;
-    if (opcode == 16 && length >= 6 && word(index + 1) == *entryId && word(index + 2) == 17)
-      return {word(index + 3), word(index + 4), word(index + 5)};
-    if (opcode == 331 && length >= 6 && word(index + 1) == *entryId && word(index + 2) == 38) {
-      std::array<uint32_t, 3> result{};
-      for (size_t axis = 0; axis < 3; ++axis) {
-        const auto value = resolve(word(index + 3 + axis));
-        if (!value) return fallback;
-        result[axis] = *value;
-      }
-      return result;
-    }
-    index += length;
-  }
-  return fallback;
 }
 
 std::optional<size_t> gemstoneVulkanDescriptorLength(VkDeviceSize bufferSize, VkDeviceSize offset, VkDeviceSize range) {
@@ -190,69 +106,6 @@ GemstoneVulkanDescriptorAllocationPlan gemstoneVulkanDescriptorAllocationPlan(co
   return plan;
 }
 
-std::optional<std::vector<uint32_t>> gemstoneVulkanDescriptorBindings(const std::vector<uint8_t> &image, std::string_view entry) {
-  if (image.size() < 20 || image.size() % 4 != 0) return std::nullopt;
-  const size_t count = image.size() / 4;
-  const auto word = [&](size_t index) {
-    uint32_t value = 0;
-    std::memcpy(&value, image.data() + index * 4, sizeof(value));
-    return value;
-  };
-  if (word(0) != 0x07230203) return std::nullopt;
-  std::unordered_map<uint32_t, uint32_t> descriptorBindings;
-  std::unordered_map<uint32_t, uint32_t> descriptorSetsById;
-  std::unordered_set<uint32_t> interfaces;
-  bool foundEntry = false;
-  for (size_t index = 5; index < count;) {
-    const uint32_t header = word(index);
-    const size_t length = header >> 16;
-    const uint32_t opcode = header & 0xffffu;
-    if (length == 0 || length > count - index) return std::nullopt;
-    if (opcode == 71 && length >= 4 && word(index + 2) == 33) descriptorBindings[word(index + 1)] = word(index + 3);
-    if (opcode == 71 && length >= 4 && word(index + 2) == 34) descriptorSetsById[word(index + 1)] = word(index + 3);
-    if (opcode == 15 && length >= 4) {
-      std::string name;
-      size_t cursor = index + 3;
-      bool complete = false;
-      for (; cursor < index + length && !complete; ++cursor) {
-        const uint32_t characters = word(cursor);
-        for (unsigned byte = 0; byte < 4; ++byte) {
-          const char character = static_cast<char>(characters >> (byte * 8));
-          if (character == '\0') {
-            complete = true;
-            break;
-          }
-          name.push_back(character);
-        }
-      }
-      if (complete && name == entry) {
-        foundEntry = true;
-        interfaces.clear();
-        for (; cursor < index + length; ++cursor)
-          interfaces.insert(word(cursor));
-      }
-    }
-    index += length;
-  }
-  if (!foundEntry) return std::nullopt;
-  std::vector<std::tuple<uint32_t, uint32_t, uint32_t>> ordered;
-  const bool scoped = std::any_of(descriptorBindings.begin(), descriptorBindings.end(),
-                                  [&](const auto &binding) { return interfaces.contains(binding.first); });
-  for (const auto &[target, binding] : descriptorBindings) {
-    const auto set = descriptorSetsById.find(target);
-    if (set != descriptorSetsById.end() && set->second == 0 && (!scoped || interfaces.contains(target)))
-      ordered.emplace_back(set->second, binding, target);
-  }
-  std::sort(ordered.begin(), ordered.end());
-  std::vector<uint32_t> result;
-  for (const auto &[set, binding, target] : ordered) {
-    (void)set;
-    (void)target;
-    if (result.empty() || result.back() != binding) result.push_back(binding);
-  }
-  return result;
-}
-
 namespace {
 
 using namespace gemstone::execution;
@@ -278,11 +131,6 @@ struct BoundBuffer {
   VkDeviceSize size = 0;
 };
 
-struct MappedMemory {
-  unsigned char *data = nullptr;
-  VkDeviceSize offset = 0;
-};
-
 struct Memory {
   std::vector<uint8_t> bytes;
 };
@@ -291,7 +139,6 @@ struct Pipeline {
   std::vector<uint8_t> image;
   std::string entry;
   std::array<uint32_t, 3> local{1, 1, 1};
-  std::unordered_map<uint32_t, uint32_t> specValues;
   std::vector<uint32_t> bindings;
 };
 
@@ -332,8 +179,7 @@ struct CommandPoolState {
 std::mutex stateMutex;
 std::unordered_map<VkBuffer, VkDeviceSize> bufferSizes;
 std::unordered_map<VkBuffer, BoundBuffer> buffers;
-std::unordered_map<VkDeviceMemory, std::unique_ptr<Memory>> memories;
-std::unordered_map<VkDeviceMemory, MappedMemory> mapped;
+std::unordered_map<VkDeviceMemory, std::shared_ptr<Memory>> memories;
 GemstoneVulkanDescriptorState descriptorSets;
 std::unordered_map<VkDescriptorPool, DescriptorPoolState> descriptorPools;
 std::unordered_map<VkShaderModule, std::vector<uint8_t>> modules;
@@ -361,29 +207,21 @@ void setFence(VkFence fence, bool signaled) {
   }
   state->changed.notify_all();
 }
-bool transfer(Client &client, AllocationId id, void *data, size_t size, bool upload) {
-  auto *bytes = static_cast<uint8_t *>(data);
-  constexpr size_t chunkSize = 1 << 20;
-  for (size_t offset = 0; offset < size;) {
-    const size_t length = std::min(chunkSize, size - offset);
-    if (upload) {
-      if (!client.call(WriteAllocation{id, static_cast<int64_t>(offset), std::vector<uint8_t>(bytes + offset, bytes + offset + length)}))
-        return false;
-    } else {
-      auto read = client.call(ReadAllocation{id, static_cast<int64_t>(offset), static_cast<int32_t>(length)});
-      if (!read || read.value().size() != length) return false;
-      std::memcpy(bytes + offset, read.value().data(), length);
-    }
-    offset += length;
-  }
-  return true;
+std::mutex &executionMutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+Client *executionClient() {
+  static ClientManager manager;
+  return manager.client();
 }
 
 bool run(const Dispatch &dispatch) {
   Pipeline pipeline;
   std::map<uint32_t, VkDescriptorBufferInfo> bindings;
   std::unordered_map<VkBuffer, BoundBuffer> bound;
-  std::unordered_map<VkDeviceMemory, Memory *> storage;
+  std::unordered_map<VkDeviceMemory, std::shared_ptr<Memory>> storage;
   {
     std::lock_guard lock(stateMutex);
     const auto pipe = pipelines.find(dispatch.pipeline);
@@ -401,25 +239,14 @@ bool run(const Dispatch &dispatch) {
       if (const auto *info = descriptorSets.get(dispatch.descriptors, binding, 0)) bindings[binding] = *info;
     bound = buffers;
     for (const auto &[handle, memory] : memories)
-      storage.emplace(handle, memory.get());
+      storage.emplace(handle, memory);
   }
-  const bool trace = std::getenv("GEMSTONE_VULKAN_TRACE") != nullptr;
+  const bool trace = gemstone::traceEnabled("vulkan");
   if (trace)
     std::fprintf(stderr, "Gemstone Vulkan dispatch: %s bindings=%zu groups=%u,%u,%u local=%u,%u,%u\n", pipeline.entry.c_str(),
                  pipeline.bindings.size(), dispatch.x, dispatch.y, dispatch.z, pipeline.local[0], pipeline.local[1], pipeline.local[2]);
-  static std::mutex rpcMutex;
-  std::lock_guard rpcLock(rpcMutex);
-  const char *clientId = std::getenv("GEMSTONE_RPC_CLIENT");
-  const char *port = std::getenv("GEMSTONE_RPC_PORT");
-  const std::string identity = std::string(clientId ? clientId : "") + ":" + std::string(port ? port : "");
-  static std::unique_ptr<Client> client;
-  static std::string clientIdentity;
-  if (!client || clientIdentity != identity) {
-    if (auto candidate = Client::fromEnvironment()) {
-      client = std::move(candidate);
-      clientIdentity = identity;
-    }
-  }
+  std::lock_guard rpcLock(executionMutex());
+  Client *client = executionClient();
   if (!client) {
     std::fprintf(stderr, "Gemstone Vulkan: GEMSTONE_RPC_CLIENT is absent\n");
     return false;
@@ -505,7 +332,7 @@ bool run(const Dispatch &dispatch) {
       }
       const AllocationId id = registered.value();
       allocations.push_back({id, data, allocation.size});
-      if (!transfer(*client, id, data, allocation.size, true)) {
+      if (!client->call(RegisterAllocationAddress{id, GuestAddress{static_cast<int64_t>(reinterpret_cast<uintptr_t>(data))}, true})) {
         okay = false;
         break;
       }
@@ -530,22 +357,15 @@ bool run(const Dispatch &dispatch) {
     else {
       CompletionResult result;
       std::string error;
-      okay = collect_completion(*client, launched.value(), result, error);
+      okay = collect_completion(*client, launched.value(), result, error, true);
       if (!okay) std::fprintf(stderr, "Gemstone Vulkan: launch failed: %s\n", error.c_str());
     }
   }
-  if (okay)
+  if (okay && trace)
     for (const auto &allocation : allocations) {
-      if (!transfer(*client, allocation.id, allocation.data, allocation.size, false)) {
-        okay = false;
-        break;
-      }
-      if (trace) {
-        uint64_t sample = 0;
-        std::memcpy(&sample, allocation.data, std::min(sizeof(sample), allocation.size));
-        std::fprintf(stderr, "Gemstone Vulkan download: size=%zu sample=%016llx\n", allocation.size,
-                     static_cast<unsigned long long>(sample));
-      }
+      uint64_t sample = 0;
+      std::memcpy(&sample, allocation.data, std::min(sizeof(sample), allocation.size));
+      std::fprintf(stderr, "Gemstone Vulkan download: size=%zu sample=%016llx\n", allocation.size, static_cast<unsigned long long>(sample));
     }
   for (const auto &allocation : allocations)
     (void)client->call(ReleaseAllocation{allocation.id});
@@ -580,7 +400,7 @@ void fillProperties(VkPhysicalDeviceProperties *properties) {
   properties->deviceID = 1;
   properties->deviceType = VK_PHYSICAL_DEVICE_TYPE_CPU;
   const char *name = "Gemstone Vulkan Compute Device";
-  if (const char *profile = std::getenv("GEMSTONE_VULKAN_PROFILE")) {
+  if (const char *profile = gemstone::environment::value(gemstone::environment::Profile)) {
     if (std::strcmp(profile, "amd") == 0) {
       name = "AMD Gemstone Vulkan GPU";
       properties->vendorID = 0x1002;
@@ -852,7 +672,7 @@ extern "C" VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(VkDevice device, const V
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(VkDevice, const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *,
                                                            VkDeviceMemory *memory) {
   if (!info || !memory || info->memoryTypeIndex != 0 || info->allocationSize > maxAllocationSize) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-  auto object = std::make_unique<Memory>();
+  auto object = std::make_shared<Memory>();
   try {
     object->bytes.resize(static_cast<size_t>(std::max<VkDeviceSize>(1, info->allocationSize)));
   } catch (const std::bad_alloc &) {
@@ -867,7 +687,6 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(VkDevice, const VkMem
 extern "C" VKAPI_ATTR void VKAPI_CALL vkFreeMemory(VkDevice, VkDeviceMemory memory, const VkAllocationCallbacks *) {
   {
     std::lock_guard lock(stateMutex);
-    mapped.erase(memory);
     memories.erase(memory);
   }
   deleteHandle(memory);
@@ -882,14 +701,10 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory(VkDevice, VkDeviceMemory m
   const VkDeviceSize length = size == VK_WHOLE_SIZE ? it->second->bytes.size() - offset : size;
   if (length > it->second->bytes.size() - offset) return VK_ERROR_MEMORY_MAP_FAILED;
   *data = it->second->bytes.data() + offset;
-  mapped[memory] = {static_cast<unsigned char *>(*data), offset};
   return VK_SUCCESS;
 }
 
-extern "C" VKAPI_ATTR void VKAPI_CALL vkUnmapMemory(VkDevice, VkDeviceMemory memory) {
-  std::lock_guard lock(stateMutex);
-  mapped.erase(memory);
-}
+extern "C" VKAPI_ATTR void VKAPI_CALL vkUnmapMemory(VkDevice, VkDeviceMemory) {}
 
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkFlushMappedMemoryRanges(VkDevice, uint32_t, const VkMappedMemoryRange *) { return VK_SUCCESS; }
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkInvalidateMappedMemoryRanges(VkDevice, uint32_t, const VkMappedMemoryRange *) {
@@ -1084,16 +899,18 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(VkDevice, VkP
                                                                    const VkComputePipelineCreateInfo *infos, const VkAllocationCallbacks *,
                                                                    VkPipeline *output) {
   if ((count && (!infos || !output))) return VK_ERROR_INITIALIZATION_FAILED;
-  std::lock_guard lock(stateMutex);
   for (uint32_t i = 0; i < count; ++i) {
-    const auto module = modules.find(infos[i].stage.module);
-    if (module == modules.end() || !infos[i].stage.pName) {
-      if (std::getenv("GEMSTONE_VULKAN_TRACE")) std::fprintf(stderr, "Gemstone Vulkan: compute pipeline has no shader module or entry\n");
-      return VK_ERROR_INVALID_SHADER_NV;
-    }
     Pipeline pipe;
-    pipe.image = module->second;
-    pipe.entry = infos[i].stage.pName;
+    {
+      std::lock_guard lock(stateMutex);
+      const auto module = modules.find(infos[i].stage.module);
+      if (module == modules.end() || !infos[i].stage.pName) {
+        if (gemstone::traceEnabled("vulkan")) std::fprintf(stderr, "Gemstone Vulkan: compute pipeline has no shader module or entry\n");
+        return VK_ERROR_INVALID_SHADER_NV;
+      }
+      pipe.image = module->second;
+      pipe.entry = infos[i].stage.pName;
+    }
     std::map<uint32_t, std::vector<uint8_t>> specializationValues;
     if (const auto *spec = infos[i].stage.pSpecializationInfo) {
       if ((spec->mapEntryCount && !spec->pMapEntries) || (spec->dataSize && !spec->pData)) return VK_ERROR_INVALID_SHADER_NV;
@@ -1102,32 +919,44 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(VkDevice, VkP
         if (map.offset > spec->dataSize || map.size > spec->dataSize - map.offset) return VK_ERROR_INVALID_SHADER_NV;
         const auto *begin = static_cast<const uint8_t *>(spec->pData) + map.offset;
         specializationValues[map.constantID] = {begin, begin + map.size};
-        if (map.size == sizeof(uint32_t)) {
-          uint32_t value = 0;
-          std::memcpy(&value, begin, sizeof(value));
-          pipe.specValues[map.constantID] = value;
-        }
       }
     }
-    std::vector<uint8_t> specialized;
-    if (!gemstone::spirv::specializeSpirv(pipe.image, specializationValues, specialized)) {
-      if (std::getenv("GEMSTONE_VULKAN_TRACE")) {
-        std::fprintf(stderr, "Gemstone Vulkan: cannot specialize %zu-byte SPIR-V module\n", pipe.image.size());
+    {
+      std::lock_guard rpcLock(executionMutex());
+      Client *client = executionClient();
+      if (!client) return VK_ERROR_INVALID_SHADER_NV;
+      if (!specializationValues.empty()) {
+        std::vector<SpecializationConstant> constants;
+        constants.reserve(specializationValues.size());
         for (const auto &[id, value] : specializationValues)
-          std::fprintf(stderr, "Gemstone Vulkan: specialization id=%u size=%zu\n", id, value.size());
+          constants.push_back(SpecializationConstant{IntPositive0{static_cast<int32_t>(id)}, value});
+        auto specialized = client->call(SpecializeImage{pipe.image, constants});
+        if (!specialized) {
+          if (gemstone::traceEnabled("vulkan")) {
+            std::fprintf(stderr, "Gemstone Vulkan: cannot specialize %zu-byte SPIR-V module\n", pipe.image.size());
+            for (const auto &[id, value] : specializationValues)
+              std::fprintf(stderr, "Gemstone Vulkan: specialization id=%u size=%zu\n", id, value.size());
+          }
+          return VK_ERROR_INVALID_SHADER_NV;
+        }
+        pipe.image = std::move(specialized.value());
       }
-      return VK_ERROR_INVALID_SHADER_NV;
+      auto described = client->call(DescribeImage{"spirv-vulkan-binary", pipe.image, KernelName{pipe.entry}});
+      if (!described) {
+        if (gemstone::traceEnabled("vulkan")) std::fprintf(stderr, "Gemstone Vulkan: cannot reflect entry %s\n", pipe.entry.c_str());
+        return VK_ERROR_INVALID_SHADER_NV;
+      }
+      const auto &metadata = described.value();
+      if (metadata.requiredWorkGroupSize)
+        pipe.local = {static_cast<uint32_t>(metadata.requiredWorkGroupSize->x.value),
+                      static_cast<uint32_t>(metadata.requiredWorkGroupSize->y.value),
+                      static_cast<uint32_t>(metadata.requiredWorkGroupSize->z.value)};
+      pipe.bindings.clear();
+      pipe.bindings.reserve(metadata.bindingIndices.size());
+      for (const auto binding : metadata.bindingIndices)
+        pipe.bindings.push_back(static_cast<uint32_t>(binding.value));
     }
-    pipe.image = std::move(specialized);
-    const auto bindings = gemstoneVulkanDescriptorBindings(pipe.image, pipe.entry);
-    if (!bindings) {
-      if (std::getenv("GEMSTONE_VULKAN_TRACE"))
-        std::fprintf(stderr, "Gemstone Vulkan: cannot reflect descriptor bindings for entry %s\n", pipe.entry.c_str());
-      return VK_ERROR_INVALID_SHADER_NV;
-    }
-    pipe.bindings = *bindings;
-    pipe.local = gemstoneVulkanLocalSize(pipe.image, pipe.entry, pipe.specValues);
-    if (const char *directory = std::getenv("GEMSTONE_VULKAN_DUMP")) {
+    if (const char *directory = gemstone::environment::value(gemstone::environment::VulkanDump)) {
       static std::atomic<unsigned> serial{0};
       char filename[1024];
       std::snprintf(filename, sizeof(filename), "%s/gemstone-%ld-%u.spv", directory, static_cast<long>(getpid()), serial++);
@@ -1136,8 +965,11 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(VkDevice, VkP
         std::fclose(file);
       }
     }
-    output[i] = makeHandle<VkPipeline>();
-    pipelines[output[i]] = std::move(pipe);
+    {
+      std::lock_guard lock(stateMutex);
+      output[i] = makeHandle<VkPipeline>();
+      pipelines[output[i]] = std::move(pipe);
+    }
   }
   return VK_SUCCESS;
 }

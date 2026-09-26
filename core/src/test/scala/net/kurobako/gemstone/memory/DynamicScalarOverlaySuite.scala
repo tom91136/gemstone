@@ -6,7 +6,7 @@ import io.github.iltotore.iron.constraint.all.*
 import net.kurobako.gemstone.Vec
 
 final class DynamicScalarOverlaySuite extends munit.FunSuite {
-  private val doubleWord = MemoryValueByteWidth(4)
+  private val doubleWord = MemoryValueByteWidth.Dword
 
   private def allocate(
       memory: DynamicAddressMemory,

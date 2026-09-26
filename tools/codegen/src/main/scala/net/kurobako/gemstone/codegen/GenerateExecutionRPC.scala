@@ -236,7 +236,6 @@ object GenerateExecutionRPC {
        |
        |struct Error {
        |  std::string detail;
-       |  std::optional<ExecutionFailure> remote;
        |};
        |
        |template <class T> class Result {
@@ -459,15 +458,15 @@ object GenerateExecutionRPC {
        |    std::lock_guard<std::mutex> guard(mutex_); error_.clear(); Writer writer; encode(writer);
        |    if (!writer.valid()) return failed<T>("execution request exceeds the encoding limits");
        |    std::vector<uint8_t> response; uint32_t status = 0;
-       |    if (!exchange(operation, writer.result(), status, response)) return Result<T>::failure(Error{error_, std::nullopt});
+       |    if (!exchange(operation, writer.result(), status, response)) return Result<T>::failure(Error{error_});
        |    Reader reader(response);
-       |    if (status == 1) { ExecutionFailure failure{}; if (!Codec<ExecutionFailure>::read(reader, failure) || reader.remaining() != 0) { poison(); return failed<T>("execution failure response is invalid"); } error_ = failureDetail(failure); return Result<T>::failure(Error{error_, std::move(failure)}); }
+       |    if (status == 1) { ExecutionFailure failure{}; if (!Codec<ExecutionFailure>::read(reader, failure) || reader.remaining() != 0) { poison(); return failed<T>("execution failure response is invalid"); } error_ = failureDetail(failure); return Result<T>::failure(Error{error_}); }
        |    T value{}; if (!Codec<T>::read(reader, value) || reader.remaining() != 0) { poison(); return failed<T>("execution response payload is invalid"); }
        |    return Result<T>::success(std::move(value));
        |  }
        |
        | private:
-       |  template <class T> Result<T> failed(std::string detail) { error_ = std::move(detail); return Result<T>::failure(Error{error_, std::nullopt}); }
+       |  template <class T> Result<T> failed(std::string detail) { error_ = std::move(detail); return Result<T>::failure(Error{error_}); }
        |  void poison() { if (fd_ >= 0) ::close(fd_); fd_ = -1; if (established_) poisoned_ = true; }
        |  bool connectServer() {
        |    if (fd_ >= 0) return true;

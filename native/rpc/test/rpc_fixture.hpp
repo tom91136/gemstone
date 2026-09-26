@@ -150,6 +150,22 @@ public:
     programKernels_ = std::move(kernels);
     programGlobals_ = std::move(globals);
   }
+  void kernelWorkGroup(std::array<uint32_t, 3> size) {
+    std::lock_guard lock(stateMutex_);
+    requiredWorkGroupSize_ = size;
+  }
+  void kernelBindings(std::vector<uint32_t> bindings) {
+    std::lock_guard lock(stateMutex_);
+    bindingIndices_ = std::move(bindings);
+  }
+  void specializationTable(std::map<uint32_t, uint32_t> sizes) {
+    std::lock_guard lock(stateMutex_);
+    specializationSizes_ = std::move(sizes);
+  }
+  std::vector<std::pair<uint32_t, std::vector<uint8_t>>> lastSpecialization() {
+    std::lock_guard lock(stateMutex_);
+    return lastSpecialization_;
+  }
   void expectGlobalBinding(std::string name, uint64_t offset, std::vector<uint8_t> initial) {
     std::lock_guard lock(stateMutex_);
     expectedGlobals_.emplace(std::move(name), std::make_pair(offset, std::move(initial)));
@@ -305,6 +321,28 @@ private:
     GEMSTONE_RPC_REQUIRE(false);
     return 0;
   }
+  void appendKernelMetadata(std::vector<uint8_t> &result) {
+    wire::appendBigEndian<uint32_t>(result, kernelArgumentBlockSize_);
+    wire::appendBigEndian<uint32_t>(result, kernelExplicitParameterCount_);
+    wire::appendBigEndian<uint32_t>(result, static_cast<uint32_t>(kernelParameters_.size()));
+    for (const auto &parameter : kernelParameters_) {
+      wire::appendBigEndian<uint32_t>(result, parameter.width);
+      wire::appendBigEndian<uint32_t>(result, parameter.offset);
+      wire::appendBigEndian<uint64_t>(result, parameterKind(parameter.kind));
+      result.push_back(static_cast<uint8_t>(parameter.containsPointers));
+    }
+    if (requiredWorkGroupSize_) {
+      result.push_back(1);
+      wire::appendBigEndian<uint32_t>(result, (*requiredWorkGroupSize_)[0]);
+      wire::appendBigEndian<uint32_t>(result, (*requiredWorkGroupSize_)[1]);
+      wire::appendBigEndian<uint32_t>(result, (*requiredWorkGroupSize_)[2]);
+    } else result.push_back(0);
+    result.push_back(0); // absent work-group size hint
+    wire::appendBigEndian<uint32_t>(result, static_cast<uint32_t>(bindingIndices_.size()));
+    for (const auto binding : bindingIndices_)
+      wire::appendBigEndian<uint32_t>(result, binding);
+    result.push_back(0); // absent entry point id
+  }
   bool receive(int socket, void *output, size_t size) {
     auto *bytes = static_cast<uint8_t *>(output);
     while (size) {
@@ -402,20 +440,60 @@ private:
           ++programLoads_;
           wire::appendBigEndian<uint64_t>(result, 91);
           break;
+        case operation::DescribeSpecialization: {
+          GEMSTONE_RPC_REQUIRE(size >= 4);
+          GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint32_t>(payload.data()) == size - 4);
+          wire::appendBigEndian<uint32_t>(result, static_cast<uint32_t>(specializationSizes_.size()));
+          for (const auto &[id, byteSize] : specializationSizes_) {
+            wire::appendBigEndian<uint32_t>(result, id);
+            wire::appendBigEndian<uint32_t>(result, byteSize);
+          }
+          break;
+        }
+        case operation::SpecializeImage: {
+          GEMSTONE_RPC_REQUIRE(size >= 8);
+          const uint32_t imageSize = wire::readBigEndian<uint32_t>(payload.data());
+          size_t cursor = 4 + imageSize;
+          GEMSTONE_RPC_REQUIRE(cursor + 4 <= size);
+          const uint32_t count = wire::readBigEndian<uint32_t>(payload.data() + cursor);
+          cursor += 4;
+          std::vector<std::pair<uint32_t, std::vector<uint8_t>>> constants;
+          constants.reserve(count);
+          for (uint32_t index = 0; index < count; ++index) {
+            GEMSTONE_RPC_REQUIRE(cursor + 8 <= size);
+            const uint32_t id = wire::readBigEndian<uint32_t>(payload.data() + cursor);
+            const uint32_t length = wire::readBigEndian<uint32_t>(payload.data() + cursor + 4);
+            cursor += 8;
+            GEMSTONE_RPC_REQUIRE(cursor + length <= size);
+            constants.emplace_back(id, std::vector<uint8_t>(payload.begin() + cursor, payload.begin() + cursor + length));
+            cursor += length;
+          }
+          GEMSTONE_RPC_REQUIRE(cursor == size);
+          lastSpecialization_ = std::move(constants);
+          wire::appendBigEndian<uint32_t>(result, imageSize);
+          result.insert(result.end(), payload.begin() + 4, payload.begin() + 4 + imageSize);
+          break;
+        }
         case operation::UnloadProgram: break;
         case operation::DescribeKernel: {
           GEMSTONE_RPC_REQUIRE(size >= 12 && wire::readBigEndian<uint64_t>(payload.data()) == 91);
           const auto nameSize = wire::readBigEndian<uint32_t>(payload.data() + 8);
           GEMSTONE_RPC_REQUIRE(nameSize != 0 && size == 12 + nameSize);
-          wire::appendBigEndian<uint32_t>(result, kernelArgumentBlockSize_);
-          wire::appendBigEndian<uint32_t>(result, kernelExplicitParameterCount_);
-          wire::appendBigEndian<uint32_t>(result, static_cast<uint32_t>(kernelParameters_.size()));
-          for (const auto &parameter : kernelParameters_) {
-            wire::appendBigEndian<uint32_t>(result, parameter.width);
-            wire::appendBigEndian<uint32_t>(result, parameter.offset);
-            wire::appendBigEndian<uint64_t>(result, parameterKind(parameter.kind));
-            result.push_back(static_cast<uint8_t>(parameter.containsPointers));
-          }
+          appendKernelMetadata(result);
+          break;
+        }
+        case operation::DescribeImage: {
+          GEMSTONE_RPC_REQUIRE(size >= 12);
+          const auto encodingSize = wire::readBigEndian<uint32_t>(payload.data());
+          size_t cursor = 4 + encodingSize;
+          GEMSTONE_RPC_REQUIRE(cursor + 4 <= size);
+          const auto imageSize = wire::readBigEndian<uint32_t>(payload.data() + cursor);
+          cursor += 4 + imageSize;
+          GEMSTONE_RPC_REQUIRE(cursor + 4 <= size);
+          const auto nameSize = wire::readBigEndian<uint32_t>(payload.data() + cursor);
+          cursor += 4 + nameSize;
+          GEMSTONE_RPC_REQUIRE(cursor == size && nameSize != 0);
+          appendKernelMetadata(result);
           break;
         }
         case operation::DescribeProgram: {
@@ -629,7 +707,8 @@ private:
         actual.emplace_back(id, offset);
       }
       const auto relocationCount = take();
-      GEMSTONE_RPC_REQUIRE(relocationCount == 0 && cursor == payload.size());
+      GEMSTONE_RPC_REQUIRE(relocationCount == 0 && cursor + 1 == payload.size());
+      ++cursor; // discoverArgumentRelocations
       if (allocationArgumentWrite_) {
         GEMSTONE_RPC_REQUIRE(allocationArgumentWrite_->argument < actual.size());
         const auto [id, base] = actual[allocationArgumentWrite_->argument];
@@ -637,6 +716,9 @@ private:
         const auto offset = base + allocationArgumentWrite_->offset;
         GEMSTONE_RPC_REQUIRE(offset <= bytes.size() && allocationArgumentWrite_->bytes.size() <= bytes.size() - offset);
         std::copy(allocationArgumentWrite_->bytes.begin(), allocationArgumentWrite_->bytes.end(), bytes.begin() + offset);
+        if (hostBacked_[id])
+          std::memcpy(reinterpret_cast<void *>(allocationAddresses_.at(id) + offset), allocationArgumentWrite_->bytes.data(),
+                      allocationArgumentWrite_->bytes.size());
       }
       outputId_ = actual.empty() ? 0 : actual.front().first;
       ranges_.clear();
@@ -693,7 +775,8 @@ private:
       cursor += 24;
       GEMSTONE_RPC_REQUIRE(cursor <= payload.size());
     }
-    GEMSTONE_RPC_REQUIRE(cursor == payload.size());
+    GEMSTONE_RPC_REQUIRE(cursor + 1 == payload.size());
+    ++cursor; // discoverArgumentRelocations
 
     auto &bytes = hostOutputAddress_ ? hostOutputBytes_ : allocations_.at(outputId_);
     ranges_.clear();
@@ -746,6 +829,8 @@ private:
   uint32_t kernelArgumentBlockSize_ = 12;
   uint32_t kernelExplicitParameterCount_ = 2;
   std::vector<KernelParameter> kernelParameters_{{8, 0, 2, 0}, {4, 8, 1, 0}};
+  std::optional<std::array<uint32_t, 3>> requiredWorkGroupSize_;
+  std::vector<uint32_t> bindingIndices_;
   std::vector<ProgramKernel> programKernels_{{"add", "add.kd"}};
   std::vector<ProgramGlobal> programGlobals_;
   struct IndirectInput {
@@ -758,6 +843,8 @@ private:
   std::map<uint64_t, uint64_t> writtenBytes_;
   std::map<uint64_t, std::vector<uint8_t>> allocations_;
   std::vector<uint8_t> lastProgramImage_;
+  std::map<uint32_t, uint32_t> specializationSizes_;
+  std::vector<std::pair<uint32_t, std::vector<uint8_t>>> lastSpecialization_;
   std::map<uint64_t, uint64_t> allocationAddresses_;
   std::map<uint64_t, bool> hostBacked_;
   std::map<std::string, std::pair<uint64_t, std::vector<uint8_t>>> expectedGlobals_;

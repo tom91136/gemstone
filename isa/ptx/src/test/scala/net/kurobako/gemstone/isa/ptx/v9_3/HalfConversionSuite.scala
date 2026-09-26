@@ -34,6 +34,6 @@ ret;
       Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
       memory
     ).isRight)
-    assertEquals(memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth(2)), Right(0x3c01L))
+    assertEquals(memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth.Word), Right(0x3c01L))
   }
 }

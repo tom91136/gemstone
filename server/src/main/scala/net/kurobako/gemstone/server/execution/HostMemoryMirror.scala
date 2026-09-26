@@ -141,10 +141,5 @@ private[execution] final class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024
     bytes.filterInPlace((address, _) => dirty.contains(address))
   }
 
-  def release(completion: Long): Unit = {
-    val _ = missing.remove(completion)
-    val _ = changed.remove(completion)
-    val _ = issued.remove(completion)
-  }
   def clear(): Unit = { atomicStores.clear(); bytes.clear(); missing.clear(); changed.clear(); issued.clear() }
 }

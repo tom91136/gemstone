@@ -86,7 +86,7 @@ object Launcher {
     Opts.option[RPCPort]("server-port", help = "Connect to an existing Gemstone server").orNone,
     invocation
   ).mapN { (apis, serverPort, command) =>
-    val directory = sys.env.get("GEMSTONE_NATIVE_DIRECTORY").filter(_.nonEmpty).map(Path.of(_))
+    val directory = sys.env.get(EnvironmentNames.NativeDirectory).filter(_.nonEmpty).map(Path.of(_))
       .getOrElse(Path.of("native-build"))
     Options(
       apis.getOrElse(ComputeAPI.defaults),
@@ -155,8 +155,8 @@ object Launcher {
       val inheritedPreload     = inherited.get("LD_PRELOAD").filter(_.nonEmpty).toVector
       val inheritedLibraryPath = inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty).toVector
       val common               = Map(
-        "GEMSTONE_RPC_PORT"   -> s"${port.value}",
-        "GEMSTONE_RPC_CLIENT" -> s"${client.value}"
+        EnvironmentNames.RpcPort   -> s"${port.value}",
+        EnvironmentNames.RpcClient -> s"${client.value}"
       )
       val dynamic = Map.newBuilder[String, String]
       if (preload.nonEmpty) dynamic += "LD_PRELOAD" -> (preload.map(path => s"$path") ++ inheritedPreload).mkString(":")
@@ -190,7 +190,7 @@ object Launcher {
   }
 
   private val RemovedOverrides = Set(
-    "GEMSTONE_RECORD",
+    EnvironmentNames.Record,
     "HSA_ENABLE_DTIF",
     "HSA_TOOLS_LIB",
     "OCL_ICD_VENDORS",

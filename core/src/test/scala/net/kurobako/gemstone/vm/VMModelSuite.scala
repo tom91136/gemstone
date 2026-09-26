@@ -107,7 +107,7 @@ final class VMModelSuite extends munit.FunSuite {
     assertEquals(
       observer.observe(
         ObservationContext(7L),
-        Event.Print("value=%d", Vec(Event.PrintArgument.Integer(Vec(1L), 32, isSigned = true)))
+        Event.Print("value=%d", Vec(Event.PrintArgument.Integer(Vec(1L), 32)))
       ),
       Left(Observer.Error("closed:7"))
     )

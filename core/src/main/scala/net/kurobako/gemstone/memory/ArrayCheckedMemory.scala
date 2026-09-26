@@ -33,7 +33,7 @@ final class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes
     validate(address, 4) match {
       case Left(error)   => Left(error)
       case Right(offset) =>
-        LittleEndian.write(value.toLong, mutableBytes, offset, ScalarByteWidth(4))
+        LittleEndian.write(value.toLong, mutableBytes, offset, ScalarByteWidth.Dword)
         Right(())
     }
   }
@@ -91,11 +91,7 @@ final class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes
   )(update: Long => Long): Either[MemoryError, Long] = lock.withLock {
     validate(address, size.value) match {
       case Left(error)   => Left(error)
-      case Right(offset) =>
-        val width    = size.scalarByteWidth
-        val previous = LittleEndian.decode(mutableBytes, offset, width)
-        LittleEndian.write(update(previous), mutableBytes, offset, width)
-        Right(previous)
+      case Right(offset) => Right(LittleEndian.atomicModify(mutableBytes, offset, size.scalarByteWidth)(update))
     }
   }
 
@@ -106,11 +102,8 @@ final class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes
   private def validate(address: GuestAddress, width: Int): Either[MemoryError, Int] =
     if (!live) Left(MemoryError.UseAfterFree(address, allocation))
     else {
-      val relative   = address.value - allocation.start.value
-      val validStart = java.lang.Long.compareUnsigned(address.value, allocation.start.value) >= 0
-      val validEnd   = width >= 0 && width <= allocation.size &&
-        java.lang.Long.compareUnsigned(relative, allocation.size.toLong - width.toLong) <= 0
-      if (validStart && validEnd)
+      val relative = address.value - allocation.start.value
+      if (AddressRanges.containsUnsigned(allocation.start.value, allocation.size.toLong, address.value, width.toLong))
         Right(relative.toInt)
       else Left(MemoryError.OutOfBounds(address, width, allocation))
     }
@@ -121,8 +114,7 @@ object ArrayCheckedMemory {
   def allocate(
       size: Int :| Positive0,
       start: GuestAddress = GuestAddress(0x10000L),
-      kind: AllocationKind = AllocationKind.Device,
       provenance: String :| MinLength[1] = "anonymous"
   ): ArrayCheckedMemory =
-    ArrayCheckedMemory(Allocation(start, size, kind, provenance), Array.ofDim[Byte](size))
+    ArrayCheckedMemory(Allocation(start, size, provenance), Array.ofDim[Byte](size))
 }

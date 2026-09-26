@@ -207,6 +207,17 @@ private[v9_3] object VMIR {
     case other                           => s"binary.$other"
   }
 
+  /** Memory space selected by a PTX atomic: explicit global/shared, or generic resolved from the address. */
+  enum AtomicSpace {
+    case Generic, Global, Shared
+
+    def qualifier: String = this match {
+      case Generic => ""
+      case Global  => "global."
+      case Shared  => "shared."
+    }
+  }
+
   enum Instruction(private val opcodeText: String) {
     final val opcode: Opcode = Opcode.applyUnsafe(opcodeText)
 
@@ -490,9 +501,6 @@ private[v9_3] object VMIR {
     case LoadGeneric(destination: RegisterName, address: Value, width: BitWidth, signed: Boolean)
         extends Instruction(s"ld.generic.${if (signed) "s" else "u"}$width")
 
-    case DiscardGlobalLoad(address: Value, width: BitWidth)
-        extends Instruction(s"ld.global.nc.u$width")
-
     case LoadGlobalVector(destinations: Vec[RegisterName], address: Value, width: BitWidth, signed: Boolean)
         extends Instruction(s"ld.global.v${destinations.size}.${if (signed) "s" else "u"}$width")
 
@@ -504,9 +512,6 @@ private[v9_3] object VMIR {
 
     case StoreGeneric(address: Value, source: Value, width: BitWidth)
         extends Instruction(s"st.generic.u$width")
-
-    case StoreGlobalVector(address: Value, sources: Vec[Value], width: BitWidth)
-        extends Instruction(s"st.global.v${sources.size}.u$width")
 
     case StoreGenericVector(address: Value, sources: Vec[Value], width: BitWidth)
         extends Instruction(s"st.generic.v${sources.size}.u$width")
@@ -587,8 +592,8 @@ private[v9_3] object VMIR {
         operation: PredicateOperation
     ) extends Instruction(s"bar.red.${operation.toString.map(_.toLower)}.pred")
 
-    case AtomicAdd(destination: RegisterName, address: Value, source: Value, width: BitWidth, global: Option[Boolean])
-        extends Instruction(s"atom.${global.fold("")(if (_) "global." else "shared.")}add.u$width")
+    case AtomicAdd(destination: RegisterName, address: Value, source: Value, width: BitWidth, space: AtomicSpace)
+        extends Instruction(s"atom.${space.qualifier}add.u$width")
 
     case AtomicCompareExchange(
         destination: RegisterName,
@@ -596,30 +601,30 @@ private[v9_3] object VMIR {
         comparator: Value,
         source: Value,
         width: BitWidth,
-        global: Option[Boolean]
-    ) extends Instruction(s"atom.${global.fold("")(if (_) "global." else "shared.")}cas.b$width")
+        space: AtomicSpace
+    ) extends Instruction(s"atom.${space.qualifier}cas.b$width")
 
     case AtomicExchange(
         destination: RegisterName,
         address: Value,
         source: Value,
         width: BitWidth,
-        global: Option[Boolean]
-    ) extends Instruction(s"atom.${global.fold("")(if (_) "global." else "shared.")}exch.b$width")
+        space: AtomicSpace
+    ) extends Instruction(s"atom.${space.qualifier}exch.b$width")
 
     case AtomicBinary(
         destination: RegisterName,
         address: Value,
         source: Value,
         width: BitWidth,
-        global: Option[Boolean],
+        space: AtomicSpace,
         operation: IntegerOperation
     ) extends Instruction(
-          s"atom.${global.fold("")(if (_) "global." else "shared.")}${atomicBinaryOpcode(operation, width)}"
+          s"atom.${space.qualifier}${atomicBinaryOpcode(operation, width)}"
         )
 
-    case AtomicMin(destination: RegisterName, address: Value, source: Value, width: BitWidth, global: Option[Boolean])
-        extends Instruction(s"atom.${global.fold("")(if (_) "global." else "shared.")}min.u$width")
+    case AtomicMin(destination: RegisterName, address: Value, source: Value, width: BitWidth, space: AtomicSpace)
+        extends Instruction(s"atom.${space.qualifier}min.u$width")
 
     case AtomicAddFloat(destination: RegisterName, address: Value, source: Value, width: FloatWidth)
         extends Instruction(s"atom.global.add.f$width")
@@ -665,7 +670,7 @@ private[v9_3] object VMIR {
 
   object Argument {
     def apply(value: Long): Argument =
-      Argument(LittleEndian.toVec(value, ScalarByteWidth(8)).refineUnsafe[MinLength[1]])
+      Argument(LittleEndian.toVec(value, ScalarByteWidth.Qword).refineUnsafe[MinLength[1]])
   }
 
   final case class Kernel(

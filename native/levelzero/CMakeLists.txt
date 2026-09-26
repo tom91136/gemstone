@@ -5,9 +5,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(LEVEL_ZERO_INCLUDE_DIR "" CACHE PATH "Directory containing ze_api.h and ze_ddi.h")
 if(NOT EXISTS "${LEVEL_ZERO_INCLUDE_DIR}/ze_ddi.h")
   include(FetchContent)
+  if(NOT LEVEL_ZERO_SOURCE_URL OR NOT LEVEL_ZERO_SOURCE_SHA256)
+    message(FATAL_ERROR "LEVEL_ZERO_SOURCE_URL and LEVEL_ZERO_SOURCE_SHA256 must be supplied by the build")
+  endif()
   FetchContent_Declare(level_zero_headers
-    URL https://github.com/oneapi-src/level-zero/archive/refs/tags/v1.33.1.tar.gz
-    URL_HASH SHA256=e0274918e10d788041aa79e166699d0975de9adf1b0b650ee02c123f81f0533f
+    URL "${LEVEL_ZERO_SOURCE_URL}"
+    URL_HASH "SHA256=${LEVEL_ZERO_SOURCE_SHA256}"
     SOURCE_SUBDIR gemstone-no-cmake-project
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   )
@@ -15,7 +18,7 @@ if(NOT EXISTS "${LEVEL_ZERO_INCLUDE_DIR}/ze_ddi.h")
   set(LEVEL_ZERO_INCLUDE_DIR "${level_zero_headers_SOURCE_DIR}/include")
 endif()
 
-add_library(gemstone_levelzero SHARED src/driver.cpp ../spirv/specialization.cpp)
+add_library(gemstone_levelzero SHARED src/driver.cpp)
 target_include_directories(gemstone_levelzero
   PRIVATE "${LEVEL_ZERO_INCLUDE_DIR}" ../generated/levelzero
 )
@@ -37,24 +40,28 @@ set_target_properties(gemstone_levelzero PROPERTIES
 )
 
 if(BUILD_TESTING)
-  find_library(LEVEL_ZERO_LOADER_LIBRARY NAMES ze_loader libze_loader.so.1)
-  if(NOT LEVEL_ZERO_LOADER_LIBRARY)
-    message(STATUS "Level Zero loader unavailable; loader-facing component tests are not applicable")
-  else()
+  include("${CMAKE_CURRENT_LIST_DIR}/../cmake/LevelZeroLoader.cmake")
+  gemstone_add_level_zero_loader()
+
   gemstone_memory_client(levelzero gemstone_levelzero)
+  set_target_properties(gemstone_memory_levelzero PROPERTIES BUILD_RPATH "$ORIGIN")
+
   add_executable(gemstone_levelzero_smoke test/levelzero_smoke.cpp)
   target_include_directories(gemstone_levelzero_smoke PRIVATE "${LEVEL_ZERO_INCLUDE_DIR}")
-  target_link_libraries(gemstone_levelzero_smoke PRIVATE "${LEVEL_ZERO_LOADER_LIBRARY}")
+  target_link_libraries(gemstone_levelzero_smoke PRIVATE ze_loader)
+  add_dependencies(gemstone_levelzero_smoke level_zero_loader)
+  set_target_properties(gemstone_levelzero_smoke PROPERTIES BUILD_RPATH "$ORIGIN")
   gemstone_test_target(gemstone_levelzero_smoke)
   gemstone_discover_tests(gemstone_levelzero_smoke TEST_PREFIX "level-zero/"
     PROPERTIES ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>;ZE_ENABLE_LOADER_DEBUG_TRACE=0")
 
   add_executable(gemstone_levelzero_rpc_test test/execution_rpc_test.cpp)
   target_include_directories(gemstone_levelzero_rpc_test PRIVATE "${LEVEL_ZERO_INCLUDE_DIR}")
-  target_link_libraries(gemstone_levelzero_rpc_test PRIVATE "${LEVEL_ZERO_LOADER_LIBRARY}" pthread)
+  target_link_libraries(gemstone_levelzero_rpc_test PRIVATE ze_loader pthread)
+  add_dependencies(gemstone_levelzero_rpc_test level_zero_loader)
+  set_target_properties(gemstone_levelzero_rpc_test PROPERTIES BUILD_RPATH "$ORIGIN")
   gemstone_test_target(gemstone_levelzero_rpc_test)
   gemstone_discover_tests(gemstone_levelzero_rpc_test TEST_PREFIX "level-zero/"
     PROPERTIES TIMEOUT 30
     ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>;ZE_ENABLE_LOADER_DEBUG_TRACE=0")
-  endif()
 endif()

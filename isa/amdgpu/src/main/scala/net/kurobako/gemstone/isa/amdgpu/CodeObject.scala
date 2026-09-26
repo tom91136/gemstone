@@ -149,7 +149,7 @@ object CodeObject {
               value,
               images(index),
               (address - section.address).toInt,
-              ScalarByteWidth(8)
+              ScalarByteWidth.Qword
             )
         }
       }
@@ -775,5 +775,5 @@ object CodeObject {
     LittleEndian.decodeInt32(bytes, offset)
 
   private def littleLong(bytes: Array[Byte], offset: Int): Long =
-    LittleEndian.decode(bytes, offset, ScalarByteWidth(8))
+    LittleEndian.decode(bytes, offset, ScalarByteWidth.Qword)
 }

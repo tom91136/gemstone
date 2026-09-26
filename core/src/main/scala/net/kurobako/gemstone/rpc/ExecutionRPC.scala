@@ -66,12 +66,20 @@ object ExecutionRPC {
         extends Operation[Vec[Byte]]
     case LoadProgram(encoding: String, image: Vec[Byte])
         extends Operation[ProgramId]
+    case DescribeSpecialization(image: Vec[Byte])
+        extends Operation[Vec[SpecializationInfo]]
+    case SpecializeImage(image: Vec[Byte], constants: Vec[SpecializationConstant])
+        extends Operation[Vec[Byte]]
     case UnloadProgram(program: ProgramId)
         extends Operation[Unit]
     case DescribeProgram(program: ProgramId)
         extends Operation[ProgramCatalog]
     case DescribeKernel(program: ProgramId, name: KernelName)
         extends Operation[KernelMetadata]
+    case DescribeImage(encoding: String, image: Vec[Byte], name: KernelName)
+        extends Operation[KernelMetadata]
+    case Blas(request: BlasRequest)
+        extends Operation[BlasResult]
     case DescribeGlobal(program: ProgramId, name: GlobalName)
         extends Operation[ProgramGlobal]
     case BindProgramGlobal(program: ProgramId, name: GlobalName, allocation: AllocationId, offset: Long :| Positive0)
@@ -89,7 +97,8 @@ object ExecutionRPC {
         privateSegmentBytes: Int :| Positive0,
         groupSegmentBytes: Int :| Positive0,
         arguments: Vec[KernelArgument],
-        pointerRelocations: Vec[PointerRelocation]
+        pointerRelocations: Vec[PointerRelocation],
+        discoverArgumentRelocations: Boolean = false
     ) extends Operation[CompletionId]
     case QueryCompletion(completion: CompletionId)
         extends Operation[CompletionStatus]
@@ -100,7 +109,7 @@ object ExecutionRPC {
     case CompletionPointerRelocations(completion: CompletionId)
         extends Operation[Vec[PointerRelocation]]
     case CompletionPrints(completion: CompletionId)
-        extends Operation[Vec[PrintEvent]]
+        extends Operation[String]
     case ReleaseCompletion(completion: CompletionId)
         extends Operation[Unit]
   }

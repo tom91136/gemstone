@@ -127,7 +127,7 @@ int launch(void *context, uint64_t program_id, const char *kernel_name, gemstone
     } else return -1;
   }
   CompletionId completion{};
-  if (std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") && !executor.client->call(EnableHostMemory{})) return -1;
+  if (gemstone::environment::present(gemstone::environment::SystemPaging) && !executor.client->call(EnableHostMemory{})) return -1;
   const auto result = accept(
       executor,
       executor.client->call(Launch{

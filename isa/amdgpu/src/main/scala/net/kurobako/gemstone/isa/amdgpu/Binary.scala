@@ -67,7 +67,7 @@ object Binary {
             val word          = SOPPEncodingPrefix |
               ((definition.opcode.toLong & 0x7fL) << SOPPOpcodeShift) |
               (value & immediateMask)
-            LittleEndian.toVec(word, ScalarByteWidth(4))
+            LittleEndian.toVec(word, ScalarByteWidth.Dword)
           }
       }
   }
@@ -78,7 +78,7 @@ object Binary {
   ): Either[CodecError, Instruction] =
     if (bytes.size != 4) Left(CodecError.InvalidEncoding(s"SOPP is exactly four bytes, found ${bytes.size}"))
     else {
-      val word = LittleEndian.decode(bytes, 0, ScalarByteWidth(4))
+      val word = LittleEndian.decode(bytes, 0, ScalarByteWidth.Dword)
       if ((word & SOPPMask) != SOPPEncodingPrefix)
         Left(CodecError.InvalidEncoding(f"not a SOPP word: 0x$word%08x"))
       else {

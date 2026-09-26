@@ -247,7 +247,16 @@ private:
     REQUIRE((payload.size() >= 12 && gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == programId));
     const auto nameSize = gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + 8);
     REQUIRE((payload.size() == 12 + nameSize));
-    REQUIRE((std::string(reinterpret_cast<const char *>(payload.data() + 12), nameSize) == "write"));
+    const std::string name(reinterpret_cast<const char *>(payload.data() + 12), nameSize);
+    if (name != "write") {
+      const std::string detail = "unknown kernel";
+      std::vector<uint8_t> failure;
+      gemstone_test::wire::appendBigEndian<uint64_t>(failure, tag::ExecutionFailureNotFound);
+      gemstone_test::wire::appendBigEndian<uint32_t>(failure, static_cast<uint32_t>(detail.size()));
+      failure.insert(failure.end(), detail.begin(), detail.end());
+      respond(connection, failure, true);
+      return;
+    }
     std::vector<uint8_t> response;
     gemstone_test::wire::appendBigEndian<uint32_t>(response, 28);
     gemstone_test::wire::appendBigEndian<uint32_t>(response, 4);
@@ -265,6 +274,11 @@ private:
                                                                                    : tag::KernelParameterKindLocal);
       response.push_back(static_cast<uint8_t>(parameter[3]));
     }
+    response.push_back(0);                                       // absent required work-group size
+    response.push_back(0);                                       // absent work-group size hint
+    gemstone_test::wire::appendBigEndian<uint32_t>(response, 0); // no argument bindings
+    response.push_back(1);                                       // entry point id 6
+    gemstone_test::wire::appendBigEndian<uint32_t>(response, 6);
     respond(connection, response);
   }
 
@@ -311,7 +325,8 @@ private:
     cursor += 16;
     REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor) == 0));
     cursor += 4;
-    REQUIRE((cursor == payload.size()));
+    REQUIRE((cursor + 1 == payload.size()));
+    ++cursor; // discoverArgumentRelocations
     std::memcpy(allocation.data() + 4, value, sizeof(uint32_t));
     std::vector<uint8_t> response;
     gemstone_test::wire::appendBigEndian<uint64_t>(response, completionId);

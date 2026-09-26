@@ -42,7 +42,7 @@ import java.util.concurrent.locks.ReentrantLock
   * invocation/work-group-owned byte buffers.
   */
 private[v1_6] object VMInterpreter {
-  import Operand.{id, operandBits, unsigned}
+  import Operand.{id, unsigned}
   private type Program = VMLoadedProgram
 
   private def isPhi(instruction: Instruction): Boolean = instruction match {
@@ -216,6 +216,7 @@ private[v1_6] object VMInterpreter {
     program.entryPoints.get(name).flatMap(program.functions.get) match {
       case None    => Left(Fault.InvalidTask(s"SPIR-V entry point $name has no function body"))
       case Some(_) =>
+        val functionId  = program.entryPoints(name)
         val descriptors = descriptorVariables(program, name)
         val parameters  = descriptors.indices.map(index =>
           KernelMetadata.Parameter(
@@ -228,8 +229,31 @@ private[v1_6] object VMInterpreter {
         KernelMetadata.validated(
           (descriptors.size * 8).refineUnsafe[Positive0],
           descriptors.size.refineUnsafe[Positive0],
-          Vec.from(parameters)
+          Vec.from(parameters),
+          requiredWorkGroupSize = workGroupSize(program, functionId),
+          workGroupSizeHint = workGroupSizeHint(program, functionId),
+          bindingIndices =
+            Vec.from(descriptors.map(variable => program.descriptorBindings(variable)._2.refineUnsafe[Positive0]))
         ).leftMap(detail => Fault.InvalidTask(detail))
+    }
+
+  private def workGroupSize(program: Program, functionId: Int): Option[KernelMetadata.WorkGroupSize] =
+    program.workGroupSizes.get(functionId).map(toWorkGroupSize(_, _, _)).orElse(builtinWorkGroupSize(program))
+
+  private def builtinWorkGroupSize(program: Program): Option[KernelMetadata.WorkGroupSize] =
+    program.builtins.collectFirst { case (variable, 25) => variable }.flatMap { variable =>
+      program.constantData.get(variable).collect {
+        case Constant.Bits(_, lanes) if lanes.size == 3 =>
+          toWorkGroupSize(lanes(0).toInt, lanes(1).toInt, lanes(2).toInt)
+      }
+    }
+
+  private def toWorkGroupSize(x: Int, y: Int, z: Int): KernelMetadata.WorkGroupSize =
+    KernelMetadata.WorkGroupSize(x.refineUnsafe[Positive], y.refineUnsafe[Positive], z.refineUnsafe[Positive])
+
+  private def workGroupSizeHint(program: Program, functionId: Int): Option[KernelMetadata.WorkGroupSize] =
+    program.workGroupSizeHints.get(functionId).map { case (x, y, z) =>
+      KernelMetadata.WorkGroupSize(x.refineUnsafe[Positive], y.refineUnsafe[Positive], z.refineUnsafe[Positive])
     }
 
   private def parameterMetadata(
@@ -671,7 +695,10 @@ private[v1_6] object VMInterpreter {
             case Left(error)   => return Left(error)
             case Right(result) => result
           }
-          val bytes = encode(program, value)
+          val bytes = encode(program, value) match {
+            case Left(error) => return Left(error)
+            case Right(data) => data
+          }
           values.update(
             variable,
             RuntimeValue.Address(
@@ -765,28 +792,24 @@ private[v1_6] object VMInterpreter {
       instruction: VMScalarIntegerInstruction
   ): Boolean = {
     val values = execution.values
-    val left   =
-      if (instruction.leftConstant) instruction.leftConstantBits
-      else values.readScalar(instruction.left)
-    val leftIsScalar = instruction.leftConstant || values.scalarReadSucceeded
-    val right        =
-      if (instruction.rightConstant) instruction.rightConstantBits
-      else values.readScalar(instruction.right)
-    val rightIsScalar = instruction.rightConstant || values.scalarReadSucceeded
-    if (!leftIsScalar || !rightIsScalar) false
-    else {
-      val result = instruction.operation match {
-        case VMScalarIntegerInstruction.Add      => left + right
-        case VMScalarIntegerInstruction.Subtract => left - right
-        case VMScalarIntegerInstruction.Multiply => left * right
-      }
-      values.updateScalar(
-        instruction.destination,
-        instruction.resultType,
-        result & instruction.resultMask
-      )
-      execution.pc += 1
-      true
+    val left = if (instruction.leftConstant) Some(instruction.leftConstantBits) else values.readScalar(instruction.left)
+    val right =
+      if (instruction.rightConstant) Some(instruction.rightConstantBits) else values.readScalar(instruction.right)
+    (left, right) match {
+      case (Some(leftValue), Some(rightValue)) =>
+        val result = instruction.operation match {
+          case VMScalarIntegerInstruction.Add      => leftValue + rightValue
+          case VMScalarIntegerInstruction.Subtract => leftValue - rightValue
+          case VMScalarIntegerInstruction.Multiply => leftValue * rightValue
+        }
+        values.updateScalar(
+          instruction.destination,
+          instruction.resultType,
+          result & instruction.resultMask
+        )
+        execution.pc += 1
+        true
+      case _ => false
     }
   }
 
@@ -814,7 +837,7 @@ private[v1_6] object VMInterpreter {
     case _: Instruction.AtomicStore | _: Instruction.AtomicLoad | _: Instruction.AtomicExchange | _: Instruction.AtomicCompareExchange | _: Instruction.AtomicCompareExchangeWeak | _: Instruction.AtomicFlagTestAndSet | _: Instruction.AtomicFlagClear | _: Instruction.AtomicFAddEXT | _: Instruction.AtomicFMinEXT | _: Instruction.AtomicFMaxEXT | _: Instruction.AtomicIAdd | _: Instruction.AtomicUMin | _: Instruction.AtomicIIncrement | _: Instruction.AtomicIDecrement | _: Instruction.AtomicISub | _: Instruction.AtomicSMin | _: Instruction.AtomicSMax | _: Instruction.AtomicUMax | _: Instruction.AtomicAnd | _: Instruction.AtomicOr | _: Instruction.AtomicXor | _: Instruction.FAdd | _: Instruction.FSub | _: Instruction.FMul | _: Instruction.Dot | _: Instruction.FDiv | _: Instruction.VectorTimesScalar =>
       executeAtomic(program, execution, memory, instruction)
     case _: Instruction.FNegate | _: Instruction.ShiftLeftLogical =>
-      executeAtomicXor(program, execution, instruction)
+      executeFloatingAndShift(program, execution, instruction)
     case _: Instruction.ShiftRightLogical | _: Instruction.ShiftRightArithmetic | _: Instruction.BitwiseOr | _: Instruction.BitwiseXor | _: Instruction.BitwiseAnd | _: Instruction.Not | _: Instruction.IEqual | _: Instruction.INotEqual | _: Instruction.LogicalEqual | _: Instruction.LogicalNotEqual | _: Instruction.LogicalOr | _: Instruction.LogicalAnd | _: Instruction.LogicalNot | _: Instruction.Any | _: Instruction.All | _: Instruction.FOrdEqual | _: Instruction.FOrdNotEqual | _: Instruction.FUnordEqual | _: Instruction.FUnordNotEqual | _: Instruction.FUnordLessThan | _: Instruction.FUnordGreaterThan | _: Instruction.FUnordLessThanEqual | _: Instruction.FUnordGreaterThanEqual | _: Instruction.Unordered | _: Instruction.Ordered | _: Instruction.FOrdLessThanEqual | _: Instruction.FOrdLessThan | _: Instruction.FOrdGreaterThan | _: Instruction.FOrdGreaterThanEqual | _: Instruction.IsInf | _: Instruction.IsNan | _: Instruction.IsFinite =>
       executeArithmetic(program, execution, instruction)
     case _: Instruction.IsNormal | _: Instruction.SignBitSet | _: Instruction.ULessThan | _: Instruction.UGreaterThan | _: Instruction.ULessThanEqual | _: Instruction.UGreaterThanEqual | _: Instruction.SGreaterThan | _: Instruction.SGreaterThanEqual | _: Instruction.SLessThan | _: Instruction.SLessThanEqual | _: Instruction.Select =>
@@ -905,15 +928,14 @@ private[v1_6] object VMInterpreter {
             case _ => ()
           }
         })
-        initializer.flatMap(value => values.get(id(value))).foreach(value =>
-          Array.copy(
-            encode(program, value),
-            0,
-            buffer,
-            0,
-            math.min(buffer.length, encode(program, value).length)
-          )
-        )
+        initializer.flatMap(value => values.get(id(value))) match {
+          case Some(value) => encode(program, value) match {
+              case Left(error)    => return Left(error)
+              case Right(encoded) =>
+                Array.copy(encoded, 0, buffer, 0, math.min(buffer.length, encoded.length))
+            }
+          case None => ()
+        }
         values.update(
           id(dest),
           RuntimeValue.Address(
@@ -922,7 +944,7 @@ private[v1_6] object VMInterpreter {
               Region.Internal(InternalMemory(buffer)),
               0L,
               pointee,
-              operandBits(storageClass),
+              id(storageClass),
               Option.when(slots.nonEmpty)(slots)
             )
           )
@@ -956,7 +978,10 @@ private[v1_6] object VMInterpreter {
                   case Right(size) => memory.read(source, size) match {
                       case Left(error)  => return Left(error)
                       case Right(bytes) =>
-                        values.update(id(dest), decode(program, id(resultType), bytes))
+                        decode(program, id(resultType), bytes) match {
+                          case Left(error)  => return Left(error)
+                          case Right(value) => values.update(id(dest), value)
+                        }
                         execution.pc += 1
                     }
                 }
@@ -994,10 +1019,13 @@ private[v1_6] object VMInterpreter {
                   case Left(error) => return Left(error)
                   case Right(())   => execution.pc += 1
                 }
-              case Some(value) => memory.write(target, encode(program, value)) match {
-                  case Left(error) =>
-                    return Left(withExecutionContext(error, execution.currentFunction, execution.pc, instruction))
-                  case Right(()) => execution.pc += 1
+              case Some(value) => encode(program, value) match {
+                  case Left(error)    => return Left(error)
+                  case Right(encoded) => memory.write(target, encoded) match {
+                      case Left(error) =>
+                        return Left(withExecutionContext(error, execution.currentFunction, execution.pc, instruction))
+                      case Right(()) => execution.pc += 1
+                    }
                 }
               case None => return Left(undefined(source))
             }
@@ -1898,7 +1926,7 @@ private[v1_6] object VMInterpreter {
 
   // The XOR atomic specialization shares the same fail-before-write semantics.
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
-  private def executeAtomicXor(
+  private def executeFloatingAndShift(
       program: Program,
       execution: InvocationExecution,
       instruction: Instruction
@@ -3000,7 +3028,7 @@ private[v1_6] object VMInterpreter {
               )
             values.get(id(arguments.head)) match {
               case Some(RuntimeValue.Address(_, pointer)) =>
-                memory.readScalar(pointer, MemoryValueByteWidth(4)) match {
+                memory.readScalar(pointer, MemoryValueByteWidth.Dword) match {
                   case Left(error) => return Left(error)
                   case Right(raw)  =>
                     values.update(
@@ -3024,7 +3052,7 @@ private[v1_6] object VMInterpreter {
               )
             values.get(id(arguments.head)) match {
               case Some(RuntimeValue.Address(_, pointer)) =>
-                memory.readScalar(pointer, MemoryValueByteWidth(2)) match {
+                memory.readScalar(pointer, MemoryValueByteWidth.Word) match {
                   case Left(error) => return Left(error)
                   case Right(raw)  =>
                     values.update(
@@ -3254,13 +3282,19 @@ private[v1_6] object VMInterpreter {
     instruction match {
       case Instruction.Branch(target) =>
         execution.predecessor = execution.currentLabel
-        execution.pc = label(execution.currentFunction, target)
+        label(execution.currentFunction, target) match {
+          case Left(error) => return Left(error)
+          case Right(pc)   => execution.pc = pc
+        }
       case Instruction.BranchConditional(condition, whenTrue, whenFalse, _) =>
         scalar(values, condition) match {
           case Left(error) => return Left(error)
           case Right(test) =>
             execution.predecessor = execution.currentLabel
-            execution.pc = label(execution.currentFunction, if (test != 0L) whenTrue else whenFalse)
+            label(execution.currentFunction, if (test != 0L) whenTrue else whenFalse) match {
+              case Left(error) => return Left(error)
+              case Right(pc)   => execution.pc = pc
+            }
         }
       case Instruction.Switch(selector, default, targets) =>
         scalar(values, selector) match {
@@ -3290,7 +3324,10 @@ private[v1_6] object VMInterpreter {
               index += 1
             }
             execution.predecessor = execution.currentLabel
-            execution.pc = label(execution.currentFunction, target)
+            label(execution.currentFunction, target) match {
+              case Left(error) => return Left(error)
+              case Right(pc)   => execution.pc = pc
+            }
         }
       case Instruction.ReturnValue(value) =>
         val returned = values.get(id(value)) match {
@@ -4173,7 +4210,7 @@ private[v1_6] object VMInterpreter {
             pc,
             scope.toInt,
             CollectivePayload.Value(id(resultType), id(destination), value),
-            operandBits(operation)
+            id(operation)
           )
         )
       case (Right(_), _) if !Vec(0L, 1L, 2L).contains(unsigned(operation)) =>
@@ -4217,7 +4254,7 @@ private[v1_6] object VMInterpreter {
             pc,
             scope.toInt,
             CollectivePayload.Value(id(resultType), id(destination), value),
-            operandBits(operation)
+            id(operation)
           )
         )
       case (Right(_), _) if !Vec(0L, 1L, 2L).contains(unsigned(operation)) =>
@@ -4261,7 +4298,7 @@ private[v1_6] object VMInterpreter {
             pc,
             scope.toInt,
             CollectivePayload.Value(id(resultType), id(destination), value),
-            operandBits(operation)
+            id(operation)
           )
         )
       case (Right(_), _) if !Vec(0L, 1L, 2L).contains(unsigned(operation)) =>
@@ -4305,7 +4342,7 @@ private[v1_6] object VMInterpreter {
             pc,
             scope.toInt,
             CollectivePayload.Value(id(resultType), id(destination), value),
-            operandBits(operation)
+            id(operation)
           )
         )
       case (Right(_), _) if !Vec(0L, 1L, 2L).contains(unsigned(operation)) =>
@@ -4349,7 +4386,7 @@ private[v1_6] object VMInterpreter {
             pc,
             scope.toInt,
             CollectivePayload.Value(id(resultType), id(destination), value),
-            operandBits(operation)
+            id(operation)
           )
         )
       case (Right(_), _) if !Vec(0L, 1L, 2L).contains(unsigned(operation)) =>
@@ -4395,7 +4432,7 @@ private[v1_6] object VMInterpreter {
             pc,
             scope.toInt,
             CollectivePayload.Value(id(resultType), id(destination), value),
-            operandBits(operation)
+            id(operation)
           )
         )
       case (Right(_), _) if !Vec(0L, 1L, 2L).contains(unsigned(operation)) =>
@@ -4640,7 +4677,7 @@ private[v1_6] object VMInterpreter {
           case KernelTask.Argument.Scalar(bytes)
               if !byValue && bytes.size == 8 && (storageClass == 5 || storageClass == 8) =>
             memory.integerPointer(
-              LittleEndian.decode(bytes, 0, MemoryValueByteWidth(8).scalarByteWidth),
+              LittleEndian.decode(bytes, 0, MemoryValueByteWidth.Qword.scalarByteWidth),
               pointee,
               storageClass
             )
@@ -4683,7 +4720,7 @@ private[v1_6] object VMInterpreter {
         }
       case Some(_) => argument match {
           case KernelTask.Argument.Scalar(bytes) =>
-            memory.relocateArgument(argumentIndex, bytes).map(decoded => decode(program, parameterType, decoded))
+            memory.relocateArgument(argumentIndex, bytes).flatMap(decoded => decode(program, parameterType, decoded))
           case value => value match {
               case KernelTask.Argument.Local(size) =>
                 // Some DPC++ Level Zero kernels lower a local pointer parameter to a
@@ -4798,7 +4835,7 @@ private[v1_6] object VMInterpreter {
       )
       val resolved = stored match {
         case Some(pointer) => Right(pointer)
-        case None          => memory.readScalar(source, MemoryValueByteWidth(8))
+        case None          => memory.readScalar(source, MemoryValueByteWidth.Qword)
             .flatMap(raw => memory.integerPointer(raw, resultPointee, resultStorage))
             .map(resultType -> _)
       }
@@ -4855,7 +4892,7 @@ private[v1_6] object VMInterpreter {
           case _ =>
             val stored = for {
               address <- memory.pointerInteger(source)
-              _       <- memory.writeScalar(target, address, MemoryValueByteWidth(8))
+              _       <- memory.writeScalar(target, address, MemoryValueByteWidth.Qword)
               _       <- memory.recordPointerRelocation(source, target)
             } yield ()
             stored match {
@@ -4898,7 +4935,10 @@ private[v1_6] object VMInterpreter {
                   )
                 )
               case Some(value) =>
-                val encoded = encode(program, value)
+                val encoded = encode(program, value) match {
+                  case Left(error) => return Left(error)
+                  case Right(data) => data
+                }
                 if (encoded.length != typeSize(program, pointee))
                   return Left(
                     Fault.InvalidTask(
@@ -5041,7 +5081,7 @@ private[v1_6] object VMInterpreter {
       storage: Operand
   ): Either[Fault, Unit] = {
     val outputType    = id(resultType)
-    val targetStorage = operandBits(storage)
+    val targetStorage = id(storage)
     (program.runtimeType(outputType), values.get(id(source))) match {
       case (
             Some(RuntimeType.Pointer(resultStorage, targetPointee)),
@@ -5250,7 +5290,7 @@ private[v1_6] object VMInterpreter {
         while (lane < count) {
           memory.readScalar(
             pointer.copy(offset = Math.addExact(base, lane.toLong * 2L)),
-            MemoryValueByteWidth(2)
+            MemoryValueByteWidth.Word
           ) match {
             case Left(error) => return Left(error)
             case Right(half) =>
@@ -5287,14 +5327,14 @@ private[v1_6] object VMInterpreter {
           case Some((width, count)) if width.value == 32 || width.value == 64 =>
             val stride = if (aligned && count == 3) 4 else count
             val base   = Math.addExact(pointer.offset, Math.multiplyExact(offset, stride.toLong * 2L))
-            val mode   = if (rounded) operandBits(sources(3)) else 0
+            val mode   = if (rounded) id(sources(3)) else 0
             var lane   = 0
             while (lane < count) {
               val source = floatingToDouble(width, lanes(lane))
               memory.writeScalar(
                 pointer.copy(offset = Math.addExact(base, lane.toLong * 2L)),
                 doubleToBinary16(source, mode).value,
-                MemoryValueByteWidth(2)
+                MemoryValueByteWidth.Word
               ) match {
                 case Left(error) => return Left(error)
                 case Right(())   => ()
@@ -5658,8 +5698,8 @@ private[v1_6] object VMInterpreter {
       values.get(id(source)) match {
         case Some(RuntimeValue.Bits(typeId, lanes)) =>
           signedIntegerShape(program, typeId) match {
-            case Some((width, _, signed)) =>
-              arguments += Event.PrintArgument.Integer(Vec.from(lanes), width.value, signed)
+            case Some((width, _, _)) =>
+              arguments += Event.PrintArgument.Integer(Vec.from(lanes), width.value)
             case None => floatingShape(program, typeId) match {
                 case Some((width, _)) =>
                   arguments += Event.PrintArgument.Floating(Vec.from(lanes), width.value)
@@ -5770,7 +5810,7 @@ private[v1_6] object VMInterpreter {
       sources: Vec[Operand]
   ): Either[Fault, Unit] = {
     val setId  = id(set)
-    val opcode = operandBits(instruction)
+    val opcode = id(instruction)
     program.extendedInstructionSets.get(setId).map(_.value) match {
       case None =>
         Left(Fault.InvalidTask(s"OpExtInst references undefined import %$setId"))
@@ -6248,17 +6288,9 @@ private[v1_6] object VMInterpreter {
       case None    => Left(undefined(sources.head))
     }
 
-  private def floatingToDouble(width: FloatingPointWidth, bits: Long): Double = width.value match {
-    case 16 => IEEE754.binary16ToFloat(Binary16.low(bits)).toDouble
-    case 32 => IEEE754.binary32ToFloat(Binary32.low(bits)).toDouble
-    case 64 => IEEE754.binary64ToDouble(bits)
-  }
+  private def floatingToDouble(width: FloatingPointWidth, bits: Long): Double = IEEE754.toDouble(bits, width)
 
-  private def doubleToFloating(width: FloatingPointWidth, value: Double): Long = width.value match {
-    case 16 => IEEE754.doubleToBinary16(value).value
-    case 32 => IEEE754.floatToBinary32(value.toFloat).value
-    case 64 => IEEE754.doubleToBinary64(value)
-  }
+  private def doubleToFloating(width: FloatingPointWidth, value: Double): Long = IEEE754.fromDouble(value, width)
 
   private def openCLSinPi(value: Double): Double =
     if (!value.isFinite) Double.NaN
@@ -7251,19 +7283,20 @@ private[v1_6] object VMInterpreter {
     )
   }
 
-  private def decode(program: Program, typeId: Int, bytes: Array[Byte]): RuntimeValue = {
-    val count = scalarLeafCount(program, typeId).fold(
-      error => throw IllegalArgumentException(error.message),
-      value => value
-    )
-    val lanes = Array.ofDim[Long](count)
-    val used  = decodeBits(program, typeId, bytes, 0, lanes, 0)
-    if (used != lanes.length)
-      throw IllegalArgumentException(
-        s"SPIR-V value of type %$typeId decoded $used scalar leaves, expected ${lanes.length}"
-      )
-    RuntimeValue.Bits(typeId, lanes)
-  }
+  private def decode(program: Program, typeId: Int, bytes: Array[Byte]): Either[Fault, RuntimeValue] =
+    scalarLeafCount(program, typeId).flatMap { count =>
+      try {
+        val lanes = Array.ofDim[Long](count)
+        val used  = decodeBits(program, typeId, bytes, 0, lanes, 0)
+        if (used != lanes.length)
+          Left(Fault.InvalidTask(
+            s"SPIR-V value of type %$typeId decoded $used scalar leaves, expected ${lanes.length}"
+          ))
+        else Right(RuntimeValue.Bits(typeId, lanes))
+      } catch {
+        case error: IllegalArgumentException => Left(Fault.InvalidTask(error.getMessage))
+      }
+    }
 
   // Dense scalar/vector decoding writes output lanes in place.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -7327,17 +7360,21 @@ private[v1_6] object VMInterpreter {
     case value => throw IllegalArgumentException(s"SPIR-V type %$typeId cannot be decoded as data: $value")
   }
 
-  private def encode(program: Program, value: RuntimeValue): Array[Byte] = value match {
+  private def encode(program: Program, value: RuntimeValue): Either[Fault, Array[Byte]] = value match {
     case RuntimeValue.Bits(typeId, lanes) =>
-      val bytes = Array.ofDim[Byte](typeSize(program, typeId))
-      val used  = encodeBits(program, typeId, lanes, 0, bytes, 0)
-      if (used != lanes.length)
-        throw IllegalArgumentException(
-          s"SPIR-V value of type %$typeId has ${lanes.length} scalar leaves, expected $used"
-        )
-      bytes
+      try {
+        val bytes = Array.ofDim[Byte](typeSize(program, typeId))
+        val used  = encodeBits(program, typeId, lanes, 0, bytes, 0)
+        if (used != lanes.length)
+          Left(Fault.InvalidTask(
+            s"SPIR-V value of type %$typeId has ${lanes.length} scalar leaves, expected $used"
+          ))
+        else Right(bytes)
+      } catch {
+        case error: IllegalArgumentException => Left(Fault.InvalidTask(error.getMessage))
+      }
     case RuntimeValue.Address(_, pointer) =>
-      throw IllegalArgumentException(s"cannot encode runtime pointer $pointer as process-neutral bytes")
+      Left(Fault.InvalidTask(s"cannot encode runtime pointer $pointer as process-neutral bytes"))
   }
 
   // Dense scalar/vector encoding writes output lanes in place.
@@ -7365,7 +7402,7 @@ private[v1_6] object VMInterpreter {
     case Some(RuntimeType.Pointer(_, _)) =>
       if (laneStart >= lanes.length)
         throw IllegalArgumentException(s"SPIR-V value of type %$typeId has too few pointer leaves")
-      LittleEndian.write(lanes(laneStart), output, byteStart, ScalarByteWidth(8))
+      LittleEndian.write(lanes(laneStart), output, byteStart, ScalarByteWidth.Qword)
       laneStart + 1
     case Some(RuntimeType.VectorType(component, count)) =>
       var lane  = laneStart
@@ -9650,11 +9687,11 @@ private[v1_6] object VMInterpreter {
     case _ => None
   }
 
-  private def label(function: Function, operand: Operand): Int =
-    function.labels.getOrElse(
-      id(operand),
-      throw IllegalArgumentException(s"SPIR-V label %${id(operand)} is absent in function %${function.id}")
-    )
+  private def label(function: Function, operand: Operand): Either[Fault, Int] =
+    function.labels.get(id(operand)) match {
+      case Some(value) => Right(value)
+      case None        => Left(Fault.InvalidTask(s"SPIR-V label %${id(operand)} is absent in function %${function.id}"))
+    }
 
   private def alignUp(value: Int, alignment: Int): Int =
     Math.multiplyExact((value + alignment - 1) / alignment, alignment)

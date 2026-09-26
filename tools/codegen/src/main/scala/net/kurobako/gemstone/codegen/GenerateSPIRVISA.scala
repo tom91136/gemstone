@@ -77,37 +77,34 @@ object GenerateSPIRVISA {
     )
   )
 
-  def main(arguments: Array[String]): Unit = command.parse(arguments.toSeq).fold(
-    help => throw IllegalArgumentException(help.toString),
-    {
-      case Instructions(grammarPath, extinstDirectory, sourceRoot, packageVersion) =>
-        val version  = checkedPackageVersion(packageVersion)
-        val grammar  = readGrammar(grammarPath)
-        val extended = readExtendedInstructions(extinstDirectory)
-        val base     = sourceRoot.resolve(PackageRoot).resolve(version.value)
-        syncRoot(
-          sourceRoot,
-          Map(
-            base.resolve("Instruction.scala")         -> renderInstructions(grammar, version),
-            base.resolve("ExtendedInstruction.scala") -> renderExtendedInstructions(extended, version),
-            base.resolve("BuiltIn.scala")             -> renderBuiltIns(grammar, version)
-          )
+  def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) {
+    case Instructions(grammarPath, extinstDirectory, sourceRoot, packageVersion) =>
+      val version  = checkedPackageVersion(packageVersion)
+      val grammar  = readGrammar(grammarPath)
+      val extended = readExtendedInstructions(extinstDirectory)
+      val base     = sourceRoot.resolve(PackageRoot).resolve(version.value)
+      syncRoot(
+        sourceRoot,
+        Map(
+          base.resolve("Instruction.scala")         -> renderInstructions(grammar, version),
+          base.resolve("ExtendedInstruction.scala") -> renderExtendedInstructions(extended, version),
+          base.resolve("BuiltIn.scala")             -> renderBuiltIns(grammar, version)
         )
-        Console.out.println(
-          s"generated ${grammar.entries.size} typed SPIR-V core instructions and ${extended.map(_.instructions.size).sum} extended instructions"
-        )
-      case Tests(grammarPath, testRoot, sourceRoot, packageVersion) =>
-        val version  = checkedPackageVersion(packageVersion)
-        val grammar  = readGrammar(grammarPath)
-        val upstream = Vector("binary_parse_test.cpp", "binary_endianness_test.cpp", "val/val_opencl_test.cpp")
-          .map(name => name -> discoveredTests(testRoot.resolve(name)))
-        val output = sourceRoot.resolve(PackageRoot).resolve(version.value).resolve("ReferenceSuite.scala")
-        syncRoot(sourceRoot, Map(output -> renderTests(grammar.entries.size, upstream, version)))
-        Console.out.println(
-          s"generated SPIR-V reference suite for ${grammar.entries.size} opcodes and ${upstream.map(_._2.size).sum} upstream tests"
-        )
-    }
-  )
+      )
+      Console.out.println(
+        s"generated ${grammar.entries.size} typed SPIR-V core instructions and ${extended.map(_.instructions.size).sum} extended instructions"
+      )
+    case Tests(grammarPath, testRoot, sourceRoot, packageVersion) =>
+      val version  = checkedPackageVersion(packageVersion)
+      val grammar  = readGrammar(grammarPath)
+      val upstream = Vector("binary_parse_test.cpp", "binary_endianness_test.cpp", "val/val_opencl_test.cpp")
+        .map(name => name -> discoveredTests(testRoot.resolve(name)))
+      val output = sourceRoot.resolve(PackageRoot).resolve(version.value).resolve("ReferenceSuite.scala")
+      syncRoot(sourceRoot, Map(output -> renderTests(grammar.entries.size, upstream, version)))
+      Console.out.println(
+        s"generated SPIR-V reference suite for ${grammar.entries.size} opcodes and ${upstream.map(_._2.size).sum} upstream tests"
+      )
+  }
 
   // OpSpecConstantOp's trailing operands depend on the embedded opcode and are
   // not listed in the core grammar, so append a repeated single-word tail. Every

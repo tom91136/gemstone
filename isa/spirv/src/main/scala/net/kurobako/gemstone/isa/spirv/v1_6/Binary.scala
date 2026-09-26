@@ -108,6 +108,6 @@ object Binary {
         case Endianness.Little => value.toLong
         case Endianness.Big    => java.lang.Integer.reverseBytes(value).toLong
       },
-      ScalarByteWidth(4)
+      ScalarByteWidth.Dword
     )
 }

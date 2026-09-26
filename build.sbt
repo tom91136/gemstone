@@ -183,6 +183,13 @@ def referenceArtifactsNamed(
   selected
 }
 
+// Native CMake fallbacks share the codegen pins instead of hardcoding them.
+def referenceArtifact(id: String): Fetch.Request = {
+  val selected = referenceArtifacts.filter(_.id == id)
+  require(selected.size == 1, s"expected one reference artifact '$id', found ${selected.size}")
+  selected.head
+}
+
 def positiveEnvironmentInt(name: String, default: => Int): Int = {
   val raw = sys.env.get(name).fold(default) { value =>
     value.toIntOption.getOrElse(
@@ -240,13 +247,9 @@ def withConformanceLauncher[A](
     """
     |unset CONFORMANCE_DEVICE
     |case "$CONFORMANCE_TARGET_BACKEND" in
-    |  cuda)
-    |    if [ -z "$GEMSTONE_CUDA_TARGET" ] && [ -z "$GEMSTONE_CUDA_TARGET_ARCH" ] && [ -n "$CONFORMANCE_TARGET_ARCHITECTURE" ]; then
-    |      export GEMSTONE_CUDA_TARGET="$CONFORMANCE_TARGET_ARCHITECTURE"
-    |    fi ;;
-    |  hip|hsa)
-    |    if [ -z "$GEMSTONE_AMDGPU_TARGET" ] && [ -n "$CONFORMANCE_TARGET_ARCHITECTURE" ]; then
-    |      export GEMSTONE_AMDGPU_TARGET="$CONFORMANCE_TARGET_ARCHITECTURE"
+    |  cuda|hip|hsa)
+    |    if [ -z "$GEMSTONE_TARGET_ARCH" ] && [ -n "$CONFORMANCE_TARGET_ARCHITECTURE" ]; then
+    |      export GEMSTONE_TARGET_ARCH="$CONFORMANCE_TARGET_ARCHITECTURE"
     |    fi ;;
     |  levelzero) export CONFORMANCE_DEVICE='*Gemstone*' ;;
     |esac
@@ -260,7 +263,6 @@ def withConformanceLauncher[A](
     |if [ -z "$GEMSTONE_OPENCL_LLVM_LINK" ] && [ -x "$toolchain/bin/compiler/llvm-link" ]; then
     |  export GEMSTONE_OPENCL_LLVM_LINK="$toolchain/bin/compiler/llvm-link"
     |fi
-    |export CONFORMANCE_OPENCL_CTS_ELEMENTS=256
     |export CONFORMANCE_OPENCL_CTS_WIMPY=1
     |export CONFORMANCE_OPENCL_CTS_TIMEOUT=600
     |""".stripMargin
@@ -381,8 +383,34 @@ lazy val apiReferenceBundle = ReferenceBundle(
       archive = cached("amd-hip"),
       destination = stage / "amd/hip",
       archiveRoot = s"hip-rocm-$hipVersion",
-      select = relative => relative == path"LICENSE.md" || relative.startsWith("include/hip")
+      select = relative =>
+        relative == path"LICENSE.md" || relative == path"VERSION" || relative.startsWith("include/hip")
     )
+    val hipVersions = Files
+      .readString(stage / "amd/hip" / "VERSION", StandardCharsets.UTF_8)
+      .linesIterator
+      .toList
+      .sliding(2)
+      .collect { case Seq(key, value) if key.startsWith("#") => key.stripPrefix("#") -> value.trim }
+      .toMap
+    val hipVersionHeader =
+      s"""// Auto-generated from the pinned HIP VERSION file.
+         |#ifndef HIP_VERSION_H
+         |#define HIP_VERSION_H
+         |
+         |#define HIP_VERSION_MAJOR ${hipVersions("HIP_VERSION_MAJOR")}
+         |#define HIP_VERSION_MINOR ${hipVersions("HIP_VERSION_MINOR")}
+         |#define HIP_VERSION_PATCH ${hipVersions("HIP_VERSION_PATCH")}
+         |#define HIP_VERSION_GITHASH ""
+         |#define HIP_VERSION_BUILD_ID 0
+         |#define HIP_VERSION_BUILD_NAME ""
+         |#define HIP_VERSION    (HIP_VERSION_MAJOR * 10000000 + HIP_VERSION_MINOR * 100000 + HIP_VERSION_PATCH)
+         |
+         |#define __HIP_HAS_GET_PCH 1
+         |
+         |#endif
+         |""".stripMargin
+    Files.writeString(stage / "amd/hip/include/hip/hip_version.h", hipVersionHeader, StandardCharsets.UTF_8)
     Compress.extractTarGz(
       archive = cached("amd-hsa"),
       destination = stage / "amd/hsa",
@@ -423,6 +451,7 @@ lazy val apiReferenceBundle = ReferenceBundle(
       "NVIDIA cuBLAS header is absent"
     )
     require((output / "amd/hip/include/hip/hip_runtime_api.h").isFile, "HIP header is absent")
+    require((output / "amd/hip/include/hip/hip_version.h").isFile, "HIP version header is absent")
     require((output / "amd/hsa/runtime/hsa-runtime/inc/hsa.h").isFile, "HSA core header is absent")
     require((output / "khronos/opencl/CL/cl.h").isFile, "OpenCL headers are absent")
     require((output / "oneapi/level-zero/include/ze_api.h").isFile, "Level Zero header is absent")
@@ -615,8 +644,9 @@ lazy val commonSettings = Seq(
   ),
   Compile / scalacOptions += "-Wunused:all",
   Test / scalacOptions ~= { _.filterNot(_ == "-Wunused:all") },
-  Compile / scalafixConfig := Some(file(".scalafix.conf")),
-  Test / scalafixConfig    := Some(file(".scalafix.conf")),
+  Compile / scalafixConfig               := Some(file(".scalafix.conf")),
+  Test / scalafixConfig                  := Some(file(".scalafix.conf")),
+  libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
   // Directory-backed inter-project classpaths; sbt 2's exported JAR cache retains stale packages.
   Compile / exportJars  := false,
   scalafmtDetailedError := true,
@@ -691,7 +721,6 @@ lazy val api = projectMatrix
     checkedInGeneratedSources,
     name := "gemstone-api",
     libraryDependencies ++= Seq(
-      "org.scalameta" %% "munit" % munitVersion % Test
     )
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
@@ -712,9 +741,7 @@ lazy val codegenProject = Project("codegen", file("tools/codegen"))
       "com.monovore"       %% "decline"       % declineVersion,
       "io.github.iltotore" %% "iron"          % ironVersion,
       "org.scalameta"      %% "scalafmt-core" % scalafmtVersion,
-      "org.typelevel"      %% "cats-core"     % catsCoreVersion,
-
-      "org.scalameta" %% "munit" % munitVersion % Test
+      "org.typelevel"      %% "cats-core"     % catsCoreVersion
     ),
     prepareAPIReferences := Def.uncached {
       apiReferenceBundle.prepare(
@@ -821,9 +848,7 @@ lazy val core = projectMatrix
     name := "gemstone-core",
     libraryDependencies ++= Seq(
       "io.github.iltotore" %% "iron"      % ironVersion,
-      "org.typelevel"      %% "cats-core" % catsCoreVersion,
-
-      "org.scalameta" %% "munit" % munitVersion % Test
+      "org.typelevel"      %% "cats-core" % catsCoreVersion
     )
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
@@ -860,7 +885,11 @@ lazy val externalCodestyleSettings = Seq(
       Codestyle.testCaseSpacing,
       Codestyle.includeBlockSpacing
     )
-    val violations = Codestyle.scan(Sources.native(nativeSourceDirectories.value), rules, baseDirectory.value.toPath)
+    val violations = Codestyle.scan(
+      Sources.native(nativeSourceDirectories.value, exclude = containsPathSegments(_, "generated")),
+      rules,
+      baseDirectory.value.toPath
+    )
     violations.foreach(violation => streams.value.log.error(violation.render))
     require(violations.isEmpty, s"found ${violations.size} native codestyle violations")
   },
@@ -894,7 +923,16 @@ lazy val nativeRuntimeSettings = Seq(
       s"-DHSA_INCLUDE_DIR=${references / "amd/hsa/runtime/hsa-runtime/inc"}",
       s"-DHSAKMT_INCLUDE_DIR=${references / "amd/hsa/libhsakmt/include"}",
       s"-DLEVEL_ZERO_INCLUDE_DIR=${references / "oneapi/level-zero/include"}",
-      s"-DOPENCL_INCLUDE_DIR=${references / "khronos/opencl"}"
+      s"-DOPENCL_INCLUDE_DIR=${references / "khronos/opencl"}",
+      s"-DVULKAN_INCLUDE_DIR=${references / "khronos/vulkan/include"}",
+      s"-DLEVEL_ZERO_SOURCE_URL=${referenceArtifact("level-zero").url}",
+      s"-DLEVEL_ZERO_SOURCE_SHA256=${referenceArtifact("level-zero").expectedSha256}",
+      s"-DVULKAN_HEADERS_SOURCE_URL=${referenceArtifact("vulkan-headers").url}",
+      s"-DVULKAN_HEADERS_SOURCE_SHA256=${referenceArtifact("vulkan-headers").expectedSha256}",
+      s"-DOPENCL_HEADERS_SOURCE_URL=${referenceArtifact("opencl-headers").url}",
+      s"-DOPENCL_HEADERS_SOURCE_SHA256=${referenceArtifact("opencl-headers").expectedSha256}",
+      s"-DROCR_HEADERS_SOURCE_URL=${referenceArtifact("amd-hsa").url}",
+      s"-DROCR_HEADERS_SOURCE_SHA256=${referenceArtifact("amd-hsa").expectedSha256}"
     )
   },
   nativeArtifact := Def.uncached {
@@ -949,9 +987,7 @@ lazy val ptx = projectMatrix
     libraryDependencies ++= Seq(
       "io.github.iltotore" %% "iron"       % ironVersion,
       "org.typelevel"      %% "cats-core"  % catsCoreVersion,
-      "org.typelevel"      %% "cats-parse" % catsParseVersion,
-
-      "org.scalameta" %% "munit" % munitVersion % Test
+      "org.typelevel"      %% "cats-parse" % catsParseVersion
     ),
     generatePTXSources := Def.uncached {
       val converter  = fileConverter.value
@@ -1007,9 +1043,7 @@ lazy val amdgpu = projectMatrix
       "com.outr"           %% "scribe"     % scribeVersion,
       "io.github.iltotore" %% "iron"       % ironVersion,
       "org.typelevel"      %% "cats-core"  % catsCoreVersion,
-      "org.typelevel"      %% "cats-parse" % catsParseVersion,
-
-      "org.scalameta" %% "munit" % munitVersion % Test
+      "org.typelevel"      %% "cats-parse" % catsParseVersion
     ),
     generateAMDGPUSources := Def.uncached {
       val converter    = fileConverter.value
@@ -1072,9 +1106,7 @@ lazy val spirv = projectMatrix
     name := "gemstone-isa-spirv",
     libraryDependencies ++= Seq(
       "io.github.iltotore" %% "iron"      % ironVersion,
-      "org.typelevel"      %% "cats-core" % catsCoreVersion,
-
-      "org.scalameta" %% "munit" % munitVersion % Test
+      "org.typelevel"      %% "cats-core" % catsCoreVersion
     ),
     generateSPIRVFixtures := Def.uncached {
       val source    = (Test / sourceDirectory).value / "fixtures"
@@ -1151,9 +1183,7 @@ lazy val server = projectMatrix
       "com.monovore"       %% "decline"   % declineVersion,
       "com.outr"           %% "scribe"    % scribeVersion,
       "io.github.iltotore" %% "iron"      % ironVersion,
-      "org.typelevel"      %% "cats-core" % catsCoreVersion,
-
-      "org.scalameta" %% "munit" % munitVersion % Test
+      "org.typelevel"      %% "cats-core" % catsCoreVersion
     ),
     Compile / mainClass := Some(s"$rootPackage.server.cli.GemstoneCLI")
   )
@@ -1189,9 +1219,7 @@ lazy val benchmarks = projectMatrix.in(file("tools/benchmarks"))
       "com.lihaoyi"        %% "upickle"   % upickleVersion,
       "com.monovore"       %% "decline"   % declineVersion,
       "io.github.iltotore" %% "iron"      % ironVersion,
-      "org.typelevel"      %% "cats-core" % catsCoreVersion,
-
-      "org.scalameta" %% "munit" % munitVersion % Test
+      "org.typelevel"      %% "cats-core" % catsCoreVersion
     ),
     Compile / mainClass       := Some(s"$rootPackage.benchmarks.BenchmarkRunner"),
     Compile / run / fork      := true,
@@ -1361,11 +1389,8 @@ lazy val conformance = project.in(file("conformance"))
       val log             = streams.value.log
       val jobs            = (Global / conformanceJobs).value
       val workers         = (Global / testParallelism).value
-      val serverHeap      = sys.env.getOrElse(
-        "GEMSTONE_CONFORMANCE_SERVER_HEAP",
-        s"${math.max(8L, math.min(32L, jobs.toLong * 6L))}g"
-      )
-      val environment = Map(
+      val serverHeap      = s"${math.max(8L, math.min(32L, jobs.toLong * 6L))}g"
+      val environment     = Map(
         "CONFORMANCE_JOBS"                    -> jobs.toString,
         "GEMSTONE_EXECUTION_PARALLELISM"      -> workers.toString,
         "GEMSTONE_NATIVE_DIRECTORY"           -> s"$nativeDirectory",
@@ -1430,6 +1455,7 @@ lazy val gemstone = project.in(file("."))
   .aggregate(spirv.projectRefs *)
   .aggregate(benchmarks.projectRefs *)
   .aggregate(codestyle)
+  .aggregate(native, conformance)
   .dependsOn(codestyleRules % ScalafixConfig)
   .settings(
     commonSettings,
@@ -1446,14 +1472,15 @@ lazy val gemstone = project.in(file("."))
     },
     checkGeneratedSources := {
       codegen.value
-      val generated = Seq(
-        "api/src/generated",
-        "isa/ptx/src/generated",
-        "isa/amdgpu/src/generated",
-        "isa/spirv/src/generated",
-        "native/generated"
-      )
-      val status = Process(Seq("git", "status", "--porcelain", "--") ++ generated, baseDirectory.value).!!
+      val root      = baseDirectory.value
+      val apiDir    = (api.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
+      val ptxDir    = (ptx.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
+      val amdgpuDir = (amdgpu.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
+      val spirvDir  = (spirv.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
+      val nativeDir = (codegenProject / nativeBindingsDirectory).value
+      val generated = Seq(apiDir, ptxDir, amdgpuDir, spirvDir, nativeDir)
+        .map(directory => IO.relativize(root, directory.absolute).getOrElse(directory.absolute.getPath))
+      val status = Process(Seq("git", "status", "--porcelain", "--") ++ generated, root).!!
       require(status.trim.isEmpty, s"generated sources are stale; run codegen:\n$status")
     },
     codegen := Def.uncached {

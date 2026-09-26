@@ -51,6 +51,7 @@ final class RPCRecording(writer: RPCJournal.Writer, source: InputStream, destina
     requestAccepted = true
   }
   def response(): Unit              = if (requestAccepted) connection.foreach(_.response(outgoing.take()))
-  def failed(message: String): Unit = if (requestAccepted) writer.markUnreplayable(message)
-  override def close(): Unit        = connection.foreach(_.close())
+  def failed(message: String): Unit =
+    if (requestAccepted || incoming.size() > 0) writer.markUnreplayable(message)
+  override def close(): Unit = connection.foreach(_.close())
 }

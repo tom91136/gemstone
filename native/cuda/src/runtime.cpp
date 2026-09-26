@@ -32,9 +32,12 @@
 #include <gemstone/export.h>
 #include <gemstone/lz4.hpp>
 #include <gemstone/memory.hpp>
+#include <gemstone/trace.hpp>
 #include <gemstone/zstd.hpp>
 
+#include "client.hpp"
 #include "completion.hpp"
+#include "transfer.hpp"
 
 using namespace aspartame;
 using namespace gemstone::cuda;
@@ -168,9 +171,8 @@ std::optional<int32_t> parsePtxTarget(std::string_view target) {
 }
 
 std::optional<int32_t> configuredPtxVersion() {
-  const char *value = getenv("GEMSTONE_CUDA_TARGET");
-  if (!value || *value == '\0') value = getenv("GEMSTONE_CUDA_TARGET_ARCH");
-  return value ? parsePtxTarget(value) : std::nullopt;
+  const char *value = gemstone::environment::value(gemstone::environment::TargetArch);
+  return value && *value != '\0' ? parsePtxTarget(value) : std::nullopt;
 }
 
 std::optional<std::pair<int32_t, int32_t>> computeCapability() {
@@ -419,17 +421,6 @@ std::optional<PointerBinding> pointerBinding(uint64_t pointer) {
            const auto offset = pointer - metadata.base;
            return PointerBinding{metadata.id, offset, metadata.size - offset};
          });
-}
-
-std::optional<PointerBinding> pointerRelocationBinding(uint64_t pointer) {
-  std::lock_guard lock{pointerMutex};
-  for (const auto &metadata : pointers) {
-    if (pointer >= metadata.base && pointer - metadata.base <= metadata.size) {
-      const auto offset = pointer - metadata.base;
-      return PointerBinding{metadata.id, offset, metadata.size - offset};
-    }
-  }
-  return std::nullopt;
 }
 
 int32_t pointerGetAttribute(void *data, int32_t attribute, uint64_t pointer) {
@@ -1606,7 +1597,7 @@ extern "C" int32_t cudaDeviceGetAttribute(int32_t *value, int32_t attribute, int
     case cudaDevAttrStreamPrioritiesSupported: *value = 1; break;
     case cudaDevAttrGlobalL1CacheSupported: *value = 1; break;
     case cudaDevAttrLocalL1CacheSupported: *value = 1; break;
-    case cudaDevAttrMaxSharedMemoryPerMultiprocessor: *value = 49152; break;
+    case cudaDevAttrMaxSharedMemoryPerMultiprocessor: *value = MaxSharedMemoryPerMultiprocessor; break;
     case cudaDevAttrMaxRegistersPerMultiprocessor: *value = MaxRegistersPerMultiprocessor; break;
     case cudaDevAttrManagedMemory: *value = 1; break;
     case cudaDevAttrIsMultiGpuBoard: *value = 0; break;
@@ -1615,7 +1606,7 @@ extern "C" int32_t cudaDeviceGetAttribute(int32_t *value, int32_t attribute, int
     case cudaDevAttrSingleToDoublePrecisionPerfRatio: *value = SingleToDoublePrecisionPerfRatio; break;
     // Managed, pinned and registered allocations share the native atomic path.
     // Ordinary pageable memory remains an experimental opt-in path.
-    // GEMSTONE_CUDA_SYSTEM_PAGING remains an explicit experimental access path.
+    // GEMSTONE_SYSTEM_PAGING remains an explicit experimental access path.
     case cudaDevAttrPageableMemoryAccess: *value = 0; break;
     case cudaDevAttrConcurrentManagedAccess: *value = 1; break;
     case cudaDevAttrComputePreemptionSupported: *value = 1; break;
@@ -1633,10 +1624,6 @@ extern "C" int32_t cudaDeviceGetAttribute(int32_t *value, int32_t attribute, int
   }
   return CUDA_SUCCESS;
 }
-
-namespace {
-
-} // namespace
 
 extern "C" int32_t cudaGetDeviceProperties(void *properties, int32_t device) {
   if (!properties || device != 0) return CUDA_ERROR_INVALID_VALUE;
@@ -1665,10 +1652,6 @@ extern "C" int32_t cudaGetDeviceProperties(void *properties, int32_t device) {
   value->multiprocessor_count = device_limits::MultiprocessorCount;
   return CUDA_SUCCESS;
 }
-
-namespace {
-
-} // namespace
 
 extern "C" int32_t cudaFuncGetAttributes(void *attributes, const void *function) {
   if (!attributes || !function) return CUDA_ERROR_INVALID_VALUE;
@@ -2221,10 +2204,6 @@ extern "C" int32_t cuDeviceGetP2PAttribute(int32_t *value, int32_t attribute, in
 extern "C" int32_t cuDeviceCanAccessPeer(int32_t *value, int32_t source, int32_t destination) {
   return deviceCanAccessPeer(value, source, destination);
 }
-
-namespace {
-
-} // namespace
 
 extern "C" int32_t cuDeviceGetProperties(void *properties, int32_t device) {
   if (!properties || device != 0) return CUDA_ERROR_INVALID_VALUE;
@@ -3525,22 +3504,17 @@ struct Function {
   std::vector<KernelParameterMetadata> parameters;
 };
 
-struct Allocation {
-  uint64_t address{};
-};
-
-std::once_flag clientOnce;
+ClientManager executionManager;
 std::mutex stateMutex;
-std::unique_ptr<Client> client;
+Client *client = nullptr;
 std::vector<std::unique_ptr<Module>> modules;
 std::vector<std::unique_ptr<Function>> functions;
-std::vector<Allocation> allocations;
 std::atomic<uint64_t> nextContext{1};
 uint64_t nextDeviceAddress = static_cast<uint64_t>(0x0000400000000000);
 
 int32_t executionReady() noexcept {
   try {
-    std::call_once(clientOnce, [] { client = Client::fromEnvironment(); });
+    client = executionManager.ready() ? executionManager.client() : nullptr;
     return client ? CUDA_SUCCESS : CUDA_ERROR_NOT_INITIALIZED;
   } catch (...) {
     return CUDA_ERROR_NOT_INITIALIZED;
@@ -3577,18 +3551,7 @@ bool releaseAllocation(uint64_t id) noexcept {
 
 bool writeAllocation(uint64_t id, uint64_t offset, const void *bytes, size_t size) noexcept {
   try {
-    constexpr size_t ChunkLimit = MaximumPayload / 2;
-    const auto *source = static_cast<const uint8_t *>(bytes);
-    while (size != 0) {
-      const auto chunk = std::min(size, ChunkLimit);
-      if (!client->call(WriteAllocation{AllocationId{static_cast<int64_t>(id)}, static_cast<int64_t>(offset),
-                                        std::vector<uint8_t>(source, source + chunk)}))
-        return false;
-      source += chunk;
-      offset += chunk;
-      size -= chunk;
-    }
-    return true;
+    return transferAllocation(*client, AllocationId{static_cast<int64_t>(id)}, offset, bytes, size, true, TransferChunk);
   } catch (...) {
     return false;
   }
@@ -3596,25 +3559,13 @@ bool writeAllocation(uint64_t id, uint64_t offset, const void *bytes, size_t siz
 
 bool readAllocation(uint64_t id, uint64_t offset, void *bytes, size_t size) noexcept {
   try {
-    constexpr size_t ChunkLimit = MaximumPayload / 2;
-    auto *destination = static_cast<uint8_t *>(bytes);
-    while (size != 0) {
-      const auto chunk = std::min(size, ChunkLimit);
-      auto result =
-          client->call(ReadAllocation{AllocationId{static_cast<int64_t>(id)}, static_cast<int64_t>(offset), static_cast<int32_t>(chunk)});
-      if (!result || result.value().size() != chunk) return false;
-      std::memcpy(destination, result.value().data(), chunk);
-      destination += chunk;
-      offset += chunk;
-      size -= chunk;
-    }
-    return true;
+    return transferAllocation(*client, AllocationId{static_cast<int64_t>(id)}, offset, bytes, size, false, TransferChunk);
   } catch (...) {
     return false;
   }
 }
 
-bool systemPagingEnabled() noexcept { return std::getenv("GEMSTONE_CUDA_SYSTEM_PAGING") != nullptr; }
+bool systemPagingEnabled() noexcept { return gemstone::environment::present(gemstone::environment::SystemPaging); }
 
 Module *findModule(void *handle) {
   const std::lock_guard lock(stateMutex);
@@ -3628,32 +3579,13 @@ Function *findFunction(void *handle) {
   return entry == functions.end() ? nullptr : entry->get();
 }
 
-bool releaseStorage(uint64_t address) noexcept {
-  try {
-    const std::lock_guard lock(stateMutex);
-    const auto entry =
-        std::find_if(allocations.begin(), allocations.end(), [address](const auto &allocation) { return allocation.address == address; });
-    if (entry == allocations.end()) return false;
-    allocations.erase(entry);
-    return true;
-  } catch (...) {
-    return false;
-  }
-}
-
 } // namespace
 
 extern "C" {
 
 int32_t cuInit(uint32_t flags) noexcept {
   if (flags != 0) return CUDA_ERROR_INVALID_VALUE;
-  const int32_t ready = executionReady();
-  if (ready != CUDA_SUCCESS) return ready;
-  try {
-    return client->call(Ping{}) ? CUDA_SUCCESS : CUDA_ERROR_NOT_INITIALIZED;
-  } catch (...) {
-    return CUDA_ERROR_NOT_INITIALIZED;
-  }
+  return executionReady();
 }
 
 int32_t cuDriverGetVersion(int32_t *version) noexcept {
@@ -3704,7 +3636,7 @@ namespace {
 int32_t synchronizeStreamCallbacks(void *stream) noexcept {
   (void)stream;
   void *context = activeContext();
-  if (!contextIsLive(context)) return 201;
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
   return commands().wait(commands().snapshot(stream));
 }
 
@@ -3714,14 +3646,14 @@ extern "C" {
 
 int32_t cuCtxDestroy_v2(void *context) noexcept {
   if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
-  if (!contextIsLive(context)) return 201;
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
   untrackContext(context);
   return CUDA_SUCCESS;
 }
 
 int32_t cuCtxSynchronize() noexcept {
   void *context = activeContext();
-  if (!contextIsLive(context)) return 201;
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
   return commands().waitAll();
 }
 
@@ -3779,14 +3711,6 @@ int32_t allocate(uint64_t *pointer, size_t size, void *module) noexcept {
   int32_t status = registerAllocation(allocationSize, AllocationKind::Device, id) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
   if (status == CUDA_SUCCESS) status = trackPointer(address, allocationSize, id, module, false, false);
   if (status == CUDA_SUCCESS && !registerAddress(id, address)) status = CUDA_ERROR_UNKNOWN;
-  if (status == CUDA_SUCCESS) {
-    try {
-      const std::lock_guard lock(stateMutex);
-      allocations.push_back(Allocation{address});
-    } catch (...) {
-      status = CUDA_ERROR_UNKNOWN;
-    }
-  }
   if (status != CUDA_SUCCESS) {
     if (id != 0) (void)releaseAllocation(id);
     untrackDevice(address);
@@ -3810,7 +3734,7 @@ int32_t cuMemFree_v2(uint64_t pointer) noexcept {
   if (!binding || binding->offset != 0) return CUDA_ERROR_INVALID_VALUE;
   if (!releaseAllocation(binding->allocation)) return CUDA_ERROR_UNKNOWN;
   untrackDevice(pointer);
-  return releaseStorage(pointer) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
+  return CUDA_SUCCESS;
 }
 
 int32_t cuMemcpyHtoD_v2(uint64_t destination, const void *source, size_t size) noexcept {
@@ -4062,10 +3986,8 @@ int32_t cuModuleUnload(void *module) noexcept {
     if (!removed) return CUDA_ERROR_INVALID_VALUE;
 
     untrackModule(module);
-    for (const auto &global : removed->globals) {
+    for (const auto &global : removed->globals)
       (void)releaseAllocation(global->allocation);
-      (void)releaseStorage(global->address);
-    }
     return CUDA_SUCCESS;
   } catch (...) {
     return CUDA_ERROR_UNKNOWN;
@@ -4091,11 +4013,9 @@ int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_
     Function *entry = findFunction(function);
     if (!entry || (!entry->parameters.empty() && !kernel_params)) return CUDA_ERROR_INVALID_VALUE;
     int32_t status = CUDA_SUCCESS;
-    if (status != CUDA_SUCCESS) return status;
 
     std::vector<gemstone::execution::KernelArgument> arguments;
     arguments.reserve(entry->parameters.size());
-    std::vector<PointerRelocation> relocations;
     if (systemPagingEnabled() && !client->call(EnableHostMemory{})) return CUDA_ERROR_UNKNOWN;
     for (size_t index = 0; index < entry->parameters.size(); ++index) {
       const auto &parameter = entry->parameters[index];
@@ -4114,17 +4034,6 @@ int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_
       } else {
         const auto *bytes = static_cast<const uint8_t *>(kernel_params[index]);
         arguments.emplace_back(KernelArgumentScalar{std::vector<uint8_t>(bytes, bytes + width)});
-        if (parameter.containsPointers && width >= sizeof(uint64_t)) {
-          for (size_t offset = 0; offset <= width - sizeof(uint64_t); offset += sizeof(uint32_t)) {
-            const auto candidate = readNative<uint64_t>(bytes, offset);
-            const auto target = pointerRelocationBinding(candidate);
-            if (target) {
-              relocations.push_back({RelocationSourceArgument{IntPositive0{static_cast<int32_t>(index)}},
-                                     LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(target->allocation)},
-                                     LongPositive0{static_cast<int64_t>(target->offset)}});
-            }
-          }
-        }
       }
     }
 
@@ -4139,46 +4048,46 @@ int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_
                          0,
                          static_cast<int32_t>(shared_memory_bytes),
                          std::move(arguments),
-                         std::move(relocations)};
+                         {},
+                         true};
     return enqueueCommand(stream, [launch = std::move(launch)]() mutable -> int32_t {
       auto workerClient = Client::fromEnvironment();
       if (!workerClient) return CUDA_ERROR_UNKNOWN;
       auto launched = workerClient->call(launch);
-      if (!launched) return 700;
+      if (!launched) return CUDA_ERROR_ILLEGAL_ADDRESS;
       const auto completion = launched.value();
-      int32_t status = CUDA_SUCCESS;
       std::string completionError;
-      if (status == CUDA_SUCCESS) {
-        gemstone::execution::CompletionResult result;
-        const bool collected = gemstone::execution::collect_completion(*workerClient, completion, result, completionError, true);
-
-        if (!collected) {
-          if (std::getenv("GEMSTONE_TRACE")) std::fprintf(stderr, "Gemstone CUDA execution failed: %s\n", completionError.c_str());
-          status = 700;
-        } else {
-          for (const auto &range : result.dirty_ranges) {
-            std::optional<PointerMetadata> target;
-            {
-              std::lock_guard lock(pointerMutex);
-              for (const auto &pointer : pointers)
-                if (pointer.id == static_cast<uint64_t>(range.allocation.value)) {
-                  target = pointer;
-                  break;
-                }
-            }
-            if (!target || (!target->host && !target->managed)) continue;
-            const auto offset = static_cast<uint64_t>(range.offset.value);
-            const auto size = static_cast<uint64_t>(range.size.value);
-            if (offset > target->size || size > target->size - offset
-                || !readAllocation(target->id, offset, reinterpret_cast<void *>(target->base + offset), size)) {
-              status = 700;
-              break;
-            }
-          }
-        }
+      gemstone::execution::CompletionResult result;
+      const bool collected = gemstone::execution::collect_completion(*workerClient, completion, result, completionError, true);
+      if (!collected) {
+        if (gemstone::traceEnabled("cuda")) std::fprintf(stderr, "Gemstone CUDA execution failed: %s\n", completionError.c_str());
+        return CUDA_ERROR_ILLEGAL_ADDRESS;
       }
-      return status;
+      return CUDA_SUCCESS;
     });
+  } catch (...) {
+    return CUDA_ERROR_UNKNOWN;
+  }
+}
+
+// Bridges for the cuBLAS compatibility surface. The BLAS arithmetic runs in the execution service, so the provider
+// only resolves device pointers to allocations and forwards the operation.
+extern "C" int32_t gemstoneCudaPointerBinding(uint64_t pointer, uint64_t *allocation, uint64_t *offset) noexcept {
+  if (!allocation || !offset) return CUDA_ERROR_INVALID_VALUE;
+  const auto binding = pointerBinding(pointer);
+  if (!binding) return CUDA_ERROR_INVALID_VALUE;
+  *allocation = binding->allocation;
+  *offset = binding->offset;
+  return CUDA_SUCCESS;
+}
+
+extern "C" int32_t gemstoneCudaBlas(const BlasRequest &request, BlasResult &result) noexcept {
+  if (executionReady() != CUDA_SUCCESS) return CUDA_ERROR_NOT_INITIALIZED;
+  try {
+    auto response = client->call(Blas{request});
+    if (!response) return CUDA_ERROR_UNKNOWN;
+    result = std::move(response.value());
+    return CUDA_SUCCESS;
   } catch (...) {
     return CUDA_ERROR_UNKNOWN;
   }

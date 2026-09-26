@@ -2,11 +2,15 @@ package net.kurobako.gemstone.server.execution
 
 import net.kurobako.gemstone.abi.ABI
 
-import net.kurobako.gemstone.{NoNul, Vec}
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
+import net.kurobako.gemstone.binary.ScalarByteWidth
+import net.kurobako.gemstone.isa.spirv.v1_6.Specialization
 import net.kurobako.gemstone.concurrent.withLock
+import net.kurobako.gemstone.launcher.EnvironmentNames
+import net.kurobako.gemstone.server.Throwables
 import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress, MemoryValueByteWidth}
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
@@ -57,7 +61,7 @@ final class ExecutionService(
       program: ProgramId,
       allocations: Set[AllocationId],
       pointerRelocations: Vec[PointerRelocation],
-      prints: Vec[PrintEvent],
+      prints: Vec[Event.Print],
       cancellation: TaskControl.Cancellation.Source
   )
   private final case class State(
@@ -212,6 +216,42 @@ final class ExecutionService(
         }
     }
   }
+
+  def blas(request: BlasRequest): Either[ExecutionFailure, BlasResult] =
+    stateLock.withLock {
+      BlasMath.execute(request, id => state.get().allocations.get(id).map(_.bytes))
+        .left.map(ExecutionFailure.InvalidRequest(_))
+    }
+
+  def describeImage(
+      encoding: String,
+      image: Vec[Byte],
+      name: KernelName
+  ): Either[ExecutionFailure, KernelMetadata] =
+    backendFor(encoding).left.map(runtimeFailure(_)).flatMap { backend =>
+      backend.load(RuntimeBackend.Services(observer, scheduler), image) match {
+        case Left(error)    => Left(runtimeFailure(error))
+        case Right(program) =>
+          try program.kernel(name).left.map(runtimeFailure(_)).flatMap(toWireKernel(_))
+          finally program.close()
+      }
+    }
+
+  def describeSpecialization(image: Vec[Byte]): Either[ExecutionFailure, Vec[SpecializationInfo]] =
+    Specialization.describe(image)
+      .left.map(ExecutionFailure.InvalidRequest(_))
+      .map(constants =>
+        constants.map(constant =>
+          SpecializationInfo(constant.specId.refineUnsafe[Positive0], constant.byteSize.refineUnsafe[Positive])
+        )
+      )
+
+  def specializeImage(
+      image: Vec[Byte],
+      constants: Vec[SpecializationConstant]
+  ): Either[ExecutionFailure, Vec[Byte]] =
+    Specialization.specialize(image, constants.map(constant => constant.specId -> constant.value).toMap)
+      .left.map(ExecutionFailure.InvalidRequest(_))
 
   def unload(id: ProgramId): Either[ExecutionFailure, Unit] = {
     // Remove the program from the service state before entering the backend so
@@ -370,38 +410,49 @@ final class ExecutionService(
         Left(ExecutionFailure.NotFound(s"program ${program.value} is not loaded"))
       else if (bindingPrograms.contains(program))
         Left(ExecutionFailure.InvalidRequest("program global binding is in progress"))
-      else validateTask(task, current) match {
-        case Left(error) => Left(error)
-        case Right(_)    =>
-          val id           = current.nextCompletion
-          val cancellation = TaskControl.Cancellation.Source()
-          val control      = TaskControl.forScheduler(taskLimits, cancellation, ObservationContext(id.value), scheduler)
-          val loaded       = current.programs(program)
-          val addressed    = current.allocations.view.collect {
-            case (allocation, value) if value.address.nonEmpty => allocation
-          }.toSet
-          observer.register(ObservationContext(id.value))(event => observe(id, event)).left.map(runtimeFailure(_)).map {
-            _ =>
-              state.set(
-                current.copy(
-                  completions = current.completions.updated(
-                    id,
-                    CompletionRecord(
-                      CompletionStatus.Pending,
-                      program,
-                      addressed ++ referencedAllocations(task) ++ boundAllocations.getOrElse(program, Set.empty),
-                      Vec.empty,
-                      Vec.empty,
-                      cancellation
+      else {
+        val loaded   = current.programs(program)
+        val prepared =
+          if (!task.discoverArgumentRelocations) Right(task)
+          else
+            discoverArgumentRelocations(task, current, loaded).map(task.withPointerRelocations(_))
+        prepared.flatMap { effective =>
+          validateTask(effective, current) match {
+            case Left(error) => Left(error)
+            case Right(_)    =>
+              val id           = current.nextCompletion
+              val cancellation = TaskControl.Cancellation.Source()
+              val control = TaskControl.forScheduler(taskLimits, cancellation, ObservationContext(id.value), scheduler)
+              val addressed = current.allocations.view.collect {
+                case (allocation, value) if value.address.nonEmpty => allocation
+              }.toSet
+              observer.register(
+                ObservationContext(id.value)
+              )(event => observe(id, event)).left.map(runtimeFailure(_)).map {
+                _ =>
+                  state.set(
+                    current.copy(
+                      completions = current.completions.updated(
+                        id,
+                        CompletionRecord(
+                          CompletionStatus.Pending,
+                          program,
+                          addressed ++ referencedAllocations(effective) ++
+                            boundAllocations.getOrElse(program, Set.empty),
+                          Vec.empty,
+                          Vec.empty,
+                          cancellation
+                        )
+                      ),
+                      nextCompletion = current.nextCompletion.next
                     )
-                  ),
-                  nextCompletion = current.nextCompletion.next
-                )
-              )
-              dirtyWrites.update(id, mutable.HashMap.empty)
-              pendingExecutions.enqueue((id, loaded, task, control))
-              id
+                  )
+                  dirtyWrites.update(id, mutable.HashMap.empty)
+                  pendingExecutions.enqueue((id, loaded, effective, control))
+                  id
+              }
           }
+        }
       }
     }
     accepted.foreach { _ =>
@@ -417,7 +468,7 @@ final class ExecutionService(
         catch {
           case scala.util.control.NonFatal(error) => failPendingExecutions(
               ExecutionFailure.Failed(
-                s"cannot schedule execution: ${Option(error.getMessage).getOrElse(error.getClass.getName)}"
+                s"cannot schedule execution: ${Throwables.detail(error)}"
               )
             )
         }
@@ -445,7 +496,7 @@ final class ExecutionService(
               case scala.util.control.NonFatal(error) =>
                 CompletionStatus.Failed(
                   ExecutionFailure.Failed(
-                    s"program executor failed: ${Option(error.getMessage).getOrElse(error.getClass.getName)}"
+                    s"program executor failed: ${Throwables.detail(error)}"
                   )
                 )
             }
@@ -517,8 +568,22 @@ final class ExecutionService(
   }
 
   def completion(id: CompletionId): Either[ExecutionFailure, CompletionStatus] =
-    state.get().completions.get(id).map(_.status)
-      .toRight(ExecutionFailure.NotFound(s"completion ${id.value} does not exist"))
+    completionRecord(id).map(_.status)
+
+  private def completionRecord(id: CompletionId): Either[ExecutionFailure, CompletionRecord] =
+    state.get().completions.get(id).toRight(ExecutionFailure.NotFound(s"completion ${id.value} does not exist"))
+
+  private def succeededCompletion[A](
+      id: CompletionId
+  )(value: CompletionRecord => Either[ExecutionFailure, A]): Either[ExecutionFailure, A] =
+    completionRecord(id).flatMap { record =>
+      record.status match {
+        case CompletionStatus.Pending =>
+          Left(ExecutionFailure.InvalidRequest(s"completion ${id.value} is still pending"))
+        case CompletionStatus.Failed(error) => Left(error)
+        case CompletionStatus.Succeeded     => value(record)
+      }
+    }
 
   def enableHostMemory(): Either[ExecutionFailure, Unit] = stateLock.withLock {
     if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
@@ -695,64 +760,47 @@ final class ExecutionService(
   }
 
   def completionDirtyRanges(id: CompletionId): Either[ExecutionFailure, Vec[DirtyRange]] = stateLock.withLock {
-    val current = state.get()
-    current.completions.get(id).map(_.status) match {
-      case None                           => Left(ExecutionFailure.NotFound(s"completion ${id.value} does not exist"))
-      case Some(CompletionStatus.Pending) =>
-        Left(ExecutionFailure.InvalidRequest(s"completion ${id.value} is still pending"))
-      case Some(CompletionStatus.Failed(error)) => Left(error)
-      case Some(CompletionStatus.Succeeded)     =>
-        val ranges = dirtyWrites.get(id).toList.view
-          .flatMap(_.view)
-          .toArray
-          .sortBy(_._1.value)
-          .view
-          .flatMap { case (allocationId, written) =>
-            written.chunks.map { (offset, size) =>
-              DirtyRange(allocationId, offset.toLong.refineUnsafe[Positive0], size.refineUnsafe[Positive])
-            }
+    succeededCompletion(id) { _ =>
+      val ranges = dirtyWrites.get(id).toList.view
+        .flatMap(_.view)
+        .toArray
+        .sortBy(_._1.value)
+        .view
+        .flatMap { case (allocationId, written) =>
+          written.chunks.map { (offset, size) =>
+            DirtyRange(allocationId, offset.toLong.refineUnsafe[Positive0], size.refineUnsafe[Positive])
           }
-        Right(Vec.from(ranges))
+        }
+      Right(Vec.from(ranges))
     }
   }
 
   def completionPointerRelocations(id: CompletionId): Either[ExecutionFailure, Vec[PointerRelocation]] =
-    stateLock.withLock {
-      val current = state.get()
-      current.completions.get(id).map(record => record.status -> record.pointerRelocations).toRight(
-        ExecutionFailure.NotFound(s"completion ${id.value} does not exist")
-      ).flatMap {
-        case (CompletionStatus.Pending, _) =>
-          Left(ExecutionFailure.InvalidRequest(s"completion ${id.value} is still pending"))
-        case (CompletionStatus.Failed(error), _) => Left(error)
-        case (CompletionStatus.Succeeded, value) => Right(value)
-      }
-    }
+    stateLock.withLock(succeededCompletion(id)(record => Right(record.pointerRelocations)))
 
-  def completionPrints(id: CompletionId): Either[ExecutionFailure, Vec[PrintEvent]] =
-    stateLock.withLock {
-      val current = state.get()
-      current.completions.get(id).map(record => record.status -> record.prints).toRight(
-        ExecutionFailure.NotFound(s"completion ${id.value} does not exist")
-      ).flatMap {
-        case (CompletionStatus.Pending, _) =>
-          Left(ExecutionFailure.InvalidRequest(s"completion ${id.value} is still pending"))
-        case (CompletionStatus.Failed(error), _) => Left(error)
-        case (CompletionStatus.Succeeded, value) => Right(value)
+  def completionPrints(id: CompletionId): Either[ExecutionFailure, String] =
+    stateLock.withLock(succeededCompletion(id)(record => renderPrints(record.prints)))
+
+  private def renderPrints(prints: Vec[Event.Print]): Either[ExecutionFailure, String] =
+    prints
+      .foldLeft[Either[ExecutionFailure, StringBuilder]](Right(StringBuilder())) { (accumulated, event) =>
+        accumulated.flatMap(builder =>
+          PrintRenderer.render(event).left.map(ExecutionFailure.Failed(_)).map(rendered => builder.append(rendered))
+        )
       }
-    }
+      .map(_.result())
 
   def releaseCompletion(id: CompletionId): Either[ExecutionFailure, Unit] = stateLock.withLock {
-    val current = state.get()
-    current.completions.get(id) match {
-      case None => Left(ExecutionFailure.NotFound(s"completion ${id.value} does not exist"))
-      case Some(record) if record.status == CompletionStatus.Pending =>
+    completionRecord(id).flatMap { record =>
+      if (record.status == CompletionStatus.Pending)
         Left(ExecutionFailure.InvalidRequest(s"completion ${id.value} is still pending"))
-      case Some(_) =>
+      else {
+        val current = state.get()
         state.set(current.copy(completions = current.completions.removed(id)))
         val _ = dirtyWrites.remove(id)
         val _ = hostMemories.remove(id)
         Right(())
+      }
     }
   }
 
@@ -844,34 +892,16 @@ final class ExecutionService(
     override def flushHostReads(): Either[Fault, Unit]    = flushHostMemory(completion)
     private def hostRegion(region: MemoryRegion): Boolean = region.value == 0L
 
-    @SuppressWarnings(Array(
-      "scalafix:DisableSyntax.var",
-      "scalafix:GemstoneNoAssume",
-      "scalafix:GemstoneNoIterator.no-iterator"
-    ))
+    @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
     private inline def withAllocation[A](
         address: GuestAddress,
         size: Int :| Positive0
-    )(inline operation: (Option[AllocationId], Long :| Positive0) => Either[Fault, A]): Either[Fault, A] = {
-      val allocations = state.get().allocations.iterator
-      var foundId     = 0L
-      var foundOffset = 0L
-      while (allocations.hasNext && foundId == 0L) {
-        val (id, allocation) = allocations.next()
-        val base             = allocation.address.getOrElse(syntheticAddress(id))
-        val relative         = address.value - base.value
-        if (
-          java.lang.Long.compareUnsigned(address.value, base.value) >= 0 &&
-          size <= allocation.size && relative <= allocation.size.toLong - size.toLong
-        ) {
-          foundId = id.value
-          foundOffset = relative
-        }
+    )(inline operation: (Option[AllocationId], Long :| Positive0) => Either[Fault, A]): Either[Fault, A] =
+      findContainingAllocation(address, size) match {
+        case Some((id, relative))      => operation(Some(id), relative.assume[Positive0])
+        case None if address.value > 0 => operation(None, address.value.assume[Positive0])
+        case None                      => Left(Fault.Memory(s"address ${address.value} is not bound"))
       }
-      if (foundId == 0L && address.value > 0) operation(None, address.value.assume[Positive0])
-      else if (foundId == 0L) Left(Fault.Memory(s"address ${address.value} is not bound"))
-      else operation(Some(AllocationId.assume(foundId)), foundOffset.assume[Positive0])
-    }
 
     // Explicit registrations may share a view while using several non-overlapping
     // backing allocations. Split only at known boundaries; unknown gaps remain exact.
@@ -1085,7 +1115,7 @@ final class ExecutionService(
       }
     }
 
-  private def recordPrint(completion: CompletionId, event: PrintEvent): Either[ExecutionFailure, Unit] =
+  private def recordPrint(completion: CompletionId, event: Event.Print): Either[ExecutionFailure, Unit] =
     stateLock.withLock {
       val current = state.get()
       current.completions.get(completion) match {
@@ -1183,6 +1213,55 @@ final class ExecutionService(
     allocations.getOrElseUpdate(id, WrittenRanges()).add(offset, size)
   }
 
+  /** Scans pointer-bearing scalar arguments for values that name a registered allocation. The client sends raw argument
+    * bytes; the service owns the allocation bases, so it is the single place that can resolve them.
+    */
+  private def discoverArgumentRelocations(
+      task: KernelTask,
+      current: State,
+      loaded: RuntimeBackend.Program
+  ): Either[ExecutionFailure, Vec[KernelTask.PointerRelocation]] =
+    loaded.kernel(task.kernelName).left.map(runtimeFailure(_)).map { metadata =>
+      Vec.from(task.arguments.zipWithIndex.flatMap { case (argument, index) =>
+        argument match {
+          case KernelTask.Argument.Scalar(bytes) if metadata.parameters.lift(index).exists(_.containsPointers) =>
+            scanArgument(bytes, index, current)
+          case _ => Vector.empty
+        }
+      })
+    }
+
+  private def scanArgument(
+      bytes: Vec[Byte],
+      index: Int,
+      current: State
+  ): Vector[KernelTask.PointerRelocation] = {
+    val array = bytes.toArray
+    (0 to bytes.size - 8).by(4).flatMap { offset =>
+      val value = LittleEndian.decode(array, offset, ScalarByteWidth.Qword)
+      locateNativeAddress(value, current).map { case (allocation, targetOffset) =>
+        KernelTask.PointerRelocation(
+          KernelTask.RelocationSource.Argument(index.refineUnsafe[Positive0]),
+          offset.toLong.refineUnsafe[Positive0],
+          MemoryRegion(allocation.value),
+          targetOffset.refineUnsafe[Positive0]
+        )
+      }
+    }.toVector
+  }
+
+  private def locateNativeAddress(value: Long, current: State): Option[(AllocationId, Long)] =
+    current.allocations.view.flatMap { case (allocation, registered) =>
+      registered.address match {
+        case Some(base) if inAllocation(base.value, registered.size.toLong, value) =>
+          Some(allocation -> (value - base.value))
+        case _ => None
+      }
+    }.headOption
+
+  private def inAllocation(base: Long, size: Long, value: Long): Boolean =
+    java.lang.Long.compareUnsigned(value, base) >= 0 && java.lang.Long.compareUnsigned(value - base, size) <= 0
+
   private def validateTask(task: KernelTask, current: State): Either[ExecutionFailure, Unit] =
     task.arguments.collectFirst {
       case KernelTask.Argument.Memory(region, _) if !current.allocations.contains(allocationId(region)) =>
@@ -1274,44 +1353,36 @@ final class ExecutionService(
     state.get().allocations.get(allocationId(region)).toRight(Fault.Memory(s"memory region ${region.value} is absent"))
       .map(allocation => allocation.address.getOrElse(syntheticAddress(allocationId(region))).offset(offset))
 
-  @SuppressWarnings(Array(
-    "scalafix:DisableSyntax.null",
-    "scalafix:DisableSyntax.var",
-    "scalafix:GemstoneNoIterator.no-iterator"
-  ))
-  private def locateAddress(address: GuestAddress, size: Int :| Positive0): Either[Fault, AddressSpace.Location] = {
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:GemstoneNoIterator.no-iterator"))
+  private def findContainingAllocation(address: GuestAddress, size: Int :| Positive0): Option[(AllocationId, Long)] = {
     val allocations                          = state.get().allocations.iterator
-    var result: AddressSpace.Location | Null = null
-    while (allocations.hasNext && result == null) {
+    var result: Option[(AllocationId, Long)] = None
+    while (allocations.hasNext && result.isEmpty) {
       val (id, allocation) = allocations.next()
       val base             = allocation.address.getOrElse(syntheticAddress(id))
       val relative         = address.value - base.value
       if (
         java.lang.Long.compareUnsigned(address.value, base.value) >= 0 &&
         size <= allocation.size && relative <= allocation.size.toLong - size.toLong
-      ) result = AddressSpace.Location(MemoryRegion(id.value), relative.refineUnsafe[Positive0])
+      ) result = Some(id -> relative)
     }
-    if (result == null) Left(Fault.Memory(s"address ${address.value} is not bound")) else Right(result.nn)
+    result
   }
+
+  private def locateAddress(address: GuestAddress, size: Int :| Positive0): Either[Fault, AddressSpace.Location] =
+    findContainingAllocation(address, size) match {
+      case Some((id, relative)) =>
+        Right(AddressSpace.Location(MemoryRegion(id.value), relative.refineUnsafe[Positive0]))
+      case None => Left(Fault.Memory(s"address ${address.value} is not bound"))
+    }
 
   private def syntheticAddress(id: AllocationId): GuestAddress =
     GuestAddress(SyntheticAddressBase + (id.value - 1L) * SyntheticAddressStride)
 
   private def observe(completion: CompletionId, event: Event): Either[net.kurobako.gemstone.vm.Observer.Error, Unit] =
     event match {
-      case Event.Print(format, arguments) =>
-        recordPrint(
-          completion,
-          PrintEvent(
-            format,
-            arguments.map {
-              case Event.PrintArgument.Integer(bits, width, signed) => PrintArgument.Integer(bits, width, signed)
-              case Event.PrintArgument.Floating(bits, width)        => PrintArgument.Floating(bits, width)
-              case Event.PrintArgument.Pointer(address)             => PrintArgument.Pointer(address)
-              case Event.PrintArgument.Text(value)                  => PrintArgument.Text(value)
-            }
-          )
-        ).left.map(error => net.kurobako.gemstone.vm.Observer.Error(error.message))
+      case event: Event.Print =>
+        recordPrint(completion, event).left.map(error => net.kurobako.gemstone.vm.Observer.Error(error.message))
       case Event.PointerRelocation(source, sourceOffset, target, targetOffset) =>
         recordPointerRelocation(
           completion,
@@ -1342,8 +1413,16 @@ final class ExecutionService(
           },
           parameter.containsPointers
         )
-      }
+      },
+      metadata.requiredWorkGroupSize.map(toWireWorkGroupSize(_)),
+      metadata.workGroupSizeHint.map(toWireWorkGroupSize(_)),
+      metadata.bindingIndices,
+      metadata.entryPointId
     ).left.map(ExecutionFailure.Failed(_))
+
+  private def toWireWorkGroupSize(
+      size: net.kurobako.gemstone.isa.KernelMetadata.WorkGroupSize
+  ): Dimensions = Dimensions(size.x, size.y, size.z)
 
   private def toWireCatalog(symbols: net.kurobako.gemstone.isa.ProgramSymbols)
       : Either[ExecutionFailure, ProgramCatalog] = {
@@ -1375,8 +1454,8 @@ final class ExecutionService(
 }
 
 object ExecutionService {
-  val MaxInstructionsEnvironment: String :| (MinLength[1] & NoNul) = "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS"
-  val QuantumEnvironment: String :| (MinLength[1] & NoNul)         = "GEMSTONE_EXECUTION_QUANTUM"
+  val MaxInstructionsEnvironment = EnvironmentNames.ExecutionMaxInstructions
+  val QuantumEnvironment         = EnvironmentNames.ExecutionQuantum
 
   def limits(environment: Map[String, String]): Either[String, TaskLimits] = {
     val maximum = environment.get(MaxInstructionsEnvironment) match {
@@ -1400,4 +1479,8 @@ object ExecutionService {
       quantumValue    <- quantum
     } yield TaskLimits(maxInstructions, quantumValue)
   }
+
+  /** Parses the execution limits, failing the process on a malformed override. */
+  def requireLimits(environment: Map[String, String]): TaskLimits =
+    limits(environment).fold(message => throw IllegalArgumentException(message), identity)
 }

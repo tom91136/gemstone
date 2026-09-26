@@ -120,8 +120,7 @@ struct MemoryClient {
     check(zeCommandListHostSynchronize(list, UINT64_MAX));
   }
   explicit MemoryClient(bool raw = false)
-      : MemoryClient(memory_patterns::allocationKind("shared"), 0, "kernel.spv",
-                     std::getenv("GEMSTONE_MEMORY_SUBMISSION_PROBE") != nullptr) {
+      : MemoryClient(memory_patterns::allocationKind("shared"), 0, "kernel.spv", memory_patterns::probeEnabled("submission")) {
     this->raw = raw;
   }
   bool raw = false;

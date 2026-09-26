@@ -1,9 +1,12 @@
 set(HSAKMT_INCLUDE_DIR "" CACHE PATH "Directory containing hsakmt/hsakmt.h")
 if(NOT EXISTS "${HSAKMT_INCLUDE_DIR}/hsakmt/hsakmt.h")
   include(FetchContent)
+  if(NOT ROCR_HEADERS_SOURCE_URL OR NOT ROCR_HEADERS_SOURCE_SHA256)
+    message(FATAL_ERROR "ROCR_HEADERS_SOURCE_URL and ROCR_HEADERS_SOURCE_SHA256 must be supplied by the build")
+  endif()
   FetchContent_Declare(rocr_headers
-    URL https://github.com/ROCm/ROCR-Runtime/archive/refs/tags/rocm-7.2.4.tar.gz
-    URL_HASH SHA256=60532cd86edce5a603aa18df406ec1f5a3d18f0663d79b3b7822ff721c5a04ec
+    URL "${ROCR_HEADERS_SOURCE_URL}"
+    URL_HASH "SHA256=${ROCR_HEADERS_SOURCE_SHA256}"
     SOURCE_SUBDIR gemstone-no-cmake-project
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   )
@@ -15,8 +18,6 @@ set(HSA_INCLUDE_DIR "" CACHE PATH "Directory containing the public HSA headers")
 if(NOT EXISTS "${HSA_INCLUDE_DIR}/hsa.h")
   if(EXISTS "${rocr_headers_SOURCE_DIR}/runtime/hsa-runtime/inc/hsa.h")
     set(HSA_INCLUDE_DIR "${rocr_headers_SOURCE_DIR}/runtime/hsa-runtime/inc" CACHE PATH "Directory containing the public HSA headers" FORCE)
-  elseif(EXISTS "/usr/include/hsa/hsa.h")
-    set(HSA_INCLUDE_DIR "/usr/include/hsa" CACHE PATH "Directory containing the public HSA headers" FORCE)
   else()
     message(FATAL_ERROR "Unable to locate the public HSA headers; set HSA_INCLUDE_DIR")
   endif()

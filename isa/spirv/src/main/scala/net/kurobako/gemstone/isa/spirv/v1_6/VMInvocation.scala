@@ -67,7 +67,6 @@ private[v1_6] object VMInvocation {
     private val touched          = if (trackTouched) Array.ofDim[Int](dense.length) else Array.empty[Int]
     private var touchedSize      = 0
     private val overflow         = mutable.LongMap.empty[RuntimeValue]
-    private var scalarReadValid  = false
 
     metrics.recordInvocationValues(dense.length, 16)
 
@@ -132,42 +131,23 @@ private[v1_6] object VMInvocation {
           case None    => fallbackScalarBits(key)
         }
 
-    def readScalar(key: Int): Long =
+    def readScalar(key: Int): Option[Long] =
       if (key >= 0 && key < dense.length) {
-        if (denseScalarTypes(key) >= 0) {
-          scalarReadValid = true
-          denseScalarBits(key)
-        } else if (dense(key) != null) {
-          scalarReadValid = false
-          0L
-        } else {
-          val baseType = baseScalars.scalarType(key)
-          if (baseType >= 0) {
-            scalarReadValid = true
-            baseScalars.scalarBits(key)
-          } else readFallbackScalar(key)
-        }
+        if (denseScalarTypes(key) >= 0) Some(denseScalarBits(key))
+        else if (dense(key) != null) None
+        else if (baseScalars.scalarType(key) >= 0) Some(baseScalars.scalarBits(key))
+        else readFallbackScalar(key)
       } else
         overflow.get(key.toLong) match {
-          case Some(RuntimeValue.Bits(_, Array(value))) =>
-            scalarReadValid = true
-            value
-          case Some(_) =>
-            scalarReadValid = false
-            0L
-          case None => readFallbackScalar(key)
+          case Some(RuntimeValue.Bits(_, Array(value))) => Some(value)
+          case Some(_)                                  => None
+          case None                                     => readFallbackScalar(key)
         }
 
-    def scalarReadSucceeded: Boolean = scalarReadValid
-
-    private def readFallbackScalar(key: Int): Long =
+    private def readFallbackScalar(key: Int): Option[Long] =
       globals.get(key).orElse(constants.get(key)) match {
-        case Some(RuntimeValue.Bits(_, Array(value))) =>
-          scalarReadValid = true
-          value
-        case _ =>
-          scalarReadValid = false
-          0L
+        case Some(RuntimeValue.Bits(_, Array(value))) => Some(value)
+        case _                                        => None
       }
 
     private def fallbackScalarType(key: Int): Int =
@@ -302,30 +282,20 @@ private[v1_6] object VMInvocation {
       enqueuedSubgroups = nextEnqueuedSubgroups
       subgroupIndex = nextSubgroupIndex
       subgroupLocal = nextSubgroupLocal
-      group(0) = groupX
-      group(1) = groupY
-      group(2) = groupZ
-      local(0) = localX
-      local(1) = localY
-      local(2) = localZ
-      global(0) = globalX
-      global(1) = globalY
-      global(2) = globalZ
-      globalSize(0) = globalSizeX
-      globalSize(1) = globalSizeY
-      globalSize(2) = globalSizeZ
-      globalOffset(0) = globalOffsetX
-      globalOffset(1) = globalOffsetY
-      globalOffset(2) = globalOffsetZ
-      workgroupSize(0) = workgroupSizeX
-      workgroupSize(1) = workgroupSizeY
-      workgroupSize(2) = workgroupSizeZ
-      enqueuedWorkgroupSize(0) = enqueuedWorkgroupSizeX
-      enqueuedWorkgroupSize(1) = enqueuedWorkgroupSizeY
-      enqueuedWorkgroupSize(2) = enqueuedWorkgroupSizeZ
-      numWorkgroups(0) = numWorkgroupsX
-      numWorkgroups(1) = numWorkgroupsY
-      numWorkgroups(2) = numWorkgroupsZ
+      assign(group, groupX, groupY, groupZ)
+      assign(local, localX, localY, localZ)
+      assign(global, globalX, globalY, globalZ)
+      assign(globalSize, globalSizeX, globalSizeY, globalSizeZ)
+      assign(globalOffset, globalOffsetX, globalOffsetY, globalOffsetZ)
+      assign(workgroupSize, workgroupSizeX, workgroupSizeY, workgroupSizeZ)
+      assign(enqueuedWorkgroupSize, enqueuedWorkgroupSizeX, enqueuedWorkgroupSizeY, enqueuedWorkgroupSizeZ)
+      assign(numWorkgroups, numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ)
+    }
+
+    private def assign(target: Array[Long], a: Long, b: Long, c: Long): Unit = {
+      target(0) = a
+      target(1) = b
+      target(2) = c
     }
   }
   // PC, call stack and collective suspension are the mutable state of one invocation machine.

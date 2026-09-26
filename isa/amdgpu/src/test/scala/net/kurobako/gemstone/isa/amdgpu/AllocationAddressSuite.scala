@@ -18,7 +18,7 @@ final class AllocationAddressSuite extends munit.FunSuite with CodeObjectTestSup
     0xc00a0100L, 0x00000000L, 0xbf8cc07fL, 0xc0060202L, 0x00000008L, 0xbf8cc07fL, 0xc0020284L, 0x00000000L, 0xbf8cc07fL,
     0x800a810aL, 0x7e000280L, 0x7e02020aL, 0xdc708000L, 0x00080100L, 0xbf8c0f70L, 0xc0020284L, 0x00000000L, 0xbf8cc07fL,
     0x7e02020aL, 0xdc708000L, 0x00060100L, 0x7e000288L, 0x7e020204L, 0x7e040205L, 0xdc748000L, 0x00060100L, 0xbf810000L
-  ).flatMap(value => LittleEndian.toVec(value, ScalarByteWidth(4)))
+  ).flatMap(value => LittleEndian.toVec(value, ScalarByteWidth.Dword))
   private val env    = MemoryRegion(1)
   private val nested = MemoryRegion(118)
   private val output = MemoryRegion(2)
@@ -63,16 +63,16 @@ final class AllocationAddressSuite extends munit.FunSuite with CodeObjectTestSup
         target,
         memory.storage(env),
         0,
-        ScalarByteWidth(8)
+        ScalarByteWidth.Qword
       ) // ordinary scalar equal to a pointer; must remain untouched
-      LittleEndian.write(target, memory.storage(env), 8, ScalarByteWidth(8))
+      LittleEndian.write(target, memory.storage(env), 8, ScalarByteWidth.Qword)
       val original = memory.storage(env).clone()
       for (value <- Seq(41L, 70L)) {
-        LittleEndian.write(value, memory.storage(nested), 0, ScalarByteWidth(4))
+        LittleEndian.write(value, memory.storage(nested), 0, ScalarByteWidth.Dword)
         assertEquals(run(memory), Right(()))
-        assertEquals(LittleEndian.decode(memory.storage(nested), 0, ScalarByteWidth(4)), value + 1)
-        assertEquals(LittleEndian.decode(memory.storage(output), 0, ScalarByteWidth(4)), value + 1)
-        assertEquals(LittleEndian.decode(memory.storage(output), 8, ScalarByteWidth(8)), base)
+        assertEquals(LittleEndian.decode(memory.storage(nested), 0, ScalarByteWidth.Dword), value + 1)
+        assertEquals(LittleEndian.decode(memory.storage(output), 0, ScalarByteWidth.Dword), value + 1)
+        assertEquals(LittleEndian.decode(memory.storage(output), 8, ScalarByteWidth.Qword), base)
         assert(memory.storage(env).sameElements(original))
       }
     }

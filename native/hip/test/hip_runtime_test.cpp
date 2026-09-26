@@ -29,7 +29,7 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
   using LegacyProperties = hipError_t (*)(void *, int);
   const auto query = reinterpret_cast<LegacyProperties>(dlsym(RTLD_DEFAULT, "hipGetDeviceProperties"));
   REQUIRE((query != nullptr));
-  REQUIRE((setenv("GEMSTONE_AMDGPU_TARGET", "gfx1036", 1) == 0));
+  REQUIRE((setenv("GEMSTONE_TARGET_ARCH", "gfx1036", 1) == 0));
   std::array<unsigned char, 792> properties{};
   REQUIRE((query(properties.data(), 0) == hipSuccess));
   auto word = [&](size_t offset) {
@@ -43,7 +43,7 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
   REQUIRE((word(392) == 1036));    // gcnArch
   REQUIRE((word(356) & (1 << 7))); // arch.hasDoubles
   REQUIRE((word(356) & (1 << 5))); // arch.hasGlobalInt64Atomics
-  REQUIRE((setenv("GEMSTONE_HSA_SYSTEM_PAGING", "1", 1) == 0));
+  REQUIRE((setenv("GEMSTONE_SYSTEM_PAGING", "1", 1) == 0));
   REQUIRE((query(properties.data(), 0) == hipSuccess));
   REQUIRE((word(784) == 1)); // pageableMemoryAccess in Polyregion's 792-byte ABI
   hipDeviceProp_tR0600 current{};
@@ -54,8 +54,8 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
   REQUIRE((current.hostNativeAtomicSupported == 1));
   REQUIRE((word(772) == current.managedMemory));
   REQUIRE((word(780) == current.concurrentManagedAccess));
-  REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
-  REQUIRE((unsetenv("GEMSTONE_AMDGPU_TARGET") == 0));
+  REQUIRE((unsetenv("GEMSTONE_SYSTEM_PAGING") == 0));
+  REQUIRE((unsetenv("GEMSTONE_TARGET_ARCH") == 0));
 }
 #endif
 
@@ -343,7 +343,7 @@ void crossWorkgroupLaunchAndCopyback() {
   REQUIRE((fixture.launches() == 112));
   // HIP advertises pageable host access to Polyregion. A stream wait must
   // expose writes to an ordinary host allocation before it returns.
-  REQUIRE((setenv("GEMSTONE_HSA_SYSTEM_PAGING", "1", 1) == 0));
+  REQUIRE((setenv("GEMSTONE_SYSTEM_PAGING", "1", 1) == 0));
   for (uint32_t seed = 1; seed <= 32; ++seed) {
     std::array<uint32_t, 4> host{0, 0, 0, 0};
     auto *output = host.data();
@@ -356,7 +356,7 @@ void crossWorkgroupLaunchAndCopyback() {
       REQUIRE((host[index] == seed + index));
     fixture.check();
   }
-  REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
+  REQUIRE((unsetenv("GEMSTONE_SYSTEM_PAGING") == 0));
   REQUIRE((fixture.launches() == 144));
   REQUIRE((hipModuleUnload(module) == hipSuccess));
   fixture.check();
@@ -511,7 +511,7 @@ TEST_CASE("HIP launch-buffer and runtime behavior", "[hip]") {
   REQUIRE((!tensile.copyTo(destination, 79, 80)));
   tensile.data = nullptr;
   REQUIRE((!tensile.copyTo(destination, 112, 80)));
-  REQUIRE((setenv("GEMSTONE_AMDGPU_TARGET", "gfx1010", 1) == 0));
+  REQUIRE((setenv("GEMSTONE_TARGET_ARCH", "gfx1010", 1) == 0));
   int major = 0;
   int minor = 0;
   REQUIRE((hipDeviceComputeCapability(&major, &minor, 0) == hipSuccess));
@@ -556,7 +556,7 @@ TEST_CASE("HIP registered host memory exposes its device pointer", "[hip][unifie
   const auto port = std::to_string(fixture.port());
   REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
   REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
-  REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
+  REQUIRE((unsetenv("GEMSTONE_SYSTEM_PAGING") == 0));
   std::array<uint32_t, 8> host{11, 22, 33, 44, 55, 66, 77, 88};
   REQUIRE((hipHostRegister(host.data(), sizeof(host), hipHostRegisterMapped) == hipSuccess));
   void *device = nullptr;
@@ -602,7 +602,7 @@ TEST_CASE("HIP registered subranges retain ownership and permit address reuse", 
   const auto port = std::to_string(fixture.port());
   REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
   REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
-  REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
+  REQUIRE((unsetenv("GEMSTONE_SYSTEM_PAGING") == 0));
   std::array<uint32_t, 16> host{};
   for (unsigned iteration = 0; iteration < 3; ++iteration) {
     REQUIRE((hipHostRegister(host.data() + 1, 4 * sizeof(uint32_t), 0) == hipSuccess));
@@ -624,7 +624,7 @@ void unifiedMemoryRoundTrip(unsigned kind) {
   const auto port = std::to_string(fixture.port());
   REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
   REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
-  REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
+  REQUIRE((unsetenv("GEMSTONE_SYSTEM_PAGING") == 0));
   std::array<uint32_t, 16> storage{};
   void *memory = storage.data();
   if (kind == 0) REQUIRE((hipMallocManaged(&memory, sizeof(storage)) == hipSuccess));

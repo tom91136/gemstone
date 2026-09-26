@@ -102,25 +102,22 @@ object GeneratePTXISA {
     )
   )
 
-  def main(arguments: Array[String]): Unit = command.parse(arguments.toSeq).fold(
-    help => throw IllegalArgumentException(help.toString),
-    request => {
-      val packageVersion = ScalaPackageVersion.either(request.packageVersion).fold(
-        message => throw IllegalArgumentException(s"invalid PTX package version '${request.packageVersion}': $message"),
-        value => value
-      )
-      val specificationVersion = parseSpecificationVersion(request.version)
-      val sections             = checkedSections(request.input)
-      val fileName             = if (request.tests) "DocumentationSuite.scala" else "Instruction.scala"
-      val output               = request.sourceRoot.resolve(PackageRoot).resolve(packageVersion.value).resolve(fileName)
-      if (request.tests) {
-        val examples = checkedExamples(sections)
-        write(output, renderTests(specificationVersion, packageVersion, examples))
-      } else write(output, renderInstructions(specificationVersion, packageVersion, sections))
-      val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
-      GeneratedFiles.removeUnexpected(request.sourceRoot, Set(output), include)
-    }
-  )
+  def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { request =>
+    val packageVersion = ScalaPackageVersion.either(request.packageVersion).fold(
+      message => throw IllegalArgumentException(s"invalid PTX package version '${request.packageVersion}': $message"),
+      value => value
+    )
+    val specificationVersion = parseSpecificationVersion(request.version)
+    val sections             = checkedSections(request.input)
+    val fileName             = if (request.tests) "DocumentationSuite.scala" else "Instruction.scala"
+    val output               = request.sourceRoot.resolve(PackageRoot).resolve(packageVersion.value).resolve(fileName)
+    if (request.tests) {
+      val examples = checkedExamples(sections)
+      write(output, renderTests(specificationVersion, packageVersion, examples))
+    } else write(output, renderInstructions(specificationVersion, packageVersion, sections))
+    val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
+    GeneratedFiles.removeUnexpected(request.sourceRoot, Set(output), include)
+  }
 
   private def checkedSections(input: Path): Vector[Section] = {
     val sections = extract(input)

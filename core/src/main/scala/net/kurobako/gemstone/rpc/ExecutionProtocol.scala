@@ -79,6 +79,13 @@ object ExecutionProtocol {
       case Unsupported(value)    => value
       case Failed(value)         => value
     }
+
+    def withDetail(value: String): ExecutionFailure = this match {
+      case _: InvalidRequest => InvalidRequest(value)
+      case _: NotFound       => NotFound(value)
+      case _: Unsupported    => Unsupported(value)
+      case _: Failed         => Failed(value)
+    }
   }
 
   enum CompletionStatus derives Codec {
@@ -109,14 +116,22 @@ object ExecutionProtocol {
   final case class KernelMetadata private (
       argumentBlockSize: Int :| Positive0,
       explicitParameterCount: Int :| Positive0,
-      parameters: Vec[KernelParameterMetadata]
+      parameters: Vec[KernelParameterMetadata],
+      requiredWorkGroupSize: Option[Dimensions],
+      workGroupSizeHint: Option[Dimensions],
+      bindingIndices: Vec[Int :| Positive0],
+      entryPointId: Option[Int :| Positive0]
   )
 
   object KernelMetadata {
     def validated(
         argumentBlockSize: Int :| Positive0,
         explicitParameterCount: Int :| Positive0,
-        parameters: Vec[KernelParameterMetadata]
+        parameters: Vec[KernelParameterMetadata],
+        requiredWorkGroupSize: Option[Dimensions] = None,
+        workGroupSizeHint: Option[Dimensions] = None,
+        bindingIndices: Vec[Int :| Positive0] = Vec.empty,
+        entryPointId: Option[Int :| Positive0] = None
     ): Either[String, KernelMetadata] =
       SymbolValidation
         .kernelParameters(
@@ -124,12 +139,85 @@ object ExecutionProtocol {
           explicitParameterCount,
           parameters.map(parameter => parameter.offset -> parameter.width)
         )
-        .map(_ => KernelMetadata(argumentBlockSize, explicitParameterCount, parameters))
+        .map(_ =>
+          KernelMetadata(
+            argumentBlockSize,
+            explicitParameterCount,
+            parameters,
+            requiredWorkGroupSize,
+            workGroupSizeHint,
+            bindingIndices,
+            entryPointId
+          )
+        )
 
     given Codec[KernelMetadata] = Codec.validated(Codec.derived[KernelMetadata])(value =>
-      validated(value.argumentBlockSize, value.explicitParameterCount, value.parameters)
+      validated(
+        value.argumentBlockSize,
+        value.explicitParameterCount,
+        value.parameters,
+        value.requiredWorkGroupSize,
+        value.workGroupSizeHint,
+        value.bindingIndices,
+        value.entryPointId
+      )
     )
   }
+
+  enum BlasOperation derives Codec {
+    case Axpy
+    case Scal
+    case Copy
+    case Dot
+    case Nrm2
+    case Asum
+    case Gemv
+    case Gemm
+    case GemmStridedBatched
+  }
+
+  enum BlasElement derives Codec {
+    case F16
+    case F32
+    case F64
+  }
+
+  final case class BlasVector(allocation: AllocationId, offset: Long :| Positive0, increment: Int) derives Codec
+  final case class BlasMatrix(allocation: AllocationId, offset: Long :| Positive0, leading: Int) derives Codec
+
+  final case class BlasRequest(
+      operation: BlasOperation,
+      element: BlasElement,
+      count: Int,
+      rows: Int,
+      columns: Int,
+      inner: Int,
+      transposeA: Boolean,
+      transposeB: Boolean,
+      alpha: Vec[Byte],
+      beta: Vec[Byte],
+      x: Option[BlasVector],
+      y: Option[BlasVector],
+      a: Option[BlasMatrix],
+      b: Option[BlasMatrix],
+      c: Option[BlasMatrix],
+      strideA: Long,
+      strideB: Long,
+      strideC: Long,
+      batch: Int
+  ) derives Codec
+
+  final case class BlasResult(scalar: Vec[Byte]) derives Codec
+
+  final case class SpecializationConstant(
+      specId: Int :| Positive0,
+      value: Vec[Byte]
+  ) derives Codec
+
+  final case class SpecializationInfo(
+      specId: Int :| Positive0,
+      byteSize: Int :| Positive
+  ) derives Codec
 
   final case class ProgramKernel(name: KernelName, linkageName: LinkageName) derives Codec
 
@@ -175,13 +263,4 @@ object ExecutionProtocol {
       validated(value.size, value.initial)
     )
   }
-
-  enum PrintArgument derives Codec {
-    case Integer(bits: Vec[Long], width: Int, isSigned: Boolean)
-    case Floating(bits: Vec[Long], width: Int)
-    case Pointer(address: Long)
-    case Text(value: String)
-  }
-
-  final case class PrintEvent(format: String, arguments: Vec[PrintArgument]) derives Codec
 }

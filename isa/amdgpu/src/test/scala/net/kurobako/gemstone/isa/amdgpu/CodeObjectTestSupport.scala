@@ -77,7 +77,7 @@ private trait CodeObjectTestSupport { self: munit.FunSuite =>
     def allocate(id: MemoryRegion, size: Int): Unit = allocations(id) = Array.ofDim[Byte](size)
 
     def putInt(id: MemoryRegion, offset: Int :| Positive0, value: Int): Unit =
-      LittleEndian.write(value.toLong, allocations(id), offset, ScalarByteWidth(4))
+      LittleEndian.write(value.toLong, allocations(id), offset, ScalarByteWidth.Dword)
 
     def getInt(id: MemoryRegion, offset: Int :| Positive0): Int =
       LittleEndian.decodeInt32(allocations(id), offset)
@@ -153,12 +153,12 @@ private trait CodeObjectTestSupport { self: munit.FunSuite =>
     Array.copy(symbolNames, 0, bytes, symbolNameOffset, symbolNames.length)
     val textByteOffset     = textOffset.refineEither[Positive0].fold(fail(_), value => value)
     val readOnlyByteOffset = readOnlyOffset.refineEither[Positive0].fold(fail(_), value => value)
-    LittleEndian.write(0xbf810000L, bytes, textByteOffset, ScalarByteWidth(4))
-    LittleEndian.write(16L, bytes, readOnlyByteOffset, ScalarByteWidth(4))
-    LittleEndian.write(8L, bytes, readOnlyByteOffset + 4, ScalarByteWidth(4))
-    LittleEndian.write(24L, bytes, readOnlyByteOffset + 8, ScalarByteWidth(4))
-    LittleEndian.write(0x80L, bytes, readOnlyByteOffset + 52, ScalarByteWidth(4))
-    LittleEndian.write(0x0aL, bytes, readOnlyByteOffset + 56, ScalarByteWidth(2))
+    LittleEndian.write(0xbf810000L, bytes, textByteOffset, ScalarByteWidth.Dword)
+    LittleEndian.write(16L, bytes, readOnlyByteOffset, ScalarByteWidth.Dword)
+    LittleEndian.write(8L, bytes, readOnlyByteOffset + 4, ScalarByteWidth.Dword)
+    LittleEndian.write(24L, bytes, readOnlyByteOffset + 8, ScalarByteWidth.Dword)
+    LittleEndian.write(0x80L, bytes, readOnlyByteOffset + 52, ScalarByteWidth.Dword)
+    LittleEndian.write(0x0aL, bytes, readOnlyByteOffset + 56, ScalarByteWidth.Word)
     Array.copy(target, 0, bytes, readOnlyOffset + 64, target.length)
 
     def section(
@@ -205,9 +205,9 @@ private trait CodeObjectTestSupport { self: munit.FunSuite =>
       section(8, 51, 4, 0x5000L, relocationOffset, 24, link = 3, alignment = 8, entrySize = 24)
       // R_AMDGPU_ABS64 for device_global (symbol 3) stored into the .got slot.
       val relocationByteOffset = relocationOffset
-      LittleEndian.write(0x4000L, bytes, relocationByteOffset, ScalarByteWidth(8))
-      LittleEndian.write((3L << 32) | 3L, bytes, relocationByteOffset + 8, ScalarByteWidth(8))
-      LittleEndian.write(0L, bytes, relocationByteOffset + 16, ScalarByteWidth(8))
+      LittleEndian.write(0x4000L, bytes, relocationByteOffset, ScalarByteWidth.Qword)
+      LittleEndian.write((3L << 32) | 3L, bytes, relocationByteOffset + 8, ScalarByteWidth.Qword)
+      LittleEndian.write(0L, bytes, relocationByteOffset + 16, ScalarByteWidth.Qword)
     }
     bytes
   }

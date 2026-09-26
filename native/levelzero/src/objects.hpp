@@ -2,14 +2,15 @@
 #define GEMSTONE_LEVELZERO_OBJECTS_HPP
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -18,9 +19,9 @@
 
 #include <ze_api.h>
 
-namespace gemstone::levelzero {
+#include "handles.hpp"
 
-inline constexpr uint64_t Magic = 0x47454d53544f4e45ULL;
+namespace gemstone::levelzero {
 
 enum class Kind : uint32_t {
   Driver,
@@ -38,19 +39,12 @@ enum class Kind : uint32_t {
   Sampler
 };
 
-inline std::mutex liveHandlesMutex;
-inline std::unordered_set<const void *> liveHandles;
+inline gemstone::rpc::LiveHandles liveHandles;
 
 struct Handle {
-  explicit Handle(Kind value) : kind(value) {
-    std::lock_guard lock(liveHandlesMutex);
-    liveHandles.insert(this);
-  }
-  virtual ~Handle() {
-    std::lock_guard lock(liveHandlesMutex);
-    liveHandles.erase(this);
-  }
-  uint64_t magic = Magic;
+  explicit Handle(Kind value) : kind(value) { liveHandles.insert(this); }
+  virtual ~Handle() { liveHandles.erase(this); }
+  uint64_t magic = gemstone::rpc::HandleMagic;
   Kind kind;
   std::atomic<uint32_t> users{0};
   std::atomic<bool> destroyRequested{false};
@@ -135,7 +129,62 @@ struct RecordedCommand {
   }
 };
 
-struct CommandList final : Handle {
+/** Drains a `pending` queue on a worker thread, recording the first failure and the completed count. */
+template <class Derived, class Job> struct WorkerLoop {
+  void run() {
+    for (;;) {
+      Job job;
+      {
+        std::unique_lock lock(mutex);
+        changed.wait(lock, [this] { return stopping || !pending.empty(); });
+        if (stopping && pending.empty()) return;
+        job = std::move(pending.front());
+        pending.pop_front();
+      }
+      ze_result_t result = ZE_RESULT_ERROR_UNKNOWN;
+      try {
+        result = static_cast<Derived *>(this)->execute(job);
+      } catch (...) {
+        result = ZE_RESULT_ERROR_UNKNOWN;
+      }
+      {
+        std::lock_guard lock(mutex);
+        if (result != ZE_RESULT_SUCCESS && failure == ZE_RESULT_SUCCESS) failure = result;
+        ++completed;
+      }
+      changed.notify_all();
+    }
+  }
+
+  /** Waits for the submitted work to drain, honouring `0` (poll) and `UINT64_MAX` (block) timeouts. */
+  ze_result_t waitFor(uint64_t timeout) {
+    if (!worker.joinable()) return ZE_RESULT_SUCCESS;
+    std::unique_lock lock(mutex);
+    const auto target = submitted;
+    const auto finished = [&] { return completed >= target; };
+    if (timeout == 0) {
+      if (!finished()) return ZE_RESULT_NOT_READY;
+    } else if (timeout == std::numeric_limits<uint64_t>::max()) {
+      changed.wait(lock, finished);
+    } else if (!changed.wait_for(
+                   lock, std::chrono::nanoseconds(static_cast<int64_t>(std::min(timeout, uint64_t{std::numeric_limits<int64_t>::max()}))),
+                   finished)) {
+      return ZE_RESULT_NOT_READY;
+    }
+    return failure;
+  }
+
+  std::mutex mutex;
+  std::condition_variable changed;
+  std::deque<Job> pending;
+  std::thread worker;
+  uint64_t submitted = 0;
+  uint64_t completed = 0;
+  ze_result_t failure = ZE_RESULT_SUCCESS;
+  bool stopping = false;
+};
+
+struct CommandList final : Handle, WorkerLoop<CommandList, RecordedCommand> {
   CommandList(bool immediateValue, Context *contextValue, Device *deviceValue,
               ze_command_queue_mode_t modeValue = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS)
       : Handle(Kind::List), immediate(immediateValue), context(contextValue), device(deviceValue) {
@@ -150,48 +199,25 @@ struct CommandList final : Handle {
     changed.notify_all();
     worker.join();
   }
-  void run() {
-    for (;;) {
-      RecordedCommand command;
-      {
-        std::unique_lock lock(mutex);
-        changed.wait(lock, [this] { return stopping || !pending.empty(); });
-        if (stopping && pending.empty()) return;
-        command = std::move(pending.front());
-        pending.pop_front();
-      }
-      ze_result_t result = ZE_RESULT_ERROR_UNKNOWN;
-      try {
-        result = command.action();
-      } catch (...) {
-        result = ZE_RESULT_ERROR_UNKNOWN;
-      }
-      command.releaseResources();
-      command = {};
-      {
-        std::lock_guard lock(mutex);
-        if (result != ZE_RESULT_SUCCESS && failure == ZE_RESULT_SUCCESS) failure = result;
-        ++completed;
-      }
-      changed.notify_all();
+  ze_result_t execute(RecordedCommand &command) {
+    ze_result_t result = ZE_RESULT_ERROR_UNKNOWN;
+    try {
+      result = command.action();
+    } catch (...) {
+      result = ZE_RESULT_ERROR_UNKNOWN;
     }
+    command.releaseResources();
+    command = {};
+    return result;
   }
   bool immediate;
   bool closed = false;
   HandleUse<Context> context;
   Device *device;
   std::vector<RecordedCommand> commands;
-  std::mutex mutex;
-  std::condition_variable changed;
-  std::deque<RecordedCommand> pending;
-  std::thread worker;
-  uint64_t submitted = 0;
-  uint64_t completed = 0;
-  ze_result_t failure = ZE_RESULT_SUCCESS;
-  bool stopping = false;
 };
 
-struct Queue final : Handle {
+struct Queue final : Handle, WorkerLoop<Queue, std::function<ze_result_t()>> {
   Queue(Context *contextValue, Device *deviceValue, const ze_command_queue_desc_t &value)
       : Handle(Kind::Queue), context(contextValue), device(deviceValue), desc(value) {
     if (desc.mode != ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS) worker = std::thread([this] { run(); });
@@ -205,42 +231,19 @@ struct Queue final : Handle {
     changed.notify_all();
     worker.join();
   }
-  void run() {
-    for (;;) {
-      std::function<ze_result_t()> job;
-      {
-        std::unique_lock lock(mutex);
-        changed.wait(lock, [this] { return stopping || !pending.empty(); });
-        if (stopping && pending.empty()) return;
-        job = std::move(pending.front());
-        pending.pop_front();
-      }
-      ze_result_t result = ZE_RESULT_ERROR_UNKNOWN;
-      try {
-        result = job();
-      } catch (...) {
-        result = ZE_RESULT_ERROR_UNKNOWN;
-      }
-      job = {};
-      {
-        std::lock_guard lock(mutex);
-        if (result != ZE_RESULT_SUCCESS && failure == ZE_RESULT_SUCCESS) failure = result;
-        ++completed;
-      }
-      changed.notify_all();
+  ze_result_t execute(std::function<ze_result_t()> &job) {
+    ze_result_t result = ZE_RESULT_ERROR_UNKNOWN;
+    try {
+      result = job();
+    } catch (...) {
+      result = ZE_RESULT_ERROR_UNKNOWN;
     }
+    job = {};
+    return result;
   }
   HandleUse<Context> context;
   Device *device;
   ze_command_queue_desc_t desc;
-  std::mutex mutex;
-  std::condition_variable changed;
-  std::deque<std::function<ze_result_t()>> pending;
-  std::thread worker;
-  uint64_t submitted = 0;
-  uint64_t completed = 0;
-  ze_result_t failure = ZE_RESULT_SUCCESS;
-  bool stopping = false;
 };
 
 struct Fence final : Handle {
@@ -261,24 +264,14 @@ struct BuildLog final : Handle {
   std::string text;
 };
 
-enum class ModuleBackend { TransferOnly, RPC };
-
-struct ModuleGlobalsSnapshot {
-  std::mutex mutex;
-  std::vector<uint64_t> allocationIds;
-};
-
 struct Module final : Handle {
-  Module(Context *contextValue, std::vector<uint8_t> value, uint64_t programValue, ModuleBackend backendValue,
-         std::string buildFlagsValue = {})
-      : Handle(Kind::Module), context(contextValue), bytes(std::move(value)), programId(programValue), backend(backendValue),
-        buildFlags(std::move(buildFlagsValue)), globalAllocations(std::make_shared<ModuleGlobalsSnapshot>()) {}
+  Module(Context *contextValue, std::vector<uint8_t> value, uint64_t programValue, std::string buildFlagsValue = {})
+      : Handle(Kind::Module), context(contextValue), bytes(std::move(value)), programId(programValue),
+        buildFlags(std::move(buildFlagsValue)) {}
   HandleUse<Context> context;
   std::vector<uint8_t> bytes;
   uint64_t programId;
-  ModuleBackend backend;
   std::string buildFlags;
-  std::shared_ptr<ModuleGlobalsSnapshot> globalAllocations;
   struct Global {
     std::string name;
     void *base;
@@ -321,9 +314,7 @@ using AllocationRef = std::shared_ptr<Allocation>;
 struct KernelLaunch {
   std::shared_ptr<HandleUse<Kernel>> lifetime;
   Context *context;
-  std::shared_ptr<ModuleGlobalsSnapshot> moduleGlobals;
   uint64_t programId;
-  ModuleBackend backend;
   std::string name;
   uint32_t groupX;
   uint32_t groupY;
@@ -343,8 +334,6 @@ struct Allocation {
   size_t size;
   ze_memory_type_t type;
   uint64_t id;
-  bool remoteSynchronized = false;
-  std::vector<uint64_t> synchronizedPageFingerprints;
 };
 
 } // namespace gemstone::levelzero

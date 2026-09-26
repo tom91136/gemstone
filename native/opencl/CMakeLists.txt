@@ -1,12 +1,12 @@
 set(OPENCL_INCLUDE_DIR "" CACHE PATH "Directory containing the Khronos OpenCL headers")
-if(OPENCL_INCLUDE_DIR STREQUAL "" AND EXISTS "/opt/intel/oneapi/compiler/2026.1/include/CL/cl.h")
-  set(OPENCL_INCLUDE_DIR "/opt/intel/oneapi/compiler/2026.1/include")
-endif()
 if(NOT EXISTS "${OPENCL_INCLUDE_DIR}/CL/cl.h" OR NOT EXISTS "${OPENCL_INCLUDE_DIR}/CL/cl_icd.h")
   include(FetchContent)
+  if(NOT OPENCL_HEADERS_SOURCE_URL OR NOT OPENCL_HEADERS_SOURCE_SHA256)
+    message(FATAL_ERROR "OPENCL_HEADERS_SOURCE_URL and OPENCL_HEADERS_SOURCE_SHA256 must be supplied by the build")
+  endif()
   FetchContent_Declare(opencl_headers
-    URL https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/tags/v2026.05.29.tar.gz
-    URL_HASH SHA256=d9e6c48357de5002da11ce45de600e0c3ffe6ab4f628a3b9fe2b38603161658a
+    URL "${OPENCL_HEADERS_SOURCE_URL}"
+    URL_HASH "SHA256=${OPENCL_HEADERS_SOURCE_SHA256}"
     SOURCE_SUBDIR gemstone-no-cmake-project
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   )
@@ -17,7 +17,6 @@ endif()
 add_library(gemstone_opencl SHARED
   src/compiler.cpp
   src/icd.cpp
-  ../spirv/specialization.cpp
   src/unsupported.cpp)
 target_include_directories(gemstone_opencl PRIVATE
   "${OPENCL_INCLUDE_DIR}"
@@ -58,27 +57,4 @@ if(BUILD_TESTING)
 
   gemstone_opencl_test(gemstone_opencl_deferred test/deferred.cpp)
   gemstone_discover_tests(gemstone_opencl_deferred TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 8)
-
-  set(sycl_client "${CMAKE_BINARY_DIR}/gemstone_memory_sycl")
-  set(sycl_runtime "${CMAKE_BINARY_DIR}/opencl/memory-sycl/lib")
-  set(sycl_build "${CMAKE_BINARY_DIR}/artifact-builds/memory-sycl")
-  file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/gemstone_memory_sycl.library-path" CONTENT "${sycl_runtime}")
-  file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/memory-sycl.cmake" CONTENT [=[
-execute_process(COMMAND icpx -std=c++20 -fsycl -fsycl-device-code-split=per_kernel
-  -ffile-prefix-map=/source=. /source/native/opencl/test/memory_sycl.cpp
-  -o /output/gemstone_memory_sycl COMMAND_ERROR_IS_FATAL ANY)
-]=])
-  add_custom_target(gemstone_memory_sycl_client ALL
-    COMMAND "${CMAKE_COMMAND}" -S "${CONFORMANCE_ARTIFACT_PROJECT}" -B "${sycl_build}" -G Ninja
-      -DCONFORMANCE_ARTIFACT_KIND=command -DCONFORMANCE_BACKEND=sycl
-      "-DCONFORMANCE_ARTIFACT_DIRECTORY=${CMAKE_BINARY_DIR}"
-      "-DCONFORMANCE_COMMAND_SOURCE=${REPOSITORY_DIRECTORY}"
-      "-DCONFORMANCE_COMMAND_SCRIPT=${CMAKE_CURRENT_BINARY_DIR}/memory-sycl.cmake"
-      "-DCONFORMANCE_COMMAND_INPUTS=native/opencl/test/memory_sycl.cpp;native/rpc/test/memory_patterns.hpp;native/rpc/test/memory_test.hpp"
-      -DCONFORMANCE_COMMAND_OUTPUTS=gemstone_memory_sycl
-      -DCONFORMANCE_RUNTIME_DIRECTORY=opencl/memory-sycl/lib
-      "-DCONTAINER_EXECUTABLE=${CONTAINER_EXECUTABLE}" "-DROCM_VERSION=${ROCM_VERSION}"
-    COMMAND "${CMAKE_COMMAND}" --build "${sycl_build}" --target artifacts --parallel 1
-    BYPRODUCTS "${sycl_client}" "${sycl_runtime}/.complete"
-    JOB_POOL container_build VERBATIM)
 endif()

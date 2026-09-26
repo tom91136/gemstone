@@ -19,7 +19,7 @@ final class GlobalWorkerSuite extends munit.FunSuite with CodeObjectTestSupport 
   private val code = Vec[Long](
     0xbe8400ffL, 0x3000L, 0xbe850080L, 0xbe8600ffL, 0x100L, 0xbe8700ffL, 0x20000L, 0x8e088402L, 0x7e000208L,
     0xe05c1000L, 0x80010100L, 0xbf8c0f70L, 0xbe8a00ffL, 0x4000L, 0xbe8b0080L, 0xdc7c8000L, 0xa0100L, 0xbf810000L
-  ).flatMap(w => LittleEndian.toVec(w, ScalarByteWidth(4)))
+  ).flatMap(w => LittleEndian.toVec(w, ScalarByteWidth.Dword))
   private object UnboundMemory extends Memory with TestAddressSpace {
     override protected val regionSizes: Iterable[(MemoryRegion, Long)]            = Seq.empty
     def read(id: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
@@ -121,7 +121,7 @@ final class GlobalWorkerSuite extends munit.FunSuite with CodeObjectTestSupport 
     }
     val memory = Memory()
     val code = Vec[Long](0xc00a0100L, 0x0L, 0xbf8cc07fL, 0x24000084L, 0xdc5c8000L, 0x1040000L, 0xbf8c0f70L, 0xdc7c8000L,
-      0x60100L, 0xbf810000L).flatMap(w => LittleEndian.toVec(w, ScalarByteWidth(4)))
+      0x60100L, 0xbf810000L).flatMap(w => LittleEndian.toVec(w, ScalarByteWidth.Dword))
     val kernel   = CodeObjectKernel("kernel", Target("gfx900"), 16, 0, 0, 0x80, 0x08, code)
     val dispatch = KernelTask.validated(
       KernelName("kernel"),
@@ -136,7 +136,7 @@ final class GlobalWorkerSuite extends munit.FunSuite with CodeObjectTestSupport 
   }
 
   test("packing rejects excess typed arguments while preserving inferred linked descriptors") {
-    val end  = Vec.from(LittleEndian.toArray(0xbf810000L, ScalarByteWidth(4)))
+    val end  = Vec.from(LittleEndian.toArray(0xbf810000L, ScalarByteWidth.Dword))
     val base = CodeObjectKernel("kernel", Target("gfx900"), 8, 0, 0, 0, 0, end)
     val word = KernelTask.Argument.Scalar(Vec.fill(8)(0.toByte))
     def run(kernel: CodeObjectKernel, args: Vec[KernelTask.Argument]) = executeKernel(

@@ -65,7 +65,7 @@ constexpr size_t DeviceSharedMemoryPerBlock = 64U * 1024U;
 constexpr uint32_t DeviceWarpSize = 64;
 constexpr uint32_t DeviceThreadsPerMultiprocessor = 1024;
 
-bool traceHip(std::string_view category) { return gemstone::traceEnabled("GEMSTONE_HIP_TRACE", category); }
+bool traceHip(std::string_view category) { return gemstone::traceEnabled("hip", category); }
 
 bool validBlock(dim3 block) {
   return block.x != 0 && block.y != 0 && block.z != 0 && block.x <= MaxBlockThreads && block.y <= MaxBlockThreads
@@ -912,7 +912,9 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
     case hipDeviceAttributeHostNativeAtomicSupported:
     case hipDeviceAttributeConcurrentManagedAccess:
     case hipDeviceAttributeManagedMemory: *value = 1; break;
-    case hipDeviceAttributePageableMemoryAccess: *value = std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") ? 1 : 0; break;
+    case hipDeviceAttributePageableMemoryAccess:
+      *value = gemstone::environment::present(gemstone::environment::SystemPaging) ? 1 : 0;
+      break;
     default: *value = 0; break;
   }
   return remember(hipSuccess);
@@ -946,7 +948,7 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   properties->managedMemory = 1;
   properties->hostNativeAtomicSupported = 1;
   properties->concurrentManagedAccess = 1;
-  properties->pageableMemoryAccess = std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") ? 1 : 0;
+  properties->pageableMemoryAccess = gemstone::environment::present(gemstone::environment::SystemPaging) ? 1 : 0;
   return remember(hipSuccess);
 }
 
@@ -1011,7 +1013,7 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *propertie
   write(GcnArch, int(std::atoi(target.c_str() + 3)));
   write(ManagedMemory, int(1));
   write(ConcurrentManagedAccess, int(1));
-  write(PageableMemoryAccess, int(std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") ? 1 : 0));
+  write(PageableMemoryAccess, int(gemstone::environment::present(gemstone::environment::SystemPaging) ? 1 : 0));
   return remember(hipSuccess);
 }
 
@@ -1477,19 +1479,32 @@ extern "C" hipError_t hipModuleGetFunction(hipFunction_t *function, hipModule_t 
   std::shared_ptr<Module> selected = handle->module;
   auto kernel = resolveModuleKernel(*selected, name);
   if (!kernel) {
-    std::lock_guard<std::mutex> guard(state().lock);
-    auto output = state().driver_modules.begin();
-    for (auto current = state().driver_modules.begin(); current != state().driver_modules.end(); ++current) {
-      auto candidate = current->lock();
-      if (!candidate) continue;
-      *output++ = *current;
-      const auto global = resolveModuleKernel(*candidate, name);
+    std::vector<std::weak_ptr<Module>> candidates;
+    {
+      std::lock_guard<std::mutex> guard(state().lock);
+      candidates = state().driver_modules;
+    }
+    std::vector<std::weak_ptr<Module>> live;
+    for (auto &candidate : candidates) {
+      auto module = candidate.lock();
+      if (!module) continue;
+      live.push_back(candidate);
+      const auto global = resolveModuleKernel(*module, name);
       if (global && !kernel) {
-        selected = std::move(candidate);
+        selected = module;
         kernel = global;
       }
     }
-    state().driver_modules.erase(output, state().driver_modules.end());
+    {
+      std::lock_guard<std::mutex> guard(state().lock);
+      // Keep modules registered while this thread was resolving.
+      for (const auto &entry : state().driver_modules) {
+        const bool present =
+            std::any_of(live.begin(), live.end(), [&](const auto &kept) { return !kept.owner_before(entry) && !entry.owner_before(kept); });
+        if (!present) live.push_back(entry);
+      }
+      state().driver_modules = std::move(live);
+    }
   }
   if (traceModules())
     std::fprintf(stderr, "Gemstone HIP module function module=%p name=%s found=%d\n", static_cast<void *>(handle), name, kernel ? 1 : 0);

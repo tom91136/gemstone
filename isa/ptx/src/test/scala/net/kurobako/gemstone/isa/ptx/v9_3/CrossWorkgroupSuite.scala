@@ -88,7 +88,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
     }
 
     def clear(): Unit = (0 until size).foreach(index => backing.writeInt8(base.offset(index), 0).toOption.get)
-    def word(offset: Long, size: MemoryValueByteWidth = MemoryValueByteWidth(4)): Long =
+    def word(offset: Long, size: MemoryValueByteWidth = MemoryValueByteWidth.Dword): Long =
       backing.readLittleEndian(base.offset(offset), size).toOption.get
   }
 
@@ -255,8 +255,8 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
               workers
             )
             (0 until groups).foreach { group =>
-              assertEquals(memory.word(24 + group * 16L, MemoryValueByteWidth(8)), 0x1122334455667788L)
-              assertEquals(memory.word(32 + group * 16L, MemoryValueByteWidth(8)), 0x1020304050607080L)
+              assertEquals(memory.word(24 + group * 16L, MemoryValueByteWidth.Qword), 0x1122334455667788L)
+              assertEquals(memory.word(32 + group * 16L, MemoryValueByteWidth.Qword), 0x1020304050607080L)
             }
             if (memory.delayPayload) assertEquals(memory.flagRead.getCount, 0L)
           }
@@ -286,7 +286,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
                 ParameterName("output")      -> Argument(memory.base.value + groups * 8L),
                 ParameterName("count")       -> Argument(
                   net.kurobako.gemstone.binary.LittleEndian
-                    .toVec(count, ScalarByteWidth(4))
+                    .toVec(count, ScalarByteWidth.Dword)
                     .refineUnsafe[MinLength[1]]
                 )
               ),
@@ -347,7 +347,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
                 ParameterName("output")      -> Argument(memory.base.value + groups * 8L),
                 ParameterName("count")       -> Argument(
                   net.kurobako.gemstone.binary.LittleEndian
-                    .toVec(count, ScalarByteWidth(4))
+                    .toVec(count, ScalarByteWidth.Dword)
                     .refineUnsafe[MinLength[1]]
                 )
               ),
@@ -378,7 +378,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
                 ParameterName("memory") -> Argument(memory.base.value),
                 ParameterName("epoch")  -> Argument(
                   net.kurobako.gemstone.binary.LittleEndian
-                    .toVec((epoch + 10) * 1000, ScalarByteWidth(4))
+                    .toVec((epoch + 10) * 1000, ScalarByteWidth.Dword)
                     .refineUnsafe[MinLength[1]]
                 )
               ),
@@ -397,7 +397,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
                 ParameterName("memory") -> Argument(memory.base.value),
                 ParameterName("epoch")  -> Argument(
                   net.kurobako.gemstone.binary.LittleEndian
-                    .toVec(epoch * 1000, ScalarByteWidth(4))
+                    .toVec(epoch * 1000, ScalarByteWidth.Dword)
                     .refineUnsafe[MinLength[1]]
                 )
               ),

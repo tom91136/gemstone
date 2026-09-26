@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.server
 
 import net.kurobako.gemstone.concurrent.withLock
+import net.kurobako.gemstone.launcher.EnvironmentNames
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionProtocol.ExecutionFailure
 import net.kurobako.gemstone.server.execution.*
@@ -22,6 +23,7 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import scala.jdk.CollectionConverters.*
 import java.nio.ByteBuffer
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
@@ -50,9 +52,7 @@ object GemstoneRPCServer {
     def connection(): ExecutionSessionConnection = ExecutionSessionConnection(this)
     override def close(): Unit                   = lock.withLock {
       closed.set(true)
-      entries.getAndSet(Map.empty).values.foreach { entry =>
-        entry.service.close()
-      }
+      Throwables.closeAllQuietly(entries.getAndSet(Map.empty).values.map(entry => () => entry.service.close()).toList)
     }
 
     private def acquire(session: ExecutionRPCProtocol.SessionId)
@@ -146,8 +146,7 @@ object GemstoneRPCServer {
     def find(id: ClientId): Option[Client] =
       if (id == RootClient) Some(root) else Option(clients.get(id.value))
     def register(): ClientId = {
-      val id = ClientId.either(next.getAndIncrement())
-        .fold(message => throw IllegalStateException(s"invalid client identity: $message"), value => value)
+      val id = clientId(next.getAndIncrement())
       clients.put(id.value, Client(id, ExecutionSessions(backends, limits, pool)))
       id
     }
@@ -157,9 +156,10 @@ object GemstoneRPCServer {
     }
     else ()
     def close(): Unit = {
-      root.close()
-      journal.foreach(_.clientClosed(root))
-      clients.values().forEach { client => client.close(); journal.foreach(_.clientClosed(client)) }
+      Throwables.closeAllQuietly(List { () => root.close(); journal.foreach(_.clientClosed(root)) })
+      Throwables.closeAllQuietly(
+        clients.values().asScala.map { client => () => client.close(); journal.foreach(_.clientClosed(client)) }.toList
+      )
       clients.clear()
     }
   }
@@ -178,8 +178,7 @@ object GemstoneRPCServer {
     def usage: Long   = clients.usage(RootClient)
 
     private val closed         = AtomicBoolean(false)
-    private val lock           = ReentrantLock()
-    override def close(): Unit = lock.withLock {
+    override def close(): Unit =
       if (closed.compareAndSet(false, true)) {
         Using.Manager { use =>
           journal.foreach { writer =>
@@ -193,30 +192,30 @@ object GemstoneRPCServer {
           } catch {
             case scala.util.control.NonFatal(error) =>
               journal.foreach(_.markUnreplayable(
-                s"server cleanup failed: ${errorMessage(error)}"
+                s"server cleanup failed: ${Throwables.detail(error)}"
               ))
               throw error
           }
         }.get
       }
-    }
   }
 
   final class ClientConnections {
     private val sockets                           = ConcurrentHashMap[Socket, Thread]()
     def add(socket: Socket, thread: Thread): Unit = { val _ = sockets.put(socket, thread) }
     def remove(socket: Socket): Unit              = { val _ = sockets.remove(socket) }
-    def closeAll(cancel: () => Unit): Unit        = {
-      sockets.keySet().forEach(_.close())
-      cancel()
-      sockets.values().forEach(_.join())
-    }
+    def closeAll(cancel: () => Unit): Unit        =
+      Throwables.closeAllQuietly(
+        sockets.keySet().asScala.map(socket => () => socket.close()).toList ++
+          List(() => cancel()) ++
+          sockets.values().asScala.map(thread => () => thread.join()).toList
+      )
   }
 
   def start(): RunningServer =
     startWith(
       RuntimeBackend.defaults,
-      ExecutionService.limits(sys.env).fold(message => throw IllegalArgumentException(message), value => value),
+      ExecutionService.requireLimits(sys.env),
       SocketTimeoutMillis
     )
 
@@ -232,7 +231,7 @@ object GemstoneRPCServer {
   ): RunningServer = {
     // Resolve the actual pool before recording its profile, so replay does not inherit another machine's default.
     val executionPool = WorkerPool.fromEnvironment(environment)
-    val journal       = try environment.get("GEMSTONE_RECORD") match {
+    val journal       = try environment.get(EnvironmentNames.Record) match {
         case None       => None
         case Some(path) =>
           val profile = RPCJournal.ExecutionProfile(
@@ -253,13 +252,13 @@ object GemstoneRPCServer {
     catch {
       case scala.util.control.NonFatal(error) => executionPool.close(); throw error
     }
-    val server = try ServerSocket()
-    catch {
-      case scala.util.control.NonFatal(error) =>
-        executionPool.close()
-        journal.foreach { writer => writer.markUnreplayable("server startup failed"); writer.close() }
-        throw error
+    def abort(error: Throwable): Nothing = {
+      executionPool.close()
+      journal.foreach { writer => writer.markUnreplayable("server startup failed"); writer.close() }
+      throw error
     }
+    val server = try ServerSocket()
+    catch { case scala.util.control.NonFatal(error) => abort(error) }
     try {
       val connections = ClientConnections()
       val clients     = ClientRegistry(backends, taskLimits, executionPool, journal)
@@ -284,9 +283,7 @@ object GemstoneRPCServer {
     } catch {
       case scala.util.control.NonFatal(error) =>
         server.close()
-        executionPool.close()
-        journal.foreach { writer => writer.markUnreplayable("server startup failed"); writer.close() }
-        throw error
+        abort(error)
     }
   }
 
@@ -309,6 +306,8 @@ object GemstoneRPCServer {
       }
     catch {
       case _: SocketException if server.isClosed => ()
+      case scala.util.control.NonFatal(error)    =>
+        scribe.error("RPC accept loop terminated unexpectedly", error)
     }
 
   private def serve(
@@ -355,13 +354,7 @@ object GemstoneRPCServer {
               case ServerControl.Magic =>
                 input.readInt() match {
                   case ServerControl.RegisterClient => output.writeLong(clients.register().value)
-                  case ServerControl.QueryUsage     =>
-                    val usage = clients.usage(readClientId(input))
-                    // Preserve the two-long control reply while retired clients disappear;
-                    // all API evidence is now the shared execution count.
-                    output.writeLong(0L)
-                    output.writeLong(usage)
-                  case ServerControl.ReleaseClient =>
+                  case ServerControl.ReleaseClient  =>
                     clients.release(readClientId(input))
                     output.writeInt(0)
                   case ServerControl.Shutdown => output.writeInt(0); output.flush(); shutdown()
@@ -388,7 +381,7 @@ object GemstoneRPCServer {
             case _: SocketException if socket.isClosed => false
             case scala.util.control.NonFatal(error)    =>
               recording.foreach(_.failed(
-                s"connection exchange failed: ${errorMessage(error)}"
+                s"connection exchange failed: ${Throwables.detail(error)}"
               ))
               scribe.debug("RPC connection exchange failed", error)
               false
@@ -405,24 +398,15 @@ object GemstoneRPCServer {
       replay: java.io.PushbackInputStream
   ): ClientId = {
     // Keep the buffered socket unmarked: Native marked refills can repeat bytes.
-    val prefix = readExactly(input, ExecutionRPCProtocol.RequestIdentityBytesAfterMagic)
+    val prefix = readExactly(input, ExecutionRPCProtocol.RequestIdentityBytesAfterMagic, EOFException(_))
     replay.unread(prefix)
-    ClientId.either(
-      ByteBuffer.wrap(prefix, ExecutionRPCProtocol.RequestClientOffsetAfterMagic, java.lang.Long.BYTES).getLong()
-    ).fold(message => throw IllegalArgumentException(s"invalid client identity: $message"), value => value)
+    clientId(ByteBuffer.wrap(
+      prefix,
+      ExecutionRPCProtocol.RequestClientOffsetAfterMagic,
+      java.lang.Long.BYTES
+    ).getLong())
   }
 
-  private def readClientId(input: DataInputStream): ClientId =
-    ClientId.either(input.readLong())
-      .fold(message => throw IllegalArgumentException(s"invalid client identity: $message"), value => value)
-
-  private def readExactly(input: DataInputStream, size: Int): Array[Byte] = {
-    val result = input.readNBytes(size)
-    if (result.length != size) throw EOFException(s"expected $size bytes, received ${result.length}")
-    result
-  }
-
-  private def errorMessage(error: Throwable): String =
-    Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getName)
+  private def readClientId(input: DataInputStream): ClientId = clientId(input.readLong())
 
 }

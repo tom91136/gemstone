@@ -29,7 +29,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     val kernel  = indexed.kernel("kernel").toOption.get
     assertEquals(
       kernel.globalMemory.find(_._1 == 0x4000L).map(_._2.take(8).toSeq),
-      Some(LittleEndian.toVec(0x3000L, ScalarByteWidth(8)).toSeq)
+      Some(LittleEndian.toVec(0x3000L, ScalarByteWidth.Qword).toSeq)
     )
   }
 
@@ -128,9 +128,9 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     test(s"$architecture decodes an unreachable linked s_trap without executing it") {
       // The entry branches into another function, requiring linked decoding.
       // The trap models an uncalled __cxa_pure_virtual at the start of .text.
-      val trap   = LittleEndian.toVec(0xbf920002L, ScalarByteWidth(4))
-      val branch = LittleEndian.toVec(0xbf820000L, ScalarByteWidth(4))
-      val end    = LittleEndian.toVec(0xbf810000L, ScalarByteWidth(4))
+      val trap   = LittleEndian.toVec(0xbf920002L, ScalarByteWidth.Dword)
+      val branch = LittleEndian.toVec(0xbf820000L, ScalarByteWidth.Dword)
+      val end    = LittleEndian.toVec(0xbf810000L, ScalarByteWidth.Dword)
       val kernel = CodeObjectKernel(
         "skip_linked_trap",
         Target(architecture),
@@ -156,7 +156,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
 
     for (trapId <- List(2, 0x3141)) test(s"$architecture executed s_trap $trapId is a runtime fault") {
       val code = Vec[Long](0xbf920000L | trapId.toLong, 0xbf810000L)
-        .flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+        .flatMap(word => LittleEndian.toVec(word, ScalarByteWidth.Dword))
       val kernel = CodeObjectKernel(
         "execute_trap",
         Target(architecture),
@@ -184,7 +184,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
   test("proven local PC-relative branches keep unrelated functions isolated") {
     val words = Vec[Long](0xbea01f00L, 0x812284ffL, 0x00000010L, 0x80202220L,
       0x82218021L, 0xbe802020L, 0xbf810000L)
-    val code        = words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+    val code        = words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth.Dword))
     val unsupported = Vec.fill(4)(0xff.toByte)
     val kernel      = CodeObjectKernel(
       "local_jump",
@@ -213,11 +213,11 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       functionSizes = Map(0xfffffff0L -> 4, 0xfffffff4L -> code.size)
     )
     assertEquals(executeKernel(compileKernel(crossing), dispatch, TestMemory()), Right(()))
-    val aliased = words.updated(1, 0x812084ffL).flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+    val aliased = words.updated(1, 0x812084ffL).flatMap(word => LittleEndian.toVec(word, ScalarByteWidth.Dword))
     assert(VMCompiler.compile(kernel.copy(code = aliased, text = unsupported ++ aliased)).isLeft)
 
     // Entry in the middle invalidates the proof even though the instruction bytes still match.
-    val intoMiddle = LittleEndian.toVec(0xbf820005L, ScalarByteWidth(4)) ++ code
+    val intoMiddle = LittleEndian.toVec(0xbf820005L, ScalarByteWidth.Dword) ++ code
     assert(VMCompiler.compile(kernel.copy(
       code = intoMiddle,
       text = unsupported ++ intoMiddle,
@@ -225,7 +225,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     )).isLeft)
     // An unproven indirect target must still require the complete linked program.
     val unknown = Vec[Long](0xbe802024L, 0xbf810000L).flatMap(word =>
-      LittleEndian.toVec(word, ScalarByteWidth(4))
+      LittleEndian.toVec(word, ScalarByteWidth.Dword)
     )
     assert(VMCompiler.compile(kernel.copy(
       code = unknown,
@@ -251,7 +251,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       0,
       0,
       0,
-      words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+      words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth.Dword))
     )
     val memory     = TestMemory()
     val allocation = MemoryRegion(1L)
@@ -270,7 +270,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     memory.putInt(allocation, 0, 0xa5a5a5a5)
     val high = kernel.copy(code =
       words.updated(8, 0xe06c1000L).flatMap(word =>
-        LittleEndian.toVec(word, ScalarByteWidth(4))
+        LittleEndian.toVec(word, ScalarByteWidth.Dword)
       )
     )
     assertEquals(executeKernel(compileKernel(high), dispatch, memory), Right(()))
@@ -299,7 +299,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       4752,
       0,
       1,
-      words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+      words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth.Dword))
     )
     val memory     = TestMemory()
     val allocation = MemoryRegion(1L)
@@ -331,7 +331,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       0,
       0,
       0,
-      words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+      words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth.Dword))
     )
     val memory     = TestMemory()
     val allocation = MemoryRegion(1L)
@@ -360,7 +360,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       0,
       0,
       0,
-      words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+      words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth.Dword))
     )
     val memory     = TestMemory()
     val allocation = MemoryRegion(1L)
@@ -466,7 +466,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       0x027f0002L, 0x7e060203L, 0x32000002L, 0x38020303L,
       0xbf8c0f70L, 0xdc708000L, 0x007f0200L, 0xbf810000L
     )
-    val code   = words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+    val code   = words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth.Dword))
     val target = Target("gfx900")
     val kernel = CodeObjectKernel("vector_copy", target, 80, 0, 0, 0x80, 0x0b, code)
     val memory = TestMemory()
@@ -497,7 +497,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     def pointer(region: MemoryRegion): KernelTask.Argument =
       if (rawPointers) KernelTask.Argument.Scalar(LittleEndian.toVec(
         memory.address(region, 0L).toOption.get.value,
-        ScalarByteWidth(8)
+        ScalarByteWidth.Qword
       ))
       else KernelTask.Argument.Memory(region, 0L)
     val zero      = KernelTask.Argument.Scalar(Vec.fill(8)(0.toByte))

@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Vec
+
 /** Fixed encoding values shared by the AMDGPU decoders and interpreter. */
 private[amdgpu] object Decoding {
   // SGPR indices the ISA aliases to architectural state.
@@ -14,6 +16,13 @@ private[amdgpu] object Decoding {
   final val LiteralSource = 255
   final val DppSource     = 250
   final val SdwaSource    = 249
+
+  // VOP inline float constants selected by source encodings 240..248.
+  final val InlineFloatingFirst                = 240
+  final val InlineFloatingConstants: Vec[Long] =
+    Vec(0x3f000000L, 0xbf000000L, 0x3f800000L, 0xbf800000L, 0x40000000L, 0xc0000000L, 0x40800000L, 0xc0800000L,
+      0x3e22f983L)
+  final val InlineFloatingValues: Vec[Double] = Vec(0.5, -0.5, 1.0, -1.0, 2.0, -2.0, 4.0, -4.0, 0.15915494)
 
   // Format prefixes carried in the first dword.
   final val SmemGfx6Prefix    = 0x30L

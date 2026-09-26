@@ -190,7 +190,7 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
             groupCount,
             Vec(
               KernelTask.Argument.Memory(MemoryRegion(allocation.value), 4L),
-              KernelTask.Argument.Scalar(LittleEndian.toVec(seed, ScalarByteWidth(4)))
+              KernelTask.Argument.Scalar(LittleEndian.toVec(seed, ScalarByteWidth.Dword))
             ),
             globalOffset = LaunchGeometry.Coordinates(2, 0, 0)
           ).toOption.get
@@ -214,7 +214,7 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
             assert(ranges.exists(range => range.offset <= address && address + 4 <= range.offset + range.size))
             val offset = address.toInt.refineEither[Positive0]
               .fold(message => fail(message), value => value)
-            LittleEndian.write(seed, expected, offset, ScalarByteWidth(4))
+            LittleEndian.write(seed, expected, offset, ScalarByteWidth.Dword)
           }
           assertEquals(Vec.from(host), Vec.from(expected))
           assertEquals(service.releaseCompletion(completion), Right(()))

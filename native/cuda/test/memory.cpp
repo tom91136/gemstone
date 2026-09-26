@@ -88,12 +88,12 @@ struct MemoryClient {
     check(symbol<int (*)()>("cuCtxSynchronize")());
   }
   explicit MemoryClient(bool raw = false)
-      : MemoryClient(
-            memory_patterns::allocationKind(concurrencyMode() && !std::getenv("GEMSTONE_MEMORY_ATOMIC_PROBE") ? "pinned" : "managed"), 0,
-            std::getenv("GEMSTONE_MEMORY_MULTILANE_PROBE") ? "contended.ptx"
-            : std::getenv("GEMSTONE_MEMORY_FENCE_PROBE")   ? "fence.ptx"
-            : std::getenv("GEMSTONE_MEMORY_ATOMIC_PROBE")  ? "atomic.ptx"
-                                                           : "kernel.ptx") {
+      : MemoryClient(memory_patterns::allocationKind(concurrencyMode() && !memory_patterns::probeEnabled("atomic") ? "pinned" : "managed"),
+                     0,
+                     memory_patterns::probeEnabled("multilane") ? "contended.ptx"
+                     : memory_patterns::probeEnabled("fence")   ? "fence.ptx"
+                     : memory_patterns::probeEnabled("atomic")  ? "atomic.ptx"
+                                                                : "kernel.ptx") {
     this->raw = raw;
   }
   bool raw = false;

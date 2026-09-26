@@ -18,7 +18,7 @@ inline constexpr uint32_t ResponseMagic = static_cast<uint32_t>(0x474d4632);
 inline constexpr uint32_t MaximumPayload = 134217728U;
 inline constexpr uint32_t MaximumElements = 16384U;
 inline constexpr uint32_t MaximumTextBytes = 8192U;
-inline constexpr uint64_t SchemaFingerprint = 0x64c8fbb072008b08ULL;
+inline constexpr uint64_t SchemaFingerprint = 0x71f377fcee08332fULL;
 inline constexpr size_t RequestFingerprintOffset = 4U;
 inline constexpr size_t RequestClientOffset = 12U;
 inline constexpr size_t RequestSessionHighOffset = 20U;
@@ -42,9 +42,13 @@ inline constexpr uint64_t ReleaseAllocation = 0x91cc677536b84617ULL;
 inline constexpr uint64_t WriteAllocation = 0x5c2847c6c97d6de9ULL;
 inline constexpr uint64_t ReadAllocation = 0x0bda0feff7f85a9aULL;
 inline constexpr uint64_t LoadProgram = 0xaae065c73584df40ULL;
+inline constexpr uint64_t DescribeSpecialization = 0x9fa04c9645f3afdcULL;
+inline constexpr uint64_t SpecializeImage = 0x02d7de1c949c2f70ULL;
 inline constexpr uint64_t UnloadProgram = 0xa0921649cb123a5dULL;
 inline constexpr uint64_t DescribeProgram = 0xa2a840d71e8875b7ULL;
 inline constexpr uint64_t DescribeKernel = 0x93b338a220a4fb14ULL;
+inline constexpr uint64_t DescribeImage = 0xe4bd817496f5c2a6ULL;
+inline constexpr uint64_t Blas = 0xe75a445a9652b322ULL;
 inline constexpr uint64_t DescribeGlobal = 0xd1f288733a2ee8faULL;
 inline constexpr uint64_t BindProgramGlobal = 0x0c1ffca104520e8aULL;
 inline constexpr uint64_t WriteProgramGlobal = 0x6ae071f2e120bb82ULL;
@@ -64,6 +68,18 @@ inline constexpr uint64_t AllocationKindHost = 0x1502c13a23427453ULL;
 inline constexpr uint64_t KernelParameterKindScalar = 0x8e8237265871dac9ULL;
 inline constexpr uint64_t KernelParameterKindAllocation = 0x003f04bd0f952e6bULL;
 inline constexpr uint64_t KernelParameterKindLocal = 0xf746e4b741bcb38cULL;
+inline constexpr uint64_t BlasOperationAxpy = 0xef5c48528519f63cULL;
+inline constexpr uint64_t BlasOperationScal = 0x7d2ba9bd7b589e31ULL;
+inline constexpr uint64_t BlasOperationCopy = 0x47f935407bfab053ULL;
+inline constexpr uint64_t BlasOperationDot = 0x5c0dfac798ad6f65ULL;
+inline constexpr uint64_t BlasOperationNrm2 = 0xd2a8ead50d554859ULL;
+inline constexpr uint64_t BlasOperationAsum = 0x3ea8c552b2656770ULL;
+inline constexpr uint64_t BlasOperationGemv = 0xaf2eee1df319a239ULL;
+inline constexpr uint64_t BlasOperationGemm = 0xaf2f031df319c5e8ULL;
+inline constexpr uint64_t BlasOperationGemmStridedBatched = 0x1d6b94d4b2145434ULL;
+inline constexpr uint64_t BlasElementF16 = 0x6f78d4946790497aULL;
+inline constexpr uint64_t BlasElementF32 = 0x6f7fd89467966ef4ULL;
+inline constexpr uint64_t BlasElementF64 = 0x6f90d49467a4db5bULL;
 inline constexpr uint64_t KernelArgumentScalar = 0x4dc1565dba3b9867ULL;
 inline constexpr uint64_t KernelArgumentAllocation = 0xc9602c96b7ee44fdULL;
 inline constexpr uint64_t KernelArgumentLocal = 0x9fa3570b0ce037faULL;
@@ -76,10 +92,6 @@ inline constexpr uint64_t ExecutionFailureFailed = 0xa2f22dde2ffdb70cULL;
 inline constexpr uint64_t CompletionStatusPending = 0x4be231fa7a2a5d64ULL;
 inline constexpr uint64_t CompletionStatusSucceeded = 0xd5313ba452a59f6aULL;
 inline constexpr uint64_t CompletionStatusFailed = 0x4167002bdf4255fcULL;
-inline constexpr uint64_t PrintArgumentInteger = 0x2fffc162da8adfbbULL;
-inline constexpr uint64_t PrintArgumentFloating = 0x7c64cbc3d8134ee9ULL;
-inline constexpr uint64_t PrintArgumentPointer = 0xb57d2dc948534440ULL;
-inline constexpr uint64_t PrintArgumentText = 0x722582b3534d844cULL;
 }
 
 struct Unit {};
@@ -137,6 +149,16 @@ struct IntPositive0 { int32_t value{}; };
 
 struct ProgramId { int64_t value{}; };
 
+struct SpecializationInfo {
+  IntPositive0 specId{};
+  IntPositive byteSize{};
+};
+
+struct SpecializationConstant {
+  IntPositive0 specId{};
+  std::vector<uint8_t> value{};
+};
+
 struct KernelName { std::string value{}; };
 
 struct LinkageName { std::string value{}; };
@@ -173,21 +195,81 @@ struct KernelParameterMetadata {
   bool containsPointers{};
 };
 
+struct Dimensions {
+  IntPositive x{};
+  IntPositive y{};
+  IntPositive z{};
+};
+
 struct KernelMetadata {
   IntPositive0 argumentBlockSize{};
   IntPositive0 explicitParameterCount{};
   std::vector<KernelParameterMetadata> parameters{};
+  std::optional<Dimensions> requiredWorkGroupSize{};
+  std::optional<Dimensions> workGroupSizeHint{};
+  std::vector<IntPositive0> bindingIndices{};
+  std::optional<IntPositive0> entryPointId{};
+};
+
+enum class BlasOperation : uint64_t {
+  Axpy = 0xef5c48528519f63cULL,
+  Scal = 0x7d2ba9bd7b589e31ULL,
+  Copy = 0x47f935407bfab053ULL,
+  Dot = 0x5c0dfac798ad6f65ULL,
+  Nrm2 = 0xd2a8ead50d554859ULL,
+  Asum = 0x3ea8c552b2656770ULL,
+  Gemv = 0xaf2eee1df319a239ULL,
+  Gemm = 0xaf2f031df319c5e8ULL,
+  GemmStridedBatched = 0x1d6b94d4b2145434ULL
+};
+
+enum class BlasElement : uint64_t {
+  F16 = 0x6f78d4946790497aULL,
+  F32 = 0x6f7fd89467966ef4ULL,
+  F64 = 0x6f90d49467a4db5bULL
+};
+
+struct BlasVector {
+  AllocationId allocation{};
+  LongPositive0 offset{};
+  int32_t increment{};
+};
+
+struct BlasMatrix {
+  AllocationId allocation{};
+  LongPositive0 offset{};
+  int32_t leading{};
+};
+
+struct BlasRequest {
+  BlasOperation operation{};
+  BlasElement element{};
+  int32_t count{};
+  int32_t rows{};
+  int32_t columns{};
+  int32_t inner{};
+  bool transposeA{};
+  bool transposeB{};
+  std::vector<uint8_t> alpha{};
+  std::vector<uint8_t> beta{};
+  std::optional<BlasVector> x{};
+  std::optional<BlasVector> y{};
+  std::optional<BlasMatrix> a{};
+  std::optional<BlasMatrix> b{};
+  std::optional<BlasMatrix> c{};
+  int64_t strideA{};
+  int64_t strideB{};
+  int64_t strideC{};
+  int32_t batch{};
+};
+
+struct BlasResult {
+  std::vector<uint8_t> scalar{};
 };
 
 struct ProgramGlobal {
   LongPositive0 size{};
   std::vector<uint8_t> initial{};
-};
-
-struct Dimensions {
-  IntPositive x{};
-  IntPositive y{};
-  IntPositive z{};
 };
 
 struct GlobalDimensions {
@@ -260,28 +342,6 @@ struct DirtyRange {
   IntPositive size{};
 };
 
-struct PrintArgumentInteger {
-  std::vector<int64_t> bits{};
-  int32_t width{};
-  bool isSigned{};
-};
-struct PrintArgumentFloating {
-  std::vector<int64_t> bits{};
-  int32_t width{};
-};
-struct PrintArgumentPointer {
-  int64_t address{};
-};
-struct PrintArgumentText {
-  std::string value{};
-};
-using PrintArgument = std::variant<PrintArgumentInteger, PrintArgumentFloating, PrintArgumentPointer, PrintArgumentText>;
-
-struct PrintEvent {
-  std::string format{};
-  std::vector<PrintArgument> arguments{};
-};
-
 struct Ping {
 };
 
@@ -335,6 +395,15 @@ struct LoadProgram {
   std::vector<uint8_t> image{};
 };
 
+struct DescribeSpecialization {
+  std::vector<uint8_t> image{};
+};
+
+struct SpecializeImage {
+  std::vector<uint8_t> image{};
+  std::vector<SpecializationConstant> constants{};
+};
+
 struct UnloadProgram {
   ProgramId program{};
 };
@@ -346,6 +415,16 @@ struct DescribeProgram {
 struct DescribeKernel {
   ProgramId program{};
   KernelName name{};
+};
+
+struct DescribeImage {
+  std::string encoding{};
+  std::vector<uint8_t> image{};
+  KernelName name{};
+};
+
+struct Blas {
+  BlasRequest request{};
 };
 
 struct DescribeGlobal {
@@ -379,6 +458,7 @@ struct Launch {
   IntPositive0 groupSegmentBytes{};
   std::vector<KernelArgument> arguments{};
   std::vector<PointerRelocation> pointerRelocations{};
+  bool discoverArgumentRelocations{};
 };
 
 struct QueryCompletion {
@@ -407,7 +487,6 @@ struct ReleaseCompletion {
 
 struct Error {
   std::string detail;
-  std::optional<ExecutionFailure> remote;
 };
 
 template <class T> class Result {
@@ -443,9 +522,13 @@ class Client {
   Result<Unit> call(const WriteAllocation &request);
   Result<std::vector<uint8_t>> call(const ReadAllocation &request);
   Result<ProgramId> call(const LoadProgram &request);
+  Result<std::vector<SpecializationInfo>> call(const DescribeSpecialization &request);
+  Result<std::vector<uint8_t>> call(const SpecializeImage &request);
   Result<Unit> call(const UnloadProgram &request);
   Result<ProgramCatalog> call(const DescribeProgram &request);
   Result<KernelMetadata> call(const DescribeKernel &request);
+  Result<KernelMetadata> call(const DescribeImage &request);
+  Result<BlasResult> call(const Blas &request);
   Result<ProgramGlobal> call(const DescribeGlobal &request);
   Result<Unit> call(const BindProgramGlobal &request);
   Result<Unit> call(const WriteProgramGlobal &request);
@@ -454,7 +537,7 @@ class Client {
   Result<Unit> call(const AwaitCompletion &request);
   Result<std::vector<DirtyRange>> call(const CompletionDirtyRanges &request);
   Result<std::vector<PointerRelocation>> call(const CompletionPointerRelocations &request);
-  Result<std::vector<PrintEvent>> call(const CompletionPrints &request);
+  Result<std::string> call(const CompletionPrints &request);
   Result<Unit> call(const ReleaseCompletion &request);
 
  private:

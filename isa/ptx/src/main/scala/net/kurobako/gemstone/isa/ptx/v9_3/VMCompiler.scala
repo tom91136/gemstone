@@ -462,6 +462,31 @@ private[v9_3] object VMCompiler {
       "atom.global."
     )
 
+  private def atomicSpace(opcode: String): VMIR.AtomicSpace = {
+    val normalized = atomicOpcode(opcode)
+    if (normalized.startsWith("atom.global.")) VMIR.AtomicSpace.Global
+    else if (normalized.startsWith("atom.shared.")) VMIR.AtomicSpace.Shared
+    else VMIR.AtomicSpace.Generic
+  }
+
+  private def atomicIntegerOperands(
+      destination: Operand,
+      address: Operand,
+      source: Operand,
+      opcode: String
+  ): Either[Error, (RegisterName, Value, Value, BitWidth, VMIR.AtomicSpace)] =
+    for {
+      destinationName <- registerName(destination)
+      addressValue    <- addressValue(address)
+      sourceValue     <- value(source)
+    } yield (
+      destinationName,
+      addressValue,
+      sourceValue,
+      if (opcode.endsWith("64")) BitWidth(64) else BitWidth(32),
+      atomicSpace(opcode)
+    )
+
   private def lowerInstruction(
       instruction: Instruction,
       labels: Map[LabelName, Pc],
@@ -1369,14 +1394,26 @@ private[v9_3] object VMCompiler {
           destinationName <- registerName(destination)
           addressValue    <- addressValue(address)
           width           <- integerWidth(modifiers)
-        } yield VMIR.Instruction.AtomicAdd(destinationName, addressValue, VMIR.Value.Immediate(0), width, Some(true))
+        } yield VMIR.Instruction.AtomicAdd(
+          destinationName,
+          addressValue,
+          VMIR.Value.Immediate(0),
+          width,
+          VMIR.AtomicSpace.Global
+        )
       case Instruction.St(address, source, None, modifiers, _)
           if instruction.qualifiedOpcode.matches("st\\.(release|relaxed)\\.(cta|gpu|sys)\\.global\\.[ub](32|64)") =>
         for {
           addressValue <- addressValue(address)
           sourceValue  <- value(source)
           width        <- integerWidth(modifiers)
-        } yield VMIR.Instruction.AtomicExchange(RegisterName("_"), addressValue, sourceValue, width, Some(true))
+        } yield VMIR.Instruction.AtomicExchange(
+          RegisterName("_"),
+          addressValue,
+          sourceValue,
+          width,
+          VMIR.AtomicSpace.Global
+        )
       case Instruction.Ld(destination, address, None, modifiers, _)
           if (instruction.qualifiedOpcode.split('.') match {
             case Array("ld", scalar) => isScalarType(scalar)
@@ -1606,21 +1643,15 @@ private[v9_3] object VMCompiler {
           if atomicOpcode(instruction.qualifiedOpcode).matches(
             "atom\\.(global\\.|shared\\.)?(max\\.u|and\\.b|or\\.b|xor\\.b)(32|64)"
           ) =>
-        for {
-          destinationName <- registerName(destination)
-          addressValue    <- addressValue(address)
-          sourceValue     <- value(source)
-          width  = if (atomicOpcode(instruction.qualifiedOpcode).endsWith("64")) BitWidth(64) else BitWidth(32)
-          global =
-            if (atomicOpcode(instruction.qualifiedOpcode).startsWith("atom.global.")) Some(true)
-            else if (atomicOpcode(instruction.qualifiedOpcode).startsWith("atom.shared.")) Some(false)
-            else None
-          operation =
-            if (atomicOpcode(instruction.qualifiedOpcode).contains(".max.")) IntegerOperation.Maximum(false)
-            else if (atomicOpcode(instruction.qualifiedOpcode).contains(".and.")) IntegerOperation.BitwiseAnd
-            else if (atomicOpcode(instruction.qualifiedOpcode).contains(".or.")) IntegerOperation.BitwiseOr
-            else IntegerOperation.BitwiseXor
-        } yield VMIR.Instruction.AtomicBinary(destinationName, addressValue, sourceValue, width, global, operation)
+        atomicIntegerOperands(destination, address, source, instruction.qualifiedOpcode).map {
+          case (destinationName, addressValue, sourceValue, width, space) =>
+            val operation =
+              if (atomicOpcode(instruction.qualifiedOpcode).contains(".max.")) IntegerOperation.Maximum(false)
+              else if (atomicOpcode(instruction.qualifiedOpcode).contains(".and.")) IntegerOperation.BitwiseAnd
+              else if (atomicOpcode(instruction.qualifiedOpcode).contains(".or.")) IntegerOperation.BitwiseOr
+              else IntegerOperation.BitwiseXor
+            VMIR.Instruction.AtomicBinary(destinationName, addressValue, sourceValue, width, space, operation)
+        }
       case Instruction.Atom(destination, address, comparator, Some(source), _, _)
           if Set(
             "atom.cas.b32",
@@ -1631,23 +1662,19 @@ private[v9_3] object VMCompiler {
             "atom.shared.cas.b64"
           )(atomicOpcode(instruction.qualifiedOpcode)) =>
         for {
-          destinationName <- registerName(destination)
-          addressValue    <- addressValue(address)
           comparatorValue <- value(comparator)
-          sourceValue     <- value(source)
-          width  = if (atomicOpcode(instruction.qualifiedOpcode).endsWith(".b64")) BitWidth(64) else BitWidth(32)
-          global =
-            if (atomicOpcode(instruction.qualifiedOpcode).startsWith("atom.global.")) Some(true)
-            else if (atomicOpcode(instruction.qualifiedOpcode).startsWith("atom.shared.")) Some(false)
-            else None
-        } yield VMIR.Instruction.AtomicCompareExchange(
-          destinationName,
-          addressValue,
-          comparatorValue,
-          sourceValue,
-          width,
-          global
-        )
+          operands        <- atomicIntegerOperands(destination, address, source, instruction.qualifiedOpcode)
+        } yield {
+          val (destinationName, addressValue, sourceValue, width, space) = operands
+          VMIR.Instruction.AtomicCompareExchange(
+            destinationName,
+            addressValue,
+            comparatorValue,
+            sourceValue,
+            width,
+            space
+          )
+        }
       case Instruction.Atom(destination, address, source, None, _, _)
           if Set(
             "atom.exch.b32",
@@ -1657,16 +1684,10 @@ private[v9_3] object VMCompiler {
             "atom.shared.exch.b32",
             "atom.shared.exch.b64"
           )(atomicOpcode(instruction.qualifiedOpcode)) =>
-        for {
-          destinationName <- registerName(destination)
-          addressValue    <- addressValue(address)
-          sourceValue     <- value(source)
-          width  = if (atomicOpcode(instruction.qualifiedOpcode).endsWith(".b64")) BitWidth(64) else BitWidth(32)
-          global =
-            if (atomicOpcode(instruction.qualifiedOpcode).startsWith("atom.global.")) Some(true)
-            else if (atomicOpcode(instruction.qualifiedOpcode).startsWith("atom.shared.")) Some(false)
-            else None
-        } yield VMIR.Instruction.AtomicExchange(destinationName, addressValue, sourceValue, width, global)
+        atomicIntegerOperands(destination, address, source, instruction.qualifiedOpcode).map {
+          case (destinationName, addressValue, sourceValue, width, space) =>
+            VMIR.Instruction.AtomicExchange(destinationName, addressValue, sourceValue, width, space)
+        }
       case Instruction.Atom(destination, address, source, None, _, _)
           if Set(
             "atom.add.u32",
@@ -1676,16 +1697,10 @@ private[v9_3] object VMCompiler {
             "atom.shared.add.u32",
             "atom.shared.add.u64"
           )(atomicOpcode(instruction.qualifiedOpcode)) =>
-        for {
-          destinationName <- registerName(destination)
-          addressValue    <- addressValue(address)
-          sourceValue     <- value(source)
-          width  = if (atomicOpcode(instruction.qualifiedOpcode).endsWith(".u64")) BitWidth(64) else BitWidth(32)
-          global =
-            if (atomicOpcode(instruction.qualifiedOpcode).startsWith("atom.global.")) Some(true)
-            else if (atomicOpcode(instruction.qualifiedOpcode).startsWith("atom.shared.")) Some(false)
-            else None
-        } yield VMIR.Instruction.AtomicAdd(destinationName, addressValue, sourceValue, width, global)
+        atomicIntegerOperands(destination, address, source, instruction.qualifiedOpcode).map {
+          case (destinationName, addressValue, sourceValue, width, space) =>
+            VMIR.Instruction.AtomicAdd(destinationName, addressValue, sourceValue, width, space)
+        }
       case Instruction.Atom(destination, address, source, None, _, _)
           if Set(
             "atom.min.u32",
@@ -1697,22 +1712,10 @@ private[v9_3] object VMCompiler {
           )(
             atomicOpcode(instruction.qualifiedOpcode)
           ) =>
-        for {
-          destinationName <- registerName(destination)
-          addressValue    <- addressValue(address)
-          sourceValue     <- value(source)
-          width  = if (atomicOpcode(instruction.qualifiedOpcode).endsWith(".u64")) BitWidth(64) else BitWidth(32)
-          global =
-            if (atomicOpcode(instruction.qualifiedOpcode).startsWith("atom.global.")) Some(true)
-            else if (atomicOpcode(instruction.qualifiedOpcode).startsWith("atom.shared.")) Some(false)
-            else None
-        } yield VMIR.Instruction.AtomicMin(
-          destinationName,
-          addressValue,
-          sourceValue,
-          width,
-          global = global
-        )
+        atomicIntegerOperands(destination, address, source, instruction.qualifiedOpcode).map {
+          case (destinationName, addressValue, sourceValue, width, space) =>
+            VMIR.Instruction.AtomicMin(destinationName, addressValue, sourceValue, width, space)
+        }
       case Instruction.Atom(destination, address, source, None, _, _)
           if atomicOpcode(instruction.qualifiedOpcode) == "atom.global.add.f32" ||
             atomicOpcode(instruction.qualifiedOpcode) == "atom.global.add.f64" =>
@@ -1924,17 +1927,14 @@ private[v9_3] object VMCompiler {
     }
 
   private def predicateRegisterName(operand: Operand): Either[Error, RegisterName] =
+    registerName(operand, "predicate register")
+
+  private def registerName(operand: Operand, describe: String = "register"): Either[Error, RegisterName] =
     operand match {
       case Operand.Register(name, None) => Right(name)
       case Operand.Symbol(name)         => Right(RegisterName(name.value))
-      case other                        => invalid(s"expected predicate register, found ${Printer.render(other)}")
+      case other                        => invalid(s"expected $describe, found ${Printer.render(other)}")
     }
-
-  private def registerName(operand: Operand): Either[Error, RegisterName] = operand match {
-    case Operand.Register(name, None) => Right(name)
-    case Operand.Symbol(name)         => Right(RegisterName(name.value))
-    case other                        => invalid(s"expected register, found ${Printer.render(other)}")
-  }
 
   private def valueRegisterName(operand: Operand): Either[Error, RegisterName] = operand match {
     case Operand.Register(name, None)                           => Right(name)
@@ -2053,7 +2053,9 @@ private[v9_3] object VMCompiler {
           }
         )
     }.flatten.distinct
-    declarations.zipWithIndex.map { case (name, index) => name -> (0x10000000L + index.toLong * 0x100000L) }.toMap
+    declarations.zipWithIndex.map { case (name, index) =>
+      name -> (PTXAddressSpace.SharedBase + index.toLong * PTXAddressSpace.KernelSharedStride)
+    }.toMap
   }
 
   private def addressValue(operand: Operand): Either[Error, Value] = operand match {
@@ -2096,15 +2098,7 @@ private[v9_3] object VMCompiler {
   }
 
   private def integerWidth(modifiers: Vec[Modifier]): Either[Error, BitWidth] =
-    modifiers.reverseIterator.collectFirst {
-      case Modifier(name) if isScalarType(name.value) => scalarTypeWidth(name.value)
-    }.filter(Set(8, 16, 32, 64).contains)
-      .toRight(Error.Invalid(
-        s"expected an 8, 16, 32, or 64-bit integer type in ${modifiers.map(_.name.value).mkString(".")}"
-      ))
-      .flatMap(width =>
-        BitWidth.either(width).leftMap(message => Error.Invalid(message))
-      )
+    scalarBitWidth(modifiers, "integer type")
 
   private def floatWidth(modifiers: Vec[Modifier]): Either[Error, FloatWidth] =
     modifiers.reverseIterator.collectFirst {
@@ -2117,14 +2111,15 @@ private[v9_3] object VMCompiler {
       )
 
   private def scalarWidth(modifiers: Vec[Modifier]): Either[Error, BitWidth] =
+    scalarBitWidth(modifiers, "scalar type")
+
+  private def scalarBitWidth(modifiers: Vec[Modifier], describe: String): Either[Error, BitWidth] =
     modifiers.reverseIterator.collectFirst {
       case Modifier(name) if isScalarType(name.value) => scalarTypeWidth(name.value)
     }.filter(Set(8, 16, 32, 64).contains)
-      .toRight(
-        Error.Invalid(
-          s"expected an 8, 16, 32, or 64-bit scalar type in ${modifiers.map(_.name.value).mkString(".")}"
-        )
-      )
+      .toRight(Error.Invalid(
+        s"expected an 8, 16, 32, or 64-bit $describe in ${modifiers.map(_.name.value).mkString(".")}"
+      ))
       .flatMap(width =>
         BitWidth.either(width).leftMap(message => Error.Invalid(message))
       )

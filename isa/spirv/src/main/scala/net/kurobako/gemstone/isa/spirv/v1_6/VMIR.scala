@@ -63,6 +63,8 @@ private[v1_6] object VMIR {
       entryPointInterfaces: Map[KernelName, Set[Int]],
       vulkanEntries: Set[KernelName],
       subgroupSizes: Map[Int, Int],
+      workGroupSizes: Map[Int, (Int, Int, Int)],
+      workGroupSizeHints: Map[Int, (Int, Int, Int)],
       functions: Map[Int, Function],
       functionNames: Map[Int, FunctionName],
       collectiveFunctions: Set[Int]

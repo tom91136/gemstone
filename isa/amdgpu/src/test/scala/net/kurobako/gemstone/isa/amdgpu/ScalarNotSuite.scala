@@ -38,14 +38,14 @@ final class ScalarNotSuite extends munit.FunSuite with CodeObjectTestSupport {
       val code        = words
         .updated(3, cmp)
         .updated(6, instruction)
-        .flatMap(value => LittleEndian.toVec(value, ScalarByteWidth(4)))
+        .flatMap(value => LittleEndian.toVec(value, ScalarByteWidth.Dword))
       val kernel   = CodeObjectKernel("kernel", Target("gfx900"), 16, 0, 0, 0x80, 0x08, code)
       val dispatch = KernelTask.validated(
         KernelName("kernel"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Scalar(LittleEndian.toVec(input, ScalarByteWidth(8))),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(input, ScalarByteWidth.Qword)),
           KernelTask.Argument.Memory(output, 0)
         )
       ).toOption.get
@@ -61,8 +61,8 @@ final class ScalarNotSuite extends munit.FunSuite with CodeObjectTestSupport {
       )
       val result = if (width == 64) ~input else ~input & 0xffffffffL
       val stored = if (width == 64) result else 0x1234567800000000L | result
-      assertEquals(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth(8)), stored)
-      assertEquals(LittleEndian.decode(memory.bytes, 8, ScalarByteWidth(4)), if (result == 0L) 0L else 1L)
+      assertEquals(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth.Qword), stored)
+      assertEquals(LittleEndian.decode(memory.bytes, 8, ScalarByteWidth.Dword), if (result == 0L) 0L else 1L)
     }
   }
 }

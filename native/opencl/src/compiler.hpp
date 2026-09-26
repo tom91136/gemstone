@@ -21,7 +21,6 @@ struct KernelArgumentInfo {
 };
 
 std::string sourceKernelText(const std::string &source, const std::string &name);
-std::array<size_t, 3> sourceRequiredWorkGroupSize(const std::string &source);
 size_t sourceStaticLocalMemory(const std::string &source);
 std::string sourceKernelAttributes(const std::string &source);
 std::vector<KernelArgumentInfo> sourceKernelArgumentInfo(const std::string &source, const std::string &name);

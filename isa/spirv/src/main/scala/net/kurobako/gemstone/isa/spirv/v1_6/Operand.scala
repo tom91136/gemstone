@@ -11,7 +11,6 @@ final case class Operand(kind: SPIRVOperandKind, words: Vec[Word] :| MinLength[1
 
 object Operand {
   // Generated Id and single-word literal operands are non-empty by construction.
-  private[v1_6] def id(operand: Operand): Int          = operand.words.head.bits
-  private[v1_6] def operandBits(operand: Operand): Int = operand.words.head.bits
-  private[v1_6] def unsigned(operand: Operand): Long   = operand.words.head.toUnsigned
+  private[v1_6] def id(operand: Operand): Int        = operand.words.head.bits
+  private[v1_6] def unsigned(operand: Operand): Long = operand.words.head.toUnsigned
 }

@@ -114,7 +114,7 @@ target/conformance/executable/bin/conformance run --profiles conformance/profile
 ```
 
 The sbt emulation task owns one shared server and gives each test process an isolated server client. `CONFORMANCE_JOBS`
-controls CTest parallelism. `GEMSTONE_CONFORMANCE_SERVER_HEAP` sets the shared server heap and defaults to 8 GB. See
+controls CTest parallelism; the shared server heap is derived from it. See
 [conformance/README.md](conformance/README.md) for artifact builds, profiles, workloads, and layout.
 
 ## Benchmarks

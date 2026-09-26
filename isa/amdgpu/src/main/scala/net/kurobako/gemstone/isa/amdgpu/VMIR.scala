@@ -442,7 +442,6 @@ private[amdgpu] object VMIR {
         srcB: InstructionSource,
         srcC: InstructionSource
     )
-    case VFloat64Add(dest: Int, srcA: InstructionSource, srcB: InstructionSource, negateB: Boolean)
     case VCompare(operation: VectorComparison, srcA: InstructionSource, srcB: InstructionSource)
     case VCompareSubDword(
         operation: VectorComparison,
@@ -504,7 +503,7 @@ private[amdgpu] object VMIR {
         scalarAddress: Option[Int],
         bytes: Int :| Interval.Closed[1, 16],
         offset: Int,
-        coherent: Boolean = false
+        coherent: Boolean
     )
     case GlobalLoadSigned(
         dest: Int,
@@ -575,7 +574,7 @@ private[amdgpu] object VMIR {
         offset: Int,
         returnValue: Boolean
     )
-    case FlatLoad(dest: Int, address: Int, bytes: Int :| Interval.Closed[1, 16], offset: Int, coherent: Boolean = false)
+    case FlatLoad(dest: Int, address: Int, bytes: Int :| Interval.Closed[1, 16], offset: Int, coherent: Boolean)
     case FlatLoadSigned(dest: Int, address: Int, bytes: Int :| Interval.Closed[1, 2], offset: Int)
     case FlatStore(address: Int, src: Int, bytes: Int :| Interval.Closed[1, 16], offset: Int)
     case FlatStoreD16High(address: Int, src: Int, bytes: Int :| Interval.Closed[1, 2], offset: Int)

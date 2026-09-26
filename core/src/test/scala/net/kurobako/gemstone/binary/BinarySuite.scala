@@ -8,7 +8,7 @@ import io.github.iltotore.iron.constraint.all.*
 final class BinarySuite extends munit.FunSuite {
   test("little-endian scalars round-trip through arrays and runtime collections") {
     val value = 0x8877665544332211L
-    val width = ScalarByteWidth(8)
+    val width = ScalarByteWidth.Qword
     val bytes = LittleEndian.toArray(value, width)
 
     assertEquals(bytes.toSeq, Seq[Byte](0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88.toByte))
@@ -85,10 +85,10 @@ final class BinarySuite extends munit.FunSuite {
 
   test("little-endian array access validates the complete runtime range") {
     val bytes = Array.ofDim[Byte](8)
-    val _     = intercept[IllegalArgumentException](LittleEndian.decode(bytes, -1, ScalarByteWidth(1)))
-    val _     = intercept[IllegalArgumentException](LittleEndian.decode(bytes, 7, ScalarByteWidth(2)))
-    val _     = intercept[IllegalArgumentException](LittleEndian.write(0L, bytes, -1, ScalarByteWidth(1)))
-    val _     = intercept[IllegalArgumentException](LittleEndian.write(0L, bytes, 7, ScalarByteWidth(2)))
+    val _     = intercept[IllegalArgumentException](LittleEndian.decode(bytes, -1, ScalarByteWidth.Byte))
+    val _     = intercept[IllegalArgumentException](LittleEndian.decode(bytes, 7, ScalarByteWidth.Word))
+    val _     = intercept[IllegalArgumentException](LittleEndian.write(0L, bytes, -1, ScalarByteWidth.Byte))
+    val _     = intercept[IllegalArgumentException](LittleEndian.write(0L, bytes, 7, ScalarByteWidth.Word))
   }
 
   test("little-endian fixed-width integer readers own their narrowing") {

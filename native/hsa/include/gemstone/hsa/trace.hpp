@@ -6,6 +6,6 @@
 
 namespace gemstone::hsa {
 
-inline bool traceEnabled(std::string_view category) { return gemstone::traceEnabled("GEMSTONE_HSA_TRACE", category); }
+inline bool traceEnabled(std::string_view category) { return gemstone::traceEnabled("hsa", category); }
 
 } // namespace gemstone::hsa

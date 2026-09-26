@@ -40,6 +40,8 @@
 #include <gemstone/bytes.hpp>
 #include <gemstone/export.h>
 
+#include "transfer.hpp"
+
 using gemstone::readNative;
 #include <sys/stat.h>
 
@@ -251,16 +253,11 @@ bool releaseAllocation(Client &client, uint64_t id) {
 }
 
 bool writeAllocation(Client &client, uint64_t id, uint64_t offset, const uint8_t *bytes, uint32_t size) {
-  return static_cast<bool>(client.call(
-      WriteAllocation{AllocationId{static_cast<int64_t>(id)}, static_cast<int64_t>(offset), std::vector<uint8_t>(bytes, bytes + size)}));
+  return transferAllocation(client, AllocationId{static_cast<int64_t>(id)}, offset, bytes, size, true, size);
 }
 
 bool readAllocation(Client &client, uint64_t id, uint64_t offset, uint8_t *bytes, uint32_t size) {
-  auto result =
-      client.call(ReadAllocation{AllocationId{static_cast<int64_t>(id)}, static_cast<int64_t>(offset), static_cast<int32_t>(size)});
-  if (!result || result.value().size() != size) return false;
-  std::memcpy(bytes, result.value().data(), size);
-  return true;
+  return transferAllocation(client, AllocationId{static_cast<int64_t>(id)}, offset, bytes, size, false, size);
 }
 
 bool initialized(const RuntimeState &runtime) { return runtime.references != 0 && runtime.client && runtime.aql; }
@@ -275,10 +272,10 @@ bool validIsa(hsa_isa_t isa) { return isa.handle == GpuIsa; }
 bool validRegion(hsa_region_t region) { return region.handle == CpuRegion || region.handle == GpuRegion; }
 bool validPool(hsa_amd_memory_pool_t pool) { return pool.handle == CpuPool || pool.handle == GpuPool || pool.handle == GroupPool; }
 
-template <typename T> bool copy_value(void *destination, const T &value) {
-  if (!destination) return false;
+template <typename T> hsa_status_t copyStatus(void *destination, const T &value) {
+  if (!destination) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   std::memcpy(destination, &value, sizeof(value));
-  return true;
+  return HSA_STATUS_SUCCESS;
 }
 
 void copyName(void *destination, const char *name) {
@@ -686,7 +683,7 @@ int completeSignal(hsa_signal_t signal) {
 // RPC timeout so a wedged queue fails instead of stalling the caller forever.
 std::chrono::seconds pagingTimeout() {
   constexpr long fallback = 300;
-  const char *raw = std::getenv("GEMSTONE_HSA_PAGING_TIMEOUT_SECONDS");
+  const char *raw = gemstone::environment::value(gemstone::environment::HsaPagingTimeoutSeconds);
   if (!raw || raw[0] == '\0') return std::chrono::seconds(fallback);
   char *end = nullptr;
   const long value = std::strtol(raw, &end, 10);
@@ -717,6 +714,36 @@ bool awaitQueuedDispatches(RuntimeState &runtime) {
   return true;
 }
 
+/** Registers a remote allocation for `[base, base + size)`, rolling back the registration and running `release` on
+ * failure.
+ */
+hsa_status_t registerRemoteAllocation(RuntimeState &runtime, void *base, size_t size, uint64_t pool, bool owned, bool hostBacked,
+                                      const std::function<void()> &release) {
+  uint64_t id = 0;
+  if (!registerAllocation(*runtime.client, size, id)) {
+    release();
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  if (!registerAddress(*runtime.client, id, reinterpret_cast<uint64_t>(base), hostBacked)
+      || gemstone_hsa_aql_runtime_register_allocation(runtime.aql, reinterpret_cast<uint64_t>(base), size, id) != 0) {
+    releaseAllocation(*runtime.client, id);
+    release();
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  try {
+    auto allocation = std::make_shared<Allocation>(base, size, id, pool, owned);
+    std::lock_guard<std::mutex> guard(runtime.lock);
+    runtime.allocations.emplace(base, allocation);
+    runtime.allocation_ids.emplace(id, allocation);
+    return HSA_STATUS_SUCCESS;
+  } catch (...) {
+    gemstone_hsa_aql_runtime_unregister_allocation(runtime.aql, reinterpret_cast<uint64_t>(base));
+    releaseAllocation(*runtime.client, id);
+    release();
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+}
+
 hsa_status_t allocate(RuntimeState &runtime, uint64_t pool, size_t requested, void **result, bool owned) {
   if (!result || requested == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (requested > std::numeric_limits<size_t>::max() - (AllocationGranule - 1U)) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -735,34 +762,15 @@ hsa_status_t allocate(RuntimeState &runtime, uint64_t pool, size_t requested, vo
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   std::memset(memory, 0, size);
-
-  uint64_t id = 0;
-  if (!registerAllocation(*runtime.client, size, id)) {
-    std::free(memory);
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-  if (!registerAddress(*runtime.client, id, reinterpret_cast<uint64_t>(memory), pool == CpuPool)
-      || gemstone_hsa_aql_runtime_register_allocation(runtime.aql, reinterpret_cast<uint64_t>(memory), size, id) != 0) {
+  const auto status = registerRemoteAllocation(runtime, memory, size, pool, owned, pool == CpuPool, [memory] { std::free(memory); });
+  if (status != HSA_STATUS_SUCCESS) {
     if (gemstone::hsa::traceEnabled("memory"))
-      std::fprintf(stderr, "Gemstone HSA allocation alias failed id=%lu address=%p size=%zu error=%s\n", id, memory, size,
+      std::fprintf(stderr, "Gemstone HSA allocation alias failed address=%p size=%zu error=%s\n", memory, size,
                    runtime.client->error().c_str());
-    releaseAllocation(*runtime.client, id);
-    std::free(memory);
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    return status;
   }
-  try {
-    auto allocation = std::make_shared<Allocation>(memory, size, id, pool, owned);
-    std::lock_guard<std::mutex> guard(runtime.lock);
-    runtime.allocations.emplace(memory, allocation);
-    runtime.allocation_ids.emplace(id, allocation);
-    *result = memory;
-    return HSA_STATUS_SUCCESS;
-  } catch (...) {
-    gemstone_hsa_aql_runtime_unregister_allocation(runtime.aql, reinterpret_cast<uint64_t>(memory));
-    releaseAllocation(*runtime.client, id);
-    std::free(memory);
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
+  *result = memory;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t freeAllocation(RuntimeState &runtime, void *pointer, bool require_owned) {
@@ -850,27 +858,21 @@ extern "C" hsa_status_t hsa_system_get_info(hsa_system_info_t attribute, void *v
   if (const auto status = requireInitialized(runtime); status != HSA_STATUS_SUCCESS) return status;
   if (!value) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   switch (attribute) {
-    case HSA_SYSTEM_INFO_VERSION_MAJOR: return copy_value(value, uint16_t(1)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_SYSTEM_INFO_VERSION_MINOR: return copy_value(value, uint16_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_SYSTEM_INFO_VERSION_MAJOR: return copyStatus(value, uint16_t(1));
+    case HSA_SYSTEM_INFO_VERSION_MINOR: return copyStatus(value, uint16_t(0));
     case HSA_SYSTEM_INFO_TIMESTAMP: {
       const auto now = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-      return copy_value(value, static_cast<uint64_t>(now)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      return copyStatus(value, static_cast<uint64_t>(now));
     }
-    case HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY:
-      return copy_value(value, uint64_t(1000000)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_SYSTEM_INFO_SIGNAL_MAX_WAIT: return copy_value(value, UINT64_MAX) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_SYSTEM_INFO_ENDIANNESS:
-      return copy_value(value, HSA_ENDIANNESS_LITTLE) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_SYSTEM_INFO_MACHINE_MODEL:
-      return copy_value(value, HSA_MACHINE_MODEL_LARGE) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY: return copyStatus(value, uint64_t(1000000));
+    case HSA_SYSTEM_INFO_SIGNAL_MAX_WAIT: return copyStatus(value, UINT64_MAX);
+    case HSA_SYSTEM_INFO_ENDIANNESS: return copyStatus(value, HSA_ENDIANNESS_LITTLE);
+    case HSA_SYSTEM_INFO_MACHINE_MODEL: return copyStatus(value, HSA_MACHINE_MODEL_LARGE);
     case HSA_SYSTEM_INFO_EXTENSIONS: std::memset(value, 0, 128); return HSA_STATUS_SUCCESS;
-    case HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED: return copy_value(value, false) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT:
-      return copy_value(value, false) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AMD_SYSTEM_INFO_EXT_VERSION_MAJOR:
-      return copy_value(value, uint16_t(HSA_AMD_INTERFACE_VERSION_MAJOR)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AMD_SYSTEM_INFO_EXT_VERSION_MINOR:
-      return copy_value(value, uint16_t(HSA_AMD_INTERFACE_VERSION_MINOR)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED: return copyStatus(value, false);
+    case HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT: return copyStatus(value, false);
+    case HSA_AMD_SYSTEM_INFO_EXT_VERSION_MAJOR: return copyStatus(value, uint16_t(HSA_AMD_INTERFACE_VERSION_MAJOR));
+    case HSA_AMD_SYSTEM_INFO_EXT_VERSION_MINOR: return copyStatus(value, uint16_t(HSA_AMD_INTERFACE_VERSION_MINOR));
     default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 }
@@ -991,27 +993,22 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
       || attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN)
       || attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_WIDTH)
       || attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION))
-    return copy_value(value, uint32_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COOPERATIVE_QUEUES))
-    return copy_value(value, false) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return copyStatus(value, uint32_t(0));
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COOPERATIVE_QUEUES)) return copyStatus(value, false);
   if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HDP_FLUSH))
-    return copy_value(value, hsa_amd_hdp_flush_t{nullptr, nullptr}) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return copyStatus(value, hsa_amd_hdp_flush_t{nullptr, nullptr});
   if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME)) {
     copyName(value, gpu ? gemstone::hsa::targetArch() : "Gemstone CPU");
     return HSA_STATUS_SUCCESS;
   }
-  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY))
-    return copy_value(value, uint64_t(1000000000)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CACHELINE_SIZE))
-    return copy_value(value, uint32_t(64)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY)) return copyStatus(value, uint64_t(1000000000));
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CACHELINE_SIZE)) return copyStatus(value, uint32_t(64));
   // These are software execution engines, with no device or VRAM clock.
   if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY)
       || attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY))
-    return copy_value(value, uint32_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID))
-    return copy_value(value, uint32_t(gpu ? 1 : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_MAX))
-    return copy_value(value, uint64_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return copyStatus(value, uint32_t(0));
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID)) return copyStatus(value, uint32_t(gpu ? 1 : 0));
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_MAX)) return copyStatus(value, uint64_t(0));
   if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES)) {
     std::memset(value, 0, 8);
     return HSA_STATUS_SUCCESS;
@@ -1022,67 +1019,49 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
     // divides this count by two in WGP mode when sizing its copy dispatches.
     const std::string target = gemstone::hsa::targetArch();
     const bool wgp = (target ^ starts_with("gfx10")) || (target ^ starts_with("gfx11")) || (target ^ starts_with("gfx12"));
-    return copy_value(value, uint32_t(gpu ? (wgp ? 2 : 1) : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return copyStatus(value, uint32_t(gpu ? (wgp ? 2 : 1) : 0));
   }
-  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU))
-    return copy_value(value, uint32_t(gpu ? 1 : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU))
-    return copy_value(value, uint32_t(gpu ? 10 : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SDMA_ENG))
-    return copy_value(value, uint32_t(gpu ? 1 : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SDMA_XGMI_ENG))
-    return copy_value(value, uint32_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU)) return copyStatus(value, uint32_t(gpu ? 1 : 0));
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU)) return copyStatus(value, uint32_t(gpu ? 10 : 0));
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SDMA_ENG)) return copyStatus(value, uint32_t(gpu ? 1 : 0));
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SDMA_XGMI_ENG)) return copyStatus(value, uint32_t(0));
   switch (attribute) {
     case HSA_AGENT_INFO_NAME:
       copyName(value, gpu ? gemstone::hsa::targetArch() : "host");
       traceApiText("hsa_agent_get_info.name", gpu ? gemstone::hsa::targetArch() : "host");
       return HSA_STATUS_SUCCESS;
     case HSA_AGENT_INFO_VENDOR_NAME: copyName(value, "Gemstone"); return HSA_STATUS_SUCCESS;
-    case HSA_AGENT_INFO_FEATURE:
-      return copy_value(value, gpu ? HSA_AGENT_FEATURE_KERNEL_DISPATCH : hsa_agent_feature_t(0)) ? HSA_STATUS_SUCCESS
-                                                                                                 : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_MACHINE_MODEL:
-      return copy_value(value, HSA_MACHINE_MODEL_LARGE) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_AGENT_INFO_FEATURE: return copyStatus(value, gpu ? HSA_AGENT_FEATURE_KERNEL_DISPATCH : hsa_agent_feature_t(0));
+    case HSA_AGENT_INFO_MACHINE_MODEL: return copyStatus(value, HSA_MACHINE_MODEL_LARGE);
     // Device pointers must be registered; arbitrary host pointers are not
     // executable memory, so advertising the full profile would bypass registration.
-    case HSA_AGENT_INFO_PROFILE: return copy_value(value, HSA_PROFILE_BASE) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_DEFAULT_FLOAT_ROUNDING_MODE:
-      return copy_value(value, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_WAVEFRONT_SIZE:
-      return copy_value(value, uint32_t(gpu ? 64 : 1)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_AGENT_INFO_PROFILE: return copyStatus(value, HSA_PROFILE_BASE);
+    case HSA_AGENT_INFO_DEFAULT_FLOAT_ROUNDING_MODE: return copyStatus(value, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR);
+    case HSA_AGENT_INFO_WAVEFRONT_SIZE: return copyStatus(value, uint32_t(gpu ? 64 : 1));
     case HSA_AGENT_INFO_WORKGROUP_MAX_DIM: {
       const uint16_t dimensions[3] = {1024, 1024, 1024};
       std::memcpy(value, dimensions, sizeof(dimensions));
       return HSA_STATUS_SUCCESS;
     }
-    case HSA_AGENT_INFO_WORKGROUP_MAX_SIZE:
-      return copy_value(value, uint32_t(gpu ? 1024 : 1)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_GRID_MAX_DIM:
-      return copy_value(value, hsa_dim3_t{UINT32_MAX, UINT32_MAX, UINT32_MAX}) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_GRID_MAX_SIZE:
-      return copy_value(value, uint32_t(UINT32_MAX)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_FBARRIER_MAX_SIZE:
-      return copy_value(value, uint32_t(gpu ? 32 : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_QUEUES_MAX:
-      return copy_value(value, uint32_t(gpu ? 128 : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_QUEUE_MIN_SIZE: return copy_value(value, uint32_t(1)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_QUEUE_MAX_SIZE:
-      return copy_value(value, uint32_t(gpu ? QueueMaximum : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_QUEUE_TYPE:
-      return copy_value(value, hsa_queue_type32_t(HSA_QUEUE_TYPE_MULTI)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_NODE: return copy_value(value, uint32_t(gpu ? 1 : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_DEVICE:
-      return copy_value(value, gpu ? HSA_DEVICE_TYPE_GPU : HSA_DEVICE_TYPE_CPU) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_AGENT_INFO_WORKGROUP_MAX_SIZE: return copyStatus(value, uint32_t(gpu ? 1024 : 1));
+    case HSA_AGENT_INFO_GRID_MAX_DIM: return copyStatus(value, hsa_dim3_t{UINT32_MAX, UINT32_MAX, UINT32_MAX});
+    case HSA_AGENT_INFO_GRID_MAX_SIZE: return copyStatus(value, uint32_t(UINT32_MAX));
+    case HSA_AGENT_INFO_FBARRIER_MAX_SIZE: return copyStatus(value, uint32_t(gpu ? 32 : 0));
+    case HSA_AGENT_INFO_QUEUES_MAX: return copyStatus(value, uint32_t(gpu ? 128 : 0));
+    case HSA_AGENT_INFO_QUEUE_MIN_SIZE: return copyStatus(value, uint32_t(1));
+    case HSA_AGENT_INFO_QUEUE_MAX_SIZE: return copyStatus(value, uint32_t(gpu ? QueueMaximum : 0));
+    case HSA_AGENT_INFO_QUEUE_TYPE: return copyStatus(value, hsa_queue_type32_t(HSA_QUEUE_TYPE_MULTI));
+    case HSA_AGENT_INFO_NODE: return copyStatus(value, uint32_t(gpu ? 1 : 0));
+    case HSA_AGENT_INFO_DEVICE: return copyStatus(value, gpu ? HSA_DEVICE_TYPE_GPU : HSA_DEVICE_TYPE_CPU);
     case HSA_AGENT_INFO_CACHE_SIZE: {
       const uint32_t cache[4] = {gpu ? 16U * 1024U : 32U * 1024U, 0, 0, 0};
       std::memcpy(value, cache, sizeof(cache));
       return HSA_STATUS_SUCCESS;
     }
-    case HSA_AGENT_INFO_ISA:
-      return copy_value(value, hsa_isa_t{uint64_t(gpu ? GpuIsa : 0)}) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_AGENT_INFO_ISA: return copyStatus(value, hsa_isa_t{uint64_t(gpu ? GpuIsa : 0)});
     case HSA_AGENT_INFO_EXTENSIONS: std::memset(value, 0, 128); return HSA_STATUS_SUCCESS;
-    case HSA_AGENT_INFO_VERSION_MAJOR: return copy_value(value, uint16_t(1)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_VERSION_MINOR: return copy_value(value, uint16_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_AGENT_INFO_VERSION_MAJOR: return copyStatus(value, uint16_t(1));
+    case HSA_AGENT_INFO_VERSION_MINOR: return copyStatus(value, uint16_t(0));
     default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 }
@@ -1120,20 +1099,17 @@ extern "C" hsa_status_t hsa_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attri
   if (!value) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   // LLVM's AMDGPU offload plugin consumes the HSA ISA name as an LLVM target
   // triple, rather than the older human-readable AMD:AMDGPU spelling.
-  const std::string name =
-      std::string("amdgcn-amd-amdhsa--") + gemstone::hsa::targetArch() + (std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") ? ":xnack+" : "");
+  const std::string name = std::string("amdgcn-amd-amdhsa--") + gemstone::hsa::targetArch()
+                           + (gemstone::environment::present(gemstone::environment::SystemPaging) ? ":xnack+" : "");
   switch (attribute) {
-    case HSA_ISA_INFO_NAME_LENGTH:
-      return copy_value(value, static_cast<uint32_t>(name.size())) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_ISA_INFO_NAME_LENGTH: return copyStatus(value, static_cast<uint32_t>(name.size()));
     case HSA_ISA_INFO_NAME:
       std::memcpy(value, name.data(), name.size());
       traceApiText("hsa_isa_get_info_alt.name", name);
       return HSA_STATUS_SUCCESS;
-    case HSA_ISA_INFO_CALL_CONVENTION_COUNT: return copy_value(value, uint32_t(1)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_ISA_INFO_CALL_CONVENTION_INFO_WAVEFRONT_SIZE:
-      return copy_value(value, uint32_t(64)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_ISA_INFO_CALL_CONVENTION_INFO_WAVEFRONTS_PER_COMPUTE_UNIT:
-      return copy_value(value, uint32_t(10)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_ISA_INFO_CALL_CONVENTION_COUNT: return copyStatus(value, uint32_t(1));
+    case HSA_ISA_INFO_CALL_CONVENTION_INFO_WAVEFRONT_SIZE: return copyStatus(value, uint32_t(64));
+    case HSA_ISA_INFO_CALL_CONVENTION_INFO_WAVEFRONTS_PER_COMPUTE_UNIT: return copyStatus(value, uint32_t(10));
     case HSA_ISA_INFO_MACHINE_MODELS: {
       const bool models[2] = {false, true};
       std::memcpy(value, models, sizeof(models));
@@ -1154,18 +1130,16 @@ extern "C" hsa_status_t hsa_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attri
       std::memcpy(value, modes, sizeof(modes));
       return HSA_STATUS_SUCCESS;
     }
-    case HSA_ISA_INFO_FAST_F16_OPERATION: return copy_value(value, true) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_ISA_INFO_FAST_F16_OPERATION: return copyStatus(value, true);
     case HSA_ISA_INFO_WORKGROUP_MAX_DIM: {
       const uint16_t dimensions[3] = {1024, 1024, 1024};
       std::memcpy(value, dimensions, sizeof(dimensions));
       return HSA_STATUS_SUCCESS;
     }
-    case HSA_ISA_INFO_WORKGROUP_MAX_SIZE: return copy_value(value, uint32_t(1024)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_ISA_INFO_GRID_MAX_DIM:
-      return copy_value(value, hsa_dim3_t{UINT32_MAX, UINT32_MAX, UINT32_MAX}) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_ISA_INFO_GRID_MAX_SIZE:
-      return copy_value(value, uint64_t(UINT64_MAX)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_ISA_INFO_FBARRIER_MAX_SIZE: return copy_value(value, uint32_t(32)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_ISA_INFO_WORKGROUP_MAX_SIZE: return copyStatus(value, uint32_t(1024));
+    case HSA_ISA_INFO_GRID_MAX_DIM: return copyStatus(value, hsa_dim3_t{UINT32_MAX, UINT32_MAX, UINT32_MAX});
+    case HSA_ISA_INFO_GRID_MAX_SIZE: return copyStatus(value, uint64_t(UINT64_MAX));
+    case HSA_ISA_INFO_FBARRIER_MAX_SIZE: return copyStatus(value, uint32_t(32));
     default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 }
@@ -1211,17 +1185,13 @@ extern "C" hsa_status_t hsa_region_get_info(hsa_region_t region, hsa_region_info
   if (!value) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   const uint32_t flags = HSA_REGION_GLOBAL_FLAG_KERNARG | HSA_REGION_GLOBAL_FLAG_FINE_GRAINED;
   switch (attribute) {
-    case HSA_REGION_INFO_SEGMENT:
-      return copy_value(value, HSA_REGION_SEGMENT_GLOBAL) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_REGION_INFO_GLOBAL_FLAGS: return copy_value(value, flags) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_REGION_INFO_SIZE: return copy_value(value, size_t(VirtualMemorySize)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_REGION_INFO_ALLOC_MAX_SIZE:
-      return copy_value(value, size_t(VirtualMemorySize)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_REGION_INFO_RUNTIME_ALLOC_ALLOWED: return copy_value(value, true) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_REGION_INFO_RUNTIME_ALLOC_GRANULE:
-      return copy_value(value, size_t(AllocationGranule)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_REGION_INFO_RUNTIME_ALLOC_ALIGNMENT:
-      return copy_value(value, size_t(AllocationGranule)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_REGION_INFO_SEGMENT: return copyStatus(value, HSA_REGION_SEGMENT_GLOBAL);
+    case HSA_REGION_INFO_GLOBAL_FLAGS: return copyStatus(value, flags);
+    case HSA_REGION_INFO_SIZE: return copyStatus(value, size_t(VirtualMemorySize));
+    case HSA_REGION_INFO_ALLOC_MAX_SIZE: return copyStatus(value, size_t(VirtualMemorySize));
+    case HSA_REGION_INFO_RUNTIME_ALLOC_ALLOWED: return copyStatus(value, true);
+    case HSA_REGION_INFO_RUNTIME_ALLOC_GRANULE: return copyStatus(value, size_t(AllocationGranule));
+    case HSA_REGION_INFO_RUNTIME_ALLOC_ALIGNMENT: return copyStatus(value, size_t(AllocationGranule));
     default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 }
@@ -1256,7 +1226,7 @@ extern "C" hsa_status_t hsa_memory_copy(void *dst, const void *src, size_t size)
     for (const auto &[base, allocation] : runtime.allocations) {
       const gemstone::MemoryRange backing{reinterpret_cast<uintptr_t>(base), allocation->size};
       if (backing.overlaps(input) && allocation->pool == GpuPool) sources.push_back(allocation);
-      if (backing.overlaps(output)) destinations.push_back(allocation);
+      if (backing.overlaps(output) && allocation->pool == GpuPool) destinations.push_back(allocation);
     }
   }
   const auto transfer = [&](const AllocationRef &allocation, gemstone::MemoryRange range, bool read) {
@@ -1282,24 +1252,7 @@ hsa_status_t registerHostSegment(void *ptr, size_t size) {
     std::lock_guard<std::mutex> guard(runtime.lock);
     if (findAllocation(runtime, ptr, size) != nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
-  uint64_t id = 0;
-  if (!registerAllocation(*runtime.client, size, id)) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  if (!registerAddress(*runtime.client, id, reinterpret_cast<uint64_t>(ptr), true)
-      || gemstone_hsa_aql_runtime_register_allocation(runtime.aql, reinterpret_cast<uint64_t>(ptr), size, id) != 0) {
-    releaseAllocation(*runtime.client, id);
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-  try {
-    auto allocation = std::make_shared<Allocation>(ptr, size, id, CpuPool, false);
-    std::lock_guard<std::mutex> guard(runtime.lock);
-    runtime.allocations.emplace(ptr, allocation);
-    runtime.allocation_ids.emplace(id, allocation);
-    return HSA_STATUS_SUCCESS;
-  } catch (...) {
-    gemstone_hsa_aql_runtime_unregister_allocation(runtime.aql, reinterpret_cast<uint64_t>(ptr));
-    releaseAllocation(*runtime.client, id);
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
+  return registerRemoteAllocation(runtime, ptr, size, CpuPool, false, true, [] {});
 }
 
 hsa_status_t registerHostView(RuntimeState &runtime, void *ptr, size_t size, bool allowOverlap) {
@@ -2300,34 +2253,23 @@ extern "C" hsa_status_t hsa_executable_symbol_get_info(hsa_executable_symbol_t s
   const auto kernel = runtime.kernels.find(symbol_handle.handle);
   if (kernel != runtime.kernels.end()) {
     switch (attribute) {
-      case HSA_EXECUTABLE_SYMBOL_INFO_TYPE:
-        return copy_value(value, HSA_SYMBOL_KIND_KERNEL) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT:
-        return copy_value(value, kernel->second->object) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE:
-        return copy_value(value, kernel->second->metadata.kernarg_size) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT:
-        return copy_value(value, uint32_t(16)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      case HSA_EXECUTABLE_SYMBOL_INFO_TYPE: return copyStatus(value, HSA_SYMBOL_KIND_KERNEL);
+      case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT: return copyStatus(value, kernel->second->object);
+      case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE: return copyStatus(value, kernel->second->metadata.kernarg_size);
+      case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT: return copyStatus(value, uint32_t(16));
       case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE:
-      case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE:
-        return copy_value(value, uint32_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_DYNAMIC_CALLSTACK:
-        return copy_value(value, false) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_CALL_CONVENTION:
-        return copy_value(value, uint32_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE: return copyStatus(value, uint32_t(0));
+      case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_DYNAMIC_CALLSTACK: return copyStatus(value, false);
+      case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_CALL_CONVENTION: return copyStatus(value, uint32_t(0));
       default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
   const auto global = runtime.globals.find(symbol_handle.handle);
   if (global == runtime.globals.end()) return HSA_STATUS_ERROR_INVALID_EXECUTABLE_SYMBOL;
   switch (attribute) {
-    case HSA_EXECUTABLE_SYMBOL_INFO_TYPE:
-      return copy_value(value, HSA_SYMBOL_KIND_VARIABLE) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS:
-      return copy_value(value, reinterpret_cast<uint64_t>(global->second->address)) ? HSA_STATUS_SUCCESS
-                                                                                    : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE:
-      return copy_value(value, global->second->size) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_EXECUTABLE_SYMBOL_INFO_TYPE: return copyStatus(value, HSA_SYMBOL_KIND_VARIABLE);
+    case HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS: return copyStatus(value, reinterpret_cast<uint64_t>(global->second->address));
+    case HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE: return copyStatus(value, global->second->size);
     default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 }
@@ -2380,17 +2322,13 @@ extern "C" hsa_status_t hsa_amd_memory_pool_get_info(hsa_amd_memory_pool_t pool,
   // LDS is allocated per workgroup by the executor, never by the host allocator.
   if (pool.handle == GroupPool) {
     switch (attribute) {
-      case HSA_AMD_MEMORY_POOL_INFO_SEGMENT:
-        return copy_value(value, HSA_AMD_SEGMENT_GROUP) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      case HSA_AMD_MEMORY_POOL_INFO_SEGMENT: return copyStatus(value, HSA_AMD_SEGMENT_GROUP);
       // ROCr returns a zero mask for non-global pools. LLVM queries this
       // property before deciding whether to retain a pool for allocation.
-      case HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS:
-        return copy_value(value, uint32_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      case HSA_AMD_MEMORY_POOL_INFO_SIZE:
-        return copy_value(value, GroupMemorySize) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      case HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS: return copyStatus(value, uint32_t(0));
+      case HSA_AMD_MEMORY_POOL_INFO_SIZE: return copyStatus(value, GroupMemorySize);
       case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED:
-      case HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL:
-        return copy_value(value, false) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      case HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL: return copyStatus(value, false);
       default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
@@ -2398,25 +2336,17 @@ extern "C" hsa_status_t hsa_amd_memory_pool_get_info(hsa_amd_memory_pool_t pool,
       HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT
       | (pool.handle == CpuPool ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED : HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED);
   switch (attribute) {
-    case HSA_AMD_MEMORY_POOL_INFO_SEGMENT:
-      return copy_value(value, HSA_AMD_SEGMENT_GLOBAL) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS: return copy_value(value, flags) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AMD_MEMORY_POOL_INFO_SIZE:
-      return copy_value(value, size_t(VirtualMemorySize)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED:
-      return copy_value(value, true) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_AMD_MEMORY_POOL_INFO_SEGMENT: return copyStatus(value, HSA_AMD_SEGMENT_GLOBAL);
+    case HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS: return copyStatus(value, flags);
+    case HSA_AMD_MEMORY_POOL_INFO_SIZE: return copyStatus(value, size_t(VirtualMemorySize));
+    case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED: return copyStatus(value, true);
     case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE:
     case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALIGNMENT:
-    case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE:
-      return copy_value(value, size_t(AllocationGranule)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL:
-      return copy_value(value, pool.handle == CpuPool) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE:
-      return copy_value(value, size_t(VirtualMemorySize)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE: return copyStatus(value, size_t(AllocationGranule));
+    case HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL: return copyStatus(value, pool.handle == CpuPool);
+    case HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE: return copyStatus(value, size_t(VirtualMemorySize));
     case HSA_AMD_MEMORY_POOL_INFO_LOCATION:
-      return copy_value(value, pool.handle == CpuPool ? HSA_AMD_MEMORY_POOL_LOCATION_CPU : HSA_AMD_MEMORY_POOL_LOCATION_GPU)
-                 ? HSA_STATUS_SUCCESS
-                 : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      return copyStatus(value, pool.handle == CpuPool ? HSA_AMD_MEMORY_POOL_LOCATION_CPU : HSA_AMD_MEMORY_POOL_LOCATION_GPU);
     default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 }
@@ -2534,12 +2464,9 @@ extern "C" hsa_status_t hsa_amd_agent_memory_pool_get_info(hsa_agent_t agent, hs
   if (!value) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   switch (attribute) {
     case HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS:
-      return copy_value(value, pool.handle == GroupPool && !validGpu(agent) ? HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED
-                                                                            : HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT)
-                 ? HSA_STATUS_SUCCESS
-                 : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AMD_AGENT_MEMORY_POOL_INFO_NUM_LINK_HOPS:
-      return copy_value(value, uint32_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      return copyStatus(value, pool.handle == GroupPool && !validGpu(agent) ? HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED
+                                                                            : HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT);
+    case HSA_AMD_AGENT_MEMORY_POOL_INFO_NUM_LINK_HOPS: return copyStatus(value, uint32_t(0));
     default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 }

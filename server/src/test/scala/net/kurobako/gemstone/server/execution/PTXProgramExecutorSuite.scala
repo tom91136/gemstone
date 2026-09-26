@@ -60,7 +60,7 @@ final class PTXProgramExecutorSuite extends munit.FunSuite {
       val completion = service.launch(program, task).toOption.get
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
       assertEquals(
-        service.read(output, 0L, 4).map(bytes => LittleEndian.decode(bytes, 0, ScalarByteWidth(4))),
+        service.read(output, 0L, 4).map(bytes => LittleEndian.decode(bytes, 0, ScalarByteWidth.Dword)),
         Right(1L)
       )
     }

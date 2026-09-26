@@ -28,6 +28,7 @@
 #include <gemstone/export.h>
 
 #include "hsakmt_backend.hpp"
+#include "transfer.hpp"
 
 namespace {
 
@@ -41,7 +42,6 @@ constexpr uint32_t GpuNode = 1;
 // actual dispatch scratch remains a separate execution-protocol milestone.
 constexpr uint64_t AvailableMemory = static_cast<uint64_t>(1) * 1024 * 1024 * 1024;
 constexpr uint32_t PageSize = 4096;
-constexpr uint32_t TransferChunk = MaximumPayload / 2;
 constexpr uint32_t UploadChunk = 64U * 1024U;
 constexpr uint16_t InvalidPacketType = GEMSTONE_HSA_AQL_INVALID;
 
@@ -157,20 +157,14 @@ int environmentRelease(void *context, uint64_t id) {
 
 int environmentWrite(void *context, uint64_t id, uint64_t offset, const void *bytes, uint32_t size) {
   if (!bytes && size != 0) return -1;
-  const auto *begin = static_cast<const uint8_t *>(bytes);
-  return static_cast<Client *>(context)->call(WriteAllocation{AllocationId{static_cast<int64_t>(id)}, static_cast<int64_t>(offset),
-                                                              std::vector<uint8_t>(begin, begin + size)})
-             ? 0
-             : -1;
+  return transferAllocation(*static_cast<Client *>(context), AllocationId{static_cast<int64_t>(id)}, offset, bytes, size, true, size) ? 0
+                                                                                                                                      : -1;
 }
 
 int environmentRead(void *context, uint64_t id, uint64_t offset, void *bytes, uint32_t size) {
   if (!bytes && size != 0) return -1;
-  auto result = static_cast<Client *>(context)->call(
-      ReadAllocation{AllocationId{static_cast<int64_t>(id)}, static_cast<int64_t>(offset), static_cast<int32_t>(size)});
-  if (!result || result.value().size() != size) return -1;
-  std::memcpy(bytes, result.value().data(), size);
-  return 0;
+  return transferAllocation(*static_cast<Client *>(context), AllocationId{static_cast<int64_t>(id)}, offset, bytes, size, false, size) ? 0
+                                                                                                                                       : -1;
 }
 
 bool opened(const State &runtime) { return runtime.open_count != 0; }
@@ -540,7 +534,7 @@ extern "C" GEMSTONE_PUBLIC_API int gemstone_hsakmt_test_install_code_object(cons
     const char *detail = gemstone_hsa_aql_runtime_error(aql);
     std::lock_guard<std::mutex> guard(runtime.lock);
     runtime.loader_error = !detail || detail[0] == '\0' ? std::string("execution service rejected AMDGPU code object") : detail;
-    const char *dump_path = std::getenv("GEMSTONE_HSA_REJECTED_CODE_OBJECT");
+    const char *dump_path = gemstone::environment::value(gemstone::environment::HsaRejectedCodeObject);
     if (dump_path && dump_path[0] != '\0') {
       const std::unique_ptr<std::FILE, FileCloser> dump(std::fopen(dump_path, "wb"));
       if (dump) std::fwrite(code_object, 1, static_cast<size_t>(code_object_size), dump.get());

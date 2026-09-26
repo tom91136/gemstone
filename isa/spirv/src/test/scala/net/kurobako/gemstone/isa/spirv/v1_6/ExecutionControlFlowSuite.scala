@@ -61,14 +61,14 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(pointer, ScalarByteWidth(8)))
+          KernelTask.Argument.Scalar(LittleEndian.toVec(pointer, ScalarByteWidth.Qword))
         )
       )
       .toOption
       .get
 
     assertEquals(executeUnchecked(module, dispatch(9L), memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(37L, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(37L, ScalarByteWidth.Dword))
     val wrongProgram = (2L << 32) | 9L
     assert(executeUnchecked(module, dispatch(wrongProgram), memory).isLeft)
     val loaded = loadUnchecked(module).toOption.get
@@ -130,14 +130,14 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(41L, ScalarByteWidth(4)))
+          KernelTask.Argument.Scalar(LittleEndian.toVec(41L, ScalarByteWidth.Dword))
         )
       )
       .toOption
       .get
 
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(42L, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(42L, ScalarByteWidth.Dword))
   }
 
   test("dispatch executes typed OpenCL.std scalar f64 hypot") {
@@ -181,15 +181,21 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(java.lang.Double.doubleToRawLongBits(3.0), ScalarByteWidth(8))),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(java.lang.Double.doubleToRawLongBits(4.0), ScalarByteWidth(8)))
+          KernelTask.Argument.Scalar(LittleEndian.toVec(
+            java.lang.Double.doubleToRawLongBits(3.0),
+            ScalarByteWidth.Qword
+          )),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(
+            java.lang.Double.doubleToRawLongBits(4.0),
+            ScalarByteWidth.Qword
+          ))
         )
       )
       .toOption
       .get
 
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(java.lang.Double.doubleToRawLongBits(5.0), ScalarByteWidth(8)))
+    assertEquals(memory.bytes, LittleEndian.toVec(java.lang.Double.doubleToRawLongBits(5.0), ScalarByteWidth.Qword))
   }
 
   test("dispatch executes OpenCL.std fma with one rounding") {
@@ -240,15 +246,15 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
           KernelTask.Argument.Memory(allocation, 0L),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Float.floatToRawIntBits(a).toLong,
-            ScalarByteWidth(4)
+            ScalarByteWidth.Dword
           )),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Float.floatToRawIntBits(b).toLong,
-            ScalarByteWidth(4)
+            ScalarByteWidth.Dword
           )),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Float.floatToRawIntBits(c).toLong,
-            ScalarByteWidth(4)
+            ScalarByteWidth.Dword
           ))
         )
       )
@@ -258,7 +264,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       memory.bytes,
-      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(Math.fma(a, b, c)).toLong, ScalarByteWidth(4))
+      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(Math.fma(a, b, c)).toLong, ScalarByteWidth.Dword)
     )
   }
 
@@ -303,7 +309,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
           KernelTask.Argument.Memory(allocation, 0L),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Float.floatToRawIntBits(4.0f).toLong,
-            ScalarByteWidth(4)
+            ScalarByteWidth.Dword
           ))
         )
       )
@@ -311,7 +317,10 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       .get
 
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.25f).toLong, ScalarByteWidth(4)))
+    assertEquals(
+      memory.bytes,
+      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.25f).toLong, ScalarByteWidth.Dword)
+    )
   }
 
   test("dispatch executes OpenCL.std native sine") {
@@ -355,7 +364,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
           KernelTask.Argument.Memory(allocation, 0L),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Float.floatToRawIntBits(0.5f).toLong,
-            ScalarByteWidth(4)
+            ScalarByteWidth.Dword
           ))
         )
       )
@@ -408,7 +417,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
           KernelTask.Argument.Memory(allocation, 0L),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Float.floatToRawIntBits(0.5f).toLong,
-            ScalarByteWidth(4)
+            ScalarByteWidth.Dword
           ))
         )
       )
@@ -478,7 +487,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(allocation, 4L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(8L, ScalarByteWidth(4)))
+          KernelTask.Argument.Scalar(LittleEndian.toVec(8L, ScalarByteWidth.Dword))
         )
       )
       .toOption
@@ -487,7 +496,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
     val decoded = ISA.decode(ISA.encode(module).toOption.get).toOption.get
     assertEquals(executeUnchecked(decoded, dispatch, memory), Right(()))
     assertEquals(memory.bytes.take(4), Vec.fill(4)(0.toByte))
-    assertEquals(memory.bytes.drop(4), Vec.from((0L until 8L).flatMap(LittleEndian.toVec(_, ScalarByteWidth(4)))))
+    assertEquals(memory.bytes.drop(4), Vec.from((0L until 8L).flatMap(LittleEndian.toVec(_, ScalarByteWidth.Dword))))
   }
 
   test("dispatch validates lifetime markers around function objects") {
@@ -540,7 +549,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       .get
 
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0x12345678L, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(0x12345678L, ScalarByteWidth.Dword))
 
     val malformed = module.copy(instructions =
       instructions.updated(

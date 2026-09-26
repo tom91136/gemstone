@@ -21,14 +21,13 @@
 #include <CL/cl_icd.h>
 
 #include "compiler.hpp"
-
-inline constexpr uint64_t Magic = static_cast<uint64_t>(0x47454d53544f4e45);
+#include "handles.hpp"
 
 enum class Kind : uint32_t { Platform, Device, Context, Queue, Memory, Program, Kernel, Event };
 
 struct Header {
   explicit Header(Kind value) : kind(value) {}
-  uint64_t magic = Magic;
+  uint64_t magic = gemstone::rpc::HandleMagic;
   Kind kind;
   std::atomic_uint references{1};
 };
@@ -76,7 +75,7 @@ struct Allocation {
   std::mutex useMutex;
   std::condition_variable usesFinished;
   size_t pendingUses = 0;
-  std::atomic_bool externallyMutable{false};
+
   std::atomic_bool released{false};
   bool runtimeOwnsBase = false;
   uint64_t svmContextIdentity = 0;
@@ -157,6 +156,8 @@ struct _cl_program {
   std::vector<uint8_t> il;
   std::vector<uint8_t> originalIL;
   std::map<cl_uint, std::vector<uint8_t>> specializationConstants;
+  std::map<cl_uint, size_t> specializationSizes;
+  bool specializationSizesLoaded = false;
   bool createdWithIL = false;
   std::vector<uint8_t> bitcode;
   uint64_t remoteId = 0;

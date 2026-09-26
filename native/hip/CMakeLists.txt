@@ -1,6 +1,6 @@
-find_path(HIP_INCLUDE_DIR hip/hip_runtime_api.h
-  PATHS /usr/include /usr/local/include
-  REQUIRED)
+if(NOT HIP_INCLUDE_DIR OR NOT EXISTS "${HIP_INCLUDE_DIR}/hip/hip_runtime_api.h")
+  message(FATAL_ERROR "HIP_INCLUDE_DIR must point at the pinned HIP headers containing hip/hip_runtime_api.h")
+endif()
 # Keep the HIP drop-in self-contained.  A vendor HIP binary normally brings
 # `libhsa-runtime64.so.1` into the process before LD_PRELOAD is considered;
 # linking our HSA facade as a shared dependency would therefore resolve the

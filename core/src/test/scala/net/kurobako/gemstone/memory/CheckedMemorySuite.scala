@@ -8,8 +8,8 @@ import net.kurobako.gemstone.Vec
 import java.util.concurrent.atomic.AtomicInteger
 
 final class CheckedMemorySuite extends munit.FunSuite {
-  private val doubleWord = MemoryValueByteWidth(4)
-  private val quadWord   = MemoryValueByteWidth(8)
+  private val doubleWord = MemoryValueByteWidth.Dword
+  private val quadWord   = MemoryValueByteWidth.Qword
 
   private def allocate(
       memory: DynamicAddressMemory,

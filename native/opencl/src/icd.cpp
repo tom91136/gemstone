@@ -30,12 +30,15 @@
 #include "gemstone_execution_rpc.hpp"
 #include "gemstone_opencl_dispatch.hpp"
 #include <gemstone/bytes.hpp>
+#include <gemstone/copy_out.hpp>
 #include <gemstone/trace.hpp>
 
-#include "../../spirv/specialization.hpp"
+#include "client.hpp"
 #include "compiler.hpp"
 #include "completion.hpp"
 #include "objects.hpp"
+#include "relocations.hpp"
+#include "transfer.hpp"
 
 namespace {
 
@@ -44,26 +47,14 @@ using namespace gemstone::execution;
 
 using namespace gemstone::opencl;
 
-std::mutex liveObjectsMutex;
-std::set<const void *> liveObjects;
+gemstone::rpc::LiveHandles liveObjects;
 
-void registerLiveObject(const void *value) {
-  std::lock_guard lock(liveObjectsMutex);
-  liveObjects.insert(value);
-}
-
-void unregisterLiveObject(const void *value) {
-  std::lock_guard lock(liveObjectsMutex);
-  liveObjects.erase(value);
-}
-
-bool isLiveObject(const void *value) {
-  std::lock_guard lock(liveObjectsMutex);
-  return liveObjects.find(value) != liveObjects.end();
-}
+void registerLiveObject(const void *value) { liveObjects.insert(value); }
+void unregisterLiveObject(const void *value) { liveObjects.erase(value); }
 
 template <class T> T *checked(T *value, Kind kind) {
-  if (!value || !isLiveObject(value) || value->header.magic != Magic || value->header.kind != kind) return nullptr;
+  if (!value || !liveObjects.contains(value) || value->header.magic != gemstone::rpc::HandleMagic || value->header.kind != kind)
+    return nullptr;
   return value;
 }
 
@@ -72,8 +63,8 @@ template <class T> void retain(T *value) { value->header.references.fetch_add(1,
 template <class T> bool release(T *value) { return value->header.references.fetch_sub(1, std::memory_order_acq_rel) == 1; }
 
 struct Remote {
-  std::once_flag initialized;
-  std::unique_ptr<Client> client;
+  ClientManager manager;
+  Client *client = nullptr;
   bool ready = false;
   std::string error;
 };
@@ -128,7 +119,7 @@ struct OpenCLIdentity {
 };
 
 OpenCLIdentity openclIdentity() {
-  const char *profile = std::getenv("GEMSTONE_OPENCL_PROFILE");
+  const char *profile = gemstone::environment::value(gemstone::environment::Profile);
   if (profile) {
     if (std::strcmp(profile, "amd") == 0)
       return {"AMD Accelerated Parallel Processing", "AMD Gemstone GPU", "Advanced Micro Devices, Inc.", 0x1002};
@@ -163,100 +154,47 @@ void notifyEventCallbacks(_cl_event *event) {
 }
 
 Remote &remoteState() {
-  std::call_once(remote.initialized, [] {
-    remote.client = Client::fromEnvironment();
-    if (!remote.client) {
-      remote.error = "GEMSTONE_RPC_CLIENT is absent or invalid";
-      return;
-    }
-    if (!remote.client->call(Ping{})) {
-      remote.error = remote.client->error();
-      remote.client.reset();
-      return;
-    }
-    remote.ready = true;
-  });
+  auto &manager = remote.manager;
+  remote.ready = manager.mode() == ClientMode::Ready;
+  remote.client = remote.ready ? manager.client() : nullptr;
+  remote.error = manager.error();
   return remote;
 }
 
 const char *remoteError() {
-  const auto &state = remoteState();
-  if (state.client) {
-    thread_local std::string message;
-    message = state.client->error();
-    if (!message.empty()) return message.c_str();
-  }
+  auto &state = remoteState();
+  thread_local std::string message;
+  message = state.manager.lastError();
+  if (!message.empty()) return message.c_str();
   return state.error.empty() ? "Gemstone execution RPC failed" : state.error.c_str();
 }
 
 bool writeRemote(Client &client, uint64_t id, uint64_t offset, const void *bytes, size_t size) {
-  constexpr size_t chunkLimit = MaximumPayload / 2;
-  const auto *source = static_cast<const uint8_t *>(bytes);
-  while (size != 0) {
-    const auto chunk = std::min(size, chunkLimit);
-    if (!client.call(WriteAllocation{AllocationId{static_cast<int64_t>(id)}, static_cast<int64_t>(offset),
-                                     std::vector<uint8_t>(source, source + chunk)}))
-      return false;
-    source += chunk;
-    offset += chunk;
-    size -= chunk;
-  }
-  return true;
+  return transferAllocation(client, AllocationId{static_cast<int64_t>(id)}, offset, bytes, size, true, MaximumPayload / 2);
 }
 
 bool readRemote(Client &client, uint64_t id, uint64_t offset, void *bytes, size_t size) {
-  constexpr size_t chunkLimit = MaximumPayload / 2;
-  auto *destination = static_cast<uint8_t *>(bytes);
-  while (size != 0) {
-    const auto chunk = std::min(size, chunkLimit);
-    auto result =
-        client.call(ReadAllocation{AllocationId{static_cast<int64_t>(id)}, static_cast<int64_t>(offset), static_cast<int32_t>(chunk)});
-    if (!result || result.value().size() != chunk) return false;
-    std::memcpy(destination, result.value().data(), chunk);
-    destination += chunk;
-    offset += chunk;
-    size -= chunk;
-  }
-  return true;
+  return transferAllocation(client, AllocationId{static_cast<int64_t>(id)}, offset, bytes, size, false, MaximumPayload / 2);
 }
 
 bool scanBufferPointerRelocations() {
-  const char *value = std::getenv("GEMSTONE_OPENCL_SCAN_BUFFER_POINTERS");
+  const char *value = gemstone::environment::value(gemstone::environment::OpenCLScanBufferPointers);
   return value && std::strcmp(value, "1") == 0;
 }
 
 cl_ulong maxMemAllocSize() {
   // Keep the advertised limit below the remote service's practical per-allocation
   // envelope.  The environment override remains available for larger deployments.
-  constexpr cl_ulong defaultSize = static_cast<uint64_t>(0x10000000);
-  const char *value = std::getenv("GEMSTONE_OPENCL_MAX_MEM_ALLOC_SIZE");
-  if (!value || value[0] == '\0') return defaultSize;
-  char *end = nullptr;
-  const auto parsed = std::strtoull(value, &end, 0);
-  return end != value && *end == '\0' && parsed != 0 ? static_cast<cl_ulong>(parsed) : defaultSize;
+  return gemstone::environment::unsignedValue(gemstone::environment::OpenCLMaxMemAllocSize, 0x10000000);
 }
 
-cl_ulong localMemSize() {
-  constexpr cl_ulong defaultSize = static_cast<uint64_t>(0x10000);
-  const char *value = std::getenv("GEMSTONE_OPENCL_LOCAL_MEM_SIZE");
-  if (!value || value[0] == '\0') return defaultSize;
-  char *end = nullptr;
-  const auto parsed = std::strtoull(value, &end, 0);
-  return end != value && *end == '\0' && parsed != 0 ? static_cast<cl_ulong>(parsed) : defaultSize;
-}
+cl_ulong localMemSize() { return gemstone::environment::unsignedValue(gemstone::environment::OpenCLLocalMemSize, 0x10000); }
 
 // The emulator executes any work-group size but only at interpreter throughput,
 // and the OpenCL CTS scales its total work with the advertised bound. Sizes above
 // this make whole conformance tests exceed their per-test budget, so advertise
 // the largest size the emulated suite can complete. Enqueue enforces the bound.
-size_t maxWorkGroupSize() {
-  constexpr size_t defaultSize = 64;
-  const char *value = std::getenv("GEMSTONE_OPENCL_MAX_WORK_GROUP_SIZE");
-  if (!value || value[0] == '\0') return defaultSize;
-  char *end = nullptr;
-  const auto parsed = std::strtoull(value, &end, 0);
-  return end != value && *end == '\0' && parsed != 0 ? static_cast<size_t>(parsed) : defaultSize;
-}
+size_t maxWorkGroupSize() { return gemstone::environment::unsignedValue(gemstone::environment::OpenCLMaxWorkGroupSize, 64); }
 
 constexpr size_t MaxSubgroupSize = 32;
 
@@ -382,7 +320,7 @@ std::shared_ptr<Allocation> allocate(size_t size, cl_int *error, size_t requeste
     if (error) *error = CL_OUT_OF_HOST_MEMORY;
     return {};
   }
-  if (gemstone::traceEnabled("GEMSTONE_OPENCL_TRACE", "allocations"))
+  if (gemstone::traceEnabled("opencl", "allocations"))
     std::fprintf(stderr, "gemstone alloc base=%p id=%llu size=%zu\n", base, static_cast<unsigned long long>(result->id), size);
   return result;
 }
@@ -442,19 +380,11 @@ cl_int readAllocation(const std::shared_ptr<Allocation> &allocation, size_t offs
 }
 
 template <class T> cl_int outputScalar(size_t capacity, void *output, size_t *written, const T &value) {
-  if (written) *written = sizeof(T);
-  if (!output) return CL_SUCCESS;
-  if (capacity < sizeof(T)) return CL_INVALID_VALUE;
-  std::memcpy(output, &value, sizeof(T));
-  return CL_SUCCESS;
+  return gemstone::copyOutValue(capacity, output, written, value) ? CL_SUCCESS : CL_INVALID_VALUE;
 }
 
 cl_int outputBytes(size_t capacity, void *output, size_t *written, const void *bytes, size_t size) {
-  if (written) *written = size;
-  if (!output) return CL_SUCCESS;
-  if (capacity < size) return CL_INVALID_VALUE;
-  if (size != 0) std::memcpy(output, bytes, size);
-  return CL_SUCCESS;
+  return gemstone::copyOut(capacity, output, written, bytes, size) ? CL_SUCCESS : CL_INVALID_VALUE;
 }
 
 cl_int outputString(size_t capacity, void *output, size_t *written, const std::string &value) {
@@ -899,25 +829,6 @@ cl_int completeEvent(_cl_command_queue *queue, cl_command_type command, cl_uint 
   return submitCommand(queue, command, false, count, waits, [] { return CL_SUCCESS; }, output, (marker || barrier) && count == 0, barrier);
 }
 
-struct MirrorResult {
-  cl_int status = CL_SUCCESS;
-  uint64_t bytes = 0;
-};
-
-MirrorResult mirrorAllocations() {
-  auto &state = remoteState();
-  if (!state.ready) return {};
-  MirrorResult result;
-  std::lock_guard lock(remoteMutex);
-  std::lock_guard memoryLock(allocationsMutex);
-  for (const auto &[_, allocation] : allocations) {
-    if (allocation->hostBacked || !allocation->externallyMutable.load(std::memory_order_relaxed)) continue;
-    if (!writeRemote(*state.client, allocation->id, 0, allocation->data(), allocation->size)) return {CL_OUT_OF_RESOURCES, result.bytes};
-    result.bytes += allocation->size;
-  }
-  return result;
-}
-
 std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
   std::lock_guard relocationsLock(pointerRelocationsMutex);
   std::vector<PointerRelocation> result;
@@ -925,8 +836,7 @@ std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
   {
     std::lock_guard lock(allocationsMutex);
     for (const auto &[_, allocation] : allocations)
-      if (!allocation->hostBacked && (allocation->externallyMutable.load(std::memory_order_relaxed) || scanBufferPointerRelocations()))
-        snapshot.push_back(allocation);
+      if (!allocation->hostBacked && scanBufferPointerRelocations()) snapshot.push_back(allocation);
   }
   for (const auto &source : snapshot) {
     scannedBytes += source->size;
@@ -963,17 +873,18 @@ std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
       }
     }
   }
+  std::set<std::pair<uint64_t, uint64_t>> emitted;
+  for (const auto &relocation : result) {
+    const auto *sourceId = std::get_if<RelocationSourceAllocation>(&relocation.source);
+    if (sourceId) emitted.emplace(static_cast<uint64_t>(sourceId->id.value), static_cast<uint64_t>(relocation.sourceOffset.value));
+  }
   for (const auto &source : snapshot) {
     for (const auto &[offset, target] : source->pointerRelocations) {
-      const auto found = std::find_if(result.begin(), result.end(), [&](const auto &relocation) {
-        const auto *sourceId = std::get_if<RelocationSourceAllocation>(&relocation.source);
-        return sourceId && static_cast<uint64_t>(sourceId->id.value) == source->id
-               && static_cast<uint64_t>(relocation.sourceOffset.value) == offset;
-      });
-      if (found == result.end() && target.first && target.second < target.first->size)
-        result.push_back({RelocationSourceAllocation{AllocationId{static_cast<int64_t>(source->id)}},
-                          LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(target.first->id)},
-                          LongPositive0{static_cast<int64_t>(target.second)}});
+      if (emitted.count({source->id, offset}) != 0 || !target.first || target.second >= target.first->size) continue;
+      result.push_back({RelocationSourceAllocation{AllocationId{static_cast<int64_t>(source->id)}},
+                        LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(target.first->id)},
+                        LongPositive0{static_cast<int64_t>(target.second)}});
+      emitted.emplace(source->id, offset);
     }
   }
   return result;
@@ -1028,25 +939,10 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
     } else {
       scalarStorage[index] = argument.bytes;
       arguments.emplace_back(KernelArgumentScalar{scalarStorage[index]});
-      if (index < kernel->parameterMetadata.size() && !kernel->parameterMetadata[index].containsPointer) continue;
-      scannedBytes += scalarStorage[index].size();
-      for (size_t offset = 0; offset + sizeof(uint64_t) <= scalarStorage[index].size(); offset += sizeof(uint32_t)) {
-        uint64_t raw = 0;
-        std::memcpy(&raw, scalarStorage[index].data() + offset, sizeof(raw));
-        size_t targetOffset = 0;
-        const auto target = findPointer(reinterpret_cast<const void *>(static_cast<uintptr_t>(raw)), &targetOffset);
-        if (target)
-          relocations.push_back({RelocationSourceArgument{IntPositive0{static_cast<int32_t>(index)}},
-                                 LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(target->id)},
-                                 LongPositive0{static_cast<int64_t>(targetOffset)}});
-      }
     }
   }
   auto memoryRelocations = collectRelocations(scannedBytes);
   relocations.insert(relocations.end(), memoryRelocations.begin(), memoryRelocations.end());
-  const auto mirrored = mirrorAllocations();
-  if (mirrored.status != CL_SUCCESS) return mirrored.status;
-  const uint64_t uploadedBytes = mirrored.bytes;
   const Dimensions groupSize{static_cast<int32_t>(group[0]), static_cast<int32_t>(group[1]), static_cast<int32_t>(group[2])};
   const Dimensions groupCount{static_cast<int32_t>(count[0]), static_cast<int32_t>(count[1]), static_cast<int32_t>(count[2])};
   const GlobalDimensions globalSize{static_cast<int64_t>(exact[0]), static_cast<int64_t>(exact[1]), static_cast<int64_t>(exact[2])};
@@ -1058,7 +954,7 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
     std::unique_lock lock(remoteMutex);
     auto launch = state.client->call(Launch{ProgramId{static_cast<int64_t>(kernel->program->remoteId)}, kernel->name, groupSize, groupCount,
                                             globalSize, static_cast<int32_t>(workDimension), globalOffset, 0, 0, std::move(arguments),
-                                            std::move(relocations)});
+                                            std::move(relocations), true});
     launched = launch ? 0 : -1;
     if (launch) completion = launch.value();
     else failureMessage = launch.error().detail;
@@ -1088,25 +984,22 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
         }
         downloadedBytes += rangeSize;
       }
-      for (const auto &relocation : result.pointer_relocations) {
-        if (launched != 0) break;
-        const auto *sourceId = std::get_if<RelocationSourceAllocation>(&relocation.source);
-        if (!sourceId) {
-          launched = -1;
-          break;
-        }
-        const auto source = findAllocation(static_cast<uint64_t>(sourceId->id.value));
-        const auto target = findAllocation(static_cast<uint64_t>(relocation.target.value));
-        const auto sourceOffset = static_cast<size_t>(relocation.sourceOffset.value);
-        const auto targetOffset = static_cast<size_t>(relocation.targetOffset.value);
-        if (!validRange(source, sourceOffset, sizeof(uintptr_t)) || !target || targetOffset > target->size) {
-          launched = -1;
-          break;
-        }
-        const auto address = reinterpret_cast<uintptr_t>(target->data()) + targetOffset;
-        std::memcpy(static_cast<uint8_t *>(source->data()) + sourceOffset, &address, sizeof(address));
-        std::lock_guard relocationsLock(pointerRelocationsMutex);
-        source->pointerRelocations[sourceOffset] = {target, targetOffset};
+      {
+        std::string relocationError;
+        const bool applied = applyPointerRelocations(
+            result.pointer_relocations,
+            [](uint64_t id) -> RelocationTarget {
+              const auto allocation = findAllocation(id);
+              return allocation ? RelocationTarget{allocation->data(), allocation->size} : RelocationTarget{};
+            },
+            [](uint64_t sourceId, uint64_t targetId, uint64_t sourceOffset, uint64_t targetOffset) {
+              const auto source = findAllocation(sourceId);
+              const auto target = findAllocation(targetId);
+              std::lock_guard relocationsLock(pointerRelocationsMutex);
+              source->pointerRelocations[sourceOffset] = {target, targetOffset};
+            },
+            relocationError);
+        if (!applied) launched = -1;
       }
     }
   }
@@ -1114,11 +1007,10 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
     std::fprintf(stderr, "Gemstone OpenCL launch failed: %s\n", failureMessage.empty() ? remoteError() : failureMessage.c_str());
     return CL_OUT_OF_RESOURCES;
   }
-  if (std::getenv("GEMSTONE_PERF_TRACE") != nullptr)
-    std::fprintf(stderr, "Gemstone OpenCL perf: kernel=%s upload=%llu download=%llu scan=%llu relocations=%llu elapsed_us=%llu\n",
-                 kernel->name.c_str(), static_cast<unsigned long long>(uploadedBytes), static_cast<unsigned long long>(downloadedBytes),
-                 static_cast<unsigned long long>(scannedBytes), static_cast<unsigned long long>(relocations.size()),
-                 static_cast<unsigned long long>((nowNanos() - started) / 1000));
+  if (gemstone::traceEnabled("perf"))
+    std::fprintf(stderr, "Gemstone OpenCL perf: kernel=%s download=%llu scan=%llu relocations=%llu elapsed_us=%llu\n", kernel->name.c_str(),
+                 static_cast<unsigned long long>(downloadedBytes), static_cast<unsigned long long>(scannedBytes),
+                 static_cast<unsigned long long>(relocations.size()), static_cast<unsigned long long>((nowNanos() - started) / 1000));
   if (output && makeEvent(queue, CL_COMMAND_NDRANGE_KERNEL, output) == nullptr) return CL_OUT_OF_HOST_MEMORY;
   return CL_SUCCESS;
 }
@@ -1647,11 +1539,18 @@ CL_API_ENTRY cl_context CL_API_CALL clCreateContext(const cl_context_properties 
   result->identity = nextContextIdentity.fetch_add(1, std::memory_order_relaxed);
   result->device = &device;
   if (properties) {
-    for (size_t index = 0; properties[index] != 0; index += 2) {
-      result->properties.push_back(properties[index]);
-      result->properties.push_back(properties[index + 1]);
+    try {
+      for (size_t index = 0; properties[index] != 0; index += 2) {
+        result->properties.push_back(properties[index]);
+        result->properties.push_back(properties[index + 1]);
+      }
+      result->properties.push_back(0);
+    } catch (const std::exception &) {
+      unregisterLiveObject(result);
+      delete result;
+      if (error) *error = CL_OUT_OF_HOST_MEMORY;
+      return nullptr;
     }
-    result->properties.push_back(0);
   }
   if (error) *error = CL_SUCCESS;
   return reinterpret_cast<cl_context>(result);
@@ -1775,11 +1674,17 @@ CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_
   auto result = clCreateCommandQueue(context, deviceValue, queueProperties, error);
   if (result && properties) {
     auto *queue = reinterpret_cast<_cl_command_queue *>(result);
-    for (size_t index = 0; properties[index] != 0; index += 2) {
-      queue->propertiesArray.push_back(properties[index]);
-      queue->propertiesArray.push_back(properties[index + 1]);
+    try {
+      for (size_t index = 0; properties[index] != 0; index += 2) {
+        queue->propertiesArray.push_back(properties[index]);
+        queue->propertiesArray.push_back(properties[index + 1]);
+      }
+      queue->propertiesArray.push_back(0);
+    } catch (const std::exception &) {
+      clReleaseCommandQueue(result);
+      if (error) *error = CL_OUT_OF_HOST_MEMORY;
+      return nullptr;
     }
-    queue->propertiesArray.push_back(0);
   }
   return result;
 }
@@ -1940,9 +1845,7 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreateImageWithProperties(cl_context value, co
   return clCreateImage(value, 0, nullptr, nullptr, nullptr, error);
 }
 
-CL_API_ENTRY cl_int CL_API_CALL clGetImageInfo(cl_mem value, cl_image_info, size_t, void *, size_t *) {
-  return checked(reinterpret_cast<_cl_mem *>(value), Kind::Memory) == nullptr ? CL_INVALID_MEM_OBJECT : CL_INVALID_MEM_OBJECT;
-}
+CL_API_ENTRY cl_int CL_API_CALL clGetImageInfo(cl_mem, cl_image_info, size_t, void *, size_t *) { return CL_INVALID_MEM_OBJECT; }
 
 CL_API_ENTRY cl_int CL_API_CALL clGetPipeInfo(cl_mem value, cl_pipe_info, size_t, void *, size_t *) {
   if (!checked(reinterpret_cast<_cl_mem *>(value), Kind::Memory)) return CL_INVALID_MEM_OBJECT;
@@ -2252,9 +2155,19 @@ CL_API_ENTRY cl_int CL_API_CALL clSetProgramSpecializationConstant(cl_program va
                                                                    const void *specValue) {
   auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
   if (!program || !program->createdWithIL) return CL_INVALID_PROGRAM;
-  const auto constant = gemstone::spirv::findSpecializationConstant(program->originalIL, specId);
-  if (!constant) return CL_INVALID_SPEC_ID;
-  if (!specValue || specSize != constant->byteSize) return CL_INVALID_VALUE;
+  auto &state = remoteState();
+  if (!state.ready) return CL_OUT_OF_RESOURCES;
+  if (!program->specializationSizesLoaded) {
+    std::lock_guard lock(remoteMutex);
+    auto described = state.client->call(DescribeSpecialization{program->originalIL});
+    if (!described) return CL_INVALID_PROGRAM;
+    for (const auto &info : described.value())
+      program->specializationSizes.emplace(static_cast<cl_uint>(info.specId.value), static_cast<size_t>(info.byteSize.value));
+    program->specializationSizesLoaded = true;
+  }
+  const auto constant = program->specializationSizes.find(specId);
+  if (constant == program->specializationSizes.end()) return CL_INVALID_SPEC_ID;
+  if (!specValue || specSize != constant->second) return CL_INVALID_VALUE;
   const auto *bytes = static_cast<const uint8_t *>(specValue);
   program->specializationConstants[specId].assign(bytes, bytes + specSize);
   return CL_SUCCESS;
@@ -2275,11 +2188,28 @@ CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, 
       }
       program->remoteId = 0;
     }
-    if (!gemstone::spirv::specializeSpirv(program->originalIL, program->specializationConstants, program->il)) {
-      program->buildStatus = CL_BUILD_ERROR;
-      program->buildLog = "invalid SPIR-V specialization constant";
-      if (notify) notify(value, user);
-      return CL_BUILD_PROGRAM_FAILURE;
+    std::vector<SpecializationConstant> constants;
+    constants.reserve(program->specializationConstants.size());
+    for (const auto &[id, bytes] : program->specializationConstants)
+      constants.push_back(SpecializationConstant{IntPositive0{static_cast<int32_t>(id)}, bytes});
+    if (constants.empty()) program->il = program->originalIL;
+    else {
+      auto &state = remoteState();
+      if (!state.ready) {
+        program->buildStatus = CL_BUILD_ERROR;
+        program->buildLog = remoteError();
+        if (notify) notify(value, user);
+        return CL_BUILD_PROGRAM_FAILURE;
+      }
+      std::lock_guard lock(remoteMutex);
+      auto specialized = state.client->call(SpecializeImage{program->originalIL, constants});
+      if (!specialized) {
+        program->buildStatus = CL_BUILD_ERROR;
+        program->buildLog = remoteError();
+        if (notify) notify(value, user);
+        return CL_BUILD_PROGRAM_FAILURE;
+      }
+      program->il = std::move(specialized.value());
     }
   }
   const std::string source = program->buildSource.empty() ? program->source : program->buildSource;
@@ -2682,7 +2612,11 @@ CL_API_ENTRY cl_kernel CL_API_CALL clCreateKernel(cl_program value, const char *
   }
   const auto &remoteMetadata = described.value();
   kernel->expectedArguments = static_cast<cl_uint>(remoteMetadata.parameters.size());
-  kernel->requiredWorkGroupSize = sourceRequiredWorkGroupSize(kernelSource);
+  kernel->requiredWorkGroupSize = remoteMetadata.requiredWorkGroupSize
+                                      ? std::array<size_t, 3>{static_cast<size_t>(remoteMetadata.requiredWorkGroupSize->x.value),
+                                                              static_cast<size_t>(remoteMetadata.requiredWorkGroupSize->y.value),
+                                                              static_cast<size_t>(remoteMetadata.requiredWorkGroupSize->z.value)}
+                                      : std::array<size_t, 3>{0, 0, 0};
   kernel->staticLocalMemory = sourceStaticLocalMemory(kernelSource);
   kernel->attributes = sourceKernelAttributes(kernelSource);
   kernel->expectedArgumentSizes.reserve(remoteMetadata.parameters.size());
@@ -2777,9 +2711,8 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArg(cl_kernel value, cl_uint index, s
   auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
   if (!kernel) return CL_INVALID_KERNEL;
   if (index >= kernel->expectedArguments) return CL_INVALID_ARG_INDEX;
-  if (!argument && size == 0) return CL_INVALID_ARG_SIZE;
-  if (argument && size == 0) return CL_INVALID_ARG_SIZE;
-  if (std::getenv("GEMSTONE_PERF_TRACE") != nullptr)
+  if (size == 0) return CL_INVALID_ARG_SIZE;
+  if (gemstone::traceEnabled("perf"))
     std::fprintf(stderr, "Gemstone OpenCL argument kernel=%s index=%u size=%zu expected=%zu local=%d aggregate=%d null=%d\n",
                  kernel->name.c_str(), index, size, index < kernel->expectedArgumentSizes.size() ? kernel->expectedArgumentSizes[index] : 0,
                  index < kernel->parameterMetadata.size() && kernel->parameterMetadata[index].local,
@@ -2861,11 +2794,10 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArgSVMPointer(cl_kernel value, cl_uin
   size_t offset = 0;
   auto allocation = findPointer(argument, &offset);
   if (!allocation) {
-    if (std::getenv("GEMSTONE_PERF_TRACE") != nullptr)
+    if (gemstone::traceEnabled("perf"))
       std::fprintf(stderr, "Gemstone OpenCL SVM argument kernel=%s index=%u pointer=%p\n", kernel->name.c_str(), index, argument);
     return CL_INVALID_ARG_VALUE;
   }
-  if (index >= kernel->expectedArguments) return CL_INVALID_ARG_INDEX;
   auto &output = kernel->arguments[index];
   output.kind = ::KernelArgument::Kind::SVM;
   output.allocation = std::move(allocation);
@@ -3669,7 +3601,6 @@ CL_API_ENTRY void *CL_API_CALL clSVMAlloc(cl_context contextValue, cl_svm_mem_fl
   cl_int error = CL_SUCCESS;
   auto allocation = allocate(size, &error, alignment, true);
   if (allocation) {
-    allocation->externallyMutable.store(true, std::memory_order_relaxed);
     allocation->runtimeOwnsBase = true;
     allocation->svmContextIdentity = context->identity;
   }
@@ -3900,7 +3831,6 @@ void *allocateUSM(cl_context contextValue, cl_device_id deviceValue, cl_unified_
   }
   auto allocation = allocate(size, error, alignment, type != CL_MEM_TYPE_DEVICE_INTEL);
   if (allocation) {
-    allocation->externallyMutable.store(type != CL_MEM_TYPE_DEVICE_INTEL, std::memory_order_relaxed);
     allocation->runtimeOwnsBase = true;
     allocation->svmContextIdentity = context->identity;
     allocation->usmType = type;

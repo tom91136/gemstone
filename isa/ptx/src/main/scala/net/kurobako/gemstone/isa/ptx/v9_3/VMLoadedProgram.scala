@@ -163,9 +163,6 @@ private[v9_3] final class VMLoadedProgram private (
 }
 
 private[v9_3] object VMLoadedProgram {
-  private inline val AllocationSpan   = 0x0000010000000000L
-  private inline val ModuleSharedBase = 0x0000000020000000L
-
   private[v9_3] final case class GlobalDefinition(size: Int :| Positive, initial: Vec[Byte] :| MinLength[1])
 
   def load(program: Program): Either[Fault, VMLoadedProgram] = {
@@ -240,7 +237,7 @@ private[v9_3] object VMLoadedProgram {
               address <- addresses.address(region, offset)
             } yield values.updated(
               parameter.name,
-              Argument(LittleEndian.toVec(address.value, ScalarByteWidth(8)).refineUnsafe[MinLength[1]])
+              Argument(LittleEndian.toVec(address.value, ScalarByteWidth.Qword).refineUnsafe[MinLength[1]])
             )
           case KernelTask.Argument.Local(size) =>
             Left(Fault.Unsupported(
@@ -267,7 +264,7 @@ private[v9_3] object VMLoadedProgram {
                   targetOffset
                 ) if source == index =>
               addresses.address(target, targetOffset).map { address =>
-                LittleEndian.write(address.value, relocated, sourceOffset.toInt, ScalarByteWidth(8))
+                LittleEndian.write(address.value, relocated, sourceOffset.toInt, ScalarByteWidth.Qword)
               }
             case _ => Right(())
           }
@@ -279,7 +276,10 @@ private[v9_3] object VMLoadedProgram {
     statements.collect {
       case Statement.Data(DataAddressSpace.Shared, _, _, name, _, _) => name
     }.distinct.zipWithIndex.map { case (name, index) =>
-      name -> Math.addExact(ModuleSharedBase, Math.multiplyExact(index.toLong, AllocationSpan))
+      name -> Math.addExact(
+        PTXAddressSpace.ModuleSharedBase,
+        Math.multiplyExact(index.toLong, PTXAddressSpace.ModuleSharedStride)
+      )
     }.toMap
 
   private def globalDefinitions(

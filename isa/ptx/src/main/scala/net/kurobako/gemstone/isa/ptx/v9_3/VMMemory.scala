@@ -22,16 +22,16 @@ private[v9_3] final class VMMemory(memory: Memory, addresses: AddressSpace) exte
     addresses.prepareReads(ranges).left.map(error(GuestAddress(0), 0, _))
 
   override def readInt8(address: GuestAddress): Either[MemoryError, Byte] =
-    readValue(address, MemoryValueByteWidth(1)).map(_.toByte)
+    readValue(address, MemoryValueByteWidth.Byte).map(_.toByte)
 
   override def readInt32(address: GuestAddress): Either[MemoryError, Int] =
-    readValue(address, MemoryValueByteWidth(4)).map(_.toInt)
+    readValue(address, MemoryValueByteWidth.Dword).map(_.toInt)
 
   override def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit] =
-    writeValue(address, value.toLong, MemoryValueByteWidth(1))
+    writeValue(address, value.toLong, MemoryValueByteWidth.Byte)
 
   override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
-    writeValue(address, value.toLong, MemoryValueByteWidth(4))
+    writeValue(address, value.toLong, MemoryValueByteWidth.Dword)
 
   override def readBytes(address: GuestAddress, size: Int :| Positive0): Either[MemoryError, Vec[Byte]] =
     addresses.read(memory, address, size).left.map(error(address, size, _))

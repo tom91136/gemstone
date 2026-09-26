@@ -14,7 +14,7 @@ import scala.util.Using
 /** The same mixed-backing and pointer-publication scenarios run through every native API. */
 final class UnifiedMemoryReviewSuite extends munit.FunSuite {
   override val munitTimeout = 150.seconds
-  for (api <- List("cuda", "hip", "hsa", "levelzero", "opencl", "sycl"))
+  for (api <- List("cuda", "hip", "hsa", "levelzero", "opencl"))
     test(s"$api mixed memory and pointer publication") {
       val directory = NativeTestProcess.nativeDirectory
       val client    = directory.resolve(s"gemstone_memory_$api")
@@ -27,24 +27,21 @@ final class UnifiedMemoryReviewSuite extends munit.FunSuite {
           TaskLimits(1000000000, 64),
           Map("GEMSTONE_EXECUTION_PARALLELISM" -> "2")
         )) { server =>
-          val libraries = directory.resolve("gemstone_memory_sycl.library-path")
-          val extra     = if (api == "sycl" && Files.isRegularFile(libraries)) Files.readString(libraries) else ""
-          val result    = NativeTestProcess.run(
+          val result = NativeTestProcess.run(
             Vector(client.toString.refineUnsafe[NoNul]).refineUnsafe[MinLength[1]],
             directory,
             Environment(
               Map(
-                "GEMSTONE_MEMORY_REVIEW_PROBE" -> "1",
-                "GEMSTONE_RPC_PORT"            -> server.port.value.toString,
-                "GEMSTONE_RPC_CLIENT"          -> server.client.value.toString,
-                "LD_LIBRARY_PATH"              ->
-                  List(directory.toString, extra, sys.env.getOrElse("LD_LIBRARY_PATH", "")).mkString(":"),
-                "ZE_ENABLE_ALT_DRIVERS"  -> directory.resolve("libze_gemstone.so.1").toString,
-                "OCL_ICD_VENDORS"        -> vendors.toString,
-                "OCL_ICD_FILENAMES"      -> directory.resolve("libOpenCL_gemstone.so.1").toString,
-                "ONEAPI_DEVICE_SELECTOR" -> "opencl:*"
+                "GEMSTONE_MEMORY_PROBE" -> "review",
+                "GEMSTONE_RPC_PORT"     -> server.port.value.toString,
+                "GEMSTONE_RPC_CLIENT"   -> server.client.value.toString,
+                "LD_LIBRARY_PATH"       ->
+                  List(directory.toString, sys.env.getOrElse("LD_LIBRARY_PATH", "")).mkString(":"),
+                "ZE_ENABLE_ALT_DRIVERS" -> directory.resolve("libze_gemstone.so.1").toString,
+                "OCL_ICD_VENDORS"       -> vendors.toString,
+                "OCL_ICD_FILENAMES"     -> directory.resolve("libOpenCL_gemstone.so.1").toString
               ),
-              Set("GEMSTONE_CUDA_SYSTEM_PAGING", "GEMSTONE_HSA_SYSTEM_PAGING", "UR_ADAPTERS_FORCE_LOAD")
+              Set("GEMSTONE_SYSTEM_PAGING", "UR_ADAPTERS_FORCE_LOAD")
             ),
             120.seconds
           )

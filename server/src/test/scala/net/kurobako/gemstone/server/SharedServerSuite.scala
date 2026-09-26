@@ -62,10 +62,6 @@ final class SharedServerSuite extends munit.FunSuite {
       assert(a != b)
       val firstAllocation = register(first, 4L)
       assert(first.call(Operation.ReadAllocation(firstAllocation, 0L, 4)).isRight)
-      assertEquals(
-        control(server.port, ServerControl.QueryUsage, Some(b))(input => input.readLong() -> input.readLong()),
-        0L -> 0L
-      )
       assert(second.call(Operation.ReadAllocation(firstAllocation, 0L, 4)).isLeft)
       val secondAllocation = register(second, 4L)
       assert(second.call(Operation.ReadAllocation(secondAllocation, 0L, 4)).isRight)

@@ -9,8 +9,20 @@ import Paths.*
 
 /** Pruning file discovery shared by the codestyle checks. */
 object Sources {
-  private val ignoredSegments = Set(".bloop", ".git", ".metals", "licenses", "target", "third_party", "vendor")
-  private val ignoredNames    = Set("PLAN.md", "CLEAN_UP_PLAN.md")
+  private val ignoredSegments =
+    Set(
+      ".bloop",
+      ".bsp",
+      ".cache",
+      ".git",
+      ".metals",
+      ".scala-build",
+      "build",
+      "licenses",
+      "target",
+      "third_party",
+      "vendor"
+    )
 
   private val nativeExtensions =
     Set("c", "cc", "cpp", "cxx", "cu", "h", "hh", "hip", "hpp", "hxx", "inc", "inl")
@@ -55,7 +67,7 @@ object Sources {
       path => {
         val name  = path.fileName
         val upper = name.toUpperCase(Locale.ROOT)
-        !exclude(path) && !ignoredNames(name) && !upper.startsWith("LICENSE") && !upper.startsWith("LICENCE") &&
+        !exclude(path) && !upper.startsWith("LICENSE") && !upper.startsWith("LICENCE") &&
         (textFileNames(name) || extension(path).exists(textExtensions))
       }
     )

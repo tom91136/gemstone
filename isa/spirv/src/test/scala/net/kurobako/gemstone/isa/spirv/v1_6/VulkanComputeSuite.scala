@@ -75,7 +75,7 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
     val memory     = ArrayMemory(allocation, 16)
     for ((offset, bits) <- Vec(4L -> 0x40000000L, 8L -> 0x40400000L, 12L -> 0x40800000L))
       assertEquals(
-        memory.write(allocation, offset.refineUnsafe[Positive0], LittleEndian.toVec(bits, ScalarByteWidth(4))),
+        memory.write(allocation, offset.refineUnsafe[Positive0], LittleEndian.toVec(bits, ScalarByteWidth.Dword)),
         Right(())
       )
     val task = KernelTask.validated(
@@ -85,7 +85,7 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
       Vec(KernelTask.Argument.Memory(allocation, 0L), KernelTask.Argument.Memory(allocation, 4L))
     ).fold(message => fail(message), identity)
     val _ = machine.execute(loaded, task, memory, TaskControl.default).fold(error => fail(error.message), identity)
-    assertEquals(memory.bytes.take(4), LittleEndian.toVec(0x41200000L, ScalarByteWidth(4)))
+    assertEquals(memory.bytes.take(4), LittleEndian.toVec(0x41200000L, ScalarByteWidth.Dword))
   }
 
   test("GLSL.std.450 Sin executes in a GLCompute shader") {
@@ -97,7 +97,7 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
     val memory     = ArrayMemory(allocation, 16)
     for ((offset, bits) <- Vec(4L -> 0x40000000L, 8L -> 0x40400000L, 12L -> 0x40800000L))
       assertEquals(
-        memory.write(allocation, offset.refineUnsafe[Positive0], LittleEndian.toVec(bits, ScalarByteWidth(4))),
+        memory.write(allocation, offset.refineUnsafe[Positive0], LittleEndian.toVec(bits, ScalarByteWidth.Dword)),
         Right(())
       )
     val task = KernelTask.validated(
@@ -107,7 +107,7 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
       Vec(KernelTask.Argument.Memory(allocation, 0L), KernelTask.Argument.Memory(allocation, 4L))
     ).fold(message => fail(message), identity)
     val _      = machine.execute(loaded, task, memory, TaskControl.default).fold(error => fail(error.message), identity)
-    val result = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth(4)).toInt)
+    val result = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth.Dword).toInt)
     assertEqualsDouble(result.toDouble, 4.0 + math.sin(2.0), 0.000001)
   }
 
@@ -120,7 +120,7 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
     val memory     = ArrayMemory(allocation, 16)
     for ((offset, bits) <- Vec(4L -> 0x40000000L, 8L -> 0x40400000L, 12L -> 0x40800000L))
       assertEquals(
-        memory.write(allocation, offset.refineUnsafe[Positive0], LittleEndian.toVec(bits, ScalarByteWidth(4))),
+        memory.write(allocation, offset.refineUnsafe[Positive0], LittleEndian.toVec(bits, ScalarByteWidth.Dword)),
         Right(())
       )
     val task = KernelTask.validated(
@@ -130,7 +130,7 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
       Vec(KernelTask.Argument.Memory(allocation, 0L), KernelTask.Argument.Memory(allocation, 4L))
     ).fold(message => fail(message), identity)
     val _      = machine.execute(loaded, task, memory, TaskControl.default).fold(error => fail(error.message), identity)
-    val result = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth(4)).toInt)
+    val result = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth.Dword).toInt)
     assertEqualsDouble(result.toDouble, 12.0, 0.000001)
   }
 }

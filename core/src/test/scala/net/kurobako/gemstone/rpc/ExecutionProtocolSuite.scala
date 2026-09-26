@@ -12,7 +12,11 @@ final class ExecutionProtocolSuite extends munit.FunSuite {
   private final case class UncheckedKernelMetadata(
       argumentBlockSize: Int :| Positive0,
       explicitParameterCount: Int :| Positive0,
-      parameters: Vec[KernelParameterMetadata]
+      parameters: Vec[KernelParameterMetadata],
+      requiredWorkGroupSize: Option[Dimensions] = None,
+      workGroupSizeHint: Option[Dimensions] = None,
+      bindingIndices: Vec[Int :| Positive0] = Vec.empty,
+      entryPointId: Option[Int :| Positive0] = None
   ) derives Codec
 
   private final case class UncheckedProgramGlobalMetadata(

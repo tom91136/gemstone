@@ -482,95 +482,9 @@ object RPCJournal {
     // Ownership transfers to Reader after validation; failures close the not-yet-transferred handle below.
     try {
       ensure(input.length() <= limits.maxArchiveBytes, "archive exceeds reader byte limit")
-      val headerRecord = readRecord(input, MetadataRecordLimit) match {
-        case Some((_, value: HeaderRecord)) => value
-        case _                              => invalid("archive does not start with a header")
-      }
-      ensure(headerRecord.format == Format && headerRecord.version == Version, "unknown archive format/version")
-      val maxFrameBytes = headerRecord.maxFrameBytes.refineEither[Interval.Closed[1, MaximumFrameBytes]]
-        .fold(message => invalid(s"invalid frame byte limit: $message"), value => value)
-      val maxArchiveBytes = headerRecord.maxArchiveBytes.refineEither[Greater[MinimumArchiveBytes]]
-        .fold(message => invalid(s"invalid archive byte limit: $message"), value => value)
-      val maxEvents = headerRecord.maxEvents.refineEither[Positive]
-        .fold(message => invalid(s"invalid event limit: $message"), value => value)
-      val declared = Limits(maxFrameBytes, maxArchiveBytes, maxEvents)
-      ensure(
-        declared.maxFrameBytes <= limits.maxFrameBytes && declared.maxArchiveBytes <= limits.maxArchiveBytes &&
-          declared.maxEvents <= limits.maxEvents,
-        "archive limits exceed reader limits"
-      )
-      ensure(input.length() <= declared.maxArchiveBytes, "archive exceeds its declared byte limit")
-      val profile = headerRecord.executionProfile.map { profile =>
-        val maxInstructions = profile.maxInstructions.refineEither[Positive]
-          .fold(message => invalid(s"invalid maximum instruction count: $message"), value => value)
-        val quantum = profile.quantum.refineEither[Positive]
-          .fold(message => invalid(s"invalid execution quantum: $message"), value => value)
-        val parallelism = profile.parallelism.refineEither[Positive]
-          .fold(message => invalid(s"invalid execution parallelism: $message"), value => value)
-        ExecutionProfile(maxInstructions, quantum, parallelism)
-      }
-      val protocolIdentity = ProtocolIdentity.either(headerRecord.protocolIdentity)
-        .fold(message => invalid(s"invalid protocol identity: $message"), value => value)
-      val header      = Header(protocolIdentity, declared, profile)
-      val events      = Vec.newBuilder[Event]
-      val locations   = mutable.Map.empty[EventId, RecordLocation]
-      val order       = Order()
-      val recordLimit = declared.maxFrameBytes + RecordOverheadBytes
-      @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-      var count = 0
-      @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-      var frames = 0
-      @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-      var summary = Option.empty[Summary]
-      while (summary.isEmpty)
-        readRecord(input, math.max(recordLimit, MetadataRecordLimit)) match {
-          case Some((location, EventRecord(sequence, code, client, connection, frame))) =>
-            ensure(count < declared.maxEvents, "too many events")
-            val kind = Kind.values.find(_.code == code).getOrElse(invalid("unknown event kind"))
-            ensure(sequence == count.toLong, "event sequence is not contiguous")
-            ensure(frame.nonEmpty == kind.hasFrame, "event frame does not match its kind")
-            frame.foreach(bytes => RPCJournal.Frames.validate(kind, bytes, declared.maxFrameBytes, normalized = true))
-            val eventId = EventId.either(sequence)
-              .fold(message => invalid(s"invalid event identity: $message"), value => value)
-            val clientId = RecordedClientId.either(client)
-              .fold(message => invalid(s"invalid client identity: $message"), value => value)
-            val connectionId = if (kind == Kind.ClientClose) {
-              ensure(connection == 0L, "client close has a connection identity")
-              None
-            } else Some(RecordedConnectionId.either(connection)
-              .fold(message => invalid(s"invalid connection identity: $message"), value => value))
-            val event = Event(eventId, kind, clientId, connectionId)
-            order.accept(event, frame.getOrElse(Array.emptyByteArray))
-            if (kind.hasFrame) { frames += 1; locations.update(eventId, location) }
-            events += event
-            count += 1
-          case Some((location, FooterRecord(expectedEvents, expectedFrames, replayable, reason))) =>
-            ensure(location.payloadBytes <= MetadataRecordLimit, "archive footer exceeds its byte limit")
-            ensure(expectedEvents == count && expectedFrames == frames, "footer totals differ")
-            val failure = reason.map(raw =>
-              FailureReason.either(raw)
-                .fold(message => invalid(s"invalid failure reason: $message"), value => value)
-            )
-            ensure(replayable == failure.isEmpty, "footer status and reason differ")
-            ensure(input.getFilePointer == input.length(), "bytes follow archive footer")
-            ensure(
-              !replayable || (order.complete && failure.isEmpty),
-              "replayable footer describes incomplete exchanges"
-            )
-            val storedBytes = input.length().refineEither[Positive]
-              .fold(message => invalid(s"invalid archive size: $message"), value => value)
-            summary = Some(Summary(
-              header,
-              count.refineUnsafe[Positive0],
-              frames.refineUnsafe[Positive0],
-              storedBytes,
-              replayable,
-              failure
-            ))
-          case Some((_, _: HeaderRecord)) => invalid("duplicate archive header")
-          case None                       => invalid("incomplete archive/footer")
-        }
-      Reader(input, summary.getOrElse(invalid("archive footer is absent")), events.result(), locations.toMap)
+      val (header, declared)           = readHeader(input, limits)
+      val (events, locations, summary) = readEvents(input, header, declared)
+      Reader(input, summary, events, locations)
     } catch {
       case error: IOException              => closeAfterFailure(input, error)
       case error: IllegalArgumentException =>
@@ -579,6 +493,105 @@ object RPCJournal {
         closeAfterFailure(input, IOException("RPC journal: invalid archive limits", error))
       case NonFatal(error) => closeAfterFailure(input, error)
     }
+  }
+
+  private def readHeader(input: RandomAccessFile, limits: Limits): (Header, Limits) = {
+    val headerRecord = readRecord(input, MetadataRecordLimit) match {
+      case Some((_, value: HeaderRecord)) => value
+      case _                              => invalid("archive does not start with a header")
+    }
+    ensure(headerRecord.format == Format && headerRecord.version == Version, "unknown archive format/version")
+    val maxFrameBytes = headerRecord.maxFrameBytes.refineEither[Interval.Closed[1, MaximumFrameBytes]]
+      .fold(message => invalid(s"invalid frame byte limit: $message"), value => value)
+    val maxArchiveBytes = headerRecord.maxArchiveBytes.refineEither[Greater[MinimumArchiveBytes]]
+      .fold(message => invalid(s"invalid archive byte limit: $message"), value => value)
+    val maxEvents = headerRecord.maxEvents.refineEither[Positive]
+      .fold(message => invalid(s"invalid event limit: $message"), value => value)
+    val declared = Limits(maxFrameBytes, maxArchiveBytes, maxEvents)
+    ensure(
+      declared.maxFrameBytes <= limits.maxFrameBytes && declared.maxArchiveBytes <= limits.maxArchiveBytes &&
+        declared.maxEvents <= limits.maxEvents,
+      "archive limits exceed reader limits"
+    )
+    ensure(input.length() <= declared.maxArchiveBytes, "archive exceeds its declared byte limit")
+    val profile = headerRecord.executionProfile.map { profile =>
+      val maxInstructions = profile.maxInstructions.refineEither[Positive]
+        .fold(message => invalid(s"invalid maximum instruction count: $message"), value => value)
+      val quantum = profile.quantum.refineEither[Positive]
+        .fold(message => invalid(s"invalid execution quantum: $message"), value => value)
+      val parallelism = profile.parallelism.refineEither[Positive]
+        .fold(message => invalid(s"invalid execution parallelism: $message"), value => value)
+      ExecutionProfile(maxInstructions, quantum, parallelism)
+    }
+    val protocolIdentity = ProtocolIdentity.either(headerRecord.protocolIdentity)
+      .fold(message => invalid(s"invalid protocol identity: $message"), value => value)
+    Header(protocolIdentity, declared, profile) -> declared
+  }
+
+  private def readEvents(
+      input: RandomAccessFile,
+      header: Header,
+      declared: Limits
+  ): (Vec[Event], Map[EventId, RecordLocation], Summary) = {
+    val events      = Vec.newBuilder[Event]
+    val locations   = mutable.Map.empty[EventId, RecordLocation]
+    val order       = Order()
+    val recordLimit = declared.maxFrameBytes + RecordOverheadBytes
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    var count = 0
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    var frames = 0
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    var summary = Option.empty[Summary]
+    while (summary.isEmpty)
+      readRecord(input, math.max(recordLimit, MetadataRecordLimit)) match {
+        case Some((location, EventRecord(sequence, code, client, connection, frame))) =>
+          ensure(count < declared.maxEvents, "too many events")
+          val kind = Kind.values.find(_.code == code).getOrElse(invalid("unknown event kind"))
+          ensure(sequence == count.toLong, "event sequence is not contiguous")
+          ensure(frame.nonEmpty == kind.hasFrame, "event frame does not match its kind")
+          frame.foreach(bytes => RPCJournal.Frames.validate(kind, bytes, declared.maxFrameBytes, normalized = true))
+          val eventId = EventId.either(sequence)
+            .fold(message => invalid(s"invalid event identity: $message"), value => value)
+          val clientId = RecordedClientId.either(client)
+            .fold(message => invalid(s"invalid client identity: $message"), value => value)
+          val connectionId = if (kind == Kind.ClientClose) {
+            ensure(connection == 0L, "client close has a connection identity")
+            None
+          } else Some(RecordedConnectionId.either(connection)
+            .fold(message => invalid(s"invalid connection identity: $message"), value => value))
+          val event = Event(eventId, kind, clientId, connectionId)
+          order.accept(event, frame.getOrElse(Array.emptyByteArray))
+          if (kind.hasFrame) { frames += 1; locations.update(eventId, location) }
+          events += event
+          count += 1
+        case Some((location, FooterRecord(expectedEvents, expectedFrames, replayable, reason))) =>
+          ensure(location.payloadBytes <= MetadataRecordLimit, "archive footer exceeds its byte limit")
+          ensure(expectedEvents == count && expectedFrames == frames, "footer totals differ")
+          val failure: Option[FailureReason] = reason.map(raw =>
+            FailureReason.either(raw)
+              .fold(message => invalid(s"invalid failure reason: $message"), value => value)
+          )
+          ensure(replayable == failure.isEmpty, "footer status and reason differ")
+          ensure(input.getFilePointer == input.length(), "bytes follow archive footer")
+          ensure(
+            !replayable || (order.complete && failure.isEmpty),
+            "replayable footer describes incomplete exchanges"
+          )
+          val storedBytes = input.length().refineEither[Positive]
+            .fold(message => invalid(s"invalid archive size: $message"), value => value)
+          summary = Some(Summary(
+            header,
+            count.refineUnsafe[Positive0],
+            frames.refineUnsafe[Positive0],
+            storedBytes,
+            replayable,
+            failure
+          ))
+        case Some((_, _: HeaderRecord)) => invalid("duplicate archive header")
+        case None                       => invalid("incomplete archive/footer")
+      }
+    (events.result(), locations.toMap, summary.getOrElse(invalid("archive footer is absent")))
   }
 
   private def closeAfterFailure(input: RandomAccessFile, error: Throwable): Nothing =

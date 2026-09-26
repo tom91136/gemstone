@@ -318,12 +318,7 @@ private[v1_6] object VMMemory {
               }
               Right(result)
           }
-        case Region.Null =>
-          Left(Fault.InvalidTask("cannot read through a null SPIR-V pointer"))
-        case Region.Opaque(bits) =>
-          Left(Fault.InvalidTask(
-            s"cannot read through opaque SPIR-V pointer 0x${java.lang.Long.toHexString(bits)}"
-          ))
+        case region @ (Region.Null | Region.Opaque(_)) => Left(regionFailure(region, "read through"))
       }
 
     def readScalar(pointer: Pointer, size: MemoryValueByteWidth): Either[Fault, Long] = {
@@ -378,12 +373,7 @@ private[v1_6] object VMMemory {
             }
             Right(value)
         }
-      case Region.Null =>
-        Left(Fault.InvalidTask("cannot read scalar through a null SPIR-V pointer"))
-      case Region.Opaque(bits) =>
-        Left(Fault.InvalidTask(
-          s"cannot read scalar through opaque SPIR-V pointer 0x${java.lang.Long.toHexString(bits)}"
-        ))
+      case region @ (Region.Null | Region.Opaque(_)) => Left(regionFailure(region, "read scalar through"))
     }
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -475,7 +465,7 @@ private[v1_6] object VMMemory {
                 val copied       = typed.filter(_.region != Region.Null).orElse {
                   readScalar(
                     Pointer(origin.region, sourceOffset, template.pointee, template.storageClass),
-                    MemoryValueByteWidth(8)
+                    MemoryValueByteWidth.Qword
                   ).toOption.flatMap(raw => integerPointer(raw, template.pointee, template.storageClass).toOption)
                 }
                 copied.foreach(pointer => target.update(destinationOffset, pointerType -> pointer))
@@ -497,12 +487,15 @@ private[v1_6] object VMMemory {
               )
             )
             .flatMap(offset => flush().flatMap(_ => memory.atomicModifyValue(id, offset, size)(value => value)))
-        case Region.Null         => Left(Fault.InvalidTask("cannot atomically read a null SPIR-V pointer"))
-        case Region.Opaque(bits) =>
-          Left(Fault.InvalidTask(
-            s"cannot atomically read opaque SPIR-V pointer 0x${java.lang.Long.toHexString(bits)}"
-          ))
+        case region @ (Region.Null | Region.Opaque(_)) => Left(regionFailure(region, "atomically read"))
       }
+
+    private def regionFailure(region: Region, operation: String): Fault = region match {
+      case Region.Null         => Fault.InvalidTask(s"cannot $operation a null SPIR-V pointer")
+      case Region.Opaque(bits) =>
+        Fault.InvalidTask(s"cannot $operation opaque SPIR-V pointer 0x${java.lang.Long.toHexString(bits)}")
+      case _ => Fault.InvalidTask(s"cannot $operation SPIR-V pointer")
+    }
 
     def atomicWriteScalar(
         pointer: Pointer,
@@ -531,11 +524,7 @@ private[v1_6] object VMMemory {
             Fault.InvalidTask(s"invalid external atomic offset ${pointer.offset}")
           )
           .flatMap(offset => flush().flatMap(_ => memory.atomicModifyValue(id, offset, size)(update)))
-      case Region.Null         => Left(Fault.InvalidTask("cannot atomically modify a null SPIR-V pointer"))
-      case Region.Opaque(bits) =>
-        Left(Fault.InvalidTask(
-          s"cannot atomically modify opaque SPIR-V pointer 0x${java.lang.Long.toHexString(bits)}"
-        ))
+      case region @ (Region.Null | Region.Opaque(_)) => Left(regionFailure(region, "atomically modify"))
     }
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))

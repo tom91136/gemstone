@@ -24,7 +24,7 @@ final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSuppo
     val bytes                                                          = Array.ofDim[Byte](16 + groups * 8)
     private val lock                                                   = ReentrantLock()
     override protected val regionSizes: Iterable[(MemoryRegion, Long)] = Seq(allocation -> bytes.length.toLong)
-    LittleEndian.write(old, bytes, 0, ScalarByteWidth(8))
+    LittleEndian.write(old, bytes, 0, ScalarByteWidth.Qword)
     def read(id: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
       Either.cond(
         id == allocation && ByteRange.contains(bytes.length, offset, size),
@@ -85,8 +85,8 @@ final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSuppo
       testDimensions(groups),
       Vec(
         KernelTask.Argument.Memory(allocation, 0),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(operand, ScalarByteWidth(8))),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(7, ScalarByteWidth(8)))
+        KernelTask.Argument.Scalar(LittleEndian.toVec(operand, ScalarByteWidth.Qword)),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(7, ScalarByteWidth.Qword))
       )
     ).toOption.get
     val memory   = Memory(groups, old)
@@ -111,10 +111,10 @@ final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSuppo
       ),
       Right(())
     )
-    val byteWidth = if (width == 64) ScalarByteWidth(8) else ScalarByteWidth(4)
+    val byteWidth = if (width == 64) ScalarByteWidth.Qword else ScalarByteWidth.Dword
     assertEquals(LittleEndian.decode(memory.bytes, 0, byteWidth), expected.last)
     val result = (0 until groups).map(index =>
-      LittleEndian.decode(memory.bytes, 16 + index * 8, ScalarByteWidth(8))
+      LittleEndian.decode(memory.bytes, 16 + index * 8, ScalarByteWidth.Qword)
     )
     val returns = expected.dropRight(1).map(value =>
       if (!returning) 0x7654321012345678L else if (width == 32) 0x7654321000000000L | value else value

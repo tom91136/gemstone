@@ -11,10 +11,13 @@ import io.github.iltotore.iron.constraint.all.*
 private[gemstone] object SymbolValidation {
   private val PointerByteWidth = ABI.MachineWordSize.toLong
 
+  private def monotonic[A](values: Vec[A])(ordered: (A, A) => Boolean): Boolean =
+    values.zip(values.drop(1)).forall { case (previous, current) => ordered(previous, current) }
+
   def globalPointerOffsets(size: Long, pointerOffsets: Vec[Int :| Positive0]): Either[String, Unit] =
     for {
       _ <- Either.cond(
-        pointerOffsets.zip(pointerOffsets.drop(1)).forall { case (previous, current) => previous < current },
+        monotonic(pointerOffsets)(_ < _),
         (),
         "program-global pointer offsets must be sorted and unique"
       )
@@ -42,7 +45,7 @@ private[gemstone] object SymbolValidation {
         "kernel parameter lies outside the argument block"
       )
       _ <- Either.cond(
-        offsetsAndWidths.zip(offsetsAndWidths.drop(1)).forall { case ((previousOffset, previousWidth), (offset, _)) =>
+        monotonic(offsetsAndWidths) { case ((previousOffset, previousWidth), (offset, _)) =>
           previousOffset.toLong + previousWidth.toLong <= offset.toLong
         },
         (),

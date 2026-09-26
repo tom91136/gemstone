@@ -35,17 +35,17 @@ final class WideDescriptorSuite extends munit.FunSuite {
     var transition                               = false
     val observed                                 = mutable.ArrayBuffer.empty[(Long, Double)]
     def set(status: Long, payload: Double): Unit = {
-      backing.writeLittleEndian(base, status, MemoryValueByteWidth(8)).toOption.get
-      backing.writeLittleEndian(base.offset(8), bits(payload), MemoryValueByteWidth(8)).toOption.get
+      backing.writeLittleEndian(base, status, MemoryValueByteWidth.Qword).toOption.get
+      backing.writeLittleEndian(base.offset(8), bits(payload), MemoryValueByteWidth.Qword).toOption.get
     }
     private def afterRead(address: GuestAddress): Unit = if (transition && address == base) {
       transition = false
       set(101, inclusive)
     }
     private def observe(): Unit = observed += (
-      backing.readLittleEndian(base, MemoryValueByteWidth(8)).toOption.get ->
+      backing.readLittleEndian(base, MemoryValueByteWidth.Qword).toOption.get ->
         java.lang.Double.longBitsToDouble(
-          backing.readLittleEndian(base.offset(8), MemoryValueByteWidth(8)).toOption.get
+          backing.readLittleEndian(base.offset(8), MemoryValueByteWidth.Qword).toOption.get
         )
     )
     override def readInt8(address: GuestAddress)               = backing.readInt8(address)
@@ -115,7 +115,7 @@ final class WideDescriptorSuite extends munit.FunSuite {
     (0 until 3).foreach { group =>
       val actual = java.lang.Double.longBitsToDouble(memory.backing.readLittleEndian(
         memory.base.offset(32 + group * 8L),
-        MemoryValueByteWidth(8)
+        MemoryValueByteWidth.Qword
       ).toOption.get)
       assertEquals(actual, expected, s"group $group must not double-count first tile $first")
     }

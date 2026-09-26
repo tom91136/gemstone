@@ -1,5 +1,7 @@
 find_package(Threads REQUIRED)
-find_path(CUDA_INCLUDE_DIR cuda.h REQUIRED)
+if(NOT CUDA_INCLUDE_DIR OR NOT EXISTS "${CUDA_INCLUDE_DIR}/cuda.h")
+  message(FATAL_ERROR "CUDA_INCLUDE_DIR must point at the pinned CUDA headers containing cuda.h")
+endif()
 # Generated ABI declarations are pinned to this API profile, including its ABI types.
 include(ValidateCUDAHeader.cmake)
 

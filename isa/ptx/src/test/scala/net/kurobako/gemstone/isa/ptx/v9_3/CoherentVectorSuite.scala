@@ -31,13 +31,13 @@ final class CoherentVectorSuite extends munit.FunSuite {
     override def readLittleEndian(address: GuestAddress, size: MemoryValueByteWidth) = {
       val result = backing.readLittleEndian(address, size)
       if (changeAfterRead && address == base) {
-        backing.writeLittleEndian(base, (1234L << 32) | 100L, MemoryValueByteWidth(8)).toOption.get
+        backing.writeLittleEndian(base, (1234L << 32) | 100L, MemoryValueByteWidth.Qword).toOption.get
       }
       result
     }
     override def writeLittleEndian(address: GuestAddress, value: Long, size: MemoryValueByteWidth) = {
       val result = backing.writeLittleEndian(address, value, size)
-      observed += backing.readLittleEndian(base, MemoryValueByteWidth(8)).toOption.get
+      observed += backing.readLittleEndian(base, MemoryValueByteWidth.Qword).toOption.get
       result
     }
   }
@@ -68,7 +68,7 @@ final class CoherentVectorSuite extends munit.FunSuite {
 
   test("packed acquire load observes one descriptor despite a following publication") {
     val memory = InterleavingMemory()
-    memory.backing.writeLittleEndian(memory.base, packed, MemoryValueByteWidth(8)).toOption.get
+    memory.backing.writeLittleEndian(memory.base, packed, MemoryValueByteWidth.Qword).toOption.get
     memory.changeAfterRead = true
     val kernel = VMCompiler.compile(""".version 8.0
       .target sm_80
@@ -88,6 +88,6 @@ final class CoherentVectorSuite extends munit.FunSuite {
       Map(ParameterName("input") -> Argument(memory.base.value)),
       memory
     ).isRight)
-    assertEquals(memory.backing.readLittleEndian(memory.base.offset(8), MemoryValueByteWidth(8)), Right(packed))
+    assertEquals(memory.backing.readLittleEndian(memory.base.offset(8), MemoryValueByteWidth.Qword), Right(packed))
   }
 }

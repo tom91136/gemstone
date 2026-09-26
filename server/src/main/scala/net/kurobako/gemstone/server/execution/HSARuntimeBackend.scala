@@ -7,16 +7,11 @@ import net.kurobako.gemstone.isa.KernelName
 import net.kurobako.gemstone.isa.ProgramSymbols
 import net.kurobako.gemstone.isa.amdgpu.CodeObject
 import net.kurobako.gemstone.isa.amdgpu.VirtualMachine as AMDGPUMachine
-import net.kurobako.gemstone.vm.KernelTask
 import net.kurobako.gemstone.vm.Memory
 import net.kurobako.gemstone.vm.MemoryRegion
-import net.kurobako.gemstone.vm.Result
-import net.kurobako.gemstone.vm.TaskControl
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-
-import java.util.concurrent.atomic.AtomicBoolean
 
 object HSARuntimeBackend extends RuntimeBackend {
   override val encoding: String = "hsa-code-object"
@@ -32,9 +27,8 @@ object HSARuntimeBackend extends RuntimeBackend {
     } yield Program(machine)(loaded)
   }
 
-  private final class Program(machine: AMDGPUMachine)(loaded: machine.LoadedProgram) extends RuntimeBackend.Program {
-    private val closed = AtomicBoolean()
-
+  private final class Program(machine: AMDGPUMachine)(loaded: machine.LoadedProgram)
+      extends MachineProgram[AMDGPUMachine](machine, loaded, "HSA program is closed") {
     override def symbols: Either[RuntimeBackend.Error, ProgramSymbols] =
       open(machine.symbols(loaded).left.map(error => RuntimeBackend.Error.Invalid(error.message)))
 
@@ -42,19 +36,6 @@ object HSARuntimeBackend extends RuntimeBackend {
       open(machine.kernel(loaded, name).left.map(error => RuntimeBackend.Error.Invalid(error.message)))
 
     override val globals: Option[RuntimeBackend.Program.Globals] = Some(Globals(machine)(loaded))
-
-    override def execute(
-        task: KernelTask,
-        memory: Memory,
-        control: TaskControl
-    ): Either[RuntimeBackend.Error, Result] =
-      open(machine.execute(loaded, task, memory, control).left.map(RuntimeBackend.Error.Execution(_)))
-
-    override def close(): Unit =
-      if (closed.compareAndSet(false, true)) machine.unload(loaded)
-
-    private def open[A](operation: => Either[RuntimeBackend.Error, A]): Either[RuntimeBackend.Error, A] =
-      if (closed.get()) Left(RuntimeBackend.Error.Failed("HSA program is closed")) else operation
   }
 
   private final class Globals(machine: AMDGPUMachine)(loaded: machine.LoadedProgram)

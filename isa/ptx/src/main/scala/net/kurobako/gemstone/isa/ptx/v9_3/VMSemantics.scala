@@ -237,244 +237,6 @@ private object VMSemantics {
                 Right(())
             }
           }.map(_ => Step.Advance)
-        case VMIR.Instruction.Move(destination, source, width) =>
-          source match {
-            case Value.Function(name) =>
-              forEveryLane(context) { lane =>
-                effects.stage(VMStateWrite.FunctionRegister(lane, destination, name))
-                Right(())
-              }.map(_ => Step.Advance)
-            case _ =>
-              forEveryLane(context) { lane =>
-                stageResult(
-                  effects,
-                  context.read(lane, source).map(value =>
-                    VMStateWrite.Register(lane, destination, truncate(value, width))
-                  )
-                )
-              }.map(_ => Step.Advance)
-          }
-        case VMIR.Instruction.MovePredicate(destination, source) =>
-          forEveryLane(context) { lane =>
-            stageResult(
-              effects,
-              context.read(lane, source).map(value => VMStateWrite.Predicate(lane, destination, value != 0L))
-            )
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.MoveSplit(destinations, source, partWidth) =>
-          forEveryLane(context) { lane =>
-            val writes = context.read(lane, source).map { value =>
-              destinations.zipWithIndex.collect {
-                case (destination, 0) if destination.value != "_" =>
-                  VMStateWrite.Register(lane, destination, truncate(value, partWidth))
-                case (destination, 1) if destination.value != "_" =>
-                  VMStateWrite.Register(lane, destination, truncate(value >>> partWidth.value, partWidth))
-              }
-            }
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.MoveCombine(destination, sources, partWidth) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              low  <- context.read(lane, sources(0))
-              high <- context.read(lane, sources(1))
-            } yield {
-              val combinedWidth = partWidth.combined
-              VMStateWrite.Register(
-                lane,
-                destination,
-                truncate(
-                  (low & truncate(-1L, partWidth)) | (truncate(high, partWidth) << partWidth.value),
-                  combinedWidth
-                )
-              )
-            }
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.IntegerUnary(operation, destination, source, width) =>
-          forEveryLane(context) { lane =>
-            val write = context.read(lane, source).map(value =>
-              VMStateWrite.Register(lane, destination, integerUnaryResult(operation, value, width))
-            )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.BitFind(destination, source, width, signed, shiftAmount) =>
-          forEveryLane(context) { lane =>
-            stageResult(
-              effects,
-              context.read(lane, source).map { value =>
-                VMStateWrite.Register(
-                  lane,
-                  destination,
-                  bitFind(value, width, signed, shiftAmount)
-                )
-              }
-            )
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.DotProduct4(destination, left, right, addend, leftSigned, rightSigned) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              leftValue   <- context.read(lane, left)
-              rightValue  <- context.read(lane, right)
-              addendValue <- context.read(lane, addend)
-            } yield VMStateWrite.Register(
-              lane,
-              destination,
-              dotProduct4(leftValue, rightValue, addendValue, leftSigned, rightSigned)
-            )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.IntegerAddWithCarry(destination, left, right, width, carryIn, carryOut) =>
-          forEveryLane(context) { lane =>
-            val writes = for {
-              leftValue  <- context.read(lane, left)
-              rightValue <- context.read(lane, right)
-            } yield {
-              val (result, nextCarry) =
-                integerAddWithCarry(leftValue, rightValue, width, carryIn, context.state.carry(lane))
-              if (carryOut)
-                Vec(VMStateWrite.Register(lane, destination, result), VMStateWrite.Carry(lane, nextCarry))
-              else Vec(VMStateWrite.Register(lane, destination, result))
-            }
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.IntegerSubWithBorrow(destination, left, right, width, borrowIn, borrowOut) =>
-          forEveryLane(context) { lane =>
-            val writes = for {
-              leftValue  <- context.read(lane, left)
-              rightValue <- context.read(lane, right)
-            } yield {
-              val (result, nextBorrow) =
-                integerSubWithBorrow(leftValue, rightValue, width, borrowIn, context.state.carry(lane))
-              if (borrowOut)
-                Vec(VMStateWrite.Register(lane, destination, result), VMStateWrite.Carry(lane, nextBorrow))
-              else Vec(VMStateWrite.Register(lane, destination, result))
-            }
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.IntegerBinary(operation, destination, left, right, width) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              leftValue  <- context.read(lane, left)
-              rightValue <- context.read(lane, right)
-            } yield VMStateWrite.Register(
-              lane,
-              destination,
-              integerBinaryResult(operation, leftValue, rightValue, width)
-            )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.FunnelShift(destination, low, high, amount, left, clamp) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              lowValue    <- context.read(lane, low)
-              highValue   <- context.read(lane, high)
-              amountValue <- context.read(lane, amount)
-            } yield VMStateWrite.Register(
-              lane,
-              destination,
-              funnelShiftResult(lowValue, highValue, amountValue, left, clamp)
-            )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.Convert(destination, source, sourceType, destinationType, rounding) =>
-          forEveryLane(context) { lane =>
-            stageResult(
-              effects,
-              context.read(lane, source).map { value =>
-                VMStateWrite.Register(
-                  lane,
-                  destination,
-                  convert(value, sourceType, destinationType, rounding)
-                )
-              }
-            )
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.MultiplyAdd(destination, left, right, addend, operation) =>
-          forEveryLane(context) { lane =>
-            val writes = for {
-              leftValue   <- context.read(lane, left)
-              rightValue  <- context.read(lane, right)
-              addendValue <- context.read(lane, addend)
-            } yield {
-              val (result, carry) =
-                integerMultiplyAdd(leftValue, rightValue, addendValue, operation, context.state.carry(lane))
-              operation match {
-                case IntegerMultiplyAddOperation.Low(_, _, _, true) | IntegerMultiplyAddOperation.High(_, _, _, true) =>
-                  Vec(VMStateWrite.Register(lane, destination, result), VMStateWrite.Carry(lane, carry))
-                case _ => Vec(VMStateWrite.Register(lane, destination, result))
-              }
-            }
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.FloatBinary(operation, destination, left, right, width) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              leftBits  <- context.read(lane, left)
-              rightBits <- context.read(lane, right)
-            } yield VMStateWrite.Register(lane, destination, floatBinaryBits(operation, leftBits, rightBits, width))
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.FloatBinaryPacked(operation, destination, left, right, bf16) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              leftBits  <- context.read(lane, left)
-              rightBits <- context.read(lane, right)
-            } yield VMStateWrite.Register(
-              lane,
-              destination,
-              packedBinaryBits(operation, leftBits, rightBits, bf16)
-            )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.FloatUnary(operation, destination, source, width) =>
-          forEveryLane(context) { lane =>
-            stageResult(
-              effects,
-              context.read(lane, source).map(value =>
-                VMStateWrite.Register(lane, destination, floatUnaryBits(operation, value, width))
-              )
-            )
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.FusedMultiplyAdd(destination, left, right, addend, width) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              leftBits   <- context.read(lane, left)
-              rightBits  <- context.read(lane, right)
-              addendBits <- context.read(lane, addend)
-            } yield VMStateWrite.Register(
-              lane,
-              destination,
-              fusedMultiplyAddBits(leftBits, rightBits, addendBits, width)
-            )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.FusedMultiplyAddPacked(destination, left, right, addend, bf16) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              leftBits   <- context.read(lane, left)
-              rightBits  <- context.read(lane, right)
-              addendBits <- context.read(lane, addend)
-            } yield VMStateWrite.Register(
-              lane,
-              destination,
-              packedFmaBits(leftBits, rightBits, addendBits, bf16)
-            )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.FusedMultiplyAddBf16(destination, left, right, addend) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              leftBits   <- context.read(lane, left)
-              rightBits  <- context.read(lane, right)
-              addendBits <- context.read(lane, addend)
-            } yield VMStateWrite.Register(
-              lane,
-              destination,
-              bf16FmaBits(leftBits, rightBits, addendBits)
-            )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
         case VMIR.Instruction.ShuffleDown(destination, validity, source, delta, clamp, _, width) =>
           forEveryLane(context) { lane =>
             val writes = for {
@@ -632,56 +394,6 @@ private object VMSemantics {
             }
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case VMIR.Instruction.BitFieldInsert(destination, insertValue, baseValue, bitPosition, bitLength, width) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              insert <- context.read(lane, insertValue)
-              base   <- context.read(lane, baseValue)
-              start  <- context.read(lane, bitPosition)
-              count  <- context.read(lane, bitLength)
-            } yield VMStateWrite.Register(lane, destination, insertBits(insert, base, start, count, width))
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.BitMask(destination, start, widthValue, mode) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              startValue <- context.read(lane, start)
-              countValue <- context.read(lane, widthValue)
-            } yield VMStateWrite.Register(
-              lane,
-              destination,
-              bitMask(startValue, countValue, mode)
-            )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.BytePermute(destination, left, right, control, mode) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              leftValue    <- context.read(lane, left)
-              rightValue   <- context.read(lane, right)
-              controlValue <- context.read(lane, control)
-            } yield VMStateWrite.Register(
-              lane,
-              destination,
-              permuteBytes(leftValue, rightValue, controlValue, mode)
-            )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.Select(destination, whenTrue, whenFalse, predicate, width) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              trueValue  <- context.read(lane, whenTrue)
-              falseValue <- context.read(lane, whenFalse)
-              condition  <- context.state.predicates(lane).get(predicate).toRight(
-                ExecutionFault.UndefinedRegister(predicate, context.pc, lane)
-              )
-            } yield VMStateWrite.Register(
-              lane,
-              destination,
-              truncate(if (condition) trueValue else falseValue, width)
-            )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
         case other => executeMemoryAndControl(other, context, effects)
       }
   }
@@ -756,21 +468,6 @@ private object VMSemantics {
           case None        => Right(Step.Advance)
         }
       }
-    case VMIR.Instruction.DiscardGlobalLoad(address, width) =>
-      forEveryLane(context) { lane =>
-        context.read(lane, address).flatMap { rawAddress =>
-          if (context.state.readParameterBuffer(rawAddress, byteCount(width)).nonEmpty) Right(())
-          else
-            context.memory
-              .readLittleEndian(GuestAddress(rawAddress), memoryByteCount(width))
-              .leftMap(error =>
-                ExecutionFault.Memory(
-                  s"pc ${context.pc.value}, lane $lane: ${error.message}"
-                )
-              )
-              .map(_ => ())
-        }
-      }.map(_ => Step.Advance)
     case VMIR.Instruction.LoadGlobalVector(destinations, address, width, signed) =>
       prepareGlobalReads(context, address, destinations.size * byteCount(width).value, false).flatMap { _ =>
         forEveryLane(context) { lane =>
@@ -867,24 +564,6 @@ private object VMSemantics {
         else effects.stageMemory(lane, GuestAddress(rawAddress), width, value)
       }
       Right(Step.Advance)
-    case VMIR.Instruction.StoreGlobalVector(address, sources, width) =>
-      forEveryLane(context) { lane =>
-        val writes = context.read(lane, address).flatMap { rawAddress =>
-          if (coherentGlobalVector(context, rawAddress, sources.size, width))
-            storeCoherentVector(context, lane, rawAddress, sources, width)
-          else sources.zipWithIndex.traverse { case (source, index) =>
-            context.read(lane, source).map(value =>
-              VMStateWrite.Memory(
-                lane,
-                GuestAddress(rawAddress + index.toLong * byteCount(width).value.toLong),
-                width,
-                value
-              )
-            )
-          }
-        }
-        stageResults(effects, writes)
-      }.map(_ => Step.Advance)
     case VMIR.Instruction.StoreGenericVector(address, sources, width) =>
       forEveryLane(context) { lane =>
         val writes = context.read(lane, address).flatMap { rawAddress =>
@@ -1086,13 +765,13 @@ private object VMSemantics {
           }
           failure.toLeft(Step.Advance)
       }
-    case VMIR.Instruction.AtomicAdd(destination, address, source, width, global) =>
+    case VMIR.Instruction.AtomicAdd(destination, address, source, width, space) =>
       forEveryLane(context) { lane =>
         val write = for {
           rawAddress  <- context.read(lane, address)
           sourceValue <- context.read(lane, source)
         } yield
-          if (atomicTargetsShared(global, rawAddress))
+          if (atomicTargetsShared(space, rawAddress))
             VMStateWrite.AtomicSharedAdd(lane, destination, rawAddress, width, sourceValue)
           else
             VMStateWrite.AtomicMemoryAdd(
@@ -1104,14 +783,14 @@ private object VMSemantics {
             )
         stageResult(effects, write)
       }.map(_ => Step.Advance)
-    case VMIR.Instruction.AtomicCompareExchange(destination, address, comparator, source, width, global) =>
+    case VMIR.Instruction.AtomicCompareExchange(destination, address, comparator, source, width, space) =>
       forEveryLane(context) { lane =>
         val write = for {
           rawAddress      <- context.read(lane, address)
           comparatorValue <- context.read(lane, comparator)
           sourceValue     <- context.read(lane, source)
         } yield
-          if (atomicTargetsShared(global, rawAddress))
+          if (atomicTargetsShared(space, rawAddress))
             VMStateWrite.AtomicSharedCompareExchange(lane, destination, rawAddress, width, comparatorValue, sourceValue)
           else
             VMStateWrite.AtomicMemoryCompareExchange(
@@ -1124,25 +803,25 @@ private object VMSemantics {
             )
         stageResult(effects, write)
       }.map(_ => Step.Advance)
-    case VMIR.Instruction.AtomicExchange(destination, address, source, width, global) =>
+    case VMIR.Instruction.AtomicExchange(destination, address, source, width, space) =>
       forEveryLane(context) { lane =>
         val write = for {
           rawAddress  <- context.read(lane, address)
           sourceValue <- context.read(lane, source)
         } yield
-          if (atomicTargetsShared(global, rawAddress))
+          if (atomicTargetsShared(space, rawAddress))
             VMStateWrite.AtomicSharedExchange(lane, destination, rawAddress, width, sourceValue)
           else
             VMStateWrite.AtomicMemoryExchange(lane, destination, GuestAddress(rawAddress), width, sourceValue)
         stageResult(effects, write)
       }.map(_ => Step.Advance)
-    case VMIR.Instruction.AtomicBinary(destination, address, source, width, global, operation) =>
+    case VMIR.Instruction.AtomicBinary(destination, address, source, width, space, operation) =>
       forEveryLane(context) { lane =>
         val write = for {
           rawAddress  <- context.read(lane, address)
           sourceValue <- context.read(lane, source)
         } yield
-          if (atomicTargetsShared(global, rawAddress))
+          if (atomicTargetsShared(space, rawAddress))
             VMStateWrite.AtomicSharedBinary(lane, destination, rawAddress, width, sourceValue, operation)
           else
             VMStateWrite.AtomicMemoryBinary(
@@ -1155,13 +834,13 @@ private object VMSemantics {
             )
         stageResult(effects, write)
       }.map(_ => Step.Advance)
-    case VMIR.Instruction.AtomicMin(destination, address, source, width, global) =>
+    case VMIR.Instruction.AtomicMin(destination, address, source, width, space) =>
       forEveryLane(context) { lane =>
         val write = for {
           rawAddress  <- context.read(lane, address)
           sourceValue <- context.read(lane, source)
         } yield
-          if (atomicTargetsShared(global, rawAddress))
+          if (atomicTargetsShared(space, rawAddress))
             VMStateWrite.AtomicSharedMin(lane, destination, rawAddress, width, sourceValue)
           else
             VMStateWrite.AtomicMemoryMin(
@@ -1806,7 +1485,7 @@ private object VMSemantics {
       returnParameters: Vec[ParameterName],
       parameters: Vec[ParameterName]
   ): Option[Either[ExecutionFault, Unit]] = {
-    def parameter(index: Int, width: ScalarByteWidth = ScalarByteWidth(8)): Long =
+    def parameter(index: Int, width: ScalarByteWidth = ScalarByteWidth.Qword): Long =
       if (index < parameters.size)
         context.state.parameters(lane).getOrElse(
           parameters(index),
@@ -1826,7 +1505,7 @@ private object VMSemantics {
         returnValue(0L)
         Some(Right(()))
       case "cudaDeviceGetAttribute" =>
-        val attribute = parameter(1, ScalarByteWidth(4)).toInt
+        val attribute = parameter(1, ScalarByteWidth.Dword).toInt
         writeLocalPointer(0, deviceAttribute(attribute).toLong)
         returnValue(0L)
         Some(Right(()))
@@ -1915,15 +1594,15 @@ private object VMSemantics {
       child match {
         case Left(fault)     => Left(fault)
         case Right(function) =>
-          val buffer = parameter(1, ScalarByteWidth(8))
+          val buffer = parameter(1, ScalarByteWidth.Qword)
           val grid   =
             (0 until 3).map(index =>
-              context.state.readParameterBytes(lane, parameters(2), index * 4, ScalarByteWidth(4)) &
+              context.state.readParameterBytes(lane, parameters(2), index * 4, ScalarByteWidth.Dword) &
                 0xffffffffL
             )
           val block =
             (0 until 3).map(index =>
-              context.state.readParameterBytes(lane, parameters(3), index * 4, ScalarByteWidth(4)) &
+              context.state.readParameterBytes(lane, parameters(3), index * 4, ScalarByteWidth.Dword) &
                 0xffffffffL
             )
           val childArguments                          = mutable.Map.empty[ParameterName, Argument]
@@ -2037,16 +1716,14 @@ private object VMSemantics {
   // The emulator keeps per-lane local storage in the low virtual-address
   // range; host-visible CUDA allocations are projected above 4 GiB.
   private def isLocalAddress(address: Long): Boolean =
-    java.lang.Long.compareUnsigned(address, 0x100000000L) < 0 && !isSharedAddress(address)
+    java.lang.Long.compareUnsigned(address, PTXAddressSpace.LocalLimit) < 0 && !isSharedAddress(address)
 
-  private def isSharedAddress(address: Long): Boolean =
-    java.lang.Long.compareUnsigned(address, 0x10000000L) >= 0 &&
-      java.lang.Long.compareUnsigned(address, 0x40000000L) < 0
+  private def isSharedAddress(address: Long): Boolean = PTXAddressSpace.isShared(address)
 
   // An atomic without an explicit state space uses generic addressing, so its
   // target follows the computed address. An explicit .shared or .global wins.
-  private def atomicTargetsShared(global: Option[Boolean], address: Long): Boolean =
-    global.contains(false) || (global.isEmpty && isSharedAddress(address))
+  private def atomicTargetsShared(space: VMIR.AtomicSpace, address: Long): Boolean =
+    space == VMIR.AtomicSpace.Shared || (space == VMIR.AtomicSpace.Generic && isSharedAddress(address))
 
   private def integerUnaryResult(operation: IntegerUnaryOperation, value: Long, width: BitWidth): Long = {
     val result = operation match {

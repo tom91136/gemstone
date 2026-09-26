@@ -22,109 +22,16 @@
 #include <aspartame/string.hpp>
 #include <aspartame/vector.hpp>
 
-#include <sys/types.h>
-#include <sys/wait.h>
+#include <gemstone/environment.hpp>
+
+#include "process.hpp"
 
 namespace gemstone::opencl {
 
 using namespace aspartame;
+using namespace gemstone::rpc;
 
 namespace {
-
-class FileDescriptor {
-public:
-  explicit FileDescriptor(int value = -1) noexcept : value_(value) {}
-  ~FileDescriptor() {
-    if (value_ != -1) close(value_);
-  }
-
-  FileDescriptor(const FileDescriptor &) = delete;
-  FileDescriptor &operator=(const FileDescriptor &) = delete;
-
-  FileDescriptor(FileDescriptor &&other) noexcept : value_(std::exchange(other.value_, -1)) {}
-  FileDescriptor &operator=(FileDescriptor &&other) noexcept {
-    if (this != &other) {
-      if (value_ != -1) close(value_);
-      value_ = std::exchange(other.value_, -1);
-    }
-    return *this;
-  }
-
-  [[nodiscard]] int get() const noexcept { return value_; }
-  [[nodiscard]] int release() noexcept { return std::exchange(value_, -1); }
-
-private:
-  int value_;
-};
-
-class TemporaryDirectory {
-public:
-  explicit TemporaryDirectory(std::string_view name) {
-    const char *configured = std::getenv("TMPDIR");
-    std::string base = configured && *configured ? configured : "/tmp";
-    while (base.size() > 1 && base.back() == '/')
-      base.pop_back();
-    const std::string pattern = base + "/" + std::string(name);
-    std::vector<char> buffer(pattern.begin(), pattern.end());
-    buffer.push_back('\0');
-    if (const auto created = mkdtemp(buffer.data())) path_ = created;
-  }
-
-  ~TemporaryDirectory() {
-    std::error_code error;
-    std::filesystem::remove_all(path_, error);
-  }
-
-  TemporaryDirectory(const TemporaryDirectory &) = delete;
-  TemporaryDirectory &operator=(const TemporaryDirectory &) = delete;
-
-  [[nodiscard]] explicit operator bool() const noexcept { return !path_.empty(); }
-  [[nodiscard]] std::string file(const std::string &name) const { return (path_ / name).string(); }
-
-private:
-  std::filesystem::path path_;
-};
-
-struct ProcessResult {
-  int status = -1;
-  std::string output;
-};
-
-ProcessResult runProcess(const std::vector<std::string> &arguments) {
-  ProcessResult result;
-  if (arguments.empty()) return result;
-  int pipeDescriptors[2];
-  if (pipe(pipeDescriptors) != 0) return result;
-  FileDescriptor readPipe(pipeDescriptors[0]);
-  FileDescriptor writePipe(pipeDescriptors[1]);
-  std::vector<char *> argv;
-  argv.reserve(arguments.size() + 1);
-  for (const auto &argument : arguments)
-    argv.push_back(const_cast<char *>(argument.c_str()));
-  argv.push_back(nullptr);
-  const pid_t child = fork();
-  if (child == -1) return result;
-  if (child == 0) {
-    close(readPipe.release());
-    if (dup2(writePipe.get(), STDOUT_FILENO) == -1 || dup2(writePipe.get(), STDERR_FILENO) == -1) _exit(126);
-    close(writePipe.release());
-    execvp(argv[0], argv.data());
-    _exit(127);
-  }
-  close(writePipe.release());
-  char buffer[4096];
-  for (;;) {
-    const ssize_t count = read(readPipe.get(), buffer, sizeof(buffer));
-    if (count > 0) result.output.append(buffer, static_cast<size_t>(count));
-    else break;
-  }
-  int status = 0;
-  if (waitpid(child, &status, 0) == child) {
-    if (WIFEXITED(status)) result.status = WEXITSTATUS(status);
-    else if (WIFSIGNALED(status)) result.status = 128 + WTERMSIG(status);
-  }
-  return result;
-}
 
 bool splitOptions(const std::string &options, std::vector<std::string> &result, std::string *error) {
   std::string current;
@@ -208,7 +115,7 @@ std::string discoverExecutable(const std::vector<std::string> &names, const std:
 
 const std::string &compilerPath() {
   static const std::string path = [] {
-    if (const char *configured = std::getenv("GEMSTONE_OPENCL_COMPILER"); configured && configured[0] != '\0')
+    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenCLCompiler); configured && configured[0] != '\0')
       return std::string(configured);
     return discoverExecutable({"icpx", "clang++", "clang"}, {"/opt/intel/oneapi/compiler/*/bin/icpx", "/opt/rocm/llvm/bin/clang++"});
   }();
@@ -217,7 +124,7 @@ const std::string &compilerPath() {
 
 const std::string &spirvConverterPath() {
   static const std::string path = [] {
-    if (const char *configured = std::getenv("GEMSTONE_OPENCL_LLVM_SPIRV"); configured && configured[0] != '\0')
+    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenCLLlvmSpirv); configured && configured[0] != '\0')
       return std::string(configured);
     return discoverExecutable({"llvm-spirv"},
                               {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-spirv", "/opt/rocm/llvm/bin/llvm-spirv",
@@ -228,7 +135,7 @@ const std::string &spirvConverterPath() {
 
 const std::string &bitcodeLinkerPath() {
   static const std::string path = [] {
-    if (const char *configured = std::getenv("GEMSTONE_OPENCL_LLVM_LINK"); configured && configured[0] != '\0')
+    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenCLLlvmLink); configured && configured[0] != '\0')
       return std::string(configured);
     return discoverExecutable({"llvm-link"},
                               {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-link", "/opt/rocm/llvm/bin/llvm-link",
@@ -707,34 +614,6 @@ std::string sourceKernelText(const std::string &source, const std::string &name)
     return source.substr(start, bodyEnd - start);
   }
   return {};
-}
-
-std::array<size_t, 3> sourceRequiredWorkGroupSize(const std::string &source) {
-  std::array<size_t, 3> result{0, 0, 0};
-  const std::string marker = "reqd_work_group_size(";
-  const size_t start = source.find(marker);
-  if (start == std::string::npos) return result;
-  size_t position = start + marker.size();
-  for (size_t index = 0; index < result.size(); ++index) {
-    while (position < source.size() && std::isspace(static_cast<unsigned char>(source[position])))
-      ++position;
-    if (position == source.size() || !std::isdigit(static_cast<unsigned char>(source[position]))) return {0, 0, 0};
-    size_t value = 0;
-    while (position < source.size() && std::isdigit(static_cast<unsigned char>(source[position]))) {
-      const size_t digit = static_cast<size_t>(source[position] - '0');
-      if (value > (std::numeric_limits<size_t>::max() - digit) / 10) return {0, 0, 0};
-      value = value * 10 + digit;
-      ++position;
-    }
-    result[index] = value;
-    while (position < source.size() && std::isspace(static_cast<unsigned char>(source[position])))
-      ++position;
-    if (index + 1 < result.size()) {
-      if (position == source.size() || source[position] != ',') return {0, 0, 0};
-      ++position;
-    }
-  }
-  return result;
 }
 
 namespace {

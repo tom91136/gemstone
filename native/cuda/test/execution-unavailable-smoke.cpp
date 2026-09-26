@@ -21,30 +21,21 @@ bool targetSelectionWorks() {
       TargetCase{"sm89", 8, 9},
       TargetCase{"compute90", 9, 0},
   };
-  constexpr std::array variables{
-      std::string_view{"GEMSTONE_CUDA_TARGET"},
-      std::string_view{"GEMSTONE_CUDA_TARGET_ARCH"},
-  };
   bool valid = true;
-  for (const auto variable : variables) {
-    unsetenv("GEMSTONE_CUDA_TARGET");
-    unsetenv("GEMSTONE_CUDA_TARGET_ARCH");
-    // The canonical setting takes precedence over the compatibility spelling.
-    if (variable == variables.front()) setenv("GEMSTONE_CUDA_TARGET_ARCH", "sm_50", 1);
-    for (const auto &target : cases) {
-      if (setenv(variable.data(), target.value.data(), 1) != 0) {
-        std::fprintf(stderr, "cannot set target case %s\n", target.value.data());
-        valid = false;
-        continue;
-      }
-      int major = -1;
-      int minor = -1;
-      const CUresult status = cuDeviceComputeCapability(&major, &minor, 0);
-      if (status != CUDA_SUCCESS || major != target.major || minor != target.minor) {
-        std::fprintf(stderr, "target case %s returned status=%d capability=%d.%d, expected %d.%d\n", target.value.data(),
-                     static_cast<int>(status), major, minor, target.major, target.minor);
-        valid = false;
-      }
+  unsetenv("GEMSTONE_TARGET_ARCH");
+  for (const auto &target : cases) {
+    if (setenv("GEMSTONE_TARGET_ARCH", target.value.data(), 1) != 0) {
+      std::fprintf(stderr, "cannot set target case %s\n", target.value.data());
+      valid = false;
+      continue;
+    }
+    int major = -1;
+    int minor = -1;
+    const CUresult status = cuDeviceComputeCapability(&major, &minor, 0);
+    if (status != CUDA_SUCCESS || major != target.major || minor != target.minor) {
+      std::fprintf(stderr, "target case %s returned status=%d capability=%d.%d, expected %d.%d\n", target.value.data(),
+                   static_cast<int>(status), major, minor, target.major, target.minor);
+      valid = false;
     }
   }
   return valid;

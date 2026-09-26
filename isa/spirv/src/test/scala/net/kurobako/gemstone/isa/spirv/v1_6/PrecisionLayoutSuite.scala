@@ -147,6 +147,6 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       )
       val memory = Memory(2)
       run(instructions, Vec(KernelTask.Argument.Memory(allocation, 0)), memory)
-      assertEquals(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth(2)), expected)
+      assertEquals(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth.Word), expected)
     }
 }

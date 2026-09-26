@@ -1,10 +1,31 @@
 #pragma once
+#include <string_view>
+
+#include <gemstone/environment.hpp>
+
 #include "memory_test.hpp"
 
 namespace memory_patterns {
-inline bool concurrencyMode() { return std::getenv("GEMSTONE_MEMORY_CONCURRENCY_DIRECTORY") != nullptr; }
+// GEMSTONE_MEMORY_PROBE is a comma-separated list of test probe names; "all" selects every probe.
+inline bool probeEnabled(std::string_view name) {
+  const char *value = gemstone::environment::value(gemstone::environment::MemoryProbe);
+  if (!value) return false;
+  std::string_view remaining(value);
+  while (true) {
+    const auto comma = remaining.find(',');
+    auto token = remaining.substr(0, comma);
+    while (!token.empty() && (token.front() == ' ' || token.front() == '\t'))
+      token.remove_prefix(1);
+    while (!token.empty() && (token.back() == ' ' || token.back() == '\t'))
+      token.remove_suffix(1);
+    if (token == name || token == "all") return true;
+    if (comma == std::string_view::npos) return false;
+    remaining.remove_prefix(comma + 1);
+  }
+}
+inline bool concurrencyMode() { return gemstone::environment::present(gemstone::environment::MemoryConcurrencyDirectory); }
 inline std::string allocationKind(const char *fallback) {
-  const auto *kind = std::getenv("GEMSTONE_MEMORY_ALLOCATION_KIND");
+  const auto *kind = gemstone::environment::value(gemstone::environment::MemoryAllocationKind);
   return kind && std::string(kind) != "default" ? kind : fallback;
 }
 
@@ -148,7 +169,7 @@ template <class Word> void publishCounter(const std::filesystem::path &directory
   require(counter.good(), "cannot publish contention address");
 }
 template <class Word, class Backend> void multiLaneAtomicCase(Backend &backend, unsigned launch) {
-  const std::filesystem::path directory(std::getenv("GEMSTONE_MEMORY_CONCURRENCY_DIRECTORY"));
+  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::MemoryConcurrencyDirectory));
   constexpr Word step = 4097;
   AllocationScope allocations(backend);
   constexpr unsigned Lanes = 128;
@@ -175,8 +196,8 @@ template <class Word, class Backend> void multiLaneAtomicCase(Backend &backend, 
   std::cout << "verified multi-workgroup atomics bits=" << sizeof(Word) * 8 << " lanes=128 groups=4" << std::endl;
 }
 template <class Word, class Backend> void atomicCase(Backend &backend, unsigned launch) {
-  const std::filesystem::path directory(std::getenv("GEMSTONE_MEMORY_CONCURRENCY_DIRECTORY"));
-  const bool fenced = std::getenv("GEMSTONE_MEMORY_FENCE_PROBE") != nullptr;
+  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::MemoryConcurrencyDirectory));
+  const bool fenced = probeEnabled("fence");
   constexpr Word step = 4097;
   AllocationScope allocations(backend);
   auto *input = static_cast<Word *>(allocations.allocate(128));
@@ -229,8 +250,8 @@ template <class Word, class Backend> void atomicCase(Backend &backend, unsigned 
 }
 
 template <class Backend> int atomicProbe(Backend &backend) {
-  const char *bits = std::getenv("GEMSTONE_MEMORY_ATOMIC_BITS");
-  if (std::getenv("GEMSTONE_MEMORY_MULTILANE_PROBE")) {
+  const char *bits = gemstone::environment::value(gemstone::environment::MemoryAtomicBits);
+  if (probeEnabled("multilane")) {
     if (bits && std::string(bits) == "64") multiLaneAtomicCase<uint64_t>(backend, 0);
     else multiLaneAtomicCase<uint32_t>(backend, 0);
     return 0;
@@ -247,7 +268,7 @@ template <class Backend> int concurrent(Backend &backend) {
   if (!backend.concurrentCapabilities()) {
     std::cout << "implementation concurrency probe beyond advertised allocation capabilities" << std::endl;
   }
-  const std::filesystem::path directory(std::getenv("GEMSTONE_MEMORY_CONCURRENCY_DIRECTORY"));
+  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::MemoryConcurrencyDirectory));
   auto *input = static_cast<uint32_t *>(backend.allocate(128));
   auto *storage = static_cast<unsigned char *>(backend.allocate(65536 + 128));
   unsigned launch = 0;
@@ -459,22 +480,22 @@ template <class Backend> int reviewCases(Backend &backend) {
 }
 
 template <class Backend> int run(Backend &backend) {
-  if (std::getenv("GEMSTONE_MEMORY_REVIEW_PROBE")) return reviewCases(backend);
-  if (std::getenv("GEMSTONE_MEMORY_COMPARE_PROBE")) {
+  if (probeEnabled("review")) return reviewCases(backend);
+  if (probeEnabled("compare")) {
     require(backend.concurrentCapabilities(), "compare-exchange integration check requires concurrent host storage");
     return compareTraffic(backend);
   }
-  if (std::getenv("GEMSTONE_MEMORY_OVERLAP_PROBE")) {
-    const auto *bits = std::getenv("GEMSTONE_MEMORY_ATOMIC_BITS");
+  if (probeEnabled("overlap")) {
+    const auto *bits = gemstone::environment::value(gemstone::environment::MemoryAtomicBits);
     return bits && std::string(bits) == "64" ? overlap<uint64_t>(backend) : overlap<uint32_t>(backend);
   }
-  if (std::getenv("GEMSTONE_MEMORY_SUBMISSION_PROBE")) {
-    const auto *bits = std::getenv("GEMSTONE_MEMORY_ATOMIC_BITS");
+  if (probeEnabled("submission")) {
+    const auto *bits = gemstone::environment::value(gemstone::environment::MemoryAtomicBits);
     return bits && std::string(bits) == "64" ? submission<uint64_t>(backend) : submission<uint32_t>(backend);
   }
-  if (std::getenv("GEMSTONE_MEMORY_ATOMIC_PROBE")) return atomicProbe(backend);
+  if (probeEnabled("atomic")) return atomicProbe(backend);
   if (concurrencyMode()) return concurrent(backend);
-  if (std::getenv("GEMSTONE_MEMORY_RPC_ONLY")) {
+  if (probeEnabled("rpc_only")) {
     AllocationScope allocations(backend);
     auto *input = static_cast<uint32_t *>(allocations.allocate(128));
     auto *output = static_cast<uint32_t *>(allocations.allocate(128));

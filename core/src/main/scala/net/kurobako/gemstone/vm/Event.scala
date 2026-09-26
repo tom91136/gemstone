@@ -17,7 +17,7 @@ object Event {
   ) extends Event
 
   enum PrintArgument {
-    case Integer(bits: Vec[Long], width: Int, isSigned: Boolean)
+    case Integer(bits: Vec[Long], width: Int)
     case Floating(bits: Vec[Long], width: Int)
     case Pointer(address: Long)
     case Text(value: String)

@@ -21,3 +21,12 @@ object RefinedValue extends RefinedType[Int, Positive] {
 object TrustedGeneratedData {
   val value: Int :| Positive = 1.assume[Positive]
 }
+
+object NoAssumeMunit {
+  object munit {
+    object Assertions {
+      def assume(condition: Boolean): Boolean = condition
+    }
+  }
+  val accepted: Boolean = munit.Assertions.assume(true)
+}

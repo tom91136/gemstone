@@ -9,7 +9,11 @@ import io.github.iltotore.iron.constraint.all.*
 final case class KernelMetadata private (
     argumentBlockSize: Int :| Positive0,
     explicitParameterCount: Int :| Positive0,
-    parameters: Vec[KernelMetadata.Parameter]
+    parameters: Vec[KernelMetadata.Parameter],
+    requiredWorkGroupSize: Option[KernelMetadata.WorkGroupSize],
+    workGroupSizeHint: Option[KernelMetadata.WorkGroupSize],
+    bindingIndices: Vec[Int :| Positive0],
+    entryPointId: Option[Int :| Positive0]
 )
 
 object KernelMetadata {
@@ -18,6 +22,8 @@ object KernelMetadata {
     case Memory
     case Local
   }
+
+  final case class WorkGroupSize(x: Int :| Positive, y: Int :| Positive, z: Int :| Positive)
 
   final case class Parameter(
       width: Int :| Positive,
@@ -29,27 +35,27 @@ object KernelMetadata {
   def validated(
       argumentBlockSize: Int :| Positive0,
       explicitParameterCount: Int :| Positive0,
-      parameters: Vec[Parameter]
+      parameters: Vec[Parameter],
+      requiredWorkGroupSize: Option[WorkGroupSize] = None,
+      workGroupSizeHint: Option[WorkGroupSize] = None,
+      bindingIndices: Vec[Int :| Positive0] = Vec.empty,
+      entryPointId: Option[Int :| Positive0] = None
   ): Either[String, KernelMetadata] =
-    for {
-      _ <- Either.cond(
-        explicitParameterCount <= parameters.size,
-        (),
-        "explicit parameter count exceeds the parameter count"
+    SymbolValidation
+      .kernelParameters(
+        argumentBlockSize,
+        explicitParameterCount,
+        parameters.map(parameter => (parameter.offset, parameter.width))
       )
-      _ <- Either.cond(
-        parameters.forall(parameter =>
-          parameter.offset.toLong + parameter.width.toLong <= argumentBlockSize.toLong
-        ),
-        (),
-        "kernel parameter lies outside the argument block"
+      .map(_ =>
+        KernelMetadata(
+          argumentBlockSize,
+          explicitParameterCount,
+          parameters,
+          requiredWorkGroupSize,
+          workGroupSizeHint,
+          bindingIndices,
+          entryPointId
+        )
       )
-      _ <- Either.cond(
-        parameters.zip(parameters.drop(1)).forall { case (previous, current) =>
-          previous.offset.toLong + previous.width.toLong <= current.offset.toLong
-        },
-        (),
-        "kernel parameters must be ordered and non-overlapping"
-      )
-    } yield KernelMetadata(argumentBlockSize, explicitParameterCount, parameters)
 }

@@ -66,11 +66,11 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffffeL, ScalarByteWidth(4)) ++
-            LittleEndian.toVec(3L, ScalarByteWidth(4))),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffffeL, ScalarByteWidth.Dword) ++
+            LittleEndian.toVec(3L, ScalarByteWidth.Dword)),
           KernelTask.Argument.Scalar(
-            LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.5f).toLong, ScalarByteWidth(4)) ++
-              LittleEndian.toVec(java.lang.Float.floatToRawIntBits(1.5f).toLong, ScalarByteWidth(4))
+            LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.5f).toLong, ScalarByteWidth.Dword) ++
+              LittleEndian.toVec(java.lang.Float.floatToRawIntBits(1.5f).toLong, ScalarByteWidth.Dword)
           )
         )
       )
@@ -80,8 +80,8 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       memory.bytes,
-      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(-2.0f).toLong, ScalarByteWidth(4)) ++
-        LittleEndian.toVec(java.lang.Float.floatToRawIntBits(3.0f).toLong, ScalarByteWidth(4))
+      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(-2.0f).toLong, ScalarByteWidth.Dword) ++
+        LittleEndian.toVec(java.lang.Float.floatToRawIntBits(3.0f).toLong, ScalarByteWidth.Dword)
     )
 
     val malformed = module.copy(instructions =
@@ -170,10 +170,10 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(halfAllocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth(2)) ++
-            LittleEndian.toVec(3L, ScalarByteWidth(2))),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0x0001L, ScalarByteWidth(2)) ++
-            LittleEndian.toVec(0x3e00L, ScalarByteWidth(2)))
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth.Word) ++
+            LittleEndian.toVec(3L, ScalarByteWidth.Word)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0x0001L, ScalarByteWidth.Word) ++
+            LittleEndian.toVec(0x3e00L, ScalarByteWidth.Word))
         )
       )
       .toOption
@@ -181,7 +181,7 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     assertEquals(executeUnchecked(halfModule, halfDispatch, halfMemory), Right(()))
     assertEquals(
       halfMemory.bytes,
-      LittleEndian.toVec(0L, ScalarByteWidth(2)) ++ LittleEndian.toVec(0x4200L, ScalarByteWidth(2))
+      LittleEndian.toVec(0L, ScalarByteWidth.Word) ++ LittleEndian.toVec(0x4200L, ScalarByteWidth.Word)
     )
   }
 
@@ -226,53 +226,53 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffff9L, ScalarByteWidth(4))),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(3L, ScalarByteWidth(4)))
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffff9L, ScalarByteWidth.Dword)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(3L, ScalarByteWidth.Dword))
         )
       )
       .toOption
       .get
 
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffffL, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffffL, ScalarByteWidth.Dword))
 
     val divided = module.copy(instructions = instructions.updated(11, Instruction.SDiv(u32, remainder, left, right)))
     assertEquals(executeUnchecked(divided, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffffeL, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffffeL, ScalarByteWidth.Dword))
 
     val xor = module.copy(instructions = instructions.updated(11, Instruction.BitwiseXor(u32, remainder, left, right)))
     assertEquals(executeUnchecked(xor, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffffaL, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffffaL, ScalarByteWidth.Dword))
 
     val shiftedRight = module.copy(instructions =
       instructions.updated(11, Instruction.ShiftRightLogical(u32, remainder, left, right))
     )
     assertEquals(executeUnchecked(shiftedRight, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0x1fffffffL, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(0x1fffffffL, ScalarByteWidth.Dword))
 
     val shiftedLeft = module.copy(instructions =
       instructions.updated(11, Instruction.ShiftLeftLogical(u32, remainder, left, right))
     )
     assertEquals(executeUnchecked(shiftedLeft, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffc8L, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffc8L, ScalarByteWidth.Dword))
 
     val not = module.copy(instructions = instructions.updated(11, Instruction.Not(u32, remainder, left)))
     assertEquals(executeUnchecked(not, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(6L, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(6L, ScalarByteWidth.Dword))
 
     val negated = module.copy(instructions = instructions.updated(11, Instruction.SNegate(u32, remainder, left)))
     assertEquals(executeUnchecked(negated, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(7L, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(7L, ScalarByteWidth.Dword))
 
     val signedLess =
       module.copy(instructions = instructions.updated(12, Instruction.SLessThan(bool, equal, left, right)))
     assertEquals(executeUnchecked(signedLess, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffff9L, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffff9L, ScalarByteWidth.Dword))
 
     val signedGreater =
       module.copy(instructions = instructions.updated(12, Instruction.SGreaterThan(bool, equal, left, right)))
     assertEquals(executeUnchecked(signedGreater, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffffL, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffffL, ScalarByteWidth.Dword))
 
     val malformed = module.copy(instructions =
       instructions.updated(
@@ -356,8 +356,8 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
           Dimensions.One,
           Vec(
             KernelTask.Argument.Memory(allocation, 0L),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(leftBits, ScalarByteWidth(4))),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(rightBits, ScalarByteWidth(4)))
+            KernelTask.Argument.Scalar(LittleEndian.toVec(leftBits, ScalarByteWidth.Dword)),
+            KernelTask.Argument.Scalar(LittleEndian.toVec(rightBits, ScalarByteWidth.Dword))
           )
         )
         .toOption
@@ -366,9 +366,9 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       memory.bytes
     }
 
-    assertEquals(run(7L, 0x80000000L, 0L), LittleEndian.toVec(0x80000000L, ScalarByteWidth(4)))
-    assertEquals(run(8L, 0x7fc00000L, 0x40400000L), LittleEndian.toVec(0x40400000L, ScalarByteWidth(4)))
-    assertEquals(run(9L, 0x40000000L, 0x40400000L), LittleEndian.toVec(0x40000000L, ScalarByteWidth(4)))
+    assertEquals(run(7L, 0x80000000L, 0L), LittleEndian.toVec(0x80000000L, ScalarByteWidth.Dword))
+    assertEquals(run(8L, 0x7fc00000L, 0x40400000L), LittleEndian.toVec(0x40400000L, ScalarByteWidth.Dword))
+    assertEquals(run(9L, 0x40000000L, 0x40400000L), LittleEndian.toVec(0x40000000L, ScalarByteWidth.Dword))
 
     val malformed = module.copy(instructions =
       instructions.updated(
@@ -384,8 +384,8 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth(4))),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth(4)))
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth.Dword)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth.Dword))
         )
       )
       .toOption
@@ -449,7 +449,7 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
             KernelTask.Argument.Memory(allocation, 0L),
             KernelTask.Argument.Scalar(LittleEndian.toVec(
               java.lang.Double.doubleToRawLongBits(value),
-              ScalarByteWidth(8)
+              ScalarByteWidth.Qword
             ))
           )
         )
@@ -458,8 +458,11 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       executeUnchecked(module, dispatch, memory).map(_ => memory.bytes)
     }
 
-    assertEquals(run(13L, 255.75), Right(LittleEndian.toVec(255L, ScalarByteWidth(8))))
-    assertEquals(run(14L, java.lang.Math.scalb(1.0, 63)), Right(LittleEndian.toVec(Long.MinValue, ScalarByteWidth(8))))
+    assertEquals(run(13L, 255.75), Right(LittleEndian.toVec(255L, ScalarByteWidth.Qword)))
+    assertEquals(
+      run(14L, java.lang.Math.scalb(1.0, 63)),
+      Right(LittleEndian.toVec(Long.MinValue, ScalarByteWidth.Qword))
+    )
     run(15L, -1.0) match {
       case Left(Fault.InvalidTask(message)) =>
         assert(message.contains("negative values are outside the unsigned range"))
@@ -475,7 +478,10 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(java.lang.Double.doubleToRawLongBits(1.0), ScalarByteWidth(8)))
+          KernelTask.Argument.Scalar(LittleEndian.toVec(
+            java.lang.Double.doubleToRawLongBits(1.0),
+            ScalarByteWidth.Qword
+          ))
         )
       )
       .toOption
@@ -528,7 +534,7 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Vec(
           KernelTask.Argument.Memory(allocation, 0L),
           KernelTask.Argument.Scalar(
-            LittleEndian.toVec(java.lang.Float.floatToRawIntBits(Float.NaN).toLong, ScalarByteWidth(4))
+            LittleEndian.toVec(java.lang.Float.floatToRawIntBits(Float.NaN).toLong, ScalarByteWidth.Dword)
           )
         )
       )
@@ -536,7 +542,7 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       .get
 
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0L, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(0L, ScalarByteWidth.Dword))
   }
 
   test("vector-times-scalar multiplies each floating lane") {
@@ -574,7 +580,7 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     val allocation                    = MemoryRegion(18L)
     val memory                        = ArrayMemory(allocation, 8)
     def bits(value: Float): Vec[Byte] =
-      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(value).toLong, ScalarByteWidth(4))
+      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(value).toLong, ScalarByteWidth.Dword)
     val dispatch = KernelTask
       .validated(
         KernelName("vector_scale"),

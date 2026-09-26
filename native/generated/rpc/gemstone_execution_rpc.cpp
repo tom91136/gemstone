@@ -135,6 +135,16 @@ template <> struct Codec<ProgramId> {
   static bool read(Reader &reader, ProgramId &value) { return Codec<int64_t>::read(reader, value.value) && ((value.value > 0)); }
 };
 
+template <> struct Codec<SpecializationInfo> {
+  static void write(Writer &writer, const SpecializationInfo &value) { Codec<IntPositive0>::write(writer, value.specId); Codec<IntPositive>::write(writer, value.byteSize); }
+  static bool read(Reader &reader, SpecializationInfo &value) { return Codec<IntPositive0>::read(reader, value.specId) && Codec<IntPositive>::read(reader, value.byteSize); }
+};
+
+template <> struct Codec<SpecializationConstant> {
+  static void write(Writer &writer, const SpecializationConstant &value) { Codec<IntPositive0>::write(writer, value.specId); Codec<std::vector<uint8_t>>::write(writer, value.value); }
+  static bool read(Reader &reader, SpecializationConstant &value) { return Codec<IntPositive0>::read(reader, value.specId) && Codec<std::vector<uint8_t>>::read(reader, value.value); }
+};
+
 template <> struct Codec<KernelName> {
   static void write(Writer &writer, const KernelName &value) { if (!((value.value.size() >= 1) && (value.value.find(std::string("\x00", 1U)) == std::string::npos))) { writer.invalidate(); return; } Codec<std::string>::write(writer, value.value); }
   static bool read(Reader &reader, KernelName &value) { return Codec<std::string>::read(reader, value.value) && ((value.value.size() >= 1) && (value.value.find(std::string("\x00", 1U)) == std::string::npos)); }
@@ -175,19 +185,49 @@ template <> struct Codec<KernelParameterMetadata> {
   static bool read(Reader &reader, KernelParameterMetadata &value) { return Codec<IntPositive>::read(reader, value.width) && Codec<IntPositive0>::read(reader, value.offset) && Codec<KernelParameterKind>::read(reader, value.kind) && Codec<bool>::read(reader, value.containsPointers); }
 };
 
+template <> struct Codec<Dimensions> {
+  static void write(Writer &writer, const Dimensions &value) { Codec<IntPositive>::write(writer, value.x); Codec<IntPositive>::write(writer, value.y); Codec<IntPositive>::write(writer, value.z); }
+  static bool read(Reader &reader, Dimensions &value) { return Codec<IntPositive>::read(reader, value.x) && Codec<IntPositive>::read(reader, value.y) && Codec<IntPositive>::read(reader, value.z); }
+};
+
 template <> struct Codec<KernelMetadata> {
-  static void write(Writer &writer, const KernelMetadata &value) { Codec<IntPositive0>::write(writer, value.argumentBlockSize); Codec<IntPositive0>::write(writer, value.explicitParameterCount); Codec<std::vector<KernelParameterMetadata>>::write(writer, value.parameters); }
-  static bool read(Reader &reader, KernelMetadata &value) { return Codec<IntPositive0>::read(reader, value.argumentBlockSize) && Codec<IntPositive0>::read(reader, value.explicitParameterCount) && Codec<std::vector<KernelParameterMetadata>>::read(reader, value.parameters); }
+  static void write(Writer &writer, const KernelMetadata &value) { Codec<IntPositive0>::write(writer, value.argumentBlockSize); Codec<IntPositive0>::write(writer, value.explicitParameterCount); Codec<std::vector<KernelParameterMetadata>>::write(writer, value.parameters); Codec<std::optional<Dimensions>>::write(writer, value.requiredWorkGroupSize); Codec<std::optional<Dimensions>>::write(writer, value.workGroupSizeHint); Codec<std::vector<IntPositive0>>::write(writer, value.bindingIndices); Codec<std::optional<IntPositive0>>::write(writer, value.entryPointId); }
+  static bool read(Reader &reader, KernelMetadata &value) { return Codec<IntPositive0>::read(reader, value.argumentBlockSize) && Codec<IntPositive0>::read(reader, value.explicitParameterCount) && Codec<std::vector<KernelParameterMetadata>>::read(reader, value.parameters) && Codec<std::optional<Dimensions>>::read(reader, value.requiredWorkGroupSize) && Codec<std::optional<Dimensions>>::read(reader, value.workGroupSizeHint) && Codec<std::vector<IntPositive0>>::read(reader, value.bindingIndices) && Codec<std::optional<IntPositive0>>::read(reader, value.entryPointId); }
+};
+
+template <> struct Codec<BlasOperation> {
+  static void write(Writer &writer, BlasOperation value) { writer.u64(static_cast<uint64_t>(value)); }
+  static bool read(Reader &reader, BlasOperation &value) { uint64_t id = 0; if (!reader.u64(id)) return false; switch (id) { case 0xef5c48528519f63cULL: value = BlasOperation::Axpy; return true; case 0x7d2ba9bd7b589e31ULL: value = BlasOperation::Scal; return true; case 0x47f935407bfab053ULL: value = BlasOperation::Copy; return true; case 0x5c0dfac798ad6f65ULL: value = BlasOperation::Dot; return true; case 0xd2a8ead50d554859ULL: value = BlasOperation::Nrm2; return true; case 0x3ea8c552b2656770ULL: value = BlasOperation::Asum; return true; case 0xaf2eee1df319a239ULL: value = BlasOperation::Gemv; return true; case 0xaf2f031df319c5e8ULL: value = BlasOperation::Gemm; return true; case 0x1d6b94d4b2145434ULL: value = BlasOperation::GemmStridedBatched; return true; default: return false; } }
+};
+
+template <> struct Codec<BlasElement> {
+  static void write(Writer &writer, BlasElement value) { writer.u64(static_cast<uint64_t>(value)); }
+  static bool read(Reader &reader, BlasElement &value) { uint64_t id = 0; if (!reader.u64(id)) return false; switch (id) { case 0x6f78d4946790497aULL: value = BlasElement::F16; return true; case 0x6f7fd89467966ef4ULL: value = BlasElement::F32; return true; case 0x6f90d49467a4db5bULL: value = BlasElement::F64; return true; default: return false; } }
+};
+
+template <> struct Codec<BlasVector> {
+  static void write(Writer &writer, const BlasVector &value) { Codec<AllocationId>::write(writer, value.allocation); Codec<LongPositive0>::write(writer, value.offset); Codec<int32_t>::write(writer, value.increment); }
+  static bool read(Reader &reader, BlasVector &value) { return Codec<AllocationId>::read(reader, value.allocation) && Codec<LongPositive0>::read(reader, value.offset) && Codec<int32_t>::read(reader, value.increment); }
+};
+
+template <> struct Codec<BlasMatrix> {
+  static void write(Writer &writer, const BlasMatrix &value) { Codec<AllocationId>::write(writer, value.allocation); Codec<LongPositive0>::write(writer, value.offset); Codec<int32_t>::write(writer, value.leading); }
+  static bool read(Reader &reader, BlasMatrix &value) { return Codec<AllocationId>::read(reader, value.allocation) && Codec<LongPositive0>::read(reader, value.offset) && Codec<int32_t>::read(reader, value.leading); }
+};
+
+template <> struct Codec<BlasRequest> {
+  static void write(Writer &writer, const BlasRequest &value) { Codec<BlasOperation>::write(writer, value.operation); Codec<BlasElement>::write(writer, value.element); Codec<int32_t>::write(writer, value.count); Codec<int32_t>::write(writer, value.rows); Codec<int32_t>::write(writer, value.columns); Codec<int32_t>::write(writer, value.inner); Codec<bool>::write(writer, value.transposeA); Codec<bool>::write(writer, value.transposeB); Codec<std::vector<uint8_t>>::write(writer, value.alpha); Codec<std::vector<uint8_t>>::write(writer, value.beta); Codec<std::optional<BlasVector>>::write(writer, value.x); Codec<std::optional<BlasVector>>::write(writer, value.y); Codec<std::optional<BlasMatrix>>::write(writer, value.a); Codec<std::optional<BlasMatrix>>::write(writer, value.b); Codec<std::optional<BlasMatrix>>::write(writer, value.c); Codec<int64_t>::write(writer, value.strideA); Codec<int64_t>::write(writer, value.strideB); Codec<int64_t>::write(writer, value.strideC); Codec<int32_t>::write(writer, value.batch); }
+  static bool read(Reader &reader, BlasRequest &value) { return Codec<BlasOperation>::read(reader, value.operation) && Codec<BlasElement>::read(reader, value.element) && Codec<int32_t>::read(reader, value.count) && Codec<int32_t>::read(reader, value.rows) && Codec<int32_t>::read(reader, value.columns) && Codec<int32_t>::read(reader, value.inner) && Codec<bool>::read(reader, value.transposeA) && Codec<bool>::read(reader, value.transposeB) && Codec<std::vector<uint8_t>>::read(reader, value.alpha) && Codec<std::vector<uint8_t>>::read(reader, value.beta) && Codec<std::optional<BlasVector>>::read(reader, value.x) && Codec<std::optional<BlasVector>>::read(reader, value.y) && Codec<std::optional<BlasMatrix>>::read(reader, value.a) && Codec<std::optional<BlasMatrix>>::read(reader, value.b) && Codec<std::optional<BlasMatrix>>::read(reader, value.c) && Codec<int64_t>::read(reader, value.strideA) && Codec<int64_t>::read(reader, value.strideB) && Codec<int64_t>::read(reader, value.strideC) && Codec<int32_t>::read(reader, value.batch); }
+};
+
+template <> struct Codec<BlasResult> {
+  static void write(Writer &writer, const BlasResult &value) { Codec<std::vector<uint8_t>>::write(writer, value.scalar); }
+  static bool read(Reader &reader, BlasResult &value) { return Codec<std::vector<uint8_t>>::read(reader, value.scalar); }
 };
 
 template <> struct Codec<ProgramGlobal> {
   static void write(Writer &writer, const ProgramGlobal &value) { Codec<LongPositive0>::write(writer, value.size); Codec<std::vector<uint8_t>>::write(writer, value.initial); }
   static bool read(Reader &reader, ProgramGlobal &value) { return Codec<LongPositive0>::read(reader, value.size) && Codec<std::vector<uint8_t>>::read(reader, value.initial); }
-};
-
-template <> struct Codec<Dimensions> {
-  static void write(Writer &writer, const Dimensions &value) { Codec<IntPositive>::write(writer, value.x); Codec<IntPositive>::write(writer, value.y); Codec<IntPositive>::write(writer, value.z); }
-  static bool read(Reader &reader, Dimensions &value) { return Codec<IntPositive>::read(reader, value.x) && Codec<IntPositive>::read(reader, value.y) && Codec<IntPositive>::read(reader, value.z); }
 };
 
 template <> struct Codec<GlobalDimensions> {
@@ -235,16 +275,6 @@ template <> struct Codec<DirtyRange> {
   static bool read(Reader &reader, DirtyRange &value) { return Codec<AllocationId>::read(reader, value.allocation) && Codec<LongPositive0>::read(reader, value.offset) && Codec<IntPositive>::read(reader, value.size); }
 };
 
-template <> struct Codec<PrintArgument> {
-  static void write(Writer &writer, const PrintArgument &value) { std::visit([&](const auto &item) { using T = std::decay_t<decltype(item)>; if constexpr (std::is_same_v<T, PrintArgumentInteger>) { writer.u64(0x2fffc162da8adfbbULL); Codec<std::vector<int64_t>>::write(writer, item.bits); Codec<int32_t>::write(writer, item.width); Codec<bool>::write(writer, item.isSigned); } else if constexpr (std::is_same_v<T, PrintArgumentFloating>) { writer.u64(0x7c64cbc3d8134ee9ULL); Codec<std::vector<int64_t>>::write(writer, item.bits); Codec<int32_t>::write(writer, item.width); } else if constexpr (std::is_same_v<T, PrintArgumentPointer>) { writer.u64(0xb57d2dc948534440ULL); Codec<int64_t>::write(writer, item.address); } else if constexpr (std::is_same_v<T, PrintArgumentText>) { writer.u64(0x722582b3534d844cULL); Codec<std::string>::write(writer, item.value); } }, value); }
-  static bool read(Reader &reader, PrintArgument &value) { uint64_t id = 0; if (!reader.u64(id)) return false; switch (id) { case 0x2fffc162da8adfbbULL: { PrintArgumentInteger item{}; if (!(Codec<std::vector<int64_t>>::read(reader, item.bits) && Codec<int32_t>::read(reader, item.width) && Codec<bool>::read(reader, item.isSigned))) return false; value = std::move(item); return true; } case 0x7c64cbc3d8134ee9ULL: { PrintArgumentFloating item{}; if (!(Codec<std::vector<int64_t>>::read(reader, item.bits) && Codec<int32_t>::read(reader, item.width))) return false; value = std::move(item); return true; } case 0xb57d2dc948534440ULL: { PrintArgumentPointer item{}; if (!(Codec<int64_t>::read(reader, item.address))) return false; value = std::move(item); return true; } case 0x722582b3534d844cULL: { PrintArgumentText item{}; if (!(Codec<std::string>::read(reader, item.value))) return false; value = std::move(item); return true; } default: return false; } }
-};
-
-template <> struct Codec<PrintEvent> {
-  static void write(Writer &writer, const PrintEvent &value) { Codec<std::string>::write(writer, value.format); Codec<std::vector<PrintArgument>>::write(writer, value.arguments); }
-  static bool read(Reader &reader, PrintEvent &value) { return Codec<std::string>::read(reader, value.format) && Codec<std::vector<PrintArgument>>::read(reader, value.arguments); }
-};
-
 std::string failureDetail(const ExecutionFailure &failure) {
   return std::visit([](const auto &value) { return value.detail; }, failure);
 }
@@ -275,15 +305,15 @@ class Client::Impl {
     std::lock_guard<std::mutex> guard(mutex_); error_.clear(); Writer writer; encode(writer);
     if (!writer.valid()) return failed<T>("execution request exceeds the encoding limits");
     std::vector<uint8_t> response; uint32_t status = 0;
-    if (!exchange(operation, writer.result(), status, response)) return Result<T>::failure(Error{error_, std::nullopt});
+    if (!exchange(operation, writer.result(), status, response)) return Result<T>::failure(Error{error_});
     Reader reader(response);
-    if (status == 1) { ExecutionFailure failure{}; if (!Codec<ExecutionFailure>::read(reader, failure) || reader.remaining() != 0) { poison(); return failed<T>("execution failure response is invalid"); } error_ = failureDetail(failure); return Result<T>::failure(Error{error_, std::move(failure)}); }
+    if (status == 1) { ExecutionFailure failure{}; if (!Codec<ExecutionFailure>::read(reader, failure) || reader.remaining() != 0) { poison(); return failed<T>("execution failure response is invalid"); } error_ = failureDetail(failure); return Result<T>::failure(Error{error_}); }
     T value{}; if (!Codec<T>::read(reader, value) || reader.remaining() != 0) { poison(); return failed<T>("execution response payload is invalid"); }
     return Result<T>::success(std::move(value));
   }
 
  private:
-  template <class T> Result<T> failed(std::string detail) { error_ = std::move(detail); return Result<T>::failure(Error{error_, std::nullopt}); }
+  template <class T> Result<T> failed(std::string detail) { error_ = std::move(detail); return Result<T>::failure(Error{error_}); }
   void poison() { if (fd_ >= 0) ::close(fd_); fd_ = -1; if (established_) poisoned_ = true; }
   bool connectServer() {
     if (fd_ >= 0) return true;
@@ -367,6 +397,14 @@ Result<ProgramId> Client::call(const LoadProgram &request) {
   return implementation_->call<ProgramId>(operation::LoadProgram, [&](Writer &writer) { Codec<std::string>::write(writer, request.encoding); Codec<std::vector<uint8_t>>::write(writer, request.image); });
 }
 
+Result<std::vector<SpecializationInfo>> Client::call(const DescribeSpecialization &request) {
+  return implementation_->call<std::vector<SpecializationInfo>>(operation::DescribeSpecialization, [&](Writer &writer) { Codec<std::vector<uint8_t>>::write(writer, request.image); });
+}
+
+Result<std::vector<uint8_t>> Client::call(const SpecializeImage &request) {
+  return implementation_->call<std::vector<uint8_t>>(operation::SpecializeImage, [&](Writer &writer) { Codec<std::vector<uint8_t>>::write(writer, request.image); Codec<std::vector<SpecializationConstant>>::write(writer, request.constants); });
+}
+
 Result<Unit> Client::call(const UnloadProgram &request) {
   return implementation_->call<Unit>(operation::UnloadProgram, [&](Writer &writer) { Codec<ProgramId>::write(writer, request.program); });
 }
@@ -377,6 +415,14 @@ Result<ProgramCatalog> Client::call(const DescribeProgram &request) {
 
 Result<KernelMetadata> Client::call(const DescribeKernel &request) {
   return implementation_->call<KernelMetadata>(operation::DescribeKernel, [&](Writer &writer) { Codec<ProgramId>::write(writer, request.program); Codec<KernelName>::write(writer, request.name); });
+}
+
+Result<KernelMetadata> Client::call(const DescribeImage &request) {
+  return implementation_->call<KernelMetadata>(operation::DescribeImage, [&](Writer &writer) { Codec<std::string>::write(writer, request.encoding); Codec<std::vector<uint8_t>>::write(writer, request.image); Codec<KernelName>::write(writer, request.name); });
+}
+
+Result<BlasResult> Client::call(const Blas &request) {
+  return implementation_->call<BlasResult>(operation::Blas, [&](Writer &writer) { Codec<BlasRequest>::write(writer, request.request); });
 }
 
 Result<ProgramGlobal> Client::call(const DescribeGlobal &request) {
@@ -392,7 +438,7 @@ Result<Unit> Client::call(const WriteProgramGlobal &request) {
 }
 
 Result<CompletionId> Client::call(const Launch &request) {
-  return implementation_->call<CompletionId>(operation::Launch, [&](Writer &writer) { Codec<ProgramId>::write(writer, request.program); Codec<KernelName>::write(writer, request.kernelName); Codec<Dimensions>::write(writer, request.groupSize); Codec<Dimensions>::write(writer, request.groupCount); Codec<GlobalDimensions>::write(writer, request.globalSize); Codec<IntInterval1To3>::write(writer, request.workDim); Codec<Coordinates>::write(writer, request.globalOffset); Codec<IntPositive0>::write(writer, request.privateSegmentBytes); Codec<IntPositive0>::write(writer, request.groupSegmentBytes); Codec<std::vector<KernelArgument>>::write(writer, request.arguments); Codec<std::vector<PointerRelocation>>::write(writer, request.pointerRelocations); });
+  return implementation_->call<CompletionId>(operation::Launch, [&](Writer &writer) { Codec<ProgramId>::write(writer, request.program); Codec<KernelName>::write(writer, request.kernelName); Codec<Dimensions>::write(writer, request.groupSize); Codec<Dimensions>::write(writer, request.groupCount); Codec<GlobalDimensions>::write(writer, request.globalSize); Codec<IntInterval1To3>::write(writer, request.workDim); Codec<Coordinates>::write(writer, request.globalOffset); Codec<IntPositive0>::write(writer, request.privateSegmentBytes); Codec<IntPositive0>::write(writer, request.groupSegmentBytes); Codec<std::vector<KernelArgument>>::write(writer, request.arguments); Codec<std::vector<PointerRelocation>>::write(writer, request.pointerRelocations); Codec<bool>::write(writer, request.discoverArgumentRelocations); });
 }
 
 Result<CompletionStatus> Client::call(const QueryCompletion &request) {
@@ -411,8 +457,8 @@ Result<std::vector<PointerRelocation>> Client::call(const CompletionPointerReloc
   return implementation_->call<std::vector<PointerRelocation>>(operation::CompletionPointerRelocations, [&](Writer &writer) { Codec<CompletionId>::write(writer, request.completion); });
 }
 
-Result<std::vector<PrintEvent>> Client::call(const CompletionPrints &request) {
-  return implementation_->call<std::vector<PrintEvent>>(operation::CompletionPrints, [&](Writer &writer) { Codec<CompletionId>::write(writer, request.completion); });
+Result<std::string> Client::call(const CompletionPrints &request) {
+  return implementation_->call<std::string>(operation::CompletionPrints, [&](Writer &writer) { Codec<CompletionId>::write(writer, request.completion); });
 }
 
 Result<Unit> Client::call(const ReleaseCompletion &request) {

@@ -87,8 +87,8 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       memory.bytes,
-      LittleEndian.toVec(1L, ScalarByteWidth(4)) ++ LittleEndian.toVec(0L, ScalarByteWidth(4)) ++
-        LittleEndian.toVec(1L, ScalarByteWidth(4)) ++ LittleEndian.toVec(0L, ScalarByteWidth(4))
+      LittleEndian.toVec(1L, ScalarByteWidth.Dword) ++ LittleEndian.toVec(0L, ScalarByteWidth.Dword) ++
+        LittleEndian.toVec(1L, ScalarByteWidth.Dword) ++ LittleEndian.toVec(0L, ScalarByteWidth.Dword)
     )
   }
 
@@ -142,7 +142,7 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
     )
     val allocation = MemoryRegion(12L)
     val memory     = ArrayMemory(allocation, 24)
-    assertEquals(memory.write(allocation, 0L, LittleEndian.toVec(10L, ScalarByteWidth(8))), Right(()))
+    assertEquals(memory.write(allocation, 0L, LittleEndian.toVec(10L, ScalarByteWidth.Qword)), Right(()))
     val dispatch = KernelTask
       .validated(
         KernelName("atomics"),
@@ -156,8 +156,8 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       memory.bytes,
-      LittleEndian.toVec(7L, ScalarByteWidth(8)) ++ LittleEndian.toVec(7L, ScalarByteWidth(8)) ++
-        LittleEndian.toVec(10L, ScalarByteWidth(8))
+      LittleEndian.toVec(7L, ScalarByteWidth.Qword) ++ LittleEndian.toVec(7L, ScalarByteWidth.Qword) ++
+        LittleEndian.toVec(10L, ScalarByteWidth.Qword)
     )
   }
 
@@ -201,7 +201,7 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
       )
       val allocation = MemoryRegion(120L)
       val memory     = ArrayMemory(allocation, 8)
-      assertEquals(memory.write(allocation, 0L, LittleEndian.toVec(initial, ScalarByteWidth(4))), Right(()))
+      assertEquals(memory.write(allocation, 0L, LittleEndian.toVec(initial, ScalarByteWidth.Dword)), Right(()))
       val dispatch = KernelTask
         .validated(
           KernelName("atomic"),
@@ -214,7 +214,7 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
       assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
       assertEquals(
         memory.bytes,
-        LittleEndian.toVec(updated, ScalarByteWidth(4)) ++ LittleEndian.toVec(initial, ScalarByteWidth(4))
+        LittleEndian.toVec(updated, ScalarByteWidth.Dword) ++ LittleEndian.toVec(initial, ScalarByteWidth.Dword)
       )
     }
 
@@ -293,9 +293,9 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       memory.bytes,
-      LittleEndian.toVec(secondBits.toLong, ScalarByteWidth(4)) ++
-        LittleEndian.toVec(firstBits.toLong, ScalarByteWidth(4)) ++
-        LittleEndian.toVec(firstBits.toLong, ScalarByteWidth(4))
+      LittleEndian.toVec(secondBits.toLong, ScalarByteWidth.Dword) ++
+        LittleEndian.toVec(firstBits.toLong, ScalarByteWidth.Dword) ++
+        LittleEndian.toVec(firstBits.toLong, ScalarByteWidth.Dword)
     )
   }
 
@@ -360,7 +360,7 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
     val expected = Array.ofDim[Byte](8200)
     offsets.foreach { offset =>
       val arrayOffset = offset.toInt.refineEither[Positive0].fold(message => fail(message), value => value)
-      LittleEndian.write(0x12345678L, expected, arrayOffset, ScalarByteWidth(4))
+      LittleEndian.write(0x12345678L, expected, arrayOffset, ScalarByteWidth.Dword)
     }
     assertEquals(memory.bytes, Vec.from(expected))
   }
@@ -390,7 +390,7 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
           testDimensions(groups),
           Vec(
             KernelTask.Argument.Memory(allocation, 4L),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(seed.toLong, ScalarByteWidth(4))),
+            KernelTask.Argument.Scalar(LittleEndian.toVec(seed.toLong, ScalarByteWidth.Dword)),
             KernelTask.Argument.Local(4L)
           ),
           globalSize = Some(testDimensions(count).toGlobalDimensions),
@@ -405,7 +405,7 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
         val expected = Vec.from(0 until count).flatMap { index =>
           LittleEndian.toVec(
             (index / local + seed) * 1000L + (index % local) * 10L + offset + index,
-            ScalarByteWidth(4)
+            ScalarByteWidth.Dword
           )
         }
         assertEquals(memory.bytes, Vec.fill((offset + 1) * 4)(0.toByte) ++ expected ++ Vec.fill(4)(0.toByte))
@@ -436,14 +436,14 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
             KernelTask.Argument.Memory(allocation, 0L),
             KernelTask.Argument.Memory(allocation, 4L),
             KernelTask.Argument.Memory(allocation, 8L),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(seed, ScalarByteWidth(4)))
+            KernelTask.Argument.Scalar(LittleEndian.toVec(seed, ScalarByteWidth.Dword))
           )
         ).toOption.get
         assertEquals(
           VMInterpreter.execute(prepared, dispatch, memory, control, scheduler, Observer.discard),
           Right(())
         )
-        val words = memory.bytes.grouped(4).map(x => LittleEndian.decode(x, 0, ScalarByteWidth(4))).toVector
+        val words = memory.bytes.grouped(4).map(x => LittleEndian.decode(x, 0, ScalarByteWidth.Dword)).toVector
         assertEquals(words.take(3), Vector(groups.toLong, seed, 1L))
         assertEquals(words.drop(3).grouped(2).map(_.head).toVector.sorted, (0L until groups.toLong).toVector)
         val observations = words.drop(3).grouped(2).map(_(1)).toVector
@@ -464,7 +464,7 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
           VMInterpreter.execute(prepared, dispatch, memory, observeControl, scheduler, Observer.discard),
           Right(())
         )
-        val consumed = memory.bytes.grouped(4).map(x => LittleEndian.decode(x, 0, ScalarByteWidth(4))).toVector
+        val consumed = memory.bytes.grouped(4).map(x => LittleEndian.decode(x, 0, ScalarByteWidth.Dword)).toVector
         assertEquals(consumed.take(3), Vector(groups.toLong * 2, seed, 1L))
         assertEquals(
           consumed.drop(3).grouped(2).map(_.head).toVector.sorted,

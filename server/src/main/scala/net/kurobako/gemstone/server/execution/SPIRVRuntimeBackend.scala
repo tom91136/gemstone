@@ -10,13 +10,8 @@ import net.kurobako.gemstone.isa.ProgramSymbols
 import net.kurobako.gemstone.isa.spirv.v1_6.ISA
 import net.kurobako.gemstone.isa.spirv.v1_6.Validation
 import net.kurobako.gemstone.isa.spirv.v1_6.VirtualMachine as SPIRVMachine
-import net.kurobako.gemstone.vm.KernelTask
 import net.kurobako.gemstone.vm.Memory
 import net.kurobako.gemstone.vm.MemoryRegion
-import net.kurobako.gemstone.vm.Result
-import net.kurobako.gemstone.vm.TaskControl
-
-import java.util.concurrent.atomic.AtomicBoolean
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -34,9 +29,8 @@ final class SPIRVRuntimeBackend(environment: Validation.Environment, override va
     } yield Program(machine)(loaded)
   }
 
-  private final class Program(machine: SPIRVMachine)(loaded: machine.LoadedProgram) extends RuntimeBackend.Program {
-    private val closed = AtomicBoolean()
-
+  private final class Program(machine: SPIRVMachine)(loaded: machine.LoadedProgram)
+      extends MachineProgram[SPIRVMachine](machine, loaded, "SPIR-V program is closed") {
     override def bindProgramId(id: Long): Unit = machine.bindProgramId(loaded, id)
 
     override def symbols: Either[RuntimeBackend.Error, ProgramSymbols] = open {
@@ -48,19 +42,6 @@ final class SPIRVRuntimeBackend(environment: Validation.Environment, override va
       open(machine.kernel(loaded, name).left.map(error => RuntimeBackend.Error.Invalid(error.message)))
 
     override val globals: Option[RuntimeBackend.Program.Globals] = Some(Globals(machine)(loaded))
-
-    override def execute(
-        task: KernelTask,
-        memory: Memory,
-        control: TaskControl
-    ): Either[RuntimeBackend.Error, Result] =
-      open(machine.execute(loaded, task, memory, control).left.map(RuntimeBackend.Error.Execution(_)))
-
-    override def close(): Unit =
-      if (closed.compareAndSet(false, true)) machine.unload(loaded)
-
-    private def open[A](operation: => Either[RuntimeBackend.Error, A]): Either[RuntimeBackend.Error, A] =
-      if (closed.get()) Left(RuntimeBackend.Error.Failed("SPIR-V program is closed")) else operation
   }
 
   private final class Globals(machine: SPIRVMachine)(loaded: machine.LoadedProgram)

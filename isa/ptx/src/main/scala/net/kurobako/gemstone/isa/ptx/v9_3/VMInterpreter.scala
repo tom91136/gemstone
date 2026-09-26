@@ -77,7 +77,7 @@ private[v9_3] object VMInterpreter {
                     case Left(message) => failure = Some(message)
                     case Right(global) =>
                       if (geometry.containsGlobal(global))
-                        live = live.union(VMLaneMask.one(lane).fold(_ => VMLaneMask.Empty, value => value))
+                        live = live.union(VMLaneMask.ofLane(lane))
                   }
               }
           }
@@ -279,8 +279,8 @@ private[v9_3] object VMInterpreter {
                 ((maskValue & 0xffffffffL) & (1L << (candidate & 31))) != 0L
               }
               if (expected.subtract(present).nonEmpty)
-                delayed = delayed.union(VMLaneMask.one(lane).fold(_ => VMLaneMask.Empty, value => value))
-              else runnable = runnable.union(VMLaneMask.one(lane).fold(_ => VMLaneMask.Empty, value => value))
+                delayed = delayed.union(VMLaneMask.ofLane(lane))
+              else runnable = runnable.union(VMLaneMask.ofLane(lane))
             }
             Right(runnable -> delayed)
         }

@@ -20,11 +20,11 @@ enum ValidationOutcome[+Issue] {
 
 object ValidationOutcome {
   def combineAll[Issue](outcomes: Vec[ValidationOutcome[Issue]]): ValidationOutcome[Issue] = {
-    val rejected = outcomes.collect { case Rejected(issues) => issues }.flatten
-    rejected.refineOption[MinLength[1]] match {
+    def issuesOf(select: ValidationOutcome[Issue] => Option[Vec[Issue]]): Option[Vec[Issue] :| MinLength[1]] =
+      outcomes.flatMap(select).flatten.refineOption[MinLength[1]]
+    issuesOf { case Rejected(values) => Some(values); case _ => None } match {
       case Some(issues) => Rejected(issues)
-      case None         =>
-        outcomes.collect { case Incomplete(issues) => issues }.flatten.refineOption[MinLength[1]] match {
+      case None         => issuesOf { case Incomplete(values) => Some(values); case _ => None } match {
           case Some(issues) => Incomplete(issues)
           case None         => Accepted
         }

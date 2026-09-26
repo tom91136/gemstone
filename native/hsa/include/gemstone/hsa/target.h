@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cstdlib>
+#include <gemstone/environment.hpp>
 
 namespace gemstone::hsa {
 
@@ -8,7 +8,7 @@ inline constexpr char defaultTarget[] = "gfx900";
 
 /** The target presented by the virtual HSA/ HIP providers. */
 inline const char *targetArch() noexcept {
-  const char *value = std::getenv("GEMSTONE_AMDGPU_TARGET");
+  const char *value = gemstone::environment::value(gemstone::environment::TargetArch);
   return value != nullptr && value[0] != '\0' ? value : defaultTarget;
 }
 

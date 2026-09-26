@@ -8,6 +8,7 @@ import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.Wire
 import net.kurobako.gemstone.server.execution.ExecutionService
+import net.kurobako.gemstone.server.Throwables
 import net.kurobako.gemstone.vm.{KernelTask, LaunchGeometry, MemoryRegion}
 
 import cats.syntax.all.*
@@ -58,7 +59,7 @@ object ExecutionRPCProtocol {
       val payloadSize = input.readInt()
       if (payloadSize < 0 || payloadSize > ExecutionRPC.MaximumPayload)
         throw IllegalArgumentException(s"invalid execution payload size: $payloadSize")
-      val payload   = readExactly(input, payloadSize)
+      val payload   = readExactly(input, payloadSize, IllegalArgumentException(_))
       val validated = for {
         _ <- Either.cond(
           fingerprint == ExecutionRPC.Schema.fingerprint,
@@ -81,7 +82,11 @@ object ExecutionRPCProtocol {
             case Right(service) =>
               Wire.Protocol[Operation].decodePayload(operationId, payload, ExecutionRPC.Limits) match {
                 case Left(message)  => Left(ExecutionFailure.InvalidRequest(message))
-                case Right(decoded) => dispatch(decoded.value, service)
+                case Right(decoded) =>
+                  try dispatch(decoded.value, service)
+                  catch {
+                    case scala.util.control.NonFatal(error) => Left(ExecutionFailure.Failed(Throwables.detail(error)))
+                  }
               }
           }
       }
@@ -97,7 +102,7 @@ object ExecutionRPCProtocol {
     write(
       output,
       Left(ExecutionFailure.InvalidRequest(
-        s"malformed execution request: ${Option(error.getMessage).getOrElse(error.getClass.getName)}"
+        s"malformed execution request: ${Throwables.detail(error)}"
       ))
     )
 
@@ -109,8 +114,7 @@ object ExecutionRPCProtocol {
     case request @ Operation.PollHostMemory(completion)           => encode(request, service.pollHostMemory(completion))
     case request @ Operation.SupplyHostMemory(completion, ranges) =>
       encode(request, service.supplyHostMemory(completion, ranges))
-    case Operation.Ping => summon[Wire.Codec[Unit]].encode((), ExecutionRPC.Limits)
-        .leftMap(message => ExecutionFailure.Failed(message))
+    case Operation.Ping                                     => encode(Operation.Ping, Right(()))
     case request @ Operation.RegisterAllocation(kind, size) =>
       encode(request, service.registerAllocation(size, kind))
     case request @ Operation.RegisterAllocationAddress(allocation, nativeBase, hostBacked) =>
@@ -125,12 +129,20 @@ object ExecutionRPCProtocol {
       encode(request, service.read(allocation, offset, size))
     case request @ Operation.LoadProgram(encoding, image) =>
       encode(request, service.load(encoding, image))
+    case request @ Operation.DescribeSpecialization(image) =>
+      encode(request, service.describeSpecialization(image))
+    case request @ Operation.SpecializeImage(image, constants) =>
+      encode(request, service.specializeImage(image, constants))
     case request @ Operation.UnloadProgram(program) =>
       encode(request, service.unload(program))
     case request @ Operation.DescribeProgram(program) =>
       encode(request, service.catalog(program))
     case request @ Operation.DescribeKernel(program, name) =>
       encode(request, service.kernel(program, name))
+    case request @ Operation.DescribeImage(encoding, image, name) =>
+      encode(request, service.describeImage(encoding, image, name))
+    case request @ Operation.Blas(blas) =>
+      encode(request, service.blas(blas))
     case request @ Operation.DescribeGlobal(program, name) =>
       encode(request, service.global(program, name))
     case request @ Operation.BindProgramGlobal(program, name, allocation, offset) =>
@@ -148,7 +160,8 @@ object ExecutionRPCProtocol {
           privateSegmentBytes,
           groupSegmentBytes,
           arguments,
-          pointerRelocations
+          pointerRelocations,
+          discoverArgumentRelocations
         ) =>
       val created = KernelTask.validated(
         kernelName = ISAKernelName(kernelName.value),
@@ -174,7 +187,8 @@ object ExecutionRPCProtocol {
           )
         },
         workDim = workDim,
-        globalOffset = LaunchGeometry.Coordinates(globalOffset.x, globalOffset.y, globalOffset.z)
+        globalOffset = LaunchGeometry.Coordinates(globalOffset.x, globalOffset.y, globalOffset.z),
+        discoverArgumentRelocations = discoverArgumentRelocations
       ).leftMap(message => ExecutionFailure.InvalidRequest(message))
       val result = created match {
         case Left(error) => Left(error)
@@ -222,15 +236,8 @@ object ExecutionRPCProtocol {
     output.flush()
   }
 
-  private def bounded(error: ExecutionFailure): ExecutionFailure = {
-    val detail = truncateUtf8(error.message, MaximumErrorTextBytes)
-    error match {
-      case _: ExecutionFailure.InvalidRequest => ExecutionFailure.InvalidRequest(detail)
-      case _: ExecutionFailure.NotFound       => ExecutionFailure.NotFound(detail)
-      case _: ExecutionFailure.Unsupported    => ExecutionFailure.Unsupported(detail)
-      case _: ExecutionFailure.Failed         => ExecutionFailure.Failed(detail)
-    }
-  }
+  private def bounded(error: ExecutionFailure): ExecutionFailure =
+    error.withDetail(truncateUtf8(error.message, MaximumErrorTextBytes))
 
   private def truncateUtf8(
       value: String,
@@ -260,9 +267,4 @@ object ExecutionRPCProtocol {
       result.result()
     }
 
-  private def readExactly(input: DataInputStream, size: Int): Array[Byte] = {
-    val result = input.readNBytes(size)
-    if (result.length != size) throw IllegalArgumentException(s"expected $size bytes, received ${result.length}")
-    result
-  }
 }

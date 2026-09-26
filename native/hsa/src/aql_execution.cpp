@@ -243,7 +243,7 @@ bool resolveArguments(gemstone_hsa_aql_runtime &runtime, const KernelBinding &bi
       }
       gemstone_hsa_argument allocation{};
       if (!resolveAllocation(runtime, pointer, allocation)) {
-        if (!std::getenv("GEMSTONE_HSA_SYSTEM_PAGING")) return false;
+        if (!gemstone::environment::present(gemstone::environment::SystemPaging)) return false;
         append_scalar(field.offset, field.size);
       } else arguments.push_back(allocation);
     } else {

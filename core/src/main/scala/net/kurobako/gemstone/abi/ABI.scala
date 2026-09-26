@@ -135,22 +135,21 @@ object ABI {
   ) {
     def length: Int :| Positive0 = mutableElements.length.refineUnsafe[Positive0]
 
+    private def checkedIndex(index: Int :| Positive0): Either[PointerError, Int] =
+      if (index >= mutableElements.length) Left(PointerError.OutOfBounds(index, length)) else Right(index)
+
     def read(index: Int :| Positive0 = 0)(using
         CanRead[Mode],
         CanDereference[Size]
-    ): Either[PointerError, A] =
-      if (index >= mutableElements.length) Left(PointerError.OutOfBounds(index, length))
-      else Right(mutableElements(index))
+    ): Either[PointerError, A] = checkedIndex(index).map(mutableElements(_))
 
     def write(value: A, index: Int :| Positive0 = 0)(using
         CanWrite[Mode],
         CanDereference[Size]
     ): Either[PointerError, Unit] =
-      if (index >= mutableElements.length) Left(PointerError.OutOfBounds(index, length))
-      else {
-        mutableElements(index) = value
-        mutableInitialized(index) = true
-        Right(())
+      checkedIndex(index).map { position =>
+        mutableElements(position) = value
+        mutableInitialized(position) = true
       }
 
     private[gemstone] def snapshot(using CanDereference[Size]): Either[PointerError, Option[Vec[A]]] =
@@ -219,7 +218,7 @@ object ABI {
 
   /** A by-value ABI value wider than this is not a machine word. */
   type MachineWordBytes = 8
-  final val MachineWordSize: Int = 8
+  final val MachineWordSize: Int = scala.compiletime.constValue[MachineWordBytes]
 
   /** Process-neutral bytes for a C typedef, enum, record, or other by-value ABI type. The literal C spelling keeps
     * unrelated vendor types distinct even when they have the same machine representation.

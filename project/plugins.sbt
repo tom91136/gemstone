@@ -1,6 +1,5 @@
 // Meta-build bootstrap only. sbt loads this file before build.sbt, so plugin and
 // build-helper dependencies cannot use the product-version catalog there.
-addSbtPlugin("com.timushev.sbt" % "sbt-updates"      % "0.7.0")
 addSbtPlugin("ch.epfl.scala"    % "sbt-scalafix"     % "0.14.9")
 addSbtPlugin("org.scalameta"    % "sbt-scalafmt"     % "2.6.2")
 addSbtPlugin("org.scala-native" % "sbt-scala-native" % "0.5.12")

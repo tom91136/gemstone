@@ -24,11 +24,7 @@ struct GemstoneVulkanDescriptorRange {
   size_t size;
 };
 
-struct GemstoneVulkanDescriptorAllocation {
-  VkDeviceMemory memory;
-  VkDeviceSize offset;
-  size_t size;
-};
+using GemstoneVulkanDescriptorAllocation = GemstoneVulkanDescriptorRange;
 
 struct GemstoneVulkanDescriptorArgument {
   size_t allocation;
@@ -40,18 +36,11 @@ struct GemstoneVulkanDescriptorAllocationPlan {
   std::vector<GemstoneVulkanDescriptorArgument> arguments;
 };
 
-__attribute__((visibility("default"))) std::array<uint32_t, 3>
-gemstoneVulkanLocalSize(const std::vector<uint8_t> &image, std::string_view entry,
-                        const std::unordered_map<uint32_t, uint32_t> &specializations);
-
 __attribute__((visibility("default"))) std::optional<size_t> gemstoneVulkanDescriptorLength(VkDeviceSize bufferSize, VkDeviceSize offset,
                                                                                             VkDeviceSize range);
 
 __attribute__((visibility("default"))) GemstoneVulkanDescriptorAllocationPlan
 gemstoneVulkanDescriptorAllocationPlan(const std::vector<GemstoneVulkanDescriptorRange> &ranges);
-
-__attribute__((visibility("default"))) std::optional<std::vector<uint32_t>>
-gemstoneVulkanDescriptorBindings(const std::vector<uint8_t> &image, std::string_view entry);
 
 __attribute__((visibility("default"))) PFN_vkVoidFunction gemstoneVulkanInstanceFunction(const char *name, PFN_vkVoidFunction real);
 __attribute__((visibility("default"))) PFN_vkVoidFunction gemstoneVulkanDeviceFunction(const char *name, PFN_vkVoidFunction real);

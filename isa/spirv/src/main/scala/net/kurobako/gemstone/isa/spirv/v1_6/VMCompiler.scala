@@ -15,7 +15,7 @@ import scala.collection.mutable
 import scala.util.control.NonFatal
 
 private[v1_6] object VMCompiler {
-  import Operand.{id, operandBits, unsigned}
+  import Operand.{id, unsigned}
 
   // OpSpecConstantOp can embed any pure opcode; the evaluator supports these two.
   private val CompositeExtractOpcode = Instruction.Definition.CompositeExtract.opcodeNumber.value.toLong
@@ -74,6 +74,8 @@ private[v1_6] object VMCompiler {
     val entryPointInterfaces    = mutable.HashMap.empty[KernelName, Set[Int]]
     val vulkanEntries           = mutable.HashSet.empty[KernelName]
     val subgroupSizes           = mutable.HashMap.empty[Int, Int]
+    val workGroupSizes          = mutable.HashMap.empty[Int, (Int, Int, Int)]
+    val workGroupSizeHints      = mutable.HashMap.empty[Int, (Int, Int, Int)]
     val functions               = mutable.HashMap.empty[Int, Function]
     val functionNames           = mutable.HashMap.empty[Int, FunctionName]
 
@@ -99,13 +101,13 @@ private[v1_6] object VMCompiler {
         case Instruction.TypeVoid(dest)                   => types.update(id(dest), RuntimeType.Void)
         case Instruction.TypeBool(dest)                   => types.update(id(dest), RuntimeType.Bool)
         case Instruction.TypeInt(dest, width, signedness) =>
-          val bits = operandBits(width)
+          val bits = id(width)
           if (bits < 8 || bits > 64 || bits % 8 != 0)
             return Left(Fault.Unsupported(s"SPIR-V integer width $bits is unsupported"))
           // The preceding guard proves the SPIR-V scalar bit-width range at the decode boundary.
           types.update(id(dest), RuntimeType.Integer(BitWidth.applyUnsafe(bits), unsigned(signedness) != 0L))
         case Instruction.TypeFloat(dest, width, _) =>
-          val bits = operandBits(width)
+          val bits = id(width)
           if (!Vec(16, 32, 64).contains(bits))
             return Left(
               Fault.Unsupported(s"SPIR-V floating-point width $bits is unsupported")
@@ -113,7 +115,7 @@ private[v1_6] object VMCompiler {
           // The preceding closed-domain check proves the supported interchange width.
           types.update(id(dest), RuntimeType.Floating(FloatingPointWidth.applyUnsafe(bits)))
         case Instruction.TypeVector(dest, component, count) =>
-          val componentCount = operandBits(count)
+          val componentCount = id(count)
           if (componentCount <= 0)
             return Left(Fault.InvalidTask(s"SPIR-V vector component count ${unsigned(count)} is invalid"))
           types.update(id(dest), RuntimeType.VectorType(id(component), componentCount))
@@ -134,7 +136,7 @@ private[v1_6] object VMCompiler {
         case Instruction.TypeStruct(dest, members) =>
           types.update(id(dest), RuntimeType.Structure(members.map(id(_))))
         case Instruction.TypePointer(dest, storageClass, dataType) =>
-          types.update(id(dest), RuntimeType.Pointer(operandBits(storageClass), id(dataType)))
+          types.update(id(dest), RuntimeType.Pointer(id(storageClass), id(dataType)))
         case Instruction.TypeFunction(dest, result, parameters) =>
           types.update(id(dest), RuntimeType.Function(id(result), parameters.map(id(_))))
         case Instruction.TypeEvent(dest)                => types.update(id(dest), RuntimeType.Event)
@@ -195,7 +197,7 @@ private[v1_6] object VMCompiler {
         case Instruction.Variable(resultType, dest, storageClass, initializer) =>
           globals.update(
             id(dest),
-            Global(id(resultType), operandBits(storageClass), initializer.map(id(_)))
+            Global(id(resultType), id(storageClass), initializer.map(id(_)))
           )
         case Instruction.Decorate(target, decoration) if decoration.words.size >= 2 && unsigned(decoration) == 11L =>
           builtins.update(id(target), decoration.words(1).bits)
@@ -241,12 +243,39 @@ private[v1_6] object VMCompiler {
                 val _ = vulkanEntries.add(kernelName)
               }
           }
-        case Instruction.ExecutionMode(entryPoint, mode)
-            if unsigned(mode) == 35L && mode.words.size >= 2 =>
-          val size = mode.words(1).toUnsigned
-          if (size == 0L || size > Int.MaxValue.toLong)
-            return Left(Fault.InvalidTask(s"SPIR-V SubgroupSize $size is invalid"))
-          subgroupSizes.update(id(entryPoint), size.toInt)
+        case Instruction.ExecutionMode(entryPoint, mode) =>
+          unsigned(mode) match {
+            case 35L if mode.words.size >= 2 =>
+              val size = mode.words(1).toUnsigned
+              if (size == 0L || size > Int.MaxValue.toLong)
+                return Left(Fault.InvalidTask(s"SPIR-V SubgroupSize $size is invalid"))
+              subgroupSizes.update(id(entryPoint), size.toInt)
+            case 17L if mode.words.size >= 4 =>
+              localSize(mode.words(1), mode.words(2), mode.words(3)).foreach(size =>
+                workGroupSizes.update(id(entryPoint), size)
+              )
+            case 18L if mode.words.size >= 4 =>
+              localSize(mode.words(1), mode.words(2), mode.words(3)).foreach(size =>
+                workGroupSizeHints.update(id(entryPoint), size)
+              )
+            case 38L if mode.words.size >= 4 =>
+              localSizeId(constants, mode.words(1), mode.words(2), mode.words(3))
+                .foreach(size => workGroupSizes.update(id(entryPoint), size))
+            case 39L if mode.words.size >= 4 =>
+              localSizeId(constants, mode.words(1), mode.words(2), mode.words(3))
+                .foreach(size => workGroupSizeHints.update(id(entryPoint), size))
+            case _ => ()
+          }
+        case Instruction.ExecutionModeId(entryPoint, mode) =>
+          unsigned(mode) match {
+            case 38L if mode.words.size >= 4 =>
+              localSizeId(constants, mode.words(1), mode.words(2), mode.words(3))
+                .foreach(size => workGroupSizes.update(id(entryPoint), size))
+            case 39L if mode.words.size >= 4 =>
+              localSizeId(constants, mode.words(1), mode.words(2), mode.words(3))
+                .foreach(size => workGroupSizeHints.update(id(entryPoint), size))
+            case _ => ()
+          }
         case Instruction.Function(_, dest, _, _) =>
           val functionId = id(dest)
           val parameters = mutable.ArrayBuilder.make[(Int, Int)]
@@ -297,6 +326,8 @@ private[v1_6] object VMCompiler {
         entryPointInterfaces = entryPointInterfaces.toMap,
         vulkanEntries = vulkanEntries.toSet,
         subgroupSizes = subgroupSizes.toMap,
+        workGroupSizes = workGroupSizes.toMap,
+        workGroupSizeHints = workGroupSizeHints.toMap,
         functions = definedFunctions,
         functionNames = definedNames,
         collectiveFunctions = reachableFunctions(
@@ -411,6 +442,27 @@ private[v1_6] object VMCompiler {
     )
   }
 
+  private def positiveTriple(x: Long, y: Long, z: Long): Option[(Int, Int, Int)] =
+    if (x <= 0L || y <= 0L || z <= 0L || x > Int.MaxValue.toLong || y > Int.MaxValue.toLong || z > Int.MaxValue.toLong)
+      None
+    else Some((x.toInt, y.toInt, z.toInt))
+
+  private def localSize(x: Word, y: Word, z: Word): Option[(Int, Int, Int)] =
+    positiveTriple(x.toUnsigned, y.toUnsigned, z.toUnsigned)
+
+  private def localSizeId(
+      constants: collection.Map[Int, Constant],
+      x: Word,
+      y: Word,
+      z: Word
+  ): Option[(Int, Int, Int)] =
+    for {
+      xValue <- constants.get(x.bits).flatMap(scalarBits(_))
+      yValue <- constants.get(y.bits).flatMap(scalarBits(_))
+      zValue <- constants.get(z.bits).flatMap(scalarBits(_))
+      size   <- positiveTriple(xValue, yValue, zValue)
+    } yield size
+
   private def scalarBits(value: Constant): Option[Long] = value match {
     case Constant.Bits(_, values) if values.size == 1 => Some(values.head)
     case _                                            => None
@@ -429,7 +481,7 @@ private[v1_6] object VMCompiler {
 
   private def literalString(operand: Operand): String = {
     val bytes = operand.words.flatMap { word =>
-      LittleEndian.toVec(word.bits.toLong, ScalarByteWidth(4))
+      LittleEndian.toVec(word.bits.toLong, ScalarByteWidth.Dword)
     }.takeWhile(_ != 0)
     String(bytes.toArray, java.nio.charset.StandardCharsets.UTF_8)
   }

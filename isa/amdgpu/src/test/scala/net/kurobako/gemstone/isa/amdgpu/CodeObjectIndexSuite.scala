@@ -54,7 +54,7 @@ final class CodeObjectIndexSuite extends munit.FunSuite with CodeObjectTestSuppo
       assertEquals(kernel.privateSegmentSize, 8)
       assertEquals(kernel.computePgmRsrc2, 0x80)
       assertEquals(kernel.kernelCodeProperties, 0x0a)
-      assertEquals(kernel.code, LittleEndian.toVec(0xbf810000L, ScalarByteWidth(4)))
+      assertEquals(kernel.code, LittleEndian.toVec(0xbf810000L, ScalarByteWidth.Dword))
       assertEquals(kernel.readOnlyAddress, 0x2000L)
       assert(kernel.readOnly.length > 64)
       assertEquals(

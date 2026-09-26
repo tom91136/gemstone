@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.server.execution
 
 import net.kurobako.gemstone.concurrent.withLock
+import net.kurobako.gemstone.launcher.EnvironmentNames
+import net.kurobako.gemstone.server.Throwables
 import net.kurobako.gemstone.PlatformTime
 import net.kurobako.gemstone.vm.{Fault, Scheduler}
 
@@ -18,7 +20,8 @@ import scala.util.control.NonFatal
 final class WorkerPool(
     val parallelism: Int :| Positive,
     minGroups: Long = 16L,
-    minWorkItems: Long = 64L
+    minWorkItems: Long = 64L,
+    trace: Boolean = EnvironmentNames.traceEnabled(sys.env, "perf")
 ) extends Scheduler with AutoCloseable {
   private final class Job(
       val count: Long :| Positive0,
@@ -35,7 +38,6 @@ final class WorkerPool(
     @volatile var finished                    = count == 0L
     val observed: Option[mutable.Set[String]] = Option.when(trace)(mutable.Set.empty)
   }
-  private val trace       = sys.env.contains("GEMSTONE_PERF_TRACE")
   private val lock        = ReentrantLock()
   private val workReady   = lock.newCondition()
   private val jobComplete = lock.newCondition()
@@ -100,7 +102,7 @@ final class WorkerPool(
       }
     } catch {
       case NonFatal(error) =>
-        val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getName)
+        val detail = Throwables.detail(error)
         outcome = Left(Fault.Backend(detail))
     } finally {
       // A task may throw a fatal error such as InterruptedException; the job
@@ -184,7 +186,7 @@ final class WorkerPool(
 }
 
 object WorkerPool {
-  val EnvironmentName                                 = "GEMSTONE_EXECUTION_PARALLELISM"
+  val EnvironmentName                                 = EnvironmentNames.ExecutionParallelism
   private val Maximum                                 = 64
   private given (Interval.Closed[1, 64] ==> Positive) = Implication()
 
@@ -205,7 +207,8 @@ object WorkerPool {
     WorkerPool(
       configured,
       minGroups = configured.toLong,
-      minWorkItems = 32L
+      minWorkItems = 32L,
+      trace = EnvironmentNames.traceEnabled(environment, "perf")
     )
   }
 

@@ -27,7 +27,7 @@ struct ScopedEnv {
 } // namespace
 
 TEST_CASE("OpenCL virtual profile advertises the selected Polyregion device", "[opencl]") {
-  const ScopedEnv profile("GEMSTONE_OPENCL_PROFILE", "rusticl-amd");
+  const ScopedEnv profile("GEMSTONE_PROFILE", "rusticl-amd");
   cl_platform_id platform = nullptr;
   cl_device_id device = nullptr;
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -327,6 +327,7 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
                                                         4,          5};
   cl_program specialized = clCreateProgramWithIL(context, specializationWords.data(), sizeof(specializationWords), &error);
   REQUIRE((specialized && error == CL_SUCCESS));
+  server.specializationTable({{101, 4}, {102, 1}});
   cl_uint constantValue = 42;
   cl_uchar boolValue = 2;
   REQUIRE((clSetProgramSpecializationConstant(specialized, 999, sizeof(constantValue), &constantValue) == CL_INVALID_SPEC_ID));
@@ -339,20 +340,24 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   const unsigned loadsBeforeSpecialization = server.programLoads();
   REQUIRE((clBuildProgram(specialized, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
   REQUIRE((server.programLoads() == loadsBeforeSpecialization + 1));
-  auto loadedSpecialization = server.lastProgramImage();
-  auto loadedWord = [&](size_t index) {
-    uint32_t value = 0;
-    std::memcpy(&value, loadedSpecialization.data() + index * 4, sizeof(value));
-    return value;
+  auto forwarded = server.lastSpecialization();
+  auto forwardedValue = [&](uint32_t id) -> const std::vector<uint8_t> * {
+    const auto found = std::find_if(forwarded.begin(), forwarded.end(), [&](const auto &entry) { return entry.first == id; });
+    return found == forwarded.end() ? nullptr : &found->second;
   };
-  REQUIRE((loadedWord(19) == ((4U << 16) | 50U)));
-  REQUIRE((loadedWord(22) == 42));
-  REQUIRE((loadedWord(23) == ((3U << 16) | 48U)));
+  const auto *constantBytes = forwardedValue(101);
+  REQUIRE((constantBytes && constantBytes->size() == sizeof(constantValue)));
+  cl_uint forwardedConstant = 0;
+  std::memcpy(&forwardedConstant, constantBytes->data(), sizeof(forwardedConstant));
+  REQUIRE((forwardedConstant == 42));
+  const auto *boolBytes = forwardedValue(102);
+  REQUIRE((boolBytes && boolBytes->size() == 1 && boolBytes->at(0) == 2));
   const cl_uchar falseValue = 0;
   REQUIRE((clSetProgramSpecializationConstant(specialized, 102, sizeof(falseValue), &falseValue) == CL_SUCCESS));
   REQUIRE((clBuildProgram(specialized, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
-  loadedSpecialization = server.lastProgramImage();
-  REQUIRE((loadedWord(23) == ((3U << 16) | 49U)));
+  forwarded = server.lastSpecialization();
+  boolBytes = forwardedValue(102);
+  REQUIRE((boolBytes && boolBytes->size() == 1 && boolBytes->at(0) == 0));
   size_t originalSize = 0;
   REQUIRE((clGetProgramInfo(specialized, CL_PROGRAM_IL, 0, nullptr, &originalSize) == CL_SUCCESS));
   REQUIRE((originalSize == sizeof(specializationWords)));

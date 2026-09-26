@@ -639,7 +639,7 @@ private[amdgpu] object VMInterpreter {
           else argumentAddress(region, offset, addresses, globalBindings) match {
             case Left(error)    => failure = Some(error)
             case Right(address) =>
-              LittleEndian.write(address.value, packed, packedOffset, ScalarByteWidth(8))
+              LittleEndian.write(address.value, packed, packedOffset, ScalarByteWidth.Qword)
               packedOffset += 8
           }
         case KernelTask.Argument.Local(_) =>
@@ -693,14 +693,14 @@ private[amdgpu] object VMInterpreter {
         .leftMap(detail => Fault.InvalidTask(detail))
       _ <- {
         val dispatchBytes = Array.ofDim[Byte](64)
-        LittleEndian.write(dispatch.geometry.groupSize.x.toLong, dispatchBytes, 4, ScalarByteWidth(2))
-        LittleEndian.write(dispatch.geometry.groupSize.y.toLong, dispatchBytes, 6, ScalarByteWidth(2))
-        LittleEndian.write(dispatch.geometry.groupSize.z.toLong, dispatchBytes, 8, ScalarByteWidth(2))
-        LittleEndian.write(dispatch.geometry.globalExtent.x.toLong, dispatchBytes, 12, ScalarByteWidth(4))
-        LittleEndian.write(dispatch.geometry.globalExtent.y.toLong, dispatchBytes, 16, ScalarByteWidth(4))
-        LittleEndian.write(dispatch.geometry.globalExtent.z.toLong, dispatchBytes, 20, ScalarByteWidth(4))
-        LittleEndian.write(dispatch.privateSegmentBytes.toLong, dispatchBytes, 24, ScalarByteWidth(4))
-        LittleEndian.write(dispatch.groupSegmentBytes.toLong, dispatchBytes, 28, ScalarByteWidth(4))
+        LittleEndian.write(dispatch.geometry.groupSize.x.toLong, dispatchBytes, 4, ScalarByteWidth.Word)
+        LittleEndian.write(dispatch.geometry.groupSize.y.toLong, dispatchBytes, 6, ScalarByteWidth.Word)
+        LittleEndian.write(dispatch.geometry.groupSize.z.toLong, dispatchBytes, 8, ScalarByteWidth.Word)
+        LittleEndian.write(dispatch.geometry.globalExtent.x.toLong, dispatchBytes, 12, ScalarByteWidth.Dword)
+        LittleEndian.write(dispatch.geometry.globalExtent.y.toLong, dispatchBytes, 16, ScalarByteWidth.Dword)
+        LittleEndian.write(dispatch.geometry.globalExtent.z.toLong, dispatchBytes, 20, ScalarByteWidth.Dword)
+        LittleEndian.write(dispatch.privateSegmentBytes.toLong, dispatchBytes, 24, ScalarByteWidth.Dword)
+        LittleEndian.write(dispatch.groupSegmentBytes.toLong, dispatchBytes, 28, ScalarByteWidth.Dword)
         def runGroupIndex(index: Long :| Positive0): Either[Fault, Unit] =
           dispatch.geometry.groupCoordinates(index)
             .leftMap(detail => Fault.InvalidTask(detail))
@@ -2931,564 +2931,15 @@ private[amdgpu] object VMInterpreter {
     def stepCompareAndMemory(index: Int, instruction: Instruction): Either[Fault, Option[Int]] =
       prepareVectorReads(instruction).flatMap(_ => stepPreparedMemory(index, instruction))
 
-    def stepPreparedMemory(index: Int, instruction: Instruction): Either[Fault, Option[Int]] = instruction match {
-      case Instruction.VCompare(operation, srcA, srcB) =>
-        def operand(sourceRegister: InstructionSource, lane: Int, right: Boolean): Long = operation.kind match {
-          case VectorComparisonKind.Signed64 | VectorComparisonKind.Unsigned64 =>
-            source64(sourceRegister, lane, scalar, vector)
-          case VectorComparisonKind.ClassFloat64 if right =>
-            source(sourceRegister, lane)
-          case VectorComparisonKind.Float64 | VectorComparisonKind.ClassFloat64 =>
-            sourceFloating64(sourceRegister, lane, scalar, vector)
-          case _ => source(sourceRegister, lane)
-        }
-        var resultMask = 0L
-        foreachLane { lane =>
-          if (active(lane) && compare(operation, operand(srcA, lane, right = false), operand(srcB, lane, right = true)))
-            resultMask |= 1L << lane
-        }
-        if (operation.updateExec) active.bits = resultMask else carry.bits = resultMask
-        AdvanceStep
-      case Instruction.VCompareSubDword(
-            operation,
-            srcA,
-            srcB,
-            srcASelection,
-            srcBSelection,
-            srcASignExtend,
-            srcBSignExtend,
-            destination
-          ) =>
-        val result = Array.fill(lanes.value)(false)
-        foreachActive { lane =>
-          val left  = selectSubDword(source(srcA, lane), srcASelection, srcASignExtend)
-          val right = selectSubDword(source(srcB, lane), srcBSelection, srcBSignExtend)
-          result(lane) = compare(operation, left, right)
-        }
-        destination match {
-          case Some(register) =>
-            updateLaneMask(register, booleanLaneMask(result))
-          case None =>
-            // SDWA VOPC instructions targeting VCC have the same
-            // complete-mask write semantics as their explicit SGPR
-            // form: inactive EXEC lanes are cleared, not preserved.
-            carry.bits = booleanLaneMask(result)
-        }
-        AdvanceStep
-      case Instruction.VCompareTo(dest, operation, srcA, srcB, absA, absB, negateA, negateB) =>
-        def operand(
-            sourceRegister: InstructionSource,
-            lane: Int,
-            absolute: Boolean,
-            negate: Boolean,
-            right: Boolean
-        ): Long = operation.kind match {
-          case VectorComparisonKind.Float16 =>
-            val raw      = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(source(sourceRegister, lane))))
-            val prepared = if (absolute) math.abs(raw) else raw
-            IEEE754.floatToBinary16(if (negate) -prepared else prepared).value
-          case VectorComparisonKind.ClassFloat32 if right =>
-            source(sourceRegister, lane)
-          case VectorComparisonKind.Float32 | VectorComparisonKind.ClassFloat32 =>
-            val raw      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(sourceRegister, lane))))
-            val prepared = if (absolute) math.abs(raw) else raw
-            IEEE754.floatToBinary32(if (negate) -prepared else prepared).value
-          case VectorComparisonKind.ClassFloat64 if right =>
-            source(sourceRegister, lane)
-          case VectorComparisonKind.Float64 | VectorComparisonKind.ClassFloat64 =>
-            val raw      = IEEE754.binary64ToDouble(sourceFloating64(sourceRegister, lane, scalar, vector))
-            val prepared = if (absolute) math.abs(raw) else raw
-            IEEE754.doubleToBinary64(if (negate) -prepared else prepared)
-          case VectorComparisonKind.Signed64 | VectorComparisonKind.Unsigned64 =>
-            source64(sourceRegister, lane, scalar, vector)
-          case _ => source(sourceRegister, lane)
-        }
-        var resultMask = 0L
-        foreachLane { lane =>
-          if (
-            active(lane) && compare(
-              operation,
-              operand(srcA, lane, absA, negateA, right = false),
-              operand(srcB, lane, absB, negateB, right = true)
-            )
-          ) resultMask |= 1L << lane
-        }
-        if (operation.updateExec) active.bits = resultMask
-        else updateLaneMask(dest, resultMask)
-        AdvanceStep
-      case Instruction.VShiftLeft64(dest, amount, src) =>
-        foreachActive { lane =>
-          val sourceLow  = Bits.low32(source(src, lane))
-          val sourceHigh = src match {
-            case InstructionSource.VectorRegister(register) => Bits.low32(vector(register + 1)(lane))
-            case InstructionSource.Scalar(register)         => Bits.low32(scalar(register + 1))
-            case InstructionSource.Constant(_)              => 0L
-            case InstructionSource.Literal(_)               => 0L
-          }
-          val shifted = Bits.join32(sourceLow, sourceHigh) << (source(amount, lane).toInt & 63)
-          vector(dest)(lane) = Bits.low32(shifted)
-          vector(dest + 1)(lane) = Bits.high32(shifted)
-        }
-        AdvanceStep
-      case Instruction.VShiftRight64(dest, amount, src) =>
-        foreachActive { lane =>
-          val shifted = source64(src, lane, scalar, vector) >>> (source(amount, lane).toInt & 63)
-          vector(dest)(lane) = Bits.low32(shifted)
-          vector(dest + 1)(lane) = Bits.high32(shifted)
-        }
-        AdvanceStep
-      case Instruction.VShiftRightArithmetic64(dest, amount, src) =>
-        foreachActive { lane =>
-          val shifted = source64(src, lane, scalar, vector) >> (source(amount, lane).toInt & 63)
-          vector(dest)(lane) = Bits.low32(shifted)
-          vector(dest + 1)(lane) = Bits.high32(shifted)
-        }
-        AdvanceStep
-      case Instruction.VFloat64Add(dest, srcA, srcB, negateB) =>
-        foreachActive { lane =>
-          val left   = IEEE754.binary64ToDouble(sourceFloating64(srcA, lane, scalar, vector))
-          val rawB   = IEEE754.binary64ToDouble(sourceFloating64(srcB, lane, scalar, vector))
-          val right  = if (negateB) -rawB else rawB
-          val result = IEEE754.doubleToBinary64(left + right)
-          vector(dest)(lane) = Bits.low32(result)
-          vector(dest + 1)(lane) = Bits.high32(result)
-        }
-        AdvanceStep
-      case Instruction.DSReadD16(dest, addressRegister, byteCount, offset, high) =>
-        val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
-        def loadLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) loadLane(lane + 1)
-          else {
-            val base         = Bits.low32(vector(addressRegister)(lane))
-            val sourceOffset = checkedLdsOffset(lds, base + offset.toLong, byteCount)
-            if (sourceOffset == InvalidLdsOffset)
-              Left(ldsFailure(base + offset.toLong, byteCount))
-            else {
-              val loaded = LittleEndian.decode(lds, sourceOffset, scalarByteCount)
-              vector(dest)(lane) =
-                if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
-                else (vector(dest)(lane) & 0xffff0000L) | loaded
-              loadLane(lane + 1)
-            }
-          }
-        advanceAfter(loadLane(0))
-      case Instruction.DSSignedReadD16(dest, addressRegister, byteCount, offset, high) =>
-        val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
-        val bitWidth                                 = BitWidth.assume(byteCount * 8)
-        def loadLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) loadLane(lane + 1)
-          else {
-            val base         = Bits.low32(vector(addressRegister)(lane))
-            val sourceOffset = checkedLdsOffset(lds, base + offset.toLong, byteCount)
-            if (sourceOffset == InvalidLdsOffset)
-              Left(ldsFailure(base + offset.toLong, byteCount))
-            else {
-              val loaded =
-                Bits.low16(
-                  Bits.signExtend(LittleEndian.decode(lds, sourceOffset, scalarByteCount), bitWidth)
-                )
-              vector(dest)(lane) =
-                if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
-                else (vector(dest)(lane) & 0xffff0000L) | loaded
-              loadLane(lane + 1)
-            }
-          }
-        advanceAfter(loadLane(0))
-      case Instruction.DSRead(dest, addressRegister, byteCount, offsetA, offsetB) =>
-        def loadLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) loadLane(lane + 1)
-          else {
-            val base  = Bits.low32(vector(addressRegister)(lane))
-            val first = checkedLdsOffset(lds, base + offsetA.toLong, byteCount)
-            if (first == InvalidLdsOffset)
-              Left(ldsFailure(base + offsetA.toLong, byteCount))
-            else {
-              val second = offsetB match {
-                case None         => InvalidLdsOffset
-                case Some(offset) => checkedLdsOffset(lds, base + offset.toLong, byteCount)
-              }
-              if (offsetB.nonEmpty && second == InvalidLdsOffset)
-                Left(ldsFailure(base + offsetB.get.toLong, byteCount))
-              else {
-                writeVectorBytes(vector, dest, lane, lds, first, byteCount)
-                if (second != InvalidLdsOffset)
-                  writeVectorBytes(vector, dest + (byteCount + 3) / 4, lane, lds, second, byteCount)
-                loadLane(lane + 1)
-              }
-            }
-          }
-        advanceAfter(loadLane(0))
-      case Instruction.DSSignedRead(dest, addressRegister, byteCount, offsetA, offsetB) =>
-        val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
-        val bitWidth                                 = BitWidth.assume(byteCount * 8)
-        def loadLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) loadLane(lane + 1)
-          else {
-            val base  = Bits.low32(vector(addressRegister)(lane))
-            val first = checkedLdsOffset(lds, base + offsetA.toLong, byteCount)
-            if (first == InvalidLdsOffset)
-              Left(ldsFailure(base + offsetA.toLong, byteCount))
-            else {
-              val second = offsetB match {
-                case None         => InvalidLdsOffset
-                case Some(offset) => checkedLdsOffset(lds, base + offset.toLong, byteCount)
-              }
-              if (offsetB.nonEmpty && second == InvalidLdsOffset)
-                Left(ldsFailure(base + offsetB.get.toLong, byteCount))
-              else {
-                writeVectorValue(
-                  vector,
-                  dest,
-                  lane,
-                  Bits.signExtend(LittleEndian.decode(lds, first, scalarByteCount), bitWidth),
-                  4
-                )
-                if (second != InvalidLdsOffset)
-                  writeVectorValue(
-                    vector,
-                    dest + 1,
-                    lane,
-                    Bits.signExtend(LittleEndian.decode(lds, second, scalarByteCount), bitWidth),
-                    4
-                  )
-                loadLane(lane + 1)
-              }
-            }
-          }
-        advanceAfter(loadLane(0))
-      case Instruction.DSPermute(dest, addressRegister, src, offset) =>
-        // DS_PERMUTE is the forward (scatter) counterpart of
-        // DS_BPERMUTE: each active source lane writes its value to
-        // the lane selected by its byte address.  Snapshot both
-        // operands because the destination may alias the source or
-        // address register.  EXEC gates the source lanes, not the
-        // destination lane: a source can scatter into a lane that is
-        // currently inactive.  Preserve old values for destinations
-        // that receive no active source.
-        val addresses = vector(addressRegister).clone()
-        val sources   = vector(src).clone()
-        val result    = vector(dest).clone()
-        foreachActive { lane =>
-          val destinationLane = permuteDestinationLane(addresses(lane), offset.toLong, waveSize)
-          if (destinationLane < lanes.value)
-            result(destinationLane) = Bits.low32(sources(lane))
-        }
-        foreachLane { lane => vector(dest)(lane) = result(lane) }
-        AdvanceStep
-      case Instruction.DSBPermute(dest, addressRegister, src, offset) =>
-        val addresses = vector(addressRegister).clone()
-        val sources   = vector(src).clone()
-        foreachActive { lane =>
-          // DS_BPERMUTE addresses are byte offsets formed by adding
-          // the instruction's immediate offset to the per-lane
-          // address operand.  Omitting the offset makes e.g.
-          // `offset:124` read lane 0 instead of lane 31, dropping
-          // the final cross-wave reduction contribution.
-          val sourceLane = bpermuteSourceLane(addresses(lane), offset.toLong)
-          vector(dest)(lane) = if (sourceLane < lanes.value) Bits.low32(sources(sourceLane)) else 0L
-        }
-        AdvanceStep
-      case Instruction.DSSwizzle(dest, src, control) =>
-        // DS_SWIZZLE packs three five-bit lane masks in the 16-bit
-        // offset: AND[4:0], OR[9:5], and XOR[14:10].  The
-        // ``BROADCAST,32,15`` encoding is 0x01e0, so OR is 15 after
-        // shifting by five.  Snapshot the source register first
-        // because the instruction permits in-place swizzles.
-        val sources = vector(src).clone()
-        val andMask = control & 0x1f
-        val orMask  = (control >>> 5) & 0x1f
-        val xorMask = (control >>> 10) & 0x1f
-        foreachActive { lane =>
-          val sourceLane = ((lane & andMask) | orMask) ^ xorMask
-          vector(dest)(lane) =
-            if (sourceLane >= 0 && sourceLane < lanes.value) Bits.low32(sources(sourceLane)) else 0L
-        }
-        AdvanceStep
-      case Instruction.DSAtomic(operation, dest, addressRegister, src, byteCount, offset, returnValue) =>
-        val scalarByteCount                            = ScalarByteWidth.assume(byteCount)
-        def atomicLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) atomicLane(lane + 1)
-          else {
-            val base = Bits.low32(vector(addressRegister)(lane))
-            readLDS(lds, base + offset.toLong, byteCount).flatMap { bytes =>
-              val previous = LittleEndian.decode(bytes, 0, scalarByteCount)
-              val operand  = if (byteCount == 8)
-                (vector(src)(lane) & 0xffffffffL) | ((vector(src + 1)(lane) & 0xffffffffL) << 32)
-              else Bits.low32(vector(src)(lane))
-              val updated = operation match {
-                case DSAtomicOperation.AddU32       => Bits.low32(previous + operand)
-                case DSAtomicOperation.SubtractU32  => Bits.low32(previous - operand)
-                case DSAtomicOperation.IncrementU32 => Bits.low32(previous + 1L)
-                case DSAtomicOperation.DecrementU32 => Bits.low32(previous - 1L)
-                case DSAtomicOperation.MinimumI32   => math.min(previous.toInt, operand.toInt).toLong & Bits.Mask32
-                case DSAtomicOperation.MaximumI32   => math.max(previous.toInt, operand.toInt).toLong & Bits.Mask32
-                case DSAtomicOperation.MinimumU32   => math.min(Bits.low32(previous), Bits.low32(operand))
-                case DSAtomicOperation.MaximumU32   => math.max(Bits.low32(previous), Bits.low32(operand))
-                case DSAtomicOperation.AddU64       => previous + operand
-                case DSAtomicOperation.SubtractU64  => previous - operand
-                case DSAtomicOperation.IncrementU64 => previous + 1L
-                case DSAtomicOperation.DecrementU64 => previous - 1L
-                case DSAtomicOperation.And32        => Bits.low32(previous) & Bits.low32(operand)
-                case DSAtomicOperation.Or32         => Bits.low32(previous) | Bits.low32(operand)
-                case DSAtomicOperation.Xor32        => Bits.low32(previous) ^ Bits.low32(operand)
-                case DSAtomicOperation.And64        => previous & operand
-                case DSAtomicOperation.Or64         => previous | operand
-                case DSAtomicOperation.Xor64        => previous ^ operand
-                case DSAtomicOperation.MinimumI64   => math.min(previous, operand)
-                case DSAtomicOperation.MaximumI64   => math.max(previous, operand)
-                case DSAtomicOperation.MinimumU64   =>
-                  if (java.lang.Long.compareUnsigned(previous, operand) <= 0) previous else operand
-                case DSAtomicOperation.MaximumU64 =>
-                  if (java.lang.Long.compareUnsigned(previous, operand) >= 0) previous else operand
-                case DSAtomicOperation.AddF32 =>
-                  IEEE754.floatToBinary32(
-                    IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous.toInt))) + IEEE754.binary32ToFloat(
-                      Binary32.fromLow(Bits.low32(
-                        operand.toInt
-                      ))
-                    )
-                  ).value.toLong & 0xffffffffL
-                case DSAtomicOperation.MinimumF32 =>
-                  IEEE754.floatToBinary32(
-                    math.min(
-                      IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous.toInt))),
-                      IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(operand.toInt)))
-                    )
-                  ).value.toLong & 0xffffffffL
-                case DSAtomicOperation.MaximumF32 =>
-                  IEEE754.floatToBinary32(
-                    math.max(
-                      IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous.toInt))),
-                      IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(operand.toInt)))
-                    )
-                  ).value.toLong & 0xffffffffL
-                case DSAtomicOperation.AddF64 =>
-                  IEEE754.doubleToBinary64(
-                    IEEE754.binary64ToDouble(previous) + IEEE754.binary64ToDouble(operand)
-                  )
-                case DSAtomicOperation.MinimumF64 =>
-                  IEEE754.doubleToBinary64(
-                    math.min(
-                      IEEE754.binary64ToDouble(previous),
-                      IEEE754.binary64ToDouble(operand)
-                    )
-                  )
-                case DSAtomicOperation.MaximumF64 =>
-                  IEEE754.doubleToBinary64(
-                    math.max(
-                      IEEE754.binary64ToDouble(previous),
-                      IEEE754.binary64ToDouble(operand)
-                    )
-                  )
-              }
-              if (returnValue)
-                writeVectorBytes(vector, dest, lane, LittleEndian.toArray(previous, scalarByteCount))
-              writeLDS(lds, base + offset.toLong, LittleEndian.toArray(updated, scalarByteCount))
-                .flatMap(_ => atomicLane(lane + 1))
-            }
-          }
-        advanceAfter(atomicLane(0))
-      case Instruction.DSWrite(addressRegister, srcA, srcB, byteCount, offsetA, offsetB) =>
-        def storeLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) storeLane(lane + 1)
-          else {
-            val base = Bits.low32(vector(addressRegister)(lane))
-            for {
-              firstAddress = base + offsetA.toLong
-              firstBytes   = vectorBytes(vector, srcA, lane, byteCount)
-              _ <- writeLDS(lds, firstAddress, firstBytes)
-              _ <- (srcB, offsetB) match {
-                case (Some(register), Some(offset)) =>
-                  val address = base + offset.toLong
-                  val bytes   = vectorBytes(vector, register, lane, byteCount)
-                  writeLDS(lds, address, bytes)
-                case (None, None) => Right(())
-                case _            => Left(Fault.Backend("malformed paired DS write"))
-              }
-              _ <- storeLane(lane + 1)
-            } yield ()
-          }
-        advanceAfter(storeLane(0))
-      case Instruction.DSWriteD16High(addressRegister, src, offset) =>
-        def storeLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) storeLane(lane + 1)
-          else {
-            val base    = Bits.low32(vector(addressRegister)(lane))
-            val value   = vector(src)(lane) >>> 16
-            val address = base + offset.toLong
-            writeLDS(lds, address, LittleEndian.toArray(value, ScalarByteWidth(2)))
-              .flatMap(_ => storeLane(lane + 1))
-          }
-        advanceAfter(storeLane(0))
-      case Instruction.DSWriteD16HighByte(addressRegister, src, offset) =>
-        def storeLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) storeLane(lane + 1)
-          else {
-            val base    = Bits.low32(vector(addressRegister)(lane))
-            val value   = vector(src)(lane) >>> 16
-            val address = base + offset.toLong
-            writeLDS(lds, address, LittleEndian.toArray(value, ScalarByteWidth(1)))
-              .flatMap(_ => storeLane(lane + 1))
-          }
-        advanceAfter(storeLane(0))
-      case Instruction.GlobalLoad(dest, addressRegister, scalarAddress, byteCount, offset, coherent) =>
-        val scalarBase = scalarAddress match {
-          case Some(register) => pair(scalar, register)
-          case None           => 0L
-        }
-        val scalarWidth           = if (byteCount <= 8) MemoryValueByteWidth.assume(byteCount) else null
-        val displacement          = signed13(offset)
-        var lane                  = 0
-        var failure: Fault | Null = null
-        while (lane < lanes.value && failure == null) {
-          if (active(lane)) {
-            val address =
-              if (scalarAddress.isDefined) scalarBase + Bits.low32(vector(addressRegister)(lane)) + displacement
-              else pair(vector, addressRegister, lane) + displacement
-            if (scalarWidth != null)
-              (if (coherent && (byteCount == 4 || byteCount == 8) && !immutableAddress(address, byteCount))
-                 atomicModifyValue(
-                   address,
-                   scalarWidth.nn,
-                   allocations,
-                   memory,
-                   kernel.globalMemory,
-                   kernel.globalMemoryLocks
-                 )(identity)
-               else readValue(
-                 address,
-                 scalarWidth.nn,
-                 kernarg,
-                 dispatchBytes,
-                 kernel.readOnlyAddress,
-                 kernel.readOnly,
-                 kernel.globalMemory,
-                 allocations,
-                 memory
-               )) match {
-                case Left(error)  => failure = error
-                case Right(value) => writeVectorValue(vector, dest, lane, value, byteCount)
-              }
-            else
-              readBytes(
-                address,
-                byteCount,
-                kernarg,
-                dispatchBytes,
-                kernel.readOnlyAddress,
-                kernel.readOnly,
-                kernel.globalMemory,
-                allocations,
-                memory
-              ) match {
-                case Left(error)  => failure = error
-                case Right(bytes) => writeVectorBytes(vector, dest, lane, bytes)
-              }
-          }
-          lane += 1
-        }
-        advanceAfter(if (failure == null) Right(()) else Left(failure.nn))
-      case Instruction.GlobalLoadSigned(dest, addressRegister, scalarAddress, byteCount, offset) =>
-        val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
-        val bitWidth                                 = BitWidth.assume(byteCount * 8)
-        def loadLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) loadLane(lane + 1)
-          else {
-            val address = scalarAddress
-              .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
-              .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            readBytes(
-              address,
-              byteCount,
-              kernarg,
-              dispatchBytes,
-              kernel.readOnlyAddress,
-              kernel.readOnly,
-              kernel.globalMemory,
-              allocations,
-              memory
-            ) match {
-              case Left(error)  => Left(error)
-              case Right(bytes) =>
-                val value = Bits.signExtend(LittleEndian.decode(bytes, 0, scalarByteCount), bitWidth)
-                vector(dest)(lane) = Bits.low32(value)
-                loadLane(lane + 1)
-            }
-          }
-        advanceAfter(loadLane(0))
-      case Instruction.GlobalLoadD16(dest, addressRegister, scalarAddress, offset, high) =>
-        def loadLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) loadLane(lane + 1)
-          else {
-            val address = scalarAddress
-              .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
-              .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            readBytes(
-              address,
-              2,
-              kernarg,
-              dispatchBytes,
-              kernel.readOnlyAddress,
-              kernel.readOnly,
-              kernel.globalMemory,
-              allocations,
-              memory
-            ) match {
-              case Left(error)  => Left(error)
-              case Right(bytes) =>
-                val loaded = LittleEndian.decode(bytes, 0, ScalarByteWidth(2))
-                vector(dest)(lane) =
-                  if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
-                  else (vector(dest)(lane) & 0xffff0000L) | loaded
-                loadLane(lane + 1)
-            }
-          }
-        advanceAfter(loadLane(0))
-      case Instruction.GlobalStore(addressRegister, scalarAddress, src, byteCount, offset) =>
-        def storeLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) storeLane(lane + 1)
-          else {
-            val address = scalarAddress
-              .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
-              .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            val stored =
-              if (byteCount <= 8)
-                writeValue(
-                  address,
-                  if (byteCount <= 4) vector(src)(lane) else pair(vector, src, lane),
-                  MemoryValueByteWidth.assume(byteCount),
-                  allocations,
-                  memory,
-                  kernel.globalMemory
-                )
-              else
-                writeBytes(address, vectorBytes(vector, src, lane, byteCount), allocations, memory, kernel.globalMemory)
-            stored match {
-              case Left(error) => Left(error)
-              case Right(_)    => storeLane(lane + 1)
-            }
-          }
-        advanceAfter(storeLane(0))
-      case Instruction.GlobalAtomicAdd(
-            dest,
-            addressRegister,
-            scalarAddress,
-            src,
-            byteCount,
-            offset,
-            returnValue
-          ) =>
+    def stepPreparedMemory(index: Int, instruction: Instruction): Either[Fault, Option[Int]] = {
+      def runGlobalAtomic(
+          dest: Int,
+          addressRegister: Int,
+          scalarAddress: Option[Int],
+          byteCount: Int,
+          offset: Int,
+          returnValue: Boolean
+      )(update: (Int, Long) => Long): Either[Fault, Unit] = {
         def atomicLane(lane: Int): Either[Fault, Unit] =
           if (lane == lanes.value) Right(())
           else if (!active(lane)) atomicLane(lane + 1)
@@ -3496,7 +2947,6 @@ private[amdgpu] object VMInterpreter {
             val address = scalarAddress
               .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
               .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            val operand = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane))
             atomicModifyValue(
               address,
               MemoryValueByteWidth.assume(byteCount),
@@ -3505,7 +2955,8 @@ private[amdgpu] object VMInterpreter {
               kernel.globalMemory,
               kernel.globalMemoryLocks
             ) { oldValue =>
-              if (byteCount == 8) oldValue + operand else Bits.low32(oldValue + operand)
+              val updated = update(lane, oldValue)
+              if (byteCount == 8) updated else Bits.low32(updated)
             } match {
               case Left(error)     => Left(error)
               case Right(oldValue) =>
@@ -3518,71 +2969,581 @@ private[amdgpu] object VMInterpreter {
                 atomicLane(lane + 1)
             }
           }
-        advanceAfter(atomicLane(0))
-      case Instruction.GlobalAtomicSwap(
-            dest,
-            addressRegister,
-            scalarAddress,
-            src,
-            byteCount,
-            offset,
-            returnValue
-          ) =>
-        def atomicLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) atomicLane(lane + 1)
-          else {
-            val address = scalarAddress
-              .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
-              .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            val operand = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane))
-            atomicModifyValue(
-              address,
-              MemoryValueByteWidth.assume(byteCount),
-              allocations,
-              memory,
-              kernel.globalMemory,
-              kernel.globalMemoryLocks
-            )(_ => operand) match {
-              case Left(error)     => Left(error)
-              case Right(oldValue) =>
-                if (returnValue) {
-                  if (byteCount == 8) {
-                    vector(dest)(lane) = Bits.low32(oldValue)
-                    vector(dest + 1)(lane) = Bits.high32(oldValue)
-                  } else vector(dest)(lane) = Bits.low32(oldValue)
-                }
-                atomicLane(lane + 1)
-            }
+        atomicLane(0)
+      }
+
+      instruction match {
+        case Instruction.VCompare(operation, srcA, srcB) =>
+          def operand(sourceRegister: InstructionSource, lane: Int, right: Boolean): Long = operation.kind match {
+            case VectorComparisonKind.Signed64 | VectorComparisonKind.Unsigned64 =>
+              source64(sourceRegister, lane, scalar, vector)
+            case VectorComparisonKind.ClassFloat64 if right =>
+              source(sourceRegister, lane)
+            case VectorComparisonKind.Float64 | VectorComparisonKind.ClassFloat64 =>
+              sourceFloating64(sourceRegister, lane, scalar, vector)
+            case _ => source(sourceRegister, lane)
           }
-        advanceAfter(atomicLane(0))
-      case Instruction.GlobalAtomicBinary(
-            operation,
-            dest,
-            addressRegister,
-            scalarAddress,
-            src,
-            byteCount,
-            offset,
-            returnValue
-          ) =>
-        def atomicLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) atomicLane(lane + 1)
-          else {
-            val address = scalarAddress
-              .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
-              .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            val operand = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane))
-            atomicModifyValue(
-              address,
-              MemoryValueByteWidth.assume(byteCount),
-              allocations,
-              memory,
-              kernel.globalMemory,
-              kernel.globalMemoryLocks
-            ) { oldValue =>
-              val updated = operation match {
+          var resultMask = 0L
+          foreachLane { lane =>
+            if (
+              active(lane) && compare(operation, operand(srcA, lane, right = false), operand(srcB, lane, right = true))
+            )
+              resultMask |= 1L << lane
+          }
+          if (operation.updateExec) active.bits = resultMask else carry.bits = resultMask
+          AdvanceStep
+        case Instruction.VCompareSubDword(
+              operation,
+              srcA,
+              srcB,
+              srcASelection,
+              srcBSelection,
+              srcASignExtend,
+              srcBSignExtend,
+              destination
+            ) =>
+          val result = Array.fill(lanes.value)(false)
+          foreachActive { lane =>
+            val left  = selectSubDword(source(srcA, lane), srcASelection, srcASignExtend)
+            val right = selectSubDword(source(srcB, lane), srcBSelection, srcBSignExtend)
+            result(lane) = compare(operation, left, right)
+          }
+          destination match {
+            case Some(register) =>
+              updateLaneMask(register, booleanLaneMask(result))
+            case None =>
+              // SDWA VOPC instructions targeting VCC have the same
+              // complete-mask write semantics as their explicit SGPR
+              // form: inactive EXEC lanes are cleared, not preserved.
+              carry.bits = booleanLaneMask(result)
+          }
+          AdvanceStep
+        case Instruction.VCompareTo(dest, operation, srcA, srcB, absA, absB, negateA, negateB) =>
+          def operand(
+              sourceRegister: InstructionSource,
+              lane: Int,
+              absolute: Boolean,
+              negate: Boolean,
+              right: Boolean
+          ): Long = operation.kind match {
+            case VectorComparisonKind.Float16 =>
+              val raw      = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(source(sourceRegister, lane))))
+              val prepared = if (absolute) math.abs(raw) else raw
+              IEEE754.floatToBinary16(if (negate) -prepared else prepared).value
+            case VectorComparisonKind.ClassFloat32 if right =>
+              source(sourceRegister, lane)
+            case VectorComparisonKind.Float32 | VectorComparisonKind.ClassFloat32 =>
+              val raw      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(sourceRegister, lane))))
+              val prepared = if (absolute) math.abs(raw) else raw
+              IEEE754.floatToBinary32(if (negate) -prepared else prepared).value
+            case VectorComparisonKind.ClassFloat64 if right =>
+              source(sourceRegister, lane)
+            case VectorComparisonKind.Float64 | VectorComparisonKind.ClassFloat64 =>
+              val raw      = IEEE754.binary64ToDouble(sourceFloating64(sourceRegister, lane, scalar, vector))
+              val prepared = if (absolute) math.abs(raw) else raw
+              IEEE754.doubleToBinary64(if (negate) -prepared else prepared)
+            case VectorComparisonKind.Signed64 | VectorComparisonKind.Unsigned64 =>
+              source64(sourceRegister, lane, scalar, vector)
+            case _ => source(sourceRegister, lane)
+          }
+          var resultMask = 0L
+          foreachLane { lane =>
+            if (
+              active(lane) && compare(
+                operation,
+                operand(srcA, lane, absA, negateA, right = false),
+                operand(srcB, lane, absB, negateB, right = true)
+              )
+            ) resultMask |= 1L << lane
+          }
+          if (operation.updateExec) active.bits = resultMask
+          else updateLaneMask(dest, resultMask)
+          AdvanceStep
+        case Instruction.VShiftLeft64(dest, amount, src) =>
+          foreachActive { lane =>
+            val sourceLow  = Bits.low32(source(src, lane))
+            val sourceHigh = src match {
+              case InstructionSource.VectorRegister(register) => Bits.low32(vector(register + 1)(lane))
+              case InstructionSource.Scalar(register)         => Bits.low32(scalar(register + 1))
+              case InstructionSource.Constant(_)              => 0L
+              case InstructionSource.Literal(_)               => 0L
+            }
+            val shifted = Bits.join32(sourceLow, sourceHigh) << (source(amount, lane).toInt & 63)
+            vector(dest)(lane) = Bits.low32(shifted)
+            vector(dest + 1)(lane) = Bits.high32(shifted)
+          }
+          AdvanceStep
+        case Instruction.VShiftRight64(dest, amount, src) =>
+          foreachActive { lane =>
+            val shifted = source64(src, lane, scalar, vector) >>> (source(amount, lane).toInt & 63)
+            vector(dest)(lane) = Bits.low32(shifted)
+            vector(dest + 1)(lane) = Bits.high32(shifted)
+          }
+          AdvanceStep
+        case Instruction.VShiftRightArithmetic64(dest, amount, src) =>
+          foreachActive { lane =>
+            val shifted = source64(src, lane, scalar, vector) >> (source(amount, lane).toInt & 63)
+            vector(dest)(lane) = Bits.low32(shifted)
+            vector(dest + 1)(lane) = Bits.high32(shifted)
+          }
+          AdvanceStep
+        case Instruction.DSReadD16(dest, addressRegister, byteCount, offset, high) =>
+          val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
+          def loadLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) loadLane(lane + 1)
+            else {
+              val base         = Bits.low32(vector(addressRegister)(lane))
+              val sourceOffset = checkedLdsOffset(lds, base + offset.toLong, byteCount)
+              if (sourceOffset == InvalidLdsOffset)
+                Left(ldsFailure(base + offset.toLong, byteCount))
+              else {
+                val loaded = LittleEndian.decode(lds, sourceOffset, scalarByteCount)
+                vector(dest)(lane) =
+                  if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
+                  else (vector(dest)(lane) & 0xffff0000L) | loaded
+                loadLane(lane + 1)
+              }
+            }
+          advanceAfter(loadLane(0))
+        case Instruction.DSSignedReadD16(dest, addressRegister, byteCount, offset, high) =>
+          val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
+          val bitWidth                                 = BitWidth.assume(byteCount * 8)
+          def loadLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) loadLane(lane + 1)
+            else {
+              val base         = Bits.low32(vector(addressRegister)(lane))
+              val sourceOffset = checkedLdsOffset(lds, base + offset.toLong, byteCount)
+              if (sourceOffset == InvalidLdsOffset)
+                Left(ldsFailure(base + offset.toLong, byteCount))
+              else {
+                val loaded =
+                  Bits.low16(
+                    Bits.signExtend(LittleEndian.decode(lds, sourceOffset, scalarByteCount), bitWidth)
+                  )
+                vector(dest)(lane) =
+                  if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
+                  else (vector(dest)(lane) & 0xffff0000L) | loaded
+                loadLane(lane + 1)
+              }
+            }
+          advanceAfter(loadLane(0))
+        case Instruction.DSRead(dest, addressRegister, byteCount, offsetA, offsetB) =>
+          def loadLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) loadLane(lane + 1)
+            else {
+              val base  = Bits.low32(vector(addressRegister)(lane))
+              val first = checkedLdsOffset(lds, base + offsetA.toLong, byteCount)
+              if (first == InvalidLdsOffset)
+                Left(ldsFailure(base + offsetA.toLong, byteCount))
+              else {
+                val second = offsetB match {
+                  case None         => InvalidLdsOffset
+                  case Some(offset) => checkedLdsOffset(lds, base + offset.toLong, byteCount)
+                }
+                if (offsetB.nonEmpty && second == InvalidLdsOffset)
+                  Left(ldsFailure(base + offsetB.get.toLong, byteCount))
+                else {
+                  writeVectorBytes(vector, dest, lane, lds, first, byteCount)
+                  if (second != InvalidLdsOffset)
+                    writeVectorBytes(vector, dest + (byteCount + 3) / 4, lane, lds, second, byteCount)
+                  loadLane(lane + 1)
+                }
+              }
+            }
+          advanceAfter(loadLane(0))
+        case Instruction.DSSignedRead(dest, addressRegister, byteCount, offsetA, offsetB) =>
+          val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
+          val bitWidth                                 = BitWidth.assume(byteCount * 8)
+          def loadLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) loadLane(lane + 1)
+            else {
+              val base  = Bits.low32(vector(addressRegister)(lane))
+              val first = checkedLdsOffset(lds, base + offsetA.toLong, byteCount)
+              if (first == InvalidLdsOffset)
+                Left(ldsFailure(base + offsetA.toLong, byteCount))
+              else {
+                val second = offsetB match {
+                  case None         => InvalidLdsOffset
+                  case Some(offset) => checkedLdsOffset(lds, base + offset.toLong, byteCount)
+                }
+                if (offsetB.nonEmpty && second == InvalidLdsOffset)
+                  Left(ldsFailure(base + offsetB.get.toLong, byteCount))
+                else {
+                  writeVectorValue(
+                    vector,
+                    dest,
+                    lane,
+                    Bits.signExtend(LittleEndian.decode(lds, first, scalarByteCount), bitWidth),
+                    4
+                  )
+                  if (second != InvalidLdsOffset)
+                    writeVectorValue(
+                      vector,
+                      dest + 1,
+                      lane,
+                      Bits.signExtend(LittleEndian.decode(lds, second, scalarByteCount), bitWidth),
+                      4
+                    )
+                  loadLane(lane + 1)
+                }
+              }
+            }
+          advanceAfter(loadLane(0))
+        case Instruction.DSPermute(dest, addressRegister, src, offset) =>
+          // DS_PERMUTE is the forward (scatter) counterpart of
+          // DS_BPERMUTE: each active source lane writes its value to
+          // the lane selected by its byte address.  Snapshot both
+          // operands because the destination may alias the source or
+          // address register.  EXEC gates the source lanes, not the
+          // destination lane: a source can scatter into a lane that is
+          // currently inactive.  Preserve old values for destinations
+          // that receive no active source.
+          val addresses = vector(addressRegister).clone()
+          val sources   = vector(src).clone()
+          val result    = vector(dest).clone()
+          foreachActive { lane =>
+            val destinationLane = permuteDestinationLane(addresses(lane), offset.toLong, waveSize)
+            if (destinationLane < lanes.value)
+              result(destinationLane) = Bits.low32(sources(lane))
+          }
+          foreachLane { lane => vector(dest)(lane) = result(lane) }
+          AdvanceStep
+        case Instruction.DSBPermute(dest, addressRegister, src, offset) =>
+          val addresses = vector(addressRegister).clone()
+          val sources   = vector(src).clone()
+          foreachActive { lane =>
+            // DS_BPERMUTE addresses are byte offsets formed by adding
+            // the instruction's immediate offset to the per-lane
+            // address operand.  Omitting the offset makes e.g.
+            // `offset:124` read lane 0 instead of lane 31, dropping
+            // the final cross-wave reduction contribution.
+            val sourceLane = bpermuteSourceLane(addresses(lane), offset.toLong)
+            vector(dest)(lane) = if (sourceLane < lanes.value) Bits.low32(sources(sourceLane)) else 0L
+          }
+          AdvanceStep
+        case Instruction.DSSwizzle(dest, src, control) =>
+          // DS_SWIZZLE packs three five-bit lane masks in the 16-bit
+          // offset: AND[4:0], OR[9:5], and XOR[14:10].  The
+          // ``BROADCAST,32,15`` encoding is 0x01e0, so OR is 15 after
+          // shifting by five.  Snapshot the source register first
+          // because the instruction permits in-place swizzles.
+          val sources = vector(src).clone()
+          val andMask = control & 0x1f
+          val orMask  = (control >>> 5) & 0x1f
+          val xorMask = (control >>> 10) & 0x1f
+          foreachActive { lane =>
+            val sourceLane = ((lane & andMask) | orMask) ^ xorMask
+            vector(dest)(lane) =
+              if (sourceLane >= 0 && sourceLane < lanes.value) Bits.low32(sources(sourceLane)) else 0L
+          }
+          AdvanceStep
+        case Instruction.DSAtomic(operation, dest, addressRegister, src, byteCount, offset, returnValue) =>
+          val scalarByteCount                            = ScalarByteWidth.assume(byteCount)
+          def atomicLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) atomicLane(lane + 1)
+            else {
+              val base = Bits.low32(vector(addressRegister)(lane))
+              readLDS(lds, base + offset.toLong, byteCount).flatMap { bytes =>
+                val previous = LittleEndian.decode(bytes, 0, scalarByteCount)
+                val operand  = if (byteCount == 8)
+                  (vector(src)(lane) & 0xffffffffL) | ((vector(src + 1)(lane) & 0xffffffffL) << 32)
+                else Bits.low32(vector(src)(lane))
+                val updated = operation match {
+                  case DSAtomicOperation.AddU32       => Bits.low32(previous + operand)
+                  case DSAtomicOperation.SubtractU32  => Bits.low32(previous - operand)
+                  case DSAtomicOperation.IncrementU32 => Bits.low32(previous + 1L)
+                  case DSAtomicOperation.DecrementU32 => Bits.low32(previous - 1L)
+                  case DSAtomicOperation.MinimumI32   => math.min(previous.toInt, operand.toInt).toLong & Bits.Mask32
+                  case DSAtomicOperation.MaximumI32   => math.max(previous.toInt, operand.toInt).toLong & Bits.Mask32
+                  case DSAtomicOperation.MinimumU32   => math.min(Bits.low32(previous), Bits.low32(operand))
+                  case DSAtomicOperation.MaximumU32   => math.max(Bits.low32(previous), Bits.low32(operand))
+                  case DSAtomicOperation.AddU64       => previous + operand
+                  case DSAtomicOperation.SubtractU64  => previous - operand
+                  case DSAtomicOperation.IncrementU64 => previous + 1L
+                  case DSAtomicOperation.DecrementU64 => previous - 1L
+                  case DSAtomicOperation.And32        => Bits.low32(previous) & Bits.low32(operand)
+                  case DSAtomicOperation.Or32         => Bits.low32(previous) | Bits.low32(operand)
+                  case DSAtomicOperation.Xor32        => Bits.low32(previous) ^ Bits.low32(operand)
+                  case DSAtomicOperation.And64        => previous & operand
+                  case DSAtomicOperation.Or64         => previous | operand
+                  case DSAtomicOperation.Xor64        => previous ^ operand
+                  case DSAtomicOperation.MinimumI64   => math.min(previous, operand)
+                  case DSAtomicOperation.MaximumI64   => math.max(previous, operand)
+                  case DSAtomicOperation.MinimumU64   =>
+                    if (java.lang.Long.compareUnsigned(previous, operand) <= 0) previous else operand
+                  case DSAtomicOperation.MaximumU64 =>
+                    if (java.lang.Long.compareUnsigned(previous, operand) >= 0) previous else operand
+                  case DSAtomicOperation.AddF32 =>
+                    IEEE754.floatToBinary32(
+                      IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous.toInt))) + IEEE754.binary32ToFloat(
+                        Binary32.fromLow(Bits.low32(
+                          operand.toInt
+                        ))
+                      )
+                    ).value.toLong & 0xffffffffL
+                  case DSAtomicOperation.MinimumF32 =>
+                    IEEE754.floatToBinary32(
+                      math.min(
+                        IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous.toInt))),
+                        IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(operand.toInt)))
+                      )
+                    ).value.toLong & 0xffffffffL
+                  case DSAtomicOperation.MaximumF32 =>
+                    IEEE754.floatToBinary32(
+                      math.max(
+                        IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous.toInt))),
+                        IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(operand.toInt)))
+                      )
+                    ).value.toLong & 0xffffffffL
+                  case DSAtomicOperation.AddF64 =>
+                    IEEE754.doubleToBinary64(
+                      IEEE754.binary64ToDouble(previous) + IEEE754.binary64ToDouble(operand)
+                    )
+                  case DSAtomicOperation.MinimumF64 =>
+                    IEEE754.doubleToBinary64(
+                      math.min(
+                        IEEE754.binary64ToDouble(previous),
+                        IEEE754.binary64ToDouble(operand)
+                      )
+                    )
+                  case DSAtomicOperation.MaximumF64 =>
+                    IEEE754.doubleToBinary64(
+                      math.max(
+                        IEEE754.binary64ToDouble(previous),
+                        IEEE754.binary64ToDouble(operand)
+                      )
+                    )
+                }
+                if (returnValue)
+                  writeVectorBytes(vector, dest, lane, LittleEndian.toArray(previous, scalarByteCount))
+                writeLDS(lds, base + offset.toLong, LittleEndian.toArray(updated, scalarByteCount))
+                  .flatMap(_ => atomicLane(lane + 1))
+              }
+            }
+          advanceAfter(atomicLane(0))
+        case Instruction.DSWrite(addressRegister, srcA, srcB, byteCount, offsetA, offsetB) =>
+          def storeLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) storeLane(lane + 1)
+            else {
+              val base = Bits.low32(vector(addressRegister)(lane))
+              for {
+                firstAddress = base + offsetA.toLong
+                firstBytes   = vectorBytes(vector, srcA, lane, byteCount)
+                _ <- writeLDS(lds, firstAddress, firstBytes)
+                _ <- (srcB, offsetB) match {
+                  case (Some(register), Some(offset)) =>
+                    val address = base + offset.toLong
+                    val bytes   = vectorBytes(vector, register, lane, byteCount)
+                    writeLDS(lds, address, bytes)
+                  case (None, None) => Right(())
+                  case _            => Left(Fault.Backend("malformed paired DS write"))
+                }
+                _ <- storeLane(lane + 1)
+              } yield ()
+            }
+          advanceAfter(storeLane(0))
+        case Instruction.DSWriteD16High(addressRegister, src, offset) =>
+          def storeLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) storeLane(lane + 1)
+            else {
+              val base    = Bits.low32(vector(addressRegister)(lane))
+              val value   = vector(src)(lane) >>> 16
+              val address = base + offset.toLong
+              writeLDS(lds, address, LittleEndian.toArray(value, ScalarByteWidth.Word))
+                .flatMap(_ => storeLane(lane + 1))
+            }
+          advanceAfter(storeLane(0))
+        case Instruction.DSWriteD16HighByte(addressRegister, src, offset) =>
+          def storeLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) storeLane(lane + 1)
+            else {
+              val base    = Bits.low32(vector(addressRegister)(lane))
+              val value   = vector(src)(lane) >>> 16
+              val address = base + offset.toLong
+              writeLDS(lds, address, LittleEndian.toArray(value, ScalarByteWidth.Byte))
+                .flatMap(_ => storeLane(lane + 1))
+            }
+          advanceAfter(storeLane(0))
+        case Instruction.GlobalLoad(dest, addressRegister, scalarAddress, byteCount, offset, coherent) =>
+          val scalarBase = scalarAddress match {
+            case Some(register) => pair(scalar, register)
+            case None           => 0L
+          }
+          val scalarWidth           = if (byteCount <= 8) MemoryValueByteWidth.assume(byteCount) else null
+          val displacement          = signed13(offset)
+          var lane                  = 0
+          var failure: Fault | Null = null
+          while (lane < lanes.value && failure == null) {
+            if (active(lane)) {
+              val address =
+                if (scalarAddress.isDefined) scalarBase + Bits.low32(vector(addressRegister)(lane)) + displacement
+                else pair(vector, addressRegister, lane) + displacement
+              if (scalarWidth != null)
+                (if (coherent && (byteCount == 4 || byteCount == 8) && !immutableAddress(address, byteCount))
+                   atomicModifyValue(
+                     address,
+                     scalarWidth.nn,
+                     allocations,
+                     memory,
+                     kernel.globalMemory,
+                     kernel.globalMemoryLocks
+                   )(identity)
+                 else readValue(
+                   address,
+                   scalarWidth.nn,
+                   kernarg,
+                   dispatchBytes,
+                   kernel.readOnlyAddress,
+                   kernel.readOnly,
+                   kernel.globalMemory,
+                   allocations,
+                   memory
+                 )) match {
+                  case Left(error)  => failure = error
+                  case Right(value) => writeVectorValue(vector, dest, lane, value, byteCount)
+                }
+              else
+                readBytes(
+                  address,
+                  byteCount,
+                  kernarg,
+                  dispatchBytes,
+                  kernel.readOnlyAddress,
+                  kernel.readOnly,
+                  kernel.globalMemory,
+                  allocations,
+                  memory
+                ) match {
+                  case Left(error)  => failure = error
+                  case Right(bytes) => writeVectorBytes(vector, dest, lane, bytes)
+                }
+            }
+            lane += 1
+          }
+          advanceAfter(if (failure == null) Right(()) else Left(failure.nn))
+        case Instruction.GlobalLoadSigned(dest, addressRegister, scalarAddress, byteCount, offset) =>
+          val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
+          val bitWidth                                 = BitWidth.assume(byteCount * 8)
+          def loadLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) loadLane(lane + 1)
+            else {
+              val address = scalarAddress
+                .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
+                .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
+              readBytes(
+                address,
+                byteCount,
+                kernarg,
+                dispatchBytes,
+                kernel.readOnlyAddress,
+                kernel.readOnly,
+                kernel.globalMemory,
+                allocations,
+                memory
+              ) match {
+                case Left(error)  => Left(error)
+                case Right(bytes) =>
+                  val value = Bits.signExtend(LittleEndian.decode(bytes, 0, scalarByteCount), bitWidth)
+                  vector(dest)(lane) = Bits.low32(value)
+                  loadLane(lane + 1)
+              }
+            }
+          advanceAfter(loadLane(0))
+        case Instruction.GlobalLoadD16(dest, addressRegister, scalarAddress, offset, high) =>
+          def loadLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) loadLane(lane + 1)
+            else {
+              val address = scalarAddress
+                .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
+                .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
+              readBytes(
+                address,
+                2,
+                kernarg,
+                dispatchBytes,
+                kernel.readOnlyAddress,
+                kernel.readOnly,
+                kernel.globalMemory,
+                allocations,
+                memory
+              ) match {
+                case Left(error)  => Left(error)
+                case Right(bytes) =>
+                  val loaded = LittleEndian.decode(bytes, 0, ScalarByteWidth.Word)
+                  vector(dest)(lane) =
+                    if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
+                    else (vector(dest)(lane) & 0xffff0000L) | loaded
+                  loadLane(lane + 1)
+              }
+            }
+          advanceAfter(loadLane(0))
+        case Instruction.GlobalStore(addressRegister, scalarAddress, src, byteCount, offset) =>
+          def storeLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) storeLane(lane + 1)
+            else {
+              val address = scalarAddress
+                .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
+                .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
+              val stored =
+                if (byteCount <= 8)
+                  writeValue(
+                    address,
+                    if (byteCount <= 4) vector(src)(lane) else pair(vector, src, lane),
+                    MemoryValueByteWidth.assume(byteCount),
+                    allocations,
+                    memory,
+                    kernel.globalMemory
+                  )
+                else
+                  writeBytes(
+                    address,
+                    vectorBytes(vector, src, lane, byteCount),
+                    allocations,
+                    memory,
+                    kernel.globalMemory
+                  )
+              stored match {
+                case Left(error) => Left(error)
+                case Right(_)    => storeLane(lane + 1)
+              }
+            }
+          advanceAfter(storeLane(0))
+        case Instruction.GlobalAtomicAdd(dest, addressRegister, scalarAddress, src, byteCount, offset, returnValue) =>
+          advanceAfter(runGlobalAtomic(dest, addressRegister, scalarAddress, byteCount, offset, returnValue) {
+            (lane, oldValue) =>
+              val operand = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane))
+              oldValue + operand
+          })
+        case Instruction.GlobalAtomicSwap(dest, addressRegister, scalarAddress, src, byteCount, offset, returnValue) =>
+          advanceAfter(runGlobalAtomic(dest, addressRegister, scalarAddress, byteCount, offset, returnValue) {
+            (lane, _) =>
+              if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane))
+          })
+        case Instruction.GlobalAtomicBinary(
+              operation,
+              dest,
+              addressRegister,
+              scalarAddress,
+              src,
+              byteCount,
+              offset,
+              returnValue
+            ) =>
+          advanceAfter(runGlobalAtomic(dest, addressRegister, scalarAddress, byteCount, offset, returnValue) {
+            (lane, oldValue) =>
+              val operand = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane))
+              operation match {
                 case AtomicBinaryOperation.Add             => oldValue + operand
                 case AtomicBinaryOperation.Subtract        => oldValue - operand
                 case AtomicBinaryOperation.MinimumUnsigned =>
@@ -3599,267 +3560,154 @@ private[amdgpu] object VMInterpreter {
                 case AtomicBinaryOperation.Or  => oldValue | operand
                 case AtomicBinaryOperation.Xor => oldValue ^ operand
               }
-              if (byteCount == 8) updated else Bits.low32(updated)
-            } match {
-              case Left(error)     => Left(error)
-              case Right(oldValue) =>
-                if (returnValue) {
-                  if (byteCount == 8) {
-                    vector(dest)(lane) = Bits.low32(oldValue)
-                    vector(dest + 1)(lane) = Bits.high32(oldValue)
-                  } else vector(dest)(lane) = Bits.low32(oldValue)
-                }
-                atomicLane(lane + 1)
-            }
-          }
-        advanceAfter(atomicLane(0))
-      case Instruction.GlobalAtomicInc(
-            dest,
-            addressRegister,
-            scalarAddress,
-            src,
-            byteCount,
-            offset,
-            returnValue
-          ) =>
-        def atomicLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) atomicLane(lane + 1)
-          else {
-            val address = scalarAddress
-              .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
-              .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            val limit = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane))
-            atomicModifyValue(
-              address,
-              MemoryValueByteWidth.assume(byteCount),
-              allocations,
-              memory,
-              kernel.globalMemory,
-              kernel.globalMemoryLocks
-            ) { oldValue =>
-              if (java.lang.Long.compareUnsigned(oldValue, limit) >= 0) 0L
-              else if (byteCount == 8) oldValue + 1L
-              else Bits.low32(oldValue + 1L)
-            } match {
-              case Left(error)     => Left(error)
-              case Right(oldValue) =>
-                if (returnValue) {
-                  if (byteCount == 8) {
-                    vector(dest)(lane) = Bits.low32(oldValue)
-                    vector(dest + 1)(lane) = Bits.high32(oldValue)
-                  } else vector(dest)(lane) = Bits.low32(oldValue)
-                }
-                atomicLane(lane + 1)
-            }
-          }
-        advanceAfter(atomicLane(0))
-      case Instruction.GlobalAtomicCompareSwap(
-            dest,
-            addressRegister,
-            scalarAddress,
-            compareSrc,
-            swapSrc,
-            byteCount,
-            offset,
-            returnValue
-          ) =>
-        def atomicLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) atomicLane(lane + 1)
-          else {
-            val address = scalarAddress
-              .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
-              .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            val (compare, swap) =
-              if (byteCount == 8) (pair(vector, compareSrc, lane), pair(vector, swapSrc, lane))
-              else (Bits.low32(vector(compareSrc)(lane)), Bits.low32(vector(swapSrc)(lane)))
-            atomicModifyValue(
-              address,
-              MemoryValueByteWidth.assume(byteCount),
-              allocations,
-              memory,
-              kernel.globalMemory,
-              kernel.globalMemoryLocks
-            ) { oldValue =>
+          })
+        case Instruction.GlobalAtomicInc(dest, addressRegister, scalarAddress, src, byteCount, offset, returnValue) =>
+          advanceAfter(runGlobalAtomic(dest, addressRegister, scalarAddress, byteCount, offset, returnValue) {
+            (lane, oldValue) =>
+              val limit = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane))
+              if (java.lang.Long.compareUnsigned(oldValue, limit) >= 0) 0L else oldValue + 1L
+          })
+        case Instruction.GlobalAtomicCompareSwap(
+              dest,
+              addressRegister,
+              scalarAddress,
+              compareSrc,
+              swapSrc,
+              byteCount,
+              offset,
+              returnValue
+            ) =>
+          advanceAfter(runGlobalAtomic(dest, addressRegister, scalarAddress, byteCount, offset, returnValue) {
+            (lane, oldValue) =>
+              val (compare, swap) =
+                if (byteCount == 8) (pair(vector, compareSrc, lane), pair(vector, swapSrc, lane))
+                else (Bits.low32(vector(compareSrc)(lane)), Bits.low32(vector(swapSrc)(lane)))
               if (oldValue == compare) swap else oldValue
-            } match {
-              case Left(error)     => Left(error)
-              case Right(oldValue) =>
-                if (returnValue) {
-                  if (byteCount == 8) {
-                    vector(dest)(lane) = Bits.low32(oldValue)
-                    vector(dest + 1)(lane) = Bits.high32(oldValue)
-                  } else vector(dest)(lane) = Bits.low32(oldValue)
-                }
-                atomicLane(lane + 1)
+          })
+        case Instruction.GlobalStoreD16High(addressRegister, scalarAddress, src, byteCount, offset) =>
+          val scalarByteCount                           = ScalarByteWidth.assume(byteCount)
+          def storeLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) storeLane(lane + 1)
+            else {
+              val address = scalarAddress
+                .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
+                .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
+              val bytes = LittleEndian.toArray(vector(src)(lane) >>> 16, scalarByteCount)
+              writeBytes(address, bytes, allocations, memory, kernel.globalMemory) match {
+                case Left(error) => Left(error)
+                case Right(_)    => storeLane(lane + 1)
+              }
             }
-          }
-        advanceAfter(atomicLane(0))
-      case Instruction.GlobalStoreD16High(addressRegister, scalarAddress, src, byteCount, offset) =>
-        val scalarByteCount                           = ScalarByteWidth.assume(byteCount)
-        def storeLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) storeLane(lane + 1)
-          else {
-            val address = scalarAddress
-              .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
-              .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            val bytes = LittleEndian.toArray(vector(src)(lane) >>> 16, scalarByteCount)
-            writeBytes(address, bytes, allocations, memory, kernel.globalMemory) match {
-              case Left(error) => Left(error)
-              case Right(_)    => storeLane(lane + 1)
-            }
-          }
-        advanceAfter(storeLane(0))
-      case Instruction.FlatLoad(dest, addressRegister, byteCount, offset, coherent) =>
-        def loadLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) loadLane(lane + 1)
-          else {
-            val address = pair(vector, addressRegister, lane) + flatOffset(offset)
-            val bytes   =
-              if (
-                coherent && (byteCount == 4 || byteCount == 8) && !immutableAddress(address, byteCount) &&
-                !ByteRange.contains(lds.length, address, byteCount.toLong) &&
-                !ByteRange.contains(scratch(lane).length, address, byteCount.toLong)
-              )
-                atomicModifyValue(
-                  address,
-                  MemoryValueByteWidth.assume(byteCount),
-                  allocations,
-                  memory,
-                  kernel.globalMemory,
-                  kernel.globalMemoryLocks
-                )(identity)
-                  .map(value => LittleEndian.toVec(value, ScalarByteWidth.assume(byteCount)))
-              else flatLoad(lane, address, byteCount)
-            bytes match {
-              case Left(error)  => Left(error)
-              case Right(bytes) =>
-                writeVectorBytes(vector, dest, lane, bytes)
-                loadLane(lane + 1)
-            }
-          }
-        advanceAfter(loadLane(0))
-      case Instruction.FlatLoadSigned(dest, addressRegister, byteCount, offset) =>
-        val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
-        val bitWidth                                 = BitWidth.assume(byteCount * 8)
-        def loadLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) loadLane(lane + 1)
-          else {
-            val address = pair(vector, addressRegister, lane) + flatOffset(offset)
-            val bytes   = flatLoad(lane, address, byteCount)
-            bytes match {
-              case Left(error)  => Left(error)
-              case Right(bytes) =>
-                val value = Bits.signExtend(LittleEndian.decode(bytes, 0, scalarByteCount), bitWidth)
-                vector(dest)(lane) = Bits.low32(value)
-                loadLane(lane + 1)
-            }
-          }
-        advanceAfter(loadLane(0))
-      case Instruction.VFlatLoadD16(dest, addressRegister, offset, high) =>
-        def loadLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) loadLane(lane + 1)
-          else {
-            val address = pair(vector, addressRegister, lane) + flatOffset(offset)
-            val bytes   = flatLoad(lane, address, 2)
-            bytes match {
-              case Left(error)        => Left(error)
-              case Right(loadedBytes) =>
-                val loaded = LittleEndian.decode(loadedBytes, 0, ScalarByteWidth(2))
-                vector(dest)(lane) =
-                  if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
-                  else (vector(dest)(lane) & 0xffff0000L) | loaded
-                loadLane(lane + 1)
-            }
-          }
-        advanceAfter(loadLane(0))
-      case Instruction.FlatStore(addressRegister, src, byteCount, offset) =>
-        def storeLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) storeLane(lane + 1)
-          else {
-            val address = pair(vector, addressRegister, lane) + flatOffset(offset)
-            val bytes   = vectorBytes(vector, src, lane, byteCount)
-            flatStore(lane, address, bytes) match {
-              case Left(error) => Left(error)
-              case Right(_)    => storeLane(lane + 1)
-            }
-          }
-        advanceAfter(storeLane(0))
-      case Instruction.FlatStoreD16High(addressRegister, src, byteCount, offset) =>
-        val scalarByteCount                           = ScalarByteWidth.assume(byteCount)
-        def storeLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) storeLane(lane + 1)
-          else {
-            val address = pair(vector, addressRegister, lane) + flatOffset(offset)
-            flatStore(lane, address, LittleEndian.toArray(vector(src)(lane) >>> 16, scalarByteCount)) match {
-              case Left(error) => Left(error)
-              case Right(_)    => storeLane(lane + 1)
-            }
-          }
-        advanceAfter(storeLane(0))
-      case Instruction.BufferCacheInvalidate =>
-        // A following ordinary load must not reuse bytes cached before acquire.
-        memory.invalidateHostReads()
-        AdvanceStep
-      case Instruction.BufferLoad(dest, address, resource, scalarOffset, byteCount, offset) =>
-        def loadLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) loadLane(lane + 1)
-          else {
-            val base  = sourceScalar64(InstructionSource.Scalar(resource)) & 0x0000ffffffffffffL
-            val start = bufferOffset(lane, address, scalarOffset, offset, base == 0L)
-            val range = Bits.low32(scalar(resource + 2))
-            if (base != 0L && (start < 0L || start > range - byteCount.toLong)) {
-              writeVectorBytes(vector, dest, lane, Array.fill(byteCount)(0.toByte))
-              loadLane(lane + 1)
-            } else if (base != 0L)
-              readBytes(
-                base + start,
-                byteCount,
-                kernarg,
-                dispatchBytes,
-                kernel.readOnlyAddress,
-                kernel.readOnly,
-                kernel.globalMemory,
-                allocations,
-                memory
-              ) match {
+          advanceAfter(storeLane(0))
+        case Instruction.FlatLoad(dest, addressRegister, byteCount, offset, coherent) =>
+          def loadLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) loadLane(lane + 1)
+            else {
+              val address = pair(vector, addressRegister, lane) + flatOffset(offset)
+              val bytes   =
+                if (
+                  coherent && (byteCount == 4 || byteCount == 8) && !immutableAddress(address, byteCount) &&
+                  !ByteRange.contains(lds.length, address, byteCount.toLong) &&
+                  !ByteRange.contains(scratch(lane).length, address, byteCount.toLong)
+                )
+                  atomicModifyValue(
+                    address,
+                    MemoryValueByteWidth.assume(byteCount),
+                    allocations,
+                    memory,
+                    kernel.globalMemory,
+                    kernel.globalMemoryLocks
+                  )(identity)
+                    .map(value => LittleEndian.toVec(value, ScalarByteWidth.assume(byteCount)))
+                else flatLoad(lane, address, byteCount)
+              bytes match {
                 case Left(error)  => Left(error)
                 case Right(bytes) =>
                   writeVectorBytes(vector, dest, lane, bytes)
                   loadLane(lane + 1)
               }
-            else if (start < 0L || start > scratch(lane).length.toLong - byteCount.toLong)
-              Left(Fault.Backend(
-                s"buffer load ${operations(index)} at instruction $index lane $lane offset $start size $byteCount exceeds private scratch ${scratch(lane).length}"
-              ))
-            else {
-              val bytes = java.util.Arrays.copyOfRange(scratch(lane), start.toInt, start.toInt + byteCount)
-              writeVectorBytes(vector, dest, lane, bytes)
-              loadLane(lane + 1)
             }
-          }
-        advanceAfter(loadLane(0))
-      case Instruction.BufferLoadD16(dest, address, resource, scalarOffset, byteCount, offset, high) =>
-        val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
-        def loadLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) loadLane(lane + 1)
-          else {
-            val base   = sourceScalar64(InstructionSource.Scalar(resource)) & 0x0000ffffffffffffL
-            val start  = bufferOffset(lane, address, scalarOffset, offset, base == 0L)
-            val range  = Bits.low32(scalar(resource + 2))
-            val loaded =
-              if (base != 0L && (start < 0L || start > range - byteCount.toLong))
-                Right(Vec.fill(byteCount)(0.toByte))
-              else if (base != 0L)
+          advanceAfter(loadLane(0))
+        case Instruction.FlatLoadSigned(dest, addressRegister, byteCount, offset) =>
+          val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
+          val bitWidth                                 = BitWidth.assume(byteCount * 8)
+          def loadLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) loadLane(lane + 1)
+            else {
+              val address = pair(vector, addressRegister, lane) + flatOffset(offset)
+              val bytes   = flatLoad(lane, address, byteCount)
+              bytes match {
+                case Left(error)  => Left(error)
+                case Right(bytes) =>
+                  val value = Bits.signExtend(LittleEndian.decode(bytes, 0, scalarByteCount), bitWidth)
+                  vector(dest)(lane) = Bits.low32(value)
+                  loadLane(lane + 1)
+              }
+            }
+          advanceAfter(loadLane(0))
+        case Instruction.VFlatLoadD16(dest, addressRegister, offset, high) =>
+          def loadLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) loadLane(lane + 1)
+            else {
+              val address = pair(vector, addressRegister, lane) + flatOffset(offset)
+              val bytes   = flatLoad(lane, address, 2)
+              bytes match {
+                case Left(error)        => Left(error)
+                case Right(loadedBytes) =>
+                  val loaded = LittleEndian.decode(loadedBytes, 0, ScalarByteWidth.Word)
+                  vector(dest)(lane) =
+                    if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
+                    else (vector(dest)(lane) & 0xffff0000L) | loaded
+                  loadLane(lane + 1)
+              }
+            }
+          advanceAfter(loadLane(0))
+        case Instruction.FlatStore(addressRegister, src, byteCount, offset) =>
+          def storeLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) storeLane(lane + 1)
+            else {
+              val address = pair(vector, addressRegister, lane) + flatOffset(offset)
+              val bytes   = vectorBytes(vector, src, lane, byteCount)
+              flatStore(lane, address, bytes) match {
+                case Left(error) => Left(error)
+                case Right(_)    => storeLane(lane + 1)
+              }
+            }
+          advanceAfter(storeLane(0))
+        case Instruction.FlatStoreD16High(addressRegister, src, byteCount, offset) =>
+          val scalarByteCount                           = ScalarByteWidth.assume(byteCount)
+          def storeLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) storeLane(lane + 1)
+            else {
+              val address = pair(vector, addressRegister, lane) + flatOffset(offset)
+              flatStore(lane, address, LittleEndian.toArray(vector(src)(lane) >>> 16, scalarByteCount)) match {
+                case Left(error) => Left(error)
+                case Right(_)    => storeLane(lane + 1)
+              }
+            }
+          advanceAfter(storeLane(0))
+        case Instruction.BufferCacheInvalidate =>
+          // A following ordinary load must not reuse bytes cached before acquire.
+          memory.invalidateHostReads()
+          AdvanceStep
+        case Instruction.BufferLoad(dest, address, resource, scalarOffset, byteCount, offset) =>
+          def loadLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) loadLane(lane + 1)
+            else {
+              val base  = sourceScalar64(InstructionSource.Scalar(resource)) & 0x0000ffffffffffffL
+              val start = bufferOffset(lane, address, scalarOffset, offset, base == 0L)
+              val range = Bits.low32(scalar(resource + 2))
+              if (base != 0L && (start < 0L || start > range - byteCount.toLong)) {
+                writeVectorBytes(vector, dest, lane, Array.fill(byteCount)(0.toByte))
+                loadLane(lane + 1)
+              } else if (base != 0L)
                 readBytes(
                   base + start,
                   byteCount,
@@ -3870,39 +3718,80 @@ private[amdgpu] object VMInterpreter {
                   kernel.globalMemory,
                   allocations,
                   memory
-                )
+                ) match {
+                  case Left(error)  => Left(error)
+                  case Right(bytes) =>
+                    writeVectorBytes(vector, dest, lane, bytes)
+                    loadLane(lane + 1)
+                }
               else if (start < 0L || start > scratch(lane).length.toLong - byteCount.toLong)
                 Left(Fault.Backend(
-                  s"buffer D16 load ${operations(index)} at instruction $index lane $lane offset $start size $byteCount exceeds private scratch ${scratch(lane).length}"
+                  s"buffer load ${operations(index)} at instruction $index lane $lane offset $start size $byteCount exceeds private scratch ${scratch(lane).length}"
                 ))
-              else Right(Vec.unsafeFromArray(java.util.Arrays.copyOfRange(
-                scratch(lane),
-                start.toInt,
-                start.toInt + byteCount
-              )))
-            loaded match {
-              case Left(error)  => Left(error)
-              case Right(bytes) =>
-                val value = Bits.low16(LittleEndian.decode(bytes, 0, scalarByteCount))
-                vector(dest)(lane) = mergeD16(vector(dest)(lane), value, high)
+              else {
+                val bytes = java.util.Arrays.copyOfRange(scratch(lane), start.toInt, start.toInt + byteCount)
+                writeVectorBytes(vector, dest, lane, bytes)
                 loadLane(lane + 1)
+              }
             }
-          }
-        advanceAfter(loadLane(0))
-      case Instruction.BufferStore(address, resource, scalarOffset, src, byteCount, offset) =>
-        executeBufferStore(index, address, resource, scalarOffset, src, byteCount, offset, None)
-      case Instruction.BufferStoreD16High(address, resource, scalarOffset, src, byteCount, offset) =>
-        executeBufferStore(
-          index,
-          address,
-          resource,
-          scalarOffset,
-          src,
-          byteCount.assume[Interval.Closed[1, 16]],
-          offset,
-          Some(ScalarByteWidth.assume(byteCount))
-        )
-      case other => Left(Fault.Unsupported(s"unhandled AMDGPU instruction $other"))
+          advanceAfter(loadLane(0))
+        case Instruction.BufferLoadD16(dest, address, resource, scalarOffset, byteCount, offset, high) =>
+          val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
+          def loadLane(lane: Int): Either[Fault, Unit] =
+            if (lane == lanes.value) Right(())
+            else if (!active(lane)) loadLane(lane + 1)
+            else {
+              val base   = sourceScalar64(InstructionSource.Scalar(resource)) & 0x0000ffffffffffffL
+              val start  = bufferOffset(lane, address, scalarOffset, offset, base == 0L)
+              val range  = Bits.low32(scalar(resource + 2))
+              val loaded =
+                if (base != 0L && (start < 0L || start > range - byteCount.toLong))
+                  Right(Vec.fill(byteCount)(0.toByte))
+                else if (base != 0L)
+                  readBytes(
+                    base + start,
+                    byteCount,
+                    kernarg,
+                    dispatchBytes,
+                    kernel.readOnlyAddress,
+                    kernel.readOnly,
+                    kernel.globalMemory,
+                    allocations,
+                    memory
+                  )
+                else if (start < 0L || start > scratch(lane).length.toLong - byteCount.toLong)
+                  Left(Fault.Backend(
+                    s"buffer D16 load ${operations(index)} at instruction $index lane $lane offset $start size $byteCount exceeds private scratch ${scratch(lane).length}"
+                  ))
+                else Right(Vec.unsafeFromArray(java.util.Arrays.copyOfRange(
+                  scratch(lane),
+                  start.toInt,
+                  start.toInt + byteCount
+                )))
+              loaded match {
+                case Left(error)  => Left(error)
+                case Right(bytes) =>
+                  val value = Bits.low16(LittleEndian.decode(bytes, 0, scalarByteCount))
+                  vector(dest)(lane) = mergeD16(vector(dest)(lane), value, high)
+                  loadLane(lane + 1)
+              }
+            }
+          advanceAfter(loadLane(0))
+        case Instruction.BufferStore(address, resource, scalarOffset, src, byteCount, offset) =>
+          executeBufferStore(index, address, resource, scalarOffset, src, byteCount, offset, None)
+        case Instruction.BufferStoreD16High(address, resource, scalarOffset, src, byteCount, offset) =>
+          executeBufferStore(
+            index,
+            address,
+            resource,
+            scalarOffset,
+            src,
+            byteCount.assume[Interval.Closed[1, 16]],
+            offset,
+            Some(ScalarByteWidth.assume(byteCount))
+          )
+        case other => Left(Fault.Unsupported(s"unhandled AMDGPU instruction $other"))
+      }
     }
 
     def step(index: Int): Either[Fault, Option[Int]] = stepInstruction(index)
@@ -4219,7 +4108,7 @@ private[amdgpu] object VMInterpreter {
   }
 
   private def unsignedInt(bytes: Vec[Byte], offset: Int): Long =
-    LittleEndian.decode(bytes, offset, ScalarByteWidth(4))
+    LittleEndian.decode(bytes, offset, ScalarByteWidth.Dword)
 
   private def pair(registers: Array[Long], first: Int): Long =
     Bits.join32(registers(first), registers(first + 1))
@@ -4422,19 +4311,8 @@ private[amdgpu] object VMInterpreter {
     case InstructionSource.Literal(raw) =>
       IEEE754.doubleToBinary64(floatingLiteralToDouble(raw))
     case InstructionSource.Constant(raw) =>
-      val value = raw match {
-        case 0x3f000000L => 0.5
-        case 0xbf000000L => -0.5
-        case 0x3f800000L => 1.0
-        case 0xbf800000L => -1.0
-        case 0x40000000L => 2.0
-        case 0xc0000000L => -2.0
-        case 0x40800000L => 4.0
-        case 0xc0800000L => -4.0
-        case 0x3e22f983L => 0.15915494
-        case _           => raw.toDouble
-      }
-      IEEE754.doubleToBinary64(value)
+      val index = Decoding.InlineFloatingConstants.indexOf(raw)
+      IEEE754.doubleToBinary64(if (index >= 0) Decoding.InlineFloatingValues(index) else raw.toDouble)
     case _ => source64(source, lane, scalar, vector)
   }
 

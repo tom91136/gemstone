@@ -20,7 +20,7 @@ final class AtomicMinimumSuite extends munit.FunSuite {
     test(s"unsigned atomic min $space/$width over $groups groups preserves high-bit ordering") {
       val memory    = ArrayCheckedMemory.allocate((8 * (groups + 1)).refineUnsafe[Positive0], GuestAddress(0x100000))
       val max       = if (width == 64) -1L else 0xffffffffL
-      val byteWidth = if (width == 64) MemoryValueByteWidth(8) else MemoryValueByteWidth(4)
+      val byteWidth = if (width == 64) MemoryValueByteWidth.Qword else MemoryValueByteWidth.Dword
       memory.writeLittleEndian(memory.allocation.start, max, byteWidth).toOption.get
       val init   = if (space == "shared") s"st.shared.u$width [scratch], $max;" else ""
       val target = if (space == "shared") "scratch" else "%out"

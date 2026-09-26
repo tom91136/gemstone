@@ -14,8 +14,12 @@ final case class KernelTask private (
     privateSegmentBytes: Int :| Positive0,
     groupSegmentBytes: Int :| Positive0,
     arguments: Vec[KernelTask.Argument],
-    pointerRelocations: Vec[KernelTask.PointerRelocation]
-)
+    pointerRelocations: Vec[KernelTask.PointerRelocation],
+    discoverArgumentRelocations: Boolean
+) {
+  def withPointerRelocations(additional: Vec[KernelTask.PointerRelocation]): KernelTask =
+    if (additional.isEmpty) this else copy(pointerRelocations = pointerRelocations ++ additional)
+}
 
 object KernelTask {
   enum Argument {
@@ -46,7 +50,8 @@ object KernelTask {
       groupSegmentBytes: Int :| Positive0 = 0,
       pointerRelocations: Vec[PointerRelocation] = Vec.empty,
       workDim: WorkDimension = 3,
-      globalOffset: LaunchGeometry.Coordinates = LaunchGeometry.Coordinates(0, 0, 0)
+      globalOffset: LaunchGeometry.Coordinates = LaunchGeometry.Coordinates(0, 0, 0),
+      discoverArgumentRelocations: Boolean = false
   ): Either[String, KernelTask] =
     for {
       geometry <- LaunchGeometry.forLaunch(groupSize, groupCount, globalSize, workDim, globalOffset)
@@ -64,6 +69,7 @@ object KernelTask {
       privateSegmentBytes,
       groupSegmentBytes,
       arguments,
-      pointerRelocations
+      pointerRelocations,
+      discoverArgumentRelocations
     )
 }

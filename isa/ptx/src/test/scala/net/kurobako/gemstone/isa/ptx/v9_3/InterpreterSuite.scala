@@ -586,14 +586,17 @@ final class InterpreterSuite extends munit.FunSuite {
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth(8)).toOption.get, -7L)
+    assertEquals(memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth.Qword).toOption.get, -7L)
     assertEquals(
-      memory.readLittleEndian(memory.allocation.start.offset(8L), MemoryValueByteWidth(8)).toOption.get,
+      memory.readLittleEndian(memory.allocation.start.offset(8L), MemoryValueByteWidth.Qword).toOption.get,
       java.lang.Long.divideUnsigned(-1L, 2L)
     )
-    assertEquals(memory.readLittleEndian(memory.allocation.start.offset(16L), MemoryValueByteWidth(8)).toOption.get, 0L)
     assertEquals(
-      memory.readLittleEndian(memory.allocation.start.offset(24L), MemoryValueByteWidth(8)).toOption.get,
+      memory.readLittleEndian(memory.allocation.start.offset(16L), MemoryValueByteWidth.Qword).toOption.get,
+      0L
+    )
+    assertEquals(
+      memory.readLittleEndian(memory.allocation.start.offset(24L), MemoryValueByteWidth.Qword).toOption.get,
       java.lang.Long.remainderUnsigned(-1L, 2L)
     )
   }
@@ -679,7 +682,7 @@ final class InterpreterSuite extends munit.FunSuite {
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth(8)).toOption.get,
+      memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth.Qword).toOption.get,
       0x3ff0000000000000L
     )
   }
@@ -919,7 +922,7 @@ final class InterpreterSuite extends munit.FunSuite {
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth(8)).toOption,
+      memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth.Qword).toOption,
       Some(0x1122334455667788L)
     )
   }

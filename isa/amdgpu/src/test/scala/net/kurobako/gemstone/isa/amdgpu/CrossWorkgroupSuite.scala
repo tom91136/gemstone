@@ -31,7 +31,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
   private val counter            = MemoryRegion(4)
   private val tickets            = MemoryRegion(5)
   private val prefixes           = MemoryRegion(6)
-  private def scalar(value: Int) = KernelTask.Argument.Scalar(LittleEndian.toVec(value.toLong, ScalarByteWidth(4)))
+  private def scalar(value: Int) = KernelTask.Argument.Scalar(LittleEndian.toVec(value.toLong, ScalarByteWidth.Dword))
   private def pointer(region: MemoryRegion)                      = KernelTask.Argument.Memory(region, 0L)
   private def prepared(name: String, size: Int, code: Vec[Long]) =
     VMCompiler.compile(CodeObjectKernel(
@@ -42,7 +42,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
       0,
       0x80,
       0x8,
-      code.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+      code.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth.Dword))
     )).toOption.get
   // Write lane values through private group LDS; publish one marker before the group barrier.
   private lazy val publish = prepared(
@@ -214,7 +214,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
             if (id == counter) 0L else -777L,
             bytes,
             i * 4,
-            ScalarByteWidth(4)
+            ScalarByteWidth.Dword
           )
       }
       publications.set(0)

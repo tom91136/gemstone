@@ -122,6 +122,9 @@ private[v9_3] object VMLaneMask {
       Right(VMLaneMask(words, 1, (lane >>> 6) + 1))
     }
 
+  /** The single-lane mask, or `Empty` when the lane is out of range. */
+  def ofLane(lane: Int): VMLaneMask = one(lane).getOrElse(Empty)
+
   def fromBits(value: Long): VMLaneMask = {
     val words = Array.fill(WordCount)(0L)
     words(0) = value
