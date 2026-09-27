@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.server.transport
 
+import net.kurobako.gemstone.Constraint.Positive
+
 import net.kurobako.gemstone.*
 
 import net.kurobako.gemstone.memory.AllocationKind
@@ -13,7 +15,7 @@ final class ExecutionRPCIOSuite extends munit.FunSuite {
     Using.Manager { use =>
       val server = use(GemstoneRPCServer.start())
       val client = use(ExecutionRPCTestClient(server.port, server.client, process = 7L, incarnation = 9L))
-      assert(client.call(Operation.RegisterAllocation(AllocationKind.Shared, PositiveLong(8L))).isRight)
+      assert(client.call(Operation.RegisterAllocation(AllocationKind.Shared, 8L)).isRight)
     }.get
   }
 }

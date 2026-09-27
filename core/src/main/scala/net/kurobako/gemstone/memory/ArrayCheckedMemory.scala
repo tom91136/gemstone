@@ -1,7 +1,14 @@
 package net.kurobako.gemstone.memory
 
-import net.kurobako.gemstone.{NonEmptyString, NonNegativeInt, Vec}
-import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.binary.Widths.*
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.concurrent.withLock
 
 import java.util.concurrent.locks.ReentrantLock
@@ -30,7 +37,7 @@ final class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes
     validate(address, 4) match {
       case Left(error)   => Left(error)
       case Right(offset) =>
-        LittleEndian.write(value.toLong, mutableBytes, offset, ScalarByteWidth.Dword)
+        LittleEndian.write(value.toLong, mutableBytes, offset, 4)
         Right(())
     }
   }
@@ -44,7 +51,7 @@ final class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes
     }
   }
 
-  override def readBytes(address: GuestAddress, size: NonNegativeInt): Either[MemoryError, Vec[Byte]] = lock.withLock {
+  override def readBytes(address: GuestAddress, size: NonNegative[Int]): Either[MemoryError, Vec[Byte]] = lock.withLock {
     validate(address, size.raw) match {
       case Left(error)   => Left(error)
       case Right(offset) =>
@@ -61,7 +68,7 @@ final class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes
     }
   }
 
-  override def readLittleEndian(address: GuestAddress, size: MemoryValueByteWidth): Either[MemoryError, Long] =
+  override def readLittleEndian(address: GuestAddress, size: IntBetween[1, 8]): Either[MemoryError, Long] =
     lock.withLock {
       validate(address, size.raw).map(offset =>
         LittleEndian.decode(mutableBytes, offset, size.scalarByteWidth)
@@ -71,7 +78,7 @@ final class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes
   override def writeLittleEndian(
       address: GuestAddress,
       value: Long,
-      size: MemoryValueByteWidth
+      size: IntBetween[1, 8]
   ): Either[MemoryError, Unit] =
     lock.withLock {
       validate(address, size.raw) match {
@@ -84,7 +91,7 @@ final class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes
 
   override def atomicModifyLittleEndian(
       address: GuestAddress,
-      size: MemoryValueByteWidth
+      size: IntBetween[1, 8]
   )(update: Long => Long): Either[MemoryError, Long] = lock.withLock {
     validate(address, size.raw) match {
       case Left(error)   => Left(error)
@@ -109,7 +116,7 @@ final class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes
 
 object ArrayCheckedMemory {
   def allocate(
-      size: NonNegativeInt,
+      size: NonNegative[Int],
       start: GuestAddress = GuestAddress(0x10000L),
       provenance: NonEmptyString = NonEmptyString("anonymous")
   ): ArrayCheckedMemory =

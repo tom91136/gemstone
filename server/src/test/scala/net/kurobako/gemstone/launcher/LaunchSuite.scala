@@ -12,10 +12,11 @@ final class LaunchSuite extends munit.FunSuite {
   private val port   = RPCPort(43123)
   private val client = ClientId(7L)
   private val root   = Path.of("/opt/gemstone")
-  private val layout = RuntimeLayout(root)
 
   private def parse(arguments: String*): Either[String, Launcher.Options] =
     Command("run", "test launcher options")(Launcher.options).parse(arguments).left.map(help => help.toString)
+
+  private def library(api: ComputeAPI): Path = root.resolve(api.lib)
 
   test("API lists are comma-separated sets") {
     def apis(value: String) = parse("--apis", value, "--", "application").map(_.apis)
@@ -51,20 +52,19 @@ final class LaunchSuite extends munit.FunSuite {
   test("all selected APIs coexist in one environment") {
     val environment = Launcher.plan(
       ComputeAPI.values.toSet,
-      layout,
+      root,
       port,
       client,
       Map("LD_PRELOAD" -> "/existing.so", "LD_LIBRARY_PATH" -> "/vendor/lib")
     ).fold(error => fail(error), value => value)
 
-    assertEquals(
-      environment.set("LD_PRELOAD"),
-      s"${layout.library(ComputeAPI.CUDA)}:${layout.library(ComputeAPI.HIP)}:${layout.library(ComputeAPI.HSA)}:${layout.library(ComputeAPI.OpenCL)}:/existing.so"
-    )
+    val preload = Vector(ComputeAPI.CUDA, ComputeAPI.HIP, ComputeAPI.HSA, ComputeAPI.OpenCL)
+      .map(api => library(api).toString) :+ "/existing.so"
+    assertEquals(environment.set("LD_PRELOAD"), preload.mkString(":"))
     assertEquals(environment.set("LD_LIBRARY_PATH"), s"$root:${root.resolve("vulkan")}:/vendor/lib")
-    assertEquals(environment.set("OCL_ICD_FILENAMES"), s"${layout.library(ComputeAPI.OpenCL)}")
-    assertEquals(environment.set("OCL_ICD_VENDORS"), s"${layout.library(ComputeAPI.OpenCL)}")
-    assertEquals(environment.set("ZE_ENABLE_ALT_DRIVERS"), s"${layout.library(ComputeAPI.LevelZero)}")
+    assertEquals(environment.set("OCL_ICD_FILENAMES"), library(ComputeAPI.OpenCL).toString)
+    assertEquals(environment.set("OCL_ICD_VENDORS"), library(ComputeAPI.OpenCL).toString)
+    assertEquals(environment.set("ZE_ENABLE_ALT_DRIVERS"), library(ComputeAPI.LevelZero).toString)
     assertEquals(environment.set("GEMSTONE_RPC_PORT"), s"${port.raw}")
     assertEquals(environment.set("GEMSTONE_RPC_CLIENT"), s"${client.raw}")
   }
@@ -72,7 +72,7 @@ final class LaunchSuite extends munit.FunSuite {
   test("Vulkan loader directory is absent when Vulkan is not selected") {
     val environment = Launcher.plan(
       Set(ComputeAPI.CUDA),
-      layout,
+      root,
       port,
       client,
       Map.empty
@@ -89,18 +89,18 @@ final class LaunchSuite extends munit.FunSuite {
       Set(ComputeAPI.HIP, ComputeAPI.HSA)
     )
     combinations.foreach { apis =>
-      assert(Launcher.plan(apis, layout, port, client, Map.empty).isRight)
+      assert(Launcher.plan(apis, root, port, client, Map.empty).isRight)
     }
   }
 
   test("an empty API set is rejected") {
-    assert(Launcher.plan(Set.empty, layout, port, client, Map.empty).isLeft)
+    assert(Launcher.plan(Set.empty, root, port, client, Map.empty).isLeft)
   }
 
   test("process-scoped execution profiles reject malformed values before launch") {
     val result = Launcher.launch(
       Set(ComputeAPI.CUDA),
-      layout,
+      root,
       Map(ExecutionService.MaxInstructionsEnvironment.raw -> "not-a-number")
     )(_ => 0)
     assert(result.isLeft)

@@ -1,6 +1,11 @@
 package net.kurobako.gemstone.memory
 
-import net.kurobako.gemstone.{NonNegativeInt, Vec}
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.binary.Widths.*
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 
 import scala.annotation.nowarn
@@ -11,7 +16,7 @@ trait AddressMemory {
 
   /** Stage only resolved accesses from active lanes; implementations may merge adjacent ranges. */
   @nowarn("msg=unused explicit parameter")
-  def prepareReads(ranges: Vec[(GuestAddress, NonNegativeInt)]): Either[MemoryError, Unit] = Right(())
+  def prepareReads(ranges: Vec[(GuestAddress, NonNegative[Int])]): Either[MemoryError, Unit] = Right(())
 
   def readInt8(address: GuestAddress): Either[MemoryError, Byte]
   def readInt32(address: GuestAddress): Either[MemoryError, Int]
@@ -21,7 +26,7 @@ trait AddressMemory {
   /** A byte-range fallback for implementations without a bulk operation. Atomic bulk access belongs to the backing
     * owner and must be provided by overriding this method.
     */
-  def readBytes(address: GuestAddress, size: NonNegativeInt): Either[MemoryError, Vec[Byte]] = {
+  def readBytes(address: GuestAddress, size: NonNegative[Int]): Either[MemoryError, Vec[Byte]] = {
     val mutableBytes = Vec.newBuilder[Byte]
     @scala.annotation.tailrec
     def read(index: Int): Either[MemoryError, Vec[Byte]] =
@@ -49,7 +54,7 @@ trait AddressMemory {
         write(0)
     }
 
-  def validateRange(address: GuestAddress, size: NonNegativeInt): Either[MemoryError, Unit] = {
+  def validateRange(address: GuestAddress, size: NonNegative[Int]): Either[MemoryError, Unit] = {
     @scala.annotation.tailrec
     def validate(index: Int): Either[MemoryError, Unit] =
       if (index == size.raw) Right(())
@@ -61,7 +66,7 @@ trait AddressMemory {
     validate(0)
   }
 
-  def readLittleEndian(address: GuestAddress, size: MemoryValueByteWidth): Either[MemoryError, Long] = {
+  def readLittleEndian(address: GuestAddress, size: IntBetween[1, 8]): Either[MemoryError, Long] = {
     @scala.annotation.tailrec
     def read(index: Int, value: Long): Either[MemoryError, Long] =
       if (index == size.raw) Right(value)
@@ -72,7 +77,7 @@ trait AddressMemory {
     read(0, 0L)
   }
 
-  def writeLittleEndian(address: GuestAddress, value: Long, size: MemoryValueByteWidth): Either[MemoryError, Unit] =
+  def writeLittleEndian(address: GuestAddress, value: Long, size: IntBetween[1, 8]): Either[MemoryError, Unit] =
     validateRange(address, size.nonNegative) match {
       case Left(error) => Left(error)
       case Right(())   =>
@@ -92,7 +97,7 @@ trait AddressMemory {
   @nowarn("msg=unused explicit parameter")
   def atomicModifyLittleEndian(
       address: GuestAddress,
-      size: MemoryValueByteWidth
+      size: IntBetween[1, 8]
   )(update: Long => Long): Either[MemoryError, Long] =
     Left(MemoryError.UnsupportedAtomic(address, size))
 }

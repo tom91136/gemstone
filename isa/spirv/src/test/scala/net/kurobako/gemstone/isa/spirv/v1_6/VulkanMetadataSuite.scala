@@ -1,7 +1,11 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.{NonNegativeInt, PositiveInt, Vec}
-import net.kurobako.gemstone.isa.{KernelMetadata, KernelName}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.isa.KernelMetadata
+import net.kurobako.gemstone.vm.LaunchGeometry
 
 final class VulkanMetadataSuite extends munit.FunSuite with ExecutionTestSupport {
   private def function(entry: Operand): Vec[Instruction] =
@@ -13,7 +17,7 @@ final class VulkanMetadataSuite extends munit.FunSuite with ExecutionTestSupport
   private def metadata(module: Module, name: String): KernelMetadata =
     loadUnchecked(module).fold(error => fail(error.message), identity) match {
       case loaded =>
-        val kernelName = KernelName.either(name).fold(message => fail(message), identity)
+        val kernelName = NonEmptyString.either(name).fold(message => fail(message), identity)
         VMInterpreter.kernelMetadata(loaded, kernelName).fold(error => fail(error.message), identity)
     }
 
@@ -30,7 +34,7 @@ final class VulkanMetadataSuite extends munit.FunSuite with ExecutionTestSupport
     )
     assertEquals(
       metadata(module, "main").requiredWorkGroupSize,
-      Some(KernelMetadata.WorkGroupSize(PositiveInt(8), PositiveInt(2), PositiveInt(1)))
+      Some(LaunchGeometry.Dimensions(8, 2, 1))
     )
   }
 
@@ -50,7 +54,7 @@ final class VulkanMetadataSuite extends munit.FunSuite with ExecutionTestSupport
     )
     assertEquals(
       metadata(module, "main").requiredWorkGroupSize,
-      Some(KernelMetadata.WorkGroupSize(PositiveInt(4), PositiveInt(3), PositiveInt(2)))
+      Some(LaunchGeometry.Dimensions(4, 3, 2))
     )
   }
 
@@ -76,7 +80,7 @@ final class VulkanMetadataSuite extends munit.FunSuite with ExecutionTestSupport
     )
     assertEquals(
       metadata(module, "main").requiredWorkGroupSize,
-      Some(KernelMetadata.WorkGroupSize(PositiveInt(4), PositiveInt(3), PositiveInt(2)))
+      Some(LaunchGeometry.Dimensions(4, 3, 2))
     )
   }
 
@@ -97,7 +101,7 @@ final class VulkanMetadataSuite extends munit.FunSuite with ExecutionTestSupport
       ) ++ function(first) ++ function(second),
       Endianness.Little
     )
-    assertEquals(metadata(module, "first").bindingIndices, Vec(NonNegativeInt(3)))
-    assertEquals(metadata(module, "second").bindingIndices, Vec(NonNegativeInt(5)))
+    assertEquals(metadata(module, "first").bindingIndices, Vec(NonNegative.unsafe(3)))
+    assertEquals(metadata(module, "second").bindingIndices, Vec(NonNegative.unsafe(5)))
   }
 }

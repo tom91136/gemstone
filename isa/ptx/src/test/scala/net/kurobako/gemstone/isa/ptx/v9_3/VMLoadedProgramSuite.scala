@@ -1,9 +1,12 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.NonEmptyVec
 
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.{GlobalName, KernelMetadata, KernelName}
+import net.kurobako.gemstone.isa.KernelMetadata
 import net.kurobako.gemstone.vm.{Observer, Scheduler}
 
 final class VMLoadedProgramSuite extends munit.FunSuite {
@@ -15,8 +18,8 @@ final class VMLoadedProgramSuite extends munit.FunSuite {
     val program = Parser.decode(source).fold(error => fail(error.message), value => value)
     val loaded  = machine.load(program).fold(error => fail(error.message), value => value)
     val actual  =
-      machine.global(loaded, GlobalName("metadata_probe")).fold(error => fail(error.message), identity)
-    val expected = NonNegativeLong(16L) -> Vec.from(Array.ofDim[Byte](16))
+      machine.global(loaded, NonEmptyString("metadata_probe")).fold(error => fail(error.message), identity)
+    val expected = NonNegative.unsafe(16L) -> Vec.from(Array.ofDim[Byte](16))
     assertEquals(actual, expected)
   }
 
@@ -27,27 +30,27 @@ final class VMLoadedProgramSuite extends munit.FunSuite {
     val program = Parser.decode(source).fold(error => fail(error.message), value => value)
     val loaded  = machine.load(program).fold(error => fail(error.message), value => value)
 
-    val actual   = machine.kernel(loaded, KernelName("layout")).fold(error => fail(error.message), identity)
+    val actual   = machine.kernel(loaded, NonEmptyString("layout")).fold(error => fail(error.message), identity)
     val expected =
       KernelMetadata.validated(
-        NonNegativeInt(14),
-        NonNegativeInt(3),
+        14,
+        3,
         Vec(
           KernelMetadata.Parameter(
-            PositiveInt(1),
-            NonNegativeInt(0),
+            1,
+            0,
             KernelMetadata.ParameterKind.Scalar,
             containsPointers = false
           ),
           KernelMetadata.Parameter(
-            PositiveInt(4),
-            NonNegativeInt(8),
+            4,
+            8,
             KernelMetadata.ParameterKind.Scalar,
             containsPointers = false
           ),
           KernelMetadata.Parameter(
-            PositiveInt(2),
-            NonNegativeInt(12),
+            2,
+            12,
             KernelMetadata.ParameterKind.Scalar,
             containsPointers = false
           )
@@ -62,10 +65,10 @@ final class VMLoadedProgramSuite extends munit.FunSuite {
         ".visible .entry pointer(.param .u64 .ptr .global output, .param .u64 bits) { ret; }\n"
     val program  = Parser.decode(source).fold(error => fail(error.message), value => value)
     val loaded   = machine.load(program).fold(error => fail(error.message), value => value)
-    val metadata = machine.kernel(loaded, KernelName("pointer")).fold(error => fail(error.message), identity)
+    val metadata = machine.kernel(loaded, NonEmptyString("pointer")).fold(error => fail(error.message), identity)
     assertEquals(
       metadata.parameters.map(_.kind),
-      Vec(KernelMetadata.ParameterKind.Memory, KernelMetadata.ParameterKind.Scalar)
+      Vec(KernelMetadata.ParameterKind.Allocation, KernelMetadata.ParameterKind.Scalar)
     )
   }
 }

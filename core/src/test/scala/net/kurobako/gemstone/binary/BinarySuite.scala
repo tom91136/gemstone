@@ -1,12 +1,15 @@
 package net.kurobako.gemstone.binary
 
+import net.kurobako.gemstone.Constraint.{IntBetween, OneOf}
+
+import net.kurobako.gemstone.Constraint.{IntBetween, MultipleIn}
 import net.kurobako.gemstone.Vec
 
 final class BinarySuite extends munit.FunSuite {
   test("little-endian scalars round-trip through arrays and runtime collections") {
-    val value = 0x8877665544332211L
-    val width = ScalarByteWidth.Qword
-    val bytes = LittleEndian.toArray(value, width)
+    val value                   = 0x8877665544332211L
+    val width: IntBetween[0, 8] = 8
+    val bytes                   = LittleEndian.toArray(value, width)
 
     assertEquals(bytes.toSeq, Seq[Byte](0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88.toByte))
     assertEquals(LittleEndian.decode(bytes, 0, width), value)
@@ -14,22 +17,22 @@ final class BinarySuite extends munit.FunSuite {
   }
 
   test("fixed-width bit operations share one validated definition") {
-    assertEquals(Bits.mask(BitWidth(13)), 0x1fffL)
-    assertEquals(Bits.truncate(0x12345L, BitWidth(16)), 0x2345L)
-    assertEquals(Bits.unsignedField(0x12345L, 4, BitWidth(8)), 0x34L)
-    assertEquals(Bits.signedField(0xf0L, 4, BitWidth(4)), -1L)
-    assertEquals(Bits.unsignedIntField(0x12345L, 4, IntFieldWidth(8)), 0x34)
-    assertEquals(Bits.signedIntField(0xf0L, 4, IntFieldWidth(4)), -1)
+    assertEquals(Bits.mask(13), 0x1fffL)
+    assertEquals(Bits.truncate(0x12345L, 16), 0x2345L)
+    assertEquals(Bits.unsignedField(0x12345L, 4, 8), 0x34L)
+    assertEquals(Bits.signedField(0xf0L, 4, 4), -1L)
+    assertEquals(Bits.unsignedIntField(0x12345L, 4, 8), 0x34)
+    assertEquals(Bits.signedIntField(0xf0L, 4, 4), -1)
     assert(Bits.isSet(0x40L, 6))
     assert(!Bits.isSet(0x40L, 5))
-    assertEquals(Bits.signExtend(0x1fffL, BitWidth(13)), -1L)
-    assertEquals(Bits.byteCount(ByteAlignedBitWidth(64)).raw, 8)
+    assertEquals(Bits.signExtend(0x1fffL, 13), -1L)
+    assertEquals(Bits.byteCount(64).raw, 8)
   }
 
   test("bit reversal and population count respect every supported width") {
     val values = Seq(0L, -1L, Long.MinValue, Long.MaxValue, 0x8877665544332211L)
     (1 to 64).foreach { width =>
-      val bitWidth = BitWidth.either(width).fold(message => fail(message), value => value)
+      val bitWidth = IntBetween.either[1, 64](width).fold(message => fail(message), value => value)
       values.foreach { value =>
         val digits          = java.lang.Long.toBinaryString(value).reverse.padTo(64, '0').take(width)
         val expectedReverse = BigInt(digits, 2).longValue
@@ -42,9 +45,9 @@ final class BinarySuite extends munit.FunSuite {
       }
     }
     Seq(0, -1, 65).foreach { width =>
-      assert(BitWidth.either(width).isLeft)
+      assert(IntBetween.either[1, 64](width).isLeft)
     }
-    assert(ByteAlignedBitWidth.either(7).isLeft)
+    assert(MultipleIn.either[0, 64, 8](7).isLeft)
   }
 
   test("32-bit words slice and join without sign extension") {
@@ -69,7 +72,7 @@ final class BinarySuite extends munit.FunSuite {
       java.lang.Double.doubleToRawLongBits(IEEE754.binary64ToDouble(0x7ff8000000001234L)),
       0x7ff8000000001234L
     )
-    assert(FloatingPointWidth.either(8).isLeft)
+    assert(OneOf.either[(16, 32, 64)](8).isLeft)
   }
 
   test("byte ranges reject negative and overflowing slices") {
@@ -82,10 +85,10 @@ final class BinarySuite extends munit.FunSuite {
 
   test("little-endian array access validates the complete runtime range") {
     val bytes = Array.ofDim[Byte](8)
-    val _     = intercept[IllegalArgumentException](LittleEndian.decode(bytes, -1, ScalarByteWidth.Byte))
-    val _     = intercept[IllegalArgumentException](LittleEndian.decode(bytes, 7, ScalarByteWidth.Word))
-    val _     = intercept[IllegalArgumentException](LittleEndian.write(0L, bytes, -1, ScalarByteWidth.Byte))
-    val _     = intercept[IllegalArgumentException](LittleEndian.write(0L, bytes, 7, ScalarByteWidth.Word))
+    val _     = intercept[IllegalArgumentException](LittleEndian.decode(bytes, -1, 1))
+    val _     = intercept[IllegalArgumentException](LittleEndian.decode(bytes, 7, 2))
+    val _     = intercept[IllegalArgumentException](LittleEndian.write(0L, bytes, -1, 1))
+    val _     = intercept[IllegalArgumentException](LittleEndian.write(0L, bytes, 7, 2))
   }
 
   test("little-endian fixed-width integer readers own their narrowing") {

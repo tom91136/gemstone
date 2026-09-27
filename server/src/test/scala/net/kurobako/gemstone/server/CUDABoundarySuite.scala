@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.server
 
+import net.kurobako.gemstone.Constraint.NoNulString
+
 import net.kurobako.gemstone.*
 
 import net.kurobako.gemstone.launcher.Environment

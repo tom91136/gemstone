@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.server.execution
 
+import net.kurobako.gemstone.Constraint.Positive
+
 import net.kurobako.gemstone.*
 
 import net.kurobako.gemstone.Vec
@@ -10,7 +12,7 @@ final class HostMemoryMirrorSuite extends munit.FunSuite {
   test("contiguous lanes merge while strided and gather accesses preserve holes") {
     val mirror = HostMemoryMirror()
     for (offset <- 0 until 32) assertEquals(mirror.read(1, 0x1000L + offset * 4, 4), None)
-    assertEquals(mirror.requests(1), Vec(HostMemoryRange(GuestAddress(0x1000L), PositiveInt(128))))
+    assertEquals(mirror.requests(1), Vec(HostMemoryRange(GuestAddress(0x1000L), 128)))
     for (address <- List(0x2000L, 0x2010L, 0x9000L, 0x2000L)) mirror.read(1, address, 4)
     assertEquals(mirror.requests(1).size, 4)
     assertEquals(mirror.requests(1).map(_.size.raw).sum, 140)
@@ -22,7 +24,7 @@ final class HostMemoryMirrorSuite extends munit.FunSuite {
     assert(mirror.supply(1, Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2, 3, 4)))).isRight)
     assertEquals(mirror.read(1, 0x1001, 2), Some(Vec[Byte](2, 3)))
     assertEquals(mirror.read(1, 0x8000, 2), None)
-    assertEquals(mirror.requests(1), Vec(HostMemoryRange(GuestAddress(0x8000L), PositiveInt(2))))
+    assertEquals(mirror.requests(1), Vec(HostMemoryRange(GuestAddress(0x8000L), 2)))
     assert(mirror.supply(1, Vec(HostMemoryBytes(GuestAddress(0x8000L), Vec[Byte](5, 6)))).isRight)
     mirror.write(1, 0x8001, Vec[Byte](9))
     assertEquals(mirror.read(2, 0x8000, 2), Some(Vec[Byte](5, 9)))

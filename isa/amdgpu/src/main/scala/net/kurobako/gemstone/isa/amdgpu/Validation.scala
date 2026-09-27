@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.isa.ValidationOutcome
@@ -12,8 +14,8 @@ import Program.*
 object Validation {
   enum Issue {
     case WrongFamily(target: Target, expected: Family)
-    case UnsupportedInstruction(opcode: Opcode, target: Target)
-    case InvalidInstruction(opcode: Opcode, message: String)
+    case UnsupportedInstruction(opcode: NonEmptyString, target: Target)
+    case InvalidInstruction(opcode: NonEmptyString, message: String)
     case Incomplete(detail: String)
   }
 

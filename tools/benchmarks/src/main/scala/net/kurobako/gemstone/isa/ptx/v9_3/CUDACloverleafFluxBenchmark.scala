@@ -1,9 +1,14 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import Program.*
 import VMIR.*
-
-import net.kurobako.gemstone.{NonNegativeInt, PlatformTime, PositiveInt}
+import net.kurobako.gemstone.PlatformTime
 import net.kurobako.gemstone.benchmarks.{
   BenchmarkArguments,
   BenchmarkName,
@@ -11,7 +16,7 @@ import net.kurobako.gemstone.benchmarks.{
   CloverleafFluxFixture,
   PlatformMetrics
 }
-import net.kurobako.gemstone.memory.{ArrayCheckedMemory, MemoryValueByteWidth}
+import net.kurobako.gemstone.memory.ArrayCheckedMemory
 import net.kurobako.gemstone.vm.LaunchGeometry
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
@@ -22,13 +27,13 @@ import java.nio.charset.StandardCharsets
 
 /** CUDA PTX form of the bounded CloverLeaf flux calculation. */
 object CUDACloverleafFluxBenchmark {
-  private final case class Options(cells: PositiveInt, iterations: PositiveInt)
+  private case class Options(cells: Positive[Int], iterations: Positive[Int])
   private val name    = BenchmarkName("cuda-cloverleaf-flux")
   private val options = (
     Opts.option[Int]("cells", help = "Cells per dispatch").withDefault(64)
-      .validate("cells must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("cells must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[Int]("iterations", help = "Dispatches per sample").withDefault(20)
-      .validate("iterations must be positive")(_ > 0).map(PositiveInt.unsafe)
+      .validate("iterations must be positive")(_ > 0).map(Positive.unsafe)
   ).mapN(Options(_, _))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -37,7 +42,7 @@ object CUDACloverleafFluxBenchmark {
     val length        = CloverleafFluxFixture.length(parsed.cells.raw)
     val bytesPerArray = Math.multiplyExact(length, 8)
     val memory        = ArrayCheckedMemory.allocate(
-      NonNegativeInt.unsafe(Math.multiplyExact(bytesPerArray, CloverleafFluxFixture.arrays))
+      NonNegative.unsafe(Math.multiplyExact(bytesPerArray, CloverleafFluxFixture.arrays))
     )
     val base                                  = memory.allocation.start
     def address(array: Int, index: Int): Long =
@@ -50,7 +55,7 @@ object CUDACloverleafFluxBenchmark {
         memory.writeLittleEndian(
           base.offset(array.toLong * bytesPerArray + index.toLong * 8L),
           bits,
-          MemoryValueByteWidth(8)
+          8
         ).fold(error => throw IllegalStateException(error.toString), identity)
         index += 1
       }
@@ -60,23 +65,23 @@ object CUDACloverleafFluxBenchmark {
     val kernel = VMCompiler.compile(source)
       .fold(error => throw IllegalArgumentException(error.message), identity)
     val parameters = Map(
-      ParameterName("clover_flux_param_0")  -> Argument.fromLong(address(0, 0)),
-      ParameterName("clover_flux_param_1")  -> Argument.fromLong(address(1, 0)),
-      ParameterName("clover_flux_param_2")  -> Argument.fromLong(address(2, 0)),
-      ParameterName("clover_flux_param_3")  -> Argument.fromLong(address(3, 0)),
-      ParameterName("clover_flux_param_4")  -> Argument.fromLong(address(4, 0)),
-      ParameterName("clover_flux_param_5")  -> Argument.fromLong(address(5, 0)),
-      ParameterName("clover_flux_param_6")  -> Argument.fromLong(address(6, 0)),
-      ParameterName("clover_flux_param_7")  -> Argument.fromLong(address(7, 0)),
-      ParameterName("clover_flux_param_8")  -> Argument.fromLong(parsed.cells.raw.toLong),
-      ParameterName("clover_flux_param_9")  -> Argument.fromLong(CloverleafFluxFixture.rowStride.toLong),
-      ParameterName("clover_flux_param_10") ->
+      NonEmptyString("clover_flux_param_0")  -> Argument.fromLong(address(0, 0)),
+      NonEmptyString("clover_flux_param_1")  -> Argument.fromLong(address(1, 0)),
+      NonEmptyString("clover_flux_param_2")  -> Argument.fromLong(address(2, 0)),
+      NonEmptyString("clover_flux_param_3")  -> Argument.fromLong(address(3, 0)),
+      NonEmptyString("clover_flux_param_4")  -> Argument.fromLong(address(4, 0)),
+      NonEmptyString("clover_flux_param_5")  -> Argument.fromLong(address(5, 0)),
+      NonEmptyString("clover_flux_param_6")  -> Argument.fromLong(address(6, 0)),
+      NonEmptyString("clover_flux_param_7")  -> Argument.fromLong(address(7, 0)),
+      NonEmptyString("clover_flux_param_8")  -> Argument.fromLong(parsed.cells.raw.toLong),
+      NonEmptyString("clover_flux_param_9")  -> Argument.fromLong(CloverleafFluxFixture.rowStride.toLong),
+      NonEmptyString("clover_flux_param_10") ->
         Argument.fromLong(java.lang.Double.doubleToRawLongBits(CloverleafFluxFixture.dt))
     )
-    val groups   = PositiveInt.unsafe(((parsed.cells.raw.toLong + 31L) / 32L).toInt)
+    val groups   = Positive.unsafe(((parsed.cells.raw.toLong + 31L) / 32L).toInt)
     val geometry = LaunchGeometry.forLaunch(
-      Dimensions(PositiveInt(32), PositiveInt.One, PositiveInt.One),
-      Dimensions(groups, PositiveInt.One, PositiveInt.One)
+      Dimensions(32, 1, 1),
+      Dimensions(groups, 1, 1)
     ).fold(error => throw IllegalArgumentException(error), identity)
     val before    = PlatformMetrics.allocatedBytes
     val started   = PlatformTime.monotonicNanos
@@ -91,20 +96,20 @@ object CUDACloverleafFluxBenchmark {
       start <- before
       end   <- PlatformMetrics.allocatedBytes
       if end >= start
-    } yield (end - start).raw
+    } yield end - start
     var checksum = 0L
     var index    = 0
     while (index < parsed.cells.raw) {
-      val x = memory.readLittleEndian(base.offset(address(6, index) - base.raw), MemoryValueByteWidth(8))
+      val x = memory.readLittleEndian(base.offset(address(6, index) - base.raw), 8)
         .fold(error => throw IllegalStateException(error.toString), java.lang.Double.longBitsToDouble(_))
-      val y = memory.readLittleEndian(base.offset(address(7, index) - base.raw), MemoryValueByteWidth(8))
+      val y = memory.readLittleEndian(base.offset(address(7, index) - base.raw), 8)
         .fold(error => throw IllegalStateException(error.toString), java.lang.Double.longBitsToDouble(_))
       checksum ^= CloverleafFluxFixture.verify(index, x, y)
       index += 1
     }
     Console.out.println(
       s"cells=${parsed.cells} iterations=${parsed.iterations} nsPerDispatch=${elapsed.toDouble / parsed.iterations.raw} " +
-        s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.toDouble / parsed.iterations.raw)} checksum=$checksum"
+        s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
     )
   }
 }

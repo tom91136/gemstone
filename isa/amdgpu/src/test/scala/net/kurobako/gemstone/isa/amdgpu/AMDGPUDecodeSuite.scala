@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import CodeObject.*
 import VMIR.*
 
@@ -57,7 +59,7 @@ final class AMDGPUDecodeSuite extends munit.FunSuite with CodeObjectTestSupport 
     val code     = wait ++ Vec[Byte](0x00, 0x00, 0x81.toByte, 0xbf.toByte)
     val kernel   = CodeObjectKernel("wait", Target("gfx1030"), 0, 0, 0, 0, 0, code)
     val dispatch = KernelTask.validated(
-      KernelName("wait"),
+      NonEmptyString("wait"),
       Dimensions.One,
       Dimensions.One,
       Vec.empty

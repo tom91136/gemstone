@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.{PositiveInt, Vec}
+import net.kurobako.gemstone.Constraint.Positive
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 
@@ -70,7 +71,7 @@ private[execution] final class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024
         size += 1
         remaining -= 1
       }
-      chunks += HostMemoryRange(GuestAddress(base), PositiveInt.unsafe(size))
+      chunks += HostMemoryRange(GuestAddress(base), Positive.unsafe(size))
     }
     Vec.from(chunks)
   }

@@ -1,6 +1,7 @@
 // Generated from pinned Khronos grammar and SPIRV-Tools tests. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.Vec
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
@@ -43,8 +44,7 @@ final class ReferenceSuite extends munit.FunSuite {
 
   test("SPIRV-Tools endian oracle is represented") {
     assert(upstreamTestCounts("binary_endianness_test.cpp") > 0)
-    val module =
-      RawModule(Header(ISA.version, Word(7), Word(2), Word(0)), Vec.empty, Endianness.Big)
+    val module = RawModule(Header(ISA.version, Word(7), Word(2), Word(0)), Vec.empty, Endianness.Big)
     val bytes = Binary.encode(module).fold(error => fail(error.message), value => value)
     assert(Binary.decode(bytes).exists(same(_, module)))
   }
@@ -65,8 +65,7 @@ final class ReferenceSuite extends munit.FunSuite {
     val unknownOpcode = SPIRVOpcodeNumber(65535)
     val raw = RawInstruction(unknownOpcode, Vec(Word(7)))
     assertEquals(Instruction.decode(raw), Left(InstructionDecodeError.UnknownOpcode(unknownOpcode)))
-    val module =
-      RawModule(Header(ISA.version, Word(0), Word(1), Word(0)), Vec(raw), Endianness.Little)
+    val module = RawModule(Header(ISA.version, Word(0), Word(1), Word(0)), Vec(raw), Endianness.Little)
     val bytes = Binary.encode(module).fold(error => fail(error.message), value => value)
     assert(Binary.decode(bytes).exists(same(_, module)))
   }
@@ -74,17 +73,17 @@ final class ReferenceSuite extends munit.FunSuite {
   test("known opcodes with malformed grammar operands fail typed decode") {
     Instruction.decode(RawInstruction(SPIRVOpcodeNumber(17), Vec.empty)) match {
       case Left(InstructionDecodeError.InvalidOperandCount(opcode, _))
-          if opcode == SPIRVOpcode("OpCapability") => ()
+          if opcode == NonEmptyString("OpCapability") => ()
       case other => fail(s"expected missing-operand failure, found $other")
     }
     Instruction.decode(RawInstruction(SPIRVOpcodeNumber(17), Vec(Word(-1)))) match {
       case Left(InstructionDecodeError.InvalidEnumerant(kind, 0xffffffffL))
-          if kind == SPIRVOperandKind("Capability") => ()
+          if kind == NonEmptyString("Capability") => ()
       case other => fail(s"expected invalid-enumerant failure, found $other")
     }
     Instruction.decode(RawInstruction(SPIRVOpcodeNumber(5), Vec(Word(1), Word(-1)))) match {
       case Left(InstructionDecodeError.UnterminatedString(opcode))
-          if opcode == SPIRVOpcode("OpName") => ()
+          if opcode == NonEmptyString("OpName") => ()
       case other => fail(s"expected unterminated-string failure, found $other")
     }
   }

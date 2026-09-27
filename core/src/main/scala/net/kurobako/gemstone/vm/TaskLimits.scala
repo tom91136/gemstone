@@ -1,13 +1,13 @@
 package net.kurobako.gemstone.vm
 
-import net.kurobako.gemstone.{PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.Positive
 
-final case class TaskLimits(
-    maxInstructions: PositiveLong,
-    quantum: PositiveInt
+case class TaskLimits(
+    maxInstructions: Positive[Long],
+    quantum: Positive[Int]
 )
 
 object TaskLimits {
   val Default: TaskLimits =
-    TaskLimits(maxInstructions = PositiveLong(100000000L), quantum = PositiveInt(4096))
+    TaskLimits(maxInstructions = 100000000L, quantum = 4096)
 }

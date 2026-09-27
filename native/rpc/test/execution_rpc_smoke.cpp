@@ -32,10 +32,10 @@ TEST_CASE("execution RPC end-to-end smoke test", "[rpc][integration]") {
   REQUIRE((catalog.value().kernels[0].name.value == "add"));
   REQUIRE((catalog.value().kernels[0].linkageName.value == "add.kd"));
 
-  std::vector<KernelArgument> arguments{
-      KernelArgumentAllocation{allocation, 2},
-      KernelArgumentScalar{{9, 8}},
-      KernelArgumentLocal{64},
+  std::vector<Argument> arguments{
+      ArgumentMemory{MemoryRegion{allocation.value}, 2},
+      ArgumentScalar{{9, 8}},
+      ArgumentLocal{64},
   };
   auto completionResult = executionClient->call(Launch{
       program,

@@ -4,32 +4,14 @@ import scala.compiletime.{constValue, error}
 
 import Program.*
 
-import net.kurobako.gemstone.NonNegativeInt
-import net.kurobako.gemstone.PositiveInt
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.ValidationOutcome
 
 import cats.syntax.either.*
 
 object ISA {
-  final case class Version(major: PositiveInt, minor: NonNegativeInt) extends Ordered[Version] {
-    override def compare(that: Version): Int =
-      Ordering[(PositiveInt, NonNegativeInt)].compare((major, minor), (that.major, that.minor))
-    override def toString: String = s"${major.raw}.${minor.raw}"
-  }
-
-  object Version {
-    def parse(value: String): Either[String, Version] = value match {
-      case s"$major.$minor" =>
-        for {
-          majorValue <- major.toIntOption.toRight(s"invalid PTX version '$value'")
-            .flatMap(PositiveInt.either(_).leftMap(_ => s"invalid PTX version '$value'"))
-          minorValue <- minor.toIntOption.toRight(s"invalid PTX version '$value'")
-            .flatMap(NonNegativeInt.either(_).leftMap(_ => s"invalid PTX version '$value'"))
-        } yield Version(majorValue, minorValue)
-      case _ => Left(s"invalid PTX version '$value'")
-    }
-  }
+  type Version = net.kurobako.gemstone.isa.Version
+  val Version: net.kurobako.gemstone.isa.Version.type = net.kurobako.gemstone.isa.Version
 
   opaque type Target = Int
   object Target {
@@ -40,7 +22,7 @@ object ISA {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): Target =
-      inline if constValue[A] >= 10 then value else error("SM target must be at least 10")
+      inline if (constValue[A] >= 10) value else error("SM target must be at least 10")
 
     def parse(value: String): Either[String, Target] = {
       val normalized = value.map(_.toLower).stripPrefix("sm_").stripSuffix("a").stripSuffix("f")

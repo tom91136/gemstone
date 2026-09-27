@@ -1,11 +1,14 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.Positive
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import VirtualMachine.*
 
 import CodeObject.*
 import VMIR.*
-
-import net.kurobako.gemstone.{PositiveInt, PositiveLong, Vec}
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{Bits, ByteRange}
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
@@ -322,7 +325,7 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
     )
     val kernel   = CodeObjectKernel("branch", Target("gfx900"), 0, 0, 0, 0x80, 0x0a, code)
     val dispatch = KernelTask.validated(
-      KernelName("branch"),
+      NonEmptyString("branch"),
       Dimensions.One,
       Dimensions.One,
       Vec.empty
@@ -331,7 +334,7 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
     val executable = compileKernel(kernel)
     assertEquals(executeKernel(executable, dispatch, TestMemory()), Right(()))
     val limited =
-      TaskControl.forScheduler(TaskLimits(maxInstructions = PositiveLong(1L), quantum = PositiveInt(1)))
+      TaskControl.forScheduler(TaskLimits(maxInstructions = 1L, quantum = 1))
     assert(
       executeKernel(executable, dispatch, TestMemory(), limited).left
         .exists(_.message.contains("instruction budget of 1"))
@@ -380,7 +383,7 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
       code
     )
     val dispatch = KernelTask.validated(
-      KernelName("divergent_barrier"),
+      NonEmptyString("divergent_barrier"),
       testDimensions(64, 1, 1),
       Dimensions.One,
       Vec.empty

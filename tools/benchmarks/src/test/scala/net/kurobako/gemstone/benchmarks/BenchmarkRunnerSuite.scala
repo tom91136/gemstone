@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.benchmarks
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveInt}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
 
 final class BenchmarkRunnerSuite extends munit.FunSuite {
   test("catalog names are stable and unique") {
@@ -20,13 +20,13 @@ final class BenchmarkRunnerSuite extends munit.FunSuite {
     assertEquals(
       options,
       BenchmarkOptions(
-        NonNegativeInt(2),
-        PositiveInt(3),
+        2,
+        3,
         BenchmarkInvocation(BenchmarkName("ptx-execution"), Vector("--iterations", "17"))
       )
     )
     assertEquals(
-      BenchmarkRunner.result(options, NonNegativeInt(1), NonNegativeLong(99L))("schema").str,
+      BenchmarkRunner.result(options, 1, 99L)("schema").str,
       "gemstone-benchmark-v1"
     )
   }

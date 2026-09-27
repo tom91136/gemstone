@@ -1,12 +1,14 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import Program.*
 
 import VMIR.*
 import VMExecution.*
 
-import net.kurobako.gemstone.NonNegativeLong
-import net.kurobako.gemstone.PositiveInt
 import net.kurobako.gemstone.Vec
 
 import net.kurobako.gemstone.memory.AddressMemory
@@ -20,14 +22,14 @@ import scala.collection.mutable
 
 private[v9_3] object VMInterpreter {
 
-  private final case class Cohort(pc: Pc, lanes: VMLaneMask)
-  private final case class BarrierReduction(
-      destination: RegisterName,
-      predicate: RegisterName,
+  private case class Cohort(pc: Pc, lanes: VMLaneMask)
+  private case class BarrierReduction(
+      destination: NonEmptyString,
+      predicate: NonEmptyString,
       operation: PredicateOperation,
       pc: Pc
   )
-  private final case class Waiting(cohort: Cohort, key: WaitKey, reduction: Option[BarrierReduction] = None)
+  private case class Waiting(cohort: Cohort, key: WaitKey, reduction: Option[BarrierReduction] = None)
 
   // The dispatch loop exits immediately on execution faults.
   @SuppressWarnings(
@@ -36,7 +38,7 @@ private[v9_3] object VMInterpreter {
   def execute(
       kernel: Kernel,
       geometry: LaunchGeometry,
-      arguments: Map[ParameterName, Argument],
+      arguments: Map[NonEmptyString, Argument],
       memory: AddressMemory,
       control: TaskControl = TaskControl.default,
       scheduler: Scheduler = Scheduler.Sequential,
@@ -56,9 +58,12 @@ private[v9_3] object VMInterpreter {
       case Right(value) => value
     }
     val everyGroupFull =
-      geometry.globalExtent.x == (geometry.groupSize.x.toLong * geometry.groupCount.x.toLong) &&
-        geometry.globalExtent.y == (geometry.groupSize.y.toLong * geometry.groupCount.y.toLong) &&
-        geometry.globalExtent.z == (geometry.groupSize.z.toLong * geometry.groupCount.z.toLong)
+      geometry.globalExtent.x ==
+        (geometry.groupSize.x.widen[Positive[Long]] * geometry.groupCount.x.widen[Positive[Long]]) &&
+        geometry.globalExtent.y ==
+        (geometry.groupSize.y.widen[Positive[Long]] * geometry.groupCount.y.widen[Positive[Long]]) &&
+        geometry.globalExtent.z ==
+        (geometry.groupSize.z.widen[Positive[Long]] * geometry.groupCount.z.widen[Positive[Long]])
     def liveLanes(group: Coordinates): Either[ExecutionFault, VMLaneMask] =
       if (everyGroupFull) Right(allLanes)
       else geometry.activeGroupSize(group) match {
@@ -113,8 +118,8 @@ private[v9_3] object VMInterpreter {
         }
     val selectedCount                  = blockIndices.fold(groupCount.raw)(_.size)
     def selectedBlock(index: Int): Int = blockIndices.fold(index)(_(index))
-    val selectedTasks                  = NonNegativeLong.unsafe(selectedCount.toLong)
-    val workItems                      = laneCount.toLong.toNonNegative
+    val selectedTasks                  = NonNegative.unsafe(selectedCount.toLong)
+    val workItems: NonNegative[Long]   = laneCount.widen
     val parallelBlocks                 = scheduler.shouldParallel(selectedTasks, workItems)
     val executionFailure               = AtomicReference(Option.empty[ExecutionFault])
     scheduler.forEach(selectedTasks, parallel = parallelBlocks) { index =>
@@ -156,7 +161,7 @@ private[v9_3] object VMInterpreter {
       group: Coordinates,
       geometry: LaunchGeometry,
       initialLive: VMLaneMask,
-      arguments: Map[ParameterName, Argument],
+      arguments: Map[NonEmptyString, Argument],
       memory: AddressMemory,
       control: TaskControl,
       scheduler: Scheduler,
@@ -196,7 +201,7 @@ private[v9_3] object VMInterpreter {
       block: Int,
       group: Coordinates,
       geometry: LaunchGeometry,
-      arguments: Map[ParameterName, Argument],
+      arguments: Map[NonEmptyString, Argument],
       memory: AddressMemory,
       control: TaskControl,
       scheduler: Scheduler,
@@ -369,7 +374,7 @@ private[v9_3] object VMInterpreter {
           cohort = cohort.copy(lanes = runnable)
       }
       if (cohort.lanes.nonEmpty) {
-        control.checkpoint(PositiveInt.unsafe(cohort.lanes.size)) match {
+        control.checkpoint(Positive.unsafe(cohort.lanes.size)) match {
           case Left(fault) => return Left(ExecutionFault.fromControl(fault))
           case Right(())   => ()
         }
@@ -511,8 +516,8 @@ private[v9_3] object VMInterpreter {
   def executeDeviceFunction(
       caller: VMExecutionContext,
       function: DeviceFunction,
-      parameters: Vec[ParameterName],
-      returnParameters: Vec[ParameterName]
+      parameters: Vec[NonEmptyString],
+      returnParameters: Vec[NonEmptyString]
   ): Either[ExecutionFault, Unit] = {
     if (parameters.size != function.parameters.size)
       return Left(ExecutionFault.InvalidState(

@@ -99,9 +99,9 @@ int describeKernel(void *context, uint64_t program_id, const char *name, uint32_
   if (capacity < metadata.parameters.size()) return -1;
   for (size_t index = 0; index < metadata.parameters.size(); ++index) {
     const auto &parameter = metadata.parameters[index];
-    const auto kind = parameter.kind == KernelParameterKind::Allocation ? GEMSTONE_HSA_ARGUMENT_ALLOCATION
-                      : parameter.kind == KernelParameterKind::Scalar   ? GEMSTONE_HSA_ARGUMENT_SCALAR
-                                                                        : gemstone_hsa_argument_kind{};
+    const auto kind = parameter.kind == ParameterKind::Allocation ? GEMSTONE_HSA_ARGUMENT_ALLOCATION
+                      : parameter.kind == ParameterKind::Scalar   ? GEMSTONE_HSA_ARGUMENT_SCALAR
+                                                                  : gemstone_hsa_argument_kind{};
     if (kind == gemstone_hsa_argument_kind{}) return -1;
     fields[index] = {kind, static_cast<uint32_t>(parameter.offset.value), static_cast<uint32_t>(parameter.width.value),
                      parameter.containsPointers ? 1U : 0U};
@@ -114,16 +114,16 @@ int launch(void *context, uint64_t program_id, const char *kernel_name, gemstone
            uint32_t group_segment_bytes, const gemstone_hsa_argument *arguments, uint32_t argument_count, uint64_t *completion_id) {
   auto &executor = connection(context);
   if (!kernel_name || !completion_id || (!arguments && argument_count != 0)) return -1;
-  std::vector<KernelArgument> converted;
+  std::vector<Argument> converted;
   converted.reserve(argument_count);
   for (uint32_t index = 0; index < argument_count; ++index) {
     const auto &input = arguments[index];
     if (input.kind == GEMSTONE_HSA_ARGUMENT_SCALAR) {
       if (!input.scalar_bytes && input.scalar_size != 0) return -1;
-      converted.emplace_back(KernelArgumentScalar{std::vector<uint8_t>(input.scalar_bytes, input.scalar_bytes + input.scalar_size)});
+      converted.emplace_back(ArgumentScalar{std::vector<uint8_t>(input.scalar_bytes, input.scalar_bytes + input.scalar_size)});
     } else if (input.kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION) {
       converted.emplace_back(
-          KernelArgumentAllocation{AllocationId{static_cast<int64_t>(input.allocation_id)}, static_cast<int64_t>(input.allocation_offset)});
+          ArgumentMemory{MemoryRegion{static_cast<int64_t>(input.allocation_id)}, static_cast<int64_t>(input.allocation_offset)});
     } else return -1;
   }
   CompletionId completion{};

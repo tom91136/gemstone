@@ -1,9 +1,12 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import Program.*
 import VMIR.*
-
-import net.kurobako.gemstone.{NonNegativeInt, PlatformTime, PositiveInt}
+import net.kurobako.gemstone.PlatformTime
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments
 import net.kurobako.gemstone.benchmarks.BenchmarkName
 import net.kurobako.gemstone.benchmarks.PlatformMetrics
@@ -22,11 +25,11 @@ object PTXExecutionBenchmark {
     case Vector, Tiny
   }
 
-  private final case class Options(
+  private case class Options(
       mode: GeometryMode,
-      measured: PositiveInt,
-      warmup: NonNegativeInt,
-      rounds: PositiveInt,
+      measured: Positive[Int],
+      warmup: NonNegative[Int],
+      rounds: Positive[Int],
       recording: Option[Path]
   )
 
@@ -35,11 +38,11 @@ object PTXExecutionBenchmark {
       .validate("mode must be vector or tiny")(value => value == "vector" || value == "tiny")
       .map(value => if (value == "tiny") GeometryMode.Tiny else GeometryMode.Vector),
     Opts.option[Int]("measured", help = "Launches per measured round").withDefault(100)
-      .validate("measured launches must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("measured launches must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[Int]("warmup", help = "Warmup launches").withDefault(1000)
-      .validate("warmup launches must be non-negative")(_ >= 0).map(NonNegativeInt.unsafe),
+      .validate("warmup launches must be non-negative")(_ >= 0).map(NonNegative.unsafe),
     Opts.option[Int]("rounds", help = "Measured rounds").withDefault(5)
-      .validate("measured rounds must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("measured rounds must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[String]("recording", help = "JFR output path").map(Path.of(_)).orNone
   ).mapN(Options(_, _, _, _, _))
   private val source = """.version 8.0
@@ -69,20 +72,20 @@ object PTXExecutionBenchmark {
   // Setup, warmup and sample loops use counters so collection allocation is not part of the measurement.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def run(args: Array[String]): Unit = {
-    val parsed              = BenchmarkArguments.parse(BenchmarkName("ptx-execution"), args.toSeq, options)
-    val mode                = parsed.mode
-    val measured            = parsed.measured
-    val warmup              = parsed.warmup
-    val rounds              = parsed.rounds
-    val lanes: PositiveInt  = if (mode == GeometryMode.Tiny) PositiveInt.One else PositiveInt(256)
-    val groups: PositiveInt = if (mode == GeometryMode.Tiny) PositiveInt.One else PositiveInt(16)
-    val size: PositiveInt   = lanes * groups
+    val parsed                = BenchmarkArguments.parse(BenchmarkName("ptx-execution"), args.toSeq, options)
+    val mode                  = parsed.mode
+    val measured              = parsed.measured
+    val warmup                = parsed.warmup
+    val rounds                = parsed.rounds
+    val lanes: Positive[Int]  = if (mode == GeometryMode.Tiny) 1 else 256
+    val groups: Positive[Int] = if (mode == GeometryMode.Tiny) 1 else 16
+    val size: Positive[Int]   = Positive.unsafe(lanes.raw * groups.raw)
     val kernel   = VMCompiler.compile(source).fold(e => throw IllegalArgumentException(e.message), value => value)
     val geometry = LaunchGeometry.forLaunch(
       dimensions(lanes),
       dimensions(groups)
     ).fold(error => throw IllegalArgumentException(error), value => value)
-    val memory = ArrayCheckedMemory.allocate(NonNegativeInt.unsafe(size.raw * 12))
+    val memory = ArrayCheckedMemory.allocate(NonNegative.unsafe(size.raw * 12))
     val base   = memory.allocation.start
     var i      = 0
     while (i < size.raw) {
@@ -93,9 +96,9 @@ object PTXExecutionBenchmark {
       i += 1
     }
     val parameters = Map(
-      ParameterName("input_a") -> Argument.fromLong(base.raw),
-      ParameterName("input_b") -> Argument.fromLong(base.raw + size.raw.toLong * 4),
-      ParameterName("output")  -> Argument.fromLong(base.raw + size.raw.toLong * 8)
+      NonEmptyString("input_a") -> Argument.fromLong(base.raw),
+      NonEmptyString("input_b") -> Argument.fromLong(base.raw + size.raw.toLong * 4),
+      NonEmptyString("output")  -> Argument.fromLong(base.raw + size.raw.toLong * 8)
     )
     def execute(): Unit =
       VMInterpreter.execute(kernel, geometry, parameters, memory)
@@ -125,16 +128,16 @@ object PTXExecutionBenchmark {
           start <- before
           end   <- PlatformMetrics.allocatedBytes
           if end >= start
-        } yield (end - start).raw
+        } yield end - start
         verify()
         Console.out.println(
           s"mode=${mode.toString.toLowerCase(java.util.Locale.ROOT)} round=$round launches=$measured nsPerLaunch=${elapsed.toDouble /
-              measured.raw} bytesPerLaunch=${allocated.fold(Double.NaN)(_.toDouble / measured.raw)} verified=$size"
+              measured.raw} bytesPerLaunch=${allocated.fold(Double.NaN)(_.raw.toDouble / measured.raw)} verified=$size"
         )
         round += 1
       }
     }
   }
 
-  private def dimensions(x: PositiveInt): Dimensions = Dimensions(x, PositiveInt.One, PositiveInt.One)
+  private def dimensions(x: Positive[Int]): Dimensions = Dimensions(x, 1, 1)
 }

@@ -1,7 +1,8 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.{PositiveInt, Vec}
+import net.kurobako.gemstone.Constraint.Positive
+import net.kurobako.gemstone.Vec
 
-final case class RawInstruction(opcodeNumber: SPIRVOpcodeNumber, operandWords: Vec[Word]) {
-  def wordCount: PositiveInt = PositiveInt.unsafe(operandWords.size + 1)
+case class RawInstruction(opcodeNumber: SPIRVOpcodeNumber, operandWords: Vec[Word]) {
+  def wordCount: Positive[Int] = Positive.unsafe(operandWords.size + 1)
 }

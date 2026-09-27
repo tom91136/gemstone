@@ -1,6 +1,7 @@
 // Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import Program.*
@@ -5903,7 +5904,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VXorB32, dest, srcA, srcB)
 
   def mods: Vec[Modifier]
-  final val opcode: Opcode = definition.opcode
+  final val opcode: NonEmptyString = definition.opcode
   final val meta: Metadata = definition.meta
   final val operands: Vec[Operand] = operandValues.toVec
 }
@@ -5916,7 +5917,7 @@ object Instruction {
     case AmbiguousForms(opcode: String, definitions: Vec[Definition])
   }
 
-  private[amdgpu] final case class FormDecoder(
+  private[amdgpu] case class FormDecoder(
       val operandCount: Int,
       construct: (Vec[Operand], Vec[Modifier]) => Instruction
   ) {
@@ -5948,14 +5949,14 @@ object Instruction {
     case Ordered, Unordered, NotLessOrGreater, Class
   }
 
-  private[amdgpu] final case class ComparisonOpcode(
+  private[amdgpu] case class ComparisonOpcode(
       kind: ComparisonKind,
       relation: ComparisonRelation,
       updateExec: Boolean
   )
 
   abstract class Definition private[amdgpu] (
-      val opcode: Opcode,
+      val opcode: NonEmptyString,
       private[amdgpu] val decoder: Decoder,
       private val metadataId: Int
   ) {
@@ -6602,7 +6603,7 @@ object Instruction {
       AllDefinitions.groupBy(_.opcode.raw)
 
     def forOpcode(opcode: String): Vec[Definition] =
-      ByOpcode.getOrElse(Opcode.normalize(opcode), Vec.empty[Definition])
+      ByOpcode.getOrElse(Program.normalizeOpcode(opcode), Vec.empty[Definition])
   }
 
   val definitions: Vec[Definition] = AllDefinitions
@@ -6612,7 +6613,7 @@ object Instruction {
       operands: Vec[Operand],
       mods: Vec[Modifier] = Vec.empty
   ): Either[DecodeError, Instruction] = {
-    val name = Opcode.normalize(opcode)
+    val name = Program.normalizeOpcode(opcode)
     decodeWithSuffixes(name, operands, mods, name)
   }
 
@@ -6628,7 +6629,7 @@ object Instruction {
       case Left(DecodeError.UnknownOpcode(_)) =>
         EncodingSuffixes.collectFirst {
           case suffix if name.endsWith(suffix) =>
-            name.dropRight(suffix.length) -> Modifier(ModifierName.unsafe(suffix.drop(1)))
+            name.dropRight(suffix.length) -> Modifier(NonEmptyString.unsafe(suffix.drop(1)))
         } match {
           case Some((canonical, modifier)) => decodeWithSuffixes(canonical, operands, modifier +: mods, original)
           case None => Left(DecodeError.UnknownOpcode(original))

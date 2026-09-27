@@ -1,7 +1,8 @@
 // Generated from pinned official headers by GenerateAPISurfaces. Regenerate with: sbt codegen
 package net.kurobako.gemstone.hip
 
-import net.kurobako.gemstone.{NonEmptyString, PositiveInt}
+import net.kurobako.gemstone.Constraint.Positive
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.abi.ABI.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
@@ -132,7 +133,7 @@ object HIP {
   type unsigned_short = CValue["unsigned short"]
 
   val HeaderVersion: NonEmptyString = NonEmptyString("7.1.1")
-  val FunctionCount: PositiveInt = PositiveInt(493)
+  val FunctionCount: Positive[Int] = 493
 }
 
 import HIP.*

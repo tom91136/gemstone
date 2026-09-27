@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong, Vec}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.rpc.ExecutionProtocol.{AllocationId, ExecutionFailure}
 import net.kurobako.gemstone.memory.AllocationKind
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
@@ -19,7 +20,7 @@ import scala.util.Using
 
 /** Socket-level isolation coverage shared by both server implementations. */
 final class SharedServerSuite extends munit.FunSuite {
-  private final class ExecutorPool(size: PositiveInt) extends AutoCloseable {
+  private final class ExecutorPool(size: Positive[Int]) extends AutoCloseable {
     val service                = Executors.newFixedThreadPool(size.raw)
     override def close(): Unit = { val _ = service.shutdownNow() }
   }
@@ -38,7 +39,7 @@ final class SharedServerSuite extends munit.FunSuite {
       output.flush()
       read(DataInputStream(socket.getInputStream))
     }
-  private def register(client: ExecutionRPCTestClient, size: PositiveLong): AllocationId =
+  private def register(client: ExecutionRPCTestClient, size: Positive[Long]): AllocationId =
     client.call(Operation.RegisterAllocation(AllocationKind.Shared, size)).fold(
       error => fail(error.message),
       value => value
@@ -57,20 +58,36 @@ final class SharedServerSuite extends munit.FunSuite {
       val first  = use(ExecutionRPCTestClient(server.port, a))
       val second = use(ExecutionRPCTestClient(server.port, b))
       assert(a != b)
-      val firstAllocation = register(first, PositiveLong(4L))
-      assert(first.call(Operation.ReadAllocation(firstAllocation, NonNegativeLong.Zero, NonNegativeInt(4))).isRight)
-      assert(second.call(Operation.ReadAllocation(firstAllocation, NonNegativeLong.Zero, NonNegativeInt(4))).isLeft)
-      val secondAllocation = register(second, PositiveLong(4L))
-      assert(second.call(Operation.ReadAllocation(secondAllocation, NonNegativeLong.Zero, NonNegativeInt(4))).isRight)
+      val firstAllocation = register(first, 4L)
+      assert(first.call(Operation.ReadAllocation(
+        firstAllocation,
+        0L,
+        4
+      )).isRight)
+      assert(second.call(Operation.ReadAllocation(
+        firstAllocation,
+        0L,
+        4
+      )).isLeft)
+      val secondAllocation = register(second, 4L)
+      assert(second.call(Operation.ReadAllocation(
+        secondAllocation,
+        0L,
+        4
+      )).isRight)
       assertEquals(control(server.port, ServerControl.ReleaseClient, Some(a))(_.readInt()), 0)
       val _ = intercept[java.io.EOFException](
-        first.call(Operation.ReadAllocation(firstAllocation, NonNegativeLong.Zero, NonNegativeInt(4)))
+        first.call(Operation.ReadAllocation(firstAllocation, 0L, 4))
       )
-      assert(second.call(Operation.ReadAllocation(secondAllocation, NonNegativeLong.Zero, NonNegativeInt(4))).isRight)
+      assert(second.call(Operation.ReadAllocation(
+        secondAllocation,
+        0L,
+        4
+      )).isRight)
     }.get
   }
 
-  for (count <- Vector(PositiveInt(3), PositiveInt(5), PositiveInt(9)))
+  for (count <- Vector[Positive[Int]](3, 5, 9))
     test(s"$count simultaneous clients retain independent server-issued allocation state") {
       scala.util.Using.Manager { use =>
         val server  = use(GemstoneRPCServer.start())
@@ -89,20 +106,20 @@ final class SharedServerSuite extends munit.FunSuite {
         clients.zipWithIndex.foreach { case (client, index) =>
           results += CompletableFuture.supplyAsync(
             () =>
-              client.call(Operation.RegisterAllocation(AllocationKind.Shared, PositiveLong(4L))) match {
+              client.call(Operation.RegisterAllocation(AllocationKind.Shared, 4L)) match {
                 case Left(error)       => Left(error)
                 case Right(allocation) => Right(Vector.tabulate(3) { round =>
                     val expected = index * 97 + round
                     val bytes    = Vec.unsafeFromArray(ByteBuffer.allocate(4).putInt(expected).array())
-                    val write    = client.call(Operation.WriteAllocation(allocation, NonNegativeLong.Zero, bytes))
+                    val write    = client.call(Operation.WriteAllocation(allocation, 0L, bytes))
                     val _        = written.await(10, TimeUnit.SECONDS)
                     (
                       expected,
                       write,
                       client.call(Operation.ReadAllocation(
                         allocation,
-                        NonNegativeLong.Zero,
-                        NonNegativeInt(4)
+                        0L,
+                        4
                       )).map(int(_))
                     )
                   })
@@ -131,23 +148,27 @@ final class SharedServerSuite extends munit.FunSuite {
       val same       = use(ExecutionRPCTestClient(server.port, client, 42L, 17L))
       val reused     = use(ExecutionRPCTestClient(server.port, client, 42L, 18L))
       val other      = use(ExecutionRPCTestClient(server.port, client, 43L, 17L))
-      val allocation = register(first, PositiveLong(4L))
+      val allocation = register(first, 4L)
       val value      = Vec.unsafeFromArray(ByteBuffer.allocate(4).putInt(123).array())
-      assert(first.call(Operation.WriteAllocation(allocation, NonNegativeLong.Zero, value)).isRight)
+      assert(first.call(Operation.WriteAllocation(allocation, 0L, value)).isRight)
       assertEquals(
-        same.call(Operation.ReadAllocation(allocation, NonNegativeLong.Zero, NonNegativeInt(4))).map(int(_)),
+        same.call(Operation.ReadAllocation(allocation, 0L, 4)).map(int(_)),
         Right(123)
       )
-      assert(reused.call(Operation.ReadAllocation(allocation, NonNegativeLong.Zero, NonNegativeInt(4))).isLeft)
-      assert(other.call(Operation.ReadAllocation(allocation, NonNegativeLong.Zero, NonNegativeInt(4))).isLeft)
-      val reusedAllocation = register(reused, PositiveLong(4L))
+      assert(reused.call(Operation.ReadAllocation(allocation, 0L, 4)).isLeft)
+      assert(other.call(Operation.ReadAllocation(allocation, 0L, 4)).isLeft)
+      val reusedAllocation = register(reused, 4L)
       assertEquals(
-        reused.call(Operation.ReadAllocation(reusedAllocation, NonNegativeLong.Zero, NonNegativeInt(4))).map(int(_)),
+        reused.call(Operation.ReadAllocation(
+          reusedAllocation,
+          0L,
+          4
+        )).map(int(_)),
         Right(0)
       )
       first.close()
       assertEquals(
-        same.call(Operation.ReadAllocation(allocation, NonNegativeLong.Zero, NonNegativeInt(4))).map(int(_)),
+        same.call(Operation.ReadAllocation(allocation, 0L, 4)).map(int(_)),
         Right(123)
       )
     }.get

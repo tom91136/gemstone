@@ -1,6 +1,9 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.NonEmptyVec
 
 import Program.*
 
@@ -40,7 +43,7 @@ DONE:
 ret;
 }"""
       val kernel = VMCompiler.compile(source).fold(e => fail(e.toString), value => value)
-      val memory = ArrayCheckedMemory.allocate(NonNegativeInt(128))
+      val memory = ArrayCheckedMemory.allocate(128)
       val values =
         Vector.tabulate(32)(lane =>
           if (negative) -100 + lane else if (signed) lane + 17 else if (lane % 2 == 0) 0x80000010 + lane else lane + 17
@@ -53,13 +56,13 @@ ret;
       }
       val expected = (if (operation == "min") participating.min else participating.max).toInt
       val geometry = LaunchGeometry.forLaunch(
-        Dimensions(PositiveInt(32), PositiveInt(1), PositiveInt(1)),
+        Dimensions(32, 1, 1),
         Dimensions.One
       ).toOption.get
       assert(VMInterpreter.execute(
         kernel,
         geometry,
-        Map(ParameterName("data") -> Argument.fromLong(memory.allocation.start.raw)),
+        Map(NonEmptyString("data") -> Argument.fromLong(memory.allocation.start.raw)),
         memory
       ).isRight)
       values.zipWithIndex.foreach { case (value, lane) =>
@@ -79,7 +82,7 @@ ret;
       kernel,
       geometry,
       Map.empty,
-      ArrayCheckedMemory.allocate(NonNegativeInt(4))
+      ArrayCheckedMemory.allocate(4)
     ).left.exists(_.toString.contains("member mask")))
   }
 

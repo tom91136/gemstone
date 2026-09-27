@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.codegen
 
+import net.kurobako.gemstone.Constraint.Positive
+
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -7,15 +9,14 @@ import cats.data.State
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import net.kurobako.gemstone.NonEmptyString
-import net.kurobako.gemstone.PositiveInt
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import upickle.default.read
 
 /** Materializes the pinned Clang declarations as checked-in Scala API traits. The generated source is deliberately
   * boring: exact C names, nominal C types, and fail-closed method bodies.
   */
 object GenerateAPISurfaces {
-  private final case class Request(
+  private case class Request(
       manifest: Path,
       sourceRoot: Path,
       cuda: String,
@@ -25,7 +26,7 @@ object GenerateAPISurfaces {
       openCL: String,
       vulkan: String
   )
-  private final case class Aliases(entries: Vector[(String, String)]) {
+  private case class Aliases(entries: Vector[(String, String)]) {
     def get(name: String): Option[String] = entries.collectFirst { case (`name`, definition) => definition }
     def put(name: String, definition: String): Aliases =
       if (get(name).nonEmpty) this else copy(entries = entries :+ (name -> definition))
@@ -37,7 +38,7 @@ object GenerateAPISurfaces {
 
   private type Render[A] = State[Aliases, A]
 
-  private final case class Target(
+  private case class Target(
       manifestNames: Vector[String],
       packageName: String,
       traitName: String,
@@ -128,7 +129,7 @@ object GenerateAPISurfaces {
         (name: String) -> (definitions.head.cType.raw: String)
       }.toMap
       val renderedFunctions = functions
-      val functionCount     = PositiveInt.either(renderedFunctions.size).fold(
+      val functionCount     = Positive.either(renderedFunctions.size).fold(
         message => throw IllegalArgumentException(s"${target.traitName} has no declarations: $message"),
         value => value
       )
@@ -159,7 +160,7 @@ object GenerateAPISurfaces {
       target: Target,
       functions: Vector[GenerateOfficialAPIManifest.Function],
       callbackTypedefs: Map[String, String],
-      surfaceSize: PositiveInt
+      surfaceSize: Positive[Int]
   ): String = {
     val rendered = functions.traverse { function =>
       val (_, namedParameters) = function.parameters.zipWithIndex.foldLeft(
@@ -188,15 +189,15 @@ object GenerateAPISurfaces {
     GeneratedHeader.scala("from pinned official headers by GenerateAPISurfaces") +
       s"""|package ${target.packageName}
         |
-        |import net.kurobako.gemstone.NonEmptyString
-        |import net.kurobako.gemstone.PositiveInt
+        |import net.kurobako.gemstone.Constraint.Positive
+        |import net.kurobako.gemstone.Constraint.NonEmptyString
         |import net.kurobako.gemstone.abi.ABI.*
         |
         |${GeneratedHeader.annotation()}object ${target.traitName} {
         |${aliasLines.mkString("\n")}
         |
         |${versionLines.mkString("\n")}
-        |  val FunctionCount: PositiveInt = PositiveInt($surfaceSize)
+        |  val FunctionCount: Positive[Int] = Positive.unsafe($surfaceSize)
         |}
         |
         |import ${target.traitName}.*
@@ -318,13 +319,5 @@ object GenerateAPISurfaces {
 
   private def identifier(value: String): String = if (ScalaKeywords(value)) s"`$value`" else value
 
-  private def literal(value: String): String =
-    "\"" + value.flatMap {
-      case '\\' => "\\\\"
-      case '\"' => "\\\""
-      case '\n' => "\\n"
-      case '\r' => "\\r"
-      case '\t' => "\\t"
-      case c    => c.toString
-    } + "\""
+  private def literal(value: String): String = Emission.literal(value)
 }

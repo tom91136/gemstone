@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.binary.{BitWidth, Bits, FloatingPointWidth, IEEE754}
+import net.kurobako.gemstone.Constraint.{IntBetween, OneOf}
+
+import net.kurobako.gemstone.binary.{Bits, IEEE754}
 import net.kurobako.gemstone.vm.Event.{Print, PrintArgument}
 
 import java.util.Locale
@@ -108,13 +110,13 @@ private[execution] object PrintRenderer {
   }
 
   @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-  private def widthMask(width: Int): Long = Bits.mask(BitWidth.unsafe(width))
+  private def widthMask(width: Int): Long = Bits.mask(IntBetween.unsafe[1, 64](width))
 
   @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-  private def signedValue(bits: Long, width: Int): Long = Bits.signExtend(bits, BitWidth.unsafe(width))
+  private def signedValue(bits: Long, width: Int): Long = Bits.signExtend(bits, IntBetween.unsafe[1, 64](width))
 
   @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-  private def floatingValue(bits: Long, width: Int): Double = IEEE754.toDouble(bits, FloatingPointWidth.unsafe(width))
+  private def floatingValue(bits: Long, width: Int): Double = IEEE754.toDouble(bits, OneOf.unsafe[(16, 32, 64)](width))
 
   private def append(output: StringBuilder, result: Either[String, String]): Either[String, Unit] =
     result.map { rendered => output.append(rendered); () }

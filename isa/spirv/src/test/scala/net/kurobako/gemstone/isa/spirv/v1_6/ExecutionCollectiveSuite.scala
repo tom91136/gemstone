@@ -1,4 +1,10 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
+
+import net.kurobako.gemstone.Constraint.{IntBetween, OneOf}
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
@@ -6,10 +12,8 @@ import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalD
 import net.kurobako.gemstone.Vec
 
 import net.kurobako.gemstone.binary.ByteRange
-import net.kurobako.gemstone.binary.FloatingPointWidth
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.binary.ScalarByteWidth
-import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.NonEmptyVec
 
 import java.util.concurrent.atomic.AtomicReference
 final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSupport {
@@ -27,19 +31,19 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     assertEquals(memory.pointerInteger(pointer), Right(address))
     assert(memory.pointerInteger(pointer.copy(offset = -2L)).toOption.get != address)
     assertEquals(memory.integerPointer(address, 0, 5), Right(pointer))
-    assert(memory.read(pointer, NonNegativeInt(1)).isLeft)
+    assert(memory.read(pointer, 1).isLeft)
   }
 
   test("floating minimum and maximum preserve IEEE signed zero") {
-    assertEquals(VMInterpreter.floatingMinimumBits(FloatingPointWidth(16), 0x0000L, 0x8000L), 0x8000L)
-    assertEquals(VMInterpreter.floatingMaximumBits(FloatingPointWidth(16), 0x0000L, 0x8000L), 0x0000L)
-    assertEquals(VMInterpreter.floatingMinimumBits(FloatingPointWidth(32), 0L, 0x80000000L), 0x80000000L)
-    assertEquals(VMInterpreter.floatingMaximumBits(FloatingPointWidth(32), 0L, 0x80000000L), 0L)
+    assertEquals(VMInterpreter.floatingMinimumBits(OneOf.unsafe[(16, 32, 64)](16), 0x0000L, 0x8000L), 0x8000L)
+    assertEquals(VMInterpreter.floatingMaximumBits(OneOf.unsafe[(16, 32, 64)](16), 0x0000L, 0x8000L), 0x0000L)
+    assertEquals(VMInterpreter.floatingMinimumBits(OneOf.unsafe[(16, 32, 64)](32), 0L, 0x80000000L), 0x80000000L)
+    assertEquals(VMInterpreter.floatingMaximumBits(OneOf.unsafe[(16, 32, 64)](32), 0L, 0x80000000L), 0L)
     assertEquals(
-      VMInterpreter.floatingMinimumBits(FloatingPointWidth(64), 0L, 0x8000000000000000L),
+      VMInterpreter.floatingMinimumBits(OneOf.unsafe[(16, 32, 64)](64), 0L, 0x8000000000000000L),
       0x8000000000000000L
     )
-    assertEquals(VMInterpreter.floatingMaximumBits(FloatingPointWidth(64), 0L, 0x8000000000000000L), 0L)
+    assertEquals(VMInterpreter.floatingMaximumBits(OneOf.unsafe[(16, 32, 64)](64), 0L, 0x8000000000000000L), 0L)
   }
 
   test("dispatch executes floating atomic minimum and maximum and returns old values") {
@@ -104,10 +108,10 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     val memory     = ArrayMemory(allocation, 12)
     val dispatch   = KernelTask
       .validated(
-        KernelName("atomic_float_min_max"),
+        NonEmptyString("atomic_float_min_max"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
       )
       .toOption
       .get
@@ -115,9 +119,9 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()), "floating atomic min/max execution")
     assertEquals(
       memory.bytes,
-      LittleEndian.toVec(maximumBits, ScalarByteWidth(4)) ++
-        LittleEndian.toVec(initialBits, ScalarByteWidth(4)) ++
-        LittleEndian.toVec(minimumBits, ScalarByteWidth(4))
+      LittleEndian.toVec(maximumBits, 4) ++
+        LittleEndian.toVec(initialBits, 4) ++
+        LittleEndian.toVec(minimumBits, 4)
     )
   }
 
@@ -167,12 +171,12 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     }
     val dispatch = KernelTask
       .validated(
-        KernelName("store_pointer"),
+        NonEmptyString("store_pointer"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, NonNegativeLong(8L)),
-          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L))
+          KernelTask.Argument.Memory(allocation, 8L),
+          KernelTask.Argument.Memory(allocation, 0L)
         )
       )
       .toOption
@@ -187,9 +191,9 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
       relocated.get(),
       Some(KernelTask.PointerRelocation(
         KernelTask.RelocationSource.Memory(allocation),
-        NonNegativeLong(8L),
+        8L,
         allocation,
-        NonNegativeLong(0L)
+        0L
       ))
     )
     assert(memory.bytes.slice(8, 16).exists(_ != 0))
@@ -250,10 +254,10 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     val memory     = ArrayMemory(allocation, 8)
     val dispatch   = KernelTask
       .validated(
-        KernelName("null_pointer"),
+        NonEmptyString("null_pointer"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
       )
       .toOption
       .get
@@ -341,10 +345,10 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     val memory     = ArrayMemory(allocation, 8)
     val dispatch   = KernelTask
       .validated(
-        KernelName("collective"),
+        NonEmptyString("collective"),
         Dimensions.One,
-        Dimensions(PositiveInt(8), PositiveInt(1), PositiveInt(1)),
-        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
+        Dimensions(8, 1, 1),
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
       )
       .toOption
       .get
@@ -370,10 +374,10 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     val barrierMemory   = ArrayMemory(allocation, 8)
     val barrierDispatch = KernelTask
       .validated(
-        KernelName("collective"),
-        Dimensions(PositiveInt(8), PositiveInt(1), PositiveInt(1)),
+        NonEmptyString("collective"),
+        Dimensions(8, 1, 1),
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
       )
       .toOption
       .get
@@ -395,10 +399,10 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     )
     val scanDispatch = KernelTask
       .validated(
-        KernelName("collective"),
-        Dimensions(PositiveInt(8), PositiveInt(1), PositiveInt(1)),
+        NonEmptyString("collective"),
+        Dimensions(8, 1, 1),
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
       )
       .toOption
       .get
@@ -406,7 +410,7 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     assertEquals(executeUnchecked(scanModule, scanDispatch, scanMemory), Right(()))
     assertEquals(
       scanMemory.bytes,
-      Vec.from(Vec(0L, 1L, 3L, 6L, 10L, 15L, 21L, 28L).view.flatMap(LittleEndian.toVec(_, ScalarByteWidth(8))))
+      Vec.from(Vec(0L, 1L, 3L, 6L, 10L, 15L, 21L, 28L).view.flatMap(LittleEndian.toVec(_, 8)))
     )
 
     val reductionModule = scanModule.copy(instructions =
@@ -417,7 +421,7 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     )
     val reductionMemory = ArrayMemory(allocation, 64)
     assertEquals(executeUnchecked(reductionModule, scanDispatch, reductionMemory), Right(()))
-    assertEquals(reductionMemory.bytes, Vec.fill(8)(LittleEndian.toVec(28L, ScalarByteWidth(8))).flatten)
+    assertEquals(reductionMemory.bytes, Vec.fill(8)(LittleEndian.toVec(28L, 8)).flatten)
 
     val multiplicationModule = scanModule.copy(instructions =
       scanInstructions.updated(
@@ -427,7 +431,7 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     )
     val multiplicationMemory = ArrayMemory(allocation, 64)
     assertEquals(executeUnchecked(multiplicationModule, scanDispatch, multiplicationMemory), Right(()))
-    assertEquals(multiplicationMemory.bytes, Vec.fill(8)(LittleEndian.toVec(6561L, ScalarByteWidth(8))).flatten)
+    assertEquals(multiplicationMemory.bytes, Vec.fill(8)(LittleEndian.toVec(6561L, 8)).flatten)
 
     val f32                      = operand("IdResult", 25)
     val floatThree               = operand("IdResult", 26)
@@ -459,7 +463,7 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     assertEquals(
       floatingScanMemory.bytes,
       Vec.from((1 to 8).view.flatMap(index =>
-        LittleEndian.toVec(java.lang.Float.floatToRawIntBits(3.0f * index).toLong, ScalarByteWidth(4)) ++
+        LittleEndian.toVec(java.lang.Float.floatToRawIntBits(3.0f * index).toLong, 4) ++
           Vec.fill(4)(0.toByte)
       ))
     )
@@ -479,14 +483,14 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
       Vec.from((1 to 8).view.flatMap(index =>
         LittleEndian.toVec(
           java.lang.Float.floatToRawIntBits(math.pow(3.0, index).toFloat).toLong,
-          ScalarByteWidth(4)
+          4
         ) ++
           Vec.fill(4)(0.toByte)
       ))
     )
     assertEquals(
       VMInterpreter.floatingAddBits(
-        FloatingPointWidth(32),
+        OneOf.unsafe[(16, 32, 64)](32),
         java.lang.Float.floatToRawIntBits(0.1f).toLong,
         java.lang.Float.floatToRawIntBits(0.2f).toLong
       ),
@@ -494,7 +498,7 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     )
     assertEquals(
       VMInterpreter.floatingMultiplyBits(
-        FloatingPointWidth(32),
+        OneOf.unsafe[(16, 32, 64)](32),
         java.lang.Float.floatToRawIntBits(0.1f).toLong,
         java.lang.Float.floatToRawIntBits(0.2f).toLong
       ),
@@ -511,7 +515,7 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     assertEquals(executeUnchecked(exclusiveModule, scanDispatch, exclusiveMemory), Right(()))
     assertEquals(
       exclusiveMemory.bytes,
-      Vec.from(Vec(0L, 0L, 1L, 3L, 6L, 10L, 15L, 21L).view.flatMap(LittleEndian.toVec(_, ScalarByteWidth(8))))
+      Vec.from(Vec(0L, 0L, 1L, 3L, 6L, 10L, 15L, 21L).view.flatMap(LittleEndian.toVec(_, 8)))
     )
 
     val broadcastInstructions = scanInstructions
@@ -527,7 +531,7 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     )
     val broadcastMemory = ArrayMemory(allocation, 64)
     assertEquals(executeUnchecked(broadcastModule, scanDispatch, broadcastMemory), Right(()))
-    assertEquals(broadcastMemory.bytes, Vec.fill(8)(LittleEndian.toVec(6L, ScalarByteWidth(8))).flatten)
+    assertEquals(broadcastMemory.bytes, Vec.fill(8)(LittleEndian.toVec(6L, 8)).flatten)
 
     val subgroupBroadcastModule = broadcastModule.copy(instructions =
       broadcastInstructions.updated(
@@ -537,10 +541,10 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     )
     val subgroupBroadcastDispatch = KernelTask
       .validated(
-        KernelName("collective"),
-        Dimensions(PositiveInt(16), PositiveInt(1), PositiveInt(1)),
+        NonEmptyString("collective"),
+        Dimensions(16, 1, 1),
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
       )
       .toOption
       .get
@@ -549,7 +553,10 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
       executeUnchecked(subgroupBroadcastModule, subgroupBroadcastDispatch, subgroupBroadcastMemory),
       Right(())
     )
-    assertEquals(subgroupBroadcastMemory.bytes, Vec.fill(16)(LittleEndian.toVec(6L, ScalarByteWidth(8))).flatten)
+    assertEquals(
+      subgroupBroadcastMemory.bytes,
+      Vec.fill(16)(LittleEndian.toVec(6L, 8)).flatten
+    )
 
     val invalidScope = module.copy(instructions =
       instructions
@@ -628,16 +635,16 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     val memory     = ArrayMemory(allocation, 4)
     val dispatch   = KernelTask
       .validated(
-        KernelName("ballot"),
-        Dimensions(PositiveInt(8), PositiveInt(1), PositiveInt(1)),
+        NonEmptyString("ballot"),
+        Dimensions(8, 1, 1),
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
       )
       .toOption
       .get
 
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(7, ScalarByteWidth(4)))
+    assertEquals(memory.bytes, LittleEndian.toVec(7, 4))
   }
 
   test("dispatch retains per-lane state only for entry points that reach collectives") {
@@ -684,18 +691,18 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
       Endianness.Little
     )
     val allocation = MemoryRegion(240L)
-    val geometry   = Dimensions(PositiveInt(8), PositiveInt(1), PositiveInt(1))
+    val geometry   = Dimensions(8, 1, 1)
     val prepared   = loadUnchecked(module).toOption.get
 
-    def dispatch(name: KernelName): KernelTask =
+    def dispatch(name: NonEmptyString): KernelTask =
       KernelTask.validated(
         name,
         geometry,
-        Dimensions(PositiveInt(2), PositiveInt(1), PositiveInt(1)),
+        Dimensions(2, 1, 1),
         Vec.empty
       ).toOption.get
 
-    def observed(name: KernelName): Performance.Snapshot = {
+    def observed(name: NonEmptyString): Performance.Snapshot = {
       val observation               = AtomicReference(Option.empty[Performance.Snapshot])
       val observer: Observer[Event] = (_, event) => {
         event match {
@@ -718,12 +725,12 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
       observation.get().getOrElse(fail("missing SPIR-V performance observation"))
     }
 
-    val plain = observed(KernelName("plain"))
+    val plain = observed(NonEmptyString("plain"))
     assertEquals(plain.invocations.raw, 16L)
     assertEquals(plain.invocationValueInstances.raw, 1L)
     assertEquals(plain.collectiveDispatches.raw, 0L)
 
-    val collective = observed(KernelName("collective"))
+    val collective = observed(NonEmptyString("collective"))
     assertEquals(collective.invocations.raw, 16L)
     assertEquals(collective.invocationValueInstances.raw, 8L)
     assertEquals(collective.collectiveDispatches.raw, 1L)

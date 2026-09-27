@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.NonNegativeInt
+import net.kurobako.gemstone.Constraint.NonNegative
+
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.ValidationOutcome
 
@@ -8,7 +9,7 @@ import cats.syntax.all.*
 
 object ISA extends net.kurobako.gemstone.isa.Decoder[Vec[Byte], Module] {
   override type Error = DecodeError
-  enum DecodeError {
+  enum DecodeError extends net.kurobako.gemstone.isa.DecodeError {
     case Binary(error: net.kurobako.gemstone.isa.spirv.v1_6.Binary.BinaryError)
     case Instruction(error: ModuleDecodeError)
 
@@ -25,7 +26,7 @@ object ISA extends net.kurobako.gemstone.isa.Decoder[Vec[Byte], Module] {
     module.instructions.zipWithIndex
       .traverse { case (instruction, index) =>
         Instruction.decode(instruction).leftMap(error =>
-          ModuleDecodeError.Instruction(NonNegativeInt.unsafe(index), error)
+          ModuleDecodeError.Instruction(NonNegative.unsafe(index), error)
         )
       }
       .map(Module(module.header, _, module.endianness))

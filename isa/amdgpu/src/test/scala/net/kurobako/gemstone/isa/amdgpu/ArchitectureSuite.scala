@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import Program.*
 
 final class ArchitectureSuite extends munit.FunSuite {
-  private final case class GfxGeneration(name: String, family: Family, isa: ISA, target: Target)
+  private case class GfxGeneration(name: String, family: Family, isa: ISA, target: Target)
 
   private val generations = Vector(
     GfxGeneration("gfx6", Family.GFX6, Architectures.gfx6, Target("gfx600")),

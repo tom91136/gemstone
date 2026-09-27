@@ -1,14 +1,20 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import CodeObject.*
+import net.kurobako.gemstone.Constraint.IntBetween
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong, Vec}
-import net.kurobako.gemstone.binary.{ByteRange, LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.binary.Widths.*
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
+import CodeObject.*
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.binary.{ByteRange, LittleEndian}
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
-import net.kurobako.gemstone.memory.MemoryValueByteWidth
 import java.util.concurrent.{Callable, CountDownLatch, Executors, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -29,8 +35,8 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
   private val tickets            = MemoryRegion(5)
   private val prefixes           = MemoryRegion(6)
   private def scalar(value: Int) =
-    KernelTask.Argument.Scalar(LittleEndian.toVec(value.toLong, ScalarByteWidth(4)))
-  private def pointer(region: MemoryRegion) = KernelTask.Argument.Memory(region, NonNegativeLong(0L))
+    KernelTask.Argument.Scalar(LittleEndian.toVec(value.toLong, 4))
+  private def pointer(region: MemoryRegion)                      = KernelTask.Argument.Memory(region, 0L)
   private def prepared(name: String, size: Int, code: Vec[Long]) =
     VMCompiler.compile(CodeObjectKernel(
       name,
@@ -40,7 +46,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
       0,
       0x80,
       0x8,
-      code.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth.Dword))
+      code.flatMap(word => LittleEndian.toVec(word, 4))
     )).toOption.get
   // Write lane values through private group LDS; publish one marker before the group barrier.
   private lazy val publish = prepared(
@@ -93,7 +99,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
         val policy = if (parallel) workers else Scheduler.Sequential
         def run(program: VMIR.Kernel, args: Vec[KernelTask.Argument]): Unit = {
           val dispatch = KernelTask.validated(
-            KernelName.either(program.source.name).fold(fail(_), value => value),
+            NonEmptyString.either(program.source.name).fold(fail(_), value => value),
             testDimensions(width),
             testDimensions(groups),
             args,
@@ -105,7 +111,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
               dispatch,
               memory,
               TaskControl.forScheduler(
-                TaskLimits(PositiveLong(5000000L), PositiveInt(64)),
+                TaskLimits(5000000L, 64),
                 scheduler = policy
               ),
               policy
@@ -164,7 +170,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
         for (epoch <- Vector(7, 29)) {
           memory.reset()
           val dispatch = KernelTask.validated(
-            KernelName.either(ldsExchange.source.name).fold(fail(_), value => value),
+            NonEmptyString.either(ldsExchange.source.name).fold(fail(_), value => value),
             testDimensions(width),
             testDimensions(groups),
             Vec(pointer(output), pointer(markers), scalar(n), scalar(width), scalar(epoch))
@@ -175,7 +181,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
               dispatch,
               memory,
               TaskControl.forScheduler(
-                TaskLimits(PositiveLong(5000000L), PositiveInt(64)),
+                TaskLimits(5000000L, 64),
                 scheduler = policy
               ),
               policy
@@ -218,7 +224,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
             if (id == counter) 0L else -777L,
             bytes,
             i * 4,
-            ScalarByteWidth.Dword
+            4
           )
       }
       publications.set(0)
@@ -226,8 +232,8 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
     }
     override def read(
         id: MemoryRegion,
-        offset: NonNegativeLong,
-        size: NonNegativeInt
+        offset: NonNegative[Long],
+        size: NonNegative[Int]
     ): Either[Fault, Vec[Byte]] =
       lock.withLock {
         val bytes = data(id)
@@ -240,7 +246,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
       }
     override def write(
         id: MemoryRegion,
-        offset: NonNegativeLong,
+        offset: NonNegative[Long],
         bytes: Vec[Byte]
     ): Either[Fault, Unit] = {
       val result = lock.withLock {
@@ -264,8 +270,8 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
     }
     override def atomicModifyValue(
         id: MemoryRegion,
-        offset: NonNegativeLong,
-        size: MemoryValueByteWidth
+        offset: NonNegative[Long],
+        size: IntBetween[1, 8]
     )(update: Long => Long): Either[Fault, Long] = lock.withLock {
       val destination = data(id)
       val scalarWidth = size.scalarByteWidth
@@ -286,11 +292,11 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
   }
 
   private final class Workers(memory: Memory) extends Scheduler with AutoCloseable {
-    val parallelism: PositiveInt = PositiveInt(4)
-    val calls                    = AtomicInteger()
-    private val pool             = Executors.newFixedThreadPool(parallelism.raw)
-    override def shouldParallel(tasks: NonNegativeLong, lanes: NonNegativeLong): Boolean = tasks.raw > 1
-    override def parallelFor(tasks: NonNegativeLong)(task: NonNegativeLong => Either[Fault, Unit])
+    val parallelism: Positive[Int] = 4
+    val calls                      = AtomicInteger()
+    private val pool               = Executors.newFixedThreadPool(parallelism.raw)
+    override def shouldParallel(tasks: NonNegative[Long], lanes: NonNegative[Long]): Boolean = tasks.raw > 1
+    override def parallelFor(tasks: NonNegative[Long])(task: NonNegative[Long] => Either[Fault, Unit])
         : Either[Fault, Unit] = {
       calls.incrementAndGet()
       // Only each bounded resident cohort rendezvous in the test memory hook. The guest kernel never waits on another group.
@@ -305,7 +311,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSuppor
             throw AssertionError("resident cohort did not publish")
         }
         val jobs = java.util.ArrayList[Callable[Either[Fault, Unit]]]()
-        indices.foreach(i => jobs.add(() => task(NonNegativeLong.unsafe(i.toLong))))
+        indices.foreach(i => jobs.add(() => task(NonNegative.unsafe(i.toLong))))
         pool.invokeAll(jobs, 15, TimeUnit.SECONDS).asScala.view.foreach { result =>
           assertEquals(result.get(), Right(()))
         }

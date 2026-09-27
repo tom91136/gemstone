@@ -1,12 +1,12 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
 import scala.compiletime.{constValue, error}
 
 import CodeObject.*
 
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.BitWidth
-
 private[amdgpu] object VMIR {
 
   private[amdgpu] opaque type TransferByteCount = Int
@@ -18,7 +18,7 @@ private[amdgpu] object VMIR {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): TransferByteCount =
-      inline if constValue[A] >= 1 && constValue[A] <= 16 then value else error("byte count must be between 1 and 16")
+      inline if (constValue[A] >= 1 && constValue[A] <= 16) value else error("byte count must be between 1 and 16")
 
     extension (bytes: TransferByteCount) {
       inline def raw: Int = bytes
@@ -34,7 +34,7 @@ private[amdgpu] object VMIR {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): NarrowTransferByteCount =
-      inline if constValue[A] >= 1 && constValue[A] <= 2 then value else error("byte count must be between 1 and 2")
+      inline if (constValue[A] >= 1 && constValue[A] <= 2) value else error("byte count must be between 1 and 2")
 
     extension (bytes: NarrowTransferByteCount) {
       inline def raw: Int = bytes
@@ -50,7 +50,7 @@ private[amdgpu] object VMIR {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): AtomicByteCount =
-      inline if constValue[A] >= 4 && constValue[A] <= 8 then value
+      inline if (constValue[A] >= 4 && constValue[A] <= 8) value
       else error("atomic byte count must be between 4 and 8")
 
     extension (bytes: AtomicByteCount) {
@@ -67,7 +67,7 @@ private[amdgpu] object VMIR {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): SubDwordShift =
-      inline if constValue[A] >= 0 && constValue[A] <= 24 then value
+      inline if (constValue[A] >= 0 && constValue[A] <= 24) value
       else error("sub-dword shift must be between 0 and 24")
 
     extension (shift: SubDwordShift) {
@@ -94,17 +94,17 @@ private[amdgpu] object VMIR {
   }
 
   private[amdgpu] enum SubDwordSelection(
-      val width: BitWidth,
+      val width: IntBetween[1, 64],
       val shift: SubDwordShift,
-      val upperBit: BitWidth
+      val upperBit: IntBetween[1, 64]
   ) {
-    case Byte0 extends SubDwordSelection(BitWidth(8), SubDwordShift(0), BitWidth(8))
-    case Byte1 extends SubDwordSelection(BitWidth(8), SubDwordShift(8), BitWidth(16))
-    case Byte2 extends SubDwordSelection(BitWidth(8), SubDwordShift(16), BitWidth(24))
-    case Byte3 extends SubDwordSelection(BitWidth(8), SubDwordShift(24), BitWidth(32))
-    case Word0 extends SubDwordSelection(BitWidth(16), SubDwordShift(0), BitWidth(16))
-    case Word1 extends SubDwordSelection(BitWidth(16), SubDwordShift(16), BitWidth(32))
-    case DWord extends SubDwordSelection(BitWidth(32), SubDwordShift(0), BitWidth(32))
+    case Byte0 extends SubDwordSelection(8, SubDwordShift(0), 8)
+    case Byte1 extends SubDwordSelection(8, SubDwordShift(8), 16)
+    case Byte2 extends SubDwordSelection(8, SubDwordShift(16), 24)
+    case Byte3 extends SubDwordSelection(8, SubDwordShift(24), 32)
+    case Word0 extends SubDwordSelection(16, SubDwordShift(0), 16)
+    case Word1 extends SubDwordSelection(16, SubDwordShift(16), 32)
+    case DWord extends SubDwordSelection(32, SubDwordShift(0), 32)
   }
 
   private[amdgpu] enum SubDwordDestinationUnused {
@@ -234,7 +234,7 @@ private[amdgpu] object VMIR {
     case Ordered, Unordered, NotLessOrGreater, Class
   }
 
-  private[amdgpu] final case class VectorComparison(
+  private[amdgpu] case class VectorComparison(
       kind: VectorComparisonKind,
       relation: VectorComparisonRelation,
       updateExec: Boolean

@@ -1,11 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.NonNegativeLong
-import net.kurobako.gemstone.PositiveLong
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.GlobalName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.KernelMetadata
-import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.ProgramSymbols
 import net.kurobako.gemstone.vm.AddressSpace
 import net.kurobako.gemstone.vm.Event
@@ -37,20 +37,20 @@ final class VirtualMachine(
 
   def symbols(program: LoadedProgram): Either[Fault, ProgramSymbols] = program.symbols
 
-  def kernel(program: LoadedProgram, name: KernelName): Either[Fault, KernelMetadata] =
+  def kernel(program: LoadedProgram, name: NonEmptyString): Either[Fault, KernelMetadata] =
     program.kernelMetadata(name)
 
   def global(
       program: LoadedProgram,
-      name: GlobalName
-  ): Either[Fault, (NonNegativeLong, Vec[Byte])] = program.globalImage(name)
+      name: NonEmptyString
+  ): Either[Fault, (NonNegative[Long], Vec[Byte])] = program.globalImage(name)
 
   def bindGlobal(
       program: LoadedProgram,
-      name: GlobalName,
+      name: NonEmptyString,
       region: MemoryRegion,
-      offset: NonNegativeLong,
-      regionSize: PositiveLong,
+      offset: NonNegative[Long],
+      regionSize: Positive[Long],
       addresses: AddressSpace
   ): Either[Fault, Unit] = program.bindGlobal(name, region, offset, regionSize, addresses)
 

@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.isa
 
-import net.kurobako.gemstone.abi.ABI
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveInt, Vec}
+import net.kurobako.gemstone.abi.ABI
+import net.kurobako.gemstone.Vec
 
 /** Layout checks shared by ISA symbol tables and their wire projections. */
 private[gemstone] object SymbolValidation {
@@ -11,7 +12,7 @@ private[gemstone] object SymbolValidation {
   private def monotonic[A](values: Vec[A])(ordered: (A, A) => Boolean): Boolean =
     values.zip(values.drop(1)).forall { case (previous, current) => ordered(previous, current) }
 
-  def globalPointerOffsets(size: NonNegativeLong, pointerOffsets: Vec[NonNegativeInt]): Either[String, Unit] =
+  def globalPointerOffsets(size: NonNegative[Long], pointerOffsets: Vec[NonNegative[Int]]): Either[String, Unit] =
     for {
       _ <- Either.cond(
         monotonic(pointerOffsets)(_ < _),
@@ -28,9 +29,9 @@ private[gemstone] object SymbolValidation {
     } yield ()
 
   def kernelParameters(
-      argumentBlockSize: NonNegativeInt,
-      explicitParameterCount: NonNegativeInt,
-      offsetsAndWidths: Vec[(NonNegativeInt, PositiveInt)]
+      argumentBlockSize: NonNegative[Int],
+      explicitParameterCount: NonNegative[Int],
+      offsetsAndWidths: Vec[(NonNegative[Int], Positive[Int])]
   ): Either[String, Unit] =
     for {
       _ <- Either.cond(

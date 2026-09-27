@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import Program.*
 
 import net.kurobako.gemstone.NonEmptyVec
@@ -12,14 +14,14 @@ import ISA.*
 
 object Validator {
   enum Issue {
-    case VersionTooOld(opcode: Opcode, required: Version, selected: Version)
-    case TargetTooOld(opcode: Opcode, required: Target, selected: Target)
+    case VersionTooOld(opcode: NonEmptyString, required: Version, selected: Version)
+    case TargetTooOld(opcode: NonEmptyString, required: Target, selected: Target)
     case InvalidOperands(
-        opcode: Opcode,
+        opcode: NonEmptyString,
         message: String
     )
     case InvalidModifiers(
-        opcode: Opcode,
+        opcode: NonEmptyString,
         message: String
     )
     case Incomplete(detail: String)
@@ -99,7 +101,7 @@ object Validator {
       }
     }
 
-  private def modifiersMatch(actual: Set[ModifierName], form: InstructionForm): Boolean = {
+  private def modifiersMatch(actual: Set[NonEmptyString], form: InstructionForm): Boolean = {
     val allowed  = form.requiredModifierGroups.flatMap(_.raw).toSet ++ form.optionalModifiers
     val required = form.requiredModifierGroups.forall(group => actual.count(group.raw.contains) == 1)
     required && actual.subsetOf(allowed)

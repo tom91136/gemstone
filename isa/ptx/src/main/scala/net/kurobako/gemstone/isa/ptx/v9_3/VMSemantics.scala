@@ -1,32 +1,32 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.binary.Widths.*
+
 import Program.*
 
 import VMIR.*
 import VMExecution.*
 
-import net.kurobako.gemstone.NonEmptyString
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.NonEmptyVec
-import net.kurobako.gemstone.NonNegativeInt
-import net.kurobako.gemstone.PositiveInt
 import net.kurobako.gemstone.Vec
 
 import net.kurobako.gemstone.binary.Binary16
 import net.kurobako.gemstone.binary.Binary32
-import net.kurobako.gemstone.binary.BitWidth as BinaryBitWidth
 import net.kurobako.gemstone.binary.Bits
 import net.kurobako.gemstone.binary.Bits.low32
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.binary.ScalarByteWidth
 import net.kurobako.gemstone.vm.LaunchGeometry
 import net.kurobako.gemstone.vm.LaunchGeometry.Axis
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
-import net.kurobako.gemstone.memory.DeviceAllocationByteSize
+import net.kurobako.gemstone.Constraint.Positive
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.memory.DeviceAllocationMemory
-import net.kurobako.gemstone.memory.MemoryValueByteWidth
-
 import cats.syntax.all.*
 
 import scala.collection.mutable
@@ -34,15 +34,15 @@ import scala.collection.mutable
 private object VMSemantics {
 
   private trait SemanticWidth[A] {
-    def bitWidth(value: A): BinaryBitWidth
+    def bitWidth(value: A): IntBetween[1, 64]
   }
 
   private given SemanticWidth[BitWidth] with {
-    override def bitWidth(value: BitWidth): BinaryBitWidth = value.asBitWidth
+    override def bitWidth(value: BitWidth): IntBetween[1, 64] = value.asBitWidth
   }
 
   private given SemanticWidth[PartWidth] with {
-    override def bitWidth(value: PartWidth): BinaryBitWidth = value.asBitWidth
+    override def bitWidth(value: PartWidth): IntBetween[1, 64] = value.asBitWidth
   }
 
   private inline def truncate[A](value: Long, width: A)(using semantic: SemanticWidth[A]): Long =
@@ -62,8 +62,8 @@ private object VMSemantics {
   private inline def byteCount(width: BitWidth) = Bits.byteCount(width.asByteAlignedBitWidth)
 
   @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-  private inline def memoryByteCount(width: BitWidth): MemoryValueByteWidth =
-    MemoryValueByteWidth.unsafe(byteCount(width).raw)
+  private inline def memoryByteCount(width: BitWidth): IntBetween[1, 8] =
+    IntBetween.unsafe[1, 8](byteCount(width).raw)
 
   private def stageResult(
       effects: VMStateEffects,
@@ -79,7 +79,7 @@ private object VMSemantics {
   private def stageRegisterResult(
       effects: VMStateEffects,
       lane: Int,
-      destination: RegisterName,
+      destination: NonEmptyString,
       result: Either[ExecutionFault, Long]
   ): Either[ExecutionFault, Unit] =
     result match {
@@ -110,7 +110,9 @@ private object VMSemantics {
           val elementBytes   = byteCount(elementWidth)
           val argumentValues = context.arguments.get(parameter).map { argument =>
             if (
-              offset < NonNegativeInt.Zero || offset.raw > argument.bytes.length - elementBytes.raw * destinations.size
+              offset < NonNegative.unsafe(
+                0
+              ) || offset.raw > argument.bytes.length - elementBytes.raw * destinations.size
             )
               Left(ExecutionFault.InvalidState(
                 s"parameter $parameter load at $offset exceeds ${argument.bytes.length} bytes"
@@ -129,7 +131,7 @@ private object VMSemantics {
           context.active.foreachLane { lane =>
             if (failure.isEmpty)
               context.state.parameters(lane).get(parameter) match {
-                case Some(value) if offset == NonNegativeInt.Zero && destinations.size == 1 =>
+                case Some(value) if offset.raw == 0 && destinations.size == 1 =>
                   effects.stageRegister(lane, destinations.head, loadBits(value, elementWidth, signed))
                 case Some(_) =>
                   failure = Some(ExecutionFault.InvalidState(
@@ -224,7 +226,7 @@ private object VMSemantics {
               case Right(value) =>
                 val stored = truncate(value, elementWidth)
                 effects.stage(VMStateWrite.ParameterBytes(lane, parameter, offset.raw, elementWidth, stored))
-                if (offset == NonNegativeInt.Zero)
+                if (offset.raw == 0)
                   effects.stage(VMStateWrite.Parameter(lane, parameter, stored))
                 source match {
                   case Value.Register(name) if context.state.functionRegisters(lane).contains(name) =>
@@ -956,7 +958,7 @@ private object VMSemantics {
       context.memory.fence().leftMap(error => ExecutionFault.Memory(error.message)).map(_ => Step.Advance)
     case VMIR.Instruction.Prefetch                                   => Right(Step.Advance)
     case VMIR.Instruction.Call(function, returnParameter, parameter) =>
-      val groups = mutable.LinkedHashMap.empty[FunctionName, VMLaneMask]
+      val groups = mutable.LinkedHashMap.empty[NonEmptyString, VMLaneMask]
       forEveryLane(context) { lane =>
         context.functionName(lane, function).flatMap { name =>
           VMLaneMask.one(lane).map { member =>
@@ -1020,7 +1022,7 @@ private object VMSemantics {
       size: Int,
       generic: Boolean
   ): Either[ExecutionFault, Unit] = {
-    val ranges = Vec.newBuilder[(GuestAddress, NonNegativeInt)]
+    val ranges = Vec.newBuilder[(GuestAddress, NonNegative[Int])]
     context.active.foreachLane { lane =>
       val raw = readFast(context, lane, address)
       if (
@@ -1029,7 +1031,7 @@ private object VMSemantics {
           size
         ).isEmpty && (!generic || (!isSharedAddress(raw) && !isLocalAddress(raw)))
       ) {
-        val _ = ranges += ((GuestAddress(raw), NonNegativeInt.unsafe(size)))
+        val _ = ranges += ((GuestAddress(raw), NonNegative.unsafe(size)))
       }
     }
     context.memory.prepareReads(ranges.result()).leftMap(error => ExecutionFault.Memory(error.message))
@@ -1039,12 +1041,12 @@ private object VMSemantics {
       context: VMExecutionContext,
       lane: Int,
       address: Long,
-      destinations: Vec[RegisterName],
+      destinations: Vec[NonEmptyString],
       width: BitWidth,
       signed: Boolean
   ): Either[ExecutionFault, Vec[VMStateWrite]] =
     if (destinations.nonEmpty && destinations.size * byteCount(width).raw <= 8) {
-      val packedBytes = MemoryValueByteWidth.unsafe(destinations.size * byteCount(width).raw)
+      val packedBytes = IntBetween.unsafe[1, 8](destinations.size * byteCount(width).raw)
       context.memory.readLittleEndian(GuestAddress(address), packedBytes)
         .leftMap(error =>
           ExecutionFault.Memory(s"pc ${context.pc.raw}, lane $lane: ${error.message}")
@@ -1060,7 +1062,7 @@ private object VMSemantics {
         }
 
     } else {
-      val totalBytes = NonNegativeInt.unsafe(Math.multiplyExact(destinations.size, byteCount(width).raw))
+      val totalBytes = NonNegative.unsafe(Math.multiplyExact(destinations.size, byteCount(width).raw))
       context.memory.readBytes(GuestAddress(address), totalBytes)
         .leftMap(error =>
           ExecutionFault.Memory(s"pc ${context.pc.raw}, lane $lane: ${error.message}")
@@ -1475,23 +1477,23 @@ private object VMSemantics {
     case _ => false
   }
 
-  private def writeRegister(registers: VMRegisterFile, name: RegisterName, index: Int, value: Long): Unit =
+  private def writeRegister(registers: VMRegisterFile, name: NonEmptyString, index: Int, value: Long): Unit =
     if (index >= 0) registers.updateSlot(index, value) else registers.update(name, value)
 
-  private def writePredicate(predicates: VMPredicateFile, name: RegisterName, index: Int, value: Boolean): Unit =
+  private def writePredicate(predicates: VMPredicateFile, name: NonEmptyString, index: Int, value: Boolean): Unit =
     if (index >= 0) predicates.updateSlot(index, value) else predicates.update(name, value)
 
-  private def readPredicateFast(predicates: VMPredicateFile, name: RegisterName, index: Int): Boolean =
+  private def readPredicateFast(predicates: VMPredicateFile, name: NonEmptyString, index: Int): Boolean =
     if (index >= 0) predicates.getSlot(index).getOrElse(false) else predicates.get(name).getOrElse(false)
 
   private def executeBuiltin(
       context: VMExecutionContext,
       lane: Int,
-      name: FunctionName,
-      returnParameters: Vec[ParameterName],
-      parameters: Vec[ParameterName]
+      name: NonEmptyString,
+      returnParameters: Vec[NonEmptyString],
+      parameters: Vec[NonEmptyString]
   ): Option[Either[ExecutionFault, Unit]] = {
-    def parameter(index: Int, width: ScalarByteWidth = ScalarByteWidth.Qword): Long =
+    def parameter(index: Int, width: IntBetween[0, 8] = 8): Long =
       if (index < parameters.size)
         context.state.parameters(lane).getOrElse(
           parameters(index),
@@ -1511,7 +1513,7 @@ private object VMSemantics {
         returnValue(0L)
         Some(Right(()))
       case "cudaDeviceGetAttribute" =>
-        val attribute = parameter(1, ScalarByteWidth.Dword).toInt
+        val attribute = parameter(1, 4).toInt
         writeLocalPointer(0, deviceAttribute(attribute).toLong)
         returnValue(0L)
         Some(Right(()))
@@ -1537,11 +1539,11 @@ private object VMSemantics {
       case "malloc" =>
         context.memory match {
           case memory: DeviceAllocationMemory =>
-            val allocation = DeviceAllocationByteSize.fromLong(parameter(0)) match {
-              case Left(message) =>
-                Left(ExecutionFault.InvalidState(s"invalid malloc size: $message"))
-              case Right(size) =>
-                memory.allocate(size).leftMap(error => ExecutionFault.Memory(error.message))
+            val allocation = parameter(0) match {
+              case size if size < 1L || size > Int.MaxValue.toLong =>
+                Left(ExecutionFault.InvalidState(s"invalid malloc size: $size"))
+              case size =>
+                memory.allocate(Positive.unsafe(size.toInt)).leftMap(error => ExecutionFault.Memory(error.message))
             }
             allocation match {
               case Left(fault)    => Some(Left(fault))
@@ -1582,9 +1584,9 @@ private object VMSemantics {
   private def executeDeviceLaunch(
       context: VMExecutionContext,
       lane: Int,
-      returnParameters: Vec[ParameterName],
-      parameters: Vec[ParameterName],
-      parameter: (Int, ScalarByteWidth) => Long
+      returnParameters: Vec[NonEmptyString],
+      parameters: Vec[NonEmptyString],
+      parameter: (Int, IntBetween[0, 8]) => Long
   ): Either[ExecutionFault, Unit] =
     if (parameters.size < 6)
       Left(ExecutionFault.InvalidState(
@@ -1600,18 +1602,18 @@ private object VMSemantics {
       child match {
         case Left(fault)     => Left(fault)
         case Right(function) =>
-          val buffer = parameter(1, ScalarByteWidth.Qword)
+          val buffer = parameter(1, 8)
           val grid   =
             (0 until 3).map(index =>
-              context.state.readParameterBytes(lane, parameters(2), index * 4, ScalarByteWidth.Dword) &
+              context.state.readParameterBytes(lane, parameters(2), index * 4, 4) &
                 0xffffffffL
             )
           val block =
             (0 until 3).map(index =>
-              context.state.readParameterBytes(lane, parameters(3), index * 4, ScalarByteWidth.Dword) &
+              context.state.readParameterBytes(lane, parameters(3), index * 4, 4) &
                 0xffffffffL
             )
-          val childArguments                          = mutable.Map.empty[ParameterName, Argument]
+          val childArguments                          = mutable.Map.empty[NonEmptyString, Argument]
           var argumentFailure: Option[ExecutionFault] = None
           var index                                   = 0
           while (index < function.parameters.size && argumentFailure.isEmpty) {
@@ -1640,7 +1642,7 @@ private object VMSemantics {
                 case Right(value) =>
                   VMInterpreter.execute(
                     Kernel(
-                      net.kurobako.gemstone.isa.KernelName(function.name.toNonEmptyString),
+                      function.name,
                       function.parameters.zip(function.parameterWidths).map { case (name, width) =>
                         KernelParameter(name, width)
                       },
@@ -1702,9 +1704,9 @@ private object VMSemantics {
 
   private def dimensions(x: Int, y: Int, z: Int): Either[String, Dimensions] =
     (
-      PositiveInt.either(x),
-      PositiveInt.either(y),
-      PositiveInt.either(z)
+      Positive.either(x),
+      Positive.either(y),
+      Positive.either(z)
     ).mapN((x, y, z) => Dimensions(x, y, z))
 
   // Preserve the first lane fault without evaluating later lanes after failure.
@@ -2036,7 +2038,7 @@ private object VMSemantics {
       val extractedWidth    = Math.min(bitCount, width.raw - bitStart)
       val mask              = if (extractedWidth == 64) -1L else (1L << extractedWidth) - 1L
       val extracted         = (sourceBits >>> bitStart) & mask
-      val extractedBitWidth = BinaryBitWidth.unsafe(extractedWidth)
+      val extractedBitWidth = IntBetween.unsafe[1, 64](extractedWidth)
       truncate(if (signed) Bits.signExtend(extracted, extractedBitWidth) else extracted, width)
     }
   }
@@ -2165,7 +2167,7 @@ private object VMSemantics {
     else {
       val insertedWidth    = Math.min(bitCount, width.raw - bitStart)
       val fieldMask        = if (insertedWidth == 64) -1L else ((1L << insertedWidth) - 1L) << bitStart
-      val insertedBitWidth = BinaryBitWidth.unsafe(insertedWidth)
+      val insertedBitWidth = IntBetween.unsafe[1, 64](insertedWidth)
       truncate((base & ~fieldMask) | ((insert & Bits.truncate(-1L, insertedBitWidth)) << bitStart), width)
     }
   }

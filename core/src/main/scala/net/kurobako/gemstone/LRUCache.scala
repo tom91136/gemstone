@@ -1,5 +1,7 @@
 package net.kurobako.gemstone
 
+import net.kurobako.gemstone.Constraint.Positive
+
 import net.kurobako.gemstone.concurrent.withLock
 
 import java.util.concurrent.locks.ReentrantLock
@@ -8,7 +10,7 @@ import scala.collection.mutable
 import scala.util.Try
 
 /** Bounded LRU reuse of immutable results. Different keys compute concurrently; identical keys share in-flight work. */
-private[gemstone] final class LRUCache[K, V] private (capacity: PositiveInt) {
+private[gemstone] final class LRUCache[K, V] private (capacity: Positive[Int]) {
   private final class Entry {
     private val lock      = ReentrantLock()
     private val completed = lock.newCondition()
@@ -64,5 +66,5 @@ private[gemstone] final class LRUCache[K, V] private (capacity: PositiveInt) {
 
 private[gemstone] object LRUCache {
   @SuppressWarnings(Array("scalafix:GemstoneNoExplicitNew"))
-  def apply[K, V](capacity: PositiveInt): LRUCache[K, V] = new LRUCache(capacity)
+  def apply[K, V](capacity: Positive[Int]): LRUCache[K, V] = new LRUCache(capacity)
 }

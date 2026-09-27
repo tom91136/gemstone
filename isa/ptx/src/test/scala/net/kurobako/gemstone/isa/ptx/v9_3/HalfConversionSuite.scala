@@ -1,6 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.NonEmptyVec
 
 import Program.*
 
@@ -27,13 +32,13 @@ ret;
 }
 """
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val memory = ArrayCheckedMemory.allocate(NonNegativeInt(2), GuestAddress(0x10000L))
+    val memory = ArrayCheckedMemory.allocate(2, GuestAddress(0x10000L))
     assert(VMInterpreter.execute(
       kernel,
       LaunchGeometry.forLaunch(Dimensions.One, Dimensions.One).toOption.get,
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     ).isRight)
-    assertEquals(memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth.Word), Right(0x3c01L))
+    assertEquals(memory.readLittleEndian(memory.allocation.start, 2), Right(0x3c01L))
   }
 }

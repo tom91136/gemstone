@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.binary
 
+import net.kurobako.gemstone.Constraint.OneOf
+
 /** Raw IEEE-754 interchange encodings used by ISA registers and memory. */
 private[gemstone] object IEEE754 {
   private inline val Binary16Bias        = 15
@@ -95,13 +97,13 @@ private[gemstone] object IEEE754 {
     Binary16.low(encoded)
   }
 
-  def toDouble(bits: Long, width: FloatingPointWidth): Double = width.raw match {
+  def toDouble(bits: Long, width: OneOf[(16, 32, 64)]): Double = width.raw match {
     case 16 => binary16ToFloat(Binary16.low(bits)).toDouble
     case 32 => binary32ToFloat(Binary32.fromLow(Bits.low32(bits))).toDouble
     case 64 => binary64ToDouble(bits)
   }
 
-  def fromDouble(value: Double, width: FloatingPointWidth): Long = width.raw match {
+  def fromDouble(value: Double, width: OneOf[(16, 32, 64)]): Long = width.raw match {
     case 16 => doubleToBinary16(value).raw
     case 32 => floatToBinary32(value.toFloat).raw
     case 64 => doubleToBinary64(value)

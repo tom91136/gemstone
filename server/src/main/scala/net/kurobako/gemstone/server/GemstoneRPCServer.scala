@@ -1,7 +1,9 @@
 package net.kurobako.gemstone.server
 
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
 import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.{NonNegativeLong, PositiveInt}
+
 import net.kurobako.gemstone.launcher.EnvironmentNames
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionProtocol.ExecutionFailure
@@ -30,12 +32,12 @@ import java.util.concurrent.locks.ReentrantLock
 import scala.util.Using
 
 object GemstoneRPCServer {
-  private val SocketTimeoutMillis: PositiveInt = PositiveInt(300000)
-  private val RootClient: ClientId             = ClientId(1L)
+  private val SocketTimeoutMillis: Positive[Int] = 300000
+  private val RootClient: ClientId               = ClientId(1L)
 
-  private final case class ExecutionSessionEntry(
+  private case class ExecutionSessionEntry(
       service: ExecutionService,
-      connections: PositiveInt
+      connections: Positive[Int]
   )
 
   final class ExecutionSessions(
@@ -63,7 +65,7 @@ object GemstoneRPCServer {
             entries.set(current.updated(
               session,
               entry.copy(
-                connections = PositiveInt.unsafe(Math.addExact(entry.connections.raw, 1))
+                connections = Positive.unsafe(Math.addExact(entry.connections.raw, 1))
               )
             ))
             entry
@@ -73,7 +75,7 @@ object GemstoneRPCServer {
               taskLimits = taskLimits,
               scheduler = executionPool
             )
-            val entry = ExecutionSessionEntry(service, PositiveInt(1))
+            val entry = ExecutionSessionEntry(service, 1)
             entries.set(current.updated(session, entry))
             entry
         })
@@ -89,7 +91,7 @@ object GemstoneRPCServer {
         } else
           entries.set(current.updated(
             session,
-            entry.copy(connections = PositiveInt.unsafe(entry.connections.raw - 1))
+            entry.copy(connections = Positive.unsafe(entry.connections.raw - 1))
           ))
       }
     }
@@ -126,7 +128,7 @@ object GemstoneRPCServer {
     def countUsage(): Unit = usage.increment()
 
     def executionCount: Long =
-      NonNegativeLong.either(usage.sum())
+      NonNegative.either(usage.sum())
         .fold(
           message => throw IllegalStateException(s"execution request counter overflowed: $message"),
           value => value.raw
@@ -227,7 +229,7 @@ object GemstoneRPCServer {
   private[server] def startWith(
       backends: List[RuntimeBackend],
       taskLimits: TaskLimits,
-      socketTimeoutMillis: PositiveInt,
+      socketTimeoutMillis: Positive[Int],
       environment: Map[String, String] = sys.env
   ): RunningServer = {
     // Resolve the actual pool before recording its profile, so replay does not inherit another machine's default.
@@ -292,7 +294,7 @@ object GemstoneRPCServer {
       server: ServerSocket,
       clients: ClientRegistry,
       connections: ClientConnections,
-      socketTimeoutMillis: PositiveInt,
+      socketTimeoutMillis: Positive[Int],
       journal: Option[RPCJournal.Writer]
   ): Unit =
     try
@@ -315,7 +317,7 @@ object GemstoneRPCServer {
       socket: Socket,
       clients: ClientRegistry,
       connections: ClientConnections,
-      socketTimeoutMillis: PositiveInt,
+      socketTimeoutMillis: Positive[Int],
       journal: Option[RPCJournal.Writer],
       shutdown: () => Unit
   ): Unit = {

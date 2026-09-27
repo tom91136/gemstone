@@ -23,12 +23,12 @@ struct RelocationTarget {
 template <class Resolve, class OnApplied>
 bool applyPointerRelocations(const std::vector<PointerRelocation> &relocations, Resolve resolve, OnApplied onApplied, std::string &error) {
   for (const auto &relocation : relocations) {
-    const auto *sourceId = std::get_if<RelocationSourceAllocation>(&relocation.source);
+    const auto *sourceId = std::get_if<RelocationSourceMemory>(&relocation.source);
     if (!sourceId) {
       error = "execution returned an invalid pointer relocation";
       return false;
     }
-    const auto sourceIdValue = static_cast<uint64_t>(sourceId->id.value);
+    const auto sourceIdValue = static_cast<uint64_t>(sourceId->region.value);
     const auto targetIdValue = static_cast<uint64_t>(relocation.target.value);
     const auto source = resolve(sourceIdValue);
     const auto target = resolve(targetIdValue);

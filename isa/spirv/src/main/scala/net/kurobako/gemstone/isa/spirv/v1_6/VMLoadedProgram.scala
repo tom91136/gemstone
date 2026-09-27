@@ -110,6 +110,6 @@ private[v1_6] final class VMLoadedProgram(val ir: VMIR.Program) {
 
   val typeAlignmentCache: TrieMap[Int, Int]                  = TrieMap.empty
   val scalarLeafCountCache: TrieMap[Int, Either[Fault, Int]] = TrieMap.empty
-  final case class GlobalBinding(region: MemoryRegion, offset: Long, memory: Memory)
+  case class GlobalBinding(region: MemoryRegion, offset: Long, memory: Memory)
   val boundGlobals: TrieMap[Int, GlobalBinding] = TrieMap.empty
 }

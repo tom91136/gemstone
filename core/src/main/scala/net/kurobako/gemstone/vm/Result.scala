@@ -1,5 +1,5 @@
 package net.kurobako.gemstone.vm
 
-import net.kurobako.gemstone.NonNegativeLong
+import net.kurobako.gemstone.Constraint.NonNegative
 
-final case class Result(instructions: NonNegativeLong)
+case class Result(instructions: NonNegative[Long])

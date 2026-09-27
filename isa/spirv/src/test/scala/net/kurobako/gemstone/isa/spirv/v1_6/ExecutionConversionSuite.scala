@@ -1,4 +1,10 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
+
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
@@ -7,8 +13,7 @@ import net.kurobako.gemstone.Vec
 
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.binary.ScalarByteWidth
-import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.NonEmptyVec
 
 import java.util.concurrent.atomic.AtomicReference
 final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSupport {
@@ -61,16 +66,16 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     val memory     = ArrayMemory(allocation, 8)
     val dispatch   = KernelTask
       .validated(
-        KernelName("signed_to_float"),
+        NonEmptyString("signed_to_float"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffffeL, ScalarByteWidth(4)) ++
-            LittleEndian.toVec(3L, ScalarByteWidth(4))),
+          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffffeL, 4) ++
+            LittleEndian.toVec(3L, 4)),
           KernelTask.Argument.Scalar(
-            LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.5f).toLong, ScalarByteWidth.Dword) ++
-              LittleEndian.toVec(java.lang.Float.floatToRawIntBits(1.5f).toLong, ScalarByteWidth.Dword)
+            LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.5f).toLong, 4) ++
+              LittleEndian.toVec(java.lang.Float.floatToRawIntBits(1.5f).toLong, 4)
           )
         )
       )
@@ -80,8 +85,8 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       memory.bytes,
-      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(-2.0f).toLong, ScalarByteWidth.Dword) ++
-        LittleEndian.toVec(java.lang.Float.floatToRawIntBits(3.0f).toLong, ScalarByteWidth.Dword)
+      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(-2.0f).toLong, 4) ++
+        LittleEndian.toVec(java.lang.Float.floatToRawIntBits(3.0f).toLong, 4)
     )
 
     val malformed = module.copy(instructions =
@@ -165,15 +170,15 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     val halfMemory     = ArrayMemory(halfAllocation, 4)
     val halfDispatch   = KernelTask
       .validated(
-        KernelName("signed_to_float"),
+        NonEmptyString("signed_to_float"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(halfAllocation, NonNegativeLong(0L)),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth(2)) ++
-            LittleEndian.toVec(3L, ScalarByteWidth(2))),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0x0001L, ScalarByteWidth(2)) ++
-            LittleEndian.toVec(0x3e00L, ScalarByteWidth(2)))
+          KernelTask.Argument.Memory(halfAllocation, 0L),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, 2) ++
+            LittleEndian.toVec(3L, 2)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0x0001L, 2) ++
+            LittleEndian.toVec(0x3e00L, 2))
         )
       )
       .toOption
@@ -181,7 +186,7 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     assertEquals(executeUnchecked(halfModule, halfDispatch, halfMemory), Right(()))
     assertEquals(
       halfMemory.bytes,
-      LittleEndian.toVec(0L, ScalarByteWidth.Word) ++ LittleEndian.toVec(0x4200L, ScalarByteWidth.Word)
+      LittleEndian.toVec(0L, 2) ++ LittleEndian.toVec(0x4200L, 2)
     )
   }
 
@@ -222,58 +227,58 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     val memory     = ArrayMemory(allocation, 4)
     val dispatch   = KernelTask
       .validated(
-        KernelName("integer_equal"),
+        NonEmptyString("integer_equal"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffff9L, ScalarByteWidth(4))),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(3L, ScalarByteWidth(4)))
+          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffff9L, 4)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(3L, 4))
         )
       )
       .toOption
       .get
 
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffffL, ScalarByteWidth.Dword))
+    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffffL, 4))
 
     val divided = module.copy(instructions = instructions.updated(11, Instruction.SDiv(u32, remainder, left, right)))
     assertEquals(executeUnchecked(divided, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffffeL, ScalarByteWidth.Dword))
+    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffffeL, 4))
 
     val xor = module.copy(instructions = instructions.updated(11, Instruction.BitwiseXor(u32, remainder, left, right)))
     assertEquals(executeUnchecked(xor, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffffaL, ScalarByteWidth.Dword))
+    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffffaL, 4))
 
     val shiftedRight = module.copy(instructions =
       instructions.updated(11, Instruction.ShiftRightLogical(u32, remainder, left, right))
     )
     assertEquals(executeUnchecked(shiftedRight, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0x1fffffffL, ScalarByteWidth.Dword))
+    assertEquals(memory.bytes, LittleEndian.toVec(0x1fffffffL, 4))
 
     val shiftedLeft = module.copy(instructions =
       instructions.updated(11, Instruction.ShiftLeftLogical(u32, remainder, left, right))
     )
     assertEquals(executeUnchecked(shiftedLeft, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffc8L, ScalarByteWidth.Dword))
+    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffc8L, 4))
 
     val not = module.copy(instructions = instructions.updated(11, Instruction.Not(u32, remainder, left)))
     assertEquals(executeUnchecked(not, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(6L, ScalarByteWidth.Dword))
+    assertEquals(memory.bytes, LittleEndian.toVec(6L, 4))
 
     val negated = module.copy(instructions = instructions.updated(11, Instruction.SNegate(u32, remainder, left)))
     assertEquals(executeUnchecked(negated, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(7L, ScalarByteWidth.Dword))
+    assertEquals(memory.bytes, LittleEndian.toVec(7L, 4))
 
     val signedLess =
       module.copy(instructions = instructions.updated(12, Instruction.SLessThan(bool, equal, left, right)))
     assertEquals(executeUnchecked(signedLess, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffff9L, ScalarByteWidth.Dword))
+    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffff9L, 4))
 
     val signedGreater =
       module.copy(instructions = instructions.updated(12, Instruction.SGreaterThan(bool, equal, left, right)))
     assertEquals(executeUnchecked(signedGreater, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffffL, ScalarByteWidth.Dword))
+    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffffL, 4))
 
     val malformed = module.copy(instructions =
       instructions.updated(
@@ -353,13 +358,13 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       val memory     = ArrayMemory(allocation, 4)
       val dispatch   = KernelTask
         .validated(
-          KernelName("floating_equal"),
+          NonEmptyString("floating_equal"),
           Dimensions.One,
           Dimensions.One,
           Vec(
-            KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(leftBits, ScalarByteWidth(4))),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(rightBits, ScalarByteWidth(4)))
+            KernelTask.Argument.Memory(allocation, 0L),
+            KernelTask.Argument.Scalar(LittleEndian.toVec(leftBits, 4)),
+            KernelTask.Argument.Scalar(LittleEndian.toVec(rightBits, 4))
           )
         )
         .toOption
@@ -368,9 +373,9 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       memory.bytes
     }
 
-    assertEquals(run(7L, 0x80000000L, 0L), LittleEndian.toVec(0x80000000L, ScalarByteWidth.Dword))
-    assertEquals(run(8L, 0x7fc00000L, 0x40400000L), LittleEndian.toVec(0x40400000L, ScalarByteWidth.Dword))
-    assertEquals(run(9L, 0x40000000L, 0x40400000L), LittleEndian.toVec(0x40000000L, ScalarByteWidth.Dword))
+    assertEquals(run(7L, 0x80000000L, 0L), LittleEndian.toVec(0x80000000L, 4))
+    assertEquals(run(8L, 0x7fc00000L, 0x40400000L), LittleEndian.toVec(0x40400000L, 4))
+    assertEquals(run(9L, 0x40000000L, 0x40400000L), LittleEndian.toVec(0x40000000L, 4))
 
     val malformed = module.copy(instructions =
       instructions.updated(
@@ -381,13 +386,13 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     val allocation = MemoryRegion(10L)
     val dispatch   = KernelTask
       .validated(
-        KernelName("floating_equal"),
+        NonEmptyString("floating_equal"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth(4))),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth(4)))
+          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, 4)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, 4))
         )
       )
       .toOption
@@ -445,14 +450,14 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       val memory     = ArrayMemory(allocation, 8)
       val dispatch   = KernelTask
         .validated(
-          KernelName("float_to_unsigned"),
+          NonEmptyString("float_to_unsigned"),
           Dimensions.One,
           Dimensions.One,
           Vec(
-            KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+            KernelTask.Argument.Memory(allocation, 0L),
             KernelTask.Argument.Scalar(LittleEndian.toVec(
               java.lang.Double.doubleToRawLongBits(value),
-              ScalarByteWidth.Qword
+              8
             ))
           )
         )
@@ -461,10 +466,10 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       executeUnchecked(module, dispatch, memory).map(_ => memory.bytes)
     }
 
-    assertEquals(run(13L, 255.75), Right(LittleEndian.toVec(255L, ScalarByteWidth(8))))
+    assertEquals(run(13L, 255.75), Right(LittleEndian.toVec(255L, 8)))
     assertEquals(
       run(14L, java.lang.Math.scalb(1.0, 63)),
-      Right(LittleEndian.toVec(Long.MinValue, ScalarByteWidth(8)))
+      Right(LittleEndian.toVec(Long.MinValue, 8))
     )
     run(15L, -1.0) match {
       case Left(Fault.InvalidTask(message)) =>
@@ -476,14 +481,14 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     val allocation = MemoryRegion(16L)
     val dispatch   = KernelTask
       .validated(
-        KernelName("float_to_unsigned"),
+        NonEmptyString("float_to_unsigned"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+          KernelTask.Argument.Memory(allocation, 0L),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Double.doubleToRawLongBits(1.0),
-            ScalarByteWidth(8)
+            8
           ))
         )
       )
@@ -531,13 +536,13 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     val memory     = ArrayMemory(allocation, 4)
     val dispatch   = KernelTask
       .validated(
-        KernelName("saturated_nan"),
+        NonEmptyString("saturated_nan"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+          KernelTask.Argument.Memory(allocation, 0L),
           KernelTask.Argument.Scalar(
-            LittleEndian.toVec(java.lang.Float.floatToRawIntBits(Float.NaN).toLong, ScalarByteWidth.Dword)
+            LittleEndian.toVec(java.lang.Float.floatToRawIntBits(Float.NaN).toLong, 4)
           )
         )
       )
@@ -545,7 +550,7 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       .get
 
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0L, ScalarByteWidth.Dword))
+    assertEquals(memory.bytes, LittleEndian.toVec(0L, 4))
   }
 
   test("vector-times-scalar multiplies each floating lane") {
@@ -583,14 +588,14 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     val allocation                    = MemoryRegion(18L)
     val memory                        = ArrayMemory(allocation, 8)
     def bits(value: Float): Vec[Byte] =
-      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(value).toLong, ScalarByteWidth.Dword)
+      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(value).toLong, 4)
     val dispatch = KernelTask
       .validated(
-        KernelName("vector_scale"),
+        NonEmptyString("vector_scale"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+          KernelTask.Argument.Memory(allocation, 0L),
           KernelTask.Argument.Scalar(bits(2.0f) ++ bits(-3.0f)),
           KernelTask.Argument.Scalar(bits(-2.0f))
         )

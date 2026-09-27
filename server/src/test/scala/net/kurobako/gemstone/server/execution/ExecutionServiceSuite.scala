@@ -1,12 +1,18 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong, Vec}
-import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
-import net.kurobako.gemstone.isa.{KernelMetadata as ISAKernelMetadata, KernelName as ISAKernelName, ProgramSymbols}
+import net.kurobako.gemstone.Constraint.NonEmptyString as ISAKernelName
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.binary.LittleEndian
+import net.kurobako.gemstone.isa.{KernelMetadata as ISAKernelMetadata, ProgramSymbols}
 import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress}
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.vm.*
-
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import java.util.concurrent.{CountDownLatch, FutureTask, TimeUnit}
 import scala.util.Using
@@ -21,36 +27,41 @@ final class ExecutionServiceSuite extends munit.FunSuite {
     override def load(
         services: RuntimeBackend.Services,
         image: Vec[Byte]
-    ): Either[RuntimeBackend.Error, RuntimeBackend.Program] = Right(Program(services, programClosed))
+    ): Either[ExecutionFailure, RuntimeBackend.Program] = Right(Program(services, programClosed))
   }
 
   private class Program(services: RuntimeBackend.Services, closed: AtomicBoolean) extends RuntimeBackend.Program {
-    override def symbols: Either[RuntimeBackend.Error, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
-    override def kernel(name: ISAKernelName): Either[RuntimeBackend.Error, ISAKernelMetadata] =
+    override def symbols: Either[ExecutionFailure, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
+    override def kernel(name: ISAKernelName): Either[ExecutionFailure, ISAKernelMetadata] =
       ISAKernelMetadata.validated(
-        NonNegativeInt(8),
-        NonNegativeInt(1),
+        8,
+        1,
         Vec(
-          ISAKernelMetadata.Parameter(PositiveInt(8), NonNegativeInt(0), ISAKernelMetadata.ParameterKind.Memory, false)
+          ISAKernelMetadata.Parameter(
+            8,
+            0,
+            ISAKernelMetadata.ParameterKind.Allocation,
+            false
+          )
         )
-      ).left.map(RuntimeBackend.Error.Invalid(_))
+      ).left.map(ExecutionFailure.InvalidRequest(_))
     override val globals: Option[RuntimeBackend.Program.Globals] = None
 
     override def execute(
         task: KernelTask,
         memory: Memory,
         control: TaskControl
-    ): Either[RuntimeBackend.Error, Result] =
+    ): Either[ExecutionFailure, Result] =
       task.arguments.headOption match {
         case Some(KernelTask.Argument.Memory(region, offset)) =>
           for {
-            _ <- memory.write(region, offset, Vec[Byte](42)).left.map(RuntimeBackend.Error.Execution(_))
+            _ <- memory.write(region, offset, Vec[Byte](42)).left.map(ExecutionFailure.fromFault(_))
             _ <- services.observer.observe(
               control.observation,
               Event.Print("done %d", Vec(Event.PrintArgument.Integer(Vec(42L), 32)))
-            ).left.map(error => RuntimeBackend.Error.Execution(Fault.Observer(error.message)))
+            ).left.map(error => ExecutionFailure.fromFault(Fault.Observer(error.message)))
           } yield Result(control.usedInstructions)
-        case _ => Left(RuntimeBackend.Error.Execution(Fault.InvalidTask("memory argument is required")))
+        case _ => Left(ExecutionFailure.fromFault(Fault.InvalidTask("memory argument is required")))
       }
 
     override def close(): Unit = closed.set(true)
@@ -59,29 +70,29 @@ final class ExecutionServiceSuite extends munit.FunSuite {
   test("service translates API ownership into a VM task and records VM events") {
     val backend = Backend()
     Using.resource(ExecutionService(List(backend))) { service =>
-      val allocation = service.registerAllocation(PositiveLong(8L), AllocationKind.Shared).toOption.get
+      val allocation = service.registerAllocation(8L, AllocationKind.Shared).toOption.get
       val program    = service.load(encoding, Vec[Byte](1)).toOption.get
       val task       = KernelTask.validated(
         ISAKernelName("write"),
         LaunchGeometry.Dimensions.One,
         LaunchGeometry.Dimensions.One,
-        Vec(KernelTask.Argument.Memory(MemoryRegion(allocation.raw), NonNegativeLong(2L)))
+        Vec(KernelTask.Argument.Memory(MemoryRegion(allocation.raw), 2L))
       ).toOption.get
       val completion = service.launch(program, task).toOption.get
 
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
-      assertEquals(service.read(allocation, NonNegativeLong(2L), NonNegativeInt(1)), Right(Vec[Byte](42)))
+      assertEquals(service.read(allocation, 2L, 1), Right(Vec[Byte](42)))
       assertEquals(service.completionPrints(completion), Right("done 42"))
       assertEquals(
         service.completionDirtyRanges(completion),
-        Right(Vec(DirtyRange(allocation, NonNegativeLong(2L), PositiveInt(1))))
+        Right(Vec(DirtyRange(allocation, 2L, 1)))
       )
     }
     assert(backend.programClosed.get())
   }
 
   test("acknowledged host fences wake polling reads from another worker") {
-    Using.resource(WorkerPool(PositiveInt(2))) { workers =>
+    Using.resource(WorkerPool(2)) { workers =>
       final class FenceBackend extends RuntimeBackend {
         override val encoding: String                                          = ExecutionServiceSuite.this.encoding
         override def load(services: RuntimeBackend.Services, image: Vec[Byte]) =
@@ -90,10 +101,10 @@ final class ExecutionServiceSuite extends munit.FunSuite {
             extends Program(services, AtomicBoolean()) {
           override def execute(task: KernelTask, memory: Memory, control: TaskControl) = {
             val staged = CountDownLatch(1)
-            services.scheduler.parallelFor(NonNegativeLong(2L)) { lane =>
+            services.scheduler.parallelFor(2L) { lane =>
               if (lane.raw == 0) {
                 assertEquals(
-                  memory.read(MemoryRegion(0), NonNegativeLong(0x1000L), NonNegativeInt(4)),
+                  memory.read(MemoryRegion(0), NonNegative.unsafe(0x1000L), 4),
                   Left(Fault.PendingMemory)
                 )
                 staged.countDown()
@@ -102,7 +113,7 @@ final class ExecutionServiceSuite extends munit.FunSuite {
                 assert(staged.await(5, TimeUnit.SECONDS))
                 memory.fenceHostMemory()
               }
-            }.left.map(RuntimeBackend.Error.Execution(_)).map(_ => Result(control.usedInstructions))
+            }.left.map(ExecutionFailure.fromFault(_)).map(_ => Result(control.usedInstructions))
           }
         }
       }
@@ -158,12 +169,12 @@ final class ExecutionServiceSuite extends munit.FunSuite {
           val result = if (sync) memory.fenceHostMemory()
           else {
             assertEquals(
-              memory.read(MemoryRegion(0), NonNegativeLong(0x1000L), NonNegativeInt(4)),
+              memory.read(MemoryRegion(0), NonNegative.unsafe(0x1000L), 4),
               Left(Fault.PendingMemory)
             )
             memory.flushHostReads()
           }
-          result.left.map(RuntimeBackend.Error.Execution(_)).map(_ => Result(control.usedInstructions))
+          result.left.map(ExecutionFailure.fromFault(_)).map(_ => Result(control.usedInstructions))
         } finally finished.countDown()
       override def close(): Unit = disposed.countDown()
     }
@@ -171,16 +182,16 @@ final class ExecutionServiceSuite extends munit.FunSuite {
       override val encoding: String                                          = ExecutionServiceSuite.this.encoding
       override def load(services: RuntimeBackend.Services, image: Vec[Byte]) = Right(WaitingProgram(services))
     }
-    Using.resource(WorkerPool(PositiveInt(1))) { workers =>
+    Using.resource(WorkerPool(1)) { workers =>
       Using.resource(ExecutionService(List(WaitingBackend()), scheduler = workers)) { service =>
         assertEquals(service.enableHostMemory(), Right(()))
-        val allocation = service.registerAllocation(PositiveLong(8L), AllocationKind.Shared).toOption.get
+        val allocation = service.registerAllocation(8L, AllocationKind.Shared).toOption.get
         val program    = service.load(encoding, Vec[Byte](1)).toOption.get
         val task       = KernelTask.validated(
           ISAKernelName("wait"),
           LaunchGeometry.Dimensions.One,
           LaunchGeometry.Dimensions.One,
-          Vec(KernelTask.Argument.Memory(MemoryRegion(allocation.raw), NonNegativeLong.Zero))
+          Vec(KernelTask.Argument.Memory(MemoryRegion(allocation.raw), 0L))
         ).toOption.get
         val first = service.launch(program, task).toOption.get
         val batch = service.pollHostMemory(first).toOption.get
@@ -212,11 +223,11 @@ final class ExecutionServiceSuite extends munit.FunSuite {
           entered.countDown()
           val released = release.await(5, TimeUnit.SECONDS)
           if (released) Right(Result(control.usedInstructions))
-          else Left(RuntimeBackend.Error.Failed("rendezvous timed out"))
+          else Left(ExecutionFailure.Failed("rendezvous timed out"))
         }
       }
     }
-    Using.resource(WorkerPool(PositiveInt(2))) { workers =>
+    Using.resource(WorkerPool(2)) { workers =>
       Using.resource(ExecutionService(List(RendezvousBackend()), scheduler = workers)) { service =>
         val program = service.load(encoding, Vec[Byte](1)).toOption.get
         val task    = KernelTask.validated(
@@ -248,20 +259,20 @@ final class ExecutionServiceSuite extends munit.FunSuite {
       private final class IsolatedProgram(services: RuntimeBackend.Services)
           extends Program(services, AtomicBoolean()) {
         override def execute(task: KernelTask, memory: Memory, control: TaskControl) = {
-          val staged  = memory.read(MemoryRegion(0), NonNegativeLong(0x1000L), NonNegativeInt(1))
+          val staged  = memory.read(MemoryRegion(0), NonNegative.unsafe(0x1000L), 1)
           val flushed = if (staged == Left(Fault.PendingMemory)) memory.flushHostReads() else staged.map(_ => ())
           flushed.flatMap { _ =>
             firstRead.countDown()
             if (!release.await(5, TimeUnit.SECONDS)) Left(Fault.Cancelled)
-            else memory.read(MemoryRegion(0), NonNegativeLong(0x1000L), NonNegativeInt(1)).map { bytes =>
+            else memory.read(MemoryRegion(0), NonNegative.unsafe(0x1000L), 1).map { bytes =>
               val _ = observed.put(control.observation.value, bytes.head)
               Result(control.usedInstructions)
             }
-          }.left.map(RuntimeBackend.Error.Execution(_))
+          }.left.map(ExecutionFailure.fromFault(_))
         }
       }
     }
-    Using.resource(WorkerPool(PositiveInt(2))) { workers =>
+    Using.resource(WorkerPool(2)) { workers =>
       Using.resource(ExecutionService(List(IsolatedBackend()), scheduler = workers)) { service =>
         assertEquals(service.enableHostMemory(), Right(()))
         val program = service.load(encoding, Vec[Byte](1)).toOption.get
@@ -306,18 +317,18 @@ final class ExecutionServiceSuite extends munit.FunSuite {
       override val encoding: String                                          = ExecutionServiceSuite.this.encoding
       override def load(services: RuntimeBackend.Services, image: Vec[Byte]) = Right(RelocationProgram(services))
       private final class RelocationProgram(services: RuntimeBackend.Services) extends RuntimeBackend.Program {
-        override def symbols: Either[RuntimeBackend.Error, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
-        override def kernel(name: ISAKernelName): Either[RuntimeBackend.Error, ISAKernelMetadata] =
+        override def symbols: Either[ExecutionFailure, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
+        override def kernel(name: ISAKernelName): Either[ExecutionFailure, ISAKernelMetadata] =
           ISAKernelMetadata.validated(
-            NonNegativeInt(8),
-            NonNegativeInt(1),
+            8,
+            1,
             Vec(ISAKernelMetadata.Parameter(
-              PositiveInt(8),
-              NonNegativeInt(0),
+              8,
+              0,
               ISAKernelMetadata.ParameterKind.Scalar,
               containsPointers = true
             ))
-          ).left.map(RuntimeBackend.Error.Invalid(_))
+          ).left.map(ExecutionFailure.InvalidRequest(_))
         override val globals: Option[RuntimeBackend.Program.Globals]                 = None
         override def execute(task: KernelTask, memory: Memory, control: TaskControl) = {
           captured.set(task.pointerRelocations)
@@ -327,10 +338,10 @@ final class ExecutionServiceSuite extends munit.FunSuite {
       }
     }
     Using.resource(ExecutionService(List(RelocationBackend()))) { service =>
-      val target = service.registerAllocation(PositiveLong(64L), AllocationKind.Device).toOption.get
+      val target = service.registerAllocation(64L, AllocationKind.Device).toOption.get
       assertEquals(service.registerAllocationAddress(target, GuestAddress(0x1000L)), Right(()))
       val program = service.load(encoding, Vec[Byte](1)).toOption.get
-      val scalar  = Vec.from(LittleEndian.toVec(0x1008L, ScalarByteWidth.Qword))
+      val scalar  = Vec.from(LittleEndian.toVec(0x1008L, 8))
       val task    = KernelTask.validated(
         ISAKernelName("relocate"),
         LaunchGeometry.Dimensions.One,
@@ -343,10 +354,10 @@ final class ExecutionServiceSuite extends munit.FunSuite {
       assertEquals(
         captured.get(),
         Vec(KernelTask.PointerRelocation(
-          KernelTask.RelocationSource.Argument(NonNegativeInt(0)),
-          NonNegativeLong.Zero,
+          KernelTask.RelocationSource.Argument(0),
+          0L,
           MemoryRegion(target.raw),
-          NonNegativeLong(8L)
+          8L
         ))
       )
     }

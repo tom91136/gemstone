@@ -1,8 +1,15 @@
 package net.kurobako.gemstone.memory
 
-import net.kurobako.gemstone.{NonNegativeInt, Vec}
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.binary.Widths.*
+
+import net.kurobako.gemstone.Constraint.Positive
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
-import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.concurrent.withLock
 
 import java.util.TreeMap
@@ -20,9 +27,9 @@ final class DynamicAddressMemory(
   override def fence(): Either[MemoryError, Unit] = delegate.fence()
   private val mutableAllocations                  = state.mutableAllocations
 
-  override def allocate(size: DeviceAllocationByteSize): Either[MemoryError, GuestAddress] = allocate(size, Vec.empty)
+  override def allocate(size: Positive[Int]): Either[MemoryError, GuestAddress] = allocate(size, Vec.empty)
 
-  def allocate(size: DeviceAllocationByteSize, initial: Vec[Byte]): Either[MemoryError, GuestAddress] =
+  def allocate(size: Positive[Int], initial: Vec[Byte]): Either[MemoryError, GuestAddress] =
     if (initial.length > size.raw)
       Left(MemoryError.AllocationInitializerTooLarge(size, initial.length))
     else state.lock.withLock {
@@ -46,21 +53,21 @@ final class DynamicAddressMemory(
     found
   }
 
-  override def prepareReads(ranges: Vec[(GuestAddress, NonNegativeInt)]): Either[MemoryError, Unit] = {
+  override def prepareReads(ranges: Vec[(GuestAddress, NonNegative[Int])]): Either[MemoryError, Unit] = {
     val external = state.lock.withLock {
       ranges.flatMap { case (address, size) =>
-        if (dynamicRange(address, size.raw).nonEmpty) Vec.empty[(GuestAddress, NonNegativeInt)]
+        if (dynamicRange(address, size.raw).nonEmpty) Vec.empty[(GuestAddress, NonNegative[Int])]
         else if (!overlapsDynamic(address, size.raw)) Vec((address, size))
         else Vec.from((0 until size.raw).collect {
           case offset if dynamicRange(address.offset(offset.toLong), 1).isEmpty =>
-            (address.offset(offset.toLong), NonNegativeInt(1))
+            (address.offset(offset.toLong), 1: NonNegative[Int])
         })
       }
     }
     delegate.prepareReads(external)
   }
 
-  override def validateRange(address: GuestAddress, size: NonNegativeInt): Either[MemoryError, Unit] = {
+  override def validateRange(address: GuestAddress, size: NonNegative[Int]): Either[MemoryError, Unit] = {
     val local = state.lock.withLock {
       if (dynamicRange(address, size.raw).nonEmpty) Some(Right(()))
       else if (overlapsDynamic(address, size.raw)) Some(super.validateRange(address, size))
@@ -75,7 +82,7 @@ final class DynamicAddressMemory(
   override def readInt32(address: GuestAddress): Either[MemoryError, Int] =
     route(address, 4)(
       (bytes, offset) => LittleEndian.decodeInt32(bytes, offset),
-      Some(super.readLittleEndian(address, MemoryValueByteWidth.Dword).map(_.toInt)),
+      Some(super.readLittleEndian(address, 4).map(_.toInt)),
       delegate.readInt32(address)
     )
 
@@ -84,12 +91,12 @@ final class DynamicAddressMemory(
 
   override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
     route(address, 4)(
-      (bytes, offset) => LittleEndian.write(value.toLong, bytes, offset, ScalarByteWidth.Dword),
-      Some(super.writeLittleEndian(address, value.toLong, MemoryValueByteWidth.Dword)),
+      (bytes, offset) => LittleEndian.write(value.toLong, bytes, offset, 4),
+      Some(super.writeLittleEndian(address, value.toLong, 4)),
       delegate.writeInt32(address, value)
     )
 
-  override def readBytes(address: GuestAddress, size: NonNegativeInt): Either[MemoryError, Vec[Byte]] =
+  override def readBytes(address: GuestAddress, size: NonNegative[Int]): Either[MemoryError, Vec[Byte]] =
     route(address, size.raw)(
       (bytes, offset) => Vec.unsafeFromArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size.raw)),
       Some(super.readBytes(address, size)),
@@ -103,7 +110,7 @@ final class DynamicAddressMemory(
       delegate.writeBytes(address, bytes)
     )
 
-  override def readLittleEndian(address: GuestAddress, size: MemoryValueByteWidth): Either[MemoryError, Long] =
+  override def readLittleEndian(address: GuestAddress, size: IntBetween[1, 8]): Either[MemoryError, Long] =
     route(address, size.raw)(
       (bytes, offset) => LittleEndian.decode(bytes, offset, size.scalarByteWidth),
       Some(super.readLittleEndian(address, size)),
@@ -113,7 +120,7 @@ final class DynamicAddressMemory(
   override def writeLittleEndian(
       address: GuestAddress,
       value: Long,
-      size: MemoryValueByteWidth
+      size: IntBetween[1, 8]
   ): Either[MemoryError, Unit] =
     route(address, size.raw)(
       (bytes, offset) => LittleEndian.write(value, bytes, offset, size.scalarByteWidth),
@@ -123,7 +130,7 @@ final class DynamicAddressMemory(
 
   override def atomicModifyLittleEndian(
       address: GuestAddress,
-      size: MemoryValueByteWidth
+      size: IntBetween[1, 8]
   )(update: Long => Long): Either[MemoryError, Long] =
     route(address, size.raw)(
       (bytes, offset) => LittleEndian.atomicModify(bytes, offset, size.scalarByteWidth)(update),

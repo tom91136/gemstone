@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.NonEmptyVec
 
 import Program.*
 
@@ -9,15 +10,15 @@ import net.kurobako.gemstone.Vec
 /** Verifies the generated PTX instruction sum type and its colocated decoders. */
 final class InstructionSuite extends munit.FunSuite {
   test("case fields and enum constructor expose one instruction model") {
-    val dest        = Operand.Register(RegisterName("%d"), None)
-    val srcA        = Operand.Register(RegisterName("%a"), None)
+    val dest        = Operand.Register(NonEmptyString("%d"), None)
+    val srcA        = Operand.Register(NonEmptyString("%a"), None)
     val instruction =
-      Instruction.Abs(dest = dest, srcA = srcA, mods = Vec(Modifier(ModifierName("s32"))), pred = None)
+      Instruction.Abs(dest = dest, srcA = srcA, mods = Vec(Modifier(NonEmptyString("s32"))), pred = None)
 
     assertEquals(instruction.opcode.raw, "abs")
     assertEquals(instruction.definition, Instruction.Definition.Abs)
     assertEquals(instruction.operands.toSeq, Seq(dest, srcA))
-    assertEquals(instruction.mods.toSeq, Seq(Modifier(ModifierName("s32"))))
+    assertEquals(instruction.mods.toSeq, Seq(Modifier(NonEmptyString("s32"))))
     assertEquals(instruction.pred, None)
     assertEquals(instruction.qualifiedOpcode, "abs.s32")
     assert(instruction.meta.entries.toVector.nonEmpty)
@@ -36,7 +37,7 @@ final class InstructionSuite extends munit.FunSuite {
       val forms =
         Instruction.definitions.filter(_.opcode.raw == opcode).flatMap(_.meta.entries.toVector).flatMap(_.forms)
       val operandCount = forms.map(_.operands.size).minOption.getOrElse(0)
-      val operands     = Vec.tabulate(operandCount)(index => Operand.Symbol(SymbolName.unsafe(s"operand$index")))
+      val operands     = Vec.tabulate(operandCount)(index => Operand.Symbol(NonEmptyString.unsafe(s"operand$index")))
       val instruction  = Instruction.decode(opcode, operands).fold(error => fail(s"$opcode: $error"), value => value)
       assertEquals(instruction.opcode.raw, opcode)
       assert(instruction.operands.sameElements(operands))
@@ -52,7 +53,7 @@ final class InstructionSuite extends munit.FunSuite {
       Instruction.decode("gemstone_unknown", Vec.empty),
       Left(Instruction.DecodeError.UnknownOpcode("gemstone_unknown"))
     )
-    Instruction.decode("add", Vec(Operand.Symbol(SymbolName("destination")))) match {
+    Instruction.decode("add", Vec(Operand.Symbol(NonEmptyString("destination")))) match {
       case Left(Instruction.DecodeError.InvalidOperandCount("add", expected, 1)) =>
         assertEquals(expected.toSeq, Seq(3))
       case value => fail(s"unexpected result: $value")

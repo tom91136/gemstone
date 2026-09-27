@@ -1,17 +1,12 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.{NonNegativeLong, PositiveLong, Vec}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.isa.{
-  GlobalName,
-  GlobalSymbol,
-  KernelMetadata,
-  KernelName,
-  KernelSymbol,
-  LinkageName,
-  ProgramSymbols
-}
+import net.kurobako.gemstone.isa.{GlobalSymbol, KernelMetadata, KernelSymbol, ProgramSymbols}
 import net.kurobako.gemstone.isa.amdgpu.CodeObject
 import net.kurobako.gemstone.isa.amdgpu.CodeObject.*
 import net.kurobako.gemstone.isa.amdgpu.CodeObjectMetadata
@@ -120,7 +115,7 @@ private[amdgpu] object VMLoader {
 
   }
 
-  private final case class AMDGPUIndexedProgram(
+  private case class AMDGPUIndexedProgram(
       index: CodeObject.Index,
       aliases: Map[String, String],
       metadata: Map[String, KernelMetadata],
@@ -153,16 +148,16 @@ private[amdgpu] object VMLoader {
 
     def symbols: Either[Fault, ProgramSymbols] = initialized.map(_.symbols)
 
-    def global(name: GlobalName): Either[Fault, (NonNegativeLong, Vec[Byte])] =
+    def global(name: NonEmptyString): Either[Fault, (NonNegative[Long], Vec[Byte])] =
       initialized.flatMap { program =>
         program.index.globalData(name)
           .leftMap(error => Fault.Memory(error.message))
-          .map { case (_, initial) => NonNegativeLong.unsafe(initial.size.toLong) -> initial }
+          .map { case (_, initial) => NonNegative.unsafe(initial.size.toLong) -> initial }
       }
 
-    private final case class Bound(value: GlobalBinding, memory: Memory)
+    private case class Bound(value: GlobalBinding, memory: Memory)
     private val bindingLock = ReentrantLock()
-    private val bound       = mutable.Map.empty[GlobalName, Bound]
+    private val bound       = mutable.Map.empty[NonEmptyString, Bound]
 
     def bindings: Vec[GlobalBinding] = bindingLock.withLock {
       Vec.from(bound.values.view.map(_.value)).distinct
@@ -171,10 +166,10 @@ private[amdgpu] object VMLoader {
     // The covered-range scan maintains one cursor while appending disjoint gaps.
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     def bindGlobal(
-        name: GlobalName,
+        name: NonEmptyString,
         allocation: MemoryRegion,
-        offset: NonNegativeLong,
-        allocationSize: PositiveLong,
+        offset: NonNegative[Long],
+        allocationSize: Positive[Long],
         memory: Memory
     ): Either[Fault, Unit] = bindingLock.withLock {
       initialized match {
@@ -187,7 +182,7 @@ private[amdgpu] object VMLoader {
               val address = guestAddress.raw
               if (
                 offset.raw > allocationSize.raw ||
-                initial.size.toLong > (allocationSize.toNonNegative - offset).raw ||
+                initial.size.toLong > (allocationSize.widen[NonNegative[Long]] - offset).raw ||
                 address < offset.raw || address > Long.MaxValue - initial.size.toLong
               )
                 Left(Fault.InvalidTask("global binding exceeds allocation or virtual address range"))
@@ -255,8 +250,8 @@ private[amdgpu] object VMLoader {
     }
 
     def writeGlobal(
-        name: GlobalName,
-        offset: NonNegativeLong,
+        name: NonEmptyString,
+        offset: NonNegative[Long],
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       bindingLock.withLock {
@@ -280,7 +275,7 @@ private[amdgpu] object VMLoader {
                     case Some(entry) =>
                       entry.memory.write(
                         entry.value.allocation,
-                        NonNegativeLong.unsafe(entry.value.offset.raw + start - entry.value.address),
+                        NonNegative.unsafe(entry.value.offset.raw + start - entry.value.address),
                         bytes
                       )
                     case None
@@ -304,7 +299,7 @@ private[amdgpu] object VMLoader {
                                 case Some(entry) =>
                                   entry.memory.write(
                                     entry.value.allocation,
-                                    NonNegativeLong.unsafe(
+                                    NonNegative.unsafe(
                                       entry.value.offset.raw + start + index - entry.value.address
                                     ),
                                     Vec(byte)
@@ -357,12 +352,12 @@ private[amdgpu] object VMLoader {
                 .asRight[Fault]
               else indexed.kernelNames.toSeq.sorted.traverse { name =>
                 for {
-                  kernelName <- KernelName.either(name).leftMap(_ =>
+                  kernelName <- NonEmptyString.either(name).leftMap(_ =>
                     Fault.InvalidTask(
                       s"invalid AMDGPU kernel name '$name'"
                     )
                   )
-                  linkageName <- LinkageName.either(name).leftMap(_ =>
+                  linkageName <- NonEmptyString.either(name).leftMap(_ =>
                     Fault.InvalidTask(
                       s"invalid AMDGPU linkage name '$name'"
                     )
@@ -374,7 +369,7 @@ private[amdgpu] object VMLoader {
               GlobalSymbol.validated(
                 global.name,
                 Some(global.address),
-                global.size.toLong,
+                global.size.widen,
                 global.pointerOffsets
               ).leftMap(detail => Fault.InvalidTask(detail))
             }

@@ -1,12 +1,14 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import Program.*
 import VMIR.*
 
 import net.kurobako.gemstone.binary.Bits.byteCount
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.binary.ScalarByteWidth
-
 import scala.collection.mutable
 
 /** Mutable storage for one executing PTX block. */
@@ -17,19 +19,19 @@ private[v9_3] final class VMState(
     val registerChunkCount: Int = 96
 ) {
   val registers: Array[VMRegisterFile] = Array.fill(laneCount)(VMRegisterFile(registerChunkCount))
-  val functionRegisters: Array[mutable.Map[RegisterName, FunctionName]] =
-    Array.fill(laneCount)(mutable.Map.empty[RegisterName, FunctionName])
-  val predicates: Array[VMPredicateFile]                  = Array.fill(laneCount)(VMPredicateFile())
-  val parameters: Array[mutable.Map[ParameterName, Long]] =
-    Array.fill(laneCount)(mutable.Map.empty[ParameterName, Long])
-  val functionParameters: Array[mutable.Map[ParameterName, FunctionName]] =
-    Array.fill(laneCount)(mutable.Map.empty[ParameterName, FunctionName])
-  val parameterBytes: Array[mutable.Map[ParameterName, mutable.Map[Int, Byte]]] =
-    Array.fill(laneCount)(mutable.Map.empty[ParameterName, mutable.Map[Int, Byte]])
-  val carry: Array[Boolean]                             = Array.fill(laneCount)(false)
-  val effects: VMStateEffects                           = VMStateEffects()
-  val parameterBuffers: mutable.Map[Long, Array[Byte]]  = mutable.Map.empty
-  val parameterAddresses: mutable.Map[SymbolName, Long] = mutable.Map.empty
+  val functionRegisters: Array[mutable.Map[NonEmptyString, NonEmptyString]] =
+    Array.fill(laneCount)(mutable.Map.empty[NonEmptyString, NonEmptyString])
+  val predicates: Array[VMPredicateFile]                   = Array.fill(laneCount)(VMPredicateFile())
+  val parameters: Array[mutable.Map[NonEmptyString, Long]] =
+    Array.fill(laneCount)(mutable.Map.empty[NonEmptyString, Long])
+  val functionParameters: Array[mutable.Map[NonEmptyString, NonEmptyString]] =
+    Array.fill(laneCount)(mutable.Map.empty[NonEmptyString, NonEmptyString])
+  val parameterBytes: Array[mutable.Map[NonEmptyString, mutable.Map[Int, Byte]]] =
+    Array.fill(laneCount)(mutable.Map.empty[NonEmptyString, mutable.Map[Int, Byte]])
+  val carry: Array[Boolean]                                 = Array.fill(laneCount)(false)
+  val effects: VMStateEffects                               = VMStateEffects()
+  val parameterBuffers: mutable.Map[Long, Array[Byte]]      = mutable.Map.empty
+  val parameterAddresses: mutable.Map[NonEmptyString, Long] = mutable.Map.empty
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var nextParameterBuffer                   = 0x700000000L
   private val local: Array[mutable.Map[Long, Byte]] = Array.fill(laneCount)(mutable.Map.empty[Long, Byte])
@@ -80,7 +82,7 @@ private[v9_3] final class VMState(
 
   def writeParameterBytes(
       lane: Int,
-      name: ParameterName,
+      name: NonEmptyString,
       offset: Int,
       width: BitWidth,
       value: Long
@@ -91,7 +93,7 @@ private[v9_3] final class VMState(
     }
   }
 
-  def readParameterBytes(lane: Int, name: ParameterName, offset: Int, size: ScalarByteWidth): Long =
+  def readParameterBytes(lane: Int, name: NonEmptyString, offset: Int, size: IntBetween[0, 8]): Long =
     LittleEndian.decode(size) { index =>
       parameterBytes(lane).get(name).flatMap(_.get(offset + index)).getOrElse(0.toByte)
     }
@@ -103,10 +105,10 @@ private[v9_3] final class VMState(
     base
   }
 
-  def bindParameterBuffer(name: ParameterName, bytes: Array[Byte]): Unit = {
+  def bindParameterBuffer(name: NonEmptyString, bytes: Array[Byte]): Unit = {
     val base = allocateParameterBuffer(bytes.length)
     Array.copy(bytes, 0, parameterBuffers(base), 0, bytes.length)
-    parameterAddresses(SymbolName(name.toNonEmptyString)) = base
+    parameterAddresses(name) = base
   }
 
   def importParameterBuffers(buffers: Map[Long, Array[Byte]]): Unit =
@@ -132,7 +134,7 @@ private[v9_3] final class VMState(
     result
   }
 
-  def readParameterBuffer(address: Long, size: ScalarByteWidth): Option[Long] =
+  def readParameterBuffer(address: Long, size: IntBetween[0, 8]): Option[Long] =
     parameterBufferRange(address, size.raw).map { case (bytes, offset) =>
       LittleEndian.decode(bytes, offset, size)
     }

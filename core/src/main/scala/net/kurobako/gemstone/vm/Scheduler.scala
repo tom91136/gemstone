@@ -1,47 +1,47 @@
 package net.kurobako.gemstone.vm
 
-import net.kurobako.gemstone.{NonNegativeLong, PositiveInt}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
 
 trait Scheduler {
-  def parallelism: PositiveInt
-  def shouldParallel(taskCount: NonNegativeLong, workItemsPerTask: NonNegativeLong): Boolean
+  def parallelism: Positive[Int]
+  def shouldParallel(taskCount: NonNegative[Long], workItemsPerTask: NonNegative[Long]): Boolean
   def parallelFor(
-      taskCount: NonNegativeLong
-  )(task: NonNegativeLong => Either[Fault, Unit]): Either[Fault, Unit]
+      taskCount: NonNegative[Long]
+  )(task: NonNegative[Long] => Either[Fault, Unit]): Either[Fault, Unit]
 
   /** Runs work that is not part of a parallel task iteration; defaults to the calling thread. */
   def schedule(runnable: Runnable): Unit = runnable.run()
 
   final def forEach(
-      taskCount: NonNegativeLong,
+      taskCount: NonNegative[Long],
       parallel: Boolean
-  )(task: NonNegativeLong => Either[Fault, Unit]): Either[Fault, Unit] =
+  )(task: NonNegative[Long] => Either[Fault, Unit]): Either[Fault, Unit] =
     if (parallel) parallelFor(taskCount)(task)
     else {
       @scala.annotation.tailrec
       @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-      def loop(index: NonNegativeLong): Either[Fault, Unit] =
+      def loop(index: NonNegative[Long]): Either[Fault, Unit] =
         if (index == taskCount) Right(())
         else task(index) match {
           case error @ Left(_) => error
-          case Right(())       => loop(NonNegativeLong.unsafe(index.raw + 1L))
+          case Right(())       => loop(NonNegative.unsafe(index.raw + 1L))
         }
-      loop(NonNegativeLong.Zero)
+      loop(0L)
     }
 }
 
 object Scheduler {
   object Sequential extends Scheduler {
-    override val parallelism: PositiveInt = PositiveInt.One
+    override val parallelism: Positive[Int] = 1
 
     override def shouldParallel(
-        taskCount: NonNegativeLong,
-        workItemsPerTask: NonNegativeLong
+        taskCount: NonNegative[Long],
+        workItemsPerTask: NonNegative[Long]
     ): Boolean = false
 
     override def parallelFor(
-        taskCount: NonNegativeLong
-    )(task: NonNegativeLong => Either[Fault, Unit]): Either[Fault, Unit] =
+        taskCount: NonNegative[Long]
+    )(task: NonNegative[Long] => Either[Fault, Unit]): Either[Fault, Unit] =
       forEach(taskCount, parallel = false)(task)
   }
 }

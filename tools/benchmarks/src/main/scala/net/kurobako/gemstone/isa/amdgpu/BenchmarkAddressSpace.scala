@@ -1,8 +1,12 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, Vec}
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.binary.Widths.*
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.memory.GuestAddress
-import net.kurobako.gemstone.memory.MemoryValueByteWidth
 import net.kurobako.gemstone.vm.{AddressSpace, Fault, Memory, MemoryRegion}
 
 private trait BenchmarkAddressSpace extends AddressSpace { self: Memory =>
@@ -16,7 +20,7 @@ private trait BenchmarkAddressSpace extends AddressSpace { self: Memory =>
 
   final override def address(
       region: MemoryRegion,
-      offset: NonNegativeLong
+      offset: NonNegative[Long]
   ): Either[Fault, GuestAddress] =
     regionSizes.find(_._1 == region).toRight(Fault.Memory("benchmark memory region")).flatMap { case (_, size) =>
       Either.cond(
@@ -33,7 +37,7 @@ private trait BenchmarkAddressSpace extends AddressSpace { self: Memory =>
   ))
   final override def locate(
       address: GuestAddress,
-      size: NonNegativeInt
+      size: NonNegative[Int]
   ): Either[Fault, AddressSpace.Location] = {
     val regions                              = regionSizes
     var result: AddressSpace.Location | Null = null
@@ -44,7 +48,7 @@ private trait BenchmarkAddressSpace extends AddressSpace { self: Memory =>
           val (region, regionSize) = indexed(index)
           val relative             = address.raw - base(region)
           if (relative >= 0L && relative <= regionSize - size.raw.toLong)
-            result = AddressSpace.Location(region, NonNegativeLong.unsafe(relative))
+            result = AddressSpace.Location(region, NonNegative.unsafe(relative))
           index += 1
         }
       case _ =>
@@ -53,7 +57,7 @@ private trait BenchmarkAddressSpace extends AddressSpace { self: Memory =>
           val (region, regionSize) = entries.next()
           val relative             = address.raw - base(region)
           if (relative >= 0L && relative <= regionSize - size.raw.toLong)
-            result = AddressSpace.Location(region, NonNegativeLong.unsafe(relative))
+            result = AddressSpace.Location(region, NonNegative.unsafe(relative))
         }
     }
     if (result == null) Left(Fault.Memory("benchmark address")) else Right(result.nn)
@@ -62,14 +66,14 @@ private trait BenchmarkAddressSpace extends AddressSpace { self: Memory =>
   final override def read(
       memory: Memory,
       address: GuestAddress,
-      size: NonNegativeInt
+      size: NonNegative[Int]
   ): Either[Fault, Vec[Byte]] = regionSizes match {
     case indexed: IndexedSeq[(MemoryRegion, Long)] @unchecked =>
       val index = mappedIndex(address, size, indexed)
       if (index < 0) Left(Fault.Memory("benchmark address"))
       else {
         val (region, _) = indexed(index)
-        NonNegativeLong.either(address.raw - base(region)) match {
+        NonNegative.either(address.raw - base(region)) match {
           case Left(message) => Left(Fault.Memory(message))
           case Right(offset) => memory.read(region, offset, size)
         }
@@ -80,12 +84,12 @@ private trait BenchmarkAddressSpace extends AddressSpace { self: Memory =>
   final override def write(memory: Memory, address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
     regionSizes match {
       case indexed: IndexedSeq[(MemoryRegion, Long)] @unchecked =>
-        val size  = NonNegativeInt.unsafe(bytes.length)
+        val size  = NonNegative.unsafe(bytes.length)
         val index = mappedIndex(address, size, indexed)
         if (index < 0) Left(Fault.Memory("benchmark address"))
         else {
           val (region, _) = indexed(index)
-          NonNegativeLong.either(address.raw - base(region)) match {
+          NonNegative.either(address.raw - base(region)) match {
             case Left(message) => Left(Fault.Memory(message))
             case Right(offset) => memory.write(region, offset, bytes)
           }
@@ -96,14 +100,14 @@ private trait BenchmarkAddressSpace extends AddressSpace { self: Memory =>
   final override def readValue(
       memory: Memory,
       address: GuestAddress,
-      size: MemoryValueByteWidth
+      size: IntBetween[1, 8]
   ): Either[Fault, Long] = regionSizes match {
     case indexed: IndexedSeq[(MemoryRegion, Long)] @unchecked =>
       val index = mappedIndex(address, size.nonNegative, indexed)
       if (index < 0) Left(Fault.Memory("benchmark address"))
       else {
         val (region, _) = indexed(index)
-        NonNegativeLong.either(address.raw - base(region)) match {
+        NonNegative.either(address.raw - base(region)) match {
           case Left(message) => Left(Fault.Memory(message))
           case Right(offset) => memory.readValue(region, offset, size)
         }
@@ -115,14 +119,14 @@ private trait BenchmarkAddressSpace extends AddressSpace { self: Memory =>
       memory: Memory,
       address: GuestAddress,
       value: Long,
-      size: MemoryValueByteWidth
+      size: IntBetween[1, 8]
   ): Either[Fault, Unit] = regionSizes match {
     case indexed: IndexedSeq[(MemoryRegion, Long)] @unchecked =>
       val index = mappedIndex(address, size.nonNegative, indexed)
       if (index < 0) Left(Fault.Memory("benchmark address"))
       else {
         val (region, _) = indexed(index)
-        NonNegativeLong.either(address.raw - base(region)) match {
+        NonNegative.either(address.raw - base(region)) match {
           case Left(message) => Left(Fault.Memory(message))
           case Right(offset) => memory.writeValue(region, offset, value, size)
         }
@@ -133,14 +137,14 @@ private trait BenchmarkAddressSpace extends AddressSpace { self: Memory =>
   final override def atomicModifyValue(
       memory: Memory,
       address: GuestAddress,
-      size: MemoryValueByteWidth
+      size: IntBetween[1, 8]
   )(update: Long => Long): Either[Fault, Long] = regionSizes match {
     case indexed: IndexedSeq[(MemoryRegion, Long)] @unchecked =>
       val index = mappedIndex(address, size.nonNegative, indexed)
       if (index < 0) Left(Fault.Memory("benchmark address"))
       else {
         val (region, _) = indexed(index)
-        NonNegativeLong.either(address.raw - base(region)) match {
+        NonNegative.either(address.raw - base(region)) match {
           case Left(message) => Left(Fault.Memory(message))
           case Right(offset) => memory.atomicModifyValue(region, offset, size)(update)
         }
@@ -151,7 +155,7 @@ private trait BenchmarkAddressSpace extends AddressSpace { self: Memory =>
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def mappedIndex(
       address: GuestAddress,
-      size: NonNegativeInt,
+      size: NonNegative[Int],
       regions: IndexedSeq[(MemoryRegion, Long)]
   ): Int = {
     val relative = address.raw - AddressBase

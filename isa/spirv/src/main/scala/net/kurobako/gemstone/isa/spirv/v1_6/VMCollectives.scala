@@ -51,7 +51,7 @@ private[v1_6] object VMCollectives {
     case Barrier(memoryScope: Int, semantics: Long)
   }
 
-  final case class Request(
+  case class Request(
       kind: Kind,
       function: Int,
       pc: Int,

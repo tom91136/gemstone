@@ -1,16 +1,17 @@
 package net.kurobako.gemstone.vm
 
-import net.kurobako.gemstone.{NonNegativeLong, Vec}
+import net.kurobako.gemstone.Constraint.NonNegative
+import net.kurobako.gemstone.Vec
 
 trait Event
 
 object Event {
-  final case class Print(format: String, arguments: Vec[PrintArgument]) extends Event
-  final case class PointerRelocation(
+  case class Print(format: String, arguments: Vec[PrintArgument]) extends Event
+  case class PointerRelocation(
       source: MemoryRegion,
-      sourceOffset: NonNegativeLong,
+      sourceOffset: NonNegative[Long],
       target: MemoryRegion,
-      targetOffset: NonNegativeLong
+      targetOffset: NonNegative[Long]
   ) extends Event
 
   enum PrintArgument {

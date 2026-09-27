@@ -1,10 +1,12 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.Bits
-import net.kurobako.gemstone.binary.IntFieldWidth
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.binary.ScalarByteWidth
 import EncodingConstants.*
 import Metadata.*
 import Program.*
@@ -17,10 +19,10 @@ import cats.syntax.all.*
 object Binary {
   enum CodecError {
     case WrongFamily(target: Target, expected: Family)
-    case UnsupportedInstruction(opcode: Opcode, target: Target)
-    case UnsupportedFormat(opcode: Opcode, target: Target, formats: Vec[String])
-    case UnsupportedOperandSyntax(opcode: Opcode, target: Target, operands: Vec[Operand])
-    case AmbiguousInstruction(opcode: Opcode, target: Target)
+    case UnsupportedInstruction(opcode: NonEmptyString, target: Target)
+    case UnsupportedFormat(opcode: NonEmptyString, target: Target, formats: Vec[String])
+    case UnsupportedOperandSyntax(opcode: NonEmptyString, target: Target, operands: Vec[Operand])
+    case AmbiguousInstruction(opcode: NonEmptyString, target: Target)
     case InvalidOperand(message: String)
     case InvalidEncoding(message: String)
   }
@@ -67,7 +69,7 @@ object Binary {
             val word          = SOPPEncodingPrefix |
               ((definition.opcode.toLong & 0x7fL) << SOPPOpcodeShift) |
               (value & immediateMask)
-            LittleEndian.toVec(word, ScalarByteWidth.Dword)
+            LittleEndian.toVec(word, 4)
           }
       }
   }
@@ -78,11 +80,11 @@ object Binary {
   ): Either[CodecError, Instruction] =
     if (bytes.size != 4) Left(CodecError.InvalidEncoding(s"SOPP is exactly four bytes, found ${bytes.size}"))
     else {
-      val word = LittleEndian.decode(bytes, 0, ScalarByteWidth.Dword)
+      val word = LittleEndian.decode(bytes, 0, 4)
       if ((word & SOPPMask) != SOPPEncodingPrefix)
         Left(CodecError.InvalidEncoding(f"not a SOPP word: 0x$word%08x"))
       else {
-        val opcode  = Bits.unsignedIntField(word, SOPPOpcodeShift, IntFieldWidth(7))
+        val opcode  = Bits.unsignedIntField(word, SOPPOpcodeShift, 7)
         val matches = Instruction.definitions.filter(definition =>
           encodingsFor(definition, target).exists(info => info.format.raw == "SOPP" && info.opcode == opcode)
         )

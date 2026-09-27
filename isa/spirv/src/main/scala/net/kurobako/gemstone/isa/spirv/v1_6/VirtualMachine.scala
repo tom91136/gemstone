@@ -1,7 +1,10 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.{NonNegativeLong, PositiveLong, Vec}
-import net.kurobako.gemstone.isa.{GlobalName, KernelMetadata, KernelName}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.isa.KernelMetadata
 import net.kurobako.gemstone.vm.{
   Event,
   Fault,
@@ -35,30 +38,30 @@ final class VirtualMachine(
     VMInterpreter.execute(program, task, memory, control, scheduler, observer)
       .map(_ => Result(control.usedInstructions))
 
-  def kernelNames(program: LoadedProgram): Vec[KernelName] =
+  def kernelNames(program: LoadedProgram): Vec[NonEmptyString] =
     VMInterpreter.kernelNames(program)
 
   def kernel(
       program: LoadedProgram,
-      name: KernelName
+      name: NonEmptyString
   ): Either[Fault, KernelMetadata] =
     VMInterpreter.kernelMetadata(program, name)
 
-  def global(program: LoadedProgram, name: GlobalName): Either[Fault, (NonNegativeLong, Vec[Byte])] =
+  def global(program: LoadedProgram, name: NonEmptyString): Either[Fault, (NonNegative[Long], Vec[Byte])] =
     VMInterpreter.globalImage(program, name.raw).map { case (_, bytes) =>
-      NonNegativeLong.unsafe(bytes.length.toLong) -> Vec.from(bytes)
+      NonNegative.unsafe(bytes.length.toLong) -> Vec.from(bytes)
     }
 
   def bindGlobal(
       program: LoadedProgram,
-      name: GlobalName,
+      name: NonEmptyString,
       region: MemoryRegion,
-      offset: NonNegativeLong,
-      regionSize: PositiveLong,
+      offset: NonNegative[Long],
+      regionSize: Positive[Long],
       memory: Memory
   ): Either[Fault, Unit] =
     VMInterpreter.globalImage(program, name.raw).flatMap { case (id, initial) =>
-      if (offset.raw > regionSize.raw || initial.length.toLong > (regionSize.toNonNegative - offset).raw)
+      if (offset.raw > regionSize.raw || initial.length.toLong > (regionSize.widen[NonNegative[Long]] - offset).raw)
         Left(Fault.Memory(s"SPIR-V global '$name' exceeds the bound allocation"))
       else memory.write(region, offset, Vec.from(initial)).map { _ =>
         val _ = program.boundGlobals.put(id, program.GlobalBinding(region, offset.raw, memory))
@@ -68,15 +71,15 @@ final class VirtualMachine(
 
   def writeGlobal(
       program: LoadedProgram,
-      name: GlobalName,
-      offset: NonNegativeLong,
+      name: NonEmptyString,
+      offset: NonNegative[Long],
       bytes: Vec[Byte]
   ): Either[Fault, Unit] =
     VMInterpreter.globalImage(program, name.raw).flatMap { case (id, initial) =>
       program.boundGlobals.get(id).toRight(Fault.Memory(s"SPIR-V global '$name' is not bound")).flatMap { binding =>
         if (offset.raw > initial.length || bytes.length > initial.length - offset.raw)
           Left(Fault.Memory(s"SPIR-V global '$name' write exceeds its storage"))
-        else binding.memory.write(binding.region, NonNegativeLong.unsafe(binding.offset + offset.raw), bytes)
+        else binding.memory.write(binding.region, NonNegative.unsafe(binding.offset + offset.raw), bytes)
       }
     }
 

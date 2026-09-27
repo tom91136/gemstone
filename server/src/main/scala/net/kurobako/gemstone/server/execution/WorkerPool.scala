@@ -1,9 +1,11 @@
 package net.kurobako.gemstone.server.execution
 
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.launcher.EnvironmentNames
 import net.kurobako.gemstone.server.Throwables
-import net.kurobako.gemstone.{NonNegativeLong, PlatformTime, PositiveInt}
+import net.kurobako.gemstone.PlatformTime
 import net.kurobako.gemstone.vm.{Fault, Scheduler}
 
 import java.util.concurrent.locks.ReentrantLock
@@ -15,15 +17,15 @@ import scala.util.control.NonFatal
   * threshold low.
   */
 final class WorkerPool(
-    val parallelism: PositiveInt,
+    val parallelism: Positive[Int],
     minGroups: Long = 16L,
     minWorkItems: Long = 64L,
     trace: Boolean = EnvironmentNames.traceEnabled(sys.env, "perf")
 ) extends Scheduler with AutoCloseable {
   private final class Job(
-      val count: NonNegativeLong,
+      val count: NonNegative[Long],
       val grain: Int,
-      val task: NonNegativeLong => Either[Fault, Unit]
+      val task: NonNegative[Long] => Either[Fault, Unit]
   ) {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var next = 0L
@@ -57,8 +59,8 @@ final class WorkerPool(
   }
 
   private def enqueue(
-      count: NonNegativeLong,
-      task: NonNegativeLong => Either[Fault, Unit]
+      count: NonNegative[Long],
+      task: NonNegative[Long] => Either[Fault, Unit]
   ): Job = lock.withLock {
     if (closed) throw java.util.concurrent.RejectedExecutionException("execution pool is closed")
     val job = Job(count, grainFor(count.raw), task)
@@ -94,7 +96,7 @@ final class WorkerPool(
     try {
       var offset = 0
       while (offset < length && outcome.isRight) {
-        outcome = job.task(NonNegativeLong.unsafe(start + offset.toLong))
+        outcome = job.task(NonNegative.unsafe(start + offset.toLong))
         offset += 1
       }
     } catch {
@@ -140,15 +142,15 @@ final class WorkerPool(
   }
 
   override def schedule(runnable: Runnable): Unit = {
-    val _ = enqueue(NonNegativeLong(1L), _ => { runnable.run(); Right(()) })
+    val _ = enqueue(1L, _ => { runnable.run(); Right(()) })
   }
 
-  override def shouldParallel(taskCount: NonNegativeLong, workItemsPerTask: NonNegativeLong): Boolean =
+  override def shouldParallel(taskCount: NonNegative[Long], workItemsPerTask: NonNegative[Long]): Boolean =
     parallelism.raw > 1 && taskCount.raw > 1L &&
       (taskCount.raw >= minGroups || workItemsPerTask.raw >= minWorkItems)
 
-  override def parallelFor(taskCount: NonNegativeLong)(
-      task: NonNegativeLong => Either[Fault, Unit]
+  override def parallelFor(taskCount: NonNegative[Long])(
+      task: NonNegative[Long] => Either[Fault, Unit]
   ): Either[Fault, Unit] = {
     val started  = if (trace) PlatformTime.monotonicNanos else 0L
     val enqueued =
@@ -188,15 +190,15 @@ object WorkerPool {
   private val Maximum = 64
 
   def fromEnvironment(environment: Map[String, String]): WorkerPool = {
-    val available               = hostBound
-    val configured: PositiveInt = environment.get(EnvironmentName) match {
+    val available                 = hostBound
+    val configured: Positive[Int] = environment.get(EnvironmentName) match {
       // Leave a small amount of host capacity for RPC, launcher, and GC work;
       // the remaining logical CPUs are available to the bounded interpreter.
       case None        => defaultParallelism
       case Some(value) =>
         value.toIntOption
           .toRight(s"$EnvironmentName must be a positive integer: $value")
-          .flatMap(PositiveInt.either(_).left.map(_ => s"$EnvironmentName must be positive: $value"))
+          .flatMap(Positive.either(_).left.map(_ => s"$EnvironmentName must be positive: $value"))
           .fold(message => throw IllegalArgumentException(message), value => value)
     }
     if (configured.raw > available.raw)
@@ -209,9 +211,9 @@ object WorkerPool {
     )
   }
 
-  private def hostBound: PositiveInt =
-    PositiveInt.unsafe(math.max(1, math.min(Maximum, sys.runtime.availableProcessors())))
+  private def hostBound: Positive[Int] =
+    Positive.unsafe(math.max(1, math.min(Maximum, sys.runtime.availableProcessors())))
 
-  private def defaultParallelism: PositiveInt =
-    PositiveInt.unsafe(math.max(1, hostBound.raw - 2))
+  private def defaultParallelism: Positive[Int] =
+    Positive.unsafe(math.max(1, hostBound.raw - 2))
 }

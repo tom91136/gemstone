@@ -1,22 +1,17 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Constraint.{IntBetween, OneOf}
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
 import scala.compiletime.{constValue, error}
 
 import Program.*
 
 import net.kurobako.gemstone.NonEmptyVec
-import net.kurobako.gemstone.NonNegativeInt
-import net.kurobako.gemstone.PositiveInt
 import net.kurobako.gemstone.Vec
-
-import net.kurobako.gemstone.binary.{
-  BitWidth as BinaryBitWidth,
-  ByteAlignedBitWidth,
-  FloatingPointWidth,
-  LittleEndian,
-  ScalarByteWidth
-}
-import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.binary.LittleEndian
+import net.kurobako.gemstone.Constraint.MultipleIn
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.vm.LaunchGeometry.Axis
 
@@ -32,14 +27,14 @@ private[v9_3] object VMIR {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): BitWidth =
-      inline if constValue[A] >= 8 && constValue[A] <= 64 && constValue[A] % 8 == 0 then value
+      inline if (constValue[A] >= 8 && constValue[A] <= 64 && constValue[A] % 8 == 0) value
       else error("bit width must be a multiple of 8 between 8 and 64")
 
     extension (width: BitWidth) {
-      inline def raw: Int                                          = width
-      private[v9_3] def asBitWidth: BinaryBitWidth                 = BinaryBitWidth.unsafe(width)
-      private[v9_3] def asByteAlignedBitWidth: ByteAlignedBitWidth = ByteAlignedBitWidth.unsafe(width)
-      private[v9_3] def asFloatingPointWidth: FloatingPointWidth   = FloatingPointWidth.unsafe(width)
+      inline def raw: Int                                           = width
+      private[v9_3] def asBitWidth: IntBetween[1, 64]               = IntBetween.unsafe[1, 64](width)
+      private[v9_3] def asByteAlignedBitWidth: MultipleIn[0, 64, 8] = MultipleIn.unsafe(width)
+      private[v9_3] def asFloatingPointWidth: OneOf[(16, 32, 64)]   = OneOf.unsafe[(16, 32, 64)](width)
     }
   }
 
@@ -53,13 +48,13 @@ private[v9_3] object VMIR {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): FloatWidth =
-      inline if constValue[A] == 16 || constValue[A] == 32 || constValue[A] == 64 then value
+      inline if (constValue[A] == 16 || constValue[A] == 32 || constValue[A] == 64) value
       else error("float width must be 16, 32, or 64")
 
     extension (width: FloatWidth) {
-      inline def raw: Int                                          = width
-      private[v9_3] def asBitWidth: BinaryBitWidth                 = BinaryBitWidth.unsafe(width)
-      private[v9_3] def asByteAlignedBitWidth: ByteAlignedBitWidth = ByteAlignedBitWidth.unsafe(width)
+      inline def raw: Int                                           = width
+      private[v9_3] def asBitWidth: IntBetween[1, 64]               = IntBetween.unsafe[1, 64](width)
+      private[v9_3] def asByteAlignedBitWidth: MultipleIn[0, 64, 8] = MultipleIn.unsafe(width)
     }
   }
 
@@ -72,22 +67,22 @@ private[v9_3] object VMIR {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): PartWidth =
-      inline if constValue[A] == 16 || constValue[A] == 32 then value else error("part width must be 16 or 32")
+      inline if (constValue[A] == 16 || constValue[A] == 32) value else error("part width must be 16 or 32")
 
     extension (width: PartWidth) {
-      inline def raw: Int                          = width
-      private[v9_3] def asBitWidth: BinaryBitWidth = BinaryBitWidth.unsafe(width)
-      private[v9_3] def combined: BitWidth         = BitWidth.unsafe(width * 2)
+      inline def raw: Int                             = width
+      private[v9_3] def asBitWidth: IntBetween[1, 64] = IntBetween.unsafe[1, 64](width)
+      private[v9_3] def combined: BitWidth            = BitWidth.unsafe(width * 2)
     }
   }
 
   enum Value {
-    case Register(name: RegisterName)
+    case Register(name: NonEmptyString)
     case RegisterSlot(index: Int)
-    case Predicate(name: RegisterName)
+    case Predicate(name: NonEmptyString)
     case PredicateSlot(index: Int)
-    case Function(name: FunctionName)
-    case Symbol(name: SymbolName)
+    case Function(name: NonEmptyString)
+    case Symbol(name: NonEmptyString)
     case Immediate(value: Long)
     case Address(base: Value, offset: Long)
     case LaneId
@@ -255,41 +250,41 @@ private[v9_3] object VMIR {
   }
 
   enum Instruction(private val opcodeText: String) {
-    final val opcode: Opcode = Opcode.unsafe(opcodeText)
+    final val opcode: NonEmptyString = NonEmptyString.unsafe(opcodeText)
 
     case LoadParameter(
-        destinations: Vec[RegisterName],
-        parameter: ParameterName,
-        offset: NonNegativeInt,
+        destinations: Vec[NonEmptyString],
+        parameter: NonEmptyString,
+        offset: NonNegative[Int],
         elementWidth: BitWidth,
         signed: Boolean
     ) extends Instruction(s"ld.param.${if (signed) "s" else "u"}$elementWidth")
 
-    case StoreParameter(parameter: ParameterName, offset: NonNegativeInt, source: Value, elementWidth: BitWidth)
+    case StoreParameter(parameter: NonEmptyString, offset: NonNegative[Int], source: Value, elementWidth: BitWidth)
         extends Instruction(s"st.param.u$elementWidth")
 
-    case LoadParameterIndirect(destination: RegisterName, address: Value, width: BitWidth, signed: Boolean)
+    case LoadParameterIndirect(destination: NonEmptyString, address: Value, width: BitWidth, signed: Boolean)
         extends Instruction(s"ld.param.${if (signed) "s" else "u"}$width")
 
     case LoadParameterIndirectVector(
-        destinations: Vec[RegisterName],
+        destinations: Vec[NonEmptyString],
         address: Value,
         width: BitWidth,
         signed: Boolean
     ) extends Instruction(s"ld.param.v${destinations.size}.${if (signed) "s" else "u"}$width")
 
-    case Move(destination: RegisterName, source: Value, width: BitWidth)
+    case Move(destination: NonEmptyString, source: Value, width: BitWidth)
         extends Instruction(s"mov.u$width")
 
-    case MovePredicate(destination: RegisterName, source: Value) extends Instruction("mov.pred")
+    case MovePredicate(destination: NonEmptyString, source: Value) extends Instruction("mov.pred")
 
-    case MoveSplit(destinations: Vec[RegisterName], source: Value, partWidth: PartWidth)
+    case MoveSplit(destinations: Vec[NonEmptyString], source: Value, partWidth: PartWidth)
         extends Instruction(s"mov.b${partWidth * 2}")
 
-    case MoveCombine(destination: RegisterName, sources: Vec[Value], partWidth: PartWidth)
+    case MoveCombine(destination: NonEmptyString, sources: Vec[Value], partWidth: PartWidth)
         extends Instruction(s"mov.b${partWidth * 2}")
 
-    case IntegerUnary(operation: IntegerUnaryOperation, destination: RegisterName, source: Value, width: BitWidth)
+    case IntegerUnary(operation: IntegerUnaryOperation, destination: NonEmptyString, source: Value, width: BitWidth)
         extends Instruction(operation match {
           case IntegerUnaryOperation.Negate           => s"neg.b$width"
           case IntegerUnaryOperation.Absolute         => s"abs.b$width"
@@ -300,7 +295,7 @@ private[v9_3] object VMIR {
         })
 
     case BitFind(
-        destination: RegisterName,
+        destination: NonEmptyString,
         source: Value,
         width: BitWidth,
         signed: Boolean,
@@ -308,7 +303,7 @@ private[v9_3] object VMIR {
     ) extends Instruction(s"bfind.${if (shiftAmount) "shiftamt." else ""}${if (signed) "s" else "u"}$width")
 
     case DotProduct4(
-        destination: RegisterName,
+        destination: NonEmptyString,
         left: Value,
         right: Value,
         addend: Value,
@@ -318,7 +313,7 @@ private[v9_3] object VMIR {
 
     case IntegerBinary(
         operation: IntegerOperation,
-        destination: RegisterName,
+        destination: NonEmptyString,
         left: Value,
         right: Value,
         width: BitWidth
@@ -346,7 +341,7 @@ private[v9_3] object VMIR {
         )
 
     case FunnelShift(
-        destination: RegisterName,
+        destination: NonEmptyString,
         low: Value,
         high: Value,
         amount: Value,
@@ -355,7 +350,7 @@ private[v9_3] object VMIR {
     ) extends Instruction(s"shf.${if (left) "l" else "r"}.${if (clamp) "clamp" else "wrap"}.b32")
 
     case IntegerAddWithCarry(
-        destination: RegisterName,
+        destination: NonEmptyString,
         left: Value,
         right: Value,
         width: BitWidth,
@@ -364,7 +359,7 @@ private[v9_3] object VMIR {
     ) extends Instruction(s"add${if (carryIn) "c" else ""}${if (carryOut) ".cc" else ""}.u$width")
 
     case IntegerSubWithBorrow(
-        destination: RegisterName,
+        destination: NonEmptyString,
         left: Value,
         right: Value,
         width: BitWidth,
@@ -373,7 +368,7 @@ private[v9_3] object VMIR {
     ) extends Instruction(s"sub${if (borrowIn) "c" else ""}${if (borrowOut) ".cc" else ""}.u$width")
 
     case MultiplyAdd(
-        destination: RegisterName,
+        destination: NonEmptyString,
         left: Value,
         right: Value,
         addend: Value,
@@ -385,7 +380,7 @@ private[v9_3] object VMIR {
 
     case FloatBinary(
         operation: FloatOperation,
-        destination: RegisterName,
+        destination: NonEmptyString,
         left: Value,
         right: Value,
         width: FloatWidth
@@ -393,7 +388,7 @@ private[v9_3] object VMIR {
 
     case FloatBinaryPacked(
         operation: FloatOperation,
-        destination: RegisterName,
+        destination: NonEmptyString,
         left: Value,
         right: Value,
         bf16: Boolean
@@ -401,7 +396,7 @@ private[v9_3] object VMIR {
           s"${operation.toString.map(_.toLower)}.${if (bf16) "bf16x2" else "f16x2"}"
         )
 
-    case FloatUnary(operation: FloatUnaryOperation, destination: RegisterName, source: Value, width: FloatWidth)
+    case FloatUnary(operation: FloatUnaryOperation, destination: NonEmptyString, source: Value, width: FloatWidth)
         extends Instruction(operation match {
           case FloatUnaryOperation.Negate               => s"neg.f$width"
           case FloatUnaryOperation.Absolute             => s"abs.f$width"
@@ -416,18 +411,18 @@ private[v9_3] object VMIR {
         })
 
     case FusedMultiplyAdd(
-        destination: RegisterName,
+        destination: NonEmptyString,
         left: Value,
         right: Value,
         addend: Value,
         width: FloatWidth
     ) extends Instruction(s"fma.f$width")
 
-    case FusedMultiplyAddBf16(destination: RegisterName, left: Value, right: Value, addend: Value)
+    case FusedMultiplyAddBf16(destination: NonEmptyString, left: Value, right: Value, addend: Value)
         extends Instruction("fma.rn.bf16")
 
     case FusedMultiplyAddPacked(
-        destination: RegisterName,
+        destination: NonEmptyString,
         left: Value,
         right: Value,
         addend: Value,
@@ -435,8 +430,8 @@ private[v9_3] object VMIR {
     ) extends Instruction(s"fma.rn.${if (bf16) "bf16x2" else "f16x2"}")
 
     case ShuffleDown(
-        destination: RegisterName,
-        validity: Option[RegisterName],
+        destination: NonEmptyString,
+        validity: Option[NonEmptyString],
         source: Value,
         delta: Value,
         clamp: Value,
@@ -445,8 +440,8 @@ private[v9_3] object VMIR {
     ) extends Instruction(s"shfl.sync.down.b$width")
 
     case ShuffleUp(
-        destination: RegisterName,
-        validity: Option[RegisterName],
+        destination: NonEmptyString,
+        validity: Option[NonEmptyString],
         source: Value,
         delta: Value,
         clamp: Value,
@@ -455,8 +450,8 @@ private[v9_3] object VMIR {
     ) extends Instruction(s"shfl.sync.up.b$width")
 
     case ShuffleIndex(
-        destination: RegisterName,
-        validity: Option[RegisterName],
+        destination: NonEmptyString,
+        validity: Option[NonEmptyString],
         source: Value,
         index: Value,
         clamp: Value,
@@ -465,8 +460,8 @@ private[v9_3] object VMIR {
     ) extends Instruction(s"shfl.sync.idx.b$width")
 
     case ShuffleBfly(
-        destination: RegisterName,
-        validity: Option[RegisterName],
+        destination: NonEmptyString,
+        validity: Option[NonEmptyString],
         source: Value,
         index: Value,
         clamp: Value,
@@ -474,18 +469,18 @@ private[v9_3] object VMIR {
         width: BitWidth
     ) extends Instruction(s"shfl.sync.bfly.b$width")
 
-    case VoteBallot(destination: RegisterName, predicate: RegisterName, memberMask: Value)
+    case VoteBallot(destination: NonEmptyString, predicate: NonEmptyString, memberMask: Value)
         extends Instruction("vote.sync.ballot.b32")
 
     case VotePredicate(
-        destination: RegisterName,
-        predicate: RegisterName,
+        destination: NonEmptyString,
+        predicate: NonEmptyString,
         memberMask: Value,
         operation: VoteOperation
     ) extends Instruction(s"vote.sync.${operation.toString.map(_.toLower)}.pred")
 
     case BitFieldExtract(
-        destination: RegisterName,
+        destination: NonEmptyString,
         source: Value,
         start: Value,
         widthValue: Value,
@@ -494,7 +489,7 @@ private[v9_3] object VMIR {
     ) extends Instruction(s"bfe.${if (signed) "s" else "u"}$width")
 
     case BitFieldInsert(
-        destination: RegisterName,
+        destination: NonEmptyString,
         insertValue: Value,
         baseValue: Value,
         bitPosition: Value,
@@ -502,11 +497,11 @@ private[v9_3] object VMIR {
         width: BitWidth
     ) extends Instruction(s"bfi.b$width")
 
-    case BitMask(destination: RegisterName, start: Value, widthValue: Value, mode: BitMaskMode)
+    case BitMask(destination: NonEmptyString, start: Value, widthValue: Value, mode: BitMaskMode)
         extends Instruction(s"bmsk.${mode.mnemonic}.b32")
 
     case BytePermute(
-        destination: RegisterName,
+        destination: NonEmptyString,
         left: Value,
         right: Value,
         control: Value,
@@ -514,15 +509,15 @@ private[v9_3] object VMIR {
     ) extends Instruction(s"prmt.b32${if (mode == BytePermuteMode.Default) "" else s".${mode.suffix}"}")
 
     case Select(
-        destination: RegisterName,
+        destination: NonEmptyString,
         whenTrue: Value,
         whenFalse: Value,
-        predicate: RegisterName,
+        predicate: NonEmptyString,
         width: BitWidth
     ) extends Instruction(s"selp.b$width")
 
     case Convert(
-        destination: RegisterName,
+        destination: NonEmptyString,
         source: Value,
         sourceType: ConversionType,
         destinationType: ConversionType,
@@ -531,16 +526,16 @@ private[v9_3] object VMIR {
           s"cvt.${rounding.map(_.mnemonic + ".").getOrElse("")}${destinationType.mnemonic}.${sourceType.mnemonic}"
         )
 
-    case LoadGlobal(destination: RegisterName, address: Value, width: BitWidth, signed: Boolean)
+    case LoadGlobal(destination: NonEmptyString, address: Value, width: BitWidth, signed: Boolean)
         extends Instruction(s"ld.global.${if (signed) "s" else "u"}$width")
 
-    case LoadGeneric(destination: RegisterName, address: Value, width: BitWidth, signed: Boolean)
+    case LoadGeneric(destination: NonEmptyString, address: Value, width: BitWidth, signed: Boolean)
         extends Instruction(s"ld.generic.${if (signed) "s" else "u"}$width")
 
-    case LoadGlobalVector(destinations: Vec[RegisterName], address: Value, width: BitWidth, signed: Boolean)
+    case LoadGlobalVector(destinations: Vec[NonEmptyString], address: Value, width: BitWidth, signed: Boolean)
         extends Instruction(s"ld.global.v${destinations.size}.${if (signed) "s" else "u"}$width")
 
-    case LoadGenericVector(destinations: Vec[RegisterName], address: Value, width: BitWidth, signed: Boolean)
+    case LoadGenericVector(destinations: Vec[NonEmptyString], address: Value, width: BitWidth, signed: Boolean)
         extends Instruction(s"ld.generic.v${destinations.size}.${if (signed) "s" else "u"}$width")
 
     case StoreGlobal(address: Value, source: Value, width: BitWidth)
@@ -552,16 +547,16 @@ private[v9_3] object VMIR {
     case StoreGenericVector(address: Value, sources: Vec[Value], width: BitWidth)
         extends Instruction(s"st.generic.v${sources.size}.u$width")
 
-    case LoadShared(destination: RegisterName, address: Value, width: BitWidth, signed: Boolean)
+    case LoadShared(destination: NonEmptyString, address: Value, width: BitWidth, signed: Boolean)
         extends Instruction(s"ld.shared.${if (signed) "s" else "u"}$width")
 
-    case LoadSharedVector(destinations: Vec[RegisterName], address: Value, width: BitWidth, signed: Boolean)
+    case LoadSharedVector(destinations: Vec[NonEmptyString], address: Value, width: BitWidth, signed: Boolean)
         extends Instruction(s"ld.shared.v${destinations.size}.${if (signed) "s" else "u"}$width")
 
-    case LoadLocal(destination: RegisterName, address: Value, width: BitWidth, signed: Boolean)
+    case LoadLocal(destination: NonEmptyString, address: Value, width: BitWidth, signed: Boolean)
         extends Instruction(s"ld.local.${if (signed) "s" else "u"}$width")
 
-    case LoadLocalVector(destinations: Vec[RegisterName], address: Value, width: BitWidth, signed: Boolean)
+    case LoadLocalVector(destinations: Vec[NonEmptyString], address: Value, width: BitWidth, signed: Boolean)
         extends Instruction(s"ld.local.v${destinations.size}.${if (signed) "s" else "u"}$width")
 
     case StoreShared(address: Value, source: Value, width: BitWidth)
@@ -579,7 +574,7 @@ private[v9_3] object VMIR {
     /** Synchronous model of the PTX asynchronous shared-memory copy. The emulator applies the copy at this instruction;
       * commit/wait operations below remain ordered no-ops because there is no separate copy engine.
       */
-    case AsyncCopy(destination: Value, source: Value, size: PositiveInt)
+    case AsyncCopy(destination: Value, source: Value, size: Positive[Int])
         extends Instruction("cp.async")
 
     case AsyncCommit extends Instruction("cp.async.commit_group")
@@ -592,7 +587,7 @@ private[v9_3] object VMIR {
     case Prefetch extends Instruction("prefetch")
 
     case SetPredicate(
-        destination: RegisterName,
+        destination: NonEmptyString,
         comparison: Comparison,
         kind: Char,
         left: Value,
@@ -601,38 +596,38 @@ private[v9_3] object VMIR {
     ) extends Instruction("setp")
 
     case PredicateCompare(
-        destination: RegisterName,
+        destination: NonEmptyString,
         comparison: Comparison,
-        left: RegisterName,
-        right: RegisterName
+        left: NonEmptyString,
+        right: NonEmptyString
     ) extends Instruction("setp.pred")
 
-    case PredicateUnary(destination: RegisterName, source: RegisterName)
+    case PredicateUnary(destination: NonEmptyString, source: NonEmptyString)
         extends Instruction("not.pred")
 
     case PredicateBinary(
         operation: PredicateOperation,
-        destination: RegisterName,
-        left: RegisterName,
-        right: RegisterName
+        destination: NonEmptyString,
+        left: NonEmptyString,
+        right: NonEmptyString
     ) extends Instruction(s"${operation.toString.map(_.toLower)}.pred")
 
     case Branch(target: Pc) extends Instruction("bra")
 
-    case BarrierSync(id: NonNegativeInt) extends Instruction("bar.sync")
+    case BarrierSync(id: NonNegative[Int]) extends Instruction("bar.sync")
 
     case BarrierReduce(
-        destination: RegisterName,
-        id: NonNegativeInt,
-        predicate: RegisterName,
+        destination: NonEmptyString,
+        id: NonNegative[Int],
+        predicate: NonEmptyString,
         operation: PredicateOperation
     ) extends Instruction(s"bar.red.${operation.toString.map(_.toLower)}.pred")
 
-    case AtomicAdd(destination: RegisterName, address: Value, source: Value, width: BitWidth, space: AtomicSpace)
+    case AtomicAdd(destination: NonEmptyString, address: Value, source: Value, width: BitWidth, space: AtomicSpace)
         extends Instruction(s"atom.${space.qualifier}add.u$width")
 
     case AtomicCompareExchange(
-        destination: RegisterName,
+        destination: NonEmptyString,
         address: Value,
         comparator: Value,
         source: Value,
@@ -641,7 +636,7 @@ private[v9_3] object VMIR {
     ) extends Instruction(s"atom.${space.qualifier}cas.b$width")
 
     case AtomicExchange(
-        destination: RegisterName,
+        destination: NonEmptyString,
         address: Value,
         source: Value,
         width: BitWidth,
@@ -649,7 +644,7 @@ private[v9_3] object VMIR {
     ) extends Instruction(s"atom.${space.qualifier}exch.b$width")
 
     case AtomicBinary(
-        destination: RegisterName,
+        destination: NonEmptyString,
         address: Value,
         source: Value,
         width: BitWidth,
@@ -659,14 +654,14 @@ private[v9_3] object VMIR {
           s"atom.${space.qualifier}${atomicBinaryOpcode(operation, width)}"
         )
 
-    case AtomicMin(destination: RegisterName, address: Value, source: Value, width: BitWidth, space: AtomicSpace)
+    case AtomicMin(destination: NonEmptyString, address: Value, source: Value, width: BitWidth, space: AtomicSpace)
         extends Instruction(s"atom.${space.qualifier}min.u$width")
 
-    case AtomicAddFloat(destination: RegisterName, address: Value, source: Value, width: FloatWidth)
+    case AtomicAddFloat(destination: NonEmptyString, address: Value, source: Value, width: FloatWidth)
         extends Instruction(s"atom.global.add.f$width")
 
     case WarpReduce(
-        destination: RegisterName,
+        destination: NonEmptyString,
         source: Value,
         memberMask: Value,
         operation: IntegerOperation,
@@ -677,7 +672,7 @@ private[v9_3] object VMIR {
 
     case WarpBarrier(memberMask: Value) extends Instruction("bar.warp.sync")
 
-    case Call(function: Value, returnParameters: Vec[ParameterName], parameters: Vec[ParameterName])
+    case Call(function: Value, returnParameters: Vec[NonEmptyString], parameters: Vec[NonEmptyString])
         extends Instruction("call")
 
     case Trap extends Instruction("trap")
@@ -685,37 +680,37 @@ private[v9_3] object VMIR {
     case Return extends Instruction("ret")
   }
 
-  final case class ExecutionPredicate(name: RegisterName, negated: Boolean)
+  case class ExecutionPredicate(name: NonEmptyString, negated: Boolean)
 
-  final case class PredicatedInstruction(instruction: Instruction, predication: Option[ExecutionPredicate]) {
-    def opcode: Opcode = instruction.opcode
+  case class PredicatedInstruction(instruction: Instruction, predication: Option[ExecutionPredicate]) {
+    def opcode: NonEmptyString = instruction.opcode
   }
 
-  final case class KernelParameter(name: ParameterName, widthBytes: PositiveInt, pointer: Boolean = false)
-  final case class Argument(bytes: NonEmptyVec[Byte])
+  case class KernelParameter(name: NonEmptyString, widthBytes: Positive[Int], pointer: Boolean = false)
+  case class Argument(bytes: NonEmptyVec[Byte])
 
-  final case class DeviceFunction(
-      name: FunctionName,
-      parameters: Vec[ParameterName],
-      parameterWidths: Vec[PositiveInt],
-      parameterOffsets: Vec[NonNegativeInt],
-      returnParameters: Vec[ParameterName],
+  case class DeviceFunction(
+      name: NonEmptyString,
+      parameters: Vec[NonEmptyString],
+      parameterWidths: Vec[Positive[Int]],
+      parameterOffsets: Vec[NonNegative[Int]],
+      returnParameters: Vec[NonEmptyString],
       program: ExecutableProgram[PredicatedInstruction],
-      sharedSymbols: Map[SymbolName, Long]
+      sharedSymbols: Map[NonEmptyString, Long]
   )
 
   object Argument {
     def fromLong(value: Long): Argument =
-      Argument(NonEmptyVec.unsafeFromVec(LittleEndian.toVec(value, ScalarByteWidth.Qword)))
+      Argument(NonEmptyVec.unsafeFromVec(LittleEndian.toVec(value, 8)))
   }
 
-  final case class Kernel(
-      name: KernelName,
+  case class Kernel(
+      name: NonEmptyString,
       parameters: Vec[KernelParameter],
       program: ExecutableProgram[PredicatedInstruction],
-      functions: Map[FunctionName, DeviceFunction] = Map.empty,
-      sharedSymbols: Map[SymbolName, Long] = Map.empty,
-      globalSymbols: Map[SymbolName, GuestAddress] = Map.empty,
+      functions: Map[NonEmptyString, DeviceFunction] = Map.empty,
+      sharedSymbols: Map[NonEmptyString, Long] = Map.empty,
+      globalSymbols: Map[NonEmptyString, GuestAddress] = Map.empty,
       registerChunkCount: Int = 96
   ) {
     def instructions: Vec[Instruction] = program.instructions.map(_.instruction)
@@ -730,7 +725,7 @@ private[v9_3] object VMIR {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): Pc =
-      inline if constValue[A] >= 0 then value else error("program counter must be positive or zero")
+      inline if (constValue[A] >= 0) value else error("program counter must be positive or zero")
 
     val Entry: Pc = 0
 
@@ -741,7 +736,7 @@ private[v9_3] object VMIR {
     }
   }
 
-  final case class ExecutableProgram[Instruction](instructions: Vec[Instruction]) {
+  case class ExecutableProgram[Instruction](instructions: Vec[Instruction]) {
     def size: Int = instructions.size
 
     def at(pc: Pc): Option[Instruction] = instructions.lift(pc)

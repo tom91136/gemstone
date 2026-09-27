@@ -1,7 +1,8 @@
 // Generated from pinned official headers by GenerateAPISurfaces. Regenerate with: sbt codegen
 package net.kurobako.gemstone.opencl
 
-import net.kurobako.gemstone.{NonEmptyString, PositiveInt}
+import net.kurobako.gemstone.Constraint.Positive
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.abi.ABI.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
@@ -93,7 +94,7 @@ object OpenCL {
   type unsigned_char = CValue["unsigned char"]
 
   val HeaderVersion: NonEmptyString = NonEmptyString("2026.05.29")
-  val FunctionCount: PositiveInt = PositiveInt(195)
+  val FunctionCount: Positive[Int] = 195
 }
 
 import OpenCL.*

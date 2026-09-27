@@ -10,10 +10,10 @@ import net.kurobako.gemstone.Vec.*
 
 /** Checked-in, readable subset of the pinned LLVM MC AMDGPU oracle. */
 object LLVMOracle {
-  final case class OracleCase(target: Target, assembly: String, bytes: Vec[Byte], source: String)
-  final case class OracleDiagnostic(target: Target, assembly: String, message: String, source: String)
+  case class OracleCase(target: Target, assembly: String, bytes: Vec[Byte], source: String)
+  case class OracleDiagnostic(target: Target, assembly: String, message: String, source: String)
 
-  private final case class Loaded(cases: Vec[OracleCase], diagnostics: Vec[OracleDiagnostic])
+  private case class Loaded(cases: Vec[OracleCase], diagnostics: Vec[OracleDiagnostic])
 
   private val Root = "/net/kurobako/gemstone/isa/amdgpu/llvm-oracle/"
 

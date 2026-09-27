@@ -1,13 +1,14 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import CodeObject.*
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
 
-import net.kurobako.gemstone.{NonNegativeInt, PositiveInt, Vec}
+import CodeObject.*
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.isa.KernelMetadata
-import net.kurobako.gemstone.isa.KernelName
-import net.kurobako.gemstone.isa.LinkageName
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.Constraint.NonEmptyString
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -15,10 +16,10 @@ import java.nio.charset.StandardCharsets
 
 /** AMDGPU MessagePack metadata from the ELF note already owned by the Scala code-object decoder. */
 object CodeObjectMetadata {
-  final case class HiddenArgument(valueKind: String, offset: Int, width: Int)
-  final case class KernelManifest(
-      name: KernelName,
-      symbol: LinkageName,
+  case class HiddenArgument(valueKind: String, offset: Int, width: Int)
+  case class KernelManifest(
+      name: NonEmptyString,
+      symbol: NonEmptyString,
       metadata: KernelMetadata,
       hiddenArguments: Vec[HiddenArgument]
   )
@@ -113,7 +114,7 @@ object CodeObjectMetadata {
     loop(start, Vec.empty).map(result => Option.when(result.nonEmpty)(result))
   }
 
-  private final case class ParameterFields(offset: Option[Int], width: Option[Int], valueKind: Option[String])
+  private case class ParameterFields(offset: Option[Int], width: Option[Int], valueKind: Option[String])
 
   private def decodeParameter(reader: Reader): Either[CodeObjectError, (KernelMetadata.Parameter, Option[String])] =
     reader.mapSize.flatMap { count =>
@@ -133,10 +134,10 @@ object CodeObjectMetadata {
           case (Some(offset), Some(width), Some(valueKind)) if width > 0 =>
             val allocation = Set("global_buffer", "by_reference", "queue").contains(valueKind)
             for {
-              refinedWidth <- PositiveInt.either(width).left.map(_ =>
+              refinedWidth <- Positive.either(width).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel argument width must be positive")
               )
-              refinedOffset <- NonNegativeInt.either(offset).left.map(_ =>
+              refinedOffset <- NonNegative.either(offset).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel argument offset must be non-negative")
               )
               _ <- Either.cond(
@@ -147,7 +148,7 @@ object CodeObjectMetadata {
             } yield KernelMetadata.Parameter(
               refinedWidth,
               refinedOffset,
-              if (allocation) KernelMetadata.ParameterKind.Memory else KernelMetadata.ParameterKind.Scalar,
+              if (allocation) KernelMetadata.ParameterKind.Allocation else KernelMetadata.ParameterKind.Scalar,
               containsPointers = !allocation
             ) -> Option.when(valueKind.startsWith("hidden_"))(valueKind)
           case _ => Left(CodeObjectError.Invalid("invalid AMDGPU kernel argument metadata"))
@@ -155,7 +156,7 @@ object CodeObjectMetadata {
       }
     }
 
-  private final case class KernelFields(
+  private case class KernelFields(
       name: Option[String],
       symbol: Option[String],
       argumentBlockSize: Option[Int],
@@ -190,16 +191,16 @@ object CodeObjectMetadata {
           case (Some(name), Some(symbol), Some(blockSize), Some(parameters)) =>
             val sorted = parameters.sortBy(_._1.offset)
             for {
-              refinedName <- KernelName.either(name).left.map(_ =>
+              refinedName <- NonEmptyString.either(name).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel name must be non-empty and contain no NUL")
               )
-              refinedSymbol <- LinkageName.either(symbol).left.map(_ =>
+              refinedSymbol <- NonEmptyString.either(symbol).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel symbol must be non-empty and contain no NUL")
               )
-              refinedBlockSize <- NonNegativeInt.either(blockSize).left.map(_ =>
+              refinedBlockSize <- NonNegative.either(blockSize).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernarg block size must be non-negative")
               )
-              refinedParameterCount <- NonNegativeInt.either(sorted.count(_._2.isEmpty)).left.map(_ =>
+              refinedParameterCount <- NonNegative.either(sorted.count(_._2.isEmpty)).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU explicit parameter count must be non-negative")
               )
               metadata <- KernelMetadata.validated(refinedBlockSize, refinedParameterCount, sorted.map(_._1))
@@ -217,15 +218,15 @@ object CodeObjectMetadata {
             )
           case (Some(name), Some(symbol), Some(0), None) =>
             for {
-              refinedName <- KernelName.either(name).left.map(_ =>
+              refinedName <- NonEmptyString.either(name).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel name must be non-empty and contain no NUL")
               )
-              refinedSymbol <- LinkageName.either(symbol).left.map(_ =>
+              refinedSymbol <- NonEmptyString.either(symbol).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel symbol must be non-empty and contain no NUL")
               )
               metadata <- KernelMetadata.validated(
-                NonNegativeInt.Zero,
-                NonNegativeInt.Zero,
+                0,
+                0,
                 Vec.empty[KernelMetadata.Parameter]
               )
                 .left.map { detail =>

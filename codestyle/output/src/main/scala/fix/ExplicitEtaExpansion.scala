@@ -1,7 +1,7 @@
 package fix
 
 object ExplicitEtaExpansion {
-  final case class Box(value: Int)
+  case class Box(value: Int)
 
   private def increment(value: Int): Int    = value + 1
   private val incrementFunction: Int => Int = value => value + 1

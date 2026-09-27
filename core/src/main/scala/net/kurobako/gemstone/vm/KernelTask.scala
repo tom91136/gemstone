@@ -1,15 +1,17 @@
 package net.kurobako.gemstone.vm
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveLong, WorkDimension}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.IntBetween
 
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 
-final case class KernelTask private (
-    kernelName: KernelName,
+case class KernelTask private (
+    kernelName: NonEmptyString,
     geometry: LaunchGeometry,
-    privateSegmentBytes: NonNegativeInt,
-    groupSegmentBytes: NonNegativeInt,
+    privateSegmentBytes: NonNegative[Int],
+    groupSegmentBytes: NonNegative[Int],
     arguments: Vec[KernelTask.Argument],
     pointerRelocations: Vec[KernelTask.PointerRelocation],
     discoverArgumentRelocations: Boolean
@@ -21,32 +23,32 @@ final case class KernelTask private (
 object KernelTask {
   enum Argument {
     case Scalar(bytes: Vec[Byte])
-    case Memory(region: MemoryRegion, offset: NonNegativeLong)
-    case Local(size: PositiveLong)
+    case Memory(region: MemoryRegion, offset: NonNegative[Long])
+    case Local(size: Positive[Long])
   }
 
   enum RelocationSource {
     case Memory(region: MemoryRegion)
-    case Argument(index: NonNegativeInt)
+    case Argument(index: NonNegative[Int])
   }
 
-  final case class PointerRelocation(
+  case class PointerRelocation(
       source: RelocationSource,
-      sourceOffset: NonNegativeLong,
+      sourceOffset: NonNegative[Long],
       target: MemoryRegion,
-      targetOffset: NonNegativeLong
+      targetOffset: NonNegative[Long]
   )
 
   def validated(
-      kernelName: KernelName,
+      kernelName: NonEmptyString,
       groupSize: LaunchGeometry.Dimensions,
       groupCount: LaunchGeometry.Dimensions,
       arguments: Vec[Argument],
       globalSize: Option[LaunchGeometry.GlobalDimensions] = None,
-      privateSegmentBytes: NonNegativeInt = NonNegativeInt.Zero,
-      groupSegmentBytes: NonNegativeInt = NonNegativeInt.Zero,
+      privateSegmentBytes: NonNegative[Int] = 0,
+      groupSegmentBytes: NonNegative[Int] = 0,
       pointerRelocations: Vec[PointerRelocation] = Vec.empty,
-      workDim: WorkDimension = WorkDimension.Three,
+      workDim: IntBetween[1, 3] = 3,
       globalOffset: LaunchGeometry.Coordinates = LaunchGeometry.Coordinates.origin,
       discoverArgumentRelocations: Boolean = false
   ): Either[String, KernelTask] =

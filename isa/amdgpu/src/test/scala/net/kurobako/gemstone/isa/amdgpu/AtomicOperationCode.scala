@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import net.kurobako.gemstone.Vec
 
 /** Exact machine code embedded directly so JVM and Native tests use the same fixture. */
@@ -38,7 +40,7 @@ private[amdgpu] object AtomicOperationCode {
     ("inc", 64, true) ->
       "000204f4000000fa000308f4080000fa7fc08cbfff02007e78563412ff02027e103254768002047e0c02087e0d020a7e0e020c7e0f020e7e008071dd02040800703f8cbf0202047e830404349004044a008074dc02000800000081bf"
   )
-  // Opcode nibbles for the 32-bit flat atomics, keyed by their fixture name.
+  // NonEmptyString nibbles for the 32-bit flat atomics, keyed by their fixture name.
   private val flatOpcodeBytes = Map(
     "flatswap" -> 0xc0,
     "flatadd"  -> 0xc8,

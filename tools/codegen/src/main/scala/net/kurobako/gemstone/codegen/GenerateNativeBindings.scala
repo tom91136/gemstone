@@ -14,22 +14,22 @@ import upickle.default.read
 
 /** Generates native ABI declarations and implementation checks. */
 object GenerateNativeBindings {
-  private final case class Request(output: Path, manifest: Path)
+  private case class Request(output: Path, manifest: Path)
   private type GeneratedFile = (path: Path, content: String)
-  private final case class Platform(
+  private case class Platform(
       name: String,
       surfaces: Vector[String],
       preamble: Vector[String],
       layout: Option[LayoutSpec] = None
   )
-  private final case class FieldLayout(mirror: String, vendor: String)
-  private final case class StructLayout(
+  private case class FieldLayout(mirror: String, vendor: String)
+  private case class StructLayout(
       mirror: String,
       vendor: String,
       fields: Vector[FieldLayout],
       prefix: Boolean = false
   )
-  private final case class LayoutSpec(header: String, defines: Vector[String], structs: Vector[StructLayout])
+  private case class LayoutSpec(header: String, defines: Vector[String], structs: Vector[StructLayout])
 
   private def layoutFields(pairs: (String, String)*): Vector[FieldLayout] =
     pairs.toVector.map { case (mirror, vendor) => FieldLayout(mirror, vendor) }

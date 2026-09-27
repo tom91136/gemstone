@@ -185,7 +185,7 @@ private[v1_6] object VMInvocation {
     }
   }
 
-  final case class CallFrame(
+  case class CallFrame(
       function: Function,
       pc: Int,
       currentLabel: Int,
@@ -194,7 +194,7 @@ private[v1_6] object VMInvocation {
       destination: Int
   )
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  final case class Invocation(
+  case class Invocation(
       var groupX: Long,
       var groupY: Long,
       var groupZ: Long,
@@ -266,7 +266,7 @@ private[v1_6] object VMInvocation {
       globalOffsetX = geometry.globalOffset.x.raw.toLong
       globalOffsetY = geometry.globalOffset.y.raw.toLong
       globalOffsetZ = geometry.globalOffset.z.raw.toLong
-      workDim = geometry.workDim.raw
+      workDim = geometry.workDim
       numWorkgroupsX = geometry.groupCount.x.raw.toLong
       numWorkgroupsY = geometry.groupCount.y.raw.toLong
       numWorkgroupsZ = geometry.groupCount.z.raw.toLong

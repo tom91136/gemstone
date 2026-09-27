@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.benchmarks
 
-import net.kurobako.gemstone.{ByteKey, PlatformTime, PositiveInt, Vec}
+import net.kurobako.gemstone.Constraint.Positive
+import net.kurobako.gemstone.{ByteKey, PlatformTime, Vec}
 
 import cats.syntax.all.*
 import com.monovore.decline.Opts
@@ -13,14 +14,14 @@ object ProgramImageKeyBenchmark {
     case Raw, Cached
   }
 
-  private final case class Options(bytes: PositiveInt, lookups: PositiveInt, key: KeyMode)
+  private case class Options(bytes: Positive[Int], lookups: Positive[Int], key: KeyMode)
 
   private val name    = BenchmarkName("program-image-key")
   private val options = (
     Opts.option[Int]("bytes", help = "Program image size").withDefault(4 * 1024 * 1024)
-      .validate("image size must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("image size must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[Int]("lookups", help = "Measured cache lookups").withDefault(100000)
-      .validate("lookup count must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("lookup count must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[String]("key", help = "Cache key implementation: cached or raw").withDefault("cached")
       .validate("key must be cached or raw")(value => value == "cached" || value == "raw")
       .map(value => if (value == "raw") KeyMode.Raw else KeyMode.Cached)
@@ -36,7 +37,7 @@ object ProgramImageKeyBenchmark {
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def measure[K](key: K, lookups: PositiveInt, bytes: PositiveInt, mode: KeyMode): Unit = {
+  private def measure[K](key: K, lookups: Positive[Int], bytes: Positive[Int], mode: KeyMode): Unit = {
     val cache    = mutable.HashMap(key -> 1)
     val started  = PlatformTime.monotonicNanos
     var index    = 0

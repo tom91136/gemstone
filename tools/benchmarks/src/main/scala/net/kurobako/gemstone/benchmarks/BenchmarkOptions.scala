@@ -1,10 +1,9 @@
 package net.kurobako.gemstone.benchmarks
 
-import net.kurobako.gemstone.NonNegativeInt
-import net.kurobako.gemstone.PositiveInt
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
 
-final case class BenchmarkOptions(
-    warmups: NonNegativeInt,
-    samples: PositiveInt,
+case class BenchmarkOptions(
+    warmups: NonNegative[Int],
+    samples: Positive[Int],
     invocation: BenchmarkInvocation
 )

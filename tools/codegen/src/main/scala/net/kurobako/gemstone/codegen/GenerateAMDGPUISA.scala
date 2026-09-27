@@ -14,7 +14,7 @@ import scala.util.Using
 
 /** Builds the normalized AMDGPU instruction catalog from pinned AMD XML and Mesa ACO sources. */
 object GenerateAMDGPUISA {
-  private final case class Request(
+  private case class Request(
       python: String,
       references: Path,
       sourceRoot: Path,
@@ -47,16 +47,16 @@ for name in sorted(module.instructions):
         opcode = getattr(instruction.op, generation)
         if opcode >= 0:
             print("\t".join((generation.upper(), name, instruction.format.name, str(opcode),
-                              instruction.cls.raw, ";".join(operands), "mesa-aco")))
+                              instruction.cls.value, ";".join(operands), "mesa-aco")))
 """
-  final case class Operand(
+  case class Operand(
       field: String,
       kind: String,
       input: Boolean,
       output: Boolean,
       implicitOperand: Boolean
   )
-  final case class Instruction(
+  case class Instruction(
       name: String,
       generation: String,
       target: String,
@@ -65,17 +65,17 @@ for name in sorted(module.instructions):
       operands: Vector[Operand],
       source: String
   )
-  private final case class SOPPRule(prefix: Long, opcodeShift: Int, immediateBits: Int)
-  private final case class Extracted(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SOPPRule)
-  private final case class Field(name: String)
-  private final case class InstructionForm(
+  private case class SOPPRule(prefix: Long, opcodeShift: Int, immediateBits: Int)
+  private case class Extracted(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SOPPRule)
+  private case class Field(name: String)
+  private case class InstructionForm(
       opcode: String,
       definitionName: String,
       caseName: String,
       fields: Vector[Field],
       operandCount: Int
   )
-  private final case class ComparisonClassification(kind: String, relation: String, updateExec: Boolean)
+  private case class ComparisonClassification(kind: String, relation: String, updateExec: Boolean)
   private enum DefinitionDomain(val directory: String, val stem: String) {
     case SOP1          extends DefinitionDomain("scalar", "SOP1")
     case SOP2          extends DefinitionDomain("scalar", "SOP2")
@@ -98,12 +98,12 @@ for name in sorted(module.instructions):
     case Export        extends DefinitionDomain("system", "Export")
     case LDSDirect     extends DefinitionDomain("system", "LDSDirect")
   }
-  private final case class DefinitionChunk(
+  private case class DefinitionChunk(
       fileName: String,
       objectName: String,
       groups: Vector[Vector[InstructionForm]]
   )
-  private final case class InstructionSources(
+  private case class InstructionSources(
       main: String,
       metadata: String,
       definitions: Vector[(String, String)]
@@ -333,6 +333,7 @@ for name in sorted(module.instructions):
     val main                 = GeneratedHeader.scala("from the pinned Mesa ACO and AMD machine-readable ISA inputs") +
       s"""|package net.kurobako.gemstone.isa.amdgpu
         |
+        |import net.kurobako.gemstone.Constraint.NonEmptyString
         |import net.kurobako.gemstone.Vec
         |import net.kurobako.gemstone.Vec.*
         |import Program.*
@@ -341,7 +342,7 @@ for name in sorted(module.instructions):
         |${instructionCases.mkString("\n")}
         |
         |  def mods: Vec[Modifier]
-        |  final val opcode: Opcode = definition.opcode
+        |  final val opcode: NonEmptyString = definition.opcode
         |  final val meta: Metadata = definition.meta
         |  final val operands: Vec[Operand] = operandValues.toVec
         |}
@@ -353,7 +354,7 @@ for name in sorted(module.instructions):
         |    case AmbiguousForms(opcode: String, definitions: Vec[Definition])
         |  }
         |
-        |  private[amdgpu] final case class FormDecoder(
+        |  private[amdgpu] case class FormDecoder(
         |      val operandCount: Int,
         |      construct: (Vec[Operand], Vec[Modifier]) => Instruction
         |  ) {
@@ -385,14 +386,14 @@ for name in sorted(module.instructions):
         |    case Ordered, Unordered, NotLessOrGreater, Class
         |  }
         |
-        |  private[amdgpu] final case class ComparisonOpcode(
+        |  private[amdgpu] case class ComparisonOpcode(
         |      kind: ComparisonKind,
         |      relation: ComparisonRelation,
         |      updateExec: Boolean
         |  )
         |
         |  abstract class Definition private[amdgpu] (
-        |      val opcode: Opcode,
+        |      val opcode: NonEmptyString,
         |      private[amdgpu] val decoder: Decoder,
         |      private val metadataId: Int
         |  ) {
@@ -416,7 +417,7 @@ for name in sorted(module.instructions):
         |      AllDefinitions.groupBy(_.opcode.raw)
         |
         |    def forOpcode(opcode: String): Vec[Definition] =
-        |      ByOpcode.getOrElse(Opcode.normalize(opcode), Vec.empty[Definition])
+        |      ByOpcode.getOrElse(Program.normalizeOpcode(opcode), Vec.empty[Definition])
         |  }
         |
         |  val definitions: Vec[Definition] = AllDefinitions
@@ -426,7 +427,7 @@ for name in sorted(module.instructions):
         |      operands: Vec[Operand],
         |      mods: Vec[Modifier] = Vec.empty
         |  ): Either[DecodeError, Instruction] = {
-        |    val name = Opcode.normalize(opcode)
+        |    val name = Program.normalizeOpcode(opcode)
         |    decodeWithSuffixes(name, operands, mods, name)
         |  }
         |
@@ -442,7 +443,7 @@ for name in sorted(module.instructions):
         |      case Left(DecodeError.UnknownOpcode(_)) =>
         |        EncodingSuffixes.collectFirst {
         |          case suffix if name.endsWith(suffix) =>
-        |            name.dropRight(suffix.length) -> Modifier(ModifierName.unsafe(suffix.drop(1)))
+        |            name.dropRight(suffix.length) -> Modifier(NonEmptyString.unsafe(suffix.drop(1)))
         |        } match {
         |          case Some((canonical, modifier)) => decodeWithSuffixes(canonical, operands, modifier +: mods, original)
         |          case None                        => Left(DecodeError.UnknownOpcode(original))
@@ -482,6 +483,7 @@ for name in sorted(module.instructions):
     GeneratedHeader.scala("from the pinned Mesa ACO and AMD machine-readable ISA inputs") +
       s"""|package net.kurobako.gemstone.isa.amdgpu
           |
+          |import net.kurobako.gemstone.Constraint.NonEmptyString
           |import net.kurobako.gemstone.Vec
           |import Instruction.*
           |import Program.*
@@ -676,7 +678,7 @@ for name in sorted(module.instructions):
       s"form(${form.operandCount})(($operandParameter, mods) => Instruction.${form.caseName}(${arguments.mkString(", ")}))"
     }
     s"""|  case object ${first.definitionName} extends Definition(
-        |    Opcode(${literal(first.opcode)}),
+        |    NonEmptyString(${literal(first.opcode)}),
         |    decoder(${decoders.mkString(", ")}),
         |    $metadataId
         |  )""".stripMargin
@@ -794,11 +796,7 @@ for name in sorted(module.instructions):
     }.toMap
   }
 
-  private def scalaCaseName(opcode: String): String = {
-    val words = Text.identifierWords(opcode)
-    val value = words.map(word => s"${word.head.toUpper}${word.tail}").mkString
-    if (value.isEmpty) "Opcode" else if (value.head.isDigit) s"Opcode$value" else value
-  }
+  private def scalaCaseName(opcode: String): String = Identifiers.upperCamel(opcode, "Opcode", "Opcode")
 
   private def renderArchitectures(): String = {
     val families = Vector(
@@ -826,17 +824,7 @@ for name in sorted(module.instructions):
     )
   }
 
-  private def literal(value: String): String = {
-    val escaped = value.flatMap {
-      case '"'  => "\\\""
-      case '\\' => "\\\\"
-      case '\n' => "\\n"
-      case '\r' => "\\r"
-      case '\t' => "\\t"
-      case char => char.toString
-    }
-    s"\"$escaped\""
-  }
+  private def literal(value: String): String = Emission.literal(value)
 
   private def generationFor(fileName: String): String = fileName match {
     case "amdgpu_isa_rdna1.xml"   => "GFX10"

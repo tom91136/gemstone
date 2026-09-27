@@ -1,26 +1,25 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.abi.ABI
+import net.kurobako.gemstone.Constraint.NonEmptyString
 
-import net.kurobako.gemstone.{
-  NonEmptyString,
-  NonEmptyVec,
-  NonNegativeInt,
-  NonNegativeLong,
-  PositiveInt,
-  PositiveLong,
-  Vec
-}
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.binary.Widths.*
+
+import net.kurobako.gemstone.abi.ABI
+import net.kurobako.gemstone.{NonEmptyVec, Vec}
 import net.kurobako.gemstone.NonEmptyVec.positiveSize
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.binary.ScalarByteWidth
+import net.kurobako.gemstone.isa.{KernelMetadata, ProgramSymbols}
 import net.kurobako.gemstone.isa.spirv.v1_6.Specialization
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.launcher.EnvironmentNames
 import net.kurobako.gemstone.server.Throwables
-import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress, MemoryValueByteWidth}
+import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress}
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.vm.{
@@ -28,6 +27,7 @@ import net.kurobako.gemstone.vm.{
   Event,
   Fault,
   KernelTask,
+  LaunchGeometry,
   Memory,
   MemoryRegion,
   ObservationContext,
@@ -54,23 +54,23 @@ final class ExecutionService(
     * simulator's hot data path; rebuilding a multi-megabyte immutable collection for every mirrored chunk creates
     * unbounded GC latency. Neither the array nor a mutable view crosses the VM memory boundary.
     */
-  private final case class RemoteAllocation(
+  private case class RemoteAllocation(
       kind: AllocationKind,
       bytes: Array[Byte],
       address: Option[GuestAddress] = None,
       hostBacked: Boolean = false
   ) {
-    val size: PositiveInt = PositiveInt.unsafe(bytes.length)
+    val size: Positive[Int] = Positive.unsafe(bytes.length)
   }
-  private final case class CompletionRecord(
+  private case class CompletionRecord(
       status: CompletionStatus,
       program: ProgramId,
       allocations: Set[AllocationId],
-      pointerRelocations: Vec[PointerRelocation],
+      pointerRelocations: Vec[KernelTask.PointerRelocation],
       prints: Vec[Event.Print],
       cancellation: TaskControl.Cancellation.Source
   )
-  private final case class State(
+  private case class State(
       allocations: Map[AllocationId, RemoteAllocation],
       programs: Map[ProgramId, RuntimeBackend.Program],
       completions: Map[CompletionId, CompletionRecord],
@@ -113,7 +113,7 @@ final class ExecutionService(
   private val bindingPrograms  = mutable.Set.empty[ProgramId]
 
   def registerAllocation(
-      size: PositiveLong,
+      size: Positive[Long],
       kind: AllocationKind
   ): Either[ExecutionFailure, AllocationId] = stateLock.withLock {
     val current = state.get()
@@ -145,8 +145,8 @@ final class ExecutionService(
       else current.allocations.get(id) match {
         case None             => Left(ExecutionFailure.NotFound(s"allocation ${id.raw} is not registered"))
         case Some(allocation) =>
-          val size = allocation.size.toLong
-          if (address.raw <= 0 || address.raw > Long.MaxValue - size.raw)
+          val size = allocation.size.raw.toLong
+          if (address.raw <= 0 || address.raw > Long.MaxValue - size)
             Left(ExecutionFailure.InvalidRequest("allocation address alias has an invalid or overflowing range"))
           else if (allocation.address.contains(address) && allocation.hostBacked == hostBacked) Right(())
           else if (allocation.address.nonEmpty)
@@ -154,7 +154,7 @@ final class ExecutionService(
           else if (
             current.allocations.values.view.exists(other =>
               other.address.exists(base =>
-                address.raw < base.raw + other.bytes.length && base.raw < address.raw + size.raw
+                address.raw < base.raw + other.bytes.length && base.raw < address.raw + size
               )
             )
           ) Left(ExecutionFailure.InvalidRequest("allocation address aliases overlap"))
@@ -200,7 +200,7 @@ final class ExecutionService(
       case Right(id)   =>
         val loaded = programLifecycleLock.writeLock().withLock {
           backendFor(encoding).flatMap(backend => backend.load(RuntimeBackend.Services(observer, scheduler), image))
-        }.left.map(runtimeFailure(_))
+        }
         loaded match {
           case Left(error)    => Left(error)
           case Right(program) =>
@@ -232,13 +232,13 @@ final class ExecutionService(
   def describeImage(
       encoding: String,
       image: Vec[Byte],
-      name: KernelName
+      name: NonEmptyString
   ): Either[ExecutionFailure, KernelMetadata] =
-    backendFor(encoding).left.map(runtimeFailure(_)).flatMap { backend =>
+    backendFor(encoding).flatMap { backend =>
       backend.load(RuntimeBackend.Services(observer, scheduler), image) match {
-        case Left(error)    => Left(runtimeFailure(error))
+        case Left(error)    => Left(error)
         case Right(program) =>
-          try program.kernel(name).left.map(runtimeFailure(_)).flatMap(toWireKernel(_))
+          try program.kernel(name)
           finally program.close()
       }
     }
@@ -248,7 +248,7 @@ final class ExecutionService(
       .left.map(ExecutionFailure.InvalidRequest(_))
       .map(constants =>
         constants.map(constant =>
-          SpecializationInfo(NonNegativeInt.unsafe(constant.specId), PositiveInt.unsafe(constant.byteSize))
+          SpecializationInfo(NonNegative.unsafe(constant.specId), Positive.unsafe(constant.byteSize))
         )
       )
 
@@ -291,26 +291,25 @@ final class ExecutionService(
     }
   }
 
-  def kernel(id: ProgramId, name: KernelName): Either[ExecutionFailure, KernelMetadata] =
-    program(id).flatMap(_.kernel(name).left.map(runtimeFailure(_)))
-      .flatMap(toWireKernel(_))
+  def kernel(id: ProgramId, name: NonEmptyString): Either[ExecutionFailure, KernelMetadata] =
+    program(id).flatMap(_.kernel(name))
 
-  def catalog(id: ProgramId): Either[ExecutionFailure, ProgramCatalog] =
-    program(id).flatMap(_.symbols.left.map(runtimeFailure(_))).flatMap(toWireCatalog(_))
+  def catalog(id: ProgramId): Either[ExecutionFailure, ProgramSymbols] =
+    program(id).flatMap(_.symbols)
 
-  def global(id: ProgramId, name: GlobalName): Either[ExecutionFailure, ProgramGlobal] =
+  def global(id: ProgramId, name: NonEmptyString): Either[ExecutionFailure, ProgramGlobal] =
     program(id).flatMap { loaded =>
       loaded.globals.toRight(ExecutionFailure.Unsupported("program global metadata is unavailable"))
-        .flatMap(_.image(name).left.map(runtimeFailure(_)))
+        .flatMap(_.image(name))
         .flatMap(image => ProgramGlobal.validated(image.size, image.initial).left.map(ExecutionFailure.Failed(_)))
     }
 
   /** Bind outside the state lock while reserving program/allocation ownership across backend preparation. */
   def bindGlobal(
       id: ProgramId,
-      name: GlobalName,
+      name: NonEmptyString,
       allocation: AllocationId,
-      offset: NonNegativeLong
+      offset: NonNegative[Long]
   ): Either[ExecutionFailure, Unit] = {
     val result = programLifecycleLock.writeLock().withLock {
       val reserved = stateLock.withLock {
@@ -324,8 +323,8 @@ final class ExecutionService(
           case None =>
             Left(ExecutionFailure.NotFound(s"allocation ${allocation.raw} is not registered"))
           case Some(value) =>
-            val allocationSize = value.size.toLong
-            if (offset > allocationSize.toNonNegative)
+            val allocationSize = value.size.raw.toLong
+            if (offset > NonNegative.unsafe(allocationSize))
               Left(ExecutionFailure.InvalidRequest("global binding offset exceeds allocation"))
             else {
               val previous = boundAllocations.getOrElse(id, Set.empty)
@@ -344,9 +343,9 @@ final class ExecutionService(
                   name,
                   MemoryRegion(allocation.raw),
                   offset,
-                  size,
+                  Positive.unsafe(size),
                   BindingMemory
-                ).left.map(runtimeFailure(_)))
+                ))
             }
           catch {
             case scala.util.control.NonFatal(error) => Left(ExecutionFailure.Failed(error.toString))
@@ -366,24 +365,24 @@ final class ExecutionService(
   }
 
   private object BindingMemory extends Memory with AddressSpace {
-    override def read(region: MemoryRegion, offset: NonNegativeLong, size: NonNegativeInt) =
+    override def read(region: MemoryRegion, offset: NonNegative[Long], size: NonNegative[Int]) =
       ExecutionService.this.read(allocationId(region), offset, size).left.map(memoryFault(_))
-    override def write(region: MemoryRegion, offset: NonNegativeLong, bytes: Vec[Byte]) =
+    override def write(region: MemoryRegion, offset: NonNegative[Long], bytes: Vec[Byte]) =
       ExecutionService.this.write(allocationId(region), offset, bytes).left.map(memoryFault(_))
-    override def atomicModifyValue(region: MemoryRegion, offset: NonNegativeLong, size: MemoryValueByteWidth)(
+    override def atomicModifyValue(region: MemoryRegion, offset: NonNegative[Long], size: IntBetween[1, 8])(
         update: Long => Long
     ): Either[Fault, Long] =
       ExecutionService.this.atomicModifyValue(allocationId(region), offset, size)(update).left.map(memoryFault(_))
-    override def address(region: MemoryRegion, offset: NonNegativeLong): Either[Fault, GuestAddress] =
+    override def address(region: MemoryRegion, offset: NonNegative[Long]): Either[Fault, GuestAddress] =
       regionAddress(region, offset)
-    override def locate(address: GuestAddress, size: NonNegativeInt): Either[Fault, AddressSpace.Location] =
+    override def locate(address: GuestAddress, size: NonNegative[Int]): Either[Fault, AddressSpace.Location] =
       locateAddress(address, size)
   }
 
   def writeGlobal(
       id: ProgramId,
-      name: GlobalName,
-      offset: NonNegativeLong,
+      name: NonEmptyString,
+      offset: NonNegative[Long],
       bytes: Vec[Byte]
   ): Either[ExecutionFailure, Unit] = {
     val accepted = stateLock.withLock {
@@ -402,7 +401,7 @@ final class ExecutionService(
                 name,
                 offset,
                 bytes
-              ).left.map(runtimeFailure(_)))
+              ))
           }
         }
     }
@@ -434,7 +433,7 @@ final class ExecutionService(
               }.toSet
               observer.register(
                 ObservationContext(id.raw)
-              )(event => observe(id, event)).left.map(runtimeFailure(_)).map {
+              )(event => observe(id, event)).map {
                 _ =>
                   state.set(
                     current.copy(
@@ -497,7 +496,7 @@ final class ExecutionService(
               programLifecycleLock.readLock().withLock {
                 program.execute(task, completionMemory(id), control)
               }
-                .fold(error => CompletionStatus.Failed(runtimeFailure(error)), _ => CompletionStatus.Succeeded)
+                .fold(error => CompletionStatus.Failed(error), _ => CompletionStatus.Succeeded)
             catch {
               case scala.util.control.NonFatal(error) =>
                 CompletionStatus.Failed(
@@ -655,7 +654,7 @@ final class ExecutionService(
   private def hostBacked(id: AllocationId): Boolean = state.get().allocations.get(id).exists(_.hostBacked)
   private def hostTransfers: Boolean = hostMemoryEnabled || state.get().allocations.values.exists(_.hostBacked)
   private def hostAccessible(address: GuestAddress, size: Int): Boolean = hostMemoryEnabled ||
-    locateAddress(address, NonNegativeInt.unsafe(size)).exists(location => hostBacked(allocationId(location.region)))
+    locateAddress(address, NonNegative.unsafe(size)).exists(location => hostBacked(allocationId(location.region)))
 
   // All host atomics linearize in the native process with CPU atomics. CAS also
   // supports arbitrary interpreter RMW functions without serializing Scala closures.
@@ -663,11 +662,11 @@ final class ExecutionService(
   private def atomicHostMemory(
       id: CompletionId,
       address: GuestAddress,
-      size: MemoryValueByteWidth
+      size: IntBetween[1, 8]
   )(update: Long => Long): Either[Fault, Long] =
     if ((size.raw != 4 && size.raw != 8) || address.raw % size.raw != 0)
       Left(Fault.Memory("host atomics require aligned 32- or 64-bit storage"))
-    else if (address.raw <= 0 || address.raw > Long.MaxValue - size.raw || !hostAccessible(address, size.raw))
+    else if (address.raw <= 0 || address.raw > Long.MaxValue - size || !hostAccessible(address, size.raw))
       Left(Fault.Memory("host atomic address is unavailable or overflows"))
     else hostSyncLock.withLock {
       val mask                                = if (size.raw == 4) 0xffffffffL else -1L
@@ -716,7 +715,7 @@ final class ExecutionService(
   private def readHostMemory(
       id: CompletionId,
       address: GuestAddress,
-      size: NonNegativeInt,
+      size: NonNegative[Int],
       defer: Boolean
   ): Either[Fault, Vec[Byte]] = {
     val result = stateLock.withLock {
@@ -772,14 +771,14 @@ final class ExecutionService(
         .view
         .flatMap { case (allocationId, written) =>
           written.chunks.map { (offset, size) =>
-            DirtyRange(allocationId, NonNegativeLong.unsafe(offset.toLong), PositiveInt.unsafe(size))
+            DirtyRange(allocationId, NonNegative.unsafe(offset.toLong), Positive.unsafe(size))
           }
         }
       Right(Vec.from(ranges))
     }
   }
 
-  def completionPointerRelocations(id: CompletionId): Either[ExecutionFailure, Vec[PointerRelocation]] =
+  def completionPointerRelocations(id: CompletionId): Either[ExecutionFailure, Vec[KernelTask.PointerRelocation]] =
     stateLock.withLock(succeededCompletion(id)(record => Right(record.pointerRelocations)))
 
   def completionPrints(id: CompletionId): Either[ExecutionFailure, String] =
@@ -810,8 +809,8 @@ final class ExecutionService(
 
   def read(
       id: AllocationId,
-      offset: NonNegativeLong,
-      size: NonNegativeInt
+      offset: NonNegative[Long],
+      size: NonNegative[Int]
   ): Either[ExecutionFailure, Vec[Byte]] = stateLock.withLock {
     state.get().allocations.get(id).toRight(
       ExecutionFailure.NotFound(s"allocation ${id.raw} is not registered")
@@ -826,8 +825,8 @@ final class ExecutionService(
 
   def readValue(
       id: AllocationId,
-      offset: NonNegativeLong,
-      size: MemoryValueByteWidth
+      offset: NonNegative[Long],
+      size: IntBetween[1, 8]
   ): Either[ExecutionFailure, Long] = stateLock.withLock {
     state.get().allocations.get(id).toRight(
       ExecutionFailure.NotFound(s"allocation ${id.raw} is not registered")
@@ -838,20 +837,20 @@ final class ExecutionService(
     }
   }
 
-  def write(id: AllocationId, offset: NonNegativeLong, bytes: Vec[Byte]): Either[ExecutionFailure, Unit] =
+  def write(id: AllocationId, offset: NonNegative[Long], bytes: Vec[Byte]): Either[ExecutionFailure, Unit] =
     write(id, offset, bytes, None)
 
   def writeValue(
       id: AllocationId,
-      offset: NonNegativeLong,
+      offset: NonNegative[Long],
       value: Long,
-      size: MemoryValueByteWidth
+      size: IntBetween[1, 8]
   ): Either[ExecutionFailure, Unit] = writeValue(id, offset, value, size, None)
 
   def atomicModifyValue(
       id: AllocationId,
-      offset: NonNegativeLong,
-      size: MemoryValueByteWidth
+      offset: NonNegative[Long],
+      size: IntBetween[1, 8]
   )(update: Long => Long): Either[ExecutionFailure, Long] =
     atomicModifyValue(id, offset, size, None)(update)
 
@@ -871,10 +870,10 @@ final class ExecutionService(
     override def fenceHostMemory(): Either[Fault, Unit] =
       if (hostTransfers) hostSyncLock.withLock(synchronizeHost(completion, None).map(_ => ()))
       else Right(())
-    override def prepareReads(ranges: Vec[(GuestAddress, NonNegativeInt)]): Either[Fault, Unit] = {
+    override def prepareReads(ranges: Vec[(GuestAddress, NonNegative[Int])]): Either[Fault, Unit] = {
       val staged = ranges.flatMap((address, size) =>
         if (locateAddress(address, size).exists(location => !hostBacked(allocationId(location.region))))
-          Vec.empty[(GuestAddress, NonNegativeInt)]
+          Vec.empty[(GuestAddress, NonNegative[Int])]
         else segments(address, size)
       ).foldLeft[Either[Fault, Unit]](Right(())) {
         case (result, (address, size)) =>
@@ -899,17 +898,17 @@ final class ExecutionService(
     @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
     private inline def withAllocation[A](
         address: GuestAddress,
-        size: NonNegativeInt
-    )(inline operation: (Option[AllocationId], NonNegativeLong) => Either[Fault, A]): Either[Fault, A] =
+        size: NonNegative[Int]
+    )(inline operation: (Option[AllocationId], NonNegative[Long]) => Either[Fault, A]): Either[Fault, A] =
       findContainingAllocation(address, size) match {
-        case Some((id, relative))    => operation(Some(id), NonNegativeLong.unsafe(relative))
-        case None if address.raw > 0 => operation(None, NonNegativeLong.unsafe(address.raw))
+        case Some((id, relative))    => operation(Some(id), NonNegative.unsafe(relative))
+        case None if address.raw > 0 => operation(None, NonNegative.unsafe(address.raw))
         case None                    => Left(Fault.Memory(s"address ${address.raw} is not bound"))
       }
 
     // Explicit registrations may share a view while using several non-overlapping
     // backing allocations. Split only at known boundaries; unknown gaps remain exact.
-    private def segments(address: GuestAddress, size: NonNegativeInt): Vec[(GuestAddress, NonNegativeInt)] = {
+    private def segments(address: GuestAddress, size: NonNegative[Int]): Vec[(GuestAddress, NonNegative[Int])] = {
       val end = address.raw + size.raw.toLong
       if (address.raw <= 0 || end < address.raw) Vec((address, size))
       else {
@@ -919,12 +918,12 @@ final class ExecutionService(
         }.filter(point => point > address.raw && point < end)
         val points = (Vector(address.raw, end) ++ boundaries).distinct.sorted
         Vec.from(points.zip(points.drop(1)).map { (begin, end) =>
-          (GuestAddress(begin), NonNegativeInt.unsafe((end - begin).toInt))
+          (GuestAddress(begin), NonNegative.unsafe((end - begin).toInt))
         })
       }
     }
 
-    private def readSegments(address: GuestAddress, size: NonNegativeInt, defer: Boolean): Either[Fault, Vec[Byte]] =
+    private def readSegments(address: GuestAddress, size: NonNegative[Int], defer: Boolean): Either[Fault, Vec[Byte]] =
       segments(address, size).foldLeft[Either[Fault, Vec[Byte]]](Right(Vec.empty)) { case (result, (begin, length)) =>
         result.flatMap(bytes =>
           withAllocation(begin, length) { (id, offset) =>
@@ -949,7 +948,7 @@ final class ExecutionService(
 
     // Device atomics serialize against every lane using this address space. Host
     // CPU participation still requires a separate coherence/atomic protocol.
-    private def atomicAddress(address: GuestAddress, size: MemoryValueByteWidth, defer: Boolean)(
+    private def atomicAddress(address: GuestAddress, size: IntBetween[1, 8], defer: Boolean)(
         update: Long => Long
     ): Either[Fault, Long] = {
       val result = stateLock.withLock {
@@ -965,7 +964,7 @@ final class ExecutionService(
       }
     }
 
-    private def crossesRegion(region: MemoryRegion, offset: NonNegativeLong, size: Int): Boolean =
+    private def crossesRegion(region: MemoryRegion, offset: NonNegative[Long], size: Int): Boolean =
       !hostRegion(region) && state.get().allocations.get(allocationId(region))
         .exists(allocation =>
           allocation.address.nonEmpty && (size > allocation.size.raw || offset.raw > allocation.size.raw - size)
@@ -973,8 +972,8 @@ final class ExecutionService(
 
     override def read(
         region: MemoryRegion,
-        offset: NonNegativeLong,
-        size: NonNegativeInt
+        offset: NonNegative[Long],
+        size: NonNegative[Int]
     ): Either[Fault, Vec[Byte]] =
       if (hostRegion(region)) readSegments(GuestAddress(offset), size, true)
       else if (hostBacked(allocationId(region)) || crossesRegion(region, offset, size.raw))
@@ -983,8 +982,8 @@ final class ExecutionService(
 
     override def readValue(
         region: MemoryRegion,
-        offset: NonNegativeLong,
-        size: MemoryValueByteWidth
+        offset: NonNegative[Long],
+        size: IntBetween[1, 8]
     ): Either[Fault, Long] =
       if (hostRegion(region) || hostBacked(allocationId(region)) || crossesRegion(region, offset, size.raw))
         read(region, offset, size.nonNegative)
@@ -993,7 +992,7 @@ final class ExecutionService(
 
     override def write(
         region: MemoryRegion,
-        offset: NonNegativeLong,
+        offset: NonNegative[Long],
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       if (hostRegion(region)) writeSegments(GuestAddress(offset), bytes)
@@ -1003,9 +1002,9 @@ final class ExecutionService(
 
     override def writeValue(
         region: MemoryRegion,
-        offset: NonNegativeLong,
+        offset: NonNegative[Long],
         value: Long,
-        size: MemoryValueByteWidth
+        size: IntBetween[1, 8]
     ): Either[Fault, Unit] =
       if (hostRegion(region) || hostBacked(allocationId(region)) || crossesRegion(region, offset, size.raw))
         write(region, offset, LittleEndian.toVec(value, size.scalarByteWidth))
@@ -1017,7 +1016,7 @@ final class ExecutionService(
         Some(completion)
       ).left.map(memoryFault(_))
 
-    override def atomicModifyValue(region: MemoryRegion, offset: NonNegativeLong, size: MemoryValueByteWidth)(
+    override def atomicModifyValue(region: MemoryRegion, offset: NonNegative[Long], size: IntBetween[1, 8])(
         update: Long => Long
     ): Either[Fault, Long] =
       if (hostRegion(region)) atomicHostMemory(completion, GuestAddress(offset), size)(update)
@@ -1032,19 +1031,19 @@ final class ExecutionService(
         Some(completion)
       )(update).left.map(memoryFault(_)))
 
-    override def address(region: MemoryRegion, offset: NonNegativeLong): Either[Fault, GuestAddress] =
+    override def address(region: MemoryRegion, offset: NonNegative[Long]): Either[Fault, GuestAddress] =
       if (hostRegion(region)) Right(GuestAddress(offset)) else regionAddress(region, offset)
 
-    override def locate(address: GuestAddress, size: NonNegativeInt): Either[Fault, AddressSpace.Location] =
+    override def locate(address: GuestAddress, size: NonNegative[Int]): Either[Fault, AddressSpace.Location] =
       locateAddress(address, size).orElse(
         if (
           address.raw > 0 &&
           (hostMemoryEnabled || segments(address, size).forall((begin, length) => locateAddress(begin, length).isRight))
-        ) Right(AddressSpace.Location(MemoryRegion(0), NonNegativeLong.unsafe(address.raw)))
+        ) Right(AddressSpace.Location(MemoryRegion(0), NonNegative.unsafe(address.raw)))
         else Left(Fault.Memory(s"address ${address.raw} is not bound"))
       )
 
-    override def read(memory: Memory, address: GuestAddress, size: NonNegativeInt): Either[Fault, Vec[Byte]] =
+    override def read(memory: Memory, address: GuestAddress, size: NonNegative[Int]): Either[Fault, Vec[Byte]] =
       withAllocation(address, size)((id, offset) =>
         if (id.isEmpty || id.exists(hostBacked(_))) readSegments(address, size, false)
         else ExecutionService.this.read(id.get, offset, size).left.map(memoryFault(_))
@@ -1053,7 +1052,7 @@ final class ExecutionService(
     override def readValue(
         memory: Memory,
         address: GuestAddress,
-        size: MemoryValueByteWidth
+        size: IntBetween[1, 8]
     ): Either[Fault, Long] =
       withAllocation(address, size.nonNegative)((id, offset) =>
         if (id.isEmpty || id.exists(hostBacked(_))) readSegments(address, size.nonNegative, false).map(bytes =>
@@ -1072,7 +1071,7 @@ final class ExecutionService(
         memory: Memory,
         address: GuestAddress,
         value: Long,
-        size: MemoryValueByteWidth
+        size: IntBetween[1, 8]
     ): Either[Fault, Unit] =
       withAllocation(address, size.nonNegative)((id, offset) =>
         if (id.isEmpty || id.exists(hostBacked(_)))
@@ -1083,7 +1082,7 @@ final class ExecutionService(
     override def atomicModifyValue(
         memory: Memory,
         address: GuestAddress,
-        size: MemoryValueByteWidth
+        size: IntBetween[1, 8]
     )(update: Long => Long): Either[Fault, Long] =
       withAllocation(address, size.nonNegative)((id, offset) =>
         if (id.isEmpty || id.exists(hostBacked(_))) atomicHostMemory(completion, address, size)(update)
@@ -1098,7 +1097,7 @@ final class ExecutionService(
 
   private def completionMemory(completion: CompletionId): Memory = CompletionMemory(completion)
 
-  private def recordPointerRelocation(completion: CompletionId, relocation: PointerRelocation): Unit =
+  private def recordPointerRelocation(completion: CompletionId, relocation: KernelTask.PointerRelocation): Unit =
     stateLock.withLock {
       val current = state.get()
       current.completions.get(completion).foreach { record =>
@@ -1141,7 +1140,7 @@ final class ExecutionService(
 
   private def write(
       id: AllocationId,
-      offset: NonNegativeLong,
+      offset: NonNegative[Long],
       bytes: Vec[Byte],
       completion: Option[CompletionId]
   ): Either[ExecutionFailure, Unit] = stateLock.withLock {
@@ -1164,9 +1163,9 @@ final class ExecutionService(
 
   private def writeValue(
       id: AllocationId,
-      offset: NonNegativeLong,
+      offset: NonNegative[Long],
       value: Long,
-      size: MemoryValueByteWidth,
+      size: IntBetween[1, 8],
       completion: Option[CompletionId]
   ): Either[ExecutionFailure, Unit] = stateLock.withLock {
     if (closed && completion.isEmpty) Left(ExecutionFailure.Failed("execution session is closed"))
@@ -1186,8 +1185,8 @@ final class ExecutionService(
 
   private def atomicModifyValue(
       id: AllocationId,
-      offset: NonNegativeLong,
-      size: MemoryValueByteWidth,
+      offset: NonNegative[Long],
+      size: IntBetween[1, 8],
       completion: Option[CompletionId]
   )(update: Long => Long): Either[ExecutionFailure, Long] = stateLock.withLock {
     if (closed && completion.isEmpty) Left(ExecutionFailure.Failed("execution session is closed"))
@@ -1225,7 +1224,7 @@ final class ExecutionService(
       current: State,
       loaded: RuntimeBackend.Program
   ): Either[ExecutionFailure, Vec[KernelTask.PointerRelocation]] =
-    loaded.kernel(task.kernelName).left.map(runtimeFailure(_)).map { metadata =>
+    loaded.kernel(task.kernelName).map { metadata =>
       Vec.from(task.arguments.zipWithIndex.flatMap { case (argument, index) =>
         argument match {
           case KernelTask.Argument.Scalar(bytes) if metadata.parameters.lift(index).exists(_.containsPointers) =>
@@ -1242,13 +1241,13 @@ final class ExecutionService(
   ): Vector[KernelTask.PointerRelocation] = {
     val array = bytes.toArray
     (0 to bytes.size - 8).by(4).flatMap { offset =>
-      val value = LittleEndian.decode(array, offset, ScalarByteWidth.Qword)
+      val value = LittleEndian.decode(array, offset, 8)
       locateNativeAddress(value, current).map { case (allocation, targetOffset) =>
         KernelTask.PointerRelocation(
-          KernelTask.RelocationSource.Argument(NonNegativeInt.unsafe(index)),
-          NonNegativeLong.unsafe(offset.toLong),
+          KernelTask.RelocationSource.Argument(NonNegative.unsafe(index)),
+          NonNegative.unsafe(offset.toLong),
           MemoryRegion(allocation.raw),
-          NonNegativeLong.unsafe(targetOffset)
+          NonNegative.unsafe(targetOffset)
         )
       }
     }.toVector
@@ -1330,35 +1329,21 @@ final class ExecutionService(
   private def program(id: ProgramId): Either[ExecutionFailure, RuntimeBackend.Program] =
     state.get().programs.get(id).toRight(ExecutionFailure.NotFound(s"program ${id.raw} is not loaded"))
 
-  private def backendFor(encoding: String): Either[RuntimeBackend.Error, RuntimeBackend] =
+  private def backendFor(encoding: String): Either[ExecutionFailure, RuntimeBackend] =
     backends.find(_.encoding == encoding)
-      .toRight(RuntimeBackend.Error.Unsupported(s"unknown program encoding: $encoding"))
-
-  private def runtimeFailure(error: RuntimeBackend.Error): ExecutionFailure = error match {
-    case RuntimeBackend.Error.Invalid(detail)     => ExecutionFailure.InvalidRequest(detail)
-    case RuntimeBackend.Error.NotFound(detail)    => ExecutionFailure.NotFound(detail)
-    case RuntimeBackend.Error.Unsupported(detail) => ExecutionFailure.Unsupported(detail)
-    case RuntimeBackend.Error.Failed(detail)      => ExecutionFailure.Failed(detail)
-    case RuntimeBackend.Error.Execution(fault)    => faultFailure(fault)
-  }
-
-  private def faultFailure(fault: Fault): ExecutionFailure = fault match {
-    case Fault.InvalidTask(detail) => ExecutionFailure.InvalidRequest(detail)
-    case Fault.Unsupported(detail) => ExecutionFailure.Unsupported(detail)
-    case _                         => ExecutionFailure.Failed(fault.message)
-  }
+      .toRight(ExecutionFailure.Unsupported(s"unknown program encoding: $encoding"))
 
   private def memoryFault(error: ExecutionFailure): Fault = Fault.Memory(error.message)
 
   private def allocationId(region: MemoryRegion): AllocationId =
     AllocationId.unsafe(region.value)
 
-  private def regionAddress(region: MemoryRegion, offset: NonNegativeLong): Either[Fault, GuestAddress] =
+  private def regionAddress(region: MemoryRegion, offset: NonNegative[Long]): Either[Fault, GuestAddress] =
     state.get().allocations.get(allocationId(region)).toRight(Fault.Memory(s"memory region ${region.value} is absent"))
       .map(allocation => allocation.address.getOrElse(syntheticAddress(allocationId(region))).offset(offset.raw))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:GemstoneNoIterator.no-iterator"))
-  private def findContainingAllocation(address: GuestAddress, size: NonNegativeInt): Option[(AllocationId, Long)] = {
+  private def findContainingAllocation(address: GuestAddress, size: NonNegative[Int]): Option[(AllocationId, Long)] = {
     val allocations                          = state.get().allocations.iterator
     var result: Option[(AllocationId, Long)] = None
     while (allocations.hasNext && result.isEmpty) {
@@ -1373,10 +1358,10 @@ final class ExecutionService(
     result
   }
 
-  private def locateAddress(address: GuestAddress, size: NonNegativeInt): Either[Fault, AddressSpace.Location] =
+  private def locateAddress(address: GuestAddress, size: NonNegative[Int]): Either[Fault, AddressSpace.Location] =
     findContainingAllocation(address, size) match {
       case Some((id, relative)) =>
-        Right(AddressSpace.Location(MemoryRegion(id.raw), NonNegativeLong.unsafe(relative)))
+        Right(AddressSpace.Location(MemoryRegion(id.raw), NonNegative.unsafe(relative)))
       case None => Left(Fault.Memory(s"address ${address.raw} is not bound"))
     }
 
@@ -1390,10 +1375,10 @@ final class ExecutionService(
       case Event.PointerRelocation(source, sourceOffset, target, targetOffset) =>
         recordPointerRelocation(
           completion,
-          PointerRelocation(
-            RelocationSource.Allocation(allocationId(source)),
+          KernelTask.PointerRelocation(
+            KernelTask.RelocationSource.Memory(source),
             sourceOffset,
-            allocationId(target),
+            target,
             targetOffset
           )
         )
@@ -1401,53 +1386,9 @@ final class ExecutionService(
       case _ => Right(())
     }
 
-  private def toWireKernel(metadata: net.kurobako.gemstone.isa.KernelMetadata)
-      : Either[ExecutionFailure, KernelMetadata] =
-    KernelMetadata.validated(
-      metadata.argumentBlockSize,
-      metadata.explicitParameterCount,
-      metadata.parameters.map { parameter =>
-        KernelParameterMetadata(
-          parameter.width,
-          parameter.offset,
-          parameter.kind match {
-            case net.kurobako.gemstone.isa.KernelMetadata.ParameterKind.Scalar => KernelParameterKind.Scalar
-            case net.kurobako.gemstone.isa.KernelMetadata.ParameterKind.Memory => KernelParameterKind.Allocation
-            case net.kurobako.gemstone.isa.KernelMetadata.ParameterKind.Local  => KernelParameterKind.Local
-          },
-          parameter.containsPointers
-        )
-      },
-      metadata.requiredWorkGroupSize.map(toWireWorkGroupSize(_)),
-      metadata.workGroupSizeHint.map(toWireWorkGroupSize(_)),
-      metadata.bindingIndices,
-      metadata.entryPointId
-    ).left.map(ExecutionFailure.Failed(_))
-
-  private def toWireWorkGroupSize(
-      size: net.kurobako.gemstone.isa.KernelMetadata.WorkGroupSize
-  ): Dimensions = Dimensions(size.x, size.y, size.z)
-
-  private def toWireCatalog(symbols: net.kurobako.gemstone.isa.ProgramSymbols)
-      : Either[ExecutionFailure, ProgramCatalog] = {
-    val kernels = symbols.kernels.map(kernel =>
-      ProgramKernel(kernel.name, kernel.linkageName)
-    )
-    symbols.globals
-      .foldLeft[Either[ExecutionFailure, Vec[ProgramGlobalMetadata]]](Right(Vec.empty)) { (accumulated, global) =>
-        for {
-          globals  <- accumulated
-          metadata <- ProgramGlobalMetadata
-            .validated(global.name, global.virtualAddress, global.size, global.pointerOffsets)
-            .left.map(ExecutionFailure.Failed(_))
-        } yield globals :+ metadata
-      }
-      .map(globals => ProgramCatalog(kernels, globals))
-  }
-
   private def checkedRange(
       length: Int,
-      offset: NonNegativeLong,
+      offset: NonNegative[Long],
       size: Int
   ): Either[ExecutionFailure, Int] =
     ByteRange
@@ -1466,7 +1407,7 @@ object ExecutionService {
       case None        => Right(TaskLimits.Default.maxInstructions)
       case Some(value) => value.toLongOption
           .toRight(s"$MaxInstructionsEnvironment must be a positive integer: $value")
-          .flatMap(PositiveLong.either(_).left.map(_ =>
+          .flatMap(Positive.either(_).left.map(_ =>
             s"$MaxInstructionsEnvironment must be positive: $value"
           ))
     }
@@ -1474,7 +1415,7 @@ object ExecutionService {
       case None        => Right(TaskLimits.Default.quantum)
       case Some(value) => value.toIntOption
           .toRight(s"$QuantumEnvironment must be a positive integer: $value")
-          .flatMap(PositiveInt.either(_).left.map(_ =>
+          .flatMap(Positive.either(_).left.map(_ =>
             s"$QuantumEnvironment must be positive: $value"
           ))
     }

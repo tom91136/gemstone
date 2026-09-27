@@ -1,13 +1,12 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import Program.*
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
 
+import Program.*
 import VMIR.{Instruction as _, *}
 
-import net.kurobako.gemstone.NonEmptyString
-import net.kurobako.gemstone.NonNegativeInt
-import net.kurobako.gemstone.PositiveInt
-import net.kurobako.gemstone.PositiveLong
+import net.kurobako.gemstone.Constraint.NonEmpty
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.Vec
 
 import net.kurobako.gemstone.memory.GuestAddress
@@ -43,7 +42,7 @@ private[v9_3] object VMCompiler {
 
   enum Error {
     case Invalid(detail: String)
-    case Unsupported(instruction: InstructionText, detail: String)
+    case Unsupported(instruction: NonEmpty[String], detail: String)
 
     def message: String = this match {
       case Invalid(detail)                  => detail
@@ -56,7 +55,7 @@ private[v9_3] object VMCompiler {
 
   def parameterLayout(
       entry: Statement.Entry
-  ): Either[Error, Vec[(KernelParameter, NonNegativeInt)]] =
+  ): Either[Error, Vec[(KernelParameter, NonNegative[Int])]] =
     for {
       parameters <- lowerParameters(entry.parameters)
       offsets    <- parameterOffsets(entry.parameters, parameters)
@@ -68,28 +67,28 @@ private[v9_3] object VMCompiler {
   def compile(
       entry: Statement.Entry,
       functions: Vec[Statement.Function],
-      globalSymbols: Map[SymbolName, GuestAddress]
+      globalSymbols: Map[NonEmptyString, GuestAddress]
   ): Either[Error, Kernel] = compile(entry, functions, globalSymbols, Map.empty)
 
   def compile(
       entry: Statement.Entry,
       functions: Vec[Statement.Function],
-      globalSymbols: Map[SymbolName, GuestAddress],
-      additionalSharedSymbols: Map[SymbolName, Long]
+      globalSymbols: Map[NonEmptyString, GuestAddress],
+      additionalSharedSymbols: Map[NonEmptyString, Long]
   ): Either[Error, Kernel] =
     compile(entry, functions, globalSymbols, additionalSharedSymbols, Vec.empty)
 
   def compile(
       entry: Statement.Entry,
       functions: Vec[Statement.Function],
-      globalSymbols: Map[SymbolName, GuestAddress],
-      additionalSharedSymbols: Map[SymbolName, Long],
+      globalSymbols: Map[NonEmptyString, GuestAddress],
+      additionalSharedSymbols: Map[NonEmptyString, Long],
       additionalEntries: Vec[Statement.Entry]
   ): Either[Error, Kernel] = {
     val Statement.Entry(_, name, parameters, body) = entry
     val functionNames                              = functions.view.map(_.name).toSet ++
       additionalEntries.view
-        .map(entry => FunctionName(entry.name.toNonEmptyString))
+        .map(entry => entry.name)
         .toSet
     for {
       loweredParameters <- lowerParameters(parameters)
@@ -110,7 +109,7 @@ private[v9_3] object VMCompiler {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def registerChunkCount(
       program: ExecutableProgram[PredicatedInstruction],
-      functions: Map[FunctionName, DeviceFunction]
+      functions: Map[NonEmptyString, DeviceFunction]
   ): Int = {
     var highest                   = -1
     def inspect(value: Any): Unit = value match {
@@ -137,12 +136,12 @@ private[v9_3] object VMCompiler {
       program: ExecutableProgram[PredicatedInstruction],
       functions: Vec[Statement.Function],
       entries: Vec[Statement.Entry],
-      functionNames: Set[FunctionName]
-  ): Either[Error, Map[FunctionName, DeviceFunction]] = {
+      functionNames: Set[NonEmptyString]
+  ): Either[Error, Map[NonEmptyString, DeviceFunction]] = {
     val functionDefinitions = functions.view.map(function => function.name -> function).toMap
-    val entryDefinitions    = entries.view.map(entry => FunctionName(entry.name.toNonEmptyString) -> entry).toMap
-    val pending             = mutable.Queue.empty[FunctionName]
-    val lowered             = mutable.Map.empty[FunctionName, DeviceFunction]
+    val entryDefinitions    = entries.view.map(entry => entry.name -> entry).toMap
+    val pending             = mutable.Queue.empty[NonEmptyString]
+    val lowered             = mutable.Map.empty[NonEmptyString, DeviceFunction]
 
     def enqueueCalls(value: ExecutableProgram[PredicatedInstruction]): Unit =
       value.instructions.foreach {
@@ -197,13 +196,13 @@ private[v9_3] object VMCompiler {
   )
   private def lowerProgram(
       body: Vec[Statement],
-      functionNames: Set[FunctionName]
+      functionNames: Set[NonEmptyString]
   ): Either[Error, ExecutableProgram[PredicatedInstruction]] = {
     val flat = flattenScoped(body) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
-    val labels           = mutable.Map.empty[LabelName, Pc]
+    val labels           = mutable.Map.empty[NonEmptyString, Pc]
     var instructionIndex = 0
     var statementIndex   = 0
     while (statementIndex < flat.size) {
@@ -218,7 +217,7 @@ private[v9_3] object VMCompiler {
           val rendered  = pred.map(value => s"${Printer.render(value)} ").getOrElse("") +
             qualified + (if (operands.isEmpty) "" else operands.map(Printer.render).mkString(" ", ", ", "")) + ";"
           return Left(
-            Error.Unsupported(InstructionText.unsafe(rendered), "instruction is not implemented")
+            Error.Unsupported(NonEmpty.unsafe(rendered), "instruction is not implemented")
           )
         case _ => ()
       }
@@ -251,7 +250,7 @@ private[v9_3] object VMCompiler {
 
   private def lowerFunction(
       function: Statement.Function,
-      functionNames: Set[FunctionName]
+      functionNames: Set[NonEmptyString]
   ): Either[Error, DeviceFunction] = {
     val Statement.Function(_, name, returnParameters, parameters, body) = function
     body match {
@@ -263,7 +262,7 @@ private[v9_3] object VMCompiler {
           offsets           <- parameterOffsets(parameters, loweredParameters)
           program           <- lowerProgram(statements, functionNames)
         } yield DeviceFunction(
-          FunctionName(name.toNonEmptyString),
+          name,
           parameters.map(_.name),
           loweredParameters.map(_.widthBytes),
           offsets,
@@ -276,7 +275,7 @@ private[v9_3] object VMCompiler {
 
   private def lowerEntryFunction(
       entry: Statement.Entry,
-      functionNames: Set[FunctionName]
+      functionNames: Set[NonEmptyString]
   ): Either[Error, DeviceFunction] = {
     val Statement.Entry(_, name, parameters, body) = entry
     for {
@@ -284,7 +283,7 @@ private[v9_3] object VMCompiler {
       offsets           <- parameterOffsets(parameters, loweredParameters)
       program           <- lowerProgram(body, functionNames)
     } yield DeviceFunction(
-      FunctionName(name.toNonEmptyString),
+      name,
       parameters.map(_.name),
       loweredParameters.map(_.widthBytes),
       offsets,
@@ -300,8 +299,8 @@ private[v9_3] object VMCompiler {
   private def parameterOffsets(
       declarations: Vec[Parameter],
       parameters: Vec[KernelParameter]
-  ): Either[Error, Vec[NonNegativeInt]] = {
-    val result = Vec.newBuilder[NonNegativeInt]
+  ): Either[Error, Vec[NonNegative[Int]]] = {
+    val result = Vec.newBuilder[NonNegative[Int]]
     var offset = 0L
     var index  = 0
     while (index < declarations.size) {
@@ -314,7 +313,7 @@ private[v9_3] object VMCompiler {
       if (offset > Int.MaxValue.toLong - padding)
         return invalid(s"kernel parameter ${declaration.name} offset exceeds the supported range")
       offset += padding
-      result += NonNegativeInt.unsafe(offset.toInt)
+      result += NonNegative.unsafe(offset.toInt)
       if (offset > Int.MaxValue.toLong - parameter.widthBytes.raw.toLong)
         return invalid(s"kernel parameter ${declaration.name} layout exceeds the supported range")
       offset += parameter.widthBytes.raw.toLong
@@ -330,22 +329,22 @@ private[v9_3] object VMCompiler {
     var index  = 0
     while (index < parameters.length) {
       val parameter = parameters(index)
-      val width     = PositiveInt.unsafe(parameter.elementType.widthBits.raw / 8)
-      val elements  = parameter.dimensions.foldLeft[Either[Error, PositiveLong]](Right(PositiveLong.One)) {
+      val width     = Positive.unsafe(parameter.elementType.widthBits.raw / 8)
+      val elements  = parameter.dimensions.foldLeft[Either[Error, Positive[Long]]](Right(1L)) {
         (current, value) =>
           for {
             count   <- current
             element <- immediate(value)
             product <-
               if (element > 0 && count.raw <= Int.MaxValue.toLong / element)
-                Right(PositiveLong.unsafe(count.raw * element))
+                Right(Positive.unsafe(count.raw * element))
               else invalid(s"kernel parameter ${parameter.name} has an invalid array dimension: $element")
           } yield product
       }
       elements match {
         case Left(error)  => return Left(error)
         case Right(count) =>
-          val totalWidth = (width.toLong * count).raw
+          val totalWidth = width.raw.toLong * count.raw
           if (totalWidth > Int.MaxValue.toLong)
             return invalid(
               s"kernel parameter ${parameter.name} is too wide: $totalWidth bytes"
@@ -354,7 +353,7 @@ private[v9_3] object VMCompiler {
             case DeclarationQualifier.Attribute(name) => name.raw == "ptr"
             case _                                    => false
           }
-          result += KernelParameter(parameter.name, PositiveInt.unsafe(totalWidth.toInt), pointer)
+          result += KernelParameter(parameter.name, Positive.unsafe(totalWidth.toInt), pointer)
       }
       index += 1
     }
@@ -367,16 +366,16 @@ private[v9_3] object VMCompiler {
   private def flattenScoped(statements: Vec[Statement]): Either[Error, Vec[Statement]] = {
     var nextScope = 0
 
-    def registerNames(operand: Operand): collection.View[RegisterName] = operand match {
+    def registerNames(operand: Operand): collection.View[NonEmptyString] = operand match {
       case Operand.Register(name, _)    => Vector(name).view
-      case Operand.Symbol(name)         => Vector(RegisterName(name.toNonEmptyString)).view
+      case Operand.Symbol(name)         => Vector(name).view
       case Operand.VectorLiteral(items) => items.view.flatMap(registerNames(_))
       case Operand.Parenthesized(items) => items.view.flatMap(registerNames(_))
       case Operand.Qualified(base, _)   => registerNames(base)
       case _                            => Vector.empty.view
     }
 
-    def declaredRegisters(body: Vec[Statement]): Vec[RegisterName] =
+    def declaredRegisters(body: Vec[Statement]): Vec[NonEmptyString] =
       Vec.toVec(body.view.flatMap {
         case Statement.Directive(path, arguments, _)
             if path.head.raw == "reg" =>
@@ -384,10 +383,10 @@ private[v9_3] object VMCompiler {
         case _ => Vector.empty.view
       }).distinct
 
-    def renameOperand(operand: Operand, names: Map[RegisterName, RegisterName]): Operand = operand match {
-      case Operand.Register(name, part) => Operand.Register(names.getOrElse(name, name), part)
-      case Operand.Symbol(name) if names.contains(RegisterName(name.toNonEmptyString)) =>
-        Operand.Register(names(RegisterName(name.toNonEmptyString)), None)
+    def renameOperand(operand: Operand, names: Map[NonEmptyString, NonEmptyString]): Operand = operand match {
+      case Operand.Register(name, part)                 => Operand.Register(names.getOrElse(name, name), part)
+      case Operand.Symbol(name) if names.contains(name) =>
+        Operand.Register(names(name), None)
       case Operand.VectorLiteral(items)  => Operand.VectorLiteral(items.map(renameOperand(_, names)))
       case Operand.Parenthesized(items)  => Operand.Parenthesized(items.map(renameOperand(_, names)))
       case Operand.Address(items)        => Operand.Address(items.map(renameOperand(_, names)))
@@ -404,7 +403,7 @@ private[v9_3] object VMCompiler {
 
     def renameInstruction(
         instruction: Instruction,
-        names: Map[RegisterName, RegisterName]
+        names: Map[NonEmptyString, NonEmptyString]
     ): Either[Error, Instruction] = {
       val operands = instruction.operands.map(renameOperand(_, names))
       val pred     = instruction.pred.map(value => value.copy(operand = renameOperand(value.operand, names)))
@@ -417,7 +416,7 @@ private[v9_3] object VMCompiler {
 
     def visit(
         body: Vec[Statement],
-        names: Map[RegisterName, RegisterName]
+        names: Map[NonEmptyString, NonEmptyString]
     ): Either[Error, Vec[Statement]] = {
       val result = Vec.newBuilder[Statement]
       var index  = 0
@@ -427,7 +426,7 @@ private[v9_3] object VMCompiler {
             val scope = nextScope
             nextScope += 1
             val scopedNames = declaredRegisters(nested).foldLeft(names) { (current, name) =>
-              current.updated(name, RegisterName.unsafe(s"${name.raw}$$scope$scope"))
+              current.updated(name, NonEmptyString.unsafe(s"${name.raw}$$scope$scope"))
             }
             visit(nested, scopedNames) match {
               case Left(error)  => return Left(error)
@@ -477,7 +476,7 @@ private[v9_3] object VMCompiler {
       address: Operand,
       source: Operand,
       opcode: String
-  ): Either[Error, (RegisterName, Value, Value, BitWidth, VMIR.AtomicSpace)] =
+  ): Either[Error, (NonEmptyString, Value, Value, BitWidth, VMIR.AtomicSpace)] =
     for {
       destinationName <- registerName(destination)
       addressValue    <- addressValue(address)
@@ -492,11 +491,11 @@ private[v9_3] object VMCompiler {
 
   private def lowerInstruction(
       instruction: Instruction,
-      labels: Map[LabelName, Pc],
-      functionNames: Set[FunctionName]
+      labels: Map[NonEmptyString, Pc],
+      functionNames: Set[NonEmptyString]
   ): Either[Error, PredicatedInstruction] = {
     val lowered = instruction match {
-      case Instruction.Ld(destination, address, None, modifiers, _)
+      case Instruction.Ld(destination, address, None, None, modifiers, _)
           if instruction.qualifiedOpcode.startsWith("ld.param.") && isDirectParameterAddress(address) =>
         for {
           destinationNames   <- registerNames(destination)
@@ -521,7 +520,7 @@ private[v9_3] object VMCompiler {
           sourceValue,
           width
         )
-      case Instruction.Ld(destination, address, None, modifiers, _)
+      case Instruction.Ld(destination, address, None, None, modifiers, _)
           if instruction.qualifiedOpcode.startsWith("ld.param.") =>
         for {
           destinationNames <- registerNames(destination)
@@ -1001,19 +1000,19 @@ private[v9_3] object VMCompiler {
           memberMask = memberMaskValue,
           width = width
         )
-      case Instruction.Vote(destination, predicate, _, _) if instruction.qualifiedOpcode == "vote.ballot.b32" =>
+      case Instruction.Vote(destination, Some(predicate), _, _) if instruction.qualifiedOpcode == "vote.ballot.b32" =>
         for {
           destinationName <- registerName(destination)
           predicateName   <- predicateRegisterName(predicate)
         } yield VMIR.Instruction.VoteBallot(destinationName, predicateName, Value.Immediate(0xffffffffL))
-      case Instruction.VoteSync(destination, predicate, memberMask, _, _)
+      case Instruction.VoteSync(destination, Some(predicate), Some(memberMask), _, _)
           if instruction.qualifiedOpcode == "vote.sync.ballot.b32" =>
         for {
           destinationName <- registerName(destination)
           predicateName   <- predicateRegisterName(predicate)
           memberMaskValue <- value(memberMask)
         } yield VMIR.Instruction.VoteBallot(destinationName, predicateName, memberMaskValue)
-      case Instruction.VoteSync(destination, predicate, memberMask, _, _)
+      case Instruction.VoteSync(destination, Some(predicate), Some(memberMask), _, _)
           if instruction.qualifiedOpcode == "vote.sync.all.pred" ||
             instruction.qualifiedOpcode == "vote.sync.any.pred" ||
             instruction.qualifiedOpcode == "vote.sync.uni.pred" =>
@@ -1373,7 +1372,7 @@ private[v9_3] object VMCompiler {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
         } yield VMIR.Instruction.Move(destinationName, sourceValue, BitWidth(64))
-      case Instruction.Cvt(destination, source, None, None, modifiers, _) =>
+      case Instruction.Cvt(destination, Some(source), None, None, None, None, modifiers, _) =>
         val types = modifiers.map(_.name.raw).flatMap(name => ConversionType.values.find(_.mnemonic == name))
         if (types.size < 2) invalid(s"expected conversion source and destination types: ${instruction.qualifiedOpcode}")
         else
@@ -1398,7 +1397,7 @@ private[v9_3] object VMCompiler {
           predicateName   <- predicateRegisterName(predicate)
           width           <- scalarWidth(modifiers)
         } yield VMIR.Instruction.Select(destinationName, trueValue, falseValue, predicateName, width)
-      case Instruction.Ld(destination, address, None, modifiers, _)
+      case Instruction.Ld(destination, address, None, None, modifiers, _)
           if instruction.qualifiedOpcode.matches("ld\\.(acquire|relaxed)\\.(cta|gpu|sys)\\.global\\.[ub](32|64)") =>
         for {
           destinationName <- registerName(destination)
@@ -1418,13 +1417,13 @@ private[v9_3] object VMCompiler {
           sourceValue  <- value(source)
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.AtomicExchange(
-          RegisterName("_"),
+          NonEmptyString("_"),
           addressValue,
           sourceValue,
           width,
           VMIR.AtomicSpace.Global
         )
-      case Instruction.Ld(destination, address, None, modifiers, _)
+      case Instruction.Ld(destination, address, None, None, modifiers, _)
           if (instruction.qualifiedOpcode.split('.') match {
             case Array("ld", scalar) => isScalarType(scalar)
             case _                   => false
@@ -1440,7 +1439,7 @@ private[v9_3] object VMCompiler {
           width,
           instruction.qualifiedOpcode.contains(".s")
         )
-      case Instruction.Ld(destination, address, None, modifiers, _)
+      case Instruction.Ld(destination, address, None, None, modifiers, _)
           if instruction.qualifiedOpcode.startsWith("ld.") &&
             !instruction.qualifiedOpcode.contains(".param.") &&
             !instruction.qualifiedOpcode.contains(".shared.") &&
@@ -1456,7 +1455,7 @@ private[v9_3] object VMCompiler {
           width,
           isSignedScalarOpcode(instruction.qualifiedOpcode)
         )
-      case Instruction.Ld(destination, address, None, modifiers, _)
+      case Instruction.Ld(destination, address, None, None, modifiers, _)
           if instruction.qualifiedOpcode.startsWith("ld.") && instruction.qualifiedOpcode.contains(".global.") =>
         for {
           destinationName <- registerName(destination)
@@ -1468,7 +1467,7 @@ private[v9_3] object VMCompiler {
           width,
           isSignedScalarOpcode(instruction.qualifiedOpcode)
         )
-      case Instruction.Ld(destination, address, None, modifiers, _)
+      case Instruction.Ld(destination, address, None, None, modifiers, _)
           if instruction.qualifiedOpcode.startsWith("ld.") &&
             !instruction.qualifiedOpcode.contains(".param.") &&
             !instruction.qualifiedOpcode.contains(".shared.") &&
@@ -1542,7 +1541,7 @@ private[v9_3] object VMCompiler {
           sourceValue  <- value(source)
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.StoreGlobal(addressValue, sourceValue, width)
-      case Instruction.Ld(destination, address, None, modifiers, _)
+      case Instruction.Ld(destination, address, None, None, modifiers, _)
           if instruction.qualifiedOpcode.startsWith("ld.") && instruction.qualifiedOpcode.contains(".shared.") &&
             Operand.isVectorLiteral(destination) =>
         for {
@@ -1555,7 +1554,7 @@ private[v9_3] object VMCompiler {
           width,
           isSignedScalarOpcode(instruction.qualifiedOpcode)
         )
-      case Instruction.Ld(destination, address, None, modifiers, _)
+      case Instruction.Ld(destination, address, None, None, modifiers, _)
           if instruction.qualifiedOpcode.startsWith("ld.") && instruction.qualifiedOpcode.contains(".shared.") =>
         for {
           destinationName <- registerName(destination)
@@ -1582,7 +1581,7 @@ private[v9_3] object VMCompiler {
           sourceValue  <- value(source)
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.StoreShared(addressValue, sourceValue, width)
-      case Instruction.Ld(destination, address, None, modifiers, _)
+      case Instruction.Ld(destination, address, None, None, modifiers, _)
           if instruction.qualifiedOpcode.startsWith("ld.") && instruction.qualifiedOpcode.contains(".local.") &&
             Operand.isVectorLiteral(destination) =>
         for {
@@ -1595,7 +1594,7 @@ private[v9_3] object VMCompiler {
           width,
           isSignedScalarOpcode(instruction.qualifiedOpcode)
         )
-      case Instruction.Ld(destination, address, None, modifiers, _)
+      case Instruction.Ld(destination, address, None, None, modifiers, _)
           if instruction.qualifiedOpcode.startsWith("ld.") && instruction.qualifiedOpcode.contains(".local.") =>
         for {
           destinationName <- registerName(destination)
@@ -1627,7 +1626,7 @@ private[v9_3] object VMCompiler {
           destinationValue <- addressValue(destination)
           sourceValue      <- addressValue(source)
           size             <- immediate(copySize).flatMap { value =>
-            if (Set(4L, 8L, 16L).contains(value)) Right(PositiveInt.unsafe(value.toInt))
+            if (Set(4L, 8L, 16L).contains(value)) Right(Positive.unsafe(value.toInt))
             else invalid(s"cp.async copy size must be 4, 8, or 16 bytes, found $value")
           }
         } yield VMIR.Instruction.AsyncCopy(destinationValue, sourceValue, size)
@@ -1748,14 +1747,14 @@ private[v9_3] object VMCompiler {
           else PredicateOperation.Or
           checkedBarrierId <-
             if (barrierId >= 0L && barrierId <= Int.MaxValue.toLong)
-              Right(NonNegativeInt.unsafe(barrierId.toInt))
+              Right(NonNegative.unsafe(barrierId.toInt))
             else invalid(s"barrier id is outside Int range: $barrierId")
         } yield VMIR.Instruction.BarrierReduce(destinationName, checkedBarrierId, predicateName, operation)
       case Instruction.Bra(target, _, _)
           if instruction.qualifiedOpcode == "bra" || instruction.qualifiedOpcode == "bra.uni" =>
         target match {
           case Operand.Symbol(label) =>
-            labels.get(LabelName(label.toNonEmptyString))
+            labels.get(label)
               .toRight(Error.Invalid(s"unknown label: $label"))
               .map(VMIR.Instruction.Branch(_))
           case other => invalid(s"expected branch label, found ${Printer.render(other)}")
@@ -1765,7 +1764,7 @@ private[v9_3] object VMCompiler {
       case Instruction.Bar(barrier, None, None, None, _, _) if instruction.qualifiedOpcode == "bar.sync" =>
         immediate(barrier).flatMap { value =>
           if (value >= 0L && value <= Int.MaxValue.toLong)
-            Right(VMIR.Instruction.BarrierSync(NonNegativeInt.unsafe(value.toInt)))
+            Right(VMIR.Instruction.BarrierSync(NonNegative.unsafe(value.toInt)))
           else invalid(s"barrier id is outside Int range: $value")
         }
       case Instruction.Membar(_, _) if instruction.qualifiedOpcode.startsWith("membar.") =>
@@ -1937,25 +1936,25 @@ private[v9_3] object VMCompiler {
         predicateRegisterName(operand).map(name => Some(ExecutionPredicate(name, negated)))
     }
 
-  private def predicateRegisterName(operand: Operand): Either[Error, RegisterName] =
+  private def predicateRegisterName(operand: Operand): Either[Error, NonEmptyString] =
     registerName(operand, "predicate register")
 
-  private def registerName(operand: Operand, describe: String = "register"): Either[Error, RegisterName] =
+  private def registerName(operand: Operand, describe: String = "register"): Either[Error, NonEmptyString] =
     operand match {
       case Operand.Register(name, None) => Right(name)
-      case Operand.Symbol(name)         => Right(RegisterName(name.toNonEmptyString))
+      case Operand.Symbol(name)         => Right(name)
       case other                        => invalid(s"expected $describe, found ${Printer.render(other)}")
     }
 
-  private def valueRegisterName(operand: Operand): Either[Error, RegisterName] = operand match {
+  private def valueRegisterName(operand: Operand): Either[Error, NonEmptyString] = operand match {
     case Operand.Register(name, None)                         => Right(name)
-    case Operand.Symbol(name) if isBareRegisterName(name.raw) => Right(RegisterName(name.toNonEmptyString))
+    case Operand.Symbol(name) if isBareRegisterName(name.raw) => Right(name)
     case other => invalid(s"expected register, found ${Printer.render(other)}")
   }
 
   private def valueDestination(
       operand: Operand
-  ): Either[Error, (RegisterName, Option[RegisterName])] = operand match {
+  ): Either[Error, (NonEmptyString, Option[NonEmptyString])] = operand match {
     case Operand.WithPredicate(base, predicate) =>
       for {
         destinationName <- valueRegisterName(base)
@@ -1964,9 +1963,9 @@ private[v9_3] object VMCompiler {
     case other => valueRegisterName(other).map(_ -> None)
   }
 
-  private def registerNames(operand: Operand): Either[Error, Vec[RegisterName]] = operand match {
+  private def registerNames(operand: Operand): Either[Error, Vec[NonEmptyString]] = operand match {
     case Operand.VectorLiteral(items) =>
-      items.foldLeft[Either[Error, Vec[RegisterName]]](Right(Vec.empty)) { (current, item) =>
+      items.foldLeft[Either[Error, Vec[NonEmptyString]]](Right(Vec.empty)) { (current, item) =>
         for {
           names <- current
           name  <- registerName(item)
@@ -1986,13 +1985,13 @@ private[v9_3] object VMCompiler {
     case other => value(other).map(Vec(_))
   }
 
-  private def splitRegisterNames(operand: Operand): Either[Error, Vec[RegisterName]] = operand match {
+  private def splitRegisterNames(operand: Operand): Either[Error, Vec[NonEmptyString]] = operand match {
     case Operand.VectorLiteral(items) =>
-      items.foldLeft[Either[Error, Vec[RegisterName]]](Right(Vec.empty)) { (current, item) =>
+      items.foldLeft[Either[Error, Vec[NonEmptyString]]](Right(Vec.empty)) { (current, item) =>
         for {
           names <- current
           name  <- item match {
-            case Operand.Symbol(name) if name.raw == "_" => Right(RegisterName("_"))
+            case Operand.Symbol(name) if name.raw == "_" => Right(NonEmptyString("_"))
             case other                                   => registerName(other)
           }
         } yield names :+ name
@@ -2015,22 +2014,22 @@ private[v9_3] object VMCompiler {
       rightName       <- predicateRegisterName(right)
     } yield VMIR.Instruction.PredicateBinary(operation, destinationName, leftName, rightName)
 
-  private def callParameters(operand: Option[Operand]): Either[Error, Vec[ParameterName]] = operand match {
+  private def callParameters(operand: Option[Operand]): Either[Error, Vec[NonEmptyString]] = operand match {
     case None        => Right(Vec.empty)
     case Some(value) => callParameters(value)
   }
 
-  private def callParameters(operand: Operand): Either[Error, Vec[ParameterName]] = operand match {
-    case Operand.Symbol(name)         => Right(Vec(ParameterName(name.toNonEmptyString)))
+  private def callParameters(operand: Operand): Either[Error, Vec[NonEmptyString]] = operand match {
+    case Operand.Symbol(name)         => Right(Vec(name))
     case Operand.Parenthesized(items) =>
-      items.foldLeft[Either[Error, Vec[ParameterName]]](Right(Vec.empty)) { (current, item) =>
+      items.foldLeft[Either[Error, Vec[NonEmptyString]]](Right(Vec.empty)) { (current, item) =>
         for {
           names <- current
           value <- callParameters(item)
         } yield names ++ value
       }
     case Operand.VectorLiteral(items) =>
-      items.foldLeft[Either[Error, Vec[ParameterName]]](Right(Vec.empty)) { (current, item) =>
+      items.foldLeft[Either[Error, Vec[NonEmptyString]]](Right(Vec.empty)) { (current, item) =>
         for {
           names <- current
           value <- callParameters(item)
@@ -2041,17 +2040,17 @@ private[v9_3] object VMCompiler {
 
   private def functionValue(
       operand: Operand,
-      functionNames: Set[FunctionName],
+      functionNames: Set[NonEmptyString],
       promoteUnknown: Boolean
   ): Either[Error, Value] = operand match {
     case Operand.Symbol(name)
-        if promoteUnknown || functionNames.contains(FunctionName(name.toNonEmptyString)) =>
-      Right(Value.Function(FunctionName(name.toNonEmptyString)))
+        if promoteUnknown || functionNames.contains(name) =>
+      Right(Value.Function(name))
     case Operand.Symbol(name) => Right(Value.Symbol(name))
     case other                => value(other)
   }
 
-  private def sharedSymbols(body: Vec[Statement]): Map[SymbolName, Long] = {
+  private def sharedSymbols(body: Vec[Statement]): Map[NonEmptyString, Long] = {
     val declarations = flatten(body).collect {
       case Statement.Data(DataAddressSpace.Shared, _, _, name, _, _) => Iterator.single(name)
       case Statement.Directive(path, arguments, _)
@@ -2076,13 +2075,13 @@ private[v9_3] object VMCompiler {
 
   private def parameterAddress(
       operand: Operand
-  ): Either[Error, (ParameterName, NonNegativeInt)] = operand match {
+  ): Either[Error, (NonEmptyString, NonNegative[Int])] = operand match {
     case Operand.Address(Vec(Operand.Symbol(name))) =>
-      Right(ParameterName(name.toNonEmptyString) -> NonNegativeInt.Zero)
+      Right(name -> 0)
     case Operand.Address(Vec(Operand.Add(Operand.Symbol(name), offset))) =>
       immediate(offset).flatMap(value =>
         if (value >= 0L && value <= Int.MaxValue.toLong)
-          Right(ParameterName(name.toNonEmptyString) -> NonNegativeInt.unsafe(value.toInt))
+          Right(name -> NonNegative.unsafe(value.toInt))
         else invalid(s"parameter offset is outside Int range: $value")
       )
     case other => invalid(s"expected parameter address, found ${Printer.render(other)}")
@@ -2172,7 +2171,7 @@ private[v9_3] object VMCompiler {
         if isBareRegisterName(name.raw) && VMRegisterFile.indexRaw(s"%${name.raw}") >= 0 =>
       Right(Value.RegisterSlot(VMRegisterFile.indexRaw(s"%${name.raw}")))
     case Operand.Symbol(name) if isBareRegisterName(name.raw) =>
-      Right(Value.Register(RegisterName(name.toNonEmptyString)))
+      Right(Value.Register(name))
     case Operand.Symbol(name)     => Right(Value.Symbol(name))
     case other: Operand.Immediate => immediate(other).map(Value.Immediate(_))
     case Operand.Negate(value)    => immediate(value).map(number => Value.Immediate(-number))

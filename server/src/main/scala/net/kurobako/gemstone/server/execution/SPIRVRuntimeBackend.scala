@@ -1,11 +1,14 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.{NonNegativeLong, PositiveLong, Vec}
-import net.kurobako.gemstone.isa.GlobalName
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.rpc.ExecutionProtocol.ExecutionFailure
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.KernelMetadata
-import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.KernelSymbol
-import net.kurobako.gemstone.isa.LinkageName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.ProgramSymbols
 import net.kurobako.gemstone.isa.spirv.v1_6.ISA
 import net.kurobako.gemstone.isa.spirv.v1_6.Validation
@@ -18,11 +21,11 @@ final class SPIRVRuntimeBackend(environment: Validation.Environment, override va
   override def load(
       services: RuntimeBackend.Services,
       image: Vec[Byte]
-  ): Either[RuntimeBackend.Error, RuntimeBackend.Program] = {
+  ): Either[ExecutionFailure, RuntimeBackend.Program] = {
     val machine = SPIRVMachine(environment, services.observer, services.scheduler)
     for {
-      module <- ISA.decode(image).left.map(error => RuntimeBackend.Error.Invalid(error.message))
-      loaded <- machine.load(module).left.map(error => RuntimeBackend.Error.Invalid(error.message))
+      module <- ISA.decode(image).left.map(error => ExecutionFailure.InvalidRequest(error.message))
+      loaded <- machine.load(module).left.map(error => ExecutionFailure.InvalidRequest(error.message))
     } yield Program(machine)(loaded)
   }
 
@@ -30,38 +33,38 @@ final class SPIRVRuntimeBackend(environment: Validation.Environment, override va
       extends MachineProgram[SPIRVMachine](machine, loaded, "SPIR-V program is closed") {
     override def bindProgramId(id: Long): Unit = machine.bindProgramId(loaded, id)
 
-    override def symbols: Either[RuntimeBackend.Error, ProgramSymbols] = open {
-      val kernels = machine.kernelNames(loaded).map(name => KernelSymbol(name, LinkageName(name.toNonEmptyString)))
+    override def symbols: Either[ExecutionFailure, ProgramSymbols] = open {
+      val kernels = machine.kernelNames(loaded).map(name => KernelSymbol(name, name))
       Right(ProgramSymbols(kernels, Vec.empty))
     }
 
-    override def kernel(name: KernelName): Either[RuntimeBackend.Error, KernelMetadata] =
-      open(machine.kernel(loaded, name).left.map(error => RuntimeBackend.Error.Invalid(error.message)))
+    override def kernel(name: NonEmptyString): Either[ExecutionFailure, KernelMetadata] =
+      open(machine.kernel(loaded, name).left.map(error => ExecutionFailure.InvalidRequest(error.message)))
 
     override val globals: Option[RuntimeBackend.Program.Globals] = Some(Globals(machine)(loaded))
   }
 
   private final class Globals(machine: SPIRVMachine)(loaded: machine.LoadedProgram)
       extends RuntimeBackend.Program.Globals {
-    override def image(name: GlobalName): Either[RuntimeBackend.Error, RuntimeBackend.Program.Globals.Image] =
-      machine.global(loaded, name).left.map(error => RuntimeBackend.Error.Invalid(error.message))
+    override def image(name: NonEmptyString): Either[ExecutionFailure, RuntimeBackend.Program.Globals.Image] =
+      machine.global(loaded, name).left.map(error => ExecutionFailure.InvalidRequest(error.message))
         .map((size, initial) => RuntimeBackend.Program.Globals.Image(size, initial))
 
     override def bind(
-        name: GlobalName,
+        name: NonEmptyString,
         region: MemoryRegion,
-        offset: NonNegativeLong,
-        regionSize: PositiveLong,
+        offset: NonNegative[Long],
+        regionSize: Positive[Long],
         memory: Memory
-    ): Either[RuntimeBackend.Error, Unit] =
+    ): Either[ExecutionFailure, Unit] =
       machine.bindGlobal(loaded, name, region, offset, regionSize, memory)
-        .left.map(RuntimeBackend.Error.Execution(_))
+        .left.map(ExecutionFailure.fromFault(_))
 
     override def write(
-        name: GlobalName,
-        offset: NonNegativeLong,
+        name: NonEmptyString,
+        offset: NonNegative[Long],
         bytes: Vec[Byte]
-    ): Either[RuntimeBackend.Error, Unit] =
-      machine.writeGlobal(loaded, name, offset, bytes).left.map(RuntimeBackend.Error.Execution(_))
+    ): Either[ExecutionFailure, Unit] =
+      machine.writeGlobal(loaded, name, offset, bytes).left.map(ExecutionFailure.fromFault(_))
   }
 }

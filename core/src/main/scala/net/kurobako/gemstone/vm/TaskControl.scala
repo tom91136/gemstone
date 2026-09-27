@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.vm
 
-import net.kurobako.gemstone.{NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 import scala.annotation.tailrec
@@ -11,16 +11,15 @@ final class TaskControl private (
     val observation: ObservationContext,
     private val budget: TaskControl.Budget
 ) {
-  def checkpoint(cost: PositiveInt = PositiveInt.One): Either[Fault, Unit] =
-    checkpoint(cost.toLong)
+  def checkpoint(cost: Positive[Int] = 1): Either[Fault, Unit] = checkpoint(cost.widen[Positive[Long]])
 
-  def checkpoint(cost: PositiveLong): Either[Fault, Unit] =
+  def checkpoint(cost: Positive[Long]): Either[Fault, Unit] =
     if (cancellation.isCancelled) Left(Fault.Cancelled)
     else budget.consume(cost.raw)
 
-  def usedInstructions: NonNegativeLong = NonNegativeLong.unsafe(budget.used)
+  def usedInstructions: NonNegative[Long] = NonNegative.unsafe(budget.used)
 
-  private[gemstone] def remainingInstructions: NonNegativeLong = NonNegativeLong.unsafe(budget.remaining)
+  private[gemstone] def remainingInstructions: NonNegative[Long] = NonNegative.unsafe(budget.remaining)
 }
 
 object TaskControl {
@@ -76,7 +75,7 @@ object TaskControl {
       override def used: Long = consumed
 
       override def consume(cost: Long): Either[Fault, Unit] =
-        if (cost > limit - consumed) Left(Fault.BudgetExceeded(PositiveLong.unsafe(limit)))
+        if (cost > limit - consumed) Left(Fault.BudgetExceeded(Positive.unsafe(limit)))
         else {
           consumed += cost
           Accepted
@@ -97,14 +96,14 @@ object TaskControl {
         if (previous < limit) Accepted
         else {
           val _ = consumed.decrementAndGet()
-          Left(Fault.BudgetExceeded(PositiveLong.unsafe(limit)))
+          Left(Fault.BudgetExceeded(Positive.unsafe(limit)))
         }
       }
 
       @tailrec
       private def reserve(increment: Long): Either[Fault, Unit] = {
         val current = consumed.get()
-        if (increment > limit - current) Left(Fault.BudgetExceeded(PositiveLong.unsafe(limit)))
+        if (increment > limit - current) Left(Fault.BudgetExceeded(Positive.unsafe(limit)))
         else if (consumed.compareAndSet(current, current + increment)) Accepted
         else reserve(increment)
       }

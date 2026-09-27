@@ -1,8 +1,11 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveLong, Vec}
-import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
-import net.kurobako.gemstone.isa.KernelName as ISAKernelName
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.binary.LittleEndian
+import net.kurobako.gemstone.Constraint.NonEmptyString as ISAKernelName
 import net.kurobako.gemstone.memory.AllocationKind
 import net.kurobako.gemstone.rpc.ExecutionProtocol.CompletionStatus
 import net.kurobako.gemstone.vm.{KernelTask, LaunchGeometry, MemoryRegion}
@@ -39,8 +42,8 @@ final class PTXProgramExecutorSuite extends munit.FunSuite {
          |}
          |""".stripMargin
     Using.resource(ExecutionService(RuntimeBackend.defaults)) { service =>
-      val allocation = service.registerAllocation(PositiveLong(16L), AllocationKind.Shared).toOption.get
-      val output     = service.registerAllocation(PositiveLong(4L), AllocationKind.Shared).toOption.get
+      val allocation = service.registerAllocation(16L, AllocationKind.Shared).toOption.get
+      val output     = service.registerAllocation(4L, AllocationKind.Shared).toOption.get
       val program    =
         service.load(PTXRuntimeBackend.encoding, Vec.from(source.getBytes(StandardCharsets.UTF_8))).toOption.get
       val task = KernelTask.validated(
@@ -48,17 +51,17 @@ final class PTXProgramExecutorSuite extends munit.FunSuite {
         LaunchGeometry.Dimensions.One,
         LaunchGeometry.Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(MemoryRegion(allocation.raw), NonNegativeLong(4L)),
-          KernelTask.Argument.Memory(MemoryRegion(allocation.raw), NonNegativeLong(4L)),
-          KernelTask.Argument.Memory(MemoryRegion(output.raw), NonNegativeLong.Zero)
+          KernelTask.Argument.Memory(MemoryRegion(allocation.raw), 4L),
+          KernelTask.Argument.Memory(MemoryRegion(allocation.raw), 4L),
+          KernelTask.Argument.Memory(MemoryRegion(output.raw), 0L)
         )
       ).toOption.get
 
       val completion = service.launch(program, task).toOption.get
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
       assertEquals(
-        service.read(output, NonNegativeLong.Zero, NonNegativeInt(4)).map(bytes =>
-          LittleEndian.decode(bytes, 0, ScalarByteWidth.Dword)
+        service.read(output, 0L, 4).map(bytes =>
+          LittleEndian.decode(bytes, 0, 4)
         ),
         Right(1L)
       )

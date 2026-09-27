@@ -1,8 +1,8 @@
 package net.kurobako.gemstone.server.transport
 
-import net.kurobako.gemstone.PositiveInt
-import Transport.*
+import net.kurobako.gemstone.Constraint.Positive
 
+import Transport.*
 import java.io.{DataInputStream, DataOutputStream, IOException}
 import java.net.{InetAddress, InetSocketAddress, Socket}
 import scala.util.Using
@@ -13,9 +13,9 @@ object ServerControl {
   val ReleaseClient  = 3
   val Shutdown       = 4
 
-  private val TimeoutMillis: PositiveInt = PositiveInt(5000)
+  private val TimeoutMillis: Positive[Int] = 5000
 
-  def register(port: RPCPort, timeoutMillis: PositiveInt = TimeoutMillis): ClientId =
+  def register(port: RPCPort, timeoutMillis: Positive[Int] = TimeoutMillis): ClientId =
     exchange(port, timeoutMillis, RegisterClient, None) { input =>
       ClientId.either(input.readLong())
         .fold(
@@ -24,7 +24,7 @@ object ServerControl {
         )
     }
 
-  def release(port: RPCPort, client: ClientId, timeoutMillis: PositiveInt = TimeoutMillis): Unit =
+  def release(port: RPCPort, client: ClientId, timeoutMillis: Positive[Int] = TimeoutMillis): Unit =
     exchange(port, timeoutMillis, ReleaseClient, Some(client)) { input =>
       if (input.readInt() != 0) throw IOException("Gemstone server rejected client release")
     }
@@ -34,7 +34,7 @@ object ServerControl {
       if (input.readInt() != 0) throw IOException("Gemstone server rejected shutdown")
     }
 
-  private def exchange[A](port: RPCPort, timeoutMillis: PositiveInt, operation: Int, client: Option[ClientId])(
+  private def exchange[A](port: RPCPort, timeoutMillis: Positive[Int], operation: Int, client: Option[ClientId])(
       read: DataInputStream => A
   ): A =
     Using.resource(Socket()) { socket =>

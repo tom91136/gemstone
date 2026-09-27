@@ -1,8 +1,12 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.ValidationOutcome
-import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.NonEmptyVec
 
 final class ValidationSuite extends munit.FunSuite {
   test("OpenCL compute environment is accepted") {
@@ -72,12 +76,12 @@ final class ValidationSuite extends munit.FunSuite {
     )
     assertEquals(
       ISA.decode(raw),
-      Left(ModuleDecodeError.Instruction(NonNegativeInt.Zero, InstructionDecodeError.UnknownOpcode(unknownOpcode)))
+      Left(ModuleDecodeError.Instruction(0, InstructionDecodeError.UnknownOpcode(unknownOpcode)))
     )
   }
 
   private def operand(kind: String, value: Int): Operand = Operand(
-    SPIRVOperandKind.either(kind).fold(message => fail(message), valid => valid),
+    NonEmptyString.either(kind).fold(message => fail(message), valid => valid),
     Vec.nonEmpty(Word(value))
   )
 }

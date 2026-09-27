@@ -15,7 +15,7 @@ object SPIRVOpcodeNumber {
     either(value).fold(message => throw IllegalArgumentException(message), identity)
 
   inline def apply[A <: Int & Singleton](inline value: A): SPIRVOpcodeNumber =
-    inline if constValue[A] >= 0 && constValue[A] <= 65535 then value else error("opcode number out of range")
+    inline if (constValue[A] >= 0 && constValue[A] <= 65535) value else error("opcode number out of range")
 
   extension (value: SPIRVOpcodeNumber) {
     inline def raw: Int = value

@@ -1,7 +1,8 @@
 // Generated from pinned official headers by GenerateAPISurfaces. Regenerate with: sbt codegen
 package net.kurobako.gemstone.vulkan
 
-import net.kurobako.gemstone.{NonEmptyString, PositiveInt}
+import net.kurobako.gemstone.Constraint.Positive
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.abi.ABI.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
@@ -503,7 +504,7 @@ object Vulkan {
   type uint64_t = CValue["uint64_t"]
 
   val HeaderVersion: NonEmptyString = NonEmptyString("v1.4.341")
-  val FunctionCount: PositiveInt = PositiveInt(719)
+  val FunctionCount: Positive[Int] = 719
 }
 
 import Vulkan.*

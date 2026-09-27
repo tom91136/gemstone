@@ -1,24 +1,18 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.{
-  NonEmptyString,
-  NonEmptyVec,
-  NonNegativeInt,
-  NonNegativeLong,
-  PlatformTime,
-  PositiveInt,
-  PositiveLong,
-  Vec
-}
-import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
-import net.kurobako.gemstone.isa.KernelName as ISAKernelName
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+import net.kurobako.gemstone.{NonEmptyVec, PlatformTime, Vec}
+import net.kurobako.gemstone.binary.LittleEndian
+import net.kurobako.gemstone.Constraint.NonEmptyString as ISAKernelName
 import net.kurobako.gemstone.isa.spirv.v1_6.Endianness
 import net.kurobako.gemstone.isa.spirv.v1_6.Header
 import net.kurobako.gemstone.isa.spirv.v1_6.ISA as SPIRV
 import net.kurobako.gemstone.isa.spirv.v1_6.Instruction
 import net.kurobako.gemstone.isa.spirv.v1_6.Module
 import net.kurobako.gemstone.isa.spirv.v1_6.Operand
-import net.kurobako.gemstone.isa.spirv.v1_6.SPIRVOperandKind
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.spirv.v1_6.Validation
 import net.kurobako.gemstone.isa.spirv.v1_6.Word
 import net.kurobako.gemstone.memory.AllocationKind
@@ -113,7 +107,7 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
     )
     val image = SPIRV.encode(module).toOption.get
     Using.resource(ExecutionService(RuntimeBackend.defaults)) { service =>
-      val allocation = service.registerAllocation(PositiveLong.unsafe(4), AllocationKind.Shared).toOption.get
+      val allocation = service.registerAllocation(4L, AllocationKind.Shared).toOption.get
       val program    = service.load(encoding, image).toOption.get
       val task       = KernelTask
         .validated(
@@ -121,7 +115,7 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
           LaunchGeometry.Dimensions.One,
           LaunchGeometry.Dimensions.One,
           Vec(
-            KernelTask.Argument.Memory(MemoryRegion(allocation.raw), NonNegativeLong.Zero),
+            KernelTask.Argument.Memory(MemoryRegion(allocation.raw), 0L),
             KernelTask.Argument.Scalar(Vec[Byte](0x78, 0x56, 0x34, 0x12))
           )
         )
@@ -131,7 +125,7 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
       val completion = service.launch(program, task).toOption.get
       assertEquals(awaitCompletion(service, completion), Right(CompletionStatus.Succeeded))
       assertEquals(
-        service.read(allocation, NonNegativeLong.Zero, NonNegativeInt(4)),
+        service.read(allocation, 0L, 4),
         Right(Vec[Byte](0x78, 0x56, 0x34, 0x12))
       )
     }
@@ -145,17 +139,17 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
       parallel <- Vec(false, true)
     } {
       final class ParallelGroups extends Scheduler {
-        override val parallelism: PositiveInt                                                = PositiveInt(4)
-        override def shouldParallel(tasks: NonNegativeLong, items: NonNegativeLong): Boolean = tasks.raw > 1L
-        override def parallelFor(tasks: NonNegativeLong)(
-            task: NonNegativeLong => Either[Fault, Unit]
+        override val parallelism: Positive[Int]                                                  = 4
+        override def shouldParallel(tasks: NonNegative[Long], items: NonNegative[Long]): Boolean = tasks.raw > 1L
+        override def parallelFor(tasks: NonNegative[Long])(
+            task: NonNegative[Long] => Either[Fault, Unit]
         )
             : Either[Fault, Unit] = {
           val failure = AtomicReference(Option.empty[Fault])
           (0L until tasks.raw).grouped(4).foreach { batch =>
             val threads = batch.map(index =>
               Thread(() =>
-                try task(NonNegativeLong.unsafe(index)).left.foreach(error => failure.set(Some(error)))
+                try task(NonNegative.unsafe(index)).left.foreach(error => failure.set(Some(error)))
                 catch {
                   case error: Throwable =>
                     failure.set(Some(Fault.Backend(error.toString)))
@@ -172,11 +166,11 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
         }
       }
       final class Capturing(delegate: Scheduler, queued: AtomicReference[Option[Runnable]]) extends Scheduler {
-        override def parallelism                                                             = delegate.parallelism
-        override def shouldParallel(tasks: NonNegativeLong, items: NonNegativeLong): Boolean =
+        override def parallelism                                                                 = delegate.parallelism
+        override def shouldParallel(tasks: NonNegative[Long], items: NonNegative[Long]): Boolean =
           delegate.shouldParallel(tasks, items)
-        override def parallelFor(tasks: NonNegativeLong)(
-            task: NonNegativeLong => Either[Fault, Unit]
+        override def parallelFor(tasks: NonNegative[Long])(
+            task: NonNegative[Long] => Either[Fault, Unit]
         ): Either[Fault, Unit]                          = delegate.parallelFor(tasks)(task)
         override def schedule(runnable: Runnable): Unit = assert(queued.compareAndSet(None, Some(runnable)))
       }
@@ -184,29 +178,33 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
       val delegate  = if (parallel) ParallelGroups() else Scheduler.Sequential
       val scheduler = Capturing(delegate, queued)
       Using.resource(ExecutionService(RuntimeBackend.defaults, scheduler = scheduler)) { service =>
-        val size           = PositiveInt.unsafe((groups + 3) * 65536 + 8)
-        val allocationSize = size.toLong
-        val allocation     = service.registerAllocation(allocationSize, AllocationKind.Shared).toOption.get
-        val program        = service.load(encoding, image).fold(error => fail(error.message), value => value)
-        val host           = Array.ofDim[Byte](size.raw)
+        val size           = Positive.unsafe((groups + 3) * 65536 + 8)
+        val allocationSize = size.raw.toLong
+        val allocation = service.registerAllocation(Positive.unsafe(allocationSize), AllocationKind.Shared).toOption.get
+        val program    = service.load(encoding, image).fold(error => fail(error.message), value => value)
+        val host       = Array.ofDim[Byte](size.raw)
         for (seed <- Vec(3L, 7L)) {
-          val before     = service.read(allocation, NonNegativeLong.Zero, size.toNonNegative).toOption.get
-          val groupCount = PositiveInt.either(groups)
-            .fold(message => fail(message), value => LaunchGeometry.Dimensions(value, PositiveInt(1), PositiveInt(1)))
+          val before     = service.read(allocation, 0L, size.widen).toOption.get
+          val groupCount = Positive.either(groups)
+            .fold(
+              message => fail(message),
+              value => LaunchGeometry.Dimensions(value, 1, 1)
+            )
           val task = KernelTask.validated(
             ISAKernelName("groups"),
             LaunchGeometry.Dimensions.One,
             groupCount,
             Vec(
-              KernelTask.Argument.Memory(MemoryRegion(allocation.raw), NonNegativeLong.unsafe(4)),
-              KernelTask.Argument.Scalar(LittleEndian.toVec(seed, ScalarByteWidth.Dword))
+              KernelTask.Argument.Memory(MemoryRegion(allocation.raw), 4L),
+              KernelTask.Argument.Scalar(LittleEndian.toVec(seed, 4))
             ),
-            globalOffset = LaunchGeometry.Coordinates(NonNegativeInt(2), NonNegativeInt(0), NonNegativeInt(0))
+            globalOffset =
+              LaunchGeometry.Coordinates(2, 0, 0)
           ).toOption.get
           val completion = service.launch(program, task).toOption.get
           assertEquals(service.completion(completion), Right(CompletionStatus.Pending))
           assert(service.completionDirtyRanges(completion).isLeft)
-          assertEquals(service.read(allocation, NonNegativeLong.Zero, size.toNonNegative), Right(before))
+          assertEquals(service.read(allocation, 0L, size.widen), Right(before))
           queued.getAndSet(None).get.run()
           assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
           val ranges = service.completionDirtyRanges(completion).toOption.get
@@ -214,7 +212,7 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
           ranges.foreach { range =>
             assertEquals(range.allocation, allocation)
             assert(range.offset.raw >= 0 && range.offset.raw + range.size.raw <= size.raw)
-            val bytes = service.read(allocation, range.offset, range.size.toNonNegative).toOption.get
+            val bytes = service.read(allocation, range.offset, range.size.widen).toOption.get
             bytes.copyToArray(host, range.offset.raw.toInt, range.size.raw)
           }
           val expected = Array.ofDim[Byte](size.raw)
@@ -223,9 +221,9 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
             assert(ranges.exists(range =>
               range.offset.raw <= address && address + 4 <= range.offset.raw + range.size.raw
             ))
-            val offset = NonNegativeInt.either(address.toInt)
+            val offset = NonNegative.either(address.toInt)
               .fold(message => fail(message), value => value)
-            LittleEndian.write(seed, expected, offset.raw, ScalarByteWidth.Dword)
+            LittleEndian.write(seed, expected, offset.raw, 4)
           }
           assertEquals(Vec.from(host), Vec.from(expected))
           assertEquals(service.releaseCompletion(completion), Right(()))
@@ -287,15 +285,15 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
 
   private def operand(kind: String, value: Int, remaining: Int*): Operand =
     Operand(
-      SPIRVOperandKind.either(kind).fold(message => fail(message), value => value),
+      NonEmptyString.either(kind).fold(message => fail(message), value => value),
       NonEmptyVec(Word(value), remaining.map(Word(_))*)
     )
 
   private def stringOperand(value: String): Operand = {
     val bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8) :+ 0.toByte
     val words = bytes.grouped(4).map { group =>
-      Word(LittleEndian.decode(group, 0, ScalarByteWidth.unsafe(group.length)).toInt)
+      Word(LittleEndian.decode(group, 0, IntBetween.unsafe[0, 8](group.length)).toInt)
     }
-    Operand(SPIRVOperandKind("LiteralString"), NonEmptyVec.unsafeFromVec(Vec.from(words)))
+    Operand(NonEmptyString("LiteralString"), NonEmptyVec.unsafeFromVec(Vec.from(words)))
   }
 }

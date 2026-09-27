@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.server
 
+import net.kurobako.gemstone.Constraint.NoNulString
+
 import net.kurobako.gemstone.*
 
 import net.kurobako.gemstone.launcher.Environment
@@ -39,7 +41,7 @@ private object NativeTestProcess {
       }
   }
 
-  final case class Result(
+  case class Result(
       command: NonEmptyVec[NoNulString],
       exit: Int,
       stdout: String,

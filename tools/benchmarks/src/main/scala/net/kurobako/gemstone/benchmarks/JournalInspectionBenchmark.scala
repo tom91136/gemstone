@@ -61,7 +61,7 @@ object JournalInspectionBenchmark {
       if (summary.events.raw != 401 || summary.frames.raw != 400 || !summary.replayable)
         throw IllegalStateException(s"unexpected journal summary: $summary")
       Console.out.println(
-        s"INSPECT sample=$sample nanos=$nanos allocated=${bytes.fold(-1L)(_.raw)} " +
+        s"INSPECT sample=$sample nanos=$nanos allocated=${bytes.fold(-1L)(identity)} " +
           s"events=${summary.events} frames=${summary.frames} archive=${Files.size(file)}"
       )
     }

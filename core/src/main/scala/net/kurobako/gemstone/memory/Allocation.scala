@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.memory
 
-import net.kurobako.gemstone.{NonEmptyString, NonNegativeInt}
+import net.kurobako.gemstone.Constraint.NonNegative
+import net.kurobako.gemstone.Constraint.NonEmptyString
 
-final case class Allocation(
+case class Allocation(
     start: GuestAddress,
-    size: NonNegativeInt,
+    size: NonNegative[Int],
     provenance: NonEmptyString
 )

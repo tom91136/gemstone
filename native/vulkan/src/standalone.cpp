@@ -263,7 +263,7 @@ bool run(const Dispatch &dispatch) {
     size_t size;
   };
   std::vector<RemoteBuffer> allocations;
-  std::vector<KernelArgument> arguments;
+  std::vector<Argument> arguments;
   // Polyregion kernels can contain inactive SIMD lanes whose accesses fall just
   // beyond the descriptor range. Vulkan robustBufferAccess discards those
   // writes and returns zero for reads; the RPC allocation needs guard storage
@@ -343,7 +343,8 @@ bool run(const Dispatch &dispatch) {
         okay = false;
         break;
       }
-      arguments.emplace_back(KernelArgumentAllocation{allocations[argument.allocation].id, static_cast<int64_t>(argument.offset)});
+      arguments.emplace_back(
+          ArgumentMemory{MemoryRegion{allocations[argument.allocation].id.value}, static_cast<int64_t>(argument.offset)});
     }
   if (okay) {
     const auto local = pipeline.local;
@@ -941,7 +942,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(VkDevice, VkP
         }
         pipe.image = std::move(specialized.value());
       }
-      auto described = client->call(DescribeImage{"spirv-vulkan-binary", pipe.image, KernelName{pipe.entry}});
+      auto described = client->call(DescribeImage{"spirv-vulkan-binary", pipe.image, NonEmptyString{pipe.entry}});
       if (!described) {
         if (gemstone::traceEnabled("vulkan")) std::fprintf(stderr, "Gemstone Vulkan: cannot reflect entry %s\n", pipe.entry.c_str());
         return VK_ERROR_INVALID_SHADER_NV;

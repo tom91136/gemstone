@@ -1,3 +1,5 @@
 package net.kurobako.gemstone.isa
 
-final case class KernelSymbol(name: KernelName, linkageName: LinkageName)
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
+case class KernelSymbol(name: NonEmptyString, linkageName: NonEmptyString)

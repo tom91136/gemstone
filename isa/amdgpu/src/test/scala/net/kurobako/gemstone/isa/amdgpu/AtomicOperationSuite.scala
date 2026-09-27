@@ -1,15 +1,20 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import CodeObject.*
+import net.kurobako.gemstone.Constraint.IntBetween
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, Vec}
-import net.kurobako.gemstone.binary.{ByteRange, LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.binary.Widths.*
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
+import CodeObject.*
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.binary.{ByteRange, LittleEndian}
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
-import net.kurobako.gemstone.memory.MemoryValueByteWidth
-
 import java.util.concurrent.locks.ReentrantLock
 
 /** RDNA2 ISA section12.18: GLC gates return; DATA has replacement before comparison; unsigned INC resets when the
@@ -21,21 +26,21 @@ final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSuppo
     val bytes                                                          = Array.ofDim[Byte](16 + groups * 8)
     private val lock                                                   = ReentrantLock()
     override protected val regionSizes: Iterable[(MemoryRegion, Long)] = Seq(allocation -> bytes.length.toLong)
-    LittleEndian.write(old, bytes, 0, ScalarByteWidth(8))
-    def read(id: MemoryRegion, offset: NonNegativeLong, size: NonNegativeInt) =
+    LittleEndian.write(old, bytes, 0, 8)
+    def read(id: MemoryRegion, offset: NonNegative[Long], size: NonNegative[Int]) =
       Either.cond(
         id == allocation && ByteRange.contains(bytes.length, offset.raw, size.raw),
         Vec.from(bytes.slice(offset.raw.toInt, offset.raw.toInt + size.raw)),
         Fault.InvalidTask("test read bounds")
       )
-    def write(id: MemoryRegion, offset: NonNegativeLong, value: Vec[Byte]) = {
+    def write(id: MemoryRegion, offset: NonNegative[Long], value: Vec[Byte]) = {
       assert(id == allocation && ByteRange.contains(bytes.length, offset.raw, value.size))
       val _ = value.copyToArray(bytes, offset.raw.toInt, value.size); Right(())
     }
     override def atomicModifyValue(
         id: MemoryRegion,
-        offset: NonNegativeLong,
-        size: MemoryValueByteWidth
+        offset: NonNegative[Long],
+        size: IntBetween[1, 8]
     )(update: Long => Long): Either[Fault, Long] = lock.withLock {
       val scalarWidth = size.scalarByteWidth
       if (id == allocation && ByteRange.contains(bytes.length, offset.raw, size.raw)) {
@@ -77,13 +82,13 @@ final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSuppo
     val code     = AtomicOperationCode.bytes(op, width, returning)
     val kernel   = CodeObjectKernel("atomic", Target("gfx1030"), 24, 0, 0, 0x80, 0x08, code)
     val dispatch = KernelTask.validated(
-      KernelName("atomic"),
+      NonEmptyString("atomic"),
       Dimensions.One,
       testDimensions(groups),
       Vec(
-        KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(operand, ScalarByteWidth(8))),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(7, ScalarByteWidth(8)))
+        KernelTask.Argument.Memory(allocation, 0L),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(operand, 8)),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(7, 8))
       )
     ).toOption.get
     val memory   = Memory(groups, old)
@@ -108,10 +113,10 @@ final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSuppo
       ),
       Right(())
     )
-    val byteWidth = if (width == 64) ScalarByteWidth.Qword else ScalarByteWidth.Dword
+    val byteWidth: IntBetween[0, 8] = if (width == 64) 8 else 4
     assertEquals(LittleEndian.decode(memory.bytes, 0, byteWidth), expected.last)
     val result = (0 until groups).map(index =>
-      LittleEndian.decode(memory.bytes, 16 + index * 8, ScalarByteWidth.Qword)
+      LittleEndian.decode(memory.bytes, 16 + index * 8, 8)
     )
     val returns = expected.dropRight(1).map(value =>
       if (!returning) 0x7654321012345678L else if (width == 32) 0x7654321000000000L | value else value

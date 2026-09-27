@@ -1,17 +1,16 @@
 package net.kurobako.gemstone.benchmarks
 
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import net.kurobako.gemstone.NonNegativeInt
-import net.kurobako.gemstone.NonNegativeLong
 import net.kurobako.gemstone.PlatformTime
-import net.kurobako.gemstone.PositiveInt
 
 object BenchmarkRunner {
   private sealed trait Action
-  private case object ListBenchmarks                      extends Action
-  private final case class Run(options: BenchmarkOptions) extends Action
+  private case object ListBenchmarks                extends Action
+  private case class Run(options: BenchmarkOptions) extends Action
 
   private val command = Command("benchmarks", "Run Gemstone microbenchmarks")(
     Opts.subcommands(
@@ -23,9 +22,9 @@ object BenchmarkRunner {
           )
           .map(value => BenchmarkName.unsafe(value)),
         Opts.option[Int]("warmup", help = "Warmup iterations").withDefault(1)
-          .validate("warmups must be non-negative")(_ >= 0).map(NonNegativeInt.unsafe),
+          .validate("warmups must be non-negative")(_ >= 0).map(NonNegative.unsafe),
         Opts.option[Int]("samples", help = "Measured samples").withDefault(5)
-          .validate("samples must be positive")(_ > 0).map(PositiveInt.unsafe),
+          .validate("samples must be positive")(_ > 0).map(Positive.unsafe),
         Opts.arguments[String]("case-argument").orEmpty
       ).mapN { (name, warmups, samples, rest) =>
         Run(BenchmarkOptions(warmups, samples, BenchmarkInvocation(name, rest.toVector)))
@@ -49,8 +48,8 @@ object BenchmarkRunner {
       while sample < options.samples.raw do {
         val started = PlatformTime.monotonicNanos
         PlatformBenchmarks.run(options.invocation)
-        val elapsed = NonNegativeLong.unsafe(math.max(0L, PlatformTime.monotonicNanos - started))
-        Console.out.println(ujson.write(result(options, NonNegativeInt.unsafe(sample), elapsed)))
+        val elapsed = NonNegative.unsafe(math.max(0L, PlatformTime.monotonicNanos - started))
+        Console.out.println(ujson.write(result(options, NonNegative.unsafe(sample), elapsed)))
         sample += 1
       }
   }
@@ -66,8 +65,8 @@ object BenchmarkRunner {
 
   def result(
       options: BenchmarkOptions,
-      sample: NonNegativeInt,
-      elapsedNanos: NonNegativeLong
+      sample: NonNegative[Int],
+      elapsedNanos: NonNegative[Long]
   ): ujson.Obj = ujson.Obj(
     "schema"               -> "gemstone-benchmark-v1",
     "case"                 -> options.invocation.name.raw,

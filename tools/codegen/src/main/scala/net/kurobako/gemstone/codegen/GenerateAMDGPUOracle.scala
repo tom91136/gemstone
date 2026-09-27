@@ -10,7 +10,7 @@ import cats.data.Chain
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import net.kurobako.gemstone.NonEmptyString
+import net.kurobako.gemstone.Constraint.NonEmptyString
 
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
@@ -26,12 +26,12 @@ object GenerateAMDGPUOracle {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): EncodedByte =
-      inline if constValue[A] >= 0 && constValue[A] <= 255 then value else error("encoded byte out of range")
+      inline if (constValue[A] >= 0 && constValue[A] <= 255) value else error("encoded byte out of range")
     extension (value: EncodedByte) def raw: Int = value
   }
 
-  private final case class Request(references: Path, resourceRoot: Path)
-  private final case class Golden(
+  private case class Request(references: Path, resourceRoot: Path)
+  private case class Golden(
       target: NonEmptyString,
       assembly: NonEmptyString,
       bytes: Vector[EncodedByte],
@@ -41,7 +41,7 @@ object GenerateAMDGPUOracle {
     val opcode: NonEmptyString = NonEmptyString.unsafe(assembly.raw.takeWhile(!_.isWhitespace))
   }
 
-  private final case class Diagnostic(
+  private case class Diagnostic(
       target: NonEmptyString,
       assembly: NonEmptyString,
       message: NonEmptyString,
@@ -49,7 +49,7 @@ object GenerateAMDGPUOracle {
       sourceFile: NonEmptyString
   )
 
-  private final case class Corpus(
+  private case class Corpus(
       positiveSeen: Set[(NonEmptyString, NonEmptyString, Vector[EncodedByte])],
       diagnosticSeen: Set[(NonEmptyString, NonEmptyString, NonEmptyString)],
       positives: Chain[Golden],
@@ -62,7 +62,7 @@ object GenerateAMDGPUOracle {
     val empty: Corpus = Corpus(Set.empty, Set.empty, Chain.empty, Chain.empty, 0, 0)
   }
 
-  private final case class Selection(positives: Vector[Golden], diagnostics: Vector[Diagnostic])
+  private case class Selection(positives: Vector[Golden], diagnostics: Vector[Diagnostic])
 
   private val Run: Regex           = raw"\s*//\s*RUN:\s*(.*)".r
   private val EncodingCheck: Regex =

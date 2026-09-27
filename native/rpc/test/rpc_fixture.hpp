@@ -34,6 +34,24 @@ namespace gemstone_test {
 
 using namespace gemstone::execution;
 
+struct FixtureOptions : glz::opts {
+  static constexpr auto format = glz::MSGPACK;
+  bool structs_as_arrays = true;
+};
+
+template <class T> T decodePayload(const std::vector<uint8_t> &payload) {
+  T value{};
+  const std::string_view view(reinterpret_cast<const char *>(payload.data()), payload.size());
+  GEMSTONE_RPC_REQUIRE(!glz::read<FixtureOptions{}>(value, view));
+  return value;
+}
+
+template <class T> void encodePayload(std::vector<uint8_t> &out, const T &value) {
+  std::string buffer;
+  GEMSTONE_RPC_REQUIRE(!glz::write<FixtureOptions{}>(value, buffer));
+  out.assign(buffer.begin(), buffer.end());
+}
+
 // Real native API/transport test peer. Kernel execution is deliberately mocked:
 // validate launch geometry, publish one range per group, and complete when awaited.
 class RpcFixture {
@@ -310,38 +328,32 @@ private:
     if (failure) std::rethrow_exception(failure);
   }
 
-  static void putString(std::vector<uint8_t> &v, const std::string &value) {
-    wire::appendBigEndian<uint32_t>(v, static_cast<uint32_t>(value.size()));
-    v.insert(v.end(), value.begin(), value.end());
-  }
-  static uint64_t parameterKind(uint32_t value) {
-    if (value == 1) return static_cast<uint64_t>(KernelParameterKind::Scalar);
-    if (value == 2) return static_cast<uint64_t>(KernelParameterKind::Allocation);
-    if (value == 3) return static_cast<uint64_t>(KernelParameterKind::Local);
+  static ParameterKind parameterKind(uint32_t value) {
+    if (value == 1) return ParameterKind::Scalar;
+    if (value == 2) return ParameterKind::Allocation;
+    if (value == 3) return ParameterKind::Local;
     GEMSTONE_RPC_REQUIRE(false);
-    return 0;
+    return ParameterKind::Scalar;
   }
   void appendKernelMetadata(std::vector<uint8_t> &result) {
-    wire::appendBigEndian<uint32_t>(result, kernelArgumentBlockSize_);
-    wire::appendBigEndian<uint32_t>(result, kernelExplicitParameterCount_);
-    wire::appendBigEndian<uint32_t>(result, static_cast<uint32_t>(kernelParameters_.size()));
+    KernelMetadata metadata{};
+    metadata.argumentBlockSize = IntPositive0{static_cast<int32_t>(kernelArgumentBlockSize_)};
+    metadata.explicitParameterCount = IntPositive0{static_cast<int32_t>(kernelExplicitParameterCount_)};
     for (const auto &parameter : kernelParameters_) {
-      wire::appendBigEndian<uint32_t>(result, parameter.width);
-      wire::appendBigEndian<uint32_t>(result, parameter.offset);
-      wire::appendBigEndian<uint64_t>(result, parameterKind(parameter.kind));
-      result.push_back(static_cast<uint8_t>(parameter.containsPointers));
+      Parameter entry{};
+      entry.width = IntPositive{static_cast<int32_t>(parameter.width)};
+      entry.offset = IntPositive0{static_cast<int32_t>(parameter.offset)};
+      entry.kind = parameterKind(parameter.kind);
+      entry.containsPointers = parameter.containsPointers != 0;
+      metadata.parameters.push_back(entry);
     }
-    if (requiredWorkGroupSize_) {
-      result.push_back(1);
-      wire::appendBigEndian<uint32_t>(result, (*requiredWorkGroupSize_)[0]);
-      wire::appendBigEndian<uint32_t>(result, (*requiredWorkGroupSize_)[1]);
-      wire::appendBigEndian<uint32_t>(result, (*requiredWorkGroupSize_)[2]);
-    } else result.push_back(0);
-    result.push_back(0); // absent work-group size hint
-    wire::appendBigEndian<uint32_t>(result, static_cast<uint32_t>(bindingIndices_.size()));
+    if (requiredWorkGroupSize_)
+      metadata.requiredWorkGroupSize = Dimensions{IntPositive{static_cast<int32_t>((*requiredWorkGroupSize_)[0])},
+                                                  IntPositive{static_cast<int32_t>((*requiredWorkGroupSize_)[1])},
+                                                  IntPositive{static_cast<int32_t>((*requiredWorkGroupSize_)[2])}};
     for (const auto binding : bindingIndices_)
-      wire::appendBigEndian<uint32_t>(result, binding);
-    result.push_back(0); // absent entry point id
+      metadata.bindingIndices.push_back(IntPositive0{static_cast<int32_t>(binding)});
+    encodePayload(result, metadata);
   }
   bool receive(int socket, void *output, size_t size) {
     auto *bytes = static_cast<uint8_t *>(output);
@@ -377,17 +389,22 @@ private:
       std::vector<uint8_t> result;
       bool failed = false;
       switch (operationId) {
-        case operation::Ping: break;
+        case operation::Ping: encodePayload(result, Unit{}); break;
+        case operation::EnableHostMemory:
+          hostMemoryEnabled_ = true;
+          encodePayload(result, Unit{});
+          break;
         case operation::RegisterAllocation: {
-          GEMSTONE_RPC_REQUIRE(size == 16);
+          const auto request = decodePayload<RegisterAllocation>(payload);
           const auto id = nextAllocation_++;
           GEMSTONE_RPC_REQUIRE(id != 0);
-          allocations_[id].resize(wire::readBigEndian<uint64_t>(payload.data() + 8));
-          wire::appendBigEndian<uint64_t>(result, id);
+          allocations_[id].resize(static_cast<size_t>(request.size.value));
+          encodePayload(result, AllocationId{static_cast<int64_t>(id)});
           break;
         }
         case operation::ReleaseAllocation: {
-          const auto id = wire::readBigEndian<uint64_t>(payload.data());
+          const auto request = decodePayload<ReleaseAllocation>(payload);
+          const auto id = static_cast<uint64_t>(request.allocation.value);
           const auto address = pauseReleaseAddress_.load();
           const auto alias = allocationAddresses_.find(id);
           if (address != 0 && alias != allocationAddresses_.end() && address >= alias->second
@@ -399,130 +416,102 @@ private:
           GEMSTONE_RPC_REQUIRE(allocations_.erase(id) == 1);
           allocationAddresses_.erase(id);
           hostBacked_.erase(id);
+          encodePayload(result, Unit{});
           break;
         }
         case operation::RegisterAllocationAddress: {
-          GEMSTONE_RPC_REQUIRE(size == 17);
-          const auto id = wire::readBigEndian<uint64_t>(payload.data()), base = wire::readBigEndian<uint64_t>(payload.data() + 8);
+          const auto request = decodePayload<RegisterAllocationAddress>(payload);
+          const auto id = static_cast<uint64_t>(request.allocation.value);
+          const auto base = static_cast<uint64_t>(request.nativeBase.value);
           GEMSTONE_RPC_REQUIRE(allocations_.count(id) == 1 && base != 0);
           GEMSTONE_RPC_REQUIRE(allocationAddresses_.emplace(id, base).second);
-          hostBacked_[id] = payload[16] != 0;
+          hostBacked_[id] = request.hostBacked;
+          encodePayload(result, Unit{});
           break;
         }
         case operation::WriteAllocation: {
-          auto &bytes = allocations_.at(wire::readBigEndian<uint64_t>(payload.data()));
-          const auto offset = wire::readBigEndian<uint64_t>(payload.data() + 8);
-          const auto count = wire::readBigEndian<uint32_t>(payload.data() + 16);
-          GEMSTONE_RPC_REQUIRE(offset + count <= bytes.size() && size == 20 + count);
-          std::memcpy(bytes.data() + offset, payload.data() + 20, count);
-          writtenBytes_[wire::readBigEndian<uint64_t>(payload.data())] += count;
+          const auto request = decodePayload<WriteAllocation>(payload);
+          const auto id = static_cast<uint64_t>(request.allocation.value);
+          auto &bytes = allocations_.at(id);
+          const auto offset = static_cast<uint64_t>(request.offset.value);
+          GEMSTONE_RPC_REQUIRE(offset + request.bytes.size() <= bytes.size());
+          std::memcpy(bytes.data() + offset, request.bytes.data(), request.bytes.size());
+          writtenBytes_[id] += request.bytes.size();
+          encodePayload(result, Unit{});
           break;
         }
         case operation::ReadAllocation: {
           GEMSTONE_RPC_REQUIRE(!active_ || completed_);
-          auto &bytes = allocations_.at(wire::readBigEndian<uint64_t>(payload.data()));
-          const auto offset = wire::readBigEndian<uint64_t>(payload.data() + 8);
-          const auto count = wire::readBigEndian<uint32_t>(payload.data() + 16);
+          const auto request = decodePayload<ReadAllocation>(payload);
+          const auto id = static_cast<uint64_t>(request.allocation.value);
+          auto &bytes = allocations_.at(id);
+          const auto offset = static_cast<uint64_t>(request.offset.value);
+          const auto count = static_cast<size_t>(request.size.value);
           GEMSTONE_RPC_REQUIRE(offset + count <= bytes.size());
-          wire::appendBigEndian<uint32_t>(result, count);
-          result.insert(result.end(), bytes.begin() + offset, bytes.begin() + offset + count);
+          encodePayload(result, std::vector<uint8_t>(bytes.begin() + offset, bytes.begin() + offset + count));
           break;
         }
         case operation::LoadProgram: {
-          GEMSTONE_RPC_REQUIRE(size >= 8);
-          const auto encodingSize = wire::readBigEndian<uint32_t>(payload.data());
-          GEMSTONE_RPC_REQUIRE(encodingSize <= size - 8);
-          const size_t imageSizeOffset = 4 + encodingSize;
-          const auto imageSize = wire::readBigEndian<uint32_t>(payload.data() + imageSizeOffset);
-          GEMSTONE_RPC_REQUIRE(imageSize == size - imageSizeOffset - 4);
-          lastProgramImage_.assign(payload.begin() + imageSizeOffset + 4, payload.end());
-        }
+          const auto request = decodePayload<LoadProgram>(payload);
+          lastProgramImage_ = request.image;
           ++programLoads_;
-          wire::appendBigEndian<uint64_t>(result, 91);
+          encodePayload(result, ProgramId{91});
           break;
+        }
         case operation::DescribeSpecialization: {
-          GEMSTONE_RPC_REQUIRE(size >= 4);
-          GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint32_t>(payload.data()) == size - 4);
-          wire::appendBigEndian<uint32_t>(result, static_cast<uint32_t>(specializationSizes_.size()));
-          for (const auto &[id, byteSize] : specializationSizes_) {
-            wire::appendBigEndian<uint32_t>(result, id);
-            wire::appendBigEndian<uint32_t>(result, byteSize);
-          }
+          decodePayload<DescribeSpecialization>(payload);
+          std::vector<SpecializationInfo> infos;
+          for (const auto &[id, byteSize] : specializationSizes_)
+            infos.push_back(SpecializationInfo{IntPositive0{static_cast<int32_t>(id)}, IntPositive{static_cast<int32_t>(byteSize)}});
+          encodePayload(result, infos);
           break;
         }
         case operation::SpecializeImage: {
-          GEMSTONE_RPC_REQUIRE(size >= 8);
-          const uint32_t imageSize = wire::readBigEndian<uint32_t>(payload.data());
-          size_t cursor = 4 + imageSize;
-          GEMSTONE_RPC_REQUIRE(cursor + 4 <= size);
-          const uint32_t count = wire::readBigEndian<uint32_t>(payload.data() + cursor);
-          cursor += 4;
+          const auto request = decodePayload<SpecializeImage>(payload);
           std::vector<std::pair<uint32_t, std::vector<uint8_t>>> constants;
-          constants.reserve(count);
-          for (uint32_t index = 0; index < count; ++index) {
-            GEMSTONE_RPC_REQUIRE(cursor + 8 <= size);
-            const uint32_t id = wire::readBigEndian<uint32_t>(payload.data() + cursor);
-            const uint32_t length = wire::readBigEndian<uint32_t>(payload.data() + cursor + 4);
-            cursor += 8;
-            GEMSTONE_RPC_REQUIRE(cursor + length <= size);
-            constants.emplace_back(id, std::vector<uint8_t>(payload.begin() + cursor, payload.begin() + cursor + length));
-            cursor += length;
-          }
-          GEMSTONE_RPC_REQUIRE(cursor == size);
+          for (const auto &constant : request.constants)
+            constants.emplace_back(static_cast<uint32_t>(constant.specId.value), constant.value);
           lastSpecialization_ = std::move(constants);
-          wire::appendBigEndian<uint32_t>(result, imageSize);
-          result.insert(result.end(), payload.begin() + 4, payload.begin() + 4 + imageSize);
+          encodePayload(result, request.image);
           break;
         }
-        case operation::UnloadProgram: break;
+        case operation::UnloadProgram: encodePayload(result, Unit{}); break;
         case operation::DescribeKernel: {
-          GEMSTONE_RPC_REQUIRE(size >= 12 && wire::readBigEndian<uint64_t>(payload.data()) == 91);
-          const auto nameSize = wire::readBigEndian<uint32_t>(payload.data() + 8);
-          GEMSTONE_RPC_REQUIRE(nameSize != 0 && size == 12 + nameSize);
+          const auto request = decodePayload<DescribeKernel>(payload);
+          GEMSTONE_RPC_REQUIRE(request.program.value == 91 && !request.name.value.empty());
           appendKernelMetadata(result);
           break;
         }
         case operation::DescribeImage: {
-          GEMSTONE_RPC_REQUIRE(size >= 12);
-          const auto encodingSize = wire::readBigEndian<uint32_t>(payload.data());
-          size_t cursor = 4 + encodingSize;
-          GEMSTONE_RPC_REQUIRE(cursor + 4 <= size);
-          const auto imageSize = wire::readBigEndian<uint32_t>(payload.data() + cursor);
-          cursor += 4 + imageSize;
-          GEMSTONE_RPC_REQUIRE(cursor + 4 <= size);
-          const auto nameSize = wire::readBigEndian<uint32_t>(payload.data() + cursor);
-          cursor += 4 + nameSize;
-          GEMSTONE_RPC_REQUIRE(cursor == size && nameSize != 0);
+          const auto request = decodePayload<DescribeImage>(payload);
+          GEMSTONE_RPC_REQUIRE(!request.name.value.empty());
           appendKernelMetadata(result);
           break;
         }
         case operation::DescribeProgram: {
-          GEMSTONE_RPC_REQUIRE(size == 8 && wire::readBigEndian<uint64_t>(payload.data()) == 91);
-          wire::appendBigEndian<uint32_t>(result, static_cast<uint32_t>(programKernels_.size()));
-          for (const auto &kernel : programKernels_) {
-            putString(result, kernel.name);
-            putString(result, kernel.linkageName);
-          }
-          wire::appendBigEndian<uint32_t>(result, static_cast<uint32_t>(programGlobals_.size()));
+          const auto request = decodePayload<DescribeProgram>(payload);
+          GEMSTONE_RPC_REQUIRE(request.program.value == 91);
+          ProgramSymbols catalog{};
+          for (const auto &kernel : programKernels_)
+            catalog.kernels.push_back(gemstone::execution::KernelSymbol{NonEmptyString{kernel.name}, NonEmptyString{kernel.linkageName}});
           for (const auto &global : programGlobals_) {
-            putString(result, global.name);
-            result.push_back(1);
-            wire::appendBigEndian<uint64_t>(result, global.virtualAddress);
-            wire::appendBigEndian<uint64_t>(result, global.size);
-            wire::appendBigEndian<uint32_t>(result, static_cast<uint32_t>(global.pointerOffsets.size()));
+            GlobalSymbol meta{};
+            meta.name = NonEmptyString{global.name};
+            meta.virtualAddress = GuestAddress{static_cast<int64_t>(global.virtualAddress)};
+            meta.size = LongPositive0{static_cast<int64_t>(global.size)};
             for (uint32_t offset : global.pointerOffsets)
-              wire::appendBigEndian<uint32_t>(result, offset);
+              meta.pointerOffsets.push_back(IntPositive0{static_cast<int32_t>(offset)});
+            catalog.globals.push_back(std::move(meta));
           }
           programGlobals_.clear();
+          encodePayload(result, catalog);
           break;
         }
         case operation::BindProgramGlobal: {
-          GEMSTONE_RPC_REQUIRE(size >= 28 && wire::readBigEndian<uint64_t>(payload.data()) == 91);
-          const auto nameSize = wire::readBigEndian<uint32_t>(payload.data() + 8);
-          GEMSTONE_RPC_REQUIRE(size == 28 + nameSize);
-          const std::string name(reinterpret_cast<const char *>(payload.data() + 12), nameSize);
-          const auto allocation = wire::readBigEndian<uint64_t>(payload.data() + 12 + nameSize);
-          const auto offset = wire::readBigEndian<uint64_t>(payload.data() + 20 + nameSize);
+          const auto request = decodePayload<BindProgramGlobal>(payload);
+          const auto name = request.name.value;
+          const auto allocation = static_cast<uint64_t>(request.allocation.value);
+          const auto offset = static_cast<uint64_t>(request.offset.value);
           auto expected = expectedGlobals_.find(name);
           GEMSTONE_RPC_REQUIRE(expected != expectedGlobals_.end() && expected->second.first == offset);
           auto &memory = allocations_.at(allocation);
@@ -530,30 +519,33 @@ private:
           GEMSTONE_RPC_REQUIRE(offset <= memory.size() && initial.size() <= memory.size() - offset);
           std::copy(initial.begin(), initial.end(), memory.begin() + offset);
           expectedGlobals_.erase(expected);
+          encodePayload(result, Unit{});
           break;
         }
         case operation::Launch:
           launch(payload);
-          wire::appendBigEndian<uint64_t>(result, completion_);
+          encodePayload(result, CompletionId{static_cast<int64_t>(completion_)});
           break;
-        case operation::QueryCompletion:
-          GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint64_t>(payload.data()) == completion_);
+        case operation::QueryCompletion: {
+          const auto request = decodePayload<QueryCompletion>(payload);
+          GEMSTONE_RPC_REQUIRE(request.completion.value == static_cast<int64_t>(completion_));
           if (polls_++ < 2) {
             ++pending_;
-            wire::appendBigEndian<uint64_t>(result, tag::CompletionStatusPending);
+            encodePayload(result, CompletionStatus{CompletionStatusPending{}});
           } else {
             completed_ = true;
-            if (failCompletion_.exchange(false)) {
-              wire::appendBigEndian<uint64_t>(result, tag::CompletionStatusFailed);
-              wire::appendBigEndian<uint64_t>(result, tag::ExecutionFailureFailed);
-              putString(result, "completion failed");
-            } else wire::appendBigEndian<uint64_t>(result, tag::CompletionStatusSucceeded);
+            if (failCompletion_.exchange(false))
+              encodePayload(result,
+                            CompletionStatus{CompletionStatusFailed{ExecutionFailure{ExecutionFailureFailed{"completion failed"}}}});
+            else encodePayload(result, CompletionStatus{CompletionStatusSucceeded{}});
           }
           break;
-        case operation::EnableHostMemory: hostMemoryEnabled_ = true; break;
+        }
         case operation::PollHostMemory:
-        case operation::AwaitCompletion:
-          GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint64_t>(payload.data()) == completion_);
+        case operation::AwaitCompletion: {
+          const auto completion = operationId == operation::PollHostMemory ? decodePayload<PollHostMemory>(payload).completion
+                                                                           : decodePayload<AwaitCompletion>(payload).completion;
+          GEMSTONE_RPC_REQUIRE(completion.value == static_cast<int64_t>(completion_));
           if (pauseCompletion_.load()) {
             completionEntered_ = true;
             while (pauseCompletion_.load() && !stopped_.load())
@@ -572,48 +564,53 @@ private:
           completed_ = true;
           failed = failCompletion_.exchange(false);
           if (operationId == operation::PollHostMemory && !failed) {
-            wire::appendBigEndian<uint32_t>(result, 0); // no reads in this fixture's write-only kernel
-            wire::appendBigEndian<uint32_t>(result, hostOutputAddress_ ? static_cast<uint32_t>(ranges_.size()) : 0);
+            HostMemoryBatch batch{};
+            batch.completed = true;
             if (hostOutputAddress_)
               for (const auto &range : ranges_) {
-                wire::appendBigEndian<uint64_t>(result, hostOutputAddress_ + range.first);
-                wire::appendBigEndian<uint32_t>(result, range.second);
-                result.insert(result.end(), hostOutputBytes_.begin() + range.first, hostOutputBytes_.begin() + range.first + range.second);
-                wire::appendBigEndian<uint32_t>(result, 0); // ordinary bytes
+                HostMemoryBytes bytes{};
+                bytes.address = GuestAddress{static_cast<int64_t>(hostOutputAddress_ + range.first)};
+                bytes.bytes.assign(hostOutputBytes_.begin() + range.first, hostOutputBytes_.begin() + range.first + range.second);
+                bytes.atomicWidth = 0;
+                batch.writes.push_back(std::move(bytes));
               }
-            result.push_back(1); // completed
-            result.push_back(0); // no atomic request
-          }
+            encodePayload(result, batch);
+          } else encodePayload(result, Unit{});
           break;
-        case operation::ReleaseCompletion:
-          GEMSTONE_RPC_REQUIRE(completed_ && wire::readBigEndian<uint64_t>(payload.data()) == completion_);
+        }
+        case operation::ReleaseCompletion: {
+          const auto request = decodePayload<ReleaseCompletion>(payload);
+          GEMSTONE_RPC_REQUIRE(completed_ && request.completion.value == static_cast<int64_t>(completion_));
           active_ = false;
+          encodePayload(result, Unit{});
           break;
-        case operation::CompletionDirtyRanges:
+        }
+        case operation::CompletionDirtyRanges: {
+          decodePayload<CompletionDirtyRanges>(payload);
           GEMSTONE_RPC_REQUIRE(completed_);
-          wire::appendBigEndian<uint32_t>(result,
-                                          static_cast<uint32_t>(((hostOutputAddress_ || hostBacked_[outputId_]) ? 0 : ranges_.size())
-                                                                + (indirectWrite_ && !hostBacked_[indirectWrite_->first] ? 1 : 0)));
+          std::vector<DirtyRange> dirty;
           if (!hostOutputAddress_ && !hostBacked_[outputId_])
-            for (const auto &range : ranges_) {
-              wire::appendBigEndian<uint64_t>(result, outputId_);
-              wire::appendBigEndian<uint64_t>(result, range.first);
-              wire::appendBigEndian<uint32_t>(result, range.second);
-            }
-          if (indirectWrite_ && !hostBacked_[indirectWrite_->first]) {
-            wire::appendBigEndian<uint64_t>(result, indirectWrite_->first);
-            wire::appendBigEndian<uint64_t>(result, indirectWrite_->second);
-            wire::appendBigEndian<uint32_t>(result, 4);
-          }
+            for (const auto &range : ranges_)
+              dirty.push_back(DirtyRange{AllocationId{static_cast<int64_t>(outputId_)}, LongPositive0{static_cast<int64_t>(range.first)},
+                                         IntPositive{static_cast<int32_t>(range.second)}});
+          if (indirectWrite_ && !hostBacked_[indirectWrite_->first])
+            dirty.push_back(DirtyRange{AllocationId{static_cast<int64_t>(indirectWrite_->first)},
+                                       LongPositive0{static_cast<int64_t>(indirectWrite_->second)}, IntPositive{4}});
+          encodePayload(result, dirty);
           break;
-        case operation::CompletionPointerRelocations:
+        }
+        case operation::CompletionPointerRelocations: {
+          decodePayload<CompletionPointerRelocations>(payload);
           GEMSTONE_RPC_REQUIRE(completed_);
-          wire::appendBigEndian<uint32_t>(result, 0);
+          encodePayload(result, std::vector<PointerRelocation>{});
           break;
-        case operation::CompletionPrints:
+        }
+        case operation::CompletionPrints: {
+          decodePayload<CompletionPrints>(payload);
           GEMSTONE_RPC_REQUIRE(completed_);
-          wire::appendBigEndian<uint32_t>(result, 0);
+          encodePayload(result, std::string{});
           break;
+        }
         default: GEMSTONE_RPC_REQUIRE(false);
       }
       std::vector<uint8_t> response;
@@ -622,16 +619,17 @@ private:
       wire::appendBigEndian<uint32_t>(response, failed ? 1 : 0);
       if (failed) {
         result.clear();
-        wire::appendBigEndian<uint64_t>(result, tag::ExecutionFailureFailed);
-        putString(result, "completion failed");
+        encodePayload(result, ExecutionFailure{ExecutionFailureFailed{"completion failed"}});
       }
       wire::appendBigEndian<uint32_t>(response, static_cast<uint32_t>(result.size()));
       response.insert(response.end(), result.begin(), result.end());
       send(socket, response);
     }
   }
+
   void launch(const std::vector<uint8_t> &payload) {
     GEMSTONE_RPC_REQUIRE(!active_);
+    const auto request = decodePayload<Launch>(payload);
     if (indirectInput_) {
       uint64_t child = 0;
       bool foundTable = false;
@@ -659,56 +657,35 @@ private:
       }
       GEMSTONE_RPC_REQUIRE(foundChild);
     }
-    size_t cursor = 8;
-    const auto nameSize = wire::readBigEndian<uint32_t>(payload.data() + cursor);
-    cursor += 4 + nameSize;
-    auto take = [&]() {
-      GEMSTONE_RPC_REQUIRE(cursor + 4 <= payload.size());
-      auto value = wire::readBigEndian<uint32_t>(payload.data() + cursor);
-      cursor += 4;
-      return value;
-    };
-    GEMSTONE_RPC_REQUIRE(take() == expected_.local);
-    GEMSTONE_RPC_REQUIRE(take() == expected_.local_yz[0]);
-    GEMSTONE_RPC_REQUIRE(take() == expected_.local_yz[1]);
-    GEMSTONE_RPC_REQUIRE(take() == expected_.groups);
-    GEMSTONE_RPC_REQUIRE(take() == expected_.groups_yz[0]);
-    GEMSTONE_RPC_REQUIRE(take() == expected_.groups_yz[1]);
-    auto takeGlobal = [&]() {
-      GEMSTONE_RPC_REQUIRE(cursor + 8 <= payload.size());
-      auto value = wire::readBigEndian<uint64_t>(payload.data() + cursor);
-      cursor += 8;
-      return value;
-    };
-    GEMSTONE_RPC_REQUIRE(takeGlobal() == expected_.global);
-    GEMSTONE_RPC_REQUIRE(takeGlobal() == expected_.global_yz[0]);
-    GEMSTONE_RPC_REQUIRE(takeGlobal() == expected_.global_yz[1]);
-    const auto dim = take();
-    GEMSTONE_RPC_REQUIRE(dim >= 1 && dim <= 3);
-    GEMSTONE_RPC_REQUIRE(take() == expected_.offset);
-    GEMSTONE_RPC_REQUIRE(take() == 0);
-    GEMSTONE_RPC_REQUIRE(take() == 0);
-    take();
-    take();
-    const auto argumentCount = take();
+    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.groupSize.x.value) == expected_.local);
+    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.groupSize.y.value) == expected_.local_yz[0]);
+    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.groupSize.z.value) == expected_.local_yz[1]);
+    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.groupCount.x.value) == expected_.groups);
+    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.groupCount.y.value) == expected_.groups_yz[0]);
+    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.groupCount.z.value) == expected_.groups_yz[1]);
+    GEMSTONE_RPC_REQUIRE(static_cast<uint64_t>(request.globalSize.x.value) == expected_.global);
+    GEMSTONE_RPC_REQUIRE(static_cast<uint64_t>(request.globalSize.y.value) == expected_.global_yz[0]);
+    GEMSTONE_RPC_REQUIRE(static_cast<uint64_t>(request.globalSize.z.value) == expected_.global_yz[1]);
+    GEMSTONE_RPC_REQUIRE(request.workDim.value >= 1 && request.workDim.value <= 3);
+    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.globalOffset.x.value) == expected_.offset);
+    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.globalOffset.y.value) == 0);
+    GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.globalOffset.z.value) == 0);
+    const auto &arguments = request.arguments;
     if (allocationArguments_) {
-      GEMSTONE_RPC_REQUIRE(argumentCount == allocationArguments_->size());
+      GEMSTONE_RPC_REQUIRE(arguments.size() == allocationArguments_->size());
+      GEMSTONE_RPC_REQUIRE(request.pointerRelocations.empty());
       std::map<size_t, uint64_t> aliases;
       std::vector<std::pair<uint64_t, uint64_t>> actual;
-      for (const auto &expected : *allocationArguments_) {
-        GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint64_t>(payload.data() + cursor) == tag::KernelArgumentAllocation);
-        cursor += 8;
-        const auto id = wire::readBigEndian<uint64_t>(payload.data() + cursor);
-        cursor += 8;
-        const auto offset = wire::readBigEndian<uint64_t>(payload.data() + cursor);
-        cursor += 8;
+      for (size_t index = 0; index < arguments.size(); ++index) {
+        const auto *memory = std::get_if<ArgumentMemory>(&arguments[index]);
+        GEMSTONE_RPC_REQUIRE(memory != nullptr);
+        const auto expected = allocationArguments_->at(index);
+        const auto id = static_cast<uint64_t>(memory->region.value);
+        const auto offset = static_cast<uint64_t>(memory->offset.value);
         const auto [alias, inserted] = aliases.emplace(expected.alias, id);
         GEMSTONE_RPC_REQUIRE((inserted || alias->second == id) && offset == expected.offset);
         actual.emplace_back(id, offset);
       }
-      const auto relocationCount = take();
-      GEMSTONE_RPC_REQUIRE(relocationCount == 0 && cursor + 1 == payload.size());
-      ++cursor; // discoverArgumentRelocations
       if (allocationArgumentWrite_) {
         GEMSTONE_RPC_REQUIRE(allocationArgumentWrite_->argument < actual.size());
         const auto [id, base] = actual[allocationArgumentWrite_->argument];
@@ -729,54 +706,36 @@ private:
       completed_ = false;
       return;
     }
-    GEMSTONE_RPC_REQUIRE(argumentCount >= 2);
+    GEMSTONE_RPC_REQUIRE(arguments.size() >= 2);
     hostOutputAddress_ = 0;
     uint64_t base = 0;
-    const auto outputKind = wire::readBigEndian<uint64_t>(payload.data() + cursor);
-    cursor += 8;
-    if (outputKind == tag::KernelArgumentAllocation) {
-      outputId_ = wire::readBigEndian<uint64_t>(payload.data() + cursor);
-      cursor += 8;
-      base = wire::readBigEndian<uint64_t>(payload.data() + cursor);
-      cursor += 8;
+    if (const auto *memory = std::get_if<ArgumentMemory>(&arguments[0])) {
+      outputId_ = static_cast<uint64_t>(memory->region.value);
+      base = static_cast<uint64_t>(memory->offset.value);
     } else {
-      GEMSTONE_RPC_REQUIRE(hostMemoryEnabled_ && outputKind == tag::KernelArgumentScalar && take() == 8);
-      std::memcpy(&hostOutputAddress_, payload.data() + cursor, 8);
-      cursor += 8;
+      const auto *scalar = std::get_if<ArgumentScalar>(&arguments[0]);
+      GEMSTONE_RPC_REQUIRE(scalar != nullptr && hostMemoryEnabled_ && scalar->bytes.size() == 8);
+      std::memcpy(&hostOutputAddress_, scalar->bytes.data(), 8);
       GEMSTONE_RPC_REQUIRE(hostOutputAddress_ != 0);
       hostOutputBytes_.resize(expected_.global * expected_.global_yz[0] * expected_.global_yz[1] * 4);
       outputId_ = 0;
     }
-    GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint64_t>(payload.data() + cursor) == tag::KernelArgumentScalar);
-    cursor += 8;
-    GEMSTONE_RPC_REQUIRE(take() == 4);
     uint32_t seed = 0;
-    std::memcpy(&seed, payload.data() + cursor, 4);
-    GEMSTONE_RPC_REQUIRE(seed == expected_.seed);
-    cursor += 4;
+    {
+      const auto *scalar = std::get_if<ArgumentScalar>(&arguments[1]);
+      GEMSTONE_RPC_REQUIRE(scalar != nullptr && scalar->bytes.size() == 4);
+      std::memcpy(&seed, scalar->bytes.data(), 4);
+      GEMSTONE_RPC_REQUIRE(seed == expected_.seed);
+    }
     if (trailingArguments_) {
       std::vector<uint8_t> bytes;
-      for (uint32_t index = 2; index < argumentCount; ++index) {
-        GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint64_t>(payload.data() + cursor) == tag::KernelArgumentScalar);
-        cursor += 8;
-        const auto size = take();
-        GEMSTONE_RPC_REQUIRE(cursor + size <= payload.size());
-        bytes.insert(bytes.end(), payload.begin() + cursor, payload.begin() + cursor + size);
-        cursor += size;
+      for (size_t index = 2; index < arguments.size(); ++index) {
+        const auto *scalar = std::get_if<ArgumentScalar>(&arguments[index]);
+        GEMSTONE_RPC_REQUIRE(scalar != nullptr);
+        bytes.insert(bytes.end(), scalar->bytes.begin(), scalar->bytes.end());
       }
       GEMSTONE_RPC_REQUIRE(bytes == *trailingArguments_);
     }
-    const auto relocationCount = take();
-    for (uint32_t index = 0; index < relocationCount; ++index) {
-      GEMSTONE_RPC_REQUIRE(cursor < payload.size());
-      if (payload[cursor++] != 0) cursor += 8;
-      GEMSTONE_RPC_REQUIRE(cursor < payload.size());
-      if (payload[cursor++] != 0) cursor += 4;
-      cursor += 24;
-      GEMSTONE_RPC_REQUIRE(cursor <= payload.size());
-    }
-    GEMSTONE_RPC_REQUIRE(cursor + 1 == payload.size());
-    ++cursor; // discoverArgumentRelocations
 
     auto &bytes = hostOutputAddress_ ? hostOutputBytes_ : allocations_.at(outputId_);
     ranges_.clear();
@@ -808,6 +767,7 @@ private:
     active_ = true;
     completed_ = false;
   }
+
   int listener_ = -1;
   uint16_t port_ = 0;
   std::atomic<bool> stopped_{false};

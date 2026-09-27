@@ -1,20 +1,19 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
 import Program.*
 
 import VMIR.*
 
 import net.kurobako.gemstone.NonEmptyVec
-import net.kurobako.gemstone.NonNegativeInt
-import net.kurobako.gemstone.NonNegativeLong
-import net.kurobako.gemstone.PositiveInt
-import net.kurobako.gemstone.PositiveLong
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.binary.ScalarByteWidth
-import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.memory.DynamicAddressMemory
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.vm.{AddressSpace, Fault, KernelTask, Memory, Result, Scheduler, TaskControl}
@@ -27,12 +26,12 @@ import scala.annotation.tailrec
 private[v9_3] final class VMLoadedProgram private (
     entries: Vec[Statement.Entry],
     functions: Vec[Statement.Function],
-    globals: Map[SymbolName, VMLoadedProgram.GlobalDefinition],
-    moduleSharedSymbols: Map[SymbolName, Long]
+    globals: Map[NonEmptyString, VMLoadedProgram.GlobalDefinition],
+    moduleSharedSymbols: Map[NonEmptyString, Long]
 ) {
-  private final case class CompilationState(
-      globalAddresses: Map[SymbolName, GuestAddress],
-      kernels: Map[KernelName, Either[Fault, Kernel]]
+  private case class CompilationState(
+      globalAddresses: Map[NonEmptyString, GuestAddress],
+      kernels: Map[NonEmptyString, Either[Fault, Kernel]]
   )
 
   private val compilationState = AtomicReference(CompilationState(Map.empty, Map.empty))
@@ -40,28 +39,28 @@ private[v9_3] final class VMLoadedProgram private (
   private[v9_3] val symbols: Either[Fault, net.kurobako.gemstone.isa.ProgramSymbols] =
     globals.toSeq.sortBy(_._1.raw).traverse { case (name, definition) =>
       for {
-        globalName = net.kurobako.gemstone.isa.GlobalName(name.toNonEmptyString)
-        size       = definition.size.toLong.toNonNegative
+        globalName = name
+        size       = definition.size.widen[NonNegative[Long]]
         metadata <- net.kurobako.gemstone.isa.GlobalSymbol.validated(globalName, None, size, Vec.empty)
           .leftMap(Fault.Backend(_))
       } yield metadata
     }.flatMap { globalMetadata =>
       entries.map(_.name).distinct.sortBy(_.raw).traverse { name =>
         for {
-          linkageName <- net.kurobako.gemstone.isa.LinkageName.either(name.raw).leftMap(_ =>
+          linkageName <- net.kurobako.gemstone.Constraint.NonEmptyString.either(name.raw: String).leftMap(_ =>
             Fault.Backend(
               s"invalid PTX linkage name '$name'"
             )
           )
         } yield net.kurobako.gemstone.isa.KernelSymbol(
-          net.kurobako.gemstone.isa.KernelName(name.toNonEmptyString),
+          name,
           linkageName
         )
       }.map(kernels => net.kurobako.gemstone.isa.ProgramSymbols(kernels, Vec.from(globalMetadata)))
     }
 
   private[v9_3] def kernelMetadata(
-      name: net.kurobako.gemstone.isa.KernelName
+      name: net.kurobako.gemstone.Constraint.NonEmptyString
   ): Either[Fault, net.kurobako.gemstone.isa.KernelMetadata] =
     entry(name).toRight(Fault.Backend(s"PTX kernel '${name.raw}' is not present"))
       .flatMap(value => VMCompiler.parameterLayout(value).leftMap(error => Fault.Unsupported(error.message)))
@@ -70,17 +69,17 @@ private[v9_3] final class VMLoadedProgram private (
           net.kurobako.gemstone.isa.KernelMetadata.Parameter(
             parameter.widthBytes,
             offset,
-            if (parameter.pointer) net.kurobako.gemstone.isa.KernelMetadata.ParameterKind.Memory
+            if (parameter.pointer) net.kurobako.gemstone.isa.KernelMetadata.ParameterKind.Allocation
             else net.kurobako.gemstone.isa.KernelMetadata.ParameterKind.Scalar,
             containsPointers = false
           )
         }
         val blockSize =
-          parameters.lastOption.fold(0L)(parameter => (parameter.offset + parameter.width).raw.toLong)
+          parameters.lastOption.fold(0L)(parameter => parameter.offset.raw.toLong + parameter.width.raw.toLong)
         for {
           refinedBlockSize <- Either.cond(
             blockSize <= Int.MaxValue.toLong,
-            NonNegativeInt.unsafe(blockSize.toInt),
+            NonNegative.unsafe(blockSize.toInt),
             Fault.InvalidTask(s"PTX argument block size exceeds the supported range: $blockSize")
           )
           metadata <- net.kurobako.gemstone.isa.KernelMetadata.validated(
@@ -92,20 +91,20 @@ private[v9_3] final class VMLoadedProgram private (
       }
 
   private[v9_3] def globalImage(
-      name: net.kurobako.gemstone.isa.GlobalName
-  ): Either[net.kurobako.gemstone.vm.Fault, (NonNegativeLong, Vec[Byte])] =
-    globals.get(SymbolName(name.toNonEmptyString)).toRight(net.kurobako.gemstone.vm.Fault.Backend(
+      name: net.kurobako.gemstone.Constraint.NonEmptyString
+  ): Either[net.kurobako.gemstone.vm.Fault, (NonNegative[Long], Vec[Byte])] =
+    globals.get(name).toRight(net.kurobako.gemstone.vm.Fault.Backend(
       s"PTX global '${name.raw}' is not present"
-    )).map(definition => definition.size.toLong.toNonNegative -> Vec.from(definition.initial.toVector))
+    )).map(definition => definition.size.widen[NonNegative[Long]] -> Vec.from(definition.initial.toVector))
 
   private[v9_3] def bindGlobal(
-      name: net.kurobako.gemstone.isa.GlobalName,
+      name: net.kurobako.gemstone.Constraint.NonEmptyString,
       region: net.kurobako.gemstone.vm.MemoryRegion,
-      offset: NonNegativeLong,
-      regionSize: PositiveLong,
+      offset: NonNegative[Long],
+      regionSize: Positive[Long],
       addresses: net.kurobako.gemstone.vm.AddressSpace
   ): Either[net.kurobako.gemstone.vm.Fault, Unit] = for {
-    definition <- globals.get(SymbolName(name.toNonEmptyString)).toRight(net.kurobako.gemstone.vm.Fault.Backend(
+    definition <- globals.get(name).toRight(net.kurobako.gemstone.vm.Fault.Backend(
       s"PTX global '${name.raw}' is not present"
     ))
     _ <- Either.cond(
@@ -119,7 +118,7 @@ private[v9_3] final class VMLoadedProgram private (
   } yield {
     compilationState.updateAndGet(state =>
       CompilationState(
-        state.globalAddresses.updated(SymbolName(name.toNonEmptyString), address),
+        state.globalAddresses.updated(name, address),
         Map.empty
       )
     )
@@ -142,7 +141,7 @@ private[v9_3] final class VMLoadedProgram private (
     }
 
   @tailrec
-  private def compiled(name: KernelName): Either[Fault, Kernel] = {
+  private def compiled(name: NonEmptyString): Either[Fault, Kernel] = {
     val state = compilationState.get()
     state.kernels.get(name) match {
       case Some(kernel) => kernel
@@ -160,14 +159,14 @@ private[v9_3] final class VMLoadedProgram private (
     }
   }
 
-  private def entry(name: KernelName): Option[Statement.Entry] = {
+  private def entry(name: NonEmptyString): Option[Statement.Entry] = {
     val matching = entries.filter(_.name == name)
     matching.find(_.body.nonEmpty).orElse(matching.headOption)
   }
 }
 
 private[v9_3] object VMLoadedProgram {
-  private[v9_3] final case class GlobalDefinition(size: PositiveInt, initial: NonEmptyVec[Byte])
+  private[v9_3] case class GlobalDefinition(size: Positive[Int], initial: NonEmptyVec[Byte])
 
   def load(program: Program): Either[Fault, VMLoadedProgram] = {
     val entries   = program.statements.collect { case entry: Statement.Entry => entry }
@@ -212,9 +211,9 @@ private[v9_3] object VMLoadedProgram {
       arguments: Vec[KernelTask.Argument],
       relocations: Vec[KernelTask.PointerRelocation],
       addresses: AddressSpace
-  ): Either[Fault, Map[ParameterName, Argument]] =
+  ): Either[Fault, Map[NonEmptyString, Argument]] =
     kernel.parameters.zip(arguments).zipWithIndex.foldLeft[
-      Either[Fault, Map[ParameterName, Argument]]
+      Either[Fault, Map[NonEmptyString, Argument]]
     ](Right(Map.empty)) { case (result, ((parameter, argument), index)) =>
       result.flatMap { values =>
         argument match {
@@ -268,7 +267,7 @@ private[v9_3] object VMLoadedProgram {
                   targetOffset
                 ) if source.raw == index =>
               addresses.address(target, targetOffset).map { address =>
-                LittleEndian.write(address.raw, relocated, sourceOffset.raw.toInt, ScalarByteWidth.Qword)
+                LittleEndian.write(address.raw, relocated, sourceOffset.raw.toInt, 8)
               }
             case _ => Right(())
           }
@@ -276,7 +275,7 @@ private[v9_3] object VMLoadedProgram {
     }.map(_ => Vec.from(relocated))
   }
 
-  private def moduleSharedSymbols(statements: Vec[Statement]): Map[SymbolName, Long] =
+  private def moduleSharedSymbols(statements: Vec[Statement]): Map[NonEmptyString, Long] =
     statements.collect {
       case Statement.Data(DataAddressSpace.Shared, _, _, name, _, _) => name
     }.distinct.zipWithIndex.map { case (name, index) =>
@@ -288,11 +287,11 @@ private[v9_3] object VMLoadedProgram {
 
   private def globalDefinitions(
       statements: Vec[Statement]
-  ): Either[Fault, Map[SymbolName, GlobalDefinition]] =
+  ): Either[Fault, Map[NonEmptyString, GlobalDefinition]] =
     statements.collect {
       case Statement.Data(addressSpace, _, elementType, name, declaredCount, initializer)
           if addressSpace == DataAddressSpace.Global || addressSpace == DataAddressSpace.Const =>
-        val count: PositiveInt = declaredCount.getOrElse(PositiveInt.One)
+        val count: Positive[Int] = declaredCount.getOrElse(1)
         (name, elementType, count, initializer)
     }.traverse { case (name, elementType, count, initializer) =>
       globalDefinition(name, elementType, count, initializer).map(name -> _)
@@ -301,12 +300,12 @@ private[v9_3] object VMLoadedProgram {
   // Initializer decoding is a parser boundary and fails on the first malformed or unrepresentable scalar.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
   private def globalDefinition(
-      name: SymbolName,
+      name: NonEmptyString,
       elementType: DataType,
-      count: PositiveInt,
+      count: Positive[Int],
       initializer: Vec[Operand]
   ): Either[Fault, GlobalDefinition] = {
-    val elementBytes = PositiveInt.unsafe(elementType.widthBits.raw / 8).raw
+    val elementBytes = Positive.unsafe(elementType.widthBits.raw / 8).raw
     if (count.raw > Int.MaxValue / elementBytes)
       return Left(Fault.InvalidTask(
         s"PTX global '$name' exceeds the supported size"
@@ -336,7 +335,7 @@ private[v9_3] object VMLoadedProgram {
       }
       index += 1
     }
-    Right(GlobalDefinition(PositiveInt.unsafe(size), NonEmptyVec.unsafeFromVec(Vec.from(bytes))))
+    Right(GlobalDefinition(Positive.unsafe(size), NonEmptyVec.unsafeFromVec(Vec.from(bytes))))
   }
 
   private def initializerBits(raw: String, kind: Char, width: Int): Option[Long] =

@@ -8,7 +8,7 @@ import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.Wire
 import net.kurobako.gemstone.server.execution.ExecutionService
 import net.kurobako.gemstone.server.Throwables
-import net.kurobako.gemstone.vm.{KernelTask, LaunchGeometry, MemoryRegion}
+import net.kurobako.gemstone.vm.KernelTask
 
 import cats.syntax.all.*
 
@@ -164,29 +164,15 @@ object ExecutionRPCProtocol {
         ) =>
       val created = KernelTask.validated(
         kernelName = kernelName,
-        groupSize = LaunchGeometry.Dimensions(groupSize.x, groupSize.y, groupSize.z),
-        groupCount = LaunchGeometry.Dimensions(groupCount.x, groupCount.y, groupCount.z),
-        arguments = arguments.map {
-          case KernelArgument.Scalar(bytes)          => KernelTask.Argument.Scalar(bytes)
-          case KernelArgument.Allocation(id, offset) => KernelTask.Argument.Memory(MemoryRegion(id.raw), offset)
-          case KernelArgument.Local(size)            => KernelTask.Argument.Local(size)
-        },
-        globalSize = Some(LaunchGeometry.GlobalDimensions(globalSize.x, globalSize.y, globalSize.z)),
+        groupSize = groupSize,
+        groupCount = groupCount,
+        arguments = arguments,
+        globalSize = Some(globalSize),
         privateSegmentBytes = privateSegmentBytes,
         groupSegmentBytes = groupSegmentBytes,
-        pointerRelocations = pointerRelocations.map { relocation =>
-          KernelTask.PointerRelocation(
-            relocation.source match {
-              case RelocationSource.Allocation(id)  => KernelTask.RelocationSource.Memory(MemoryRegion(id.raw))
-              case RelocationSource.Argument(index) => KernelTask.RelocationSource.Argument(index)
-            },
-            relocation.sourceOffset,
-            MemoryRegion(relocation.target.raw),
-            relocation.targetOffset
-          )
-        },
+        pointerRelocations = pointerRelocations,
         workDim = workDim,
-        globalOffset = LaunchGeometry.Coordinates(globalOffset.x, globalOffset.y, globalOffset.z),
+        globalOffset = globalOffset,
         discoverArgumentRelocations = discoverArgumentRelocations
       ).leftMap(message => ExecutionFailure.InvalidRequest(message))
       val result = created match {

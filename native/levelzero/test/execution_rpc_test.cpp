@@ -49,13 +49,15 @@ void sendAll(int socket, const void *input, size_t size) {
 }
 
 void respond(int socket, const std::vector<uint8_t> &payload = {}, bool failed = false) {
+  std::vector<uint8_t> body = payload;
+  if (body.empty() && !failed) gemstone_test::encodePayload(body, Unit{});
   std::vector<uint8_t> header;
   gemstone_test::wire::appendBigEndian<uint32_t>(header, ResponseMagic);
   gemstone_test::wire::appendBigEndian<uint64_t>(header, SchemaFingerprint);
   gemstone_test::wire::appendBigEndian<uint32_t>(header, failed ? 1 : 0);
-  gemstone_test::wire::appendBigEndian<uint32_t>(header, static_cast<uint32_t>(payload.size()));
+  gemstone_test::wire::appendBigEndian<uint32_t>(header, static_cast<uint32_t>(body.size()));
   sendAll(socket, header.data(), header.size());
-  if (!payload.empty()) sendAll(socket, payload.data(), payload.size());
+  if (!body.empty()) sendAll(socket, body.data(), body.size());
 }
 
 struct MockServer {
@@ -121,10 +123,7 @@ private:
 
       switch (operationId) {
         case operation::EnableHostMemory:
-        case operation::Ping:
-          REQUIRE((payload.empty()));
-          respond(connection);
-          break;
+        case operation::Ping: respond(connection); break;
         case operation::RegisterAllocation: registerAllocation(connection, payload); break;
         case operation::RegisterAllocationAddress: respond(connection); break;
         case operation::ReleaseAllocation:
@@ -138,31 +137,37 @@ private:
           break;
         case operation::ReadAllocation: readAllocation(connection, payload); break;
         case operation::LoadProgram: loadProgram(connection, payload); break;
-        case operation::UnloadProgram:
-          REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == programId));
+        case operation::UnloadProgram: {
+          const auto request = gemstone_test::decodePayload<UnloadProgram>(payload);
+          REQUIRE((request.program.value == static_cast<int64_t>(programId)));
           respond(connection);
           break;
+        }
         case operation::DescribeKernel: describeKernel(connection, payload); break;
         case operation::Launch: launch(connection, payload); break;
         case operation::QueryCompletion: queryCompletion(connection, payload); break;
         case operation::AwaitCompletion: awaitCompletion(connection, payload); break;
         case operation::PollHostMemory: awaitCompletion(connection, payload, true); break;
-        case operation::ReleaseCompletion:
-          REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == completionId));
+        case operation::ReleaseCompletion: {
+          const auto request = gemstone_test::decodePayload<ReleaseCompletion>(payload);
+          REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
           respond(connection);
           break;
+        }
         case operation::CompletionDirtyRanges: dirtyRanges(connection, payload); break;
         case operation::CompletionPointerRelocations: {
-          REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == completionId));
+          const auto request = gemstone_test::decodePayload<CompletionPointerRelocations>(payload);
+          REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
           std::vector<uint8_t> response;
-          gemstone_test::wire::appendBigEndian<uint32_t>(response, 0);
+          gemstone_test::encodePayload(response, std::vector<PointerRelocation>{});
           respond(connection, response);
           break;
         }
         case operation::CompletionPrints: {
-          REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == completionId));
+          const auto request = gemstone_test::decodePayload<CompletionPrints>(payload);
+          REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
           std::vector<uint8_t> response;
-          gemstone_test::wire::appendBigEndian<uint32_t>(response, 0);
+          gemstone_test::encodePayload(response, std::string{});
           respond(connection, response);
           break;
         }
@@ -174,23 +179,24 @@ private:
   }
 
   void registerAllocation(int connection, const std::vector<uint8_t> &payload) {
-    REQUIRE((payload.size() == 16));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == tag::AllocationKindDevice));
+    const auto request = gemstone_test::decodePayload<RegisterAllocation>(payload);
+    REQUIRE((request.kind == AllocationKind::Device));
     const auto id = nextAllocationId++;
     if (allocationId == 0) {
       allocationId = id;
-      allocation.resize(gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + 8));
+      allocation.resize(static_cast<size_t>(request.size.value));
     } else {
       REQUIRE((unrelatedAllocationId == 0));
       unrelatedAllocationId = id;
     }
     std::vector<uint8_t> response;
-    gemstone_test::wire::appendBigEndian<uint64_t>(response, id);
+    gemstone_test::encodePayload(response, AllocationId{static_cast<int64_t>(id)});
     respond(connection, response);
   }
 
   void releaseAllocation(const std::vector<uint8_t> &payload) {
-    const auto id = gemstone_test::wire::readBigEndian<uint64_t>(payload.data());
+    const auto request = gemstone_test::decodePayload<ReleaseAllocation>(payload);
+    const auto id = static_cast<uint64_t>(request.allocation.value);
     REQUIRE((id == allocationId || id == unrelatedAllocationId));
     ++releasedAllocations;
   }
@@ -198,160 +204,126 @@ private:
   void writeAllocation(const std::vector<uint8_t> &payload) {
     // The unrelated allocation is live but unreachable from this non-indirect
     // kernel, so it must not be mirrored for the launch.
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == allocationId));
-    const auto offset = gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + 8);
-    const auto size = gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + 16);
+    const auto request = gemstone_test::decodePayload<WriteAllocation>(payload);
+    REQUIRE((static_cast<uint64_t>(request.allocation.value) == allocationId));
+    const auto offset = static_cast<uint64_t>(request.offset.value);
+    const auto size = request.bytes.size();
     REQUIRE((offset + size <= allocation.size()));
-    REQUIRE((payload.size() == 20 + size));
-    std::memcpy(allocation.data() + offset, payload.data() + 20, size);
+    std::memcpy(allocation.data() + offset, request.bytes.data(), size);
     writeRequests.fetch_add(1, std::memory_order_relaxed);
   }
 
   void readAllocation(int connection, const std::vector<uint8_t> &payload) {
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == allocationId));
-    const auto offset = gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + 8);
-    const auto size = gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + 16);
+    const auto request = gemstone_test::decodePayload<ReadAllocation>(payload);
+    REQUIRE((static_cast<uint64_t>(request.allocation.value) == allocationId));
+    const auto offset = static_cast<uint64_t>(request.offset.value);
+    const auto size = static_cast<size_t>(request.size.value);
     REQUIRE((offset == 4));
     REQUIRE((size == sizeof(uint32_t)));
     REQUIRE((offset + size <= allocation.size()));
     std::vector<uint8_t> response;
-    gemstone_test::wire::appendBigEndian<uint32_t>(response, size);
-    response.insert(response.end(), allocation.begin() + offset, allocation.begin() + offset + size);
+    gemstone_test::encodePayload(response, std::vector<uint8_t>(allocation.begin() + offset, allocation.begin() + offset + size));
     respond(connection, response);
   }
 
   void dirtyRanges(int connection, const std::vector<uint8_t> &payload) {
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == completionId));
+    gemstone_test::decodePayload<CompletionDirtyRanges>(payload);
     std::vector<uint8_t> response;
-    gemstone_test::wire::appendBigEndian<uint32_t>(response, 1);
-    gemstone_test::wire::appendBigEndian<uint64_t>(response, allocationId);
-    gemstone_test::wire::appendBigEndian<uint64_t>(response, 4);
-    gemstone_test::wire::appendBigEndian<uint32_t>(response, sizeof(uint32_t));
+    gemstone_test::encodePayload(
+        response, std::vector<DirtyRange>{DirtyRange{AllocationId{static_cast<int64_t>(allocationId)}, LongPositive0{4}, IntPositive{4}}});
     respond(connection, response);
   }
 
   void loadProgram(int connection, const std::vector<uint8_t> &payload) {
-    const auto encodingSize = gemstone_test::wire::readBigEndian<uint32_t>(payload.data());
-    REQUIRE((encodingSize == std::string_view{"spirv-binary"}.size()));
-    REQUIRE((std::string_view{reinterpret_cast<const char *>(payload.data() + 4), encodingSize} == "spirv-binary"));
-    const auto imageOffset = 4 + encodingSize;
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + imageOffset) >= 4));
-    REQUIRE((payload[imageOffset + 4] == 3 && payload[imageOffset + 5] == 2 && payload[imageOffset + 6] == 35
-             && payload[imageOffset + 7] == 7));
+    const auto request = gemstone_test::decodePayload<LoadProgram>(payload);
+    REQUIRE((request.encoding == "spirv-binary"));
+    REQUIRE((request.image.size() >= 4));
+    REQUIRE((request.image[0] == 3 && request.image[1] == 2 && request.image[2] == 35 && request.image[3] == 7));
     std::vector<uint8_t> response;
-    gemstone_test::wire::appendBigEndian<uint64_t>(response, programId);
+    gemstone_test::encodePayload(response, ProgramId{static_cast<int64_t>(programId)});
     respond(connection, response);
   }
 
   void describeKernel(int connection, const std::vector<uint8_t> &payload) {
-    REQUIRE((payload.size() >= 12 && gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == programId));
-    const auto nameSize = gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + 8);
-    REQUIRE((payload.size() == 12 + nameSize));
-    const std::string name(reinterpret_cast<const char *>(payload.data() + 12), nameSize);
-    if (name != "write") {
-      const std::string detail = "unknown kernel";
+    const auto request = gemstone_test::decodePayload<DescribeKernel>(payload);
+    REQUIRE((request.program.value == static_cast<int64_t>(programId)));
+    if (request.name.value != "write") {
       std::vector<uint8_t> failure;
-      gemstone_test::wire::appendBigEndian<uint64_t>(failure, tag::ExecutionFailureNotFound);
-      gemstone_test::wire::appendBigEndian<uint32_t>(failure, static_cast<uint32_t>(detail.size()));
-      failure.insert(failure.end(), detail.begin(), detail.end());
+      gemstone_test::encodePayload(failure, ExecutionFailure{ExecutionFailureNotFound{"unknown kernel"}});
       respond(connection, failure, true);
       return;
     }
-    std::vector<uint8_t> response;
-    gemstone_test::wire::appendBigEndian<uint32_t>(response, 28);
-    gemstone_test::wire::appendBigEndian<uint32_t>(response, 4);
-    gemstone_test::wire::appendBigEndian<uint32_t>(response, 4);
-    for (const std::array<uint32_t, 4> parameter : {
-             std::array<uint32_t, 4>{8, 0, 2, 0},
-             std::array<uint32_t, 4>{4, 8, 1, 0},
-             std::array<uint32_t, 4>{8, 16, 3, 0},
-             std::array<uint32_t, 4>{4, 24, 1, 0},
-         }) {
-      gemstone_test::wire::appendBigEndian<uint32_t>(response, parameter[0]);
-      gemstone_test::wire::appendBigEndian<uint32_t>(response, parameter[1]);
-      gemstone_test::wire::appendBigEndian<uint64_t>(response, parameter[2] == 1   ? tag::KernelParameterKindScalar
-                                                               : parameter[2] == 2 ? tag::KernelParameterKindAllocation
-                                                                                   : tag::KernelParameterKindLocal);
-      response.push_back(static_cast<uint8_t>(parameter[3]));
+    KernelMetadata metadata{};
+    metadata.argumentBlockSize = IntPositive0{28};
+    metadata.explicitParameterCount = IntPositive0{4};
+    for (const std::array<int32_t, 4> parameter : {std::array<int32_t, 4>{8, 0, 2, 0}, std::array<int32_t, 4>{4, 8, 1, 0},
+                                                   std::array<int32_t, 4>{8, 16, 3, 0}, std::array<int32_t, 4>{4, 24, 1, 0}}) {
+      Parameter entry{};
+      entry.width = IntPositive{parameter[0]};
+      entry.offset = IntPositive0{parameter[1]};
+      entry.kind = parameter[2] == 1 ? ParameterKind::Scalar : parameter[2] == 2 ? ParameterKind::Allocation : ParameterKind::Local;
+      entry.containsPointers = parameter[3] != 0;
+      metadata.parameters.push_back(entry);
     }
-    response.push_back(0);                                       // absent required work-group size
-    response.push_back(0);                                       // absent work-group size hint
-    gemstone_test::wire::appendBigEndian<uint32_t>(response, 0); // no argument bindings
-    response.push_back(1);                                       // entry point id 6
-    gemstone_test::wire::appendBigEndian<uint32_t>(response, 6);
+    metadata.entryPointId = IntPositive0{6};
+    std::vector<uint8_t> response;
+    gemstone_test::encodePayload(response, metadata);
     respond(connection, response);
   }
 
   void launch(int connection, const std::vector<uint8_t> &payload) {
-    size_t cursor = 0;
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == programId));
-    cursor += 8;
-    const uint32_t nameSize = gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor);
-    cursor += 4;
-    REQUIRE((std::string(reinterpret_cast<const char *>(payload.data() + cursor), nameSize) == "write"));
-    cursor += nameSize;
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor) == 4));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 4) == 1));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 8) == 1));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 12) == 2));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 16) == 1));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 20) == 1));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + cursor + 24) == 8));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + cursor + 32) == 1));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + cursor + 40) == 1));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 48) == 3));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 52) == 0));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 56) == 0));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 60) == 0));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 64) == 0));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 68) == 0));
-    cursor += 72;
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor) == 4));
-    cursor += 4;
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + cursor) == tag::KernelArgumentAllocation));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + cursor + 8) == allocationId));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + cursor + 16) == 4));
-    cursor += 24;
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + cursor) == tag::KernelArgumentScalar));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 8) == 4));
-    const auto *value = payload.data() + cursor + 12;
-    cursor += 16;
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + cursor) == tag::KernelArgumentLocal));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + cursor + 8) == 64));
-    cursor += 16;
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data() + cursor) == tag::KernelArgumentScalar));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 8) == sizeof(uint32_t)));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor + 12) == 0));
-    cursor += 16;
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + cursor) == 0));
-    cursor += 4;
-    REQUIRE((cursor + 1 == payload.size()));
-    ++cursor; // discoverArgumentRelocations
-    std::memcpy(allocation.data() + 4, value, sizeof(uint32_t));
+    const auto request = gemstone_test::decodePayload<Launch>(payload);
+    REQUIRE((request.program.value == static_cast<int64_t>(programId)));
+    REQUIRE((request.kernelName.value == "write"));
+    REQUIRE((request.groupSize.x.value == 4 && request.groupSize.y.value == 1 && request.groupSize.z.value == 1));
+    REQUIRE((request.groupCount.x.value == 2 && request.groupCount.y.value == 1 && request.groupCount.z.value == 1));
+    REQUIRE((request.globalSize.x.value == 8 && request.globalSize.y.value == 1 && request.globalSize.z.value == 1));
+    REQUIRE((request.workDim.value == 3));
+    REQUIRE((request.globalOffset.x.value == 0 && request.globalOffset.y.value == 0 && request.globalOffset.z.value == 0));
+    REQUIRE((request.privateSegmentBytes.value == 0 && request.groupSegmentBytes.value == 0));
+    REQUIRE((request.arguments.size() == 4));
+    const auto *memory = std::get_if<ArgumentMemory>(&request.arguments[0]);
+    REQUIRE((memory != nullptr && static_cast<uint64_t>(memory->region.value) == allocationId));
+    REQUIRE((memory->offset.value == 4));
+    const auto *seed = std::get_if<ArgumentScalar>(&request.arguments[1]);
+    REQUIRE((seed != nullptr && seed->bytes.size() == 4));
+    const auto *local = std::get_if<ArgumentLocal>(&request.arguments[2]);
+    REQUIRE((local != nullptr && local->size.value == 64));
+    const auto *tail = std::get_if<ArgumentScalar>(&request.arguments[3]);
+    REQUIRE((tail != nullptr && tail->bytes.size() == sizeof(uint32_t)));
+    REQUIRE((request.pointerRelocations.empty()));
+    REQUIRE((!request.discoverArgumentRelocations));
+    std::memcpy(allocation.data() + 4, seed->bytes.data(), sizeof(uint32_t));
     std::vector<uint8_t> response;
-    gemstone_test::wire::appendBigEndian<uint64_t>(response, completionId);
+    gemstone_test::encodePayload(response, CompletionId{static_cast<int64_t>(completionId)});
     respond(connection, response);
   }
 
   void queryCompletion(int connection, const std::vector<uint8_t> &payload) {
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == completionId));
+    const auto request = gemstone_test::decodePayload<QueryCompletion>(payload);
+    REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
     std::vector<uint8_t> response;
-    gemstone_test::wire::appendBigEndian<uint64_t>(response, tag::CompletionStatusSucceeded);
+    gemstone_test::encodePayload(response, CompletionStatus{CompletionStatusSucceeded{}});
     respond(connection, response);
   }
 
   void awaitCompletion(int connection, const std::vector<uint8_t> &payload, bool hostMemory = false) {
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == completionId));
+    const auto completion = hostMemory ? gemstone_test::decodePayload<PollHostMemory>(payload).completion
+                                       : gemstone_test::decodePayload<AwaitCompletion>(payload).completion;
+    REQUIRE((completion.value == static_cast<int64_t>(completionId)));
     if (failNextCompletion.exchange(false)) {
       std::vector<uint8_t> failure;
-      gemstone_test::wire::appendBigEndian<uint64_t>(failure, tag::ExecutionFailureFailed);
-      constexpr std::string_view message = "completion failed";
-      gemstone_test::wire::appendBigEndian<uint32_t>(failure, static_cast<uint32_t>(message.size()));
-      failure.insert(failure.end(), message.begin(), message.end());
+      gemstone_test::encodePayload(failure, ExecutionFailure{ExecutionFailureFailed{"completion failed"}});
       respond(connection, failure, true);
       return;
     }
-    respond(connection, hostMemory ? std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 0, 1, 0} : std::vector<uint8_t>{});
+    if (hostMemory) {
+      HostMemoryBatch batch{};
+      batch.completed = true;
+      std::vector<uint8_t> response;
+      gemstone_test::encodePayload(response, batch);
+      respond(connection, response);
+    } else respond(connection);
   }
 
   int listener = -1;

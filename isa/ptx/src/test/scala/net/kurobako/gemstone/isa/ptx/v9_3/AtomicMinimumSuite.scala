@@ -1,6 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.NonEmptyVec
 
 import Program.*
 
@@ -17,9 +22,9 @@ final class AtomicMinimumSuite extends munit.FunSuite {
     groups <- Seq(1, 5)
   }
     test(s"unsigned atomic min $space/$width over $groups groups preserves high-bit ordering") {
-      val memory    = ArrayCheckedMemory.allocate(NonNegativeInt.unsafe(8 * (groups + 1)), GuestAddress(0x100000L))
-      val max       = if (width == 64) -1L else 0xffffffffL
-      val byteWidth = if (width == 64) MemoryValueByteWidth.Qword else MemoryValueByteWidth.Dword
+      val memory = ArrayCheckedMemory.allocate(NonNegative.unsafe(8 * (groups + 1)), GuestAddress(0x100000L))
+      val max    = if (width == 64) -1L else 0xffffffffL
+      val byteWidth: IntBetween[1, 8] = if (width == 64) 8 else 4
       memory.writeLittleEndian(memory.allocation.start, max, byteWidth).toOption.get
       val init   = if (space == "shared") s"st.shared.u$width [scratch], $max;" else ""
       val target = if (space == "shared") "scratch" else "%out"
@@ -48,7 +53,7 @@ ret;
       val result   = VMInterpreter.execute(
         kernel,
         geometry,
-        Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+        Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
         memory
       )
       assert(result.isRight, result.toString)

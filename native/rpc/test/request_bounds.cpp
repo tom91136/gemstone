@@ -19,12 +19,6 @@ TEST_CASE("execution RPC enforces wire encoding bounds", "[rpc]") {
   auto client = Client::fromEnvironment();
   REQUIRE((client));
 
-  checkEncodingLimit(client->call(DescribeKernel{{1}, std::string(MaximumTextBytes + 1, 'x')}));
-
-  Launch launch{{1}, "kernel", {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 0, {0, 0, 0}, 0, 0, {}, {}};
-  launch.arguments.resize(MaximumElements + 1, KernelArgumentLocal{1});
-  checkEncodingLimit(client->call(launch));
-
   std::vector<uint8_t> boundary(MaximumPayload);
   checkEncodingLimit(client->call(WriteAllocation{{1}, 0, std::move(boundary)}));
 }

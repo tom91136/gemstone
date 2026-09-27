@@ -1,7 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.binary.LittleEndian
 
 /** Rewrites SPIR-V specialization constants from a raw instruction stream.
   *
@@ -10,7 +12,7 @@ import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
   * module reaches a backend.
   */
 object Specialization {
-  final case class Constant(specId: Int, byteSize: Int)
+  case class Constant(specId: Int, byteSize: Int)
 
   private val DecorateOpcode           = Instruction.Definition.Decorate.opcodeNumber.raw
   private val SpecIdDecoration         = 1
@@ -21,10 +23,10 @@ object Specialization {
   private val SpecConstantFalseOpcode  = Instruction.Definition.SpecConstantFalse.opcodeNumber.raw
   private val SpecConstantNumberOpcode = Instruction.Definition.SpecConstant.opcodeNumber.raw
 
-  private final case class TypeInfo(byteSize: Int, boolean: Boolean)
-  private final case class Declaration(offset: Int, words: Int, typeId: Int, opcode: Int)
-  private final case class Located(offset: Int, byteSize: Int, boolean: Boolean)
-  private final case class ModuleIndex(
+  private case class TypeInfo(byteSize: Int, boolean: Boolean)
+  private case class Declaration(offset: Int, words: Int, typeId: Int, opcode: Int)
+  private case class Located(offset: Int, byteSize: Int, boolean: Boolean)
+  private case class ModuleIndex(
       specIds: Map[Int, Int],
       types: Map[Int, TypeInfo],
       declarations: Map[Int, Declaration]
@@ -60,7 +62,7 @@ object Specialization {
                       (if (value(0) == 0) SpecConstantFalseOpcode else SpecConstantTrueOpcode)).toLong,
                     bytes,
                     constant.offset,
-                    ScalarByteWidth.Dword
+                    4
                   )
                 else {
                   java.util.Arrays.fill(bytes, constant.offset + 12, constant.offset + (header >>> 16) * 4, 0.toByte)

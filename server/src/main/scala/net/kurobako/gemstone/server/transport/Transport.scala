@@ -15,7 +15,7 @@ object Transport {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Long & Singleton](inline value: A): ClientId =
-      inline if constValue[A] > 0L then value else error("client id must be strictly positive")
+      inline if (constValue[A] > 0L) value else error("client id must be strictly positive")
 
     extension (value: ClientId) {
       inline def raw: Long = value
@@ -32,7 +32,7 @@ object Transport {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): RPCPort =
-      inline if constValue[A] >= 1 && constValue[A] <= 65535 then value
+      inline if (constValue[A] >= 1 && constValue[A] <= 65535) value
       else error("RPC port must be between 1 and 65535")
 
     extension (value: RPCPort) {

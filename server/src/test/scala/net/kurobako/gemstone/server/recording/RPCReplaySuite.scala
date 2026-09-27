@@ -1,11 +1,12 @@
 package net.kurobako.gemstone.server.recording
 
+import net.kurobako.gemstone.Constraint.Positive
+
 import net.kurobako.gemstone.*
 
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.server.transport.ServerControl
 import net.kurobako.gemstone.server.transport.Transport.*
-
 import java.io.{DataInputStream, DataOutputStream, EOFException, IOException}
 import java.net.{InetAddress, ServerSocket, Socket, SocketException}
 import java.nio.ByteBuffer
@@ -108,7 +109,7 @@ final class RPCReplaySuite extends munit.FunSuite {
         arrivals.countDown(); val arrived = arrivals.await(2, TimeUnit.SECONDS); assert(arrived); out.write(response())
       }
       Using.resource(peer) { peer =>
-        val result = RPCReplay.run(RPCReplay.Options(file, schema, PositiveInt(3000)), _ => peer.endpoint)
+        val result = RPCReplay.run(RPCReplay.Options(file, schema, 3000), _ => peer.endpoint)
         assertEquals(result.requests.raw, 2); assertEquals(peer.registered.get(), 2);
         assertEquals(peer.clients.size(), 2)
         peer.verify()
@@ -125,7 +126,7 @@ final class RPCReplaySuite extends munit.FunSuite {
       val calls = AtomicInteger()
       val peer  = Peer((_, _, out) => out.write(completion(if (early || calls.incrementAndGet() >= 4) 2 else 1)))
       Using.resource(peer) { peer =>
-        val result = RPCReplay.run(RPCReplay.Options(file, schema, PositiveInt(3000)), _ => peer.endpoint)
+        val result = RPCReplay.run(RPCReplay.Options(file, schema, 3000), _ => peer.endpoint)
         assertEquals(result.extraCompletionPolls.raw, if (early) 0L else 2L)
         peer.verify()
       }
@@ -142,7 +143,7 @@ final class RPCReplaySuite extends munit.FunSuite {
       val peer = Peer((_, _, out) => out.write(if (failed) completion(0) else completion(1)))
       Using.resource(peer) { peer =>
         val error = intercept[IOException](RPCReplay.run(
-          RPCReplay.Options(file, schema, PositiveInt(1000)),
+          RPCReplay.Options(file, schema, 1000),
           _ => peer.endpoint
         ))
         assert(
@@ -162,7 +163,7 @@ final class RPCReplaySuite extends munit.FunSuite {
       val calls = AtomicInteger()
       val peer  = Peer((_, _, out) => out.write(if (calls.incrementAndGet() < 3) completion(1) else completion(0)))
       Using.resource(peer) { peer =>
-        val report = RPCReplay.run(RPCReplay.Options(file, schema, PositiveInt(3000)), _ => peer.endpoint)
+        val report = RPCReplay.run(RPCReplay.Options(file, schema, 3000), _ => peer.endpoint)
         assertEquals(report.extraCompletionPolls.raw, 2L)
         peer.verify()
       }
@@ -178,7 +179,7 @@ final class RPCReplaySuite extends munit.FunSuite {
       val peer   = Peer((_, _, out) => out.write(response(1)))
       Using.resource(peer) { peer =>
         val e = intercept[IOException](RPCReplay.run(
-          RPCReplay.Options(file, schema, PositiveInt(3000)),
+          RPCReplay.Options(file, schema, 3000),
           _ =>
             RPCReplay.Target(peer.endpoint.port, () => { closed.set(true); peer.close() })
         ))

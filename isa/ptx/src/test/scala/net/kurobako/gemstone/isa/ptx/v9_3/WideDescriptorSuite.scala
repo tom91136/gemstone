@@ -1,6 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.NonEmptyVec
 
 import Program.*
 
@@ -24,7 +29,7 @@ final class WideDescriptorSuite extends munit.FunSuite {
   private val expected  = values.take(2688).sum.toDouble
   private val geometry  = LaunchGeometry.forLaunch(
     Dimensions.One,
-    Dimensions(PositiveInt(3), PositiveInt(1), PositiveInt(1))
+    Dimensions(3, 1, 1)
   ).toOption.get
   private def bits(value: Double): Long      = java.lang.Double.doubleToRawLongBits(value)
   private def literal(value: Double): String = "0d" + java.lang.Long.toHexString(bits(value))
@@ -32,39 +37,39 @@ final class WideDescriptorSuite extends munit.FunSuite {
   // Interleaving controls and observations are confined to this final test fixture.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private final class DescriptorMemory extends AddressMemory {
-    val backing    = ArrayCheckedMemory.allocate(NonNegativeInt(64), GuestAddress(0x10000000000L))
-    val base       = backing.allocation.start
-    var transition = false
-    val observed   = mutable.ArrayBuffer.empty[(Long, Double)]
+    val backing                                  = ArrayCheckedMemory.allocate(64, GuestAddress(0x10000000000L))
+    val base                                     = backing.allocation.start
+    var transition                               = false
+    val observed                                 = mutable.ArrayBuffer.empty[(Long, Double)]
     def set(status: Long, payload: Double): Unit = {
-      backing.writeLittleEndian(base, status, MemoryValueByteWidth.Qword).toOption.get
-      backing.writeLittleEndian(base.offset(8), bits(payload), MemoryValueByteWidth.Qword).toOption.get
+      backing.writeLittleEndian(base, status, 8).toOption.get
+      backing.writeLittleEndian(base.offset(8), bits(payload), 8).toOption.get
     }
     private def afterRead(address: GuestAddress): Unit = if (transition && address == base) {
       transition = false
       set(101, inclusive)
     }
     private def observe(): Unit = observed += (
-      backing.readLittleEndian(base, MemoryValueByteWidth.Qword).toOption.get ->
+      backing.readLittleEndian(base, 8).toOption.get ->
         java.lang.Double.longBitsToDouble(
-          backing.readLittleEndian(base.offset(8), MemoryValueByteWidth.Qword).toOption.get
+          backing.readLittleEndian(base.offset(8), 8).toOption.get
         )
     )
-    override def readInt8(address: GuestAddress)               = backing.readInt8(address)
-    override def readInt32(address: GuestAddress)              = backing.readInt32(address)
-    override def writeInt8(address: GuestAddress, value: Byte) = backing.writeInt8(address, value)
-    override def writeInt32(address: GuestAddress, value: Int) = backing.writeInt32(address, value)
-    override def readLittleEndian(address: GuestAddress, size: MemoryValueByteWidth) = {
+    override def readInt8(address: GuestAddress)                                 = backing.readInt8(address)
+    override def readInt32(address: GuestAddress)                                = backing.readInt32(address)
+    override def writeInt8(address: GuestAddress, value: Byte)                   = backing.writeInt8(address, value)
+    override def writeInt32(address: GuestAddress, value: Int)                   = backing.writeInt32(address, value)
+    override def readLittleEndian(address: GuestAddress, size: IntBetween[1, 8]) = {
       val result = backing.readLittleEndian(address, size)
       afterRead(address)
       result
     }
-    override def writeLittleEndian(address: GuestAddress, value: Long, size: MemoryValueByteWidth) = {
+    override def writeLittleEndian(address: GuestAddress, value: Long, size: IntBetween[1, 8]) = {
       val result = backing.writeLittleEndian(address, value, size)
       observe()
       result
     }
-    override def readBytes(address: GuestAddress, size: NonNegativeInt): Either[MemoryError, Vec[Byte]] = {
+    override def readBytes(address: GuestAddress, size: NonNegative[Int]): Either[MemoryError, Vec[Byte]] = {
       val result = backing.validateRange(address, size).map(_ =>
         Vec.from((0 until size.raw).map(index => backing.readInt8(address.offset(index.toLong)).toOption.get))
       )
@@ -72,7 +77,7 @@ final class WideDescriptorSuite extends munit.FunSuite {
       result
     }
     override def writeBytes(address: GuestAddress, bytes: Vec[Byte]): Either[MemoryError, Unit] = {
-      val result = backing.validateRange(address, NonNegativeInt.unsafe(bytes.size)).map { _ =>
+      val result = backing.validateRange(address, NonNegative.unsafe(bytes.size)).map { _ =>
         bytes.zipWithIndex.foreach { case (byte, index) => backing.writeInt8(address.offset(index), byte).toOption.get }
       }
       observe()
@@ -110,14 +115,14 @@ final class WideDescriptorSuite extends munit.FunSuite {
     val result = VMInterpreter.execute(
       kernel,
       geometry,
-      Map(ParameterName("memory") -> Argument.fromLong(memory.base.raw)),
+      Map(NonEmptyString("memory") -> Argument.fromLong(memory.base.raw)),
       memory
     )
     assert(result.isRight, result.toString)
     (0 until 3).foreach { group =>
       val actual = java.lang.Double.longBitsToDouble(memory.backing.readLittleEndian(
         memory.base.offset(32 + group * 8L),
-        MemoryValueByteWidth.Qword
+        8
       ).toOption.get)
       assertEquals(actual, expected, s"group $group must not double-count first tile $first")
     }
@@ -141,7 +146,7 @@ final class WideDescriptorSuite extends munit.FunSuite {
     val result = VMInterpreter.execute(
       kernel,
       geometry,
-      Map(ParameterName("memory") -> Argument.fromLong(memory.base.raw)),
+      Map(NonEmptyString("memory") -> Argument.fromLong(memory.base.raw)),
       memory
     )
     assert(result.isRight, result.toString)

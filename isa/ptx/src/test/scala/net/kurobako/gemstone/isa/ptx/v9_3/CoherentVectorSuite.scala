@@ -1,6 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.NonEmptyVec
 
 import Program.*
 
@@ -19,24 +24,24 @@ final class CoherentVectorSuite extends munit.FunSuite {
   // Interleaving controls and observations are confined to this final test fixture.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private final class InterleavingMemory extends AddressMemory {
-    val backing         = ArrayCheckedMemory.allocate(NonNegativeInt(32), GuestAddress(0x10000000000L))
-    val base            = backing.allocation.start
-    val observed        = mutable.ArrayBuffer.empty[Long]
-    var changeAfterRead = false
-    override def readInt8(address: GuestAddress)               = backing.readInt8(address)
-    override def readInt32(address: GuestAddress)              = backing.readInt32(address)
-    override def writeInt8(address: GuestAddress, value: Byte) = backing.writeInt8(address, value)
-    override def writeInt32(address: GuestAddress, value: Int) = backing.writeInt32(address, value)
-    override def readLittleEndian(address: GuestAddress, size: MemoryValueByteWidth) = {
+    val backing                                   = ArrayCheckedMemory.allocate(32, GuestAddress(0x10000000000L))
+    val base                                      = backing.allocation.start
+    val observed                                  = mutable.ArrayBuffer.empty[Long]
+    var changeAfterRead                           = false
+    override def readInt8(address: GuestAddress)  = backing.readInt8(address)
+    override def readInt32(address: GuestAddress) = backing.readInt32(address)
+    override def writeInt8(address: GuestAddress, value: Byte)                   = backing.writeInt8(address, value)
+    override def writeInt32(address: GuestAddress, value: Int)                   = backing.writeInt32(address, value)
+    override def readLittleEndian(address: GuestAddress, size: IntBetween[1, 8]) = {
       val result = backing.readLittleEndian(address, size)
       if (changeAfterRead && address == base) {
-        backing.writeLittleEndian(base, (1234L << 32) | 100L, MemoryValueByteWidth.Qword).toOption.get
+        backing.writeLittleEndian(base, (1234L << 32) | 100L, 8).toOption.get
       }
       result
     }
-    override def writeLittleEndian(address: GuestAddress, value: Long, size: MemoryValueByteWidth) = {
+    override def writeLittleEndian(address: GuestAddress, value: Long, size: IntBetween[1, 8]) = {
       val result = backing.writeLittleEndian(address, value, size)
-      observed += backing.readLittleEndian(base, MemoryValueByteWidth.Qword).toOption.get
+      observed += backing.readLittleEndian(base, 8).toOption.get
       result
     }
   }
@@ -58,7 +63,7 @@ final class CoherentVectorSuite extends munit.FunSuite {
     assert(VMInterpreter.execute(
       kernel,
       geometry,
-      Map(ParameterName("output") -> Argument.fromLong(memory.base.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.base.raw)),
       memory
     ).isRight)
     assert(memory.observed.nonEmpty)
@@ -67,7 +72,7 @@ final class CoherentVectorSuite extends munit.FunSuite {
 
   test("packed acquire load observes one descriptor despite a following publication") {
     val memory = InterleavingMemory()
-    memory.backing.writeLittleEndian(memory.base, packed, MemoryValueByteWidth.Qword).toOption.get
+    memory.backing.writeLittleEndian(memory.base, packed, 8).toOption.get
     memory.changeAfterRead = true
     val kernel = VMCompiler.compile(""".version 8.0
       .target sm_80
@@ -84,9 +89,9 @@ final class CoherentVectorSuite extends munit.FunSuite {
     assert(VMInterpreter.execute(
       kernel,
       geometry,
-      Map(ParameterName("input") -> Argument.fromLong(memory.base.raw)),
+      Map(NonEmptyString("input") -> Argument.fromLong(memory.base.raw)),
       memory
     ).isRight)
-    assertEquals(memory.backing.readLittleEndian(memory.base.offset(8), MemoryValueByteWidth.Qword), Right(packed))
+    assertEquals(memory.backing.readLittleEndian(memory.base.offset(8), 8), Right(packed))
   }
 }

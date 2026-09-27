@@ -1,24 +1,25 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.NonNegativeLong
+import net.kurobako.gemstone.Constraint.NonNegative
+
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.vm.Event
 
 import java.util.concurrent.locks.ReentrantLock
 
 object Performance {
-  final case class Snapshot(
-      dispatches: NonNegativeLong,
-      collectiveDispatches: NonNegativeLong,
-      invocations: NonNegativeLong,
-      instructions: NonNegativeLong,
-      invocationValueInstances: NonNegativeLong,
-      denseValueSlots: NonNegativeLong,
-      estimatedDenseValueBytes: NonNegativeLong,
-      elapsedNanos: NonNegativeLong
+  case class Snapshot(
+      dispatches: NonNegative[Long],
+      collectiveDispatches: NonNegative[Long],
+      invocations: NonNegative[Long],
+      instructions: NonNegative[Long],
+      invocationValueInstances: NonNegative[Long],
+      denseValueSlots: NonNegative[Long],
+      estimatedDenseValueBytes: NonNegative[Long],
+      elapsedNanos: NonNegative[Long]
   )
 
-  final case class Observation(snapshot: Snapshot) extends Event
+  case class Observation(snapshot: Snapshot) extends Event
 
   /** Per-task execution measurements emitted through the VM observer. Group-local counters are written by one worker
     * thread, so only the cross-thread merge and snapshot take the lock.
@@ -87,14 +88,14 @@ object Performance {
 
     def snapshot: Snapshot = lock.withLock {
       Snapshot(
-        NonNegativeLong.unsafe(dispatchCount),
-        NonNegativeLong.unsafe(collectiveDispatchCount),
-        NonNegativeLong.unsafe(invocationCount),
-        NonNegativeLong.unsafe(instructionCount),
-        NonNegativeLong.unsafe(invocationValueInstanceCount),
-        NonNegativeLong.unsafe(denseValueSlotCount),
-        NonNegativeLong.unsafe(estimatedDenseValueByteCount),
-        NonNegativeLong.unsafe(dispatchElapsedNanos)
+        NonNegative.unsafe(dispatchCount),
+        NonNegative.unsafe(collectiveDispatchCount),
+        NonNegative.unsafe(invocationCount),
+        NonNegative.unsafe(instructionCount),
+        NonNegative.unsafe(invocationValueInstanceCount),
+        NonNegative.unsafe(denseValueSlotCount),
+        NonNegative.unsafe(estimatedDenseValueByteCount),
+        NonNegative.unsafe(dispatchElapsedNanos)
       )
     }
   }

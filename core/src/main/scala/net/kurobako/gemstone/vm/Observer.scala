@@ -5,7 +5,7 @@ trait Observer[-E] {
 }
 
 object Observer {
-  final case class Error(message: String)
+  case class Error(message: String)
 
   def discard[E]: Observer[E] = (_, _) => Right(())
 }

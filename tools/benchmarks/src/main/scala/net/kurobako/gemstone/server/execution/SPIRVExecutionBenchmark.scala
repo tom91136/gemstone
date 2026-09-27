@@ -1,13 +1,15 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PlatformTime, PositiveInt, Vec}
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+import net.kurobako.gemstone.{NonEmptyVec, PlatformTime, Vec}
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments
 import net.kurobako.gemstone.benchmarks.BenchmarkName
 import net.kurobako.gemstone.benchmarks.PlatformMetrics
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.binary.ScalarByteWidth
 import net.kurobako.gemstone.isa.spirv.v1_6.*
-import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.vm.{Fault, KernelTask, LaunchGeometry, Memory, MemoryRegion, Observer, TaskControl}
 
 import cats.syntax.all.*
@@ -19,25 +21,25 @@ import scala.util.Using
 
 /** Concurrent arithmetic dispatches representative of the SPIR-V interpreter's instruction loop. */
 object SPIRVExecutionBenchmark {
-  private final case class Options(
-      iterations: PositiveInt,
-      groups: PositiveInt,
-      instructions: PositiveInt,
-      parallelism: PositiveInt,
+  private case class Options(
+      iterations: Positive[Int],
+      groups: Positive[Int],
+      instructions: Positive[Int],
+      parallelism: Positive[Int],
       recording: Option[Path]
   )
 
   private object EmptyMemory extends Memory {
     override def read(
         region: MemoryRegion,
-        offset: NonNegativeLong,
-        size: NonNegativeInt
+        offset: NonNegative[Long],
+        size: NonNegative[Int]
     ): Either[Fault, Vec[Byte]] =
       Left(Fault.Unsupported("benchmark kernel attempted a memory read"))
 
     override def write(
         region: MemoryRegion,
-        offset: NonNegativeLong,
+        offset: NonNegative[Long],
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       Left(Fault.Unsupported("benchmark kernel attempted a memory write"))
@@ -46,14 +48,14 @@ object SPIRVExecutionBenchmark {
   private val name    = BenchmarkName("spirv-execution")
   private val options = (
     Opts.option[Int]("iterations", help = "Measured dispatches").withDefault(20)
-      .validate("iterations must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("iterations must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[Int]("groups", help = "Workgroups per dispatch").withDefault(256)
-      .validate("groups must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("groups must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[Int]("instructions", help = "Integer additions per invocation").withDefault(64)
-      .validate("instructions must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("instructions must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[Int]("parallelism", help = "VMInterpreter worker count")
       .withDefault(sys.runtime.availableProcessors())
-      .validate("parallelism must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("parallelism must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[String]("recording", help = "JFR output path").map(Path.of(_)).orNone
   ).mapN(Options(_, _, _, _, _))
 
@@ -62,9 +64,9 @@ object SPIRVExecutionBenchmark {
     val parsed = BenchmarkArguments.parse(name, arguments.toSeq, options)
     val source = module(parsed.instructions)
     val task   = KernelTask.validated(
-      kernelName = KernelName("arithmetic"),
+      kernelName = NonEmptyString("arithmetic"),
       groupSize = LaunchGeometry.Dimensions.One,
-      groupCount = LaunchGeometry.Dimensions(parsed.groups, PositiveInt.One, PositiveInt.One),
+      groupCount = LaunchGeometry.Dimensions(parsed.groups, 1, 1),
       arguments = Vec.empty
     ).fold(error => throw IllegalArgumentException(error), value => value)
 
@@ -88,18 +90,18 @@ object SPIRVExecutionBenchmark {
         before <- allocatedBefore
         after  <- PlatformMetrics.allocatedBytes
         if after >= before
-      } yield (after - before).raw
+      } yield after - before
       Console.out.println(
         s"iterations=${parsed.iterations} groups=${parsed.groups} instructions=${parsed.instructions} " +
           s"parallelism=${parsed.parallelism} nsPerDispatch=${elapsed.toDouble / parsed.iterations.raw} " +
-          s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.toDouble / parsed.iterations.raw)}"
+          s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)}"
       )
     }
   }
 
   private def operand(kind: String, values: Int*): Operand =
     Operand(
-      SPIRVOperandKind.either(kind).fold(message => throw IllegalArgumentException(message), value => value),
+      NonEmptyString.either(kind).fold(message => throw IllegalArgumentException(message), value => value),
       NonEmptyVec.unsafeFromVec(Vec.from(values.map(Word(_))))
     )
 
@@ -108,16 +110,16 @@ object SPIRVExecutionBenchmark {
   private def literalString(value: String): Operand = {
     val bytes = value.getBytes(StandardCharsets.UTF_8) :+ 0.toByte
     Operand(
-      SPIRVOperandKind("LiteralString"),
+      NonEmptyString("LiteralString"),
       NonEmptyVec.unsafeFromVec(Vec.from(bytes.grouped(4).map { group =>
-        val width = ScalarByteWidth.either(group.length)
+        val width = IntBetween.either[0, 8](group.length)
           .fold(message => throw IllegalArgumentException(message), value => value)
         Word(LittleEndian.decode(group, 0, width).toInt)
       }))
     )
   }
 
-  private def module(instructionCount: PositiveInt): Module = {
+  private def module(instructionCount: Positive[Int]): Module = {
     import Instruction.*
     val arithmetic = Vector.tabulate(instructionCount.raw) { index =>
       val destination = index + 7

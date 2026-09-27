@@ -1,9 +1,12 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PlatformTime, PositiveInt, PositiveLong, Vec}
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+import net.kurobako.gemstone.{PlatformTime, Vec}
 import net.kurobako.gemstone.benchmarks.{BenchmarkArguments, BenchmarkName, BenchmarkResources, PlatformMetrics}
-import net.kurobako.gemstone.binary.{ByteRange, LittleEndian, ScalarByteWidth}
-import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.binary.{ByteRange, LittleEndian}
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.spirv.v1_6.{ISA, Validation, VirtualMachine}
 import net.kurobako.gemstone.vm.{Fault, KernelTask, LaunchGeometry, Memory, MemoryRegion, Observer, TaskControl}
 
@@ -14,13 +17,13 @@ import scala.util.Using
 
 /** Bounded OpenCL CTS async-copy paths, measured after SPIR-V loading. */
 object OpenCLCTSCopyBenchmark {
-  private final case class Options(
+  private case class Options(
       direction: String,
-      groups: PositiveInt,
-      localSize: PositiveInt,
-      stride: PositiveInt,
-      iterations: PositiveInt,
-      parallelism: PositiveInt
+      groups: Positive[Int],
+      localSize: Positive[Int],
+      stride: Positive[Int],
+      iterations: Positive[Int],
+      parallelism: Positive[Int]
   )
 
   private val name    = BenchmarkName("opencl-cts-async-copy")
@@ -31,15 +34,15 @@ object OpenCLCTSCopyBenchmark {
         value == "global-to-local" || value == "local-to-global"
       ),
     Opts.option[Int]("groups", help = "Workgroups per dispatch").withDefault(16)
-      .validate("groups must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("groups must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[Int]("local-size", help = "Work items per group").withDefault(8)
-      .validate("local-size must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("local-size must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[Int]("stride", help = "Element stride (1 is contiguous)").withDefault(2)
-      .validate("stride must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("stride must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[Int]("iterations", help = "Dispatches per sample").withDefault(3)
-      .validate("iterations must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("iterations must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[Int]("parallelism", help = "VM worker count").withDefault(1)
-      .validate("parallelism must be positive")(_ > 0).map(PositiveInt.unsafe)
+      .validate("parallelism must be positive")(_ > 0).map(Positive.unsafe)
   ).mapN(Options(_, _, _, _, _, _))
 
   private val inputRegion  = MemoryRegion(1)
@@ -54,8 +57,8 @@ object OpenCLCTSCopyBenchmark {
 
     override def read(
         region: MemoryRegion,
-        offset: NonNegativeLong,
-        size: NonNegativeInt
+        offset: NonNegative[Long],
+        size: NonNegative[Int]
     ): Either[Fault, Vec[Byte]] =
       bytes(region).flatMap { source =>
         Either.cond(
@@ -71,7 +74,7 @@ object OpenCLCTSCopyBenchmark {
 
     override def write(
         region: MemoryRegion,
-        offset: NonNegativeLong,
+        offset: NonNegative[Long],
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       if (region != outputRegion) Left(Fault.InvalidTask("benchmark write to input"))
@@ -114,20 +117,20 @@ object OpenCLCTSCopyBenchmark {
     )
     val memory = CopyMemory(elements)
     val kernel = (parsed.direction, parsed.stride.raw) match {
-      case ("global-to-local", 1) => KernelName("global_to_local_contiguous")
-      case ("local-to-global", 1) => KernelName("local_to_global_contiguous")
-      case ("global-to-local", _) => KernelName("global_to_local")
-      case _                      => KernelName("local_to_global")
+      case ("global-to-local", 1) => NonEmptyString("global_to_local_contiguous")
+      case ("local-to-global", 1) => NonEmptyString("local_to_global_contiguous")
+      case ("global-to-local", _) => NonEmptyString("global_to_local")
+      case _                      => NonEmptyString("local_to_global")
     }
     val task = KernelTask.validated(
       kernel,
-      LaunchGeometry.Dimensions(parsed.localSize, PositiveInt.One, PositiveInt.One),
-      LaunchGeometry.Dimensions(parsed.groups, PositiveInt.One, PositiveInt.One),
+      LaunchGeometry.Dimensions(parsed.localSize, 1, 1),
+      LaunchGeometry.Dimensions(parsed.groups, 1, 1),
       Vec(
-        KernelTask.Argument.Memory(inputRegion, NonNegativeLong.Zero),
-        KernelTask.Argument.Memory(outputRegion, NonNegativeLong.Zero),
-        KernelTask.Argument.Local(PositiveLong.unsafe(parsed.localSize.raw.toLong * 3L * 4L)),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(parsed.stride.raw.toLong, ScalarByteWidth(4)))
+        KernelTask.Argument.Memory(inputRegion, 0L),
+        KernelTask.Argument.Memory(outputRegion, 0L),
+        KernelTask.Argument.Local(Positive.unsafe(parsed.localSize.raw.toLong * 3L * 4L)),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(parsed.stride.raw.toLong, 4))
       )
     ).fold(error => throw IllegalArgumentException(error), identity)
     val image  = BenchmarkResources.bytes("opencl-cts-async-copy.spv")
@@ -151,14 +154,14 @@ object OpenCLCTSCopyBenchmark {
         before <- allocatedBefore
         after  <- PlatformMetrics.allocatedBytes
         if after >= before
-      } yield (after - before).raw
+      } yield after - before
       val checksum = memory.verify(parsed.groups.raw, parsed.localSize.raw, parsed.stride.raw)
       Console.out.println(
         s"direction=${parsed.direction} groups=${parsed.groups} localSize=${parsed.localSize} " +
           s"stride=${parsed.stride} iterations=${parsed.iterations} parallelism=${parsed.parallelism} " +
-          s"elements=${(parsed.groups * parsed.localSize).raw * 3} nsPerDispatch=${elapsed.toDouble /
+          s"elements=${(parsed.groups * parsed.localSize) * 3} nsPerDispatch=${elapsed.toDouble /
               parsed.iterations.raw} " +
-          s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.toDouble / parsed.iterations.raw)} checksum=$checksum"
+          s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
       )
       machine.unload(program)
     }

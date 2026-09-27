@@ -10,8 +10,8 @@ set_target_properties(gemstone_execution_client PROPERTIES
 target_include_directories(gemstone_execution_client PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../generated/rpc")
-target_compile_features(gemstone_execution_client PUBLIC cxx_std_17)
-target_link_libraries(gemstone_execution_client PUBLIC Threads::Threads)
+target_compile_features(gemstone_execution_client PUBLIC cxx_std_23)
+target_link_libraries(gemstone_execution_client PUBLIC Threads::Threads glaze::glaze)
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(gemstone_execution_client PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()

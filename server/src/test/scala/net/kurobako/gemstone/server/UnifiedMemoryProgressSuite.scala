@@ -1,5 +1,9 @@
 package net.kurobako.gemstone.server
 
+import net.kurobako.gemstone.Constraint.NoNulString
+
+import net.kurobako.gemstone.Constraint.Positive
+
 import net.kurobako.gemstone.*
 
 import net.kurobako.gemstone.launcher.Environment
@@ -64,11 +68,11 @@ final class UnifiedMemoryProgressSuite extends munit.FunSuite {
       Using.resource(if (concurrent)
         GemstoneRPCServer.startWith(
           checkpoint.backends,
-          TaskLimits(PositiveLong.unsafe((if (atomicProbe) 100000 else 10000000).toLong), PositiveInt(64)),
-          PositiveInt(30000),
+          TaskLimits(Positive.unsafe((if (atomicProbe) 100000 else 10000000).toLong), 64),
+          30000,
           environment
         )
-      else GemstoneRPCServer.start(TaskLimits(PositiveLong(10000000L), PositiveInt(64)), environment)) {
+      else GemstoneRPCServer.start(TaskLimits(10000000L, 64), environment)) {
         server =>
           val libraryPath = List(directory.toString, sys.env.getOrElse("LD_LIBRARY_PATH", "")).mkString(":")
           val probes      =

@@ -1,22 +1,23 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.KernelName
-import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.Constraint.NonNegative
 
-import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.NonEmptyVec
 
 final class VirtualMachineSuite extends munit.FunSuite {
   private object EmptyMemory extends Memory {
     override def read(
         region: MemoryRegion,
-        offset: NonNegativeLong,
-        size: NonNegativeInt
+        offset: NonNegative[Long],
+        size: NonNegative[Int]
     ): Either[Fault, Vec[Byte]] = Left(Fault.Memory("unexpected read"))
 
     override def write(
         region: MemoryRegion,
-        offset: NonNegativeLong,
+        offset: NonNegative[Long],
         bytes: Vec[Byte]
     ): Either[Fault, Unit] = Left(Fault.Memory("unexpected write"))
   }
@@ -43,7 +44,7 @@ final class VirtualMachineSuite extends munit.FunSuite {
     val machine = VirtualMachine(Validation.Environment.OpenCLCompute, Observer.discard, Scheduler.Sequential)
     val loaded  = machine.load(module).fold(error => fail(error.message), value => value)
     val task    = KernelTask.validated(
-      KernelName("empty"),
+      NonEmptyString("empty"),
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
       Vec.empty
@@ -54,7 +55,7 @@ final class VirtualMachineSuite extends munit.FunSuite {
   }
 
   private def operand(kind: String, value: Int): Operand =
-    Operand(SPIRVOperandKind.unsafe(kind), NonEmptyVec(Word(value)))
+    Operand(NonEmptyString.unsafe(kind), NonEmptyVec(Word(value)))
 
   private def stringOperand(value: String): Operand = {
     val bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8) ++ Array(0.toByte)
@@ -63,6 +64,6 @@ final class VirtualMachineSuite extends munit.FunSuite {
         word | ((byte & 0xff) << (index * 8))
       })
     }.toSeq
-    Operand(SPIRVOperandKind("LiteralString"), NonEmptyVec.unsafeFromVec(Vec.from(words)))
+    Operand(NonEmptyString("LiteralString"), NonEmptyVec.unsafeFromVec(Vec.from(words)))
   }
 }

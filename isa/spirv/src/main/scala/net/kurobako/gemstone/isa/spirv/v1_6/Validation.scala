@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import net.kurobako.gemstone.{NonEmptyVec, Vec}
 import net.kurobako.gemstone.isa.ValidationOutcome
 
@@ -8,7 +10,7 @@ import cats.data.Chain
 object Validation {
   enum Issue {
     case InvalidHeader(detail: String)
-    case MalformedOperand(opcode: SPIRVOpcode, detail: String)
+    case MalformedOperand(opcode: NonEmptyString, detail: String)
     case MissingKernelCapability
     case MissingKernelEntryPoint
     case MissingOpenCLMemoryModel
@@ -39,7 +41,7 @@ object Validation {
 
   private val Kernel = 6L
 
-  private final case class Requirements(
+  private case class Requirements(
       capabilityWord: Long,
       entryPointWord: Long,
       acceptsMemoryModel: (Long, Long) => Boolean,
@@ -49,7 +51,7 @@ object Validation {
       requireEntryPoint: Boolean
   )
 
-  private final case class Facts(
+  private case class Facts(
       hasCapability: Boolean,
       hasEntryPoint: Boolean,
       hasMemoryModel: Boolean,
@@ -98,14 +100,14 @@ object Validation {
           case Right(word) if word.toUnsigned.raw == requirements.capabilityWord => state.copy(hasCapability = true)
           case Right(_)                                                          => state
           case Left(detail)                                                      => state.copy(issues =
-              state.issues.append(Issue.MalformedOperand(SPIRVOpcode("OpCapability"), detail))
+              state.issues.append(Issue.MalformedOperand(NonEmptyString("OpCapability"), detail))
             )
         }
       case (state, Instruction.EntryPoint(executionModel, _, _, _)) => executionModel.singleWord match {
           case Right(word) if word.toUnsigned.raw == requirements.entryPointWord => state.copy(hasEntryPoint = true)
           case Right(_)                                                          => state
           case Left(detail)                                                      => state.copy(issues =
-              state.issues.append(Issue.MalformedOperand(SPIRVOpcode("OpEntryPoint"), detail))
+              state.issues.append(Issue.MalformedOperand(NonEmptyString("OpEntryPoint"), detail))
             )
         }
       case (state, Instruction.MemoryModel(addressingModel, memoryModel)) =>
@@ -115,10 +117,10 @@ object Validation {
               state.hasMemoryModel || requirements.acceptsMemoryModel(addressing.toUnsigned.raw, memory.toUnsigned.raw)
             )
           case (Left(detail), _) => state.copy(issues =
-              state.issues.append(Issue.MalformedOperand(SPIRVOpcode("OpMemoryModel"), detail))
+              state.issues.append(Issue.MalformedOperand(NonEmptyString("OpMemoryModel"), detail))
             )
           case (_, Left(detail)) => state.copy(issues =
-              state.issues.append(Issue.MalformedOperand(SPIRVOpcode("OpMemoryModel"), detail))
+              state.issues.append(Issue.MalformedOperand(NonEmptyString("OpMemoryModel"), detail))
             )
         }
       case (state, _) => state

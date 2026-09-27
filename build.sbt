@@ -576,8 +576,6 @@ lazy val generateAPISources =
   taskKey[Seq[Path]]("Bootstrap checked-in CUDA, HIP, HSA, Level Zero, OpenCL, and Vulkan API surfaces.")
 lazy val generateSPIRVSources =
   taskKey[Seq[Path]]("Update checked-in SPIR-V sources and reference tests.")
-lazy val generateSPIRVFixtures =
-  taskKey[Seq[File]]("Assemble readable SPIR-V test fixtures into managed resources.")
 lazy val checkGeneratedSources    = taskKey[Unit]("Verify every checked-in generated source and fixture is current.")
 lazy val codegen                  = taskKey[Unit]("Update and format every checked-in generated source and fixture.")
 lazy val nativeConfigureArguments =
@@ -1101,29 +1099,6 @@ lazy val spirv = projectMatrix
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-core" % catsCoreVersion
     ),
-    generateSPIRVFixtures := Def.uncached {
-      val source    = (Test / sourceDirectory).value / "fixtures"
-      val output    = (Test / resourceManaged).value.toPath
-      val assembler = sys.env.getOrElse("SPIRV_AS", "spirv-as")
-      val fixtures  = Seq(
-        ("glcompute-dot-double", "spv1.3"),
-        ("glcompute-fma", "spv1.3"),
-        ("glcompute-pow", "spv1.5"),
-        ("glcompute-sin", "spv1.3")
-      )
-      Files.createDirectories(output)
-      fixtures.map { case (name, environment) =>
-        val input  = source / s"$name.spvasm"
-        val result = output / s"$name.spv"
-        val exit   = Process(Seq(assembler, "--target-env", environment, s"$input", "-o", s"$result")).!
-        if (exit != 0)
-          throw MessageOnlyException(
-            s"failed to assemble $input; install SPIRV-Tools or set SPIRV_AS to spirv-as"
-          )
-        result.toFile
-      }
-    },
-    Test / resourceGenerators += generateSPIRVFixtures.taskValue,
     generateSPIRVSources := Def.uncached {
       val converter  = fileConverter.value
       val references = (codegenProject / prepareSPIRVReferences).value

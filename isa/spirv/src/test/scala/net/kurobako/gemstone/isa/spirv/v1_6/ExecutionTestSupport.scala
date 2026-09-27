@@ -1,16 +1,20 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
+
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.binary.Widths.*
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
-
-import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, Vec}
+import net.kurobako.gemstone.{NonEmptyVec, Vec}
 
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.binary.ScalarByteWidth
 import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.memory.MemoryValueByteWidth
-
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
 
@@ -36,9 +40,9 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
     VMInterpreter.execute(program, task, memory, control, scheduler, observer)
 
   protected final def testDimensions(
-      x: PositiveInt,
-      y: PositiveInt = PositiveInt.One,
-      z: PositiveInt = PositiveInt.One
+      x: Positive[Int],
+      y: Positive[Int] = 1,
+      z: Positive[Int] = 1
   ): Dimensions = Dimensions(x, y, z)
 
   protected final class ArrayMemory(
@@ -53,18 +57,18 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
 
     override def read(
         id: MemoryRegion,
-        offset: NonNegativeLong,
-        size: NonNegativeInt
+        offset: NonNegative[Long],
+        size: NonNegative[Int]
     ): Either[Fault, Vec[Byte]] =
       checked(id, offset, size).map(start => content.get().slice(start, start + size.raw))
 
     override def write(
         id: MemoryRegion,
-        offset: NonNegativeLong,
+        offset: NonNegative[Long],
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       // Collection sizes are non-negative by construction.
-      checked(id, offset, NonNegativeInt.unsafe(bytes.size)) match {
+      checked(id, offset, NonNegative.unsafe(bytes.size)) match {
         case Left(error)  => Left(error)
         case Right(start) =>
           written(offset.raw, bytes.size)
@@ -76,8 +80,8 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
 
     override def atomicModifyValue(
         id: MemoryRegion,
-        offset: NonNegativeLong,
-        size: MemoryValueByteWidth
+        offset: NonNegative[Long],
+        size: IntBetween[1, 8]
     )(update: Long => Long): Either[Fault, Long] = atomicLock.withLock {
       checked(id, offset, size.nonNegative) match {
         case Left(error)  => Left(error)
@@ -96,8 +100,8 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
 
     private def checked(
         id: MemoryRegion,
-        offset: NonNegativeLong,
-        length: NonNegativeInt
+        offset: NonNegative[Long],
+        length: NonNegative[Int]
     ): Either[Fault, Int] =
       Either.cond(
         id == expectedId && ByteRange.contains(size, offset.raw, length.raw.toLong),
@@ -107,7 +111,7 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
   }
 
   protected def operand(kind: String, values: Int*): Operand = Operand(
-    SPIRVOperandKind.either(kind).fold(message => fail(message), valid => valid),
+    NonEmptyString.either(kind).fold(message => fail(message), valid => valid),
     NonEmptyVec.fromVec(Vec.from(values.map(Word(_))))
       .fold(message => throw IllegalArgumentException(message), value => value)
   )
@@ -115,7 +119,7 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
   protected def phiPair(value: Operand, parent: Operand): Operand = {
     val valueWord  = value.singleWord.fold(message => fail(message), word => word)
     val parentWord = parent.singleWord.fold(message => fail(message), word => word)
-    Operand(SPIRVOperandKind("PairIdRefIdRef"), Vec.nonEmpty(valueWord, parentWord))
+    Operand(NonEmptyString("PairIdRefIdRef"), Vec.nonEmpty(valueWord, parentWord))
   }
 
   protected def stringOperand(value: String): Operand = {
@@ -123,9 +127,9 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
       .fold(message => fail(message), valid => valid)
     val bytes = checked.getBytes(java.nio.charset.StandardCharsets.UTF_8) :+ 0.toByte
     val words = bytes.grouped(4).map { group =>
-      val width = ScalarByteWidth.either(group.length).fold(message => fail(message), value => value)
+      val width = IntBetween.either[0, 8](group.length).fold(message => fail(message), value => value)
       Word(LittleEndian.decode(group, 0, width).toInt)
     }
-    Operand(SPIRVOperandKind("LiteralString"), NonEmptyVec.unsafeFromVec(Vec.from(words)))
+    Operand(NonEmptyString("LiteralString"), NonEmptyVec.unsafeFromVec(Vec.from(words)))
   }
 }

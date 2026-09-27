@@ -1,17 +1,17 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
 import scala.compiletime.{constValue, error}
 
 import CodeObject.Program
 
-import net.kurobako.gemstone.NonNegativeLong
-import net.kurobako.gemstone.PositiveLong
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.BitWidth
 import net.kurobako.gemstone.binary.Bits
-import net.kurobako.gemstone.isa.GlobalName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.KernelMetadata
-import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.ProgramSymbols
 import net.kurobako.gemstone.vm.AddressSpace
 import net.kurobako.gemstone.vm.Event
@@ -49,28 +49,28 @@ final class VirtualMachine(
 
   def kernel(
       program: LoadedProgram,
-      name: KernelName
+      name: NonEmptyString
   ): Either[Fault, KernelMetadata] = program.kernel(name)
 
   def global(
       program: LoadedProgram,
-      name: GlobalName
-  ): Either[Fault, (NonNegativeLong, Vec[Byte])] = program.global(name)
+      name: NonEmptyString
+  ): Either[Fault, (NonNegative[Long], Vec[Byte])] = program.global(name)
 
   def bindGlobal(
       program: LoadedProgram,
-      name: GlobalName,
+      name: NonEmptyString,
       region: MemoryRegion,
-      offset: NonNegativeLong,
-      regionSize: PositiveLong,
+      offset: NonNegative[Long],
+      regionSize: Positive[Long],
       memory: Memory
   ): Either[Fault, Unit] =
     program.bindGlobal(name, region, offset, regionSize, memory)
 
   def writeGlobal(
       program: LoadedProgram,
-      name: GlobalName,
-      offset: NonNegativeLong,
+      name: NonEmptyString,
+      offset: NonNegative[Long],
       bytes: Vec[Byte]
   ): Either[Fault, Unit] = program.writeGlobal(name, offset, bytes)
 
@@ -87,11 +87,11 @@ object VirtualMachine {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): LaneCount =
-      inline if constValue[A] >= 1 && constValue[A] <= 64 then value else error("lane count must be between 1 and 64")
+      inline if (constValue[A] >= 1 && constValue[A] <= 64) value else error("lane count must be between 1 and 64")
 
     extension (lanes: LaneCount) {
-      inline def raw: Int    = lanes
-      def bitWidth: BitWidth = BitWidth.unsafe(lanes)
+      inline def raw: Int             = lanes
+      def bitWidth: IntBetween[1, 64] = IntBetween.unsafe[1, 64](lanes)
     }
   }
 
@@ -104,7 +104,7 @@ object VirtualMachine {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): LaneIndex =
-      inline if constValue[A] >= 0 && constValue[A] <= 63 then value else error("lane index must be between 0 and 63")
+      inline if (constValue[A] >= 0 && constValue[A] <= 63) value else error("lane index must be between 0 and 63")
 
     extension (lane: LaneIndex) {
       inline def raw: Int = lane
@@ -120,7 +120,7 @@ object VirtualMachine {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): WaveSize =
-      inline if constValue[A] == 32 || constValue[A] == 64 then value else error("wave size must be 32 or 64")
+      inline if (constValue[A] == 32 || constValue[A] == 64) value else error("wave size must be 32 or 64")
 
     extension (size: WaveSize) {
       inline def raw: Int = size
@@ -207,7 +207,7 @@ object VirtualMachine {
     }
   }
 
-  private[amdgpu] final case class WaveState(
+  private[amdgpu] case class WaveState(
       scalar: Array[Long],
       vector: VectorRegisters,
       carry: LaneBits,

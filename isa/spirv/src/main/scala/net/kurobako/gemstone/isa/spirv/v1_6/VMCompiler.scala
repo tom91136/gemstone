@@ -1,11 +1,17 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Constraint.{IntBetween, OneOf}
+
+import net.kurobako.gemstone.Constraint.NoNulString
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import VMIR.*
 import VMCollectives.openCLBroadcastScope
 
 import net.kurobako.gemstone.{NonEmptyVec, Vec}
-import net.kurobako.gemstone.binary.{BitWidth, FloatingPointWidth, LittleEndian, ScalarByteWidth}
-import net.kurobako.gemstone.isa.{KernelName, ValidationOutcome}
+import net.kurobako.gemstone.binary.LittleEndian
+import net.kurobako.gemstone.isa.ValidationOutcome
 import net.kurobako.gemstone.vm.Fault
 
 import scala.collection.mutable
@@ -66,26 +72,26 @@ private[v1_6] object VMCompiler {
     val byValueParameters       = mutable.HashSet.empty[Int]
     val saturatedConversions    = mutable.HashSet.empty[Int]
     val roundingModes           = mutable.HashMap.empty[Int, Int]
-    val extendedInstructionSets = mutable.HashMap.empty[Int, InstructionSetName]
-    val entryPoints             = mutable.HashMap.empty[KernelName, Int]
-    val entryPointInterfaces    = mutable.HashMap.empty[KernelName, Set[Int]]
-    val vulkanEntries           = mutable.HashSet.empty[KernelName]
+    val extendedInstructionSets = mutable.HashMap.empty[Int, NonEmptyString]
+    val entryPoints             = mutable.HashMap.empty[NonEmptyString, Int]
+    val entryPointInterfaces    = mutable.HashMap.empty[NonEmptyString, Set[Int]]
+    val vulkanEntries           = mutable.HashSet.empty[NonEmptyString]
     val subgroupSizes           = mutable.HashMap.empty[Int, Int]
     val workGroupSizes          = mutable.HashMap.empty[Int, (Int, Int, Int)]
     val workGroupSizeHints      = mutable.HashMap.empty[Int, (Int, Int, Int)]
     val functions               = mutable.HashMap.empty[Int, Function]
-    val functionNames           = mutable.HashMap.empty[Int, FunctionName]
+    val functionNames           = mutable.HashMap.empty[Int, NoNulString]
 
     module.instructions.foreach {
       case Instruction.Name(target, name) =>
-        functionNames.update(id(target), FunctionName.unsafe(literalString(name)))
+        functionNames.update(id(target), NoNulString.unsafe(literalString(name)))
       case Instruction.Decorate(target, decoration)
           if decoration.words.length >= 2 && unsigned(decoration) == 41L =>
         // Optimized/linker-produced modules may omit OpName for imported
         // builtins but retain their LinkageAttributes decoration.
         functionNames.update(
           id(target),
-          FunctionName.unsafe(
+          NoNulString.unsafe(
             literalString(decoration.copy(words =
               NonEmptyVec.unsafeFromVec(Vec.from(decoration.words.toVector.drop(1)))
             ))
@@ -104,7 +110,7 @@ private[v1_6] object VMCompiler {
           if (bits < 8 || bits > 64 || bits % 8 != 0)
             return Left(Fault.Unsupported(s"SPIR-V integer width $bits is unsupported"))
           // The preceding guard proves the SPIR-V scalar bit-width range at the decode boundary.
-          types.update(id(dest), RuntimeType.Integer(BitWidth.unsafe(bits), unsigned(signedness) != 0L))
+          types.update(id(dest), RuntimeType.Integer(IntBetween.unsafe[1, 64](bits), unsigned(signedness) != 0L))
         case Instruction.TypeFloat(dest, width, _) =>
           val bits = id(width)
           if (!Vec(16, 32, 64).contains(bits))
@@ -112,7 +118,7 @@ private[v1_6] object VMCompiler {
               Fault.Unsupported(s"SPIR-V floating-point width $bits is unsupported")
             )
           // The preceding closed-domain check proves the supported interchange width.
-          types.update(id(dest), RuntimeType.Floating(FloatingPointWidth.unsafe(bits)))
+          types.update(id(dest), RuntimeType.Floating(OneOf.unsafe[(16, 32, 64)](bits)))
         case Instruction.TypeVector(dest, component, count) =>
           val componentCount = id(count)
           if (componentCount <= 0)
@@ -224,14 +230,14 @@ private[v1_6] object VMCompiler {
           )
         case Instruction.ExtInstImport(dest, name) =>
           val decodedName = literalString(name)
-          InstructionSetName.either(decodedName) match {
+          NonEmptyString.either(decodedName) match {
             case Left(_) =>
               return Left(Fault.InvalidTask("SPIR-V extended instruction-set name is empty"))
             case Right(instructionSetName) => extendedInstructionSets.update(id(dest), instructionSetName)
           }
         case Instruction.EntryPoint(executionModel, entryPoint, name, interfaces) =>
           val decodedName = literalString(name)
-          KernelName.either(decodedName) match {
+          NonEmptyString.either(decodedName) match {
             case Left(_) =>
               return Left(
                 Fault.InvalidTask(s"invalid SPIR-V entry-point name '$decodedName'")
@@ -383,7 +389,7 @@ private[v1_6] object VMCompiler {
 
   private def isDirectCollective(
       instruction: Instruction,
-      functionNames: Map[Int, FunctionName]
+      functionNames: Map[Int, NoNulString]
   ): Boolean =
     instruction match {
       case _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax |
@@ -481,7 +487,7 @@ private[v1_6] object VMCompiler {
 
   private def literalString(operand: Operand): String = {
     val bytes = operand.words.toVector.flatMap { word =>
-      LittleEndian.toVec(word.raw.toLong, ScalarByteWidth.Dword)
+      LittleEndian.toVec(word.raw.toLong, 4)
     }.takeWhile(_ != 0)
     String(bytes.toArray, java.nio.charset.StandardCharsets.UTF_8)
   }

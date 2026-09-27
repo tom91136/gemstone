@@ -1,7 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.NonEmptyVec
 
 final class InstructionSuite extends munit.FunSuite {
   test("every grammar opcode decodes to exactly one typed enum case") {
@@ -47,7 +49,7 @@ final class InstructionSuite extends munit.FunSuite {
       Instruction.decode(raw),
       Left(
         InstructionDecodeError.InvalidOperandCount(
-          SPIRVOpcode("OpPhi"),
+          NonEmptyString("OpPhi"),
           "short PairIdRefIdRef at word 2"
         )
       )
@@ -60,12 +62,12 @@ final class InstructionSuite extends munit.FunSuite {
     val srcA        = operand("IdRef", 3)
     val srcB        = operand("IdRef", 4)
     val instruction = Instruction.IAdd(resultType, dest, srcA, srcB)
-    assertEquals(instruction.opcode, SPIRVOpcode("OpIAdd"))
+    assertEquals(instruction.opcode, NonEmptyString("OpIAdd"))
     assertEquals(instruction.operands.toSeq, Seq(resultType, dest, srcA, srcB))
   }
 
   private def operand(kind: String, value: Int): Operand = Operand(
-    SPIRVOperandKind.either(kind).fold(message => fail(message), valid => valid),
+    NonEmptyString.either(kind).fold(message => fail(message), valid => valid),
     Vec.nonEmpty(Word(value))
   )
 }

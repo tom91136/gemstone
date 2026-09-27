@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
+import net.kurobako.gemstone.Constraint.NonEmpty
 import net.kurobako.gemstone.Vec
 
 /** Deterministic canonical printer. Parsing its output must reproduce the same syntax tree. */
@@ -42,11 +43,11 @@ object Printer extends net.kurobako.gemstone.isa.Printer[Program] {
       .filter(_.nonEmpty).mkString(" ")
   }
 
-  def render(instruction: Instruction): InstructionText = {
+  def render(instruction: Instruction): NonEmpty[String] = {
     val prefix       = instruction.pred.map(predication => s"${render(predication)} ").getOrElse("")
     val operandsText =
       if (instruction.operands.isEmpty) "" else instruction.operands.map(render(_)).mkString(" ", ", ", "")
-    InstructionText.unsafe(s"$prefix${instruction.qualifiedOpcode}$operandsText;")
+    NonEmpty.unsafe(s"$prefix${instruction.qualifiedOpcode}$operandsText;")
   }
 
   def render(statement: Statement): String = statement match {

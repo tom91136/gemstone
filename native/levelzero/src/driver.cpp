@@ -191,8 +191,8 @@ std::vector<PointerRelocation> collectPointerRelocations(const KernelLaunch &ker
         uint64_t targetId = 0;
         uint64_t targetOffset = 0;
         if (classifyPointerValueLocked(pointer, targetId, targetOffset)) {
-          result.push_back({RelocationSourceAllocation{AllocationId{static_cast<int64_t>(source->id)}},
-                            LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(targetId)},
+          result.push_back({RelocationSourceMemory{MemoryRegion{static_cast<int64_t>(source->id)}},
+                            LongPositive0{static_cast<int64_t>(offset)}, MemoryRegion{static_cast<int64_t>(targetId)},
                             LongPositive0{static_cast<int64_t>(targetOffset)}});
         }
       }
@@ -211,7 +211,7 @@ std::vector<PointerRelocation> collectPointerRelocations(const KernelLaunch &ker
         uint64_t targetOffset = 0;
         if (classifyPointerValueLocked(pointer, targetId, targetOffset)) {
           result.push_back({RelocationSourceArgument{IntPositive0{static_cast<int32_t>(argument)}},
-                            LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(targetId)},
+                            LongPositive0{static_cast<int64_t>(offset)}, MemoryRegion{static_cast<int64_t>(targetId)},
                             LongPositive0{static_cast<int64_t>(targetOffset)}});
         }
       }
@@ -1089,12 +1089,12 @@ ze_result_t launchRpc(const KernelLaunch &kernel, const ze_group_count_t &groups
     return ZE_RESULT_ERROR_DEVICE_LOST;
   }
 
-  std::vector<gemstone::execution::KernelArgument> arguments;
+  std::vector<gemstone::execution::Argument> arguments;
   arguments.reserve(kernel.arguments.size());
   for (size_t index = 0; index < kernel.arguments.size(); ++index) {
     const auto &input = kernel.arguments[index];
     if (input.local) {
-      arguments.emplace_back(KernelArgumentLocal{static_cast<int64_t>(input.localSize)});
+      arguments.emplace_back(ArgumentLocal{static_cast<int64_t>(input.localSize)});
       continue;
     }
     const bool pointerAggregate = index < kernel.parameters.size() && kernel.parameters[index].pointerAggregate;
@@ -1107,9 +1107,9 @@ ze_result_t launchRpc(const KernelLaunch &kernel, const ze_group_count_t &groups
                            })
             : relocations.end();
     if (directPointer != relocations.end()) {
-      arguments.emplace_back(KernelArgumentAllocation{directPointer->target, directPointer->targetOffset});
+      arguments.emplace_back(ArgumentMemory{directPointer->target, directPointer->targetOffset});
     } else {
-      arguments.emplace_back(KernelArgumentScalar{input.bytes});
+      arguments.emplace_back(ArgumentScalar{input.bytes});
     }
   }
 
@@ -1971,7 +1971,7 @@ ze_result_t ZE_APICALL moduleFunctionPointer(ze_module_handle_t handle, const ch
   if (state.mode != RemoteMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
   auto described = [&] {
     std::lock_guard rpcLock(rpcTransactionMutex);
-    return state.client->call(DescribeKernel{ProgramId{static_cast<int64_t>(module->programId)}, KernelName{name}});
+    return state.client->call(DescribeKernel{ProgramId{static_cast<int64_t>(module->programId)}, NonEmptyString{name}});
   }();
   if (!described) {
     rememberRemoteError(state, described.error().detail);
@@ -2200,9 +2200,9 @@ ze_result_t ZE_APICALL kernelCreate(ze_module_handle_t moduleHandle, const ze_ke
   }
   kernel->parameters.reserve(described.value().parameters.size());
   for (const auto &parameter : described.value().parameters) {
-    const bool directPointer = parameter.kind == KernelParameterKind::Allocation;
-    kernel->parameters.push_back({parameter.kind == KernelParameterKind::Scalar && parameter.containsPointers,
-                                  parameter.kind == KernelParameterKind::Local, directPointer || parameter.containsPointers});
+    const bool directPointer = parameter.kind == ParameterKind::Allocation;
+    kernel->parameters.push_back({parameter.kind == ParameterKind::Scalar && parameter.containsPointers,
+                                  parameter.kind == ParameterKind::Local, directPointer || parameter.containsPointers});
   }
   *result = reinterpret_cast<ze_kernel_handle_t>(kernel);
   return ZE_RESULT_SUCCESS;

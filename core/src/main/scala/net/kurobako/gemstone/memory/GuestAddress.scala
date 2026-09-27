@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.memory
 
-import net.kurobako.gemstone.{NonNegativeLong, PositiveLong}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
 
 import scala.annotation.targetName
 
@@ -11,10 +11,10 @@ object GuestAddress {
   inline def apply(inline value: Long): GuestAddress = value
 
   @targetName("fromNonNegativeLong")
-  inline def apply(inline value: NonNegativeLong): GuestAddress = value.raw
+  inline def apply(inline value: NonNegative[Long]): GuestAddress = value.raw
 
   @targetName("fromPositiveLong")
-  inline def apply(inline value: PositiveLong): GuestAddress = value.raw
+  inline def apply(inline value: Positive[Long]): GuestAddress = value.raw
 
   given Ordering[GuestAddress] = Ordering.Long
 

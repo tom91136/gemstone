@@ -1,6 +1,9 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.PositiveInt
+import net.kurobako.gemstone.Constraint.Positive
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import Program.*
@@ -17,8 +20,8 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
 
   private def parseError(line: Int, column: Int, message: String): ParseError =
     ParseError(
-      PositiveInt.unsafe(line),
-      PositiveInt.unsafe(column),
+      Positive.unsafe(line),
+      Positive.unsafe(column),
       message
     )
 
@@ -66,7 +69,7 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
     val opcodeText = if (opcodeEnd < 0) text else text.take(opcodeEnd)
     if (opcodeName.parseAll(opcodeText).isLeft) Left(parseError(line, 1, s"invalid AMDGPU opcode '$opcodeText'"))
     else {
-      val opcode = Opcode.normalize(opcodeText)
+      val opcode = Program.normalizeOpcode(opcodeText)
       val tail   = if (opcodeEnd < 0) "" else text.drop(opcodeEnd).trim
       splitTopLevel(tail, ',', line).flatMap { commaParts =>
         commaParts
@@ -102,7 +105,7 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
         case Some(modifier)        => Right(Right(modifier))
         case None if wordIndex > 0 =>
           val name = if (isIdentifier(word)) word.toLowerCase(java.util.Locale.ROOT) else word
-          ModifierName.either(name)
+          NonEmptyString.either(name)
             .leftMap(_ => parseError(line, instruction.indexOf(word) + 1, s"invalid modifier '$word'"))
             .map(value => Right(Modifier(value)))
         case None => parseOperand(word, line, instruction.indexOf(word) + 1).map(Left(_))
@@ -162,11 +165,11 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
   private def parseModifier(text: String): Option[Modifier] = {
     val colon = topLevelColon(text)
     if (colon > 0 && colon < text.length - 1 && isIdentifier(text.take(colon)))
-      ModifierValue.either(text.drop(colon + 1)).toOption.map(value =>
-        Modifier(ModifierName.unsafe(text.take(colon).toLowerCase(java.util.Locale.ROOT)), Some(value))
+      NonEmptyString.either(text.drop(colon + 1)).toOption.map(value =>
+        Modifier(NonEmptyString.unsafe(text.take(colon).toLowerCase(java.util.Locale.ROOT)), Some(value))
       )
     else if (KnownFlagModifiers.contains(text.toLowerCase(java.util.Locale.ROOT)))
-      Some(Modifier(ModifierName.unsafe(text.toLowerCase(java.util.Locale.ROOT))))
+      Some(Modifier(NonEmptyString.unsafe(text.toLowerCase(java.util.Locale.ROOT))))
     else None
   }
 

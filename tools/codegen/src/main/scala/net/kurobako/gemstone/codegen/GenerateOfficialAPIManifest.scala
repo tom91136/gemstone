@@ -7,7 +7,7 @@ import java.nio.file.Path
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import net.kurobako.gemstone.NonEmptyString
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import scala.jdk.CollectionConverters.*
 import scala.sys.process.Process
 import scala.util.Using
@@ -25,7 +25,8 @@ object GenerateOfficialAPIManifest {
 
     inline def apply[A <: String & Singleton](inline value: A)(using CompileTime.NonEmptyNoNul[A]): CIdentifier =
       value
-    given ReadWriter[CIdentifier] = readwriter[String].bimap((value: CIdentifier) => value, unsafe)
+    given ReadWriter[CIdentifier] =
+      readwriter[String].bimap((value: CIdentifier) => value, (input: String) => unsafe(input))
     extension (identifier: CIdentifier) {
       def raw: String = identifier
     }
@@ -39,7 +40,7 @@ object GenerateOfficialAPIManifest {
 
     inline def apply[A <: String & Singleton](inline value: A)(using CompileTime.NonEmptyNoNul[A]): CType =
       value
-    given ReadWriter[CType] = readwriter[String].bimap((value: CType) => value, unsafe)
+    given ReadWriter[CType] = readwriter[String].bimap((value: CType) => value, (input: String) => unsafe(input))
     extension (cType: CType) {
       def raw: String = cType
     }
@@ -53,7 +54,8 @@ object GenerateOfficialAPIManifest {
 
     inline def apply[A <: String & Singleton](inline value: A)(using CompileTime.NonEmptyNoNul[A]): EnumValue =
       value
-    given ReadWriter[EnumValue] = readwriter[String].bimap((value: EnumValue) => value, unsafe)
+    given ReadWriter[EnumValue] =
+      readwriter[String].bimap((value: EnumValue) => value, (input: String) => unsafe(input))
     extension (enumValue: EnumValue) {
       def raw: String = enumValue
     }
@@ -67,35 +69,36 @@ object GenerateOfficialAPIManifest {
 
     inline def apply[A <: String & Singleton](inline value: A)(using CompileTime.NonEmptyNoNul[A]): SurfaceName =
       value
-    given ReadWriter[SurfaceName] = readwriter[String].bimap((value: SurfaceName) => value, unsafe)
+    given ReadWriter[SurfaceName] =
+      readwriter[String].bimap((value: SurfaceName) => value, (input: String) => unsafe(input))
     extension (surfaceName: SurfaceName) {
       def raw: String = surfaceName
     }
   }
 
-  private final case class Request(clang: String, references: Path, output: Path)
-  final case class Parameter(name: Option[CIdentifier], cType: CType) derives ReadWriter
-  final case class Function(
+  private case class Request(clang: String, references: Path, output: Path)
+  case class Parameter(name: Option[CIdentifier], cType: CType) derives ReadWriter
+  case class Function(
       name: CIdentifier,
       returnType: CType,
       functionType: CType,
       parameters: Vector[Parameter]
   ) derives ReadWriter
-  final case class CallbackTypedef(name: CIdentifier, cType: CType) derives ReadWriter
-  final case class EnumConstant(name: CIdentifier, value: EnumValue) derives ReadWriter
-  final case class DispatchField(name: CIdentifier, cType: CType) derives ReadWriter
-  final case class DispatchTable(name: CIdentifier, fields: Vector[DispatchField]) derives ReadWriter
-  final case class Surface(
+  case class CallbackTypedef(name: CIdentifier, cType: CType) derives ReadWriter
+  case class EnumConstant(name: CIdentifier, value: EnumValue) derives ReadWriter
+  case class DispatchField(name: CIdentifier, cType: CType) derives ReadWriter
+  case class DispatchTable(name: CIdentifier, fields: Vector[DispatchField]) derives ReadWriter
+  case class Surface(
       name: SurfaceName,
       functions: Vector[Function],
       callbackTypedefs: Vector[CallbackTypedef],
       enumConstants: Vector[EnumConstant],
       dispatchTables: Vector[DispatchTable]
   ) derives ReadWriter
-  final case class Manifest(format: Int, surfaces: Vector[Surface]) derives ReadWriter
+  case class Manifest(format: Int, surfaces: Vector[Surface]) derives ReadWriter
 
-  private final case class TypeInfo(qualType: String) derives ReadWriter
-  private final case class Node(
+  private case class TypeInfo(qualType: String) derives ReadWriter
+  private case class Node(
       kind: Option[String] = None,
       name: Option[String] = None,
       `type`: Option[TypeInfo] = None,
@@ -105,7 +108,7 @@ object GenerateOfficialAPIManifest {
       inner: Option[Vector[Node]] = None
   ) derives ReadWriter
 
-  private final case class Config(
+  private case class Config(
       name: String,
       language: String,
       headers: Vector[String],

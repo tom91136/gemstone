@@ -1,11 +1,13 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import net.kurobako.gemstone.Vec
 
-final case class Encoding(
+case class Encoding(
     family: Family,
-    target: MetadataTarget,
-    format: InstructionFormat,
+    target: NonEmptyString,
+    format: NonEmptyString,
     opcode: Int,
     operands: Vec[OperandInfo],
     source: MetadataSource

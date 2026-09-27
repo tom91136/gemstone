@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import Program.*
 
 import net.kurobako.gemstone.Vec
@@ -11,7 +13,7 @@ final class InstructionSuite extends munit.FunSuite {
     Instruction.definitions.foreach { definition =>
       definition.decoder.operandCounts.foreach { operandCount =>
         val operands = operandsFor(operandCount)
-        val modifier = Modifier(ModifierName("test"), Some(ModifierValue("value")))
+        val modifier = Modifier(NonEmptyString("test"), Some(NonEmptyString("value")))
         val decoded  = definition.decoder(operands, Vec(modifier))
         assertEquals(decoded.size, 1, s"${definition.toString}: ambiguous or missing form")
         val instruction = decoded.head

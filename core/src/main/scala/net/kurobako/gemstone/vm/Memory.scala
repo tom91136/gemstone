@@ -1,9 +1,12 @@
 package net.kurobako.gemstone.vm
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, Vec}
-import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.memory.MemoryValueByteWidth
+import net.kurobako.gemstone.Constraint.IntBetween
 
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.binary.Widths.*
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.binary.LittleEndian
 import scala.annotation.nowarn
 
 trait Memory {
@@ -21,37 +24,37 @@ trait Memory {
 
   def read(
       region: MemoryRegion,
-      offset: NonNegativeLong,
-      size: NonNegativeInt
+      offset: NonNegative[Long],
+      size: NonNegative[Int]
   ): Either[Fault, Vec[Byte]]
 
   def write(
       region: MemoryRegion,
-      offset: NonNegativeLong,
+      offset: NonNegative[Long],
       bytes: Vec[Byte]
   ): Either[Fault, Unit]
 
   def readValue(
       region: MemoryRegion,
-      offset: NonNegativeLong,
-      size: MemoryValueByteWidth
+      offset: NonNegative[Long],
+      size: IntBetween[1, 8]
   ): Either[Fault, Long] =
     read(region, offset, size.nonNegative)
       .map(bytes => LittleEndian.decode(bytes, 0, size.scalarByteWidth))
 
   def writeValue(
       region: MemoryRegion,
-      offset: NonNegativeLong,
+      offset: NonNegative[Long],
       value: Long,
-      size: MemoryValueByteWidth
+      size: IntBetween[1, 8]
   ): Either[Fault, Unit] =
     write(region, offset, LittleEndian.toVec(value, size.scalarByteWidth))
 
   @nowarn("msg=unused explicit parameter")
   def atomicModifyValue(
       region: MemoryRegion,
-      offset: NonNegativeLong,
-      size: MemoryValueByteWidth
+      offset: NonNegative[Long],
+      size: IntBetween[1, 8]
   )(update: Long => Long): Either[Fault, Long] =
     Left(Fault.Unsupported("memory does not support atomic modification"))
 }

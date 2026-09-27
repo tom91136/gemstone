@@ -3501,7 +3501,7 @@ struct Module {
 struct Function {
   Module *module{};
   std::string name;
-  std::vector<KernelParameterMetadata> parameters;
+  std::vector<Parameter> parameters;
 };
 
 ClientManager executionManager;
@@ -4014,7 +4014,7 @@ int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_
     if (!entry || (!entry->parameters.empty() && !kernel_params)) return CUDA_ERROR_INVALID_VALUE;
     int32_t status = CUDA_SUCCESS;
 
-    std::vector<gemstone::execution::KernelArgument> arguments;
+    std::vector<gemstone::execution::Argument> arguments;
     arguments.reserve(entry->parameters.size());
     if (systemPagingEnabled() && !client->call(EnableHostMemory{})) return CUDA_ERROR_UNKNOWN;
     for (size_t index = 0; index < entry->parameters.size(); ++index) {
@@ -4025,15 +4025,15 @@ int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_
         break;
       }
       uint64_t pointer = 0;
-      if (parameter.kind == KernelParameterKind::Allocation && width == sizeof(pointer))
+      if (parameter.kind == ParameterKind::Allocation && width == sizeof(pointer))
         std::memcpy(&pointer, kernel_params[index], sizeof(pointer));
-      auto binding = parameter.kind == KernelParameterKind::Allocation ? pointerBinding(pointer) : std::nullopt;
+      auto binding = parameter.kind == ParameterKind::Allocation ? pointerBinding(pointer) : std::nullopt;
       if (width == sizeof(pointer) && binding) {
         arguments.emplace_back(
-            KernelArgumentAllocation{AllocationId{static_cast<int64_t>(binding->allocation)}, static_cast<int64_t>(binding->offset)});
+            ArgumentMemory{MemoryRegion{static_cast<int64_t>(binding->allocation)}, static_cast<int64_t>(binding->offset)});
       } else {
         const auto *bytes = static_cast<const uint8_t *>(kernel_params[index]);
-        arguments.emplace_back(KernelArgumentScalar{std::vector<uint8_t>(bytes, bytes + width)});
+        arguments.emplace_back(ArgumentScalar{std::vector<uint8_t>(bytes, bytes + width)});
       }
     }
 

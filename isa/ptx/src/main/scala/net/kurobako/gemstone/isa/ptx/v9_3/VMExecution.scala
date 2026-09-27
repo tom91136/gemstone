@@ -1,10 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import Program.{Opcode, RegisterName}
+import net.kurobako.gemstone.Constraint.Positive
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import VMIR.Pc
 
-import net.kurobako.gemstone.NonEmptyString
-import net.kurobako.gemstone.PositiveLong
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.vm.Fault
 
 private[v9_3] object VMExecution {
@@ -16,16 +17,16 @@ private[v9_3] object VMExecution {
     case External
   }
 
-  final case class WaitKey(scope: WaitScope, id: Long, phase: Long)
+  case class WaitKey(scope: WaitScope, id: Long, phase: Long)
 
   enum ExecutionFault {
-    case Unsupported(opcode: Opcode, detail: String)
+    case Unsupported(opcode: NonEmptyString, detail: String)
     case InvalidProgram(detail: String)
     case InvalidState(detail: String)
-    case UndefinedRegister(name: RegisterName, pc: Pc, lane: Int)
+    case UndefinedRegister(name: NonEmptyString, pc: Pc, lane: Int)
     case Memory(detail: String)
     case ArchitecturalTrap(isa: NonEmptyString, code: Long, pc: Pc)
-    case BudgetExceeded(limit: PositiveLong)
+    case BudgetExceeded(limit: Positive[Long])
     case Cancelled
     case Deadlock(detail: String)
 

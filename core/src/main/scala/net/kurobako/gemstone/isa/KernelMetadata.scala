@@ -1,42 +1,42 @@
 package net.kurobako.gemstone.isa
 
-import net.kurobako.gemstone.{NonNegativeInt, PositiveInt, Vec}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.vm.LaunchGeometry
 
 /** Format-neutral information needed by a native facade to marshal a kernel launch. */
-final case class KernelMetadata private (
-    argumentBlockSize: NonNegativeInt,
-    explicitParameterCount: NonNegativeInt,
+case class KernelMetadata private (
+    argumentBlockSize: NonNegative[Int],
+    explicitParameterCount: NonNegative[Int],
     parameters: Vec[KernelMetadata.Parameter],
-    requiredWorkGroupSize: Option[KernelMetadata.WorkGroupSize],
-    workGroupSizeHint: Option[KernelMetadata.WorkGroupSize],
-    bindingIndices: Vec[NonNegativeInt],
-    entryPointId: Option[NonNegativeInt]
+    requiredWorkGroupSize: Option[LaunchGeometry.Dimensions],
+    workGroupSizeHint: Option[LaunchGeometry.Dimensions],
+    bindingIndices: Vec[NonNegative[Int]],
+    entryPointId: Option[NonNegative[Int]]
 )
 
 object KernelMetadata {
   enum ParameterKind {
     case Scalar
-    case Memory
+    case Allocation
     case Local
   }
 
-  final case class WorkGroupSize(x: PositiveInt, y: PositiveInt, z: PositiveInt)
-
-  final case class Parameter(
-      width: PositiveInt,
-      offset: NonNegativeInt,
+  case class Parameter(
+      width: Positive[Int],
+      offset: NonNegative[Int],
       kind: ParameterKind,
       containsPointers: Boolean
   )
 
   def validated(
-      argumentBlockSize: NonNegativeInt,
-      explicitParameterCount: NonNegativeInt,
+      argumentBlockSize: NonNegative[Int],
+      explicitParameterCount: NonNegative[Int],
       parameters: Vec[Parameter],
-      requiredWorkGroupSize: Option[WorkGroupSize] = None,
-      workGroupSizeHint: Option[WorkGroupSize] = None,
-      bindingIndices: Vec[NonNegativeInt] = Vec.empty,
-      entryPointId: Option[NonNegativeInt] = None
+      requiredWorkGroupSize: Option[LaunchGeometry.Dimensions] = None,
+      workGroupSizeHint: Option[LaunchGeometry.Dimensions] = None,
+      bindingIndices: Vec[NonNegative[Int]] = Vec.empty,
+      entryPointId: Option[NonNegative[Int]] = None
   ): Either[String, KernelMetadata] =
     SymbolValidation
       .kernelParameters(

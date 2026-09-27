@@ -11,7 +11,7 @@ import scalafix.v1.*
   * generated files that contain a large number of declarations.
   */
 final class GemstoneFilenameConventions extends SyntacticRule("GemstoneFilenameConventions") {
-  private final case class Declaration(name: String, position: Position)
+  private case class Declaration(name: String, position: Position)
 
   override def fix(using document: SyntacticDocument): Patch =
     sourceName(document.input).fold(Patch.empty) { fileName =>

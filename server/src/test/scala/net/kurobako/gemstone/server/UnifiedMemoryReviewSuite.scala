@@ -1,6 +1,9 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.{NoNulString, NonEmptyVec, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.NoNulString
+
+import net.kurobako.gemstone.Constraint.Positive
+import net.kurobako.gemstone.NonEmptyVec
 import net.kurobako.gemstone.launcher.Environment
 import net.kurobako.gemstone.vm.TaskLimits
 
@@ -21,7 +24,7 @@ final class UnifiedMemoryReviewSuite extends munit.FunSuite {
       val _       = Files.writeString(icd, directory.resolve("libOpenCL_gemstone.so.1").toString + "\n")
       try
         Using.resource(GemstoneRPCServer.start(
-          TaskLimits(PositiveLong(1000000000L), PositiveInt(64)),
+          TaskLimits(1000000000L, 64),
           Map("GEMSTONE_EXECUTION_PARALLELISM" -> "2")
         )) { server =>
           val result = NativeTestProcess.run(

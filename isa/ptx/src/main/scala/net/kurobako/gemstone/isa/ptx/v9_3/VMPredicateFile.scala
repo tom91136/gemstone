@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import Program.*
 
 import scala.collection.mutable
@@ -13,7 +15,7 @@ private[v9_3] final class VMPredicateFile {
   private var bits: Array[Long] | Null                   = null
   private var named: mutable.Map[String, Boolean] | Null = null
 
-  def get(name: RegisterName): Option[Boolean] = predicateSlot(name.raw) match {
+  def get(name: NonEmptyString): Option[Boolean] = predicateSlot(name.raw) match {
     case Some(index) => getSlot(index)
     case None        => named match {
         case null   => None
@@ -31,9 +33,9 @@ private[v9_3] final class VMPredicateFile {
     }
   }
 
-  def apply(name: RegisterName): Boolean = get(name).getOrElse(false)
+  def apply(name: NonEmptyString): Boolean = get(name).getOrElse(false)
 
-  def update(name: RegisterName, value: Boolean): Unit = predicateSlot(name.raw) match {
+  def update(name: NonEmptyString, value: Boolean): Unit = predicateSlot(name.raw) match {
     case Some(index) => updateSlot(index, value)
     case None        =>
       val values = named match {
@@ -79,7 +81,7 @@ private[v9_3] final class VMPredicateFile {
 }
 
 private[v9_3] object VMPredicateFile {
-  def index(name: RegisterName): Int = indexRaw(name.raw)
+  def index(name: NonEmptyString): Int = indexRaw(name.raw)
 
   def indexRaw(name: String): Int = {
     val index = VMRegisterFile.indexRaw(name)

@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.NonEmptyString
+import net.kurobako.gemstone.Constraint.NonEmptyString
 
 enum Family(val number: NonEmptyString) {
   case GFX6  extends Family(NonEmptyString("gfx6"))

@@ -1,6 +1,9 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.NonEmptyVec
 
 import Program.*
 
@@ -54,7 +57,7 @@ final class SyntaxSuite extends munit.FunSuite {
     }
 
   test("version and instruction specifications are generated at package level") {
-    assertEquals(Instruction.version, Version(PositiveInt(9), NonNegativeInt(3)))
+    assertEquals(Instruction.version, Version(9, 3))
     assert(Instruction.definitions.size >= 170)
   }
 
@@ -116,7 +119,7 @@ final class SyntaxSuite extends munit.FunSuite {
     statements.statements.last match {
       case Statement.Entry(true, name, parameters, body) if name.raw == "kernel" =>
         assertEquals(parameters.map(_.name.raw).toSeq, Seq("pointer"))
-        assert(body.contains(Statement.Label(LabelName("again"))))
+        assert(body.contains(Statement.Label(NonEmptyString("again"))))
         assertEquals(body.collect { case _: Statement.Instruction => 1 }.sum, 2)
       case other => fail(s"unexpected statement: $other")
     }
@@ -150,8 +153,8 @@ final class SyntaxSuite extends munit.FunSuite {
   test("data declarations retain structured storage, type, extent, and initializer") {
     statement(".global .align 4 .b8 table[4] = {65, 144, 67, 60};") match {
       case Statement.Data(DataAddressSpace.Global, qualifiers, DataType.B8, name, Some(count), initializer)
-          if name == SymbolName("table") && count.raw == 4 =>
-        assertEquals(qualifiers.toSeq, Seq(DeclarationQualifier.Alignment(PositiveInt(4))))
+          if name == NonEmptyString("table") && count.raw == 4 =>
+        assertEquals(qualifiers.toSeq, Seq(DeclarationQualifier.Alignment(4)))
         assertEquals(initializer.size, 4)
       case other => fail(s"unexpected declaration: $other")
     }
@@ -160,12 +163,12 @@ final class SyntaxSuite extends munit.FunSuite {
   test("unsized external shared declarations retain structured storage") {
     statement(".extern .shared .align 16 .b8 shmem[];") match {
       case Statement.Data(DataAddressSpace.Shared, qualifiers, DataType.B8, name, None, initializer)
-          if name == SymbolName("shmem") =>
+          if name == NonEmptyString("shmem") =>
         assertEquals(
           qualifiers.toSeq,
           Seq(
-            DeclarationQualifier.Attribute(QualifierName("extern")),
-            DeclarationQualifier.Alignment(PositiveInt(16))
+            DeclarationQualifier.Attribute(NonEmptyString("extern")),
+            DeclarationQualifier.Alignment(16)
           )
         )
         assertEquals(initializer, Vec.empty[Operand])

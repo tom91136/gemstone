@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import Program.*
 import VMIR.*
 import VMExecution.*
@@ -18,7 +20,7 @@ private[v9_3] final class VMExecutionContext(
     val state: VMState,
     val pc: Pc,
     val active: VMLaneMask,
-    val arguments: Map[ParameterName, Argument],
+    val arguments: Map[NonEmptyString, Argument],
     val memory: AddressMemory,
     val control: TaskControl,
     val scheduler: Scheduler
@@ -57,7 +59,7 @@ private[v9_3] final class VMExecutionContext(
     case Value.GridDim(axis)  => Right(axis.select(geometry.groupCount).raw.toLong)
   }
 
-  def functionName(lane: Int, value: Value): Either[ExecutionFault, FunctionName] = value match {
+  def functionName(lane: Int, value: Value): Either[ExecutionFault, NonEmptyString] = value match {
     case Value.Function(name) => Right(name)
     case Value.Register(name) => state.functionRegisters(lane).get(name).toRight(
         ExecutionFault.UndefinedRegister(name, pc, lane)

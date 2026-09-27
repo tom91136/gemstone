@@ -1,13 +1,17 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import CodeObject.*
+import net.kurobako.gemstone.Constraint.IntBetween
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PlatformTime, PositiveInt, Vec}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.binary.Widths.*
+
+import CodeObject.*
+import net.kurobako.gemstone.{PlatformTime, Vec}
 import net.kurobako.gemstone.benchmarks.{BenchmarkArguments, BenchmarkName, PlatformMetrics}
-import net.kurobako.gemstone.binary.{ByteRange, LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.binary.{ByteRange, LittleEndian}
 import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.isa.KernelName
-import net.kurobako.gemstone.memory.MemoryValueByteWidth
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
@@ -25,12 +29,12 @@ object AMDGPUAtomicBenchmark {
     val bytes                                                          = Array.ofDim[Byte](24)
     private val lock                                                   = ReentrantLock()
     override protected val regionSizes: Iterable[(MemoryRegion, Long)] = Seq(allocation -> bytes.length.toLong)
-    LittleEndian.write(7L, bytes, 0, ScalarByteWidth(4))
+    LittleEndian.write(7L, bytes, 0, 4)
 
     override def read(
         region: MemoryRegion,
-        offset: NonNegativeLong,
-        size: NonNegativeInt
+        offset: NonNegative[Long],
+        size: NonNegative[Int]
     ): Either[Fault, Vec[Byte]] =
       Either.cond(
         region == allocation && ByteRange.contains(bytes.length, offset.raw, size.raw.toLong),
@@ -40,7 +44,7 @@ object AMDGPUAtomicBenchmark {
 
     override def write(
         region: MemoryRegion,
-        offset: NonNegativeLong,
+        offset: NonNegative[Long],
         value: Vec[Byte]
     ): Either[Fault, Unit] =
       if (region == allocation && ByteRange.contains(bytes.length, offset.raw, value.length.toLong)) {
@@ -50,8 +54,8 @@ object AMDGPUAtomicBenchmark {
 
     override def atomicModifyValue(
         region: MemoryRegion,
-        offset: NonNegativeLong,
-        size: MemoryValueByteWidth
+        offset: NonNegative[Long],
+        size: IntBetween[1, 8]
     )(update: Long => Long): Either[Fault, Long] = lock.withLock {
       if (region == allocation && ByteRange.contains(bytes.length, offset.raw, size.raw.toLong)) {
         val scalarSize = size.scalarByteWidth
@@ -65,18 +69,18 @@ object AMDGPUAtomicBenchmark {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def run(arguments: Array[String]): Unit = {
     val iterations =
-      BenchmarkArguments.iterations(BenchmarkName("amdgpu-atomic"), arguments.toSeq, PositiveInt(20000))
+      BenchmarkArguments.iterations(BenchmarkName("amdgpu-atomic"), arguments.toSeq, 20000)
     val code   = Vec.from(image.grouped(2).map(Integer.parseInt(_, 16).toByte))
     val kernel = VMCompiler.compile(CodeObjectKernel("atomic", Target("gfx1030"), 24, 0, 0, 0x80, 0x08, code))
       .fold(error => throw IllegalStateException(error.message), identity)
     val dispatch = KernelTask.validated(
-      KernelName("atomic"),
+      NonEmptyString("atomic"),
       Dimensions.One,
       Dimensions.One,
       Vec(
-        KernelTask.Argument.Memory(allocation, NonNegativeLong.Zero),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(9L, ScalarByteWidth(8))),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(7L, ScalarByteWidth(8)))
+        KernelTask.Argument.Memory(allocation, 0L),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(9L, 8)),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(7L, 8))
       )
     ).fold(error => throw IllegalArgumentException(error), identity)
     val memory = AtomicMemory()
@@ -100,14 +104,14 @@ object AMDGPUAtomicBenchmark {
       initial <- before
       current <- PlatformMetrics.allocatedBytes
       if current >= initial
-    } yield (current - initial).raw
-    val observed = LittleEndian.decode(memory.bytes, 0, ScalarByteWidth(4))
+    } yield current - initial
+    val observed = LittleEndian.decode(memory.bytes, 0, 4)
     val expected = (7L + iterations.raw.toLong * 9L) & 0xffffffffL
     if (observed != expected)
       throw IllegalStateException(s"atomic benchmark result $observed != $expected")
     Console.out.println(
       s"iterations=$iterations nsPerDispatch=${elapsed.toDouble / iterations.raw} " +
-        s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.toDouble / iterations.raw)} checksum=$observed"
+        s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.raw.toDouble / iterations.raw)} checksum=$observed"
     )
   }
 }

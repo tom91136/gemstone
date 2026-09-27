@@ -1,7 +1,9 @@
 package net.kurobako.gemstone.server.execution
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.{Binary16, IEEE754, LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.binary.{Binary16, IEEE754, LittleEndian}
 import net.kurobako.gemstone.rpc.AllocationId
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 
@@ -21,13 +23,13 @@ private[execution] object BlasMath {
   private object F32 extends Ops[Float] {
     val width: Int                                   = 4
     def read(bytes: Array[Byte], offset: Int): Float =
-      java.lang.Float.intBitsToFloat(LittleEndian.decode(bytes, offset, ScalarByteWidth.Dword).toInt)
+      java.lang.Float.intBitsToFloat(LittleEndian.decode(bytes, offset, 4).toInt)
     def write(bytes: Array[Byte], offset: Int, value: Float): Unit =
       LittleEndian.write(
         java.lang.Float.floatToRawIntBits(value).toLong & 0xffffffffL,
         bytes,
         offset,
-        ScalarByteWidth.Dword
+        4
       )
     def toDouble(value: Float): Double   = value.toDouble
     def fromDouble(value: Double): Float = value.toFloat
@@ -36,9 +38,9 @@ private[execution] object BlasMath {
   private object F64 extends Ops[Double] {
     val width: Int                                    = 8
     def read(bytes: Array[Byte], offset: Int): Double =
-      java.lang.Double.longBitsToDouble(LittleEndian.decode(bytes, offset, ScalarByteWidth.Qword))
+      java.lang.Double.longBitsToDouble(LittleEndian.decode(bytes, offset, 8))
     def write(bytes: Array[Byte], offset: Int, value: Double): Unit =
-      LittleEndian.write(java.lang.Double.doubleToRawLongBits(value), bytes, offset, ScalarByteWidth.Qword)
+      LittleEndian.write(java.lang.Double.doubleToRawLongBits(value), bytes, offset, 8)
     def toDouble(value: Double): Double   = value
     def fromDouble(value: Double): Double = value
   }
@@ -46,9 +48,9 @@ private[execution] object BlasMath {
   private object F16 extends Ops[Float] {
     val width: Int                                   = 2
     def read(bytes: Array[Byte], offset: Int): Float =
-      halfToFloat(LittleEndian.decode(bytes, offset, ScalarByteWidth.Word).toInt)
+      halfToFloat(LittleEndian.decode(bytes, offset, 2).toInt)
     def write(bytes: Array[Byte], offset: Int, value: Float): Unit =
-      LittleEndian.write(floatToHalf(value).toLong & 0xffffL, bytes, offset, ScalarByteWidth.Word)
+      LittleEndian.write(floatToHalf(value).toLong & 0xffffL, bytes, offset, 2)
     def toDouble(value: Float): Double   = value.toDouble
     def fromDouble(value: Double): Float = value.toFloat
   }

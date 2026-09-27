@@ -1,9 +1,14 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import CodeObject.*
+import net.kurobako.gemstone.Constraint.IntBetween
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, Vec}
-import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
+import CodeObject.*
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
@@ -17,11 +22,11 @@ final class ScalarNotSuite extends munit.FunSuite with CodeObjectTestSupport {
   )
   private val output = MemoryRegion(1)
   private final class Memory extends net.kurobako.gemstone.vm.Memory with TestAddressSpace {
-    val bytes                                                                 = Array.ofDim[Byte](16)
-    override protected val regionSizes: Iterable[(MemoryRegion, Long)]        = Seq(output -> bytes.length.toLong)
-    def read(id: MemoryRegion, offset: NonNegativeLong, size: NonNegativeInt) =
+    val bytes                                                                     = Array.ofDim[Byte](16)
+    override protected val regionSizes: Iterable[(MemoryRegion, Long)]            = Seq(output -> bytes.length.toLong)
+    def read(id: MemoryRegion, offset: NonNegative[Long], size: NonNegative[Int]) =
       Right(Vec.from(bytes.slice(offset.raw.toInt, offset.raw.toInt + size.raw)))
-    def write(id: MemoryRegion, offset: NonNegativeLong, value: Vec[Byte]) = {
+    def write(id: MemoryRegion, offset: NonNegative[Long], value: Vec[Byte]) = {
       val _ = value.copyToArray(bytes, offset.raw.toInt, value.size); Right(())
     }
   }
@@ -36,15 +41,15 @@ final class ScalarNotSuite extends munit.FunSuite with CodeObjectTestSupport {
       val code        = words
         .updated(3, cmp)
         .updated(6, instruction)
-        .flatMap(value => LittleEndian.toVec(value, ScalarByteWidth.Dword))
+        .flatMap(value => LittleEndian.toVec(value, 4))
       val kernel   = CodeObjectKernel("kernel", Target("gfx900"), 16, 0, 0, 0x80, 0x08, code)
       val dispatch = KernelTask.validated(
-        KernelName("kernel"),
+        NonEmptyString("kernel"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Scalar(LittleEndian.toVec(input, ScalarByteWidth(8))),
-          KernelTask.Argument.Memory(output, NonNegativeLong(0L))
+          KernelTask.Argument.Scalar(LittleEndian.toVec(input, 8)),
+          KernelTask.Argument.Memory(output, 0L)
         )
       ).toOption.get
       val memory = Memory()
@@ -59,8 +64,8 @@ final class ScalarNotSuite extends munit.FunSuite with CodeObjectTestSupport {
       )
       val result = if (width == 64) ~input else ~input & 0xffffffffL
       val stored = if (width == 64) result else 0x1234567800000000L | result
-      assertEquals(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth.Qword), stored)
-      assertEquals(LittleEndian.decode(memory.bytes, 8, ScalarByteWidth.Dword), if (result == 0L) 0L else 1L)
+      assertEquals(LittleEndian.decode(memory.bytes, 0, 8), stored)
+      assertEquals(LittleEndian.decode(memory.bytes, 8, 4), if (result == 0L) 0L else 1L)
     }
   }
 }

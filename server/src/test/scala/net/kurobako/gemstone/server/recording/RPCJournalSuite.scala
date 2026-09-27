@@ -1,10 +1,11 @@
 package net.kurobako.gemstone.server.recording
 
+import net.kurobako.gemstone.Constraint.Positive
+
 import net.kurobako.gemstone.*
 
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.server.transport.Transport.*
-
 import java.io.{IOException, RandomAccessFile}
 import java.nio.file.Files
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -47,7 +48,7 @@ final class RPCJournalSuite extends munit.FunSuite {
   test("execution profile survives the archive and reaches the fresh endpoint factory") {
     temporary { file =>
       val profile =
-        RPCJournal.ExecutionProfile(PositiveLong(2000000000L), PositiveInt(8192), PositiveInt(8))
+        RPCJournal.ExecutionProfile(2000000000L, 8192, 8)
       val writer = RPCJournal.Writer(file, RPCJournal.Header(schema, executionProfile = Some(profile)))
       writer.close()
       val observed = AtomicReference(Option.empty[RPCJournal.ExecutionProfile])
@@ -112,7 +113,7 @@ final class RPCJournalSuite extends munit.FunSuite {
   test("frame bounds include headers and lifecycle ordering is validated") {
     temporary { file =>
       val writer =
-        RPCJournal.Writer(file, RPCJournal.Header(schema, RPCJournal.Limits(maxEvents = PositiveInt(2))))
+        RPCJournal.Writer(file, RPCJournal.Header(schema, RPCJournal.Limits(maxEvents = 2)))
       val c = writer.connection(Object())
       c.request(execution()); c.response(response())
       val _ = intercept[IOException](c.close())

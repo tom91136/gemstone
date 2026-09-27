@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.server.execution
 
+import net.kurobako.gemstone.rpc.ExecutionProtocol.ExecutionFailure
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.vm.{Event, ObservationContext, Observer}
 
@@ -12,10 +13,10 @@ final class CompletionObserver extends Observer[Event] {
 
   def register(
       context: ObservationContext
-  )(sink: Event => Either[Observer.Error, Unit]): Either[RuntimeBackend.Error, Unit] =
+  )(sink: Event => Either[Observer.Error, Unit]): Either[ExecutionFailure, Unit] =
     lock.withLock {
       if (sinks.contains(context))
-        Left(RuntimeBackend.Error.Failed(s"task token is already registered: ${context.value}"))
+        Left(ExecutionFailure.Failed(s"task token is already registered: ${context.value}"))
       else {
         sinks(context) = sink
         Right(())

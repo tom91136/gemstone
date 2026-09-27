@@ -1,15 +1,13 @@
 package net.kurobako.gemstone.server.recording
 
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
 import scala.compiletime.{constValue, error}
 import net.kurobako.gemstone.CompileTime
-
-import net.kurobako.gemstone.{NonNegativeInt, PositiveInt, PositiveLong, Vec}
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.rpc.ExecutionRPC
-
 import upickle.default.{ReadWriter, macroRW, readBinary, writeBinary}
 import upickle.implicits.key
-
 import java.io.{DataOutputStream, IOException, RandomAccessFile}
 import java.nio.ByteBuffer
 import java.nio.file.{FileAlreadyExistsException, Files, Path}
@@ -65,7 +63,7 @@ object RPCJournal {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Long & Singleton](inline value: A): RecordedClientId =
-      inline if constValue[A] > 0L then value else error("client id must be strictly positive")
+      inline if (constValue[A] > 0L) value else error("client id must be strictly positive")
 
     extension (id: RecordedClientId) {
       inline def raw: Long       = id
@@ -83,7 +81,7 @@ object RPCJournal {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Long & Singleton](inline value: A): RecordedConnectionId =
-      inline if constValue[A] > 0L then value else error("connection id must be strictly positive")
+      inline if (constValue[A] > 0L) value else error("connection id must be strictly positive")
 
     extension (id: RecordedConnectionId) {
       inline def raw: Long           = id
@@ -101,7 +99,7 @@ object RPCJournal {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Long & Singleton](inline value: A): EventId =
-      inline if constValue[A] >= 0L then value else error("event id must be positive or zero")
+      inline if (constValue[A] >= 0L) value else error("event id must be positive or zero")
 
     extension (id: EventId) {
       inline def raw: Long = id
@@ -142,7 +140,7 @@ object RPCJournal {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Int & Singleton](inline value: A): FrameByteSize =
-      inline if constValue[A] >= 1 && constValue[A] <= MaximumFrameBytes then value
+      inline if (constValue[A] >= 1 && constValue[A] <= MaximumFrameBytes) value
       else error("frame byte size out of range")
 
     extension (value: FrameByteSize) {
@@ -161,24 +159,24 @@ object RPCJournal {
       either(value).fold(message => throw IllegalArgumentException(message), identity)
 
     inline def apply[A <: Long & Singleton](inline value: A): ArchiveByteSize =
-      inline if constValue[A] > MinimumArchiveBytes then value else error("archive byte size below minimum")
+      inline if (constValue[A] > MinimumArchiveBytes) value else error("archive byte size below minimum")
 
     extension (value: ArchiveByteSize) {
       inline def raw: Long = value
     }
   }
 
-  final case class Limits(
+  case class Limits(
       maxFrameBytes: FrameByteSize = FrameByteSize(134221824),
       maxArchiveBytes: ArchiveByteSize = ArchiveByteSize(8589934592L),
-      maxEvents: PositiveInt = PositiveInt(1000000)
+      maxEvents: Positive[Int] = 1000000
   )
-  final case class ExecutionProfile(
-      maxInstructions: PositiveLong,
-      quantum: PositiveInt,
-      parallelism: PositiveInt
+  case class ExecutionProfile(
+      maxInstructions: Positive[Long],
+      quantum: Positive[Int],
+      parallelism: Positive[Int]
   )
-  final case class Header(
+  case class Header(
       protocolIdentity: ProtocolIdentity,
       limits: Limits = Limits(),
       executionProfile: Option[ExecutionProfile] = None
@@ -189,17 +187,17 @@ object RPCJournal {
     case ConnectionClose extends Kind(5, false)
     case ClientClose     extends Kind(6, false)
   }
-  final case class Event(
+  case class Event(
       sequence: EventId,
       kind: Kind,
       client: RecordedClientId,
       connection: Option[RecordedConnectionId]
   )
-  final case class Summary(
+  case class Summary(
       header: Header,
-      events: NonNegativeInt,
-      frames: NonNegativeInt,
-      storedBytes: PositiveLong,
+      events: NonNegative[Int],
+      frames: NonNegative[Int],
+      storedBytes: Positive[Long],
       replayable: Boolean,
       reason: Option[FailureReason]
   )
@@ -261,7 +259,7 @@ object RPCJournal {
 
   private sealed trait Record
   @key("header")
-  private final case class HeaderRecord(
+  private case class HeaderRecord(
       format: String,
       version: Int,
       protocolIdentity: String,
@@ -270,9 +268,9 @@ object RPCJournal {
       maxEvents: Int,
       executionProfile: Option[ExecutionProfileRecord]
   ) extends Record
-  private final case class ExecutionProfileRecord(maxInstructions: Long, quantum: Int, parallelism: Int)
+  private case class ExecutionProfileRecord(maxInstructions: Long, quantum: Int, parallelism: Int)
   @key("event")
-  private final case class EventRecord(
+  private case class EventRecord(
       sequence: Long,
       kind: Int,
       client: Long,
@@ -280,7 +278,7 @@ object RPCJournal {
       frame: Option[Array[Byte]]
   ) extends Record
   @key("footer")
-  private final case class FooterRecord(
+  private case class FooterRecord(
       events: Int,
       frames: Int,
       replayable: Boolean,
@@ -298,11 +296,11 @@ object RPCJournal {
     )
   }
 
-  private final case class RecordLocation(
+  private case class RecordLocation(
       offset: Long,
       payloadBytes: Int
   )
-  private final case class ConnectionState(
+  private case class ConnectionState(
       client: RecordedClientId,
       requestPending: Boolean = false,
       closed: Boolean = false
@@ -616,7 +614,7 @@ object RPCJournal {
       .fold(message => invalid(s"invalid frame byte limit: $message"), value => value)
     val maxArchiveBytes = ArchiveByteSize.either(headerRecord.maxArchiveBytes)
       .fold(message => invalid(s"invalid archive byte limit: $message"), value => value)
-    val maxEvents = PositiveInt.either(headerRecord.maxEvents)
+    val maxEvents = Positive.either(headerRecord.maxEvents)
       .fold(message => invalid(s"invalid event limit: $message"), value => value)
     val declared = Limits(maxFrameBytes, maxArchiveBytes, maxEvents)
     ensure(
@@ -627,11 +625,11 @@ object RPCJournal {
     )
     ensure(input.length() <= declared.maxArchiveBytes, "archive exceeds its declared byte limit")
     val profile = headerRecord.executionProfile.map { profile =>
-      val maxInstructions = PositiveLong.either(profile.maxInstructions)
+      val maxInstructions = Positive.either(profile.maxInstructions)
         .fold(message => invalid(s"invalid maximum instruction count: $message"), value => value)
-      val quantum = PositiveInt.either(profile.quantum)
+      val quantum = Positive.either(profile.quantum)
         .fold(message => invalid(s"invalid execution quantum: $message"), value => value)
-      val parallelism = PositiveInt.either(profile.parallelism)
+      val parallelism = Positive.either(profile.parallelism)
         .fold(message => invalid(s"invalid execution parallelism: $message"), value => value)
       ExecutionProfile(maxInstructions, quantum, parallelism)
     }
@@ -690,12 +688,12 @@ object RPCJournal {
             !replayable || (order.complete && failure.isEmpty),
             "replayable footer describes incomplete exchanges"
           )
-          val storedBytes = PositiveLong.either(input.length())
+          val storedBytes = Positive.either(input.length())
             .fold(message => invalid(s"invalid archive size: $message"), value => value)
           summary = Some(Summary(
             header,
-            NonNegativeInt.unsafe(count),
-            NonNegativeInt.unsafe(frames),
+            NonNegative.unsafe(count),
+            NonNegative.unsafe(frames),
             storedBytes,
             replayable,
             failure

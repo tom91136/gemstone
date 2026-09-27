@@ -4,12 +4,17 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
+
+#include <glaze/glaze.hpp>
+#include <glaze/msgpack.hpp>
 
 namespace gemstone::execution {
 
@@ -18,7 +23,7 @@ inline constexpr uint32_t ResponseMagic = static_cast<uint32_t>(0x474d4632);
 inline constexpr uint32_t MaximumPayload = 134217728U;
 inline constexpr uint32_t MaximumElements = 16384U;
 inline constexpr uint32_t MaximumTextBytes = 8192U;
-inline constexpr uint64_t SchemaFingerprint = 0x71f377fcee08332fULL;
+inline constexpr uint64_t SchemaFingerprint = 0x5972750acc285ed3ULL;
 inline constexpr size_t RequestFingerprintOffset = 4U;
 inline constexpr size_t RequestClientOffset = 12U;
 inline constexpr size_t RequestSessionHighOffset = 20U;
@@ -60,47 +65,20 @@ inline constexpr uint64_t CompletionPointerRelocations = 0x128e5851a288e89aULL;
 inline constexpr uint64_t CompletionPrints = 0xfd4bcd954c0c4b36ULL;
 inline constexpr uint64_t ReleaseCompletion = 0x7d37075e20a4c797ULL;
 }
-namespace tag {
-inline constexpr uint64_t AllocationKindDevice = 0x550c809331279417ULL;
-inline constexpr uint64_t AllocationKindManaged = 0xe3e753f7a49fdebaULL;
-inline constexpr uint64_t AllocationKindShared = 0x3cca1c4bb4e27b28ULL;
-inline constexpr uint64_t AllocationKindHost = 0x1502c13a23427453ULL;
-inline constexpr uint64_t KernelParameterKindScalar = 0x8e8237265871dac9ULL;
-inline constexpr uint64_t KernelParameterKindAllocation = 0x003f04bd0f952e6bULL;
-inline constexpr uint64_t KernelParameterKindLocal = 0xf746e4b741bcb38cULL;
-inline constexpr uint64_t BlasOperationAxpy = 0xef5c48528519f63cULL;
-inline constexpr uint64_t BlasOperationScal = 0x7d2ba9bd7b589e31ULL;
-inline constexpr uint64_t BlasOperationCopy = 0x47f935407bfab053ULL;
-inline constexpr uint64_t BlasOperationDot = 0x5c0dfac798ad6f65ULL;
-inline constexpr uint64_t BlasOperationNrm2 = 0xd2a8ead50d554859ULL;
-inline constexpr uint64_t BlasOperationAsum = 0x3ea8c552b2656770ULL;
-inline constexpr uint64_t BlasOperationGemv = 0xaf2eee1df319a239ULL;
-inline constexpr uint64_t BlasOperationGemm = 0xaf2f031df319c5e8ULL;
-inline constexpr uint64_t BlasOperationGemmStridedBatched = 0x1d6b94d4b2145434ULL;
-inline constexpr uint64_t BlasElementF16 = 0x6f78d4946790497aULL;
-inline constexpr uint64_t BlasElementF32 = 0x6f7fd89467966ef4ULL;
-inline constexpr uint64_t BlasElementF64 = 0x6f90d49467a4db5bULL;
-inline constexpr uint64_t KernelArgumentScalar = 0x4dc1565dba3b9867ULL;
-inline constexpr uint64_t KernelArgumentAllocation = 0xc9602c96b7ee44fdULL;
-inline constexpr uint64_t KernelArgumentLocal = 0x9fa3570b0ce037faULL;
-inline constexpr uint64_t RelocationSourceAllocation = 0x7f6ec03808ee2e12ULL;
-inline constexpr uint64_t RelocationSourceArgument = 0xd0123da2fbcfda83ULL;
-inline constexpr uint64_t ExecutionFailureInvalidRequest = 0xa706a7cf8cba6a29ULL;
-inline constexpr uint64_t ExecutionFailureNotFound = 0x39b74efbac06d31eULL;
-inline constexpr uint64_t ExecutionFailureUnsupported = 0x67943c05acc71738ULL;
-inline constexpr uint64_t ExecutionFailureFailed = 0xa2f22dde2ffdb70cULL;
-inline constexpr uint64_t CompletionStatusPending = 0x4be231fa7a2a5d64ULL;
-inline constexpr uint64_t CompletionStatusSucceeded = 0xd5313ba452a59f6aULL;
-inline constexpr uint64_t CompletionStatusFailed = 0x4167002bdf4255fcULL;
-}
 
 struct Unit {};
 
-struct CompletionId { int64_t value{}; };
+struct CompletionId {
+  int64_t value{};
+};
 
-struct GuestAddress { int64_t value{}; };
+struct GuestAddress {
+  int64_t value{};
+};
 
-struct IntPositive { int32_t value{}; };
+struct IntPositive {
+  int32_t value{};
+};
 
 struct HostMemoryRange {
   GuestAddress address{};
@@ -132,22 +110,32 @@ struct HostMemoryBatch {
   std::optional<HostMemorySync> sync{};
 };
 
-enum class AllocationKind : uint64_t {
-  Device = 0x550c809331279417ULL,
-  Managed = 0xe3e753f7a49fdebaULL,
-  Shared = 0x3cca1c4bb4e27b28ULL,
-  Host = 0x1502c13a23427453ULL
+enum class AllocationKind : uint8_t {
+  Device = 0,
+  Managed = 1,
+  Shared = 2,
+  Host = 3
 };
 
-struct LongPositive { int64_t value{}; };
+struct LongPositive {
+  int64_t value{};
+};
 
-struct AllocationId { int64_t value{}; };
+struct AllocationId {
+  int64_t value{};
+};
 
-struct LongPositive0 { int64_t value{}; };
+struct LongPositive0 {
+  int64_t value{};
+};
 
-struct IntPositive0 { int32_t value{}; };
+struct IntPositive0 {
+  int32_t value{};
+};
 
-struct ProgramId { int64_t value{}; };
+struct ProgramId {
+  int64_t value{};
+};
 
 struct SpecializationInfo {
   IntPositive0 specId{};
@@ -159,39 +147,37 @@ struct SpecializationConstant {
   std::vector<uint8_t> value{};
 };
 
-struct KernelName { std::string value{}; };
-
-struct LinkageName { std::string value{}; };
-
-struct ProgramKernel {
-  KernelName name{};
-  LinkageName linkageName{};
+struct NonEmptyString {
+  std::string value{};
 };
 
-struct GlobalName { std::string value{}; };
+struct KernelSymbol {
+  NonEmptyString name{};
+  NonEmptyString linkageName{};
+};
 
-struct ProgramGlobalMetadata {
-  GlobalName name{};
+struct GlobalSymbol {
+  NonEmptyString name{};
   std::optional<GuestAddress> virtualAddress{};
   LongPositive0 size{};
   std::vector<IntPositive0> pointerOffsets{};
 };
 
-struct ProgramCatalog {
-  std::vector<ProgramKernel> kernels{};
-  std::vector<ProgramGlobalMetadata> globals{};
+struct ProgramSymbols {
+  std::vector<KernelSymbol> kernels{};
+  std::vector<GlobalSymbol> globals{};
 };
 
-enum class KernelParameterKind : uint64_t {
-  Scalar = 0x8e8237265871dac9ULL,
-  Allocation = 0x003f04bd0f952e6bULL,
-  Local = 0xf746e4b741bcb38cULL
+enum class ParameterKind : uint8_t {
+  Scalar = 0,
+  Allocation = 1,
+  Local = 2
 };
 
-struct KernelParameterMetadata {
+struct Parameter {
   IntPositive width{};
   IntPositive0 offset{};
-  KernelParameterKind kind{};
+  ParameterKind kind{};
   bool containsPointers{};
 };
 
@@ -204,29 +190,29 @@ struct Dimensions {
 struct KernelMetadata {
   IntPositive0 argumentBlockSize{};
   IntPositive0 explicitParameterCount{};
-  std::vector<KernelParameterMetadata> parameters{};
+  std::vector<Parameter> parameters{};
   std::optional<Dimensions> requiredWorkGroupSize{};
   std::optional<Dimensions> workGroupSizeHint{};
   std::vector<IntPositive0> bindingIndices{};
   std::optional<IntPositive0> entryPointId{};
 };
 
-enum class BlasOperation : uint64_t {
-  Axpy = 0xef5c48528519f63cULL,
-  Scal = 0x7d2ba9bd7b589e31ULL,
-  Copy = 0x47f935407bfab053ULL,
-  Dot = 0x5c0dfac798ad6f65ULL,
-  Nrm2 = 0xd2a8ead50d554859ULL,
-  Asum = 0x3ea8c552b2656770ULL,
-  Gemv = 0xaf2eee1df319a239ULL,
-  Gemm = 0xaf2f031df319c5e8ULL,
-  GemmStridedBatched = 0x1d6b94d4b2145434ULL
+enum class BlasOperation : uint8_t {
+  Axpy = 0,
+  Scal = 1,
+  Copy = 2,
+  Dot = 3,
+  Nrm2 = 4,
+  Asum = 5,
+  Gemv = 6,
+  Gemm = 7,
+  GemmStridedBatched = 8
 };
 
-enum class BlasElement : uint64_t {
-  F16 = 0x6f78d4946790497aULL,
-  F32 = 0x6f7fd89467966ef4ULL,
-  F64 = 0x6f90d49467a4db5bULL
+enum class BlasElement : uint8_t {
+  F16 = 0,
+  F32 = 1,
+  F64 = 2
 };
 
 struct BlasVector {
@@ -278,7 +264,9 @@ struct GlobalDimensions {
   LongPositive z{};
 };
 
-struct IntInterval1To3 { int32_t value{}; };
+struct IntInterval1To3 {
+  int32_t value{};
+};
 
 struct Coordinates {
   IntPositive0 x{};
@@ -286,30 +274,36 @@ struct Coordinates {
   IntPositive0 z{};
 };
 
-struct KernelArgumentScalar {
+struct MemoryRegion {
+  int64_t value{};
+};
+
+struct ArgumentScalar {
   std::vector<uint8_t> bytes{};
 };
-struct KernelArgumentAllocation {
-  AllocationId id{};
+struct ArgumentMemory {
+  MemoryRegion region{};
   LongPositive0 offset{};
 };
-struct KernelArgumentLocal {
+struct ArgumentLocal {
   LongPositive size{};
 };
-using KernelArgument = std::variant<KernelArgumentScalar, KernelArgumentAllocation, KernelArgumentLocal>;
 
-struct RelocationSourceAllocation {
-  AllocationId id{};
+using Argument = std::variant<ArgumentScalar, ArgumentMemory, ArgumentLocal>;
+
+struct RelocationSourceMemory {
+  MemoryRegion region{};
 };
 struct RelocationSourceArgument {
   IntPositive0 index{};
 };
-using RelocationSource = std::variant<RelocationSourceAllocation, RelocationSourceArgument>;
+
+using RelocationSource = std::variant<RelocationSourceMemory, RelocationSourceArgument>;
 
 struct PointerRelocation {
   RelocationSource source{};
   LongPositive0 sourceOffset{};
-  AllocationId target{};
+  MemoryRegion target{};
   LongPositive0 targetOffset{};
 };
 
@@ -325,15 +319,15 @@ struct ExecutionFailureUnsupported {
 struct ExecutionFailureFailed {
   std::string detail{};
 };
+
 using ExecutionFailure = std::variant<ExecutionFailureInvalidRequest, ExecutionFailureNotFound, ExecutionFailureUnsupported, ExecutionFailureFailed>;
 
-struct CompletionStatusPending {
-};
-struct CompletionStatusSucceeded {
-};
+struct CompletionStatusPending {};
+struct CompletionStatusSucceeded {};
 struct CompletionStatusFailed {
   ExecutionFailure error{};
 };
+
 using CompletionStatus = std::variant<CompletionStatusPending, CompletionStatusSucceeded, CompletionStatusFailed>;
 
 struct DirtyRange {
@@ -414,13 +408,13 @@ struct DescribeProgram {
 
 struct DescribeKernel {
   ProgramId program{};
-  KernelName name{};
+  NonEmptyString name{};
 };
 
 struct DescribeImage {
   std::string encoding{};
   std::vector<uint8_t> image{};
-  KernelName name{};
+  NonEmptyString name{};
 };
 
 struct Blas {
@@ -429,26 +423,26 @@ struct Blas {
 
 struct DescribeGlobal {
   ProgramId program{};
-  GlobalName name{};
+  NonEmptyString name{};
 };
 
 struct BindProgramGlobal {
   ProgramId program{};
-  GlobalName name{};
+  NonEmptyString name{};
   AllocationId allocation{};
   LongPositive0 offset{};
 };
 
 struct WriteProgramGlobal {
   ProgramId program{};
-  GlobalName name{};
+  NonEmptyString name{};
   LongPositive0 offset{};
   std::vector<uint8_t> bytes{};
 };
 
 struct Launch {
   ProgramId program{};
-  KernelName kernelName{};
+  NonEmptyString kernelName{};
   Dimensions groupSize{};
   Dimensions groupCount{};
   GlobalDimensions globalSize{};
@@ -456,7 +450,7 @@ struct Launch {
   Coordinates globalOffset{};
   IntPositive0 privateSegmentBytes{};
   IntPositive0 groupSegmentBytes{};
-  std::vector<KernelArgument> arguments{};
+  std::vector<Argument> arguments{};
   std::vector<PointerRelocation> pointerRelocations{};
   bool discoverArgumentRelocations{};
 };
@@ -525,7 +519,7 @@ class Client {
   Result<std::vector<SpecializationInfo>> call(const DescribeSpecialization &request);
   Result<std::vector<uint8_t>> call(const SpecializeImage &request);
   Result<Unit> call(const UnloadProgram &request);
-  Result<ProgramCatalog> call(const DescribeProgram &request);
+  Result<ProgramSymbols> call(const DescribeProgram &request);
   Result<KernelMetadata> call(const DescribeKernel &request);
   Result<KernelMetadata> call(const DescribeImage &request);
   Result<BlasResult> call(const Blas &request);
@@ -547,5 +541,42 @@ class Client {
 };
 
 } // namespace gemstone::execution
+
+template <> struct glz::meta<gemstone::execution::Unit> { static constexpr auto value = glz::object(); };
+template <> struct glz::meta<gemstone::execution::CompletionId> { static constexpr auto value = &gemstone::execution::CompletionId::value; };
+template <> struct glz::meta<gemstone::execution::GuestAddress> { static constexpr auto value = &gemstone::execution::GuestAddress::value; };
+template <> struct glz::meta<gemstone::execution::IntPositive> { static constexpr auto value = &gemstone::execution::IntPositive::value; };
+template <> struct glz::meta<gemstone::execution::LongPositive> { static constexpr auto value = &gemstone::execution::LongPositive::value; };
+template <> struct glz::meta<gemstone::execution::AllocationId> { static constexpr auto value = &gemstone::execution::AllocationId::value; };
+template <> struct glz::meta<gemstone::execution::LongPositive0> { static constexpr auto value = &gemstone::execution::LongPositive0::value; };
+template <> struct glz::meta<gemstone::execution::IntPositive0> { static constexpr auto value = &gemstone::execution::IntPositive0::value; };
+template <> struct glz::meta<gemstone::execution::ProgramId> { static constexpr auto value = &gemstone::execution::ProgramId::value; };
+template <> struct glz::meta<gemstone::execution::NonEmptyString> { static constexpr auto value = &gemstone::execution::NonEmptyString::value; };
+template <> struct glz::meta<gemstone::execution::IntInterval1To3> { static constexpr auto value = &gemstone::execution::IntInterval1To3::value; };
+template <> struct glz::meta<gemstone::execution::MemoryRegion> { static constexpr auto value = &gemstone::execution::MemoryRegion::value; };
+template <> struct glz::meta<gemstone::execution::Argument> {
+  static constexpr std::string_view tag = "t";
+  static constexpr std::string_view content = "v";
+  static constexpr auto ids = std::array<std::string_view, 3>{"Scalar", "Memory", "Local"};
+};
+template <> struct glz::meta<gemstone::execution::RelocationSource> {
+  static constexpr std::string_view tag = "t";
+  static constexpr std::string_view content = "v";
+  static constexpr auto ids = std::array<std::string_view, 2>{"Memory", "Argument"};
+};
+template <> struct glz::meta<gemstone::execution::ExecutionFailure> {
+  static constexpr std::string_view tag = "t";
+  static constexpr std::string_view content = "v";
+  static constexpr auto ids = std::array<std::string_view, 4>{"InvalidRequest", "NotFound", "Unsupported", "Failed"};
+};
+template <> struct glz::meta<gemstone::execution::CompletionStatusPending> { static constexpr auto value = glz::object(); };
+template <> struct glz::meta<gemstone::execution::CompletionStatusSucceeded> { static constexpr auto value = glz::object(); };
+template <> struct glz::meta<gemstone::execution::CompletionStatus> {
+  static constexpr std::string_view tag = "t";
+  static constexpr std::string_view content = "v";
+  static constexpr auto ids = std::array<std::string_view, 3>{"Pending", "Succeeded", "Failed"};
+};
+template <> struct glz::meta<gemstone::execution::Ping> { static constexpr auto value = glz::object(); };
+template <> struct glz::meta<gemstone::execution::EnableHostMemory> { static constexpr auto value = glz::object(); };
 
 #endif

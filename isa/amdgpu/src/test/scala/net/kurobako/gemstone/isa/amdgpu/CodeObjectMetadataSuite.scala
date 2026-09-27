@@ -1,7 +1,9 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.{KernelMetadata, KernelName, LinkageName}
+import net.kurobako.gemstone.isa.KernelMetadata
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -13,8 +15,8 @@ final class CodeObjectMetadataSuite extends munit.FunSuite {
 
     assertEquals(result.size, 1)
     val kernel = result.head
-    assertEquals(kernel.name, KernelName("add"))
-    assertEquals(kernel.symbol, LinkageName("add.kd"))
+    assertEquals(kernel.name, NonEmptyString("add"))
+    assertEquals(kernel.symbol, NonEmptyString("add.kd"))
     assertEquals(kernel.metadata.argumentBlockSize.raw, 20)
     assertEquals(kernel.metadata.explicitParameterCount.raw, 3)
     assertEquals(kernel.hiddenArguments, Vec.empty[CodeObjectMetadata.HiddenArgument])
@@ -23,8 +25,8 @@ final class CodeObjectMetadataSuite extends munit.FunSuite {
         (parameter.offset.raw, parameter.width.raw, parameter.kind, parameter.containsPointers)
       ),
       Vec(
-        (0, 8, KernelMetadata.ParameterKind.Memory, false),
-        (8, 8, KernelMetadata.ParameterKind.Memory, false),
+        (0, 8, KernelMetadata.ParameterKind.Allocation, false),
+        (8, 8, KernelMetadata.ParameterKind.Allocation, false),
         (16, 4, KernelMetadata.ParameterKind.Scalar, true)
       )
     )

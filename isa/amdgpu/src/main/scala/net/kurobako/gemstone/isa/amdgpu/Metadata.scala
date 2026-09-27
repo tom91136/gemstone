@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 
-final case class Metadata(encodings: Vec[Encoding]) {
+case class Metadata(encodings: Vec[Encoding]) {
   def supports(family: Family): Boolean = encodings.exists(_.family == family)
   def supports(target: Target): Boolean =
     encodings.exists(encoding => encoding.family == target.family && encoding.target == target.metadataTarget)

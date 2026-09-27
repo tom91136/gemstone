@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.NonNegative
+import net.kurobako.gemstone.NonEmptyVec
 
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.vm.*
 
@@ -11,23 +12,23 @@ final class VirtualMachineSuite extends munit.FunSuite {
   private object EmptyMemory extends Memory with AddressSpace {
     override def address(
         region: MemoryRegion,
-        offset: NonNegativeLong
+        offset: NonNegative[Long]
     ): Either[Fault, GuestAddress] = Left(Fault.Memory("unexpected address lookup"))
 
     override def locate(
         address: GuestAddress,
-        size: NonNegativeInt
+        size: NonNegative[Int]
     ): Either[Fault, AddressSpace.Location] = Left(Fault.Memory("unexpected address lookup"))
 
     override def read(
         region: MemoryRegion,
-        offset: NonNegativeLong,
-        size: NonNegativeInt
+        offset: NonNegative[Long],
+        size: NonNegative[Int]
     ): Either[Fault, Vec[Byte]] = Left(Fault.Memory("unexpected read"))
 
     override def write(
         region: MemoryRegion,
-        offset: NonNegativeLong,
+        offset: NonNegative[Long],
         bytes: Vec[Byte]
     ): Either[Fault, Unit] = Left(Fault.Memory("unexpected write"))
   }
@@ -41,7 +42,7 @@ final class VirtualMachineSuite extends munit.FunSuite {
     assert(!(first eq second))
 
     val task = KernelTask.validated(
-      KernelName("empty"),
+      NonEmptyString("empty"),
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
       Vec.empty

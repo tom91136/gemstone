@@ -1,7 +1,10 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.{NonNegativeLong, Vec}
-import net.kurobako.gemstone.binary.{FloatingPointWidth, IEEE754, LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.Constraint.{IntBetween, OneOf}
+
+import net.kurobako.gemstone.Constraint.NonNegative
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.binary.{IEEE754, LittleEndian}
 import net.kurobako.gemstone.rpc.AllocationId
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 
@@ -19,7 +22,7 @@ final class BlasMathSuite extends munit.FunSuite {
         java.lang.Float.floatToRawIntBits(value).toLong & 0xffffffffL,
         bytes,
         index * 4,
-        ScalarByteWidth.Dword
+        4
       )
     }
     bytes
@@ -27,7 +30,7 @@ final class BlasMathSuite extends munit.FunSuite {
 
   private def read(bytes: Array[Byte]): Vec[Float] =
     Vec.tabulate(bytes.length / 4)(index =>
-      java.lang.Float.intBitsToFloat(LittleEndian.decode(bytes, index * 4, ScalarByteWidth.Dword).toInt)
+      java.lang.Float.intBitsToFloat(LittleEndian.decode(bytes, index * 4, 4).toInt)
     )
 
   private def scalar(value: Float): Vec[Byte] = Vec.from(f32(value))
@@ -36,7 +39,7 @@ final class BlasMathSuite extends munit.FunSuite {
     entries.toMap.get(_)
 
   private def vector(allocation: AllocationId, increment: Int = 1): Option[BlasVector] =
-    Some(BlasVector(allocation, NonNegativeLong.Zero, increment))
+    Some(BlasVector(allocation, 0L, increment))
 
   private def request(operation: BlasOperation, element: BlasElement = BlasElement.F32, count: Int = 0) =
     BlasRequest(
@@ -93,7 +96,7 @@ final class BlasMathSuite extends munit.FunSuite {
       java.lang.Float.intBitsToFloat(LittleEndian.decode(
         result.toOption.get.scalar.toArray,
         0,
-        ScalarByteWidth.Dword
+        4
       ).toInt)
 
     assertEquals(
@@ -121,7 +124,7 @@ final class BlasMathSuite extends munit.FunSuite {
     val gemv   = request(BlasOperation.Gemv).copy(
       rows = 2,
       columns = 2,
-      a = Some(BlasMatrix(a, NonNegativeLong.Zero, 2)),
+      a = Some(BlasMatrix(a, 0L, 2)),
       x = vector(x),
       y = vector(y),
       alpha = scalar(1),
@@ -140,9 +143,9 @@ final class BlasMathSuite extends munit.FunSuite {
         rows = 2,
         columns = 2,
         inner = 2,
-        a = Some(BlasMatrix(a, NonNegativeLong.Zero, 2)),
-        b = Some(BlasMatrix(b, NonNegativeLong.Zero, 2)),
-        c = Some(BlasMatrix(c, NonNegativeLong.Zero, 2)),
+        a = Some(BlasMatrix(a, 0L, 2)),
+        b = Some(BlasMatrix(b, 0L, 2)),
+        c = Some(BlasMatrix(c, 0L, 2)),
         alpha = scalar(1),
         beta = scalar(0),
         batch = batch,
@@ -173,14 +176,14 @@ final class BlasMathSuite extends munit.FunSuite {
       rows = 2,
       columns = 2,
       inner = 2,
-      a = Some(BlasMatrix(a, NonNegativeLong.Zero, 2)),
-      b = Some(BlasMatrix(b, NonNegativeLong.Zero, 2)),
-      c = Some(BlasMatrix(c, NonNegativeLong.Zero, 2)),
+      a = Some(BlasMatrix(a, 0L, 2)),
+      b = Some(BlasMatrix(b, 0L, 2)),
+      c = Some(BlasMatrix(c, 0L, 2)),
       alpha = Vec[Byte](0x00, 0x3c),
       beta = Vec[Byte](0x00, 0x00)
     )
     def halfOf(value: Float): Array[Byte] = {
-      val bits = IEEE754.fromDouble(value.toDouble, FloatingPointWidth(16)).toInt & 0xffff
+      val bits = IEEE754.fromDouble(value.toDouble, OneOf.unsafe[(16, 32, 64)](16)).toInt & 0xffff
       Array[Byte](bits.toByte, (bits >> 8).toByte)
     }
     val operands = memory(

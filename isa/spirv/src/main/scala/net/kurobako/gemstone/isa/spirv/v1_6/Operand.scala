@@ -1,8 +1,10 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import net.kurobako.gemstone.NonEmptyVec
 
-final case class Operand(kind: SPIRVOperandKind, words: NonEmptyVec[Word]) {
+case class Operand(kind: NonEmptyString, words: NonEmptyVec[Word]) {
   def singleWord: Either[String, Word] =
     Either.cond(words.length == 1, words.head, s"$kind contains ${words.length} words")
 }

@@ -1,18 +1,19 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
 import net.kurobako.gemstone.ByteKey
-import net.kurobako.gemstone.NonEmptyString
-import net.kurobako.gemstone.NonNegativeInt
-import net.kurobako.gemstone.PositiveInt
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.LRUCache
 import net.kurobako.gemstone.binary.Bits
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.binary.ScalarByteWidth
 import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.isa.GlobalName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.memory.GuestAddress
 
 import cats.syntax.either.*
@@ -26,7 +27,7 @@ import java.util.concurrent.locks.ReentrantLock
 
 /** Strict, dependency-free ELF boundary for AMDGPU code objects. */
 object CodeObject {
-  final case class Program private[CodeObject] (image: Vec[Byte]) extends net.kurobako.gemstone.isa.Program
+  case class Program private[CodeObject] (image: Vec[Byte]) extends net.kurobako.gemstone.isa.Program
 
   object Decoder extends net.kurobako.gemstone.isa.Decoder[Vec[Byte], Program] {
     override type Error = CodeObjectError
@@ -35,7 +36,7 @@ object CodeObject {
       validateHeader(image).map(_ => Program(image))
   }
 
-  enum CodeObjectError {
+  enum CodeObjectError extends net.kurobako.gemstone.isa.DecodeError {
     case Invalid(detail: String)
     case Unsupported(detail: String)
 
@@ -46,7 +47,7 @@ object CodeObject {
   }
 
   /** One loadable kernel extracted from an ELF64 AMDGPU code object. */
-  final case class CodeObjectKernel private[amdgpu] (
+  case class CodeObjectKernel private[amdgpu] (
       name: String,
       target: Target,
       kernargSize: Int,
@@ -71,14 +72,14 @@ object CodeObject {
   }
 
   /** Public-symbol information needed by an API facade; decoding and relocation ownership remain in this ISA layer. */
-  final case class CodeObjectGlobal(
-      name: GlobalName,
+  case class CodeObjectGlobal(
+      name: NonEmptyString,
       address: GuestAddress,
-      size: NonNegativeInt,
-      pointerOffsets: Vec[NonNegativeInt]
+      size: NonNegative[Int],
+      pointerOffsets: Vec[NonNegative[Int]]
   )
 
-  private final case class Section(
+  private case class Section(
       nameOffset: Int,
       sectionType: Int,
       flags: Long,
@@ -88,7 +89,7 @@ object CodeObject {
       link: Int,
       entrySize: Int
   )
-  private final case class Symbol(
+  private case class Symbol(
       name: String,
       value: Long,
       size: Int,
@@ -96,7 +97,7 @@ object CodeObject {
       kind: Int,
       inferredSize: Boolean = false
   )
-  private final case class KernelRecord(
+  private case class KernelRecord(
       symbol: Symbol,
       codeStart: Int,
       kernargSize: Int,
@@ -118,7 +119,7 @@ object CodeObject {
       private val textSection: Section,
       private val readOnlySection: Option[Section],
       private val globalSections: Map[Int, Section],
-      private val globalSymbols: Map[GlobalName, Symbol],
+      private val globalSymbols: Map[NonEmptyString, Symbol],
       private val globalRelocations: Vec[(Long, Long)]
   ) {
     private val materialized    = ConcurrentHashMap[String, CodeObjectKernel]()
@@ -148,7 +149,7 @@ object CodeObject {
               value,
               images(index),
               (address - section.address).toInt,
-              ScalarByteWidth.Qword
+              8
             )
         }
       }
@@ -196,8 +197,8 @@ object CodeObject {
         CodeObjectGlobal(
           name,
           GuestAddress(symbol.value),
-          NonNegativeInt.unsafe(symbol.size),
-          pointerOffsets.map(NonNegativeInt.unsafe)
+          NonNegative.unsafe(symbol.size),
+          pointerOffsets.map(NonNegative.unsafe)
         )
       }.toSeq.sortBy(global => (global.address.raw, global.name.raw))
     )
@@ -220,19 +221,19 @@ object CodeObject {
       )
 
     /** Returns the device address and size of a mutable HIP/HSA-visible global. */
-    def global(name: GlobalName): Option[(GuestAddress, NonNegativeInt)] =
+    def global(name: NonEmptyString): Option[(GuestAddress, NonNegative[Int])] =
       globalSymbols.get(name).flatMap { symbol =>
         globalSections.get(symbol.section).flatMap { section =>
           Option.when(
             symbol.value >= section.address &&
               symbol.value - section.address <= section.size.toLong &&
               symbol.size.toLong <= section.size.toLong - (symbol.value - section.address)
-          )(GuestAddress(symbol.value) -> NonNegativeInt.unsafe(symbol.size))
+          )(GuestAddress(symbol.value) -> NonNegative.unsafe(symbol.size))
         }
       }
 
     /** Snapshot from this session's relocated section image, before external storage is bound. */
-    def globalData(name: GlobalName): Either[CodeObjectError, (GuestAddress, Vec[Byte])] = globalImageLock.withLock {
+    def globalData(name: NonEmptyString): Either[CodeObjectError, (GuestAddress, Vec[Byte])] = globalImageLock.withLock {
       global(name).toRight(CodeObjectError.Invalid(
         s"AMDGPU global symbol $name is not present"
       )).map {
@@ -246,7 +247,7 @@ object CodeObject {
     }
 
     /** Applies a host-to-device symbol copy to the shared code-object section image. */
-    def writeGlobal(name: GlobalName, offset: Long, value: Vec[Byte]): Either[CodeObjectError, Unit] =
+    def writeGlobal(name: NonEmptyString, offset: Long, value: Vec[Byte]): Either[CodeObjectError, Unit] =
       globalImageLock.withLock {
         globalSymbols.get(name).toRight(CodeObjectError.Invalid(
           s"AMDGPU global symbol $name is not present"
@@ -295,7 +296,7 @@ object CodeObject {
   }
 
   private val TargetPrefix = "amdgcn-amd-amdhsa--".getBytes(StandardCharsets.US_ASCII)
-  private val indexCache   = LRUCache[ByteKey, Either[CodeObjectError, Index]](capacity = PositiveInt(4))
+  private val indexCache   = LRUCache[ByteKey, Either[CodeObjectError, Index]](capacity = 4)
 
   private val EmulatedCallKinds = Vec(
     "logIf",
@@ -416,7 +417,7 @@ object CodeObject {
       globalSymbols <- symbols.view.filter { symbol =>
         symbol.kind == 1 && globalSections.contains(symbol.section)
       }.toVec.traverse { symbol =>
-        GlobalName.either(symbol.name)
+        NonEmptyString.either(symbol.name)
           .leftMap(_ =>
             CodeObjectError.Invalid(
               s"invalid AMDGPU global name '${symbol.name}'"
@@ -774,5 +775,5 @@ object CodeObject {
     LittleEndian.decodeInt32(bytes, offset)
 
   private def littleLong(bytes: Array[Byte], offset: Int): Long =
-    LittleEndian.decode(bytes, offset, ScalarByteWidth.Qword)
+    LittleEndian.decode(bytes, offset, 8)
 }

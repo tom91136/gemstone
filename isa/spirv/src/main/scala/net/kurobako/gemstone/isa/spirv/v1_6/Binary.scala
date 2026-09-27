@@ -1,9 +1,11 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.{PositiveInt, Vec}
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.Positive
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.Bits
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.binary.ScalarByteWidth
 import cats.data.Chain
 
 import scala.annotation.tailrec
@@ -15,7 +17,7 @@ object Binary {
     case InvalidMagic(found: Long)
     case ZeroInstructionWordCount(wordOffset: Int)
     case TruncatedInstruction(wordOffset: Int, declaredWords: Int, remainingWords: Int)
-    case InstructionTooLong(opcodeNumber: SPIRVOpcodeNumber, wordCount: PositiveInt)
+    case InstructionTooLong(opcodeNumber: SPIRVOpcodeNumber, wordCount: Positive[Int])
 
     def message: String = this match {
       case MisalignedByteLength(length)     => s"SPIR-V binary length $length is not a multiple of four"
@@ -106,6 +108,6 @@ object Binary {
         case Endianness.Little => value.toLong
         case Endianness.Big    => java.lang.Integer.reverseBytes(value).toLong
       },
-      ScalarByteWidth.Dword
+      4
     )
 }

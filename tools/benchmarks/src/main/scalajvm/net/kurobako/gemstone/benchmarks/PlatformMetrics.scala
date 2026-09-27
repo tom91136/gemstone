@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.benchmarks
 
-import net.kurobako.gemstone.NonNegativeLong
+import net.kurobako.gemstone.Constraint.NonNegative
 
 import java.lang.management.ManagementFactory
 import java.nio.file.Path
@@ -16,9 +16,9 @@ object PlatformMetrics {
     case _ => None
   }
 
-  def allocatedBytes: Option[NonNegativeLong] =
+  def allocatedBytes: Option[NonNegative[Long]] =
     allocationBean.flatMap(bean =>
-      NonNegativeLong.either(bean.getThreadAllocatedBytes(Thread.currentThread().threadId())).toOption
+      NonNegative.either(bean.getThreadAllocatedBytes(Thread.currentThread().threadId())).toOption
     )
 
   def startRecording(destination: Option[Path]): AutoCloseable = destination match {

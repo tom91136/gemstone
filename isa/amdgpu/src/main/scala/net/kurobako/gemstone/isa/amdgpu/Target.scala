@@ -1,13 +1,13 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.NonEmptyString
+import net.kurobako.gemstone.Constraint.NonEmptyString
 
 import scala.compiletime.{constValue, erasedValue}
 
 /** Exact processor target used by LLVM MC. */
 opaque type Target = String
 object Target {
-  private final case class Classification(family: Family, metadataTarget: MetadataTarget)
+  private case class Classification(family: Family, metadataTarget: NonEmptyString)
 
   private type GFX6 = ("tahiti", "verde", "gfx600", "gfx601")
   private type GFX7 = ("bonaire", "hawaii", "kabini", "kaveri", "gfx700", "gfx701")
@@ -75,25 +75,25 @@ object Target {
 
   private def group(
       family: Family,
-      metadataTarget: MetadataTarget,
+      metadataTarget: NonEmptyString,
       names: Vector[String]
   ): Seq[(String, Classification)] =
     names.map(_ -> Classification(family, metadataTarget))
 
   private val classifications = Map.from(
-    group(Family.GFX6, MetadataTarget("gfx6"), names[GFX6]) ++
-      group(Family.GFX7, MetadataTarget("gfx7"), names[GFX7]) ++
-      group(Family.GFX8, MetadataTarget("gfx8"), names[GFX8]) ++
-      group(Family.GFX9, MetadataTarget("gfx9"), names[GFX9]) ++
-      group(Family.CDNA1, MetadataTarget("cdna1"), names[CDNA1]) ++
-      group(Family.CDNA2, MetadataTarget("cdna2"), names[CDNA2]) ++
-      group(Family.CDNA3, MetadataTarget("cdna3"), names[CDNA3]) ++
-      group(Family.CDNA4, MetadataTarget("cdna4"), names[CDNA4]) ++
-      group(Family.GFX10, MetadataTarget("rdna1"), names[RDNA1]) ++
-      group(Family.GFX10, MetadataTarget("rdna2"), names[RDNA2]) ++
-      group(Family.GFX11, MetadataTarget("rdna3"), names[RDNA3]) ++
-      group(Family.GFX11, MetadataTarget("rdna3_5"), names[RDNA3_5]) ++
-      group(Family.GFX12, MetadataTarget("rdna4"), names[RDNA4])
+    group(Family.GFX6, NonEmptyString("gfx6"), names[GFX6]) ++
+      group(Family.GFX7, NonEmptyString("gfx7"), names[GFX7]) ++
+      group(Family.GFX8, NonEmptyString("gfx8"), names[GFX8]) ++
+      group(Family.GFX9, NonEmptyString("gfx9"), names[GFX9]) ++
+      group(Family.CDNA1, NonEmptyString("cdna1"), names[CDNA1]) ++
+      group(Family.CDNA2, NonEmptyString("cdna2"), names[CDNA2]) ++
+      group(Family.CDNA3, NonEmptyString("cdna3"), names[CDNA3]) ++
+      group(Family.CDNA4, NonEmptyString("cdna4"), names[CDNA4]) ++
+      group(Family.GFX10, NonEmptyString("rdna1"), names[RDNA1]) ++
+      group(Family.GFX10, NonEmptyString("rdna2"), names[RDNA2]) ++
+      group(Family.GFX11, NonEmptyString("rdna3"), names[RDNA3]) ++
+      group(Family.GFX11, NonEmptyString("rdna3_5"), names[RDNA3_5]) ++
+      group(Family.GFX12, NonEmptyString("rdna4"), names[RDNA4])
   )
 
   def either(value: String): Either[String, Target] =
@@ -110,7 +110,7 @@ object Target {
     inline def raw: String             = target
     def name: NonEmptyString           = NonEmptyString.unsafe(target)
     def family: Family                 = classification(target).family
-    def metadataTarget: MetadataTarget = classification(target).metadataTarget
+    def metadataTarget: NonEmptyString = classification(target).metadataTarget
   }
 
   private def classification(target: Target): Classification = classifications(target.raw)

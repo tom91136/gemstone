@@ -1,19 +1,21 @@
 package net.kurobako.gemstone.codegen
 
+import net.kurobako.gemstone.Constraint.Positive
+
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.Wire
 import net.kurobako.gemstone.rpc.Wire.{Alternative, Field, OperationShape, Shape}
-
 import com.monovore.decline.{Command, Opts}
 
 import java.nio.file.Path
-import java.nio.charset.StandardCharsets
 import scala.collection.mutable
 
-/** Derives the native execution client and codecs from the Scala operation enum. */
+/** Derives the native execution client and its Glaze MessagePack codecs from the Scala operation enum. */
 object GenerateExecutionRPC {
-  private final case class Request(output: Path)
-  private final case class Named(name: String, shape: Shape)
+  private case class Request(output: Path)
+  private case class Named(name: String, shape: Shape)
+
+  private val Namespace = "gemstone::execution"
 
   private val command = Command("GenerateExecutionRPC", "Generate the native typed execution RPC client")(
     Opts.argument[String]("output-directory").map(Path.of(_)).map(Request(_))
@@ -35,53 +37,20 @@ object GenerateExecutionRPC {
     val result = value.map(character => if (character.isLetterOrDigit || character == '_') character else '_')
     if (result.headOption.exists(_.isDigit)) s"_$result" else result
   }
-  private def constraintName(constraint: Wire.Constraint): String = constraint match {
-    case Wire.Constraint.Positive                       => "Positive"
-    case Wire.Constraint.Positive0                      => "Positive0"
-    case Wire.Constraint.IntInterval(minimum, maximum)  => s"Interval${numberName(minimum)}To${numberName(maximum)}"
-    case Wire.Constraint.LongInterval(minimum, maximum) =>
-      s"Interval${numberName(minimum)}To${numberName(maximum)}"
-    case Wire.Constraint.MinimumLength(minimum) => s"MinimumLength$minimum"
-    case Wire.Constraint.NotContains(value)     =>
-      val bytes = value.getBytes(StandardCharsets.UTF_8)
-      s"NotContains${bytes.view.map(byte => f"${byte & 0xff}%02x").mkString}"
-  }
+  private def qualified(name: String): String = s"$Namespace::$name"
   private def numberName(value: Long): String =
     if (value < 0L) s"Negative${value.toString.drop(1)}" else value.toString
   private def aliasName(name: String, constraints: Vector[Wire.Constraint]): String =
-    if (name == "Int" || name == "Long" || name == "String")
-      identifier(name + constraints.map(constraintName(_)).mkString)
+    if (name == "Int" || name == "Long" || name == "String") identifier(name + constraints.map {
+      case Wire.Constraint.Positive               => "Positive"
+      case Wire.Constraint.Positive0              => "Positive0"
+      case Wire.Constraint.IntInterval(min, max)  => s"Interval${numberName(min)}To${numberName(max)}"
+      case Wire.Constraint.LongInterval(min, max) => s"Interval${numberName(min)}To${numberName(max)}"
+      case Wire.Constraint.MinimumLength(min)     => s"MinimumLength$min"
+      case Wire.Constraint.NotContains(value)     =>
+        s"NotContains${value.getBytes(java.nio.charset.StandardCharsets.UTF_8).view.map(byte => f"${byte & 0xff}%02x").mkString}"
+    }.mkString)
     else identifier(name)
-
-  private def cppString(value: String): String = {
-    val bytes   = value.getBytes(StandardCharsets.UTF_8)
-    val escaped = bytes.view.map(byte => f"\\x${byte & 0xff}%02x").mkString
-    s"std::string(\"$escaped\", ${bytes.length}U)"
-  }
-
-  private def constraintValidation(
-      underlying: Shape,
-      constraints: Vector[Wire.Constraint],
-      expression: String
-  ): String = {
-    val validations = constraints.map {
-      case Wire.Constraint.Positive if underlying == Shape.Int32 || underlying == Shape.Int64 =>
-        s"$expression > 0"
-      case Wire.Constraint.Positive0 if underlying == Shape.Int32 || underlying == Shape.Int64 =>
-        s"$expression >= 0"
-      case Wire.Constraint.IntInterval(minimum, maximum) if underlying == Shape.Int32 =>
-        s"$expression >= $minimum && $expression <= $maximum"
-      case Wire.Constraint.LongInterval(minimum, maximum) if underlying == Shape.Int64 =>
-        s"$expression >= INT64_C($minimum) && $expression <= INT64_C($maximum)"
-      case Wire.Constraint.MinimumLength(minimum) if underlying == Shape.Text =>
-        s"$expression.size() >= $minimum"
-      case Wire.Constraint.NotContains(value) if underlying == Shape.Text =>
-        s"$expression.find(${cppString(value)}) == std::string::npos"
-      case constraint =>
-        throw IllegalArgumentException(s"constraint $constraint is incompatible with wire shape $underlying")
-    }
-    if (validations.isEmpty) "true" else validations.map(value => s"($value)").mkString(" && ")
-  }
   private def alternativeName(sum: String, alternative: String): String = s"$sum$alternative"
   private def isNullary(alternative: Alternative): Boolean              = alternative.shape match {
     case Shape.Product(_, fields) => fields.isEmpty
@@ -148,28 +117,74 @@ object GenerateExecutionRPC {
 
   private def definition(named: Named, model: Model): String = named.shape match {
     case Shape.Alias(_, underlying, _) =>
-      s"struct ${named.name} { ${model.cppType(underlying)} value{}; };"
+      s"""struct ${named.name} {
+         |  ${model.cppType(underlying)} value{};
+         |};""".stripMargin
     case Shape.Product(_, productFields) =>
       s"struct ${named.name} {\n${fields(productFields, model)}};"
     case Shape.Sum(_, alternatives) if alternatives.forall(isNullary(_)) =>
-      val values = alternatives.map(value => s"  ${identifier(value.name)} = ${hex(value.id)}").mkString(",\n")
-      s"enum class ${named.name} : uint64_t {\n$values\n};"
+      val values = alternatives.zipWithIndex.map { case (alternative, index) =>
+        s"  ${identifier(alternative.name)} = $index"
+      }.mkString(",\n")
+      s"enum class ${named.name} : uint8_t {\n$values\n};"
     case Shape.Sum(_, alternatives) =>
       val cases = alternatives.map { alternative =>
         val name = alternativeName(named.name, identifier(alternative.name))
         alternative.shape match {
-          case Shape.Product(_, caseFields) => s"struct $name {\n${fields(caseFields, model)}};"
-          case other                        => s"struct $name {\n  ${model.cppType(other)} value{};\n};"
+          case Shape.Product(_, caseFields) if caseFields.isEmpty => s"struct $name {};"
+          case Shape.Product(_, caseFields)                       => s"struct $name {\n${fields(caseFields, model)}};"
+          case other => s"struct $name {\n  ${model.cppType(other)} value{};\n};"
         }
-      }
+      }.mkString("\n")
       val variants = alternatives.map(value => alternativeName(named.name, identifier(value.name))).mkString(", ")
-      s"${cases.mkString("\n")}\nusing ${named.name} = std::variant<$variants>;"
+      s"""$cases
+         |
+         |using ${named.name} = std::variant<$variants>;""".stripMargin
     case other => throw IllegalArgumentException(s"unnamed RPC definition: $other")
+  }
+
+  private def metaDefinition(named: Named, model: Model): Vector[String] = named.shape match {
+    case Shape.Alias(_, _, _) =>
+      Vector(s"template <> struct glz::meta<${qualified(named.name)}> { static constexpr auto value = &${qualified(
+          named.name
+        )}::value; };")
+    case Shape.Sum(_, alternatives) if alternatives.forall(isNullary(_)) => Vector.empty
+    case Shape.Sum(_, alternatives)                                      =>
+      val emptyArms = alternatives.collect {
+        case alternative if isNullary(alternative) =>
+          val name = alternativeName(named.name, identifier(alternative.name))
+          s"template <> struct glz::meta<${qualified(name)}> { static constexpr auto value = glz::object(); };"
+      }
+      val ids = alternatives.map(value => s"\"${identifier(value.name)}\"").mkString(", ")
+      emptyArms :+ s"""template <> struct glz::meta<${qualified(named.name)}> {
+                      |  static constexpr std::string_view tag = "t";
+                      |  static constexpr std::string_view content = "v";
+                      |  static constexpr auto ids = std::array<std::string_view, ${alternatives.length}>{$ids};
+                      |};""".stripMargin
+    case _ => Vector.empty
   }
 
   private def requestDefinition(operation: OperationShape, model: Model): String = operation.request.shape match {
     case Shape.Product(_, requestFields) =>
       s"struct ${identifier(operation.request.name)} {\n${fields(requestFields, model)}};"
+    case other => throw IllegalArgumentException(s"operation ${operation.request.name} is not a product: $other")
+  }
+
+  private def requestMeta(operation: OperationShape): Option[String] = operation.request.shape match {
+    case Shape.Product(_, requestFields) if requestFields.isEmpty =>
+      Some(
+        s"template <> struct glz::meta<${qualified(identifier(operation.request.name))}> { static constexpr auto value = glz::object(); };"
+      )
+    case _ => None
+  }
+
+  private def call(operation: OperationShape, model: Model): String = operation.request.shape match {
+    case Shape.Product(_, _) =>
+      val request = identifier(operation.request.name)
+      val reply   = model.cppType(operation.reply)
+      s"""Result<$reply> Client::call(const $request &request) {
+         |  return implementation_->call<$reply>(operation::$request, request);
+         |}""".stripMargin
     case other => throw IllegalArgumentException(s"operation ${operation.request.name} is not a product: $other")
   }
 
@@ -183,24 +198,27 @@ object GenerateExecutionRPC {
     val operationIds = protocol.operations.map(operation =>
       s"inline constexpr uint64_t ${identifier(operation.request.name)} = ${hex(operation.request.id)};"
     ).mkString("\n")
-    val tags = model.named.flatMap {
-      case Named(name, Shape.Sum(_, alternatives)) => alternatives.map(alternative =>
-          s"inline constexpr uint64_t ${alternativeName(name, identifier(alternative.name))} = ${hex(alternative.id)};"
-        )
-      case _ => Vector.empty
-    }.mkString("\n")
+    val metas = Vector(
+      s"template <> struct glz::meta<${qualified("Unit")}> { static constexpr auto value = glz::object(); };"
+    ) ++ model.named.flatMap(metaDefinition(_, model)) ++
+      protocol.operations.flatMap(operation => requestMeta(operation))
     GeneratedHeader.cpp("from ExecutionRPC.Operation") +
       s"""|#ifndef GEMSTONE_EXECUTION_RPC_HPP
        |#define GEMSTONE_EXECUTION_RPC_HPP
        |
        |#include <stddef.h>
        |#include <stdint.h>
+       |#include <array>
        |#include <memory>
        |#include <optional>
        |#include <string>
+       |#include <string_view>
        |#include <utility>
        |#include <variant>
        |#include <vector>
+       |
+       |#include <glaze/glaze.hpp>
+       |#include <glaze/msgpack.hpp>
        |
        |namespace gemstone::execution {
        |
@@ -223,9 +241,6 @@ object GenerateExecutionRPC {
        |inline constexpr size_t ResponseHeaderBytes = ${ExecutionRPC.ResponseHeaderBytes}U;
        |namespace operation {
        |$operationIds
-       |}
-       |namespace tag {
-       |$tags
        |}
        |
        |struct Unit {};
@@ -270,95 +285,15 @@ object GenerateExecutionRPC {
        |
        |} // namespace gemstone::execution
        |
+       |${metas.mkString("\n")}
+       |
        |#endif
        |""".stripMargin
   }
 
-  private def writeFields(expression: String, value: Vector[Field], model: Model): String =
-    value.map(field => s"Codec<${model.cppType(field.shape)}>::write(writer, $expression.${identifier(field.name)});")
-      .mkString(" ")
-
-  private def readFields(expression: String, value: Vector[Field], model: Model): String =
-    value.map(field => s"Codec<${model.cppType(field.shape)}>::read(reader, $expression.${identifier(field.name)})")
-      .mkString(" && ") match {
-      case ""     => "true"
-      case result => result
-    }
-
-  private def codec(named: Named, model: Model): String = named.shape match {
-    case Shape.Alias(_, underlying, constraints) =>
-      val validation = constraintValidation(underlying, constraints, "value.value")
-      s"""template <> struct Codec<${named.name}> {
-         |  static void write(Writer &writer, const ${named.name} &value) { if (!($validation)) { writer.invalidate(); return; } Codec<${model.cppType(
-          underlying
-        )}>::write(writer, value.value); }
-         |  static bool read(Reader &reader, ${named.name} &value) { return Codec<${model.cppType(
-          underlying
-        )}>::read(reader, value.value) && ($validation); }
-         |};""".stripMargin
-    case Shape.Product(_, productFields) =>
-      s"""template <> struct Codec<${named.name}> {
-         |  static void write(Writer &writer, const ${named.name} &value) { ${writeFields(
-          "value",
-          productFields,
-          model
-        )} }
-         |  static bool read(Reader &reader, ${named.name} &value) { return ${readFields(
-          "value",
-          productFields,
-          model
-        )}; }
-         |};""".stripMargin
-    case Shape.Sum(_, alternatives) if alternatives.forall(isNullary(_)) =>
-      val accepted = alternatives.map(value =>
-        s"case ${hex(value.id)}: value = ${named.name}::${identifier(value.name)}; return true;"
-      ).mkString(" ")
-      s"""template <> struct Codec<${named.name}> {
-         |  static void write(Writer &writer, ${named.name} value) { writer.u64(static_cast<uint64_t>(value)); }
-         |  static bool read(Reader &reader, ${named.name} &value) { uint64_t id = 0; if (!reader.u64(id)) return false; switch (id) { $accepted default: return false; } }
-         |};""".stripMargin
-    case Shape.Sum(_, alternatives) =>
-      val writeCases = alternatives.map { alternative =>
-        val caseName = alternativeName(named.name, identifier(alternative.name))
-        val body     = alternative.shape match {
-          case Shape.Product(_, caseFields) => writeFields("item", caseFields, model)
-          case other                        => s"Codec<${model.cppType(other)}>::write(writer, item.value);"
-        }
-        s"if constexpr (std::is_same_v<T, $caseName>) { writer.u64(${hex(alternative.id)}); $body }"
-      }.mkString(" else ")
-      val readCases = alternatives.map { alternative =>
-        val caseName = alternativeName(named.name, identifier(alternative.name))
-        val body     = alternative.shape match {
-          case Shape.Product(_, caseFields) => readFields("item", caseFields, model)
-          case other                        => s"Codec<${model.cppType(other)}>::read(reader, item.value)"
-        }
-        s"case ${hex(alternative.id)}: { $caseName item{}; if (!($body)) return false; value = std::move(item); return true; }"
-      }.mkString(" ")
-      s"""template <> struct Codec<${named.name}> {
-         |  static void write(Writer &writer, const ${named.name} &value) { std::visit([&](const auto &item) { using T = std::decay_t<decltype(item)>; $writeCases }, value); }
-         |  static bool read(Reader &reader, ${named.name} &value) { uint64_t id = 0; if (!reader.u64(id)) return false; switch (id) { $readCases default: return false; } }
-         |};""".stripMargin
-    case other => throw IllegalArgumentException(s"unnamed RPC codec: $other")
-  }
-
-  private def call(operation: OperationShape, model: Model): String = operation.request.shape match {
-    case Shape.Product(_, requestFields) =>
-      val request   = identifier(operation.request.name)
-      val reply     = model.cppType(operation.reply)
-      val writes    = writeFields("request", requestFields, model)
-      val parameter = if (requestFields.isEmpty) s"const $request &" else s"const $request &request"
-      val capture   = if (requestFields.isEmpty) "" else "&"
-      val writer    = if (requestFields.isEmpty) "Writer &" else "Writer &writer"
-      s"""Result<$reply> Client::call($parameter) {
-         |  return implementation_->call<$reply>(operation::$request, [$capture]($writer) { $writes });
-         |}""".stripMargin
-    case other => throw IllegalArgumentException(s"operation ${operation.request.name} is not a product: $other")
-  }
-
   private def source(protocol: Wire.ProtocolShape): String = {
-    val model  = Model(protocol)
-    val codecs = model.named.map(codec(_, model)).mkString("\n\n")
-    val calls  = protocol.operations.map(call(_, model)).mkString("\n\n")
+    val model = Model(protocol)
+    val calls = protocol.operations.map(call(_, model)).mkString("\n\n")
     GeneratedHeader.cpp("from ExecutionRPC.Operation") +
       s"""|#define _POSIX_C_SOURCE 200112L
        |#include "gemstone_execution_rpc.hpp"
@@ -372,6 +307,7 @@ object GenerateExecutionRPC {
        |#include <mutex>
        |#include <netdb.h>
        |#include <netinet/tcp.h>
+       |#include <string_view>
        |#include <sys/socket.h>
        |#include <sys/time.h>
        |#include <type_traits>
@@ -379,6 +315,11 @@ object GenerateExecutionRPC {
        |
        |namespace gemstone::execution {
        |namespace {
+       |
+       |struct GlazeOptions : glz::opts {
+       |  static constexpr auto format = glz::MSGPACK;
+       |  bool structs_as_arrays = true;
+       |};
        |
        |int socketTimeoutSeconds() {
        |  constexpr int fallback = 300;
@@ -389,44 +330,24 @@ object GenerateExecutionRPC {
        |             ? static_cast<int>(value) : fallback;
        |}
        |
-       |class Writer {
-       | public:
-       |  void u8(uint8_t value) { if (bytes_.size() == MaximumPayload) { valid_ = false; return; } bytes_.push_back(value); }
-       |  void u32(uint32_t value) { u8(value >> 24); u8(value >> 16); u8(value >> 8); u8(value); }
-       |  void u64(uint64_t value) { u32(value >> 32); u32(value); }
-       |  void bytes(const uint8_t *value, size_t size) { if (size > MaximumPayload - bytes_.size()) { valid_ = false; return; } bytes_.insert(bytes_.end(), value, value + size); }
-       |  void invalidate() { valid_ = false; }
-       |  bool valid() const { return valid_; }
-       |  const std::vector<uint8_t> &result() const { return bytes_; }
-       | private:
-       |  bool valid_ = true;
-       |  std::vector<uint8_t> bytes_;
-       |};
+       |void appendU32(std::vector<uint8_t> &out, uint32_t value) {
+       |  out.push_back(static_cast<uint8_t>(value >> 24));
+       |  out.push_back(static_cast<uint8_t>(value >> 16));
+       |  out.push_back(static_cast<uint8_t>(value >> 8));
+       |  out.push_back(static_cast<uint8_t>(value));
+       |}
        |
-       |class Reader {
-       | public:
-       |  explicit Reader(const std::vector<uint8_t> &bytes) : bytes_(bytes) {}
-       |  bool u8(uint8_t &value) { if (remaining() < 1) return false; value = bytes_[offset_++]; return true; }
-       |  bool u32(uint32_t &value) { if (remaining() < 4) return false; value = (uint32_t(bytes_[offset_]) << 24) | (uint32_t(bytes_[offset_ + 1]) << 16) | (uint32_t(bytes_[offset_ + 2]) << 8) | bytes_[offset_ + 3]; offset_ += 4; return true; }
-       |  bool u64(uint64_t &value) { uint32_t high = 0, low = 0; if (!u32(high) || !u32(low)) return false; value = (uint64_t(high) << 32) | low; return true; }
-       |  bool bytes(uint8_t *value, size_t size) { if (size > remaining()) return false; std::memcpy(value, bytes_.data() + offset_, size); offset_ += size; return true; }
-       |  size_t remaining() const { return bytes_.size() - offset_; }
-       | private:
-       |  const std::vector<uint8_t> &bytes_;
-       |  size_t offset_ = 0;
-       |};
+       |void appendU64(std::vector<uint8_t> &out, uint64_t value) {
+       |  appendU32(out, static_cast<uint32_t>(value >> 32));
+       |  appendU32(out, static_cast<uint32_t>(value));
+       |}
        |
-       |template <class T> struct Codec;
-       |template <> struct Codec<Unit> { static void write(Writer &, Unit) {} static bool read(Reader &, Unit &) { return true; } };
-       |template <> struct Codec<bool> { static void write(Writer &w, bool v) { w.u8(v ? 1 : 0); } static bool read(Reader &r, bool &v) { uint8_t n = 0; if (!r.u8(n) || n > 1) return false; v = n != 0; return true; } };
-       |template <> struct Codec<uint8_t> { static void write(Writer &w, uint8_t v) { w.u8(v); } static bool read(Reader &r, uint8_t &v) { return r.u8(v); } };
-       |template <> struct Codec<int32_t> { static void write(Writer &w, int32_t v) { w.u32(static_cast<uint32_t>(v)); } static bool read(Reader &r, int32_t &v) { uint32_t n = 0; if (!r.u32(n)) return false; v = static_cast<int32_t>(n); return true; } };
-       |template <> struct Codec<int64_t> { static void write(Writer &w, int64_t v) { w.u64(static_cast<uint64_t>(v)); } static bool read(Reader &r, int64_t &v) { uint64_t n = 0; if (!r.u64(n)) return false; v = static_cast<int64_t>(n); return true; } };
-       |template <> struct Codec<std::string> { static void write(Writer &w, const std::string &v) { if (v.size() > MaximumTextBytes) { w.invalidate(); return; } w.u32(static_cast<uint32_t>(v.size())); w.bytes(reinterpret_cast<const uint8_t *>(v.data()), v.size()); } static bool read(Reader &r, std::string &v) { uint32_t n = 0; if (!r.u32(n) || n > MaximumTextBytes || n > r.remaining()) return false; v.resize(n); return r.bytes(reinterpret_cast<uint8_t *>(v.data()), n); } };
-       |template <class T> struct Codec<std::vector<T>> { static void write(Writer &w, const std::vector<T> &v) { const size_t limit = std::is_same_v<T, uint8_t> ? MaximumPayload : MaximumElements; if (v.size() > limit) { w.invalidate(); return; } w.u32(static_cast<uint32_t>(v.size())); if constexpr (std::is_same_v<T, uint8_t>) w.bytes(v.data(), v.size()); else for (const auto &item : v) Codec<T>::write(w, item); } static bool read(Reader &r, std::vector<T> &v) { uint32_t n = 0; const uint32_t limit = std::is_same_v<T, uint8_t> ? MaximumPayload : MaximumElements; if (!r.u32(n) || n > limit) return false; v.resize(n); if constexpr (std::is_same_v<T, uint8_t>) return r.bytes(v.data(), v.size()); else { for (auto &item : v) if (!Codec<T>::read(r, item)) return false; return true; } } };
-       |template <class T> struct Codec<std::optional<T>> { static void write(Writer &w, const std::optional<T> &v) { w.u8(v ? 1 : 0); if (v) Codec<T>::write(w, *v); } static bool read(Reader &r, std::optional<T> &v) { uint8_t tag = 0; if (!r.u8(tag) || tag > 1) return false; if (tag == 0) { v.reset(); return true; } T item{}; if (!Codec<T>::read(r, item)) return false; v = std::move(item); return true; } };
+       |uint32_t readU32(const uint8_t *data) {
+       |  return (static_cast<uint32_t>(data[0]) << 24) | (static_cast<uint32_t>(data[1]) << 16) | (static_cast<uint32_t>(data[2]) << 8)
+       |         | static_cast<uint32_t>(data[3]);
+       |}
        |
-       |$codecs
+       |uint64_t readU64(const uint8_t *data) { return (static_cast<uint64_t>(readU32(data)) << 32) | readU32(data + 4); }
        |
        |std::string failureDetail(const ExecutionFailure &failure) {
        |  return std::visit([](const auto &value) { return value.detail; }, failure);
@@ -454,14 +375,21 @@ object GenerateExecutionRPC {
        |  ~Impl() { if (fd_ >= 0) ::close(fd_); }
        |  std::string error() const { std::lock_guard<std::mutex> guard(mutex_); return error_; }
        |
-       |  template <class T, class Encode> Result<T> call(uint64_t operation, Encode encode) {
-       |    std::lock_guard<std::mutex> guard(mutex_); error_.clear(); Writer writer; encode(writer);
-       |    if (!writer.valid()) return failed<T>("execution request exceeds the encoding limits");
+       |  template <class T, class Request> Result<T> call(uint64_t operation, const Request &request) {
+       |    std::lock_guard<std::mutex> guard(mutex_); error_.clear();
+       |    std::string payload;
+       |    if (glz::write<GlazeOptions{}>(request, payload)) return failed<T>("execution request encoding failed");
+       |    if (payload.size() > MaximumPayload) return failed<T>("execution request exceeds the encoding limits");
        |    std::vector<uint8_t> response; uint32_t status = 0;
-       |    if (!exchange(operation, writer.result(), status, response)) return Result<T>::failure(Error{error_});
-       |    Reader reader(response);
-       |    if (status == 1) { ExecutionFailure failure{}; if (!Codec<ExecutionFailure>::read(reader, failure) || reader.remaining() != 0) { poison(); return failed<T>("execution failure response is invalid"); } error_ = failureDetail(failure); return Result<T>::failure(Error{error_}); }
-       |    T value{}; if (!Codec<T>::read(reader, value) || reader.remaining() != 0) { poison(); return failed<T>("execution response payload is invalid"); }
+       |    if (!exchange(operation, payload, status, response)) return Result<T>::failure(Error{error_});
+       |    const std::string_view body(reinterpret_cast<const char *>(response.data()), response.size());
+       |    if (status == 1) {
+       |      ExecutionFailure failure{};
+       |      if (glz::read<GlazeOptions{}>(failure, body)) { poison(); return failed<T>("execution failure response is invalid"); }
+       |      error_ = failureDetail(failure); return Result<T>::failure(Error{error_});
+       |    }
+       |    T value{};
+       |    if (glz::read<GlazeOptions{}>(value, body)) { poison(); return failed<T>("execution response payload is invalid"); }
        |    return Result<T>::success(std::move(value));
        |  }
        |
@@ -484,14 +412,25 @@ object GenerateExecutionRPC {
        |    }
        |    fd_ = connected; established_ = true; return true;
        |  }
-       |  bool exchange(uint64_t operation, const std::vector<uint8_t> &payload, uint32_t &status, std::vector<uint8_t> &response) {
+       |  bool exchange(uint64_t operation, const std::string &payload, uint32_t &status, std::vector<uint8_t> &response) {
        |    if (!connectServer()) return false;
-       |    Writer header; header.u32(RequestMagic); header.u64(SchemaFingerprint); header.u64(client_); header.u64(sessionHigh_); header.u64(sessionLow_); header.u64(operation); header.u32(static_cast<uint32_t>(payload.size()));
-       |    if (!sendAll(fd_, header.result().data(), header.result().size()) || (!payload.empty() && !sendAll(fd_, payload.data(), payload.size()))) { poison(); error_ = "execution request transport failed"; return false; }
-       |    uint8_t headerBytes[ResponseHeaderBytes]; if (!receiveAll(fd_, headerBytes, sizeof(headerBytes))) { poison(); error_ = "execution response transport failed"; return false; }
-       |    const std::vector<uint8_t> headerVector(headerBytes, headerBytes + sizeof(headerBytes)); Reader headerReader(headerVector); uint32_t magic = 0, size = 0; uint64_t fingerprint = 0;
-       |    if (!headerReader.u32(magic) || !headerReader.u64(fingerprint) || !headerReader.u32(status) || !headerReader.u32(size) || magic != ResponseMagic || fingerprint != SchemaFingerprint || status > 1 || size > MaximumPayload) { poison(); error_ = "execution response header is invalid"; return false; }
-       |    response.resize(size); if (!response.empty() && !receiveAll(fd_, response.data(), response.size())) { poison(); error_ = "execution response body is truncated"; return false; } return true;
+       |    std::vector<uint8_t> header;
+       |    appendU32(header, RequestMagic); appendU64(header, SchemaFingerprint); appendU64(header, client_);
+       |    appendU64(header, sessionHigh_); appendU64(header, sessionLow_); appendU64(header, operation);
+       |    appendU32(header, static_cast<uint32_t>(payload.size()));
+       |    if (!sendAll(fd_, header.data(), header.size())
+       |        || (!payload.empty() && !sendAll(fd_, reinterpret_cast<const uint8_t *>(payload.data()), payload.size()))) {
+       |      poison(); error_ = "execution request transport failed"; return false;
+       |    }
+       |    uint8_t headerBytes[ResponseHeaderBytes];
+       |    if (!receiveAll(fd_, headerBytes, sizeof(headerBytes))) { poison(); error_ = "execution response transport failed"; return false; }
+       |    const uint32_t magic = readU32(headerBytes); const uint64_t fingerprint = readU64(headerBytes + 4);
+       |    status = readU32(headerBytes + 12); const uint32_t size = readU32(headerBytes + 16);
+       |    if (magic != ResponseMagic || fingerprint != SchemaFingerprint || status > 1 || size > MaximumPayload) {
+       |      poison(); error_ = "execution response header is invalid"; return false;
+       |    }
+       |    response.resize(size); if (!response.empty() && !receiveAll(fd_, response.data(), response.size())) { poison(); error_ = "execution response body is truncated"; return false; }
+       |    return true;
        |  }
        |  mutable std::mutex mutex_; int fd_ = -1; bool established_ = false; bool poisoned_ = false;
        |  uint64_t client_; uint64_t sessionHigh_; uint64_t sessionLow_; std::string error_;

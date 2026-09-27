@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.25)
 project(gemstone-native LANGUAGES C CXX)
 
+# The execution client and every facade that includes its generated header use
+# Glaze, which requires C++23.
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 include(CTest)
 include(FetchContent)
 
@@ -18,6 +24,10 @@ endif()
 
 # The execution client is always built, so fmt is fetched unconditionally.
 include(cmake/Fmt.cmake)
+# The execution client uses Glaze for its MessagePack codecs.
+include(cmake/Glaze.cmake)
+# Keep Glaze headers on every target that includes the generated RPC header.
+include_directories(SYSTEM "${glaze_SOURCE_DIR}/include")
 
 if(GEMSTONE_ENABLE_CUDA OR GEMSTONE_ENABLE_HIP)
   set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)

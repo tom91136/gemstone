@@ -1,7 +1,10 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveLong, Vec}
-import net.kurobako.gemstone.isa.{GlobalName, KernelMetadata, KernelName, ProgramSymbols}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.isa.{KernelMetadata, ProgramSymbols}
 import net.kurobako.gemstone.isa.amdgpu.CodeObject.CodeObjectKernel
 import net.kurobako.gemstone.vm.{AddressSpace, Fault, KernelTask, Memory, MemoryRegion, Scheduler, TaskControl}
 
@@ -9,13 +12,13 @@ private[amdgpu] final class VMLoadedProgram(
     resolveKernel: String => Either[Fault, CodeObjectKernel],
     describeKernel: String => Either[Fault, KernelMetadata],
     describeSymbols: () => Either[Fault, ProgramSymbols],
-    describeGlobal: GlobalName => Either[Fault, (NonNegativeLong, Vec[Byte])],
-    writeGlobalFn: (GlobalName, NonNegativeLong, Vec[Byte]) => Either[Fault, Unit],
+    describeGlobal: NonEmptyString => Either[Fault, (NonNegative[Long], Vec[Byte])],
+    writeGlobalFn: (NonEmptyString, NonNegative[Long], Vec[Byte]) => Either[Fault, Unit],
     bindGlobalFn: (
-        GlobalName,
+        NonEmptyString,
         MemoryRegion,
-        NonNegativeLong,
-        PositiveLong,
+        NonNegative[Long],
+        Positive[Long],
         Memory
     ) => Either[Fault, Unit],
     bindings: () => Vec[VMLoadedProgram.GlobalBinding]
@@ -27,9 +30,9 @@ private[amdgpu] final class VMLoadedProgram(
 
   def symbols: Either[Fault, ProgramSymbols] = describeSymbols()
 
-  def kernel(name: KernelName): Either[Fault, KernelMetadata] = describeKernel(name.raw)
+  def kernel(name: NonEmptyString): Either[Fault, KernelMetadata] = describeKernel(name.raw)
 
-  def global(name: GlobalName): Either[Fault, (NonNegativeLong, Vec[Byte])] = describeGlobal(name)
+  def global(name: NonEmptyString): Either[Fault, (NonNegative[Long], Vec[Byte])] = describeGlobal(name)
 
   def execute(
       task: KernelTask,
@@ -48,26 +51,26 @@ private[amdgpu] final class VMLoadedProgram(
   }
 
   def bindGlobal(
-      name: GlobalName,
+      name: NonEmptyString,
       allocation: MemoryRegion,
-      offset: NonNegativeLong,
-      allocationSize: PositiveLong,
+      offset: NonNegative[Long],
+      allocationSize: Positive[Long],
       memory: Memory
   ): Either[Fault, Unit] = bindGlobalFn(name, allocation, offset, allocationSize, memory)
 
   def writeGlobal(
-      name: GlobalName,
-      offset: NonNegativeLong,
+      name: NonEmptyString,
+      offset: NonNegative[Long],
       bytes: Vec[Byte]
   ): Either[Fault, Unit] = writeGlobalFn(name, offset, bytes)
 }
 
 private[amdgpu] object VMLoadedProgram {
-  final case class GlobalBinding(
+  case class GlobalBinding(
       address: Long,
-      size: NonNegativeInt,
+      size: NonNegative[Int],
       allocation: MemoryRegion,
-      offset: NonNegativeLong,
-      allocationSize: PositiveLong
+      offset: NonNegative[Long],
+      allocationSize: Positive[Long]
   )
 }

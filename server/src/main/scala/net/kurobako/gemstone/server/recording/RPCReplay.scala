@@ -1,13 +1,13 @@
 package net.kurobako.gemstone.server.recording
 
-import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PlatformTime, PositiveInt}
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+import net.kurobako.gemstone.PlatformTime
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionProtocol.CompletionStatus
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.rpc.Wire
 import net.kurobako.gemstone.server.transport.ServerControl
 import net.kurobako.gemstone.server.transport.Transport.*
-
 import java.io.{DataInputStream, DataOutputStream, IOException}
 import java.net.{InetAddress, InetSocketAddress, Socket}
 import java.nio.ByteBuffer
@@ -17,22 +17,22 @@ import scala.util.Using
 
 /** API-frame replay only: neither reverse instruction execution nor a scheduler for backend data races. */
 object RPCReplay {
-  final case class Target(port: RPCPort, closeFn: () => Unit) extends AutoCloseable {
+  case class Target(port: RPCPort, closeFn: () => Unit) extends AutoCloseable {
     override def close(): Unit = closeFn()
   }
-  final case class Options(
+  case class Options(
       archive: Path,
       protocolIdentity: RPCJournal.ProtocolIdentity,
-      timeoutMillis: PositiveInt = PositiveInt(300000),
+      timeoutMillis: Positive[Int] = 300000,
       limits: RPCJournal.Limits = RPCJournal.Limits()
   )
-  final case class Report(
-      events: NonNegativeInt,
-      requests: NonNegativeInt,
-      extraCompletionPolls: NonNegativeLong
+  case class Report(
+      events: NonNegative[Int],
+      requests: NonNegative[Int],
+      extraCompletionPolls: NonNegative[Long]
   )
 
-  private def connect(endpoint: Target, timeoutMillis: PositiveInt): ReplayConnection = {
+  private def connect(endpoint: Target, timeoutMillis: Positive[Int]): ReplayConnection = {
     val socket = Socket()
     // Ownership transfers only after the connection and stream wrappers are established.
     try {
@@ -62,7 +62,7 @@ object RPCReplay {
     override def close(): Unit = socket.close()
   }
   // The request paired with the next recorded response advances with the connection.
-  private final case class Active(
+  private case class Active(
       wire: ReplayConnection,
       client: RPCJournal.RecordedClientId,
       @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -85,7 +85,7 @@ object RPCReplay {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var failed         = false
     private def report: Report =
-      Report(NonNegativeInt.unsafe(cursor), NonNegativeInt.unsafe(requests), NonNegativeLong.unsafe(polls))
+      Report(NonNegative.unsafe(cursor), NonNegative.unsafe(requests), NonNegative.unsafe(polls))
 
     private def assignedClient(client: RPCJournal.RecordedClientId): ClientId = clients.get(client) match {
       case Some(assigned) => assigned
@@ -113,7 +113,7 @@ object RPCReplay {
       } else throw IOException(f"RPC replay: unexpected response magic 0x$magic%08x")
       if (payloadBytes < 0 || payloadBytes > options.limits.maxFrameBytes.raw - ExecutionRPC.ResponseHeaderBytes.raw)
         throw IOException("RPC replay: response exceeds frame bounds")
-      val size  = NonNegativeInt.unsafe(payloadBytes)
+      val size  = NonNegative.unsafe(payloadBytes)
       val frame = Array.ofDim[Byte]((ExecutionRPC.ResponseHeaderBytes + size).raw)
       Array.copy(prefix.array(), 0, frame, 0, ExecutionRPC.ResponseHeaderBytes.raw)
       input.readFully(frame, ExecutionRPC.ResponseHeaderBytes.raw, size.raw)

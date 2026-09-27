@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import Program.*
 
 import scala.collection.mutable
@@ -13,7 +15,7 @@ private[v9_3] final class VMRegisterFile(chunkCount: Int = 96) {
   private val values                                  = Array.ofDim[Array[Long] | Null](chunkCount)
   private var named: mutable.Map[String, Long] | Null = null
 
-  def get(name: RegisterName): Long = slot(name.raw) match {
+  def get(name: NonEmptyString): Long = slot(name.raw) match {
     case Some(index) => getSlot(index)
     case None        => named match {
         case null   => 0L
@@ -27,9 +29,9 @@ private[v9_3] final class VMRegisterFile(chunkCount: Int = 96) {
       case chunk => chunk(index & 63)
     }
 
-  def apply(name: RegisterName): Long = get(name)
+  def apply(name: NonEmptyString): Long = get(name)
 
-  def update(name: RegisterName, value: Long): Unit = slot(name.raw) match {
+  def update(name: NonEmptyString, value: Long): Unit = slot(name.raw) match {
     case Some(index) => updateSlot(index, value)
     case None        =>
       val values = named match {
@@ -104,10 +106,10 @@ private[v9_3] object VMRegisterFile {
     value + offset
   }
 
-  def index(name: RegisterName): Int = indexRaw(name.raw)
+  def index(name: NonEmptyString): Int = indexRaw(name.raw)
 
-  def name(index: Int): RegisterName =
-    RegisterName.unsafe(
+  def name(index: Int): NonEmptyString =
+    NonEmptyString.unsafe(
       if (index >= 0 && index < 1024) s"%rd$index"
       else if (index < 2048) s"%rs${index - 1024}"
       else if (index < 3072) s"%r${index - 2048}"

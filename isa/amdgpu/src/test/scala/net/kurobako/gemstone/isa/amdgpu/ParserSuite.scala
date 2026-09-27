@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import Program.*
 
 import net.kurobako.gemstone.Vec
@@ -19,7 +21,7 @@ final class ParserSuite extends munit.FunSuite {
     assertEquals(instruction.operands.size, 3)
     assertEquals(
       instruction.mods.toSeq,
-      Seq(Modifier(ModifierName("e32")), Modifier(ModifierName("clamp")))
+      Seq(Modifier(NonEmptyString("e32")), Modifier(NonEmptyString("clamp")))
     )
     assertEquals(Printer.render(instruction), "v_add_f32 v0, |v1|, -v2 e32 clamp")
   }

@@ -1,12 +1,16 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import net.kurobako.gemstone.{NonEmptyVec, Vec}
-import net.kurobako.gemstone.binary.{BitWidth, Bits}
+import net.kurobako.gemstone.binary.Bits
 
 import cats.data.Chain
 
 private[v1_6] object OperandDecoder {
-  final case class DecodedOperands(fields: Vec[Vec[Operand]]) {
+  case class DecodedOperands(fields: Vec[Vec[Operand]]) {
     def required(index: Int): Operand         = fields(index).head
     def optional(index: Int): Option[Operand] = fields(index).headOption
     def repeated(index: Int): Vec[Operand]    = fields(index)
@@ -16,7 +20,7 @@ private[v1_6] object OperandDecoder {
       definition: Instruction.Definition,
       words: Vec[Word],
       shapes: Vec[OperandShape],
-      kinds: Map[SPIRVOperandKind, OperandKindInfo]
+      kinds: Map[NonEmptyString, OperandKindInfo]
   ): Either[InstructionDecodeError, DecodedOperands] =
     decodeShapes(definition.opcode, words, shapes, kinds, 0, 0, Chain.empty)
       .map(fields => DecodedOperands(Vec.from(fields.toVector.view))) match {
@@ -43,11 +47,11 @@ private[v1_6] object OperandDecoder {
         "literal/label pairs are not 64-bit aligned"
       ))
     else {
-      val selector = Operand(SPIRVOperandKind("IdRef"), Vec.nonEmpty(words(0)))
-      val default  = Operand(SPIRVOperandKind("IdRef"), Vec.nonEmpty(words(1)))
+      val selector = Operand(NonEmptyString("IdRef"), Vec.nonEmpty(words(0)))
+      val default  = Operand(NonEmptyString("IdRef"), Vec.nonEmpty(words(1)))
       val targets  = (2 until words.size by 3).map(index =>
         Operand(
-          SPIRVOperandKind("PairLiteralIntegerIdRef"),
+          NonEmptyString("PairLiteralIntegerIdRef"),
           NonEmptyVec.unsafeFromVec(words.slice(index, index + 3))
         )
       )
@@ -55,10 +59,10 @@ private[v1_6] object OperandDecoder {
     }
 
   private def decodeShapes(
-      opcode: SPIRVOpcode,
+      opcode: NonEmptyString,
       words: Vec[Word],
       shapes: Vec[OperandShape],
-      kinds: Map[SPIRVOperandKind, OperandKindInfo],
+      kinds: Map[NonEmptyString, OperandKindInfo],
       index: Int,
       offset: Int,
       fields: Chain[Vec[Operand]]
@@ -99,11 +103,11 @@ private[v1_6] object OperandDecoder {
     }
 
   private def decodeRepeated(
-      opcode: SPIRVOpcode,
-      kind: SPIRVOperandKind,
+      opcode: NonEmptyString,
+      kind: NonEmptyString,
       words: Vec[Word],
       offset: Int,
-      kinds: Map[SPIRVOperandKind, OperandKindInfo],
+      kinds: Map[NonEmptyString, OperandKindInfo],
       operands: Chain[Operand]
   ): Either[InstructionDecodeError, (Chain[Operand], Int)] =
     if (offset >= words.size) Right(operands -> offset)
@@ -112,7 +116,7 @@ private[v1_6] object OperandDecoder {
         decodeRepeated(opcode, kind, words, next, kinds, operands.append(operand))
       }
 
-  def minimumWords(shapes: Vec[OperandShape], kinds: Map[SPIRVOperandKind, OperandKindInfo]): Vec[Word] =
+  def minimumWords(shapes: Vec[OperandShape], kinds: Map[NonEmptyString, OperandKindInfo]): Vec[Word] =
     shapes.flatMap { shape =>
       shape.quantifier match {
         case OperandQuantifier.One      => minimumOperand(shape.kind, kinds)
@@ -121,7 +125,7 @@ private[v1_6] object OperandDecoder {
       }
     }
 
-  private def minimumOperand(kind: SPIRVOperandKind, kinds: Map[SPIRVOperandKind, OperandKindInfo]): Vec[Word] =
+  private def minimumOperand(kind: NonEmptyString, kinds: Map[NonEmptyString, OperandKindInfo]): Vec[Word] =
     if (kind.raw == "LiteralString") Vec(Word(0))
     else if (kind.raw.startsWith("Pair")) Vec(Word(0), Word(0))
     else kinds.get(kind) match {
@@ -134,11 +138,11 @@ private[v1_6] object OperandDecoder {
     }
 
   private def decodeOne(
-      opcode: SPIRVOpcode,
-      kind: SPIRVOperandKind,
+      opcode: NonEmptyString,
+      kind: NonEmptyString,
       words: Vec[Word],
       offset: Int,
-      kinds: Map[SPIRVOperandKind, OperandKindInfo]
+      kinds: Map[NonEmptyString, OperandKindInfo]
   ): Either[InstructionDecodeError, (Operand, Int)] =
     if (offset >= words.size)
       Left(InstructionDecodeError.InvalidOperandCount(opcode, s"missing $kind at word $offset"))
@@ -156,13 +160,16 @@ private[v1_6] object OperandDecoder {
     }
 
   private def decodeString(
-      opcode: SPIRVOpcode,
-      kind: SPIRVOperandKind,
+      opcode: NonEmptyString,
+      kind: NonEmptyString,
       words: Vec[Word],
       offset: Int
   ): Either[InstructionDecodeError, (Operand, Int)] =
     words.indexWhere(
-      word => (0 until 4).exists(byte => Bits.unsignedField(word.toUnsigned.raw, byte * 8, BitWidth(8)) == 0L),
+      word =>
+        (0 until 4).exists(byte =>
+          Bits.unsignedField(word.toUnsigned.raw, byte * 8, 8) == 0L
+        ),
       offset
     ) match {
       case -1  => Left(InstructionDecodeError.UnterminatedString(opcode))
@@ -170,11 +177,11 @@ private[v1_6] object OperandDecoder {
     }
 
   private def decodeValueEnum(
-      opcode: SPIRVOpcode,
+      opcode: NonEmptyString,
       info: OperandKindInfo,
       words: Vec[Word],
       offset: Int,
-      kinds: Map[SPIRVOperandKind, OperandKindInfo]
+      kinds: Map[NonEmptyString, OperandKindInfo]
   ): Either[InstructionDecodeError, (Operand, Int)] = {
     val value = words(offset).toUnsigned.raw
     info.enumerants.find(_.value == value) match {
@@ -184,11 +191,11 @@ private[v1_6] object OperandDecoder {
   }
 
   private def decodeBitEnum(
-      opcode: SPIRVOpcode,
+      opcode: NonEmptyString,
       info: OperandKindInfo,
       words: Vec[Word],
       offset: Int,
-      kinds: Map[SPIRVOperandKind, OperandKindInfo]
+      kinds: Map[NonEmptyString, OperandKindInfo]
   ): Either[InstructionDecodeError, (Operand, Int)] = {
     val value       = words(offset).toUnsigned.raw
     val allowedMask = info.enumerants.foldLeft(0L)(_ | _.value)
@@ -202,12 +209,12 @@ private[v1_6] object OperandDecoder {
   }
 
   private def decodeParameters(
-      opcode: SPIRVOpcode,
-      outerKind: SPIRVOperandKind,
+      opcode: NonEmptyString,
+      outerKind: NonEmptyString,
       words: Vec[Word],
       offset: Int,
-      parameterKinds: Vec[SPIRVOperandKind],
-      kinds: Map[SPIRVOperandKind, OperandKindInfo]
+      parameterKinds: Vec[NonEmptyString],
+      kinds: Map[NonEmptyString, OperandKindInfo]
   ): Either[InstructionDecodeError, (Operand, Int)] =
     parameterKinds
       .foldLeft[Either[InstructionDecodeError, Int]](Right(offset + 1)) { (next, parameterKind) =>

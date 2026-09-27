@@ -1,10 +1,11 @@
 package net.kurobako.gemstone.abi
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonNegative
+
 import ABI.*
-
-import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, Vec}
-import net.kurobako.gemstone.memory.MemoryValueByteWidth
-
+import net.kurobako.gemstone.{NonEmptyVec, Vec}
 import scala.compiletime.testing.typeCheckErrors
 
 final class ABISuite extends munit.FunSuite {
@@ -12,40 +13,39 @@ final class ABISuite extends munit.FunSuite {
     val input = Pointer.input[Int, One](Vec(7)).fold(error => fail(error.message), value => value)
     assertEquals(input.read(), Right(7))
 
-    val output = Pointer.output[Int, One](NonNegativeInt(1)).fold(error => fail(error.message), value => value)
+    val output = Pointer.output[Int, One](1).fold(error => fail(error.message), value => value)
     assertEquals(output.snapshot, Right(None))
     assertEquals(output.write(11), Right(()))
     assert(output.snapshot.exists(_.exists(_.sameElements(Seq(11)))))
 
     val partial =
-      Pointer.output[Int, Fixed[2]](NonNegativeInt(2)).fold(error => fail(error.message), value => value)
-    assertEquals(partial.write(3, NonNegativeInt.Zero), Right(()))
+      Pointer.output[Int, Fixed[2]](2).fold(error => fail(error.message), value => value)
+    assertEquals(partial.write(3, 0), Right(()))
     assertEquals(partial.snapshot, Right(None))
-    assertEquals(partial.write(5, NonNegativeInt(1)), Right(()))
+    assertEquals(partial.write(5, 1), Right(()))
     assert(partial.snapshot.exists(_.exists(_.sameElements(Seq(3, 5)))))
   }
 
   test("pointer capabilities are bounds checked") {
     val values = Pointer.inputOutput[Int, Fixed[2]](Vec(1, 2)).fold(error => fail(error.message), value => value)
-    assertEquals(values.read(NonNegativeInt(1)), Right(2))
-    assert(values.write(3, NonNegativeInt(2)).isLeft)
+    assertEquals(values.read(1), Right(2))
+    assert(values.write(3, 2).isLeft)
   }
 
   test("pointer extents validate their runtime storage shape") {
     assert(Pointer.input[Int, One](Vec(1, 2)).isLeft)
-    assert(Pointer.output[Int, One](NonNegativeInt.Zero).isLeft)
+    assert(Pointer.output[Int, One](0).isLeft)
     assert(Pointer.input[Int, Fixed[2]](Vec(1)).isLeft)
-    assert(Pointer.output[Int, Fixed[2]](NonNegativeInt(3)).isLeft)
+    assert(Pointer.output[Int, Fixed[2]](3).isLeft)
     assert(
       typeCheckErrors("""
         import net.kurobako.gemstone.abi.ABI.*
-        import net.kurobako.gemstone.NonNegativeInt
-        Pointer.output[Int, Fixed[0]](NonNegativeInt.Zero)
+        Pointer.output[Int, Fixed[0]](0)
       """).nonEmpty
     )
 
     val empty =
-      Pointer.output[Byte, CountedBy["count"]](NonNegativeInt.Zero).fold(error => fail(error.message), value => value)
+      Pointer.output[Byte, CountedBy["count"]](0).fold(error => fail(error.message), value => value)
     assert(empty.snapshot.exists(_.exists(_.isEmpty)))
 
     val bytes =
@@ -77,7 +77,7 @@ final class ABISuite extends munit.FunSuite {
   }
 
   test("nominal C values are constructible without losing their C type identity") {
-    val flags = CValue.fromUnsignedLong["ze_init_flags_t"](3L, MemoryValueByteWidth(4))
+    val flags = CValue.fromUnsignedLong["ze_init_flags_t"](3L, 4)
 
     assertEquals(flags.byteSize.raw, 4)
     assertEquals(flags.scalarByteSize.raw, 4)
@@ -86,8 +86,7 @@ final class ABISuite extends munit.FunSuite {
 
     val errors = typeCheckErrors("""
       import net.kurobako.gemstone.abi.ABI.*
-      import net.kurobako.gemstone.memory.MemoryValueByteWidth
-      val flags: CValue["ze_init_flags_t"] = CValue.fromUnsignedLong["other_flags_t"](1L, MemoryValueByteWidth(4))
+      val flags: CValue["ze_init_flags_t"] = CValue.fromUnsignedLong["other_flags_t"](1L, 4)
     """)
     assert(errors.nonEmpty)
 

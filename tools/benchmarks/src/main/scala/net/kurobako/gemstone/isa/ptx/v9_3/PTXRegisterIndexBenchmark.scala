@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Constraint.Positive
+
 import net.kurobako.gemstone.isa.ptx.v9_3.VMRegisterFile
 
 import net.kurobako.gemstone.PlatformTime
-import net.kurobako.gemstone.PositiveInt
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments
 import net.kurobako.gemstone.benchmarks.BenchmarkName
 import net.kurobako.gemstone.benchmarks.PlatformMetrics
@@ -16,10 +17,10 @@ object PTXRegisterIndexBenchmark {
     case Numbered, Named
   }
 
-  private final case class Options(
+  private case class Options(
       kind: RegisterKind,
-      names: PositiveInt,
-      iterations: PositiveInt
+      names: Positive[Int],
+      iterations: Positive[Int]
   )
 
   private val name    = BenchmarkName("ptx-register-index")
@@ -28,9 +29,9 @@ object PTXRegisterIndexBenchmark {
       .validate("kind must be numbered or named")(value => value == "numbered" || value == "named")
       .map(value => if (value == "named") RegisterKind.Named else RegisterKind.Numbered),
     Opts.option[Int]("names", help = "Distinct register names").withDefault(6144)
-      .validate("names must be positive")(_ > 0).map(PositiveInt.unsafe),
+      .validate("names must be positive")(_ > 0).map(Positive.unsafe),
     Opts.option[Int]("iterations", help = "Register index operations").withDefault(1000000)
-      .validate("iterations must be positive")(_ > 0).map(PositiveInt.unsafe)
+      .validate("iterations must be positive")(_ > 0).map(Positive.unsafe)
   ).mapN(Options(_, _, _))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -55,11 +56,11 @@ object PTXRegisterIndexBenchmark {
       before <- allocatedBefore
       after  <- PlatformMetrics.allocatedBytes
       if after >= before
-    } yield (after - before).raw
+    } yield after - before
     Console.out.println(
       s"kind=${parsed.kind.toString.toLowerCase(java.util.Locale.ROOT)} names=${parsed.names} iterations=${parsed.iterations} " +
         s"nsPerIndex=${elapsed.toDouble / parsed.iterations.raw} " +
-        s"bytesPerIndex=${allocated.fold(Double.NaN)(_.toDouble / parsed.iterations.raw)} checksum=$checksum"
+        s"bytesPerIndex=${allocated.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
     )
   }
 }

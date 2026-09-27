@@ -1,7 +1,11 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
+
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.{Bits, ByteRange, ScalarByteWidth}
+import net.kurobako.gemstone.binary.{Bits, ByteRange}
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.isa.*
@@ -21,14 +25,14 @@ final class CodeObjectIndexSuite extends munit.FunSuite with CodeObjectTestSuppo
     assertEquals(indexed.target, Target("gfx900"))
     assertEquals(indexed.kernelNames, Set("kernel"))
     assertEquals(
-      indexed.global(GlobalName("device_global")).map { (address, size) =>
+      indexed.global(NonEmptyString("device_global")).map { (address, size) =>
         val rawAddress: Long = address.raw
         val rawSize: Int     = size.raw
         rawAddress -> rawSize
       },
       Some(0x3000L -> 16)
     )
-    assertEquals(indexed.writeGlobal(GlobalName("device_global"), 4L, Vec[Byte](9, 8, 7, 6)), Right(()))
+    assertEquals(indexed.writeGlobal(NonEmptyString("device_global"), 4L, Vec[Byte](9, 8, 7, 6)), Right(()))
 
     // The index owns its image: mutating the caller's input after indexing must
     // not affect later lazy kernel materialization.
@@ -51,7 +55,7 @@ final class CodeObjectIndexSuite extends munit.FunSuite with CodeObjectTestSuppo
       assertEquals(kernel.privateSegmentSize, 8)
       assertEquals(kernel.computePgmRsrc2, 0x80)
       assertEquals(kernel.kernelCodeProperties, 0x0a)
-      assertEquals(kernel.code, LittleEndian.toVec(0xbf810000L, ScalarByteWidth.Dword))
+      assertEquals(kernel.code, LittleEndian.toVec(0xbf810000L, 4))
       assertEquals(kernel.readOnlyAddress, 0x2000L)
       assert(kernel.readOnly.length > 64)
       assertEquals(
@@ -64,7 +68,7 @@ final class CodeObjectIndexSuite extends munit.FunSuite with CodeObjectTestSuppo
   test("identical ELF indexes isolate mutable globals across cached views") {
     val first  = CodeObject.index(Vec.unsafeFromArray(minimalCodeObject())).toOption.get
     val second = CodeObject.index(Vec.unsafeFromArray(minimalCodeObject())).toOption.get
-    assertEquals(first.writeGlobal(GlobalName("device_global"), 4L, Vec[Byte](9, 8, 7, 6)), Right(()))
+    assertEquals(first.writeGlobal(NonEmptyString("device_global"), 4L, Vec[Byte](9, 8, 7, 6)), Right(()))
     assertEquals(
       second.kernel("kernel").toOption.get.globalMemory.find(_._1 == 0x3000L).map { case (_, bytes) =>
         bytes.drop(4).take(4).toSeq

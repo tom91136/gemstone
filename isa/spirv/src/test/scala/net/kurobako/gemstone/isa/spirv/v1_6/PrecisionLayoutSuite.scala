@@ -1,39 +1,47 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
+
+import net.kurobako.gemstone.Constraint.{IntBetween, OneOf}
+
+import net.kurobako.gemstone.Constraint.NonNegative
+
+import net.kurobako.gemstone.binary.Widths.*
+
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
 
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.{ByteRange, FloatingPointWidth, IEEE754, LittleEndian, ScalarByteWidth}
-import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.binary.{ByteRange, IEEE754, LittleEndian}
+import net.kurobako.gemstone.NonEmptyVec
 
 final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSupport {
   private def o(kind: String, values: Int*): Operand = Operand(
-    SPIRVOperandKind.either(kind).fold(message => fail(message), valid => valid),
+    NonEmptyString.either(kind).fold(message => fail(message), valid => valid),
     NonEmptyVec.fromVec(Vec.from(values.map(Word(_))))
       .fold(message => throw IllegalArgumentException(message), value => value)
   )
-  private def r(value: Int)                                   = o("IdResult", value)
-  private def literal(value: Long, width: FloatingPointWidth) = {
+  private def r(value: Int)                                    = o("IdResult", value)
+  private def literal(value: Long, width: OneOf[(16, 32, 64)]) = {
     val byteWidth = width.scalarByteWidth
     Operand(
-      SPIRVOperandKind("LiteralContextDependentNumber"),
+      NonEmptyString("LiteralContextDependentNumber"),
       NonEmptyVec.unsafeFromVec(Vec.from(LittleEndian.toArray(value, byteWidth).grouped(4).map { bytes =>
-        val chunkWidth = ScalarByteWidth.either(bytes.length)
+        val chunkWidth = IntBetween.either[0, 8](bytes.length)
           .fold(message => throw IllegalArgumentException(message), value => value)
         Word(LittleEndian.decode(bytes, 0, chunkWidth).toInt)
       }))
     )
   }
-  private val entry      = Operand(SPIRVOperandKind("LiteralString"), Vec.nonEmpty(Word(0x6b)))
+  private val entry      = Operand(NonEmptyString("LiteralString"), Vec.nonEmpty(Word(0x6b)))
   private val allocation = MemoryRegion(1)
   private final class Memory(size: Int) extends net.kurobako.gemstone.vm.Memory {
-    val bytes                                                                   = Array.ofDim[Byte](size)
-    def read(id: MemoryRegion, offset: NonNegativeLong, length: NonNegativeInt) = {
+    val bytes                                                                       = Array.ofDim[Byte](size)
+    def read(id: MemoryRegion, offset: NonNegative[Long], length: NonNegative[Int]) = {
       assert(id == allocation && ByteRange.contains(size, offset.raw, length.raw.toLong))
       Right(Vec.from(bytes.slice(offset.raw.toInt, offset.raw.toInt + length.raw)))
     }
-    def write(id: MemoryRegion, offset: NonNegativeLong, value: Vec[Byte]) = {
+    def write(id: MemoryRegion, offset: NonNegative[Long], value: Vec[Byte]) = {
       assert(id == allocation && ByteRange.contains(size, offset.raw, value.size))
       val _ = value.copyToArray(bytes, offset.raw.toInt, value.size); Right(())
     }
@@ -47,7 +55,7 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       Endianness.Little
     )
     val dispatch =
-      KernelTask.validated(KernelName("k"), Dimensions.One, Dimensions.One, args).toOption.get
+      KernelTask.validated(NonEmptyString("k"), Dimensions.One, Dimensions.One, args).toOption.get
     assertEquals(
       executeLoaded(
         VMCompiler.compile(module, Validation.Environment.OpenCLCompute)
@@ -61,12 +69,12 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
   }
   for {
     (width, count) <- Seq(
-      FloatingPointWidth(32) -> 4,
-      FloatingPointWidth(32) -> 8,
-      FloatingPointWidth(32) -> 16,
-      FloatingPointWidth(64) -> 3,
-      FloatingPointWidth(64) -> 4,
-      FloatingPointWidth(64) -> 8
+      OneOf.unsafe[(16, 32, 64)](32) -> 4,
+      OneOf.unsafe[(16, 32, 64)](32) -> 8,
+      OneOf.unsafe[(16, 32, 64)](32) -> 16,
+      OneOf.unsafe[(16, 32, 64)](64) -> 3,
+      OneOf.unsafe[(16, 32, 64)](64) -> 4,
+      OneOf.unsafe[(16, 32, 64)](64) -> 8
     )
     byValue <- Seq(false, true)
   }
@@ -78,10 +86,10 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       val size      = align * 2
       val expected  = Array.ofDim[Byte](size * 2)
       for (base <- Seq(0, size)) {
-        val baseOffset = NonNegativeInt.either(base).fold(message => fail(message), value => value)
+        val baseOffset = NonNegative.either(base).fold(message => fail(message), value => value)
         LittleEndian.write(IEEE754.fromDouble(2.25, width), expected, baseOffset.raw, byteWidth)
         for (lane <- 0 until count) {
-          val laneOffset = NonNegativeInt.either(base + align + lane * byteWidth.raw)
+          val laneOffset = NonNegative.either(base + align + lane * byteWidth.raw)
             .fold(message => fail(message), value => value)
           LittleEndian.write(IEEE754.fromDouble(1.5, width), expected, laneOffset.raw, byteWidth)
         }
@@ -94,7 +102,7 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.TypePointer(r(5), o("StorageClass", 5), r(4)),
         Instruction.TypePointer(r(6), o("StorageClass", 7), r(4)),
         Instruction.TypeInt(r(7), o("LiteralInteger", 32), o("LiteralInteger", 0)),
-        Instruction.Constant(r(7), r(8), literal(1, FloatingPointWidth(32))),
+        Instruction.Constant(r(7), r(8), literal(1, OneOf.unsafe[(16, 32, 64)](32))),
         Instruction.Constant(r(2), r(9), literal(IEEE754.fromDouble(1.5, width), width)),
         Instruction.Constant(r(2), r(10), literal(IEEE754.fromDouble(2.25, width), width)),
         Instruction.ConstantComposite(r(3), r(11), Vec.fill(count)(r(9))),
@@ -119,7 +127,7 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         )
       val args =
         (if (byValue) Vec[KernelTask.Argument](KernelTask.Argument.Scalar(Vec.from(expected.take(size))))
-         else Vec.empty[KernelTask.Argument]) :+ KernelTask.Argument.Memory(allocation, NonNegativeLong(0L))
+         else Vec.empty[KernelTask.Argument]) :+ KernelTask.Argument.Memory(allocation, 0L)
       val memory = Memory(expected.length)
       run(instructions, args, memory)
       assertEquals(memory.bytes.toSeq, expected.toSeq)
@@ -138,7 +146,7 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.TypeFloat(r(3), o("LiteralInteger", 16), None),
         Instruction.TypePointer(r(4), o("StorageClass", 5), r(3)),
         Instruction.TypeFunction(r(5), r(1), Vec(r(4))),
-        Instruction.Constant(r(2), r(6), literal(IEEE754.doubleToBinary64(input), FloatingPointWidth(64))),
+        Instruction.Constant(r(2), r(6), literal(IEEE754.doubleToBinary64(input), OneOf.unsafe[(16, 32, 64)](64))),
         Instruction.EntryPoint(o("ExecutionModel", 6), r(20), entry, Vec.empty),
         Instruction.Function(r(1), r(20), o("FunctionControl", 0), r(5)),
         Instruction.FunctionParameter(r(4), r(21)),
@@ -149,7 +157,7 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.FunctionEnd()
       )
       val memory = Memory(2)
-      run(instructions, Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L))), memory)
-      assertEquals(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth(2)), expected)
+      run(instructions, Vec(KernelTask.Argument.Memory(allocation, 0L)), memory)
+      assertEquals(LittleEndian.decode(memory.bytes, 0, 2), expected)
     }
 }

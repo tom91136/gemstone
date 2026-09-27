@@ -1,6 +1,9 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+import net.kurobako.gemstone.NonEmptyVec
 
 import Program.*
 
@@ -9,10 +12,9 @@ import VMExecution.*
 
 import net.kurobako.gemstone.Vec
 
-import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.memory.ArrayCheckedMemory
 import net.kurobako.gemstone.memory.GuestAddress
-import net.kurobako.gemstone.memory.MemoryValueByteWidth
 import net.kurobako.gemstone.vm.{Fault, LaunchGeometry, Scheduler, TaskControl, TaskLimits}
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
@@ -45,18 +47,18 @@ final class InterpreterSuite extends munit.FunSuite {
         ret;
       }"""
     val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(NonNegativeInt.unsafe(3 * size))
+    val memory = ArrayCheckedMemory.allocate(NonNegative.unsafe(3 * size))
     val start  = memory.allocation.start
     assertEquals(
       VMInterpreter.execute(
         kernel,
         geometry(1, 1),
-        Map(ParameterName("output") -> Argument.fromLong(start.raw)),
+        Map(NonEmptyString("output") -> Argument.fromLong(start.raw)),
         memory
       ),
       Right(())
     )
-    val byteWidth = MemoryValueByteWidth.unsafe(size)
+    val byteWidth = IntBetween.unsafe[1, 8](size)
     assertEquals(memory.readLittleEndian(start, byteWidth).toOption.get, 7L)
     assertEquals(
       memory.readLittleEndian(start.offset(size.toLong), byteWidth).toOption.get,
@@ -84,18 +86,18 @@ final class InterpreterSuite extends munit.FunSuite {
         ret;
       }"""
     val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(NonNegativeInt.unsafe(33 * size))
+    val memory = ArrayCheckedMemory.allocate(NonNegative.unsafe(33 * size))
     val start  = memory.allocation.start
     assertEquals(
       VMInterpreter.execute(
         kernel,
         geometry(1, 32),
-        Map(ParameterName("output") -> Argument.fromLong(start.raw)),
+        Map(NonEmptyString("output") -> Argument.fromLong(start.raw)),
         memory
       ),
       Right(())
     )
-    val byteWidth = MemoryValueByteWidth.unsafe(size)
+    val byteWidth = IntBetween.unsafe[1, 8](size)
     val observed  = (1 to 32).map(i => memory.readLittleEndian(start.offset(i.toLong * size), byteWidth).toOption.get)
     assertEquals(observed.count(_ == 0L), 1)
     assertEquals(observed.count(_ == 1L), 31)
@@ -116,14 +118,14 @@ final class InterpreterSuite extends munit.FunSuite {
         ret;
       }"""
     val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(NonNegativeInt(8))
+    val memory = ArrayCheckedMemory.allocate(8)
     val start  = memory.allocation.start
     assertEquals(memory.writeInt32(start, 3), Right(()))
     assertEquals(
       VMInterpreter.execute(
         kernel,
         geometry(1, 1),
-        Map(ParameterName("output") -> Argument.fromLong(start.raw)),
+        Map(NonEmptyString("output") -> Argument.fromLong(start.raw)),
         memory
       ),
       Right(())
@@ -146,14 +148,14 @@ final class InterpreterSuite extends munit.FunSuite {
         ret;
       }"""
     val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(NonNegativeInt(8))
+    val memory = ArrayCheckedMemory.allocate(8)
     val start  = memory.allocation.start
     assertEquals(memory.writeInt32(start, 3), Right(()))
     assertEquals(
       VMInterpreter.execute(
         kernel,
         geometry(1, 1),
-        Map(ParameterName("output") -> Argument.fromLong(start.raw)),
+        Map(NonEmptyString("output") -> Argument.fromLong(start.raw)),
         memory
       ),
       Right(())
@@ -176,14 +178,14 @@ final class InterpreterSuite extends munit.FunSuite {
         ret;
       }"""
     val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(NonNegativeInt(8))
+    val memory = ArrayCheckedMemory.allocate(8)
     val start  = memory.allocation.start
     assertEquals(memory.writeInt32(start, 7), Right(()))
     assertEquals(
       VMInterpreter.execute(
         kernel,
         geometry(1, 1),
-        Map(ParameterName("output") -> Argument.fromLong(start.raw)),
+        Map(NonEmptyString("output") -> Argument.fromLong(start.raw)),
         memory
       ),
       Right(())
@@ -215,14 +217,14 @@ final class InterpreterSuite extends munit.FunSuite {
         ret;
       }"""
     val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(NonNegativeInt(20))
+    val memory = ArrayCheckedMemory.allocate(20)
     val start  = memory.allocation.start
     assertEquals(memory.writeInt32(start, 7), Right(()))
     assertEquals(
       VMInterpreter.execute(
         kernel,
         geometry(1, 1),
-        Map(ParameterName("output") -> Argument.fromLong(start.raw)),
+        Map(NonEmptyString("output") -> Argument.fromLong(start.raw)),
         memory
       ),
       Right(())
@@ -257,11 +259,11 @@ final class InterpreterSuite extends munit.FunSuite {
         ret;
       }"""
     val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(NonNegativeInt(16))
+    val memory = ArrayCheckedMemory.allocate(16)
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 4),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assertEquals(result, Right(()))
@@ -306,11 +308,11 @@ final class InterpreterSuite extends munit.FunSuite {
         ret;
       }"""
     val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(NonNegativeInt(8))
+    val memory = ArrayCheckedMemory.allocate(8)
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 2),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assertEquals(result, Right(()))
@@ -341,11 +343,11 @@ final class InterpreterSuite extends munit.FunSuite {
         ret;
       }"""
     val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(NonNegativeInt(4))
+    val memory = ArrayCheckedMemory.allocate(4)
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 1),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assertEquals(result, Right(()))
@@ -355,11 +357,11 @@ final class InterpreterSuite extends munit.FunSuite {
   test("atomics in device callees remain correct across parallel blocks") {
     val parallelCalls = java.util.concurrent.atomic.AtomicInteger(0)
     final class RecordingScheduler extends Scheduler {
-      override val parallelism: PositiveInt                                                    = PositiveInt(4)
-      override def shouldParallel(tasks: NonNegativeLong, workItems: NonNegativeLong): Boolean = tasks.raw > 1L
+      override val parallelism: Positive[Int]                                                      = 4
+      override def shouldParallel(tasks: NonNegative[Long], workItems: NonNegative[Long]): Boolean = tasks.raw > 1L
       override def parallelFor(
-          tasks: NonNegativeLong
-      )(task: NonNegativeLong => Either[Fault, Unit]) = {
+          tasks: NonNegative[Long]
+      )(task: NonNegative[Long] => Either[Fault, Unit]) = {
         parallelCalls.incrementAndGet()
         Scheduler.Sequential.parallelFor(tasks)(task)
       }
@@ -384,13 +386,13 @@ final class InterpreterSuite extends munit.FunSuite {
         ret;
       }"""
     val kernel    = VMCompiler.compile(source).fold(error => fail(error.toString), value => value)
-    val memory    = ArrayCheckedMemory.allocate(NonNegativeInt(4))
+    val memory    = ArrayCheckedMemory.allocate(4)
     val scheduler = RecordingScheduler()
     val control   = TaskControl.forScheduler(scheduler = scheduler)
     val result    = VMInterpreter.execute(
       kernel,
       geometry(4, 1),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory,
       control,
       scheduler
@@ -434,18 +436,18 @@ final class InterpreterSuite extends munit.FunSuite {
 
   test("parse and deterministically execute integer vector addition") {
     val kernel = VMCompiler.compile(vectorAdd).toOption.get
-    assertEquals(kernel.name, KernelName("vector_add"))
+    assertEquals(kernel.name, NonEmptyString("vector_add"))
     assertEquals(
       kernel.parameters.toSeq,
       Seq(
-        KernelParameter(ParameterName("input_a"), PositiveInt(8)),
-        KernelParameter(ParameterName("input_b"), PositiveInt(8)),
-        KernelParameter(ParameterName("output"), PositiveInt(8))
+        KernelParameter(NonEmptyString("input_a"), 8),
+        KernelParameter(NonEmptyString("input_b"), 8),
+        KernelParameter(NonEmptyString("output"), 8)
       )
     )
 
     val memory =
-      ArrayCheckedMemory.allocate(NonNegativeInt(192), provenance = NonEmptyString("vector-add arena"))
+      ArrayCheckedMemory.allocate(192, provenance = NonEmptyString("vector-add arena"))
     val base   = memory.allocation.start
     val a      = base
     val b      = base.offset(64L)
@@ -462,9 +464,9 @@ final class InterpreterSuite extends munit.FunSuite {
         kernel,
         geometry(1, values.size),
         Map(
-          ParameterName("input_a") -> Argument.fromLong(a.raw),
-          ParameterName("input_b") -> Argument.fromLong(b.raw),
-          ParameterName("output")  -> Argument.fromLong(output.raw)
+          NonEmptyString("input_a") -> Argument.fromLong(a.raw),
+          NonEmptyString("input_b") -> Argument.fromLong(b.raw),
+          NonEmptyString("output")  -> Argument.fromLong(output.raw)
         ),
         memory
       )
@@ -497,12 +499,12 @@ final class InterpreterSuite extends munit.FunSuite {
       |}
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val memory = ArrayCheckedMemory.allocate(NonNegativeInt(16))
+    val memory = ArrayCheckedMemory.allocate(16)
     val base   = memory.allocation.start
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 1),
-      Map(ParameterName("output") -> Argument.fromLong(base.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(base.raw)),
       memory
     )
     assert(result.isRight, result.toString)
@@ -524,18 +526,18 @@ final class InterpreterSuite extends munit.FunSuite {
       |}
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    assertEquals(kernel.sharedSymbols.keySet, Set(SymbolName("first"), SymbolName("second")))
-    assertNotEquals(kernel.sharedSymbols(SymbolName("first")), kernel.sharedSymbols(SymbolName("second")))
+    assertEquals(kernel.sharedSymbols.keySet, Set(NonEmptyString("first"), NonEmptyString("second")))
+    assertNotEquals(kernel.sharedSymbols(NonEmptyString("first")), kernel.sharedSymbols(NonEmptyString("second")))
     assert(
       kernel.instructions.exists {
-        case VMIR.Instruction.Move(_, Value.Symbol(name), _) if name == SymbolName("first") => true
-        case _                                                                              => false
+        case VMIR.Instruction.Move(_, Value.Symbol(name), _) if name == NonEmptyString("first") => true
+        case _                                                                                  => false
       }
     )
     assert(
       kernel.instructions.exists {
-        case VMIR.Instruction.Move(_, Value.Symbol(name), _) if name == SymbolName("second") => true
-        case _                                                                               => false
+        case VMIR.Instruction.Move(_, Value.Symbol(name), _) if name == NonEmptyString("second") => true
+        case _                                                                                   => false
       }
     )
   }
@@ -562,11 +564,11 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory =
-      ArrayCheckedMemory.allocate(NonNegativeInt(4), provenance = NonEmptyString("generic-shared"))
+      ArrayCheckedMemory.allocate(4, provenance = NonEmptyString("generic-shared"))
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 1),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
@@ -604,31 +606,31 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory =
-      ArrayCheckedMemory.allocate(NonNegativeInt(32), provenance = NonEmptyString("integer-division"))
+      ArrayCheckedMemory.allocate(32, provenance = NonEmptyString("integer-division"))
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 1),
       Map(
-        ParameterName("dividend")          -> Argument.fromLong(-21L),
-        ParameterName("unsigned_dividend") -> Argument.fromLong(-1L),
-        ParameterName("divisor")           -> Argument.fromLong(3L),
-        ParameterName("unsigned_divisor")  -> Argument.fromLong(2L),
-        ParameterName("output")            -> Argument.fromLong(memory.allocation.start.raw)
+        NonEmptyString("dividend")          -> Argument.fromLong(-21L),
+        NonEmptyString("unsigned_dividend") -> Argument.fromLong(-1L),
+        NonEmptyString("divisor")           -> Argument.fromLong(3L),
+        NonEmptyString("unsigned_divisor")  -> Argument.fromLong(2L),
+        NonEmptyString("output")            -> Argument.fromLong(memory.allocation.start.raw)
       ),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth.Qword).toOption.get, -7L)
+    assertEquals(memory.readLittleEndian(memory.allocation.start, 8).toOption.get, -7L)
     assertEquals(
-      memory.readLittleEndian(memory.allocation.start.offset(8L), MemoryValueByteWidth.Qword).toOption.get,
+      memory.readLittleEndian(memory.allocation.start.offset(8L), 8).toOption.get,
       java.lang.Long.divideUnsigned(-1L, 2L)
     )
     assertEquals(
-      memory.readLittleEndian(memory.allocation.start.offset(16L), MemoryValueByteWidth.Qword).toOption.get,
+      memory.readLittleEndian(memory.allocation.start.offset(16L), 8).toOption.get,
       0L
     )
     assertEquals(
-      memory.readLittleEndian(memory.allocation.start.offset(24L), MemoryValueByteWidth.Qword).toOption.get,
+      memory.readLittleEndian(memory.allocation.start.offset(24L), 8).toOption.get,
       java.lang.Long.remainderUnsigned(-1L, 2L)
     )
   }
@@ -660,11 +662,11 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory =
-      ArrayCheckedMemory.allocate(NonNegativeInt(16), provenance = NonEmptyString("divergent-barrier"))
+      ArrayCheckedMemory.allocate(16, provenance = NonEmptyString("divergent-barrier"))
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 4),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
@@ -707,18 +709,18 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(
-      NonNegativeInt(8),
+      8,
       provenance = NonEmptyString("divergent-workgroup-barrier-id")
     )
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 256),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth.Qword).toOption.get,
+      memory.readLittleEndian(memory.allocation.start, 8).toOption.get,
       0x3ff0000000000000L
     )
   }
@@ -754,13 +756,13 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(
-      NonNegativeInt(16),
+      16,
       provenance = NonEmptyString("divergent-warp-barrier")
     )
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 4),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
@@ -792,11 +794,11 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory =
-      ArrayCheckedMemory.allocate(NonNegativeInt(16), provenance = NonEmptyString("sync-warp-shuffle"))
+      ArrayCheckedMemory.allocate(16, provenance = NonEmptyString("sync-warp-shuffle"))
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 4),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
@@ -825,13 +827,13 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(
-      NonNegativeInt.unsafe(32 * 4),
+      NonNegative.unsafe(32 * 4),
       provenance = NonEmptyString("segmented-warp-shuffle")
     )
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 32),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
@@ -868,11 +870,11 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), identity)
     val memory =
-      ArrayCheckedMemory.allocate(NonNegativeInt(16), provenance = NonEmptyString("funnel-shift"))
+      ArrayCheckedMemory.allocate(16, provenance = NonEmptyString("funnel-shift"))
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 1),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
@@ -901,13 +903,13 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), identity)
     val memory = ArrayCheckedMemory.allocate(
-      NonNegativeInt(8),
+      8,
       provenance = NonEmptyString("immediate-local-vector-store")
     )
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 1),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
@@ -935,11 +937,11 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), identity)
     val memory =
-      ArrayCheckedMemory.allocate(NonNegativeInt(4), provenance = NonEmptyString("signed-wide-multiply"))
+      ArrayCheckedMemory.allocate(4, provenance = NonEmptyString("signed-wide-multiply"))
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 1),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
@@ -962,16 +964,16 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory =
-      ArrayCheckedMemory.allocate(NonNegativeInt(8), provenance = NonEmptyString("64-bit-warp-shuffle"))
+      ArrayCheckedMemory.allocate(8, provenance = NonEmptyString("64-bit-warp-shuffle"))
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 4),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth.Qword).toOption,
+      memory.readLittleEndian(memory.allocation.start, 8).toOption,
       Some(0x1122334455667788L)
     )
   }
@@ -998,13 +1000,13 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(
-      NonNegativeInt(8),
+      8,
       provenance = NonEmptyString("inline-warp-shuffle-registers")
     )
     val result = VMInterpreter.execute(
       kernel,
       geometry(1, 2),
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
@@ -1044,17 +1046,17 @@ final class InterpreterSuite extends munit.FunSuite {
       |}
       |""".stripMargin
     val kernel     = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val groupSize  = Dimensions(PositiveInt(2), PositiveInt(2), PositiveInt(1))
-    val groupCount = Dimensions(PositiveInt(2), PositiveInt(2), PositiveInt(1))
+    val groupSize  = Dimensions(2, 2, 1)
+    val groupCount = Dimensions(2, 2, 1)
     val launch     = LaunchGeometry.forLaunch(groupSize, groupCount).toOption.get
     val memory     = ArrayCheckedMemory.allocate(
-      NonNegativeInt.unsafe(16 * 4),
+      NonNegative.unsafe(16 * 4),
       provenance = NonEmptyString("ptx-3d-coordinates")
     )
     val result = VMInterpreter.execute(
       kernel,
       launch,
-      Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
 
@@ -1079,8 +1081,8 @@ final class InterpreterSuite extends munit.FunSuite {
       kernel,
       geometry(1, 1),
       Map.empty,
-      ArrayCheckedMemory.allocate(NonNegativeInt(4)),
-      TaskControl.forScheduler(TaskLimits(maxInstructions = PositiveLong(8L), quantum = PositiveInt(2)))
+      ArrayCheckedMemory.allocate(4),
+      TaskControl.forScheduler(TaskLimits(maxInstructions = 8L, quantum = 2))
     )
     assert(result.left.exists(_.message.contains("instruction budget of 8")))
   }
@@ -1093,7 +1095,7 @@ final class InterpreterSuite extends munit.FunSuite {
       kernel,
       geometry(1, 1),
       Map.empty,
-      ArrayCheckedMemory.allocate(NonNegativeInt(4)),
+      ArrayCheckedMemory.allocate(4),
       control = TaskControl.forScheduler(cancellation = cancellation)
     )
     assertEquals(result, Left(ExecutionFault.Cancelled))

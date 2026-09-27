@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Constraint.NonNegative
+
 import CodeObject.*
 import VMIR.*
-
-import net.kurobako.gemstone.{NonNegativeLong, Vec}
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{Bits, ByteRange}
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
@@ -352,7 +353,7 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
       VMInterpreter.effectiveKernargSize(
         kernel,
         Vec(
-          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+          KernelTask.Argument.Memory(allocation, 0L),
           KernelTask.Argument.Scalar(Vec.fill(12)(0.toByte))
         )
       ),

@@ -867,23 +867,22 @@ std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
       const auto target = findPointer(reinterpret_cast<const void *>(static_cast<uintptr_t>(value)), &targetOffset);
       if (target && targetOffset < target->size) {
         source->pointerRelocations[offset] = {target, targetOffset};
-        result.push_back({RelocationSourceAllocation{AllocationId{static_cast<int64_t>(source->id)}},
-                          LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(target->id)},
+        result.push_back({RelocationSourceMemory{MemoryRegion{static_cast<int64_t>(source->id)}},
+                          LongPositive0{static_cast<int64_t>(offset)}, MemoryRegion{static_cast<int64_t>(target->id)},
                           LongPositive0{static_cast<int64_t>(targetOffset)}});
       }
     }
   }
   std::set<std::pair<uint64_t, uint64_t>> emitted;
   for (const auto &relocation : result) {
-    const auto *sourceId = std::get_if<RelocationSourceAllocation>(&relocation.source);
-    if (sourceId) emitted.emplace(static_cast<uint64_t>(sourceId->id.value), static_cast<uint64_t>(relocation.sourceOffset.value));
+    const auto *sourceId = std::get_if<RelocationSourceMemory>(&relocation.source);
+    if (sourceId) emitted.emplace(static_cast<uint64_t>(sourceId->region.value), static_cast<uint64_t>(relocation.sourceOffset.value));
   }
   for (const auto &source : snapshot) {
     for (const auto &[offset, target] : source->pointerRelocations) {
       if (emitted.count({source->id, offset}) != 0 || !target.first || target.second >= target.first->size) continue;
-      result.push_back({RelocationSourceAllocation{AllocationId{static_cast<int64_t>(source->id)}},
-                        LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(target.first->id)},
-                        LongPositive0{static_cast<int64_t>(target.second)}});
+      result.push_back({RelocationSourceMemory{MemoryRegion{static_cast<int64_t>(source->id)}}, LongPositive0{static_cast<int64_t>(offset)},
+                        MemoryRegion{static_cast<int64_t>(target.first->id)}, LongPositive0{static_cast<int64_t>(target.second)}});
       emitted.emplace(source->id, offset);
     }
   }
@@ -922,23 +921,23 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
       if (group[index] == 0 || group[index] > std::numeric_limits<uint32_t>::max()) return CL_INVALID_WORK_GROUP_SIZE;
     }
   }
-  std::vector<gemstone::execution::KernelArgument> arguments;
+  std::vector<gemstone::execution::Argument> arguments;
   arguments.reserve(kernel->arguments.size());
   std::vector<std::vector<uint8_t>> scalarStorage(kernel->arguments.size());
   std::vector<PointerRelocation> relocations;
   for (size_t index = 0; index < kernel->arguments.size(); ++index) {
     const auto &argument = kernel->arguments[index];
     if (argument.kind == ::KernelArgument::Kind::Local) {
-      arguments.emplace_back(KernelArgumentLocal{static_cast<int64_t>(argument.offset)});
+      arguments.emplace_back(ArgumentLocal{static_cast<int64_t>(argument.offset)});
     } else if (argument.kind == ::KernelArgument::Kind::Allocation) {
       arguments.emplace_back(
-          KernelArgumentAllocation{AllocationId{static_cast<int64_t>(argument.allocation->id)}, static_cast<int64_t>(argument.offset)});
+          ArgumentMemory{MemoryRegion{static_cast<int64_t>(argument.allocation->id)}, static_cast<int64_t>(argument.offset)});
     } else if (argument.kind == ::KernelArgument::Kind::SVM) {
       arguments.emplace_back(
-          KernelArgumentAllocation{AllocationId{static_cast<int64_t>(argument.allocation->id)}, static_cast<int64_t>(argument.offset)});
+          ArgumentMemory{MemoryRegion{static_cast<int64_t>(argument.allocation->id)}, static_cast<int64_t>(argument.offset)});
     } else {
       scalarStorage[index] = argument.bytes;
-      arguments.emplace_back(KernelArgumentScalar{scalarStorage[index]});
+      arguments.emplace_back(ArgumentScalar{scalarStorage[index]});
     }
   }
   auto memoryRelocations = collectRelocations(scannedBytes);
@@ -2623,9 +2622,9 @@ CL_API_ENTRY cl_kernel CL_API_CALL clCreateKernel(cl_program value, const char *
   kernel->parameterMetadata.reserve(remoteMetadata.parameters.size());
   for (const auto &parameter : remoteMetadata.parameters) {
     kernel->expectedArgumentSizes.push_back(static_cast<size_t>(parameter.width.value));
-    const bool directPointer = parameter.kind == KernelParameterKind::Allocation;
-    kernel->parameterMetadata.push_back({parameter.kind == KernelParameterKind::Scalar && parameter.containsPointers,
-                                         parameter.kind == KernelParameterKind::Local, directPointer || parameter.containsPointers});
+    const bool directPointer = parameter.kind == ParameterKind::Allocation;
+    kernel->parameterMetadata.push_back({parameter.kind == ParameterKind::Scalar && parameter.containsPointers,
+                                         parameter.kind == ParameterKind::Local, directPointer || parameter.containsPointers});
   }
   kernel->argumentInfo = sourceKernelArgumentInfo(kernelSource, kernel->name);
   kernel->arguments.resize(kernel->expectedArguments);

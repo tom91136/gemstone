@@ -1,12 +1,16 @@
 package net.kurobako.gemstone.server.execution
 
+import net.kurobako.gemstone.Constraint.IntBetween
+
+import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+
 import net.kurobako.gemstone.*
 
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
-import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress}
-import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.Constraint.NonEmptyString
 import net.kurobako.gemstone.isa.spirv.v1_6.{
   Endianness,
   Header,
@@ -14,7 +18,6 @@ import net.kurobako.gemstone.isa.spirv.v1_6.{
   Instruction,
   Module,
   Operand,
-  SPIRVOperandKind,
   Validation,
   Word
 }
@@ -26,15 +29,15 @@ import scala.collection.mutable
 import scala.util.Using
 
 final class HostMemoryExecutionSuite extends munit.FunSuite {
-  private def encoded(value: Long, size: Int): Vec[Byte] = LittleEndian.toVec(value, ScalarByteWidth.unsafe(size))
+  private def encoded(value: Long, size: Int): Vec[Byte] = LittleEndian.toVec(value, IntBetween.unsafe[0, 8](size))
   private def scalar(value: Long, size: Int = 8): KernelTask.Argument = KernelTask.Argument.Scalar(encoded(value, size))
   private def bytes(address: Long, value: Long, size: Int): Map[Long, Byte] =
     encoded(value, size).zipWithIndex.map((byte, index) => (address + index.toLong) -> byte).toMap
 
   private object Async extends Scheduler {
-    override val parallelism                                                             = PositiveInt(1)
-    override def shouldParallel(tasks: NonNegativeLong, items: NonNegativeLong): Boolean = false
-    override def parallelFor(tasks: NonNegativeLong)(task: NonNegativeLong => Either[Fault, Unit])
+    override val parallelism                                                                 = 1
+    override def shouldParallel(tasks: NonNegative[Long], items: NonNegative[Long]): Boolean = false
+    override def parallelFor(tasks: NonNegative[Long])(task: NonNegative[Long] => Either[Fault, Unit])
         : Either[Fault, Unit] =
       Scheduler.Sequential.parallelFor(tasks)(task)
     override def schedule(runnable: Runnable): Unit = {
@@ -57,20 +60,20 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       beforeSync: (HostMemorySync, Map[Long, Byte]) => Map[Long, Byte] = (_, _) => Map.empty,
       beforeRead: (HostMemoryRange, scala.collection.Map[Long, Byte]) => Map[Long, Byte] = (_, _) => Map.empty,
       relocations: Vec[KernelTask.PointerRelocation] = Vec.empty,
-      afterCompletion: Vec[PointerRelocation] => Unit = _ => ()
+      afterCompletion: Vec[KernelTask.PointerRelocation] => Unit = _ => ()
   ) =
     Using.resource(ExecutionService(RuntimeBackend.defaults, scheduler = Async)) { service =>
       assertEquals(service.enableHostMemory(), Right(()))
       fragments.foreach { (address, contents) =>
         val allocation =
-          service.registerAllocation(PositiveLong.unsafe(contents.size.toLong), AllocationKind.Shared).toOption.get
+          service.registerAllocation(Positive.unsafe(contents.size.toLong), AllocationKind.Shared).toOption.get
         assertEquals(service.registerAllocationAddress(allocation, GuestAddress(address), hostBacked), Right(()))
-        assertEquals(service.write(allocation, NonNegativeLong(0L), contents), Right(()))
+        assertEquals(service.write(allocation, 0L, contents), Right(()))
       }
       val program = service.load(encoding, image).toOption.get
       val task    = KernelTask.validated(
-        KernelName("probe"),
-        LaunchGeometry.Dimensions(PositiveInt.unsafe(lanes), PositiveInt(1), PositiveInt(1)),
+        NonEmptyString("probe"),
+        LaunchGeometry.Dimensions(Positive.unsafe(lanes), 1, 1),
         LaunchGeometry.Dimensions.One,
         arguments,
         pointerRelocations = relocations
@@ -300,12 +303,12 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       List(0x1000L -> Vec.fill(64)(0.toByte), 0x8000L -> Vec.fill(64)(0.toByte)),
       hostBacked = true
     )
-    assertEquals(reads, Vector(HostMemoryRange(GuestAddress(0x100cL), PositiveInt(4))))
+    assertEquals(reads, Vector(HostMemoryRange(GuestAddress(0x100cL), 4)))
     assertEquals(writes, bytes(0x8004, 73, 4))
   }
 
   private def operand(kind: String, words: Int*): Operand =
-    Operand(SPIRVOperandKind.either(kind).toOption.get, NonEmptyVec.unsafeFromVec(Vec.from(words.map(Word(_)))))
+    Operand(NonEmptyString.either(kind).toOption.get, NonEmptyVec.unsafeFromVec(Vec.from(words.map(Word(_)))))
   private def id(value: Int): Operand = operand("IdRef", value)
 
   // This oracle checks the interpreter's publication/cache boundary, independently of
@@ -423,8 +426,8 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       SPIRV.encode(module).toOption.get,
       1,
       Vec(
-        KernelTask.Argument.Memory(MemoryRegion(1), NonNegativeLong(8L)),
-        KernelTask.Argument.Memory(MemoryRegion(2), NonNegativeLong(0L)),
+        KernelTask.Argument.Memory(MemoryRegion(1), 8L),
+        KernelTask.Argument.Memory(MemoryRegion(2), 0L),
         scalar(0x8000)
       ),
       bytes(0x1008, 0x4000, 8) ++ bytes(0x4000, 11, 4) ++ bytes(0x5000, 29, 4),
@@ -437,15 +440,15 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       relocations = if (relocated)
         Vec(KernelTask.PointerRelocation(
           KernelTask.RelocationSource.Memory(MemoryRegion(1)),
-          NonNegativeLong(8L),
+          8L,
           MemoryRegion(2),
-          NonNegativeLong(0L)
+          0L
         ))
       else Vec.empty,
       afterCompletion = values =>
         assertEquals(
           values,
-          Vec.empty[PointerRelocation],
+          Vec.empty[KernelTask.PointerRelocation],
           "native pointer stores must not be replayed after host synchronization"
         )
     )
@@ -531,7 +534,7 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       SPIRVRuntimeBackend(Validation.Environment.OpenCLCompute).encoding,
       SPIRV.encode(module).toOption.get,
       1,
-      Vec(KernelTask.Argument.Memory(MemoryRegion(1), NonNegativeLong.unsafe(offset))),
+      Vec(KernelTask.Argument.Memory(MemoryRegion(1), NonNegative.unsafe(offset))),
       bytes(0x1000 + offset, 0x8000, 8),
       List(0x1000L -> Vec.fill(24)(0.toByte)),
       hostBacked = true
