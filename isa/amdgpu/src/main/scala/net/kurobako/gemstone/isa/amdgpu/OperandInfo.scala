@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.constraint.*
 
 case class OperandInfo(
     field: Option[String],
-    kind: NonEmptyString,
+    kind: NonEmpty[String],
     implicitOperand: Boolean
 )

@@ -1,11 +1,10 @@
 package fix
 
 import scala.meta.*
-
 import scalafix.v1.*
 
 /** Requires explicit case or type-pattern matching at runtime type boundaries. */
-final class GemstoneNoTypeCasting extends SyntacticRule("GemstoneNoTypeCasting") {
+class GemstoneNoTypeCasting extends SyntacticRule("GemstoneNoTypeCasting") {
   private val forbiddenSelections = Set("isInstanceOf", "asInstanceOf")
 
   override def fix(using document: SyntacticDocument): Patch = document.tree.collect {

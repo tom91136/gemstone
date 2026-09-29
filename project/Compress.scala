@@ -1,3 +1,4 @@
+import Paths.*
 import java.io.BufferedInputStream
 import java.io.InputStream
 import java.nio.file.Files
@@ -9,8 +10,6 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
-
-import Paths.*
 
 /** Traversal-safe extraction for the archive formats consumed by the build. */
 object Compress {
@@ -59,7 +58,7 @@ object Compress {
                 !tarEntry.isSymbolicLink && !tarEntry.isLink,
                 s"archive links are not permitted: ${tarEntry.getName}"
               )
-              copyEntry(tarInput, safeTarget(destination, relative))
+              copyEntry(tarInput, destination.resolveWithin(relative))
             }
           }
           true
@@ -100,7 +99,7 @@ object Compress {
         relative.filter(_ => !entry.isDirectory).filter(select).foreach { relative =>
           require(entry.isFile, s"selected archive entry is not a regular file: ${entry.getName}")
           require(!entry.isSymbolicLink && !entry.isLink, s"archive links are not permitted: ${entry.getName}")
-          copyEntry(tarInput, safeTarget(destination, relative))
+          copyEntry(tarInput, destination.resolveWithin(relative))
         }
       }
     }.get
@@ -118,7 +117,7 @@ object Compress {
       archiveEntries(zipInput.getNextEntry).foreach { entry =>
         val relative = archiveRoot.fold(Some(safeRelative(entry.getName)))(root => archiveRelative(entry.getName, root))
         relative.filter(_ => !entry.isDirectory).filter(select).foreach { relative =>
-          copyEntry(zipInput, safeTarget(destination, relative))
+          copyEntry(zipInput, destination.resolveWithin(relative))
         }
         zipInput.closeEntry()
       }
@@ -140,13 +139,6 @@ object Compress {
       s"archive traversal is not permitted: $name"
     )
     raw.normalize
-  }
-
-  private def safeTarget(destination: Path, relative: Path): Path = {
-    val root   = destination.absolute
-    val target = (root / relative).normalize
-    require(target.startsWith(root), s"archive target escapes destination: $relative")
-    target
   }
 
   private def copyEntry(input: InputStream, target: Path): Unit = {

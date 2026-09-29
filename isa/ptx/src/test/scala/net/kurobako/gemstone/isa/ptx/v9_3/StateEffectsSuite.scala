@@ -1,24 +1,17 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.NonNegative
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.NonEmptyVec
-
-import Program.*
-import VMExecution.*
 import VMIR.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
 
-import net.kurobako.gemstone.memory.ArrayCheckedMemory
-
-final class StateEffectsSuite extends munit.FunSuite {
+class StateEffectsSuite extends munit.FunSuite {
   test("an invalid memory write prevents staged register writes from committing") {
-    val state       = VMState(1, VMLaneMask.all(1).toOption.get)
-    val memory      = ArrayCheckedMemory.allocate(4)
-    val destination = NonEmptyString("%r0")
+    val state                         = VMBlockState(1, VMLaneMask.all(1).toOption.get)
+    val memory                        = ArrayCheckedMemory.allocate(4)
+    val destination: NonEmpty[String] = "%r0"
 
     state.effects.stageRegister(0, destination, 42L)
-    state.effects.stageMemory(0, memory.allocation.start.offset(4L), BitWidth(32), 7L)
+    state.effects.stageMemory(0, memory.allocation.start.offset(4L), 32: Int where (Between[8, 64] & MultipleOf[8]), 7L)
 
     assert(state.effects.commit(state, memory, Pc.Entry).isLeft)
     assertEquals(state.registers(0)(destination), 0L)
@@ -26,9 +19,9 @@ final class StateEffectsSuite extends munit.FunSuite {
   }
 
   test("the reusable effect buffer grows and preserves register write order") {
-    val state       = VMState(1, VMLaneMask.all(1).toOption.get)
-    val memory      = ArrayCheckedMemory.allocate(0)
-    val destination = NonEmptyString("%r0")
+    val state                         = VMBlockState(1, VMLaneMask.all(1).toOption.get)
+    val memory                        = ArrayCheckedMemory.allocate(0)
+    val destination: NonEmpty[String] = "%r0"
 
     (0 until 129).foreach(value => state.effects.stageRegister(0, destination, value.toLong))
 

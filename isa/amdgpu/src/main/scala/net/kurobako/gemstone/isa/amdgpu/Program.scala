@@ -1,22 +1,16 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.Positive
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.Vec
-
-/** A parsed AMDGPU assembly program. Source locations are deliberately kept out of the semantic tree. */
-case class Program(statements: Vec[Program.Statement]) extends net.kurobako.gemstone.isa.Program
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.amdgpu.Instruction as AMDGPUInstruction
 
 object Program {
 
-  private[amdgpu] def normalizeOpcode(value: String): String = value.toLowerCase(java.util.Locale.ROOT)
-
   enum Statement {
-    case Instruction(value: net.kurobako.gemstone.isa.amdgpu.Instruction)
+    case Instruction(value: AMDGPUInstruction)
     case InstructionPair(
-        left: net.kurobako.gemstone.isa.amdgpu.Instruction,
-        right: net.kurobako.gemstone.isa.amdgpu.Instruction
+        left: AMDGPUInstruction,
+        right: AMDGPUInstruction
     )
     case Label(name: String)
     case Directive(name: String, arguments: String)
@@ -37,13 +31,16 @@ object Program {
     case Absolute(value: Operand)
   }
 
-  case class Modifier(name: NonEmptyString, value: Option[NonEmptyString] = None)
+  case class Modifier(name: NonEmpty[String], value: Option[NonEmpty[String]] = None)
 
   case class ParseError(
-      line: Positive[Int],
-      column: Positive[Int],
-      message: String
-  ) extends net.kurobako.gemstone.isa.DecodeError {
+      line: Int > 0,
+      column: Int > 0,
+      message: NonEmpty[String]
+  ) {
     override def toString: String = s"$line:$column: $message"
   }
 }
+
+/** A parsed AMDGPU assembly program. Source locations are deliberately kept out of the semantic tree. */
+case class Program(statements: Vec[Program.Statement])

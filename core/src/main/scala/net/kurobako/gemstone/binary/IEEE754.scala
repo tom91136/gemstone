@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.binary
 
-import net.kurobako.gemstone.Constraint.OneOf
+import net.kurobako.gemstone.constraint.*
 
 /** Raw IEEE-754 interchange encodings used by ISA registers and memory. */
-private[gemstone] object IEEE754 {
+object IEEE754 {
   private inline val Binary16Bias        = 15
   private inline val Binary16ExponentMax = 0x1f
   private inline val Binary32Bias        = 127
@@ -12,7 +12,7 @@ private[gemstone] object IEEE754 {
   private inline val Binary16NaN         = 0x7e00
   private inline val Binary32Infinity    = 0x7f800000
 
-  inline def binary32ToFloat(bits: Binary32): Float = java.lang.Float.intBitsToFloat(bits.raw.toInt)
+  inline def binary32ToFloat(bits: Binary32): Float = java.lang.Float.intBitsToFloat(bits.toInt)
 
   inline def floatToBinary32(value: Float): Binary32 =
     Binary32.fromLow(Bits.unsigned32(java.lang.Float.floatToRawIntBits(value)))
@@ -23,7 +23,7 @@ private[gemstone] object IEEE754 {
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def binary16ToFloat(value: Binary16): Float = {
-    val bits16   = value.raw.toInt
+    val bits16   = value.toInt
     val sign     = (bits16 & 0x8000) << 16
     val exponent = (bits16 >>> 10) & 0x1f
     val fraction = bits16 & 0x3ff
@@ -104,8 +104,8 @@ private[gemstone] object IEEE754 {
   }
 
   def fromDouble(value: Double, width: OneOf[(16, 32, 64)]): Long = width.raw match {
-    case 16 => doubleToBinary16(value).raw
-    case 32 => floatToBinary32(value.toFloat).raw
+    case 16 => doubleToBinary16(value).toLong
+    case 32 => floatToBinary32(value.toFloat).toLong
     case 64 => doubleToBinary64(value)
   }
 }

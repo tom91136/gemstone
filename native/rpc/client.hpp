@@ -8,12 +8,14 @@
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/environment.hpp>
 
+#include <environment_keys.hpp>
+
 namespace gemstone::execution {
 
 enum class ClientMode { Uninitialized, Disabled, Ready, Misconfigured };
 
 /** Lazily connects one facade process to the execution service. The service
- * location comes from `GEMSTONE_RPC_CLIENT`/`GEMSTONE_RPC_PORT`; a `Ping`
+ * location comes from `GEMSTONE_RPC_CLIENT`/`GEMSTONE_RPC_ENDPOINT`; a `Ping`
  * handshake confirms the transport before the connection is published as ready.
  */
 class ClientManager {
@@ -46,23 +48,23 @@ public:
 private:
   void ensure() {
     std::call_once(initialized_, [this] {
-      const char *port = environment::value(environment::RpcPort);
+      const char *endpoint = environment::value(environment::RpcEndpoint);
       const char *client = environment::value(environment::RpcClient);
-      const bool hasPort = port && port[0] != '\0';
+      const bool hasEndpoint = endpoint && endpoint[0] != '\0';
       const bool hasClient = client && client[0] != '\0';
-      if (!hasPort && !hasClient) {
+      if (!hasEndpoint && !hasClient) {
         mode_ = ClientMode::Disabled;
         return;
       }
-      if (!hasPort || !hasClient) {
+      if (!hasEndpoint || !hasClient) {
         mode_ = ClientMode::Misconfigured;
-        error_ = "GEMSTONE_RPC_PORT and GEMSTONE_RPC_CLIENT must be set together";
+        error_ = std::string(environment::RpcEndpoint) + " and " + environment::RpcClient + " must be set together";
         return;
       }
       client_ = Client::fromEnvironment();
       if (!client_) {
         mode_ = ClientMode::Misconfigured;
-        error_ = "GEMSTONE_RPC_CLIENT must be a positive integer";
+        error_ = std::string(environment::RpcClient) + " must be a positive signed 64-bit integer";
         return;
       }
       if (!client_->call(Ping{})) {

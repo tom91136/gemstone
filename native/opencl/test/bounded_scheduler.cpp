@@ -10,12 +10,13 @@
 #include <gemstone/test_support.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
+#include <environment_keys.hpp>
 
 TEST_CASE("OpenCL deferred work uses a bounded scheduler", "[opencl]") {
   gemstone_test::RpcFixture server;
-  const auto port = std::to_string(server.port());
-  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
-  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  const auto port = "tcp://127.0.0.1:" + std::to_string(server.port());
+  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
+  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
   cl_platform_id platform = nullptr;
   cl_device_id device = nullptr;
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));

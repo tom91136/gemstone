@@ -27,6 +27,7 @@
 #include "client.hpp"
 #include "completion.hpp"
 #include "runtime.hpp"
+#include <environment_keys.hpp>
 
 void GemstoneVulkanDescriptorState::update(uint32_t writeCount, const VkWriteDescriptorSet *writes, uint32_t copyCount,
                                            const VkCopyDescriptorSet *copies) {
@@ -248,7 +249,7 @@ bool run(const Dispatch &dispatch) {
   std::lock_guard rpcLock(executionMutex());
   Client *client = executionClient();
   if (!client) {
-    std::fprintf(stderr, "Gemstone Vulkan: GEMSTONE_RPC_CLIENT is absent\n");
+    std::fprintf(stderr, "Gemstone Vulkan: %s is absent\n", gemstone::environment::RpcClient);
     return false;
   }
   auto loaded = client->call(LoadProgram{"spirv-vulkan-binary", pipeline.image});
@@ -344,7 +345,7 @@ bool run(const Dispatch &dispatch) {
         break;
       }
       arguments.emplace_back(
-          ArgumentMemory{MemoryRegion{allocations[argument.allocation].id.value}, static_cast<int64_t>(argument.offset)});
+          ArgumentMemory{AllocationId{allocations[argument.allocation].id.value}, static_cast<int64_t>(argument.offset)});
     }
   if (okay) {
     const auto local = pipeline.local;
@@ -930,7 +931,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(VkDevice, VkP
         std::vector<SpecializationConstant> constants;
         constants.reserve(specializationValues.size());
         for (const auto &[id, value] : specializationValues)
-          constants.push_back(SpecializationConstant{IntPositive0{static_cast<int32_t>(id)}, value});
+          constants.push_back(SpecializationConstant{Binary32{static_cast<int64_t>(id)}, value});
         auto specialized = client->call(SpecializeImage{pipe.image, constants});
         if (!specialized) {
           if (gemstone::traceEnabled("vulkan")) {
@@ -942,7 +943,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(VkDevice, VkP
         }
         pipe.image = std::move(specialized.value());
       }
-      auto described = client->call(DescribeImage{"spirv-vulkan-binary", pipe.image, NonEmptyString{pipe.entry}});
+      auto described = client->call(DescribeImage{"spirv-vulkan-binary", pipe.image, {pipe.entry}});
       if (!described) {
         if (gemstone::traceEnabled("vulkan")) std::fprintf(stderr, "Gemstone Vulkan: cannot reflect entry %s\n", pipe.entry.c_str());
         return VK_ERROR_INVALID_SHADER_NV;

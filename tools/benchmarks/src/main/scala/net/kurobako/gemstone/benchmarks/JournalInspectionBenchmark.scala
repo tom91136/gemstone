@@ -1,33 +1,28 @@
 package net.kurobako.gemstone.benchmarks
 
-import net.kurobako.gemstone.PlatformTime
-import net.kurobako.gemstone.rpc.ExecutionRPC
-import net.kurobako.gemstone.server.recording.RPCJournal
-
+import com.monovore.decline.Opts
 import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import com.monovore.decline.Opts
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.server.recording.*
 import scala.util.Using
 
 /** Repeated identical frames measure inspection work separately from capture and replay. */
 object JournalInspectionBenchmark {
-  private val WriteAllocation = ExecutionRPC.Schema.operations
-    .find(_.request.name == "WriteAllocation")
-    .fold(throw IllegalStateException("execution RPC schema has no WriteAllocation operation"))(_.request.id)
-
-  // Request and response header sizes mirror the wire layout in the generated RPC code.
-  private val RequestHeaderBytes  = 48
-  private val ResponseHeaderBytes = 20
-
-  private def execution(operation: Long, payload: Array[Byte]): Array[Byte] =
+  private def execution(operation: String, payload: Array[Byte]): Array[Byte] = {
+    val tag = operation.getBytes(StandardCharsets.UTF_8)
     ByteBuffer.allocate(
-      RequestHeaderBytes + payload.length
-    ).putInt(ExecutionRPC.RequestMagic).putLong(ExecutionRPC.Schema.fingerprint)
+      ExecutionRPC.RequestHeaderBytes.raw + tag.length + payload.length
+    ).putInt(ExecutionRPC.RequestMagic)
       .putLong(23L).putLong(42L).putLong(17L)
-      .putLong(operation).putInt(payload.length).put(payload).array()
+      .putInt(tag.length).putInt(payload.length).put(tag).put(payload).array()
+  }
   private def response(): Array[Byte] =
-    ByteBuffer.allocate(ResponseHeaderBytes).putInt(ExecutionRPC.ResponseMagic).putLong(ExecutionRPC.Schema.fingerprint)
+    ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes.raw).putInt(ExecutionRPC.ResponseMagic)
       .putInt(0).putInt(0).array()
 
   def run(arguments: Array[String]): Unit = {
@@ -36,23 +31,23 @@ object JournalInspectionBenchmark {
       arguments.toSeq,
       Opts.argument[String]("journal").map(Path.of(_))
     )
-    val protocolIdentity = RPCJournal.ProtocolIdentity.either(ExecutionRPC.Identity.raw)
+    val protocolIdentity = Journal.ProtocolIdentity.either(ExecutionRPC.Identity)
       .fold(error => throw IllegalArgumentException(error), value => value)
-    Using.resource(RPCJournal.Writer(file, RPCJournal.Header(protocolIdentity))) { writer =>
+    Using.resource(Journal.Writer(file, Journal.Header(protocolIdentity))) { writer =>
       Using.resource(writer.connection(Object())) { connection =>
-        val request = execution(WriteAllocation, Array.fill[Byte](256 * 1024)(17))
+        val request = execution("WriteAllocation", Array.fill[Byte](256 * 1024)(17))
         for (_ <- 0 until 200) {
           connection.request(request)
           connection.response(response())
         }
       }
     }
-    for (_ <- 0 until 2) RPCJournal.inspect(file)
+    for (_ <- 0 until 2) Journal.inspect(file)
     for (sample <- 0 until 5) {
       val allocated = PlatformMetrics.allocatedBytes
-      val started   = PlatformTime.monotonicNanos
-      val summary   = RPCJournal.inspect(file)
-      val nanos     = PlatformTime.monotonicNanos - started
+      val started   = platform.monotonicNanos
+      val summary   = Journal.inspect(file)
+      val nanos     = platform.monotonicNanos - started
       val bytes     = for {
         start <- allocated
         end   <- PlatformMetrics.allocatedBytes

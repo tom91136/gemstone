@@ -29,6 +29,7 @@
 
 #include "hsakmt_backend.hpp"
 #include "transfer.hpp"
+#include <environment_keys.hpp>
 
 namespace {
 

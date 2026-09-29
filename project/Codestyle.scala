@@ -1,7 +1,7 @@
+import StringCase.*
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.Locale
 import scala.util.control.NonFatal
 import scala.util.matching.Regex
 
@@ -50,7 +50,7 @@ object Codestyle {
   def wordVariants(stem: String): Regex = {
     val lower = raw"\b${stem}s?\b"
     val camel = s"${stem.capitalize}s?(?=\\z|[^a-z])"
-    val upper = s"${stem.toUpperCase(Locale.ROOT)}s?(?=\\z|[^A-Z])"
+    val upper = s"${stem.toUpperCaseRoot}s?(?=\\z|[^A-Z])"
     s"(?:$lower|$camel|$upper)".r
   }
 

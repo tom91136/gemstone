@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.codegen
 
-final class TextSuite extends munit.FunSuite {
+class TextSuite extends munit.FunSuite {
   test("text helpers tokenize fixed generator formats without regex") {
     assertEquals(Text.normalizeWhitespace("  alpha\t beta\n"), "alpha beta")
     assertEquals(Text.stripLineComment("value // note"), "value")

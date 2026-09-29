@@ -1,0 +1,212 @@
+package net.kurobako.gemstone.server.recording
+
+import java.io.IOException
+import java.io.RandomAccessFile
+import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.server.transport.*
+import scala.util.Using
+
+class JournalSuite extends munit.FunSuite {
+  import journal.*
+  test("archive preserves sequenced frames and normalizes client identities") {
+    temporary { file =>
+      val owner = Object()
+      capture(file) { writer =>
+        val generic = writer.connection(owner)
+        for (_ <- 0 until 2) { generic.request(execution()); generic.response(response()) }
+        generic.close()
+        writer.clientClosed(owner)
+      }
+      Using.resource(Journal.open(file)) { reader =>
+        assert(reader.summary.replayable)
+        assertEquals(reader.events.size, 6)
+        assertEquals(reader.summary.frames.raw, 4)
+        assertEquals(
+          reader.events.filter(_.kind == Journal.Kind.Request).map(_.client).toSet,
+          Set(Journal.RecordedClientId(1L))
+        )
+        val first = reader.frame(reader.events.head)
+        assertEquals(
+          first.toSeq,
+          Journal.Frames.normalized(
+            Journal.Kind.Request,
+            execution(),
+            Journal.FrameByteSize(4096)
+          ).toSeq
+        )
+        first(0) = 0
+        assertEquals(Journal.Frames.magic(reader.frame(reader.events.head)), ExecutionRPC.RequestMagic)
+      }
+      val _ = intercept[IOException](Journal.Writer(file, Journal.Header(schema)))
+    }
+  }
+  test("execution profile survives the archive and reaches the fresh endpoint factory") {
+    temporary { file =>
+      val profile =
+        Journal.ExecutionProfile(2000000000L, 8)
+      val writer = Journal.Writer(file, Journal.Header(schema, executionProfile = Some(profile)))
+      writer.close()
+      val observed = AtomicReference(Option.empty[Journal.ExecutionProfile])
+      val closed   = AtomicBoolean(false)
+      assertEquals(
+        Replay.run(
+          Replay.Options(file, schema),
+          header => {
+            observed.set(header.executionProfile);
+            Replay.Target(Endpoint.Tcp("127.0.0.1", Port(1)), () => closed.set(true))
+          }
+        ).events.raw,
+        0
+      )
+      assertEquals(observed.get(), Some(profile)); assert(closed.get())
+    }
+  }
+
+  test("truncated and corrupt archives fail instead of replaying a prefix") {
+    temporary { file =>
+      capture(file) { w =>
+        val c = w.connection(Object()); c.request(execution()); c.response(response()); c.close()
+      }
+      val original = Files.readAllBytes(file)
+      Using.resource(RandomAccessFile(file.toFile, "rw"))(_.setLength(original.length - 1L))
+      val _ = intercept[IOException](Journal.open(file))
+      Files.write(file, original)
+      val corrupt = original.clone()
+      corrupt(corrupt.length / 2) = (corrupt(corrupt.length / 2) ^ 1).toByte
+      Files.write(file, corrupt)
+      val _ = intercept[IOException](Journal.open(file))
+    }
+  }
+  test("unfinished exchanges and capture limits are explicitly unreplayable") {
+    temporary { file =>
+      capture(file) { w =>
+        val c = w.connection(Object()); c.request(execution()); c.close()
+      }
+      val summary = Journal.inspect(file)
+      assert(!summary.replayable)
+      assert(summary.reason.exists(_.raw.contains("incomplete")))
+      val started = AtomicBoolean(false)
+      val _       = intercept[IOException](Replay.run(
+        Replay.Options(file, schema),
+        _ => { started.set(true); Replay.Target(Endpoint.Tcp("127.0.0.1", Port(1)), () => ()) }
+      ))
+      assert(!started.get())
+    }
+    temporary { file =>
+      val frame   = execution("Ping", Array.ofDim[Byte](5))
+      val maximum = Journal.FrameByteSize.either(frame.length - 1)
+        .fold(message => fail(message), value => value)
+      val writer = Journal.Writer(
+        file,
+        Journal.Header(schema, Journal.Limits(maxFrameBytes = maximum))
+      )
+      val connection = writer.connection(Object())
+      val _          = intercept[IOException](connection.request(frame))
+      writer.close()
+      assert(!Journal.inspect(file).replayable)
+    }
+  }
+  test("frame bounds include headers and lifecycle ordering is validated") {
+    temporary { file =>
+      val writer =
+        Journal.Writer(file, Journal.Header(schema, Journal.Limits(maxEvents = 2)))
+      val c = writer.connection(Object())
+      c.request(execution()); c.response(response())
+      val _ = intercept[IOException](c.close())
+      writer.close()
+      assert(!Journal.inspect(file).replayable)
+    }
+    temporary { file =>
+      val writer = Journal.Writer(file, Journal.Header(schema))
+      val c      = writer.connection(Object())
+      val _      = intercept[IOException](c.response(response()))
+      writer.close()
+      assert(!Journal.inspect(file).replayable)
+    }
+  }
+  test("replay rejects a different stored schema before starting a server") {
+    temporary { file =>
+      Using.resource(Journal.Writer(file, Journal.Header(schema, schema = ExecutionRPC.Schema.canonical + "changed")))(
+        _ => ()
+      )
+      val started = java.util.concurrent.atomic.AtomicBoolean(false)
+      val _       = intercept[IOException] {
+        Replay.run(
+          Replay.Options(file, schema),
+          _ => {
+            started.set(true)
+            throw IllegalStateException("must not start")
+          }
+        )
+      }
+      assert(!started.get())
+    }
+  }
+
+  test("the full schema counts against the archive byte budget before a file is published") {
+    temporary { file =>
+      val header = Journal.Header(schema, Journal.Limits(maxArchiveBytes = Journal.ArchiveByteSize(5000L)))
+      val _      = intercept[IOException](Journal.Writer(file, header))
+      assert(!Files.exists(file))
+    }
+  }
+
+  test("bounded prefixes validate full declared frame lengths without retaining payloads") {
+    val maximum = Journal.Limits().maxFrameBytes
+    val frame   = Journal.Frames.normalized(
+      Journal.Kind.Request,
+      journal.execution("Ping", Array.fill[Byte](256 * 1024)(17)),
+      maximum
+    )
+    val prefix = frame.take(ExecutionRPC.RequestHeaderBytes.raw + "Ping".length)
+    Journal.Frames.validatePrefix(
+      kind = Journal.Kind.Request,
+      bytes = prefix,
+      frameSize = frame.length,
+      maximum = maximum,
+      normalized = true
+    )
+    val _ = intercept[java.io.IOException] {
+      Journal.Frames.validatePrefix(
+        kind = Journal.Kind.Request,
+        bytes = prefix,
+        frameSize = frame.length + 1,
+        maximum = maximum,
+        normalized = true
+      )
+    }
+    val _ = intercept[java.io.IOException] {
+      Journal.Frames.validatePrefix(
+        kind = Journal.Kind.Response,
+        bytes = prefix,
+        frameSize = frame.length,
+        maximum = maximum,
+        normalized = true
+      )
+    }
+    val _ = intercept[java.io.IOException] {
+      Journal.Frames.validatePrefix(
+        kind = Journal.Kind.Request,
+        bytes = prefix.take(ExecutionRPC.RequestHeaderBytes.raw - 1),
+        frameSize = frame.length,
+        maximum = maximum,
+        normalized = true
+      )
+    }
+    prefix(ExecutionRPC.RequestClientOffset.raw) = 1
+    intercept[java.io.IOException] {
+      Journal.Frames.validatePrefix(
+        kind = Journal.Kind.Request,
+        bytes = prefix,
+        frameSize = frame.length,
+        maximum = maximum,
+        normalized = true
+      )
+    }
+  }
+}

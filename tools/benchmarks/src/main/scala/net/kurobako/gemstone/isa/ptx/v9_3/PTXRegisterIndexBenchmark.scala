@@ -1,16 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.Positive
-
-import net.kurobako.gemstone.isa.ptx.v9_3.VMRegisterFile
-
-import net.kurobako.gemstone.PlatformTime
-import net.kurobako.gemstone.benchmarks.BenchmarkArguments
-import net.kurobako.gemstone.benchmarks.BenchmarkName
-import net.kurobako.gemstone.benchmarks.PlatformMetrics
-
 import cats.syntax.all.*
 import com.monovore.decline.Opts
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.string.*
 
 object PTXRegisterIndexBenchmark {
   private enum RegisterKind {
@@ -19,8 +14,8 @@ object PTXRegisterIndexBenchmark {
 
   private case class Options(
       kind: RegisterKind,
-      names: Positive[Int],
-      iterations: Positive[Int]
+      names: Int > 0,
+      iterations: Int > 0
   )
 
   private val name    = BenchmarkName("ptx-register-index")
@@ -29,9 +24,9 @@ object PTXRegisterIndexBenchmark {
       .validate("kind must be numbered or named")(value => value == "numbered" || value == "named")
       .map(value => if (value == "named") RegisterKind.Named else RegisterKind.Numbered),
     Opts.option[Int]("names", help = "Distinct register names").withDefault(6144)
-      .validate("names must be positive")(_ > 0).map(Positive.unsafe),
+      .validate("names must be positive")(_ > 0).map(_.unsafe[Int > 0]),
     Opts.option[Int]("iterations", help = "Register index operations").withDefault(1000000)
-      .validate("iterations must be positive")(_ > 0).map(Positive.unsafe)
+      .validate("iterations must be positive")(_ > 0).map(_.unsafe[Int > 0])
   ).mapN(Options(_, _, _))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -39,26 +34,26 @@ object PTXRegisterIndexBenchmark {
     val parsed = BenchmarkArguments.parse(name, arguments.toSeq, options)
     val names  = Array.tabulate(parsed.names.raw) { index =>
       parsed.kind match {
-        case RegisterKind.Numbered => VMRegisterFile.name(index % 6144).raw
+        case RegisterKind.Numbered => VMRegisterFile.name(index % 6144)
         case RegisterKind.Named    => s"%benchmark_named_$index"
       }
     }
     val allocatedBefore = PlatformMetrics.allocatedBytes
-    val started         = PlatformTime.monotonicNanos
+    val started         = platform.monotonicNanos
     var iteration       = 0
     var checksum        = 0L
     while (iteration < parsed.iterations.raw) {
       checksum += VMRegisterFile.indexRaw(names(iteration % names.length))
       iteration += 1
     }
-    val elapsed   = math.max(0L, PlatformTime.monotonicNanos - started)
+    val elapsed   = math.max(0L, platform.monotonicNanos - started)
     val allocated = for {
       before <- allocatedBefore
       after  <- PlatformMetrics.allocatedBytes
       if after >= before
     } yield after - before
     Console.out.println(
-      s"kind=${parsed.kind.toString.toLowerCase(java.util.Locale.ROOT)} names=${parsed.names} iterations=${parsed.iterations} " +
+      s"kind=${parsed.kind.toString.toLowerCaseRoot} names=${parsed.names} iterations=${parsed.iterations} " +
         s"nsPerIndex=${elapsed.toDouble / parsed.iterations.raw} " +
         s"bytesPerIndex=${allocated.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
     )

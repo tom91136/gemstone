@@ -1,18 +1,12 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.NonEmptyVec
-
-import Program.*
-
 import ISA.*
+import Program.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.ValidationOutcome
-
-final class ValidationSuite extends munit.FunSuite {
+class ValidationSuite extends munit.FunSuite {
   private def instruction(source: String): Instruction =
     Parser.parseStatement(source).toOption.get match {
       case Statement.Instruction(value) => value
@@ -21,14 +15,14 @@ final class ValidationSuite extends munit.FunSuite {
 
   test("typed forms enforce modifier groups after decoding enforces operand counts") {
     assertEquals(
-      Validator.validate(
+      Validation.validate(
         instruction("mul.wide.u32 %rd0, %r1, 4;"),
         Version(9, 3),
         Target(100)
       ),
       ValidationOutcome.Accepted
     )
-    Validator.validate(
+    Validation.validate(
       instruction("mul.u32 %r0, %r1, %r2;"),
       Version(9, 3),
       Target(100)
@@ -41,35 +35,35 @@ final class ValidationSuite extends munit.FunSuite {
 
   test("instruction introduction and minimum SM are enforced") {
     val value = instruction("clmad.lo.u64 %rd0, %rd1, %rd2, %rd3;")
-    Validator.validate(value, Version(9, 2), Target(100)) match {
+    Validation.validate(value, Version(9, 2), Target(100)) match {
       case ValidationOutcome.Rejected(errors) => assert(errors.exists {
-          case Validator.Issue.VersionTooOld(_, _, _) => true
-          case _                                      => false
+          case Validation.Issue.VersionTooOld(_, _, _) => true
+          case _                                       => false
         })
       case other => fail(s"expected version rejection, found $other")
     }
-    Validator.validate(value, Version(9, 3), Target(70)) match {
+    Validation.validate(value, Version(9, 3), Target(70)) match {
       case ValidationOutcome.Rejected(errors) => assert(errors.exists {
-          case Validator.Issue.TargetTooOld(_, _, _) => true
-          case _                                     => false
+          case Validation.Issue.TargetTooOld(_, _, _) => true
+          case _                                      => false
         })
       case other => fail(s"expected target rejection, found $other")
     }
     assertEquals(
-      Validator.validate(value, Version(9, 3), Target(80)),
+      Validation.validate(value, Version(9, 3), Target(80)),
       ValidationOutcome.Accepted
     )
   }
 
   test("conditional specification notes fail closed") {
     assertEquals(
-      Validator.validate(
+      Validation.validate(
         instruction("add.u32 %r0, %r1, %r2;"),
         Version(9, 3),
         Target(100)
       ),
       ValidationOutcome.Incomplete(
-        Vec.nonEmpty(Validator.Issue.Incomplete("syntax form for add.u32 is not fully normalized"))
+        Vec.nonEmpty(Validation.Issue.Incomplete("syntax form for add.u32 is not fully normalized"))
       )
     )
   }
@@ -77,9 +71,9 @@ final class ValidationSuite extends munit.FunSuite {
   test("unknown instructions remain explicit after parsing") {
     Parser.parseStatement("not_a_ptx_instruction.u32 %r0;") match {
       case Right(Statement.UnsupportedInstruction(opcode, operands, mods, None))
-          if opcode == NonEmptyString("not_a_ptx_instruction") =>
+          if opcode == "not_a_ptx_instruction" =>
         assertEquals(operands.size, 1)
-        assertEquals(mods.map(_.name.raw).toSeq, Seq("u32"))
+        assertEquals(mods.map(_.name), Seq("u32"))
       case other => fail(s"unexpected parse result: $other")
     }
   }

@@ -1,30 +1,23 @@
 package net.kurobako.gemstone.memory
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.NonNegative
-
-import net.kurobako.gemstone.Constraint.Positive
-import net.kurobako.gemstone.Vec
-
 import java.util.concurrent.atomic.AtomicInteger
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 
-final class CheckedMemorySuite extends munit.FunSuite {
-  private val doubleWord: IntBetween[1, 8] = 4
-  private val quadWord: IntBetween[1, 8]   = 8
+class CheckedMemorySuite extends munit.FunSuite {
+  private val doubleWord: Int where Between[1, 8] = 4
+  private val quadWord: Int where Between[1, 8]   = 8
 
   private def allocate(
       memory: DynamicAddressMemory,
-      size: Positive[Int],
+      size: Int > 0,
       initial: Vec[Byte] = Vec.empty
   ): GuestAddress =
     memory.allocate(size, initial).fold(error => fail(error.message), address => address)
 
   test("integer access is little endian and bounds checked") {
     val memory =
-      ArrayCheckedMemory.allocate(8, provenance = NonEmptyString("test allocation"))
+      ArrayCheckedMemory.allocate(8, provenance = "test allocation")
     val start = memory.allocation.start
 
     assertEquals(memory.writeInt32(start, 0x12345678), Right(()))
@@ -34,7 +27,7 @@ final class CheckedMemorySuite extends munit.FunSuite {
 
   test("freed memory is quarantined") {
     val memory =
-      ArrayCheckedMemory.allocate(4, provenance = NonEmptyString("freed allocation"))
+      ArrayCheckedMemory.allocate(4, provenance = "freed allocation")
     val start = memory.allocation.start
     memory.free()
 
@@ -48,9 +41,9 @@ final class CheckedMemorySuite extends munit.FunSuite {
     val delegate = ArrayCheckedMemory.allocate(
       4,
       GuestAddress(0x1000L),
-      provenance = NonEmptyString("delegate")
+      provenance = "delegate"
     )
-    val memory = DynamicAddressMemory(delegate, DynamicAddressMemory.State(GuestAddress(0x2000L)))
+    val memory = DynamicAddressMemory(delegate, GuestAddress(0x2000L))
     val first  = allocate(memory, 4, Vec[Byte](1, 2, 3, 4))
     val second = allocate(memory, 4, Vec[Byte](5, 6, 7, 8))
 
@@ -67,9 +60,9 @@ final class CheckedMemorySuite extends munit.FunSuite {
     val delegate = ArrayCheckedMemory.allocate(
       16,
       GuestAddress(0x1000L),
-      provenance = NonEmptyString("scalar delegate")
+      provenance = "scalar delegate"
     )
-    val memory  = DynamicAddressMemory(delegate, DynamicAddressMemory.State(GuestAddress(0x2000L)))
+    val memory  = DynamicAddressMemory(delegate, GuestAddress(0x2000L))
     val address = delegate.allocation.start.offset(1L)
     val value   = 0x8877665544332211L
     assertEquals(memory.writeLittleEndian(address, value, quadWord), Right(()))
@@ -91,16 +84,22 @@ final class CheckedMemorySuite extends munit.FunSuite {
     val backing    = ArrayCheckedMemory.allocate(16, GuestAddress(0x1000L))
     val readCalls  = AtomicInteger()
     val writeCalls = AtomicInteger()
-    final class BulkDelegate extends AddressMemory {
-      override def readInt8(address: GuestAddress)                                 = backing.readInt8(address)
-      override def readInt32(address: GuestAddress)                                = backing.readInt32(address)
-      override def writeInt8(address: GuestAddress, value: Byte)                   = backing.writeInt8(address, value)
-      override def writeInt32(address: GuestAddress, value: Int)                   = backing.writeInt32(address, value)
-      override def readLittleEndian(address: GuestAddress, size: IntBetween[1, 8]) = {
+    class BulkDelegate extends AddressMemory {
+      override def readInt8(address: GuestAddress): Either[MemoryError, Byte]               = backing.readInt8(address)
+      override def readInt32(address: GuestAddress): Either[MemoryError, Int]               = backing.readInt32(address)
+      override def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit] =
+        backing.writeInt8(address, value)
+      override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
+        backing.writeInt32(address, value)
+      override def readLittleEndian(address: GuestAddress, size: Int where Between[1, 8]): Either[MemoryError, Long] = {
         val _ = readCalls.incrementAndGet()
         backing.readLittleEndian(address, size)
       }
-      override def writeLittleEndian(address: GuestAddress, value: Long, size: IntBetween[1, 8]) = {
+      override def writeLittleEndian(
+          address: GuestAddress,
+          value: Long,
+          size: Int where Between[1, 8]
+      ): Either[MemoryError, Unit] = {
         val _ = writeCalls.incrementAndGet()
         backing.writeLittleEndian(address, value, size)
       }
@@ -117,7 +116,7 @@ final class CheckedMemorySuite extends munit.FunSuite {
 
   test("word accesses crossing dynamic ownership retain per-byte routing and bounds") {
     val backing = ArrayCheckedMemory.allocate(16, GuestAddress(0x1000L))
-    val memory  = DynamicAddressMemory(backing, DynamicAddressMemory.State(GuestAddress(0x1004L)))
+    val memory  = DynamicAddressMemory(backing, GuestAddress(0x1004L))
     val address = allocate(memory, 4)
     val start   = backing.allocation.start.offset(2)
     val value   = 0x8877665544332211L
@@ -143,43 +142,43 @@ final class CheckedMemorySuite extends munit.FunSuite {
     assert(memory.readBytes(memory.allocation.start, 16).isLeft)
   }
 
-  test("wide dynamic transfers share owned state and preserve delegated transaction boundaries") {
+  test("wide dynamic transfers preserve owned storage and delegated transaction boundaries") {
     val backing    = ArrayCheckedMemory.allocate(32, GuestAddress(0x1000L))
     val readCalls  = AtomicInteger()
     val writeCalls = AtomicInteger()
-    final class BulkMemory extends AddressMemory {
-      override def readInt8(address: GuestAddress)                          = backing.readInt8(address)
-      override def readInt32(address: GuestAddress)                         = backing.readInt32(address)
-      override def writeInt8(address: GuestAddress, value: Byte)            = backing.writeInt8(address, value)
-      override def writeInt32(address: GuestAddress, value: Int)            = backing.writeInt32(address, value)
-      override def readBytes(address: GuestAddress, size: NonNegative[Int]) = {
+    class BulkMemory extends AddressMemory {
+      override def readInt8(address: GuestAddress): Either[MemoryError, Byte]               = backing.readInt8(address)
+      override def readInt32(address: GuestAddress): Either[MemoryError, Int]               = backing.readInt32(address)
+      override def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit] =
+        backing.writeInt8(address, value)
+      override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
+        backing.writeInt32(address, value)
+      override def readBytes(address: GuestAddress, size: Int >= 0): Either[MemoryError, Vec[Byte]] = {
         val _ = readCalls.incrementAndGet()
         backing.readBytes(address, size)
       }
-      override def writeBytes(address: GuestAddress, bytes: Vec[Byte]) = {
+      override def writeBytes(address: GuestAddress, bytes: Vec[Byte]): Either[MemoryError, Unit] = {
         val _ = writeCalls.incrementAndGet()
         backing.writeBytes(address, bytes)
       }
     }
-    val state    = DynamicAddressMemory.State(GuestAddress(0x2000L))
     val delegate = BulkMemory()
-    val first    = DynamicAddressMemory(delegate, state)
-    val second   = DynamicAddressMemory(delegate, state)
-    val owned    = allocate(first, 16)
+    val memory   = DynamicAddressMemory(delegate, GuestAddress(0x2000L))
+    val owned    = allocate(memory, 16)
     val bytes    = Vec.from((1 to 16).map(_.toByte))
-    assertEquals(first.writeBytes(owned, bytes), Right(()))
-    assertEquals(second.readBytes(owned, 16), Right(bytes))
+    assertEquals(memory.writeBytes(owned, bytes), Right(()))
+    assertEquals(memory.readBytes(owned, 16), Right(bytes))
     assertEquals(writeCalls.get(), 0)
     assertEquals(readCalls.get(), 0)
-    assertEquals(first.writeBytes(backing.allocation.start, bytes), Right(()))
-    assertEquals(second.readBytes(backing.allocation.start, 16), Right(bytes))
+    assertEquals(memory.writeBytes(backing.allocation.start, bytes), Right(()))
+    assertEquals(memory.readBytes(backing.allocation.start, 16), Right(bytes))
     assertEquals(writeCalls.get(), 1)
     assertEquals(readCalls.get(), 1)
   }
 
   test("wide mixed overlay ranges preserve per-byte ownership and failed-write contents") {
     val backing = ArrayCheckedMemory.allocate(16, GuestAddress(0x1000L))
-    val memory  = DynamicAddressMemory(backing, DynamicAddressMemory.State(GuestAddress(0x1004L)))
+    val memory  = DynamicAddressMemory(backing, GuestAddress(0x1004L))
     val owned   = allocate(memory, 4)
     val bytes   = Vec.from((1 to 16).map(_.toByte))
     assertEquals(memory.writeBytes(backing.allocation.start, bytes), Right(()))
@@ -190,4 +189,35 @@ final class CheckedMemorySuite extends munit.FunSuite {
     assertEquals(memory.readBytes(backing.allocation.start, 16), Right(bytes))
   }
 
+  for (offset <- Seq(2, 6)) {
+    test(s"Int32 read at mixed overlay boundary $offset agrees with byte ownership") {
+      val backing  = ArrayCheckedMemory.allocate(16, GuestAddress(0x1000L))
+      val memory   = DynamicAddressMemory(backing, GuestAddress(0x1004L))
+      val owned    = allocate(memory, 4, Vec[Byte](1, 2, 3, 4))
+      val address  = backing.allocation.start.offset(offset)
+      val expected = if (offset == 2) 0x02010000 else 0x00000403
+      assertEquals(memory.readInt32(address), Right(expected))
+      assertEquals(memory.readLittleEndian(address, doubleWord), Right(expected.toLong))
+      assertEquals(memory.readInt32(owned), Right(0x04030201))
+    }
+    test(s"Int32 write at mixed overlay boundary $offset preserves hidden backing and free semantics") {
+      val backing = ArrayCheckedMemory.allocate(16, GuestAddress(0x1000L))
+      val memory  = DynamicAddressMemory(backing, GuestAddress(0x1004L))
+      val owned   = allocate(memory, 4)
+      val address = backing.allocation.start.offset(offset)
+      assertEquals(memory.writeInt32(address, 0x44332211), Right(()))
+      assertEquals(memory.readBytes(address, 4), Right(Vec[Byte](0x11, 0x22, 0x33, 0x44)))
+      assertEquals(backing.readInt32(owned), Right(0))
+      assert(memory.free(owned))
+      assertEquals(memory.readInt32(owned), Right(0))
+    }
+  }
+  test("failed mixed Int32 write leaves both owners unchanged") {
+    val backing = ArrayCheckedMemory.allocate(3, GuestAddress(0x1000L))
+    val memory  = DynamicAddressMemory(backing, GuestAddress(0x1002L))
+    val owned   = allocate(memory, 1, Vec(9.toByte))
+    assert(memory.writeInt32(GuestAddress(0x1000L), 0x44332211).isLeft)
+    assertEquals(backing.readBytes(GuestAddress(0x1000L), 3), Right(Vec[Byte](0, 0, 0)))
+    assertEquals(memory.readInt8(owned), Right(9.toByte))
+  }
 }

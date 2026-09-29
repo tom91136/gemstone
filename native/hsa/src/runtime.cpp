@@ -20,6 +20,8 @@
 #include <stdint.h>
 
 #include <gemstone/memory.hpp>
+
+#include <environment_keys.hpp>
 #if defined(__linux__)
   #include <sys/mman.h>
 #endif
@@ -681,14 +683,7 @@ int completeSignal(hsa_signal_t signal) {
 
 // Bounds every wait for a queue to drain under system paging. Defaults to the
 // RPC timeout so a wedged queue fails instead of stalling the caller forever.
-std::chrono::seconds pagingTimeout() {
-  constexpr long fallback = 300;
-  const char *raw = gemstone::environment::value(gemstone::environment::HsaPagingTimeoutSeconds);
-  if (!raw || raw[0] == '\0') return std::chrono::seconds(fallback);
-  char *end = nullptr;
-  const long value = std::strtol(raw, &end, 10);
-  return std::chrono::seconds(end && *end == '\0' && value > 0 ? value : fallback);
-}
+std::chrono::seconds pagingTimeout() { return std::chrono::seconds(gemstone::environment::hsaPagingTimeoutSeconds()); }
 
 bool awaitQueuedDispatches(RuntimeState &runtime) {
   std::vector<std::pair<QueueRef, uint64_t>> pending;
@@ -1100,7 +1095,7 @@ extern "C" hsa_status_t hsa_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attri
   // LLVM's AMDGPU offload plugin consumes the HSA ISA name as an LLVM target
   // triple, rather than the older human-readable AMD:AMDGPU spelling.
   const std::string name = std::string("amdgcn-amd-amdhsa--") + gemstone::hsa::targetArch()
-                           + (gemstone::environment::present(gemstone::environment::SystemPaging) ? ":xnack+" : "");
+                           + (gemstone::environment::enabled(gemstone::environment::SystemPaging) ? ":xnack+" : "");
   switch (attribute) {
     case HSA_ISA_INFO_NAME_LENGTH: return copyStatus(value, static_cast<uint32_t>(name.size()));
     case HSA_ISA_INFO_NAME:

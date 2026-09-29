@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <iosfwd>
 #include <map>
 #include <optional>
 #include <span>
@@ -75,7 +76,7 @@ void materialize_ctest(const std::filesystem::path &directory, const std::filesy
                        const std::vector<TargetExecution> &targets);
 ProcessResult run_process(const std::vector<std::string> &command, const std::filesystem::path &directory,
                           const std::map<std::string, std::string> &environment, std::chrono::milliseconds timeout,
-                          const std::string &prefix = {}, bool capture_output = false);
+                          const std::string &prefix = {}, bool capture_output = false, std::ostream *output_log = nullptr);
 int32_t execute_case(const std::filesystem::path &config, const ScheduledCase &test);
 int32_t run(RunOptions configuration, const std::filesystem::path &driver);
 std::filesystem::path executable_path(const char *argument);

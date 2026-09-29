@@ -1,36 +1,22 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.binary.Widths.*
-
-import CodeObject.*
+import ELF.*
+import LoadedProgram.*
+import VMArithmetic.*
 import VMIR.*
-import VirtualMachine.*
-import VMLoadedProgram.GlobalBinding
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.Bits
-import net.kurobako.gemstone.binary.Binary16
-import net.kurobako.gemstone.binary.Binary32
-import net.kurobako.gemstone.binary.ByteRange
-import net.kurobako.gemstone.binary.IEEE754
-import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.memory.GuestAddress
-import net.kurobako.gemstone.vm.{AddressSpace, Fault, KernelTask, Memory, MemoryRegion, Scheduler, TaskControl}
-import net.kurobako.gemstone.vm.LaunchGeometry
-import net.kurobako.gemstone.vm.LaunchGeometry.Coordinates
-
+import VMState.*
 import cats.syntax.either.*
-
 import java.math.BigInteger
-import java.util.concurrent.locks.ReentrantLock
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-private[amdgpu] object VMInterpreter {
-  private val KernargAddress                          = 0x100000000000L
-  private val DispatchAddress                         = 0x200000000000L
+private object VMInterpreter {
+  import VMDispatchMemory.*
   private val AdvanceMarker                           = Int.MinValue
   private val AdvanceStep: Either[Fault, Option[Int]] = Right(Some(AdvanceMarker))
 
@@ -78,449 +64,6 @@ private[amdgpu] object VMInterpreter {
   )
   private val TrigPreopMask = BigInteger.ONE.shiftLeft(53).subtract(BigInteger.ONE)
 
-  private[amdgpu] def unsignedMultiplyHigh32(left: Long, right: Long): Long =
-    Bits.high32(Bits.low32(left).raw * Bits.low32(right).raw).raw
-  private[amdgpu] def signedMultiplyHigh32(left: Long, right: Long): Long =
-    Bits.high32(Bits.signed32(left).toLong * Bits.signed32(right).toLong).raw
-  private[amdgpu] def unsignedMultiplyHigh24(left: Long, right: Long): Long =
-    Bits.high32((left & 0xffffffL) * (right & 0xffffffL)).raw
-  private[amdgpu] def signedMultiplyImmediate(register: Long, immediate: Int): (Long, Boolean) = {
-    val product  = register.toInt.toLong * immediate.toLong
-    val overflow = product < Int.MinValue.toLong || product > Int.MaxValue.toLong
-    (Bits.low32(product).raw, overflow)
-  }
-  private[amdgpu] def unsignedSubtract32(left: Long, right: Long): (Long, Boolean) = {
-    val unsignedLeft  = Bits.low32(left).raw
-    val unsignedRight = Bits.low32(right).raw
-    // AMD names the VCC result "carry", but V_SUB*_CO exposes the borrow
-    // bit: it is set when the unsigned minuend is smaller than the
-    // subtrahend.  V_SUBB then consumes that bit as its borrow-in.
-    (Bits.low32(unsignedLeft - unsignedRight).raw, unsignedLeft < unsignedRight)
-  }
-  private[amdgpu] def unsignedSubtractWithBorrow32(left: Long, right: Long, borrowIn: Boolean): (Long, Boolean) = {
-    val unsignedLeft  = Bits.low32(left).raw
-    val unsignedRight = Bits.low32(right).raw + (if (borrowIn) 1L else 0L)
-    (Bits.low32(unsignedLeft - unsignedRight).raw, unsignedLeft < unsignedRight)
-  }
-  private[amdgpu] def unsignedMultiply24(left: Long, right: Long): Long =
-    Bits.low32((left & 0xffffffL) * (right & 0xffffffL)).raw
-  private[amdgpu] def unsignedMultiplyAdd24(left: Long, right: Long, addend: Long): Long =
-    Bits.low32(unsignedMultiply24(left, right) + Bits.low32(addend).raw).raw
-  private[amdgpu] def unsignedSubtractReverse32(left: Long, right: Long): Long =
-    Bits.low32(Bits.low32(right).raw - Bits.low32(left).raw).raw
-  private[amdgpu] def unsignedMin32(left: Long, right: Long): Long =
-    math.min(Bits.low32(left).raw, Bits.low32(right).raw)
-  private[amdgpu] def scalarMinMax(
-      operation: ScalarMinMaxOperation,
-      left: Long,
-      right: Long
-  ): (Long, Boolean) = {
-    val left32  = Bits.low32(left).raw
-    val right32 = Bits.low32(right).raw
-    operation match {
-      case ScalarMinMaxOperation.MinimumU32 => (math.min(left32, right32), left32 < right32)
-      case ScalarMinMaxOperation.MaximumU32 => (math.max(left32, right32), left32 > right32)
-      case ScalarMinMaxOperation.MinimumI32 =>
-        (Bits.low32(math.min(left32.toInt, right32.toInt).toLong).raw, left32.toInt < right32.toInt)
-      case ScalarMinMaxOperation.MaximumI32 =>
-        (Bits.low32(math.max(left32.toInt, right32.toInt).toLong).raw, left32.toInt > right32.toInt)
-    }
-  }
-  private[amdgpu] def mergeD16(existing: Long, value: Long, high: Boolean): Long =
-    if (high) (Bits.low32(existing).raw & 0x0000ffffL) | (Bits.low16(value).raw << 16)
-    else (Bits.low32(existing).raw & 0xffff0000L) | Bits.low16(value).raw
-  private[amdgpu] def andn2SaveExecMask(previous: Long, source: Long): Long =
-    // SAVEEXEC keeps the explicit source as ANDN2's first operand and the
-    // previous EXEC mask as its second operand: source & ~previous.
-    source & ~previous
-  private[amdgpu] def signedFirstBitHigh32(value: Long): Long = {
-    val signed = Bits.signed32(value)
-    if (signed == 0 || signed == -1) 0xffffffffL
-    else if (signed >= 0) Integer.numberOfLeadingZeros(signed).toLong
-    else Integer.numberOfLeadingZeros(~signed).toLong
-  }
-  private[amdgpu] def firstBitHigh32(value: Long): Long = {
-    val unsigned = Bits.signed32(value)
-    if (unsigned == 0) 0xffffffffL else Integer.numberOfLeadingZeros(unsigned).toLong
-  }
-  private[amdgpu] def floatClassMask(value: Float): Long = {
-    val bits     = IEEE754.floatToBinary32(value).raw
-    val exponent = (bits >>> 23) & 0xff
-    val fraction = bits & 0x7fffff
-    val negative = (bits & 0x80000000L) != 0L
-    val classBit =
-      if (exponent == 0xff && fraction != 0) if ((fraction & 0x400000) == 0) 0 else 1
-      else if (exponent == 0xff) if (negative) 2 else 9
-      else if (exponent == 0 && fraction == 0) if (negative) 5 else 6
-      else if (exponent == 0) if (negative) 4 else 7
-      else if (negative) 3 else 8
-    1L << classBit
-  }
-  private[amdgpu] def clampF32(value: Float): Float =
-    if (value.isNaN) value else math.max(0.0f, math.min(1.0f, value))
-  private[amdgpu] def trigF32(operation: VectorConvertOperation, value: Float): Float = operation match {
-    // AMD's scalarized sin/cos instructions use turns, not radians: one
-    // instruction unit is 2*pi radians.  HIP kernels commonly multiply
-    // radians by 1/(2*pi) before reaching these instructions.
-    case VectorConvertOperation.SineF32   => math.sin(2.0 * math.Pi * value.toDouble).toFloat
-    case VectorConvertOperation.CosineF32 => math.cos(2.0 * math.Pi * value.toDouble).toFloat
-    case _ => throw IllegalArgumentException(s"$operation is not a trigonometric operation")
-  }
-  private[amdgpu] def packedFmaF16(
-      srcA: Long,
-      srcB: Long,
-      srcC: Long,
-      lowSelection: Int,
-      highSelection: Int,
-      negateLow: Int,
-      negateHigh: Int,
-      clamp: Boolean
-  ): Long = {
-    def half(source: Long, high: Boolean): Float =
-      IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(if (high) source >>> 16 else source)))
-    def calculate(selection: Int, negate: Int): Long = {
-      def operand(source: Long, index: Int): Float = {
-        val value = half(source, (selection & (1 << index)) != 0)
-        if ((negate & (1 << index)) != 0) -value else value
-      }
-      val result  = Math.fma(operand(srcA, 0), operand(srcB, 1), operand(srcC, 2))
-      val clamped = if (clamp) clampF32(result) else result
-      IEEE754.floatToBinary16(clamped).raw
-    }
-    calculate(lowSelection, negateLow) | (calculate(highSelection, negateHigh) << 16)
-  }
-  private[amdgpu] def fmaMixF16(
-      existing: Long,
-      srcA: Long,
-      srcB: Long,
-      srcC: Long,
-      opSelection: Int,
-      opSelectionHi: Int,
-      negate: Int,
-      absolute: Int,
-      clamp: Boolean,
-      high: Boolean
-  ): Long = {
-    def operand(source: Long, index: Int): Float = {
-      val convertFromHalf = (opSelectionHi & (1 << index)) != 0
-      val selectHigh      = (opSelection & (1 << index)) != 0
-      val value           =
-        if (convertFromHalf)
-          IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(if (selectHigh) source >>> 16 else source)))
-        else IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source)))
-      val absoluteValue = if ((absolute & (1 << index)) != 0) math.abs(value) else value
-      if ((negate & (1 << index)) != 0) -absoluteValue else absoluteValue
-    }
-    val rounded = IEEE754.floatToBinary16(Math.fma(operand(srcA, 0), operand(srcB, 1), operand(srcC, 2)))
-    val value   =
-      if (clamp) {
-        val converted = IEEE754.binary16ToFloat(rounded)
-        IEEE754.floatToBinary16(math.max(0.0f, math.min(1.0f, converted)))
-      } else rounded
-    mergeD16(existing, value.raw, high)
-  }
-  private[amdgpu] def fmaMixF32(
-      srcA: Long,
-      srcB: Long,
-      srcC: Long,
-      opSelection: Int,
-      opSelectionHi: Int,
-      negate: Int,
-      absolute: Int,
-      clamp: Boolean
-  ): Long = {
-    def operand(source: Long, index: Int): Float = {
-      val convertFromHalf = (opSelectionHi & (1 << index)) != 0
-      val selectHigh      = (opSelection & (1 << index)) != 0
-      val value           =
-        if (convertFromHalf)
-          IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(if (selectHigh) source >>> 16 else source)))
-        else IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source)))
-      val absoluteValue = if ((absolute & (1 << index)) != 0) math.abs(value) else value
-      if ((negate & (1 << index)) != 0) -absoluteValue else absoluteValue
-    }
-    val result = Math.fma(operand(srcA, 0), operand(srcB, 1), operand(srcC, 2))
-    IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).raw
-  }
-  private[amdgpu] def dot2F32F16(left: Long, right: Long, accumulator: Long, accumulate: Boolean): Binary32 = {
-    val leftLow   = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left)))
-    val leftHigh  = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left >>> 16)))
-    val rightLow  = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right)))
-    val rightHigh = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right >>> 16)))
-    val products  = Math.fma(leftLow, rightLow, leftHigh * rightHigh)
-    val result    =
-      if (accumulate) products + IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(accumulator))) else products
-    IEEE754.floatToBinary32(result)
-  }
-  // Four packed lanes are accumulated without creating an intermediate collection.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private[amdgpu] def dot4U32U8(left: Long, right: Long, accumulator: Long): Long = {
-    var result = Bits.low32(accumulator).raw
-    var index  = 0
-    while (index < 4) {
-      val leftByte  = (left >>> (index * 8)) & 0xffL
-      val rightByte = (right >>> (index * 8)) & 0xffL
-      result = Bits.low32(result + leftByte * rightByte).raw
-      index += 1
-    }
-    result
-  }
-
-  /** AMD's unsigned float-to-dword conversion returns the truncated magnitude for negative inputs.
-    *
-    * LLVM uses this defined device behavior while lowering signed float-to-64-bit conversions: it restores the sign
-    * with a subsequent XOR/subtract sequence. Converting a negative JVM Float directly to Long would instead produce
-    * the two's-complement low dword, which breaks that sequence (for example, -3.0f would feed 0xfffffffd instead of
-    * 3).
-    */
-  private[amdgpu] def unsignedFloatToInt32(value: Float): Long =
-    Bits.low32((if (value < 0.0f) -value else value).toLong).raw
-  private[amdgpu] def doubleClassMask(value: Double): Long = {
-    val bits     = IEEE754.doubleToBinary64(value)
-    val exponent = (bits >>> 52) & 0x7ffL
-    val fraction = bits & 0x000fffffffffffffL
-    val negative = bits < 0L
-    val classBit =
-      if (exponent == 0x7ffL && fraction != 0L) if ((fraction & 0x0008000000000000L) == 0L) 0 else 1
-      else if (exponent == 0x7ffL) if (negative) 2 else 9
-      else if (exponent == 0L && fraction == 0L) if (negative) 5 else 6
-      else if (exponent == 0L) if (negative) 4 else 7
-      else if (negative) 3 else 8
-    1L << classBit
-  }
-  private[amdgpu] def signedMultiply24(left: Long, right: Long): Long = {
-    def signed(value: Long): Long = {
-      val bits = value & 0xffffffL
-      if ((bits & 0x800000L) == 0L) bits else bits | ~0xffffffL
-    }
-    Bits.low32(signed(left) * signed(right)).raw
-  }
-  private[amdgpu] def signedMultiplyHigh24(left: Long, right: Long): Long = {
-    def signed(value: Long): Long = {
-      val bits = value & 0xffffffL
-      if ((bits & 0x800000L) == 0L) bits else bits | ~0xffffffL
-    }
-    Bits.low32((signed(left) * signed(right)) >> 32).raw
-  }
-  private[amdgpu] def divisionFixupF32(quotient: Float, denominator: Float, numerator: Float): Float = {
-    val negative =
-      ((java.lang.Float.floatToRawIntBits(numerator) ^
-        java.lang.Float.floatToRawIntBits(denominator)) & 0x80000000) != 0
-    val sign = if (negative) -1.0f else 1.0f
-    if (
-      numerator.isNaN || denominator.isNaN || (numerator.isInfinite && denominator.isInfinite) ||
-      (numerator == 0.0f && denominator == 0.0f)
-    ) Float.NaN
-    else if (denominator == 0.0f || numerator.isInfinite) Math.copySign(Float.PositiveInfinity, sign)
-    else if (denominator.isInfinite || numerator == 0.0f) Math.copySign(0.0f, sign)
-    else if (quotient.isNaN) numerator / denominator
-    else Math.copySign(math.abs(quotient), sign)
-  }
-
-  private[amdgpu] def fmaF32(
-      operation: VectorMadF32Operation,
-      leftBits: Long,
-      rightBits: Long,
-      addendBits: Long
-  ): Binary32 = {
-    val left   = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftBits)))
-    val right  = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(rightBits)))
-    val addend = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(addendBits)))
-    val result = operation match {
-      case VectorMadF32Operation.FusedMultiplyAdd => Math.fma(left, right, addend)
-      case VectorMadF32Operation.MultiplyAdd      => left * right + addend
-    }
-    IEEE754.floatToBinary32(result)
-  }
-  private[amdgpu] def bitReverse32(value: Long): Long =
-    Bits.reverseBits(value, 32)
-  private[amdgpu] def minimumF16(left: Long, right: Long): Binary16 =
-    IEEE754.floatToBinary16(
-      math.min(
-        IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))),
-        IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right)))
-      )
-    )
-  private def comparisonResult(
-      relation: VectorComparisonRelation,
-      less: Boolean,
-      equal: Boolean,
-      greater: Boolean,
-      unordered: Boolean
-  ): Boolean = relation match {
-    case VectorComparisonRelation.Equal             => equal
-    case VectorComparisonRelation.NotEqual          => !equal
-    case VectorComparisonRelation.Less              => less
-    case VectorComparisonRelation.LessOrEqual       => less || equal
-    case VectorComparisonRelation.Greater           => greater
-    case VectorComparisonRelation.GreaterOrEqual    => greater || equal
-    case VectorComparisonRelation.NotLess           => !less
-    case VectorComparisonRelation.NotLessOrEqual    => !(less || equal)
-    case VectorComparisonRelation.NotGreater        => !greater
-    case VectorComparisonRelation.NotGreaterOrEqual => !(greater || equal)
-    case VectorComparisonRelation.Ordered           => !unordered
-    case VectorComparisonRelation.Unordered         => unordered
-    case VectorComparisonRelation.NotLessOrGreater  => !less && !greater
-    case VectorComparisonRelation.Class             => false
-  }
-
-  private[amdgpu] def compare(operation: VectorComparison, left: Long, right: Long): Boolean = {
-    def integer(leftValue: Long, rightValue: Long): Boolean = {
-      val ordering = java.lang.Long.compare(leftValue, rightValue)
-      comparisonResult(operation.relation, ordering < 0, ordering == 0, ordering > 0, unordered = false)
-    }
-    def unsigned(leftValue: Long, rightValue: Long): Boolean = {
-      val ordering = java.lang.Long.compareUnsigned(leftValue, rightValue)
-      comparisonResult(operation.relation, ordering < 0, ordering == 0, ordering > 0, unordered = false)
-    }
-    def floating(leftValue: Double, rightValue: Double): Boolean =
-      comparisonResult(
-        operation.relation,
-        leftValue < rightValue,
-        leftValue == rightValue,
-        leftValue > rightValue,
-        leftValue.isNaN || rightValue.isNaN
-      )
-
-    operation.kind match {
-      case VectorComparisonKind.Signed16 =>
-        integer(
-          Bits.signExtend(Bits.low16(left).raw, 16),
-          Bits.signExtend(Bits.low16(right).raw, 16)
-        )
-      case VectorComparisonKind.Signed32 =>
-        integer(
-          Bits.signExtend(Bits.low32(left).raw, 32),
-          Bits.signExtend(Bits.low32(right).raw, 32)
-        )
-      case VectorComparisonKind.Signed64   => integer(left, right)
-      case VectorComparisonKind.Unsigned16 => unsigned(Bits.low16(left).raw, Bits.low16(right).raw)
-      case VectorComparisonKind.Unsigned32 => unsigned(Bits.low32(left).raw, Bits.low32(right).raw)
-      case VectorComparisonKind.Unsigned64 => unsigned(left, right)
-      case VectorComparisonKind.Float16    =>
-        floating(
-          IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))).toDouble,
-          IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right))).toDouble
-        )
-      case VectorComparisonKind.Float32 =>
-        floating(
-          IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))).toDouble,
-          IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right))).toDouble
-        )
-      case VectorComparisonKind.Float64 =>
-        floating(IEEE754.binary64ToDouble(left), IEEE754.binary64ToDouble(right))
-      case VectorComparisonKind.ClassFloat32 =>
-        (floatClassMask(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left)))) & Bits.low32(right).raw) != 0L
-      case VectorComparisonKind.ClassFloat64 =>
-        (doubleClassMask(IEEE754.binary64ToDouble(left)) & Bits.low32(right).raw) != 0L
-    }
-  }
-  private[amdgpu] def floatingLiteralToDouble(raw: Long): Double =
-    IEEE754.binary64ToDouble(Bits.join32(0L, Bits.low32(raw).raw))
-  private[amdgpu] def bpermuteSourceLane(address: Long): Int =
-    bpermuteSourceLane(address, 0L)
-  private[amdgpu] def bpermuteSourceLane(address: Long, offset: Long): Int =
-    (((address + offset) >>> 2) & 63L).toInt
-  private[amdgpu] def permuteDestinationLane(address: Long, offset: Long, waveSize: WaveSize): Int =
-    (((address + offset) >>> 2) & (waveSize.raw - 1L)).toInt
-  private[amdgpu] def dppQuadSourceLane(lane: Int, control: Int): Int =
-    (lane & ~3) | ((control >>> ((lane & 3) * 2)) & 3)
-  private[amdgpu] def dppSourceLane(lane: Int, control: Int): Option[Int] =
-    if (control <= 0xff) Some(dppQuadSourceLane(lane, control))
-    else if (control >= 0x100 && control <= 0x10f) {
-      val source = (lane & 15) + (control & 15)
-      Option.when(source < 16)((lane & ~15) | source)
-    } else if (control >= 0x110 && control <= 0x11f) {
-      val source = (lane & 15) - (control & 15)
-      Option.when(source >= 0)((lane & ~15) | source)
-    } else if (control >= 0x121 && control <= 0x12f) {
-      val rowBase = lane & ~15
-      Some(rowBase | (((lane & 15) - (control & 15)) & 15))
-    } else control match {
-      case 0x130 => Option.when(lane < 63)(lane + 1)
-      case 0x134 => Some((lane + 1) & 63)
-      case 0x138 => Option.when(lane > 0)(lane - 1)
-      case 0x13c => Some((lane - 1) & 63)
-      case 0x142 => Option.when(((lane / 16) & 1) == 1)((lane / 16 - 1) * 16 + 15)
-      case 0x143 => Option.when(lane / 16 >= 2)(31)
-      case _     => None
-    }
-  private[amdgpu] def dppLaneEnabled(lane: Int, rowMask: Int, bankMask: Int): Boolean =
-    (rowMask & (1 << (lane / 16))) != 0 && (bankMask & (1 << (lane & 3))) != 0
-  private[amdgpu] def waveConditionMask(mask: Long, lanes: LaneCount): Long =
-    if (lanes.raw <= 32) Bits.low32(mask).raw else mask
-  private[amdgpu] def mbCount(mask: Long, executionMask: Long, lane: Int, high: Boolean, base: Long): Long = {
-    val laneInHalf = lane & 31
-    val belowLane  = if (laneInHalf == 0) 0L else (1L << laneInHalf) - 1L
-    val relevant   =
-      if (high) {
-        if (lane < 32) 0L else Bits.high32(executionMask).raw & belowLane
-      } else {
-        val belowLow = if (lane < 32) belowLane else Bits.Mask32
-        executionMask & belowLow
-      }
-    Bits.low32(base + java.lang.Integer.bitCount((mask & relevant).toInt).toLong).raw
-  }
-
-  private final class MemoryContext(delegate: Memory, addresses: AddressSpace)
-      extends Memory {
-    override def flushHostWrites(): Either[Fault, Unit]                  = delegate.flushHostWrites()
-    override def invalidateHostReads(): Unit                             = delegate.invalidateHostReads()
-    private def complete[A](read: => Either[Fault, A]): Either[Fault, A] = read match {
-      case Left(Fault.PendingMemory) => delegate.flushHostReads().flatMap(_ => complete(read))
-      case result                    => result
-    }
-    override def read(
-        region: MemoryRegion,
-        offset: NonNegative[Long],
-        size: NonNegative[Int]
-    ): Either[Fault, Vec[Byte]] = complete(delegate.read(region, offset, size))
-
-    override def write(
-        region: MemoryRegion,
-        offset: NonNegative[Long],
-        bytes: Vec[Byte]
-    ): Either[Fault, Unit] = delegate.write(region, offset, bytes)
-
-    override def readValue(
-        region: MemoryRegion,
-        offset: NonNegative[Long],
-        size: IntBetween[1, 8]
-    ): Either[Fault, Long] = complete(delegate.readValue(region, offset, size))
-
-    override def writeValue(
-        region: MemoryRegion,
-        offset: NonNegative[Long],
-        value: Long,
-        size: IntBetween[1, 8]
-    ): Either[Fault, Unit] = delegate.writeValue(region, offset, value, size)
-
-    override def atomicModifyValue(
-        region: MemoryRegion,
-        offset: NonNegative[Long],
-        size: IntBetween[1, 8]
-    )(update: Long => Long): Either[Fault, Long] =
-      complete(delegate.atomicModifyValue(region, offset, size)(update))
-
-    def prepareReads(ranges: Vec[(GuestAddress, NonNegative[Int])]): Either[Fault, Unit] =
-      addresses.prepareReads(ranges)
-
-    def read(address: GuestAddress, size: NonNegative[Int]): Either[Fault, Vec[Byte]] =
-      complete(addresses.read(delegate, address, size))
-
-    def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
-      addresses.write(delegate, address, bytes)
-
-    def readValue(address: GuestAddress, size: IntBetween[1, 8]): Either[Fault, Long] =
-      complete(addresses.readValue(delegate, address, size))
-
-    def writeValue(address: GuestAddress, value: Long, size: IntBetween[1, 8]): Either[Fault, Unit] =
-      addresses.writeValue(delegate, address, value, size)
-
-    def atomicModifyValue(address: GuestAddress, size: IntBetween[1, 8])(
-        update: Long => Long
-    ): Either[Fault, Long] = addresses.atomicModifyValue(delegate, address, size)(update)
-  }
   // Lane-wise register updates are an allocation-sensitive interpreter loop.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def executeVMove(
@@ -530,7 +73,7 @@ private[amdgpu] object VMInterpreter {
       vector: VectorRegisters,
       carry: LaneBits,
       active: LaneBits,
-      lanes: LaneCount
+      lanes: Int where Between[1, 64]
   ): Unit = {
     val destination = vector(dest)
     src match {
@@ -538,15 +81,15 @@ private[amdgpu] object VMInterpreter {
         val source = vector(index)
         var lane   = 0
         while (lane < lanes.raw) {
-          if (active(lane)) destination(lane) = Bits.low32(source(lane)).raw
+          if (active(lane)) destination(lane) = Bits.low32(source(lane)).toLong
           lane += 1
         }
       case other =>
         val value = other match {
-          case InstructionSource.Scalar(Decoding.VccLo)  => Bits.low32(carry.register).raw
-          case InstructionSource.Scalar(Decoding.VccHi)  => Bits.high32(carry.register).raw
-          case InstructionSource.Scalar(Decoding.ExecLo) => Bits.low32(active.register).raw
-          case InstructionSource.Scalar(Decoding.ExecHi) => Bits.high32(active.register).raw
+          case InstructionSource.Scalar(Decoding.VccLo)  => Bits.low32(carry.register).toLong
+          case InstructionSource.Scalar(Decoding.VccHi)  => Bits.high32(carry.register).toLong
+          case InstructionSource.Scalar(Decoding.ExecLo) => Bits.low32(active.register).toLong
+          case InstructionSource.Scalar(Decoding.ExecHi) => Bits.high32(active.register).toLong
           case InstructionSource.Scalar(index)           => scalar(index)
           case InstructionSource.Constant(raw)           => raw
           case InstructionSource.Literal(raw)            => raw
@@ -554,7 +97,7 @@ private[amdgpu] object VMInterpreter {
         }
         var lane = 0
         while (lane < lanes.raw) {
-          if (active(lane)) destination(lane) = Bits.low32(value).raw
+          if (active(lane)) destination(lane) = Bits.low32(value).toLong
           lane += 1
         }
     }
@@ -562,18 +105,16 @@ private[amdgpu] object VMInterpreter {
   def execute(
       prepared: Kernel,
       dispatch: KernelTask,
-      memory: Memory,
-      addresses: AddressSpace,
+      memory: AddressSpace,
       control: TaskControl,
-      scheduler: Scheduler,
+      workgroups: Workgroups,
       globalBindings: Vec[GlobalBinding]
   ): Either[Fault, Unit] =
     for {
       kernargSize <- effectiveKernargSize(prepared.source, dispatch.arguments)
         .leftMap(detail => Fault.InvalidTask(detail))
-      kernarg <- packArguments(dispatch.arguments, kernargSize, addresses, globalBindings)
-      context = MemoryContext(memory, addresses)
-      _ <- runDispatch(
+      kernarg <- packArguments(dispatch.arguments, kernargSize, memory, globalBindings)
+      _       <- runDispatch(
         prepared.source,
         prepared.instructions,
         prepared.instructionIndices,
@@ -582,27 +123,31 @@ private[amdgpu] object VMInterpreter {
         kernarg,
         Vec.toArray(globalBindings),
         dispatch,
-        context,
+        memory,
         control,
-        scheduler
+        workgroups
       )
     } yield ()
 
-  private[amdgpu] def effectiveKernargSize(
+  def effectiveKernargSize(
       kernel: CodeObjectKernel,
       arguments: Vec[KernelTask.Argument]
-  ): Either[String, Int] =
+  ): Either[NonEmpty[String], Int] =
     if (kernel.kernargSize != 0 || arguments.isEmpty || kernel.codeAddress == 0L) Right(kernel.kernargSize)
     else
-      arguments.foldLeft[Either[String, Int]](Right(0)) { (total, argument) =>
+      arguments.foldLeft[Either[NonEmpty[String], Int]](Right(0)) { (total, argument) =>
         total.flatMap { current =>
-          val size = argument match {
+          val size: Either[NonEmpty[String], Int] = argument match {
             case KernelTask.Argument.Scalar(bytes) => Right(bytes.length)
             case KernelTask.Argument.Memory(_, _)  => Right(8)
             case KernelTask.Argument.Local(_)      => Left("gfx900 local kernargs are not implemented")
           }
           size.flatMap(value =>
-            Either.cond(current <= Int.MaxValue - value, current + value, "kernel arguments are too large")
+            Either.cond[NonEmpty[String], Int](
+              current <= Int.MaxValue - value,
+              current + value,
+              "kernel arguments are too large"
+            )
           )
         }
       }
@@ -663,8 +208,8 @@ private[amdgpu] object VMInterpreter {
   }
 
   private def argumentAddress(
-      region: MemoryRegion,
-      offset: NonNegative[Long],
+      region: AllocationId,
+      offset: Long >= 0,
       addresses: AddressSpace,
       globalBindings: Vec[GlobalBinding]
   ): Either[Fault, GuestAddress] =
@@ -678,7 +223,7 @@ private[amdgpu] object VMInterpreter {
       case None => addresses.address(region, offset)
     }
 
-  // Workgroups advance through the shared bounded scheduler without materializing a result collection.
+  // Workgroups advance through the shared bounded workgroups without materializing a result collection.
   private def runDispatch(
       kernel: CodeObjectKernel,
       operations: Vec[Instruction],
@@ -688,9 +233,9 @@ private[amdgpu] object VMInterpreter {
       kernarg: Array[Byte],
       allocations: Array[GlobalBinding],
       dispatch: KernelTask,
-      memory: Memory,
+      memory: AddressSpace,
       control: TaskControl,
-      scheduler: Scheduler
+      workgroups: Workgroups
   ): Either[Fault, Unit] =
     for {
       localCount <- dispatch.geometry.groupSize.volumeInt
@@ -698,8 +243,8 @@ private[amdgpu] object VMInterpreter {
       groupCount <- dispatch.geometry.groupCount.volume
         .leftMap(detail => Fault.InvalidTask(detail))
       _ <- {
-        val dispatchBytes                                                = Array.ofDim[Byte](64)
-        def runGroupIndex(index: NonNegative[Long]): Either[Fault, Unit] =
+        val dispatchMemory = VMDispatchMemory(kernel, kernarg, Array.ofDim[Byte](64), allocations, memory)
+        def runGroupIndex(index: Long >= 0): Either[Fault, Unit] =
           dispatch.geometry.groupCoordinates(index.raw)
             .leftMap(detail => Fault.InvalidTask(detail))
             .fold(
@@ -711,55 +256,47 @@ private[amdgpu] object VMInterpreter {
                   instructionIndices,
                   instructionOffsets,
                   entryInstruction,
-                  kernarg,
-                  dispatchBytes,
-                  allocations,
+                  dispatchMemory,
                   dispatch,
                   localCount.raw,
                   group,
-                  memory,
-                  control,
-                  scheduler
+                  control
                 )
             )
-        val refinedGroupCount = groupCount.widen[NonNegative[Long]]
-        val parallelGroups    = scheduler.shouldParallel(
+        val refinedGroupCount = groupCount
+        val parallelGroups    = workgroups.shouldParallel(
           refinedGroupCount,
-          localCount.widen
+          localCount.toLong
         )
-        scheduler.forEach(refinedGroupCount, parallel = parallelGroups)(runGroupIndex(_))
+        workgroups.forEach(refinedGroupCount, parallel = parallelGroups)(runGroupIndex(_))
       }
     } yield ()
 
   // Wave rendezvous is a measured mutable state machine; null marks absent wave state and the first failure.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null", "scalafix:GemstoneNoAssume"))
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   private def runGroup(
       kernel: CodeObjectKernel,
       operations: Vec[Instruction],
       instructionIndices: Map[Int, Int],
       instructionOffsets: Vec[Int],
       entryInstruction: Int,
-      kernarg: Array[Byte],
-      dispatchBytes: Array[Byte],
-      allocations: Array[GlobalBinding],
+      dispatchMemory: VMDispatchMemory,
       dispatch: KernelTask,
       localCount: Int,
       group: Coordinates,
-      memory: Memory,
-      control: TaskControl,
-      scheduler: Scheduler
+      control: TaskControl
   ): Either[Fault, Unit] = {
     val lds = Array.ofDim[Byte](
       effectiveGroupSegmentSize(kernel.groupSegmentSize, dispatch.groupSegmentBytes.raw)
     )
-    // GFX6-9 code objects use wave64; RDNA and later objects normally select
-    // wave32.  The wave width is part of the executable target, not a global
+    // GFX6-9 and CDNA use wave64; RDNA defaults to wave32 here.
+    // The wave width is part of the executable target, not a global
     // property of the interpreter, and controls both lane partitioning and
     // EXEC/VCC mask width.
-    val waveSize: WaveSize = kernel.target.family match {
-      case Family.GFX6 | Family.GFX7 | Family.GFX8 | Family.GFX9 | Family.CDNA1 | Family.CDNA2 | Family.CDNA3 | Family.CDNA4 |
-          Family.CDNA5 => WaveSize(64)
-      case _ => WaveSize(32)
+    val waveSize: Int in (32, 64) = kernel.target.isa match {
+      case ISA.GFX6 | ISA.GFX7 | ISA.GFX8 | ISA.GFX9 | ISA.CDNA1 | ISA.CDNA2 | ISA.CDNA3 | ISA.CDNA4 |
+          ISA.CDNA5 => 64: Int in (32, 64)
+      case ISA.RDNA1 | ISA.RDNA2 | ISA.RDNA3 | ISA.RDNA3_5 | ISA.RDNA4 => 32: Int in (32, 64)
     }
     val waveCount = (localCount + waveSize.raw - 1) / waveSize.raw
     val states    = Array.ofDim[WaveState | Null](waveCount)
@@ -780,7 +317,7 @@ private[amdgpu] object VMInterpreter {
           live += 1
           val start = waveIndex * waveSize.raw
           // The enclosing wave loop guarantees start < localCount; waveSize is 32 or 64.
-          val lanes         = LaneCount.unsafe(math.min(waveSize.raw, localCount - start))
+          val lanes         = math.min(waveSize.raw, localCount - start).unsafe[Int where Between[1, 64]]
           val initialActive = {
             var active                          = 0L
             var lane                            = 0
@@ -808,9 +345,7 @@ private[amdgpu] object VMInterpreter {
                 instructionIndices,
                 instructionOffsets,
                 entryInstruction,
-                kernarg,
-                dispatchBytes,
-                allocations,
+                dispatchMemory,
                 dispatch.geometry,
                 group,
                 start,
@@ -819,9 +354,7 @@ private[amdgpu] object VMInterpreter {
                 lds,
                 activeMask,
                 states(waveIndex),
-                memory,
-                control,
-                scheduler
+                control
               ) match {
                 case Left(error)                        => failure = error
                 case Right(WaveBoundary.Barrier(state)) =>
@@ -843,32 +376,23 @@ private[amdgpu] object VMInterpreter {
 
   // Register, PC and barrier state are updated directly in the measured wave interpreter loop; null avoids allocating
   // checkpoint and optional-state wrappers for every instruction.
-  @SuppressWarnings(Array(
-    "scalafix:DisableSyntax.var",
-    "scalafix:DisableSyntax.null",
-    "scalafix:DisableSyntax.return",
-    "scalafix:GemstoneNoAssume"
-  ))
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null", "scalafix:DisableSyntax.return"))
   private def runWave(
       kernel: CodeObjectKernel,
       operations: Vec[Instruction],
       instructionIndices: Map[Int, Int],
       instructionOffsets: Vec[Int],
       entryInstruction: Int,
-      kernarg: Array[Byte],
-      dispatchBytes: Array[Byte],
-      allocations: Array[GlobalBinding],
+      dispatchMemory: VMDispatchMemory,
       geometry: LaunchGeometry,
       group: Coordinates,
       localStart: Int,
-      lanes: LaneCount,
-      waveSize: WaveSize,
+      lanes: Int where Between[1, 64],
+      waveSize: Int in (32, 64),
       lds: Array[Byte],
       initialActive: Long,
       initial: WaveState | Null,
-      memory: Memory,
-      control: TaskControl,
-      scheduler: Scheduler
+      control: TaskControl
   ): Either[Fault, WaveBoundary] = {
     val groupX          = group.x
     val groupY          = group.y
@@ -932,16 +456,16 @@ private[amdgpu] object VMInterpreter {
       if (enabled(kernel.kernelCodeProperties, 4)) setPair(scalar, reserve(2), 0L)
       if (enabled(kernel.kernelCodeProperties, 5)) setPair(scalar, reserve(2), 0L)
       if (enabled(kernel.kernelCodeProperties, 6)) scalar(reserve(1)) = kernel.privateSegmentSize.toLong
-      if (enabled(kernel.computePgmRsrc2, 7)) scalar(reserve(1)) = Bits.unsigned32(groupX.raw).raw
-      if (enabled(kernel.computePgmRsrc2, 8)) scalar(reserve(1)) = Bits.unsigned32(groupY.raw).raw
-      if (enabled(kernel.computePgmRsrc2, 9)) scalar(reserve(1)) = Bits.unsigned32(groupZ.raw).raw
+      if (enabled(kernel.computePgmRsrc2, 7)) scalar(reserve(1)) = Bits.unsigned32(groupX.raw).toLong
+      if (enabled(kernel.computePgmRsrc2, 8)) scalar(reserve(1)) = Bits.unsigned32(groupY.raw).toLong
+      if (enabled(kernel.computePgmRsrc2, 9)) scalar(reserve(1)) = Bits.unsigned32(groupZ.raw).toLong
       if (enabled(kernel.computePgmRsrc2, 10)) scalar(reserve(1)) = 0L
       val enabledWorkItemIds = (kernel.computePgmRsrc2 >>> 11) & 0x3
       (0 until lanes.raw).foreach { lane =>
         val local = laneCoordinates(lane)
-        vector(0)(lane) = Bits.unsigned32(local.x.raw).raw
-        if (enabledWorkItemIds >= 1) vector(1)(lane) = Bits.unsigned32(local.y.raw).raw
-        if (enabledWorkItemIds >= 2) vector(2)(lane) = Bits.unsigned32(local.z.raw).raw
+        vector(0)(lane) = Bits.unsigned32(local.x.raw).toLong
+        if (enabledWorkItemIds >= 1) vector(1)(lane) = Bits.unsigned32(local.y.raw).toLong
+        if (enabledWorkItemIds >= 2) vector(2)(lane) = Bits.unsigned32(local.z.raw).toLong
       }
     }
 
@@ -966,23 +490,23 @@ private[amdgpu] object VMInterpreter {
       // s126 is the live EXEC mask in the emulator.
       if (destination != Decoding.NullSgpr) {
         if (waveSize.raw <= 32) {
-          writeScalar32(destination, Bits.low32(result).raw)
+          writeScalar32(destination, Bits.low32(result).toLong)
         } else {
           writeScalar64(destination, result)
         }
       }
 
     def saveExecSource(src: InstructionSource, width: Int): Long =
-      if (width == 32) Bits.low32(sourceScalar64(src)).raw else sourceScalar64(src)
+      if (width == 32) Bits.low32(sourceScalar64(src)).toLong else sourceScalar64(src)
 
     def saveExecWrite(destination: Int, value: Long, width: Int): Unit =
       if (width == 32) writeScalar32(destination, value) else writeScalar64(destination, value)
 
     def source(value: InstructionSource, lane: Int): Long = value match {
-      case InstructionSource.Scalar(Decoding.VccLo)  => Bits.low32(carry.register).raw
-      case InstructionSource.Scalar(Decoding.VccHi)  => Bits.high32(carry.register).raw
-      case InstructionSource.Scalar(Decoding.ExecLo) => Bits.low32(active.register).raw
-      case InstructionSource.Scalar(Decoding.ExecHi) => Bits.high32(active.register).raw
+      case InstructionSource.Scalar(Decoding.VccLo)  => Bits.low32(carry.register).toLong
+      case InstructionSource.Scalar(Decoding.VccHi)  => Bits.high32(carry.register).toLong
+      case InstructionSource.Scalar(Decoding.ExecLo) => Bits.low32(active.register).toLong
+      case InstructionSource.Scalar(Decoding.ExecHi) => Bits.high32(active.register).toLong
       case InstructionSource.Scalar(index)           => scalar(index)
       case InstructionSource.VectorRegister(index)   => vector(index)(lane)
       case InstructionSource.Constant(raw)           => raw
@@ -991,9 +515,9 @@ private[amdgpu] object VMInterpreter {
 
     def sourceScalar64(value: InstructionSource): Long = value match {
       case InstructionSource.Scalar(Decoding.VccLo)  => carry.register
-      case InstructionSource.Scalar(Decoding.VccHi)  => Bits.high32(carry.register).raw
+      case InstructionSource.Scalar(Decoding.VccHi)  => Bits.high32(carry.register).toLong
       case InstructionSource.Scalar(Decoding.ExecLo) => active.register
-      case InstructionSource.Scalar(Decoding.ExecHi) => Bits.high32(active.register).raw
+      case InstructionSource.Scalar(Decoding.ExecHi) => Bits.high32(active.register).toLong
       case InstructionSource.Scalar(index)           => pair(scalar, index)
       case InstructionSource.Constant(raw)           => raw
       case InstructionSource.Literal(raw)            => raw
@@ -1007,12 +531,12 @@ private[amdgpu] object VMInterpreter {
     }
 
     def writeScalar32(dest: Int, value: Long): Unit = dest match {
-      case Decoding.VccLo => carry.register = (carry.register & 0xffffffff00000000L) | Bits.low32(value).raw
+      case Decoding.VccLo => carry.register = (carry.register & 0xffffffff00000000L) | Bits.low32(value).toLong
       case Decoding.VccHi =>
-        carry.register = (carry.register & 0xffffffffL) | (Bits.low32(value).raw << 32)
-      case Decoding.ExecLo => active.register = (active.register & 0xffffffff00000000L) | Bits.low32(value).raw
-      case Decoding.ExecHi => active.register = (active.register & 0xffffffffL) | (Bits.low32(value).raw << 32)
-      case _               => scalar(dest) = Bits.low32(value).raw
+        carry.register = (carry.register & 0xffffffffL) | (Bits.low32(value).toLong << 32)
+      case Decoding.ExecLo => active.register = (active.register & 0xffffffff00000000L) | Bits.low32(value).toLong
+      case Decoding.ExecHi => active.register = (active.register & 0xffffffffL) | (Bits.low32(value).toLong << 32)
+      case _               => scalar(dest) = Bits.low32(value).toLong
     }
 
     def foreachLane(operation: Int => Unit): Unit = {
@@ -1045,28 +569,14 @@ private[amdgpu] object VMInterpreter {
     // functions (the hardware applies the local aperture); model that
     // aperture explicitly before falling back to per-lane scratch or the
     // dispatch allocation map.
-    def immutableAddress(address: Long, size: Int): Boolean =
-      ByteRange.contains(kernarg.length, address - KernargAddress, size.toLong) ||
-        ByteRange.contains(dispatchBytes.length, address - DispatchAddress, size.toLong) ||
-        ByteRange.contains(kernel.readOnly.length, address - kernel.readOnlyAddress, size.toLong)
 
     def flatLoad(lane: Int, address: Long, size: Int): Either[Fault, Vec[Byte]] =
       if (address >= 0L && address <= lds.length.toLong - size.toLong)
-        readLDS(lds, address, size).map(Vec.unsafeFromArray)
+        readLDS(lds, address, size).map(Vec.unsafeWrapArray)
       else if (address >= 0L && address <= scratch(lane).length.toLong - size.toLong)
-        Right(Vec.unsafeFromArray(java.util.Arrays.copyOfRange(scratch(lane), address.toInt, address.toInt + size)))
+        Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(scratch(lane), address.toInt, address.toInt + size)))
       else
-        readBytes(
-          address,
-          size,
-          kernarg,
-          dispatchBytes,
-          kernel.readOnlyAddress,
-          kernel.readOnly,
-          kernel.globalMemory,
-          allocations,
-          memory
-        )
+        dispatchMemory.readBytes(address, size)
 
     def flatStore(lane: Int, address: Long, bytes: Array[Byte]): Either[Fault, Unit] =
       if (address >= 0L && address <= lds.length.toLong - bytes.length)
@@ -1074,7 +584,7 @@ private[amdgpu] object VMInterpreter {
       else if (address >= 0L && address <= scratch(lane).length.toLong - bytes.length) {
         Array.copy(bytes, 0, scratch(lane), address.toInt, bytes.length)
         Right(())
-      } else writeBytes(address, bytes, allocations, memory, kernel.globalMemory)
+      } else dispatchMemory.writeBytes(address, bytes)
 
     def isEmulatedCall(name: String): Boolean =
       name == "__ockl_get_group_id" || name == "__ockl_get_local_size" || name == "__ockl_get_local_id" ||
@@ -1087,8 +597,8 @@ private[amdgpu] object VMInterpreter {
         offset: Int,
         privateScratch: Boolean
     ): Long = {
-      val vectorOffset      = address.map(register => Bits.low32(vector(register)(lane)).raw).getOrElse(0L)
-      val scalarOffsetBytes = scalarOffset.fold(0L)(register => Bits.low32(scalar(register)).raw)
+      val vectorOffset      = address.map(register => Bits.low32(vector(register)(lane)).toLong).getOrElse(0L)
+      val scalarOffsetBytes = scalarOffset.fold(0L)(register => Bits.low32(scalar(register)).toLong)
       // Scratch V# scalar offsets address wave-interleaved backing memory.
       // Convert that portion to a per-lane private byte offset; VGPR and
       // instruction offsets already name bytes within one work-item's scratch.
@@ -1103,7 +613,7 @@ private[amdgpu] object VMInterpreter {
         src: Int,
         byteCount: Int,
         offset: Int,
-        highByteCount: Option[IntBetween[0, 8]]
+        highByteCount: Option[Int where Between[0, 8]]
     ): Either[Fault, Option[Int]] = {
       def storedBytes(lane: Int): Array[Byte] = highByteCount match {
         case Some(width) => LittleEndian.toArray(vector(src)(lane) >>> 16, width)
@@ -1116,10 +626,10 @@ private[amdgpu] object VMInterpreter {
         else {
           val base  = sourceScalar64(InstructionSource.Scalar(resource)) & 0x0000ffffffffffffL
           val start = bufferOffset(lane, address, scalarOffset, offset, base == 0L)
-          val range = Bits.low32(scalar(resource + 2)).raw
+          val range = Bits.low32(scalar(resource + 2)).toLong
           if (base != 0L && (start < 0L || start > range - byteCount.toLong)) storeLane(lane + 1)
           else if (base != 0L)
-            writeBytes(base + start, storedBytes(lane), allocations, memory, kernel.globalMemory)
+            dispatchMemory.writeBytes(base + start, storedBytes(lane))
               .flatMap(_ => storeLane(lane + 1))
           else if (start < 0L || start > scratch(lane).length.toLong - byteCount.toLong)
             Left(Fault.Backend(
@@ -1137,10 +647,10 @@ private[amdgpu] object VMInterpreter {
 
     // Split the instruction switch into JIT-sized methods. The complete switch is too large for C2 to compile.
     def stepInstruction(index: Int): Either[Fault, Option[Int]] = operations(index) match {
-      case Instruction.End        => memory.flushHostWrites().map(_ => None)
+      case Instruction.End        => dispatchMemory.flushHostWrites().map(_ => None)
       case Instruction.Trap(code) =>
         Left(Fault.Backend(f"AMDGPU s_trap $code%d at pc 0x${programCounter(index)}%x"))
-      case Instruction.Wait                      => memory.flushHostWrites().flatMap(_ => AdvanceStep)
+      case Instruction.Wait                      => dispatchMemory.flushHostWrites().flatMap(_ => AdvanceStep)
       case Instruction.SSetGprIdxOn              => AdvanceStep
       case Instruction.Barrier                   => Right(Some(-1))
       case Instruction.Branch(condition, target) =>
@@ -1149,9 +659,9 @@ private[amdgpu] object VMInterpreter {
           case ScalarBranchCondition.SccZero    => !scalarCarry
           case ScalarBranchCondition.SccNonZero => scalarCarry
           case ScalarBranchCondition.VccZero    =>
-            (laneMask(carry) & Bits.mask(lanes.bitWidth)) == 0L
+            (laneMask(carry) & Bits.mask(lanes)) == 0L
           case ScalarBranchCondition.VccNonZero =>
-            (laneMask(carry) & Bits.mask(lanes.bitWidth)) != 0L
+            (laneMask(carry) & Bits.mask(lanes)) != 0L
           case ScalarBranchCondition.ExecZero    => active.isEmpty
           case ScalarBranchCondition.ExecNonZero => active.nonEmpty
         }
@@ -1160,17 +670,7 @@ private[amdgpu] object VMInterpreter {
         Left(Fault.Backend("unresolved AMDGPU branch reached execution"))
       case Instruction.SLoad(dest, count, base, offset, scalarOffset) =>
         val address = pair(scalar, base) + offset.toLong + scalarOffset.fold(0L)(register => scalar(register))
-        readBytes(
-          address,
-          count * 4,
-          kernarg,
-          dispatchBytes,
-          kernel.readOnlyAddress,
-          kernel.readOnly,
-          kernel.globalMemory,
-          allocations,
-          memory
-        ) match {
+        dispatchMemory.readBytes(address, count * 4) match {
           case Left(error)  => Left(error)
           case Right(bytes) =>
             (0 until count).foreach { register =>
@@ -1182,7 +682,7 @@ private[amdgpu] object VMInterpreter {
         writeScalar32(dest, source(src, 0))
         AdvanceStep
       case Instruction.SMoveImmediate(dest, value) =>
-        writeScalar32(dest, Bits.unsigned32(value).raw)
+        writeScalar32(dest, Bits.unsigned32(value).toLong)
         AdvanceStep
       case Instruction.SMultiplyImmediate(dest, value) =>
         val (result, overflow) = signedMultiplyImmediate(scalar(dest), value)
@@ -1269,8 +769,8 @@ private[amdgpu] object VMInterpreter {
               foreachActive { lane =>
                 val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
-                vector(0)(lane) = IEEE754.floatToBinary32(math.log(math.hypot(real, imaginary)).toFloat).raw
-                vector(1)(lane) = IEEE754.floatToBinary32(math.atan2(imaginary, real).toFloat).raw
+                vector(0)(lane) = IEEE754.floatToBinary32(math.log(math.hypot(real, imaginary)).toFloat).toLong
+                vector(1)(lane) = IEEE754.floatToBinary32(math.atan2(imaginary, real).toFloat).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("logId") =>
@@ -1279,10 +779,10 @@ private[amdgpu] object VMInterpreter {
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
                 val realBits      = IEEE754.doubleToBinary64(math.log(math.hypot(real, imaginary)))
                 val imaginaryBits = IEEE754.doubleToBinary64(math.atan2(imaginary, real))
-                vector(0)(lane) = Bits.low32(realBits).raw
-                vector(1)(lane) = Bits.high32(realBits).raw
-                vector(2)(lane) = Bits.low32(imaginaryBits).raw
-                vector(3)(lane) = Bits.high32(imaginaryBits).raw
+                vector(0)(lane) = Bits.low32(realBits).toLong
+                vector(1)(lane) = Bits.high32(realBits).toLong
+                vector(2)(lane) = Bits.low32(imaginaryBits).toLong
+                vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("casinhf") =>
@@ -1297,8 +797,8 @@ private[amdgpu] object VMInterpreter {
                 val shiftedReal      = real + rootReal
                 val shiftedImaginary = imaginary + rootImaginary
                 vector(0)(lane) =
-                  IEEE754.floatToBinary32(math.log(math.hypot(shiftedReal, shiftedImaginary)).toFloat).raw
-                vector(1)(lane) = IEEE754.floatToBinary32(math.atan2(shiftedImaginary, shiftedReal).toFloat).raw
+                  IEEE754.floatToBinary32(math.log(math.hypot(shiftedReal, shiftedImaginary)).toFloat).toLong
+                vector(1)(lane) = IEEE754.floatToBinary32(math.atan2(shiftedImaginary, shiftedReal).toFloat).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("casinhE") =>
@@ -1316,10 +816,10 @@ private[amdgpu] object VMInterpreter {
                 val resultImaginary  = math.atan2(shiftedImaginary, shiftedReal)
                 val realBits         = IEEE754.doubleToBinary64(resultReal)
                 val imaginaryBits    = IEEE754.doubleToBinary64(resultImaginary)
-                vector(0)(lane) = Bits.low32(realBits).raw
-                vector(1)(lane) = Bits.high32(realBits).raw
-                vector(2)(lane) = Bits.low32(imaginaryBits).raw
-                vector(3)(lane) = Bits.high32(imaginaryBits).raw
+                vector(0)(lane) = Bits.low32(realBits).toLong
+                vector(1)(lane) = Bits.high32(realBits).toLong
+                vector(2)(lane) = Bits.low32(imaginaryBits).toLong
+                vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("cacosf") =>
@@ -1327,8 +827,8 @@ private[amdgpu] object VMInterpreter {
                 val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val result    = complexAcos(real, imaginary)
-                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat).raw
-                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).raw
+                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat).toLong
+                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("cacosE") =>
@@ -1338,10 +838,10 @@ private[amdgpu] object VMInterpreter {
                 val result        = complexAcos(real, imaginary)
                 val realBits      = IEEE754.doubleToBinary64(result._1)
                 val imaginaryBits = IEEE754.doubleToBinary64(result._2)
-                vector(0)(lane) = Bits.low32(realBits).raw
-                vector(1)(lane) = Bits.high32(realBits).raw
-                vector(2)(lane) = Bits.low32(imaginaryBits).raw
-                vector(3)(lane) = Bits.high32(imaginaryBits).raw
+                vector(0)(lane) = Bits.low32(realBits).toLong
+                vector(1)(lane) = Bits.high32(realBits).toLong
+                vector(2)(lane) = Bits.low32(imaginaryBits).toLong
+                vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("catanf") =>
@@ -1349,8 +849,8 @@ private[amdgpu] object VMInterpreter {
                 val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val result    = complexAtan(real, imaginary)
-                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat).raw
-                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).raw
+                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat).toLong
+                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("catanE") =>
@@ -1360,10 +860,10 @@ private[amdgpu] object VMInterpreter {
                 val result        = complexAtan(real, imaginary)
                 val realBits      = IEEE754.doubleToBinary64(result._1)
                 val imaginaryBits = IEEE754.doubleToBinary64(result._2)
-                vector(0)(lane) = Bits.low32(realBits).raw
-                vector(1)(lane) = Bits.high32(realBits).raw
-                vector(2)(lane) = Bits.low32(imaginaryBits).raw
-                vector(3)(lane) = Bits.high32(imaginaryBits).raw
+                vector(0)(lane) = Bits.low32(realBits).toLong
+                vector(1)(lane) = Bits.high32(realBits).toLong
+                vector(2)(lane) = Bits.low32(imaginaryBits).toLong
+                vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("cacoshf") =>
@@ -1371,8 +871,8 @@ private[amdgpu] object VMInterpreter {
                 val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val result    = complexAcosh(real, imaginary)
-                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat).raw
-                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).raw
+                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat).toLong
+                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("cacoshE") =>
@@ -1382,10 +882,10 @@ private[amdgpu] object VMInterpreter {
                 val result        = complexAcosh(real, imaginary)
                 val realBits      = IEEE754.doubleToBinary64(result._1)
                 val imaginaryBits = IEEE754.doubleToBinary64(result._2)
-                vector(0)(lane) = Bits.low32(realBits).raw
-                vector(1)(lane) = Bits.high32(realBits).raw
-                vector(2)(lane) = Bits.low32(imaginaryBits).raw
-                vector(3)(lane) = Bits.high32(imaginaryBits).raw
+                vector(0)(lane) = Bits.low32(realBits).toLong
+                vector(1)(lane) = Bits.high32(realBits).toLong
+                vector(2)(lane) = Bits.low32(imaginaryBits).toLong
+                vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("catanhf") =>
@@ -1393,8 +893,8 @@ private[amdgpu] object VMInterpreter {
                 val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val result    = complexAtanh(real, imaginary)
-                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat).raw
-                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).raw
+                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat).toLong
+                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("catanhE") =>
@@ -1404,10 +904,10 @@ private[amdgpu] object VMInterpreter {
                 val result        = complexAtanh(real, imaginary)
                 val realBits      = IEEE754.doubleToBinary64(result._1)
                 val imaginaryBits = IEEE754.doubleToBinary64(result._2)
-                vector(0)(lane) = Bits.low32(realBits).raw
-                vector(1)(lane) = Bits.high32(realBits).raw
-                vector(2)(lane) = Bits.low32(imaginaryBits).raw
-                vector(3)(lane) = Bits.high32(imaginaryBits).raw
+                vector(0)(lane) = Bits.low32(realBits).toLong
+                vector(1)(lane) = Bits.high32(realBits).toLong
+                vector(2)(lane) = Bits.low32(imaginaryBits).toLong
+                vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("csinhf") =>
@@ -1416,8 +916,8 @@ private[amdgpu] object VMInterpreter {
                 val imaginary       = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val resultReal      = math.sinh(real) * math.cos(imaginary)
                 val resultImaginary = math.cosh(real) * math.sin(imaginary)
-                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat).raw
-                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).raw
+                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat).toLong
+                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("ccoshf") =>
@@ -1426,8 +926,8 @@ private[amdgpu] object VMInterpreter {
                 val imaginary       = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val resultReal      = math.cosh(real) * math.cos(imaginary)
                 val resultImaginary = math.sinh(real) * math.sin(imaginary)
-                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat).raw
-                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).raw
+                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat).toLong
+                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("ctanhf") =>
@@ -1437,8 +937,8 @@ private[amdgpu] object VMInterpreter {
                 val denominator     = math.cosh(2.0 * real) + math.cos(2.0 * imaginary)
                 val resultReal      = math.sinh(2.0 * real) / denominator
                 val resultImaginary = math.sin(2.0 * imaginary) / denominator
-                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat).raw
-                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).raw
+                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat).toLong
+                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("csinhE") =>
@@ -1449,10 +949,10 @@ private[amdgpu] object VMInterpreter {
                 val resultImaginary = math.cosh(real) * math.sin(imaginary)
                 val realBits        = IEEE754.doubleToBinary64(resultReal)
                 val imaginaryBits   = IEEE754.doubleToBinary64(resultImaginary)
-                vector(0)(lane) = Bits.low32(realBits).raw
-                vector(1)(lane) = Bits.high32(realBits).raw
-                vector(2)(lane) = Bits.low32(imaginaryBits).raw
-                vector(3)(lane) = Bits.high32(imaginaryBits).raw
+                vector(0)(lane) = Bits.low32(realBits).toLong
+                vector(1)(lane) = Bits.high32(realBits).toLong
+                vector(2)(lane) = Bits.low32(imaginaryBits).toLong
+                vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("ccoshE") =>
@@ -1463,10 +963,10 @@ private[amdgpu] object VMInterpreter {
                 val resultImaginary = math.sinh(real) * math.sin(imaginary)
                 val realBits        = IEEE754.doubleToBinary64(resultReal)
                 val imaginaryBits   = IEEE754.doubleToBinary64(resultImaginary)
-                vector(0)(lane) = Bits.low32(realBits).raw
-                vector(1)(lane) = Bits.high32(realBits).raw
-                vector(2)(lane) = Bits.low32(imaginaryBits).raw
-                vector(3)(lane) = Bits.high32(imaginaryBits).raw
+                vector(0)(lane) = Bits.low32(realBits).toLong
+                vector(1)(lane) = Bits.high32(realBits).toLong
+                vector(2)(lane) = Bits.low32(imaginaryBits).toLong
+                vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("ctanhE") =>
@@ -1478,10 +978,10 @@ private[amdgpu] object VMInterpreter {
                 val resultImaginary = math.sin(2.0 * imaginary) / denominator
                 val realBits        = IEEE754.doubleToBinary64(resultReal)
                 val imaginaryBits   = IEEE754.doubleToBinary64(resultImaginary)
-                vector(0)(lane) = Bits.low32(realBits).raw
-                vector(1)(lane) = Bits.high32(realBits).raw
-                vector(2)(lane) = Bits.low32(imaginaryBits).raw
-                vector(3)(lane) = Bits.high32(imaginaryBits).raw
+                vector(0)(lane) = Bits.low32(realBits).toLong
+                vector(1)(lane) = Bits.high32(realBits).toLong
+                vector(2)(lane) = Bits.low32(imaginaryBits).toLong
+                vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("expIf") =>
@@ -1489,8 +989,8 @@ private[amdgpu] object VMInterpreter {
                 val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val scale     = math.exp(real)
-                vector(0)(lane) = IEEE754.floatToBinary32((scale * math.cos(imaginary)).toFloat).raw
-                vector(1)(lane) = IEEE754.floatToBinary32((scale * math.sin(imaginary)).toFloat).raw
+                vector(0)(lane) = IEEE754.floatToBinary32((scale * math.cos(imaginary)).toFloat).toLong
+                vector(1)(lane) = IEEE754.floatToBinary32((scale * math.sin(imaginary)).toFloat).toLong
               }
               AdvanceStep
             case Some(name) if name.contains("expId") =>
@@ -1500,10 +1000,10 @@ private[amdgpu] object VMInterpreter {
                 val scale         = math.exp(real)
                 val realBits      = IEEE754.doubleToBinary64(scale * math.cos(imaginary))
                 val imaginaryBits = IEEE754.doubleToBinary64(scale * math.sin(imaginary))
-                vector(0)(lane) = Bits.low32(realBits).raw
-                vector(1)(lane) = Bits.high32(realBits).raw
-                vector(2)(lane) = Bits.low32(imaginaryBits).raw
-                vector(3)(lane) = Bits.high32(imaginaryBits).raw
+                vector(0)(lane) = Bits.low32(realBits).toLong
+                vector(1)(lane) = Bits.high32(realBits).toLong
+                vector(2)(lane) = Bits.low32(imaginaryBits).toLong
+                vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
             case Some(name)
@@ -1533,7 +1033,7 @@ private[amdgpu] object VMInterpreter {
                     }
                   case _ => 0
                 }
-                vector(0)(lane) = Bits.unsigned32(value).raw
+                vector(0)(lane) = Bits.unsigned32(value).toLong
               }
               AdvanceStep
             case Some(name) =>
@@ -1547,7 +1047,7 @@ private[amdgpu] object VMInterpreter {
       case Instruction.SAndSaveExec(dest, src, width) =>
         val previous    = laneMask(active)
         val sourceValue = saveExecSource(src, width)
-        val result      = if (width == 32) Bits.low32(previous).raw & sourceValue else previous & sourceValue
+        val result      = if (width == 32) Bits.low32(previous).toLong & sourceValue else previous & sourceValue
         saveExecWrite(dest, previous, width)
         saveExecWrite(Decoding.ExecLo, result, width)
         scalarCarry = result != 0L
@@ -1558,7 +1058,7 @@ private[amdgpu] object VMInterpreter {
         // The explicit source is ANDN2's first operand and the old
         // EXEC mask is its second operand; the old mask is saved to
         // dest before EXEC is replaced.
-        val result = if (width == 32) Bits.low32(andn2SaveExecMask(Bits.low32(previous).raw, sourceValue)).raw
+        val result = if (width == 32) Bits.low32(andn2SaveExecMask(Bits.low32(previous).toLong, sourceValue)).toLong
         else andn2SaveExecMask(previous, sourceValue)
         saveExecWrite(dest, previous, width)
         saveExecWrite(Decoding.ExecLo, result, width)
@@ -1566,7 +1066,7 @@ private[amdgpu] object VMInterpreter {
         AdvanceStep
       case Instruction.SOrSaveExec(dest, src, width) =>
         val previous = laneMask(active)
-        val result   = if (width == 32) Bits.low32(previous).raw | saveExecSource(src, width)
+        val result   = if (width == 32) Bits.low32(previous).toLong | saveExecSource(src, width)
         else previous | saveExecSource(src, width)
         saveExecWrite(dest, previous, width)
         saveExecWrite(Decoding.ExecLo, result, width)
@@ -1574,7 +1074,7 @@ private[amdgpu] object VMInterpreter {
         AdvanceStep
       case Instruction.SXorSaveExec(dest, src, width) =>
         val previous = laneMask(active)
-        val result   = if (width == 32) Bits.low32(previous).raw ^ saveExecSource(src, width)
+        val result   = if (width == 32) Bits.low32(previous).toLong ^ saveExecSource(src, width)
         else previous ^ saveExecSource(src, width)
         saveExecWrite(dest, previous, width)
         saveExecWrite(Decoding.ExecLo, result, width)
@@ -1583,22 +1083,22 @@ private[amdgpu] object VMInterpreter {
       case Instruction.SUnary(operation, dest, src) =>
         val result = operation match {
           case ScalarUnaryOperation.AbsoluteI32 =>
-            Bits.low32(math.abs(Bits.low32(source(src, 0)).raw.toInt).toLong).raw
+            Bits.low32(math.abs(Bits.low32(source(src, 0)).toInt).toLong).toLong
           case ScalarUnaryOperation.SignExtendI8 =>
-            Bits.low32(Bits.signExtend(source(src, 0) & 0xffL, 8)).raw
+            Bits.low32(Bits.signExtend(source(src, 0) & 0xffL, 8)).toLong
           case ScalarUnaryOperation.SignExtendI16 =>
-            Bits.low32(Bits.signExtend(source(src, 0) & 0xffffL, 16)).raw
+            Bits.low32(Bits.signExtend(source(src, 0) & 0xffffL, 16)).toLong
           case ScalarUnaryOperation.CountBits32 => Bits.bitCount(source(src, 0), 32).toLong
           case ScalarUnaryOperation.CountBits64 =>
             Bits.bitCount(sourceScalar64(src), 64).toLong
           case ScalarUnaryOperation.ReverseBits32   => bitReverse32(source(src, 0))
-          case ScalarUnaryOperation.Not32           => Bits.low32(~source(src, 0)).raw
+          case ScalarUnaryOperation.Not32           => Bits.low32(~source(src, 0)).toLong
           case ScalarUnaryOperation.Not64           => ~sourceScalar64(src)
           case ScalarUnaryOperation.FirstBitHighI32 => signedFirstBitHigh32(source(src, 0))
           case ScalarUnaryOperation.ClearBit32      =>
-            Bits.low32(scalar(dest) & ~(1L << (source(src, 0).toInt & 31))).raw
+            Bits.low32(scalar(dest) & ~(1L << (source(src, 0).toInt & 31))).toLong
           case ScalarUnaryOperation.SetBit32 =>
-            Bits.low32(scalar(dest) | (1L << (source(src, 0).toInt & 31))).raw
+            Bits.low32(scalar(dest) | (1L << (source(src, 0).toInt & 31))).toLong
         }
         if (operation == ScalarUnaryOperation.Not64) writeScalar64(dest, result) else writeScalar32(dest, result)
         if (operation == ScalarUnaryOperation.Not32 || operation == ScalarUnaryOperation.Not64)
@@ -1609,8 +1109,8 @@ private[amdgpu] object VMInterpreter {
 
     def stepScalarAndVector(index: Int, instruction: Instruction): Either[Fault, Option[Int]] = instruction match {
       case Instruction.SBinary(operation, dest, srcA, srcB) =>
-        val left   = Bits.low32(source(srcA, 0)).raw
-        val right  = Bits.low32(source(srcB, 0)).raw
+        val left   = Bits.low32(source(srcA, 0)).toLong
+        val right  = Bits.low32(source(srcB, 0)).toLong
         val result = operation match {
           case ScalarBinaryOperation.And32 =>
             val value = left & right
@@ -1624,29 +1124,29 @@ private[amdgpu] object VMInterpreter {
           case ScalarBinaryOperation.MultiplyHighU32 => unsignedMultiplyHigh32(left, right)
           case ScalarBinaryOperation.MultiplyHighI32 => signedMultiplyHigh32(left, right)
           case ScalarBinaryOperation.AddI32          =>
-            val sum = Bits.low32(left + right).raw
+            val sum = Bits.low32(left + right).toLong
             scalarCarry = ((~(left ^ right) & (left ^ sum)) & 0x80000000L) != 0L
             sum
           case ScalarBinaryOperation.SubtractI32 =>
-            val difference = Bits.low32(left - right).raw
+            val difference = Bits.low32(left - right).toLong
             scalarCarry = (((left ^ right) & (left ^ difference)) & 0x80000000L) != 0L
             difference
           case ScalarBinaryOperation.ShiftLeft32            => left << (right.toInt & 31)
           case ScalarBinaryOperation.ShiftLeftTwoAndAddU32  => (left << 2) + right
-          case ScalarBinaryOperation.ShiftRightArithmetic32 => Bits.unsigned32(left.toInt >> (right.toInt & 31)).raw
+          case ScalarBinaryOperation.ShiftRightArithmetic32 => Bits.unsigned32(left.toInt >> (right.toInt & 31)).toLong
           case ScalarBinaryOperation.BitFieldExtractU32     =>
             val shift = (right & 0x3fL).toInt
             val width = ((right >>> 16) & 0x3fL).toInt
-            if (width >= 32) Bits.low32(left >>> shift).raw
-            else if (width == 0) 0L else Bits.low32((left >>> shift) & ((1L << width) - 1L)).raw
+            if (width >= 32) Bits.low32(left >>> shift).toLong
+            else if (width == 0) 0L else Bits.low32((left >>> shift) & ((1L << width) - 1L)).toLong
           case ScalarBinaryOperation.BitFieldExtractI32 =>
             val shift = (right & 0x3fL).toInt
             val width = ((right >>> 16) & 0x3fL).toInt
-            if (width >= 32) Bits.low32(Bits.signExtend(left >>> shift, 32)).raw
+            if (width >= 32) Bits.low32(Bits.signExtend(left >>> shift, 32)).toLong
             else if (width == 0) 0L
             else {
-              val bitWidth = IntBetween.unsafe[1, 64](width)
-              Bits.low32(Bits.signExtend((left >>> shift) & ((1L << width) - 1L), bitWidth)).raw
+              val bitWidth = width.unsafe[Int where Between[1, 64]]
+              Bits.low32(Bits.signExtend((left >>> shift) & ((1L << width) - 1L), bitWidth)).toLong
             }
           case ScalarBinaryOperation.ShiftRight32 => left >>> (right.toInt & 31)
           case ScalarBinaryOperation.AndNot32     =>
@@ -1654,17 +1154,18 @@ private[amdgpu] object VMInterpreter {
             scalarCarry = value != 0L
             value
           case ScalarBinaryOperation.OrNot32 =>
-            val value = Bits.low32(left | ~right).raw
+            val value = Bits.low32(left | ~right).toLong
             scalarCarry = value != 0L
             value
           case ScalarBinaryOperation.Nor32 =>
-            val value = Bits.low32(~(left | right)).raw
+            val value = Bits.low32(~(left | right)).toLong
             scalarCarry = value != 0L
             value
-          case ScalarBinaryOperation.PackLowLow16   => Bits.low16(left).raw | (Bits.low16(right).raw << 16)
-          case ScalarBinaryOperation.PackLowHigh16  => Bits.low16(left).raw | (Bits.low16(right >>> 16).raw << 16)
+          case ScalarBinaryOperation.PackLowLow16  => Bits.low16(left).toLong | (Bits.low16(right).toLong << 16)
+          case ScalarBinaryOperation.PackLowHigh16 =>
+            Bits.low16(left).toLong | (Bits.low16(right >>> 16).toLong << 16)
           case ScalarBinaryOperation.PackHighHigh16 =>
-            (Bits.low16(left >>> 16).raw) | (Bits.low16(right >>> 16).raw << 16)
+            (Bits.low16(left >>> 16).toLong) | (Bits.low16(right >>> 16).toLong << 16)
           case ScalarBinaryOperation.AddU32 =>
             val sum = left + right
             scalarCarry = sum > Bits.Mask32
@@ -1711,7 +1212,7 @@ private[amdgpu] object VMInterpreter {
             if (width >= 64) Bits.signExtend(left >>> shift, 64)
             else if (width == 0) 0L
             else {
-              val bitWidth = IntBetween.unsafe[1, 64](width)
+              val bitWidth = width.unsafe[Int where Between[1, 64]]
               Bits.signExtend((left >>> shift) & Bits.mask(bitWidth), bitWidth)
             }
         }
@@ -1730,20 +1231,22 @@ private[amdgpu] object VMInterpreter {
           case ScalarImmediateCompareOperation.NotEqualI32 => value.toInt != immediate
           case ScalarImmediateCompareOperation.GreaterI32  => value.toInt > immediate
           case ScalarImmediateCompareOperation.LessI32     => value.toInt < immediate
-          case ScalarImmediateCompareOperation.EqualU32    => Bits.low32(value).raw == Bits.unsigned32(immediate).raw
+          case ScalarImmediateCompareOperation.EqualU32    =>
+            Bits.low32(value).toLong == Bits.unsigned32(immediate).toLong
           case ScalarImmediateCompareOperation.NotEqualU32 =>
-            Bits.low32(value).raw != Bits.unsigned32(immediate).raw
-          case ScalarImmediateCompareOperation.GreaterU32 => Bits.low32(value).raw > Bits.unsigned32(immediate).raw
+            Bits.low32(value).toLong != Bits.unsigned32(immediate).toLong
+          case ScalarImmediateCompareOperation.GreaterU32 =>
+            Bits.low32(value).toLong > Bits.unsigned32(immediate).toLong
           case ScalarImmediateCompareOperation.GreaterOrEqualU32 =>
-            Bits.low32(value).raw >= Bits.unsigned32(immediate).raw
-          case ScalarImmediateCompareOperation.LessU32        => Bits.low32(value).raw < Bits.unsigned32(immediate).raw
+            Bits.low32(value).toLong >= Bits.unsigned32(immediate).toLong
+          case ScalarImmediateCompareOperation.LessU32 => Bits.low32(value).toLong < Bits.unsigned32(immediate).toLong
           case ScalarImmediateCompareOperation.LessOrEqualU32 =>
-            Bits.low32(value).raw <= Bits.unsigned32(immediate).raw
+            Bits.low32(value).toLong <= Bits.unsigned32(immediate).toLong
         }
         AdvanceStep
       case Instruction.SCmp(operation, srcA, srcB) =>
-        val left32  = Bits.low32(source(srcA, 0)).raw
-        val right32 = Bits.low32(source(srcB, 0)).raw
+        val left32  = Bits.low32(source(srcA, 0)).toLong
+        val right32 = Bits.low32(source(srcB, 0)).toLong
         scalarCarry = operation match {
           case ScalarCompareOperation.EqualU32          => left32 == right32
           case ScalarCompareOperation.GreaterI32        => left32.toInt > right32.toInt
@@ -1767,12 +1270,12 @@ private[amdgpu] object VMInterpreter {
         executeVMove(dest, src, scalar, vector, carry, active, lanes)
         AdvanceStep
       case Instruction.VMoveRelative(dest, InstructionSource.VectorRegister(src)) =>
-        val indexed = src + (Bits.low32(scalar(Decoding.M0)).raw & 0xffL).toInt
+        val indexed = src + (Bits.low32(scalar(Decoding.M0)).toLong & 0xffL).toInt
         if (indexed < 0 || indexed >= 256)
           Left(Fault.Backend(s"v_movrels_b32 indexed VGPR $indexed is out of range"))
         else {
           val sourceValues = vector(indexed)
-          foreachActive(lane => vector(dest)(lane) = Bits.low32(sourceValues(lane)).raw)
+          foreachActive(lane => vector(dest)(lane) = Bits.low32(sourceValues(lane)).toLong)
           AdvanceStep
         }
       case Instruction.VMoveRelative(_, source) =>
@@ -1780,21 +1283,21 @@ private[amdgpu] object VMInterpreter {
           s"v_movrels_b32 requires a vector-register source, found $source"
         ))
       case Instruction.VMoveRelativeDestination(dest, src) =>
-        val indexed = dest + (Bits.low32(scalar(Decoding.M0)).raw & 0xffL).toInt
+        val indexed = dest + (Bits.low32(scalar(Decoding.M0)).toLong & 0xffL).toInt
         if (indexed < 0 || indexed >= 256)
           Left(Fault.Backend(s"v_movreld_b32 indexed VGPR $indexed is out of range"))
         else {
-          foreachActive(lane => vector(indexed)(lane) = Bits.low32(source(src, lane)).raw)
+          foreachActive(lane => vector(indexed)(lane) = Bits.low32(source(src, lane)).toLong)
           AdvanceStep
         }
       case Instruction.VNot(dest, src) =>
-        foreachActive(lane => vector(dest)(lane) = Bits.low32(~source(src, lane)).raw)
+        foreachActive(lane => vector(dest)(lane) = Bits.low32(~source(src, lane)).toLong)
         AdvanceStep
       case Instruction.VSwap(dest, InstructionSource.VectorRegister(src)) =>
         foreachActive { lane =>
           val destinationValue = vector(dest)(lane)
-          vector(dest)(lane) = Bits.low32(vector(src)(lane)).raw
-          vector(src)(lane) = Bits.low32(destinationValue).raw
+          vector(dest)(lane) = Bits.low32(vector(src)(lane)).toLong
+          vector(src)(lane) = Bits.low32(destinationValue).toLong
         }
         AdvanceStep
       case Instruction.VSwap(_, _) =>
@@ -1813,29 +1316,29 @@ private[amdgpu] object VMInterpreter {
             // therefore CLZ-like, not the bit index of the highest set bit.
             case VectorBitFindOperation.FirstBitHighU32 => firstBitHigh32(value)
           }
-          vector(dest)(lane) = Bits.unsigned32(result.toInt).raw
+          vector(dest)(lane) = Bits.unsigned32(result.toInt).toLong
         }
         AdvanceStep
       case Instruction.VConvert(operation, dest, src) =>
         foreachActive { lane =>
           val raw     = Bits.signed32(source(src, lane))
           val float32 = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
-          def writeFloat32(value: Float): Unit  = vector(dest)(lane) = IEEE754.floatToBinary32(value).raw
+          def writeFloat32(value: Float): Unit  = vector(dest)(lane) = IEEE754.floatToBinary32(value).toLong
           def writeFloat64(value: Double): Unit = {
             val bits = IEEE754.doubleToBinary64(value)
-            vector(dest)(lane) = Bits.low32(bits).raw
-            vector(dest + 1)(lane) = Bits.high32(bits).raw
+            vector(dest)(lane) = Bits.low32(bits).toLong
+            vector(dest + 1)(lane) = Bits.high32(bits).toLong
           }
           operation match {
             case VectorConvertOperation.FrexpExponentF64 =>
               val value = IEEE754.binary64ToDouble(sourceFloating64(src, lane, scalar, vector))
               vector(dest)(lane) = Bits.unsigned32(
                 if (value == 0.0 || value.isNaN || value.isInfinite) 0 else Math.getExponent(value) + 1
-              ).raw
+              ).toLong
             case VectorConvertOperation.FrexpExponentF32 =>
               vector(dest)(lane) = Bits.unsigned32(
                 if (float32 == 0.0f || float32.isNaN || float32.isInfinite) 0 else Math.getExponent(float32) + 1
-              ).raw
+              ).toLong
             case VectorConvertOperation.FrexpMantissaF32 =>
               writeFloat32(
                 if (float32 == 0.0f || float32.isNaN || float32.isInfinite) float32
@@ -1876,14 +1379,14 @@ private[amdgpu] object VMInterpreter {
               writeFloat32(trigF32(trig, float32))
             case VectorConvertOperation.LogarithmBase2F32 =>
               writeFloat32((math.log(float32.toDouble) / math.log(2.0)).toFloat)
-            case VectorConvertOperation.I32FromF32 => vector(dest)(lane) = Bits.unsigned32(float32.toInt).raw
+            case VectorConvertOperation.I32FromF32 => vector(dest)(lane) = Bits.unsigned32(float32.toInt).toLong
             case VectorConvertOperation.U32FromF32 => vector(dest)(lane) = unsignedFloatToInt32(float32)
             case VectorConvertOperation.I32FromF64 =>
               vector(dest)(lane) =
-                Bits.unsigned32(IEEE754.binary64ToDouble(source64(src, lane, scalar, vector)).toInt).raw
+                Bits.unsigned32(IEEE754.binary64ToDouble(source64(src, lane, scalar, vector)).toInt).toLong
             case VectorConvertOperation.U32FromF64 =>
               vector(dest)(lane) =
-                Bits.low32(IEEE754.binary64ToDouble(source64(src, lane, scalar, vector)).toLong).raw
+                Bits.low32(IEEE754.binary64ToDouble(source64(src, lane, scalar, vector)).toLong).toLong
             case byte @ (
                   VectorConvertOperation.F32FromUByte0 | VectorConvertOperation.F32FromUByte1 |
                   VectorConvertOperation.F32FromUByte2 | VectorConvertOperation.F32FromUByte3
@@ -1894,10 +1397,10 @@ private[amdgpu] object VMInterpreter {
               writeFloat32(IEEE754.binary64ToDouble(sourceFloating64(src, lane, scalar, vector)).toFloat)
             case VectorConvertOperation.F32FromF16 =>
               writeFloat32(IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(raw))))
-            case VectorConvertOperation.F16FromF32 => vector(dest)(lane) = IEEE754.floatToBinary16(float32).raw
+            case VectorConvertOperation.F16FromF32 => vector(dest)(lane) = IEEE754.floatToBinary16(float32).toLong
             case VectorConvertOperation.I16FromF16 =>
               vector(dest)(lane) =
-                Bits.low16(IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(raw))).toInt.toLong).raw
+                Bits.low16(IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(raw))).toInt.toLong).toLong
             case VectorConvertOperation.F64FromI32 => writeFloat64(raw.toDouble)
             case VectorConvertOperation.F64FromU32 => writeFloat64(Integer.toUnsignedLong(raw).toDouble)
             case VectorConvertOperation.F64FromF32 => writeFloat64(float32.toDouble)
@@ -1913,7 +1416,7 @@ private[amdgpu] object VMInterpreter {
             dppSourceLane(lane, control) match {
               case Some(sourceLane) if sourceLane < lanes.raw =>
                 vector(dest)(lane) =
-                  if (fetchInactive || active(sourceLane)) Bits.low32(sourceValues(sourceLane)).raw else 0L
+                  if (fetchInactive || active(sourceLane)) Bits.low32(sourceValues(sourceLane)).toLong else 0L
               case _ if boundControl => vector(dest)(lane) = 0L
               case _                 => ()
             }
@@ -1927,13 +1430,13 @@ private[amdgpu] object VMInterpreter {
         foreachActive { lane =>
           val selectB       = (conditionMask & (1L << lane)) != 0L
           val selected      = if (selectB) srcB else srcA
-          val selectedValue = Bits.low32(source(selected, lane)).raw
+          val selectedValue = Bits.low32(source(selected, lane)).toLong
           val absolute      = if (selectB) absB else absA
           val negate        = if (selectB) negateB else negateA
           val modified      =
             (if (absolute) selectedValue & 0x7fffffffL else selectedValue) ^
               (if (negate) 0x80000000L else 0L)
-          vector(dest)(lane) = Bits.low32(modified).raw
+          vector(dest)(lane) = Bits.low32(modified).toLong
         }
         AdvanceStep
       case other => stepVectorInstruction(index, other)
@@ -1944,7 +1447,7 @@ private[amdgpu] object VMInterpreter {
         active.first match {
           case None       => Left(Fault.Backend("v_readfirstlane_b32 has an empty EXEC mask"))
           case Some(lane) =>
-            scalar(dest) = Bits.low32(source(src, lane.raw)).raw
+            scalar(dest) = Bits.low32(source(src, lane.raw)).toLong
             Right(Some(index + 1))
         }
       case Instruction.VReadLane(dest, src, lane) =>
@@ -1952,7 +1455,7 @@ private[amdgpu] object VMInterpreter {
         if (selected < 0 || selected >= lanes.raw)
           Left(Fault.Backend("v_readlane_b32 selected an invalid lane"))
         else {
-          scalar(dest) = Bits.low32(source(src, selected)).raw
+          scalar(dest) = Bits.low32(source(src, selected)).toLong
           AdvanceStep
         }
       case Instruction.VWriteLane(dest, src, lane) =>
@@ -1960,7 +1463,7 @@ private[amdgpu] object VMInterpreter {
         if (selected < 0 || selected >= lanes.raw)
           Left(Fault.Backend("v_writelane_b32 selected an invalid lane"))
         else {
-          vector(dest)(selected) = Bits.low32(source(src, selected)).raw
+          vector(dest)(selected) = Bits.low32(source(src, selected)).toLong
           AdvanceStep
         }
       case Instruction.VMaskBitCount(dest, mask, base, high) =>
@@ -1975,10 +1478,10 @@ private[amdgpu] object VMInterpreter {
             Bits.low32(java.lang.Integer.bitCount(Bits.low32(source(
               src,
               lane
-            )).raw.toInt).toLong + Bits.low32(source(
+            )).toInt).toLong + Bits.low32(source(
               base,
               lane
-            )).raw).raw
+            )).toLong).toLong
         }
         AdvanceStep
       case Instruction.VMadMkF32(dest, srcA, multiplier, addend) =>
@@ -1986,7 +1489,7 @@ private[amdgpu] object VMInterpreter {
           val left  = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcA, lane))))
           val scale = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(multiplier)))
           val right = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(addend, lane))))
-          vector(dest)(lane) = IEEE754.floatToBinary32(left * scale + right).raw
+          vector(dest)(lane) = IEEE754.floatToBinary32(left * scale + right).toLong
         }
         AdvanceStep
       case Instruction.VMadAkF32(dest, srcA, srcB, addend) =>
@@ -1996,7 +1499,7 @@ private[amdgpu] object VMInterpreter {
           val literal = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(addend)))
           // MADAK is the literal-addend form of MAD.  Unlike FMA it
           // rounds the product before adding the literal.
-          vector(dest)(lane) = IEEE754.floatToBinary32(left * right + literal).raw
+          vector(dest)(lane) = IEEE754.floatToBinary32(left * right + literal).toLong
         }
         AdvanceStep
       case Instruction.VMadF32(
@@ -2027,7 +1530,7 @@ private[amdgpu] object VMInterpreter {
             if (operation == VectorMadF32Operation.FusedMultiplyAdd)
               Math.fma(productLeft, productRight, productAddend)
             else productLeft * productRight + productAddend
-          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).raw
+          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).toLong
         }
         AdvanceStep
       case Instruction.VMadF64(dest, srcA, srcB, srcC, absA, absB, absC, negateA, negateB, negateC) =>
@@ -2043,8 +1546,8 @@ private[amdgpu] object VMInterpreter {
           val addend         = if (negateC) -preparedAddend else preparedAddend
           val result         = Math.fma(left, right, addend)
           val bits           = IEEE754.doubleToBinary64(result)
-          vector(dest)(lane) = Bits.low32(bits).raw
-          vector(dest + 1)(lane) = Bits.high32(bits).raw
+          vector(dest)(lane) = Bits.low32(bits).toLong
+          vector(dest + 1)(lane) = Bits.high32(bits).toLong
         }
         AdvanceStep
       case Instruction.VUnaryF32Modified(dest, src, absolute, negate, clamp) =>
@@ -2053,7 +1556,7 @@ private[amdgpu] object VMInterpreter {
           val prepared = if (absolute) math.abs(raw) else raw
           val value    = if (negate) -prepared else prepared
           val result   = 1.0f / value
-          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).raw
+          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).toLong
         }
         AdvanceStep
       case Instruction.VFrexpMantF32Modified(dest, src, absolute, negate, clamp) =>
@@ -2064,7 +1567,7 @@ private[amdgpu] object VMInterpreter {
           val mantissa =
             if (value == 0.0f || value.isNaN || value.isInfinite) value
             else Math.scalb(value, -Math.getExponent(value) - 1)
-          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(mantissa) else mantissa).raw
+          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(mantissa) else mantissa).toLong
         }
         AdvanceStep
       case Instruction.VCvtF64F32Modified(dest, src, absolute, negate, clamp) =>
@@ -2074,8 +1577,8 @@ private[amdgpu] object VMInterpreter {
           val value    = if (negate) -prepared else prepared
           val result   = value.toDouble
           val bits     = IEEE754.doubleToBinary64(if (clamp) math.max(0.0, math.min(1.0, result)) else result)
-          vector(dest)(lane) = Bits.low32(bits).raw
-          vector(dest + 1)(lane) = Bits.high32(bits).raw
+          vector(dest)(lane) = Bits.low32(bits).toLong
+          vector(dest + 1)(lane) = Bits.high32(bits).toLong
         }
         AdvanceStep
       case Instruction.VUnaryF64Modified(dest, src, absolute, negate) =>
@@ -2087,8 +1590,8 @@ private[amdgpu] object VMInterpreter {
             if (value == 0.0 || value.isNaN || value.isInfinite) value
             else Math.scalb(value, -Math.getExponent(value) - 1)
           val bits = IEEE754.doubleToBinary64(mantissa)
-          vector(dest)(lane) = Bits.low32(bits).raw
-          vector(dest + 1)(lane) = Bits.high32(bits).raw
+          vector(dest)(lane) = Bits.low32(bits).toLong
+          vector(dest + 1)(lane) = Bits.high32(bits).toLong
         }
         AdvanceStep
       case Instruction.VTrigPreopF64(dest, src, segment, absolute, negate) =>
@@ -2105,8 +1608,8 @@ private[amdgpu] object VMInterpreter {
           if (exponent >= 1968L) scale += 128
           val result     = Math.scalb(chunk, scale)
           val resultBits = IEEE754.doubleToBinary64(result)
-          vector(dest)(lane) = Bits.low32(resultBits).raw
-          vector(dest + 1)(lane) = Bits.high32(resultBits).raw
+          vector(dest)(lane) = Bits.low32(resultBits).toLong
+          vector(dest + 1)(lane) = Bits.high32(resultBits).toLong
         }
         AdvanceStep
       case Instruction.VBinaryF32Modified(
@@ -2137,7 +1640,7 @@ private[amdgpu] object VMInterpreter {
             case VectorF32BinaryOperation.Maximum         => math.max(valueA, valueB)
             case VectorF32BinaryOperation.Minimum         => math.min(valueA, valueB)
           }
-          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).raw
+          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).toLong
         }
         AdvanceStep
       case Instruction.VDivScaleF32(dest, conditionDest, srcA, srcB, srcC) =>
@@ -2167,7 +1670,7 @@ private[amdgpu] object VMInterpreter {
           } else if (Math.getExponent(s2) <= 23 - 127) {
             result = Math.scalb(s0, 64)
           }
-          vector(dest)(lane) = IEEE754.floatToBinary32(result).raw
+          vector(dest)(lane) = IEEE754.floatToBinary32(result).toLong
         }
         if (waveSize.raw <= 32) writeScalar32(conditionDest, booleanLaneMask(conditions))
         else writeScalar64(conditionDest, booleanLaneMask(conditions))
@@ -2200,8 +1703,8 @@ private[amdgpu] object VMInterpreter {
             result = Math.scalb(s0, 128)
           }
           val bits = IEEE754.doubleToBinary64(result)
-          vector(dest)(lane) = Bits.low32(bits).raw
-          vector(dest + 1)(lane) = Bits.high32(bits).raw
+          vector(dest)(lane) = Bits.low32(bits).toLong
+          vector(dest + 1)(lane) = Bits.high32(bits).toLong
         }
         if (waveSize.raw <= 32) writeScalar32(conditionDest, booleanLaneMask(conditions))
         else writeScalar64(conditionDest, booleanLaneMask(conditions))
@@ -2214,8 +1717,8 @@ private[amdgpu] object VMInterpreter {
           val result = Math.fma(left, right, addend)
           val scaled = (laneMask(carry) & (1L << lane)) != 0L
           val bits   = IEEE754.doubleToBinary64(if (scaled) Math.scalb(result, 64) else result)
-          vector(dest)(lane) = Bits.low32(bits).raw
-          vector(dest + 1)(lane) = Bits.high32(bits).raw
+          vector(dest)(lane) = Bits.low32(bits).toLong
+          vector(dest + 1)(lane) = Bits.high32(bits).toLong
         }
         AdvanceStep
       case Instruction.VDivFixupF32(dest, quotient, denominator, numerator, absolute, negate) =>
@@ -2229,7 +1732,7 @@ private[amdgpu] object VMInterpreter {
           val d      = operand(denominator, 1)
           val n      = operand(numerator, 2)
           val result = divisionFixupF32(q, d, n)
-          vector(dest)(lane) = IEEE754.floatToBinary32(result).raw
+          vector(dest)(lane) = IEEE754.floatToBinary32(result).toLong
         }
         AdvanceStep
       case Instruction.VDivFixupF64(dest, quotient, denominator, numerator, absolute, negate) =>
@@ -2252,125 +1755,126 @@ private[amdgpu] object VMInterpreter {
             else if (d.isInfinite || n == 0.0) Math.copySign(0.0, sign)
             else q
           val bits = IEEE754.doubleToBinary64(result)
-          vector(dest)(lane) = Bits.low32(bits).raw
-          vector(dest + 1)(lane) = Bits.high32(bits).raw
+          vector(dest)(lane) = Bits.low32(bits).toLong
+          vector(dest + 1)(lane) = Bits.high32(bits).toLong
         }
         AdvanceStep
       case Instruction.VBinary(operation, dest, srcA, srcB, clamp) =>
         foreachActive { lane =>
-          val left     = Bits.low32(source(srcA, lane)).raw
-          val right    = Bits.low32(source(srcB, lane)).raw
-          val previous = Bits.low32(vector(dest)(lane)).raw
+          val left     = Bits.low32(source(srcA, lane)).toLong
+          val right    = Bits.low32(source(srcB, lane)).toLong
+          val previous = Bits.low32(vector(dest)(lane)).toLong
           operation match {
             case VectorBinaryOperation.AddU32 =>
-              vector(dest)(lane) = if (clamp) math.min(Bits.Mask32, left + right) else Bits.low32(left + right).raw
-            case VectorBinaryOperation.MultiplyLowU32  => vector(dest)(lane) = Bits.low32(left * right).raw
+              vector(dest)(lane) = if (clamp) math.min(Bits.Mask32, left + right) else Bits.low32(left + right).toLong
+            case VectorBinaryOperation.MultiplyLowU32  => vector(dest)(lane) = Bits.low32(left * right).toLong
             case VectorBinaryOperation.MultiplyHighU32 => vector(dest)(lane) = unsignedMultiplyHigh32(left, right)
             case VectorBinaryOperation.MultiplyHighI32 => vector(dest)(lane) = signedMultiplyHigh32(left, right)
             case VectorBinaryOperation.ShiftRightArithmeticI32 =>
-              vector(dest)(lane) = Bits.unsigned32(right.toInt >> (left.toInt & 31)).raw
+              vector(dest)(lane) = Bits.unsigned32(right.toInt >> (left.toInt & 31)).toLong
             case VectorBinaryOperation.ShiftRightArithmeticI16 =>
               val signed = (Bits.low16Int(right) << 16) >> 16
-              vector(dest)(lane) = Bits.low16(signed >> (left.toInt & 15)).raw
-            case VectorBinaryOperation.ShiftLeft32  => vector(dest)(lane) = Bits.low32(right << (left.toInt & 31)).raw
+              vector(dest)(lane) = Bits.low16(signed >> (left.toInt & 15)).toLong
+            case VectorBinaryOperation.ShiftLeft32 =>
+              vector(dest)(lane) = Bits.low32(right << (left.toInt & 31)).toLong
             case VectorBinaryOperation.ShiftRight32 => vector(dest)(lane) = right >>> (left.toInt & 31)
             case VectorBinaryOperation.ShiftRight16 =>
-              vector(dest)(lane) = Bits.low16(right >>> (left.toInt & 15)).raw
-            case VectorBinaryOperation.AddU16      => vector(dest)(lane) = Bits.low16(left + right).raw
+              vector(dest)(lane) = Bits.low16(right >>> (left.toInt & 15)).toLong
+            case VectorBinaryOperation.AddU16      => vector(dest)(lane) = Bits.low16(left + right).toLong
             case VectorBinaryOperation.And32       => vector(dest)(lane) = left & right
             case VectorBinaryOperation.Or32        => vector(dest)(lane) = left | right
             case VectorBinaryOperation.Xor32       => vector(dest)(lane) = left ^ right
             case VectorBinaryOperation.ShiftLeft16 =>
-              vector(dest)(lane) = Bits.low16(Bits.low16(right).raw << (left.toInt & 15)).raw
-            case VectorBinaryOperation.SubtractU16 => vector(dest)(lane) = Bits.low16(left - right).raw
+              vector(dest)(lane) = Bits.low16(Bits.low16(right).toLong << (left.toInt & 15)).toLong
+            case VectorBinaryOperation.SubtractU16 => vector(dest)(lane) = Bits.low16(left - right).toLong
             case VectorBinaryOperation.SubtractU32 =>
-              vector(dest)(lane) = if (clamp) math.max(0L, left - right) else Bits.low32(left - right).raw
+              vector(dest)(lane) = if (clamp) math.max(0L, left - right) else Bits.low32(left - right).toLong
             case VectorBinaryOperation.SubtractReverseU32 =>
               vector(dest)(lane) =
                 if (clamp) math.max(0L, right - left) else unsignedSubtractReverse32(left, right)
             case VectorBinaryOperation.SubtractReverseF32 => vector(dest)(lane) =
                 IEEE754.floatToBinary32(IEEE754.binary32ToFloat(
                   Binary32.fromLow(Bits.low32(right))
-                ) - IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left)))).raw
+                ) - IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left)))).toLong
             case VectorBinaryOperation.MultiplyU24     => vector(dest)(lane) = unsignedMultiply24(left, right)
             case VectorBinaryOperation.MultiplyHighU24 => vector(dest)(lane) = unsignedMultiplyHigh24(left, right)
             case VectorBinaryOperation.MultiplyI24     => vector(dest)(lane) = signedMultiply24(left, right)
             case VectorBinaryOperation.MultiplyHighI24 => vector(dest)(lane) = signedMultiplyHigh24(left, right)
-            case VectorBinaryOperation.MultiplyLowU16  => vector(dest)(lane) = Bits.low16(left * right).raw
+            case VectorBinaryOperation.MultiplyLowU16  => vector(dest)(lane) = Bits.low16(left * right).toLong
             case VectorBinaryOperation.MinimumU32      => vector(dest)(lane) = math.min(left, right)
             case VectorBinaryOperation.MaximumU32      => vector(dest)(lane) = math.max(left, right)
             case VectorBinaryOperation.MinimumI32      =>
-              vector(dest)(lane) = Bits.low32(math.min(left.toInt, right.toInt).toLong).raw
+              vector(dest)(lane) = Bits.low32(math.min(left.toInt, right.toInt).toLong).toLong
             case VectorBinaryOperation.MinimumI16 => vector(dest)(lane) =
                 Bits.low16(math.min(
-                  Bits.signExtend(Bits.low16(left).raw, 16),
-                  Bits.signExtend(Bits.low16(right).raw, 16)
-                )).raw
+                  Bits.signExtend(Bits.low16(left).toLong, 16),
+                  Bits.signExtend(Bits.low16(right).toLong, 16)
+                )).toLong
             case VectorBinaryOperation.MinimumU16 =>
-              vector(dest)(lane) = Bits.low16(math.min(Bits.low16(left).raw, Bits.low16(right).raw)).raw
+              vector(dest)(lane) = Bits.low16(math.min(Bits.low16(left).toLong, Bits.low16(right).toLong)).toLong
             case VectorBinaryOperation.MinimumF32 =>
               vector(dest)(lane) =
                 IEEE754.floatToBinary32(math.min(
                   IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))),
                   IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))
-                )).raw
-            case VectorBinaryOperation.MinimumF16 => vector(dest)(lane) = minimumF16(left, right).raw
+                )).toLong
+            case VectorBinaryOperation.MinimumF16 => vector(dest)(lane) = minimumF16(left, right).toLong
             case VectorBinaryOperation.MaximumI32 =>
               vector(dest)(lane) = math.max(left.toInt, right.toInt).toLong & Bits.Mask32
             case VectorBinaryOperation.MaximumI16 => vector(dest)(lane) =
                 Bits.low16(math.max(
-                  Bits.signExtend(Bits.low16(left).raw, 16),
-                  Bits.signExtend(Bits.low16(right).raw, 16)
-                )).raw
+                  Bits.signExtend(Bits.low16(left).toLong, 16),
+                  Bits.signExtend(Bits.low16(right).toLong, 16)
+                )).toLong
             case VectorBinaryOperation.MaximumU16 =>
-              vector(dest)(lane) = Bits.low16(math.max(Bits.low16(left).raw, Bits.low16(right).raw)).raw
+              vector(dest)(lane) = Bits.low16(math.max(Bits.low16(left).toLong, Bits.low16(right).toLong)).toLong
             case VectorBinaryOperation.MaximumF32 =>
               vector(dest)(lane) =
                 IEEE754.floatToBinary32(math.max(
                   IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))),
                   IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))
-                )).raw
+                )).toLong
             case VectorBinaryOperation.MaximumF16 =>
               vector(dest)(lane) = IEEE754.floatToBinary16(
                 math.max(
                   IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))),
                   IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right)))
                 )
-              ).raw
+              ).toLong
             case VectorBinaryOperation.LoadExponentF32 =>
               vector(dest)(lane) =
                 IEEE754.floatToBinary32(Math.scalb(
                   IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))),
                   right.toInt
-                )).raw
+                )).toLong
             case VectorBinaryOperation.AddF32 =>
               val result = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) + IEEE754.binary32ToFloat(
                 Binary32.fromLow(Bits.low32(right))
               )
-              vector(dest)(lane) = IEEE754.floatToBinary32(result).raw
+              vector(dest)(lane) = IEEE754.floatToBinary32(result).toLong
             case VectorBinaryOperation.MultiplyF32 =>
               val result = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) * IEEE754.binary32ToFloat(
                 Binary32.fromLow(Bits.low32(right))
               )
-              vector(dest)(lane) = IEEE754.floatToBinary32(result).raw
+              vector(dest)(lane) = IEEE754.floatToBinary32(result).toLong
             case VectorBinaryOperation.MultiplyAccumulateF32 =>
               val result = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) * IEEE754.binary32ToFloat(
                 Binary32.fromLow(Bits.low32(right))
               ) +
                 IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous)))
-              vector(dest)(lane) = IEEE754.floatToBinary32(result).raw
+              vector(dest)(lane) = IEEE754.floatToBinary32(result).toLong
             case VectorBinaryOperation.AddF16 =>
               val result =
                 IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))) + IEEE754.binary16ToFloat(
                   Binary16.fromLow(Bits.low16(right))
                 )
-              vector(dest)(lane) = IEEE754.floatToBinary16(result).raw
+              vector(dest)(lane) = IEEE754.floatToBinary16(result).toLong
             case VectorBinaryOperation.MultiplyF16 =>
               val result =
                 IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))) * IEEE754.binary16ToFloat(
                   Binary16.fromLow(Bits.low16(right))
                 )
-              vector(dest)(lane) = IEEE754.floatToBinary16(result).raw
+              vector(dest)(lane) = IEEE754.floatToBinary16(result).toLong
             case VectorBinaryOperation.FusedMultiplyAccumulateF16 =>
               vector(dest)(lane) = IEEE754.floatToBinary16(
                 Math.fma(
@@ -2378,19 +1882,19 @@ private[amdgpu] object VMInterpreter {
                   IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right))),
                   IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(previous)))
                 )
-              ).raw
+              ).toLong
             case VectorBinaryOperation.SubtractF32 =>
               val result = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) - IEEE754.binary32ToFloat(
                 Binary32.fromLow(Bits.low32(right))
               )
-              vector(dest)(lane) = IEEE754.floatToBinary32(result).raw
+              vector(dest)(lane) = IEEE754.floatToBinary32(result).toLong
             case VectorBinaryOperation.AddCarryU32 =>
               val sum = left + right
-              vector(dest)(lane) = Bits.low32(sum).raw
+              vector(dest)(lane) = Bits.low32(sum).toLong
               carry(lane) = sum > Bits.Mask32
             case VectorBinaryOperation.AddWithCarryU32 =>
               val sum = left + right + (if (carry(lane)) 1L else 0L)
-              vector(dest)(lane) = Bits.low32(sum).raw
+              vector(dest)(lane) = Bits.low32(sum).toLong
               carry(lane) = sum > Bits.Mask32
             case VectorBinaryOperation.SubtractCarryU32 =>
               val (difference, borrow) = unsignedSubtract32(left, right)
@@ -2406,11 +1910,11 @@ private[amdgpu] object VMInterpreter {
       case Instruction.VDot2F32F16(dest, srcA, srcB, accumulate) =>
         foreachActive { lane =>
           vector(dest)(lane) = dot2F32F16(
-            Bits.low32(source(srcA, lane)).raw,
-            Bits.low32(source(srcB, lane)).raw,
+            Bits.low32(source(srcA, lane)).toLong,
+            Bits.low32(source(srcB, lane)).toLong,
             vector(dest)(lane),
             accumulate
-          ).raw
+          ).toLong
         }
         AdvanceStep
       case Instruction.VDot4U32U8(dest, srcA, srcB, srcC) =>
@@ -2456,8 +1960,8 @@ private[amdgpu] object VMInterpreter {
               case VectorBinary64Operation.Minimum      => math.min(valueA, valueB)
             }
             val bits = IEEE754.doubleToBinary64(result)
-            destinationLow(lane) = Bits.low32(bits).raw
-            destinationHigh(lane) = Bits.high32(bits).raw
+            destinationLow(lane) = Bits.low32(bits).toLong
+            destinationHigh(lane) = Bits.high32(bits).toLong
           }
           lane += 1
         }
@@ -2479,54 +1983,55 @@ private[amdgpu] object VMInterpreter {
           val right  = selectSubDword(source(srcB, lane), srcBSelection, srcBSignExtend)
           val result = operation match {
             case VectorSubDwordOperation.ConditionalMask32 =>
-              val conditionMask = Bits.low32(source(InstructionSource.Scalar(Decoding.VccLo), 0)).raw
+              val conditionMask = Bits.low32(source(InstructionSource.Scalar(Decoding.VccLo), 0)).toLong
               if ((conditionMask & (1L << lane)) != 0L) right else left
-            case VectorSubDwordOperation.AddU32 => Bits.low32(left + right).raw
-            case VectorSubDwordOperation.AddU16 => Bits.low16(left + right).raw
+            case VectorSubDwordOperation.AddU32 => Bits.low32(left + right).toLong
+            case VectorSubDwordOperation.AddU16 => Bits.low16(left + right).toLong
             case VectorSubDwordOperation.AddF16 =>
               IEEE754.floatToBinary16(
                 IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))) + IEEE754.binary16ToFloat(
                   Binary16.fromLow(Bits.low16(right))
                 )
-              ).raw
+              ).toLong
             case VectorSubDwordOperation.AddCarryU32 =>
               val sum = left + right
               carry(lane) = sum > Bits.Mask32
-              Bits.low32(sum).raw
+              Bits.low32(sum).toLong
             case VectorSubDwordOperation.AddWithCarryU32 =>
               val sum = left + right + (if (carry(lane)) 1L else 0L)
               carry(lane) = sum > Bits.Mask32
-              Bits.low32(sum).raw
-            case VectorSubDwordOperation.And32        => left & right
-            case VectorSubDwordOperation.ShiftLeft16  => Bits.low16(Bits.low16(right).raw << (left.toInt & 15)).raw
-            case VectorSubDwordOperation.ShiftLeft32  => Bits.low32(right << (left.toInt & 31)).raw
+              Bits.low32(sum).toLong
+            case VectorSubDwordOperation.And32       => left & right
+            case VectorSubDwordOperation.ShiftLeft16 =>
+              Bits.low16(Bits.low16(right).toLong << (left.toInt & 15)).toLong
+            case VectorSubDwordOperation.ShiftLeft32  => Bits.low32(right << (left.toInt & 31)).toLong
             case VectorSubDwordOperation.ShiftRight32 => right >>> (left.toInt & 31)
-            case VectorSubDwordOperation.ShiftRight16 => Bits.low16(right >>> (left.toInt & 15)).raw
-            case VectorSubDwordOperation.MaximumI16   => Bits.low16(math.max(left, right)).raw
+            case VectorSubDwordOperation.ShiftRight16 => Bits.low16(right >>> (left.toInt & 15)).toLong
+            case VectorSubDwordOperation.MaximumI16   => Bits.low16(math.max(left, right)).toLong
             case VectorSubDwordOperation.MaximumF16   =>
               IEEE754.floatToBinary16(
                 math.max(
                   IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))),
                   IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right)))
                 )
-              ).raw
-            case VectorSubDwordOperation.MinimumI16 => Bits.low16(math.min(left, right)).raw
-            case VectorSubDwordOperation.MinimumF16 => minimumF16(left, right).raw
+              ).toLong
+            case VectorSubDwordOperation.MinimumI16 => Bits.low16(math.min(left, right)).toLong
+            case VectorSubDwordOperation.MinimumF16 => minimumF16(left, right).toLong
             case VectorSubDwordOperation.MinimumU16 =>
-              Bits.low16(math.min(Bits.low16(left).raw, Bits.low16(right).raw)).raw
-            case VectorSubDwordOperation.MultiplyLowU16 => Bits.low16(left * right).raw
+              Bits.low16(math.min(Bits.low16(left).toLong, Bits.low16(right).toLong)).toLong
+            case VectorSubDwordOperation.MultiplyLowU16 => Bits.low16(left * right).toLong
             case VectorSubDwordOperation.MultiplyF16    =>
               val result =
                 IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))) * IEEE754.binary16ToFloat(
                   Binary16.fromLow(Bits.low16(right))
                 )
-              IEEE754.floatToBinary16(result).raw
+              IEEE754.floatToBinary16(result).toLong
             case VectorSubDwordOperation.MultiplyU24      => unsignedMultiply24(left, right)
             case VectorSubDwordOperation.MultiplyI24      => signedMultiply24(left, right)
             case VectorSubDwordOperation.Or32             => left | right
             case VectorSubDwordOperation.Xor32            => left ^ right
-            case VectorSubDwordOperation.SubtractU16      => Bits.low16(left - right).raw
-            case VectorSubDwordOperation.SubtractU32      => Bits.low32(left - right).raw
+            case VectorSubDwordOperation.SubtractU16      => Bits.low16(left - right).toLong
+            case VectorSubDwordOperation.SubtractU32      => Bits.low32(left - right).toLong
             case VectorSubDwordOperation.SubtractCarryU32 =>
               val (difference, borrow) = unsignedSubtract32(left, right)
               carry(lane) = borrow
@@ -2549,50 +2054,50 @@ private[amdgpu] object VMInterpreter {
         AdvanceStep
       case Instruction.VPackedBinary(operation, dest, srcA, srcB, srcAHighForHigh, srcBHighForHigh) =>
         foreachActive { lane =>
-          val left                              = Bits.low32(source(srcA, lane)).raw
-          val right                             = Bits.low32(source(srcB, lane)).raw
+          val left                              = Bits.low32(source(srcA, lane)).toLong
+          val right                             = Bits.low32(source(srcB, lane)).toLong
           def calculate(a: Long, b: Long): Long = operation match {
-            case VectorPackedBinaryOperation.AddU16 => Bits.low16(a + b).raw
+            case VectorPackedBinaryOperation.AddU16 => Bits.low16(a + b).toLong
             case VectorPackedBinaryOperation.AddF16 =>
               Bits.low16(IEEE754.floatToBinary16(
                 IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(a))) + IEEE754.binary16ToFloat(
                   Binary16.fromLow(Bits.low16(b))
                 )
-              ).raw).raw
-            case VectorPackedBinaryOperation.MultiplyLowU16 => Bits.low16(a * b).raw
+              ).toLong).toLong
+            case VectorPackedBinaryOperation.MultiplyLowU16 => Bits.low16(a * b).toLong
             case VectorPackedBinaryOperation.MultiplyF16    =>
               Bits.low16(IEEE754.floatToBinary16(
                 IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(a))) * IEEE754.binary16ToFloat(
                   Binary16.fromLow(Bits.low16(b))
                 )
-              ).raw).raw
+              ).toLong).toLong
             case VectorPackedBinaryOperation.MaximumF16 =>
               Bits.low16(IEEE754.floatToBinary16(math.max(
                 IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(a))),
                 IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(b)))
-              )).raw).raw
+              )).toLong).toLong
             case VectorPackedBinaryOperation.MinimumF16 =>
               Bits.low16(IEEE754.floatToBinary16(math.min(
                 IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(a))),
                 IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(b)))
-              )).raw).raw
+              )).toLong).toLong
             case VectorPackedBinaryOperation.MaximumI16 =>
               if (
                 Bits.signExtend(
-                  Bits.low16(a).raw,
+                  Bits.low16(a).toLong,
                   16
-                ) >= Bits.signExtend(Bits.low16(b).raw, 16)
+                ) >= Bits.signExtend(Bits.low16(b).toLong, 16)
               )
-                Bits.low16(a).raw
-              else Bits.low16(b).raw
-            case VectorPackedBinaryOperation.MaximumU16   => math.max(Bits.low16(a).raw, Bits.low16(b).raw)
-            case VectorPackedBinaryOperation.SubtractI16  => Bits.low16(a - b).raw
-            case VectorPackedBinaryOperation.ShiftRight16 => Bits.low16(b >>> (a.toInt & 15)).raw
+                Bits.low16(a).toLong
+              else Bits.low16(b).toLong
+            case VectorPackedBinaryOperation.MaximumU16   => math.max(Bits.low16(a).toLong, Bits.low16(b).toLong)
+            case VectorPackedBinaryOperation.SubtractI16  => Bits.low16(a - b).toLong
+            case VectorPackedBinaryOperation.ShiftRight16 => Bits.low16(b >>> (a.toInt & 15)).toLong
           }
-          val low  = calculate(Bits.low16(left).raw, Bits.low16(right).raw)
+          val low  = calculate(Bits.low16(left).toLong, Bits.low16(right).toLong)
           val high = calculate(
-            if (srcAHighForHigh) left >>> 16 else Bits.low16(left).raw,
-            if (srcBHighForHigh) right >>> 16 else Bits.low16(right).raw
+            if (srcAHighForHigh) left >>> 16 else Bits.low16(left).toLong,
+            if (srcBHighForHigh) right >>> 16 else Bits.low16(right).toLong
           )
           vector(dest)(lane) = low | (high << 16)
         }
@@ -2601,7 +2106,7 @@ private[amdgpu] object VMInterpreter {
         foreachActive { lane =>
           val low  = IEEE754.floatToBinary16(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcA, lane)))))
           val high = IEEE754.floatToBinary16(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcB, lane)))))
-          vector(dest)(lane) = low.raw | (high.raw << 16)
+          vector(dest)(lane) = low.toLong | (high.toLong << 16)
         }
         AdvanceStep
       case Instruction.VPackedFmaF16(
@@ -2617,9 +2122,9 @@ private[amdgpu] object VMInterpreter {
           ) =>
         foreachActive { lane =>
           vector(dest)(lane) = packedFmaF16(
-            Bits.low32(source(srcA, lane)).raw,
-            Bits.low32(source(srcB, lane)).raw,
-            Bits.low32(source(srcC, lane)).raw,
+            Bits.low32(source(srcA, lane)).toLong,
+            Bits.low32(source(srcB, lane)).toLong,
+            Bits.low32(source(srcC, lane)).toLong,
             lowSelection,
             highSelection,
             negateLow,
@@ -2643,9 +2148,9 @@ private[amdgpu] object VMInterpreter {
         foreachActive { lane =>
           vector(dest)(lane) = fmaMixF16(
             vector(dest)(lane),
-            Bits.low32(source(srcA, lane)).raw,
-            Bits.low32(source(srcB, lane)).raw,
-            Bits.low32(source(srcC, lane)).raw,
+            Bits.low32(source(srcA, lane)).toLong,
+            Bits.low32(source(srcB, lane)).toLong,
+            Bits.low32(source(srcC, lane)).toLong,
             opSelection,
             opSelectionHi,
             negate,
@@ -2668,9 +2173,9 @@ private[amdgpu] object VMInterpreter {
           ) =>
         foreachActive { lane =>
           vector(dest)(lane) = fmaMixF32(
-            Bits.low32(source(srcA, lane)).raw,
-            Bits.low32(source(srcB, lane)).raw,
-            Bits.low32(source(srcC, lane)).raw,
+            Bits.low32(source(srcA, lane)).toLong,
+            Bits.low32(source(srcB, lane)).toLong,
+            Bits.low32(source(srcC, lane)).toLong,
             opSelection,
             opSelectionHi,
             negate,
@@ -2686,11 +2191,11 @@ private[amdgpu] object VMInterpreter {
         }
         maskAccumulator(0) = 0L
         foreachActive { lane =>
-          val left     = Bits.low32(source(srcA, lane)).raw
-          val right    = Bits.low32(source(srcB, lane)).raw
+          val left     = Bits.low32(source(srcA, lane)).toLong
+          val right    = Bits.low32(source(srcB, lane)).toLong
           val carryBit = (inputCarry & (1L << lane)) != 0L
           val sum      = left + right + (if (carryBit) 1L else 0L)
-          vector(dest)(lane) = Bits.low32(sum).raw
+          vector(dest)(lane) = Bits.low32(sum).toLong
           if (sum > Bits.Mask32) maskAccumulator(0) |= 1L << lane
         }
         updateLaneMask(carryDest, maskAccumulator(0))
@@ -2702,8 +2207,8 @@ private[amdgpu] object VMInterpreter {
         }
         val outputCarry = Array.fill(lanes.raw)(false)
         foreachActive { lane =>
-          val left                 = Bits.low32(source(srcA, lane)).raw
-          val right                = Bits.low32(source(srcB, lane)).raw
+          val left                 = Bits.low32(source(srcA, lane)).toLong
+          val right                = Bits.low32(source(srcB, lane)).toLong
           val borrowIn             = (inputCarry & (1L << lane)) != 0L
           val (difference, borrow) =
             if (carryIn.isDefined) unsignedSubtractWithBorrow32(left, right, borrowIn)
@@ -2721,8 +2226,8 @@ private[amdgpu] object VMInterpreter {
         }
         val outputCarry = Array.fill(lanes.raw)(false)
         foreachActive { lane =>
-          val left                 = Bits.low32(source(srcA, lane)).raw
-          val right                = Bits.low32(source(srcB, lane)).raw
+          val left                 = Bits.low32(source(srcA, lane)).toLong
+          val right                = Bits.low32(source(srcB, lane)).toLong
           val borrowIn             = (inputCarry & (1L << lane)) != 0L
           val (difference, borrow) =
             if (carryIn.isDefined) unsignedSubtractWithBorrow32(right, left, borrowIn)
@@ -2735,9 +2240,9 @@ private[amdgpu] object VMInterpreter {
         AdvanceStep
       case Instruction.VTernary(operation, dest, srcA, srcB, srcC) =>
         foreachActive { lane =>
-          val left   = Bits.low32(source(srcA, lane)).raw
-          val right  = Bits.low32(source(srcB, lane)).raw
-          val addend = Bits.low32(source(srcC, lane)).raw
+          val left   = Bits.low32(source(srcA, lane)).toLong
+          val right  = Bits.low32(source(srcB, lane)).toLong
+          val addend = Bits.low32(source(srcC, lane)).toLong
           vector(dest)(lane) = Bits.low32(
             operation match {
               case VectorTernaryOperation.Add3U32     => left + right + addend
@@ -2754,7 +2259,7 @@ private[amdgpu] object VMInterpreter {
                     IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))
                   ),
                   IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(addend)))
-                )).raw
+                )).toLong
               case VectorTernaryOperation.Minimum3U32 => math.min(math.min(left, right), addend)
               case VectorTernaryOperation.Median3I32  =>
                 val a = left.toInt
@@ -2762,60 +2267,60 @@ private[amdgpu] object VMInterpreter {
                 val c = addend.toInt
                 math.max(math.min(a, b), math.min(math.max(a, b), c)).toLong
               case VectorTernaryOperation.Median3U32 =>
-                val a = Bits.low32(left).raw
-                val b = Bits.low32(right).raw
-                val c = Bits.low32(addend).raw
+                val a = Bits.low32(left).toLong
+                val b = Bits.low32(right).toLong
+                val c = Bits.low32(addend).toLong
                 math.max(math.min(a, b), math.min(math.max(a, b), c))
               case VectorTernaryOperation.Median3I16 =>
-                val a = Bits.signExtend(Bits.low16(left).raw, 16)
-                val b = Bits.signExtend(Bits.low16(right).raw, 16)
-                val c = Bits.signExtend(Bits.low16(addend).raw, 16)
-                Bits.low16(math.max(math.min(a, b), math.min(math.max(a, b), c))).raw
+                val a = Bits.signExtend(Bits.low16(left).toLong, 16)
+                val b = Bits.signExtend(Bits.low16(right).toLong, 16)
+                val c = Bits.signExtend(Bits.low16(addend).toLong, 16)
+                Bits.low16(math.max(math.min(a, b), math.min(math.max(a, b), c))).toLong
               case VectorTernaryOperation.Median3U16 =>
-                val a = Bits.low16(left).raw
-                val b = Bits.low16(right).raw
-                val c = Bits.low16(addend).raw
-                Bits.low16(math.max(math.min(a, b), math.min(math.max(a, b), c))).raw
+                val a = Bits.low16(left).toLong
+                val b = Bits.low16(right).toLong
+                val c = Bits.low16(addend).toLong
+                Bits.low16(math.max(math.min(a, b), math.min(math.max(a, b), c))).toLong
               case VectorTernaryOperation.Maximum3I16 => Bits.low16(math.max(
                   math.max(
-                    Bits.signExtend(Bits.low16(left).raw, 16),
-                    Bits.signExtend(Bits.low16(right).raw, 16)
+                    Bits.signExtend(Bits.low16(left).toLong, 16),
+                    Bits.signExtend(Bits.low16(right).toLong, 16)
                   ),
-                  Bits.signExtend(Bits.low16(addend).raw, 16)
-                )).raw
+                  Bits.signExtend(Bits.low16(addend).toLong, 16)
+                )).toLong
               case VectorTernaryOperation.Maximum3U16 =>
                 Bits.low16(math.max(
-                  math.max(Bits.low16(left).raw, Bits.low16(right).raw),
-                  Bits.low16(addend).raw
-                )).raw
+                  math.max(Bits.low16(left).toLong, Bits.low16(right).toLong),
+                  Bits.low16(addend).toLong
+                )).toLong
               case VectorTernaryOperation.Minimum3I16 => Bits.low16(math.min(
                   math.min(
-                    Bits.signExtend(Bits.low16(left).raw, 16),
-                    Bits.signExtend(Bits.low16(right).raw, 16)
+                    Bits.signExtend(Bits.low16(left).toLong, 16),
+                    Bits.signExtend(Bits.low16(right).toLong, 16)
                   ),
-                  Bits.signExtend(Bits.low16(addend).raw, 16)
-                )).raw
+                  Bits.signExtend(Bits.low16(addend).toLong, 16)
+                )).toLong
               case VectorTernaryOperation.Minimum3U16 =>
                 Bits.low16(math.min(
-                  math.min(Bits.low16(left).raw, Bits.low16(right).raw),
-                  Bits.low16(addend).raw
-                )).raw
+                  math.min(Bits.low16(left).toLong, Bits.low16(right).toLong),
+                  Bits.low16(addend).toLong
+                )).toLong
               case VectorTernaryOperation.MultiplyAddU16 =>
-                Bits.low16(Bits.low16(left).raw * Bits.low16(right).raw + Bits.low16(addend).raw).raw
+                Bits.low16(Bits.low16(left).toLong * Bits.low16(right).toLong + Bits.low16(addend).toLong).toLong
               case VectorTernaryOperation.FusedMultiplyAddF32 => IEEE754.floatToBinary32(
                   IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) * IEEE754.binary32ToFloat(
                     Binary32.fromLow(Bits.low32(right))
                   ) + IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(
                     addend
                   )))
-                ).raw
+                ).toLong
               case VectorTernaryOperation.FusedMultiplyAddF16 =>
                 IEEE754.floatToBinary16(
                   IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))) * IEEE754.binary16ToFloat(
                     Binary16.fromLow(Bits.low16(right))
                   ) +
                     IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(addend)))
-                ).raw
+                ).toLong
               case VectorTernaryOperation.DivisionFusedMultiplyAddF32 =>
                 val result =
                   IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) * IEEE754.binary32ToFloat(
@@ -2825,11 +2330,11 @@ private[amdgpu] object VMInterpreter {
                   )))
                 val scaled      = (laneMask(carry) & (1L << lane)) != 0L
                 val finalResult = if (scaled) Math.scalb(result, 32) else result
-                IEEE754.floatToBinary32(finalResult).raw
+                IEEE754.floatToBinary32(finalResult).toLong
               case VectorTernaryOperation.MultiplyAddLegacyU16 =>
-                Bits.low16(left).raw * Bits.low16(right).raw + Bits.low16(addend).raw
+                Bits.low16(left).toLong * Bits.low16(right).toLong + Bits.low16(addend).toLong
               case VectorTernaryOperation.MultiplyAddU24 => unsignedMultiplyAdd24(left, right, addend)
-              case VectorTernaryOperation.MultiplyAddI24 => Bits.low32(signedMultiply24(left, right) + addend).raw
+              case VectorTernaryOperation.MultiplyAddI24 => Bits.low32(signedMultiply24(left, right) + addend).toLong
               // ALIGNBIT treats SRC0 as the high dword and SRC1 as
               // the low dword of the 64-bit shift window.  join32
               // takes its low word first.
@@ -2843,18 +2348,21 @@ private[amdgpu] object VMInterpreter {
                 if (width == 0) 0L
                 else {
                   val mask = (1L << width) - 1L
-                  Bits.low32(Bits.signExtend((left >>> (right.toInt & 31)) & mask, IntBetween.unsafe[1, 64](width))).raw
+                  Bits.low32(Bits.signExtend(
+                    (left >>> (right.toInt & 31)) & mask,
+                    width.unsafe[Int where Between[1, 64]]
+                  )).toLong
                 }
               case VectorTernaryOperation.BitFieldExtractU32 =>
                 val width = addend.toInt & 31
-                if (width == 0) 0L else Bits.low32(left >>> (right.toInt & 31)).raw & ((1L << width) - 1L)
-              case VectorTernaryOperation.XorAddU32       => Bits.low32((left ^ right) + addend).raw
+                if (width == 0) 0L else Bits.low32(left >>> (right.toInt & 31)).toLong & ((1L << width) - 1L)
+              case VectorTernaryOperation.XorAddU32       => Bits.low32((left ^ right) + addend).toLong
               case VectorTernaryOperation.AddShiftLeftU32 => (left + right) << (addend.toInt & 31)
               case VectorTernaryOperation.ShiftLeftAddU32 => (left << (right.toInt & 31)) + addend
               case VectorTernaryOperation.ShiftLeftOr32   => (left << (right.toInt & 31)) | addend
               case VectorTernaryOperation.PermuteBytes32  => permuteBytes(left, right, addend)
             }
-          ).raw
+          ).toLong
         }
         AdvanceStep
       case Instruction.VMadU64U32(dest, carryDest, srcA, srcB, srcC) =>
@@ -2863,10 +2371,10 @@ private[amdgpu] object VMInterpreter {
           val rawA    = source(srcA, lane)
           val rawB    = source(srcB, lane)
           val addend  = source64(srcC, lane, scalar, vector)
-          val product = Bits.low32(rawA).raw * Bits.low32(rawB).raw
+          val product = Bits.low32(rawA).toLong * Bits.low32(rawB).toLong
           val sum     = product + addend
-          vector(dest)(lane) = Bits.low32(sum).raw
-          vector(dest + 1)(lane) = Bits.high32(sum).raw
+          vector(dest)(lane) = Bits.low32(sum).toLong
+          vector(dest + 1)(lane) = Bits.high32(sum).toLong
           madCarry(lane) = java.lang.Long.compareUnsigned(sum, product) < 0
         }
         updateLaneMask(carryDest, booleanLaneMask(madCarry))
@@ -2877,12 +2385,12 @@ private[amdgpu] object VMInterpreter {
           val rawA    = source(srcA, lane)
           val rawB    = source(srcB, lane)
           val addend  = source64(srcC, lane, scalar, vector)
-          val left    = Bits.signExtend(Bits.low32(rawA).raw, 32)
-          val right   = Bits.signExtend(Bits.low32(rawB).raw, 32)
+          val left    = Bits.signExtend(Bits.low32(rawA).toLong, 32)
+          val right   = Bits.signExtend(Bits.low32(rawB).toLong, 32)
           val product = left * right
           val sum     = product + addend
-          vector(dest)(lane) = Bits.low32(sum).raw
-          vector(dest + 1)(lane) = Bits.high32(sum).raw
+          vector(dest)(lane) = Bits.low32(sum).toLong
+          vector(dest + 1)(lane) = Bits.high32(sum).toLong
           // The carry result is the carry out of the two-word addition,
           // using the two's-complement bit representation of the signed
           // product, just as the hardware's vcc_out does.
@@ -2897,7 +2405,7 @@ private[amdgpu] object VMInterpreter {
     // code-object globals and descriptor out-of-bounds lanes never reach the host pump.
     def prepareVectorReads(instruction: Instruction): Either[Fault, Unit] = {
       def global(register: Int, scalarRegister: Option[Int], offset: Int)(lane: Int): Option[Long] =
-        Some(scalarRegister.map(r => pair(scalar, r) + Bits.low32(vector(register)(lane)).raw)
+        Some(scalarRegister.map(r => pair(scalar, r) + Bits.low32(vector(register)(lane)).toLong)
           .getOrElse(pair(vector, register, lane)) + signed13(offset))
       def flat(register: Int, offset: Int, size: Int)(lane: Int): Option[Long] = {
         val address = pair(vector, register, lane) + flatOffset(offset)
@@ -2914,20 +2422,14 @@ private[amdgpu] object VMInterpreter {
         val base  = sourceScalar64(InstructionSource.Scalar(resource)) & 0x0000ffffffffffffL
         val start = bufferOffset(lane, register, scalarOffset, offset, base == 0L)
         Option.when(
-          base != 0L && (start >= 0L && start <= Bits.low32(scalar(resource + 2)).raw - size.toLong)
+          base != 0L && (start >= 0L && start <= Bits.low32(scalar(resource + 2)).toLong - size.toLong)
         )(base + start)
       }
-      def prepare(size: Int, addressOf: Int => Option[Long]): Either[Fault, Unit] = memory match {
-        case context: MemoryContext =>
-          val ranges = Vec.from((0 until lanes.raw).filter(active(_)).flatMap(addressOf).filter { address =>
-            aliasedRegion(address, allocations) == null &&
-            !ByteRange.contains(kernarg.length, address - KernargAddress, size.toLong) &&
-            !ByteRange.contains(dispatchBytes.length, address - DispatchAddress, size.toLong) &&
-            !ByteRange.contains(kernel.readOnly.length, address - kernel.readOnlyAddress, size.toLong) &&
-            globalRegionIndex(address, size, kernel.globalMemory) < 0
-          }.map(address => (GuestAddress(address), NonNegative.unsafe(size))))
-          if (ranges.isEmpty) Right(()) else context.prepareReads(ranges)
-        case _ => Right(())
+      def prepare(size: Int, addressOf: Int => Option[Long]): Either[Fault, Unit] = {
+        val ranges = Vec.from((0 until lanes.raw).filter(active(_)).flatMap(addressOf).filter { address =>
+          dispatchMemory.isExternal(address, size)
+        }.map(address => (GuestAddress(address), size.unsafe[Int >= 0])))
+        if (ranges.isEmpty) Right(()) else dispatchMemory.prepareReads(ranges)
       }
       instruction match {
         case Instruction.GlobalLoad(_, address, scalarAddress, rawSize, offset, false) =>
@@ -2963,35 +2465,30 @@ private[amdgpu] object VMInterpreter {
           dest: Int,
           addressRegister: Int,
           scalarAddress: Option[Int],
-          byteCount: Int,
+          byteWidth: Int where Between[1, 8],
           offset: Int,
           returnValue: Boolean
       )(update: (Int, Long) => Long): Either[Fault, Unit] = {
+        val byteCount = byteWidth.raw
+        @annotation.tailrec
         def atomicLane(lane: Int): Either[Fault, Unit] =
           if (lane == lanes.raw) Right(())
           else if (!active(lane)) atomicLane(lane + 1)
           else {
             val address = scalarAddress
-              .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)).raw)
+              .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)).toLong)
               .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            atomicModifyValue(
-              address,
-              IntBetween.unsafe[1, 8](byteCount),
-              allocations,
-              memory,
-              kernel.globalMemory,
-              kernel.globalMemoryLocks
-            ) { oldValue =>
+            dispatchMemory.atomicModifyValue(address, byteWidth) { oldValue =>
               val updated = update(lane, oldValue)
-              if (byteCount == 8) updated else Bits.low32(updated).raw
+              if (byteCount == 8) updated else Bits.low32(updated).toLong
             } match {
               case Left(error)     => Left(error)
               case Right(oldValue) =>
                 if (returnValue) {
                   if (byteCount == 8) {
-                    vector(dest)(lane) = Bits.low32(oldValue).raw
-                    vector(dest + 1)(lane) = Bits.high32(oldValue).raw
-                  } else vector(dest)(lane) = Bits.low32(oldValue).raw
+                    vector(dest)(lane) = Bits.low32(oldValue).toLong
+                    vector(dest + 1)(lane) = Bits.high32(oldValue).toLong
+                  } else vector(dest)(lane) = Bits.low32(oldValue).toLong
                 }
                 atomicLane(lane + 1)
             }
@@ -3056,13 +2553,13 @@ private[amdgpu] object VMInterpreter {
             case VectorComparisonKind.Float16 =>
               val raw      = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(source(sourceRegister, lane))))
               val prepared = if (absolute) math.abs(raw) else raw
-              IEEE754.floatToBinary16(if (negate) -prepared else prepared).raw
+              IEEE754.floatToBinary16(if (negate) -prepared else prepared).toLong
             case VectorComparisonKind.ClassFloat32 if right =>
               source(sourceRegister, lane)
             case VectorComparisonKind.Float32 | VectorComparisonKind.ClassFloat32 =>
               val raw      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(sourceRegister, lane))))
               val prepared = if (absolute) math.abs(raw) else raw
-              IEEE754.floatToBinary32(if (negate) -prepared else prepared).raw
+              IEEE754.floatToBinary32(if (negate) -prepared else prepared).toLong
             case VectorComparisonKind.ClassFloat64 if right =>
               source(sourceRegister, lane)
             case VectorComparisonKind.Float64 | VectorComparisonKind.ClassFloat64 =>
@@ -3088,40 +2585,41 @@ private[amdgpu] object VMInterpreter {
           AdvanceStep
         case Instruction.VShiftLeft64(dest, amount, src) =>
           foreachActive { lane =>
-            val sourceLow  = Bits.low32(source(src, lane)).raw
+            val sourceLow  = Bits.low32(source(src, lane)).toLong
             val sourceHigh = src match {
-              case InstructionSource.VectorRegister(register) => Bits.low32(vector(register + 1)(lane)).raw
-              case InstructionSource.Scalar(register)         => Bits.low32(scalar(register + 1)).raw
+              case InstructionSource.VectorRegister(register) => Bits.low32(vector(register + 1)(lane)).toLong
+              case InstructionSource.Scalar(register)         => Bits.low32(scalar(register + 1)).toLong
               case InstructionSource.Constant(_)              => 0L
               case InstructionSource.Literal(_)               => 0L
             }
             val shifted = Bits.join32(sourceLow, sourceHigh) << (source(amount, lane).toInt & 63)
-            vector(dest)(lane) = Bits.low32(shifted).raw
-            vector(dest + 1)(lane) = Bits.high32(shifted).raw
+            vector(dest)(lane) = Bits.low32(shifted).toLong
+            vector(dest + 1)(lane) = Bits.high32(shifted).toLong
           }
           AdvanceStep
         case Instruction.VShiftRight64(dest, amount, src) =>
           foreachActive { lane =>
             val shifted = source64(src, lane, scalar, vector) >>> (source(amount, lane).toInt & 63)
-            vector(dest)(lane) = Bits.low32(shifted).raw
-            vector(dest + 1)(lane) = Bits.high32(shifted).raw
+            vector(dest)(lane) = Bits.low32(shifted).toLong
+            vector(dest + 1)(lane) = Bits.high32(shifted).toLong
           }
           AdvanceStep
         case Instruction.VShiftRightArithmetic64(dest, amount, src) =>
           foreachActive { lane =>
             val shifted = source64(src, lane, scalar, vector) >> (source(amount, lane).toInt & 63)
-            vector(dest)(lane) = Bits.low32(shifted).raw
-            vector(dest + 1)(lane) = Bits.high32(shifted).raw
+            vector(dest)(lane) = Bits.low32(shifted).toLong
+            vector(dest + 1)(lane) = Bits.high32(shifted).toLong
           }
           AdvanceStep
         case Instruction.DSReadD16(dest, addressRegister, rawByteCount, offset, high) =>
-          val byteCount                                = rawByteCount.raw
-          val scalarByteCount                          = IntBetween.unsafe[0, 8](byteCount)
+          val byteCount       = rawByteCount.raw
+          val scalarByteCount = rawByteCount
+          @annotation.tailrec
           def loadLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) loadLane(lane + 1)
             else {
-              val base         = Bits.low32(vector(addressRegister)(lane)).raw
+              val base         = Bits.low32(vector(addressRegister)(lane)).toLong
               val sourceOffset = checkedLdsOffset(lds, base + offset.toLong, byteCount)
               if (sourceOffset == InvalidLdsOffset)
                 Left(ldsFailure(base + offset.toLong, byteCount))
@@ -3135,14 +2633,15 @@ private[amdgpu] object VMInterpreter {
             }
           advanceAfter(loadLane(0))
         case Instruction.DSSignedReadD16(dest, addressRegister, rawByteCount, offset, high) =>
-          val byteCount                                = rawByteCount.raw
-          val scalarByteCount                          = IntBetween.unsafe[0, 8](byteCount)
-          val bitWidth                                 = IntBetween.unsafe[1, 64](byteCount * 8)
+          val byteCount       = rawByteCount.raw
+          val scalarByteCount = rawByteCount
+          val bitWidth        = (byteCount * 8).unsafe[Int where Between[1, 64]]
+          @annotation.tailrec
           def loadLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) loadLane(lane + 1)
             else {
-              val base         = Bits.low32(vector(addressRegister)(lane)).raw
+              val base         = Bits.low32(vector(addressRegister)(lane)).toLong
               val sourceOffset = checkedLdsOffset(lds, base + offset.toLong, byteCount)
               if (sourceOffset == InvalidLdsOffset)
                 Left(ldsFailure(base + offset.toLong, byteCount))
@@ -3150,7 +2649,7 @@ private[amdgpu] object VMInterpreter {
                 val loaded =
                   Bits.low16(
                     Bits.signExtend(LittleEndian.decode(lds, sourceOffset, scalarByteCount), bitWidth)
-                  ).raw
+                  ).toLong
                 vector(dest)(lane) =
                   if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
                   else (vector(dest)(lane) & 0xffff0000L) | loaded
@@ -3159,12 +2658,13 @@ private[amdgpu] object VMInterpreter {
             }
           advanceAfter(loadLane(0))
         case Instruction.DSRead(dest, addressRegister, rawByteCount, offsetA, offsetB) =>
-          val byteCount                                = rawByteCount.raw
+          val byteCount = rawByteCount.raw
+          @annotation.tailrec
           def loadLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) loadLane(lane + 1)
             else {
-              val base  = Bits.low32(vector(addressRegister)(lane)).raw
+              val base  = Bits.low32(vector(addressRegister)(lane)).toLong
               val first = checkedLdsOffset(lds, base + offsetA.toLong, byteCount)
               if (first == InvalidLdsOffset)
                 Left(ldsFailure(base + offsetA.toLong, byteCount))
@@ -3185,14 +2685,15 @@ private[amdgpu] object VMInterpreter {
             }
           advanceAfter(loadLane(0))
         case Instruction.DSSignedRead(dest, addressRegister, rawByteCount, offsetA, offsetB) =>
-          val byteCount                                = rawByteCount.raw
-          val scalarByteCount                          = IntBetween.unsafe[0, 8](byteCount)
-          val bitWidth                                 = IntBetween.unsafe[1, 64](byteCount * 8)
+          val byteCount       = rawByteCount.raw
+          val scalarByteCount = rawByteCount
+          val bitWidth        = (byteCount * 8).unsafe[Int where Between[1, 64]]
+          @annotation.tailrec
           def loadLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) loadLane(lane + 1)
             else {
-              val base  = Bits.low32(vector(addressRegister)(lane)).raw
+              val base  = Bits.low32(vector(addressRegister)(lane)).toLong
               val first = checkedLdsOffset(lds, base + offsetA.toLong, byteCount)
               if (first == InvalidLdsOffset)
                 Left(ldsFailure(base + offsetA.toLong, byteCount))
@@ -3239,7 +2740,7 @@ private[amdgpu] object VMInterpreter {
           foreachActive { lane =>
             val destinationLane = permuteDestinationLane(addresses(lane), offset.toLong, waveSize)
             if (destinationLane < lanes.raw)
-              result(destinationLane) = Bits.low32(sources(lane)).raw
+              result(destinationLane) = Bits.low32(sources(lane)).toLong
           }
           foreachLane { lane => vector(dest)(lane) = result(lane) }
           AdvanceStep
@@ -3253,7 +2754,7 @@ private[amdgpu] object VMInterpreter {
             // `offset:124` read lane 0 instead of lane 31, dropping
             // the final cross-wave reduction contribution.
             val sourceLane = bpermuteSourceLane(addresses(lane), offset.toLong)
-            vector(dest)(lane) = if (sourceLane < lanes.raw) Bits.low32(sources(sourceLane)).raw else 0L
+            vector(dest)(lane) = if (sourceLane < lanes.raw) Bits.low32(sources(sourceLane)).toLong else 0L
           }
           AdvanceStep
         case Instruction.DSSwizzle(dest, src, control) =>
@@ -3269,38 +2770,40 @@ private[amdgpu] object VMInterpreter {
           foreachActive { lane =>
             val sourceLane = ((lane & andMask) | orMask) ^ xorMask
             vector(dest)(lane) =
-              if (sourceLane >= 0 && sourceLane < lanes.raw) Bits.low32(sources(sourceLane)).raw else 0L
+              if (sourceLane >= 0 && sourceLane < lanes.raw) Bits.low32(sources(sourceLane)).toLong else 0L
           }
           AdvanceStep
         case Instruction.DSAtomic(operation, dest, addressRegister, src, rawByteCount, offset, returnValue) =>
           val byteCount                                  = rawByteCount.raw
-          val scalarByteCount                            = IntBetween.unsafe[0, 8](byteCount)
+          val scalarByteCount                            = rawByteCount
           def atomicLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) atomicLane(lane + 1)
             else {
-              val base = Bits.low32(vector(addressRegister)(lane)).raw
+              val base = Bits.low32(vector(addressRegister)(lane)).toLong
               readLDS(lds, base + offset.toLong, byteCount).flatMap { bytes =>
                 val previous = LittleEndian.decode(bytes, 0, scalarByteCount)
                 val operand  = if (byteCount == 8)
                   (vector(src)(lane) & 0xffffffffL) | ((vector(src + 1)(lane) & 0xffffffffL) << 32)
-                else Bits.low32(vector(src)(lane)).raw
+                else Bits.low32(vector(src)(lane)).toLong
                 val updated = operation match {
-                  case DSAtomicOperation.AddU32       => Bits.low32(previous + operand).raw
-                  case DSAtomicOperation.SubtractU32  => Bits.low32(previous - operand).raw
-                  case DSAtomicOperation.IncrementU32 => Bits.low32(previous + 1L).raw
-                  case DSAtomicOperation.DecrementU32 => Bits.low32(previous - 1L).raw
+                  case DSAtomicOperation.AddU32       => Bits.low32(previous + operand).toLong
+                  case DSAtomicOperation.SubtractU32  => Bits.low32(previous - operand).toLong
+                  case DSAtomicOperation.IncrementU32 => Bits.low32(previous + 1L).toLong
+                  case DSAtomicOperation.DecrementU32 => Bits.low32(previous - 1L).toLong
                   case DSAtomicOperation.MinimumI32   => math.min(previous.toInt, operand.toInt).toLong & Bits.Mask32
                   case DSAtomicOperation.MaximumI32   => math.max(previous.toInt, operand.toInt).toLong & Bits.Mask32
-                  case DSAtomicOperation.MinimumU32   => math.min(Bits.low32(previous).raw, Bits.low32(operand).raw)
-                  case DSAtomicOperation.MaximumU32   => math.max(Bits.low32(previous).raw, Bits.low32(operand).raw)
+                  case DSAtomicOperation.MinimumU32   =>
+                    math.min(Bits.low32(previous).toLong, Bits.low32(operand).toLong)
+                  case DSAtomicOperation.MaximumU32 =>
+                    math.max(Bits.low32(previous).toLong, Bits.low32(operand).toLong)
                   case DSAtomicOperation.AddU64       => previous + operand
                   case DSAtomicOperation.SubtractU64  => previous - operand
                   case DSAtomicOperation.IncrementU64 => previous + 1L
                   case DSAtomicOperation.DecrementU64 => previous - 1L
-                  case DSAtomicOperation.And32        => Bits.low32(previous).raw & Bits.low32(operand).raw
-                  case DSAtomicOperation.Or32         => Bits.low32(previous).raw | Bits.low32(operand).raw
-                  case DSAtomicOperation.Xor32        => Bits.low32(previous).raw ^ Bits.low32(operand).raw
+                  case DSAtomicOperation.And32        => Bits.low32(previous).toLong & Bits.low32(operand).toLong
+                  case DSAtomicOperation.Or32         => Bits.low32(previous).toLong | Bits.low32(operand).toLong
+                  case DSAtomicOperation.Xor32        => Bits.low32(previous).toLong ^ Bits.low32(operand).toLong
                   case DSAtomicOperation.And64        => previous & operand
                   case DSAtomicOperation.Or64         => previous | operand
                   case DSAtomicOperation.Xor64        => previous ^ operand
@@ -3317,21 +2820,21 @@ private[amdgpu] object VMInterpreter {
                           operand.toInt
                         ))
                       )
-                    ).raw & 0xffffffffL
+                    ).toLong & 0xffffffffL
                   case DSAtomicOperation.MinimumF32 =>
                     IEEE754.floatToBinary32(
                       math.min(
                         IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous.toInt))),
                         IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(operand.toInt)))
                       )
-                    ).raw & 0xffffffffL
+                    ).toLong & 0xffffffffL
                   case DSAtomicOperation.MaximumF32 =>
                     IEEE754.floatToBinary32(
                       math.max(
                         IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous.toInt))),
                         IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(operand.toInt)))
                       )
-                    ).raw & 0xffffffffL
+                    ).toLong & 0xffffffffL
                   case DSAtomicOperation.AddF64 =>
                     IEEE754.doubleToBinary64(
                       IEEE754.binary64ToDouble(previous) + IEEE754.binary64ToDouble(operand)
@@ -3364,7 +2867,7 @@ private[amdgpu] object VMInterpreter {
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) storeLane(lane + 1)
             else {
-              val base = Bits.low32(vector(addressRegister)(lane)).raw
+              val base = Bits.low32(vector(addressRegister)(lane)).toLong
               for {
                 firstAddress = base + offsetA.toLong
                 firstBytes   = vectorBytes(vector, srcA, lane, byteCount)
@@ -3386,7 +2889,7 @@ private[amdgpu] object VMInterpreter {
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) storeLane(lane + 1)
             else {
-              val base    = Bits.low32(vector(addressRegister)(lane)).raw
+              val base    = Bits.low32(vector(addressRegister)(lane)).toLong
               val value   = vector(src)(lane) >>> 16
               val address = base + offset.toLong
               writeLDS(lds, address, LittleEndian.toArray(value, 2))
@@ -3398,7 +2901,7 @@ private[amdgpu] object VMInterpreter {
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) storeLane(lane + 1)
             else {
-              val base    = Bits.low32(vector(addressRegister)(lane)).raw
+              val base    = Bits.low32(vector(addressRegister)(lane)).toLong
               val value   = vector(src)(lane) >>> 16
               val address = base + offset.toLong
               writeLDS(lds, address, LittleEndian.toArray(value, 1))
@@ -3411,51 +2914,25 @@ private[amdgpu] object VMInterpreter {
             case Some(register) => pair(scalar, register)
             case None           => 0L
           }
-          val scalarWidth           = if (byteCount <= 8) IntBetween.unsafe[1, 8](byteCount) else null
+          val scalarWidth           = if (byteCount <= 8) byteCount.unsafe[Int where Between[1, 8]] else null
           val displacement          = signed13(offset)
           var lane                  = 0
           var failure: Fault | Null = null
           while (lane < lanes.raw && failure == null) {
             if (active(lane)) {
               val address =
-                if (scalarAddress.isDefined) scalarBase + Bits.low32(vector(addressRegister)(lane)).raw + displacement
+                if (scalarAddress.isDefined)
+                  scalarBase + Bits.low32(vector(addressRegister)(lane)).toLong + displacement
                 else pair(vector, addressRegister, lane) + displacement
               if (scalarWidth != null)
-                (if (coherent && (byteCount == 4 || byteCount == 8) && !immutableAddress(address, byteCount))
-                   atomicModifyValue(
-                     address,
-                     scalarWidth.nn,
-                     allocations,
-                     memory,
-                     kernel.globalMemory,
-                     kernel.globalMemoryLocks
-                   )(identity)
-                 else readValue(
-                   address,
-                   scalarWidth.nn,
-                   kernarg,
-                   dispatchBytes,
-                   kernel.readOnlyAddress,
-                   kernel.readOnly,
-                   kernel.globalMemory,
-                   allocations,
-                   memory
-                 )) match {
+                (if (coherent && (byteCount == 4 || byteCount == 8) && !dispatchMemory.isImmutable(address, byteCount))
+                   dispatchMemory.atomicModifyValue(address, scalarWidth.nn)(identity)
+                 else dispatchMemory.readValue(address, scalarWidth.nn)) match {
                   case Left(error)  => failure = error
                   case Right(value) => writeVectorValue(vector, dest, lane, value, byteCount)
                 }
               else
-                readBytes(
-                  address,
-                  byteCount,
-                  kernarg,
-                  dispatchBytes,
-                  kernel.readOnlyAddress,
-                  kernel.readOnly,
-                  kernel.globalMemory,
-                  allocations,
-                  memory
-                ) match {
+                dispatchMemory.readBytes(address, byteCount) match {
                   case Left(error)  => failure = error
                   case Right(bytes) => writeVectorBytes(vector, dest, lane, bytes)
                 }
@@ -3464,54 +2941,36 @@ private[amdgpu] object VMInterpreter {
           }
           advanceAfter(if (failure == null) Right(()) else Left(failure.nn))
         case Instruction.GlobalLoadSigned(dest, addressRegister, scalarAddress, rawByteCount, offset) =>
-          val byteCount                                = rawByteCount.raw
-          val scalarByteCount                          = IntBetween.unsafe[0, 8](byteCount)
-          val bitWidth                                 = IntBetween.unsafe[1, 64](byteCount * 8)
+          val byteCount       = rawByteCount.raw
+          val scalarByteCount = rawByteCount
+          val bitWidth        = (byteCount * 8).unsafe[Int where Between[1, 64]]
+          @annotation.tailrec
           def loadLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) loadLane(lane + 1)
             else {
               val address = scalarAddress
-                .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)).raw)
+                .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)).toLong)
                 .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-              readBytes(
-                address,
-                byteCount,
-                kernarg,
-                dispatchBytes,
-                kernel.readOnlyAddress,
-                kernel.readOnly,
-                kernel.globalMemory,
-                allocations,
-                memory
-              ) match {
+              dispatchMemory.readBytes(address, byteCount) match {
                 case Left(error)  => Left(error)
                 case Right(bytes) =>
                   val value = Bits.signExtend(LittleEndian.decode(bytes, 0, scalarByteCount), bitWidth)
-                  vector(dest)(lane) = Bits.low32(value).raw
+                  vector(dest)(lane) = Bits.low32(value).toLong
                   loadLane(lane + 1)
               }
             }
           advanceAfter(loadLane(0))
         case Instruction.GlobalLoadD16(dest, addressRegister, scalarAddress, offset, high) =>
+          @annotation.tailrec
           def loadLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) loadLane(lane + 1)
             else {
               val address = scalarAddress
-                .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)).raw)
+                .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)).toLong)
                 .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-              readBytes(
-                address,
-                2,
-                kernarg,
-                dispatchBytes,
-                kernel.readOnlyAddress,
-                kernel.readOnly,
-                kernel.globalMemory,
-                allocations,
-                memory
-              ) match {
+              dispatchMemory.readBytes(address, 2) match {
                 case Left(error)  => Left(error)
                 case Right(bytes) =>
                   val loaded = LittleEndian.decode(bytes, 0, 2)
@@ -3523,32 +2982,24 @@ private[amdgpu] object VMInterpreter {
             }
           advanceAfter(loadLane(0))
         case Instruction.GlobalStore(addressRegister, scalarAddress, src, rawByteCount, offset) =>
-          val byteCount                                 = rawByteCount.raw
+          val byteCount = rawByteCount.raw
+          @annotation.tailrec
           def storeLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) storeLane(lane + 1)
             else {
               val address = scalarAddress
-                .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)).raw)
+                .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)).toLong)
                 .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
               val stored =
                 if (byteCount <= 8)
-                  writeValue(
+                  dispatchMemory.writeValue(
                     address,
                     if (byteCount <= 4) vector(src)(lane) else pair(vector, src, lane),
-                    IntBetween.unsafe[1, 8](byteCount),
-                    allocations,
-                    memory,
-                    kernel.globalMemory
+                    byteCount.unsafe[Int where Between[1, 8]]
                   )
                 else
-                  writeBytes(
-                    address,
-                    vectorBytes(vector, src, lane, byteCount),
-                    allocations,
-                    memory,
-                    kernel.globalMemory
-                  )
+                  dispatchMemory.writeBytes(address, vectorBytes(vector, src, lane, byteCount))
               stored match {
                 case Left(error) => Left(error)
                 case Right(_)    => storeLane(lane + 1)
@@ -3565,9 +3016,16 @@ private[amdgpu] object VMInterpreter {
               returnValue
             ) =>
           val byteCount = rawByteCount.raw
-          advanceAfter(runGlobalAtomic(dest, addressRegister, scalarAddress, byteCount, offset, returnValue) {
+          advanceAfter(runGlobalAtomic(
+            dest,
+            addressRegister,
+            scalarAddress,
+            rawByteCount,
+            offset,
+            returnValue
+          ) {
             (lane, oldValue) =>
-              val operand = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane)).raw
+              val operand = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane)).toLong
               oldValue + operand
           })
         case Instruction.GlobalAtomicSwap(
@@ -3580,9 +3038,16 @@ private[amdgpu] object VMInterpreter {
               returnValue
             ) =>
           val byteCount = rawByteCount.raw
-          advanceAfter(runGlobalAtomic(dest, addressRegister, scalarAddress, byteCount, offset, returnValue) {
+          advanceAfter(runGlobalAtomic(
+            dest,
+            addressRegister,
+            scalarAddress,
+            rawByteCount,
+            offset,
+            returnValue
+          ) {
             (lane, _) =>
-              if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane)).raw
+              if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane)).toLong
           })
         case Instruction.GlobalAtomicBinary(
               operation,
@@ -3595,9 +3060,16 @@ private[amdgpu] object VMInterpreter {
               returnValue
             ) =>
           val byteCount = rawByteCount.raw
-          advanceAfter(runGlobalAtomic(dest, addressRegister, scalarAddress, byteCount, offset, returnValue) {
+          advanceAfter(runGlobalAtomic(
+            dest,
+            addressRegister,
+            scalarAddress,
+            rawByteCount,
+            offset,
+            returnValue
+          ) {
             (lane, oldValue) =>
-              val operand = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane)).raw
+              val operand = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane)).toLong
               operation match {
                 case AtomicBinaryOperation.Add             => oldValue + operand
                 case AtomicBinaryOperation.Subtract        => oldValue - operand
@@ -3626,9 +3098,16 @@ private[amdgpu] object VMInterpreter {
               returnValue
             ) =>
           val byteCount = rawByteCount.raw
-          advanceAfter(runGlobalAtomic(dest, addressRegister, scalarAddress, byteCount, offset, returnValue) {
+          advanceAfter(runGlobalAtomic(
+            dest,
+            addressRegister,
+            scalarAddress,
+            rawByteCount,
+            offset,
+            returnValue
+          ) {
             (lane, oldValue) =>
-              val limit = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane)).raw
+              val limit = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane)).toLong
               if (java.lang.Long.compareUnsigned(oldValue, limit) >= 0) 0L else oldValue + 1L
           })
         case Instruction.GlobalAtomicCompareSwap(
@@ -3642,32 +3121,40 @@ private[amdgpu] object VMInterpreter {
               returnValue
             ) =>
           val byteCount = rawByteCount.raw
-          advanceAfter(runGlobalAtomic(dest, addressRegister, scalarAddress, byteCount, offset, returnValue) {
+          advanceAfter(runGlobalAtomic(
+            dest,
+            addressRegister,
+            scalarAddress,
+            rawByteCount,
+            offset,
+            returnValue
+          ) {
             (lane, oldValue) =>
               val (compare, swap) =
                 if (byteCount == 8) (pair(vector, compareSrc, lane), pair(vector, swapSrc, lane))
-                else (Bits.low32(vector(compareSrc)(lane)).raw, Bits.low32(vector(swapSrc)(lane)).raw)
+                else (Bits.low32(vector(compareSrc)(lane)).toLong, Bits.low32(vector(swapSrc)(lane)).toLong)
               if (oldValue == compare) swap else oldValue
           })
         case Instruction.GlobalStoreD16High(addressRegister, scalarAddress, src, rawByteCount, offset) =>
-          val byteCount                                 = rawByteCount.raw
-          val scalarByteCount                           = IntBetween.unsafe[0, 8](byteCount)
+          val scalarByteCount = rawByteCount
+          @annotation.tailrec
           def storeLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) storeLane(lane + 1)
             else {
               val address = scalarAddress
-                .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)).raw)
+                .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)).toLong)
                 .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
               val bytes = LittleEndian.toArray(vector(src)(lane) >>> 16, scalarByteCount)
-              writeBytes(address, bytes, allocations, memory, kernel.globalMemory) match {
+              dispatchMemory.writeBytes(address, bytes) match {
                 case Left(error) => Left(error)
                 case Right(_)    => storeLane(lane + 1)
               }
             }
           advanceAfter(storeLane(0))
         case Instruction.FlatLoad(dest, addressRegister, rawByteCount, offset, coherent) =>
-          val byteCount                                = rawByteCount.raw
+          val byteCount = rawByteCount.raw
+          @annotation.tailrec
           def loadLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) loadLane(lane + 1)
@@ -3675,20 +3162,14 @@ private[amdgpu] object VMInterpreter {
               val address = pair(vector, addressRegister, lane) + flatOffset(offset)
               val bytes   =
                 if (
-                  coherent && (byteCount == 4 || byteCount == 8) && !immutableAddress(address, byteCount) &&
+                  coherent && (byteCount == 4 || byteCount == 8) && !dispatchMemory.isImmutable(address, byteCount) &&
                   !ByteRange.contains(lds.length, address, byteCount.toLong) &&
                   !ByteRange.contains(scratch(lane).length, address, byteCount.toLong)
-                )
-                  atomicModifyValue(
-                    address,
-                    IntBetween.unsafe[1, 8](byteCount),
-                    allocations,
-                    memory,
-                    kernel.globalMemory,
-                    kernel.globalMemoryLocks
-                  )(identity)
-                    .map(value => LittleEndian.toVec(value, IntBetween.unsafe[0, 8](byteCount)))
-                else flatLoad(lane, address, byteCount)
+                ) {
+                  val scalarWidth = byteCount.unsafe[Int where Between[1, 8]]
+                  dispatchMemory.atomicModifyValue(address, scalarWidth)(identity)
+                    .map(value => LittleEndian.toVec(value, scalarWidth))
+                } else flatLoad(lane, address, byteCount)
               bytes match {
                 case Left(error)  => Left(error)
                 case Right(bytes) =>
@@ -3698,9 +3179,10 @@ private[amdgpu] object VMInterpreter {
             }
           advanceAfter(loadLane(0))
         case Instruction.FlatLoadSigned(dest, addressRegister, rawByteCount, offset) =>
-          val byteCount                                = rawByteCount.raw
-          val scalarByteCount                          = IntBetween.unsafe[0, 8](byteCount)
-          val bitWidth                                 = IntBetween.unsafe[1, 64](byteCount * 8)
+          val byteCount       = rawByteCount.raw
+          val scalarByteCount = rawByteCount
+          val bitWidth        = (byteCount * 8).unsafe[Int where Between[1, 64]]
+          @annotation.tailrec
           def loadLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) loadLane(lane + 1)
@@ -3711,12 +3193,13 @@ private[amdgpu] object VMInterpreter {
                 case Left(error)  => Left(error)
                 case Right(bytes) =>
                   val value = Bits.signExtend(LittleEndian.decode(bytes, 0, scalarByteCount), bitWidth)
-                  vector(dest)(lane) = Bits.low32(value).raw
+                  vector(dest)(lane) = Bits.low32(value).toLong
                   loadLane(lane + 1)
               }
             }
           advanceAfter(loadLane(0))
         case Instruction.VFlatLoadD16(dest, addressRegister, offset, high) =>
+          @annotation.tailrec
           def loadLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) loadLane(lane + 1)
@@ -3735,7 +3218,8 @@ private[amdgpu] object VMInterpreter {
             }
           advanceAfter(loadLane(0))
         case Instruction.FlatStore(addressRegister, src, rawByteCount, offset) =>
-          val byteCount                                 = rawByteCount.raw
+          val byteCount = rawByteCount.raw
+          @annotation.tailrec
           def storeLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) storeLane(lane + 1)
@@ -3749,8 +3233,8 @@ private[amdgpu] object VMInterpreter {
             }
           advanceAfter(storeLane(0))
         case Instruction.FlatStoreD16High(addressRegister, src, rawByteCount, offset) =>
-          val byteCount                                 = rawByteCount.raw
-          val scalarByteCount                           = IntBetween.unsafe[0, 8](byteCount)
+          val scalarByteCount = rawByteCount
+          @annotation.tailrec
           def storeLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) storeLane(lane + 1)
@@ -3764,32 +3248,23 @@ private[amdgpu] object VMInterpreter {
           advanceAfter(storeLane(0))
         case Instruction.BufferCacheInvalidate =>
           // A following ordinary load must not reuse bytes cached before acquire.
-          memory.invalidateHostReads()
+          dispatchMemory.invalidateHostReads()
           AdvanceStep
         case Instruction.BufferLoad(dest, address, resource, scalarOffset, rawByteCount, offset) =>
-          val byteCount                                = rawByteCount.raw
+          val byteCount = rawByteCount.raw
+          @annotation.tailrec
           def loadLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) loadLane(lane + 1)
             else {
               val base  = sourceScalar64(InstructionSource.Scalar(resource)) & 0x0000ffffffffffffL
               val start = bufferOffset(lane, address, scalarOffset, offset, base == 0L)
-              val range = Bits.low32(scalar(resource + 2)).raw
+              val range = Bits.low32(scalar(resource + 2)).toLong
               if (base != 0L && (start < 0L || start > range - byteCount.toLong)) {
                 writeVectorBytes(vector, dest, lane, Array.fill(byteCount)(0.toByte))
                 loadLane(lane + 1)
               } else if (base != 0L)
-                readBytes(
-                  base + start,
-                  byteCount,
-                  kernarg,
-                  dispatchBytes,
-                  kernel.readOnlyAddress,
-                  kernel.readOnly,
-                  kernel.globalMemory,
-                  allocations,
-                  memory
-                ) match {
+                dispatchMemory.readBytes(base + start, byteCount) match {
                   case Left(error)  => Left(error)
                   case Right(bytes) =>
                     writeVectorBytes(vector, dest, lane, bytes)
@@ -3807,35 +3282,26 @@ private[amdgpu] object VMInterpreter {
             }
           advanceAfter(loadLane(0))
         case Instruction.BufferLoadD16(dest, address, resource, scalarOffset, rawByteCount, offset, high) =>
-          val byteCount                                = rawByteCount.raw
-          val scalarByteCount                          = IntBetween.unsafe[0, 8](byteCount)
+          val byteCount       = rawByteCount.raw
+          val scalarByteCount = rawByteCount
+          @annotation.tailrec
           def loadLane(lane: Int): Either[Fault, Unit] =
             if (lane == lanes.raw) Right(())
             else if (!active(lane)) loadLane(lane + 1)
             else {
               val base   = sourceScalar64(InstructionSource.Scalar(resource)) & 0x0000ffffffffffffL
               val start  = bufferOffset(lane, address, scalarOffset, offset, base == 0L)
-              val range  = Bits.low32(scalar(resource + 2)).raw
+              val range  = Bits.low32(scalar(resource + 2)).toLong
               val loaded =
                 if (base != 0L && (start < 0L || start > range - byteCount.toLong))
                   Right(Vec.fill(byteCount)(0.toByte))
                 else if (base != 0L)
-                  readBytes(
-                    base + start,
-                    byteCount,
-                    kernarg,
-                    dispatchBytes,
-                    kernel.readOnlyAddress,
-                    kernel.readOnly,
-                    kernel.globalMemory,
-                    allocations,
-                    memory
-                  )
+                  dispatchMemory.readBytes(base + start, byteCount)
                 else if (start < 0L || start > scratch(lane).length.toLong - byteCount.toLong)
                   Left(Fault.Backend(
                     s"buffer D16 load ${operations(index)} at instruction $index lane $lane offset $start size $byteCount exceeds private scratch ${scratch(lane).length}"
                   ))
-                else Right(Vec.unsafeFromArray(java.util.Arrays.copyOfRange(
+                else Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(
                   scratch(lane),
                   start.toInt,
                   start.toInt + byteCount
@@ -3843,7 +3309,7 @@ private[amdgpu] object VMInterpreter {
               loaded match {
                 case Left(error)  => Left(error)
                 case Right(bytes) =>
-                  val value = Bits.low16(LittleEndian.decode(bytes, 0, scalarByteCount)).raw
+                  val value = Bits.low16(LittleEndian.decode(bytes, 0, scalarByteCount)).toLong
                   vector(dest)(lane) = mergeD16(vector(dest)(lane), value, high)
                   loadLane(lane + 1)
               }
@@ -3862,62 +3328,21 @@ private[amdgpu] object VMInterpreter {
             src,
             byteCount,
             offset,
-            Some(IntBetween.unsafe[0, 8](byteCount))
+            Some(rawByteCount)
           )
         case other => Left(Fault.Unsupported(s"unhandled AMDGPU instruction $other"))
       }
     }
 
-    def step(index: Int): Either[Fault, Option[Int]] = stepInstruction(index)
-
     var instructionIndex       = if (initial == null) entryInstruction else initial.nextInstruction
     var running                = true
     var reachedBarrier         = false
     var failure: Option[Fault] = None
-    var pendingInstructionCost = 0L
-
-    def checkpoint(cost: Int): Fault | Null = {
-      def flush(): Fault | Null =
-        if (pendingInstructionCost == 0L) null
-        else
-          control.checkpoint(
-            Positive.unsafe(math.min(pendingInstructionCost, Int.MaxValue.toLong).toInt)
-          ) match {
-            case Left(fault) => fault
-            case Right(())   =>
-              pendingInstructionCost = math.max(0L, pendingInstructionCost - Int.MaxValue.toLong)
-              if (pendingInstructionCost == 0L) null else flush()
-          }
-
-      // Deferred charges cannot share unreserved credits between concurrent waves.
-      if (scheduler.parallelism > 1) {
-        if (cost == 0) null
-        else control.checkpoint(Positive.unsafe(cost)) match {
-          case Left(fault) => fault
-          case Right(())   => null
-        }
-      } else if (cost == 0) flush()
-      else if (pendingInstructionCost == 0L && control.cancellation.isCancelled)
-        Fault.Cancelled
-      else if (pendingInstructionCost.toLong + cost.toLong > control.remainingInstructions.raw) {
-        val flushFailure = flush()
-        if (flushFailure != null) flushFailure
-        else
-          control.checkpoint(Positive.unsafe(cost)) match {
-            case Left(fault) => fault
-            case Right(())   => null
-          }
-      } else {
-        pendingInstructionCost += cost
-        if (pendingInstructionCost >= control.limits.quantum.raw) flush() else null
-      }
-    }
-
     while (running && failure.isEmpty)
-      checkpoint(math.max(1, active.count)) match {
-        case fault: Fault => failure = Some(fault)
-        case null         =>
-          val stepResult = step(instructionIndex)
+      control.checkpoint(math.max(1, active.count).unsafe[Int > 0]) match {
+        case Left(fault) => failure = Some(fault)
+        case Right(())   =>
+          val stepResult = stepInstruction(instructionIndex)
           stepResult match {
             case Left(error)     => failure = Some(error)
             case Right(None)     => running = false
@@ -3929,10 +3354,6 @@ private[amdgpu] object VMInterpreter {
             case Right(Some(index))         => instructionIndex = index
           }
       }
-    if (failure.isEmpty) checkpoint(0) match {
-      case fault: Fault => failure = Some(fault)
-      case null         => ()
-    }
     failure match {
       case Some(error)            => Left(error)
       case None if reachedBarrier =>
@@ -3942,254 +3363,6 @@ private[amdgpu] object VMInterpreter {
       case None =>
         Right(WaveBoundary.End)
     }
-  }
-
-  // These memory-instruction helpers consume the allocation-free null sentinel returned by boundGlobal.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:GemstoneNoAssume"))
-  private def readBytes(
-      address: Long,
-      size: Int,
-      kernarg: Array[Byte],
-      dispatch: Array[Byte],
-      readOnlyAddress: Long,
-      readOnly: Array[Byte],
-      globalMemory: Array[(Long, Array[Byte])],
-      allocations: Array[GlobalBinding],
-      memory: Memory
-  ): Either[Fault, Vec[Byte]] = {
-    val binding = aliasedRegion(address, allocations)
-    if (binding != null)
-      memory.read(
-        binding.allocation,
-        NonNegative.unsafe(binding.offset.raw + address - binding.address),
-        NonNegative.unsafe(size)
-      )
-    else localRead(address, size, KernargAddress, kernarg)
-      .orElse(localRead(address, size, DispatchAddress, dispatch))
-      .orElse(localRead(address, size, readOnlyAddress, readOnly))
-      .orElse(globalRead(address, size, globalMemory)) match {
-      case Some(bytes) => Right(Vec.unsafeFromArray(bytes))
-      case None        =>
-        memory match {
-          case context: MemoryContext =>
-            context.read(GuestAddress(address), NonNegative.unsafe(size)).leftMap { error =>
-              Fault.Memory(s"AMDGPU memory read address=0x${address.toHexString} size=$size: ${error.message}")
-            }
-          case _ =>
-            Left(Fault.Backend("AMDGPU memory context has no address space"))
-        }
-    }
-
-  }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:GemstoneNoAssume"))
-  private def readValue(
-      address: Long,
-      size: IntBetween[1, 8],
-      kernarg: Array[Byte],
-      dispatch: Array[Byte],
-      readOnlyAddress: Long,
-      readOnly: Array[Byte],
-      globalMemory: Array[(Long, Array[Byte])],
-      allocations: Array[GlobalBinding],
-      memory: Memory
-  ): Either[Fault, Long] = {
-    val scalarSize = size.scalarByteWidth
-    val binding    = aliasedRegion(address, allocations)
-    if (binding != null)
-      memory.readValue(
-        binding.allocation,
-        NonNegative.unsafe(binding.offset.raw + address - binding.address),
-        size
-      )
-    else {
-      val kernargOffset = address - KernargAddress
-      if (ByteRange.contains(kernarg.length, kernargOffset, size.raw.toLong))
-        Right(LittleEndian.decode(kernarg, kernargOffset.toInt, scalarSize))
-      else {
-        val dispatchOffset = address - DispatchAddress
-        if (ByteRange.contains(dispatch.length, dispatchOffset, size.raw.toLong))
-          Right(LittleEndian.decode(dispatch, dispatchOffset.toInt, scalarSize))
-        else {
-          val readOnlyOffset = address - readOnlyAddress
-          if (ByteRange.contains(readOnly.length, readOnlyOffset, size.raw.toLong))
-            Right(LittleEndian.decode(readOnly, readOnlyOffset.toInt, scalarSize))
-          else {
-            val globalIndex = globalRegionIndex(address, size.raw, globalMemory)
-            if (globalIndex >= 0) {
-              val (base, bytes) = globalMemory(globalIndex)
-              Right(LittleEndian.decode(bytes, (address - base).toInt, scalarSize))
-            } else memory match {
-              case context: MemoryContext =>
-                context.readValue(GuestAddress(address), size).leftMap(error =>
-                  Fault.Memory(s"AMDGPU memory read address=0x${address.toHexString} size=$size: ${error.message}")
-                )
-              case _ =>
-                Left(Fault.Backend("AMDGPU memory context has no address space"))
-            }
-          }
-        }
-      }
-    }
-  }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:GemstoneNoAssume"))
-  private def writeBytes(
-      address: Long,
-      bytes: Array[Byte],
-      allocations: Array[GlobalBinding],
-      memory: Memory,
-      globalMemory: Array[(Long, Array[Byte])]
-  ): Either[Fault, Unit] = {
-    val binding = aliasedRegion(address, allocations)
-    if (binding != null)
-      memory.write(
-        binding.allocation,
-        NonNegative.unsafe(binding.offset.raw + address - binding.address),
-        Vec.unsafeFromArray(bytes)
-      )
-    else globalWrite(address, bytes, globalMemory) match {
-      case Some(_) => Right(())
-      case None    =>
-        memory match {
-          case context: MemoryContext =>
-            context.write(GuestAddress(address), Vec.unsafeFromArray(bytes)).leftMap { error =>
-              Fault.Memory(
-                s"AMDGPU memory write address=0x${address.toHexString} size=${bytes.length}: ${error.message}"
-              )
-            }
-          case _ =>
-            Left(Fault.Backend("AMDGPU memory context has no address space"))
-        }
-    }
-
-  }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:GemstoneNoAssume"))
-  private def writeValue(
-      address: Long,
-      value: Long,
-      size: IntBetween[1, 8],
-      allocations: Array[GlobalBinding],
-      memory: Memory,
-      globalMemory: Array[(Long, Array[Byte])]
-  ): Either[Fault, Unit] = {
-    val scalarSize = size.scalarByteWidth
-    val binding    = aliasedRegion(address, allocations)
-    if (binding != null)
-      memory.writeValue(
-        binding.allocation,
-        NonNegative.unsafe(binding.offset.raw + address - binding.address),
-        value,
-        size
-      )
-    else {
-      val globalIndex = globalRegionIndex(address, size.raw, globalMemory)
-      if (globalIndex >= 0) {
-        val (base, bytes) = globalMemory(globalIndex)
-        LittleEndian.write(value, bytes, (address - base).toInt, scalarSize)
-        Right(())
-      } else memory match {
-        case context: MemoryContext =>
-          context.writeValue(GuestAddress(address), value, size).leftMap(error =>
-            Fault.Memory(s"AMDGPU memory write address=0x${address.toHexString} size=$size: ${error.message}")
-          )
-        case _ =>
-          Left(Fault.Backend("AMDGPU memory context has no address space"))
-      }
-    }
-  }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:GemstoneNoAssume"))
-  private def atomicModifyValue(
-      address: Long,
-      size: IntBetween[1, 8],
-      allocations: Array[GlobalBinding],
-      memory: Memory,
-      globalMemory: Array[(Long, Array[Byte])],
-      globalMemoryLocks: Array[ReentrantLock]
-  )(update: Long => Long): Either[Fault, Long] = {
-    val scalarSize = size.scalarByteWidth
-    val binding    = aliasedRegion(address, allocations)
-    if (binding != null)
-      memory.atomicModifyValue(
-        binding.allocation,
-        NonNegative.unsafe(binding.offset.raw + address - binding.address),
-        size
-      )(update)
-    else {
-      val globalIndex = globalRegionIndex(address, size.raw, globalMemory)
-      if (globalIndex >= 0) {
-        val (base, bytes) = globalMemory(globalIndex)
-        globalMemoryLocks(globalIndex).withLock {
-          val offset   = (address - base).toInt
-          val previous = LittleEndian.decode(bytes, offset, scalarSize)
-          LittleEndian.write(update(previous), bytes, offset, scalarSize)
-          Right(previous)
-        }
-      } else memory match {
-        case context: MemoryContext =>
-          context.atomicModifyValue(GuestAddress(address), size)(update).left.map { error =>
-            Fault.Memory(s"AMDGPU atomic address=0x${address.toHexString} size=$size: ${error.message}")
-          }
-        case _ =>
-          Left(Fault.Backend("AMDGPU memory context has no address space"))
-      }
-    }
-  }
-
-  private def globalRead(address: Long, size: Int, regions: Array[(Long, Array[Byte])]): Option[Array[Byte]] = {
-    val index = globalRegionIndex(address, size, regions)
-    if (index < 0) None
-    else {
-      val (base, bytes) = regions(index)
-      val offset        = address - base
-      Some(java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size))
-    }
-  }
-
-  private def globalWrite(address: Long, value: Array[Byte], regions: Array[(Long, Array[Byte])]): Option[Unit] = {
-    val index = globalRegionIndex(address, value.length, regions)
-    if (index < 0) None
-    else {
-      val (base, bytes) = regions(index)
-      val offset        = address - base
-      Array.copy(value, 0, bytes, offset.toInt, value.length)
-      Some(())
-    }
-  }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def globalRegionIndex(address: Long, size: Int, regions: Array[(Long, Array[Byte])]): Int = {
-    var index = 0
-    var found = -1
-    while (index < regions.length && found < 0) {
-      val (base, bytes) = regions(index)
-      val offset        = address - base
-      if (address >= base && offset <= bytes.length.toLong - size.toLong) found = index
-      index += 1
-    }
-    found
-  }
-
-  // Null is the allocation-free miss sentinel in this memory-instruction hot path.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
-  private def aliasedRegion(address: Long, allocations: Array[GlobalBinding]): GlobalBinding | Null = {
-    var index                        = 0
-    var result: GlobalBinding | Null = null
-    while (index < allocations.length && result == null) {
-      val region = allocations(index)
-      if (address >= region.address && address - region.address < region.size.raw) result = region
-      index += 1
-    }
-    result
-  }
-
-  private def localRead(address: Long, size: Int, base: Long, bytes: Array[Byte]): Option[Array[Byte]] = {
-    val offset = address - base
-    Option.when(ByteRange.contains(bytes.length, offset, size.toLong))(
-      java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size)
-    )
   }
 
   private def unsignedInt(bytes: Vec[Byte], offset: Int): Long =
@@ -4202,55 +3375,14 @@ private[amdgpu] object VMInterpreter {
     Bits.join32(registers(first)(lane), registers(first + 1)(lane))
 
   private def setPair(registers: Array[Long], first: Int, value: Long): Unit = {
-    registers(first) = Bits.low32(value).raw
-    registers(first + 1) = Bits.high32(value).raw
+    registers(first) = Bits.low32(value).toLong
+    registers(first + 1) = Bits.high32(value).toLong
   }
 
-  private def selectSubDword(value: Long, selection: SubDwordSelection, signExtend: Boolean): Long = {
-    val mask     = Bits.mask(selection.width)
-    val selected = (value >>> selection.shift.raw) & mask
-    if (signExtend) Bits.signExtend(selected, selection.width) else selected
-  }
-
-  private def placeSubDword(
-      existing: Long,
-      value: Long,
-      selection: SubDwordSelection,
-      unused: SubDwordDestinationUnused
-  ): Long = {
-    val mask     = Bits.mask(selection.width) << selection.shift.raw
-    val selected = (value << selection.shift.raw) & mask
-    unused match {
-      case SubDwordDestinationUnused.Pad        => Bits.low32(selected).raw
-      case SubDwordDestinationUnused.Preserve   => Bits.low32((existing & ~mask) | selected).raw
-      case SubDwordDestinationUnused.SignExtend =>
-        val endMask =
-          if (selection.upperBit.raw == 32) Bits.Mask32
-          else Bits.mask(selection.upperBit)
-        val upper =
-          if ((selected & (1L << (selection.upperBit.raw - 1))) != 0L) Bits.Mask32 & ~endMask
-          else 0L
-        Bits.low32(selected | upper).raw
-    }
-  }
-
-  private[amdgpu] def permuteBytes(srcA: Long, srcB: Long, selectors: Long): Long = {
-    val sources = Bits.join32(srcB, srcA)
-    (0 until 4).foldLeft(0L) { (result, byte) =>
-      // V_PERM uses the full four-bit selector.  Values 0..7 address the
-      // concatenated second/first sources; selectors 8..15 produce zero
-      // (in particular, 0xc is the canonical zero selector used by LLVM).
-      val selector = ((selectors >>> (byte * 8)) & 0xfL).toInt
-      if (selector < 8)
-        result | (((sources >>> (selector * 8)) & 0xffL) << (byte * 8))
-      else result
-    }
-  }
-
-  private[amdgpu] def effectiveGroupSegmentSize(fixed: Int, dynamic: Int): Int =
+  def effectiveGroupSegmentSize(fixed: Int, dynamic: Int): Int =
     Math.addExact(fixed, dynamic)
 
-  private[amdgpu] def ldsOffset(address: Long): Long = address & 0xffffL
+  def ldsOffset(address: Long): Long = address & 0xffffL
 
   // A negative offset is impossible for a valid LDS byte range.  Returning a
   // primitive sentinel keeps the per-lane DS read path allocation-free; the
@@ -4300,7 +3432,7 @@ private[amdgpu] object VMInterpreter {
     }
 
   /** Consume the owned memory snapshot directly; copying it into another array adds no isolation. */
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:GemstoneNoAssume"))
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def writeVectorBytes(
       registers: VectorRegisters,
       first: Int,
@@ -4315,7 +3447,7 @@ private[amdgpu] object VMInterpreter {
       registers(register)(lane) = LittleEndian.decode(
         bytes,
         offset,
-        IntBetween.unsafe[0, 8](width)
+        width.unsafe[Int where Between[0, 8]]
       )
       offset += width
       register += 1
@@ -4371,8 +3503,8 @@ private[amdgpu] object VMInterpreter {
       value: Long,
       size: Int
   ): Unit = {
-    registers(first)(lane) = Bits.low32(value).raw
-    if (size > 4) registers(first + 1)(lane) = Bits.high32(value).raw
+    registers(first)(lane) = Bits.low32(value).toLong
+    if (size > 4) registers(first + 1)(lane) = Bits.high32(value).toLong
   }
 
   private def source64(

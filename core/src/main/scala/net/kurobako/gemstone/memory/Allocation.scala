@@ -1,10 +1,9 @@
 package net.kurobako.gemstone.memory
 
-import net.kurobako.gemstone.Constraint.NonNegative
-import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.constraint.*
 
 case class Allocation(
     start: GuestAddress,
-    size: NonNegative[Int],
-    provenance: NonEmptyString
+    size: Int >= 0,
+    provenance: NonEmpty[String]
 )

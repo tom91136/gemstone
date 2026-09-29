@@ -1,24 +1,17 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import CodeObject.*
+import ELF.*
 import VMIR.*
-
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.{Bits, ByteRange}
-import net.kurobako.gemstone.binary.IEEE754
-import net.kurobako.gemstone.binary.LittleEndian
+import fixtures.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.charset.StandardCharsets
-import java.util.concurrent.Executors
+class AMDGPUDecodeSuite extends munit.FunSuite {
+  // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
-final class AMDGPUDecodeSuite extends munit.FunSuite with CodeObjectTestSupport {
   test("gfx900 conditional scalar move retains the destination when SCC is clear") {
     assertEquals(
       VMCompiler.decodeInstruction(
@@ -56,10 +49,19 @@ final class AMDGPUDecodeSuite extends munit.FunSuite with CodeObjectTestSupport 
     // LLVM encoding of s_waitcnt_lgkmcnt null, 0, used by Tensile's gfx1030 GEMM.
     val wait = Vec[Byte](0x00, 0x00, 0x7d, 0xbd.toByte)
     assertEquals(VMCompiler.decodeInstruction(wait, Target("gfx1030")), Right(Instruction.Wait))
-    val code     = wait ++ Vec[Byte](0x00, 0x00, 0x81.toByte, 0xbf.toByte)
-    val kernel   = CodeObjectKernel("wait", Target("gfx1030"), 0, 0, 0, 0, 0, code)
+    val code   = wait ++ Vec[Byte](0x00, 0x00, 0x81.toByte, 0xbf.toByte)
+    val kernel = CodeObjectKernel(
+      name = "wait",
+      target = Target("gfx1030"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
+      computePgmRsrc2 = 0,
+      kernelCodeProperties = 0,
+      code = code
+    )
     val dispatch = KernelTask.validated(
-      NonEmptyString("wait"),
+      "wait",
       Dimensions.One,
       Dimensions.One,
       Vec.empty
@@ -130,7 +132,7 @@ final class AMDGPUDecodeSuite extends munit.FunSuite with CodeObjectTestSupport 
           1,
           None,
           2,
-          AtomicByteCount(4),
+          4: Int where Between[4, 8],
           0,
           returnValue = false
         )
@@ -147,7 +149,7 @@ final class AMDGPUDecodeSuite extends munit.FunSuite with CodeObjectTestSupport 
           2,
           None,
           3,
-          AtomicByteCount(4),
+          4: Int where Between[4, 8],
           0,
           returnValue = true
         )
@@ -171,14 +173,14 @@ final class AMDGPUDecodeSuite extends munit.FunSuite with CodeObjectTestSupport 
         Vec[Byte](0x02, 0x02, 0x08, 0xf4.toByte, 0x10, 0x00, 0x00, 0xfa.toByte),
         Target("gfx1036")
       ),
-      Right(Instruction.SLoad(8, 4, 4, 16, None))
+      Right(Instruction.SLoad(dest = 8, count = 4, base = 4, offset = 16, scalarOffset = None))
     )
     assertEquals(
       VMCompiler.decodeInstruction(
         Vec[Byte](0x02, 0x00, 0x04, 0xf4.toByte, 0x00, 0x00, 0x00, 0xfa.toByte),
         Target("gfx1036")
       ),
-      Right(Instruction.SLoad(0, 2, 4, 0, None))
+      Right(Instruction.SLoad(dest = 0, count = 2, base = 4, offset = 0, scalarOffset = None))
     )
   }
 
@@ -188,7 +190,7 @@ final class AMDGPUDecodeSuite extends munit.FunSuite with CodeObjectTestSupport 
         Vec[Byte](0x00, 0x80.toByte, 0x78, 0xdc.toByte, 0x17, 0x0d, 0x7d, 0x00),
         Target("gfx1036")
       ),
-      Right(Instruction.GlobalStore(23, None, 13, TransferByteCount(16), 0))
+      Right(Instruction.GlobalStore(23, None, 13, 16: Int where Between[1, 16], 0))
     )
   }
 
@@ -198,7 +200,7 @@ final class AMDGPUDecodeSuite extends munit.FunSuite with CodeObjectTestSupport 
         Vec[Byte](0x00, 0x80.toByte, 0x70, 0xdc.toByte, 0x40, 0x09, 0x7d, 0x00),
         Target("gfx1036")
       ),
-      Right(Instruction.GlobalStore(64, None, 9, TransferByteCount(4), 0))
+      Right(Instruction.GlobalStore(64, None, 9, 4: Int where Between[1, 16], 0))
     )
   }
 

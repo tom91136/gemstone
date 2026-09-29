@@ -1,17 +1,14 @@
 // Generated from pinned Khronos grammar and SPIRV-Tools tests. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.collection.*
 
+// Reference inventory: binary_parse_test.cpp (24 upstream test declarations; not a coverage claim).
+// Reference inventory: binary_endianness_test.cpp (3 upstream test declarations; not a coverage claim).
+// Reference inventory: val/val_opencl_test.cpp (17 upstream test declarations; not a coverage claim).
 @javax.annotation.processing.Generated(Array("sbt codegen"))
-final class ReferenceSuite extends munit.FunSuite {
-  private val upstreamTestCounts: Map[String, Int] = Map(
-    "binary_parse_test.cpp" -> 24,
-    "binary_endianness_test.cpp" -> 3,
-    "val/val_opencl_test.cpp" -> 17
-  )
-
+class ReferenceSuite extends munit.FunSuite {
   private def same(left: RawInstruction, right: RawInstruction): Boolean =
     left.opcodeNumber == right.opcodeNumber && left.operandWords.sameElements(right.operandWords)
 
@@ -42,15 +39,15 @@ final class ReferenceSuite extends munit.FunSuite {
     }
   }
 
-  test("SPIRV-Tools endian oracle is represented") {
-    assert(upstreamTestCounts("binary_endianness_test.cpp") > 0)
+  test("big-endian headers match fixed wire bytes") {
     val module = RawModule(Header(ISA.version, Word(7), Word(2), Word(0)), Vec.empty, Endianness.Big)
     val bytes = Binary.encode(module).fold(error => fail(error.message), value => value)
-    assert(Binary.decode(bytes).exists(same(_, module)))
+    val expected = Vec[Byte](7, 35, 2, 3, 0, 1, 6, 0, 0, 0, 0, 7, 0, 0, 0, 2, 0, 0, 0, 0)
+    assertEquals(bytes, expected)
+    assert(Binary.decode(expected).exists(same(_, module)))
   }
 
-  test("SPIRV-Tools parser negative classes are fail-closed") {
-    assert(upstreamTestCounts("binary_parse_test.cpp") >= 20)
+  test("malformed binary headers and instruction lengths are rejected") {
     val malformed = Vec(
       Vec[Byte](1, 2, 3),
       words(0x07230203, 0x00010600, 0, 1),
@@ -73,23 +70,19 @@ final class ReferenceSuite extends munit.FunSuite {
   test("known opcodes with malformed grammar operands fail typed decode") {
     Instruction.decode(RawInstruction(SPIRVOpcodeNumber(17), Vec.empty)) match {
       case Left(InstructionDecodeError.InvalidOperandCount(opcode, _))
-          if opcode == NonEmptyString("OpCapability") => ()
+          if opcode == "OpCapability" => ()
       case other => fail(s"expected missing-operand failure, found $other")
     }
     Instruction.decode(RawInstruction(SPIRVOpcodeNumber(17), Vec(Word(-1)))) match {
       case Left(InstructionDecodeError.InvalidEnumerant(kind, 0xffffffffL))
-          if kind == NonEmptyString("Capability") => ()
+          if kind == "Capability" => ()
       case other => fail(s"expected invalid-enumerant failure, found $other")
     }
     Instruction.decode(RawInstruction(SPIRVOpcodeNumber(5), Vec(Word(1), Word(-1)))) match {
       case Left(InstructionDecodeError.UnterminatedString(opcode))
-          if opcode == NonEmptyString("OpName") => ()
+          if opcode == "OpName" => ()
       case other => fail(s"expected unterminated-string failure, found $other")
     }
-  }
-
-  test("SPIRV-Tools OpenCL validation corpus is tracked") {
-    assert(upstreamTestCounts("val/val_opencl_test.cpp") >= 10)
   }
 
   private def words(values: Int*): Vec[Byte] = Vec.from(values).flatMap { value =>

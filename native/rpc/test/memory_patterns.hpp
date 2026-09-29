@@ -4,6 +4,7 @@
 #include <gemstone/environment.hpp>
 
 #include "memory_test.hpp"
+#include <environment_keys.hpp>
 
 namespace memory_patterns {
 // GEMSTONE_MEMORY_PROBE is a comma-separated list of test probe names; "all" selects every probe.

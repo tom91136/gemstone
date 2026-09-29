@@ -271,7 +271,6 @@ static DeviceSelection discover_physical_device() {
     size_t flat_device_index;
     cl_device_type type;
     std::string type_name;
-    std::string description;
   };
   std::vector<Candidate> candidates;
   std::vector<std::string> descriptions;
@@ -326,9 +325,9 @@ static DeviceSelection discover_physical_device() {
                          + info(platforms[platform_index], CL_PLATFORM_NAME, clGetPlatformInfo) + ':'
                          + info(all_devices[device_index], CL_DEVICE_VENDOR, clGetDeviceInfo) + ':'
                          + info(all_devices[device_index], CL_DEVICE_NAME, clGetDeviceInfo);
-      descriptions.push_back(description);
-      candidates.push_back({all_devices[device_index], platform_index, type_index, flat_device_offset + device_index, type,
-                            std::move(type_name), std::move(description)});
+      descriptions.push_back(std::move(description));
+      candidates.push_back(
+          {all_devices[device_index], platform_index, type_index, flat_device_offset + device_index, type, std::move(type_name)});
     }
     flat_device_offset += all_devices.size();
   }
@@ -363,7 +362,7 @@ static DeviceSelection discover_physical_device() {
   if (clGetDeviceInfo(candidate.device, CL_DEVICE_UUID_KHR, sizeof(uuid), uuid, nullptr) == CL_SUCCESS
       && std::ranges::any_of(uuid, [](uint8_t byte) { return byte != 0; }))
     return selection(make_uuid_device(uuid));
-  return selection(make_registry_device(fmt::format("{}:{}:{}", candidate.description, candidate.platform_index, candidate.device_index)));
+  return selection(PhysicalDevice{PhysicalDeviceScheme::unknown, {}});
 #elif defined(CONFORMANCE_DEVICE_LEVELZERO)
   if (zeInit(0) != ZE_RESULT_SUCCESS) throw std::runtime_error("cannot initialize Level Zero");
   uint32_t driver_count = 0;

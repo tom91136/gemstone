@@ -1,45 +1,42 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.NonNegative
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.NonEmptyVec
-
-import Program.*
-
 import VMIR.*
-
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.vm.LaunchGeometry
-import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
-
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 
-final class CoherentVectorSuite extends munit.FunSuite {
+class CoherentVectorSuite extends munit.FunSuite {
   private val geometry = LaunchGeometry.forLaunch(Dimensions.One, Dimensions.One).toOption.get
   private val packed   = (668L << 32) | 101L
 
   // Interleaving controls and observations are confined to this final test fixture.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private final class InterleavingMemory extends AddressMemory {
-    val backing                                   = ArrayCheckedMemory.allocate(32, GuestAddress(0x10000000000L))
-    val base                                      = backing.allocation.start
-    val observed                                  = mutable.ArrayBuffer.empty[Long]
-    var changeAfterRead                           = false
-    override def readInt8(address: GuestAddress)  = backing.readInt8(address)
-    override def readInt32(address: GuestAddress) = backing.readInt32(address)
-    override def writeInt8(address: GuestAddress, value: Byte)                   = backing.writeInt8(address, value)
-    override def writeInt32(address: GuestAddress, value: Int)                   = backing.writeInt32(address, value)
-    override def readLittleEndian(address: GuestAddress, size: IntBetween[1, 8]) = {
+  private class InterleavingMemory extends AddressMemory {
+    val backing: ArrayCheckedMemory = ArrayCheckedMemory.allocate(32, GuestAddress(0x10000000000L))
+    val base                        = backing.allocation.start
+    val observed: ArrayBuffer[Long] = mutable.ArrayBuffer.empty[Long]
+    var changeAfterRead             = false
+    override def readInt8(address: GuestAddress): Either[MemoryError, Byte]               = backing.readInt8(address)
+    override def readInt32(address: GuestAddress): Either[MemoryError, Int]               = backing.readInt32(address)
+    override def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit] =
+      backing.writeInt8(address, value)
+    override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
+      backing.writeInt32(address, value)
+    override def readLittleEndian(address: GuestAddress, size: Int where Between[1, 8]): Either[MemoryError, Long] = {
       val result = backing.readLittleEndian(address, size)
       if (changeAfterRead && address == base) {
         backing.writeLittleEndian(base, (1234L << 32) | 100L, 8).toOption.get
       }
       result
     }
-    override def writeLittleEndian(address: GuestAddress, value: Long, size: IntBetween[1, 8]) = {
+    override def writeLittleEndian(
+        address: GuestAddress,
+        value: Long,
+        size: Int where Between[1, 8]
+    ): Either[MemoryError, Unit] = {
       val result = backing.writeLittleEndian(address, value, size)
       observed += backing.readLittleEndian(base, 8).toOption.get
       result
@@ -63,7 +60,7 @@ final class CoherentVectorSuite extends munit.FunSuite {
     assert(VMInterpreter.execute(
       kernel,
       geometry,
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.base.raw)),
+      Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.base.raw)),
       memory
     ).isRight)
     assert(memory.observed.nonEmpty)
@@ -89,7 +86,7 @@ final class CoherentVectorSuite extends munit.FunSuite {
     assert(VMInterpreter.execute(
       kernel,
       geometry,
-      Map(NonEmptyString("input") -> Argument.fromLong(memory.base.raw)),
+      Map(("input": NonEmpty[String]) -> Argument.fromLong(memory.base.raw)),
       memory
     ).isRight)
     assertEquals(memory.backing.readLittleEndian(memory.base.offset(8), 8), Right(packed))

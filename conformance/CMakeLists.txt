@@ -10,9 +10,6 @@ include(cmake/Dependencies.cmake)
 include(cmake/SystemIncludes.cmake)
 include(cmake/TestTimeouts.cmake)
 
-if(NOT DEFINED CONFORMANCE_DEPENDENCY_CACHE AND DEFINED ENV{CONFORMANCE_DEPENDENCY_CACHE})
-  set(CONFORMANCE_DEPENDENCY_CACHE "$ENV{CONFORMANCE_DEPENDENCY_CACHE}")
-endif()
 set(CONFORMANCE_DEPENDENCY_CACHE "${CONFORMANCE_DEPENDENCY_CACHE}" CACHE PATH
     "Shared source cache for conformance dependencies")
 option(CONFORMANCE_OFFLINE "Use only cached dependencies; forbid network fetches" OFF)
@@ -168,8 +165,9 @@ if(NOT CONFORMANCE_BACKEND OR BUILD_TESTING)
   target_compile_features(conformance_driver PUBLIC cxx_std_23)
   target_include_directories(conformance_driver PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" PRIVATE src)
   target_link_libraries(conformance_driver PUBLIC glaze::glaze magic_enum::magic_enum Aspartame::Aspartame fmt::fmt-header-only)
-  target_compile_definitions(conformance_driver PRIVATE
-    CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS="${CONFORMANCE_TIMEOUT_OPENCL_ISOLATED}")
+  target_compile_definitions(conformance_driver PUBLIC
+    CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS="${CONFORMANCE_TIMEOUT_OPENCL_ISOLATED}"
+    CONFORMANCE_SYCL_HANDLER_TIMEOUT_SECONDS=${CONFORMANCE_TIMEOUT_SYCL_HANDLER_ISOLATED})
   add_executable(conformance src/main.cpp)
   target_include_directories(conformance SYSTEM PRIVATE "${fire_SOURCE_DIR}")
   target_include_directories(conformance PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")

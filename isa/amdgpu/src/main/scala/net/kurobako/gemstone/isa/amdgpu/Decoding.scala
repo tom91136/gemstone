@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.collection.*
 
 /** Fixed encoding values shared by the AMDGPU decoders and interpreter. */
-private[amdgpu] object Decoding {
+private object Decoding {
   // SGPR indices the ISA aliases to architectural state.
   final val VccLo    = 106
   final val VccHi    = 107

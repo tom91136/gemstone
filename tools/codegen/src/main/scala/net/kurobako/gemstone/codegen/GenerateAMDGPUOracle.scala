@@ -1,66 +1,52 @@
 package net.kurobako.gemstone.codegen
 
-import scala.compiletime.{constValue, error}
-
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
-
 import cats.data.Chain
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.string.*
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 import scala.util.matching.Regex
 
 /** Selects a bounded, readable conformance oracle from the exhaustive LLVM MC AMDGPU tests. */
 object GenerateAMDGPUOracle {
-  opaque type EncodedByte = Int
-  object EncodedByte {
-    def either(value: Int): Either[String, EncodedByte] =
-      if (value >= 0 && value <= 255) Right(value) else Left(s"encoded byte must be between 0 and 255: $value")
-    def unsafe(value: Int): EncodedByte =
-      either(value).fold(message => throw IllegalArgumentException(message), identity)
-
-    inline def apply[A <: Int & Singleton](inline value: A): EncodedByte =
-      inline if (constValue[A] >= 0 && constValue[A] <= 255) value else error("encoded byte out of range")
-    extension (value: EncodedByte) def raw: Int = value
-  }
 
   private case class Request(references: Path, resourceRoot: Path)
   private case class Golden(
-      target: NonEmptyString,
-      assembly: NonEmptyString,
-      bytes: Vector[EncodedByte],
-      source: NonEmptyString,
-      sourceFile: NonEmptyString
+      target: NonEmpty[String],
+      assembly: NonEmpty[String],
+      bytes: Vector[Int where Between[0, 255]],
+      source: NonEmpty[String],
+      sourceFile: NonEmpty[String]
   ) {
-    val opcode: NonEmptyString = NonEmptyString.unsafe(assembly.raw.takeWhile(!_.isWhitespace))
+    val opcode: NonEmpty[String] = assembly.takeWhile(!_.isWhitespace).unsafe[NonEmpty[String]]
   }
 
   private case class Diagnostic(
-      target: NonEmptyString,
-      assembly: NonEmptyString,
-      message: NonEmptyString,
-      source: NonEmptyString,
-      sourceFile: NonEmptyString
-  )
-
-  private case class Corpus(
-      positiveSeen: Set[(NonEmptyString, NonEmptyString, Vector[EncodedByte])],
-      diagnosticSeen: Set[(NonEmptyString, NonEmptyString, NonEmptyString)],
-      positives: Chain[Golden],
-      diagnostics: Chain[Diagnostic],
-      encodingChecks: Int,
-      diagnosticChecks: Int
+      target: NonEmpty[String],
+      assembly: NonEmpty[String],
+      message: NonEmpty[String],
+      source: NonEmpty[String],
+      sourceFile: NonEmpty[String]
   )
 
   private object Corpus {
     val empty: Corpus = Corpus(Set.empty, Set.empty, Chain.empty, Chain.empty, 0, 0)
   }
+
+  private case class Corpus(
+      positiveSeen: Set[(NonEmpty[String], NonEmpty[String], Vector[Int where Between[0, 255]])],
+      diagnosticSeen: Set[(NonEmpty[String], NonEmpty[String], NonEmpty[String])],
+      positives: Chain[Golden],
+      diagnostics: Chain[Diagnostic],
+      encodingChecks: Int,
+      diagnosticChecks: Int
+  )
 
   private case class Selection(positives: Vector[Golden], diagnostics: Vector[Diagnostic])
 
@@ -71,7 +57,7 @@ object GenerateAMDGPUOracle {
   private val Mcpu: Regex            = raw"(?:^|\s)-mcpu(?:=|\s+)([A-Za-z0-9_]+)".r
   private val CheckPrefixes: Regex   = raw"--?check-prefix(?:es)?(?:=|\s+)([A-Za-z0-9_,-]+)".r
   private val LineReference: Regex   = raw"\[\[@LINE(?:([+-])([0-9]+))?\]\]".r
-  private val CheckDirective: Regex  = "-(?:NEXT|SAME|DAG|LABEL|EMPTY|NOT|COUNT-[0-9]+)$$".r
+  private val CheckDirective: Regex  = "-(?:NEXT|SAME|DAG|LABEL|EMPTY|NOT|COUNT-[0-9]+)$".r
   private val Number: Regex          = raw"(?i)(?:0x[0-9a-f]+|\b[0-9]+\b)".r
   private val Quoted: Regex          = "'[^']*'|\"[^\"]*\"".r
   private val GPUName: Regex         = raw"(?i)\bgfx[0-9a-z]+\b".r
@@ -120,17 +106,17 @@ object GenerateAMDGPUOracle {
       val lines         = Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toVector
       val prefixTargets = targetsByCheckPrefix(lines)
       // Files.walk only contributes descendants ending in .s, so this relative path is non-empty; Path rejects NUL.
-      val sourceFile = NonEmptyString.unsafe(root.relativize(file).toString)
+      val sourceFile = root.relativize(file).toString.unsafe[NonEmpty[String]]
       lines.zipWithIndex.foldLeft(corpus) {
         case (state, (EncodingCheck(rawPrefix, assembly, encoded), index)) =>
-          val source = NonEmptyString.unsafe(s"${sourceFile.raw}:${index + 1}")
+          val source: NonEmpty[String] = s"${sourceFile}:${index + 1}"
           parseBytes(encoded).fold(state.copy(encodingChecks = state.encodingChecks + 1)) { bytes =>
-            prefixTargets.getOrElse(normalizePrefix(rawPrefix), Set.empty).toVector.sortBy(_.raw).foldLeft(
+            prefixTargets.getOrElse(normalizePrefix(rawPrefix), Set.empty).toVector.sorted.foldLeft(
               state.copy(encodingChecks = state.encodingChecks + 1)
             ) { (current, target) =>
-              NonEmptyString.either(assembly.trim).toOption.fold(current) { canonical =>
+              assembly.trim.refine[NonEmpty[String]].toOption.fold(current) { canonical =>
                 val key = (target, canonical, bytes)
-                if (!containsFileCheckExpression(canonical.raw) && !current.positiveSeen(key))
+                if (!containsFileCheckExpression(canonical) && !current.positiveSeen(key))
                   current.copy(
                     positiveSeen = current.positiveSeen + key,
                     positives = current.positives.append(Golden(target, canonical, bytes, source, sourceFile))
@@ -145,15 +131,15 @@ object GenerateAMDGPUOracle {
             check,
             index
           ).flatMap(lines.lift).map(stripComment(_)).filter(validDiagnosticSource(_)).flatMap { assembly =>
-            NonEmptyString.either(assembly).toOption
+            assembly.refine[NonEmpty[String]].toOption
           }.fold(counted) { assembly =>
-            val message = check.drop(check.indexOf("error:") + "error:".length).trim
-            val source  = NonEmptyString.unsafe(s"${sourceFile.raw}:${index + 1}")
-            prefixTargets.getOrElse(normalizePrefix(rawPrefix), Set.empty).toVector.sortBy(_.raw).foldLeft(counted) {
+            val message                  = check.drop(check.indexOf("error:") + "error:".length).trim
+            val source: NonEmpty[String] = s"${sourceFile}:${index + 1}"
+            prefixTargets.getOrElse(normalizePrefix(rawPrefix), Set.empty).toVector.sorted.foldLeft(counted) {
               (current, target) =>
-                NonEmptyString.either(message).toOption.fold(current) { diagnostic =>
+                message.refine[NonEmpty[String]].toOption.fold(current) { diagnostic =>
                   val key = (target, assembly, diagnostic)
-                  if (!containsFileCheckExpression(assembly.raw) && !current.diagnosticSeen(key))
+                  if (!containsFileCheckExpression(assembly) && !current.diagnosticSeen(key))
                     current.copy(
                       diagnosticSeen = current.diagnosticSeen + key,
                       diagnostics = current.diagnostics.append(
@@ -175,7 +161,7 @@ object GenerateAMDGPUOracle {
     val positiveCoverage =
       firstBy(positives)(value => canonicalOpcode(value.opcode)) ++
         firstBy(positives)(_.sourceFile) ++
-        positives.groupBy(value => familyForTarget(value.target.raw)).values.toVector.flatMap { familyCases =>
+        positives.groupBy(value => familyForTarget(value.target)).values.toVector.flatMap { familyCases =>
           evenly(firstBy(familyCases.sorted(using goldenOrdering))(value => canonicalOpcode(value.opcode)), 128)
         } ++
         positives.groupBy(_.target).values.toVector.flatMap { targetCases =>
@@ -186,7 +172,7 @@ object GenerateAMDGPUOracle {
     val diagnosticCoverage =
       evenly(firstBy(diagnostics)(value => diagnosticCategory(value.message)), 256) ++
         firstBy(diagnostics)(_.sourceFile) ++
-        diagnostics.groupBy(value => familyForTarget(value.target.raw)).values.toVector.flatMap { familyCases =>
+        diagnostics.groupBy(value => familyForTarget(value.target)).values.toVector.flatMap { familyCases =>
           evenly(
             firstBy(familyCases.sorted(using diagnosticOrdering))(value => diagnosticCategory(value.message)),
             32
@@ -224,7 +210,7 @@ object GenerateAMDGPUOracle {
     else Vector.tabulate(limit)(index => values(index * (values.size - 1) / (limit - 1)))
 
   private def syntaxFeatures(value: Golden): Vector[String] = {
-    val assembly    = value.assembly.raw
+    val assembly    = value.assembly
     val words       = Text.splitWords(assembly, Set(','))
     val identifiers = Text.identifierWords(assembly)
     Vector(
@@ -256,15 +242,16 @@ object GenerateAMDGPUOracle {
     ).flatten
   }
 
-  private def diagnosticCategory(message: NonEmptyString): String = {
-    val withoutQuoted  = Quoted.replaceAllIn(message.raw.toLowerCase(java.util.Locale.ROOT), "<value>")
+  private def diagnosticCategory(message: NonEmpty[String]): String = {
+    val withoutQuoted  = Quoted.replaceAllIn(message.toLowerCaseRoot, "<value>")
     val withoutGPUName = GPUName.replaceAllIn(withoutQuoted, "<gpu>")
     Text.normalizeWhitespace(Number.replaceAllIn(withoutGPUName, "<number>"))
   }
 
-  private def canonicalOpcode(opcode: NonEmptyString): NonEmptyString =
+  @annotation.tailrec
+  private def canonicalOpcode(opcode: NonEmpty[String]): NonEmpty[String] =
     EncodingSuffixes.collectFirst {
-      case suffix if opcode.raw.endsWith(suffix) => NonEmptyString.unsafe(opcode.raw.dropRight(suffix.length))
+      case suffix if opcode.endsWith(suffix) => opcode.dropRight(suffix.length).unsafe[NonEmpty[String]]
     } match {
       case Some(value) => canonicalOpcode(value)
       case None        => opcode
@@ -280,27 +267,27 @@ object GenerateAMDGPUOracle {
     val grouped =
       (selected.positives.map(value => value.target -> Left(value)) ++
         selected.diagnostics.map(value => value.target -> Right(value))).groupMap(_._1)(_._2)
-    val files = grouped.toVector.sortBy(_._1.raw).map { case (target, cases) =>
-      val name = s"${target.raw}.s"
+    val files = grouped.toVector.sortBy(_._1).map { case (target, cases) =>
+      val name = s"${target}.s"
       val body = cases.groupBy {
         case Left(value)  => value.sourceFile
         case Right(value) => value.sourceFile
-      }.toVector.sortBy(_._1.raw).map { case (sourceFile, sourceCases) =>
+      }.toVector.sortBy(_._1).map { case (sourceFile, sourceCases) =>
         val rendered = sourceCases.sortBy {
-          case Left(value)  => (value.assembly.raw, "0", value.source.raw)
-          case Right(value) => (value.assembly.raw, "1", value.source.raw)
+          case Left(value)  => (value.assembly, "0", value.source)
+          case Right(value) => (value.assembly, "1", value.source)
         }.map {
           case Left(value) =>
             val bytes = value.bytes.map(byte => f"0x${byte}%02x").mkString(", ")
-            s"${value.assembly.raw}\n// ENCODING: [$bytes]"
+            s"${value.assembly}\n// ENCODING: [$bytes]"
           case Right(value) =>
-            s"${value.assembly.raw}\n// ERROR: ${value.message.raw}"
+            s"${value.assembly}\n// ERROR: ${value.message}"
         }.mkString("\n\n")
-        s"// SOURCE: ${sourceFile.raw}\n\n$rendered"
+        s"// SOURCE: ${sourceFile}\n\n$rendered"
       }.mkString("\n\n")
       name ->
         (GeneratedHeader.line("//", "from pinned LLVM MC/AMDGPU checks") +
-          s"""|// TARGET: ${target.raw}
+          s"""|// TARGET: ${target}
               |
               |$body
             |""".stripMargin)
@@ -311,8 +298,8 @@ object GenerateAMDGPUOracle {
         s"""|source-files=$sourceFileCount
             |source-encoding-checks=${corpus.encodingChecks}
           |source-diagnostic-checks=${corpus.diagnosticChecks}
-          |source-positive-cases=${corpus.positives.size.toLong}
-          |source-diagnostic-cases=${corpus.diagnostics.size.toLong}
+          |source-positive-cases=${corpus.positives.size}
+          |source-diagnostic-cases=${corpus.diagnostics.size}
           |selected-positive-cases=${selected.positives.size}
           |selected-diagnostic-cases=${selected.diagnostics.size}
           |${files.map { case (name, _) => s"file=$name" }.mkString("\n")}
@@ -324,8 +311,8 @@ object GenerateAMDGPUOracle {
     val expected = (files.map(_._1).toSet + "manifest.txt").map(output.resolve(_))
     GeneratedFiles.removeUnexpected(resourceRoot, expected, _ => true)
     Console.out.println(
-      s"selected ${selected.positives.size}/${corpus.positives.size.toLong} positive and " +
-        s"${selected.diagnostics.size}/${corpus.diagnostics.size.toLong} diagnostic LLVM AMDGPU cases"
+      s"selected ${selected.positives.size}/${corpus.positives.size} positive and " +
+        s"${selected.diagnostics.size}/${corpus.diagnostics.size} diagnostic LLVM AMDGPU cases"
     )
   }
 
@@ -333,13 +320,13 @@ object GenerateAMDGPUOracle {
     val _ = GeneratedFiles.write(output, content)
   }
 
-  private def targetsByCheckPrefix(lines: Vector[String]): Map[String, Set[NonEmptyString]] = {
+  private def targetsByCheckPrefix(lines: Vector[String]): Map[String, Set[NonEmpty[String]]] = {
     val pairs = lines.flatMap {
       case Run(command) if command.contains("llvm-mc") && !command.contains("-disassemble") =>
         Mcpu.findFirstMatchIn(command).toVector.flatMap { targetMatch =>
-          val rawTarget = targetMatch.group(1).toLowerCase(java.util.Locale.ROOT)
+          val rawTarget = targetMatch.group(1).toLowerCaseRoot
           familyForTargetOption(rawTarget).toVector.flatMap { _ =>
-            val target = NonEmptyString.unsafe(rawTarget)
+            val target = rawTarget.unsafe[NonEmpty[String]]
             CheckPrefixes.findFirstMatchIn(command).map(_.group(1).split(',').toVector).getOrElse(Vector("CHECK"))
               .map(prefix => normalizePrefix(prefix) -> target)
           }
@@ -369,7 +356,7 @@ object GenerateAMDGPUOracle {
   }
 
   private def normalizePrefix(prefix: String): String =
-    CheckDirective.replaceFirstIn(prefix.toUpperCase(java.util.Locale.ROOT), "")
+    CheckDirective.replaceFirstIn(prefix.toUpperCaseRoot, "")
 
   private def referencedLine(check: String, checkIndex: Int): Option[Int] =
     LineReference.findFirstMatchIn(check).map { reference =>
@@ -392,21 +379,21 @@ object GenerateAMDGPUOracle {
 
   private def containsFileCheckExpression(value: String): Boolean = value.contains("{{") || value.contains("[[")
 
-  private def parseBytes(value: String): Option[Vector[EncodedByte]] = {
+  private def parseBytes(value: String): Option[Vector[Int where Between[0, 255]]] = {
     val fields = value.split(',').view.map(_.trim).filter(_.nonEmpty).toVector
     Option.when(
       fields.forall(field =>
         field.length >= 3 && field.length <= 4 && field.take(2).equalsIgnoreCase("0x") &&
           field.drop(2).forall(character => Character.digit(character, 16) >= 0)
       )
-    )(fields.map(field => EncodedByte.unsafe(Integer.parseInt(field.drop(2), 16))))
+    )(fields.map(field => Integer.parseInt(field.drop(2), 16).unsafe[Int where Between[0, 255]]))
   }
 
   private def goldenKey(value: Golden): (String, String, String, String) =
-    (value.target.raw, value.opcode.raw, value.source.raw, value.assembly.raw)
+    (value.target, value.opcode, value.source, value.assembly)
 
   private def diagnosticKey(value: Diagnostic): (String, String, String, String) =
-    (value.target.raw, value.source.raw, value.assembly.raw, value.message.raw)
+    (value.target, value.source, value.assembly, value.message)
 
   private val goldenOrdering: Ordering[Golden]         = Ordering.by(goldenKey(_))
   private val diagnosticOrdering: Ordering[Diagnostic] = Ordering.by(diagnosticKey(_))

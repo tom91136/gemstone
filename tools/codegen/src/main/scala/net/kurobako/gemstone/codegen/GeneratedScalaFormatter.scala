@@ -1,8 +1,7 @@
 package net.kurobako.gemstone.codegen
 
-import org.scalafmt.Scalafmt
-
 import java.nio.file.Path
+import org.scalafmt.Scalafmt
 
 /** Applies the repository formatter before generated Scala is compared or written. Generators emit the final runtime
   * vocabulary themselves; formatting is the only post-processing step.

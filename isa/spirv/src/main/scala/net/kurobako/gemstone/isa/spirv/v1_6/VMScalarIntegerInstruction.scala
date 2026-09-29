@@ -1,6 +1,12 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-private[v1_6] final class VMScalarIntegerInstruction(
+private object VMScalarIntegerInstruction {
+  val Add: Byte      = 0
+  val Subtract: Byte = 1
+  val Multiply: Byte = 2
+}
+
+private class VMScalarIntegerInstruction(
     val operation: Byte,
     val resultType: Int,
     val destination: Int,
@@ -12,9 +18,3 @@ private[v1_6] final class VMScalarIntegerInstruction(
     val rightConstantBits: Long,
     val resultMask: Long
 )
-
-private[v1_6] object VMScalarIntegerInstruction {
-  val Add: Byte      = 0
-  val Subtract: Byte = 1
-  val Multiply: Byte = 2
-}

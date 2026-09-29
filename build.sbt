@@ -1,15 +1,18 @@
-import sbt.internal.util.MessageOnlyException
+import ExternalProjectPlugin.autoImport.*
+import Paths.*
+import Paths.given
+import StringCase.*
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.concurrent.TimeUnit
+import sbt.internal.util.MessageOnlyException
+import scala.concurrent.duration.*
 import scala.language.implicitConversions
 import scala.scalanative.sbtplugin.ScalaNativePlugin.autoImport.NativeTags
-import scala.sys.process.{Process, ProcessLogger}
+import scala.sys.process.Process
+import scala.sys.process.ProcessLogger
 import scala.util.control.NonFatal
-
-import Paths.{*, given}
-import ExternalProjectPlugin.autoImport.*
+import stryker4s.sbt.Stryker4sPlugin
 
 // Each Native linker can consume gigabytes; use the plugin's standard scheduling tag.
 Global / concurrentRestrictions += Tags.limit(NativeTags.Link, 1)
@@ -47,7 +50,7 @@ lazy val ptxISAPackage        = "v" + ptxISAVersion.replace('.', '_')
 lazy val spirvVersion         = "1.6"
 
 // Conformance workloads are much larger than interactive use, so the emulated
-// suite runs with a bigger budget than TaskLimits.Default. Keep the two in sync
+// suite runs with a bigger budget than TaskControl.Limits.Default. Keep the two in sync
 // if the interpreter's instruction accounting changes. The big-index thrust
 // cases alone need more than the old 1e9.
 lazy val conformanceMaxInstructions = "100000000000"
@@ -189,18 +192,66 @@ def referenceArtifact(id: String): Fetch.Request = {
   selected.head
 }
 
+// Owned names and shared numeric defaults. Parsing belongs to each consumer.
+lazy val environmentVariables: Vector[(String, Option[Long])] = Vector(
+  "BENCHMARK_JFR"                -> None,
+  "OFFLINE"                      -> None,
+  "EXECUTION_MAX_INSTRUCTIONS"   -> None,
+  "EXECUTION_PARALLELISM"        -> None,
+  "HSA_PAGING_TIMEOUT_SECONDS"   -> None,
+  "HSA_REJECTED_CODE_OBJECT"     -> None,
+  "NATIVE_DIRECTORY"             -> None,
+  "OPENCL_COMPILER"              -> None,
+  "OPENCL_LLVM_LINK"             -> None,
+  "OPENCL_LLVM_SPIRV"            -> None,
+  "OPENCL_LOCAL_MEM_SIZE"        -> Some(65536L),
+  "OPENCL_MAX_MEM_ALLOC_SIZE"    -> Some(268435456L),
+  "OPENCL_MAX_WORK_GROUP_SIZE"   -> Some(64L),
+  "OPENCL_SCAN_BUFFER_POINTERS"  -> None,
+  "PROFILE"                      -> None,
+  "RECORD"                       -> None,
+  "RPC_CLIENT"                   -> None,
+  "RPC_ENDPOINT"                 -> None,
+  "RPC_TIMEOUT_SECONDS"          -> Some(300L),
+  "SYSTEM_PAGING"                -> None,
+  "TARGET_ARCH"                  -> None,
+  "TRACE"                        -> None,
+  "VULKAN_DUMP"                  -> None,
+  "MEMORY_ALLOCATION_KIND"       -> None,
+  "MEMORY_ATOMIC_BITS"           -> None,
+  "MEMORY_CONCURRENCY_DIRECTORY" -> None,
+  "MEMORY_PROBE"                 -> None,
+  "TEST_LIBRARY"                 -> None
+)
+
+def environmentName(key: String): String = {
+  require(environmentVariables.exists(_._1 == key), s"unknown environment variable: $key")
+  s"GEMSTONE_$key"
+}
+
+lazy val environmentArguments: Seq[String] = environmentVariables.flatMap { case (key, default) =>
+  Seq(environmentName(key), default.fold("")(_.toString))
+}
+
 def positiveEnvironmentInt(name: String, default: => Int): Int = {
   val raw = sys.env.get(name).fold(default) { value =>
-    value.toIntOption.getOrElse(
-      throw MessageOnlyException(s"$name must be a positive integer: $value")
-    )
+    Option.when(value.nonEmpty && value.forall(c => c >= '0' && c <= '9'))(value)
+      .flatMap(_.toIntOption).getOrElse(
+        throw MessageOnlyException(s"$name must be a positive integer: $value")
+      )
   }
   if (raw <= 0) throw MessageOnlyException(s"$name must be a positive integer: $raw")
   raw
 }
 
 def environmentFlag(name: String): Boolean =
-  sys.env.get(name).exists(value => Set("1", "true", "on").contains(value.toLowerCase(_root_.java.util.Locale.ROOT)))
+  sys.env.get(name).exists { value =>
+    value.toLowerCaseRoot match {
+      case "1" | "true" | "on"   => true
+      case "0" | "false" | "off" => false
+      case _                     => throw MessageOnlyException(s"$name must be a boolean: $value")
+    }
+  }
 
 def runConformance(
     root: Path,
@@ -243,24 +294,24 @@ def withConformanceLauncher[A](
   val configured = environment.toMap
     .toVector.sortBy(_._1).map { case (key, value) => s"export $key=${quoted(value)}" }.mkString("\n")
   val routing =
-    """
+    s"""
     |unset CONFORMANCE_DEVICE
-    |case "$CONFORMANCE_TARGET_BACKEND" in
+    |case "$$CONFORMANCE_TARGET_BACKEND" in
     |  cuda|hip|hsa)
-    |    if [ -z "$GEMSTONE_TARGET_ARCH" ] && [ -n "$CONFORMANCE_TARGET_ARCHITECTURE" ]; then
-    |      export GEMSTONE_TARGET_ARCH="$CONFORMANCE_TARGET_ARCHITECTURE"
+    |    if [ -z "$$${environmentName("TARGET_ARCH")}" ] && [ -n "$$CONFORMANCE_TARGET_ARCHITECTURE" ]; then
+    |      export ${environmentName("TARGET_ARCH")}="$$CONFORMANCE_TARGET_ARCHITECTURE"
     |    fi ;;
     |  levelzero) export CONFORMANCE_DEVICE='*Gemstone*' ;;
     |esac
-    |toolchain="$CONFORMANCE_SUPPORT_ROOT/opencl-toolchain"
-    |if [ -z "$GEMSTONE_OPENCL_COMPILER" ] && [ -x "$toolchain/bin/icpx" ]; then
-    |  export GEMSTONE_OPENCL_COMPILER="$toolchain/bin/icpx"
+    |toolchain="$$CONFORMANCE_SUPPORT_ROOT/opencl-toolchain"
+    |if [ -z "$$${environmentName("OPENCL_COMPILER")}" ] && [ -x "$$toolchain/bin/icpx" ]; then
+    |  export ${environmentName("OPENCL_COMPILER")}="$$toolchain/bin/icpx"
     |fi
-    |if [ -z "$GEMSTONE_OPENCL_LLVM_SPIRV" ] && [ -x "$toolchain/bin/compiler/llvm-spirv" ]; then
-    |  export GEMSTONE_OPENCL_LLVM_SPIRV="$toolchain/bin/compiler/llvm-spirv"
+    |if [ -z "$$${environmentName("OPENCL_LLVM_SPIRV")}" ] && [ -x "$$toolchain/bin/compiler/llvm-spirv" ]; then
+    |  export ${environmentName("OPENCL_LLVM_SPIRV")}="$$toolchain/bin/compiler/llvm-spirv"
     |fi
-    |if [ -z "$GEMSTONE_OPENCL_LLVM_LINK" ] && [ -x "$toolchain/bin/compiler/llvm-link" ]; then
-    |  export GEMSTONE_OPENCL_LLVM_LINK="$toolchain/bin/compiler/llvm-link"
+    |if [ -z "$$${environmentName("OPENCL_LLVM_LINK")}" ] && [ -x "$$toolchain/bin/compiler/llvm-link" ]; then
+    |  export ${environmentName("OPENCL_LLVM_LINK")}="$$toolchain/bin/compiler/llvm-link"
     |fi
     |export CONFORMANCE_OPENCL_CTS_WIMPY=1
     |export CONFORMANCE_OPENCL_CTS_TIMEOUT=600
@@ -271,50 +322,41 @@ def withConformanceLauncher[A](
   } finally Files.deleteIfExists(script)
 }
 
-def awaitGemstoneServerPort(portFile: Path, server: scala.sys.process.Process): Int = {
-  val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
-  var port     = Option.empty[Int]
-  while (port.isEmpty && server.isAlive() && System.nanoTime() < deadline) {
-    if (Files.isRegularFile(portFile))
-      port = Files.readString(portFile, StandardCharsets.US_ASCII).trim.toIntOption
-        .filter(value => value >= 1 && value <= 65535)
-    if (port.isEmpty) Thread.sleep(25L)
-  }
-  port.getOrElse {
-    val reason = if (server.isAlive()) "did not publish a port" else s"exited with ${server.exitValue()}"
+def awaitGemstoneServerEndpoint(endpointFile: Path, server: scala.sys.process.Process): String =
+  Processes.awaitJsonString(endpointFile, "endpoint", server, 30.seconds).getOrElse {
+    val reason = if (server.isAlive()) "did not publish an endpoint" else s"exited with ${server.exitValue()}"
     throw MessageOnlyException(s"Gemstone conformance server $reason")
   }
-}
 
 def withGemstoneServer(
     root: Path,
     launchServer: Path => scala.sys.process.Process,
-    shutdownServer: Int => Boolean,
+    shutdownServer: String => Boolean,
     log: sbt.util.Logger
-)(run: Int => Unit): Unit = {
+)(run: String => Unit): Unit = {
   val parent = root / "target/conformance"
   Files.createDirectories(parent)
-  val directory = Files.createTempDirectory(parent, "server-")
-  val portFile  = directory / "port"
-  val server    = try launchServer(portFile)
+  val directory    = Files.createTempDirectory(parent, "server-")
+  val endpointFile = directory / "endpoint.json"
+  val server       = try launchServer(endpointFile)
   catch {
     case NonFatal(failure) =>
-      Files.deleteIfExists(portFile)
+      Files.deleteIfExists(endpointFile)
       Files.deleteIfExists(directory)
       throw failure
   }
   val shutdownHook = Thread(() => server.destroy(), "gemstone-conformance-server-cleanup")
   sys.runtime.addShutdownHook(shutdownHook)
-  var port = Option.empty[Int]
+  var endpoint = Option.empty[String]
   try {
-    val activePort = awaitGemstoneServerPort(portFile, server)
-    port = Some(activePort)
-    run(activePort)
+    val activeEndpoint = awaitGemstoneServerEndpoint(endpointFile, server)
+    endpoint = Some(activeEndpoint)
+    run(activeEndpoint)
   } finally {
-    port match {
-      case Some(activePort) if server.isAlive() =>
+    endpoint match {
+      case Some(activeEndpoint) if server.isAlive() =>
         try
-          if (!shutdownServer(activePort)) server.destroy()
+          if (!shutdownServer(activeEndpoint)) server.destroy()
         catch {
           case NonFatal(failure) =>
             log.error(s"cannot stop Gemstone conformance server: ${failure.getMessage}"); server.destroy()
@@ -324,7 +366,7 @@ def withGemstoneServer(
     }
     try {
       val _ = server.exitValue()
-      Files.deleteIfExists(portFile)
+      Files.deleteIfExists(endpointFile)
       Files.deleteIfExists(directory)
     } finally
       try sys.runtime.removeShutdownHook(shutdownHook)
@@ -334,6 +376,7 @@ def withGemstoneServer(
 
 lazy val apiReferenceBundle = ReferenceBundle(
   name = "api-native",
+  recipeRevision = "1",
   artifacts = referenceArtifactsNamed(
     "nvidia-cuda-driver-dev",
     "nvidia-cuda-runtime-dev",
@@ -460,6 +503,7 @@ lazy val apiReferenceBundle = ReferenceBundle(
 
 lazy val ptxReferenceBundle = ReferenceBundle(
   name = "ptx",
+  recipeRevision = "1",
   artifacts = referenceArtifactsNamed("nvidia-ptx"),
   populate = (cached, stage) =>
     IO.copyFile(
@@ -471,6 +515,7 @@ lazy val ptxReferenceBundle = ReferenceBundle(
 
 lazy val amdgpuReferenceBundle = ReferenceBundle(
   name = "amdgpu",
+  recipeRevision = "1",
   artifacts = referenceArtifactsNamed(
     "llvm",
     "mesa",
@@ -508,6 +553,7 @@ lazy val amdgpuReferenceBundle = ReferenceBundle(
 
 lazy val spirvReferenceBundle = ReferenceBundle(
   name = "spirv",
+  recipeRevision = "1",
   artifacts = referenceArtifactsNamed("spirv-headers", "spirv-tools"),
   populate = (cached, stage) => {
     Compress.extractZipRoot(
@@ -566,6 +612,8 @@ lazy val prepareAMDGPUReferences     = taskKey[Path]("Prepare pinned AMDGPU refe
 lazy val prepareSPIRVReferences      = taskKey[Path]("Prepare pinned SPIR-V references.")
 lazy val generateOfficialAPIManifest =
   taskKey[Path]("Extract normalized declarations from pinned official API headers.")
+lazy val generateEnvironment  = taskKey[Unit]("Generate Scala and C++ environment constants from the build table.")
+lazy val checkEnvironment     = taskKey[Unit]("Check environment output freshness and declared names.")
 lazy val generateExecutionRPC =
   taskKey[Seq[Path]]("Generate the typed native execution RPC client.")
 lazy val generatePTXSources =
@@ -598,7 +646,7 @@ lazy val clangFormatExecutable     = settingKey[String]("Clang-format command us
 lazy val pythonExecutable          = settingKey[String]("Python command used by AMDGPU generation.")
 lazy val containerExecutable       = settingKey[String]("OCI container executable used by pinned toolchain builds.")
 lazy val buildParallelism          = settingKey[Int]("Parallelism for CMake and Ninja builds.")
-lazy val testParallelism           = settingKey[Int]("Parallelism for test and execution runs.")
+lazy val testParallelism           = settingKey[Int]("Parallelism for CTest runs.")
 lazy val conformanceJobs           = settingKey[Int]("Concurrent conformance jobs for the emulated suite.")
 lazy val conformanceArtifactParallelism =
   settingKey[Int]("Parallelism for conformance artifact builds.")
@@ -612,9 +660,15 @@ Global / clangExecutable            := sys.env.getOrElse("CLANG", "clang")
 Global / clangFormatExecutable      := sys.env.getOrElse("CLANG_FORMAT", "clang-format")
 Global / pythonExecutable           := sys.env.getOrElse("PYTHON", "python3")
 Global / containerExecutable        := sys.env.getOrElse("CONTAINER_EXECUTABLE", "podman")
-Global / buildParallelism := positiveEnvironmentInt("CMAKE_BUILD_PARALLEL_LEVEL", sys.runtime.availableProcessors())
-Global / testParallelism  := positiveEnvironmentInt("GEMSTONE_EXECUTION_PARALLELISM", sys.runtime.availableProcessors())
-Global / conformanceJobs  := positiveEnvironmentInt(
+Global / buildParallelism           := positiveEnvironmentInt(
+  "CMAKE_BUILD_PARALLEL_LEVEL",
+  sys.runtime.availableProcessors()
+)
+Global / testParallelism := positiveEnvironmentInt(
+  "CTEST_PARALLEL_LEVEL",
+  sys.runtime.availableProcessors()
+)
+Global / conformanceJobs := positiveEnvironmentInt(
   "CONFORMANCE_JOBS",
   math.max(1, math.min(8, sys.runtime.availableProcessors() / 4))
 )
@@ -623,7 +677,7 @@ Global / conformanceArtifactParallelism :=
     "CONFORMANCE_ARTIFACT_PARALLELISM",
     math.max(1, math.min(4, sys.runtime.availableProcessors() / 8))
   )
-Global / offlineMode := environmentFlag("GEMSTONE_OFFLINE")
+Global / offlineMode := environmentFlag(environmentName("OFFLINE"))
 
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
@@ -639,15 +693,21 @@ lazy val commonSettings = Seq(
     "-source",
     "3.9"
   ),
-  Compile / scalacOptions += "-Wunused:all",
-  Test / scalacOptions ~= { _.filterNot(_ == "-Wunused:all") },
+  scalacOptions += "-Wunused:all",
   Compile / scalafixConfig               := Some(file(".scalafix.conf")),
   Test / scalafixConfig                  := Some(file(".scalafix.conf")),
   libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
+  Test / testOptions += Tests.Argument(TestFrameworks.MUnit, "--log=warn", "--logger=sbt"),
   // Directory-backed inter-project classpaths; sbt 2's exported JAR cache retains stale packages.
   Compile / exportJars  := false,
   scalafmtDetailedError := true,
   scalafmtFailOnErrors  := true
+)
+
+lazy val nativeTestSettings = Seq(
+  Test / nativeConfig ~= (_.withMode(scala.scalanative.build.Mode.debug)),
+  Test / nativeLink / logLevel           := Level.Warn,
+  Test / loadedTestFrameworks / logLevel := Level.Warn
 )
 
 // Checked-in generator output is a persistent build input, not an sbt-managed
@@ -668,6 +728,7 @@ lazy val generateNativeBindings =
   taskKey[Seq[Path]]("Generate native ABI declarations and implementation checks for every platform.")
 
 lazy val codestyleRules = project.in(file("codestyle/rules"))
+  .disablePlugins(Stryker4sPlugin)
   .disablePlugins(_root_.scalafix.sbt.ScalafixPlugin)
   .settings(
     name           := "gemstone-codestyle-rules",
@@ -678,22 +739,30 @@ lazy val codestyleRules = project.in(file("codestyle/rules"))
   )
 
 lazy val codestyleInput = project.in(file("codestyle/input"))
+  .disablePlugins(Stryker4sPlugin)
   .disablePlugins(_root_.scalafix.sbt.ScalafixPlugin)
   .settings(
-    publish / skip    := true,
-    semanticdbEnabled := true
+    publish / skip                         := true,
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion,
+    semanticdbEnabled                      := true
   )
 
 lazy val codestyleOutput = project.in(file("codestyle/output"))
+  .disablePlugins(Stryker4sPlugin)
   .disablePlugins(_root_.scalafix.sbt.ScalafixPlugin)
-  .settings(publish / skip := true)
+  .settings(
+    publish / skip                         := true,
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion
+  )
 
 lazy val codestyleTests = project.in(file("codestyle/tests"))
+  .disablePlugins(Stryker4sPlugin)
   .dependsOn(codestyleInput, codestyleRules)
   .dependsOn(codestyleRules % ScalafixConfig)
   .enablePlugins(_root_.scalafix.sbt.ScalafixTestkitPlugin)
   .settings(
-    publish / skip                         := true,
+    publish / skip := true,
+    scalacOptions += "-Wunused:all",
     scalafixTestkitOutputSourceDirectories := (codestyleOutput / Compile / sourceDirectories).value,
     scalafixTestkitInputSourceDirectories  := (codestyleInput / Compile / sourceDirectories).value,
     scalafixTestkitInputClasspath          := (codestyleInput / Compile / fullClasspath).value,
@@ -702,6 +771,7 @@ lazy val codestyleTests = project.in(file("codestyle/tests"))
   )
 
 lazy val codestyle = project.in(file("codestyle"))
+  .disablePlugins(Stryker4sPlugin)
   .aggregate(codestyleRules, codestyleInput, codestyleOutput, codestyleTests)
   .disablePlugins(_root_.scalafix.sbt.ScalafixPlugin)
   .settings(
@@ -709,7 +779,17 @@ lazy val codestyle = project.in(file("codestyle"))
     publish / skip := true
   )
 
+// No dependency on core: its own tests can use these utilities without a cycle.
+lazy val testSupport = projectMatrix.in(file("tools/test-support"))
+  .disablePlugins(Stryker4sPlugin)
+  .dependsOn(codestyleRules % ScalafixConfig)
+  .settings(commonSettings, name := "gemstone-test-support", publish / skip := true)
+  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
+
 lazy val api = projectMatrix
+  .dependsOn(testSupport % "test->compile")
+  .disablePlugins(Stryker4sPlugin)
   .dependsOn(core)
   .dependsOn(codestyleRules % ScalafixConfig)
   .settings(
@@ -720,20 +800,22 @@ lazy val api = projectMatrix
     )
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
-  .nativePlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
 
 lazy val codegenProject = Project("codegen", file("tools/codegen"))
+  .dependsOn(testSupport.jvm(scala3Version) % "test->compile")
+  .disablePlugins(Stryker4sPlugin)
   .dependsOn(core.jvm(scala3Version))
   .dependsOn(codestyleRules % ScalafixConfig)
   .settings(
     commonSettings,
     name                    := "gemstone-codegen",
     publish / skip          := true,
+    Test / baseDirectory    := (LocalRootProject / baseDirectory).value,
     nativeBindingsDirectory := (LocalRootProject / baseDirectory).value / "native/generated",
     libraryDependencies ++= Seq(
       "org.jsoup" % "jsoup" % jsoupVersion,
 
-      "com.lihaoyi"   %% "upickle"       % upickleVersion,
       "com.monovore"  %% "decline"       % declineVersion,
       "org.scalameta" %% "scalafmt-core" % scalafmtVersion,
       "org.typelevel" %% "cats-core"     % catsCoreVersion
@@ -821,6 +903,26 @@ lazy val codegenProject = Project("codegen", file("tools/codegen"))
       require(outputs.nonEmpty, s"native binding generator did not produce files under $output")
       outputs
     },
+    generateEnvironment / logLevel := Level.Warn,
+    checkEnvironment / logLevel    := Level.Warn,
+    generateEnvironment            := Def.uncached {
+      val converter = fileConverter.value
+      (Compile / runner).value.run(
+        s"$rootPackage.codegen.GenerateEnvironment",
+        (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data)),
+        Seq((LocalRootProject / baseDirectory).value.toString, "--write") ++ environmentArguments,
+        streams.value.log
+      ).get
+    },
+    checkEnvironment := Def.uncached {
+      val converter = fileConverter.value
+      (Compile / runner).value.run(
+        s"$rootPackage.codegen.GenerateEnvironment",
+        (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data)),
+        Seq((LocalRootProject / baseDirectory).value.toString, "--check") ++ environmentArguments,
+        streams.value.log
+      ).get
+    },
     generateExecutionRPC := Def.uncached {
       val converter = fileConverter.value
       val output    = nativeBindingsDirectory.value / "rpc"
@@ -836,17 +938,46 @@ lazy val codegenProject = Project("codegen", file("tools/codegen"))
     }
   )
 
+lazy val mutationSettings = Mutation.settings ++ Seq(
+  strykerConcurrency     := 1,
+  strykerReporters       := Seq("console", "html", "json"),
+  strykerThresholdsBreak := 0,
+  strykerOpenReport      := false
+)
+
 lazy val core = projectMatrix
+  .dependsOn(testSupport % "test->compile")
+  .disablePlugins(Stryker4sPlugin)
   .dependsOn(codestyleRules % ScalafixConfig)
   .settings(
     commonSettings,
+    checkedInGeneratedSources,
     name := "gemstone-core",
     libraryDependencies ++= Seq(
+      "com.lihaoyi"   %% "upickle"   % upickleVersion,
       "org.typelevel" %% "cats-core" % catsCoreVersion
     )
   )
-  .jvmPlatform(scalaVersions = Seq(scala3Version))
-  .nativePlatform(scalaVersions = Seq(scala3Version))
+  .jvmPlatform(
+    scalaVersions = Seq(scala3Version),
+    axisValues = Seq.empty,
+    configure = project =>
+      project.enablePlugins(Stryker4sPlugin).settings(
+        mutationSettings,
+        // Focus on authored boundaries; generated code and compiler macros need separate analysis.
+        strykerMutate := Seq(
+          "src/main/scala/net/kurobako/gemstone/binary/ByteRange.scala",
+          "src/main/scala/net/kurobako/gemstone/memory/WrittenRanges.scala",
+          "src/main/scala/net/kurobako/gemstone/rpc/Wire.scala"
+        ),
+        strykerTestFilter := Seq(
+          "net.kurobako.gemstone.binary.BinarySuite",
+          "net.kurobako.gemstone.memory.WrittenRangesSuite",
+          "net.kurobako.gemstone.rpc.*"
+        )
+      )
+  )
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
 
 lazy val externalCodestyleSettings = Seq(
   nativeSourceDirectories := Seq(baseDirectory.value.toPath),
@@ -894,10 +1025,7 @@ lazy val nativeRuntimeSettings = Seq(
   nativeConfigureArguments := Def.uncached {
     val references      = (codegenProject / prepareAPIReferences).value
     val matchingHeaders = (references / "nvidia/cuda").descendants("cuda.h").filter { path =>
-      (0 until path.getNameCount - 1).exists { index =>
-        s"${path.getName(index)}" == s"cuda-$cudaAPIVersion" &&
-        s"${path.getName(index + 1)}" == "targets"
-      }
+      containsPathSegments(path, s"cuda-$cudaAPIVersion", "targets")
     }
     require(matchingHeaders.size == 1, s"expected one pinned CUDA header, found ${matchingHeaders.size}")
     val cudaInclude =
@@ -961,16 +1089,20 @@ lazy val nativeRuntimeSettings = Seq(
 )
 
 lazy val native = project.in(file("native"))
+  .disablePlugins(Stryker4sPlugin)
   .enablePlugins(ExternalProjectPlugin)
   .disablePlugins(plugins.JvmPlugin, plugins.IvyPlugin)
   .settings(
     externalCodestyleSettings,
     nativeRuntimeSettings,
+    nativeSourceDirectories += (LocalRootProject / baseDirectory).value.toPath / "server/src/main/resources/scala-native",
     name       := "gemstone-native",
     cleanFiles := Seq((LocalRootProject / baseDirectory).value / "target/native")
   )
 
 lazy val ptx = projectMatrix
+  .dependsOn(testSupport % "test->compile")
+  .disablePlugins(Stryker4sPlugin)
   .in(file("isa/ptx"))
   .dependsOn(core)
   .dependsOn(codestyleRules % ScalafixConfig)
@@ -1021,9 +1153,11 @@ lazy val ptx = projectMatrix
     }
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
-  .nativePlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
 
 lazy val amdgpu = projectMatrix
+  .dependsOn(testSupport % "test->compile")
+  .disablePlugins(Stryker4sPlugin)
   .in(file("isa/amdgpu"))
   .dependsOn(core)
   .dependsOn(codestyleRules % ScalafixConfig)
@@ -1032,7 +1166,6 @@ lazy val amdgpu = projectMatrix
     checkedInGeneratedSources,
     name := "gemstone-isa-amdgpu",
     libraryDependencies ++= Seq(
-      "com.lihaoyi"   %% "upickle"    % upickleVersion,
       "com.outr"      %% "scribe"     % scribeVersion,
       "org.typelevel" %% "cats-core"  % catsCoreVersion,
       "org.typelevel" %% "cats-parse" % catsParseVersion
@@ -1079,16 +1212,27 @@ lazy val amdgpu = projectMatrix
       sources ++ metadataFiles ++ oracleFiles
     }
   )
-  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .jvmPlatform(
+    scalaVersions = Seq(scala3Version),
+    axisValues = Seq.empty,
+    configure = project =>
+      project.enablePlugins(Stryker4sPlugin).settings(
+        mutationSettings,
+        strykerMutate     := Seq("src/main/scala/net/kurobako/gemstone/isa/amdgpu/Parser.scala"),
+        strykerTestFilter := Seq("net.kurobako.gemstone.isa.amdgpu.ParserSuite")
+      )
+  )
   .nativePlatform(
     scalaVersions = Seq(scala3Version),
-    settings = Seq(
+    settings = nativeTestSettings ++ Seq(
       Compile / nativeConfig ~= (_.withEmbedResources(true)),
       Test / nativeConfig ~= (_.withEmbedResources(true))
     )
   )
 
 lazy val spirv = projectMatrix
+  .dependsOn(testSupport % "test->compile")
+  .disablePlugins(Stryker4sPlugin)
   .in(file("isa/spirv"))
   .dependsOn(core)
   .dependsOn(codestyleRules % ScalafixConfig)
@@ -1133,49 +1277,70 @@ lazy val spirv = projectMatrix
       outputs
     }
   )
-  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .jvmPlatform(
+    scalaVersions = Seq(scala3Version),
+    axisValues = Seq.empty,
+    configure = project =>
+      project.enablePlugins(Stryker4sPlugin).settings(
+        mutationSettings,
+        strykerMutate := Seq(
+          s"src/main/scala/${rootPackage.replace('.', '/')}/isa/spirv/$spirvPackage/Binary.scala"
+        ),
+        strykerTestFilter := Seq(
+          s"$rootPackage.isa.spirv.$spirvPackage.ReferenceSuite",
+          s"$rootPackage.isa.spirv.$spirvPackage.BinarySuite"
+        )
+      )
+  )
   .nativePlatform(
     scalaVersions = Seq(scala3Version),
-    settings = Seq(Test / nativeConfig ~= (_.withEmbedResources(true)))
+    settings = nativeTestSettings ++ Seq(Test / nativeConfig ~= (_.withEmbedResources(true)))
   )
 
 lazy val server = projectMatrix
+  .dependsOn(testSupport % "test->compile")
+  .disablePlugins(Stryker4sPlugin)
   .in(file("server"))
   .dependsOn(core, ptx, amdgpu, spirv)
   .dependsOn(codestyleRules % ScalafixConfig)
   .settings(
     commonSettings,
     name := "gemstone-server",
+    Test / envVars += (environmentName("NATIVE_DIRECTORY") -> s"${(native / nativeArtifact).value}"),
     libraryDependencies ++= Seq(
-      "com.lihaoyi"   %% "upickle"   % upickleVersion,
       "com.monovore"  %% "decline"   % declineVersion,
       "com.outr"      %% "scribe"    % scribeVersion,
       "org.typelevel" %% "cats-core" % catsCoreVersion
     ),
-    Compile / mainClass := Some(s"$rootPackage.server.cli.GemstoneCLI")
+    Compile / mainClass := Some(s"$rootPackage.server.CLI")
   )
   .jvmPlatform(
     scalaVersions = Seq(scala3Version),
-    settings = Seq(
-      Compile / run / fork := true,
-      Test / fork          := true,
-      Test / javaOptions += Def.uncached {
-        s"-Dgemstone.native.directory=${(native / nativeArtifact).value}"
-      }
-    )
+    axisValues = Seq.empty,
+    configure = project =>
+      project.settings(
+        Compile / run / fork := true,
+        Test / fork          := true,
+        Test / javaOptions += Def.uncached {
+          val converter = fileConverter.value
+          val classpath = (Runtime / fullClasspath).value.map(entry => converter.toPath(entry.data))
+          s"-Dgemstone.cli.classpath=${classpath.mkString(java.io.File.pathSeparator)}"
+        }
+      )
   )
   .nativePlatform(
     scalaVersions = Seq(scala3Version),
-    settings = Seq(
+    settings = nativeTestSettings ++ Seq(
+      // sbt 2 exposes resource directories separately; package them once for Native's C-source discovery.
+      Compile / exportJars := true,
       Compile / nativeConfig ~= (_.withMode(scala.scalanative.build.Mode.releaseFast).withEmbedResources(true)),
-      Test / nativeConfig ~= (_.withEmbedResources(true)),
-      Test / envVars += (
-        "GEMSTONE_NATIVE_TEST_DIRECTORY" -> s"${(native / nativeArtifact).value}"
-      )
+      Test / nativeConfig ~= (_.withEmbedResources(true))
     )
   )
 
 lazy val benchmarks = projectMatrix.in(file("tools/benchmarks"))
+  .dependsOn(testSupport % "test->compile")
+  .disablePlugins(Stryker4sPlugin)
   .dependsOn(core, ptx, amdgpu, spirv, server)
   .dependsOn(codestyleRules % ScalafixConfig)
   .settings(
@@ -1183,7 +1348,6 @@ lazy val benchmarks = projectMatrix.in(file("tools/benchmarks"))
     name           := "gemstone-benchmarks",
     publish / skip := true,
     libraryDependencies ++= Seq(
-      "com.lihaoyi"   %% "upickle"   % upickleVersion,
       "com.monovore"  %% "decline"   % declineVersion,
       "org.typelevel" %% "cats-core" % catsCoreVersion
     ),
@@ -1221,13 +1385,16 @@ lazy val benchmarks = projectMatrix.in(file("tools/benchmarks"))
   )
   .jvmPlatform(
     scalaVersions = Seq(scala3Version),
-    settings = Seq(
-      Compile / run / javaOptions ++= Seq("-Xms512m", "-Xmx4g")
-    )
+    axisValues = Seq.empty,
+    configure = project =>
+      project.settings(
+        Compile / run / javaOptions ++= Seq("-Xms512m", "-Xmx4g")
+      )
   )
-  .nativePlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
 
 lazy val conformance = project.in(file("conformance"))
+  .disablePlugins(Stryker4sPlugin)
   .enablePlugins(ExternalProjectPlugin)
   .disablePlugins(plugins.JvmPlugin, plugins.IvyPlugin)
   .settings(
@@ -1354,18 +1521,22 @@ lazy val conformance = project.in(file("conformance"))
       val converter       = fileConverter.value
       val log             = streams.value.log
       val jobs            = (Global / conformanceJobs).value
-      val workers         = (Global / testParallelism).value
-      val serverHeap      = s"${math.max(8L, math.min(32L, jobs.toLong * 6L))}g"
-      val environment     = Map(
-        "CONFORMANCE_JOBS"                    -> jobs.toString,
-        "GEMSTONE_EXECUTION_PARALLELISM"      -> workers.toString,
-        "GEMSTONE_NATIVE_DIRECTORY"           -> s"$nativeDirectory",
-        "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS" -> sys.env.getOrElse(
-          "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS",
+      val workers         = positiveEnvironmentInt(
+        environmentName("EXECUTION_PARALLELISM"),
+        math.max(1, math.min(64, sys.runtime.availableProcessors()) - 2)
+      )
+      // Stay below the compressed-reference limit; 32 GiB disables it on the supported JVM.
+      val serverHeap  = s"${math.max(8L, math.min(28L, jobs.toLong * 6L))}g"
+      val environment = Map(
+        "CONFORMANCE_JOBS"                            -> jobs.toString,
+        environmentName("EXECUTION_PARALLELISM")      -> workers.toString,
+        environmentName("NATIVE_DIRECTORY")           -> s"$nativeDirectory",
+        environmentName("EXECUTION_MAX_INSTRUCTIONS") -> sys.env.getOrElse(
+          environmentName("EXECUTION_MAX_INSTRUCTIONS"),
           conformanceMaxInstructions
         )
       )
-      val mainClass = s"$rootPackage.server.cli.GemstoneCLI"
+      val mainClass = s"$rootPackage.server.CLI"
       val classpath = (server.jvm(scala3Version) / Runtime / fullClasspath).value
         .map(entry => converter.toPath(entry.data))
       val baseForkOptions = (server.jvm(scala3Version) / Compile / run / forkOptions).value
@@ -1385,13 +1556,13 @@ lazy val conformance = project.in(file("conformance"))
         Vector("-cp", classpath.mkString(sys.props("path.separator")), mainClass)
       withGemstoneServer(
         root = root,
-        launchServer = portFile =>
-          ForkRun(serverOptions).fork(mainClass, classpath, Seq("serve", "--port-file", s"$portFile"), log),
-        shutdownServer = port =>
-          ForkRun(clientOptions).run(mainClass, classpath, Seq("shutdown", "--port", port.toString), log).isSuccess,
+        launchServer = endpointFile =>
+          ForkRun(serverOptions).fork(mainClass, classpath, Seq("serve", "--endpoint-file", s"$endpointFile"), log),
+        shutdownServer = endpoint =>
+          ForkRun(clientOptions).run(mainClass, classpath, Seq("shutdown", "--server", endpoint), log).isSuccess,
         log = log
-      ) { port =>
-        withConformanceLauncher(root, launcherCommand ++ Seq("run", "--server-port", port.toString), environment.toSeq) {
+      ) { endpoint =>
+        withConformanceLauncher(root, launcherCommand ++ Seq("run", "--server", endpoint), environment.toSeq) {
           launcher =>
             runConformance(
               root = root,
@@ -1412,6 +1583,8 @@ lazy val conformance = project.in(file("conformance"))
   )
 
 lazy val gemstone = project.in(file("."))
+  .disablePlugins(Stryker4sPlugin)
+  .aggregate(testSupport.projectRefs *)
   .aggregate(api.projectRefs *)
   .aggregate(codegenProject)
   .aggregate(core.projectRefs *)
@@ -1425,8 +1598,40 @@ lazy val gemstone = project.in(file("."))
   .dependsOn(codestyleRules % ScalafixConfig)
   .settings(
     commonSettings,
-    name             := "gemstone",
-    publish / skip   := true,
+    name           := "gemstone",
+    publish / skip := true,
+    commands ++= Coverage.commands(
+      full = "coverageJvm",
+      focused = "coverageOnly",
+      title = "Gemstone JVM",
+      entries = Seq(
+        Coverage.Entry(core.jvm(scala3Version).id),
+        Coverage.Entry(
+          amdgpu.jvm(scala3Version).id,
+          generated = Seq((amdgpu.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
+        ),
+        Coverage.Entry(
+          ptx.jvm(scala3Version).id,
+          generated = Seq((ptx.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
+        ),
+        Coverage.Entry(
+          spirv.jvm(scala3Version).id,
+          generated = Seq((spirv.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
+        ),
+        Coverage.Entry(server.jvm(scala3Version).id),
+        Coverage.Entry(
+          api.jvm(scala3Version).id,
+          tests = false,
+          generated = Seq((api.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
+        ),
+        Coverage.Entry(codegenProject.id),
+        Coverage.Entry(benchmarks.jvm(scala3Version).id),
+        Coverage.Entry(codestyleRules.id, tests = false),
+        Coverage.Entry(codestyleTests.id, measure = false)
+      ),
+      includes = Seq(s"$rootPackage.*", "fix.*"),
+      output = baseDirectory.value / "target" / "coverage"
+    ),
     terminologyCheck := Def.uncached {
       val root       = baseDirectory.value.absolute
       val prohibited = Codestyle.wordVariants("contract")
@@ -1436,21 +1641,30 @@ lazy val gemstone = project.in(file("."))
       violations.foreach(violation => streams.value.log.error(violation.render))
       require(violations.isEmpty, s"found ${violations.size} terminology violations")
     },
-    checkGeneratedSources := {
-      codegen.value
+    checkEnvironment      := (codegenProject / checkEnvironment).value,
+    checkGeneratedSources := Def.taskDyn {
       val root      = baseDirectory.value
       val apiDir    = (api.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
       val ptxDir    = (ptx.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
       val amdgpuDir = (amdgpu.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
       val spirvDir  = (spirv.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
       val nativeDir = (codegenProject / nativeBindingsDirectory).value
-      val generated = Seq(apiDir, ptxDir, amdgpuDir, spirvDir, nativeDir)
-        .map(directory => IO.relativize(root, directory.absolute).getOrElse(directory.absolute.getPath))
-      val status = Process(Seq("git", "status", "--porcelain", "--") ++ generated, root).!!
-      require(status.trim.isEmpty, s"generated sources are stale; run codegen:\n$status")
-    },
+      val generated = Seq(apiDir, ptxDir, amdgpuDir, spirvDir, nativeDir, root / "core/src/generated")
+      def snapshot(): Map[Path, String] =
+        generated.flatMap(_.walk()).map(path => path -> Fetch.sha256(path)).toMap
+      val before = snapshot()
+      Def.task {
+        codegen.value
+        val after   = snapshot()
+        val changed = (before.keySet ++ after.keySet).filter(path => before.get(path) != after.get(path))
+          .toVector.sortBy(_.toString).map(root.relativize(_))
+        require(changed.isEmpty, s"generated sources were stale; regeneration changed:\n${changed.mkString("\n")}")
+      }
+    }.value,
+
     codegen := Def.uncached {
       Def.sequential(
+        codegenProject / generateEnvironment,
         codegenProject / generateAPISources,
         codegenProject / generateNativeBindings,
         codegenProject / generateExecutionRPC,
@@ -1472,9 +1686,9 @@ lazy val gemstone = project.in(file("."))
       val baseForkOptions = (server.jvm(scala3Version) / Compile / run / forkOptions).value
       val options         = baseForkOptions
         .withWorkingDirectory(root)
-        .withEnvVars(baseForkOptions.envVars + ("GEMSTONE_NATIVE_DIRECTORY" -> s"$nativeDirectory"))
+        .withEnvVars(baseForkOptions.envVars + (environmentName("NATIVE_DIRECTORY") -> s"$nativeDirectory"))
       ForkRun(options)
-        .run(s"$rootPackage.server.cli.GemstoneCLI", classpath, "run" +: arguments, log)
+        .run(s"$rootPackage.server.CLI", classpath, "run" +: arguments, log)
         .get
     },
     // Keep standard sbt output paths; root clean also owns shared fixture and report outputs.
@@ -1483,5 +1697,5 @@ lazy val gemstone = project.in(file("."))
 
 addCommandAlias(
   "lint",
-  ";terminologyCheck;checkGeneratedSources;scalafmtCheckAll;scalafmtSbtCheck;scalafixAll --check;native/lint;conformance/lint"
+  ";terminologyCheck;checkEnvironment;checkGeneratedSources;scalafmtCheckAll;scalafmtSbtCheck;scalafixAll --check;native/lint;conformance/lint"
 )

@@ -1,32 +1,19 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-import scala.compiletime.{constValue, error}
-
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.NonEmptyVec
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.string.*
+import scala.util.Try
 import ujson.Value
 
 object GenerateSPIRVISA {
   private val MetadataChunkSize = 200
-
-  opaque type VersionByte = Int
-  object VersionByte {
-    def either(value: Int): Either[String, VersionByte] =
-      if (value >= 0 && value <= 255) Right(value) else Left(s"version component must be between 0 and 255: $value")
-    def unsafe(value: Int): VersionByte =
-      either(value).fold(message => throw IllegalArgumentException(message), identity)
-
-    inline def apply[A <: Int & Singleton](inline value: A): VersionByte =
-      inline if (constValue[A] >= 0 && constValue[A] <= 255) value else error("version byte out of range")
-    extension (value: VersionByte) def raw: Int = value
-  }
 
   private sealed trait Request
   private case class Instructions(
@@ -39,34 +26,34 @@ object GenerateSPIRVISA {
   private case class Tests(grammar: Path, tests: Path, sourceRoot: Path, packageVersion: String)
       extends Request
   private case class Operand(
-      kind: NonEmptyString,
-      name: Option[NonEmptyString],
-      quantifier: Option[NonEmptyString]
+      kind: NonEmpty[String],
+      name: Option[NonEmpty[String]],
+      quantifier: Option[NonEmpty[String]]
   )
   private case class Enumerant(
       value: Long,
-      name: NonEmptyString,
-      parameters: Vector[NonEmptyString]
+      name: NonEmpty[String],
+      parameters: Vector[NonEmpty[String]]
   )
   private case class OperandKind(
-      kind: NonEmptyString,
-      category: NonEmptyString,
+      kind: NonEmpty[String],
+      category: NonEmpty[String],
       enumerants: Vector[Enumerant]
   )
   private case class Entry(
       opcode: Int,
-      name: NonEmptyString,
-      instructionClass: NonEmptyString,
-      version: Option[NonEmptyString],
-      capabilities: Vector[NonEmptyString],
+      name: NonEmpty[String],
+      instructionClass: NonEmpty[String],
+      version: Option[NonEmpty[String]],
+      capabilities: Vector[NonEmpty[String]],
       operands: Vector[Operand]
   )
   private case class Grammar(
-      major: VersionByte,
-      minor: VersionByte,
-      revision: NonNegative[Int],
-      entries: NonEmptyVec[Entry],
-      kinds: NonEmptyVec[OperandKind]
+      major: Int where Between[0, 255],
+      minor: Int where Between[0, 255],
+      revision: Int >= 0,
+      entries: NonEmpty[Vec[Entry]],
+      kinds: NonEmpty[Vec[OperandKind]]
   )
   private case class Field(name: String, operand: Operand)
   private val PackageRoot = "net/kurobako/gemstone/isa/spirv"
@@ -100,7 +87,7 @@ object GenerateSPIRVISA {
       val extended   = readExtendedInstructions(extinstDirectory)
       val base       = sourceRoot.resolve(PackageRoot).resolve(version.raw)
       val enumerants = grammar.kinds.toVector.filter(_.enumerants.nonEmpty).map { kind =>
-        base.resolve(s"${kind.kind.raw}.scala") -> renderEnumerants(kind, version)
+        base.resolve(s"${kind.kind}.scala") -> renderEnumerants(kind, version)
       }
       syncRoot(
         sourceRoot,
@@ -131,9 +118,9 @@ object GenerateSPIRVISA {
     if (opname == "OpSpecConstantOp")
       Vector(
         Operand(
-          NonEmptyString("LiteralInteger"),
-          Some(NonEmptyString("operands")),
-          Some(NonEmptyString("*"))
+          "LiteralInteger",
+          Some("operands"),
+          Some("*")
         )
       )
     else Vector.empty
@@ -157,13 +144,12 @@ object GenerateSPIRVISA {
               optionalString(operand, "name"),
               optionalString(operand, "quantifier")
             )
-          } ++ grammarOverride(stringField(obj, "opname").raw)
+          } ++ grammarOverride(stringField(obj, "opname"))
         )
       case _ => throw IllegalArgumentException("instruction entry is not an object")
     }.sortBy(_.opcode)
-    val wrappedEntries = NonEmptyVec.fromVector(entries)
-      .fold(error => throw IllegalArgumentException(error), identity)
-    val kinds = arrayField(root, "operand_kinds").map {
+    val wrappedEntries = Vec.from(entries).unsafe[NonEmpty[Vec[Entry]]]
+    val kinds          = arrayField(root, "operand_kinds").map {
       case obj: ujson.Obj =>
         OperandKind(
           kind = stringField(obj, "kind"),
@@ -181,10 +167,10 @@ object GenerateSPIRVISA {
     Grammar(
       major = versionField(root, "major_version"),
       minor = versionField(root, "minor_version"),
-      revision = NonNegative.either(numberField(root, "revision"))
+      revision = Try(numberField(root, "revision").unsafe[Int >= 0]).toEither.left.map(_.getMessage)
         .fold(error => throw IllegalArgumentException(s"invalid grammar revision: $error"), identity),
       entries = wrappedEntries,
-      kinds = NonEmptyVec.fromVector(kinds).fold(error => throw IllegalArgumentException(error), identity)
+      kinds = Vec.from(kinds).unsafe[NonEmpty[Vec[OperandKind]]]
     )
   }
 
@@ -207,77 +193,66 @@ object GenerateSPIRVISA {
         .mkString("\n")
       s"InstructionMetadata$chunk.scala" ->
         (GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
-          s"""|package net.kurobako.gemstone.isa.spirv.${packageVersion.raw}
+          s"""|package net.kurobako.gemstone.isa.spirv.$packageVersion
               |
-              |import net.kurobako.gemstone.Constraint.NonEmptyString
-              |import net.kurobako.gemstone.Vec
+              |import net.kurobako.gemstone.constraint.*
+              |import net.kurobako.gemstone.collection.*
               |
               |${GeneratedHeader.annotation()}object InstructionMetadata$chunk {
               |$body
               |}
               |""".stripMargin)
-    }.toMap
+    }
     val kindValues =
-      grammar.kinds.toVector.filter(kind => kind.category.raw == "ValueEnum" || kind.category.raw == "BitEnum")
+      grammar.kinds.toVector.filter(kind => kind.category == "ValueEnum" || kind.category == "BitEnum")
         .map(renderKind(_))
     val kindChunks = kindValues.grouped(8).zipWithIndex.map { case (values, index) =>
       s"  private def operandKinds$index: Vec[OperandKindInfo] = Vec(\n${values.mkString(",\n")}\n  )"
     }.toVector
     val kindExpression = kindChunks.indices.map(index => s"operandKinds$index").mkString("Vec(", ", ", ").flatten")
     val instruction    = GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
-      s"""|package net.kurobako.gemstone.isa.spirv.${packageVersion.raw}
+      s"""|package net.kurobako.gemstone.isa.spirv.$packageVersion
         |
-        |import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-        |import net.kurobako.gemstone.Constraint.NonEmptyString
-        |import net.kurobako.gemstone.NonEmptyVec
-        |import net.kurobako.gemstone.Vec
-        |import net.kurobako.gemstone.Vec.*
-        |import net.kurobako.gemstone.isa.spirv.${packageVersion.raw}.OperandDecoder.DecodedOperands
-        |
-        |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
-        |${cases.mkString("\n")}
-        |
-        |  final val operands: Vec[Operand] = operandValues.toVec
-        |  final def opcode: NonEmptyString = definition.opcode
-        |  final def opcodeNumber: SPIRVOpcodeNumber = definition.opcodeNumber
-        |  final def decoder: Instruction.Decoder = definition.decoder
-        |  final def meta: Metadata = definition.meta
-        |}
+        |import net.kurobako.gemstone.constraint.*
+        |import net.kurobako.gemstone.isa.*
+        |import net.kurobako.gemstone.collection.*
+        |import net.kurobako.gemstone.collection.Vec.*
+        |import net.kurobako.gemstone.isa.spirv.$packageVersion.OperandDecoder.*
         |
         |${GeneratedHeader.annotation()}object Instruction {
         |  type Decoder = RawInstruction => Either[InstructionDecodeError, Instruction]
         |
         |  enum Definition(
-        |      val opcode: NonEmptyString,
+        |      val opcode: NonEmpty[java.lang.String],
         |      val opcodeNumber: SPIRVOpcodeNumber,
         |      decode: Definition => Decoder,
         |      val meta: Metadata
         |  ) {
         |${definitions.mkString("\n")}
         |
-        |    final lazy val decoder: Decoder = decode(this)
+        |    lazy val decoder: Decoder = decode(this)
         |  }
         |
-        |  val version: SPIRVVersion = SPIRVVersion(
-        |    Positive.unsafe(${grammar.major}),
-        |    NonNegative.unsafe(${grammar.minor})
+        |  val version: Version = Version(
+        |    ${grammar.major},
+        |    ${grammar.minor}
         |  )
-        |  val grammarRevision: NonNegative[Int] = NonNegative.unsafe(${grammar.revision})
+        |  val grammarRevision: Int >= 0 = ${grammar.revision}
         |  val definitions: Vec[Definition] = Definition.values.toVec
         |
         |${kindChunks.mkString("\n\n")}
         |
-        |  private val operandKinds: Map[NonEmptyString, OperandKindInfo] =
+        |  private val operandKinds: Map[NonEmpty[java.lang.String], OperandKindInfo] =
         |    $kindExpression.view.map(value => value.kind -> value).toMap
         |
         |  private val byNumber: Map[SPIRVOpcodeNumber, Vec[Definition]] =
         |    definitions.groupMap(_.opcodeNumber)(value => value)
-        |  private val byOpcode: Map[NonEmptyString, Vec[Definition]] =
+        |  private val byOpcode: Map[NonEmpty[java.lang.String], Vec[Definition]] =
         |    definitions.groupMap(_.opcode)(value => value)
         |
         |  def definitionsFor(opcodeNumber: SPIRVOpcodeNumber): Vec[Definition] =
         |    byNumber.getOrElse(opcodeNumber, Vec.empty[Definition])
-        |  def definitionsFor(opcode: NonEmptyString): Vec[Definition] =
+        |  def definitionsFor(opcode: NonEmpty[java.lang.String]): Vec[Definition] =
         |    byOpcode.getOrElse(opcode, Vec.empty[Definition])
         |
         |  def decode(raw: RawInstruction): Either[InstructionDecodeError, Instruction] = {
@@ -294,24 +269,24 @@ object GenerateSPIRVISA {
         |          case Vec() =>
         |            Left(InstructionDecodeError.NoMatchingDefinition(
         |              raw.opcodeNumber,
-        |              NonEmptyVec.unsafeFromVec(definitions.map(_.opcode))
+        |              (definitions.map(_.opcode)).unsafe
         |            ))
         |          case values =>
         |            Left(InstructionDecodeError.AmbiguousDefinition(
         |              raw.opcodeNumber,
-        |              NonEmptyVec.unsafeFromVec(values.map(_._1.opcode))
+        |              (values.map(_._1.opcode)).unsafe
         |            ))
         |        }
         |    }
         |  }
         |
         |  def encode(instruction: Instruction): RawInstruction =
-        |    RawInstruction(instruction.definition.opcodeNumber, instruction.operands.flatMap(_.words.toVector))
+        |    RawInstruction(instruction.definition.opcodeNumber, instruction.operands.flatMap(_.words))
         |
         |  def minimumOperandWords(definition: Definition): Vec[Word] =
         |    OperandDecoder.minimumWords(definition.meta.operands, operandKinds)
         |
-        |  private[${packageVersion.raw}] def decodeDefinition(
+        |  private def decodeDefinition(
         |      definition: Definition,
         |      raw: RawInstruction,
         |      construct: DecodedOperands => Instruction
@@ -323,25 +298,36 @@ object GenerateSPIRVISA {
         |        .decode(definition, raw.operandWords, definition.meta.operands, operandKinds)
         |        .map(construct)
         |}
+        |
+        |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
+        |${cases.mkString("\n")}
+        |
+        |  val operands: Vec[Operand] = operandValues.toVec
+        |  final def opcode: NonEmpty[java.lang.String] = definition.opcode
+        |  final def opcodeNumber: SPIRVOpcodeNumber = definition.opcodeNumber
+        |  final def decoder: Instruction.Decoder = definition.decoder
+        |  final def meta: Metadata = definition.meta
+        |}
+        |
         |""".stripMargin
     Map("Instruction.scala" -> instruction) ++ metadataFiles
   }
 
   private def renderDefinition(entry: Entry, fields: Vector[Field], metadataRef: String): String = {
-    val caseName  = normalizeCase(entry.name.raw.stripPrefix("Op"))
+    val caseName  = normalizeCase(entry.name.stripPrefix("Op"))
     val parameter = if (fields.isEmpty) "_" else "values"
     val decoder   =
       s"definition => raw => Instruction.decodeDefinition(definition, raw, $parameter => ${construct(entry, fields)})"
-    s"    case $caseName extends Definition(NonEmptyString(\"${escape(entry.name.raw)}\"), " +
+    s"    case $caseName extends Definition(\"${escape(entry.name)}\", " +
       s"SPIRVOpcodeNumber(${entry.opcode}), $decoder, $metadataRef)"
   }
 
   private def renderCase(entry: Entry, fields: Vector[Field]): String = {
-    val caseName = normalizeCase(entry.name.raw.stripPrefix("Op"))
+    val caseName = normalizeCase(entry.name.stripPrefix("Op"))
     if (fields.isEmpty) s"  case $caseName() extends Instruction(Instruction.Definition.$caseName)"
     else {
       val parameters = fields.map { field =>
-        field.operand.quantifier.map(_.raw) match {
+        field.operand.quantifier match {
           case Some("?") => s"${field.name}: Option[Operand]"
           case Some("*") => s"${field.name}: Vec[Operand]"
           case _         => s"${field.name}: Operand"
@@ -355,7 +341,7 @@ object GenerateSPIRVISA {
           if (required.isEmpty) parts else parts :+ required.mkString("Vec(", ", ", ")")
         val (parts, required) = fields.foldLeft((Vector.empty[String], Vector.empty[String])) {
           case ((parts, required), field) =>
-            field.operand.quantifier.map(_.raw) match {
+            field.operand.quantifier match {
               case Some("?") =>
                 (flush(parts, required) :+ s"${field.name}.toVec", Vector.empty)
               case Some("*") =>
@@ -370,32 +356,32 @@ object GenerateSPIRVISA {
   }
 
   private def renderMetadata(entry: Entry, fields: Vector[Field]): String = {
-    val since        = entry.version.map(value => s"Some(${trustedText(value.raw)})").getOrElse("None")
-    val capabilities = entry.capabilities.map(value => trustedText(value.raw)).mkString("Vec(", ", ", ")")
+    val since        = entry.version.map(value => s"Some(${trustedText(value)})").getOrElse("None")
+    val capabilities = entry.capabilities.map(value => trustedText(value)).mkString("Vec(", ", ", ")")
     val operands     = fields.map { field =>
-      val quantifier = field.operand.quantifier.map(_.raw) match {
+      val quantifier = field.operand.quantifier match {
         case Some("?") => "OperandQuantifier.Optional"
         case Some("*") => "OperandQuantifier.Repeated"
         case _         => "OperandQuantifier.One"
       }
-      s"OperandShape(NonEmptyString(\"${escape(field.operand.kind.raw)}\"), ${trustedText(field.name)}, $quantifier)"
+      s"OperandShape(\"${escape(field.operand.kind)}\", ${trustedText(field.name)}, $quantifier)"
     }.mkString("Vec(", ", ", ")")
-    s"Metadata(${trustedText(entry.instructionClass.raw)}, $since, $capabilities, $operands)"
+    s"Metadata(${trustedText(entry.instructionClass)}, $since, $capabilities, $operands)"
   }
 
   private def renderKind(kind: OperandKind): String = {
     val enumerants = kind.enumerants.map { enumerant =>
-      val parameters = enumerant.parameters.map(value => s"NonEmptyString(\"${escape(value.raw)}\")")
+      val parameters = enumerant.parameters.map(value => s"\"${escape(value)}\"")
         .mkString("Vec(", ", ", ")")
       s"OperandEnumerant(${enumerant.value}L, $parameters)"
     }.mkString("Vec(", ", ", ")")
-    s"    OperandKindInfo(NonEmptyString(\"${escape(kind.kind.raw)}\"), ${trustedText(kind.category.raw)}, $enumerants)"
+    s"    OperandKindInfo(\"${escape(kind.kind)}\", ${trustedText(kind.category)}, $enumerants)"
   }
 
   private def construct(entry: Entry, fields: Vector[Field]): String = {
-    val caseName  = normalizeCase(entry.name.raw.stripPrefix("Op"))
+    val caseName  = normalizeCase(entry.name.stripPrefix("Op"))
     val arguments = fields.zipWithIndex.map { case (field, index) =>
-      field.operand.quantifier.map(_.raw) match {
+      field.operand.quantifier match {
         case Some("?") => s"values.optional($index)"
         case Some("*") => s"values.repeated($index)"
         case _         => s"values.required($index)"
@@ -407,25 +393,25 @@ object GenerateSPIRVISA {
 
   private def fields(entry: Entry): Vector[Field] = {
     val generic = entry.operands.zipWithIndex.collect {
-      case (operand, index) if operand.name.exists(_.raw.toLowerCase(java.util.Locale.ROOT).startsWith("operand")) =>
+      case (operand, index) if operand.name.exists(_.toLowerCaseRoot.startsWith("operand")) =>
         index
     }
     val bases = entry.operands.zipWithIndex.map { case (operand, index) =>
       val name =
-        if (operand.kind.raw == "IdResultType") "resultType"
-        else if (operand.kind.raw == "IdResult") "dest"
-        else if (operand.kind.raw == "MemoryAccess" || operand.kind.raw == "ImageOperands") "mods"
-        else operand.name.map(_.raw.toLowerCase(java.util.Locale.ROOT)) match {
+        if (operand.kind == "IdResultType") "resultType"
+        else if (operand.kind == "IdResult") "dest"
+        else if (operand.kind == "MemoryAccess" || operand.kind == "ImageOperands") "mods"
+        else operand.name.map(_.toLowerCaseRoot) match {
           case Some("condition")                          => "pred"
           case Some("predicate")                          => "pred"
           case Some("memory access")                      => "mods"
           case Some("image operands")                     => "mods"
           case Some("object")                             => "src"
           case Some(value) if value.startsWith("operand") =>
-            if (operand.quantifier.exists(_.raw == "*")) "srcs"
+            if (operand.quantifier.contains("*")) "srcs"
             else if (generic.size == 1) "src"
             else s"src${letter(generic.indexOf(index))}"
-          case _ => normalizeField(operand.name.map(_.raw).getOrElse(operand.kind.raw))
+          case _ => normalizeField(operand.name.getOrElse(operand.kind))
         }
       name
     }
@@ -482,18 +468,17 @@ object GenerateSPIRVISA {
       upstream: Vector[(String, Vector[String])],
       packageVersion: ScalaPackageVersion
   ): String = {
-    val sourceRows = upstream.map { case (file, names) => s"    \"${escape(file)}\" -> ${names.size}" }.mkString(",\n")
+    val provenance = upstream.map { case (file, names) =>
+      s"// Reference inventory: $file (${names.size} upstream test declarations; not a coverage claim)."
+    }.mkString("\n")
     GeneratedHeader.scala("from pinned Khronos grammar and SPIRV-Tools tests") +
-      s"""        |package net.kurobako.gemstone.isa.spirv.${packageVersion.raw}
+      s"""        |package net.kurobako.gemstone.isa.spirv.$packageVersion
         |
-        |import net.kurobako.gemstone.Constraint.NonEmptyString
-        |import net.kurobako.gemstone.Vec
+        |import net.kurobako.gemstone.constraint.*
+        |import net.kurobako.gemstone.collection.*
         |
-        |${GeneratedHeader.annotation()}final class ReferenceSuite extends munit.FunSuite {
-        |  private val upstreamTestCounts: Map[String, Int] = Map(
-        |$sourceRows
-        |  )
-        |
+        |$provenance
+        |${GeneratedHeader.annotation()}class ReferenceSuite extends munit.FunSuite {
         |  private def same(left: RawInstruction, right: RawInstruction): Boolean =
         |    left.opcodeNumber == right.opcodeNumber && left.operandWords.sameElements(right.operandWords)
         |
@@ -521,15 +506,15 @@ object GenerateSPIRVISA {
         |    }
         |  }
         |
-        |  test("SPIRV-Tools endian oracle is represented") {
-        |    assert(upstreamTestCounts("binary_endianness_test.cpp") > 0)
+        |  test("big-endian headers match fixed wire bytes") {
         |    val module = RawModule(Header(ISA.version, Word(7), Word(2), Word(0)), Vec.empty, Endianness.Big)
         |    val bytes = Binary.encode(module).fold(error => fail(error.message), value => value)
-        |    assert(Binary.decode(bytes).exists(same(_, module)))
+        |    val expected = Vec[Byte](7, 35, 2, 3, 0, 1, 6, 0, 0, 0, 0, 7, 0, 0, 0, 2, 0, 0, 0, 0)
+        |    assertEquals(bytes, expected)
+        |    assert(Binary.decode(expected).exists(same(_, module)))
         |  }
         |
-        |  test("SPIRV-Tools parser negative classes are fail-closed") {
-        |    assert(upstreamTestCounts("binary_parse_test.cpp") >= 20)
+        |  test("malformed binary headers and instruction lengths are rejected") {
         |    val malformed = Vec(
         |      Vec[Byte](1, 2, 3),
         |      words(0x07230203, 0x00010600, 0, 1),
@@ -552,23 +537,19 @@ object GenerateSPIRVISA {
         |  test("known opcodes with malformed grammar operands fail typed decode") {
         |    Instruction.decode(RawInstruction(SPIRVOpcodeNumber(17), Vec.empty)) match {
         |      case Left(InstructionDecodeError.InvalidOperandCount(opcode, _))
-        |          if opcode == NonEmptyString("OpCapability") => ()
+        |          if opcode == "OpCapability" => ()
         |      case other => fail(s"expected missing-operand failure, found $$other")
         |    }
         |    Instruction.decode(RawInstruction(SPIRVOpcodeNumber(17), Vec(Word(-1)))) match {
         |      case Left(InstructionDecodeError.InvalidEnumerant(kind, 0xffffffffL))
-        |          if kind == NonEmptyString("Capability") => ()
+        |          if kind == "Capability" => ()
         |      case other => fail(s"expected invalid-enumerant failure, found $$other")
         |    }
         |    Instruction.decode(RawInstruction(SPIRVOpcodeNumber(5), Vec(Word(1), Word(-1)))) match {
         |      case Left(InstructionDecodeError.UnterminatedString(opcode))
-        |          if opcode == NonEmptyString("OpName") => ()
+        |          if opcode == "OpName" => ()
         |      case other => fail(s"expected unterminated-string failure, found $$other")
         |    }
-        |  }
-        |
-        |  test("SPIRV-Tools OpenCL validation corpus is tracked") {
-        |    assert(upstreamTestCounts("val/val_opencl_test.cpp") >= 10)
         |  }
         |
         |  private def words(values: Int*): Vec[Byte] = Vec.from(values).flatMap { value =>
@@ -596,7 +577,7 @@ object GenerateSPIRVISA {
   private def optionalStringArray(
       obj: ujson.Obj,
       name: String
-  ): Vector[NonEmptyString] = obj.value.get(name).toVector
+  ): Vector[NonEmpty[String]] = obj.value.get(name).toVector
     .flatMap {
       case ujson.Arr(values) => values.toVector.map {
           case ujson.Str(value) => nonEmpty(value, s"JSON field $name")
@@ -604,14 +585,14 @@ object GenerateSPIRVISA {
         }
       case _ => throw IllegalArgumentException(s"JSON field $name is not an array")
     }
-  private def stringField(obj: ujson.Obj, name: String): NonEmptyString = field(obj, name) match {
+  private def stringField(obj: ujson.Obj, name: String): NonEmpty[String] = field(obj, name) match {
     case ujson.Str(value) => nonEmpty(value, s"JSON field $name")
     case _                => throw IllegalArgumentException(s"JSON field $name is not a string")
   }
   private def optionalString(
       obj: ujson.Obj,
       name: String
-  ): Option[NonEmptyString] = obj.value.get(name).map {
+  ): Option[NonEmpty[String]] = obj.value.get(name).map {
     case ujson.Str(value) => nonEmpty(value, s"JSON field $name")
     case _                => throw IllegalArgumentException(s"JSON field $name is not a string")
   }
@@ -625,14 +606,14 @@ object GenerateSPIRVISA {
     else throw IllegalArgumentException(s"JSON field $name must be between 0 and 65535: $value")
   }
 
-  private def versionField(obj: ujson.Obj, name: String): VersionByte =
-    VersionByte.either(numberField(obj, name))
+  private def versionField(obj: ujson.Obj, name: String): Int where Between[0, 255] =
+    scala.util.Try(numberField(obj, name).unsafe[Int where Between[0, 255]]).toEither.left.map(_.getMessage)
       .fold(error => throw IllegalArgumentException(s"invalid JSON field $name: $error"), identity)
 
-  private def nonEmpty(value: String, description: String): NonEmptyString =
-    NonEmptyString.either(value)
+  private def nonEmpty(value: String, description: String): NonEmpty[String] =
+    value.refine[NonEmpty[String]]
       .fold(
-        error => throw IllegalArgumentException(s"$description must be non-empty and contain no NUL: $error"),
+        error => throw IllegalArgumentException(s"$description must be non-empty: $error"),
         identity
       )
   private def parseUnsigned(value: Value): Long = value match {
@@ -663,7 +644,7 @@ object GenerateSPIRVISA {
       }
       val instructions = arrayField(root, "instructions").map {
         case obj: ujson.Obj =>
-          val opname: String = stringField(obj, "opname").raw
+          val opname: String = stringField(obj, "opname")
           val opcode: Int    = opcodeField(obj, "opcode")
           opname -> opcode
         case _ => throw IllegalArgumentException(s"$file instruction entry is not an object")
@@ -685,7 +666,7 @@ object GenerateSPIRVISA {
   ): String = {
     val objects = sets.map { set =>
       val values = set.instructions.map { case (name, opcode) =>
-        val safe = if (ScalaKeywords(name)) s"`$name`" else name
+        val safe = Identifiers.upperCamel(name, "Value", "Value")
         s"    final val $safe = $opcode"
       }.mkString("\n")
       s"""|  /** ${escape(set.name)} */
@@ -694,7 +675,7 @@ object GenerateSPIRVISA {
           |  }""".stripMargin
     }.mkString("\n\n")
     GeneratedHeader.scala("from the pinned Khronos SPIR-V extended instruction grammars") +
-      s"""|package net.kurobako.gemstone.isa.spirv.${packageVersion.raw}
+      s"""|package net.kurobako.gemstone.isa.spirv.$packageVersion
           |
           |${GeneratedHeader.annotation()}object ExtendedInstruction {
           |$objects
@@ -703,18 +684,15 @@ object GenerateSPIRVISA {
   }
 
   private def renderEnumerants(kind: OperandKind, packageVersion: ScalaPackageVersion): String = {
-    val raw        = kind.kind.raw
+    val raw        = kind.kind
     val objectName = if (ScalaKeywords(raw)) s"`$raw`" else raw
     val values     = kind.enumerants.map { enumerant =>
-      val name: String = enumerant.name.raw
-      val safe         =
-        if (ScalaKeywords(name) || !name.headOption.exists(character => character.isLetter || character == '_'))
-          s"`$name`"
-        else name
+      val name: String = enumerant.name
+      val safe         = Identifiers.upperCamel(name, "Value", "Value")
       s"    final val $safe: Int = ${enumerant.value}"
     }.mkString("\n")
     GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
-      s"""|package net.kurobako.gemstone.isa.spirv.${packageVersion.raw}
+      s"""|package net.kurobako.gemstone.isa.spirv.$packageVersion
           |
           |${GeneratedHeader.annotation()}object $objectName {
           |$values

@@ -1,33 +1,10 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.Constraint.NonEmpty
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.NonEmptyVec
-import net.kurobako.gemstone.Vec
-
-case class Program(statements: Vec[Program.Statement]) extends net.kurobako.gemstone.isa.Program
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.ptx.v9_3.Instruction as PTXInstruction
 
 object Program {
-
-  /** Lossless syntax used by generated, opcode-specific [[Instruction]] cases. */
-  enum Operand {
-    case Immediate(raw: NonEmpty[String])
-    case Register(name: NonEmptyString, part: Option[NonEmptyString])
-    case Symbol(name: NonEmptyString)
-    case StringLiteral(rawContents: String)
-    case Qualifier(path: NonEmptyVec[NonEmptyString])
-    case VectorLiteral(items: Vec[Operand])
-    case Parenthesized(items: Vec[Operand])
-    case Address(items: Vec[Operand])
-    case Qualified(base: Operand, qualifier: NonEmptyString)
-    case Index(base: Operand, index: Operand)
-    case Add(left: Operand, right: Operand)
-    case Subtract(left: Operand, right: Operand)
-    case WithPredicate(base: Operand, predicate: Operand)
-    case Negate(operand: Operand)
-  }
 
   object Operand {
     def isAddress(operand: Operand): Boolean = operand match {
@@ -51,9 +28,27 @@ object Program {
     }
   }
 
+  /** Lossless syntax used by generated, opcode-specific [[Instruction]] cases. */
+  enum Operand {
+    case Immediate(raw: NonEmpty[String])
+    case Register(name: NonEmpty[String], part: Option[NonEmpty[String]])
+    case Symbol(name: NonEmpty[String])
+    case StringLiteral(rawContents: String)
+    case Qualifier(path: NonEmpty[Vec[NonEmpty[String]]])
+    case VectorLiteral(items: Vec[Operand])
+    case Parenthesized(items: Vec[Operand])
+    case Address(items: Vec[Operand])
+    case Qualified(base: Operand, qualifier: NonEmpty[String])
+    case Index(base: Operand, index: Operand)
+    case Add(left: Operand, right: Operand)
+    case Subtract(left: Operand, right: Operand)
+    case WithPredicate(base: Operand, predicate: Operand)
+    case Negate(operand: Operand)
+  }
+
   case class Predication(negated: Boolean, operand: Operand)
 
-  case class Modifier(name: NonEmptyString)
+  case class Modifier(name: NonEmpty[String])
 
   enum DirectiveSeparator {
     case Space
@@ -73,7 +68,7 @@ object Program {
     case Shared extends DataAddressSpace("shared")
   }
 
-  enum DataType(val mnemonic: String, val widthBits: Positive[Int], val kind: Char) {
+  enum DataType(val mnemonic: String, val widthBits: Int > 0, val kind: Char) {
     case B8   extends DataType("b8", 8, 'b')
     case B16  extends DataType("b16", 16, 'b')
     case B32  extends DataType("b32", 32, 'b')
@@ -93,49 +88,49 @@ object Program {
   }
 
   enum DeclarationQualifier {
-    case Alignment(bytes: Positive[Int])
-    case Attribute(name: NonEmptyString)
+    case Alignment(bytes: Int > 0)
+    case Attribute(name: NonEmpty[String])
     case Value(value: NonEmpty[String])
   }
 
   case class Parameter(
       qualifiers: Vec[DeclarationQualifier],
       elementType: DataType,
-      name: NonEmptyString,
+      name: NonEmpty[String],
       dimensions: Vec[Operand]
   )
 
   enum Statement {
-    case Label(name: NonEmptyString)
+    case Label(name: NonEmpty[String])
     case Data(
         addressSpace: DataAddressSpace,
         qualifiers: Vec[DeclarationQualifier],
         elementType: DataType,
-        name: NonEmptyString,
-        count: Option[Positive[Int]],
+        name: NonEmpty[String],
+        count: Option[Int > 0],
         initializer: Vec[Operand]
     )
     case Directive(
-        path: NonEmptyVec[NonEmptyString],
+        path: NonEmpty[Vec[NonEmpty[String]]],
         arguments: Vec[DirectiveArgument],
         terminator: DirectiveTerminator
     )
-    case Instruction(value: net.kurobako.gemstone.isa.ptx.v9_3.Instruction)
+    case Instruction(value: PTXInstruction)
 
     /** Parsed instruction whose opcode is valid PTX syntax but is outside the currently implemented semantic subset. It
       * remains in the syntax tree so libraries can be loaded and inspected; lowering reports it when executed.
       */
     case UnsupportedInstruction(
-        opcode: NonEmptyString,
+        opcode: NonEmpty[String],
         operands: Vec[Operand],
         mods: Vec[Modifier],
         pred: Option[Predication]
     )
     case Block(body: Vec[Statement])
-    case Entry(visible: Boolean, name: NonEmptyString, parameters: Vec[Parameter], body: Vec[Statement])
+    case Entry(visible: Boolean, name: NonEmpty[String], parameters: Vec[Parameter], body: Vec[Statement])
     case Function(
         visible: Boolean,
-        name: NonEmptyString,
+        name: NonEmpty[String],
         returnParameters: Vec[Parameter],
         parameters: Vec[Parameter],
         body: Option[Vec[Statement]]
@@ -143,12 +138,12 @@ object Program {
   }
 
   case class ParseError(
-      offset: NonNegative[Int],
-      line: Positive[Int],
-      column: Positive[Int],
+      offset: Int >= 0,
+      line: Int > 0,
+      column: Int > 0,
       expected: Vec[String]
-  ) extends net.kurobako.gemstone.isa.DecodeError {
-    def message: String = {
+  ) {
+    def message: NonEmpty[String] = {
       val expectation = if (expected.isEmpty) "valid PTX syntax" else expected.mkString("; ")
       s"$line:$column (offset $offset): expected $expectation"
     }
@@ -157,3 +152,5 @@ object Program {
   }
 
 }
+
+case class Program(statements: Vec[Program.Statement])

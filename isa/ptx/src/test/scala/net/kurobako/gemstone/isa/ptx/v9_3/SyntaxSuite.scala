@@ -1,17 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.NonEmptyVec
-
 import Program.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 
-import ISA.*
-
-import net.kurobako.gemstone.Vec
-
-final class SyntaxSuite extends munit.FunSuite {
+class SyntaxSuite extends munit.FunSuite {
   test("empty line comments are valid trivia") {
     assert(Parser.parse("//\n.version 9.2;").isRight)
   }
@@ -67,8 +61,8 @@ final class SyntaxSuite extends munit.FunSuite {
             instruction @ Instruction.LdGlobalNc(destination, address, None, modifiers, Some(predicate))
           ) =>
         assertEquals(predicate.negated, false)
-        assertEquals(instruction.opcode.raw, "ld.global.nc")
-        assertEquals(modifiers.map(_.name.raw).toSeq, Seq("L1::evict_last", "v2", "f64"))
+        assertEquals(instruction.opcode, "ld.global.nc")
+        assertEquals(modifiers.map(_.name), Seq("L1::evict_last", "v2", "f64"))
         assert(Operand.isVectorLiteral(destination))
         assert(Operand.isAddress(address))
       case other => fail(s"unexpected statement: $other")
@@ -81,7 +75,7 @@ final class SyntaxSuite extends munit.FunSuite {
     )
     parsed match {
       case Statement.Instruction(instruction) =>
-        assert(instruction.mods.exists(_.name.raw == "collector::b2::use"))
+        assert(instruction.mods.exists(_.name == "collector::b2::use"))
         assert(Printer.render(Program(Vec(parsed))).contains("collector::b2::use"))
       case other => fail(s"unexpected statement: $other")
     }
@@ -117,9 +111,9 @@ final class SyntaxSuite extends munit.FunSuite {
     }
     assertEquals(statements.statements.size, 4)
     statements.statements.last match {
-      case Statement.Entry(true, name, parameters, body) if name.raw == "kernel" =>
-        assertEquals(parameters.map(_.name.raw).toSeq, Seq("pointer"))
-        assert(body.contains(Statement.Label(NonEmptyString("again"))))
+      case Statement.Entry(true, name, parameters, body) if name == "kernel" =>
+        assertEquals(parameters.map(_.name), Seq("pointer"))
+        assert(body.contains(Statement.Label("again")))
         assertEquals(body.collect { case _: Statement.Instruction => 1 }.sum, 2)
       case other => fail(s"unexpected statement: $other")
     }
@@ -153,8 +147,8 @@ final class SyntaxSuite extends munit.FunSuite {
   test("data declarations retain structured storage, type, extent, and initializer") {
     statement(".global .align 4 .b8 table[4] = {65, 144, 67, 60};") match {
       case Statement.Data(DataAddressSpace.Global, qualifiers, DataType.B8, name, Some(count), initializer)
-          if name == NonEmptyString("table") && count.raw == 4 =>
-        assertEquals(qualifiers.toSeq, Seq(DeclarationQualifier.Alignment(4)))
+          if name == "table" && count.raw == 4 =>
+        assertEquals(qualifiers, Seq(DeclarationQualifier.Alignment(4)))
         assertEquals(initializer.size, 4)
       case other => fail(s"unexpected declaration: $other")
     }
@@ -163,11 +157,11 @@ final class SyntaxSuite extends munit.FunSuite {
   test("unsized external shared declarations retain structured storage") {
     statement(".extern .shared .align 16 .b8 shmem[];") match {
       case Statement.Data(DataAddressSpace.Shared, qualifiers, DataType.B8, name, None, initializer)
-          if name == NonEmptyString("shmem") =>
+          if name == "shmem" =>
         assertEquals(
-          qualifiers.toSeq,
+          qualifiers,
           Seq(
-            DeclarationQualifier.Attribute(NonEmptyString("extern")),
+            DeclarationQualifier.Attribute("extern"),
             DeclarationQualifier.Alignment(16)
           )
         )

@@ -1,11 +1,10 @@
 package fix
 
 import scala.meta.*
-
 import scalafix.v1.*
 
 /** Repository-wide JVM API policy, matched by resolved symbols rather than source spellings. */
-final class GemstoneForbiddenAPIs extends SemanticRule("GemstoneForbiddenAPIs") {
+class GemstoneForbiddenAPIs extends SemanticRule("GemstoneForbiddenAPIs") {
   private val bannedClasses = Map(
     "java/lang/System#"     -> "use Scala APIs or a narrow platform abstraction instead of java.lang.System",
     "java/lang/Runtime#"    -> "use scala.sys.runtime instead of java.lang.Runtime",

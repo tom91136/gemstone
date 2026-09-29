@@ -1,28 +1,26 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import EncodingConstants.*
-import Metadata.*
+import scala.util.Try
+import upickle.default.read
 
-final class MetadataSuite extends munit.FunSuite {
-  test("generate normalized ACO and official XML instruction metadata") {
-    assert(MesaACORecordCount >= 3500)
-    assert(AMDXMLRecordCount >= 40000)
-    assert(MetadataRecordCount >= 43000)
-    assertEquals(allEncodings.size, MetadataRecordCount)
-
-    val definition = Instruction.Definition.forOpcode("v_add_f32").head
-    val old        = encodingsFor(definition, Family.GFX6)
-    assert(old.exists(info => info.source == MetadataSource.MesaACO && info.format.raw == "VOP2"))
-
-    val current = encodingsFor(definition, Family.GFX11)
-    assert(current.exists(info => info.source == MetadataSource.AMDXML && info.operands.nonEmpty))
+class MetadataSuite extends munit.FunSuite {
+  test("catalogue decoding validates interned strings at the JSON boundary") {
+    def catalogue(text: String): ujson.Value = ujson.Obj(
+      "strings"   -> ujson.Arr(text),
+      "schemas"   -> ujson.Arr(),
+      "encodings" -> ujson.Arr(),
+      "metadata"  -> ujson.Arr()
+    )
+    assertEquals(read[Metadata.Catalogue](catalogue("VOP2")).strings, Vector("VOP2"))
+    assert(Try(read[Metadata.Catalogue](catalogue(""))).isFailure)
+    assertEquals(read[Metadata.Catalogue](catalogue("VO\u0000P2")).strings, Vector("VO\u0000P2"))
   }
 
   test("every instruction definition exposes metadata, an opcode lookup, and decoder forms") {
     Instruction.definitions.foreach { definition =>
       assert(definition.meta.encodings.nonEmpty, definition.toString)
-      assertEquals(Instruction.Definition.forOpcode(definition.opcode.raw).contains(definition), true)
-      assert(definition.decoder.operandCounts.nonEmpty)
+      assertEquals(Instruction.Definition.forOpcode(definition.opcode).contains(definition), true)
+      assert(definition.operandCounts.nonEmpty)
     }
   }
 }

@@ -2,6 +2,6 @@ package fix
 
 import scalafix.testkit.AbstractSemanticRuleSuite
 
-final class RuleSuite extends AbstractSemanticRuleSuite {
+class RuleSuite extends AbstractSemanticRuleSuite {
   runAllTests()
 }

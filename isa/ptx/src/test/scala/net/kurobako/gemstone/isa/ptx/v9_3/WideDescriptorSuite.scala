@@ -1,24 +1,16 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.NonEmptyVec
-
-import Program.*
-
 import VMIR.*
-
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.vm.LaunchGeometry
-import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
-
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 
-final class WideDescriptorSuite extends munit.FunSuite {
+class WideDescriptorSuite extends munit.FunSuite {
   private val values = (0 until 4096).map { index =>
     val x = (index * 17 + 11) % 23 - 11; x * x
   }
@@ -36,11 +28,11 @@ final class WideDescriptorSuite extends munit.FunSuite {
 
   // Interleaving controls and observations are confined to this final test fixture.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private final class DescriptorMemory extends AddressMemory {
-    val backing                                  = ArrayCheckedMemory.allocate(64, GuestAddress(0x10000000000L))
+  private class DescriptorMemory extends AddressMemory {
+    val backing: ArrayCheckedMemory              = ArrayCheckedMemory.allocate(64, GuestAddress(0x10000000000L))
     val base                                     = backing.allocation.start
     var transition                               = false
-    val observed                                 = mutable.ArrayBuffer.empty[(Long, Double)]
+    val observed: ArrayBuffer[(Long, Double)]    = mutable.ArrayBuffer.empty[(Long, Double)]
     def set(status: Long, payload: Double): Unit = {
       backing.writeLittleEndian(base, status, 8).toOption.get
       backing.writeLittleEndian(base.offset(8), bits(payload), 8).toOption.get
@@ -55,21 +47,27 @@ final class WideDescriptorSuite extends munit.FunSuite {
           backing.readLittleEndian(base.offset(8), 8).toOption.get
         )
     )
-    override def readInt8(address: GuestAddress)                                 = backing.readInt8(address)
-    override def readInt32(address: GuestAddress)                                = backing.readInt32(address)
-    override def writeInt8(address: GuestAddress, value: Byte)                   = backing.writeInt8(address, value)
-    override def writeInt32(address: GuestAddress, value: Int)                   = backing.writeInt32(address, value)
-    override def readLittleEndian(address: GuestAddress, size: IntBetween[1, 8]) = {
+    override def readInt8(address: GuestAddress): Either[MemoryError, Byte]               = backing.readInt8(address)
+    override def readInt32(address: GuestAddress): Either[MemoryError, Int]               = backing.readInt32(address)
+    override def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit] =
+      backing.writeInt8(address, value)
+    override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
+      backing.writeInt32(address, value)
+    override def readLittleEndian(address: GuestAddress, size: Int where Between[1, 8]): Either[MemoryError, Long] = {
       val result = backing.readLittleEndian(address, size)
       afterRead(address)
       result
     }
-    override def writeLittleEndian(address: GuestAddress, value: Long, size: IntBetween[1, 8]) = {
+    override def writeLittleEndian(
+        address: GuestAddress,
+        value: Long,
+        size: Int where Between[1, 8]
+    ): Either[MemoryError, Unit] = {
       val result = backing.writeLittleEndian(address, value, size)
       observe()
       result
     }
-    override def readBytes(address: GuestAddress, size: NonNegative[Int]): Either[MemoryError, Vec[Byte]] = {
+    override def readBytes(address: GuestAddress, size: Int >= 0): Either[MemoryError, Vec[Byte]] = {
       val result = backing.validateRange(address, size).map(_ =>
         Vec.from((0 until size.raw).map(index => backing.readInt8(address.offset(index.toLong)).toOption.get))
       )
@@ -77,7 +75,7 @@ final class WideDescriptorSuite extends munit.FunSuite {
       result
     }
     override def writeBytes(address: GuestAddress, bytes: Vec[Byte]): Either[MemoryError, Unit] = {
-      val result = backing.validateRange(address, NonNegative.unsafe(bytes.size)).map { _ =>
+      val result = backing.validateRange(address, bytes.nonNegativeSize).map { _ =>
         bytes.zipWithIndex.foreach { case (byte, index) => backing.writeInt8(address.offset(index), byte).toOption.get }
       }
       observe()
@@ -115,7 +113,7 @@ final class WideDescriptorSuite extends munit.FunSuite {
     val result = VMInterpreter.execute(
       kernel,
       geometry,
-      Map(NonEmptyString("memory") -> Argument.fromLong(memory.base.raw)),
+      Map(("memory": NonEmpty[String]) -> Argument.fromLong(memory.base.raw)),
       memory
     )
     assert(result.isRight, result.toString)
@@ -146,7 +144,7 @@ final class WideDescriptorSuite extends munit.FunSuite {
     val result = VMInterpreter.execute(
       kernel,
       geometry,
-      Map(NonEmptyString("memory") -> Argument.fromLong(memory.base.raw)),
+      Map(("memory": NonEmpty[String]) -> Argument.fromLong(memory.base.raw)),
       memory
     )
     assert(result.isRight, result.toString)

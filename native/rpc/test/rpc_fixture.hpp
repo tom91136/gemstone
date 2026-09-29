@@ -24,6 +24,7 @@
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 
 #define GEMSTONE_RPC_REQUIRE(condition)                                                                                                    \
   do {                                                                                                                                     \
@@ -83,17 +84,31 @@ public:
     size_t alias;
     uint64_t offset;
   };
-  RpcFixture() {
-    listener_ = socket(AF_INET, SOCK_STREAM, 0);
-    GEMSTONE_RPC_REQUIRE(listener_ >= 0);
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    GEMSTONE_RPC_REQUIRE(bind(listener_, reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0);
+  explicit RpcFixture(bool unixSocket = false) {
+    if (unixSocket) {
+      char directory[] = "/tmp/gemstone-rpc-XXXXXX";
+      GEMSTONE_RPC_REQUIRE(mkdtemp(directory) != nullptr);
+      directory_ = directory;
+      path_ = directory_ + "/socket with space";
+      sockaddr_un address{};
+      address.sun_family = AF_UNIX;
+      GEMSTONE_RPC_REQUIRE(path_.size() < sizeof(address.sun_path));
+      std::memcpy(address.sun_path, path_.c_str(), path_.size() + 1);
+      listener_ = socket(AF_UNIX, SOCK_STREAM, 0);
+      GEMSTONE_RPC_REQUIRE(listener_ >= 0);
+      GEMSTONE_RPC_REQUIRE(bind(listener_, reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0);
+    } else {
+      listener_ = socket(AF_INET, SOCK_STREAM, 0);
+      GEMSTONE_RPC_REQUIRE(listener_ >= 0);
+      sockaddr_in address{};
+      address.sin_family = AF_INET;
+      address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+      GEMSTONE_RPC_REQUIRE(bind(listener_, reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0);
+      socklen_t length = sizeof(address);
+      GEMSTONE_RPC_REQUIRE(getsockname(listener_, reinterpret_cast<sockaddr *>(&address), &length) == 0);
+      port_ = ntohs(address.sin_port);
+    }
     GEMSTONE_RPC_REQUIRE(listen(listener_, 8) == 0);
-    socklen_t length = sizeof(address);
-    GEMSTONE_RPC_REQUIRE(getsockname(listener_, reinterpret_cast<sockaddr *>(&address), &length) == 0);
-    port_ = ntohs(address.sin_port);
     acceptor_ = std::thread([this] {
       try {
         while (!stopped_.load()) {
@@ -103,7 +118,7 @@ public:
             break;
           }
           const int enabled = 1;
-          GEMSTONE_RPC_REQUIRE(setsockopt(connection, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled)) == 0);
+          if (path_.empty()) GEMSTONE_RPC_REQUIRE(setsockopt(connection, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled)) == 0);
           std::lock_guard lock(connectionsMutex_);
           connections_.push_back(connection);
           workers_.emplace_back([this, connection] {
@@ -134,8 +149,19 @@ public:
     }
     for (auto &worker : workers_)
       worker.join();
+    if (!path_.empty()) {
+      unlink(path_.c_str());
+      rmdir(directory_.c_str());
+    }
   }
   uint16_t port() const { return port_; }
+  std::string endpoint() const {
+    if (path_.empty()) return "tcp://127.0.0.1:" + std::to_string(port_);
+    std::string encoded = "unix://";
+    for (char ch : path_)
+      encoded += ch == ' ' ? "%20" : std::string(1, ch);
+    return encoded;
+  }
   void expect(Expected expected) {
     std::lock_guard lock(stateMutex_);
     GEMSTONE_RPC_REQUIRE(!active_);
@@ -262,6 +288,7 @@ public:
   bool completionEntered() const { return completionEntered_.load(); }
   void releasePausedCompletion() { pauseCompletion_ = false; }
   unsigned launches() const { return launches_.load(); }
+  unsigned reads() const { return reads_.load(); }
   unsigned programLoads() const { return programLoads_.load(); }
   std::vector<uint8_t> lastProgramImage() {
     std::lock_guard lock(stateMutex_);
@@ -375,12 +402,26 @@ private:
     }
   }
   void serve(int socket) {
+    std::array<uint8_t, 8> hello{};
+    if (!receive(socket, hello.data(), hello.size())) return;
+    GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint32_t>(hello.data()) == HelloMagic);
+    const auto schemaSize = wire::readBigEndian<uint32_t>(hello.data() + 4);
+    GEMSTONE_RPC_REQUIRE(schemaSize == Schema.size());
+    std::string schema(schemaSize, '\0');
+    GEMSTONE_RPC_REQUIRE(receive(socket, reinterpret_cast<uint8_t *>(schema.data()), schema.size()));
+    GEMSTONE_RPC_REQUIRE(schema == Schema);
+    std::vector<uint8_t> accepted;
+    wire::appendBigEndian<uint32_t>(accepted, HelloResponseMagic);
+    wire::appendBigEndian<uint32_t>(accepted, 0);
+    send(socket, accepted);
     std::array<uint8_t, RequestHeaderBytes> header{};
     while (receive(socket, header.data(), header.size())) {
-      GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint32_t>(header.data()) == RequestMagic
-                           && wire::readBigEndian<uint64_t>(header.data() + RequestFingerprintOffset) == SchemaFingerprint);
+      GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint32_t>(header.data()) == RequestMagic);
       GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint64_t>(header.data() + RequestClientOffset) == clientId);
-      const auto operationId = wire::readBigEndian<uint64_t>(header.data() + RequestOperationOffset);
+      const auto tagSize = wire::readBigEndian<uint32_t>(header.data() + RequestTagSizeOffset);
+      GEMSTONE_RPC_REQUIRE(tagSize > 0 && tagSize <= MaximumTagBytes);
+      std::string operationTag(tagSize, '\0');
+      GEMSTONE_RPC_REQUIRE(receive(socket, reinterpret_cast<uint8_t *>(operationTag.data()), operationTag.size()));
       const auto size = wire::readBigEndian<uint32_t>(header.data() + RequestPayloadSizeOffset);
       GEMSTONE_RPC_REQUIRE(size <= MaximumPayload);
       std::vector<uint8_t> payload(size);
@@ -388,234 +429,198 @@ private:
       std::lock_guard lock(stateMutex_);
       std::vector<uint8_t> result;
       bool failed = false;
-      switch (operationId) {
-        case operation::Ping: encodePayload(result, Unit{}); break;
-        case operation::EnableHostMemory:
-          hostMemoryEnabled_ = true;
-          encodePayload(result, Unit{});
-          break;
-        case operation::RegisterAllocation: {
-          const auto request = decodePayload<RegisterAllocation>(payload);
-          const auto id = nextAllocation_++;
-          GEMSTONE_RPC_REQUIRE(id != 0);
-          allocations_[id].resize(static_cast<size_t>(request.size.value));
-          encodePayload(result, AllocationId{static_cast<int64_t>(id)});
-          break;
+      if (operationTag == operation::Ping) {
+        encodePayload(result, Unit{});
+      } else if (operationTag == operation::EnableHostMemory) {
+        hostMemoryEnabled_ = true;
+        encodePayload(result, Unit{});
+      } else if (operationTag == operation::RegisterAllocation) {
+        const auto request = decodePayload<RegisterAllocation>(payload);
+        const auto id = nextAllocation_++;
+        GEMSTONE_RPC_REQUIRE(id != 0);
+        allocations_[id].resize(static_cast<size_t>(request.size.value));
+        encodePayload(result, AllocationId{static_cast<int64_t>(id)});
+      } else if (operationTag == operation::ReleaseAllocation) {
+        const auto request = decodePayload<ReleaseAllocation>(payload);
+        const auto id = static_cast<uint64_t>(request.allocation.value);
+        const auto address = pauseReleaseAddress_.load();
+        const auto alias = allocationAddresses_.find(id);
+        if (address != 0 && alias != allocationAddresses_.end() && address >= alias->second
+            && address - alias->second < allocations_.at(id).size()) {
+          releaseEntered_ = true;
+          while (pauseReleaseAddress_.load() != 0 && !stopped_.load())
+            std::this_thread::yield();
         }
-        case operation::ReleaseAllocation: {
-          const auto request = decodePayload<ReleaseAllocation>(payload);
-          const auto id = static_cast<uint64_t>(request.allocation.value);
-          const auto address = pauseReleaseAddress_.load();
-          const auto alias = allocationAddresses_.find(id);
-          if (address != 0 && alias != allocationAddresses_.end() && address >= alias->second
-              && address - alias->second < allocations_.at(id).size()) {
-            releaseEntered_ = true;
-            while (pauseReleaseAddress_.load() != 0 && !stopped_.load())
-              std::this_thread::yield();
-          }
-          GEMSTONE_RPC_REQUIRE(allocations_.erase(id) == 1);
-          allocationAddresses_.erase(id);
-          hostBacked_.erase(id);
-          encodePayload(result, Unit{});
-          break;
+        GEMSTONE_RPC_REQUIRE(allocations_.erase(id) == 1);
+        allocationAddresses_.erase(id);
+        hostBacked_.erase(id);
+        encodePayload(result, Unit{});
+      } else if (operationTag == operation::RegisterAllocationAddress) {
+        const auto request = decodePayload<RegisterAllocationAddress>(payload);
+        const auto id = static_cast<uint64_t>(request.allocation.value);
+        const auto base = static_cast<uint64_t>(request.nativeBase.value);
+        GEMSTONE_RPC_REQUIRE(allocations_.count(id) == 1 && base != 0);
+        GEMSTONE_RPC_REQUIRE(allocationAddresses_.emplace(id, base).second);
+        hostBacked_[id] = request.hostBacked;
+        encodePayload(result, Unit{});
+      } else if (operationTag == operation::WriteAllocation) {
+        const auto request = decodePayload<WriteAllocation>(payload);
+        const auto id = static_cast<uint64_t>(request.allocation.value);
+        auto &bytes = allocations_.at(id);
+        const auto offset = static_cast<uint64_t>(request.offset.value);
+        GEMSTONE_RPC_REQUIRE(offset + request.bytes.size() <= bytes.size());
+        std::memcpy(bytes.data() + offset, request.bytes.data(), request.bytes.size());
+        writtenBytes_[id] += request.bytes.size();
+        encodePayload(result, Unit{});
+      } else if (operationTag == operation::ReadAllocation) {
+        ++reads_;
+        GEMSTONE_RPC_REQUIRE(!active_ || completed_);
+        const auto request = decodePayload<ReadAllocation>(payload);
+        const auto id = static_cast<uint64_t>(request.allocation.value);
+        auto &bytes = allocations_.at(id);
+        const auto offset = static_cast<uint64_t>(request.offset.value);
+        const auto count = static_cast<size_t>(request.size.value);
+        GEMSTONE_RPC_REQUIRE(offset + count <= bytes.size());
+        encodePayload(result, std::vector<uint8_t>(bytes.begin() + offset, bytes.begin() + offset + count));
+      } else if (operationTag == operation::LoadProgram) {
+        const auto request = decodePayload<LoadProgram>(payload);
+        lastProgramImage_ = request.image;
+        ++programLoads_;
+        encodePayload(result, ProgramId{91});
+      } else if (operationTag == operation::DescribeSpecialization) {
+        decodePayload<DescribeSpecialization>(payload);
+        std::vector<SpecializationInfo> infos;
+        for (const auto &[id, byteSize] : specializationSizes_)
+          infos.push_back(SpecializationInfo{Binary32{static_cast<int64_t>(id)}, IntPositive{static_cast<int32_t>(byteSize)}});
+        encodePayload(result, infos);
+      } else if (operationTag == operation::SpecializeImage) {
+        const auto request = decodePayload<SpecializeImage>(payload);
+        std::vector<std::pair<uint32_t, std::vector<uint8_t>>> constants;
+        for (const auto &constant : request.constants)
+          constants.emplace_back(static_cast<uint32_t>(constant.specId.value), constant.value);
+        lastSpecialization_ = std::move(constants);
+        encodePayload(result, request.image);
+      } else if (operationTag == operation::UnloadProgram) {
+        encodePayload(result, Unit{});
+      } else if (operationTag == operation::DescribeKernel) {
+        const auto request = decodePayload<DescribeKernel>(payload);
+        GEMSTONE_RPC_REQUIRE(request.program.value == 91 && !request.name.value.empty());
+        appendKernelMetadata(result);
+      } else if (operationTag == operation::DescribeImage) {
+        const auto request = decodePayload<DescribeImage>(payload);
+        GEMSTONE_RPC_REQUIRE(!request.name.value.empty());
+        appendKernelMetadata(result);
+      } else if (operationTag == operation::DescribeProgram) {
+        const auto request = decodePayload<DescribeProgram>(payload);
+        GEMSTONE_RPC_REQUIRE(request.program.value == 91);
+        ProgramSymbols catalog{};
+        for (const auto &kernel : programKernels_)
+          catalog.kernels.push_back(gemstone::execution::KernelSymbol{{kernel.name}, {kernel.linkageName}});
+        for (const auto &global : programGlobals_) {
+          GlobalSymbol meta{};
+          meta.name = {global.name};
+          meta.virtualAddress = GuestAddress{static_cast<int64_t>(global.virtualAddress)};
+          meta.size = LongPositive0{static_cast<int64_t>(global.size)};
+          for (uint32_t offset : global.pointerOffsets)
+            meta.pointerOffsets.push_back(IntPositive0{static_cast<int32_t>(offset)});
+          catalog.globals.push_back(std::move(meta));
         }
-        case operation::RegisterAllocationAddress: {
-          const auto request = decodePayload<RegisterAllocationAddress>(payload);
-          const auto id = static_cast<uint64_t>(request.allocation.value);
-          const auto base = static_cast<uint64_t>(request.nativeBase.value);
-          GEMSTONE_RPC_REQUIRE(allocations_.count(id) == 1 && base != 0);
-          GEMSTONE_RPC_REQUIRE(allocationAddresses_.emplace(id, base).second);
-          hostBacked_[id] = request.hostBacked;
-          encodePayload(result, Unit{});
-          break;
-        }
-        case operation::WriteAllocation: {
-          const auto request = decodePayload<WriteAllocation>(payload);
-          const auto id = static_cast<uint64_t>(request.allocation.value);
-          auto &bytes = allocations_.at(id);
-          const auto offset = static_cast<uint64_t>(request.offset.value);
-          GEMSTONE_RPC_REQUIRE(offset + request.bytes.size() <= bytes.size());
-          std::memcpy(bytes.data() + offset, request.bytes.data(), request.bytes.size());
-          writtenBytes_[id] += request.bytes.size();
-          encodePayload(result, Unit{});
-          break;
-        }
-        case operation::ReadAllocation: {
-          GEMSTONE_RPC_REQUIRE(!active_ || completed_);
-          const auto request = decodePayload<ReadAllocation>(payload);
-          const auto id = static_cast<uint64_t>(request.allocation.value);
-          auto &bytes = allocations_.at(id);
-          const auto offset = static_cast<uint64_t>(request.offset.value);
-          const auto count = static_cast<size_t>(request.size.value);
-          GEMSTONE_RPC_REQUIRE(offset + count <= bytes.size());
-          encodePayload(result, std::vector<uint8_t>(bytes.begin() + offset, bytes.begin() + offset + count));
-          break;
-        }
-        case operation::LoadProgram: {
-          const auto request = decodePayload<LoadProgram>(payload);
-          lastProgramImage_ = request.image;
-          ++programLoads_;
-          encodePayload(result, ProgramId{91});
-          break;
-        }
-        case operation::DescribeSpecialization: {
-          decodePayload<DescribeSpecialization>(payload);
-          std::vector<SpecializationInfo> infos;
-          for (const auto &[id, byteSize] : specializationSizes_)
-            infos.push_back(SpecializationInfo{IntPositive0{static_cast<int32_t>(id)}, IntPositive{static_cast<int32_t>(byteSize)}});
-          encodePayload(result, infos);
-          break;
-        }
-        case operation::SpecializeImage: {
-          const auto request = decodePayload<SpecializeImage>(payload);
-          std::vector<std::pair<uint32_t, std::vector<uint8_t>>> constants;
-          for (const auto &constant : request.constants)
-            constants.emplace_back(static_cast<uint32_t>(constant.specId.value), constant.value);
-          lastSpecialization_ = std::move(constants);
-          encodePayload(result, request.image);
-          break;
-        }
-        case operation::UnloadProgram: encodePayload(result, Unit{}); break;
-        case operation::DescribeKernel: {
-          const auto request = decodePayload<DescribeKernel>(payload);
-          GEMSTONE_RPC_REQUIRE(request.program.value == 91 && !request.name.value.empty());
-          appendKernelMetadata(result);
-          break;
-        }
-        case operation::DescribeImage: {
-          const auto request = decodePayload<DescribeImage>(payload);
-          GEMSTONE_RPC_REQUIRE(!request.name.value.empty());
-          appendKernelMetadata(result);
-          break;
-        }
-        case operation::DescribeProgram: {
-          const auto request = decodePayload<DescribeProgram>(payload);
-          GEMSTONE_RPC_REQUIRE(request.program.value == 91);
-          ProgramSymbols catalog{};
-          for (const auto &kernel : programKernels_)
-            catalog.kernels.push_back(gemstone::execution::KernelSymbol{NonEmptyString{kernel.name}, NonEmptyString{kernel.linkageName}});
-          for (const auto &global : programGlobals_) {
-            GlobalSymbol meta{};
-            meta.name = NonEmptyString{global.name};
-            meta.virtualAddress = GuestAddress{static_cast<int64_t>(global.virtualAddress)};
-            meta.size = LongPositive0{static_cast<int64_t>(global.size)};
-            for (uint32_t offset : global.pointerOffsets)
-              meta.pointerOffsets.push_back(IntPositive0{static_cast<int32_t>(offset)});
-            catalog.globals.push_back(std::move(meta));
-          }
-          programGlobals_.clear();
-          encodePayload(result, catalog);
-          break;
-        }
-        case operation::BindProgramGlobal: {
-          const auto request = decodePayload<BindProgramGlobal>(payload);
-          const auto name = request.name.value;
-          const auto allocation = static_cast<uint64_t>(request.allocation.value);
-          const auto offset = static_cast<uint64_t>(request.offset.value);
-          auto expected = expectedGlobals_.find(name);
-          GEMSTONE_RPC_REQUIRE(expected != expectedGlobals_.end() && expected->second.first == offset);
-          auto &memory = allocations_.at(allocation);
-          const auto &initial = expected->second.second;
-          GEMSTONE_RPC_REQUIRE(offset <= memory.size() && initial.size() <= memory.size() - offset);
-          std::copy(initial.begin(), initial.end(), memory.begin() + offset);
-          expectedGlobals_.erase(expected);
-          encodePayload(result, Unit{});
-          break;
-        }
-        case operation::Launch:
-          launch(payload);
-          encodePayload(result, CompletionId{static_cast<int64_t>(completion_)});
-          break;
-        case operation::QueryCompletion: {
-          const auto request = decodePayload<QueryCompletion>(payload);
-          GEMSTONE_RPC_REQUIRE(request.completion.value == static_cast<int64_t>(completion_));
-          if (polls_++ < 2) {
-            ++pending_;
-            encodePayload(result, CompletionStatus{CompletionStatusPending{}});
-          } else {
-            completed_ = true;
-            if (failCompletion_.exchange(false))
-              encodePayload(result,
-                            CompletionStatus{CompletionStatusFailed{ExecutionFailure{ExecutionFailureFailed{"completion failed"}}}});
-            else encodePayload(result, CompletionStatus{CompletionStatusSucceeded{}});
-          }
-          break;
-        }
-        case operation::PollHostMemory:
-        case operation::AwaitCompletion: {
-          const auto completion = operationId == operation::PollHostMemory ? decodePayload<PollHostMemory>(payload).completion
-                                                                           : decodePayload<AwaitCompletion>(payload).completion;
-          GEMSTONE_RPC_REQUIRE(completion.value == static_cast<int64_t>(completion_));
-          if (pauseCompletion_.load()) {
-            completionEntered_ = true;
-            while (pauseCompletion_.load() && !stopped_.load())
-              std::this_thread::yield();
-          }
-          if (!failCompletion_.load()) {
-            if (hostBacked_[outputId_])
-              for (const auto &range : ranges_)
-                std::memcpy(reinterpret_cast<void *>(allocationAddresses_.at(outputId_) + range.first),
-                            allocations_.at(outputId_).data() + range.first, range.second);
-            if (indirectWrite_ && hostBacked_[indirectWrite_->first])
-              std::memcpy(reinterpret_cast<void *>(allocationAddresses_.at(indirectWrite_->first) + indirectWrite_->second),
-                          allocations_.at(indirectWrite_->first).data() + indirectWrite_->second, 4);
-          }
-          ++awaited_;
+        programGlobals_.clear();
+        encodePayload(result, catalog);
+      } else if (operationTag == operation::BindProgramGlobal) {
+        const auto request = decodePayload<BindProgramGlobal>(payload);
+        const auto name = request.name.value;
+        const auto allocation = static_cast<uint64_t>(request.allocation.value);
+        const auto offset = static_cast<uint64_t>(request.offset.value);
+        auto expected = expectedGlobals_.find(name);
+        GEMSTONE_RPC_REQUIRE(expected != expectedGlobals_.end() && expected->second.first == offset);
+        auto &memory = allocations_.at(allocation);
+        const auto &initial = expected->second.second;
+        GEMSTONE_RPC_REQUIRE(offset <= memory.size() && initial.size() <= memory.size() - offset);
+        std::copy(initial.begin(), initial.end(), memory.begin() + offset);
+        expectedGlobals_.erase(expected);
+        encodePayload(result, Unit{});
+      } else if (operationTag == operation::Launch) {
+        launch(payload);
+        encodePayload(result, CompletionId{static_cast<int64_t>(completion_)});
+      } else if (operationTag == operation::QueryCompletion) {
+        const auto request = decodePayload<QueryCompletion>(payload);
+        GEMSTONE_RPC_REQUIRE(request.completion.value == static_cast<int64_t>(completion_));
+        if (polls_++ < 2) {
+          ++pending_;
+          encodePayload(result, CompletionStatus{CompletionStatusPending{}});
+        } else {
           completed_ = true;
-          failed = failCompletion_.exchange(false);
-          if (operationId == operation::PollHostMemory && !failed) {
-            HostMemoryBatch batch{};
-            batch.completed = true;
-            if (hostOutputAddress_)
-              for (const auto &range : ranges_) {
-                HostMemoryBytes bytes{};
-                bytes.address = GuestAddress{static_cast<int64_t>(hostOutputAddress_ + range.first)};
-                bytes.bytes.assign(hostOutputBytes_.begin() + range.first, hostOutputBytes_.begin() + range.first + range.second);
-                bytes.atomicWidth = 0;
-                batch.writes.push_back(std::move(bytes));
-              }
-            encodePayload(result, batch);
-          } else encodePayload(result, Unit{});
-          break;
+          if (failCompletion_.exchange(false))
+            encodePayload(result, CompletionStatus{CompletionStatusFailed{ExecutionFailure{ExecutionFailureFailed{"completion failed"}}}});
+          else encodePayload(result, CompletionStatus{CompletionStatusSucceeded{}});
         }
-        case operation::ReleaseCompletion: {
-          const auto request = decodePayload<ReleaseCompletion>(payload);
-          GEMSTONE_RPC_REQUIRE(completed_ && request.completion.value == static_cast<int64_t>(completion_));
-          active_ = false;
-          encodePayload(result, Unit{});
-          break;
+      } else if (operationTag == operation::PollHostMemory || operationTag == operation::AwaitCompletion) {
+        const auto completion = operationTag == operation::PollHostMemory ? decodePayload<PollHostMemory>(payload).completion
+                                                                          : decodePayload<AwaitCompletion>(payload).completion;
+        GEMSTONE_RPC_REQUIRE(completion.value == static_cast<int64_t>(completion_));
+        if (pauseCompletion_.load()) {
+          completionEntered_ = true;
+          while (pauseCompletion_.load() && !stopped_.load())
+            std::this_thread::yield();
         }
-        case operation::CompletionDirtyRanges: {
-          decodePayload<CompletionDirtyRanges>(payload);
-          GEMSTONE_RPC_REQUIRE(completed_);
-          std::vector<DirtyRange> dirty;
-          if (!hostOutputAddress_ && !hostBacked_[outputId_])
+        if (!failCompletion_.load()) {
+          if (hostBacked_[outputId_])
             for (const auto &range : ranges_)
-              dirty.push_back(DirtyRange{AllocationId{static_cast<int64_t>(outputId_)}, LongPositive0{static_cast<int64_t>(range.first)},
-                                         IntPositive{static_cast<int32_t>(range.second)}});
-          if (indirectWrite_ && !hostBacked_[indirectWrite_->first])
-            dirty.push_back(DirtyRange{AllocationId{static_cast<int64_t>(indirectWrite_->first)},
-                                       LongPositive0{static_cast<int64_t>(indirectWrite_->second)}, IntPositive{4}});
-          encodePayload(result, dirty);
-          break;
+              std::memcpy(reinterpret_cast<void *>(allocationAddresses_.at(outputId_) + range.first),
+                          allocations_.at(outputId_).data() + range.first, range.second);
+          if (indirectWrite_ && hostBacked_[indirectWrite_->first])
+            std::memcpy(reinterpret_cast<void *>(allocationAddresses_.at(indirectWrite_->first) + indirectWrite_->second),
+                        allocations_.at(indirectWrite_->first).data() + indirectWrite_->second, 4);
         }
-        case operation::CompletionPointerRelocations: {
-          decodePayload<CompletionPointerRelocations>(payload);
-          GEMSTONE_RPC_REQUIRE(completed_);
-          encodePayload(result, std::vector<PointerRelocation>{});
-          break;
-        }
-        case operation::CompletionPrints: {
-          decodePayload<CompletionPrints>(payload);
-          GEMSTONE_RPC_REQUIRE(completed_);
-          encodePayload(result, std::string{});
-          break;
-        }
-        default: GEMSTONE_RPC_REQUIRE(false);
+        ++awaited_;
+        completed_ = true;
+        failed = failCompletion_.exchange(false);
+        if (operationTag == operation::PollHostMemory && !failed) {
+          HostMemoryBatch batch{};
+          batch.completed = true;
+          if (hostOutputAddress_)
+            for (const auto &range : ranges_) {
+              HostMemoryBytes bytes{};
+              bytes.address = GuestAddress{static_cast<int64_t>(hostOutputAddress_ + range.first)};
+              bytes.bytes.assign(hostOutputBytes_.begin() + range.first, hostOutputBytes_.begin() + range.first + range.second);
+              bytes.atomicWidth = 0;
+              batch.writes.push_back(std::move(bytes));
+            }
+          encodePayload(result, batch);
+        } else encodePayload(result, Unit{});
+      } else if (operationTag == operation::ReleaseCompletion) {
+        const auto request = decodePayload<ReleaseCompletion>(payload);
+        GEMSTONE_RPC_REQUIRE(completed_ && request.completion.value == static_cast<int64_t>(completion_));
+        active_ = false;
+        encodePayload(result, Unit{});
+      } else if (operationTag == operation::CompletionDirtyRanges) {
+        const auto request = decodePayload<CompletionDirtyRanges>(payload);
+        GEMSTONE_RPC_REQUIRE(completed_);
+        std::vector<DirtyRange> dirty;
+        if (!hostOutputAddress_ && !hostBacked_[outputId_])
+          for (const auto &range : ranges_)
+            dirty.push_back(DirtyRange{AllocationId{static_cast<int64_t>(outputId_)}, LongPositive0{static_cast<int64_t>(range.first)},
+                                       IntPositive{static_cast<int32_t>(range.second)}});
+        if (indirectWrite_ && !hostBacked_[indirectWrite_->first])
+          dirty.push_back(DirtyRange{AllocationId{static_cast<int64_t>(indirectWrite_->first)},
+                                     LongPositive0{static_cast<int64_t>(indirectWrite_->second)}, IntPositive{4}});
+        const auto begin = std::min(static_cast<size_t>(request.offset.value), dirty.size());
+        const auto end = std::min(begin + MaximumElements, dirty.size());
+        encodePayload(result, std::vector<DirtyRange>(dirty.begin() + begin, dirty.begin() + end));
+      } else if (operationTag == operation::CompletionPointerRelocations) {
+        decodePayload<CompletionPointerRelocations>(payload);
+        GEMSTONE_RPC_REQUIRE(completed_);
+        encodePayload(result, std::vector<PointerRelocation>{});
+      } else if (operationTag == operation::CompletionPrints) {
+        decodePayload<CompletionPrints>(payload);
+        GEMSTONE_RPC_REQUIRE(completed_);
+        encodePayload(result, std::string{});
+      } else {
+        GEMSTONE_RPC_REQUIRE(false);
       }
       std::vector<uint8_t> response;
       wire::appendBigEndian<uint32_t>(response, ResponseMagic);
-      wire::appendBigEndian<uint64_t>(response, SchemaFingerprint);
       wire::appendBigEndian<uint32_t>(response, failed ? 1 : 0);
       if (failed) {
         result.clear();
@@ -768,9 +773,11 @@ private:
     completed_ = false;
   }
 
+  std::string path_, directory_;
   int listener_ = -1;
   uint16_t port_ = 0;
   std::atomic<bool> stopped_{false};
+  std::atomic<unsigned> reads_{0};
   std::thread acceptor_;
   mutable std::mutex failureMutex_;
   std::exception_ptr failure_;

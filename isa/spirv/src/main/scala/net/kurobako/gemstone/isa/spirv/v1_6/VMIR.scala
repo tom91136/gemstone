@@ -1,22 +1,16 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.{IntBetween, OneOf}
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.vm.*
 
-import net.kurobako.gemstone.Constraint.NoNulString
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import net.kurobako.gemstone.Vec
-
-import net.kurobako.gemstone.vm.Fault
-
-private[v1_6] object VMIR {
-  import Operand.id
+private object VMIR {
+  import Operand.*
 
   enum RuntimeType {
     case Void
     case Bool
-    case Integer(width: IntBetween[1, 64], signed: Boolean)
+    case Integer(width: Int where Between[1, 64], signed: Boolean)
     case Floating(width: OneOf[(16, 32, 64)])
     case VectorType(component: Int, count: Int)
     case Array(element: Int, count: Long)
@@ -46,7 +40,7 @@ private[v1_6] object VMIR {
       types: Map[Int, RuntimeType],
       constantData: Map[Int, Constant],
       globals: Map[Int, Global],
-      descriptorBindings: Map[Int, (Int, Int)],
+      descriptorBindings: Map[Int, (Int >= 0, Int >= 0)],
       builtins: Map[Int, Int],
       arrayStrides: Map[Int, Int],
       memberOffsets: Map[(Int, Int), Int],
@@ -54,20 +48,21 @@ private[v1_6] object VMIR {
       byValueParameters: Set[Int],
       saturatedConversions: Set[Int],
       roundingModes: Map[Int, Int],
-      extendedInstructionSets: Map[Int, NonEmptyString],
-      entryPoints: Map[NonEmptyString, Int],
-      entryPointInterfaces: Map[NonEmptyString, Set[Int]],
-      vulkanEntries: Set[NonEmptyString],
+      extendedInstructionSets: Map[Int, NonEmpty[String]],
+      entryPoints: Map[NonEmpty[String], Int],
+      entryPointInterfaces: Map[NonEmpty[String], Set[Int]],
+      vulkanEntries: Set[NonEmpty[String]],
       subgroupSizes: Map[Int, Int],
-      workGroupSizes: Map[Int, (Int, Int, Int)],
-      workGroupSizeHints: Map[Int, (Int, Int, Int)],
+      workGroupSizes: Map[Int, LaunchGeometry.Dimensions],
+      builtinWorkGroupSize: Option[LaunchGeometry.Dimensions],
+      workGroupSizeHints: Map[Int, LaunchGeometry.Dimensions],
       functions: Map[Int, Function],
-      functionNames: Map[Int, NoNulString],
+      functionNames: Map[Int, String],
       collectiveFunctions: Set[Int]
   )
 
-  private[v1_6] def zeroValue(
-      types: collection.Map[Int, RuntimeType],
+  def zeroValue(
+      types: scala.collection.Map[Int, RuntimeType],
       resultType: Operand,
       destination: Operand,
       opcode: String
@@ -86,8 +81,8 @@ private[v1_6] object VMIR {
     }
   }
 
-  private[v1_6] def scalarLeafCount(
-      types: collection.Map[Int, RuntimeType],
+  def scalarLeafCount(
+      types: scala.collection.Map[Int, RuntimeType],
       typeId: Int
   ): Either[Fault, Int] = types.get(typeId) match {
     case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) |

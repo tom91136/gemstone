@@ -1,13 +1,14 @@
 package net.kurobako.gemstone.codegen
 
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
 import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
+import net.kurobako.gemstone.string.*
 import org.w3c.dom.Element
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
@@ -58,15 +59,13 @@ for name in sorted(module.instructions):
   )
   case class Instruction(
       name: String,
-      generation: String,
-      target: String,
+      isa: String,
       format: String,
       opcode: Int,
-      operands: Vector[Operand],
-      source: String
+      operands: Vector[Operand]
   )
   private case class SOPPRule(prefix: Long, opcodeShift: Int, immediateBits: Int)
-  private case class Extracted(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SOPPRule)
+  private case class Extracted(records: Vector[Instruction], sopp: SOPPRule)
   private case class Field(name: String)
   private case class InstructionForm(
       opcode: String,
@@ -123,7 +122,7 @@ for name in sorted(module.instructions):
     val result          = extract(request.references, request.python)
     val instructionRoot = request.sourceRoot.resolve(PackageRoot)
     val constants       = instructionRoot.resolve("EncodingConstants.scala")
-    write(constants, render(result.records, result.acoCount, result.xmlCount, result.sopp))
+    write(constants, render(result.sopp))
     val instructions = renderInstructions(result.records)
     write(instructionRoot.resolve("Instruction.scala"), instructions.main)
     val definitionsRoot = instructionRoot.resolve("definitions")
@@ -131,12 +130,10 @@ for name in sorted(module.instructions):
       definitionsRoot.resolve(name) -> content
     }
     definitions.foreach { case (path, content) => write(path, content) }
-    val architectures = instructionRoot.resolve("Architectures.scala")
-    write(architectures, renderArchitectures())
     val metadataResource = request.resourceRoot.resolve(PackageRoot).resolve("metadata.json")
     val _                = GeneratedFiles.write(metadataResource, instructions.metadata)
     val expected         = definitions.map(_._1).toSet ++
-      Set(constants, instructionRoot.resolve("Instruction.scala"), architectures)
+      Set(constants, instructionRoot.resolve("Instruction.scala"))
     val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
     GeneratedFiles.removeUnexpected(request.sourceRoot, expected, include)
     GeneratedFiles.removeUnexpected(request.resourceRoot, Set(metadataResource), _ => true)
@@ -144,7 +141,7 @@ for name in sorted(module.instructions):
 
   def generate(references: Path): String = {
     val result = extract(references)
-    render(result.records, result.acoCount, result.xmlCount, result.sopp)
+    render(result.sopp)
   }
 
   private def extract(references: Path, python: String = "python3"): Extracted = {
@@ -161,15 +158,14 @@ for name in sorted(module.instructions):
     val aco      = parseACO(references.resolve("mesa/src/amd/compiler/aco_opcodes.py"), python)
     val sopp     = parseACOSOPPRule(references.resolve("mesa/src/amd/compiler"))
     val records  = (aco ++ official)
-      .sortBy(record => (record.name, record.generation, record.target, record.format, record.opcode))
-    Extracted(records, aco.size, official.size, sopp)
+      .sortBy(record => (record.name, record.isa, record.format, record.opcode))
+    Extracted(records, sopp)
   }
 
   private def parseOfficialXML(input: Path): Vector[Instruction] = {
-    val fileName   = input.getFileName.toString
-    val generation = generationFor(fileName)
-    val target     = fileName.stripPrefix("amdgpu_isa_").stripSuffix(".xml")
-    val factory    = DocumentBuilderFactory.newInstance()
+    val fileName = input.getFileName.toString
+    val isa      = fileName.stripPrefix("amdgpu_isa_").stripSuffix(".xml").toUpperCaseRoot
+    val factory  = DocumentBuilderFactory.newInstance()
     factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
     factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
     factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
@@ -186,7 +182,7 @@ for name in sorted(module.instructions):
         case element: Element => element
         case node             => throw IllegalArgumentException(s"Instruction node is not an XML element: $node")
       }
-      val name = requiredText(instruction, "InstructionName").toLowerCase(java.util.Locale.ROOT)
+      val name = requiredText(instruction, "InstructionName").toLowerCaseRoot
       directChildren(requiredDirect(instruction, "InstructionEncodings"), "InstructionEncoding").map { encoding =>
         val format   = requiredText(encoding, "EncodingName").stripPrefix("ENC_")
         val opcode   = parseRadix(requiredDirect(encoding, "Opcode"))
@@ -201,7 +197,7 @@ for name in sorted(module.instructions):
               implicitOperand = booleanAttribute(operand, "IsImplicit")
             )
           }
-        Instruction(name, generation, target, format, opcode, operands, "AMDXML")
+        Instruction(name, isa, format, opcode, operands)
       }
     }.flatten
   }
@@ -228,11 +224,9 @@ for name in sorted(module.instructions):
       Instruction(
         columns(1),
         columns(0),
-        columns(0).toLowerCase(java.util.Locale.ROOT),
         columns(2),
         columns(3).toInt,
-        operands,
-        "MesaACO"
+        operands
       )
     }
   }
@@ -261,15 +255,12 @@ for name in sorted(module.instructions):
     SOPPRule(java.lang.Long.parseLong(prefixBits, 2) << prefixShift, opcodeShift, immediateBits)
   }
 
-  private def render(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SOPPRule): String =
+  private def render(sopp: SOPPRule): String =
     GeneratedHeader.scala("encoding constants from pinned Mesa ACO inputs") +
       "// Instruction metadata is attached directly to generated Instruction.Definition cases.\n" +
       s"""|package net.kurobako.gemstone.isa.amdgpu
           |
-          |${GeneratedHeader.annotation()}private[amdgpu] object EncodingConstants {
-        |  val MesaACORecordCount: Int = $acoCount
-        |  val AMDXMLRecordCount: Int = $xmlCount
-        |  val MetadataRecordCount: Int = ${records.size}
+          |${GeneratedHeader.annotation()}private object EncodingConstants {
         |  val SOPPEncodingPrefix: Long = ${sopp.prefix}L
         |  val SOPPOpcodeShift: Int = ${sopp.opcodeShift}
         |  val SOPPImmediateBits: Int = ${sopp.immediateBits}
@@ -333,19 +324,11 @@ for name in sorted(module.instructions):
     val main                 = GeneratedHeader.scala("from the pinned Mesa ACO and AMD machine-readable ISA inputs") +
       s"""|package net.kurobako.gemstone.isa.amdgpu
         |
-        |import net.kurobako.gemstone.Constraint.NonEmptyString
-        |import net.kurobako.gemstone.Vec
-        |import net.kurobako.gemstone.Vec.*
+        |import net.kurobako.gemstone.string.*
+        |import net.kurobako.gemstone.constraint.*
+        |import net.kurobako.gemstone.collection.*
+        |import net.kurobako.gemstone.collection.Vec.*
         |import Program.*
-        |
-        |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
-        |${instructionCases.mkString("\n")}
-        |
-        |  def mods: Vec[Modifier]
-        |  final val opcode: NonEmptyString = definition.opcode
-        |  final val meta: Metadata = definition.meta
-        |  final val operands: Vec[Operand] = operandValues.toVec
-        |}
         |
         |${GeneratedHeader.annotation()}object Instruction {
         |  enum DecodeError {
@@ -354,71 +337,72 @@ for name in sorted(module.instructions):
         |    case AmbiguousForms(opcode: String, definitions: Vec[Definition])
         |  }
         |
-        |  private[amdgpu] case class FormDecoder(
-        |      val operandCount: Int,
+        |  case class FormDecoder(
+        |      operandCount: Int,
         |      construct: (Vec[Operand], Vec[Modifier]) => Instruction
         |  ) {
         |    def decode(operands: Vec[Operand], mods: Vec[Modifier]): Option[Instruction] =
         |      Option.when(operands.size == operandCount)(construct(operands, mods))
         |  }
         |
-        |  private[amdgpu] final class Decoder(forms: Vec[FormDecoder]) {
+        |  class Decoder(forms: Vec[FormDecoder]) {
         |    val operandCounts: Vec[Int] = forms.map(_.operandCount).distinct.sorted
         |
         |    def apply(operands: Vec[Operand], mods: Vec[Modifier]): Vec[Instruction] =
         |      forms.flatMap(_.decode(operands, mods))
         |  }
         |
-        |  private[amdgpu] def form(
+        |  def form(
         |      operandCount: Int
         |  )(construct: (Vec[Operand], Vec[Modifier]) => Instruction): FormDecoder =
         |    FormDecoder(operandCount, construct)
-        |  private[amdgpu] def decoder(forms: FormDecoder*): Decoder = Decoder(forms.toVec)
+        |  def decoder(forms: FormDecoder*): Decoder = Decoder(forms.toVec)
         |
-        |  private[amdgpu] enum ComparisonKind {
+        |  enum ComparisonKind {
         |    case Signed16, Signed32, Signed64, Unsigned16, Unsigned32, Unsigned64
         |    case Float16, Float32, Float64, ClassFloat32, ClassFloat64
         |  }
         |
-        |  private[amdgpu] enum ComparisonRelation {
+        |  enum ComparisonRelation {
         |    case Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual
         |    case NotLess, NotLessOrEqual, NotGreater, NotGreaterOrEqual
         |    case Ordered, Unordered, NotLessOrGreater, Class
         |  }
         |
-        |  private[amdgpu] case class ComparisonOpcode(
+        |  case class ComparisonOpcode(
         |      kind: ComparisonKind,
         |      relation: ComparisonRelation,
         |      updateExec: Boolean
         |  )
         |
-        |  abstract class Definition private[amdgpu] (
-        |      val opcode: NonEmptyString,
-        |      private[amdgpu] val decoder: Decoder,
+        |  object Definition {
+        |    private lazy val ByOpcode: Map[String, Vec[Definition]] =
+        |      AllDefinitions.groupBy(_.opcode)
+        |
+        |    def forOpcode(opcode: String): Vec[Definition] =
+        |      ByOpcode.getOrElse(opcode.toLowerCaseRoot, Vec.empty[Definition])
+        |  }
+        |
+        |  abstract class Definition (
+        |      val opcode: NonEmpty[String],
+        |      private val decoder: Decoder,
         |      private val metadataId: Int
         |  ) {
-        |    final lazy val meta: Metadata = MetadataCatalog(metadataId)
+        |    final def operandCounts: Vec[Int] = decoder.operandCounts
+        |    lazy val meta: Metadata = Metadata.Catalogue.metadata(metadataId)
         |
         |    final def decode(operands: Vec[Operand], mods: Vec[Modifier]): Vec[Instruction] =
         |      decoder(operands, mods)
         |
-        |    override final def toString: String = opcode.raw
+        |    override final def toString: String = opcode
         |  }
         |
         |  private val AllDefinitions: Vec[Definition] = Vec($definitionChunkNames).flatten
-        |  private[amdgpu] val GlobalDefinitions: Set[Definition] = Set(${globalDefinitionReferences.mkString(", ")})
-        |  private[amdgpu] val FlatDefinitions: Set[Definition] = Set(${flatDefinitionReferences.mkString(", ")})
-        |  private[amdgpu] val ComparisonOpcodes: Map[Definition, ComparisonOpcode] = Map(
+        |  val GlobalDefinitions: Set[Definition] = Set(${globalDefinitionReferences.mkString(", ")})
+        |  val FlatDefinitions: Set[Definition] = Set(${flatDefinitionReferences.mkString(", ")})
+        |  val ComparisonOpcodes: Map[Definition, ComparisonOpcode] = Map(
         |$renderedComparisons
         |  )
-        |
-        |  object Definition {
-        |    private lazy val ByOpcode: Map[String, Vec[Definition]] =
-        |      AllDefinitions.groupBy(_.opcode.raw)
-        |
-        |    def forOpcode(opcode: String): Vec[Definition] =
-        |      ByOpcode.getOrElse(Program.normalizeOpcode(opcode), Vec.empty[Definition])
-        |  }
         |
         |  val definitions: Vec[Definition] = AllDefinitions
         |
@@ -427,12 +411,13 @@ for name in sorted(module.instructions):
         |      operands: Vec[Operand],
         |      mods: Vec[Modifier] = Vec.empty
         |  ): Either[DecodeError, Instruction] = {
-        |    val name = Program.normalizeOpcode(opcode)
+        |    val name = opcode.toLowerCaseRoot
         |    decodeWithSuffixes(name, operands, mods, name)
         |  }
         |
         |  private val EncodingSuffixes: Vec[String] = Vec("_dpp8", "_sdwa", "_dpp", "_e64", "_e32")
         |
+        |  @annotation.tailrec
         |  private def decodeWithSuffixes(
         |      name: String,
         |      operands: Vec[Operand],
@@ -443,7 +428,7 @@ for name in sorted(module.instructions):
         |      case Left(DecodeError.UnknownOpcode(_)) =>
         |        EncodingSuffixes.collectFirst {
         |          case suffix if name.endsWith(suffix) =>
-        |            name.dropRight(suffix.length) -> Modifier(NonEmptyString.unsafe(suffix.drop(1)))
+        |            name.dropRight(suffix.length) -> Modifier((suffix.drop(1)).unsafe[NonEmpty[String]])
         |        } match {
         |          case Some((canonical, modifier)) => decodeWithSuffixes(canonical, operands, modifier +: mods, original)
         |          case None                        => Left(DecodeError.UnknownOpcode(original))
@@ -464,13 +449,23 @@ for name in sorted(module.instructions):
         |          case Vec(instruction) => Right(instruction)
         |          case Vec() => Left(
         |            DecodeError.InvalidOperandCount(
-        |              name, candidates.flatMap(_.decoder.operandCounts).distinct.sorted, operands.size
+        |              name, candidates.flatMap(_.operandCounts).distinct.sorted, operands.size
         |            )
         |          )
         |          case _ => Left(DecodeError.AmbiguousForms(name, matches.map(_.definition)))
         |        }
         |    }
         |}
+        |
+        |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
+        |${instructionCases.mkString("\n")}
+        |
+        |  def mods: Vec[Modifier]
+        |  val opcode: NonEmpty[String] = definition.opcode
+        |  val meta: Metadata = definition.meta
+        |  val operands: Vec[Operand] = operandValues.toVec
+        |}
+        |
         |""".stripMargin
     InstructionSources(main, metadata, definitionSources)
   }
@@ -483,10 +478,9 @@ for name in sorted(module.instructions):
     GeneratedHeader.scala("from the pinned Mesa ACO and AMD machine-readable ISA inputs") +
       s"""|package net.kurobako.gemstone.isa.amdgpu
           |
-          |import net.kurobako.gemstone.Constraint.NonEmptyString
-          |import net.kurobako.gemstone.Vec
+          |import net.kurobako.gemstone.constraint.*
+          |import net.kurobako.gemstone.collection.*
           |import Instruction.*
-          |import Program.*
           |
           |${renderDefinitionChunk(objectName, groups, metadataIdByOpcode)}
         |""".stripMargin
@@ -663,7 +657,7 @@ for name in sorted(module.instructions):
   ): String = {
     val cases      = groups.map(forms => renderDefinitionCase(forms, metadataIdByOpcode(forms.head.opcode)))
     val references = groups.map(_.head.definitionName).mkString(", ")
-    s"""|${GeneratedHeader.annotation()}private[amdgpu] object $objectName {
+    s"""|${GeneratedHeader.annotation()}private object $objectName {
         |${cases.mkString("\n")}
         |
         |  val definitions: Vec[Definition] = Vec($references)
@@ -678,7 +672,7 @@ for name in sorted(module.instructions):
       s"form(${form.operandCount})(($operandParameter, mods) => Instruction.${form.caseName}(${arguments.mkString(", ")}))"
     }
     s"""|  case object ${first.definitionName} extends Definition(
-        |    NonEmptyString(${literal(first.opcode)}),
+        |    ${literal(first.opcode)},
         |    decoder(${decoders.mkString(", ")}),
         |    $metadataId
         |  )""".stripMargin
@@ -687,7 +681,7 @@ for name in sorted(module.instructions):
   def renderMetadataJson(metadata: Vector[Vector[Instruction]]): String = {
     val records = metadata.flatten
     val strings = records.flatMap { record =>
-      Vector(record.generation, record.target, record.format, record.source) ++
+      Vector(record.isa, record.format) ++
         record.operands.flatMap(operand => operand.kind +: Option.when(operand.field.nonEmpty)(operand.field).toVector)
     }.distinct.sorted
     val stringIds = strings.zipWithIndex.toMap
@@ -711,12 +705,10 @@ for name in sorted(module.instructions):
       "  ],",
       "  \"encodings\": [",
       records.map { record =>
-        val family = stringIds(record.generation)
-        val target = stringIds(record.target)
+        val isa    = stringIds(record.isa)
         val format = stringIds(record.format)
         val schema = schemaIds(record.operands)
-        val source = stringIds(record.source)
-        s"""    {"family":$family,"target":$target,"format":$format,"opcode":${record.opcode},"schema":$schema,"source":$source}"""
+        s"""    {"isa":$isa,"format":$format,"opcode":${record.opcode},"schema":$schema}"""
       }.mkString(",\n"),
       "  ],",
       "  \"metadata\": [",
@@ -741,7 +733,7 @@ for name in sorted(module.instructions):
       operands: Vector[Operand],
       arity: Int
   ): String = {
-    val fields                            = operands.map(_.field.toUpperCase(java.util.Locale.ROOT)).filter(_.nonEmpty)
+    val fields                            = operands.map(_.field.toUpperCaseRoot).filter(_.nonEmpty)
     val output                            = operands.exists(_.output)
     val input                             = operands.exists(_.input)
     def sourceName(position: Int): String =
@@ -789,56 +781,16 @@ for name in sorted(module.instructions):
 
   private def uniqueCaseNames(opcodes: Vector[String]): Map[String, String] = {
     val bases      = opcodes.map(opcode => opcode -> scalaCaseName(opcode))
-    val collisions = bases.groupMap { case (_, name) => name.toLowerCase(java.util.Locale.ROOT) }(_._1)
+    val collisions = bases.groupMap { case (_, name) => name.toLowerCaseRoot }(_._1)
     bases.map { case (opcode, base) =>
-      val alternatives = collisions(base.toLowerCase(java.util.Locale.ROOT)).sorted
+      val alternatives = collisions(base.toLowerCaseRoot).sorted
       opcode -> (if (alternatives.size == 1) base else s"${base}_${alternatives.indexOf(opcode) + 1}")
     }.toMap
   }
 
   private def scalaCaseName(opcode: String): String = Identifiers.upperCamel(opcode, "Opcode", "Opcode")
 
-  private def renderArchitectures(): String = {
-    val families = Vector(
-      "gfx6"  -> "GFX6",
-      "gfx7"  -> "GFX7",
-      "gfx8"  -> "GFX8",
-      "gfx9"  -> "GFX9",
-      "gfx10" -> "GFX10",
-      "gfx11" -> "GFX11",
-      "gfx12" -> "GFX12",
-      "cdna1" -> "CDNA1",
-      "cdna2" -> "CDNA2",
-      "cdna3" -> "CDNA3",
-      "cdna4" -> "CDNA4",
-      "cdna5" -> "CDNA5"
-    )
-    val entries = families.map { case (name, generation) =>
-      s"  val $name: ISA = ISA(Family.$generation)"
-    }
-    entries.mkString(
-      GeneratedHeader.scala("from the normalized AMDGPU generation set") +
-        "package net.kurobako.gemstone.isa.amdgpu\n\n" + GeneratedHeader.annotation() + "object Architectures {\n",
-      "\n",
-      "\n}\n"
-    )
-  }
-
   private def literal(value: String): String = Emission.literal(value)
-
-  private def generationFor(fileName: String): String = fileName match {
-    case "amdgpu_isa_rdna1.xml"   => "GFX10"
-    case "amdgpu_isa_rdna2.xml"   => "GFX10"
-    case "amdgpu_isa_rdna3.xml"   => "GFX11"
-    case "amdgpu_isa_rdna3_5.xml" => "GFX11"
-    case "amdgpu_isa_rdna4.xml"   => "GFX12"
-    case "amdgpu_isa_cdna1.xml"   => "CDNA1"
-    case "amdgpu_isa_cdna2.xml"   => "CDNA2"
-    case "amdgpu_isa_cdna3.xml"   => "CDNA3"
-    case "amdgpu_isa_cdna4.xml"   => "CDNA4"
-    case "amdgpu_isa_cdna5.xml"   => "CDNA5"
-    case other                    => throw IllegalArgumentException(s"unknown AMD ISA XML: $other")
-  }
 
   private def parseRadix(element: Element): Int = {
     val radix = Option(element.getAttribute("Radix")).filter(_.nonEmpty).map(_.toInt).getOrElse(10)
@@ -846,7 +798,7 @@ for name in sorted(module.instructions):
   }
 
   private def booleanAttribute(element: Element, name: String): Boolean =
-    element.getAttribute(name).toLowerCase(java.util.Locale.ROOT) match {
+    element.getAttribute(name).toLowerCaseRoot match {
       case "true"  => true
       case "false" => false
       case other   => throw IllegalArgumentException(s"invalid $name '$other'")

@@ -1,65 +1,64 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.{IntBetween, OneOf}
-
-import net.kurobako.gemstone.Constraint.NonNegative
-
+import execution.*
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.spirv.v1_6 as spv
+import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.{ByteRange, IEEE754, LittleEndian}
-import net.kurobako.gemstone.NonEmptyVec
-
-final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSupport {
-  private def o(kind: String, values: Int*): Operand = Operand(
-    NonEmptyString.either(kind).fold(message => fail(message), valid => valid),
-    NonEmptyVec.fromVec(Vec.from(values.map(Word(_))))
-      .fold(message => throw IllegalArgumentException(message), value => value)
+class PrecisionLayoutSuite extends munit.FunSuite {
+  private def o(kind: NonEmpty[String], values: Int*): Operand = Operand(
+    kind,
+    Vec.from(values.map(Word(_))).unsafe[NonEmpty[Vec[Word]]]
   )
   private def r(value: Int)                                    = o("IdResult", value)
   private def literal(value: Long, width: OneOf[(16, 32, 64)]) = {
     val byteWidth = width.scalarByteWidth
     Operand(
-      NonEmptyString("LiteralContextDependentNumber"),
-      NonEmptyVec.unsafeFromVec(Vec.from(LittleEndian.toArray(value, byteWidth).grouped(4).map { bytes =>
-        val chunkWidth = IntBetween.either[0, 8](bytes.length)
+      "LiteralContextDependentNumber",
+      Vec.from(LittleEndian.toArray(value, byteWidth).grouped(4).map { bytes =>
+        val chunkWidth = bytes.length.refine[Int where Between[0, 8]]
           .fold(message => throw IllegalArgumentException(message), value => value)
         Word(LittleEndian.decode(bytes, 0, chunkWidth).toInt)
-      }))
+      }).unsafe
     )
   }
-  private val entry      = Operand(NonEmptyString("LiteralString"), Vec.nonEmpty(Word(0x6b)))
-  private val allocation = MemoryRegion(1)
-  private final class Memory(size: Int) extends net.kurobako.gemstone.vm.Memory {
-    val bytes                                                                       = Array.ofDim[Byte](size)
-    def read(id: MemoryRegion, offset: NonNegative[Long], length: NonNegative[Int]) = {
+  private val entry      = Operand("LiteralString", Vec.nonEmpty(Word(0x6b)))
+  private val allocation = AllocationId(1)
+  private class Memory(size: Int) extends vm.Memory {
+    val bytes: Array[Byte]                                                                    = Array.ofDim[Byte](size)
+    def read(id: AllocationId, offset: Long >= 0, length: Int >= 0): Either[Fault, Vec[Byte]] = {
       assert(id == allocation && ByteRange.contains(size, offset.raw, length.raw.toLong))
       Right(Vec.from(bytes.slice(offset.raw.toInt, offset.raw.toInt + length.raw)))
     }
-    def write(id: MemoryRegion, offset: NonNegative[Long], value: Vec[Byte]) = {
+    def write(id: AllocationId, offset: Long >= 0, value: Vec[Byte]): Either[Fault, Unit] = {
       assert(id == allocation && ByteRange.contains(size, offset.raw, value.size))
       val _ = value.copyToArray(bytes, offset.raw.toInt, value.size); Right(())
     }
   }
   private def run(instructions: Vec[Instruction], args: Vec[KernelTask.Argument], memory: Memory): Unit = {
     val profile = Vec.from(Seq(4, 6, 7, 9, 10, 11).map(value => Instruction.Capability(o("Capability", value)))) :+
-      Instruction.MemoryModel(o("AddressingModel", 2), o("MemoryModel", 2))
+      Instruction.MemoryModel(
+        o("AddressingModel", spv.AddressingModel.Physical64),
+        o("MemoryModel", spv.MemoryModel.OpenCL)
+      )
     val module = Module(
       Header(ISA.version, Word(0), Word(64), Word(0)),
       profile ++ instructions,
       Endianness.Little
     )
     val dispatch =
-      KernelTask.validated(NonEmptyString("k"), Dimensions.One, Dimensions.One, args).toOption.get
+      KernelTask.validated("k", Dimensions.One, Dimensions.One, args).toOption.get
     assertEquals(
       executeLoaded(
         VMCompiler.compile(module, Validation.Environment.OpenCLCompute)
-          .map(VMLoadedProgram(_))
+          .map(VMProgramRuntime(_))
           .fold(error => fail(error.message), value => value),
         dispatch,
         memory
@@ -69,27 +68,28 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
   }
   for {
     (width, count) <- Seq(
-      OneOf.unsafe[(16, 32, 64)](32) -> 4,
-      OneOf.unsafe[(16, 32, 64)](32) -> 8,
-      OneOf.unsafe[(16, 32, 64)](32) -> 16,
-      OneOf.unsafe[(16, 32, 64)](64) -> 3,
-      OneOf.unsafe[(16, 32, 64)](64) -> 4,
-      OneOf.unsafe[(16, 32, 64)](64) -> 8
+      (32: OneOf[(16, 32, 64)]) -> 4,
+      (32: OneOf[(16, 32, 64)]) -> 8,
+      (32: OneOf[(16, 32, 64)]) -> 16,
+      (64: OneOf[(16, 32, 64)]) -> 3,
+      (64: OneOf[(16, 32, 64)]) -> 4,
+      (64: OneOf[(16, 32, 64)]) -> 8
     )
     byValue <- Seq(false, true)
   }
     test(
-      s"natural OpenCL vector layout width=${width.raw} lanes=$count byval=$byValue preserves struct array stride"
+      s"natural OpenCL vector layout width=$width lanes=$count byval=$byValue preserves struct array stride"
     ) {
       val byteWidth = width.scalarByteWidth
       val align     = byteWidth.raw * (if (count == 3) 4 else count)
       val size      = align * 2
       val expected  = Array.ofDim[Byte](size * 2)
       for (base <- Seq(0, size)) {
-        val baseOffset = NonNegative.either(base).fold(message => fail(message), value => value)
+        val baseOffset =
+          base.refine[Int >= 0].fold(message => fail(message), value => value)
         LittleEndian.write(IEEE754.fromDouble(2.25, width), expected, baseOffset.raw, byteWidth)
         for (lane <- 0 until count) {
-          val laneOffset = NonNegative.either(base + align + lane * byteWidth.raw)
+          val laneOffset = (base + align + lane * byteWidth.raw).refine[Int >= 0]
             .fold(message => fail(message), value => value)
           LittleEndian.write(IEEE754.fromDouble(1.5, width), expected, laneOffset.raw, byteWidth)
         }
@@ -99,23 +99,25 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.TypeFloat(r(2), o("LiteralInteger", width.raw), None),
         Instruction.TypeVector(r(3), r(2), o("LiteralInteger", count)),
         Instruction.TypeStruct(r(4), Vec(r(2), r(3))),
-        Instruction.TypePointer(r(5), o("StorageClass", 5), r(4)),
-        Instruction.TypePointer(r(6), o("StorageClass", 7), r(4)),
+        Instruction.TypePointer(r(5), o("StorageClass", spv.StorageClass.CrossWorkgroup), r(4)),
+        Instruction.TypePointer(r(6), o("StorageClass", spv.StorageClass.Function), r(4)),
         Instruction.TypeInt(r(7), o("LiteralInteger", 32), o("LiteralInteger", 0)),
-        Instruction.Constant(r(7), r(8), literal(1, OneOf.unsafe[(16, 32, 64)](32))),
+        Instruction.Constant(r(7), r(8), literal(1, 32)),
         Instruction.Constant(r(2), r(9), literal(IEEE754.fromDouble(1.5, width), width)),
         Instruction.Constant(r(2), r(10), literal(IEEE754.fromDouble(2.25, width), width)),
         Instruction.ConstantComposite(r(3), r(11), Vec.fill(count)(r(9))),
         Instruction.ConstantComposite(r(4), r(12), Vec(r(10), r(11))),
         Instruction.TypeFunction(r(13), r(1), if (byValue) Vec(r(6), r(5)) else Vec(r(5))),
-        Instruction.EntryPoint(o("ExecutionModel", 6), r(20), entry, Vec.empty)
+        Instruction.EntryPoint(o("ExecutionModel", spv.ExecutionModel.Kernel), r(20), entry, Vec.empty)
       ) ++
-        (if (byValue) Vec[Instruction](Instruction.Decorate(r(21), o("Decoration", 38, 2))) else Vec.empty[Instruction])
+        (if (byValue) Vec[Instruction](Instruction.Decorate(r(21), o("Decoration", spv.Decoration.FuncParamAttr, 2)))
+         else Vec.empty[Instruction])
       val parameters = if (byValue)
         Vec[Instruction](Instruction.FunctionParameter(r(6), r(21)), Instruction.FunctionParameter(r(5), r(22)))
       else Vec[Instruction](Instruction.FunctionParameter(r(5), r(22)))
       val instructions = definitions ++
-        Vec[Instruction](Instruction.Function(r(1), r(20), o("FunctionControl", 0), r(13))) ++ parameters ++
+        Vec[Instruction](Instruction.Function(r(1), r(20), o("FunctionControl", spv.FunctionControl.None), r(13))) ++
+        parameters ++
         Vec[Instruction](Instruction.Label(r(23))) ++
         (if (byValue) Vec[Instruction](Instruction.Load(r(4), r(24), r(21), None)) else Vec.empty[Instruction]) ++
         Vec[Instruction](
@@ -144,11 +146,11 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.TypeVoid(r(1)),
         Instruction.TypeFloat(r(2), o("LiteralInteger", 64), None),
         Instruction.TypeFloat(r(3), o("LiteralInteger", 16), None),
-        Instruction.TypePointer(r(4), o("StorageClass", 5), r(3)),
+        Instruction.TypePointer(r(4), o("StorageClass", spv.StorageClass.CrossWorkgroup), r(3)),
         Instruction.TypeFunction(r(5), r(1), Vec(r(4))),
-        Instruction.Constant(r(2), r(6), literal(IEEE754.doubleToBinary64(input), OneOf.unsafe[(16, 32, 64)](64))),
-        Instruction.EntryPoint(o("ExecutionModel", 6), r(20), entry, Vec.empty),
-        Instruction.Function(r(1), r(20), o("FunctionControl", 0), r(5)),
+        Instruction.Constant(r(2), r(6), literal(IEEE754.doubleToBinary64(input), 64)),
+        Instruction.EntryPoint(o("ExecutionModel", spv.ExecutionModel.Kernel), r(20), entry, Vec.empty),
+        Instruction.Function(r(1), r(20), o("FunctionControl", spv.FunctionControl.None), r(5)),
         Instruction.FunctionParameter(r(4), r(21)),
         Instruction.Label(r(22)),
         Instruction.FConvert(r(3), r(23), r(6)),

@@ -5,5 +5,5 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 object CooperativeMatrixReduce {
   final val Row: Int = 1
   final val Column: Int = 2
-  final val `2x2`: Int = 4
+  final val Value2x2: Int = 4
 }

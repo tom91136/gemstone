@@ -25,6 +25,7 @@
 #include <gemstone/environment.hpp>
 
 #include "process.hpp"
+#include <environment_keys.hpp>
 
 namespace gemstone::opencl {
 
@@ -115,7 +116,7 @@ std::string discoverExecutable(const std::vector<std::string> &names, const std:
 
 const std::string &compilerPath() {
   static const std::string path = [] {
-    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenCLCompiler); configured && configured[0] != '\0')
+    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclCompiler); configured && configured[0] != '\0')
       return std::string(configured);
     return discoverExecutable({"icpx", "clang++", "clang"}, {"/opt/intel/oneapi/compiler/*/bin/icpx", "/opt/rocm/llvm/bin/clang++"});
   }();
@@ -124,7 +125,7 @@ const std::string &compilerPath() {
 
 const std::string &spirvConverterPath() {
   static const std::string path = [] {
-    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenCLLlvmSpirv); configured && configured[0] != '\0')
+    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclLlvmSpirv); configured && configured[0] != '\0')
       return std::string(configured);
     return discoverExecutable({"llvm-spirv"},
                               {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-spirv", "/opt/rocm/llvm/bin/llvm-spirv",
@@ -135,7 +136,7 @@ const std::string &spirvConverterPath() {
 
 const std::string &bitcodeLinkerPath() {
   static const std::string path = [] {
-    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenCLLlvmLink); configured && configured[0] != '\0')
+    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclLlvmLink); configured && configured[0] != '\0')
       return std::string(configured);
     return discoverExecutable({"llvm-link"},
                               {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-link", "/opt/rocm/llvm/bin/llvm-link",
@@ -345,7 +346,7 @@ bool readBytes(const std::string &path, std::vector<uint8_t> *bytes) {
 
 bool compileSourceToBitcode(const std::string &source, const std::string &options, std::vector<uint8_t> &bitcode, std::string &log) {
   if (compilerPath().empty()) {
-    log = "no OpenCL compiler found (set GEMSTONE_OPENCL_COMPILER or install icpx/clang)";
+    log = std::string("no OpenCL compiler found (set ") + gemstone::environment::OpenclCompiler + " or install icpx/clang)";
     return false;
   }
   std::vector<std::string> optionArguments;
@@ -517,7 +518,7 @@ bool linkBitcode(const std::vector<std::vector<uint8_t>> &modules, std::vector<u
                  std::string &log) {
   if (modules.empty()) return false;
   if (bitcodeLinkerPath().empty()) {
-    log = "no llvm-link found (set GEMSTONE_OPENCL_LLVM_LINK or install llvm-link)";
+    log = std::string("no llvm-link found (set ") + gemstone::environment::OpenclLlvmLink + " or install llvm-link)";
     return false;
   }
   const TemporaryDirectory directory("gemstone-opencl-link-XXXXXX");

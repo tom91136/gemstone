@@ -1,7 +1,6 @@
 package fix
 
 import scala.meta.*
-
 import scalafix.v1.*
 
 /** Keeps named top-level declarations in the file named after them.
@@ -10,7 +9,7 @@ import scalafix.v1.*
   * reviewed before they are split. A single diagnostic is emitted per file so the first pass is actionable even for
   * generated files that contain a large number of declarations.
   */
-final class GemstoneFilenameConventions extends SyntacticRule("GemstoneFilenameConventions") {
+class GemstoneFilenameConventions extends SyntacticRule("GemstoneFilenameConventions") {
   private case class Declaration(name: String, position: Position)
 
   override def fix(using document: SyntacticDocument): Patch =

@@ -1,20 +1,17 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-import net.kurobako.gemstone.{PlatformTime, Vec}
-import net.kurobako.gemstone.benchmarks.BenchmarkArguments
-import net.kurobako.gemstone.benchmarks.BenchmarkName
-import net.kurobako.gemstone.benchmarks.PlatformMetrics
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.memory.GuestAddress
-import net.kurobako.gemstone.vm.*
-
 import cats.syntax.all.*
 import com.monovore.decline.Opts
-
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.string.*
+import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 /** Exercises the PTX program lifecycle that CUDA conformance spends most of its setup time in. */
@@ -25,36 +22,34 @@ object PTXProgramLifecycleBenchmark {
 
   private case class Options(
       operation: Operation,
-      iterations: Positive[Int],
-      images: Positive[Int],
-      entries: Positive[Int],
-      instructions: NonNegative[Int],
+      iterations: Int > 0,
+      images: Int > 0,
+      entries: Int > 0,
+      instructions: Int >= 0,
       source: Option[Path],
-      kernel: NonEmptyString,
+      kernel: NonEmpty[String],
       recording: Option[Path]
   )
 
-  private val machine = VirtualMachine(Observer.discard, Scheduler.Sequential)
-
-  private object EmptyMemory extends Memory with AddressSpace {
+  private object EmptyMemory extends AddressSpace {
     override def read(
-        region: MemoryRegion,
-        offset: NonNegative[Long],
-        size: NonNegative[Int]
+        region: AllocationId,
+        offset: Long >= 0,
+        size: Int >= 0
     ): Either[Fault, Vec[Byte]] =
       Left(Fault.Unsupported("benchmark kernel attempted a memory read"))
 
     override def write(
-        region: MemoryRegion,
-        offset: NonNegative[Long],
+        region: AllocationId,
+        offset: Long >= 0,
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       Left(Fault.Unsupported("benchmark kernel attempted a memory write"))
 
-    override def address(region: MemoryRegion, offset: NonNegative[Long]): Either[Fault, GuestAddress] =
+    override def address(region: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] =
       Left(Fault.Unsupported("benchmark kernel attempted address translation"))
 
-    override def locate(address: GuestAddress, size: NonNegative[Int]): Either[Fault, AddressSpace.Location] =
+    override def locate(address: GuestAddress, size: Int >= 0): Either[Fault, AddressSpace.Location] =
       Left(Fault.Unsupported("benchmark kernel attempted address lookup"))
   }
 
@@ -64,17 +59,17 @@ object PTXProgramLifecycleBenchmark {
       .validate("operation must be decode or launch")(value => value == "decode" || value == "launch")
       .map(value => if (value == "launch") Operation.Launch else Operation.Decode),
     Opts.option[Int]("iterations", help = "Measured lifecycle operations").withDefault(20)
-      .validate("iterations must be positive")(_ > 0).map(Positive.unsafe),
+      .validate("iterations must be positive")(_ > 0).map(_.unsafe[Int > 0]),
     Opts.option[Int]("images", help = "Distinct images rotated by decode operations").withDefault(8)
-      .validate("images must be positive")(_ > 0).map(Positive.unsafe),
+      .validate("images must be positive")(_ > 0).map(_.unsafe[Int > 0]),
     Opts.option[Int]("entries", help = "Entries in the generated PTX fixture").withDefault(256)
-      .validate("entries must be positive")(_ > 0).map(Positive.unsafe),
+      .validate("entries must be positive")(_ > 0).map(_.unsafe[Int > 0]),
     Opts.option[Int]("instructions", help = "Arithmetic instructions generated per entry").withDefault(0)
-      .validate("instructions must be non-negative")(_ >= 0).map(NonNegative.unsafe),
+      .validate("instructions must be non-negative")(_ >= 0).map(_.unsafe[Int >= 0]),
     Opts.option[String]("source", help = "Optional PTX source file").map(Path.of(_)).orNone,
     Opts.option[String]("kernel", help = "Parameterless entry used by launch operations").withDefault("benchmark")
       .validate("kernel must be non-empty and contain no NUL")(value => value.nonEmpty && !value.contains('\u0000'))
-      .map(NonEmptyString.unsafe),
+      .map(_.unsafe[NonEmpty[String]]),
     Opts.option[String]("recording", help = "JFR output path").map(Path.of(_)).orNone
   ).mapN(Options(_, _, _, _, _, _, _, _))
 
@@ -86,25 +81,26 @@ object PTXProgramLifecycleBenchmark {
 
     Using.resource(PlatformMetrics.startRecording(parsed.recording)) { _ =>
       val allocatedBefore = PlatformMetrics.allocatedBytes
-      val started         = PlatformTime.monotonicNanos
+      val started         = platform.monotonicNanos
       val checksum        = parsed.operation match {
         case Operation.Decode =>
           var iteration = 0
           var total     = 0L
           while (iteration < parsed.iterations.raw) {
             val program = decode(images(iteration % images.size))
-            total += machine.symbols(program)
-              .fold(error => throw IllegalStateException(error.message), _.kernels.size.toLong)
+            total +=
+              program.symbols
+                .fold(error => throw IllegalStateException(error.message), _.kernels.size.toLong)
             iteration += 1
           }
           total
         case Operation.Launch =>
           val program  = decode(images.head)
-          val metadata = machine.kernel(program, parsed.kernel)
+          val metadata = program.kernel(parsed.kernel)
             .fold(error => throw IllegalArgumentException(error.message), value => value)
           if (metadata.explicitParameterCount.raw != 0)
             throw IllegalArgumentException(
-              s"benchmark launch kernel '${parsed.kernel.raw}' has ${metadata.explicitParameterCount} parameters"
+              s"benchmark launch kernel '${parsed.kernel}' has ${metadata.explicitParameterCount} parameters"
             )
           val task = KernelTask.validated(
             kernelName = parsed.kernel,
@@ -114,20 +110,20 @@ object PTXProgramLifecycleBenchmark {
           ).fold(error => throw IllegalArgumentException(error), value => value)
           var iteration = 0
           while (iteration < parsed.iterations.raw) {
-            machine.execute(program, task, EmptyMemory, TaskControl.default)
+            program.execute(task, EmptyMemory, TaskControl())
               .fold(error => throw IllegalStateException(error.message), _ => ())
             iteration += 1
           }
           parsed.iterations.raw.toLong
       }
-      val elapsed   = math.max(0L, PlatformTime.monotonicNanos - started)
+      val elapsed   = math.max(0L, platform.monotonicNanos - started)
       val allocated = for {
         before <- allocatedBefore
         after  <- PlatformMetrics.allocatedBytes
         if after >= before
       } yield after - before
       Console.out.println(
-        s"operation=${parsed.operation.toString.toLowerCase(java.util.Locale.ROOT)} iterations=${parsed.iterations} " +
+        s"operation=${parsed.operation.toString.toLowerCaseRoot} iterations=${parsed.iterations} " +
           s"images=${parsed.images} entries=${parsed.entries} instructions=${parsed.instructions} " +
           s"sourceBytes=${source.getBytes(StandardCharsets.UTF_8).length} " +
           s"nsPerOperation=${elapsed.toDouble / parsed.iterations.raw} " +
@@ -136,12 +132,12 @@ object PTXProgramLifecycleBenchmark {
     }
   }
 
-  private def decode(source: String): machine.LoadedProgram = {
+  private def decode(source: String): LoadedProgram = {
     val program = Parser.decode(source).fold(error => throw IllegalArgumentException(error.message), identity)
-    machine.load(program).fold(error => throw IllegalArgumentException(error.message), identity)
+    LoadedProgram.load(program).fold(error => throw IllegalArgumentException(error.message), identity)
   }
 
-  private def generatedSource(entries: Positive[Int], instructions: NonNegative[Int]): String = {
+  private def generatedSource(entries: Int > 0, instructions: Int >= 0): String = {
     val body =
       if (instructions.raw == 0) "ret;"
       else {

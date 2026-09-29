@@ -87,7 +87,7 @@ gemstone_hsa_aql_runtime *gemstone_hsa_aql_runtime_create(const gemstone_hsa_exe
                                                           const gemstone_hsa_signal_operations *signals);
 
 // Creates the same runtime using the shared execution client and
-// GEMSTONE_RPC_PORT/GEMSTONE_RPC_CLIENT. Returns null when the environment is
+// GEMSTONE_RPC_ENDPOINT/GEMSTONE_RPC_CLIENT. Returns null when the environment is
 // incomplete. This deliberately has no fallback to a physical GPU.
 gemstone_hsa_aql_runtime *gemstone_hsa_aql_runtime_create_from_environment(const gemstone_hsa_signal_operations *signals);
 

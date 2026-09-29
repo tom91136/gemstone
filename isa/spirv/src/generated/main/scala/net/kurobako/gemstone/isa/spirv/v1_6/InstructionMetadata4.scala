@@ -1,854 +1,840 @@
 // Generated from the pinned Khronos SPIR-V core grammar. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import net.kurobako.gemstone.{Vec}
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.collection.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 object InstructionMetadata4 {
   lazy val m0: Metadata = Metadata(
-    NonEmptyString("@exclude"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("ArbitraryPrecisionFixedPointALTERA")),
+    "@exclude",
+    Some("None"),
+    Vec("ArbitraryPrecisionFixedPointALTERA"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("input"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("s"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("i"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("rI"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("q"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("o"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "input", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "s", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "i", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "rI", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "q", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "o", OperandQuantifier.One)
     )
   )
   lazy val m1: Metadata = Metadata(
-    NonEmptyString("@exclude"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("ArbitraryPrecisionFixedPointALTERA")),
+    "@exclude",
+    Some("None"),
+    Vec("ArbitraryPrecisionFixedPointALTERA"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("input"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("s"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("i"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("rI"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("q"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("o"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "input", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "s", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "i", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "rI", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "q", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "o", OperandQuantifier.One)
     )
   )
   lazy val m2: Metadata = Metadata(
-    NonEmptyString("@exclude"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("USMStorageClassesALTERA")),
+    "@exclude",
+    Some("None"),
+    Vec("USMStorageClassesALTERA"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pointer"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "pointer", OperandQuantifier.One)
     )
   )
   lazy val m3: Metadata = Metadata(
-    NonEmptyString("@exclude"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("USMStorageClassesALTERA")),
+    "@exclude",
+    Some("None"),
+    Vec("USMStorageClassesALTERA"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pointer"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "pointer", OperandQuantifier.One)
     )
   )
   lazy val m4: Metadata = Metadata(
-    NonEmptyString("@exclude"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("BlockingPipesALTERA")),
+    "@exclude",
+    Some("None"),
+    Vec("BlockingPipesALTERA"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pipe"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pointer"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("packetSize"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("packetAlignment"), OperandQuantifier.One)
+      OperandShape("IdRef", "pipe", OperandQuantifier.One),
+      OperandShape("IdRef", "pointer", OperandQuantifier.One),
+      OperandShape("IdRef", "packetSize", OperandQuantifier.One),
+      OperandShape("IdRef", "packetAlignment", OperandQuantifier.One)
     )
   )
   lazy val m5: Metadata = Metadata(
-    NonEmptyString("@exclude"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("BlockingPipesALTERA")),
+    "@exclude",
+    Some("None"),
+    Vec("BlockingPipesALTERA"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pipe"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pointer"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("packetSize"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("packetAlignment"), OperandQuantifier.One)
+      OperandShape("IdRef", "pipe", OperandQuantifier.One),
+      OperandShape("IdRef", "pointer", OperandQuantifier.One),
+      OperandShape("IdRef", "packetSize", OperandQuantifier.One),
+      OperandShape("IdRef", "packetAlignment", OperandQuantifier.One)
     )
   )
   lazy val m6: Metadata = Metadata(
-    NonEmptyString("@exclude"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("FPGARegALTERA")),
+    "@exclude",
+    Some("None"),
+    Vec("FPGARegALTERA"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("input"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "input", OperandQuantifier.One)
     )
   )
   lazy val m7: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One)
     )
   )
   lazy val m8: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One)
     )
   )
   lazy val m9: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("intersection"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
+      OperandShape("IdRef", "intersection", OperandQuantifier.One)
     )
   )
   lazy val m10: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("intersection"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
+      OperandShape("IdRef", "intersection", OperandQuantifier.One)
     )
   )
   lazy val m11: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("intersection"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
+      OperandShape("IdRef", "intersection", OperandQuantifier.One)
     )
   )
   lazy val m12: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("intersection"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
+      OperandShape("IdRef", "intersection", OperandQuantifier.One)
     )
   )
   lazy val m13: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("intersection"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
+      OperandShape("IdRef", "intersection", OperandQuantifier.One)
     )
   )
   lazy val m14: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("intersection"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
+      OperandShape("IdRef", "intersection", OperandQuantifier.One)
     )
   )
   lazy val m15: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("intersection"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
+      OperandShape("IdRef", "intersection", OperandQuantifier.One)
     )
   )
   lazy val m16: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("intersection"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
+      OperandShape("IdRef", "intersection", OperandQuantifier.One)
     )
   )
   lazy val m17: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One)
     )
   )
   lazy val m18: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("intersection"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
+      OperandShape("IdRef", "intersection", OperandQuantifier.One)
     )
   )
   lazy val m19: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("intersection"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
+      OperandShape("IdRef", "intersection", OperandQuantifier.One)
     )
   )
   lazy val m20: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One)
     )
   )
   lazy val m21: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One)
     )
   )
   lazy val m22: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("intersection"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
+      OperandShape("IdRef", "intersection", OperandQuantifier.One)
     )
   )
   lazy val m23: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("RayQueryKHR")),
+    "Reserved",
+    Some("None"),
+    Vec("RayQueryKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("rayQuery"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("intersection"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
+      OperandShape("IdRef", "intersection", OperandQuantifier.One)
     )
   )
   lazy val m24: Metadata = Metadata(
-    NonEmptyString("Atomic"),
-    Some(NonEmptyString("None")),
+    "Atomic",
+    Some("None"),
+    Vec("AtomicFloat16AddEXT", "AtomicFloat32AddEXT", "AtomicFloat64AddEXT", "AtomicFloat16VectorNV"),
     Vec(
-      NonEmptyString("AtomicFloat16AddEXT"),
-      NonEmptyString("AtomicFloat32AddEXT"),
-      NonEmptyString("AtomicFloat64AddEXT"),
-      NonEmptyString("AtomicFloat16VectorNV")
-    ),
-    Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pointer"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("memory"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdMemorySemantics"), NonEmptyString("semantics"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("value"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "pointer", OperandQuantifier.One),
+      OperandShape("IdScope", "memory", OperandQuantifier.One),
+      OperandShape("IdMemorySemantics", "semantics", OperandQuantifier.One),
+      OperandShape("IdRef", "value", OperandQuantifier.One)
     )
   )
   lazy val m25: Metadata = Metadata(
-    NonEmptyString("Type-Declaration"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("VectorComputeINTEL")),
+    "Type-Declaration",
+    Some("None"),
+    Vec("VectorComputeINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("AccessQualifier"), NonEmptyString("accessQualifier"), OperandQuantifier.One)
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("AccessQualifier", "accessQualifier", OperandQuantifier.One)
     )
   )
   lazy val m26: Metadata = Metadata(
-    NonEmptyString("Type-Declaration"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("LongCompositesINTEL")),
-    Vec(OperandShape(NonEmptyString("IdRef"), NonEmptyString("member0TypeMember1Type"), OperandQuantifier.Repeated))
+    "Type-Declaration",
+    Some("None"),
+    Vec("LongCompositesINTEL"),
+    Vec(OperandShape("IdRef", "member0TypeMember1Type", OperandQuantifier.Repeated))
   )
   lazy val m27: Metadata = Metadata(
-    NonEmptyString("Constant-Creation"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("LongCompositesINTEL")),
-    Vec(OperandShape(NonEmptyString("IdRef"), NonEmptyString("constituents"), OperandQuantifier.Repeated))
+    "Constant-Creation",
+    Some("None"),
+    Vec("LongCompositesINTEL"),
+    Vec(OperandShape("IdRef", "constituents", OperandQuantifier.Repeated))
   )
   lazy val m28: Metadata = Metadata(
-    NonEmptyString("Constant-Creation"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("LongCompositesINTEL")),
-    Vec(OperandShape(NonEmptyString("IdRef"), NonEmptyString("constituents"), OperandQuantifier.Repeated))
+    "Constant-Creation",
+    Some("None"),
+    Vec("LongCompositesINTEL"),
+    Vec(OperandShape("IdRef", "constituents", OperandQuantifier.Repeated))
   )
   lazy val m29: Metadata = Metadata(
-    NonEmptyString("Composite"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("LongCompositesINTEL")),
-    Vec(OperandShape(NonEmptyString("IdRef"), NonEmptyString("constituents"), OperandQuantifier.Repeated))
+    "Composite",
+    Some("None"),
+    Vec("LongCompositesINTEL"),
+    Vec(OperandShape("IdRef", "constituents", OperandQuantifier.Repeated))
   )
   lazy val m30: Metadata = Metadata(
-    NonEmptyString("Conversion"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("BFloat16ConversionINTEL")),
+    "Conversion",
+    Some("None"),
+    Vec("BFloat16ConversionINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("floatValue"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "floatValue", OperandQuantifier.One)
     )
   )
   lazy val m31: Metadata = Metadata(
-    NonEmptyString("Conversion"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("BFloat16ConversionINTEL")),
+    "Conversion",
+    Some("None"),
+    Vec("BFloat16ConversionINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("bFloat16Value"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "bFloat16Value", OperandQuantifier.One)
     )
   )
   lazy val m32: Metadata = Metadata(
-    NonEmptyString("Barrier"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("SplitBarrierEXT")),
+    "Barrier",
+    Some("None"),
+    Vec("SplitBarrierEXT"),
     Vec(
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("execution"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("memory"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdMemorySemantics"), NonEmptyString("semantics"), OperandQuantifier.One)
+      OperandShape("IdScope", "execution", OperandQuantifier.One),
+      OperandShape("IdScope", "memory", OperandQuantifier.One),
+      OperandShape("IdMemorySemantics", "semantics", OperandQuantifier.One)
     )
   )
   lazy val m33: Metadata = Metadata(
-    NonEmptyString("Barrier"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("SplitBarrierEXT")),
+    "Barrier",
+    Some("None"),
+    Vec("SplitBarrierEXT"),
     Vec(
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("execution"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("memory"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdMemorySemantics"), NonEmptyString("semantics"), OperandQuantifier.One)
+      OperandShape("IdScope", "execution", OperandQuantifier.One),
+      OperandShape("IdScope", "memory", OperandQuantifier.One),
+      OperandShape("IdMemorySemantics", "semantics", OperandQuantifier.One)
     )
   )
   lazy val m34: Metadata = Metadata(
-    NonEmptyString("Miscellaneous"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("ArithmeticFenceEXT")),
+    "Miscellaneous",
+    Some("None"),
+    Vec("ArithmeticFenceEXT"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("target"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "target", OperandQuantifier.One)
     )
   )
   lazy val m35: Metadata = Metadata(
-    NonEmptyString("@exclude"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("TaskSequenceALTERA")),
+    "@exclude",
+    Some("None"),
+    Vec("TaskSequenceALTERA"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("function"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("pipelined"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("useStallEnableClusters"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("getCapacity"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("asyncCapacity"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "function", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "pipelined", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "useStallEnableClusters", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "getCapacity", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "asyncCapacity", OperandQuantifier.One)
     )
   )
   lazy val m36: Metadata = Metadata(
-    NonEmptyString("@exclude"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("TaskSequenceALTERA")),
+    "@exclude",
+    Some("None"),
+    Vec("TaskSequenceALTERA"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("sequence"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("arguments"), OperandQuantifier.Repeated)
+      OperandShape("IdRef", "sequence", OperandQuantifier.One),
+      OperandShape("IdRef", "arguments", OperandQuantifier.Repeated)
     )
   )
   lazy val m37: Metadata = Metadata(
-    NonEmptyString("@exclude"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("TaskSequenceALTERA")),
+    "@exclude",
+    Some("None"),
+    Vec("TaskSequenceALTERA"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("sequence"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "sequence", OperandQuantifier.One)
     )
   )
   lazy val m38: Metadata = Metadata(
-    NonEmptyString("@exclude"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("TaskSequenceALTERA")),
-    Vec(OperandShape(NonEmptyString("IdRef"), NonEmptyString("sequence"), OperandQuantifier.One))
+    "@exclude",
+    Some("None"),
+    Vec("TaskSequenceALTERA"),
+    Vec(OperandShape("IdRef", "sequence", OperandQuantifier.One))
   )
   lazy val m39: Metadata = Metadata(
-    NonEmptyString("@exclude"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("TaskSequenceALTERA")),
-    Vec(OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One))
+    "@exclude",
+    Some("None"),
+    Vec("TaskSequenceALTERA"),
+    Vec(OperandShape("IdResult", "dest", OperandQuantifier.One))
   )
   lazy val m40: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("SubgroupBufferPrefetchINTEL")),
+    "Group",
+    Some("None"),
+    Vec("SubgroupBufferPrefetchINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("ptr"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("numBytes"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("MemoryAccess"), NonEmptyString("mods"), OperandQuantifier.Optional)
+      OperandShape("IdRef", "ptr", OperandQuantifier.One),
+      OperandShape("IdRef", "numBytes", OperandQuantifier.One),
+      OperandShape("MemoryAccess", "mods", OperandQuantifier.Optional)
     )
   )
   lazy val m41: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("Subgroup2DBlockIOINTEL")),
+    "Group",
+    Some("None"),
+    Vec("Subgroup2DBlockIOINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("elementSize"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockWidth"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockHeight"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockCount"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("srcBasePointer"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryWidth"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryHeight"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryPitch"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("coordinate"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("dstPointer"), OperandQuantifier.One)
+      OperandShape("IdRef", "elementSize", OperandQuantifier.One),
+      OperandShape("IdRef", "blockWidth", OperandQuantifier.One),
+      OperandShape("IdRef", "blockHeight", OperandQuantifier.One),
+      OperandShape("IdRef", "blockCount", OperandQuantifier.One),
+      OperandShape("IdRef", "srcBasePointer", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryWidth", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryHeight", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryPitch", OperandQuantifier.One),
+      OperandShape("IdRef", "coordinate", OperandQuantifier.One),
+      OperandShape("IdRef", "dstPointer", OperandQuantifier.One)
     )
   )
   lazy val m42: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("Subgroup2DBlockTransformINTEL")),
+    "Group",
+    Some("None"),
+    Vec("Subgroup2DBlockTransformINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("elementSize"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockWidth"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockHeight"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockCount"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("srcBasePointer"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryWidth"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryHeight"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryPitch"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("coordinate"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("dstPointer"), OperandQuantifier.One)
+      OperandShape("IdRef", "elementSize", OperandQuantifier.One),
+      OperandShape("IdRef", "blockWidth", OperandQuantifier.One),
+      OperandShape("IdRef", "blockHeight", OperandQuantifier.One),
+      OperandShape("IdRef", "blockCount", OperandQuantifier.One),
+      OperandShape("IdRef", "srcBasePointer", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryWidth", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryHeight", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryPitch", OperandQuantifier.One),
+      OperandShape("IdRef", "coordinate", OperandQuantifier.One),
+      OperandShape("IdRef", "dstPointer", OperandQuantifier.One)
     )
   )
   lazy val m43: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("Subgroup2DBlockTransposeINTEL")),
+    "Group",
+    Some("None"),
+    Vec("Subgroup2DBlockTransposeINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("elementSize"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockWidth"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockHeight"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockCount"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("srcBasePointer"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryWidth"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryHeight"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryPitch"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("coordinate"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("dstPointer"), OperandQuantifier.One)
+      OperandShape("IdRef", "elementSize", OperandQuantifier.One),
+      OperandShape("IdRef", "blockWidth", OperandQuantifier.One),
+      OperandShape("IdRef", "blockHeight", OperandQuantifier.One),
+      OperandShape("IdRef", "blockCount", OperandQuantifier.One),
+      OperandShape("IdRef", "srcBasePointer", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryWidth", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryHeight", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryPitch", OperandQuantifier.One),
+      OperandShape("IdRef", "coordinate", OperandQuantifier.One),
+      OperandShape("IdRef", "dstPointer", OperandQuantifier.One)
     )
   )
   lazy val m44: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("Subgroup2DBlockIOINTEL")),
+    "Group",
+    Some("None"),
+    Vec("Subgroup2DBlockIOINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("elementSize"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockWidth"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockHeight"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockCount"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("srcBasePointer"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryWidth"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryHeight"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryPitch"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("coordinate"), OperandQuantifier.One)
+      OperandShape("IdRef", "elementSize", OperandQuantifier.One),
+      OperandShape("IdRef", "blockWidth", OperandQuantifier.One),
+      OperandShape("IdRef", "blockHeight", OperandQuantifier.One),
+      OperandShape("IdRef", "blockCount", OperandQuantifier.One),
+      OperandShape("IdRef", "srcBasePointer", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryWidth", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryHeight", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryPitch", OperandQuantifier.One),
+      OperandShape("IdRef", "coordinate", OperandQuantifier.One)
     )
   )
   lazy val m45: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("Subgroup2DBlockIOINTEL")),
+    "Group",
+    Some("None"),
+    Vec("Subgroup2DBlockIOINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("elementSize"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockWidth"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockHeight"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("blockCount"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("srcPointer"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("dstBasePointer"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryWidth"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryHeight"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("memoryPitch"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("coordinate"), OperandQuantifier.One)
+      OperandShape("IdRef", "elementSize", OperandQuantifier.One),
+      OperandShape("IdRef", "blockWidth", OperandQuantifier.One),
+      OperandShape("IdRef", "blockHeight", OperandQuantifier.One),
+      OperandShape("IdRef", "blockCount", OperandQuantifier.One),
+      OperandShape("IdRef", "srcPointer", OperandQuantifier.One),
+      OperandShape("IdRef", "dstBasePointer", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryWidth", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryHeight", OperandQuantifier.One),
+      OperandShape("IdRef", "memoryPitch", OperandQuantifier.One),
+      OperandShape("IdRef", "coordinate", OperandQuantifier.One)
     )
   )
   lazy val m46: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("SubgroupMatrixMultiplyAccumulateINTEL")),
+    "Group",
+    Some("None"),
+    Vec("SubgroupMatrixMultiplyAccumulateINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("kDim"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("matrixA"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("matrixB"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("matrixC"), OperandQuantifier.One),
-      OperandShape(
-        NonEmptyString("MatrixMultiplyAccumulateOperands"),
-        NonEmptyString("matrixMultiplyAccumulateOperands"),
-        OperandQuantifier.Optional
-      )
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "kDim", OperandQuantifier.One),
+      OperandShape("IdRef", "matrixA", OperandQuantifier.One),
+      OperandShape("IdRef", "matrixB", OperandQuantifier.One),
+      OperandShape("IdRef", "matrixC", OperandQuantifier.One),
+      OperandShape("MatrixMultiplyAccumulateOperands", "matrixMultiplyAccumulateOperands", OperandQuantifier.Optional)
     )
   )
   lazy val m47: Metadata = Metadata(
-    NonEmptyString("Bit"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("TernaryBitwiseFunctionINTEL")),
+    "Bit",
+    Some("None"),
+    Vec("TernaryBitwiseFunctionINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("a"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("b"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("c"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("lUTIndex"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "a", OperandQuantifier.One),
+      OperandShape("IdRef", "b", OperandQuantifier.One),
+      OperandShape("IdRef", "c", OperandQuantifier.One),
+      OperandShape("IdRef", "lUTIndex", OperandQuantifier.One)
     )
   )
   lazy val m48: Metadata = Metadata(
-    NonEmptyString("Memory"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("UntypedVariableLengthArrayINTEL")),
+    "Memory",
+    Some("None"),
+    Vec("UntypedVariableLengthArrayINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("elementType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("length"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "elementType", OperandQuantifier.One),
+      OperandShape("IdRef", "length", OperandQuantifier.One)
     )
   )
   lazy val m49: Metadata = Metadata(
-    NonEmptyString("Extension"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("SpecConditionalINTEL")),
+    "Extension",
+    Some("None"),
+    Vec("SpecConditionalINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pred"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralString"), NonEmptyString("name"), OperandQuantifier.One)
+      OperandShape("IdRef", "pred", OperandQuantifier.One),
+      OperandShape("LiteralString", "name", OperandQuantifier.One)
     )
   )
   lazy val m50: Metadata = Metadata(
-    NonEmptyString("Mode-Setting"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("SpecConditionalINTEL")),
+    "Mode-Setting",
+    Some("None"),
+    Vec("SpecConditionalINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pred"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("ExecutionModel"), NonEmptyString("executionModel"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("entryPoint"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralString"), NonEmptyString("name"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("interface"), OperandQuantifier.Repeated)
+      OperandShape("IdRef", "pred", OperandQuantifier.One),
+      OperandShape("ExecutionModel", "executionModel", OperandQuantifier.One),
+      OperandShape("IdRef", "entryPoint", OperandQuantifier.One),
+      OperandShape("LiteralString", "name", OperandQuantifier.One),
+      OperandShape("IdRef", "interface", OperandQuantifier.Repeated)
     )
   )
   lazy val m51: Metadata = Metadata(
-    NonEmptyString("Mode-Setting"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("SpecConditionalINTEL")),
+    "Mode-Setting",
+    Some("None"),
+    Vec("SpecConditionalINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pred"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("Capability"), NonEmptyString("capability"), OperandQuantifier.One)
+      OperandShape("IdRef", "pred", OperandQuantifier.One),
+      OperandShape("Capability", "capability", OperandQuantifier.One)
     )
   )
   lazy val m52: Metadata = Metadata(
-    NonEmptyString("Constant-Creation"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("FunctionVariantsINTEL")),
+    "Constant-Creation",
+    Some("None"),
+    Vec("FunctionVariantsINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("target"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("features"), OperandQuantifier.Repeated)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "target", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "features", OperandQuantifier.Repeated)
     )
   )
   lazy val m53: Metadata = Metadata(
-    NonEmptyString("Constant-Creation"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("FunctionVariantsINTEL")),
+    "Constant-Creation",
+    Some("None"),
+    Vec("FunctionVariantsINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("category"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("family"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("instructionOpcode"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("architecture"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "category", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "family", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "instructionOpcode", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "architecture", OperandQuantifier.One)
     )
   )
   lazy val m54: Metadata = Metadata(
-    NonEmptyString("Constant-Creation"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("FunctionVariantsINTEL")),
+    "Constant-Creation",
+    Some("None"),
+    Vec("FunctionVariantsINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("Capability"), NonEmptyString("capabilities"), OperandQuantifier.Repeated)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("Capability", "capabilities", OperandQuantifier.Repeated)
     )
   )
   lazy val m55: Metadata = Metadata(
-    NonEmptyString("Composite"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("SpecConditionalINTEL")),
+    "Composite",
+    Some("None"),
+    Vec("SpecConditionalINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(
-        NonEmptyString("IdRef"),
-        NonEmptyString("condition0Operand0Condition1Operand1"),
-        OperandQuantifier.Repeated
-      )
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "condition0Operand0Condition1Operand1", OperandQuantifier.Repeated)
     )
   )
   lazy val m56: Metadata = Metadata(
-    NonEmptyString("Memory"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("PredicatedIOINTEL")),
+    "Memory",
+    Some("None"),
+    Vec("PredicatedIOINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pointer"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pred"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("defaultValue"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("MemoryAccess"), NonEmptyString("mods"), OperandQuantifier.Optional)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "pointer", OperandQuantifier.One),
+      OperandShape("IdRef", "pred", OperandQuantifier.One),
+      OperandShape("IdRef", "defaultValue", OperandQuantifier.One),
+      OperandShape("MemoryAccess", "mods", OperandQuantifier.Optional)
     )
   )
   lazy val m57: Metadata = Metadata(
-    NonEmptyString("Memory"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("PredicatedIOINTEL")),
+    "Memory",
+    Some("None"),
+    Vec("PredicatedIOINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pointer"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("src"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("pred"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("MemoryAccess"), NonEmptyString("mods"), OperandQuantifier.Optional)
+      OperandShape("IdRef", "pointer", OperandQuantifier.One),
+      OperandShape("IdRef", "src", OperandQuantifier.One),
+      OperandShape("IdRef", "pred", OperandQuantifier.One),
+      OperandShape("MemoryAccess", "mods", OperandQuantifier.Optional)
     )
   )
   lazy val m58: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("GroupUniformArithmeticKHR")),
+    "Group",
+    Some("None"),
+    Vec("GroupUniformArithmeticKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("execution"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("GroupOperation"), NonEmptyString("operation"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("x"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdScope", "execution", OperandQuantifier.One),
+      OperandShape("GroupOperation", "operation", OperandQuantifier.One),
+      OperandShape("IdRef", "x", OperandQuantifier.One)
     )
   )
   lazy val m59: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("GroupUniformArithmeticKHR")),
+    "Group",
+    Some("None"),
+    Vec("GroupUniformArithmeticKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("execution"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("GroupOperation"), NonEmptyString("operation"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("x"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdScope", "execution", OperandQuantifier.One),
+      OperandShape("GroupOperation", "operation", OperandQuantifier.One),
+      OperandShape("IdRef", "x", OperandQuantifier.One)
     )
   )
   lazy val m60: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("GroupUniformArithmeticKHR")),
+    "Group",
+    Some("None"),
+    Vec("GroupUniformArithmeticKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("execution"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("GroupOperation"), NonEmptyString("operation"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("x"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdScope", "execution", OperandQuantifier.One),
+      OperandShape("GroupOperation", "operation", OperandQuantifier.One),
+      OperandShape("IdRef", "x", OperandQuantifier.One)
     )
   )
   lazy val m61: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("GroupUniformArithmeticKHR")),
+    "Group",
+    Some("None"),
+    Vec("GroupUniformArithmeticKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("execution"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("GroupOperation"), NonEmptyString("operation"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("x"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdScope", "execution", OperandQuantifier.One),
+      OperandShape("GroupOperation", "operation", OperandQuantifier.One),
+      OperandShape("IdRef", "x", OperandQuantifier.One)
     )
   )
   lazy val m62: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("GroupUniformArithmeticKHR")),
+    "Group",
+    Some("None"),
+    Vec("GroupUniformArithmeticKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("execution"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("GroupOperation"), NonEmptyString("operation"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("x"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdScope", "execution", OperandQuantifier.One),
+      OperandShape("GroupOperation", "operation", OperandQuantifier.One),
+      OperandShape("IdRef", "x", OperandQuantifier.One)
     )
   )
   lazy val m63: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("GroupUniformArithmeticKHR")),
+    "Group",
+    Some("None"),
+    Vec("GroupUniformArithmeticKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("execution"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("GroupOperation"), NonEmptyString("operation"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("x"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdScope", "execution", OperandQuantifier.One),
+      OperandShape("GroupOperation", "operation", OperandQuantifier.One),
+      OperandShape("IdRef", "x", OperandQuantifier.One)
     )
   )
   lazy val m64: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("GroupUniformArithmeticKHR")),
+    "Group",
+    Some("None"),
+    Vec("GroupUniformArithmeticKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("execution"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("GroupOperation"), NonEmptyString("operation"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("x"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdScope", "execution", OperandQuantifier.One),
+      OperandShape("GroupOperation", "operation", OperandQuantifier.One),
+      OperandShape("IdRef", "x", OperandQuantifier.One)
     )
   )
   lazy val m65: Metadata = Metadata(
-    NonEmptyString("Group"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("GroupUniformArithmeticKHR")),
+    "Group",
+    Some("None"),
+    Vec("GroupUniformArithmeticKHR"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdScope"), NonEmptyString("execution"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("GroupOperation"), NonEmptyString("operation"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("x"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdScope", "execution", OperandQuantifier.One),
+      OperandShape("GroupOperation", "operation", OperandQuantifier.One),
+      OperandShape("IdRef", "x", OperandQuantifier.One)
     )
   )
   lazy val m66: Metadata = Metadata(
-    NonEmptyString("Conversion"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("TensorFloat32RoundingINTEL")),
+    "Conversion",
+    Some("None"),
+    Vec("TensorFloat32RoundingINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("floatValue"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "floatValue", OperandQuantifier.One)
     )
   )
   lazy val m67: Metadata = Metadata(
-    NonEmptyString("Memory"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("MaskedGatherScatterINTEL")),
+    "Memory",
+    Some("None"),
+    Vec("MaskedGatherScatterINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("ptrVector"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("alignment"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("mask"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("fillEmpty"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "ptrVector", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "alignment", OperandQuantifier.One),
+      OperandShape("IdRef", "mask", OperandQuantifier.One),
+      OperandShape("IdRef", "fillEmpty", OperandQuantifier.One)
     )
   )
   lazy val m68: Metadata = Metadata(
-    NonEmptyString("Memory"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("MaskedGatherScatterINTEL")),
+    "Memory",
+    Some("None"),
+    Vec("MaskedGatherScatterINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("inputVector"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("ptrVector"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("LiteralInteger"), NonEmptyString("alignment"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("mask"), OperandQuantifier.One)
+      OperandShape("IdRef", "inputVector", OperandQuantifier.One),
+      OperandShape("IdRef", "ptrVector", OperandQuantifier.One),
+      OperandShape("LiteralInteger", "alignment", OperandQuantifier.One),
+      OperandShape("IdRef", "mask", OperandQuantifier.One)
     )
   )
   lazy val m69: Metadata = Metadata(
-    NonEmptyString("Image"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("BindlessImagesINTEL")),
+    "Image",
+    Some("None"),
+    Vec("BindlessImagesINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("src"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "src", OperandQuantifier.One)
     )
   )
   lazy val m70: Metadata = Metadata(
-    NonEmptyString("Image"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("BindlessImagesINTEL")),
+    "Image",
+    Some("None"),
+    Vec("BindlessImagesINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("src"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "src", OperandQuantifier.One)
     )
   )
   lazy val m71: Metadata = Metadata(
-    NonEmptyString("Image"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("BindlessImagesINTEL")),
+    "Image",
+    Some("None"),
+    Vec("BindlessImagesINTEL"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("src"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "src", OperandQuantifier.One)
     )
   )
   lazy val m72: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("DotProductFloat16AccFloat32VALVE"), NonEmptyString("DotProductBFloat16AccVALVE")),
+    "Reserved",
+    Some("None"),
+    Vec("DotProductFloat16AccFloat32VALVE", "DotProductBFloat16AccVALVE"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("vector1"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("vector2"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("accumulator"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "vector1", OperandQuantifier.One),
+      OperandShape("IdRef", "vector2", OperandQuantifier.One),
+      OperandShape("IdRef", "accumulator", OperandQuantifier.One)
     )
   )
   lazy val m73: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("DotProductFloat16AccFloat16VALVE"), NonEmptyString("DotProductBFloat16AccVALVE")),
+    "Reserved",
+    Some("None"),
+    Vec("DotProductFloat16AccFloat16VALVE", "DotProductBFloat16AccVALVE"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("vector1"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("vector2"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("accumulator"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "vector1", OperandQuantifier.One),
+      OperandShape("IdRef", "vector2", OperandQuantifier.One),
+      OperandShape("IdRef", "accumulator", OperandQuantifier.One)
     )
   )
   lazy val m74: Metadata = Metadata(
-    NonEmptyString("Reserved"),
-    Some(NonEmptyString("None")),
-    Vec(NonEmptyString("DotProductFloat8AccFloat32VALVE")),
+    "Reserved",
+    Some("None"),
+    Vec("DotProductFloat8AccFloat32VALVE"),
     Vec(
-      OperandShape(NonEmptyString("IdResultType"), NonEmptyString("resultType"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdResult"), NonEmptyString("dest"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("vector1"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("vector2"), OperandQuantifier.One),
-      OperandShape(NonEmptyString("IdRef"), NonEmptyString("accumulator"), OperandQuantifier.One)
+      OperandShape("IdResultType", "resultType", OperandQuantifier.One),
+      OperandShape("IdResult", "dest", OperandQuantifier.One),
+      OperandShape("IdRef", "vector1", OperandQuantifier.One),
+      OperandShape("IdRef", "vector2", OperandQuantifier.One),
+      OperandShape("IdRef", "accumulator", OperandQuantifier.One)
     )
   )
 }

@@ -6,6 +6,8 @@
 
 #include "gemstone_execution_rpc.hpp"
 
+#include <environment_keys.hpp>
+
 using namespace gemstone::execution;
 
 template <class T> void checkEncodingLimit(const Result<T> &result) {
@@ -14,8 +16,8 @@ template <class T> void checkEncodingLimit(const Result<T> &result) {
 }
 
 TEST_CASE("execution RPC enforces wire encoding bounds", "[rpc]") {
-  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
-  REQUIRE((unsetenv("GEMSTONE_RPC_PORT") == 0));
+  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  REQUIRE((unsetenv(gemstone::environment::RpcEndpoint) == 0));
   auto client = Client::fromEnvironment();
   REQUIRE((client));
 

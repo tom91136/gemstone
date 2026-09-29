@@ -2,11 +2,10 @@ package fix
 
 import scala.meta.*
 import scala.util.control.NonFatal
-
 import scalafix.v1.*
 
 /** Requires method values to show their arity instead of relying on invisible eta expansion. */
-final class GemstoneExplicitEtaExpansion extends SemanticRule("GemstoneExplicitEtaExpansion") {
+class GemstoneExplicitEtaExpansion extends SemanticRule("GemstoneExplicitEtaExpansion") {
   override def fix(using document: SemanticDocument): Patch = document.tree.collect {
     case reference: Term.Ref if isArgument(reference) =>
       explicitApplication(reference).map { application =>

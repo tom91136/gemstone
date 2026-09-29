@@ -1,10 +1,11 @@
 package net.kurobako.gemstone.benchmarks
 
-import net.kurobako.gemstone.Constraint.NonNegative
-
 import java.lang.management.ManagementFactory
 import java.nio.file.Path
-import jdk.jfr.{Configuration, Recording}
+import jdk.jfr.Configuration
+import jdk.jfr.Recording
+import net.kurobako.gemstone.constraint.*
+import scala.util.Try
 
 object PlatformMetrics {
   val platform = "jvm"
@@ -16,9 +17,9 @@ object PlatformMetrics {
     case _ => None
   }
 
-  def allocatedBytes: Option[NonNegative[Long]] =
+  def allocatedBytes: Option[Long >= 0] =
     allocationBean.flatMap(bean =>
-      NonNegative.either(bean.getThreadAllocatedBytes(Thread.currentThread().threadId())).toOption
+      Try(bean.getThreadAllocatedBytes(Thread.currentThread().threadId()).unsafe[Long >= 0]).toOption
     )
 
   def startRecording(destination: Option[Path]): AutoCloseable = destination match {

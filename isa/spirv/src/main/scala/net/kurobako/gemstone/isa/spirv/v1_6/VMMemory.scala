@@ -1,32 +1,26 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.NonNegative
-
-import net.kurobako.gemstone.binary.Widths.*
-
-import net.kurobako.gemstone.vm.AddressSpace
-import net.kurobako.gemstone.memory.GuestAddress
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.{ByteRange, LittleEndian}
-import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.vm.*
-
 import cats.syntax.all.*
-
 import java.util.concurrent.locks.ReentrantLock
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.concurrent.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
-private[v1_6] object VMMemory {
+private object VMMemory {
   enum Region {
-    case External(id: MemoryRegion)
+    case External(id: AllocationId)
+    case Absolute(address: GuestAddress)
     case Internal(memory: InternalMemory)
     case Opaque(bits: Long)
     case Null
   }
 
-  final class InternalMemory(val bytes: Array[Byte]) {
+  class InternalMemory(val bytes: Array[Byte]) {
     val lock: ReentrantLock = ReentrantLock()
   }
 
@@ -41,9 +35,9 @@ private[v1_6] object VMMemory {
   private val VirtualAddressSpan = 0x0000010000000000L
 
   /** One sparse dirty page in SPIR-V's buffered external-memory view. */
-  final class DirtyPage {
-    val bytes         = Array.ofDim[Byte](4096)
-    private val dirty = Array.ofDim[Long](64)
+  class DirtyPage {
+    val bytes: Array[Byte] = Array.ofDim[Byte](4096)
+    private val dirty      = Array.ofDim[Long](64)
 
     def update(offset: Int, value: Byte): Unit = {
       bytes(offset) = value
@@ -77,21 +71,20 @@ private[v1_6] object VMMemory {
     }
   }
   // Mirrored writes, virtual pointers and relocation bookkeeping are confined behind this final memory-state holder.
-  final class MemoryState(
+  class MemoryState(
       memory: Memory,
       relocations: Vec[KernelTask.PointerRelocation],
-      observer: Observer[Event],
-      observation: ObservationContext
+      val handler: Event => Either[Fault, Unit]
   ) {
     def flushHostReads(): Either[Fault, Unit] = memory.flushHostReads()
     def fence(): Either[Fault, Unit]          = flush().flatMap(_ => memory.fenceHostMemory())
-    private val writes                        = mutable.HashMap.empty[MemoryRegion, mutable.LongMap[DirtyPage]]
-    private val externalVirtualAddresses      = mutable.HashMap.empty[MemoryRegion, Long]
+    private val writes                        = mutable.HashMap.empty[AllocationId, mutable.LongMap[DirtyPage]]
+    private val externalVirtualAddresses      = mutable.HashMap.empty[AllocationId, Long]
     private val internalVirtualAddresses      = java.util.IdentityHashMap[Array[Byte], java.lang.Long]()
     private val virtualPointers               = mutable.LongMap.empty[Pointer]
     private val exceptionalAddresses          = mutable.HashMap.empty[(Region, Long), Long]
     private val exceptionalPointers           = mutable.LongMap.empty[Pointer]
-    private val pointerRelocations: mutable.HashMap[(MemoryRegion, Long), (MemoryRegion, Long)] =
+    private val pointerRelocations: mutable.HashMap[(AllocationId, Long), (AllocationId, Long)] =
       mutable.HashMap.from(relocations.view.collect {
         case KernelTask.PointerRelocation(
               KernelTask.RelocationSource.Memory(source),
@@ -102,7 +95,7 @@ private[v1_6] object VMMemory {
           (source -> sourceOffset.raw) -> (target -> targetOffset.raw)
       })
     private val argumentRelocations = {
-      val result = mutable.HashMap.empty[Int, mutable.LongMap[(MemoryRegion, Long)]]
+      val result = mutable.HashMap.empty[Int, mutable.LongMap[(AllocationId, Long)]]
       relocations.foreach {
         case KernelTask.PointerRelocation(
               KernelTask.RelocationSource.Argument(argument),
@@ -127,7 +120,7 @@ private[v1_6] object VMMemory {
     def pointerInteger(pointer: Pointer): Either[Fault, Long] = {
       (memory, pointer.region) match {
         case (addresses: AddressSpace, Region.External(id)) if pointer.offset >= 0 =>
-          return addresses.address(id, NonNegative.unsafe(pointer.offset)).map(_.raw)
+          return addresses.address(id, pointer.offset.unsafe[Long >= 0]).map(_.raw)
         case _ => ()
       }
       val base = pointer.region match {
@@ -140,7 +133,8 @@ private[v1_6] object VMMemory {
               allocated
             case existing => existing.longValue()
           }
-        case Region.Opaque(bits) =>
+        case Region.Absolute(address) => return Right(address.offset(pointer.offset).raw)
+        case Region.Opaque(bits)      =>
           return Either
             .catchOnly[ArithmeticException](Math.addExact(bits, pointer.offset))
             .leftMap(_ => Fault.InvalidTask("opaque SPIR-V pointer arithmetic overflow"))
@@ -188,28 +182,29 @@ private[v1_6] object VMMemory {
       failure.toLeft(relocated)
     }
 
-    def argumentRelocation(index: Int, offset: Long): Option[(MemoryRegion, Long)] =
+    def argumentRelocation(index: Int, offset: Long): Option[(AllocationId, Long)] =
       argumentRelocations.get(index).flatMap(_.get(offset))
 
     def nativePointerStorage(pointer: Pointer): Boolean = pointer.region match {
       case Region.External(region) => memory.hasNativePointers(region)
+      case Region.Absolute(_)      => true
       case _                       => false
     }
 
-    def allocationRelocation(source: MemoryRegion, offset: Long): Option[(MemoryRegion, Long)] =
+    def allocationRelocation(source: AllocationId, offset: Long): Option[(AllocationId, Long)] =
       if (memory.hasNativePointers(source)) None else pointerRelocations.get(source -> offset)
 
     def recordPointerRelocation(pointer: Pointer, destination: Pointer): Either[Fault, Unit] =
       destination.region match {
         case Region.External(destinationAllocation)
-            if destinationAllocation.value != 0 && !memory.hasNativePointers(destinationAllocation) =>
-          NonNegative.either(destination.offset) match {
+            if !memory.hasNativePointers(destinationAllocation) =>
+          destination.offset.refine[Long >= 0] match {
             case Left(_) => Left(Fault.InvalidTask(
                 s"negative SPIR-V pointer relocation destination offset ${destination.offset}"
               ))
             case Right(sourceOffset) => pointer.region match {
-                case Region.External(pointerAllocation) if pointerAllocation.value != 0 =>
-                  NonNegative.either(pointer.offset) match {
+                case Region.External(pointerAllocation) =>
+                  pointer.offset.refine[Long >= 0] match {
                     case Left(_) => Left(Fault.InvalidTask(
                         s"negative SPIR-V pointer relocation target offset ${pointer.offset}"
                       ))
@@ -218,7 +213,7 @@ private[v1_6] object VMMemory {
                         destinationAllocation -> destination.offset,
                         pointerAllocation     -> pointer.offset
                       )
-                      observe(
+                      handler(
                         Event.PointerRelocation(
                           destinationAllocation,
                           sourceOffset,
@@ -234,9 +229,6 @@ private[v1_6] object VMMemory {
           }
         case _ => Right(())
       }
-
-    def observe(event: Event): Either[Fault, Unit] =
-      observer.observe(observation, event).leftMap(error => Fault.Observer(error.message))
 
     def relocatedPointer(source: Pointer, pointee: Int, storageClass: Int): Option[Pointer] =
       source.region match {
@@ -277,9 +269,12 @@ private[v1_6] object VMMemory {
               )
             case _ => memory match {
                 case addresses: AddressSpace =>
-                  addresses.locate(GuestAddress(address), 0).map(location =>
-                    Pointer(Region.External(location.region), location.offset.raw, pointee, storageClass)
-                  ).orElse(Right(Pointer(Region.Opaque(address), 0L, pointee, storageClass)))
+                  addresses.locate(GuestAddress(address), 0).map {
+                    case AddressSpace.Location.Within(allocation, offset) =>
+                      Pointer(Region.External(allocation), offset.raw, pointee, storageClass)
+                    case AddressSpace.Location.Absolute(value) =>
+                      Pointer(Region.Absolute(value), 0L, pointee, storageClass)
+                  }.orElse(Right(Pointer(Region.Opaque(address), 0L, pointee, storageClass)))
                 case _ => Right(Pointer(Region.Opaque(address), 0L, pointee, storageClass))
               }
           }
@@ -292,19 +287,25 @@ private[v1_6] object VMMemory {
       address
     }
 
+    private def addressed[A, E >: Fault](operation: AddressSpace => Either[E, A]): Either[E, A] =
+      memory match {
+        case addresses: AddressSpace => flush().flatMap(_ => operation(addresses))
+        case _ => Left(Fault.Unsupported("absolute SPIR-V pointers require an address-space capable memory"))
+      }
+
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    def read(pointer: Pointer, size: NonNegative[Int]): Either[Fault, Array[Byte]] =
+    def read(pointer: Pointer, size: Int >= 0): Memory.ReadResult[Array[Byte]] =
       pointer.region match {
         case Region.Internal(internal) =>
           checkedRange(internal.bytes.length, pointer.offset, size.raw).map(start =>
             java.util.Arrays.copyOfRange(internal.bytes, start, start + size.raw)
           )
         case Region.External(id) =>
-          NonNegative.either(pointer.offset)
+          pointer.offset.refine[Long >= 0]
             .leftMap(_ =>
               Fault.InvalidTask(s"invalid external read offset ${pointer.offset}")
             )
-            .flatMap(offset => memory.read(id, offset, size)) match {
+            .flatMap(offset => memory.readDeferred(id, offset, size)) match {
             case Left(error)   => Left(error)
             case Right(source) =>
               val result = source.toArray
@@ -321,10 +322,12 @@ private[v1_6] object VMMemory {
               }
               Right(result)
           }
+        case Region.Absolute(address) =>
+          addressed(_.readDeferred(address.offset(pointer.offset), size)).map(_.toArray)
         case region @ (Region.Null | Region.Opaque(_)) => Left(regionFailure(region, "read through"))
       }
 
-    def readScalar(pointer: Pointer, size: IntBetween[1, 8]): Either[Fault, Long] = {
+    def readScalar(pointer: Pointer, size: Int where Between[1, 8]): Memory.ReadResult[Long] = {
       val relocation =
         if (size.raw != 8) None
         else
@@ -332,6 +335,7 @@ private[v1_6] object VMMemory {
             case Region.External(source) => allocationRelocation(source, pointer.offset)
             case Region.Internal(_)      => None
             case Region.Opaque(_)        => None
+            case Region.Absolute(_)      => None
             case Region.Null             => None
           }
       relocation match {
@@ -344,19 +348,19 @@ private[v1_6] object VMMemory {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private def readExternalScalar(
         pointer: Pointer,
-        size: IntBetween[1, 8]
-    ): Either[Fault, Long] = pointer.region match {
+        size: Int where Between[1, 8]
+    ): Memory.ReadResult[Long] = pointer.region match {
       case Region.Internal(internal) =>
         checkedRange(internal.bytes.length, pointer.offset, size.raw)
           .map(start => LittleEndian.decode(internal.bytes, start, size.scalarByteWidth))
       case Region.External(id) =>
-        NonNegative.either(pointer.offset)
+        pointer.offset.refine[Long >= 0]
           .leftMap(_ =>
             Fault.InvalidTask(
               s"invalid external scalar read offset ${pointer.offset}"
             )
           )
-          .flatMap(offset => memory.readValue(id, offset, size)) match {
+          .flatMap(offset => memory.readValueDeferred(id, offset, size)) match {
           case Left(error)   => Left(error)
           case Right(source) =>
             var value = source
@@ -376,6 +380,10 @@ private[v1_6] object VMMemory {
             }
             Right(value)
         }
+      case Region.Absolute(address) =>
+        addressed(_.readDeferred(address.offset(pointer.offset), size.nonNegative)).map(bytes =>
+          LittleEndian.decode(bytes, 0, size.scalarByteWidth)
+        )
       case region @ (Region.Null | Region.Opaque(_)) => Left(regionFailure(region, "read scalar through"))
     }
 
@@ -405,7 +413,8 @@ private[v1_6] object VMMemory {
             }
             Right(())
           }
-        case Region.Null =>
+        case Region.Absolute(address) => addressed(_.write(address.offset(pointer.offset), Vec.from(bytes)))
+        case Region.Null              =>
           Left(
             Fault.InvalidTask(
               s"cannot write through a null SPIR-V pointer (offset=${pointer.offset}, pointee=%${pointer.pointee}, " +
@@ -418,7 +427,7 @@ private[v1_6] object VMMemory {
           ))
       }
 
-    def writeScalar(pointer: Pointer, value: Long, size: IntBetween[1, 8]): Either[Fault, Unit] =
+    def writeScalar(pointer: Pointer, value: Long, size: Int where Between[1, 8]): Either[Fault, Unit] =
       pointer.region match {
         case Region.Internal(internal) =>
           checkedRange(internal.bytes.length, pointer.offset, size.raw)
@@ -441,7 +450,8 @@ private[v1_6] object VMMemory {
             }
             Right(())
           }
-        case Region.Null =>
+        case Region.Absolute(address) => addressed(_.writeValue(address.offset(pointer.offset), value, size))
+        case Region.Null              =>
           Left(
             Fault.InvalidTask(
               s"cannot write through a null SPIR-V pointer (offset=${pointer.offset}, pointee=%${pointer.pointee}, " +
@@ -479,17 +489,19 @@ private[v1_6] object VMMemory {
         Right(())
       }
 
-    def atomicReadScalar(pointer: Pointer, size: IntBetween[1, 8]): Either[Fault, Long] =
+    def atomicReadScalar(pointer: Pointer, size: Int where Between[1, 8]): Either[Fault, Long] =
       pointer.region match {
-        case Region.Internal(internal) => internal.lock.withLock(readExternalScalar(pointer, size))
+        case Region.Internal(internal) => internal.lock.withLock(memory.awaitRead(readExternalScalar(pointer, size)))
         case Region.External(id)       =>
-          NonNegative.either(pointer.offset)
+          pointer.offset.refine[Long >= 0]
             .leftMap(_ =>
               Fault.InvalidTask(
                 s"invalid external atomic read offset ${pointer.offset}"
               )
             )
             .flatMap(offset => flush().flatMap(_ => memory.atomicModifyValue(id, offset, size)(value => value)))
+        case Region.Absolute(address) =>
+          addressed(_.atomicModifyValue(address.offset(pointer.offset), size)(identity))
         case region @ (Region.Null | Region.Opaque(_)) => Left(regionFailure(region, "atomically read"))
       }
 
@@ -503,13 +515,13 @@ private[v1_6] object VMMemory {
     def atomicWriteScalar(
         pointer: Pointer,
         value: Long,
-        size: IntBetween[1, 8]
+        size: Int where Between[1, 8]
     ): Either[Fault, Unit] =
       atomicModifyScalar(pointer, size)(_ => value).map(_ => ())
 
     def atomicModifyScalar(
         pointer: Pointer,
-        size: IntBetween[1, 8]
+        size: Int where Between[1, 8]
     )(update: Long => Long): Either[Fault, Long] = pointer.region match {
       case Region.Internal(internal) => internal.lock.withLock {
           checkedRange(internal.bytes.length, pointer.offset, size.raw) match {
@@ -522,17 +534,19 @@ private[v1_6] object VMMemory {
           }
         }
       case Region.External(id) =>
-        NonNegative.either(pointer.offset)
+        pointer.offset.refine[Long >= 0]
           .leftMap(_ =>
             Fault.InvalidTask(s"invalid external atomic offset ${pointer.offset}")
           )
           .flatMap(offset => flush().flatMap(_ => memory.atomicModifyValue(id, offset, size)(update)))
+      case Region.Absolute(address) =>
+        addressed(_.atomicModifyValue(address.offset(pointer.offset), size)(update))
       case region @ (Region.Null | Region.Opaque(_)) => Left(regionFailure(region, "atomically modify"))
     }
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
     def flush(): Either[Fault, Unit] = {
-      val allocations = writes.view.toArray.sortBy(_._1.value)
+      val allocations = writes.view.toArray.sortBy(_._1.toLong)
       var allocation  = 0
       while (allocation < allocations.length) {
         val (id, pending) = allocations(allocation)
@@ -548,7 +562,7 @@ private[v1_6] object VMMemory {
               offset = page.nextCleanByte(start)
               memory.write(
                 id,
-                NonNegative.unsafe((number << 12) + start.toLong),
+                ((number << 12) + start.toLong).unsafe[Long >= 0],
                 Vec.from(java.util.Arrays.copyOfRange(page.bytes, start, offset))
               ) match {
                 case Left(error) => return Left(error)

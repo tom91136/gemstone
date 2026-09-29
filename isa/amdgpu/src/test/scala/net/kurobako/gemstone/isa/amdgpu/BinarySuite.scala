@@ -1,10 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import Program.*
-
-import net.kurobako.gemstone.Vec
-
-final class BinarySuite extends munit.FunSuite {
+class BinarySuite extends munit.FunSuite {
   test("encode and decode the reference SOPP layout") {
     val instruction = Parser.parseInstruction("s_nop 0x1234").fold(error => fail(error.toString), value => value)
     val target      = Target("gfx1010")

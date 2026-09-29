@@ -1,47 +1,36 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import Program.*
-
-import VMIR.*
 import VMExecution.*
-
-import net.kurobako.gemstone.Vec
-
-import net.kurobako.gemstone.memory.AddressMemory
-import net.kurobako.gemstone.vm.LaunchGeometry
-import net.kurobako.gemstone.vm.LaunchGeometry.Coordinates
-import net.kurobako.gemstone.vm.Scheduler
-import net.kurobako.gemstone.vm.TaskControl
-
+import VMIR.*
 import java.util.concurrent.atomic.AtomicReference
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 
-private[v9_3] object VMInterpreter {
+private object VMInterpreter {
 
   private case class Cohort(pc: Pc, lanes: VMLaneMask)
   private case class BarrierReduction(
-      destination: NonEmptyString,
-      predicate: NonEmptyString,
+      destination: NonEmpty[String],
+      predicate: NonEmpty[String],
       operation: PredicateOperation,
       pc: Pc
   )
   private case class Waiting(cohort: Cohort, key: WaitKey, reduction: Option[BarrierReduction] = None)
 
   // The dispatch loop exits immediately on execution faults.
-  @SuppressWarnings(
-    Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return", "scalafix:GemstoneNoAssume")
-  )
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
   def execute(
       kernel: Kernel,
       geometry: LaunchGeometry,
-      arguments: Map[NonEmptyString, Argument],
+      arguments: Map[NonEmpty[String], Argument],
       memory: AddressMemory,
-      control: TaskControl = TaskControl.default,
-      scheduler: Scheduler = Scheduler.Sequential,
+      control: TaskControl = TaskControl(),
+      workgroups: Workgroups = Workgroups.Sequential,
       initialParameterBuffers: Map[Long, Array[Byte]] = Map.empty,
       blockIndices: Option[Vec[Int]] = None
   ): Either[ExecutionFault, Unit] = {
@@ -59,11 +48,11 @@ private[v9_3] object VMInterpreter {
     }
     val everyGroupFull =
       geometry.globalExtent.x ==
-        (geometry.groupSize.x.widen[Positive[Long]] * geometry.groupCount.x.widen[Positive[Long]]) &&
+        (geometry.groupSize.x.toLong * geometry.groupCount.x.toLong) &&
         geometry.globalExtent.y ==
-        (geometry.groupSize.y.widen[Positive[Long]] * geometry.groupCount.y.widen[Positive[Long]]) &&
+        (geometry.groupSize.y.toLong * geometry.groupCount.y.toLong) &&
         geometry.globalExtent.z ==
-        (geometry.groupSize.z.widen[Positive[Long]] * geometry.groupCount.z.widen[Positive[Long]])
+        (geometry.groupSize.z.toLong * geometry.groupCount.z.toLong)
     def liveLanes(group: Coordinates): Either[ExecutionFault, VMLaneMask] =
       if (everyGroupFull) Right(allLanes)
       else geometry.activeGroupSize(group) match {
@@ -111,18 +100,18 @@ private[v9_3] object VMInterpreter {
                   arguments,
                   memory,
                   control,
-                  scheduler,
+                  workgroups,
                   initialParameterBuffers
                 ).map(_ => ())
             }
         }
     val selectedCount                  = blockIndices.fold(groupCount.raw)(_.size)
     def selectedBlock(index: Int): Int = blockIndices.fold(index)(_(index))
-    val selectedTasks                  = NonNegative.unsafe(selectedCount.toLong)
-    val workItems: NonNegative[Long]   = laneCount.widen
-    val parallelBlocks                 = scheduler.shouldParallel(selectedTasks, workItems)
+    val selectedTasks                  = selectedCount.toLong.unsafe[Long >= 0]
+    val workItems: Long >= 0           = laneCount.toLong
+    val parallelBlocks                 = workgroups.shouldParallel(selectedTasks, workItems)
     val executionFailure               = AtomicReference(Option.empty[ExecutionFault])
-    scheduler.forEach(selectedTasks, parallel = parallelBlocks) { index =>
+    workgroups.forEach(selectedTasks, parallel = parallelBlocks) { index =>
       runBlock(selectedBlock(index.raw.toInt)).left.map { error =>
         val _ = executionFailure.compareAndSet(None, Some(error))
         error.toFault
@@ -137,21 +126,21 @@ private[v9_3] object VMInterpreter {
   // Retain one idle block state across dispatches. The single slot bounds retained memory and transfers ownership
   // atomically when independent executions overlap.
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-  private val blockState = AtomicReference[VMState | Null](null)
+  private val blockState = AtomicReference[VMBlockState | Null](null)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-  private def borrowState(laneCount: Int, initialLive: VMLaneMask, registerChunkCount: Int): VMState = {
+  private def borrowState(laneCount: Int, initialLive: VMLaneMask, registerChunkCount: Int): VMBlockState = {
     val cached = blockState.getAndSet(null)
     cached match {
-      case state: VMState if state.laneCount == laneCount && state.registerChunkCount == registerChunkCount =>
+      case state: VMBlockState if state.laneCount == laneCount && state.registerChunkCount == registerChunkCount =>
         state.reset(initialLive)
         state
-      case _ => VMState(laneCount, initialLive, registerChunkCount = registerChunkCount)
+      case _ => VMBlockState(laneCount, initialLive, registerChunkCount = registerChunkCount)
     }
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-  private def releaseState(state: VMState): Unit = {
+  private def releaseState(state: VMBlockState): Unit = {
     val _ = blockState.compareAndSet(null, state)
   }
 
@@ -161,13 +150,13 @@ private[v9_3] object VMInterpreter {
       group: Coordinates,
       geometry: LaunchGeometry,
       initialLive: VMLaneMask,
-      arguments: Map[NonEmptyString, Argument],
+      arguments: Map[NonEmpty[String], Argument],
       memory: AddressMemory,
       control: TaskControl,
-      scheduler: Scheduler,
+      workgroups: Workgroups,
       initialParameterBuffers: Map[Long, Array[Byte]],
-      initialState: Option[VMState] = None
-  ): Either[ExecutionFault, VMState] = {
+      initialState: Option[VMBlockState] = None
+  ): Either[ExecutionFault, VMBlockState] = {
     val laneCount =
       geometry.groupSize.volumeInt.fold(message => throw IllegalArgumentException(message), value => value)
     val state    = initialState.getOrElse(borrowState(laneCount.raw, initialLive, kernel.registerChunkCount))
@@ -181,7 +170,7 @@ private[v9_3] object VMInterpreter {
         arguments,
         memory,
         control,
-        scheduler,
+        workgroups,
         initialParameterBuffers,
         state
       )
@@ -189,31 +178,25 @@ private[v9_3] object VMInterpreter {
   }
 
   // Cohort and barrier state model the SIMT machine directly; early exits preserve the first fault.
-  @SuppressWarnings(
-    Array(
-      "scalafix:DisableSyntax.var",
-      "scalafix:DisableSyntax.return",
-      "scalafix:GemstoneNoAssume"
-    )
-  )
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
   private def executeBlockWithState(
       kernel: Kernel,
       block: Int,
       group: Coordinates,
       geometry: LaunchGeometry,
-      arguments: Map[NonEmptyString, Argument],
+      arguments: Map[NonEmpty[String], Argument],
       memory: AddressMemory,
       control: TaskControl,
-      scheduler: Scheduler,
+      workgroups: Workgroups,
       initialParameterBuffers: Map[Long, Array[Byte]],
-      state: VMState
-  ): Either[ExecutionFault, VMState] = {
+      state: VMBlockState
+  ): Either[ExecutionFault, VMBlockState] = {
     import VMSemantics.*
 
     state.importParameterBuffers(initialParameterBuffers)
     kernel.parameters.foreach { parameter =>
       arguments.get(parameter.name).foreach(argument =>
-        state.bindParameterBuffer(parameter.name, argument.bytes.toVector.toArray)
+        state.bindParameterBuffer(parameter.name, argument.bytes.toArray)
       )
     }
     val ready                                    = mutable.ArrayBuffer.empty[Cohort]
@@ -247,7 +230,7 @@ private[v9_3] object VMInterpreter {
     ): Either[ExecutionFault, (VMLaneMask, VMLaneMask)] = warpMemberMask(executable.instruction) match {
       case None             => Right(cohort.lanes -> VMLaneMask.Empty)
       case Some(memberMask) =>
-        val context = VMExecutionContext(
+        val context = VMInstructionContext(
           kernel,
           block,
           group,
@@ -258,7 +241,7 @@ private[v9_3] object VMInterpreter {
           arguments,
           memory,
           control,
-          scheduler
+          workgroups
         )
         val masks                           = mutable.Map.empty[Int, Long]
         var failure: Option[ExecutionFault] = None
@@ -348,15 +331,16 @@ private[v9_3] object VMInterpreter {
 
     while (state.live.nonEmpty) {
       if (ready.isEmpty) {
-        val waits  = waiting.map(value => s"${value.key.scope}:${value.key.id}@${value.key.phase}").distinct.sorted
-        val detail = if (waits.nonEmpty) waits.mkString(", ") else "no runnable cohort"
+        val waits = waiting.map(value => s"${value.key.scope}:${value.key.id}@${value.key.phase}").distinct.sorted
+        val detail: NonEmpty[String] =
+          if (waits.nonEmpty) s"waiting for ${waits.mkString(", ")}" else "no runnable cohort"
         return Left(ExecutionFault.Deadlock(detail))
       }
       var cohort     = ready.remove(0)
       val executable = kernel.program.at(cohort.pc) match {
         case None =>
           return Left(ExecutionFault.InvalidProgram(
-            s"program counter ${cohort.pc.raw} is outside a ${kernel.program.size}-instruction program"
+            s"program counter ${cohort.pc} is outside a ${kernel.program.size}-instruction program"
           ))
         case Some(value) => value
       }
@@ -374,7 +358,7 @@ private[v9_3] object VMInterpreter {
           cohort = cohort.copy(lanes = runnable)
       }
       if (cohort.lanes.nonEmpty) {
-        control.checkpoint(Positive.unsafe(cohort.lanes.size)) match {
+        control.checkpoint(cohort.lanes.size.unsafe[Int > 0]) match {
           case Left(fault) => return Left(ExecutionFault.fromControl(fault))
           case Right(())   => ()
         }
@@ -402,7 +386,7 @@ private[v9_3] object VMInterpreter {
           case None        => ()
         }
         val skipped = if (executable.predication.isEmpty) VMLaneMask.Empty else cohort.lanes.subtract(active)
-        val context = VMExecutionContext(
+        val context = VMInstructionContext(
           kernel,
           block,
           group,
@@ -413,7 +397,7 @@ private[v9_3] object VMInterpreter {
           arguments,
           memory,
           control,
-          scheduler
+          workgroups
         )
 
         effects.clear()
@@ -514,10 +498,10 @@ private[v9_3] object VMInterpreter {
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   def executeDeviceFunction(
-      caller: VMExecutionContext,
+      caller: VMInstructionContext,
       function: DeviceFunction,
-      parameters: Vec[NonEmptyString],
-      returnParameters: Vec[NonEmptyString]
+      parameters: Vec[NonEmpty[String]],
+      returnParameters: Vec[NonEmpty[String]]
   ): Either[ExecutionFault, Unit] = {
     if (parameters.size != function.parameters.size)
       return Left(ExecutionFault.InvalidState(
@@ -528,7 +512,7 @@ private[v9_3] object VMInterpreter {
         s"device function ${function.name} returns ${function.returnParameters.size} parameters, found ${returnParameters.size}"
       ))
     val laneCount = caller.state.laneCount
-    val state     = VMState(laneCount, caller.active, caller.state.shared, caller.state.registerChunkCount)
+    val state     = VMBlockState(laneCount, caller.active, caller.state.shared, caller.state.registerChunkCount)
     state.importParameterBuffers(caller.state.parameterBuffers.toMap)
     state.parameterAddresses ++= caller.state.parameterAddresses
     // Arity is validated above. A call operand whose param-space buffer was
@@ -552,7 +536,7 @@ private[v9_3] object VMInterpreter {
       Map.empty,
       caller.memory,
       caller.control,
-      caller.scheduler,
+      caller.workgroups,
       Map.empty,
       Some(state)
     ).map { completed =>

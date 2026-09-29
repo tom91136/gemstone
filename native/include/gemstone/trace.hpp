@@ -4,6 +4,8 @@
 
 #include <gemstone/environment.hpp>
 
+#include <environment_keys.hpp>
+
 namespace gemstone {
 
 namespace detail {

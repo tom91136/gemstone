@@ -1,5 +1,6 @@
 import java.nio.file.Path
-import scala.sys.process.{Process, ProcessLogger}
+import scala.sys.process.Process
+import scala.sys.process.ProcessLogger
 
 /** clang-format invocation shared by the native formatting tasks. */
 object ClangFormat {

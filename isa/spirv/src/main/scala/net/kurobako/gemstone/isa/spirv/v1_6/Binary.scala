@@ -1,13 +1,10 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.Positive
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.Bits
-import net.kurobako.gemstone.binary.LittleEndian
 import cats.data.Chain
-
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 import scala.annotation.tailrec
 
 object Binary {
@@ -15,14 +12,18 @@ object Binary {
     case MisalignedByteLength(length: Int)
     case TruncatedHeader(wordCount: Int)
     case InvalidMagic(found: Long)
+    case InvalidVersion(found: Long)
+    case VersionTooLarge(version: Version)
     case ZeroInstructionWordCount(wordOffset: Int)
     case TruncatedInstruction(wordOffset: Int, declaredWords: Int, remainingWords: Int)
-    case InstructionTooLong(opcodeNumber: SPIRVOpcodeNumber, wordCount: Positive[Int])
+    case InstructionTooLong(opcodeNumber: SPIRVOpcodeNumber, wordCount: Int > 0)
 
-    def message: String = this match {
+    def message: NonEmpty[String] = this match {
       case MisalignedByteLength(length)     => s"SPIR-V binary length $length is not a multiple of four"
       case TruncatedHeader(wordCount)       => s"SPIR-V header needs five words, found $wordCount"
       case InvalidMagic(found)              => f"invalid SPIR-V magic 0x$found%08x"
+      case InvalidVersion(found)            => f"invalid SPIR-V version word 0x$found%08x"
+      case VersionTooLarge(version)         => s"SPIR-V version $version does not fit the version word"
       case ZeroInstructionWordCount(offset) => s"instruction at word $offset has zero word count"
       case TruncatedInstruction(offset, declared, remaining) =>
         s"instruction at word $offset declares $declared words with only $remaining remaining"
@@ -45,9 +46,10 @@ object Binary {
       endianness <-
         if (rawMagic == Magic) Right(Endianness.Little)
         else if (java.lang.Integer.reverseBytes(rawMagic) == Magic) Right(Endianness.Big)
-        else Left(BinaryError.InvalidMagic(Bits.unsigned32(rawMagic).raw))
-      words  = Vec.tabulate(wordCount)(index => Word(readInt(bytes, index * 4, endianness)))
-      header = Header(SPIRVVersion.fromWord(words(1)), words(2), words(3), words(4))
+        else Left(BinaryError.InvalidMagic(Bits.unsigned32(rawMagic).toLong))
+      words = Vec.tabulate(wordCount)(index => Word(readInt(bytes, index * 4, endianness)))
+      version <- decodeVersion(words(1)).toRight(BinaryError.InvalidVersion(words(1).toUnsigned.toLong))
+      header = Header(version, words(2), words(3), words(4))
       instructions <- parseInstructions(words, 5, Chain.empty)
     } yield RawModule(header, instructions, endianness)
 
@@ -71,29 +73,31 @@ object Binary {
           words,
           offset + declared,
           instructions.append(
-            RawInstruction(SPIRVOpcodeNumber.unsafe(opcodeValue), words.slice(offset + 1, offset + declared))
+            RawInstruction(opcodeValue.unsafe[SPIRVOpcodeNumber], words.slice(offset + 1, offset + declared))
           )
         )
     }
 
-  def encode(module: RawModule): Either[BinaryError, Vec[Byte]] =
-    module.instructions.find(_.wordCount.raw > 0xffff) match {
+  def encode(module: RawModule): Either[BinaryError, Vec[Byte]] = for {
+    version <- encodeVersion(module.header.version).toRight(BinaryError.VersionTooLarge(module.header.version))
+    bytes   <- module.instructions.find(_.wordCount.raw > 0xffff) match {
       case Some(instruction) =>
         Left(BinaryError.InstructionTooLong(instruction.opcodeNumber, instruction.wordCount))
       case None =>
         val header = Vec(
           Word(Magic),
-          module.header.version.word,
+          version,
           module.header.generator,
           module.header.bound,
           module.header.schema
         )
         val body = module.instructions.flatMap { instruction =>
-          Vec(Word((instruction.wordCount.raw << 16) | instruction.opcodeNumber.raw)) ++
+          Vec(Word((instruction.wordCount.raw << 16) | instruction.opcodeNumber.toInt)) ++
             instruction.operandWords
         }
         Right((header ++ body).flatMap(word => writeInt(word.raw, module.endianness)))
     }
+  } yield bytes
 
   private def readInt(bytes: Vec[Byte], offset: Int, endianness: Endianness): Int =
     endianness match {
@@ -109,5 +113,19 @@ object Binary {
         case Endianness.Big    => java.lang.Integer.reverseBytes(value).toLong
       },
       4
+    )
+  private def decodeVersion(word: Word): Option[Version] = {
+    val raw = word.toUnsigned.toLong
+    // Physical layout: zero byte, major byte, minor byte, zero byte.
+    if ((raw & 0xff0000ffL) != 0L) None
+    else for {
+      major <- Bits.unsignedIntField(raw, 16, 8).refine[Int > 0].toOption
+      minor <- Bits.unsignedIntField(raw, 8, 8).refine[Int >= 0].toOption
+    } yield Version(major, minor)
+  }
+
+  private def encodeVersion(version: Version): Option[Word] =
+    Option.when(version.major.raw <= 0xff && version.minor.raw <= 0xff)(
+      Word((version.major.raw << 16) | (version.minor.raw << 8))
     )
 }

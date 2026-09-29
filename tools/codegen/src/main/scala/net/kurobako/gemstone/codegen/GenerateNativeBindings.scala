@@ -1,15 +1,13 @@
 package net.kurobako.gemstone.codegen
 
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
+import GenerateOfficialAPIManifest.SurfaceName.*
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import GenerateOfficialAPIManifest.CIdentifier.raw
-import GenerateOfficialAPIManifest.CType.raw
-import GenerateOfficialAPIManifest.EnumValue.raw
-import GenerateOfficialAPIManifest.SurfaceName.raw
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import net.kurobako.gemstone.string.*
 import upickle.default.read
 
 /** Generates native ABI declarations and implementation checks. */
@@ -315,12 +313,13 @@ object GenerateNativeBindings {
     val byName: Map[String, GenerateOfficialAPIManifest.Surface] =
       manifest.surfaces.map(surface => surface.name.raw -> surface).toMap
     val platformFiles: Vector[GeneratedFile] = platforms.flatMap { platform =>
-      val functions = platform.surfaces.flatMap(name => byName.getOrElse(name, missingSurface(name)).functions)
-        .distinctBy(_.name).sortBy(_.name.raw)
+      val functions = GenerateOfficialAPIManifest.Function.merge(
+        platform.surfaces.flatMap(name => byName.getOrElse(name, missingSurface(name)).functions)
+      ).sortBy(_.name.raw)
       val enumConstants = platform.surfaces.flatMap(name => byName.getOrElse(name, missingSurface(name)).enumConstants)
       val conflicts     = enumConstants.groupBy(_.name).collect {
         case (name, values) if values.map(_.value).distinct.size > 1 =>
-          s"${name.raw}: ${values.map(_.value.raw).distinct.mkString(" versus ")}"
+          s"$name: ${values.map(_.value).distinct.mkString(" versus ")}"
       }
       if (conflicts.nonEmpty)
         throw IllegalStateException(s"${platform.name}: conflicting enum constants: ${conflicts.mkString("; ")}")
@@ -361,7 +360,7 @@ object GenerateNativeBindings {
       platform: Platform,
       functions: Vector[GenerateOfficialAPIManifest.Function]
   ): String = {
-    val guard        = s"GEMSTONE_${platform.name.toUpperCase(java.util.Locale.ROOT)}_API_H"
+    val guard        = s"GEMSTONE_${platform.name.toUpperCaseRoot}_API_H"
     val declarations = functions.map { function =>
       val functionType = function.functionType.raw
       val open         = functionType.indexOf('(')
@@ -449,9 +448,9 @@ object GenerateNativeBindings {
       platform: String,
       constants: Vector[GenerateOfficialAPIManifest.EnumConstant]
   ): String = {
-    val guard  = s"GEMSTONE_${platform.toUpperCase(java.util.Locale.ROOT)}_CONSTANTS_HPP"
+    val guard  = s"GEMSTONE_${platform.toUpperCaseRoot}_CONSTANTS_HPP"
     val values =
-      constants.map(constant => s"inline constexpr auto ${constant.name.raw} = ${constant.value.raw};").mkString("\n")
+      constants.map(constant => s"inline constexpr auto ${constant.name} = ${constant.value};").mkString("\n")
     s"""#ifndef $guard
        |#define $guard
        |
@@ -493,9 +492,8 @@ object GenerateNativeBindings {
     if (surface.dispatchTables.isEmpty)
       throw IllegalStateException("level-zero-ddi: no DDI table records found")
     val clearers = surface.dispatchTables.map { table =>
-      val assignments = table.fields.map(field => s"  table->${field.name.raw} = nullptr;").mkString("\n")
-      s"""inline void clear(struct ${table.name.raw} *table) {
-         |$assignments
+      s"""inline void clear(struct ${table.name} *table) {
+         |  *table = {};
          |}""".stripMargin
     }.mkString("\n\n")
     s"""#ifndef GEMSTONE_LEVELZERO_DDI_HPP
@@ -518,6 +516,7 @@ object GenerateNativeBindings {
       val _ = GeneratedFiles.write(file.path, file.content)
       Console.out.println(s"generated ${file.path}")
     }
-    GeneratedFiles.removeUnexpected(output, files.map(_.path).toSet, path => !path.startsWith(output.resolve("rpc")))
+    val ownedDirectories = files.map(_.path.toAbsolutePath.normalize.getParent).toSet
+    GeneratedFiles.removeUnexpected(output, files.map(_.path).toSet, path => ownedDirectories(path.getParent))
   }
 }

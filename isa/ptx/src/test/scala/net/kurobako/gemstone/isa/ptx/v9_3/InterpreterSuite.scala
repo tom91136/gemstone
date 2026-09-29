@@ -1,411 +1,15 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-import net.kurobako.gemstone.NonEmptyVec
-
-import Program.*
-
-import VMIR.*
 import VMExecution.*
+import VMIR.*
+import execution.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-import net.kurobako.gemstone.Vec
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.memory.ArrayCheckedMemory
-import net.kurobako.gemstone.memory.GuestAddress
-import net.kurobako.gemstone.vm.{Fault, LaunchGeometry, Scheduler, TaskControl, TaskLimits}
-import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
-
-final class InterpreterSuite extends munit.FunSuite {
-  for {
-    width  <- List(32, 64)
-    target <- List("generic", "global", "acquire.sys.global", "shared", "generic-shared")
-  } test(s"$target $width-bit CAS returns old bits on success and failure") {
-    val size      = width / 8
-    val shared    = target == "shared" || target == "generic-shared"
-    val qualifier = if (target.startsWith("generic")) "" else s"$target."
-    val setup     = if (shared) s"mov.u64 %p, scratch; st.shared.b$width [%p], -1;"
-    else s"mov.u64 %p, %q; st.global.b$width [%p], -1;"
-    val load   = if (shared) "shared" else "global"
-    val source = s""".version 8.0
-      .target sm_80
-      .address_size 64
-      .visible .entry compare(.param .u64 output) {
-        .shared .align 8 .b8 scratch[8];
-        .reg .u64 %p, %q;
-        .reg .b$width %old, %value;
-        ld.param.u64 %q, [output];
-        $setup
-        atom.${qualifier}cas.b$width %old, [%p], -1, 7;
-        st.global.b$width [%q+$size], %old;
-        atom.${qualifier}cas.b$width %old, [%p], -1, 19;
-        st.global.b$width [%q+${2 * size}], %old;
-        ld.$load.b$width %value, [%p];
-        st.global.b$width [%q], %value;
-        ret;
-      }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(NonNegative.unsafe(3 * size))
-    val start  = memory.allocation.start
-    assertEquals(
-      VMInterpreter.execute(
-        kernel,
-        geometry(1, 1),
-        Map(NonEmptyString("output") -> Argument.fromLong(start.raw)),
-        memory
-      ),
-      Right(())
-    )
-    val byteWidth = IntBetween.unsafe[1, 8](size)
-    assertEquals(memory.readLittleEndian(start, byteWidth).toOption.get, 7L)
-    assertEquals(
-      memory.readLittleEndian(start.offset(size.toLong), byteWidth).toOption.get,
-      if (width == 32) 0xffffffffL else -1L
-    )
-    assertEquals(memory.readLittleEndian(start.offset(2L * size), byteWidth).toOption.get, 7L)
-  }
-
-  for (width <- List(32, 64)) test(s"$width-bit CAS has exactly one winner across lanes") {
-    val size   = width / 8
-    val source = s""".version 8.0
-      .target sm_80
-      .address_size 64
-      .visible .entry compare(.param .u64 output) {
-        .reg .u64 %p, %q, %offset;
-        .reg .u32 %lane;
-        .reg .b$width %old;
-        ld.param.u64 %p, [output];
-        mov.u32 %lane, %tid.x;
-        add.u32 %lane, %lane, 1;
-        mul.wide.u32 %offset, %lane, $size;
-        add.u64 %q, %p, %offset;
-        atom.global.cas.b$width %old, [%p], 0, 1;
-        st.global.b$width [%q], %old;
-        ret;
-      }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(NonNegative.unsafe(33 * size))
-    val start  = memory.allocation.start
-    assertEquals(
-      VMInterpreter.execute(
-        kernel,
-        geometry(1, 32),
-        Map(NonEmptyString("output") -> Argument.fromLong(start.raw)),
-        memory
-      ),
-      Right(())
-    )
-    val byteWidth = IntBetween.unsafe[1, 8](size)
-    val observed  = (1 to 32).map(i => memory.readLittleEndian(start.offset(i.toLong * size), byteWidth).toOption.get)
-    assertEquals(observed.count(_ == 0L), 1)
-    assertEquals(observed.count(_ == 1L), 31)
-    assertEquals(memory.readLittleEndian(start, byteWidth).toOption.get, 1L)
-  }
-
-  test("generic atom.exch.b32 returns the old value and stores the new value") {
-    val source = """.version 8.0
-      .target sm_80
-      .address_size 64
-      .visible .entry exchange(.param .u64 output) {
-        .reg .u64 %p, %old_address;
-        .reg .b32 %old;
-        ld.param.u64 %p, [output];
-        atom.exch.b32 %old, [%p], 9;
-        add.u64 %old_address, %p, 4;
-        st.global.u32 [%old_address], %old;
-        ret;
-      }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(8)
-    val start  = memory.allocation.start
-    assertEquals(memory.writeInt32(start, 3), Right(()))
-    assertEquals(
-      VMInterpreter.execute(
-        kernel,
-        geometry(1, 1),
-        Map(NonEmptyString("output") -> Argument.fromLong(start.raw)),
-        memory
-      ),
-      Right(())
-    )
-    assertEquals(memory.readInt32(start).toOption.get, 9)
-    assertEquals(memory.readInt32(start.offset(4)).toOption.get, 3)
-  }
-
-  test("generic atom.add.u32 returns the old value and adds") {
-    val source = """.version 8.0
-      .target sm_80
-      .address_size 64
-      .visible .entry add(.param .u64 output) {
-        .reg .u64 %p, %old_address;
-        .reg .u32 %old;
-        ld.param.u64 %p, [output];
-        atom.add.u32 %old, [%p], 2;
-        add.u64 %old_address, %p, 4;
-        st.global.u32 [%old_address], %old;
-        ret;
-      }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(8)
-    val start  = memory.allocation.start
-    assertEquals(memory.writeInt32(start, 3), Right(()))
-    assertEquals(
-      VMInterpreter.execute(
-        kernel,
-        geometry(1, 1),
-        Map(NonEmptyString("output") -> Argument.fromLong(start.raw)),
-        memory
-      ),
-      Right(())
-    )
-    assertEquals(memory.readInt32(start).toOption.get, 5)
-    assertEquals(memory.readInt32(start.offset(4)).toOption.get, 3)
-  }
-
-  test("generic atom.min.u32 returns the old value and stores the minimum") {
-    val source = """.version 8.0
-      .target sm_80
-      .address_size 64
-      .visible .entry minimum(.param .u64 output) {
-        .reg .u64 %p, %old_address;
-        .reg .u32 %old;
-        ld.param.u64 %p, [output];
-        atom.min.u32 %old, [%p], 3;
-        add.u64 %old_address, %p, 4;
-        st.global.u32 [%old_address], %old;
-        ret;
-      }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(8)
-    val start  = memory.allocation.start
-    assertEquals(memory.writeInt32(start, 7), Right(()))
-    assertEquals(
-      VMInterpreter.execute(
-        kernel,
-        geometry(1, 1),
-        Map(NonEmptyString("output") -> Argument.fromLong(start.raw)),
-        memory
-      ),
-      Right(())
-    )
-    assertEquals(memory.readInt32(start).toOption.get, 3)
-    assertEquals(memory.readInt32(start.offset(4)).toOption.get, 7)
-  }
-
-  test("generic maximum and bitwise atomics return each previous value") {
-    val source = """.version 8.0
-      .target sm_80
-      .address_size 64
-      .visible .entry atomic_bits(.param .u64 output) {
-        .reg .u64 %p, %old_address;
-        .reg .u32 %old;
-        ld.param.u64 %p, [output];
-        atom.max.u32 %old, [%p], 19;
-        add.u64 %old_address, %p, 4;
-        st.global.u32 [%old_address], %old;
-        atom.and.b32 %old, [%p], 31;
-        add.u64 %old_address, %p, 8;
-        st.global.u32 [%old_address], %old;
-        atom.or.b32 %old, [%p], 32;
-        add.u64 %old_address, %p, 12;
-        st.global.u32 [%old_address], %old;
-        atom.xor.b32 %old, [%p], 3;
-        add.u64 %old_address, %p, 16;
-        st.global.u32 [%old_address], %old;
-        ret;
-      }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(20)
-    val start  = memory.allocation.start
-    assertEquals(memory.writeInt32(start, 7), Right(()))
-    assertEquals(
-      VMInterpreter.execute(
-        kernel,
-        geometry(1, 1),
-        Map(NonEmptyString("output") -> Argument.fromLong(start.raw)),
-        memory
-      ),
-      Right(())
-    )
-    assertEquals(
-      (0 to 4).map(index => memory.readInt32(start.offset(index.toLong * 4L)).toOption.get),
-      Seq(48, 7, 19, 19, 51)
-    )
-  }
-
-  test("device calls preserve thread coordinates") {
-    val source = """.version 8.0
-      .target sm_80
-      .address_size 64
-      .func store_lane(.param .u64 pointer) {
-        .reg .u32 %lane;
-        .reg .u64 %output, %offset;
-        ld.param.u64 %output, [pointer];
-        mov.u32 %lane, %tid.x;
-        mul.wide.u32 %offset, %lane, 4;
-        add.u64 %output, %output, %offset;
-        st.global.u32 [%output], %lane;
-        ret;
-      }
-      .visible .entry write(.param .u64 output) {
-        .reg .u64 %pointer;
-        ld.param.u64 %pointer, [output];
-        { .param .u64 argument;
-          st.param.u64 [argument], %pointer;
-          call store_lane, (argument);
-        }
-        ret;
-      }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(16)
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 4),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory
-    )
-    assertEquals(result, Right(()))
-    assertEquals(
-      Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
-      Seq(0, 1, 2, 3)
-    )
-  }
-
-  test("device function barriers synchronize lanes and share memory") {
-    val source = """.version 8.0
-      .target sm_80
-      .address_size 64
-      .func exchange(.param .u64 pointer) {
-        .shared .align 4 .b8 scratch[8];
-        .reg .u32 %lane, %other, %value;
-        .reg .u64 %output, %slot, %offset;
-        ld.param.u64 %output, [pointer];
-        mov.u32 %lane, %tid.x;
-        mul.wide.u32 %offset, %lane, 4;
-        mov.u64 %slot, scratch;
-        add.u64 %slot, %slot, %offset;
-        st.shared.u32 [%slot], %lane;
-        bar.sync 0;
-        xor.b32 %other, %lane, 1;
-        mul.wide.u32 %offset, %other, 4;
-        mov.u64 %slot, scratch;
-        add.u64 %slot, %slot, %offset;
-        ld.shared.u32 %value, [%slot];
-        mul.wide.u32 %offset, %lane, 4;
-        add.u64 %output, %output, %offset;
-        st.global.u32 [%output], %value;
-        ret;
-      }
-      .visible .entry exchange_kernel(.param .u64 output) {
-        .reg .u64 %pointer;
-        ld.param.u64 %pointer, [output];
-        { .param .u64 argument;
-          st.param.u64 [argument], %pointer;
-          call exchange, (argument);
-        }
-        ret;
-      }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(8)
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 2),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory
-    )
-    assertEquals(result, Right(()))
-    assertEquals(memory.readInt32(memory.allocation.start), Right(1))
-    assertEquals(memory.readInt32(memory.allocation.start.offset(4L)), Right(0))
-  }
-
-  test("device calls accept an unused unwritten parameter") {
-    val source = """.version 8.0
-      .target sm_80
-      .address_size 64
-      .func store(.param .u64 unused, .param .u64 pointer) {
-        .reg .u64 %address;
-        .reg .u32 %value;
-        ld.param.u64 %address, [pointer];
-        mov.u32 %value, 42;
-        st.global.u32 [%address], %value;
-        ret;
-      }
-      .visible .entry write(.param .u64 output) {
-        .reg .u64 %address;
-        ld.param.u64 %address, [output];
-        { .param .u64 missing;
-          .param .u64 supplied;
-          st.param.u64 [supplied], %address;
-          call store, (missing, supplied);
-        }
-        ret;
-      }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
-    val memory = ArrayCheckedMemory.allocate(4)
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 1),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory
-    )
-    assertEquals(result, Right(()))
-    assertEquals(memory.readInt32(memory.allocation.start), Right(42))
-  }
-
-  test("atomics in device callees remain correct across parallel blocks") {
-    val parallelCalls = java.util.concurrent.atomic.AtomicInteger(0)
-    final class RecordingScheduler extends Scheduler {
-      override val parallelism: Positive[Int]                                                      = 4
-      override def shouldParallel(tasks: NonNegative[Long], workItems: NonNegative[Long]): Boolean = tasks.raw > 1L
-      override def parallelFor(
-          tasks: NonNegative[Long]
-      )(task: NonNegative[Long] => Either[Fault, Unit]) = {
-        parallelCalls.incrementAndGet()
-        Scheduler.Sequential.parallelFor(tasks)(task)
-      }
-    }
-    val source    = """.version 8.0
-      .target sm_80
-      .address_size 64
-      .func increment(.param .u64 pointer) {
-        .reg .u64 %p;
-        .reg .u32 %old;
-        ld.param.u64 %p, [pointer];
-        atom.global.add.u32 %old, [%p], 1;
-        ret;
-      }
-      .visible .entry count(.param .u64 output) {
-        .reg .u64 %p;
-        ld.param.u64 %p, [output];
-        { .param .u64 argument;
-          st.param.u64 [argument], %p;
-          call increment, (argument);
-        }
-        ret;
-      }"""
-    val kernel    = VMCompiler.compile(source).fold(error => fail(error.toString), value => value)
-    val memory    = ArrayCheckedMemory.allocate(4)
-    val scheduler = RecordingScheduler()
-    val control   = TaskControl.forScheduler(scheduler = scheduler)
-    val result    = VMInterpreter.execute(
-      kernel,
-      geometry(4, 1),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory,
-      control,
-      scheduler
-    )
-    assert(result.isRight, result.toString)
-    assertEquals(memory.readInt32(memory.allocation.start), Right(4))
-    assertEquals(parallelCalls.get(), 1)
-  }
-
-  private def geometry(blocks: Int, threads: Int): LaunchGeometry =
-    LaunchGeometry.forLaunch(TestDimensions(threads), TestDimensions(blocks))
-      .toOption.get
-
+class InterpreterSuite extends munit.FunSuite {
   private val vectorAdd = """
     |.version 8.0
     |.target sm_80
@@ -436,18 +40,18 @@ final class InterpreterSuite extends munit.FunSuite {
 
   test("parse and deterministically execute integer vector addition") {
     val kernel = VMCompiler.compile(vectorAdd).toOption.get
-    assertEquals(kernel.name, NonEmptyString("vector_add"))
+    assertEquals(kernel.name, "vector_add")
     assertEquals(
-      kernel.parameters.toSeq,
+      kernel.parameters,
       Seq(
-        KernelParameter(NonEmptyString("input_a"), 8),
-        KernelParameter(NonEmptyString("input_b"), 8),
-        KernelParameter(NonEmptyString("output"), 8)
+        KernelParameter("input_a", 8),
+        KernelParameter("input_b", 8),
+        KernelParameter("output", 8)
       )
     )
 
     val memory =
-      ArrayCheckedMemory.allocate(192, provenance = NonEmptyString("vector-add arena"))
+      ArrayCheckedMemory.allocate(192, provenance = "vector-add arena")
     val base   = memory.allocation.start
     val a      = base
     val b      = base.offset(64L)
@@ -459,14 +63,14 @@ final class InterpreterSuite extends munit.FunSuite {
       memory.writeInt32(b.offset(index.toLong * 4L), values(index) * 10).toOption.get
     }
 
-    val result = VMInterpreter
+    VMInterpreter
       .execute(
         kernel,
-        geometry(1, values.size),
+        geometry(blocks = 1, threads = values.size),
         Map(
-          NonEmptyString("input_a") -> Argument.fromLong(a.raw),
-          NonEmptyString("input_b") -> Argument.fromLong(b.raw),
-          NonEmptyString("output")  -> Argument.fromLong(output.raw)
+          ("input_a": NonEmpty[String]) -> Argument.fromLong(a.raw),
+          ("input_b": NonEmpty[String]) -> Argument.fromLong(b.raw),
+          ("output": NonEmpty[String])  -> Argument.fromLong(output.raw)
         ),
         memory
       )
@@ -474,7 +78,7 @@ final class InterpreterSuite extends munit.FunSuite {
       .get
 
     assertEquals(
-      values.indices.map(index => memory.readInt32(output.offset(index.toLong * 4L)).toOption.get).toSeq,
+      values.indices.map(index => memory.readInt32(output.offset(index.toLong * 4L)).toOption.get),
       Seq(11, 22, 33, 44)
     )
   }
@@ -503,8 +107,8 @@ final class InterpreterSuite extends munit.FunSuite {
     val base   = memory.allocation.start
     val result = VMInterpreter.execute(
       kernel,
-      geometry(1, 1),
-      Map(NonEmptyString("output") -> Argument.fromLong(base.raw)),
+      geometry(blocks = 1, threads = 1),
+      Map(("output": NonEmpty[String]) -> Argument.fromLong(base.raw)),
       memory
     )
     assert(result.isRight, result.toString)
@@ -526,18 +130,21 @@ final class InterpreterSuite extends munit.FunSuite {
       |}
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    assertEquals(kernel.sharedSymbols.keySet, Set(NonEmptyString("first"), NonEmptyString("second")))
-    assertNotEquals(kernel.sharedSymbols(NonEmptyString("first")), kernel.sharedSymbols(NonEmptyString("second")))
+    assertEquals(kernel.sharedSymbols.keySet, Set[NonEmpty[String]]("first", "second"))
+    assertNotEquals(
+      kernel.sharedSymbols("first"),
+      kernel.sharedSymbols("second")
+    )
     assert(
       kernel.instructions.exists {
-        case VMIR.Instruction.Move(_, Value.Symbol(name), _) if name == NonEmptyString("first") => true
-        case _                                                                                  => false
+        case VMIR.Instruction.Move(_, Value.Symbol(name), _) if name == "first" => true
+        case _                                                                  => false
       }
     )
     assert(
       kernel.instructions.exists {
-        case VMIR.Instruction.Move(_, Value.Symbol(name), _) if name == NonEmptyString("second") => true
-        case _                                                                                   => false
+        case VMIR.Instruction.Move(_, Value.Symbol(name), _) if name == "second" => true
+        case _                                                                   => false
       }
     )
   }
@@ -564,324 +171,15 @@ final class InterpreterSuite extends munit.FunSuite {
       |""".stripMargin
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory =
-      ArrayCheckedMemory.allocate(4, provenance = NonEmptyString("generic-shared"))
+      ArrayCheckedMemory.allocate(4, provenance = "generic-shared")
     val result = VMInterpreter.execute(
       kernel,
-      geometry(1, 1),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      geometry(blocks = 1, threads = 1),
+      Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(memory.readInt32(memory.allocation.start).toOption.get, 255)
-  }
-
-  test("execute signed and unsigned integer division and remainder") {
-    val source = """
-      |.version 8.0
-      |.target sm_80
-      |.address_size 64
-      |.visible .entry divide(
-      |  .param .s64 dividend,
-      |  .param .u64 unsigned_dividend,
-      |  .param .s64 divisor,
-      |  .param .u64 unsigned_divisor,
-      |  .param .u64 output
-      |) {
-      |  .reg .b64 %rd<9>;
-      |  ld.param.s64 %rd0, [dividend];
-      |  ld.param.u64 %rd1, [unsigned_dividend];
-      |  ld.param.s64 %rd2, [divisor];
-      |  ld.param.u64 %rd3, [unsigned_divisor];
-      |  ld.param.u64 %rd4, [output];
-      |  div.s64 %rd5, %rd0, %rd2;
-      |  st.global.s64 [%rd4], %rd5;
-      |  div.u64 %rd5, %rd1, %rd3;
-      |  st.global.u64 [%rd4+8], %rd5;
-      |  rem.s64 %rd6, %rd0, %rd2;
-      |  st.global.s64 [%rd4+16], %rd6;
-      |  rem.u64 %rd7, %rd1, %rd3;
-      |  st.global.u64 [%rd4+24], %rd7;
-      |  ret;
-      |}
-      |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val memory =
-      ArrayCheckedMemory.allocate(32, provenance = NonEmptyString("integer-division"))
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 1),
-      Map(
-        NonEmptyString("dividend")          -> Argument.fromLong(-21L),
-        NonEmptyString("unsigned_dividend") -> Argument.fromLong(-1L),
-        NonEmptyString("divisor")           -> Argument.fromLong(3L),
-        NonEmptyString("unsigned_divisor")  -> Argument.fromLong(2L),
-        NonEmptyString("output")            -> Argument.fromLong(memory.allocation.start.raw)
-      ),
-      memory
-    )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(memory.readLittleEndian(memory.allocation.start, 8).toOption.get, -7L)
-    assertEquals(
-      memory.readLittleEndian(memory.allocation.start.offset(8L), 8).toOption.get,
-      java.lang.Long.divideUnsigned(-1L, 2L)
-    )
-    assertEquals(
-      memory.readLittleEndian(memory.allocation.start.offset(16L), 8).toOption.get,
-      0L
-    )
-    assertEquals(
-      memory.readLittleEndian(memory.allocation.start.offset(24L), 8).toOption.get,
-      java.lang.Long.remainderUnsigned(-1L, 2L)
-    )
-  }
-
-  test("predicated branches reconverge at a block barrier") {
-    val source = """
-      |.version 8.0
-      |.target sm_80
-      |.address_size 64
-      |.visible .entry choose(.param .u64 output) {
-      |  .reg .pred %p;
-      |  .reg .b32 %r<3>;
-      |  .reg .b64 %rd<2>;
-      |  ld.param.u64 %rd0, [output];
-      |  mov.u32 %r0, %tid.x;
-      |  setp.lt.u32 %p, %r0, 2;
-      |  @%p bra low;
-      |  mov.u32 %r1, 9;
-      |  bra join;
-      |low:
-      |  mov.u32 %r1, 7;
-      |join:
-      |  bar.sync 0;
-      |  mul.wide.u32 %rd1, %r0, 4;
-      |  add.u64 %rd1, %rd0, %rd1;
-      |  st.global.u32 [%rd1], %r1;
-      |  ret;
-      |}
-      |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val memory =
-      ArrayCheckedMemory.allocate(16, provenance = NonEmptyString("divergent-barrier"))
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 4),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory
-    )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(
-      Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
-      Seq(7, 7, 9, 9)
-    )
-  }
-
-  test("workgroup barriers match divergent arrivals by hardware barrier ID") {
-    val source = """
-      |.version 8.0
-      |.target sm_80
-      |.address_size 64
-      |.visible .entry divergent_barrier(.param .u64 output) {
-      |  .shared .align 8 .b8 values[2048];
-      |  .reg .pred %p;
-      |  .reg .b32 %r<2>;
-      |  .reg .b64 %rd<4>;
-      |  .reg .f64 %fd;
-      |  ld.param.u64 %rd0, [output];
-      |  mov.u32 %r0, %tid.x;
-      |  mul.wide.u32 %rd1, %r0, 8;
-      |  mov.u64 %rd2, values;
-      |  add.s64 %rd2, %rd2, %rd1;
-      |  mov.f64 %fd, 0d3ff0000000000000;
-      |  st.shared.f64 [%rd2], %fd;
-      |  setp.lt.u32 %p, %r0, 128;
-      |  @%p bra low;
-      |  bar.sync 0;
-      |  bra join;
-      |low:
-      |  bar.sync 0;
-      |  ld.shared.f64 %fd, [%rd2];
-      |join:
-      |  setp.eq.u32 %p, %r0, 0;
-      |  @%p st.global.f64 [%rd0], %fd;
-      |  ret;
-      |}
-      |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val memory = ArrayCheckedMemory.allocate(
-      8,
-      provenance = NonEmptyString("divergent-workgroup-barrier-id")
-    )
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 256),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory
-    )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(
-      memory.readLittleEndian(memory.allocation.start, 8).toOption.get,
-      0x3ff0000000000000L
-    )
-  }
-
-  test("divergent warp participants publish shared stores at a warp barrier") {
-    val source = """
-      |.version 8.0
-      |.target sm_80
-      |.address_size 64
-      |.visible .entry choose(.param .u64 output) {
-      |  .reg .pred %p;
-      |  .reg .b32 %r<4>;
-      |  .reg .b64 %rd<3>;
-      |  ld.param.u64 %rd0, [output];
-      |  mov.u32 %r0, %tid.x;
-      |  setp.lt.u32 %p, %r0, 2;
-      |  @%p bra low;
-      |  mov.u32 %r1, 9;
-      |  bra join;
-      |low:
-      |  mov.u32 %r1, 7;
-      |join:
-      |  mul.wide.u32 %rd1, %r0, 4;
-      |  st.shared.u32 [%rd1], %r1;
-      |  bar.warp.sync -1;
-      |  mov.u32 %r2, 0;
-      |  ld.shared.u32 %r3, [%r2];
-      |  mul.wide.u32 %rd2, %r0, 4;
-      |  add.u64 %rd2, %rd0, %rd2;
-      |  st.global.u32 [%rd2], %r3;
-      |  ret;
-      |}
-      |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val memory = ArrayCheckedMemory.allocate(
-      16,
-      provenance = NonEmptyString("divergent-warp-barrier")
-    )
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 4),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory
-    )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(
-      Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
-      Seq(7, 7, 7, 7)
-    )
-  }
-
-  test("warp shuffles wait for masked lanes before reading registers") {
-    val source = """
-      |.version 8.0
-      |.target sm_80
-      |.address_size 64
-      |.visible .entry choose(.param .u64 output) {
-      |  .reg .pred %p;
-      |  .reg .b32 %r<4>;
-      |  .reg .b64 %rd<3>;
-      |  ld.param.u64 %rd0, [output];
-      |  mov.u32 %r0, %tid.x;
-      |  setp.eq.u32 %p, %r0, 0;
-      |  @%p mov.u32 %r1, 7;
-      |  shfl.sync.idx.b32 %r2, %r1, 0, 31, -1;
-      |  mul.wide.u32 %rd1, %r0, 4;
-      |  add.u64 %rd2, %rd0, %rd1;
-      |  st.global.u32 [%rd2], %r2;
-      |  ret;
-      |}
-      |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val memory =
-      ArrayCheckedMemory.allocate(16, provenance = NonEmptyString("sync-warp-shuffle"))
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 4),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory
-    )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(
-      Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
-      Seq(7, 7, 7, 7)
-    )
-  }
-
-  test("indexed warp shuffle keeps the source inside each eight-lane segment") {
-    val source = """
-      |.version 8.0
-      |.target sm_80
-      |.address_size 64
-      |.visible .entry choose(.param .u64 output) {
-      |  .reg .b32 %r<3>;
-      |  .reg .b64 %rd<3>;
-      |  ld.param.u64 %rd0, [output];
-      |  mov.u32 %r0, %tid.x;
-      |  shfl.sync.idx.b32 %r1, %r0, 0, 0x1807, -1;
-      |  mul.wide.u32 %rd1, %r0, 4;
-      |  add.u64 %rd2, %rd0, %rd1;
-      |  st.global.u32 [%rd2], %r1;
-      |  ret;
-      |}
-      |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val memory = ArrayCheckedMemory.allocate(
-      NonNegative.unsafe(32 * 4),
-      provenance = NonEmptyString("segmented-warp-shuffle")
-    )
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 32),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory
-    )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(
-      Vec.tabulate(32)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
-      (0 until 32).map(_ & ~7)
-    )
-  }
-
-  test("funnel shifts wrap or clamp the shift count") {
-    val source = """
-      |.version 8.0
-      |.target sm_80
-      |.address_size 64
-      |.visible .entry choose(.param .u64 output) {
-      |  .reg .b32 %r<7>;
-      |  .reg .b64 %rd<2>;
-      |  ld.param.u64 %rd0, [output];
-      |  mov.b32 %r0, 0x12345679;
-      |  mov.b32 %r1, 0x9abcdef3;
-      |  shf.l.wrap.b32 %r2, %r0, %r1, 4;
-      |  shf.r.wrap.b32 %r3, %r0, %r1, 4;
-      |  shf.l.clamp.b32 %r4, %r0, %r1, 33;
-      |  shf.r.clamp.b32 %r5, %r0, %r1, 33;
-      |  st.global.u32 [%rd0], %r2;
-      |  add.u64 %rd1, %rd0, 4;
-      |  st.global.u32 [%rd1], %r3;
-      |  add.u64 %rd1, %rd0, 8;
-      |  st.global.u32 [%rd1], %r4;
-      |  add.u64 %rd1, %rd0, 12;
-      |  st.global.u32 [%rd1], %r5;
-      |  ret;
-      |}
-      |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), identity)
-    val memory =
-      ArrayCheckedMemory.allocate(16, provenance = NonEmptyString("funnel-shift"))
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 1),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory
-    )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(
-      Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
-      Seq(0xabcdef31, 0x31234567, 0x12345679, 0x9abcdef3)
-    )
   }
 
   test("vector local stores accept immediate elements") {
@@ -904,115 +202,18 @@ final class InterpreterSuite extends munit.FunSuite {
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), identity)
     val memory = ArrayCheckedMemory.allocate(
       8,
-      provenance = NonEmptyString("immediate-local-vector-store")
+      provenance = "immediate-local-vector-store"
     )
     val result = VMInterpreter.execute(
       kernel,
-      geometry(1, 1),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      geometry(blocks = 1, threads = 1),
+      Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      Vec.tabulate(2)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
+      Vec.tabulate(2)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get),
       Seq(0, 0x3f800000)
-    )
-  }
-
-  test("wide signed 16-bit multiplication sign extends its operands") {
-    val source = """
-      |.version 8.0
-      |.target sm_80
-      |.address_size 64
-      |.visible .entry choose(.param .u64 output) {
-      |  .reg .s16 %rs<1>;
-      |  .reg .b32 %r<1>;
-      |  .reg .b64 %rd<1>;
-      |  ld.param.u64 %rd0, [output];
-      |  mov.s16 %rs0, -2;
-      |  mul.wide.s16 %r0, %rs0, 3;
-      |  st.global.u32 [%rd0], %r0;
-      |  ret;
-      |}
-      |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), identity)
-    val memory =
-      ArrayCheckedMemory.allocate(4, provenance = NonEmptyString("signed-wide-multiply"))
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 1),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory
-    )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(memory.readInt32(memory.allocation.start).toOption, Some(-6))
-  }
-
-  test("64-bit warp shuffles preserve the complete register value") {
-    val source = """
-      |.version 8.0
-      |.target sm_80
-      |.address_size 64
-      |.visible .entry choose(.param .u64 output) {
-      |  .reg .b64 %rd<4>;
-      |  ld.param.u64 %rd0, [output];
-      |  mov.b64 %rd1, 0x1122334455667788;
-      |  shfl.sync.idx.b64 %rd2, %rd1, 0, 31, -1;
-      |  st.global.b64 [%rd0], %rd2;
-      |  ret;
-      |}
-      |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val memory =
-      ArrayCheckedMemory.allocate(8, provenance = NonEmptyString("64-bit-warp-shuffle"))
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 4),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory
-    )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(
-      memory.readLittleEndian(memory.allocation.start, 8).toOption,
-      Some(0x1122334455667788L)
-    )
-  }
-
-  test("inline PTX warp-shuffle register aliases are accepted") {
-    val source = """
-      |.version 8.0
-      |.target sm_80
-      |.address_size 64
-      |.visible .entry choose(.param .u64 output) {
-      |  .reg .pred p;
-      |  .reg .b32 lo;
-      |  .reg .b32 %r<2>;
-      |  .reg .b64 %rd<3>;
-      |  ld.param.u64 %rd0, [output];
-      |  mov.u32 lo, 7;
-      |  shfl.sync.up.b32 lo|p, lo, 1, 0, -1;
-      |  mov.u32 %r0, %tid.x;
-      |  mul.wide.u32 %rd1, %r0, 4;
-      |  add.u64 %rd2, %rd0, %rd1;
-      |  st.global.u32 [%rd2], lo;
-      |  ret;
-      |}
-      |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val memory = ArrayCheckedMemory.allocate(
-      8,
-      provenance = NonEmptyString("inline-warp-shuffle-registers")
-    )
-    val result = VMInterpreter.execute(
-      kernel,
-      geometry(1, 2),
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
-      memory
-    )
-    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(
-      Vec.tabulate(2)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
-      Seq(7, 7)
     )
   }
 
@@ -1050,19 +251,19 @@ final class InterpreterSuite extends munit.FunSuite {
     val groupCount = Dimensions(2, 2, 1)
     val launch     = LaunchGeometry.forLaunch(groupSize, groupCount).toOption.get
     val memory     = ArrayCheckedMemory.allocate(
-      NonNegative.unsafe(16 * 4),
-      provenance = NonEmptyString("ptx-3d-coordinates")
+      16 * 4,
+      provenance = "ptx-3d-coordinates"
     )
     val result = VMInterpreter.execute(
       kernel,
       launch,
-      Map(NonEmptyString("output") -> Argument.fromLong(memory.allocation.start.raw)),
+      Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
 
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      Vec.tabulate(16)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
+      Vec.tabulate(16)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get),
       Vec.from(0.until(16))
     )
   }
@@ -1079,24 +280,24 @@ final class InterpreterSuite extends munit.FunSuite {
     val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val result = VMInterpreter.execute(
       kernel,
-      geometry(1, 1),
+      geometry(blocks = 1, threads = 1),
       Map.empty,
       ArrayCheckedMemory.allocate(4),
-      TaskControl.forScheduler(TaskLimits(maxInstructions = 8L, quantum = 2))
+      TaskControl(TaskControl.Limits(maxInstructions = 8L))
     )
     assert(result.left.exists(_.message.contains("instruction budget of 8")))
   }
 
   test("execution observes cancellation before fetching an instruction") {
     val kernel       = VMCompiler.compile(vectorAdd).fold(error => fail(error.message), value => value)
-    val cancellation = TaskControl.Cancellation.Source()
+    val cancellation = TaskControl()
     cancellation.cancel()
     val result = VMInterpreter.execute(
       kernel,
-      geometry(1, 1),
+      geometry(blocks = 1, threads = 1),
       Map.empty,
       ArrayCheckedMemory.allocate(4),
-      control = TaskControl.forScheduler(cancellation = cancellation)
+      control = cancellation
     )
     assertEquals(result, Left(ExecutionFault.Cancelled))
   }

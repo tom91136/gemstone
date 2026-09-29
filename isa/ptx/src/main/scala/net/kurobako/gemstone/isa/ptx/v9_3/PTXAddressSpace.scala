@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
 /** Virtual-address apertures the PTX emulator assigns to local, shared, and module-shared storage. */
-private[v9_3] object PTXAddressSpace {
+private object PTXAddressSpace {
   inline val LocalLimit         = 0x100000000L
   inline val SharedBase         = 0x10000000L
   inline val SharedLimit        = 0x40000000L

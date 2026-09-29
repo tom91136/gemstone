@@ -1,11 +1,10 @@
 package net.kurobako.gemstone.benchmarks
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import net.kurobako.gemstone.PlatformTime
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.constraint.*
 
 object BenchmarkRunner {
   private sealed trait Action
@@ -20,11 +19,15 @@ object BenchmarkRunner {
           .validate("benchmark name must be non-empty and contain no NUL")(value =>
             value.nonEmpty && !value.contains('\u0000')
           )
-          .map(value => BenchmarkName.unsafe(value)),
+          .map(value => value.unsafe[BenchmarkName])
+          .mapValidated { name =>
+            if (PlatformBenchmarks.names.contains(name)) name.validNel
+            else s"unknown benchmark: $name".invalidNel
+          },
         Opts.option[Int]("warmup", help = "Warmup iterations").withDefault(1)
-          .validate("warmups must be non-negative")(_ >= 0).map(NonNegative.unsafe),
+          .validate("warmups must be non-negative")(_ >= 0).map(_.unsafe[Int >= 0]),
         Opts.option[Int]("samples", help = "Measured samples").withDefault(5)
-          .validate("samples must be positive")(_ > 0).map(Positive.unsafe),
+          .validate("samples must be positive")(_ > 0).map(_.unsafe[Int > 0]),
         Opts.arguments[String]("case-argument").orEmpty
       ).mapN { (name, warmups, samples, rest) =>
         Run(BenchmarkOptions(warmups, samples, BenchmarkInvocation(name, rest.toVector)))
@@ -37,8 +40,6 @@ object BenchmarkRunner {
   def main(arguments: Array[String]): Unit = parse(arguments.toSeq) match {
     case ListBenchmarks => PlatformBenchmarks.names.toVector.foreach(name => Console.out.println(name.raw))
     case Run(options)   =>
-      if (!PlatformBenchmarks.names.exists(_ == options.invocation.name))
-        throw IllegalArgumentException(s"unknown benchmark: ${options.invocation.name}")
       var warmup = 0
       while warmup < options.warmups.raw do {
         PlatformBenchmarks.run(options.invocation)
@@ -46,10 +47,10 @@ object BenchmarkRunner {
       }
       var sample = 0
       while sample < options.samples.raw do {
-        val started = PlatformTime.monotonicNanos
+        val started = platform.monotonicNanos
         PlatformBenchmarks.run(options.invocation)
-        val elapsed = NonNegative.unsafe(math.max(0L, PlatformTime.monotonicNanos - started))
-        Console.out.println(ujson.write(result(options, NonNegative.unsafe(sample), elapsed)))
+        val elapsed = math.max(0L, platform.monotonicNanos - started).unsafe[Long >= 0]
+        Console.out.println(ujson.write(result(options, sample.unsafe[Int >= 0], elapsed)))
         sample += 1
       }
   }
@@ -65,14 +66,14 @@ object BenchmarkRunner {
 
   def result(
       options: BenchmarkOptions,
-      sample: NonNegative[Int],
-      elapsedNanos: NonNegative[Long]
+      sample: Int >= 0,
+      elapsedNanos: Long >= 0
   ): ujson.Obj = ujson.Obj(
     "schema"               -> "gemstone-benchmark-v1",
     "case"                 -> options.invocation.name.raw,
     "arguments"            -> ujson.Arr.from(options.invocation.arguments),
     "platform"             -> PlatformMetrics.platform,
-    "started_epoch_millis" -> PlatformTime.epochMillis,
+    "started_epoch_millis" -> platform.epochMillis,
     "sample"               -> sample.raw,
     "warmups"              -> options.warmups.raw,
     "operation_count"      -> 1L,

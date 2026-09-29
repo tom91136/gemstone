@@ -1,10 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import VMInvocation.RuntimeValue
+import VMInvocation.*
+import net.kurobako.gemstone.collection.*
 
-import net.kurobako.gemstone.Vec
-
-private[v1_6] object VMCollectives {
+private object VMCollectives {
   def openCLBroadcastScope(name: String): Option[Int] =
     if (name.startsWith("_Z19sub_group_broadcast")) Some(3)
     else if (name.startsWith("_Z20work_group_broadcast")) Some(2)

@@ -1,27 +1,37 @@
 package net.kurobako.gemstone.isa
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import net.kurobako.gemstone.Constraint.NonNegative
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.memory.GuestAddress
-
-/** One addressable program global. Pointer offsets identify relocation-bearing words in its initial image. */
-case class GlobalSymbol private (
-    name: NonEmptyString,
-    virtualAddress: Option[GuestAddress],
-    size: NonNegative[Long],
-    pointerOffsets: Vec[NonNegative[Int]]
-)
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
 
 object GlobalSymbol {
   def validated(
-      name: NonEmptyString,
+      name: NonEmpty[String],
       virtualAddress: Option[GuestAddress],
-      size: NonNegative[Long],
-      pointerOffsets: Vec[NonNegative[Int]]
-  ): Either[String, GlobalSymbol] =
-    SymbolValidation.globalPointerOffsets(size, pointerOffsets).map(_ =>
-      GlobalSymbol(name, virtualAddress, size, pointerOffsets)
-    )
+      size: Long >= 0,
+      pointerOffsets: Vec[Int >= 0]
+  ): Either[NonEmpty[String], GlobalSymbol] =
+    for {
+      _ <- Either.cond[NonEmpty[String], Unit](
+        pointerOffsets.monotonic(_ < _),
+        (),
+        "program-global pointer offsets must be sorted and unique"
+      )
+      _ <- Either.cond[NonEmpty[String], Unit](
+        pointerOffsets.forall(offset =>
+          size.raw >= abi.MachineWordSize && offset.raw.toLong <= size.raw - abi.MachineWordSize
+        ),
+        (),
+        "program-global pointer offset lies outside its 64-bit storage slot"
+      )
+    } yield GlobalSymbol(name, virtualAddress, size, pointerOffsets)
 }
+
+/** One addressable program global. Pointer offsets identify relocation-bearing words in its initial image. */
+case class GlobalSymbol private (
+    name: NonEmpty[String],
+    virtualAddress: Option[GuestAddress],
+    size: Long >= 0,
+    pointerOffsets: Vec[Int >= 0]
+)

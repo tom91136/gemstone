@@ -1,9 +1,8 @@
 // Generated from pinned official headers by GenerateAPISurfaces. Regenerate with: sbt codegen
 package net.kurobako.gemstone.hsa
 
-import net.kurobako.gemstone.Constraint.Positive
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.abi.ABI.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.abi.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 object HSA {
@@ -110,8 +109,8 @@ object HSA {
   type uint8_t = CValue["uint8_t"]
   type volatile_hsa_signal_value_t = CValue["volatile hsa_signal_value_t"]
 
-  val HeaderVersion: NonEmptyString = NonEmptyString("7.1.1")
-  val FunctionCount: Positive[Int] = 254
+  val HeaderVersion: NonEmpty[String] = "7.1.1"
+  val FunctionCount: Int > 0 = 254
 }
 
 import HSA.*

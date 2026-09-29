@@ -1,32 +1,30 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.NonNegative
-
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.ValidationOutcome
-
 import cats.syntax.all.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.spirv.v1_6.Binary as SPIRVBinary
 
-object ISA extends net.kurobako.gemstone.isa.Decoder[Vec[Byte], Module] {
-  override type Error = DecodeError
-  enum DecodeError extends net.kurobako.gemstone.isa.DecodeError {
-    case Binary(error: net.kurobako.gemstone.isa.spirv.v1_6.Binary.BinaryError)
+object ISA extends Decoder[Vec[Byte], Module, ISA.DecodeError] {
+  enum DecodeError {
+    case Binary(error: SPIRVBinary.BinaryError)
     case Instruction(error: ModuleDecodeError)
 
-    def message: String = this match {
+    def message: NonEmpty[String] = this match {
       case Binary(error)      => error.message
       case Instruction(error) => error.message
     }
   }
 
-  val version: SPIRVVersion                     = Instruction.version
+  val version: Version                          = Instruction.version
   val instructions: Vec[Instruction.Definition] = Instruction.definitions
 
   def decode(module: RawModule): Either[ModuleDecodeError, Module] =
     module.instructions.zipWithIndex
       .traverse { case (instruction, index) =>
         Instruction.decode(instruction).leftMap(error =>
-          ModuleDecodeError.Instruction(NonNegative.unsafe(index), error)
+          ModuleDecodeError.Instruction(index.unsafe[Int >= 0], error)
         )
       }
       .map(Module(module.header, _, module.endianness))

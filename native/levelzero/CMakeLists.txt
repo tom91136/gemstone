@@ -52,8 +52,8 @@ if(BUILD_TESTING)
   add_dependencies(gemstone_levelzero_smoke level_zero_loader)
   set_target_properties(gemstone_levelzero_smoke PROPERTIES BUILD_RPATH "$ORIGIN")
   gemstone_test_target(gemstone_levelzero_smoke)
-  gemstone_discover_tests(gemstone_levelzero_smoke TEST_PREFIX "level-zero/"
-    PROPERTIES ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>;ZE_ENABLE_LOADER_DEBUG_TRACE=0")
+  gemstone_discover_tests(gemstone_levelzero_smoke TEST_PREFIX "level-zero/" DISCOVERY_MODE PRE_TEST
+    PROPERTIES ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>")
 
   add_executable(gemstone_levelzero_rpc_test test/execution_rpc_test.cpp)
   target_include_directories(gemstone_levelzero_rpc_test PRIVATE "${LEVEL_ZERO_INCLUDE_DIR}")
@@ -61,7 +61,7 @@ if(BUILD_TESTING)
   add_dependencies(gemstone_levelzero_rpc_test level_zero_loader)
   set_target_properties(gemstone_levelzero_rpc_test PROPERTIES BUILD_RPATH "$ORIGIN")
   gemstone_test_target(gemstone_levelzero_rpc_test)
-  gemstone_discover_tests(gemstone_levelzero_rpc_test TEST_PREFIX "level-zero/"
+  gemstone_discover_tests(gemstone_levelzero_rpc_test TEST_PREFIX "level-zero/" DISCOVERY_MODE PRE_TEST
     PROPERTIES TIMEOUT 30
-    ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>;ZE_ENABLE_LOADER_DEBUG_TRACE=0")
+    ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>")
 endif()

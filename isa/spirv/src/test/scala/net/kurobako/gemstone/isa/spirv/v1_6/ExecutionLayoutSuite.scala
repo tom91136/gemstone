@@ -1,22 +1,46 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
+import execution.*
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.spirv.v1_6 as spv
+import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
+import net.kurobako.gemstone.vm.LaunchGeometry.*
+class ExecutionLayoutSuite extends munit.FunSuite {
+  test("OpenCL metadata retains required and hinted work-group sizes") {
+    val entry  = operand("IdResult", 7)
+    val module = Module(
+      Header(ISA.version, Word(0), Word(16), Word(0)),
+      Vec(
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          entry,
+          stringOperand("main"),
+          Vec.empty
+        ),
+        Instruction.ExecutionMode(entry, operand("ExecutionMode", spv.ExecutionMode.LocalSize, 8, 2, 1)),
+        Instruction.ExecutionMode(entry, operand("ExecutionMode", spv.ExecutionMode.LocalSizeHint, 4, 3, 2)),
+        Instruction.Function(
+          operand("IdResultType", 1),
+          entry,
+          operand("FunctionControl", spv.FunctionControl.None),
+          operand("IdRef", 2)
+        ),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val loaded   = loadUnchecked(module).fold(error => fail(error.message), identity)
+    val metadata = loaded.kernel("main").fold(error => fail(error.message), identity)
+    assertEquals(metadata.requiredWorkGroupSize, Some(Dimensions(8, 2, 1)))
+    assertEquals(metadata.workGroupSizeHint, Some(Dimensions(4, 3, 2)))
+    assertEquals(metadata.entryPointId.map(_.raw), Some(7))
+  }
 
-import net.kurobako.gemstone.Vec
-
-import net.kurobako.gemstone.binary.ByteRange
-import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.NonEmptyVec
-
-import java.util.concurrent.atomic.AtomicReference
-final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSupport {
   test("prepares byte-aligned nonstandard integer widths") {
     val module = Module(
       Header(ISA.version, Word(0), Word(4), Word(0)),
@@ -46,13 +70,32 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
         Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
         Instruction.TypeVector(operand("IdResult", 4), u64, operand("LiteralInteger", 3)),
-        Instruction.TypePointer(operand("IdResult", 5), operand("StorageClass", 1), operand("IdRef", 4)),
-        Instruction.TypePointer(operand("IdResult", 6), operand("StorageClass", 5), u32),
+        Instruction.TypePointer(
+          operand("IdResult", 5),
+          operand("StorageClass", spv.StorageClass.Input),
+          operand("IdRef", 4)
+        ),
+        Instruction.TypePointer(operand("IdResult", 6), operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
         Instruction.TypeFunction(operand("IdResult", 7), operand("IdRef", 1), Vec(operand("IdRef", 6), u32)),
-        Instruction.Variable(operand("IdResultType", 5), globalId, operand("StorageClass", 1), None),
-        Instruction.Decorate(globalId, operand("Decoration", 11, 28)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("fill"), Vec(globalId)),
-        Instruction.Function(operand("IdResultType", 1), function, operand("FunctionControl", 0), operand("IdRef", 7)),
+        Instruction.Variable(
+          operand("IdResultType", 5),
+          globalId,
+          operand("StorageClass", spv.StorageClass.Input),
+          None
+        ),
+        Instruction.Decorate(globalId, operand("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.GlobalInvocationId)),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          function,
+          stringOperand("fill"),
+          Vec(globalId)
+        ),
+        Instruction.Function(
+          operand("IdResultType", 1),
+          function,
+          operand("FunctionControl", spv.FunctionControl.None),
+          operand("IdRef", 7)
+        ),
         Instruction.FunctionParameter(operand("IdResultType", 6), output),
         Instruction.FunctionParameter(operand("IdResultType", 2), fillValue),
         Instruction.Label(operand("IdResult", 12)),
@@ -65,11 +108,11 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       ),
       Endianness.Little
     )
-    val allocation = MemoryRegion(1L)
+    val allocation = AllocationId(1L)
     val memory     = ArrayMemory(allocation, 40)
     val dispatch   = KernelTask
       .validated(
-        NonEmptyString("fill"),
+        "fill",
         Dimensions(4, 1, 1),
         Dimensions(2, 1, 1),
         Vec(
@@ -82,7 +125,7 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
 
     val prepared = loadUnchecked(module).toOption.get
     val limited  =
-      TaskControl.forScheduler(TaskLimits(maxInstructions = 1L, quantum = 1))
+      TaskControl(TaskControl.Limits(maxInstructions = 1L))
     assert(
       executeLoaded(prepared, dispatch, memory, limited).left.exists(_.message.contains("instruction budget of 1"))
     )
@@ -95,14 +138,14 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     assertEquals(memory.bytes.drop(36), Vec.fill(4)(0.toByte))
 
     val parallelCalls = java.util.concurrent.atomic.AtomicInteger(0)
-    final class RecordingParallelism extends Scheduler {
-      override val parallelism                                                                     = 4
-      override def shouldParallel(tasks: NonNegative[Long], workItems: NonNegative[Long]): Boolean = tasks.raw > 1L
-      override def parallelFor(tasks: NonNegative[Long])(
-          task: NonNegative[Long] => Either[Fault, Unit]
-      ) = {
+    class RecordingParallelism extends Workgroups {
+
+      override def shouldParallel(tasks: Long >= 0, workItems: Long >= 0): Boolean = tasks.raw > 1L
+      override def parallelFor(tasks: Long >= 0)(
+          task: Long >= 0 => Either[Fault, Unit]
+      ): Either[Fault, Unit] = {
         parallelCalls.incrementAndGet()
-        Scheduler.Sequential.parallelFor(tasks)(task)
+        Workgroups.Sequential.parallelFor(tasks)(task)
       }
     }
     val unrelatedAtomic = module.copy(
@@ -114,7 +157,7 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.Function(
           operand("IdResultType", 1),
           operand("IdResult", 100),
-          operand("FunctionControl", 0),
+          operand("FunctionControl", spv.FunctionControl.None),
           operand("IdRef", 7)
         ),
         Instruction.FunctionParameter(operand("IdResultType", 6), operand("IdResult", 101)),
@@ -131,15 +174,15 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       )
     )
     val parallelMemory = ArrayMemory(allocation, 40)
-    val scheduler      = RecordingParallelism()
+    val workgroups     = RecordingParallelism()
     assertEquals(
       VMInterpreter.execute(
         loadUnchecked(unrelatedAtomic).toOption.get,
         dispatch,
         parallelMemory,
-        TaskControl.forScheduler(scheduler = scheduler),
-        scheduler,
-        Observer.discard
+        TaskControl(),
+        workgroups,
+        _ => Right(())
       ),
       Right(())
     )
@@ -149,14 +192,14 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     val workgroupSizeModule = module.copy(instructions =
       module.instructions.updated(
         8,
-        Instruction.Decorate(globalId, operand("Decoration", 11, 25))
+        Instruction.Decorate(globalId, operand("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.WorkgroupSize))
       )
     )
-    val workgroupAllocation = MemoryRegion(17L)
+    val workgroupAllocation = AllocationId(17L)
     val workgroupMemory     = ArrayMemory(workgroupAllocation, 40)
     val workgroupDispatch   = KernelTask
       .validated(
-        NonEmptyString("fill"),
+        "fill",
         Dimensions(4, 1, 1),
         Dimensions(2, 1, 1),
         Vec(
@@ -210,23 +253,23 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
       Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
       Instruction.TypeVector(vector3, u64, operand("LiteralInteger", 3)),
-      Instruction.TypePointer(globalIdType, operand("StorageClass", 1), vector3),
-      Instruction.TypePointer(subgroupIdType, operand("StorageClass", 1), u32),
-      Instruction.TypePointer(outputType, operand("StorageClass", 5), u32),
+      Instruction.TypePointer(globalIdType, operand("StorageClass", spv.StorageClass.Input), vector3),
+      Instruction.TypePointer(subgroupIdType, operand("StorageClass", spv.StorageClass.Input), u32),
+      Instruction.TypePointer(outputType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
       Instruction.TypeFunction(functionType, voidType, Vec(outputType)),
-      Instruction.Variable(globalIdType, globalId, operand("StorageClass", 1), None),
-      Instruction.Variable(subgroupIdType, subgroupId, operand("StorageClass", 1), None),
-      Instruction.Decorate(globalId, operand("Decoration", 11, 28)),
-      Instruction.Decorate(subgroupId, operand("Decoration", 11, 40)),
+      Instruction.Variable(globalIdType, globalId, operand("StorageClass", spv.StorageClass.Input), None),
+      Instruction.Variable(subgroupIdType, subgroupId, operand("StorageClass", spv.StorageClass.Input), None),
+      Instruction.Decorate(globalId, operand("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.GlobalInvocationId)),
+      Instruction.Decorate(subgroupId, operand("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.SubgroupId)),
       Instruction.Undef(u32, undefValue),
       Instruction.EntryPoint(
-        operand("ExecutionModel", 6),
+        operand("ExecutionModel", spv.ExecutionModel.Kernel),
         function,
         stringOperand("subgroups"),
         Vec(globalId, subgroupId)
       ),
-      Instruction.ExecutionMode(function, operand("ExecutionMode", 35, 32)),
-      Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+      Instruction.ExecutionMode(function, operand("ExecutionMode", spv.ExecutionMode.SubgroupSize, 32)),
+      Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
       Instruction.FunctionParameter(outputType, output),
       Instruction.Label(operand("IdResult", 13)),
       Instruction.Load(vector3, loadedGlobalId, globalId, None),
@@ -239,10 +282,10 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     )
     val module =
       Module(Header(ISA.version, Word(0), Word(19), Word(0)), instructions, Endianness.Little)
-    val allocation = MemoryRegion(31L)
+    val allocation = AllocationId(31L)
     val dispatch   = KernelTask
       .validated(
-        NonEmptyString("subgroups"),
+        "subgroups",
         Dimensions(64, 1, 1),
         Dimensions.One,
         Vec(KernelTask.Argument.Memory(allocation, 0L))
@@ -270,7 +313,7 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     val numSubgroupsModule = module.copy(instructions =
       instructions.updated(
         subgroupDecoration,
-        Instruction.Decorate(subgroupId, operand("Decoration", 11, 38))
+        Instruction.Decorate(subgroupId, operand("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.NumSubgroups))
       )
     )
     val numSubgroupsMemory = ArrayMemory(allocation, 256)
@@ -280,7 +323,10 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     val numEnqueuedSubgroupsModule = module.copy(instructions =
       instructions.updated(
         subgroupDecoration,
-        Instruction.Decorate(subgroupId, operand("Decoration", 11, 39))
+        Instruction.Decorate(
+          subgroupId,
+          operand("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.NumEnqueuedSubgroups)
+        )
       )
     )
     val numEnqueuedSubgroupsMemory = ArrayMemory(allocation, 256)
@@ -322,17 +368,27 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
         Instruction.Constant(u32, length, operand("LiteralContextDependentNumber", 2)),
         Instruction.TypeArray(arrayType, u32, length),
-        Instruction.TypePointer(globalType, operand("StorageClass", 5), arrayType),
-        Instruction.TypePointer(pointerType, operand("StorageClass", 5), u32),
+        Instruction.TypePointer(globalType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), arrayType),
+        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
         Instruction.TypeFunction(functionType, voidType, Vec(pointerType)),
         Instruction.Constant(u32, first, operand("LiteralContextDependentNumber", 17)),
         Instruction.Constant(u32, second, operand("LiteralContextDependentNumber", 29)),
         Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
         Instruction.ConstantComposite(arrayType, initial, Vec(first, second)),
-        Instruction.Variable(globalType, global, operand("StorageClass", 5), Some(initial)),
-        Instruction.Decorate(global, operand("Decoration", 22)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("global"), Vec(global)),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.Variable(
+          globalType,
+          global,
+          operand("StorageClass", spv.StorageClass.CrossWorkgroup),
+          Some(initial)
+        ),
+        Instruction.Decorate(global, operand("Decoration", spv.Decoration.Constant)),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          function,
+          stringOperand("global"),
+          Vec(global)
+        ),
+        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.Label(operand("IdResult", 17)),
         Instruction.AccessChain(pointerType, element, global, Vec(one)),
@@ -343,11 +399,11 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       ),
       Endianness.Little
     )
-    val allocation = MemoryRegion(20L)
+    val allocation = AllocationId(20L)
     val memory     = ArrayMemory(allocation, 4)
     val dispatch   = KernelTask
       .validated(
-        NonEmptyString("global"),
+        "global",
         Dimensions.One,
         Dimensions.One,
         Vec(KernelTask.Argument.Memory(allocation, 0L))
@@ -377,13 +433,18 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.TypeVoid(voidType),
         Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
         Instruction.TypePointer(localPointer, operand("StorageClass", storageClass), u32),
-        Instruction.TypePointer(outputPointer, operand("StorageClass", 5), u32),
+        Instruction.TypePointer(outputPointer, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
         Instruction.TypeFunction(functionType, voidType, Vec(outputPointer)),
         Instruction.Constant(u32, initial, operand("LiteralContextDependentNumber", 7)),
         Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
         Instruction.Variable(localPointer, variable, operand("StorageClass", storageClass), Some(initial)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand(entryPoint), Vec(variable)),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          function,
+          stringOperand(entryPoint),
+          Vec(variable)
+        ),
+        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
         Instruction.FunctionParameter(outputPointer, output),
         Instruction.Label(operand("IdResult", 11)),
         Instruction.Load(u32, loaded, variable, None),
@@ -396,11 +457,11 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       Module(Header(ISA.version, Word(0), Word(14), Word(0)), instructions, Endianness.Little)
     }
 
-    val allocation        = MemoryRegion(41L)
+    val allocation        = AllocationId(41L)
     val workgroupMemory   = ArrayMemory(allocation, 4)
     val workgroupDispatch = KernelTask
       .validated(
-        NonEmptyString("workgroup_lifetime"),
+        "workgroup_lifetime",
         Dimensions.One,
         Dimensions(2, 1, 1),
         Vec(KernelTask.Argument.Memory(allocation, 0L))
@@ -416,7 +477,7 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     val privateMemory   = ArrayMemory(allocation, 4)
     val privateDispatch = KernelTask
       .validated(
-        NonEmptyString("private_lifetime"),
+        "private_lifetime",
         Dimensions(2, 1, 1),
         Dimensions.One,
         Vec(KernelTask.Argument.Memory(allocation, 0L))
@@ -453,7 +514,7 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.Constant(u32, two, operand("LiteralContextDependentNumber", 2)),
         Instruction.TypeArray(arrayType, u32, two),
         Instruction.TypeStruct(structureType, Vec(u32, arrayType)),
-        Instruction.TypePointer(outputPointer, operand("StorageClass", 5), structureType),
+        Instruction.TypePointer(outputPointer, operand("StorageClass", spv.StorageClass.CrossWorkgroup), structureType),
         Instruction.TypeFunction(functionType, voidType, Vec(outputPointer)),
         Instruction.Constant(u32, first, operand("LiteralContextDependentNumber", 11)),
         Instruction.Constant(u32, second, operand("LiteralContextDependentNumber", 22)),
@@ -461,10 +522,19 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
         Instruction.ConstantComposite(arrayType, arrayValue, Vec(first, second)),
         Instruction.ConstantComposite(structureType, structureValue, Vec(header, arrayValue)),
-        Instruction.Decorate(arrayType, operand("Decoration", 6, 16)),
-        Instruction.MemberDecorate(structureType, operand("LiteralInteger", 1), operand("Decoration", 35, 16)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("layout"), Vec.empty),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.Decorate(arrayType, operand("Decoration", spv.Decoration.ArrayStride, 16)),
+        Instruction.MemberDecorate(
+          structureType,
+          operand("LiteralInteger", 1),
+          operand("Decoration", spv.Decoration.Offset, 16)
+        ),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          function,
+          stringOperand("layout"),
+          Vec.empty
+        ),
+        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
         Instruction.FunctionParameter(outputPointer, output),
         Instruction.Label(operand("IdResult", 15)),
         Instruction.Store(output, structureValue, None),
@@ -476,11 +546,11 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       ),
       Endianness.Little
     )
-    val allocation = MemoryRegion(43L)
+    val allocation = AllocationId(43L)
     val memory     = ArrayMemory(allocation, 96)
     val dispatch   = KernelTask
       .validated(
-        NonEmptyString("layout"),
+        "layout",
         Dimensions.One,
         Dimensions.One,
         Vec(KernelTask.Argument.Memory(allocation, 0L))
@@ -536,17 +606,22 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.TypeArray(padding, u8, three),
         Instruction.TypeStruct(storage, Vec(u32)),
         Instruction.TypeStruct(payloadBase, Vec(storage, u8)),
-        Instruction.Decorate(payloadBase, operand("Decoration", 10)),
+        Instruction.Decorate(payloadBase, operand("Decoration", spv.Decoration.CPacked)),
         Instruction.TypeStruct(payload, Vec(payloadBase, padding)),
         Instruction.TypeStruct(optionalBase, Vec(payload)),
         Instruction.TypeStruct(optional, Vec(optionalBase)),
-        Instruction.TypePointer(optionalPtr, operand("StorageClass", 5), optional),
-        Instruction.TypePointer(bytePtr, operand("StorageClass", 5), u8),
+        Instruction.TypePointer(optionalPtr, operand("StorageClass", spv.StorageClass.CrossWorkgroup), optional),
+        Instruction.TypePointer(bytePtr, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u8),
         Instruction.TypeFunction(functionType, voidType, Vec(optionalPtr, bytePtr)),
         Instruction.Constant(u32, zero, operand("LiteralContextDependentNumber", 0)),
         Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("packed_stride"), Vec.empty),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          function,
+          stringOperand("packed_stride"),
+          Vec.empty
+        ),
+        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
         Instruction.FunctionParameter(optionalPtr, input),
         Instruction.FunctionParameter(bytePtr, output),
         Instruction.Label(operand("IdResult", 23)),
@@ -559,12 +634,12 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       ),
       Endianness.Little
     )
-    val allocation = MemoryRegion(122L)
+    val allocation = AllocationId(122L)
     val memory     = ArrayMemory(allocation, 40)
     assertEquals(memory.write(allocation, 12L, Vec(1.toByte)), Right(()))
     val dispatch = KernelTask
       .validated(
-        NonEmptyString("packed_stride"),
+        "packed_stride",
         Dimensions.One,
         Dimensions.One,
         Vec(
@@ -590,10 +665,10 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       Vec(
         Instruction.TypeVoid(voidType),
         Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypePointer(pointer, operand("StorageClass", 5), u32),
+        Instruction.TypePointer(pointer, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
         Instruction.Constant(u32, length, operand("LiteralContextDependentNumber", 2)),
         Instruction.TypeArray(array, pointer, length),
-        Instruction.Decorate(array, operand("Decoration", 6, 16))
+        Instruction.Decorate(array, operand("Decoration", spv.Decoration.ArrayStride, 16))
       ),
       Endianness.Little
     )
@@ -616,16 +691,21 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.Constant(result(2), result(5), operand("LiteralContextDependentNumber", 8, 0)),
         Instruction.TypeArray(result(6), result(3), result(5)),
         Instruction.TypeStruct(result(7), Vec(result(6), result(2))),
-        Instruction.Decorate(result(7), operand("Decoration", 10)),
-        Instruction.TypePointer(result(8), operand("StorageClass", 7), result(7)),
-        Instruction.TypePointer(result(9), operand("StorageClass", 7), result(2)),
-        Instruction.TypePointer(result(10), operand("StorageClass", 5), result(2)),
-        Instruction.TypePointer(result(11), operand("StorageClass", 8), result(4)),
+        Instruction.Decorate(result(7), operand("Decoration", spv.Decoration.CPacked)),
+        Instruction.TypePointer(result(8), operand("StorageClass", spv.StorageClass.Function), result(7)),
+        Instruction.TypePointer(result(9), operand("StorageClass", spv.StorageClass.Function), result(2)),
+        Instruction.TypePointer(result(10), operand("StorageClass", spv.StorageClass.CrossWorkgroup), result(2)),
+        Instruction.TypePointer(result(11), operand("StorageClass", spv.StorageClass.Generic), result(4)),
         Instruction.TypeFunction(result(14), result(1), Vec(result(8), result(10))),
         Instruction.Constant(result(2), result(15), operand("LiteralContextDependentNumber", 1, 0)),
-        Instruction.Decorate(result(21), operand("Decoration", 38, 2)), // FuncParamAttr ByVal
-        Instruction.EntryPoint(operand("ExecutionModel", 6), result(20), stringOperand("byval_bytes"), Vec.empty),
-        Instruction.Function(result(1), result(20), operand("FunctionControl", 0), result(14)),
+        Instruction.Decorate(result(21), operand("Decoration", spv.Decoration.FuncParamAttr, 2)), // FuncParamAttr ByVal
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          result(20),
+          stringOperand("byval_bytes"),
+          Vec.empty
+        ),
+        Instruction.Function(result(1), result(20), operand("FunctionControl", spv.FunctionControl.None), result(14)),
         Instruction.FunctionParameter(result(8), result(21)),
         Instruction.FunctionParameter(result(10), result(22)),
         Instruction.Label(result(23)),
@@ -645,24 +725,24 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       Endianness.Little
     )
     val allocationPairs = Vec(
-      MemoryRegion(1L)                -> MemoryRegion(3L),
-      MemoryRegion(9007199254740993L) -> MemoryRegion(9007199254740995L)
+      AllocationId(1L)                -> AllocationId(3L),
+      AllocationId(9007199254740993L) -> AllocationId(9007199254740995L)
     )
     for ((needle, output) <- allocationPairs) {
-      final class Memory extends net.kurobako.gemstone.vm.Memory {
-        val storage =
+      class Memory extends vm.Memory {
+        val storage: Map[AllocationId.Type, Array[Byte]] =
           Map(needle -> LittleEndian.toArray(7L, 4), output -> Array.ofDim[Byte](16))
         def read(
-            id: MemoryRegion,
-            offset: NonNegative[Long],
-            size: NonNegative[Int]
+            id: AllocationId,
+            offset: Long >= 0,
+            size: Int >= 0
         ): Either[Fault, Vec[Byte]] =
           if (offset.raw > storage(id).length - size.raw)
             Left(Fault.InvalidTask("test read exceeds allocation"))
           else Right(Vec.from(storage(id).slice(offset.raw.toInt, offset.raw.toInt + size.raw)))
         def write(
-            id: MemoryRegion,
-            offset: NonNegative[Long],
+            id: AllocationId,
+            offset: Long >= 0,
             bytes: Vec[Byte]
         ): Either[Fault, Unit] = {
           val _ = bytes.copyToArray(storage(id), offset.raw.toInt, bytes.size); Right(())
@@ -672,7 +752,7 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       val aggregate = LittleEndian.toVec(0x12345678L, 8) ++
         LittleEndian.toVec(99L, 8)
       val dispatch = KernelTask.validated(
-        NonEmptyString("byval_bytes"),
+        "byval_bytes",
         Dimensions.One,
         Dimensions.One,
         Vec(KernelTask.Argument.Scalar(aggregate), KernelTask.Argument.Memory(output, 0L)),
@@ -710,14 +790,19 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       Vec(
         Instruction.TypeVoid(voidType),
         Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypePointer(valuePointer, operand("StorageClass", 5), u32),
+        Instruction.TypePointer(valuePointer, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
         Instruction.TypeStruct(structureType, Vec(valuePointer, u32)),
-        Instruction.TypePointer(structurePtr, operand("StorageClass", 5), structureType),
+        Instruction.TypePointer(structurePtr, operand("StorageClass", spv.StorageClass.CrossWorkgroup), structureType),
         Instruction.TypeFunction(functionType, voidType, Vec(structurePtr)),
         Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
         Instruction.Constant(u32, expected, operand("LiteralContextDependentNumber", 42)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("external_aggregate"), Vec.empty),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          function,
+          stringOperand("external_aggregate"),
+          Vec.empty
+        ),
+        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
         Instruction.FunctionParameter(structurePtr, argument),
         Instruction.Label(operand("IdResult", 11)),
         Instruction.AccessChain(valuePointer, member, argument, Vec(one)),
@@ -727,11 +812,11 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       ),
       Endianness.Little
     )
-    val allocation = MemoryRegion(45L)
+    val allocation = AllocationId(45L)
     val memory     = ArrayMemory(allocation, 12)
     val dispatch   = KernelTask
       .validated(
-        NonEmptyString("external_aggregate"),
+        "external_aggregate",
         Dimensions.One,
         Dimensions.One,
         Vec(KernelTask.Argument.Scalar(Vec.fill(8)(0.toByte))),
@@ -750,4 +835,56 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     assertEquals(memory.bytes.drop(8), LittleEndian.toVec(42L, 4))
   }
 
+  test("cross-workgroup IDs, partial extents and workgroup barriers stay isolated across launches") {
+    for {
+      groups   <- interleaving.groups
+      local    <- Vec[Int > 0](31, 32, 33)
+      parallel <- Vec(false, true)
+      barrier  <- Vec(false, true)
+      producer <- if (barrier) Vec(2, local.raw - 1) else Vec(2)
+    } {
+      val count            = (local.raw * groups.raw - (if (barrier) 0 else 1)).unsafe[Int > 0]
+      val offset: Int >= 0 = 7
+      val allocation       = AllocationId(300L)
+      val memory           = ArrayMemory(allocation, (offset.raw + count.raw + 2) * 4)
+      val prepared         = loadUnchecked(interleaving.geometry(barrier, producer)).toOption.get
+      for (seed <- Vec(1, 9)) {
+        val schedule   = interleaving.Interleaving()
+        val workgroups = if (parallel) schedule else Workgroups.Sequential
+        val control    = TaskControl()
+        val dispatch   = KernelTask.validated(
+          "groups",
+          testDimensions(local),
+          testDimensions(groups),
+          Vec(
+            KernelTask.Argument.Memory(allocation, 4L),
+            KernelTask.Argument.Scalar(LittleEndian.toVec(seed.toLong, 4)),
+            KernelTask.Argument.Local(4L)
+          ),
+          globalSize = Some(testDimensions(count).toGlobalDimensions),
+          globalOffset = Coordinates(offset, 0, 0)
+        ).toOption.get
+        assertEquals(
+          VMInterpreter.execute(
+            prepared,
+            dispatch,
+            schedule.InterleavedMemory(memory),
+            control,
+            workgroups,
+            _ => Right(())
+          ),
+          Right(()),
+          s"groups=$groups local=$local parallel=$parallel barrier=$barrier"
+        )
+        assertEquals(schedule.calls.get(), if (parallel && groups > 1) 1 else 0)
+        val expected = Vec.from(0 until count.raw).flatMap { index =>
+          LittleEndian.toVec(
+            (index / local.raw + seed) * 1000L + (index % local.raw) * 10L + offset.raw + index,
+            4
+          )
+        }
+        assertEquals(memory.bytes, Vec.fill((offset.raw + 1) * 4)(0.toByte) ++ expected ++ Vec.fill(4)(0.toByte))
+      }
+    }
+  }
 }

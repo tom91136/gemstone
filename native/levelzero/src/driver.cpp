@@ -39,6 +39,7 @@
 #include "objects.hpp"
 #include "process.hpp"
 #include "relocations.hpp"
+#include "transfer.hpp"
 #include <sys/mman.h>
 #include <sys/syscall.h>
 
@@ -96,37 +97,23 @@ struct VirtualReservation {
 std::mutex virtualMemoryMutex;
 std::map<uintptr_t, VirtualReservation> virtualReservations;
 
-enum class RemoteMode { Uninitialized, Disabled, Ready, Misconfigured };
-
 struct RemoteExecution {
-  ClientManager manager;
-  RemoteMode mode = RemoteMode::Uninitialized;
-  Client *client = nullptr;
+  ClientMode mode;
+  Client *client;
   std::string error;
 };
 
-RemoteExecution remote;
+ClientManager remote;
 
 struct LaunchPerformance {
   uint64_t relocationScanBytes = 0;
   uint64_t relocationCount = 0;
 };
 
-RemoteExecution &remoteExecution() {
-  auto &manager = remote.manager;
-  switch (manager.mode()) {
-    case ClientMode::Ready: remote.mode = RemoteMode::Ready; break;
-    case ClientMode::Disabled: remote.mode = RemoteMode::Disabled; break;
-    case ClientMode::Misconfigured: remote.mode = RemoteMode::Misconfigured; break;
-    case ClientMode::Uninitialized: remote.mode = RemoteMode::Uninitialized; break;
-  }
-  remote.client = remote.mode == RemoteMode::Ready ? manager.client() : nullptr;
-  remote.error = manager.error();
-  return remote;
-}
+RemoteExecution remoteExecution() { return {remote.mode(), remote.client(), remote.error()}; }
 
-std::string remoteError(RemoteExecution &state) {
-  const auto value = state.manager.lastError();
+std::string remoteError(const RemoteExecution &state) {
+  const auto value = remote.lastError();
   if (!value.empty()) return value;
   return state.error.empty() ? "Gemstone execution RPC failed" : state.error;
 }
@@ -191,8 +178,8 @@ std::vector<PointerRelocation> collectPointerRelocations(const KernelLaunch &ker
         uint64_t targetId = 0;
         uint64_t targetOffset = 0;
         if (classifyPointerValueLocked(pointer, targetId, targetOffset)) {
-          result.push_back({RelocationSourceMemory{MemoryRegion{static_cast<int64_t>(source->id)}},
-                            LongPositive0{static_cast<int64_t>(offset)}, MemoryRegion{static_cast<int64_t>(targetId)},
+          result.push_back({RelocationSourceMemory{AllocationId{static_cast<int64_t>(source->id)}},
+                            LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(targetId)},
                             LongPositive0{static_cast<int64_t>(targetOffset)}});
         }
       }
@@ -211,7 +198,7 @@ std::vector<PointerRelocation> collectPointerRelocations(const KernelLaunch &ker
         uint64_t targetOffset = 0;
         if (classifyPointerValueLocked(pointer, targetId, targetOffset)) {
           result.push_back({RelocationSourceArgument{IntPositive0{static_cast<int32_t>(argument)}},
-                            LongPositive0{static_cast<int64_t>(offset)}, MemoryRegion{static_cast<int64_t>(targetId)},
+                            LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(targetId)},
                             LongPositive0{static_cast<int64_t>(targetOffset)}});
         }
       }
@@ -1059,26 +1046,24 @@ bool uploadAllocations(Client &client, const KernelLaunch &kernel, const std::ve
 
 bool copyBackDirtyRanges(Client &client, const std::vector<DirtyRange> &ranges) {
   std::lock_guard lock(allocationsMutex);
-  for (const auto &range : ranges) {
+  return readDirtyRanges(client, ranges, [&](const DirtyRange &range, const uint8_t *bytes) {
     const auto id = static_cast<uint64_t>(range.allocation.value);
     const auto offset = static_cast<uint64_t>(range.offset.value);
     const auto size = static_cast<uint64_t>(range.size.value);
     const auto found = std::find_if(allocations.begin(), allocations.end(), [&](const auto &entry) { return entry.second->id == id; });
     if (found == allocations.end() || offset > found->second->size || size > found->second->size - offset) return false;
-    auto bytes = client.call(ReadAllocation{range.allocation, range.offset, static_cast<int32_t>(size)});
-    if (!bytes || bytes.value().size() != size) return false;
-    std::memcpy(static_cast<uint8_t *>(found->first) + offset, bytes.value().data(), size);
-  }
-  return true;
+    std::memcpy(static_cast<uint8_t *>(found->first) + offset, bytes, size);
+    return true;
+  });
 }
 
 ze_result_t launchRpc(const KernelLaunch &kernel, const ze_group_count_t &groups) {
   // Serialize metadata preparation and copy-back, but let independent queues
   // execute and pump host-memory exchanges on separate connections.
   std::unique_lock rpcLock(rpcTransactionMutex);
-  auto &state = remoteExecution();
-  if (state.mode == RemoteMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
-  if (state.mode != RemoteMode::Ready) return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+  auto state = remoteExecution();
+  if (state.mode == ClientMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
+  if (state.mode != ClientMode::Ready) return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
   // Ordinary host pointers are serviced by exact interpreter accesses.
   if (!state.client->call(EnableHostMemory{})) return ZE_RESULT_ERROR_DEVICE_LOST;
   const auto started = std::chrono::steady_clock::now();
@@ -1343,9 +1328,9 @@ ze_result_t allocate(Context *context, size_t size, size_t alignment, ze_memory_
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (alignment != 0 && (alignment & (alignment - 1)) != 0) return ZE_RESULT_ERROR_UNSUPPORTED_ALIGNMENT;
-  auto &state = remoteExecution();
-  if (state.mode == RemoteMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
-  if (state.mode == RemoteMode::Ready && size > static_cast<size_t>(std::numeric_limits<int32_t>::max()))
+  auto state = remoteExecution();
+  if (state.mode == ClientMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
+  if (state.mode == ClientMode::Ready && size > static_cast<size_t>(std::numeric_limits<int32_t>::max()))
     return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
   *result = alignedAllocate(size, alignment);
   if (!*result) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
@@ -1354,7 +1339,7 @@ ze_result_t allocate(Context *context, size_t size, size_t alignment, ze_memory_
   // the fresh allocation behaviour of the physical oracle used by the suite.
   std::memset(*result, 0, std::max(size, size_t{1}));
   uint64_t allocationId = 0;
-  if (state.mode == RemoteMode::Ready) {
+  if (state.mode == ClientMode::Ready) {
     std::lock_guard rpcLock(rpcTransactionMutex);
     auto registered = state.client->call(RegisterAllocation{rpcKind(type), static_cast<int64_t>(size)});
     if (!registered) {
@@ -1407,9 +1392,9 @@ ze_result_t ZE_APICALL memFree(ze_context_handle_t contextHandle, void *pointer)
     allocation = found->second;
     allocations.erase(found);
   }
-  auto &state = remoteExecution();
+  auto state = remoteExecution();
   std::lock_guard rpcLock(rpcTransactionMutex);
-  const bool released = state.mode != RemoteMode::Ready
+  const bool released = state.mode != ClientMode::Ready
                         || static_cast<bool>(state.client->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(allocation->id)}}));
   if (!released) rememberRemoteError(state, remoteError(state));
   std::free(pointer);
@@ -1436,9 +1421,9 @@ ze_result_t ZE_APICALL virtualReserve(ze_context_handle_t contextHandle, const v
   if (!result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (size == 0 || size % PageSize != 0) return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
   if (start && reinterpret_cast<uintptr_t>(start) % PageSize != 0) return ZE_RESULT_ERROR_UNSUPPORTED_ALIGNMENT;
-  auto &state = remoteExecution();
-  if (state.mode == RemoteMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
-  if (state.mode == RemoteMode::Ready && size > static_cast<size_t>(std::numeric_limits<int32_t>::max()))
+  auto state = remoteExecution();
+  if (state.mode == ClientMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
+  if (state.mode == ClientMode::Ready && size > static_cast<size_t>(std::numeric_limits<int32_t>::max()))
     return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
   void *address = MAP_FAILED;
   if (start)
@@ -1446,7 +1431,7 @@ ze_result_t ZE_APICALL virtualReserve(ze_context_handle_t contextHandle, const v
   if (address == MAP_FAILED) address = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (address == MAP_FAILED) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
   uint64_t allocationId = 0;
-  if (state.mode == RemoteMode::Ready) {
+  if (state.mode == ClientMode::Ready) {
     std::lock_guard rpcLock(rpcTransactionMutex);
     auto registered = state.client->call(RegisterAllocation{AllocationKind::Device, static_cast<int64_t>(size)});
     if (!registered) {
@@ -1490,8 +1475,8 @@ ze_result_t ZE_APICALL virtualFree(ze_context_handle_t contextHandle, const void
     auto allocation = allocations.find(const_cast<void *>(pointer));
     if (allocation == allocations.end() || allocation->second.use_count() != 1) return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
   }
-  auto &state = remoteExecution();
-  if (state.mode == RemoteMode::Ready) {
+  auto state = remoteExecution();
+  if (state.mode == ClientMode::Ready) {
     std::lock_guard rpcLock(rpcTransactionMutex);
     if (!state.client->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(found->second.allocationId)}})) {
       rememberRemoteError(state, remoteError(state));
@@ -1871,13 +1856,13 @@ ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device
   }
   std::vector<std::vector<uint8_t>> prepared;
   prepared.reserve(inputs.size());
-  auto &state = remoteExecution();
+  auto state = remoteExecution();
   for (const auto &input : inputs) {
     std::vector<uint8_t> bytes(input.data, input.data + input.size);
     if (input.constants && input.constants->numConstants != 0) {
       const auto &constants = *input.constants;
       if (!constants.pConstantIds || !constants.pConstantValues) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-      if (state.mode != RemoteMode::Ready) {
+      if (state.mode != ClientMode::Ready) {
         setBuildLog(log, "SPIR-V specialization requires the Gemstone execution service");
         return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
       }
@@ -1901,8 +1886,7 @@ ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device
           setBuildLog(log, "invalid SPIR-V specialization constant");
           return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
         }
-        values.push_back(
-            SpecializationConstant{IntPositive0{static_cast<int32_t>(id)}, std::vector<uint8_t>(value, value + found->second)});
+        values.push_back(SpecializationConstant{Binary32{static_cast<int64_t>(id)}, std::vector<uint8_t>(value, value + found->second)});
       }
       auto specialized = state.client->call(SpecializeImage{bytes, values});
       if (!specialized) {
@@ -1930,8 +1914,8 @@ ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device
     if (valid < bytes.size()) bytes.resize(valid);
   }
   uint64_t programId = 0;
-  if (state.mode != RemoteMode::Ready) {
-    setBuildLog(log, state.mode == RemoteMode::Misconfigured ? state.error : "Gemstone execution service is not configured");
+  if (state.mode != ClientMode::Ready) {
+    setBuildLog(log, state.mode == ClientMode::Misconfigured ? state.error : "Gemstone execution service is not configured");
     return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
   }
   {
@@ -1967,11 +1951,11 @@ ze_result_t ZE_APICALL moduleFunctionPointer(ze_module_handle_t handle, const ch
   auto *module = cast<Module>(handle, Kind::Module);
   if (!module) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!name || !pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  auto &state = remoteExecution();
-  if (state.mode != RemoteMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
+  auto state = remoteExecution();
+  if (state.mode != ClientMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
   auto described = [&] {
     std::lock_guard rpcLock(rpcTransactionMutex);
-    return state.client->call(DescribeKernel{ProgramId{static_cast<int64_t>(module->programId)}, NonEmptyString{name}});
+    return state.client->call(DescribeKernel{ProgramId{static_cast<int64_t>(module->programId)}, {name}});
   }();
   if (!described) {
     rememberRemoteError(state, described.error().detail);
@@ -1998,8 +1982,8 @@ ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char
       return ZE_RESULT_SUCCESS;
     }
   }
-  auto &state = remoteExecution();
-  if (state.mode != RemoteMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
+  auto state = remoteExecution();
+  if (state.mode != ClientMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
   auto described = [&] {
     std::lock_guard rpcLock(rpcTransactionMutex);
     return state.client->call(DescribeGlobal{ProgramId{static_cast<int64_t>(module->programId)}, name});
@@ -2062,7 +2046,7 @@ ze_result_t ZE_APICALL moduleDestroy(ze_module_handle_t handle) {
   if (!module) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (module->users.load(std::memory_order_acquire) != 0) return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
   {
-    auto &state = remoteExecution();
+    auto state = remoteExecution();
     std::lock_guard rpcLock(rpcTransactionMutex);
     if (!state.client->call(UnloadProgram{ProgramId{static_cast<int64_t>(module->programId)}})) {
       rememberRemoteError(state, remoteError(state));
@@ -2086,8 +2070,8 @@ ze_result_t ZE_APICALL moduleDestroy(ze_module_handle_t handle) {
       }
     }
     if (allocation) {
-      auto &state = remoteExecution();
-      if (state.mode == RemoteMode::Ready) {
+      auto state = remoteExecution();
+      if (state.mode == ClientMode::Ready) {
         std::lock_guard rpcLock(rpcTransactionMutex);
         if (!state.client->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(allocation->id)}})) {
           rememberRemoteError(state, remoteError(state));
@@ -2187,8 +2171,8 @@ ze_result_t ZE_APICALL kernelCreate(ze_module_handle_t moduleHandle, const ze_ke
   if (!module || !desc || !result || !desc->pKernelName) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   auto *kernel = createHandle<Kernel>(module, desc->pKernelName);
   if (!kernel) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
-  auto &state = remoteExecution();
-  if (state.mode != RemoteMode::Ready) {
+  auto state = remoteExecution();
+  if (state.mode != ClientMode::Ready) {
     delete kernel;
     return ZE_RESULT_ERROR_DEVICE_LOST;
   }
@@ -2311,8 +2295,8 @@ ze_result_t ZE_APICALL kernelSourceAttributes(ze_kernel_handle_t handle, uint32_
   auto *kernel = cast<Kernel>(handle, Kind::Kernel);
   if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!size) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  auto &state = remoteExecution();
-  if (state.mode != RemoteMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
+  auto state = remoteExecution();
+  if (state.mode != ClientMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
   auto described = state.client->call(DescribeKernel{ProgramId{static_cast<int64_t>(kernel->module->programId)}, kernel->name});
   if (!described) {
     rememberRemoteError(state, remoteError(state));

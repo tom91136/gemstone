@@ -27,7 +27,6 @@ std::map<std::string, std::string> base_environment() {
 }
 void prepare_runtime_environment(std::map<std::string, std::string> &environment, const std::filesystem::path &artifact,
                                  const std::filesystem::path &support, std::string_view backend) {
-  environment["CONFORMANCE_ARTIFACT_ROOT"] = artifact.string();
   environment["CONFORMANCE_SUPPORT_ROOT"] = support.string();
   // This map is used with env::empty, so absent variables really are absent.
   for (auto i = environment.begin(); i != environment.end();) {

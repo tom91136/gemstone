@@ -6,6 +6,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cuda.h>
 
+#include <environment_keys.hpp>
+
 namespace {
 
 struct TargetCase {
@@ -22,9 +24,9 @@ bool targetSelectionWorks() {
       TargetCase{"compute90", 9, 0},
   };
   bool valid = true;
-  unsetenv("GEMSTONE_TARGET_ARCH");
+  unsetenv(gemstone::environment::TargetArch);
   for (const auto &target : cases) {
-    if (setenv("GEMSTONE_TARGET_ARCH", target.value.data(), 1) != 0) {
+    if (setenv(gemstone::environment::TargetArch, target.value.data(), 1) != 0) {
       std::fprintf(stderr, "cannot set target case %s\n", target.value.data());
       valid = false;
       continue;
@@ -104,8 +106,8 @@ bool driverEntryPointQueryWorks() {
 } // namespace
 
 TEST_CASE("CUDA facade fails closed without execution service", "[cuda]") {
-  unsetenv("GEMSTONE_RPC_CLIENT");
-  unsetenv("GEMSTONE_RPC_PORT");
+  unsetenv(gemstone::environment::RpcClient);
+  unsetenv(gemstone::environment::RpcEndpoint);
   const CUresult status = cuInit(0);
   REQUIRE((status == CUDA_ERROR_NOT_INITIALIZED));
   REQUIRE((targetSelectionWorks()));

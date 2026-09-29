@@ -17,6 +17,7 @@
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "../../rpc/test/wire.hpp"
 #include <arpa/inet.h>
+#include <environment_keys.hpp>
 #include <netinet/in.h>
 #include <sys/socket.h>
 
@@ -53,7 +54,6 @@ void respond(int socket, const std::vector<uint8_t> &payload = {}, bool failed =
   if (body.empty() && !failed) gemstone_test::encodePayload(body, Unit{});
   std::vector<uint8_t> header;
   gemstone_test::wire::appendBigEndian<uint32_t>(header, ResponseMagic);
-  gemstone_test::wire::appendBigEndian<uint64_t>(header, SchemaFingerprint);
   gemstone_test::wire::appendBigEndian<uint32_t>(header, failed ? 1 : 0);
   gemstone_test::wire::appendBigEndian<uint32_t>(header, static_cast<uint32_t>(body.size()));
   sendAll(socket, header.data(), header.size());
@@ -96,6 +96,17 @@ private:
       if (peers[0].revents & POLLIN) {
         const auto connection = accept(listener, nullptr, nullptr);
         REQUIRE(connection >= 0);
+        std::array<uint8_t, 8> hello{};
+        receiveAll(connection, hello.data(), hello.size());
+        REQUIRE(gemstone_test::wire::readBigEndian<uint32_t>(hello.data()) == HelloMagic);
+        REQUIRE(gemstone_test::wire::readBigEndian<uint32_t>(hello.data() + 4) == Schema.size());
+        std::string schema(Schema.size(), '\0');
+        receiveAll(connection, schema.data(), schema.size());
+        REQUIRE(schema == Schema);
+        std::vector<uint8_t> accepted;
+        gemstone_test::wire::appendBigEndian<uint32_t>(accepted, HelloResponseMagic);
+        gemstone_test::wire::appendBigEndian<uint32_t>(accepted, 0);
+        sendAll(connection, accepted.data(), accepted.size());
         peers.push_back({connection, POLLIN, 0});
         continue;
       }
@@ -113,65 +124,68 @@ private:
       std::array<uint8_t, RequestHeaderBytes> header{};
       receiveAll(connection, header.data(), header.size());
       REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(header.data()) == RequestMagic));
-      REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(header.data() + RequestFingerprintOffset) == SchemaFingerprint));
       REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(header.data() + RequestClientOffset) == clientId));
       REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(header.data() + RequestSessionHighOffset) != 0
                || gemstone_test::wire::readBigEndian<uint64_t>(header.data() + RequestSessionLowOffset) != 0));
-      const uint64_t operationId = gemstone_test::wire::readBigEndian<uint64_t>(header.data() + RequestOperationOffset);
+      const auto tagSize = gemstone_test::wire::readBigEndian<uint32_t>(header.data() + RequestTagSizeOffset);
+      REQUIRE(tagSize > 0);
+      REQUIRE(tagSize <= MaximumTagBytes);
+      std::string operationTag(tagSize, '\0');
+      receiveAll(connection, operationTag.data(), operationTag.size());
       std::vector<uint8_t> payload(gemstone_test::wire::readBigEndian<uint32_t>(header.data() + RequestPayloadSizeOffset));
       if (!payload.empty()) receiveAll(connection, payload.data(), payload.size());
 
-      switch (operationId) {
-        case operation::EnableHostMemory:
-        case operation::Ping: respond(connection); break;
-        case operation::RegisterAllocation: registerAllocation(connection, payload); break;
-        case operation::RegisterAllocationAddress: respond(connection); break;
-        case operation::ReleaseAllocation:
-          releaseAllocation(payload);
-          respond(connection);
-          running = releasedAllocations != 2;
-          break;
-        case operation::WriteAllocation:
-          writeAllocation(payload);
-          respond(connection);
-          break;
-        case operation::ReadAllocation: readAllocation(connection, payload); break;
-        case operation::LoadProgram: loadProgram(connection, payload); break;
-        case operation::UnloadProgram: {
-          const auto request = gemstone_test::decodePayload<UnloadProgram>(payload);
-          REQUIRE((request.program.value == static_cast<int64_t>(programId)));
-          respond(connection);
-          break;
-        }
-        case operation::DescribeKernel: describeKernel(connection, payload); break;
-        case operation::Launch: launch(connection, payload); break;
-        case operation::QueryCompletion: queryCompletion(connection, payload); break;
-        case operation::AwaitCompletion: awaitCompletion(connection, payload); break;
-        case operation::PollHostMemory: awaitCompletion(connection, payload, true); break;
-        case operation::ReleaseCompletion: {
-          const auto request = gemstone_test::decodePayload<ReleaseCompletion>(payload);
-          REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
-          respond(connection);
-          break;
-        }
-        case operation::CompletionDirtyRanges: dirtyRanges(connection, payload); break;
-        case operation::CompletionPointerRelocations: {
-          const auto request = gemstone_test::decodePayload<CompletionPointerRelocations>(payload);
-          REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
-          std::vector<uint8_t> response;
-          gemstone_test::encodePayload(response, std::vector<PointerRelocation>{});
-          respond(connection, response);
-          break;
-        }
-        case operation::CompletionPrints: {
-          const auto request = gemstone_test::decodePayload<CompletionPrints>(payload);
-          REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
-          std::vector<uint8_t> response;
-          gemstone_test::encodePayload(response, std::string{});
-          respond(connection, response);
-          break;
-        }
-        default: REQUIRE((false));
+      if (operationTag == operation::EnableHostMemory || operationTag == operation::Ping) {
+        respond(connection);
+      } else if (operationTag == operation::RegisterAllocation) {
+        registerAllocation(connection, payload);
+      } else if (operationTag == operation::RegisterAllocationAddress) {
+        respond(connection);
+      } else if (operationTag == operation::ReleaseAllocation) {
+        releaseAllocation(payload);
+        respond(connection);
+        running = releasedAllocations != 2;
+      } else if (operationTag == operation::WriteAllocation) {
+        writeAllocation(payload);
+        respond(connection);
+      } else if (operationTag == operation::ReadAllocation) {
+        readAllocation(connection, payload);
+      } else if (operationTag == operation::LoadProgram) {
+        loadProgram(connection, payload);
+      } else if (operationTag == operation::UnloadProgram) {
+        const auto request = gemstone_test::decodePayload<UnloadProgram>(payload);
+        REQUIRE((request.program.value == static_cast<int64_t>(programId)));
+        respond(connection);
+      } else if (operationTag == operation::DescribeKernel) {
+        describeKernel(connection, payload);
+      } else if (operationTag == operation::Launch) {
+        launch(connection, payload);
+      } else if (operationTag == operation::QueryCompletion) {
+        queryCompletion(connection, payload);
+      } else if (operationTag == operation::AwaitCompletion) {
+        awaitCompletion(connection, payload);
+      } else if (operationTag == operation::PollHostMemory) {
+        awaitCompletion(connection, payload, true);
+      } else if (operationTag == operation::ReleaseCompletion) {
+        const auto request = gemstone_test::decodePayload<ReleaseCompletion>(payload);
+        REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
+        respond(connection);
+      } else if (operationTag == operation::CompletionDirtyRanges) {
+        dirtyRanges(connection, payload);
+      } else if (operationTag == operation::CompletionPointerRelocations) {
+        const auto request = gemstone_test::decodePayload<CompletionPointerRelocations>(payload);
+        REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
+        std::vector<uint8_t> response;
+        gemstone_test::encodePayload(response, std::vector<PointerRelocation>{});
+        respond(connection, response);
+      } else if (operationTag == operation::CompletionPrints) {
+        const auto request = gemstone_test::decodePayload<CompletionPrints>(payload);
+        REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
+        std::vector<uint8_t> response;
+        gemstone_test::encodePayload(response, std::string{});
+        respond(connection, response);
+      } else {
+        REQUIRE((false));
       }
     }
     for (size_t i = 1; i < peers.size(); ++i)
@@ -358,9 +372,9 @@ ze_device_handle_t gemstoneDevice(ze_driver_handle_t *selectedDriver) {
 
 void crossWorkgroupApi() {
   gemstone_test::RpcFixture server;
-  const auto port = std::to_string(server.port());
-  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
-  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  const auto port = "tcp://127.0.0.1:" + std::to_string(server.port());
+  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
+  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
   REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
   ze_driver_handle_t driver = nullptr;
   auto device = gemstoneDevice(&driver);
@@ -497,9 +511,9 @@ void crossWorkgroupApi() {
 
 TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   MockServer server;
-  const auto port = std::to_string(server.port);
-  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
-  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  const auto port = "tcp://127.0.0.1:" + std::to_string(server.port);
+  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
+  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
   REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
 
   ze_driver_handle_t driver = nullptr;
@@ -707,9 +721,9 @@ TEST_CASE("Level Zero cross-workgroup API", "[level-zero][rpc]") { crossWorkgrou
 namespace {
 void ordinaryHostPointer(unsigned storageKind, bool primeBase) {
   gemstone_test::RpcFixture server;
-  const auto port = std::to_string(server.port());
-  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
-  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  const auto port = "tcp://127.0.0.1:" + std::to_string(server.port());
+  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
+  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
   REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
 
   ze_driver_handle_t driver = nullptr;

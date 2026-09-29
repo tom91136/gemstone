@@ -38,11 +38,16 @@ class LineSink {
   std::ostream *stream_;
   std::string prefix_, pending_;
   std::string *capture_;
+  std::ostream *log_;
 
 public:
-  LineSink(std::ostream *stream, std::string prefix, std::string *capture = nullptr)
-      : stream_(stream), prefix_(std::move(prefix)), capture_(capture) {}
+  LineSink(std::ostream *stream, std::string prefix, std::string *capture = nullptr, std::ostream *log = nullptr)
+      : stream_(stream), prefix_(std::move(prefix)), capture_(capture), log_(log) {}
   void write(const uint8_t *data, size_t size) {
+    if (log_) {
+      log_->write(reinterpret_cast<const char *>(data), static_cast<std::streamsize>(size));
+      log_->flush();
+    }
     if (capture_) {
       if (capture_->size() + size > 128 * 1024 * 1024) return;
       capture_->append(reinterpret_cast<const char *>(data), size);
@@ -153,7 +158,7 @@ int wait_for_exit(int32_t pid, std::chrono::steady_clock::time_point deadline) {
 
 ProcessResult run_process(const std::vector<std::string> &command, const std::filesystem::path &directory,
                           const std::map<std::string, std::string> &environment, std::chrono::milliseconds timeout,
-                          const std::string &prefix, bool capture_output) {
+                          const std::string &prefix, bool capture_output, std::ostream *output_log) {
   if (command.empty() || timeout.count() <= 0 || timeout.count() > INT32_MAX)
     throw std::invalid_argument("invalid process command or timeout");
   const auto working = directory.string();
@@ -171,8 +176,8 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
     environment_storage.push_back(key + "=" + value);
 
   std::string output, error_output;
-  LineSink stdout_sink(capture_output ? nullptr : &std::cout, prefix, capture_output ? &output : nullptr);
-  LineSink stderr_sink(capture_output ? nullptr : &std::cerr, prefix, capture_output ? &error_output : nullptr);
+  LineSink stdout_sink(capture_output || output_log ? nullptr : &std::cout, prefix, capture_output ? &output : nullptr, output_log);
+  LineSink stderr_sink(capture_output || output_log ? nullptr : &std::cerr, prefix, capture_output ? &error_output : nullptr, output_log);
 
   const auto timed_out = [&] {
     std::cerr << prefix << "conformance: process tree timed out: " << command.front() << '\n';

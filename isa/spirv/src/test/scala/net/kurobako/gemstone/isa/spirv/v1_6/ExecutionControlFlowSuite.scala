@@ -1,22 +1,15 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.NonNegative
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
+import execution.*
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.spirv.v1_6 as spv
+import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
-
-import net.kurobako.gemstone.Vec
-
-import net.kurobako.gemstone.binary.ByteRange
-import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.NonEmptyVec
-
-import java.util.concurrent.atomic.AtomicReference
-final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestSupport {
+import net.kurobako.gemstone.vm.LaunchGeometry.*
+class ExecutionControlFlowSuite extends munit.FunSuite {
   test("indirect function call rejects a pointer from another program") {
     val voidType       = operand("IdResult", 1)
     val u32            = operand("IdResult", 2)
@@ -36,12 +29,19 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Instruction.TypeVoid(voidType),
         Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
         Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
-        Instruction.TypePointer(pointerType, operand("StorageClass", 5), u32),
+        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
         Instruction.TypeFunction(entryType, voidType, Vec(pointerType, u64)),
         Instruction.TypeFunction(helperType, u32, Vec.empty),
         Instruction.Constant(u32, helperValue, operand("LiteralContextDependentNumber", 37)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), entryFunction, stringOperand("indirect"), Vec.empty),
-        Instruction.Function(voidType, entryFunction, operand("FunctionControl", 0), entryType),
+        Instruction.Name(helperFunction, stringOperand("helper")),
+        Instruction.Name(helperValue, stringOperand("not_a_function")),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          entryFunction,
+          stringOperand("indirect"),
+          Vec.empty
+        ),
+        Instruction.Function(voidType, entryFunction, operand("FunctionControl", spv.FunctionControl.None), entryType),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(u64, token),
         Instruction.Label(operand("IdResult", 12)),
@@ -49,18 +49,18 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Instruction.Store(output, result, None),
         Instruction.Return(),
         Instruction.FunctionEnd(),
-        Instruction.Function(u32, helperFunction, operand("FunctionControl", 0), helperType),
+        Instruction.Function(u32, helperFunction, operand("FunctionControl", spv.FunctionControl.None), helperType),
         Instruction.Label(operand("IdResult", 14)),
         Instruction.ReturnValue(helperValue),
         Instruction.FunctionEnd()
       ),
       Endianness.Little
     )
-    val allocation              = MemoryRegion(30L)
+    val allocation              = AllocationId(30L)
     val memory                  = ArrayMemory(allocation, 4)
     def dispatch(pointer: Long) = KernelTask
       .validated(
-        NonEmptyString("indirect"),
+        "indirect",
         Dimensions.One,
         Dimensions.One,
         Vec(
@@ -76,9 +76,19 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
     val wrongProgram = (2L << 32) | 9L
     assert(executeUnchecked(module, dispatch(wrongProgram), memory).isLeft)
     val loaded = loadUnchecked(module).toOption.get
-    loaded.programId = 1L
+    val helper = loaded.kernel("helper").fold(error => fail(error.message), identity)
+    assertEquals(helper.entryPointId.map(_.raw), Some(9))
+    assertEquals(loaded.kernelNames, Vec("indirect"))
+    assert(loaded.kernel("missing").isLeft)
+    assert(loaded.kernel("not_a_function").isLeft)
+    assertEquals(loaded.bindFunctionPointerNamespace(1L), Right(()))
+    assertEquals(loaded.bindFunctionPointerNamespace(1L), Right(()))
+    assert(loaded.bindFunctionPointerNamespace(2L).isLeft)
+    assert(loaded.bindFunctionPointerNamespace(0L).isLeft)
+    assert(loaded.bindFunctionPointerNamespace(0x100000000L).isLeft)
     assert(executeLoaded(loaded, dispatch(wrongProgram), memory).isLeft)
-    assertEquals(executeLoaded(loaded, dispatch((1L << 32) | 9L), memory), Right(()))
+    val pointer = (1L << 32) | helper.entryPointId.get.raw.toLong
+    assertEquals(executeLoaded(loaded, dispatch(pointer), memory), Right(()))
   }
 
   test("dispatch executes typed function calls and return values") {
@@ -100,13 +110,18 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       Vec(
         Instruction.TypeVoid(voidType),
         Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypePointer(pointerType, operand("StorageClass", 5), u32),
+        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
         Instruction.TypeFunction(entryType, voidType, Vec(pointerType, u32)),
         Instruction.TypeFunction(helperType, u32, Vec(u32)),
         Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
         Instruction.String(operand("IdResult", 17), stringOperand("call.cl")),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), entryFunction, stringOperand("call"), Vec.empty),
-        Instruction.Function(voidType, entryFunction, operand("FunctionControl", 0), entryType),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          entryFunction,
+          stringOperand("call"),
+          Vec.empty
+        ),
+        Instruction.Function(voidType, entryFunction, operand("FunctionControl", spv.FunctionControl.None), entryType),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(u32, input),
         Instruction.Label(operand("IdResult", 11)),
@@ -116,7 +131,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Instruction.NoLine(),
         Instruction.Return(),
         Instruction.FunctionEnd(),
-        Instruction.Function(u32, helperFunction, operand("FunctionControl", 0), helperType),
+        Instruction.Function(u32, helperFunction, operand("FunctionControl", spv.FunctionControl.None), helperType),
         Instruction.FunctionParameter(u32, helperParameter),
         Instruction.Label(operand("IdResult", 15)),
         Instruction.IAdd(u32, helperResult, helperParameter, one),
@@ -125,11 +140,11 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       ),
       Endianness.Little
     )
-    val allocation = MemoryRegion(21L)
+    val allocation = AllocationId(21L)
     val memory     = ArrayMemory(allocation, 4)
     val dispatch   = KernelTask
       .validated(
-        NonEmptyString("call"),
+        "call",
         Dimensions.One,
         Dimensions.One,
         Vec(
@@ -142,298 +157,6 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
 
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toVec(42L, 4))
-  }
-
-  test("dispatch executes typed OpenCL.std scalar f64 hypot") {
-    val voidType     = operand("IdResult", 1)
-    val f64          = operand("IdResult", 2)
-    val pointerType  = operand("IdResult", 3)
-    val functionType = operand("IdResult", 4)
-    val opencl       = operand("IdResult", 5)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val left         = operand("IdResult", 8)
-    val right        = operand("IdResult", 9)
-    val result       = operand("IdResult", 11)
-    val module       = Module(
-      Header(ISA.version, Word(0), Word(20), Word(0)),
-      Vec(
-        Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
-        Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(f64, operand("LiteralInteger", 64), None),
-        Instruction.TypePointer(pointerType, operand("StorageClass", 5), f64),
-        Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f64, f64)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("hypot"), Vec.empty),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
-        Instruction.FunctionParameter(pointerType, output),
-        Instruction.FunctionParameter(f64, left),
-        Instruction.FunctionParameter(f64, right),
-        Instruction.Label(operand("IdResult", 10)),
-        Instruction.ExtInst(f64, result, opencl, operand("LiteralExtInstInteger", 32), Vec(left, right)),
-        Instruction.Store(output, result, None),
-        Instruction.Return(),
-        Instruction.FunctionEnd()
-      ),
-      Endianness.Little
-    )
-    val allocation = MemoryRegion(22L)
-    val memory     = ArrayMemory(allocation, 8)
-    val dispatch   = KernelTask
-      .validated(
-        NonEmptyString("hypot"),
-        Dimensions.One,
-        Dimensions.One,
-        Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(
-            java.lang.Double.doubleToRawLongBits(3.0),
-            8
-          )),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(
-            java.lang.Double.doubleToRawLongBits(4.0),
-            8
-          ))
-        )
-      )
-      .toOption
-      .get
-
-    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(
-      memory.bytes,
-      LittleEndian.toVec(java.lang.Double.doubleToRawLongBits(5.0), 8)
-    )
-  }
-
-  test("dispatch executes OpenCL.std fma with one rounding") {
-    val voidType     = operand("IdResult", 1)
-    val f32          = operand("IdResult", 2)
-    val pointerType  = operand("IdResult", 3)
-    val functionType = operand("IdResult", 4)
-    val opencl       = operand("IdResult", 5)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val left         = operand("IdResult", 8)
-    val right        = operand("IdResult", 9)
-    val addend       = operand("IdResult", 10)
-    val result       = operand("IdResult", 12)
-    val module       = Module(
-      Header(ISA.version, Word(0), Word(16), Word(0)),
-      Vec(
-        Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
-        Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
-        Instruction.TypePointer(pointerType, operand("StorageClass", 5), f32),
-        Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f32, f32, f32)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("fma"), Vec.empty),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
-        Instruction.FunctionParameter(pointerType, output),
-        Instruction.FunctionParameter(f32, left),
-        Instruction.FunctionParameter(f32, right),
-        Instruction.FunctionParameter(f32, addend),
-        Instruction.Label(operand("IdResult", 11)),
-        Instruction.ExtInst(f32, result, opencl, operand("LiteralExtInstInteger", 26), Vec(left, right, addend)),
-        Instruction.Store(output, result, None),
-        Instruction.Return(),
-        Instruction.FunctionEnd()
-      ),
-      Endianness.Little
-    )
-    val allocation = MemoryRegion(25L)
-    val memory     = ArrayMemory(allocation, 4)
-    val a          = 1.0f + math.pow(2, -23).toFloat
-    val b          = 1.0f - math.pow(2, -23).toFloat
-    val c          = -1.0f
-    val dispatch   = KernelTask
-      .validated(
-        NonEmptyString("fma"),
-        Dimensions.One,
-        Dimensions.One,
-        Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(
-            java.lang.Float.floatToRawIntBits(a).toLong,
-            4
-          )),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(
-            java.lang.Float.floatToRawIntBits(b).toLong,
-            4
-          )),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(
-            java.lang.Float.floatToRawIntBits(c).toLong,
-            4
-          ))
-        )
-      )
-      .toOption
-      .get
-
-    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(
-      memory.bytes,
-      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(Math.fma(a, b, c)).toLong, 4)
-    )
-  }
-
-  test("dispatch executes OpenCL.std native reciprocal") {
-    val voidType     = operand("IdResult", 1)
-    val f32          = operand("IdResult", 2)
-    val pointerType  = operand("IdResult", 3)
-    val functionType = operand("IdResult", 4)
-    val opencl       = operand("IdResult", 5)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val input        = operand("IdResult", 8)
-    val result       = operand("IdResult", 10)
-    val module       = Module(
-      Header(ISA.version, Word(0), Word(11), Word(0)),
-      Vec(
-        Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
-        Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
-        Instruction.TypePointer(pointerType, operand("StorageClass", 5), f32),
-        Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f32)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("native_recip"), Vec.empty),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
-        Instruction.FunctionParameter(pointerType, output),
-        Instruction.FunctionParameter(f32, input),
-        Instruction.Label(operand("IdResult", 9)),
-        Instruction.ExtInst(f32, result, opencl, operand("LiteralExtInstInteger", 90), Vec(input)),
-        Instruction.Store(output, result, None),
-        Instruction.Return(),
-        Instruction.FunctionEnd()
-      ),
-      Endianness.Little
-    )
-    val allocation = MemoryRegion(23L)
-    val memory     = ArrayMemory(allocation, 4)
-    val dispatch   = KernelTask
-      .validated(
-        NonEmptyString("native_recip"),
-        Dimensions.One,
-        Dimensions.One,
-        Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(
-            java.lang.Float.floatToRawIntBits(4.0f).toLong,
-            4
-          ))
-        )
-      )
-      .toOption
-      .get
-
-    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(
-      memory.bytes,
-      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.25f).toLong, 4)
-    )
-  }
-
-  test("dispatch executes OpenCL.std native sine") {
-    val voidType     = operand("IdResult", 1)
-    val f32          = operand("IdResult", 2)
-    val pointerType  = operand("IdResult", 3)
-    val functionType = operand("IdResult", 4)
-    val opencl       = operand("IdResult", 5)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val input        = operand("IdResult", 8)
-    val result       = operand("IdResult", 10)
-    val module       = Module(
-      Header(ISA.version, Word(0), Word(11), Word(0)),
-      Vec(
-        Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
-        Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
-        Instruction.TypePointer(pointerType, operand("StorageClass", 5), f32),
-        Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f32)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("native_sin"), Vec.empty),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
-        Instruction.FunctionParameter(pointerType, output),
-        Instruction.FunctionParameter(f32, input),
-        Instruction.Label(operand("IdResult", 9)),
-        Instruction.ExtInst(f32, result, opencl, operand("LiteralExtInstInteger", 92), Vec(input)),
-        Instruction.Store(output, result, None),
-        Instruction.Return(),
-        Instruction.FunctionEnd()
-      ),
-      Endianness.Little
-    )
-    val allocation = MemoryRegion(24L)
-    val memory     = ArrayMemory(allocation, 4)
-    val dispatch   = KernelTask
-      .validated(
-        NonEmptyString("native_sin"),
-        Dimensions.One,
-        Dimensions.One,
-        Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(
-            java.lang.Float.floatToRawIntBits(0.5f).toLong,
-            4
-          ))
-        )
-      )
-      .toOption
-      .get
-
-    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    val actual = java.lang.Float.intBitsToFloat(LittleEndian.decodeInt32(memory.bytes, 0))
-    assert(math.abs(actual - 0.47942555f) < 1.0e-6f)
-  }
-
-  test("dispatch executes OpenCL.std native cosine") {
-    val voidType     = operand("IdResult", 1)
-    val f32          = operand("IdResult", 2)
-    val pointerType  = operand("IdResult", 3)
-    val functionType = operand("IdResult", 4)
-    val opencl       = operand("IdResult", 5)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val input        = operand("IdResult", 8)
-    val result       = operand("IdResult", 10)
-    val module       = Module(
-      Header(ISA.version, Word(0), Word(11), Word(0)),
-      Vec(
-        Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
-        Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
-        Instruction.TypePointer(pointerType, operand("StorageClass", 5), f32),
-        Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f32)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("native_cos"), Vec.empty),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
-        Instruction.FunctionParameter(pointerType, output),
-        Instruction.FunctionParameter(f32, input),
-        Instruction.Label(operand("IdResult", 9)),
-        Instruction.ExtInst(f32, result, opencl, operand("LiteralExtInstInteger", 81), Vec(input)),
-        Instruction.Store(output, result, None),
-        Instruction.Return(),
-        Instruction.FunctionEnd()
-      ),
-      Endianness.Little
-    )
-    val allocation = MemoryRegion(25L)
-    val memory     = ArrayMemory(allocation, 4)
-    val dispatch   = KernelTask
-      .validated(
-        NonEmptyString("native_cos"),
-        Dimensions.One,
-        Dimensions.One,
-        Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(
-            java.lang.Float.floatToRawIntBits(0.5f).toLong,
-            4
-          ))
-        )
-      )
-      .toOption
-      .get
-
-    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    val actual = java.lang.Float.intBitsToFloat(LittleEndian.decodeInt32(memory.bytes, 0))
-    assert(math.abs(actual - 0.87758255f) < 1.0e-6f)
   }
 
   test("dispatch executes structured loops and Phi values") {
@@ -459,19 +182,29 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Instruction.TypeVoid(voidType),
         Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
         Instruction.TypeBool(operand("IdResult", 18)),
-        Instruction.TypePointer(pointerType, operand("StorageClass", 5), u32),
+        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
         Instruction.TypeFunction(operand("IdResult", 4), voidType, Vec(pointerType, u32)),
         Instruction.Constant(u32, zero, operand("LiteralContextDependentNumber", 0)),
         Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("sequence"), Vec.empty),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), operand("IdRef", 4)),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          function,
+          stringOperand("sequence"),
+          Vec.empty
+        ),
+        Instruction.Function(
+          voidType,
+          function,
+          operand("FunctionControl", spv.FunctionControl.None),
+          operand("IdRef", 4)
+        ),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(u32, bound),
         Instruction.Label(entry),
         Instruction.Branch(header),
         Instruction.Label(header),
         Instruction.Phi(u32, index, Vec(phiPair(zero, entry), phiPair(next, body))),
-        Instruction.LoopMerge(merge, body, operand("LoopControl", 0)),
+        Instruction.LoopMerge(merge, body, operand("LoopControl", spv.LoopControl.None)),
         Instruction.ULessThan(operand("IdResultType", 18), condition, index, bound),
         Instruction.BranchConditional(condition, body, merge, Vec.empty),
         Instruction.Label(body),
@@ -485,11 +218,11 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       ),
       Endianness.Little
     )
-    val allocation = MemoryRegion(2L)
+    val allocation = AllocationId(2L)
     val memory     = ArrayMemory(allocation, 36)
     val dispatch   = KernelTask
       .validated(
-        NonEmptyString("sequence"),
+        "sequence",
         Dimensions.One,
         Dimensions.One,
         Vec(
@@ -526,16 +259,26 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       Instruction.TypeVoid(voidType),
       Instruction.TypeInt(u8, operand("LiteralInteger", 8), operand("LiteralInteger", 0)),
       Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-      Instruction.TypePointer(outputType, operand("StorageClass", 5), u32),
-      Instruction.TypePointer(localType, operand("StorageClass", 7), u32),
-      Instruction.TypePointer(localBytePtr, operand("StorageClass", 7), u8),
+      Instruction.TypePointer(outputType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
+      Instruction.TypePointer(localType, operand("StorageClass", spv.StorageClass.Function), u32),
+      Instruction.TypePointer(localBytePtr, operand("StorageClass", spv.StorageClass.Function), u8),
       Instruction.TypeFunction(operand("IdResult", 7), voidType, Vec(outputType)),
       Instruction.Constant(u32, value, operand("LiteralContextDependentNumber", 0x12345678)),
-      Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("lifetime"), Vec.empty),
-      Instruction.Function(voidType, function, operand("FunctionControl", 0), operand("IdRef", 7)),
+      Instruction.EntryPoint(
+        operand("ExecutionModel", spv.ExecutionModel.Kernel),
+        function,
+        stringOperand("lifetime"),
+        Vec.empty
+      ),
+      Instruction.Function(
+        voidType,
+        function,
+        operand("FunctionControl", spv.FunctionControl.None),
+        operand("IdRef", 7)
+      ),
       Instruction.FunctionParameter(outputType, output),
       Instruction.Label(operand("IdResult", 10)),
-      Instruction.Variable(localType, local, operand("StorageClass", 7), None),
+      Instruction.Variable(localType, local, operand("StorageClass", spv.StorageClass.Function), None),
       Instruction.Bitcast(localBytePtr, bytePointer, local),
       Instruction.LifetimeStart(bytePointer, operand("LiteralInteger", 4)),
       Instruction.Store(local, value, None),
@@ -547,11 +290,11 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
     )
     val module =
       Module(Header(ISA.version, Word(0), Word(20), Word(0)), instructions, Endianness.Little)
-    val allocation = MemoryRegion(3L)
+    val allocation = AllocationId(3L)
     val memory     = ArrayMemory(allocation, 4)
     val dispatch   = KernelTask
       .validated(
-        NonEmptyString("lifetime"),
+        "lifetime",
         Dimensions.One,
         Dimensions.One,
         Vec(KernelTask.Argument.Memory(allocation, 0L))

@@ -2,6 +2,8 @@
 
 #include <gemstone/environment.hpp>
 
+#include <environment_keys.hpp>
+
 namespace gemstone::hsa {
 
 inline constexpr char defaultTarget[] = "gfx900";

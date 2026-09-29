@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.isa.amdgpu.Instruction as AMDGPUInstruction
 import PackedVectorInstructionDefs.*
 import VOP1InstructionDefs.*
 import VOP2InstructionDefs.*
+import net.kurobako.gemstone.isa.amdgpu.Instruction as AMDGPUInstruction
 
 /** GFX9 VOP3 opcode aliases the pinned ACO and AMD XML inputs do not carry.
   *
@@ -12,7 +12,7 @@ import VOP2InstructionDefs.*
   * decoder's VOPC fallback and native VOP3 opcodes come from the generated metadata, so only the aliases that neither
   * source covers remain here. This is reviewed encoding data, not logic.
   */
-private[amdgpu] object Gfx9Vop3Aliases {
+private object Gfx9Vop3Aliases {
   private type VendorInstruction = AMDGPUInstruction.Definition
 
   val byOpcode: Map[Int, VendorInstruction] = Map(

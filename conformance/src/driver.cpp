@@ -144,8 +144,10 @@ std::vector<profile::ResolvedTarget> unique_routes(const std::vector<profile::Re
     // An isolated launcher replaces the native provider and device. Its route
     // is the artifact ABI, not the machine-specific selector, environment, or
     // lock policy used to reach the physical device.
-    if (!isolated || seen.emplace(target.backend, target.architecture).second) result.push_back(target);
-    else std::cout << "conformance: identical isolated route " << target.id << " omitted before discovery\n";
+    if (!isolated || seen.emplace(target.backend, target.architecture).second) {
+      result.push_back(target);
+      if (isolated) result.back().deviceLock = false;
+    } else std::cout << "conformance: identical isolated route " << target.id << " omitted before discovery\n";
   }
   return result;
 }
@@ -301,7 +303,7 @@ std::vector<ScheduledCase> discover_cases(const RunOptions &configuration, const
       });
     if (names.size() > UINT32_MAX) throw std::runtime_error("test inventory is too large");
     const auto count = static_cast<uint32_t>(names.size());
-    auto timeout = scaled_timeout(program.timeout_seconds);
+    auto timeout = scaled_timeout(suite_timeout(program.name, program.timeout_seconds, configuration.isolated_launcher));
     if (const auto key = suite_timeout_environment(program.name); !key.empty()) {
       if (const auto found = environment.find(std::string(key)); found != environment.end())
         timeout = scaled_timeout(parse_timeout(found->second, artifact / "test-programs.txt"));
@@ -400,8 +402,29 @@ int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
   environment["CONFORMANCE_REPORT_DIRECTORY"] = report.string();
   std::unique_ptr<DeviceLock> lock;
   if (config.deviceLock) lock = std::make_unique<DeviceLock>(physical_device_from_key(config.device), 10min);
+  const auto output_path = report / "output.log";
+  std::ofstream output(output_path, std::ios::binary);
+  output.exceptions(std::ios::failbit | std::ios::badbit);
+  std::cout << "conformance: full output: " << output_path << std::endl;
+  // Save both streams as they arrive, including output preceding a timeout or crash.
   const auto result = run_process(launched(config.launcher, std::move(arguments)), gtest ? fs::path(config.directory) : report, environment,
-                                  std::chrono::seconds(test.timeout_seconds));
+                                  std::chrono::seconds(test.timeout_seconds), {}, false, &output);
+  output.close();
+  constexpr size_t ExcerptBytes = 8192;
+  const auto size = fs::file_size(output_path);
+  std::ifstream recorded(output_path, std::ios::binary);
+  std::string excerpt(static_cast<size_t>(std::min<uintmax_t>(size, ExcerptBytes * 2)), '\0');
+  if (size <= ExcerptBytes * 2) {
+    recorded.read(excerpt.data(), static_cast<std::streamsize>(excerpt.size()));
+    std::cout << excerpt;
+  } else {
+    recorded.read(excerpt.data(), ExcerptBytes);
+    recorded.seekg(-static_cast<std::streamoff>(ExcerptBytes), std::ios::end);
+    recorded.read(excerpt.data() + ExcerptBytes, ExcerptBytes);
+    std::cout << std::string_view(excerpt).substr(0, ExcerptBytes) << "\n... output abbreviated ...\n"
+              << std::string_view(excerpt).substr(ExcerptBytes);
+  }
+  if (result.status != 0 || size > ExcerptBytes * 2) std::cout << "\nconformance: exit status " << result.status << '\n';
   return result.status;
 }
 int32_t run(RunOptions configuration, const fs::path &driver) {
@@ -421,7 +444,9 @@ int32_t run(RunOptions configuration, const fs::path &driver) {
   for (const auto &target :
        unique_routes(profile::resolve_targets(resolved_profile, configuration.selectors), configuration.isolated_launcher)) {
     auto value = prepare_target(configuration, workload, target, reports);
-    std::cout << "conformance target " << value.id << " resolved to " << value.device << " with " << value.tests.size() << " test(s)\n";
+    std::cout << "conformance target " << value.id;
+    if (!value.device.empty()) std::cout << " resolved to " << value.device;
+    std::cout << " with " << value.tests.size() << " test(s)\n";
     prepared.push_back(std::move(value));
   }
   if (prepared.empty()) throw std::runtime_error("no conformance targets selected");

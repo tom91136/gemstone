@@ -16,8 +16,8 @@ object Emission {
 
   def literal(value: String): String = "\"" + escape(value) + "\""
 
-  def nonEmptyString(value: String): String = s"NonEmptyString(${literal(value)})"
+  def nonEmptyString(value: String): String = literal(value)
 
   def nonEmptyVector(values: Vector[String]): String =
-    values.map(value => nonEmptyString(value)).mkString("NonEmptyVec.unsafeFromVec(Vec(", ", ", "))")
+    values.map(value => nonEmptyString(value)).mkString("Vec.nonEmpty[NonEmpty[java.lang.String]](", ", ", ")")
 }

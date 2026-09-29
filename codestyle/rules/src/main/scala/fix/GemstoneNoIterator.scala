@@ -1,11 +1,10 @@
 package fix
 
 import scala.meta.*
-
 import scalafix.v1.*
 
 /** Prevents single-use collection traversal from leaking into repository code. */
-final class GemstoneNoIterator extends SyntacticRule("GemstoneNoIterator") {
+class GemstoneNoIterator extends SyntacticRule("GemstoneNoIterator") {
   private val forbiddenSelections = Set("iterator", "keysIterator", "valuesIterator")
 
   override def fix(using document: SyntacticDocument): Patch = document.tree.collect {

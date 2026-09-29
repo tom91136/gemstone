@@ -1,9 +1,8 @@
 // Generated from pinned official headers by GenerateAPISurfaces. Regenerate with: sbt codegen
 package net.kurobako.gemstone.cuda
 
-import net.kurobako.gemstone.Constraint.Positive
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.abi.ABI.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.abi.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 object CUDA {
@@ -283,8 +282,8 @@ object CUDA {
   type unsigned_long_long = CValue["unsigned long long"]
   type unsigned_short = CValue["unsigned short"]
 
-  val HeaderVersion: NonEmptyString = NonEmptyString("13.3")
-  val FunctionCount: Positive[Int] = 820
+  val HeaderVersion: NonEmpty[String] = "13.3"
+  val FunctionCount: Int > 0 = 820
 }
 
 import CUDA.*

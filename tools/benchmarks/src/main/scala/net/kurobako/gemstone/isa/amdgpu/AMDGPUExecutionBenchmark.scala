@@ -1,26 +1,19 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.binary.Widths.*
-
-import CodeObject.*
-import net.kurobako.gemstone.{PlatformTime, Vec}
-import net.kurobako.gemstone.binary.ByteRange
-import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.benchmarks.BenchmarkArguments
-import net.kurobako.gemstone.benchmarks.BenchmarkName
-import net.kurobako.gemstone.benchmarks.PlatformMetrics
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
-
+import ELF.*
 import cats.syntax.all.*
 import com.monovore.decline.Opts
-
 import java.nio.file.Path
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.environment as env
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 import scala.util.Using
 
@@ -30,34 +23,34 @@ import scala.util.Using
   * a performance assertion: it prints stable per-dispatch measurements suitable for before/after comparisons.
   */
 object AMDGPUExecutionBenchmark {
-  private def dimensions(x: Positive[Int]): Dimensions = Dimensions(x, 1, 1)
+  private def dimensions(x: Int > 0): Dimensions = Dimensions(x, 1, 1)
 
   private case class Options(
-      measured: Positive[Int],
-      warmup: Option[NonNegative[Int]],
-      groups: Positive[Int]
+      measured: Int > 0,
+      warmup: Option[Int >= 0],
+      groups: Int > 0
   )
   private val options = (
     Opts.option[Int]("measured", help = "Measured dispatches").withDefault(200)
-      .validate("measured dispatches must be positive")(_ > 0).map(Positive.unsafe),
+      .validate("measured dispatches must be positive")(_ > 0).map(_.unsafe[Int > 0]),
     Opts.option[Int]("warmup", help = "Warmup dispatches").validate("warmup dispatches must be non-negative")(_ >= 0)
-      .map(NonNegative.unsafe).orNone,
+      .map(_.unsafe[Int >= 0]).orNone,
     Opts.option[Int]("groups", help = "Workgroups per dispatch").withDefault(1)
       .validate("workgroup count must be between 1 and 65536")(value => value >= 1 && value <= 65536)
-      .map(Positive.unsafe)
+      .map(_.unsafe[Int > 0])
   ).mapN(Options(_, _, _))
-  private val InputId  = MemoryRegion(1L)
-  private val OutputId = MemoryRegion(2L)
-  private val UnusedId = MemoryRegion(3L)
+  private val InputId  = AllocationId(1L)
+  private val OutputId = AllocationId(2L)
+  private val UnusedId = AllocationId(3L)
 
   // Warmup and measured dispatches share an allocation-free counter loop.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def run(arguments: Array[String]): Unit = {
-    val parsed                  = BenchmarkArguments.parse(BenchmarkName("amdgpu-execution"), arguments.toSeq, options)
-    val measured                = parsed.measured
-    val warmup                  = parsed.warmup.getOrElse(NonNegative.unsafe(math.max(20, measured.raw / 10)))
-    val groups                  = parsed.groups
-    val elements: Positive[Int] = Positive.unsafe(groups.raw * 64)
+    val parsed            = BenchmarkArguments.parse(BenchmarkName("amdgpu-execution"), arguments.toSeq, options)
+    val measured          = parsed.measured
+    val warmup            = parsed.warmup.getOrElse(math.max(20, measured.raw / 10).unsafe[Int >= 0])
+    val groups            = parsed.groups
+    val elements: Int > 0 = groups * 64
 
     val words = Vec[Long](
       0xc0020242L, 0x00000004L, 0xc0020283L, 0x00000018L,
@@ -73,16 +66,16 @@ object AMDGPUExecutionBenchmark {
     val prepared =
       VMCompiler.compile(kernel).fold(failure => throw RuntimeException(failure.message), value => value)
     val memory = BenchmarkMemory()
-    memory.allocate(InputId, Positive.unsafe(elements.raw * 4))
-    memory.allocate(OutputId, Positive.unsafe(elements.raw * 4))
+    memory.allocate(InputId, elements * 4)
+    memory.allocate(OutputId, elements * 4)
     memory.allocate(UnusedId, 256)
     Array.tabulate(elements.raw)(index => index * 97 - 11).zipWithIndex.foreach { case (value, index) =>
-      memory.putInt(InputId, NonNegative.unsafe(index * 4), value)
+      memory.putInt(InputId, (index * 4).unsafe[Int >= 0], value)
     }
 
     val zero     = KernelTask.Argument.Scalar(Vec.fill(8)(0.toByte))
     val dispatch = KernelTask.validated(
-      NonEmptyString("vector_copy"),
+      "vector_copy",
       Dimensions(64, 1, 1),
       dimensions(groups),
       Vec(
@@ -100,14 +93,13 @@ object AMDGPUExecutionBenchmark {
     ).fold(message => throw IllegalArgumentException(message), value => value)
 
     def execute(): Unit = {
-      val control = TaskControl.default
+      val control = TaskControl()
       VMInterpreter.execute(
         prepared,
         dispatch,
         memory,
-        memory,
         control,
-        Scheduler.Sequential,
+        Workgroups.Sequential,
         Vec.empty
       ).fold(
         failure => throw RuntimeException(failure.message),
@@ -122,9 +114,9 @@ object AMDGPUExecutionBenchmark {
     }
 
     val (allocatedBefore, elapsed, allocatedAfter) =
-      Using.resource(PlatformMetrics.startRecording(sys.env.get("GEMSTONE_BENCHMARK_JFR").map(Path.of(_)))) { _ =>
+      Using.resource(PlatformMetrics.startRecording(sys.env.get(env.BenchmarkJfr).map(Path.of(_)))) { _ =>
         val before  = PlatformMetrics.allocatedBytes
-        val started = PlatformTime.monotonicNanos
+        val started = platform.monotonicNanos
         iteration = 0
         while (iteration < measured.raw) {
           execute()
@@ -132,12 +124,12 @@ object AMDGPUExecutionBenchmark {
         }
         (
           before,
-          NonNegative.unsafe(math.max(0L, PlatformTime.monotonicNanos - started)),
+          math.max(0L, platform.monotonicNanos - started).unsafe[Long >= 0],
           PlatformMetrics.allocatedBytes
         )
       }
     val checksum = Array.tabulate(elements.raw) { index =>
-      val observed = memory.getInt(OutputId, NonNegative.unsafe(index * 4))
+      val observed = memory.getInt(OutputId, (index * 4).unsafe[Int >= 0])
       if (observed != index * 97 - 11)
         throw IllegalStateException(s"copy mismatch at $index: $observed")
       observed.toLong
@@ -157,38 +149,38 @@ object AMDGPUExecutionBenchmark {
   }
 
   // Mutable allocation contents are confined to this final benchmark memory fixture.
-  private final class BenchmarkMemory extends Memory with BenchmarkAddressSpace {
-    private val allocations                                             = mutable.Map.empty[MemoryRegion, Array[Byte]]
-    override protected val regionSizes: mutable.Map[MemoryRegion, Long] = mutable.Map.empty
+  private class BenchmarkMemory extends Memory with BenchmarkAddressSpace {
+    private val allocations                                             = mutable.Map.empty[AllocationId, Array[Byte]]
+    override protected val regionSizes: mutable.Map[AllocationId, Long] = mutable.Map.empty
 
-    def allocate(id: MemoryRegion, size: Positive[Int]): Unit = {
+    def allocate(id: AllocationId, size: Int > 0): Unit = {
       allocations(id) = Array.ofDim[Byte](size.raw)
       regionSizes(id) = size.raw.toLong
     }
 
-    def putInt(id: MemoryRegion, offset: NonNegative[Int], value: Int): Unit =
+    def putInt(id: AllocationId, offset: Int >= 0, value: Int): Unit =
       LittleEndian.write(value.toLong, allocations(id), offset.raw, 4)
 
-    def getInt(id: MemoryRegion, offset: NonNegative[Int]): Int =
+    def getInt(id: AllocationId, offset: Int >= 0): Int =
       LittleEndian.decodeInt32(allocations(id), offset.raw)
 
     override def read(
-        id: MemoryRegion,
-        offset: NonNegative[Long],
-        size: NonNegative[Int]
+        id: AllocationId,
+        offset: Long >= 0,
+        size: Int >= 0
     ): Either[Fault, Vec[Byte]] =
       allocations.get(id).toRight(Fault.Memory("benchmark memory region")).flatMap { bytes =>
         Either.cond(
           ByteRange.contains(bytes.length, offset.raw, size.raw.toLong),
-          Vec.unsafeFromArray(java.util.Arrays.copyOfRange(bytes, offset.raw.toInt, offset.raw.toInt + size.raw)),
+          Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, offset.raw.toInt, offset.raw.toInt + size.raw)),
           Fault.InvalidTask("benchmark read range")
         )
       }
 
     override def readValue(
-        id: MemoryRegion,
-        offset: NonNegative[Long],
-        size: IntBetween[1, 8]
+        id: AllocationId,
+        offset: Long >= 0,
+        size: Int where Between[1, 8]
     ): Either[Fault, Long] =
       allocations.get(id) match {
         case None        => Left(Fault.Memory("benchmark memory region"))
@@ -200,8 +192,8 @@ object AMDGPUExecutionBenchmark {
       }
 
     override def write(
-        id: MemoryRegion,
-        offset: NonNegative[Long],
+        id: AllocationId,
+        offset: Long >= 0,
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       allocations.get(id) match {
@@ -214,10 +206,10 @@ object AMDGPUExecutionBenchmark {
       }
 
     override def writeValue(
-        id: MemoryRegion,
-        offset: NonNegative[Long],
+        id: AllocationId,
+        offset: Long >= 0,
         value: Long,
-        size: IntBetween[1, 8]
+        size: Int where Between[1, 8]
     ): Either[Fault, Unit] =
       allocations.get(id) match {
         case None              => Left(Fault.Memory("benchmark memory region"))

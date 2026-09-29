@@ -15,6 +15,7 @@
 #include <cuda.h>
 
 #include "../../rpc/test/queued_lifetime.hpp"
+#include <environment_keys.hpp>
 
 namespace {
 
@@ -144,7 +145,7 @@ void check(CUresult status) {
 CUdeviceptr devicePointer(const void *pointer) { return reinterpret_cast<CUdeviceptr>(pointer); }
 
 void run() {
-  const char *configuredPath = std::getenv("GEMSTONE_TEST_LIBRARY");
+  const char *configuredPath = std::getenv(gemstone::environment::TestLibrary);
   const SharedLibrary library{configuredPath ? configuredPath : "libcuda.so.1"};
   const auto init = library.load<CUresult (*)(unsigned)>("cuInit");
   const auto primaryContextRetain = library.load<CUresult (*)(CUcontext *, CUdevice)>("cuDevicePrimaryCtxRetain");
@@ -342,7 +343,7 @@ void run() {
 
 void runStreamCallbacks() {
   // Synchronization publishes callback effects to the calling thread.
-  const char *configuredPath = std::getenv("GEMSTONE_TEST_LIBRARY");
+  const char *configuredPath = std::getenv(gemstone::environment::TestLibrary);
   const SharedLibrary library{configuredPath ? configuredPath : "libcuda.so.1"};
   const auto init = library.load<CUresult (*)(unsigned)>("cuInit");
   const auto contextCreate = library.load<CUresult (*)(CUcontext *, unsigned, CUdevice)>("cuCtxCreate_v2");
@@ -402,7 +403,7 @@ void runSystemPaging() {
                             "  st.global.u32 [%rd1], %r1;\n"
                             "  ret;\n"
                             "}\n";
-  const char *configuredPath = std::getenv("GEMSTONE_TEST_LIBRARY");
+  const char *configuredPath = std::getenv(gemstone::environment::TestLibrary);
   const SharedLibrary library{configuredPath ? configuredPath : "libcuda.so.1"};
   const auto init = library.load<CUresult (*)(unsigned)>("cuInit");
   const auto attribute = library.load<CUresult (*)(int *, CUdevice_attribute, CUdevice)>("cuDeviceGetAttribute");
@@ -455,7 +456,7 @@ void runSystemPaging() {
 }
 
 void runManagedRuntime() {
-  const char *configuredPath = std::getenv("GEMSTONE_TEST_LIBRARY");
+  const char *configuredPath = std::getenv(gemstone::environment::TestLibrary);
   const SharedLibrary library{configuredPath ? configuredPath : "libcuda.so.1"};
   const auto mallocManaged = library.load<int32_t (*)(void **, size_t, unsigned)>("cudaMallocManaged");
   const auto malloc = library.load<int32_t (*)(void **, size_t)>("cudaMalloc");
@@ -511,7 +512,7 @@ TEST_CASE("CUDA system paging reaches a plain host pointer", "[cuda][integration
 namespace {
 // Exercise actual PTX execution and synchronization through the existing server.
 struct UnifiedMemoryClient {
-  SharedLibrary library{std::getenv("GEMSTONE_TEST_LIBRARY") ? std::getenv("GEMSTONE_TEST_LIBRARY") : "libcuda.so.1"};
+  SharedLibrary library{std::getenv(gemstone::environment::TestLibrary) ? std::getenv(gemstone::environment::TestLibrary) : "libcuda.so.1"};
   CUcontext context = nullptr;
   CUmodule module = nullptr;
   decltype(&cuMemAllocManaged) managed = library.load<decltype(&cuMemAllocManaged)>("cuMemAllocManaged");
@@ -682,7 +683,7 @@ TEST_CASE("CUDA runtime host registration supports a borrowed stack range", "[cu
 }
 
 TEST_CASE("CUDA free waits for queued memory uses", "[cuda][integration]") {
-  const char *configuredPath = std::getenv("GEMSTONE_TEST_LIBRARY");
+  const char *configuredPath = std::getenv(gemstone::environment::TestLibrary);
   const SharedLibrary library{configuredPath ? configuredPath : "libcuda.so.1"};
   check(library.load<decltype(&cuInit)>("cuInit")(0));
   CUcontext context{};

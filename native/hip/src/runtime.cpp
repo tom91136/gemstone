@@ -37,6 +37,8 @@
 #include <gemstone/trace.hpp>
 #include <gemstone/zstd.hpp>
 
+#include <environment_keys.hpp>
+
 namespace {
 
 using namespace aspartame;
@@ -913,7 +915,7 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
     case hipDeviceAttributeConcurrentManagedAccess:
     case hipDeviceAttributeManagedMemory: *value = 1; break;
     case hipDeviceAttributePageableMemoryAccess:
-      *value = gemstone::environment::present(gemstone::environment::SystemPaging) ? 1 : 0;
+      *value = gemstone::environment::enabled(gemstone::environment::SystemPaging) ? 1 : 0;
       break;
     default: *value = 0; break;
   }
@@ -948,7 +950,7 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   properties->managedMemory = 1;
   properties->hostNativeAtomicSupported = 1;
   properties->concurrentManagedAccess = 1;
-  properties->pageableMemoryAccess = gemstone::environment::present(gemstone::environment::SystemPaging) ? 1 : 0;
+  properties->pageableMemoryAccess = gemstone::environment::enabled(gemstone::environment::SystemPaging) ? 1 : 0;
   return remember(hipSuccess);
 }
 
@@ -1013,7 +1015,7 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *propertie
   write(GcnArch, int(std::atoi(target.c_str() + 3)));
   write(ManagedMemory, int(1));
   write(ConcurrentManagedAccess, int(1));
-  write(PageableMemoryAccess, int(gemstone::environment::present(gemstone::environment::SystemPaging) ? 1 : 0));
+  write(PageableMemoryAccess, int(gemstone::environment::enabled(gemstone::environment::SystemPaging) ? 1 : 0));
   return remember(hipSuccess);
 }
 

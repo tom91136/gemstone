@@ -1,6 +1,6 @@
+import java.nio.file.Path
 import sbt.*
 import sbt.Keys.*
-import java.nio.file.Path
 
 /** A non-JVM project whose public surface is an external build tool. */
 object ExternalProjectPlugin extends AutoPlugin {

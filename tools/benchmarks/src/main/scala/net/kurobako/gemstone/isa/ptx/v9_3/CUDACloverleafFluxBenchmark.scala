@@ -1,39 +1,25 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import Program.*
 import VMIR.*
-import net.kurobako.gemstone.PlatformTime
-import net.kurobako.gemstone.benchmarks.{
-  BenchmarkArguments,
-  BenchmarkName,
-  BenchmarkResources,
-  CloverleafFluxFixture,
-  PlatformMetrics
-}
-import net.kurobako.gemstone.memory.ArrayCheckedMemory
-import net.kurobako.gemstone.vm.LaunchGeometry
-import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
-
 import cats.syntax.all.*
 import com.monovore.decline.Opts
-
 import java.nio.charset.StandardCharsets
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 /** CUDA PTX form of the bounded CloverLeaf flux calculation. */
 object CUDACloverleafFluxBenchmark {
-  private case class Options(cells: Positive[Int], iterations: Positive[Int])
+  private case class Options(cells: Int > 0, iterations: Int > 0)
   private val name    = BenchmarkName("cuda-cloverleaf-flux")
   private val options = (
     Opts.option[Int]("cells", help = "Cells per dispatch").withDefault(64)
-      .validate("cells must be positive")(_ > 0).map(Positive.unsafe),
+      .validate("cells must be positive")(_ > 0).map(_.unsafe[Int > 0]),
     Opts.option[Int]("iterations", help = "Dispatches per sample").withDefault(20)
-      .validate("iterations must be positive")(_ > 0).map(Positive.unsafe)
+      .validate("iterations must be positive")(_ > 0).map(_.unsafe[Int > 0])
   ).mapN(Options(_, _))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -42,7 +28,7 @@ object CUDACloverleafFluxBenchmark {
     val length        = CloverleafFluxFixture.length(parsed.cells.raw)
     val bytesPerArray = Math.multiplyExact(length, 8)
     val memory        = ArrayCheckedMemory.allocate(
-      NonNegative.unsafe(Math.multiplyExact(bytesPerArray, CloverleafFluxFixture.arrays))
+      Math.multiplyExact(bytesPerArray, CloverleafFluxFixture.arrays).unsafe[Int >= 0]
     )
     val base                                  = memory.allocation.start
     def address(array: Int, index: Int): Long =
@@ -65,33 +51,33 @@ object CUDACloverleafFluxBenchmark {
     val kernel = VMCompiler.compile(source)
       .fold(error => throw IllegalArgumentException(error.message), identity)
     val parameters = Map(
-      NonEmptyString("clover_flux_param_0")  -> Argument.fromLong(address(0, 0)),
-      NonEmptyString("clover_flux_param_1")  -> Argument.fromLong(address(1, 0)),
-      NonEmptyString("clover_flux_param_2")  -> Argument.fromLong(address(2, 0)),
-      NonEmptyString("clover_flux_param_3")  -> Argument.fromLong(address(3, 0)),
-      NonEmptyString("clover_flux_param_4")  -> Argument.fromLong(address(4, 0)),
-      NonEmptyString("clover_flux_param_5")  -> Argument.fromLong(address(5, 0)),
-      NonEmptyString("clover_flux_param_6")  -> Argument.fromLong(address(6, 0)),
-      NonEmptyString("clover_flux_param_7")  -> Argument.fromLong(address(7, 0)),
-      NonEmptyString("clover_flux_param_8")  -> Argument.fromLong(parsed.cells.raw.toLong),
-      NonEmptyString("clover_flux_param_9")  -> Argument.fromLong(CloverleafFluxFixture.rowStride.toLong),
-      NonEmptyString("clover_flux_param_10") ->
+      ("clover_flux_param_0": NonEmpty[String])  -> Argument.fromLong(address(0, 0)),
+      ("clover_flux_param_1": NonEmpty[String])  -> Argument.fromLong(address(1, 0)),
+      ("clover_flux_param_2": NonEmpty[String])  -> Argument.fromLong(address(2, 0)),
+      ("clover_flux_param_3": NonEmpty[String])  -> Argument.fromLong(address(3, 0)),
+      ("clover_flux_param_4": NonEmpty[String])  -> Argument.fromLong(address(4, 0)),
+      ("clover_flux_param_5": NonEmpty[String])  -> Argument.fromLong(address(5, 0)),
+      ("clover_flux_param_6": NonEmpty[String])  -> Argument.fromLong(address(6, 0)),
+      ("clover_flux_param_7": NonEmpty[String])  -> Argument.fromLong(address(7, 0)),
+      ("clover_flux_param_8": NonEmpty[String])  -> Argument.fromLong(parsed.cells.raw.toLong),
+      ("clover_flux_param_9": NonEmpty[String])  -> Argument.fromLong(CloverleafFluxFixture.rowStride.toLong),
+      ("clover_flux_param_10": NonEmpty[String]) ->
         Argument.fromLong(java.lang.Double.doubleToRawLongBits(CloverleafFluxFixture.dt))
     )
-    val groups   = Positive.unsafe(((parsed.cells.raw.toLong + 31L) / 32L).toInt)
+    val groups   = ((parsed.cells.raw.toLong + 31L) / 32L).toInt.unsafe[Int > 0]
     val geometry = LaunchGeometry.forLaunch(
       Dimensions(32, 1, 1),
       Dimensions(groups, 1, 1)
     ).fold(error => throw IllegalArgumentException(error), identity)
     val before    = PlatformMetrics.allocatedBytes
-    val started   = PlatformTime.monotonicNanos
+    val started   = platform.monotonicNanos
     var iteration = 0
     while (iteration < parsed.iterations.raw) {
       VMInterpreter.execute(kernel, geometry, parameters, memory)
         .fold(error => throw IllegalStateException(error.message), _ => ())
       iteration += 1
     }
-    val elapsed   = math.max(0L, PlatformTime.monotonicNanos - started)
+    val elapsed   = math.max(0L, platform.monotonicNanos - started)
     val allocated = for {
       start <- before
       end   <- PlatformMetrics.allocatedBytes

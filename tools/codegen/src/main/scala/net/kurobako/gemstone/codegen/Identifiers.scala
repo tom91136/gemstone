@@ -14,7 +14,7 @@ object Identifiers {
     value.foreach { character =>
       if (character.isLetterOrDigit) {
         val _ = result.append(character)
-      } else if (result.lastOption.forall(_ != '_')) {
+      } else if (!result.lastOption.contains('_')) {
         val _ = result.append('_')
       }
     }

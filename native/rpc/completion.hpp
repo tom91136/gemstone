@@ -18,6 +18,7 @@ struct CompletionResult {
  * fails. Facades remain responsible for applying records to native memory.
  */
 bool await_completion(Client &client, CompletionId completion, std::string &error, bool hostMemory = false);
+bool completion_dirty_ranges(Client &client, CompletionId completion, std::vector<DirtyRange> &ranges, std::string &error);
 bool collect_completion(Client &client, CompletionId completion, CompletionResult &result, std::string &error, bool hostMemory = false);
 
 } // namespace gemstone::execution

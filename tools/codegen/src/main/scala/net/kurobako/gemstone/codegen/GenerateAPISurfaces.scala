@@ -1,15 +1,13 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.Constraint.Positive
-
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
 import cats.data.State
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import net.kurobako.gemstone.Constraint.NonEmptyString
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import net.kurobako.gemstone.constraint.*
 import upickle.default.read
 
 /** Materializes the pinned Clang declarations as checked-in Scala API traits. The generated source is deliberately
@@ -26,14 +24,19 @@ object GenerateAPISurfaces {
       openCL: String,
       vulkan: String
   )
+  private object Aliases {
+    val empty: Aliases = Aliases(Vector.empty)
+  }
+
   private case class Aliases(entries: Vector[(String, String)]) {
     def get(name: String): Option[String] = entries.collectFirst { case (`name`, definition) => definition }
     def put(name: String, definition: String): Aliases =
-      if (get(name).nonEmpty) this else copy(entries = entries :+ (name -> definition))
-  }
-
-  private object Aliases {
-    val empty: Aliases = Aliases(Vector.empty)
+      get(name) match {
+        case Some(existing) if existing != definition =>
+          throw IllegalArgumentException(s"conflicting Scala alias $name: $existing versus $definition")
+        case Some(_) => this
+        case None    => copy(entries = entries :+ (name -> definition))
+      }
   }
 
   private type Render[A] = State[Aliases, A]
@@ -43,7 +46,7 @@ object GenerateAPISurfaces {
       packageName: String,
       traitName: String,
       output: Path,
-      versions: Vector[(String, NonEmptyString)]
+      versions: Vector[(String, NonEmpty[String])]
   )
 
   private val command = Command("GenerateAPISurfaces", "Generate Scala API surfaces")((
@@ -65,7 +68,7 @@ object GenerateAPISurfaces {
     )
     val versions =
       Vector(request.cuda, request.hip, request.hsa, request.levelZero, request.openCL, request.vulkan).map { version =>
-        NonEmptyString.either(version).fold(
+        version.refine[NonEmpty[String]].fold(
           message => throw IllegalArgumentException(s"invalid header version: $message"),
           value => value
         )
@@ -116,9 +119,9 @@ object GenerateAPISurfaces {
     )
     val byName: Map[String, GenerateOfficialAPIManifest.Surface] =
       manifest.surfaces.map(surface => (surface.name.raw: String) -> surface).toMap
-    targets.foreach { target =>
+    val generated = targets.map { target =>
       val surfaces  = target.manifestNames.map(name => byName.getOrElse(name, missing(name)))
-      val functions = surfaces.flatMap(_.functions)
+      val functions = GenerateOfficialAPIManifest.Function.merge(surfaces.flatMap(_.functions))
       val typedefs  = surfaces.flatMap(_.callbackTypedefs).groupBy(_.name.raw)
       val conflicts = typedefs.collect {
         case (name, definitions) if definitions.map(_.cType).distinct.size > 1 => name
@@ -129,7 +132,7 @@ object GenerateAPISurfaces {
         (name: String) -> (definitions.head.cType.raw: String)
       }.toMap
       val renderedFunctions = functions
-      val functionCount     = Positive.either(renderedFunctions.size).fold(
+      val functionCount     = renderedFunctions.size.refine[Int > 0].fold(
         message => throw IllegalArgumentException(s"${target.traitName} has no declarations: $message"),
         value => value
       )
@@ -142,9 +145,12 @@ object GenerateAPISurfaces {
           functionCount
         )
       )
+      (target, content, functionCount)
+    }
+    generated.foreach { (target, content, functionCount) =>
       val _ = Files.createDirectories(target.output.getParent)
       val _ = GeneratedFiles.write(target.output, content)
-      Console.out.println(s"generated ${renderedFunctions.size} ${target.traitName} declarations at ${target.output}")
+      Console.out.println(s"generated $functionCount ${target.traitName} declarations at ${target.output}")
     }
     val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
     GeneratedFiles.removeUnexpected(
@@ -160,7 +166,7 @@ object GenerateAPISurfaces {
       target: Target,
       functions: Vector[GenerateOfficialAPIManifest.Function],
       callbackTypedefs: Map[String, String],
-      surfaceSize: Positive[Int]
+      surfaceSize: Int > 0
   ): String = {
     val rendered = functions.traverse { function =>
       val (_, namedParameters) = function.parameters.zipWithIndex.foldLeft(
@@ -184,20 +190,19 @@ object GenerateAPISurfaces {
         s"  type ${identifier(name)} = $definition"
     }
     val versionLines = target.versions.map { case (name, value) =>
-      s"  val $name: NonEmptyString = NonEmptyString(${literal(value.raw)})"
+      s"  val $name: NonEmpty[String] = ${literal(value)}"
     }
     GeneratedHeader.scala("from pinned official headers by GenerateAPISurfaces") +
       s"""|package ${target.packageName}
         |
-        |import net.kurobako.gemstone.Constraint.Positive
-        |import net.kurobako.gemstone.Constraint.NonEmptyString
-        |import net.kurobako.gemstone.abi.ABI.*
+        |import net.kurobako.gemstone.constraint.*
+        |import net.kurobako.gemstone.abi.*
         |
         |${GeneratedHeader.annotation()}object ${target.traitName} {
         |${aliasLines.mkString("\n")}
         |
         |${versionLines.mkString("\n")}
-        |  val FunctionCount: Positive[Int] = Positive.unsafe($surfaceSize)
+        |  val FunctionCount: Int > 0 = $surfaceSize
         |}
         |
         |import ${target.traitName}.*

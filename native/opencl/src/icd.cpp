@@ -39,6 +39,7 @@
 #include "objects.hpp"
 #include "relocations.hpp"
 #include "transfer.hpp"
+#include <environment_keys.hpp>
 
 namespace {
 
@@ -62,14 +63,7 @@ template <class T> void retain(T *value) { value->header.references.fetch_add(1,
 
 template <class T> bool release(T *value) { return value->header.references.fetch_sub(1, std::memory_order_acq_rel) == 1; }
 
-struct Remote {
-  ClientManager manager;
-  Client *client = nullptr;
-  bool ready = false;
-  std::string error;
-};
-
-Remote remote;
+ClientManager remote;
 std::mutex remoteMutex;
 std::mutex kernelSubmissionMutex;
 std::mutex pointerRelocationsMutex;
@@ -153,20 +147,10 @@ void notifyEventCallbacks(_cl_event *event) {
     callback.function(reinterpret_cast<cl_event>(event), status, callback.user);
 }
 
-Remote &remoteState() {
-  auto &manager = remote.manager;
-  remote.ready = manager.mode() == ClientMode::Ready;
-  remote.client = remote.ready ? manager.client() : nullptr;
-  remote.error = manager.error();
-  return remote;
-}
-
 const char *remoteError() {
-  auto &state = remoteState();
   thread_local std::string message;
-  message = state.manager.lastError();
-  if (!message.empty()) return message.c_str();
-  return state.error.empty() ? "Gemstone execution RPC failed" : state.error.c_str();
+  message = remote.error();
+  return message.c_str();
 }
 
 bool writeRemote(Client &client, uint64_t id, uint64_t offset, const void *bytes, size_t size) {
@@ -177,24 +161,27 @@ bool readRemote(Client &client, uint64_t id, uint64_t offset, void *bytes, size_
   return transferAllocation(client, AllocationId{static_cast<int64_t>(id)}, offset, bytes, size, false, MaximumPayload / 2);
 }
 
-bool scanBufferPointerRelocations() {
-  const char *value = gemstone::environment::value(gemstone::environment::OpenCLScanBufferPointers);
-  return value && std::strcmp(value, "1") == 0;
-}
+bool scanBufferPointerRelocations() { return gemstone::environment::enabled(gemstone::environment::OpenclScanBufferPointers); }
 
 cl_ulong maxMemAllocSize() {
   // Keep the advertised limit below the remote service's practical per-allocation
   // envelope.  The environment override remains available for larger deployments.
-  return gemstone::environment::unsignedValue(gemstone::environment::OpenCLMaxMemAllocSize, 0x10000000);
+  return gemstone::environment::unsignedValue(gemstone::environment::OpenclMaxMemAllocSize,
+                                              gemstone::environment::OpenclMaxMemAllocSizeDefault);
 }
 
-cl_ulong localMemSize() { return gemstone::environment::unsignedValue(gemstone::environment::OpenCLLocalMemSize, 0x10000); }
+cl_ulong localMemSize() {
+  return gemstone::environment::unsignedValue(gemstone::environment::OpenclLocalMemSize, gemstone::environment::OpenclLocalMemSizeDefault);
+}
 
 // The emulator executes any work-group size but only at interpreter throughput,
 // and the OpenCL CTS scales its total work with the advertised bound. Sizes above
 // this make whole conformance tests exceed their per-test budget, so advertise
 // the largest size the emulated suite can complete. Enqueue enforces the bound.
-size_t maxWorkGroupSize() { return gemstone::environment::unsignedValue(gemstone::environment::OpenCLMaxWorkGroupSize, 64); }
+size_t maxWorkGroupSize() {
+  return gemstone::environment::unsignedValue(gemstone::environment::OpenclMaxWorkGroupSize,
+                                              gemstone::environment::OpenclMaxWorkGroupSizeDefault);
+}
 
 constexpr size_t MaxSubgroupSize = 32;
 
@@ -290,18 +277,23 @@ std::shared_ptr<Allocation> allocate(size_t size, cl_int *error, size_t requeste
   result->storage = std::move(storage);
   result->size = size;
   result->hostBacked = hostBacked;
-  auto &state = remoteState();
-  if (state.ready) {
+  auto &state = remote;
+  if (state.ready()) {
     std::lock_guard lock(remoteMutex);
-    auto registered = state.client->call(RegisterAllocation{AllocationKind::Shared, static_cast<int64_t>(size)});
+    auto registered = state.client()->call(RegisterAllocation{AllocationKind::Shared, static_cast<int64_t>(size)});
     if (!registered) {
+      if (gemstone::traceEnabled("opencl"))
+        std::fprintf(stderr, "Gemstone OpenCL allocation failed: %s\n", registered.error().detail.c_str());
       if (error) *error = CL_OUT_OF_RESOURCES;
       return {};
     }
     result->id = static_cast<uint64_t>(registered.value().value);
-    if (!state.client->call(RegisterAllocationAddress{registered.value(),
-                                                      GuestAddress{static_cast<int64_t>(reinterpret_cast<uintptr_t>(base))}, hostBacked})) {
-      (void)state.client->call(ReleaseAllocation{registered.value()});
+    const auto bound = state.client()->call(
+        RegisterAllocationAddress{registered.value(), GuestAddress{static_cast<int64_t>(reinterpret_cast<uintptr_t>(base))}, hostBacked});
+    if (!bound) {
+      if (gemstone::traceEnabled("opencl"))
+        std::fprintf(stderr, "Gemstone OpenCL allocation address failed: %s\n", bound.error().detail.c_str());
+      (void)state.client()->call(ReleaseAllocation{registered.value()});
       if (error) *error = CL_OUT_OF_RESOURCES;
       return {};
     }
@@ -313,9 +305,9 @@ std::shared_ptr<Allocation> allocate(size_t size, cl_int *error, size_t requeste
     inserted = allocations.emplace(key, result).second;
   }
   if (!inserted) {
-    if (state.ready) {
+    if (state.ready()) {
       std::lock_guard lock(remoteMutex);
-      (void)state.client->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(result->id)}});
+      (void)state.client()->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(result->id)}});
     }
     if (error) *error = CL_OUT_OF_HOST_MEMORY;
     return {};
@@ -333,11 +325,11 @@ cl_int releaseAllocation(const std::shared_ptr<Allocation> &allocation, bool rel
     const auto entry = allocations.find(reinterpret_cast<uintptr_t>(allocation->data()));
     if (entry != allocations.end() && entry->second.get() == allocation.get()) allocations.erase(entry);
   }
-  auto &state = remoteState();
+  auto &state = remote;
   cl_int result = CL_SUCCESS;
-  if (state.ready) {
+  if (state.ready()) {
     std::lock_guard lock(remoteMutex);
-    if (!state.client->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(allocation->id)}})) result = CL_OUT_OF_RESOURCES;
+    if (!state.client()->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(allocation->id)}})) result = CL_OUT_OF_RESOURCES;
   }
   if (!allocation->runtimeOwnsBase || releaseRuntimeBase) allocation->storage.reset();
   return result;
@@ -347,20 +339,20 @@ cl_int writeAllocation(const std::shared_ptr<Allocation> &allocation, size_t off
   if (!validRange(allocation, offset, size) || (size != 0 && !bytes)) return CL_INVALID_VALUE;
   invalidatePointerRelocations(allocation, offset, size);
   if (size != 0) std::memcpy(static_cast<uint8_t *>(allocation->data()) + offset, bytes, size);
-  auto &state = remoteState();
-  if (state.ready && size != 0 && !allocation->hostBacked) {
+  auto &state = remote;
+  if (state.ready() && size != 0 && !allocation->hostBacked) {
     std::lock_guard lock(remoteMutex);
-    if (!writeRemote(*state.client, allocation->id, offset, bytes, size)) return CL_OUT_OF_RESOURCES;
+    if (!writeRemote(*state.client(), allocation->id, offset, bytes, size)) return CL_OUT_OF_RESOURCES;
   }
   return CL_SUCCESS;
 }
 
 cl_int readAllocation(const std::shared_ptr<Allocation> &allocation, size_t offset, void *bytes, size_t size) {
   if (!validRange(allocation, offset, size) || (size != 0 && !bytes)) return CL_INVALID_VALUE;
-  auto &state = remoteState();
-  if (state.ready && size != 0 && !allocation->hostBacked) {
+  auto &state = remote;
+  if (state.ready() && size != 0 && !allocation->hostBacked) {
     std::lock_guard lock(remoteMutex);
-    if (!readRemote(*state.client, allocation->id, offset, bytes, size)) return CL_OUT_OF_RESOURCES;
+    if (!readRemote(*state.client(), allocation->id, offset, bytes, size)) return CL_OUT_OF_RESOURCES;
     std::memcpy(static_cast<uint8_t *>(allocation->data()) + offset, bytes, size);
   } else if (size != 0) {
     std::memcpy(bytes, static_cast<uint8_t *>(allocation->data()) + offset, size);
@@ -867,8 +859,8 @@ std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
       const auto target = findPointer(reinterpret_cast<const void *>(static_cast<uintptr_t>(value)), &targetOffset);
       if (target && targetOffset < target->size) {
         source->pointerRelocations[offset] = {target, targetOffset};
-        result.push_back({RelocationSourceMemory{MemoryRegion{static_cast<int64_t>(source->id)}},
-                          LongPositive0{static_cast<int64_t>(offset)}, MemoryRegion{static_cast<int64_t>(target->id)},
+        result.push_back({RelocationSourceMemory{AllocationId{static_cast<int64_t>(source->id)}},
+                          LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(target->id)},
                           LongPositive0{static_cast<int64_t>(targetOffset)}});
       }
     }
@@ -881,8 +873,8 @@ std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
   for (const auto &source : snapshot) {
     for (const auto &[offset, target] : source->pointerRelocations) {
       if (emitted.count({source->id, offset}) != 0 || !target.first || target.second >= target.first->size) continue;
-      result.push_back({RelocationSourceMemory{MemoryRegion{static_cast<int64_t>(source->id)}}, LongPositive0{static_cast<int64_t>(offset)},
-                        MemoryRegion{static_cast<int64_t>(target.first->id)}, LongPositive0{static_cast<int64_t>(target.second)}});
+      result.push_back({RelocationSourceMemory{AllocationId{static_cast<int64_t>(source->id)}}, LongPositive0{static_cast<int64_t>(offset)},
+                        AllocationId{static_cast<int64_t>(target.first->id)}, LongPositive0{static_cast<int64_t>(target.second)}});
       emitted.emplace(source->id, offset);
     }
   }
@@ -895,8 +887,8 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
   const uint64_t started = nowNanos();
   uint64_t scannedBytes = 0;
   uint64_t downloadedBytes = 0;
-  auto &state = remoteState();
-  if (!state.ready || kernel->program->remoteId == 0) return CL_OUT_OF_RESOURCES;
+  auto &state = remote;
+  if (!state.ready() || kernel->program->remoteId == 0) return CL_OUT_OF_RESOURCES;
   if (workDimension == 0 || workDimension > 3 || !global) return CL_INVALID_WORK_DIMENSION;
   size_t group[3] = {1, 1, 1};
   size_t count[3] = {1, 1, 1};
@@ -931,10 +923,10 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
       arguments.emplace_back(ArgumentLocal{static_cast<int64_t>(argument.offset)});
     } else if (argument.kind == ::KernelArgument::Kind::Allocation) {
       arguments.emplace_back(
-          ArgumentMemory{MemoryRegion{static_cast<int64_t>(argument.allocation->id)}, static_cast<int64_t>(argument.offset)});
+          ArgumentMemory{AllocationId{static_cast<int64_t>(argument.allocation->id)}, static_cast<int64_t>(argument.offset)});
     } else if (argument.kind == ::KernelArgument::Kind::SVM) {
       arguments.emplace_back(
-          ArgumentMemory{MemoryRegion{static_cast<int64_t>(argument.allocation->id)}, static_cast<int64_t>(argument.offset)});
+          ArgumentMemory{AllocationId{static_cast<int64_t>(argument.allocation->id)}, static_cast<int64_t>(argument.offset)});
     } else {
       scalarStorage[index] = argument.bytes;
       arguments.emplace_back(ArgumentScalar{scalarStorage[index]});
@@ -951,9 +943,9 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
   std::string failureMessage;
   {
     std::unique_lock lock(remoteMutex);
-    auto launch = state.client->call(Launch{ProgramId{static_cast<int64_t>(kernel->program->remoteId)}, kernel->name, groupSize, groupCount,
-                                            globalSize, static_cast<int32_t>(workDimension), globalOffset, 0, 0, std::move(arguments),
-                                            std::move(relocations), true});
+    auto launch = state.client()->call(Launch{ProgramId{static_cast<int64_t>(kernel->program->remoteId)}, kernel->name, groupSize,
+                                              groupCount, globalSize, static_cast<int32_t>(workDimension), globalOffset, 0, 0,
+                                              std::move(arguments), std::move(relocations), true});
     launched = launch ? 0 : -1;
     if (launch) completion = launch.value();
     else failureMessage = launch.error().detail;
@@ -966,23 +958,17 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
         launched = -1;
       submissionLock.lock();
       lock.lock();
-      for (const auto &range : result.dirty_ranges) {
-        if (launched != 0) break;
-        const auto allocation = findAllocation(static_cast<uint64_t>(range.allocation.value));
-        const auto rangeOffset = static_cast<size_t>(range.offset.value);
-        const auto rangeSize = static_cast<size_t>(range.size.value);
-        if (!validRange(allocation, rangeOffset, rangeSize)) {
-          launched = -1;
-          break;
-        }
-        invalidatePointerRelocations(allocation, rangeOffset, rangeSize);
-        if (!readRemote(*state.client, allocation->id, rangeOffset, static_cast<uint8_t *>(allocation->data()) + rangeOffset,
-                        range.size.value)) {
-          launched = -1;
-          break;
-        }
-        downloadedBytes += rangeSize;
-      }
+      if (launched == 0 && !readDirtyRanges(*state.client(), result.dirty_ranges, [&](const DirtyRange &range, const uint8_t *bytes) {
+            const auto allocation = findAllocation(static_cast<uint64_t>(range.allocation.value));
+            const auto rangeOffset = static_cast<size_t>(range.offset.value);
+            const auto rangeSize = static_cast<size_t>(range.size.value);
+            if (!validRange(allocation, rangeOffset, rangeSize)) return false;
+            invalidatePointerRelocations(allocation, rangeOffset, rangeSize);
+            std::memcpy(static_cast<uint8_t *>(allocation->data()) + rangeOffset, bytes, rangeSize);
+            downloadedBytes += rangeSize;
+            return true;
+          }))
+        launched = -1;
       {
         std::string relocationError;
         const bool applied = applyPointerRelocations(
@@ -1023,7 +1009,7 @@ CL_API_ENTRY void *CL_API_CALL clGetExtensionFunctionAddressForPlatform(cl_platf
 
 CL_API_ENTRY cl_int CL_API_CALL clGetPlatformIDs(cl_uint entries, cl_platform_id *platforms, cl_uint *count) {
   initializeDispatch();
-  (void)remoteState();
+  (void)remote.mode();
   if (!platforms && !count) return CL_INVALID_VALUE;
   if (entries == 0 && platforms) return CL_INVALID_VALUE;
   if (platforms) platforms[0] = reinterpret_cast<cl_platform_id>(&platform);
@@ -1777,10 +1763,12 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreateBuffer(cl_context value, cl_mem_flags fl
     std::memcpy(allocation->data(), host, size);
   }
   cl_int writeResult = CL_SUCCESS;
-  if (remoteState().ready) {
+  if (remote.ready()) {
     std::lock_guard lock(remoteMutex);
-    if (!writeRemote(*remote.client, allocation->id, hostOffset, static_cast<uint8_t *>(allocation->data()) + hostOffset, size))
+    if (!writeRemote(*remote.client(), allocation->id, hostOffset, static_cast<uint8_t *>(allocation->data()) + hostOffset, size)) {
+      if (gemstone::traceEnabled("opencl")) std::fprintf(stderr, "Gemstone OpenCL buffer upload failed: %s\n", remoteError());
       writeResult = CL_OUT_OF_RESOURCES;
+    }
   }
   if (writeResult != CL_SUCCESS) {
     if (!aliasesRuntimeAllocation) releaseAllocation(allocation);
@@ -1970,23 +1958,23 @@ namespace {
 cl_int loadProgramIL(_cl_program *program) {
   if (program->remoteId != 0) return CL_SUCCESS;
   if (program->il.empty() || program->il.size() > std::numeric_limits<uint32_t>::max()) return CL_INVALID_BINARY;
-  auto &state = remoteState();
-  if (!state.ready) {
+  auto &state = remote;
+  if (!state.ready()) {
     program->buildLog = remoteError();
     return CL_OUT_OF_RESOURCES;
   }
   std::lock_guard lock(remoteMutex);
-  auto loaded = state.client->call(LoadProgram{"spirv-binary", program->il});
+  auto loaded = state.client()->call(LoadProgram{"spirv-binary", program->il});
   if (!loaded) {
     program->buildLog = remoteError();
     return CL_INVALID_BINARY;
   }
   program->remoteId = static_cast<uint64_t>(loaded.value().value);
   std::vector<std::string> kernelNames;
-  auto catalog = state.client->call(DescribeProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+  auto catalog = state.client()->call(DescribeProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
   if (!catalog) {
     program->buildLog = remoteError();
-    (void)state.client->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+    (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
     program->remoteId = 0;
     return CL_INVALID_BINARY;
   }
@@ -2138,10 +2126,10 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseProgram(cl_program value) {
   auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
   if (!program) return CL_INVALID_PROGRAM;
   if (release(program)) {
-    auto &state = remoteState();
-    if (state.ready && program->remoteId != 0) {
+    auto &state = remote;
+    if (state.ready() && program->remoteId != 0) {
       std::lock_guard lock(remoteMutex);
-      (void)state.client->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+      (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
     }
     auto *context = program->context;
     unregisterLiveObject(program);
@@ -2154,11 +2142,11 @@ CL_API_ENTRY cl_int CL_API_CALL clSetProgramSpecializationConstant(cl_program va
                                                                    const void *specValue) {
   auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
   if (!program || !program->createdWithIL) return CL_INVALID_PROGRAM;
-  auto &state = remoteState();
-  if (!state.ready) return CL_OUT_OF_RESOURCES;
+  auto &state = remote;
+  if (!state.ready()) return CL_OUT_OF_RESOURCES;
   if (!program->specializationSizesLoaded) {
     std::lock_guard lock(remoteMutex);
-    auto described = state.client->call(DescribeSpecialization{program->originalIL});
+    auto described = state.client()->call(DescribeSpecialization{program->originalIL});
     if (!described) return CL_INVALID_PROGRAM;
     for (const auto &info : described.value())
       program->specializationSizes.emplace(static_cast<cl_uint>(info.specId.value), static_cast<size_t>(info.byteSize.value));
@@ -2180,28 +2168,28 @@ CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, 
   program->buildOptions = !options ? "" : options;
   if (program->createdWithIL) {
     if (program->remoteId != 0) {
-      auto &state = remoteState();
-      if (state.ready) {
+      auto &state = remote;
+      if (state.ready()) {
         std::lock_guard lock(remoteMutex);
-        (void)state.client->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+        (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
       }
       program->remoteId = 0;
     }
     std::vector<SpecializationConstant> constants;
     constants.reserve(program->specializationConstants.size());
     for (const auto &[id, bytes] : program->specializationConstants)
-      constants.push_back(SpecializationConstant{IntPositive0{static_cast<int32_t>(id)}, bytes});
+      constants.push_back(SpecializationConstant{Binary32{static_cast<int64_t>(id)}, bytes});
     if (constants.empty()) program->il = program->originalIL;
     else {
-      auto &state = remoteState();
-      if (!state.ready) {
+      auto &state = remote;
+      if (!state.ready()) {
         program->buildStatus = CL_BUILD_ERROR;
         program->buildLog = remoteError();
         if (notify) notify(value, user);
         return CL_BUILD_PROGRAM_FAILURE;
       }
       std::lock_guard lock(remoteMutex);
-      auto specialized = state.client->call(SpecializeImage{program->originalIL, constants});
+      auto specialized = state.client()->call(SpecializeImage{program->originalIL, constants});
       if (!specialized) {
         program->buildStatus = CL_BUILD_ERROR;
         program->buildLog = remoteError();
@@ -2213,10 +2201,10 @@ CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, 
   }
   const std::string source = program->buildSource.empty() ? program->source : program->buildSource;
   if (!source.empty() && program->remoteId != 0) {
-    auto &state = remoteState();
-    if (state.ready) {
+    auto &state = remote;
+    if (state.ready()) {
       std::lock_guard lock(remoteMutex);
-      (void)state.client->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+      (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
     }
     program->remoteId = 0;
     program->il.clear();
@@ -2291,10 +2279,10 @@ CL_API_ENTRY cl_int CL_API_CALL clCompileProgram(cl_program value, cl_uint count
   const std::string source = program->buildSource.empty() ? program->source : program->buildSource;
   const bool compilesIL = source.empty() && !program->il.empty();
   if (program->remoteId != 0) {
-    auto &state = remoteState();
-    if (state.ready) {
+    auto &state = remote;
+    if (state.ready()) {
       std::lock_guard lock(remoteMutex);
-      (void)state.client->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+      (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
     }
   }
   program->remoteId = 0;
@@ -2595,14 +2583,14 @@ CL_API_ENTRY cl_kernel CL_API_CALL clCreateKernel(cl_program value, const char *
   kernel->program = program;
   kernel->name = name;
   const auto kernelSource = sourceKernelText(program->source, kernel->name);
-  auto &state = remoteState();
-  if (!state.ready) {
+  auto &state = remote;
+  if (!state.ready()) {
     unregisterLiveObject(kernel);
     delete kernel;
     if (error) *error = CL_INVALID_KERNEL_DEFINITION;
     return nullptr;
   }
-  auto described = state.client->call(DescribeKernel{ProgramId{static_cast<int64_t>(program->remoteId)}, name});
+  auto described = state.client()->call(DescribeKernel{ProgramId{static_cast<int64_t>(program->remoteId)}, name});
   if (!described) {
     unregisterLiveObject(kernel);
     delete kernel;
@@ -2811,6 +2799,10 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArgSVMPointer(cl_kernel value, cl_uin
 CL_API_ENTRY cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel value, cl_kernel_exec_info name, size_t size, const void *valueData) {
   auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
   if (!kernel) return CL_INVALID_KERNEL;
+  if (name == CL_KERNEL_EXEC_INFO_SVM_PTRS && size == 0 && !valueData) {
+    kernel->indirectAllocations.erase(name);
+    return CL_SUCCESS;
+  }
   if (!valueData) return CL_INVALID_VALUE;
   if (name == CL_KERNEL_EXEC_INFO_SVM_PTRS || name == CL_KERNEL_EXEC_INFO_USM_PTRS_INTEL) {
     if (size == 0 || size % sizeof(void *) != 0) return CL_INVALID_VALUE;

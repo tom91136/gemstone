@@ -1,41 +1,25 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.{IntBetween, OneOf}
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.binary.Widths.*
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
+import VMCollectives.{Kind as CollectiveKind, Payload as CollectivePayload, Request as CollectiveRequest, *}
 import VMIR.*
-import VMCollectives.{
-  Kind as CollectiveKind,
-  Payload as CollectivePayload,
-  Request as CollectiveRequest,
-  openCLBroadcastScope
-}
 import VMInvocation.*
 import VMMemory.*
-import net.kurobako.gemstone.{NonEmptyVec, PlatformTime, Vec}
-import net.kurobako.gemstone.NonEmptyVec.toVec
-
-import net.kurobako.gemstone.binary.Bits.bitCount
-import net.kurobako.gemstone.binary.Bits.mask
-import net.kurobako.gemstone.binary.Bits.signExtend
-import net.kurobako.gemstone.binary.Binary16
-import net.kurobako.gemstone.binary.Binary32
-import net.kurobako.gemstone.binary.IEEE754
-import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.isa.KernelMetadata
-import net.kurobako.gemstone.vm.*
-import cats.syntax.all.*
-import scala.collection.mutable
-import scala.annotation.tailrec
-import scala.util.control.NonFatal
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.locks.ReentrantLock
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Bits.*
+import net.kurobako.gemstone.binary.Widths.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.concurrent.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.*
+import scala.annotation.tailrec
+import scala.collection.mutable
+import scala.util.control.NonFatal
 
 /** Typed SPIR-V kernel execution over process-neutral allocation identities.
   *
@@ -43,9 +27,9 @@ import java.util.concurrent.locks.ReentrantLock
   * addresses: external memory is always accessed through [[Memory]], while Function and local storage use
   * invocation/work-group-owned byte buffers.
   */
-private[v1_6] object VMInterpreter {
-  import Operand.{id, unsigned}
-  private type Program = VMLoadedProgram
+private object VMInterpreter {
+  import Operand.*
+  private type Program = VMProgramRuntime
 
   private def isPhi(instruction: Instruction): Boolean = instruction match {
     case Instruction.Phi(_, _, _) => true
@@ -87,241 +71,76 @@ private[v1_6] object VMInterpreter {
   }
 
   private val OpenCLUnaryFloatingOpcodes = Set(
-    ExtendedInstruction.OpenClStd.acos,
-    ExtendedInstruction.OpenClStd.acosh,
-    ExtendedInstruction.OpenClStd.acospi,
-    ExtendedInstruction.OpenClStd.asin,
-    ExtendedInstruction.OpenClStd.asinh,
-    ExtendedInstruction.OpenClStd.asinpi,
-    ExtendedInstruction.OpenClStd.atan,
-    ExtendedInstruction.OpenClStd.atanh,
-    ExtendedInstruction.OpenClStd.atanpi,
-    ExtendedInstruction.OpenClStd.cbrt,
-    ExtendedInstruction.OpenClStd.ceil,
-    ExtendedInstruction.OpenClStd.cos,
-    ExtendedInstruction.OpenClStd.cosh,
-    ExtendedInstruction.OpenClStd.cospi,
-    ExtendedInstruction.OpenClStd.exp,
-    ExtendedInstruction.OpenClStd.exp2,
-    ExtendedInstruction.OpenClStd.exp10,
-    ExtendedInstruction.OpenClStd.expm1,
-    ExtendedInstruction.OpenClStd.fabs,
-    ExtendedInstruction.OpenClStd.floor,
-    ExtendedInstruction.OpenClStd.log,
-    ExtendedInstruction.OpenClStd.log2,
-    ExtendedInstruction.OpenClStd.log10,
-    ExtendedInstruction.OpenClStd.log1p,
-    ExtendedInstruction.OpenClStd.logb,
-    ExtendedInstruction.OpenClStd.rint,
-    ExtendedInstruction.OpenClStd.round,
-    ExtendedInstruction.OpenClStd.rsqrt,
-    ExtendedInstruction.OpenClStd.sin,
-    ExtendedInstruction.OpenClStd.sinh,
-    ExtendedInstruction.OpenClStd.sinpi,
-    ExtendedInstruction.OpenClStd.sqrt,
-    ExtendedInstruction.OpenClStd.tan,
-    ExtendedInstruction.OpenClStd.tanh,
-    ExtendedInstruction.OpenClStd.tanpi,
-    ExtendedInstruction.OpenClStd.trunc,
-    ExtendedInstruction.OpenClStd.native_cos,
-    ExtendedInstruction.OpenClStd.native_exp,
-    ExtendedInstruction.OpenClStd.native_exp2,
-    ExtendedInstruction.OpenClStd.native_exp10,
-    ExtendedInstruction.OpenClStd.native_log,
-    ExtendedInstruction.OpenClStd.native_log2,
-    ExtendedInstruction.OpenClStd.native_log10,
-    ExtendedInstruction.OpenClStd.native_recip,
-    ExtendedInstruction.OpenClStd.native_rsqrt,
-    ExtendedInstruction.OpenClStd.native_sin,
-    ExtendedInstruction.OpenClStd.native_sqrt,
-    ExtendedInstruction.OpenClStd.native_tan
+    ExtendedInstruction.OpenClStd.Acos,
+    ExtendedInstruction.OpenClStd.Acosh,
+    ExtendedInstruction.OpenClStd.Acospi,
+    ExtendedInstruction.OpenClStd.Asin,
+    ExtendedInstruction.OpenClStd.Asinh,
+    ExtendedInstruction.OpenClStd.Asinpi,
+    ExtendedInstruction.OpenClStd.Atan,
+    ExtendedInstruction.OpenClStd.Atanh,
+    ExtendedInstruction.OpenClStd.Atanpi,
+    ExtendedInstruction.OpenClStd.Cbrt,
+    ExtendedInstruction.OpenClStd.Ceil,
+    ExtendedInstruction.OpenClStd.Cos,
+    ExtendedInstruction.OpenClStd.Cosh,
+    ExtendedInstruction.OpenClStd.Cospi,
+    ExtendedInstruction.OpenClStd.Exp,
+    ExtendedInstruction.OpenClStd.Exp2,
+    ExtendedInstruction.OpenClStd.Exp10,
+    ExtendedInstruction.OpenClStd.Expm1,
+    ExtendedInstruction.OpenClStd.Fabs,
+    ExtendedInstruction.OpenClStd.Floor,
+    ExtendedInstruction.OpenClStd.Log,
+    ExtendedInstruction.OpenClStd.Log2,
+    ExtendedInstruction.OpenClStd.Log10,
+    ExtendedInstruction.OpenClStd.Log1p,
+    ExtendedInstruction.OpenClStd.Logb,
+    ExtendedInstruction.OpenClStd.Rint,
+    ExtendedInstruction.OpenClStd.Round,
+    ExtendedInstruction.OpenClStd.Rsqrt,
+    ExtendedInstruction.OpenClStd.Sin,
+    ExtendedInstruction.OpenClStd.Sinh,
+    ExtendedInstruction.OpenClStd.Sinpi,
+    ExtendedInstruction.OpenClStd.Sqrt,
+    ExtendedInstruction.OpenClStd.Tan,
+    ExtendedInstruction.OpenClStd.Tanh,
+    ExtendedInstruction.OpenClStd.Tanpi,
+    ExtendedInstruction.OpenClStd.Trunc,
+    ExtendedInstruction.OpenClStd.NativeCos,
+    ExtendedInstruction.OpenClStd.NativeExp,
+    ExtendedInstruction.OpenClStd.NativeExp2,
+    ExtendedInstruction.OpenClStd.NativeExp10,
+    ExtendedInstruction.OpenClStd.NativeLog,
+    ExtendedInstruction.OpenClStd.NativeLog2,
+    ExtendedInstruction.OpenClStd.NativeLog10,
+    ExtendedInstruction.OpenClStd.NativeRecip,
+    ExtendedInstruction.OpenClStd.NativeRsqrt,
+    ExtendedInstruction.OpenClStd.NativeSin,
+    ExtendedInstruction.OpenClStd.NativeSqrt,
+    ExtendedInstruction.OpenClStd.NativeTan
   )
   private val OpenCLBinaryFloatingOpcodes = Set(
-    ExtendedInstruction.OpenClStd.atan2,
-    ExtendedInstruction.OpenClStd.atan2pi,
-    ExtendedInstruction.OpenClStd.fdim,
-    ExtendedInstruction.OpenClStd.fmod,
-    ExtendedInstruction.OpenClStd.hypot,
-    ExtendedInstruction.OpenClStd.powr
+    ExtendedInstruction.OpenClStd.Atan2,
+    ExtendedInstruction.OpenClStd.Atan2pi,
+    ExtendedInstruction.OpenClStd.Fdim,
+    ExtendedInstruction.OpenClStd.Fmod,
+    ExtendedInstruction.OpenClStd.Hypot,
+    ExtendedInstruction.OpenClStd.Powr
   )
-
-  def kernelNames(program: Program): Vec[NonEmptyString] =
-    Vec.from(program.entryPoints.keys.toSeq.sortBy(_.raw))
-
-  def globalImage(program: Program, name: String): Either[Fault, (Int, Array[Byte])] =
-    program.functionNames.find { case (id, candidate) =>
-      candidate.raw == name && program.globals.contains(id)
-    }.map(_._1).toRight(Fault.Memory(s"SPIR-V global '$name' is not present")).flatMap { id =>
-      materializeGlobals(program, storageClass => storageClass != 4 && storageClass != 6, useBindings = false)
-        .flatMap(_.get(id) match {
-          case Some(RuntimeValue.Address(_, Pointer(Region.Internal(storage), _, _, _, _))) =>
-            Right(id -> storage.bytes)
-          case _ => Left(Fault.Memory(s"SPIR-V global '$name' has no storage"))
-        })
-    }
-
-  def kernelMetadata(program: Program, name: NonEmptyString): Either[Fault, KernelMetadata] =
-    if (program.vulkanEntries.contains(name)) vulkanKernelMetadata(program, name)
-    else {
-      val compiled = program
-      compiled.entryPoints.get(name).toRight(
-        Fault.InvalidTask(s"SPIR-V entry point $name does not exist")
-      ).flatMap { functionId =>
-        compiled.functions.get(functionId).toRight(
-          Fault.InvalidTask(s"SPIR-V entry point $name has no function body")
-        ).flatMap { function =>
-          function.parameters.foldLeft[Either[Fault, (Vec[KernelMetadata.Parameter], Int)]](
-            Right((Vec.empty[KernelMetadata.Parameter], 0))
-          ) { case (result, (parameterId, parameterType)) =>
-            result.flatMap { case (parameters, currentOffset) =>
-              parameterMetadata(compiled, parameterId, parameterType).flatMap { parameter =>
-                val offset = alignUp(currentOffset, math.min(8, typeAlignment(compiled, parameterType)))
-                NonNegative.either(offset)
-                  .leftMap(_ =>
-                    Fault.InvalidTask(s"negative SPIR-V parameter offset $offset")
-                  )
-                  .map(refinedOffset =>
-                    parameters.appended(parameter.copy(offset =
-                      refinedOffset
-                    )) -> Math.addExact(offset, parameter.width.raw)
-                  )
-              }
-            }
-          }.flatMap { case (parameters, size) =>
-            for {
-              refinedSize <- NonNegative.either(size)
-                .leftMap(_ =>
-                  Fault.InvalidTask(s"negative SPIR-V argument block size $size")
-                )
-              parameterCount <- NonNegative.either(parameters.size)
-                .leftMap(_ => Fault.InvalidTask("negative SPIR-V parameter count"))
-              metadata <- KernelMetadata.validated(refinedSize, parameterCount, parameters)
-                .leftMap(detail => Fault.InvalidTask(detail))
-            } yield metadata
-          }
-        }
-      }
-    }
-
-  private[v1_6] def descriptorVariables(program: Program, name: NonEmptyString): Vec[Int] = {
-    val declared = program.ir.entryPointInterfaces.getOrElse(name, Set.empty)
-    val scoped   = program.descriptorBindings.filter { case (variable, _) => declared.contains(variable) }
-    // Before SPIR-V 1.4, descriptor globals were not required in OpEntryPoint's
-    // interface. Retain compatibility with those modules when none are listed.
-    val bindings = if (scoped.nonEmpty) scoped else program.descriptorBindings
-    Vec.from(bindings.toSeq.sortBy { case (variable, (set, binding)) =>
-      (set, binding, variable)
-    }.map(_._1))
-  }
-
-  private def vulkanKernelMetadata(program: Program, name: NonEmptyString): Either[Fault, KernelMetadata] =
-    program.entryPoints.get(name).flatMap(program.functions.get) match {
-      case None    => Left(Fault.InvalidTask(s"SPIR-V entry point $name has no function body"))
-      case Some(_) =>
-        val functionId  = program.entryPoints(name)
-        val descriptors = descriptorVariables(program, name)
-        val parameters  = descriptors.indices.map(index =>
-          KernelMetadata.Parameter(
-            8,
-            NonNegative.unsafe(index * 8),
-            KernelMetadata.ParameterKind.Allocation,
-            containsPointers = false
-          )
-        )
-        KernelMetadata.validated(
-          NonNegative.unsafe(descriptors.size * 8),
-          NonNegative.unsafe(descriptors.size),
-          Vec.from(parameters),
-          requiredWorkGroupSize = workGroupSize(program, functionId),
-          workGroupSizeHint = workGroupSizeHint(program, functionId),
-          bindingIndices =
-            Vec.from(descriptors.map(variable => NonNegative.unsafe(program.descriptorBindings(variable)._2)))
-        ).leftMap(detail => Fault.InvalidTask(detail))
-    }
-
-  private def workGroupSize(program: Program, functionId: Int): Option[LaunchGeometry.Dimensions] =
-    program.workGroupSizes.get(functionId).map(toWorkGroupSize(_, _, _)).orElse(builtinWorkGroupSize(program))
-
-  private def builtinWorkGroupSize(program: Program): Option[LaunchGeometry.Dimensions] =
-    program.builtins.collectFirst { case (variable, 25) => variable }.flatMap { variable =>
-      program.constantData.get(variable).collect {
-        case Constant.Bits(_, lanes) if lanes.size == 3 =>
-          toWorkGroupSize(lanes(0).toInt, lanes(1).toInt, lanes(2).toInt)
-      }
-    }
-
-  private def toWorkGroupSize(x: Int, y: Int, z: Int): LaunchGeometry.Dimensions =
-    LaunchGeometry.Dimensions(Positive.unsafe(x), Positive.unsafe(y), Positive.unsafe(z))
-
-  private def workGroupSizeHint(program: Program, functionId: Int): Option[LaunchGeometry.Dimensions] =
-    program.workGroupSizeHints.get(functionId).map { case (x, y, z) =>
-      LaunchGeometry.Dimensions(Positive.unsafe(x), Positive.unsafe(y), Positive.unsafe(z))
-    }
-
-  private def parameterMetadata(
-      program: Program,
-      parameterId: Int,
-      parameterType: Int
-  ): Either[Fault, KernelMetadata.Parameter] =
-    program.runtimeType(parameterType) match {
-      case Some(RuntimeType.Pointer(_, pointee)) if program.byValueParameters.contains(parameterId) =>
-        pointerLeafOffsets(program, pointee, 0L).flatMap(pointers =>
-          parameterMetadata(typeSize(program, pointee), KernelMetadata.ParameterKind.Scalar, pointers.nonEmpty)
-        )
-      case Some(RuntimeType.Pointer(storageClass, _)) if storageClass == 4 =>
-        Right(KernelMetadata.Parameter(
-          8,
-          0,
-          KernelMetadata.ParameterKind.Local,
-          containsPointers = false
-        ))
-      case Some(RuntimeType.Pointer(_, _)) =>
-        Right(KernelMetadata.Parameter(
-          8,
-          0,
-          KernelMetadata.ParameterKind.Allocation,
-          containsPointers = false
-        ))
-      case Some(_) => pointerLeafOffsets(program, parameterType, 0L).flatMap(pointers =>
-          parameterMetadata(typeSize(program, parameterType), KernelMetadata.ParameterKind.Scalar, pointers.nonEmpty)
-        )
-      case None => Left(
-          Fault.InvalidTask(s"SPIR-V parameter type %$parameterType is undefined")
-        )
-    }
-
-  private def parameterMetadata(
-      width: Int,
-      kind: KernelMetadata.ParameterKind,
-      containsPointers: Boolean
-  ): Either[Fault, KernelMetadata.Parameter] =
-    Positive.either(width)
-      .leftMap(_ =>
-        Fault.InvalidTask(s"SPIR-V parameter width must be positive: $width")
-      )
-      .map(refinedWidth => KernelMetadata.Parameter(refinedWidth, 0, kind, containsPointers))
 
   def execute(
       program: Program,
       dispatch: KernelTask,
       memory: Memory,
       control: TaskControl,
-      scheduler: Scheduler,
-      observer: Observer[Event]
-  ): Either[Fault, Unit] =
-    executeMeasured(program, dispatch, memory, control, scheduler, observer)
-
-  private def executeMeasured(
-      program: Program,
-      dispatch: KernelTask,
-      memory: Memory,
-      control: TaskControl,
-      scheduler: Scheduler,
-      observer: Observer[Event]
+      workgroups: Workgroups,
+      handler: Event => Either[Fault, Unit],
+      measurement: ExecutionMetrics => Unit = _ => ()
   ): Either[Fault, Unit] = {
-    val metrics = Performance.Metrics()
-    val started = PlatformTime.monotonicNanos
-    val result  = try executeValidated(program, dispatch, memory, control, scheduler, observer, metrics)
+    val metrics = VMMetrics()
+    val started = platform.monotonicNanos
+    val result  = try executeValidated(program, dispatch, memory, control, workgroups, handler, metrics)
     catch {
       case NonFatal(error) =>
         Left(
@@ -330,11 +149,9 @@ private[v1_6] object VMInterpreter {
           )
         )
     }
-    metrics.recordElapsed(math.max(0L, PlatformTime.monotonicNanos - started))
-    result.flatMap(_ =>
-      observer.observe(control.observation, Performance.Observation(metrics.snapshot))
-        .leftMap(error => Fault.Observer(error.message))
-    )
+    metrics.recordElapsed(math.max(0L, platform.monotonicNanos - started))
+    measurement(metrics.snapshot)
+    result
   }
 
   private def executeValidated(
@@ -342,38 +159,35 @@ private[v1_6] object VMInterpreter {
       dispatch: KernelTask,
       memory: Memory,
       control: TaskControl,
-      scheduler: Scheduler,
-      observer: Observer[Event],
-      metrics: Performance.Metrics
+      workgroups: Workgroups,
+      handler: Event => Either[Fault, Unit],
+      metrics: VMMetrics
   ): Either[Fault, Unit] =
     program.entryPoints.get(dispatch.kernelName).toRight(
       Fault.InvalidTask(
-        s"SPIR-V entry point ${dispatch.kernelName.raw} does not exist"
+        s"SPIR-V entry point ${dispatch.kernelName} does not exist"
       )
     ).flatMap { functionId =>
       program.functions.get(functionId).toRight(
         Fault.InvalidTask(
-          s"SPIR-V entry point ${dispatch.kernelName.raw} has no function body"
+          s"SPIR-V entry point ${dispatch.kernelName} has no function body"
         )
       ).flatMap { function =>
         Either.cond(
           (if (program.vulkanEntries.contains(dispatch.kernelName))
-             descriptorVariables(program, dispatch.kernelName).size
+             program.descriptorVariables(dispatch.kernelName).size
            else function.parameters.size) == dispatch.arguments.size,
           (),
           Fault.InvalidTask(
-            s"SPIR-V entry point ${dispatch.kernelName.raw} expects ${
-                if (program.vulkanEntries.contains(dispatch.kernelName)) descriptorVariables(program, dispatch.kernelName).size
+            s"SPIR-V entry point ${dispatch.kernelName} expects ${
+                if (program.vulkanEntries.contains(dispatch.kernelName)) program.descriptorVariables(dispatch.kernelName).size
                 else function.parameters.size
               } arguments, " +
               s"received ${dispatch.arguments.size}"
           )
-        ).flatMap(_ => executeDispatch(program, function, dispatch, memory, control, scheduler, observer, metrics))
+        ).flatMap(_ => executeDispatch(program, function, dispatch, memory, control, workgroups, handler, metrics))
       }
     }
-
-  private def scalarLeafCount(program: Program, typeId: Int): Either[Fault, Int] =
-    program.scalarLeafCountCache.getOrElseUpdate(typeId, VMIR.scalarLeafCount(program.types, typeId))
 
   // Work-item scheduling reuses nullable invocation slots and mutable loop state to keep the dispatch hot path lean.
   @SuppressWarnings(Array(
@@ -387,24 +201,24 @@ private[v1_6] object VMInterpreter {
       dispatch: KernelTask,
       memory: Memory,
       control: TaskControl,
-      scheduler: Scheduler,
-      observer: Observer[Event],
-      metrics: Performance.Metrics
+      workgroups: Workgroups,
+      handler: Event => Either[Fault, Unit],
+      metrics: VMMetrics
   ): Either[Fault, Unit] = {
-    val initialGlobals = materializeGlobals(program, storageClass => storageClass != 4 && storageClass != 6) match {
+    val initialGlobals = program.materializeGlobals(storageClass => storageClass != 4 && storageClass != 6) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
     val globalValues = if (!program.vulkanEntries.contains(dispatch.kernelName)) initialGlobals
     else {
-      descriptorVariables(
-        program,
-        dispatch.kernelName
-      ).zip(dispatch.arguments).foldLeft[Either[Fault, Map[Int, RuntimeValue]]](Right(initialGlobals)) {
+      program.descriptorVariables(dispatch.kernelName).zip(dispatch.arguments).foldLeft[Either[
+        Fault,
+        Map[Int, RuntimeValue]
+      ]](Right(initialGlobals)) {
         case (result, (variable, KernelTask.Argument.Memory(allocation, offset))) => result.flatMap { values =>
             program.globals.get(variable).toRight(Fault.InvalidTask(s"SPIR-V descriptor %$variable has no variable"))
               .map { global =>
-                val pointee = pointerPointee(program, global.pointerType)
+                val pointee = program.layout.pointerPointee(global.pointerType)
                 values.updated(
                   variable,
                   RuntimeValue.Address(
@@ -428,33 +242,33 @@ private[v1_6] object VMInterpreter {
     val subgroup          = program.subgroupSizes.getOrElse(function.id, math.max(1, math.min(32, totalLocal.raw)))
     val enqueuedSubgroups = (totalLocal.raw.toLong + subgroup.toLong - 1L) / subgroup.toLong
     val hasCollectives    = program.collectiveFunctions.contains(function.id) || memory.defersHostReads
-    val baseScalars = BaseScalarValues(program.constants, globalValues, program.module.header.bound.toUnsigned.raw)
+    val baseScalars = BaseScalarValues(program.constants, globalValues, program.module.header.bound.toUnsigned.toLong)
     metrics.recordDispatch(hasCollectives)
     val groupCount = dispatch.geometry.groupCount.volume match {
       case Left(message) => return Left(Fault.InvalidTask(message))
       case Right(value)  => value
     }
-    // The scheduler parallelizes launches large enough to amortise queue traffic and claims a range of groups per
+    // The workgroups parallelizes launches large enough to amortise queue traffic and claims a range of groups per
     // dequeue, so queue overhead stays bounded while medium grids leave the calling thread.
-    // Positive launch volumes imply the scheduler's non-negative task-count requirement.
-    val taskCount: NonNegative[Long] = groupCount.widen
-    val workItems: NonNegative[Long] = totalLocal.widen
-    val parallelWork                 = scheduler.shouldParallel(taskCount, workItems)
-    val state                        = MemoryState(memory, dispatch.pointerRelocations, observer, control.observation)
-    val flushLock                    = ReentrantLock()
-    val reusableValues               =
+    // Positive launch volumes imply the workgroups's non-negative task-count requirement.
+    val taskCount: Long >= 0 = groupCount
+    val workItems: Long >= 0 = totalLocal.toLong
+    val parallelWork         = workgroups.shouldParallel(taskCount, workItems)
+    val state                = MemoryState(memory, dispatch.pointerRelocations, handler)
+    val flushLock            = ReentrantLock()
+    val reusableValues       =
       if (hasCollectives || parallelWork) None
       else
         Some(
           InvocationValues(
             program.constants,
             globalValues,
-            program.module.header.bound.toUnsigned.raw,
+            program.module.header.bound.toUnsigned.toLong,
             baseScalars,
             metrics
           )
         )
-    val reusableExecution = Array[InvocationExecution | Null](null)
+    val reusableExecution = Array[InvocationState | Null](null)
     // Collective invocations must keep separate register files while a workgroup is suspended,
     // but a completed workgroup no longer needs them. Reuse each local lane's file in the
     // next workgroup when dispatch is sequential.
@@ -464,11 +278,11 @@ private[v1_6] object VMInterpreter {
       else Array.empty[Option[InvocationValues]]
 
     def runGroup(
-        groupIndex: NonNegative[Long],
+        groupIndex: Long >= 0,
         reuseInvocationState: Boolean,
-        groupMetrics: Performance.Metrics,
+        groupMetrics: VMMetrics,
         reuseValues: Option[InvocationValues],
-        reuseExecution: Option[Array[InvocationExecution | Null]],
+        reuseExecution: Option[Array[InvocationState | Null]],
         groupState: MemoryState
     ): Either[Fault, Unit] = {
       val group = dispatch.geometry.groupCoordinates(groupIndex.raw) match {
@@ -484,7 +298,7 @@ private[v1_6] object VMInterpreter {
         case Right(value)  => value
       }
 
-      val workgroupValues = materializeGlobals(program, _ == 4) match {
+      val workgroupValues = program.materializeGlobals(_ == 4) match {
         case Left(error)  => return Left(error)
         case Right(value) => value
       }
@@ -500,17 +314,17 @@ private[v1_6] object VMInterpreter {
           InvocationValues(
             program.constants,
             globalValues,
-            program.module.header.bound.toUnsigned.raw,
+            program.module.header.bound.toUnsigned.toLong,
             baseScalars,
             groupMetrics
           )
         )
       )
-      var reusableExecution: InvocationExecution | Null = reuseExecution match {
+      var reusableExecution: InvocationState | Null = reuseExecution match {
         case Some(slot) => slot(0)
         case None       => null
       }
-      val executions  = if (hasCollectives) mutable.ArrayBuffer.empty[InvocationExecution] else null
+      val executions  = if (hasCollectives) mutable.ArrayBuffer.empty[InvocationState] else null
       var linearLocal = 0
       while (linearLocal < activeLocalCount.raw) {
         // The loop lower bound proves the linear local index is non-negative.
@@ -524,7 +338,7 @@ private[v1_6] object VMInterpreter {
         }
         if (dispatch.geometry.containsGlobal(global)) {
           groupMetrics.recordInvocation()
-          val privateValues = materializeGlobals(program, _ == 6) match {
+          val privateValues = program.materializeGlobals(_ == 6) match {
             case Left(error)  => return Left(error)
             case Right(value) => value
           }
@@ -532,38 +346,19 @@ private[v1_6] object VMInterpreter {
           val subgroupSize  = math.min(subgroup, activeLocalCount.raw - subgroupIndex * subgroup)
           val numSubgroups  = (activeLocalCount.raw.toLong + subgroup.toLong - 1L) / subgroup.toLong
           val invocation    = reusableExecution match {
-            case null => Invocation(
-                groupX = group.x.raw.toLong,
-                groupY = group.y.raw.toLong,
-                groupZ = group.z.raw.toLong,
-                localX = local.x.raw.toLong,
-                localY = local.y.raw.toLong,
-                localZ = local.z.raw.toLong,
-                globalX = global.x.raw,
-                globalY = global.y.raw,
-                globalZ = global.z.raw,
-                globalSizeX = dispatch.geometry.globalExtent.x.raw,
-                globalSizeY = dispatch.geometry.globalExtent.y.raw,
-                globalSizeZ = dispatch.geometry.globalExtent.z.raw,
-                globalOffsetX = dispatch.geometry.globalOffset.x.raw.toLong,
-                globalOffsetY = dispatch.geometry.globalOffset.y.raw.toLong,
-                globalOffsetZ = dispatch.geometry.globalOffset.z.raw.toLong,
-                workDim = dispatch.geometry.workDim,
-                numWorkgroupsX = dispatch.geometry.groupCount.x.raw.toLong,
-                numWorkgroupsY = dispatch.geometry.groupCount.y.raw.toLong,
-                numWorkgroupsZ = dispatch.geometry.groupCount.z.raw.toLong,
-                workgroupSizeX = activeGroupSize.x.raw.toLong,
-                workgroupSizeY = activeGroupSize.y.raw.toLong,
-                workgroupSizeZ = activeGroupSize.z.raw.toLong,
-                enqueuedWorkgroupSizeX = groupSize.x.raw.toLong,
-                enqueuedWorkgroupSizeY = groupSize.y.raw.toLong,
-                enqueuedWorkgroupSizeZ = groupSize.z.raw.toLong,
-                subgroupSize = subgroupSize,
-                maxSubgroupSize = subgroup,
-                numSubgroups = numSubgroups,
-                enqueuedSubgroups = enqueuedSubgroups,
-                subgroupIndex = subgroupIndex,
-                subgroupLocal = linearLocal % subgroup
+            case null => InvocationBuiltins(
+                group,
+                local,
+                global,
+                dispatch.geometry,
+                activeGroupSize,
+                groupSize,
+                subgroupSize,
+                subgroup,
+                numSubgroups,
+                enqueuedSubgroups,
+                subgroupIndex,
+                linearLocal % subgroup
               )
             case execution =>
               execution.invocation.reset(
@@ -629,11 +424,18 @@ private[v1_6] object VMInterpreter {
       else Right(())
     }
 
-    val runResult = scheduler.forEach(taskCount, parallel = parallelWork) { groupIndex =>
+    val runResult = workgroups.forEach(taskCount, parallel = parallelWork) { groupIndex =>
       if (parallelWork) {
-        val groupMetrics = Performance.Metrics()
-        val groupState   = MemoryState(memory, dispatch.pointerRelocations, observer, control.observation)
-        runGroup(groupIndex, reuseInvocationState = false, groupMetrics, None, None, groupState) match {
+        val groupMetrics = VMMetrics()
+        val groupState   = MemoryState(memory, dispatch.pointerRelocations, handler)
+        runGroup(
+          groupIndex = groupIndex,
+          reuseInvocationState = false,
+          groupMetrics = groupMetrics,
+          reuseValues = None,
+          reuseExecution = None,
+          groupState = groupState
+        ) match {
           case Left(error) => Left(error)
           case Right(_)    => flushLock.withLock(groupState.flush()) match {
               case Left(error) => Left(error)
@@ -644,12 +446,12 @@ private[v1_6] object VMInterpreter {
         }
       } else {
         runGroup(
-          groupIndex,
+          groupIndex = groupIndex,
           reuseInvocationState = true,
-          metrics,
-          reusableValues,
-          Some(reusableExecution),
-          state
+          groupMetrics = metrics,
+          reuseValues = reusableValues,
+          reuseExecution = Some(reusableExecution),
+          groupState = state
         )
       }
     }
@@ -660,7 +462,7 @@ private[v1_6] object VMInterpreter {
     if (parallelWork) Right(()) else state.flush()
   }
 
-  // Invocation setup fills the machine frame sequentially and fails fast on invalid parameters.
+  // InvocationBuiltins setup fills the machine frame sequentially and fails fast on invalid parameters.
   @SuppressWarnings(
     Array(
       "scalafix:DisableSyntax.var",
@@ -673,15 +475,15 @@ private[v1_6] object VMInterpreter {
       function: Function,
       arguments: Vec[KernelTask.Argument],
       shared: Map[Int, Region],
-      invocation: Invocation,
+      invocation: InvocationBuiltins,
       globalValues: Map[Int, RuntimeValue],
       reusableValues: Option[InvocationValues],
-      reusableExecution: InvocationExecution | Null,
+      reusableExecution: InvocationState | Null,
       memory: MemoryState,
       baseScalars: BaseScalarValues,
-      metrics: Performance.Metrics,
+      metrics: VMMetrics,
       trackTouched: Boolean
-  ): Either[Fault, InvocationExecution] = {
+  ): Either[Fault, InvocationState] = {
     val values = reusableValues match {
       case Some(value) =>
         value.clear()
@@ -691,7 +493,7 @@ private[v1_6] object VMInterpreter {
         InvocationValues(
           program.constants,
           globalValues,
-          program.module.header.bound.toUnsigned.raw,
+          program.module.header.bound.toUnsigned.toLong,
           baseScalars,
           metrics,
           trackTouched
@@ -703,12 +505,12 @@ private[v1_6] object VMInterpreter {
       val (variable, global) = globals(globalIndex)
       program.builtins.get(variable) match {
         case Some(builtin) =>
-          val pointee = pointerPointee(program, global.pointerType)
+          val pointee = program.layout.pointerPointee(global.pointerType)
           val value   = builtinValue(program, pointee, builtin, invocation) match {
             case Left(error)   => return Left(error)
             case Right(result) => result
           }
-          val bytes = encode(program, value) match {
+          val bytes = program.encode(value) match {
             case Left(error) => return Left(error)
             case Right(data) => data
           }
@@ -743,7 +545,7 @@ private[v1_6] object VMInterpreter {
 
     val execution = reusableExecution match {
       case null =>
-        InvocationExecution(
+        InvocationState(
           invocation,
           values,
           function,
@@ -751,9 +553,7 @@ private[v1_6] object VMInterpreter {
           -1,
           -1,
           0L,
-          mutable.ArrayDeque.empty[CallFrame],
-          None,
-          false
+          mutable.ArrayDeque.empty[CallFrame]
         )
       case value =>
         value.reset(invocation, function)
@@ -765,15 +565,15 @@ private[v1_6] object VMInterpreter {
   private val InstructionCompleted: Either[Fault, Unit] = Right(())
 
   // Keep the loop and semantic families below HotSpot's huge-method threshold.
-  // Invocation state is explicit so calls, returns and collective suspension share one path.
+  // InvocationBuiltins state is explicit so calls, returns and collective suspension share one path.
   // The instruction loop exits as soon as the invocation completes, suspends, or faults.
   @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.return"))
   private def resumeInvocation(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       memory: MemoryState,
       control: TaskControl,
-      metrics: Performance.Metrics
+      metrics: VMMetrics
   ): Either[Fault, Unit] = {
     while (execution.pc < execution.currentFunction.end) {
       execution.instructionCount += 1L
@@ -785,23 +585,23 @@ private[v1_6] object VMInterpreter {
       val scalarInteger = program.scalarIntegerInstruction(execution.pc)
       if (scalarInteger == null || !executeScalarInteger(execution, scalarInteger.nn))
         executeInstruction(program, execution, memory, program.module.instructions(execution.pc)) match {
-          case Left(Fault.PendingMemory) =>
-            execution.memoryPending = true
+          case Left(Memory.Pending) =>
+            execution.awaitMemory()
             return InstructionCompleted
-          case Left(error) => return Left(error)
-          case Right(_)    => ()
+          case Left(error: Fault) => return Left(error)
+          case Right(_)           => ()
         }
       if (execution.completed || execution.suspended.nonEmpty) return InstructionCompleted
     }
     Left(Fault.InvalidTask(
       s"SPIR-V function %${execution.currentFunction.id} " +
-        s"(${program.functionNames.get(execution.currentFunction.id).fold("unnamed")(_.raw)}) " +
+        s"(${program.functionNames.get(execution.currentFunction.id).fold("unnamed")(_)}) " +
         "reached OpFunctionEnd without OpReturn"
     ))
   }
 
   private def executeScalarInteger(
-      execution: InvocationExecution,
+      execution: InvocationState,
       instruction: VMScalarIntegerInstruction
   ): Boolean = {
     val values = execution.values
@@ -828,10 +628,10 @@ private[v1_6] object VMInterpreter {
 
   private def executeInstruction(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       memory: MemoryState,
       instruction: Instruction
-  ): Either[Fault, Unit] = instruction match {
+  ): Memory.ReadResult[Unit] = instruction match {
     case _: Instruction.Line | _: Instruction.NoLine =>
       execution.pc += 1
       Right(())
@@ -874,7 +674,7 @@ private[v1_6] object VMInterpreter {
   )
   private def executePhi(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       instruction: Instruction
   ): Either[Fault, Unit] = {
     val values = execution.values
@@ -924,25 +724,25 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeMemory(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       memory: MemoryState,
       instruction: Instruction
-  ): Either[Fault, Unit] = {
+  ): Memory.ReadResult[Unit] = {
     val values = execution.values
     instruction match {
       case Instruction.Variable(resultType, dest, storageClass, initializer) =>
-        val pointee = pointerPointee(program, id(resultType))
-        val buffer  = Array.ofDim[Byte](typeSize(program, pointee))
+        val pointee = program.layout.pointerPointee(id(resultType))
+        val buffer  = Array.ofDim[Byte](program.layout.typeSize(pointee))
         val slots   = mutable.LongMap.empty[(Int, Pointer)]
-        pointerLeafOffsets(program, pointee, 0L).toOption.foreach(_.foreach { case (offset, pointerType) =>
-          program.runtimeType(pointerType) match {
+        program.layout.pointerLeafOffsets(pointee, 0L).toOption.foreach(_.foreach { case (offset, pointerType) =>
+          program.layout.runtimeType(pointerType) match {
             case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
               slots.update(offset, pointerType -> Pointer(Region.Null, 0L, pointerPointee, pointerStorage))
             case _ => ()
           }
         })
         initializer.flatMap(value => values.get(id(value))) match {
-          case Some(value) => encode(program, value) match {
+          case Some(value) => program.encode(value) match {
               case Left(error)    => return Left(error)
               case Right(encoded) =>
                 Array.copy(encoded, 0, buffer, 0, math.min(buffer.length, encoded.length))
@@ -967,7 +767,7 @@ private[v1_6] object VMInterpreter {
         address(values, pointer) match {
           case Left(error)   => return Left(error)
           case Right(source) =>
-            program.runtimeType(id(resultType)) match {
+            program.layout.runtimeType(id(resultType)) match {
               case Some(RuntimeType.Pointer(_, _)) =>
                 loadPointer(program, memory, source, id(resultType)) match {
                   case Left(error) =>
@@ -977,7 +777,7 @@ private[v1_6] object VMInterpreter {
                     execution.pc += 1
                 }
               case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) =>
-                scalarMemoryWidth(program, id(resultType)) match {
+                program.layout.scalarMemoryWidth(id(resultType)) match {
                   case Left(error) => return Left(error)
                   case Right(size) => memory.readScalar(source, size) match {
                       case Left(error)   => return Left(error)
@@ -986,12 +786,12 @@ private[v1_6] object VMInterpreter {
                         execution.pc += 1
                     }
                 }
-              case _ => nonNegativeTypeSize(program, id(resultType)) match {
+              case _ => program.layout.nonNegativeTypeSize(id(resultType)) match {
                   case Left(error) => return Left(error)
                   case Right(size) => memory.read(source, size) match {
                       case Left(error)  => return Left(error)
                       case Right(bytes) =>
-                        decode(program, id(resultType), bytes) match {
+                        program.decode(id(resultType), bytes) match {
                           case Left(error)  => return Left(error)
                           case Right(value) => values.update(id(dest), value)
                         }
@@ -1004,7 +804,7 @@ private[v1_6] object VMInterpreter {
         address(values, pointer) match {
           case Right(target) if values.scalarType(id(source)) >= 0 =>
             val sourceType = values.scalarType(id(source))
-            scalarMemoryWidth(program, sourceType) match {
+            program.layout.scalarMemoryWidth(sourceType) match {
               case Left(error) => return Left(error)
               case Right(size) =>
                 memory.writeScalar(target, values.scalarBits(id(source)), size) match {
@@ -1032,7 +832,7 @@ private[v1_6] object VMInterpreter {
                   case Left(error) => return Left(error)
                   case Right(())   => execution.pc += 1
                 }
-              case Some(value) => encode(program, value) match {
+              case Some(value) => program.encode(value) match {
                   case Left(error)    => return Left(error)
                   case Right(encoded) => memory.write(target, encoded) match {
                       case Left(error) =>
@@ -1047,7 +847,7 @@ private[v1_6] object VMInterpreter {
       case Instruction.CopyMemory(target, source, _, _) =>
         (address(values, target), address(values, source)) match {
           case (Right(destination), Right(origin)) =>
-            nonNegativeTypeSize(program, origin.pointee) match {
+            program.layout.nonNegativeTypeSize(origin.pointee) match {
               case Left(error) => return Left(error)
               case Right(size) => memory.read(origin, size) match {
                   case Left(error)  => return Left(error)
@@ -1067,7 +867,7 @@ private[v1_6] object VMInterpreter {
         (address(values, target), address(values, source), scalar(values, size)) match {
           case (Right(destination), Right(origin), Right(rawSize))
               if rawSize >= 0L && rawSize <= Int.MaxValue.toLong =>
-            val byteCount = NonNegative.unsafe(rawSize.toInt)
+            val byteCount = rawSize.toInt.unsafe[Int >= 0]
             memory.read(origin, byteCount) match {
               case Left(error)  => return Left(error)
               case Right(bytes) =>
@@ -1143,7 +943,7 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def executeComposite(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       memory: MemoryState,
       instruction: Instruction
   ): Either[Fault, Unit] = {
@@ -1152,7 +952,7 @@ private[v1_6] object VMInterpreter {
       case Instruction.Bitcast(resultType, dest, source) =>
         values.get(id(source)) match {
           case Some(RuntimeValue.Address(_, pointer)) =>
-            val pointee = pointerPointee(program, id(resultType))
+            val pointee = program.layout.pointerPointee(id(resultType))
             val result  = if (pointer.pointee == pointee) pointer else pointer.copy(pointee = pointee)
             values.update(id(dest), RuntimeValue.Address(id(resultType), result))
             execution.pc += 1
@@ -1166,7 +966,7 @@ private[v1_6] object VMInterpreter {
                     execution.pc += 1
                 }
               case RuntimeValue.Address(_, pointer) =>
-                val pointee = pointerPointee(program, id(resultType))
+                val pointee = program.layout.pointerPointee(id(resultType))
                 val result  = if (pointer.pointee == pointee) pointer else pointer.copy(pointee = pointee)
                 values.update(id(dest), RuntimeValue.Address(id(resultType), result))
                 execution.pc += 1
@@ -1179,9 +979,9 @@ private[v1_6] object VMInterpreter {
           case Right(())   => execution.pc += 1
         }
       case Instruction.PtrCastToGeneric(resultType, dest, source) =>
-        (program.runtimeType(id(resultType)), values.get(id(source))) match {
+        (program.layout.runtimeType(id(resultType)), values.get(id(source))) match {
           case (Some(RuntimeType.Pointer(8, pointee)), Some(RuntimeValue.Address(sourceType, pointer))) =>
-            program.runtimeType(sourceType) match {
+            program.layout.runtimeType(sourceType) match {
               case Some(RuntimeType.Pointer(storageClass, sourcePointee))
                   if Vec(4, 5, 7).contains(storageClass) && sourcePointee == pointee &&
                     pointer.pointee == pointee && (pointer.region == Region.Null || pointer.storageClass == storageClass) =>
@@ -1263,7 +1063,7 @@ private[v1_6] object VMInterpreter {
           index += 1
         }
         val result = lanes.result()
-        scalarLeafCount(program, id(resultType)) match {
+        program.layout.scalarLeafCount(id(resultType)) match {
           case Right(expected) if result.length == expected =>
             values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
             execution.pc += 1
@@ -1321,16 +1121,16 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def executeExtended(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       memory: MemoryState,
       instruction: Instruction
-  ): Either[Fault, Unit] = {
+  ): Memory.ReadResult[Unit] = {
     val values = execution.values
     instruction match {
       case Instruction.VectorShuffle(resultType, dest, vector1, vector2, components) =>
         (values.get(id(vector1)), values.get(id(vector2))) match {
           case (Some(RuntimeValue.Bits(_, left)), Some(RuntimeValue.Bits(_, right))) =>
-            scalarLeafCount(program, id(resultType)) match {
+            program.layout.scalarLeafCount(id(resultType)) match {
               case Right(expected) if expected == components.size =>
                 val combined = left ++ right
                 val result   = Array.ofDim[Long](components.size)
@@ -1379,7 +1179,7 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeConversion(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       memory: MemoryState,
       instruction: Instruction
   ): Either[Fault, Unit] = {
@@ -1388,13 +1188,13 @@ private[v1_6] object VMInterpreter {
       case Instruction.UConvert(resultType, dest, source) =>
         val sourceId = id(source)
         if (values.scalarType(sourceId) >= 0) {
-          val width = scalarWidth(program, id(resultType))
+          val width = program.layout.scalarWidth(id(resultType))
           values.updateScalar(id(dest), id(resultType), values.scalarBits(sourceId) & mask(width))
           execution.pc += 1
         } else
           values.get(sourceId) match {
             case Some(RuntimeValue.Bits(_, lanes)) =>
-              val width = scalarWidth(program, id(resultType))
+              val width = program.layout.scalarWidth(id(resultType))
               values.update(id(dest), RuntimeValue.Bits(id(resultType), lanes.map(_ & mask(width))))
               execution.pc += 1
             case Some(_) => return Left(Fault.InvalidTask("OpUConvert cannot convert a pointer"))
@@ -1418,7 +1218,7 @@ private[v1_6] object VMInterpreter {
             execution.pc += 1
         }
       case Instruction.ConvertUToPtr(resultType, dest, integerValue) =>
-        (program.runtimeType(id(resultType)), values.get(id(integerValue))) match {
+        (program.layout.runtimeType(id(resultType)), values.get(id(integerValue))) match {
           case (
                 Some(RuntimeType.Pointer(_, pointee)),
                 Some(RuntimeValue.Bits(integerType, Array(rawAddress)))
@@ -1434,7 +1234,11 @@ private[v1_6] object VMInterpreter {
                 Some(RuntimeType.Pointer(storageClass, pointee)),
                 Some(RuntimeValue.Bits(integerType, Array(rawAddress)))
               ) if integerShape(program, integerType).exists(_._2 == 1) =>
-            memory.integerPointer(rawAddress & mask(scalarWidth(program, integerType)), pointee, storageClass) match {
+            memory.integerPointer(
+              rawAddress & mask(program.layout.scalarWidth(integerType)),
+              pointee,
+              storageClass
+            ) match {
               case Left(error) =>
                 return Left(
                   Fault.InvalidTask(
@@ -1517,7 +1321,7 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeInteger(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       instruction: Instruction
   ): Either[Fault, Unit] = {
     val values = execution.values
@@ -1604,7 +1408,7 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeAtomic(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       memory: MemoryState,
       instruction: Instruction
   ): Either[Fault, Unit] = {
@@ -1941,7 +1745,7 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeFloatingAndShift(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       instruction: Instruction
   ): Either[Fault, Unit] = {
     val values = execution.values
@@ -1970,7 +1774,7 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeArithmetic(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       instruction: Instruction
   ): Either[Fault, Unit] = {
     val values = execution.values
@@ -2195,7 +1999,7 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeComparison(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       instruction: Instruction
   ): Either[Fault, Unit] = {
     val values = execution.values
@@ -2259,7 +2063,7 @@ private[v1_6] object VMInterpreter {
                 Some(RuntimeValue.Bits(_, trueLanes)),
                 Some(RuntimeValue.Bits(_, falseLanes))
               ) =>
-            (booleanLanes(program, conditionType), scalarLeafCount(program, id(resultType))) match {
+            (booleanLanes(program, conditionType), program.layout.scalarLeafCount(id(resultType))) match {
               case (Some(conditionCount), Right(resultCount))
                   if trueLanes.length == resultCount && falseLanes.length == resultCount &&
                     (conditionCount == 1 || conditionCount == resultCount) =>
@@ -2308,7 +2112,7 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeCollective(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       memory: MemoryState,
       instruction: Instruction
   ): Either[Fault, Unit] = {
@@ -2783,19 +2587,19 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def executeCall(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       memory: MemoryState,
       instruction: Instruction
-  ): Either[Fault, Unit] = {
+  ): Memory.ReadResult[Unit] = {
     val values = execution.values
     instruction match {
       case Instruction.FunctionPointerCallINTEL(resultType, dest, sources) if sources.nonEmpty =>
         return values.get(id(sources.head)) match {
           case Some(RuntimeValue.Bits(_, Array(token)))
-              if (token >>> 32) == program.programId &&
+              if program.ownsFunctionPointer(token) &&
                 (token & 0xffffffffL) > 0 && (token & 0xffffffffL) <= Int.MaxValue &&
                 program.functions.contains((token & 0xffffffffL).toInt) =>
-            val called = sources.head.copy(words = NonEmptyVec(Word((token & 0xffffffffL).toInt)))
+            val called = sources.head.copy(words = Vec.nonEmpty(Word((token & 0xffffffffL).toInt)))
             executeCall(program, execution, memory, Instruction.FunctionCall(resultType, dest, called, sources.tail))
           case Some(_) => Left(Fault.InvalidTask("OpFunctionPointerCallINTEL has an invalid function pointer"))
           case None    => Left(undefined(sources.head))
@@ -2816,7 +2620,7 @@ private[v1_6] object VMInterpreter {
               s"OpFunctionCall %${id(called)} expects ${callee.parameters.size} arguments, received ${arguments.size}"
             )
           )
-        program.functionNames.get(id(called)).map(_.raw) match {
+        program.functionNames.get(id(called)) match {
           case Some("_Z12get_local_idj") =>
             scalar(values, arguments.head) match {
               case Left(error)                                           => return Left(error)
@@ -2849,7 +2653,7 @@ private[v1_6] object VMInterpreter {
               case Right(dimension) if dimension >= 0L && dimension < 3L =>
                 integerShape(program, id(resultType)) match {
                   case Some((width, 1)) =>
-                    val source = program.functionNames.get(id(called)).map(_.raw) match {
+                    val source = program.functionNames.get(id(called)) match {
                       case Some("_Z12get_group_idj")            => execution.invocation.group(dimension.toInt)
                       case Some("_Z14get_local_sizej")          => execution.invocation.workgroupSize(dimension.toInt)
                       case Some("_Z23get_enqueued_local_sizej") =>
@@ -2861,7 +2665,7 @@ private[v1_6] object VMInterpreter {
                   case _ =>
                     return Left(
                       Fault.InvalidTask(
-                        s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_.raw)} result type " +
+                        s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} result type " +
                           s"%${id(resultType)} is not an integer scalar"
                       )
                     )
@@ -2869,7 +2673,7 @@ private[v1_6] object VMInterpreter {
               case Right(dimension) =>
                 return Left(
                   Fault.InvalidTask(
-                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_.raw)} dimension $dimension is invalid"
+                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} dimension $dimension is invalid"
                   )
                 )
             }
@@ -2905,7 +2709,7 @@ private[v1_6] object VMInterpreter {
               case Right(dimension) if dimension >= 0L && dimension < 3L =>
                 integerShape(program, id(resultType)) match {
                   case Some((width, 1)) =>
-                    val source = program.functionNames.get(id(called)).map(_.raw) match {
+                    val source = program.functionNames.get(id(called)) match {
                       case Some("_Z15get_global_sizej")   => execution.invocation.globalSize(dimension.toInt)
                       case Some("_Z17get_global_offsetj") => execution.invocation.globalOffset(dimension.toInt)
                       case Some("_Z14get_num_groupsj")    => execution.invocation.numWorkgroups(dimension.toInt)
@@ -2916,14 +2720,14 @@ private[v1_6] object VMInterpreter {
                   case _ =>
                     return Left(
                       Fault.InvalidTask(
-                        s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_.raw)} result type is not an integer scalar"
+                        s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} result type is not an integer scalar"
                       )
                     )
                 }
               case Right(dimension) =>
                 return Left(
                   Fault.InvalidTask(
-                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_.raw)} dimension $dimension is invalid"
+                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} dimension $dimension is invalid"
                   )
                 )
             }
@@ -2931,7 +2735,7 @@ private[v1_6] object VMInterpreter {
               Some("_Z16get_sub_group_idv") | Some("_Z18get_num_sub_groupsv") =>
             integerShape(program, id(resultType)) match {
               case Some((width, 1)) =>
-                val source = program.functionNames.get(id(called)).map(_.raw) match {
+                val source = program.functionNames.get(id(called)) match {
                   case Some("_Z18get_sub_group_sizev")     => execution.invocation.subgroupSize.toLong
                   case Some("_Z22get_sub_group_local_idv") => execution.invocation.subgroupLocal.toLong
                   case Some("_Z16get_sub_group_idv")       => execution.invocation.subgroupIndex.toLong
@@ -2943,7 +2747,7 @@ private[v1_6] object VMInterpreter {
               case _ =>
                 return Left(
                   Fault.InvalidTask(
-                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_.raw)} result type " +
+                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} result type " +
                       s"%${id(resultType)} is not an integer scalar"
                   )
                 )
@@ -3081,7 +2885,7 @@ private[v1_6] object VMInterpreter {
               case None => return Left(undefined(arguments.head))
             }
           case Some("__to_global") =>
-            (values.get(id(arguments.head)), program.runtimeType(id(resultType))) match {
+            (values.get(id(arguments.head)), program.layout.runtimeType(id(resultType))) match {
               case (Some(RuntimeValue.Address(_, pointer)), Some(RuntimeType.Pointer(storageClass, pointee))) =>
                 values.update(
                   id(dest),
@@ -3185,7 +2989,7 @@ private[v1_6] object VMInterpreter {
               case Some(value @ RuntimeValue.Bits(sourceType, lanes))
                   if lanes.length == 1 && integerShape(program, sourceType).isDefined &&
                     integerShape(program, sourceType) == integerShape(program, id(resultType)) =>
-                val scope = program.functionNames.get(id(called)).map(_.raw) match {
+                val scope = program.functionNames.get(id(called)) match {
                   case Some("_Z28sub_group_scan_exclusive_addi") => 3
                   case _                                         => 2
                 }
@@ -3288,7 +3092,7 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def executeBranch(
       program: Program,
-      execution: InvocationExecution,
+      execution: InvocationState,
       instruction: Instruction
   ): Either[Fault, Unit] = {
     val values = execution.values
@@ -3317,15 +3121,15 @@ private[v1_6] object VMInterpreter {
             var index  = 0
             while (index < targets.size) {
               val pair    = targets(index)
-              val literal = pair.words.toVec match {
+              val literal = pair.words match {
                 case Vec(low, _) =>
-                  if (pair.kind.raw != "PairLiteralIntegerIdRef")
+                  if (pair.kind != "PairLiteralIntegerIdRef")
                     return Left(Fault.InvalidTask("OpSwitch target is not a literal/label pair"))
-                  low.toUnsigned.raw
+                  low.toUnsigned.toLong
                 case Vec(low, high, _) =>
-                  if (pair.kind.raw != "PairLiteralIntegerIdRef")
+                  if (pair.kind != "PairLiteralIntegerIdRef")
                     return Left(Fault.InvalidTask("OpSwitch target is not a literal/label pair"))
-                  low.toUnsigned.raw | (high.toUnsigned.raw << 32)
+                  low.toUnsigned.toLong | (high.toUnsigned.toLong << 32)
                 case _ =>
                   return Left(Fault.InvalidTask("OpSwitch has an incomplete literal/label pair"))
               }
@@ -3333,7 +3137,7 @@ private[v1_6] object VMInterpreter {
                 return Left(Fault.InvalidTask("OpSwitch has an incomplete literal/label pair"))
               val label = pair.words.last
               if (literal == value)
-                target = Operand(NonEmptyString("IdRef"), Vec.nonEmpty(label))
+                target = Operand("IdRef", Vec.nonEmpty(label))
               index += 1
             }
             execution.predecessor = execution.currentLabel
@@ -3358,9 +3162,9 @@ private[v1_6] object VMInterpreter {
         }
       case Instruction.Return() => execution.calls.removeLastOption() match {
           case None =>
-            execution.completed = true
+            execution.complete()
             return Right(())
-          case Some(frame) => program.runtimeType(frame.resultType) match {
+          case Some(frame) => program.layout.runtimeType(frame.resultType) match {
               case Some(RuntimeType.Void) =>
                 execution.currentFunction = frame.function
                 execution.pc = frame.pc
@@ -3383,7 +3187,7 @@ private[v1_6] object VMInterpreter {
   }
 
   private def suspend(
-      execution: InvocationExecution,
+      execution: InvocationState,
       function: Function,
       pc: Int,
       currentLabel: Int,
@@ -3396,7 +3200,7 @@ private[v1_6] object VMInterpreter {
     execution.currentLabel = currentLabel
     execution.predecessor = predecessor
     execution.instructionCount = instructionCount
-    execution.suspended = Some(request)
+    execution.suspend(request)
   }
 
   // Workgroup progress mutates invocation machines in place and stops at the first fault or deadlock.
@@ -3408,10 +3212,10 @@ private[v1_6] object VMInterpreter {
   )
   private def runWorkgroup(
       program: Program,
-      executions: mutable.ArrayBuffer[InvocationExecution],
+      executions: mutable.ArrayBuffer[InvocationState],
       memory: MemoryState,
       control: TaskControl,
-      metrics: Performance.Metrics
+      metrics: VMMetrics
   ): Either[Fault, Unit] = {
     while (executions.exists(!_.completed)) {
       var index = 0
@@ -3428,7 +3232,7 @@ private[v1_6] object VMInterpreter {
       if (hadPendingMemory) {
         memory.flushHostReads() match {
           case Left(error) => return Left(error)
-          case Right(())   => executions.foreach(_.memoryPending = false)
+          case Right(())   => executions.foreach(_.memoryReady())
         }
       }
       resolveCollectives(program, executions) match {
@@ -3439,9 +3243,9 @@ private[v1_6] object VMInterpreter {
             .map(execution =>
               execution.suspended match {
                 case Some(request) =>
-                  s"local=${execution.invocation.local.mkString("(", ",", ")")}:" +
+                  s"local=${execution.invocation.localVector.mkString("(", ",", ")")}:" +
                     s"${request.kind}@%${request.function}:${request.pc}/scope=${request.scope}"
-                case None => s"local=${execution.invocation.local.mkString("(", ",", ")")}:running"
+                case None => s"local=${execution.invocation.localVector.mkString("(", ",", ")")}:running"
               }
             )
             .take(8)
@@ -3466,7 +3270,7 @@ private[v1_6] object VMInterpreter {
   )
   private def resolveCollectives(
       program: Program,
-      executions: mutable.ArrayBuffer[InvocationExecution]
+      executions: mutable.ArrayBuffer[InvocationState]
   ): Either[Fault, Int] = {
     var resolved  = 0
     val subgroups = executions.view.map(_.invocation.subgroupIndex).toSet.toArray.sorted
@@ -3519,15 +3323,15 @@ private[v1_6] object VMInterpreter {
             ) =>
           leftMemoryScope == rightMemoryScope && leftSemantics == rightSemantics
         case (
-              CollectivePayload.ShuffleUp(leftType, _, _, _, leftDelta),
-              CollectivePayload.ShuffleUp(rightType, _, _, _, rightDelta)
+              CollectivePayload.ShuffleUp(leftType, _, _, _, _),
+              CollectivePayload.ShuffleUp(rightType, _, _, _, _)
             ) =>
-          leftType == rightType && leftDelta == rightDelta
+          leftType == rightType
         case (
-              CollectivePayload.ShuffleDown(leftType, _, _, _, leftDelta),
-              CollectivePayload.ShuffleDown(rightType, _, _, _, rightDelta)
+              CollectivePayload.ShuffleDown(leftType, _, _, _, _),
+              CollectivePayload.ShuffleDown(rightType, _, _, _, _)
             ) =>
-          leftType == rightType && leftDelta == rightDelta
+          leftType == rightType
         case _ => false
       })
 
@@ -3535,7 +3339,7 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def resolveCollective(
       program: Program,
-      participants: Vec[InvocationExecution],
+      participants: Vec[InvocationState],
       expected: CollectiveRequest
   ): Either[Fault, Unit] = {
     val requests = participants.map(_.suspended.get)
@@ -3562,7 +3366,7 @@ private[v1_6] object VMInterpreter {
         participants.foreach { execution =>
           val request = execution.suspended.get
           execution.pc = request.pc + 1
-          execution.suspended = None
+          execution.resume()
         }
         Right(())
       case CollectivePayload.Shuffle(resultType, _, _, _) =>
@@ -3607,12 +3411,12 @@ private[v1_6] object VMInterpreter {
                   case _ => ()
                 }
                 execution.pc = execution.suspended.get.pc + 1
-                execution.suspended = None
+                execution.resume()
               }
               Right(())
           }
         }
-      case CollectivePayload.ShuffleUp(resultType, _, _, _, delta) =>
+      case CollectivePayload.ShuffleUp(resultType, _, _, _, _) =>
         val shuffleRequests = requests.collect {
           case CollectiveRequest(
                 _,
@@ -3622,8 +3426,8 @@ private[v1_6] object VMInterpreter {
                 CollectivePayload.ShuffleUp(_, destination, previous, current, requestDelta),
                 _,
                 _
-              ) if requestDelta == delta =>
-            (destination, previous, current)
+              ) =>
+            (destination, previous, current, requestDelta)
         }
         if (shuffleRequests.size != requests.size)
           Left(Fault.InvalidTask(
@@ -3632,7 +3436,7 @@ private[v1_6] object VMInterpreter {
         else {
           val results =
             participants.zip(shuffleRequests).foldLeft[Either[Fault, Vec[RuntimeValue]]](Right(Vec.empty)) {
-              case (Right(existing), (execution, _)) =>
+              case (Right(existing), (execution, (_, _, _, delta))) =>
                 val unwrappedSource = execution.invocation.subgroupLocal.toLong - delta
                 val usePrevious     = unwrappedSource < 0L
                 val sourceLocal     =
@@ -3673,12 +3477,12 @@ private[v1_6] object VMInterpreter {
                   case _ => ()
                 }
                 execution.pc = request.pc + 1
-                execution.suspended = None
+                execution.resume()
               }
               Right(())
           }
         }
-      case CollectivePayload.ShuffleDown(resultType, _, _, _, delta) =>
+      case CollectivePayload.ShuffleDown(resultType, _, _, _, _) =>
         val shuffleRequests = requests.collect {
           case CollectiveRequest(
                 _,
@@ -3688,8 +3492,8 @@ private[v1_6] object VMInterpreter {
                 CollectivePayload.ShuffleDown(_, destination, current, next, requestDelta),
                 _,
                 _
-              ) if requestDelta == delta =>
-            (destination, current, next)
+              ) =>
+            (destination, current, next, requestDelta)
         }
         if (shuffleRequests.size != requests.size)
           Left(Fault.InvalidTask(
@@ -3698,7 +3502,7 @@ private[v1_6] object VMInterpreter {
         else {
           val results =
             participants.zip(shuffleRequests).foldLeft[Either[Fault, Vec[RuntimeValue]]](Right(Vec.empty)) {
-              case (Right(existing), (execution, _)) =>
+              case (Right(existing), (execution, (_, _, _, delta))) =>
                 val unwrappedSource = execution.invocation.subgroupLocal.toLong + delta
                 val useNext         = unwrappedSource >= execution.invocation.subgroupSize.toLong
                 val sourceLocal = if (useNext) unwrappedSource - execution.invocation.subgroupSize else unwrappedSource
@@ -3734,7 +3538,7 @@ private[v1_6] object VMInterpreter {
                   case _ => ()
                 }
                 execution.pc = execution.suspended.get.pc + 1
-                execution.suspended = None
+                execution.resume()
               }
               Right(())
           }
@@ -3772,7 +3576,7 @@ private[v1_6] object VMInterpreter {
                   )
                 )
               else {
-                val width: IntBetween[1, 64] = integerShape(program, resultType).map(_._1).getOrElse(64)
+                val width: Int where Between[1, 64] = integerShape(program, resultType).map(_._1).getOrElse(64)
                 val signed  = expected.kind == CollectiveKind.SignedMin || expected.kind == CollectiveKind.SignedMax
                 val maximum = expected.kind == CollectiveKind.UnsignedMax || expected.kind == CollectiveKind.SignedMax
                 def extremum(left: Long, right: Long): Long = {
@@ -3804,7 +3608,7 @@ private[v1_6] object VMInterpreter {
                   "OpGroupIAdd participants do not all provide integer values"
                 ))
               else {
-                val width: IntBetween[1, 64] = integerShape(program, resultType).map(_._1).getOrElse(64)
+                val width: Int where Between[1, 64] = integerShape(program, resultType).map(_._1).getOrElse(64)
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.foldLeft(0L)((sum, input) => (sum + input(lane)) & mask(width))
@@ -3821,7 +3625,7 @@ private[v1_6] object VMInterpreter {
                   "OpGroupIMulKHR participants do not all provide integer values"
                 ))
               else {
-                val width: IntBetween[1, 64] = integerShape(program, resultType).map(_._1).getOrElse(64)
+                val width: Int where Between[1, 64] = integerShape(program, resultType).map(_._1).getOrElse(64)
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.foldLeft(1L)((product, input) => (product * input(lane)) & mask(width))
@@ -3838,7 +3642,7 @@ private[v1_6] object VMInterpreter {
                   "OpGroupFAdd participants do not all provide floating values"
                 ))
               else {
-                val width = floatingShape(program, resultType).map(_._1).getOrElse(OneOf.unsafe[(16, 32, 64)](64))
+                val width: OneOf[(16, 32, 64)] = floatingShape(program, resultType).map(_._1).getOrElse(64)
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.foldLeft(0L)((sum, input) => floatingAddBits(width, sum, input(lane)))
@@ -3855,8 +3659,8 @@ private[v1_6] object VMInterpreter {
                   s"${expected.kind} participants do not all provide values"
                 ))
               else {
-                val width   = floatingShape(program, resultType).map(_._1).getOrElse(OneOf.unsafe[(16, 32, 64)](64))
-                val maximum = expected.kind == CollectiveKind.FloatingMax
+                val width: OneOf[(16, 32, 64)]              = floatingShape(program, resultType).map(_._1).getOrElse(64)
+                val maximum                                 = expected.kind == CollectiveKind.FloatingMax
                 def extremum(left: Long, right: Long): Long =
                   if (maximum) floatingMaximumBits(width, left, right)
                   else floatingMinimumBits(width, left, right)
@@ -3877,8 +3681,8 @@ private[v1_6] object VMInterpreter {
                   "OpGroupFMulKHR participants do not all provide floating values"
                 ))
               else {
-                val width    = floatingShape(program, resultType).map(_._1).getOrElse(OneOf.unsafe[(16, 32, 64)](64))
-                val identity = floatingOneBits(width)
+                val width: OneOf[(16, 32, 64)] = floatingShape(program, resultType).map(_._1).getOrElse(64)
+                val identity                   = floatingOneBits(width)
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.foldLeft(identity) { (product, input) =>
@@ -3947,7 +3751,7 @@ private[v1_6] object VMInterpreter {
                   case CollectivePayload.ShuffleDown(_, _, _, _, _) => ()
                 }
                 execution.pc = request.pc + 1
-                execution.suspended = None
+                execution.resume()
               }
               Right(())
           }
@@ -4036,7 +3840,7 @@ private[v1_6] object VMInterpreter {
       program: Program,
       values: InvocationValues,
       memory: MemoryState,
-      invocation: Invocation,
+      invocation: InvocationBuiltins,
       resultType: Operand,
       resultDestination: Operand,
       executionScope: Operand,
@@ -4044,7 +3848,7 @@ private[v1_6] object VMInterpreter {
       sourceId: Operand,
       numElements: Operand,
       stride: Operand
-  ): Either[Fault, Unit] =
+  ): Memory.ReadResult[Unit] =
     for {
       scope       <- scalar(values, executionScope)
       destination <- address(values, destinationId)
@@ -4072,7 +3876,7 @@ private[v1_6] object VMInterpreter {
         )
       )
       _ <- {
-        val elementSize = typeSize(program, destination.pointee)
+        val elementSize = program.layout.typeSize(destination.pointee)
         if (elementSize <= 0)
           Left(Fault.InvalidTask("OpGroupAsyncCopy element type has no data size"))
         else if (invocation.localX != 0L || invocation.localY != 0L || invocation.localZ != 0L) {
@@ -4087,7 +3891,7 @@ private[v1_6] object VMInterpreter {
                 val sourceSpan =
                   if (count == 0L) 0
                   else Math.toIntExact(Math.addExact(Math.multiplyExact(count - 1L, strideBytes), elementSize.toLong))
-                memory.read(source, NonNegative.unsafe(sourceSpan)).map { strided =>
+                memory.read(source, sourceSpan.unsafe[Int >= 0]).map { strided =>
                   if (strideValue == 1L) strided
                   else {
                     val packed = Array.ofDim[Byte](packedBytes)
@@ -4105,7 +3909,7 @@ private[v1_6] object VMInterpreter {
                     packed
                   }
                 }
-              } else memory.read(source, NonNegative.unsafe(packedBytes))
+              } else memory.read(source, packedBytes.unsafe[Int >= 0])
             sourceBytes.flatMap { packed =>
               if (destination.storageClass == 5 && strideValue != 1L) {
                 @tailrec
@@ -4608,7 +4412,7 @@ private[v1_6] object VMInterpreter {
           if sourceType == id(resultType) && integerShape(program, localIdType).exists { case (_, count) =>
             count == lanes.length && Vec(1, 3).contains(count)
           } =>
-        val width: IntBetween[1, 64] = integerShape(program, localIdType).map(_._1).getOrElse(64)
+        val width: Int where Between[1, 64] = integerShape(program, localIdType).map(_._1).getOrElse(64)
         Right(
           CollectiveRequest(
             CollectiveKind.Broadcast,
@@ -4644,10 +4448,10 @@ private[v1_6] object VMInterpreter {
       argumentIndex: Int,
       memory: MemoryState
   ): Either[Fault, RuntimeValue] =
-    program.runtimeType(parameterType) match {
+    program.layout.runtimeType(parameterType) match {
       case Some(RuntimeType.Pointer(storageClass, pointee)) => argument match {
           case KernelTask.Argument.Memory(allocation, offset) =>
-            pointerLeafOffsets(program, pointee, 0L) match {
+            program.layout.pointerLeafOffsets(pointee, 0L) match {
               case Right(leaves) if leaves.isEmpty =>
                 Right(RuntimeValue.Address(
                   parameterType,
@@ -4666,7 +4470,7 @@ private[v1_6] object VMInterpreter {
             }
           case KernelTask.Argument.Scalar(bytes)
               if !byValue && bytes.toArray.forall(_ == 0) &&
-                !program.runtimeType(pointee).exists {
+                !program.layout.runtimeType(pointee).exists {
                   case RuntimeType.Structure(_) | RuntimeType.Array(_, _) => true
                   case _                                                  => false
                 } =>
@@ -4675,8 +4479,8 @@ private[v1_6] object VMInterpreter {
               // A ByVal aggregate can contain a pointer in opaque byte-array storage at offset zero.
               // That relocation belongs inside the private copy, not to the parameter pointer itself.
               if !byValue && memory.argumentRelocation(argumentIndex, 0L).isDefined &&
-                (pointerLeafOffsets(program, pointee, 0L).toOption.exists(_.isEmpty) ||
-                  typeSize(program, pointee) > bytes.size) =>
+                (program.layout.pointerLeafOffsets(pointee, 0L).toOption.exists(_.isEmpty) ||
+                  program.layout.typeSize(pointee) > bytes.size) =>
             memory.argumentRelocation(argumentIndex, 0L) match {
               case Some((target, targetOffset)) =>
                 Right(
@@ -4690,7 +4494,7 @@ private[v1_6] object VMInterpreter {
           case KernelTask.Argument.Scalar(bytes)
               if !byValue && bytes.size == 8 && (storageClass == 5 || storageClass == 8) =>
             memory.integerPointer(
-              LittleEndian.decode(bytes, 0, 8.scalarByteWidth),
+              LittleEndian.decode(bytes, 0, 8),
               pointee,
               storageClass
             )
@@ -4699,13 +4503,13 @@ private[v1_6] object VMInterpreter {
             memory.relocateArgument(argumentIndex, bytes) match {
               case Left(error)      => Left(error)
               case Right(relocated) =>
-                val size   = math.max(typeSize(program, pointee), relocated.length)
+                val size   = math.max(program.layout.typeSize(pointee), relocated.length)
                 val buffer = Array.ofDim[Byte](size)
                 Array.copy(relocated, 0, buffer, 0, relocated.length)
                 val slots = mutable.LongMap.empty[(Int, Pointer)]
-                pointerLeafOffsets(program, pointee, 0L) match {
+                program.layout.pointerLeafOffsets(pointee, 0L) match {
                   case Right(leaves) => leaves.foreach { case (offset, pointerType) =>
-                      program.runtimeType(pointerType) match {
+                      program.layout.runtimeType(pointerType) match {
                         case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
                           memory.argumentRelocation(argumentIndex, offset).foreach { (target, targetOffset) =>
                             val pointer = Pointer(Region.External(target), targetOffset, pointerPointee, pointerStorage)
@@ -4733,7 +4537,7 @@ private[v1_6] object VMInterpreter {
         }
       case Some(_) => argument match {
           case KernelTask.Argument.Scalar(bytes) =>
-            memory.relocateArgument(argumentIndex, bytes).flatMap(decoded => decode(program, parameterType, decoded))
+            memory.relocateArgument(argumentIndex, bytes).flatMap(decoded => program.decode(parameterType, decoded))
           case value => value match {
               case KernelTask.Argument.Local(size) =>
                 // Some DPC++ Level Zero kernels lower a local pointer parameter to a
@@ -4761,16 +4565,16 @@ private[v1_6] object VMInterpreter {
       parameterType: Int,
       storageClass: Int,
       pointee: Int,
-      allocation: MemoryRegion,
+      allocation: AllocationId,
       allocationOffset: Long,
       memory: MemoryState
   ): Either[Fault, RuntimeValue] =
-    pointerLeafOffsets(program, pointee, 0L) match {
+    program.layout.pointerLeafOffsets(pointee, 0L) match {
       case Left(error)   => Left(error)
       case Right(leaves) =>
         val slots = mutable.LongMap.empty[(Int, Pointer)]
         leaves.foreach { case (slotOffset, pointerType) =>
-          program.runtimeType(pointerType) match {
+          program.layout.runtimeType(pointerType) match {
             case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
               // Missing relocation metadata says nothing about the stored pointer.
               // Leave the slot absent so loadPointer reads the registered native bytes.
@@ -4795,53 +4599,20 @@ private[v1_6] object VMInterpreter {
         )
     }
 
-  private[v1_6] def pointerLeafOffsetsForTest(
+  def pointerLeafOffsetsForTest(
       module: Module,
       typeId: Int
   ): Either[Fault, Vec[(Long, Int)]] =
     VMCompiler.compileUnchecked(module)
-      .map(VMLoadedProgram(_))
-      .flatMap(program => pointerLeafOffsets(program, typeId, 0L))
-
-  private def pointerLeafOffsets(
-      program: Program,
-      typeId: Int,
-      baseOffset: Long
-  ): Either[Fault, Vec[(Long, Int)]] = program.runtimeType(typeId) match {
-    case Some(RuntimeType.Pointer(_, _))      => Right(Vec(baseOffset -> typeId))
-    case Some(RuntimeType.Structure(members)) =>
-      members.zipWithIndex.foldLeft[Either[Fault, Vec[(Long, Int)]]](Right(Vec.empty)) {
-        case (result, (member, index)) =>
-          result.flatMap(existing =>
-            pointerLeafOffsets(program, member, baseOffset + structMemberOffset(program, typeId, members, index)).map(
-              existing ++ _
-            )
-          )
-      }
-    case Some(RuntimeType.Array(element, count)) =>
-      if (count < 0L || count > Int.MaxValue.toLong)
-        Left(Fault.InvalidTask(
-          s"SPIR-V aggregate pointer array type %$typeId has invalid size $count"
-        ))
-      else
-        (0 until count.toInt).foldLeft[Either[Fault, Vec[(Long, Int)]]](Right(Vec.empty)) {
-          case (result, index) =>
-            result.flatMap { existing =>
-              val stride = program.arrayStrides.getOrElse(typeId, typeSize(program, element))
-              pointerLeafOffsets(program, element, baseOffset + index.toLong * stride).map(existing ++ _)
-            }
-        }
-    case Some(_) => Right(Vec.empty)
-    case None    =>
-      Left(Fault.InvalidTask(s"SPIR-V aggregate member type %$typeId is undefined"))
-  }
+      .map(VMProgramRuntime(_))
+      .flatMap(program => program.layout.pointerLeafOffsets(typeId, 0L))
 
   private def loadPointer(
       program: Program,
       memory: MemoryState,
       source: Pointer,
       resultType: Int
-  ): Either[Fault, RuntimeValue] = program.runtimeType(resultType) match {
+  ): Memory.ReadResult[RuntimeValue] = program.layout.runtimeType(resultType) match {
     case Some(RuntimeType.Pointer(resultStorage, resultPointee)) =>
       val stored = if (memory.nativePointerStorage(source)) None
       else source.slots.flatMap(_.get(source.offset)).orElse(
@@ -4854,7 +4625,7 @@ private[v1_6] object VMInterpreter {
             .map(resultType -> _)
       }
       resolved.flatMap { case (slotType, pointer) =>
-        program.runtimeType(slotType) match {
+        program.layout.runtimeType(slotType) match {
           case Some(RuntimeType.Pointer(slotStorage, _))
               if pointer.region == Region.Null ||
                 ((slotStorage == 8 || pointer.storageClass == slotStorage) &&
@@ -4871,7 +4642,7 @@ private[v1_6] object VMInterpreter {
             Left(
               Fault.InvalidTask(
                 s"SPIR-V pointer slot at byte ${source.offset} has type %$slotType ($value), " +
-                  s"expected %$resultType (${program.runtimeType(resultType)}), " +
+                  s"expected %$resultType (${program.layout.runtimeType(resultType)}), " +
                   s"base pointee %${source.pointee}, storage ${source.storageClass}, " +
                   s"slots ${source.slots.map(slots => Vec.from(slots.keys).sorted.mkString("[", ",", "]")).getOrElse("none")}"
               )
@@ -4892,7 +4663,7 @@ private[v1_6] object VMInterpreter {
       sourceType: Int,
       source: Pointer
   ): Either[Fault, Unit] =
-    (program.runtimeType(target.pointee), program.runtimeType(sourceType)) match {
+    (program.layout.runtimeType(target.pointee), program.layout.runtimeType(sourceType)) match {
       case (
             Some(RuntimeType.Pointer(targetStorage, targetPointee)),
             Some(RuntimeType.Pointer(sourceStorage, sourcePointee))
@@ -4925,55 +4696,6 @@ private[v1_6] object VMInterpreter {
         )
     }
 
-  // Global initialization exits before publishing a partially materialized image.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
-  private def materializeGlobals(
-      program: Program,
-      includeStorageClass: Int => Boolean,
-      useBindings: Boolean = true
-  ): Either[Fault, Map[Int, RuntimeValue]] = {
-    val values      = Map.newBuilder[Int, RuntimeValue]
-    val globals     = program.globals.view.toVector
-    var globalIndex = 0
-    while (globalIndex < globals.size) {
-      val (variable, global) = globals(globalIndex)
-      if (!program.builtins.contains(variable) && includeStorageClass(global.storageClass)) {
-        val pointee = pointerPointee(program, global.pointerType)
-        val bytes   = global.initializer match {
-          case None              => Array.ofDim[Byte](typeSize(program, pointee))
-          case Some(initializer) => program.constants.get(initializer) match {
-              case None =>
-                return Left(
-                  Fault.InvalidTask(
-                    s"SPIR-V global variable %$variable has undefined initializer %$initializer"
-                  )
-                )
-              case Some(value) =>
-                val encoded = encode(program, value) match {
-                  case Left(error) => return Left(error)
-                  case Right(data) => data
-                }
-                if (encoded.length != typeSize(program, pointee))
-                  return Left(
-                    Fault.InvalidTask(
-                      s"SPIR-V global variable %$variable initializer has ${encoded.length} bytes, " +
-                        s"expected ${typeSize(program, pointee)}"
-                    )
-                  )
-                encoded
-            }
-        }
-        val pointer = (if (useBindings) program.boundGlobals.get(variable) else None) match {
-          case Some(binding) => Pointer(Region.External(binding.region), binding.offset, pointee, global.storageClass)
-          case None          => Pointer(Region.Internal(InternalMemory(bytes)), 0L, pointee, global.storageClass)
-        }
-        values += variable -> RuntimeValue.Address(global.pointerType, pointer)
-      }
-      globalIndex += 1
-    }
-    Right(values.result())
-  }
-
   // Access-chain layout walks nested types with a cursor and fails at the first invalid index.
   @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def accessChain(
@@ -4993,7 +4715,7 @@ private[v1_6] object VMInterpreter {
     val initial = element match {
       case Some(value) =>
         scalar(values, value).map(index =>
-          (memory.elementOffset(source, index, typeSize(program, source.pointee)), source.pointee)
+          (memory.elementOffset(source, index, program.layout.typeSize(source.pointee)), source.pointee)
         )
       case None => Right((source.offset, source.pointee))
     }
@@ -5009,19 +4731,19 @@ private[v1_6] object VMInterpreter {
         case Left(error)  => return Left(error)
         case Right(value) => value
       }
-      program.runtimeType(typeId) match {
+      program.layout.runtimeType(typeId) match {
         case Some(RuntimeType.Structure(members)) =>
           if (index < 0L || index >= members.size.toLong)
             return Left(
               Fault.InvalidTask(s"structure member index $index is out of range")
             )
-          offset += structMemberOffset(program, typeId, members, index.toInt)
+          offset += program.layout.structMemberOffset(typeId, members, index.toInt)
           typeId = members(index.toInt)
         case Some(RuntimeType.Array(member, _)) =>
-          offset += index * program.arrayStrides.getOrElse(typeId, typeSize(program, member))
+          offset += index * program.arrayStrides.getOrElse(typeId, program.layout.typeSize(member))
           typeId = member
         case Some(RuntimeType.VectorType(component, _)) =>
-          offset += index * typeSize(program, component)
+          offset += index * program.layout.typeSize(component)
           typeId = component
         case Some(value) =>
           return Left(Fault.InvalidTask(s"cannot index through SPIR-V type $value"))
@@ -5031,7 +4753,7 @@ private[v1_6] object VMInterpreter {
       position += 1
     }
     val outputType = id(resultType)
-    val pointee    = pointerPointee(program, outputType)
+    val pointee    = program.layout.pointerPointee(outputType)
     values.update(
       id(destination),
       RuntimeValue.Address(outputType, Pointer(source.region, offset, pointee, source.storageClass, source.slots))
@@ -5047,12 +4769,12 @@ private[v1_6] object VMInterpreter {
       source: Operand
   ): Either[Fault, Unit] = {
     val outputType = id(resultType)
-    (program.runtimeType(outputType), values.get(id(source))) match {
+    (program.layout.runtimeType(outputType), values.get(id(source))) match {
       case (
             Some(RuntimeType.Pointer(targetStorage, targetPointee)),
             Some(RuntimeValue.Address(sourceType, pointer))
           ) if Vec(4, 5, 7).contains(targetStorage) =>
-        program.runtimeType(sourceType) match {
+        program.layout.runtimeType(sourceType) match {
           case Some(RuntimeType.Pointer(8, sourcePointee))
               if sourcePointee == targetPointee && pointer.pointee == targetPointee =>
             val converted = pointer.region match {
@@ -5096,12 +4818,12 @@ private[v1_6] object VMInterpreter {
   ): Either[Fault, Unit] = {
     val outputType    = id(resultType)
     val targetStorage = id(storage)
-    (program.runtimeType(outputType), values.get(id(source))) match {
+    (program.layout.runtimeType(outputType), values.get(id(source))) match {
       case (
             Some(RuntimeType.Pointer(resultStorage, targetPointee)),
             Some(RuntimeValue.Address(sourceType, pointer))
           ) if resultStorage == targetStorage && Vec(4, 5, 7).contains(targetStorage) =>
-        program.runtimeType(sourceType) match {
+        program.layout.runtimeType(sourceType) match {
           case Some(RuntimeType.Pointer(8, sourcePointee))
               if sourcePointee == targetPointee && pointer.pointee == targetPointee =>
             val converted =
@@ -5147,15 +4869,15 @@ private[v1_6] object VMInterpreter {
     var index   = 0
     while (index < indexes.size) {
       val selected = unsigned(indexes(index))
-      program.runtimeType(current) match {
+      program.layout.runtimeType(current) match {
         case Some(RuntimeType.VectorType(component, count)) if selected < count.toLong =>
-          scalarLeafCount(program, component) match {
+          program.layout.scalarLeafCount(component) match {
             case Left(error)   => return Left(error)
             case Right(leaves) => offset += Math.toIntExact(selected * leaves.toLong)
           }
           current = component
         case Some(RuntimeType.Array(element, count)) if selected < count =>
-          scalarLeafCount(program, element) match {
+          program.layout.scalarLeafCount(element) match {
             case Left(error)   => return Left(error)
             case Right(leaves) => offset += Math.toIntExact(selected * leaves.toLong)
           }
@@ -5163,7 +4885,7 @@ private[v1_6] object VMInterpreter {
         case Some(RuntimeType.Structure(members)) if selected < members.size.toLong =>
           var member = 0
           while (member < selected.toInt) {
-            scalarLeafCount(program, members(member)) match {
+            program.layout.scalarLeafCount(members(member)) match {
               case Left(error)   => return Left(error)
               case Right(leaves) => offset = Math.addExact(offset, leaves)
             }
@@ -5181,7 +4903,7 @@ private[v1_6] object VMInterpreter {
       }
       index += 1
     }
-    scalarLeafCount(program, current).map(leaves => offset -> leaves)
+    program.layout.scalarLeafCount(current).map(leaves => offset -> leaves)
   }
 
   private def compositeExtract(
@@ -5240,7 +4962,7 @@ private[v1_6] object VMInterpreter {
     }
 
   private def nextBinary16(bits: Binary16, upward: Boolean): Binary16 = {
-    val value  = bits.raw.toInt
+    val value  = bits.toInt
     val result = if ((value & 0x7fff) > 0x7c00) value.toLong
     else if (upward) {
       if (value == 0x7c00) value.toLong
@@ -5256,26 +4978,19 @@ private[v1_6] object VMInterpreter {
   }
 
   private def doubleToBinary16(value: Double, mode: Int): Binary16 = {
-    val approximate = IEEE754.doubleToBinary16(value)
-    if (value.isNaN || value.isInfinite) approximate
+    val nearest = IEEE754.doubleToBinary16(value)
+    // The core conversion already rounds to nearest even, including overflow.
+    // Directed modes only need to move to an adjacent representable value when
+    // the nearest result lies on the wrong side of the original value.
+    if (value.isNaN || value.isInfinite) nearest
     else {
-      val approximateValue = IEEE754.binary16ToFloat(approximate).toDouble
-      if (approximateValue == value) approximate
-      else {
-        val (lower, upper) =
-          if (approximateValue < value) approximate      -> nextBinary16(approximate, upward = true)
-          else nextBinary16(approximate, upward = false) -> approximate
-        mode match {
-          case 1 => if (value < 0.0) upper else lower
-          case 2 => upper
-          case 3 => lower
-          case _ =>
-            val lowerDistance = value - IEEE754.binary16ToFloat(lower).toDouble
-            val upperDistance = IEEE754.binary16ToFloat(upper).toDouble - value
-            if (lowerDistance < upperDistance) lower
-            else if (upperDistance < lowerDistance) upper
-            else if ((lower.raw & 1L) == 0L) lower else upper
-        }
+      val rounded = IEEE754.binary16ToFloat(nearest).toDouble
+      mode match {
+        case FPRoundingMode.RTZ if value > 0.0 && rounded > value => nextBinary16(nearest, upward = false)
+        case FPRoundingMode.RTZ if value < 0.0 && rounded < value => nextBinary16(nearest, upward = true)
+        case FPRoundingMode.RTP if rounded < value                => nextBinary16(nearest, upward = true)
+        case FPRoundingMode.RTN if rounded > value                => nextBinary16(nearest, upward = false)
+        case _                                                    => nearest
       }
     }
   }
@@ -5290,7 +5005,7 @@ private[v1_6] object VMInterpreter {
       destination: Operand,
       sources: Vec[Operand],
       aligned: Boolean
-  ): Either[Fault, Unit] = {
+  ): Memory.ReadResult[Unit] = {
     val vector = sources.size == 3
     if ((!vector && sources.size != 2) || (vector && sources.size != 3))
       return Left(Fault.InvalidTask("OpenCL.std half load has an invalid operand count"))
@@ -5308,7 +5023,7 @@ private[v1_6] object VMInterpreter {
           ) match {
             case Left(error) => return Left(error)
             case Right(half) =>
-              result(lane) = IEEE754.floatToBinary32(IEEE754.binary16ToFloat(Binary16.low(half))).raw
+              result(lane) = IEEE754.floatToBinary32(IEEE754.binary16ToFloat(Binary16.low(half))).toLong
           }
           lane += 1
         }
@@ -5347,7 +5062,7 @@ private[v1_6] object VMInterpreter {
               val source = floatingToDouble(width, lanes(lane))
               memory.writeScalar(
                 pointer.copy(offset = Math.addExact(base, lane.toLong * 2L)),
-                doubleToBinary16(source, mode).raw,
+                doubleToBinary16(source, mode).toLong,
                 2
               ) match {
                 case Left(error) => return Left(error)
@@ -5375,18 +5090,18 @@ private[v1_6] object VMInterpreter {
       resultType: Operand,
       destination: Operand,
       sources: Vec[Operand]
-  ): Either[Fault, Unit] =
+  ): Memory.ReadResult[Unit] =
     if (sources.size != 3)
       Left(Fault.InvalidTask(
         s"OpenCL.std vloadn expects 3 operands, received ${sources.size}"
       ))
     else
-      (program.runtimeType(id(resultType)), scalar(values, sources(0)), address(values, sources(1))) match {
+      (program.layout.runtimeType(id(resultType)), scalar(values, sources(0)), address(values, sources(1))) match {
         case (_, Left(error), _) => Left(error)
         case (_, _, Left(error)) => Left(error)
         case (Some(RuntimeType.VectorType(component, count)), Right(offset), Right(pointer))
             if unsigned(sources(2)) == count.toLong =>
-          val elementSize = scalarMemoryWidth(program, component) match {
+          val elementSize = program.layout.scalarMemoryWidth(component) match {
             case Left(error) => return Left(error)
             case Right(size) => size
           }
@@ -5441,9 +5156,9 @@ private[v1_6] object VMInterpreter {
     else
       (values.get(id(source)), scalar(values, sources(0)), address(values, sources(1))) match {
         case (Some(RuntimeValue.Bits(sourceType, lanes)), Right(offset), Right(pointer)) =>
-          program.runtimeType(sourceType) match {
+          program.layout.runtimeType(sourceType) match {
             case Some(RuntimeType.VectorType(component, count)) if lanes.length == count =>
-              val elementSize = scalarMemoryWidth(program, component) match {
+              val elementSize = program.layout.scalarMemoryWidth(component) match {
                 case Left(error) => return Left(error)
                 case Right(size) => size
               }
@@ -5504,14 +5219,14 @@ private[v1_6] object VMInterpreter {
                       IEEE754.binary16ToFloat(Binary16.low(leftLanes(index))),
                       IEEE754.binary16ToFloat(Binary16.low(rightLanes(index)))
                     )
-                  ).raw
+                  ).toLong
                 case 32 =>
                   IEEE754.floatToBinary32(
                     Math.nextAfter(
                       IEEE754.binary32ToFloat(Binary32.low(leftLanes(index))),
                       IEEE754.binary32ToFloat(Binary32.low(rightLanes(index)))
                     )
-                  ).raw
+                  ).toLong
                 case 64 =>
                   IEEE754.doubleToBinary64(
                     Math.nextAfter(
@@ -5684,7 +5399,7 @@ private[v1_6] object VMInterpreter {
       resultType: Operand,
       destination: Operand,
       sources: Vec[Operand]
-  ): Either[Fault, Unit] = {
+  ): Memory.ReadResult[Unit] = {
     if (sources.isEmpty)
       return Left(Fault.InvalidTask("OpenCL.std printf requires a format string"))
     val format = values.get(id(sources.head)) match {
@@ -5739,7 +5454,7 @@ private[v1_6] object VMInterpreter {
       }
       index += 1
     }
-    memory.observe(Event.Print(format, Vec.from(arguments))).flatMap { _ =>
+    memory.handler(Event.Print(format, Vec.from(arguments))).flatMap { _ =>
       integerShape(program, id(resultType)) match {
         case Some((width, 1)) =>
           values.update(id(destination), RuntimeValue.Bits(id(resultType), Array(0L & mask(width))))
@@ -5749,10 +5464,10 @@ private[v1_6] object VMInterpreter {
     }
   }
 
-  private def signedIntegerShape(program: Program, typeId: Int): Option[(IntBetween[1, 64], Int, Boolean)] =
-    program.runtimeType(typeId) match {
+  private def signedIntegerShape(program: Program, typeId: Int): Option[(Int where Between[1, 64], Int, Boolean)] =
+    program.layout.runtimeType(typeId) match {
       case Some(RuntimeType.Integer(width, signed))       => Some((width, 1, signed))
-      case Some(RuntimeType.VectorType(component, count)) => program.runtimeType(component) match {
+      case Some(RuntimeType.VectorType(component, count)) => program.layout.runtimeType(component) match {
           case Some(RuntimeType.Integer(width, signed)) => Some((width, count, signed))
           case _                                        => None
         }
@@ -5760,7 +5475,7 @@ private[v1_6] object VMInterpreter {
     }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
-  private def readCString(memory: MemoryState, pointer: Pointer): Either[Fault, String] = {
+  private def readCString(memory: MemoryState, pointer: Pointer): Memory.ReadResult[String] = {
     val bytes = mutable.ArrayBuffer.empty[Byte]
     var index = 0L
     while (index < 1024L * 1024L) {
@@ -5822,10 +5537,10 @@ private[v1_6] object VMInterpreter {
       set: Operand,
       instruction: Operand,
       sources: Vec[Operand]
-  ): Either[Fault, Unit] = {
+  ): Memory.ReadResult[Unit] = {
     val setId  = id(set)
     val opcode = id(instruction)
-    program.extendedInstructionSets.get(setId).map(_.raw) match {
+    program.extendedInstructionSets.get(setId) match {
       case None =>
         Left(Fault.InvalidTask(s"OpExtInst references undefined import %$setId"))
       case Some("GLSL.std.450")
@@ -5835,7 +5550,7 @@ private[v1_6] object VMInterpreter {
         if (sources.size != 2)
           Left(Fault.InvalidTask("GLSL.std.450 Pow expects two operands"))
         else openCLPow(program, values, resultType, destination, sources(0), sources(1))
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.copysign =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Copysign =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std copysign expects 2 operands, received ${sources.size}"
@@ -5875,8 +5590,8 @@ private[v1_6] object VMInterpreter {
             case _         => Left(Fault.InvalidTask("OpenCL.std copysign operands are not floating-point"))
           }
       case Some("OpenCL.std")
-          if opcode == ExtendedInstruction.OpenClStd.fma || opcode == ExtendedInstruction.OpenClStd.mad =>
-        val name = if (opcode == ExtendedInstruction.OpenClStd.fma) "fma" else "mad"
+          if opcode == ExtendedInstruction.OpenClStd.Fma || opcode == ExtendedInstruction.OpenClStd.Mad =>
+        val name = if (opcode == ExtendedInstruction.OpenClStd.Fma) "fma" else "mad"
         if (sources.size != 3)
           Left(Fault.InvalidTask(
             s"OpenCL.std $name expects 3 operands, received ${sources.size}"
@@ -5889,29 +5604,29 @@ private[v1_6] object VMInterpreter {
           sources(0),
           sources(1),
           sources(2),
-          opcode == ExtendedInstruction.OpenClStd.fma
+          opcode == ExtendedInstruction.OpenClStd.Fma
         )
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.maxmag =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Maxmag =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std maxmag expects 2 operands, received ${sources.size}"
           ))
         else openCLMaxMag(program, values, resultType, destination, sources(0), sources(1))
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.pow =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Pow =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std pow expects 2 operands, received ${sources.size}"
           ))
         else openCLPow(program, values, resultType, destination, sources(0), sources(1))
       case Some("OpenCL.std")
-          if opcode >= ExtendedInstruction.OpenClStd.s_max && opcode <= ExtendedInstruction.OpenClStd.u_min =>
+          if opcode >= ExtendedInstruction.OpenClStd.SMax && opcode <= ExtendedInstruction.OpenClStd.UMin =>
         val name = opcode match {
-          case ExtendedInstruction.OpenClStd.s_max => "s_max"
-          case ExtendedInstruction.OpenClStd.u_max => "u_max"
-          case ExtendedInstruction.OpenClStd.s_min => "s_min"
-          case _                                   => "u_min"
+          case ExtendedInstruction.OpenClStd.SMax => "s_max"
+          case ExtendedInstruction.OpenClStd.UMax => "u_max"
+          case ExtendedInstruction.OpenClStd.SMin => "s_min"
+          case _                                  => "u_min"
         }
-        val width: IntBetween[1, 64] = integerShape(program, id(resultType)).map(_._1).getOrElse(64)
+        val width: Int where Between[1, 64] = integerShape(program, id(resultType)).map(_._1).getOrElse(64)
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std $name expects 2 operands, received ${sources.size}"
@@ -5920,26 +5635,26 @@ private[v1_6] object VMInterpreter {
           integerBitwise(program, values, resultType, destination, sources(0), sources(1), s"OpenCL.std $name") {
             (left, right) =>
               opcode match {
-                case ExtendedInstruction.OpenClStd.s_max =>
+                case ExtendedInstruction.OpenClStd.SMax =>
                   if (signExtend(left, width) >= signExtend(right, width)) left else right
-                case ExtendedInstruction.OpenClStd.u_max =>
+                case ExtendedInstruction.OpenClStd.UMax =>
                   if (java.lang.Long.compareUnsigned(left, right) >= 0) left else right
-                case ExtendedInstruction.OpenClStd.s_min =>
+                case ExtendedInstruction.OpenClStd.SMin =>
                   if (signExtend(left, width) <= signExtend(right, width)) left else right
                 case _ => if (java.lang.Long.compareUnsigned(left, right) <= 0) left else right
               }
           }
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.sincos =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Sincos =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std sincos expects 2 operands, received ${sources.size}"
           ))
         else openCLSinCos(program, values, memory, resultType, destination, sources(0), sources(1))
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.printf =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Printf =>
         openCLPrintf(program, values, memory, resultType, destination, sources)
       case Some("OpenCL.std")
-          if opcode == ExtendedInstruction.OpenClStd.fmax || opcode == ExtendedInstruction.OpenClStd.fmin =>
-        val name = if (opcode == ExtendedInstruction.OpenClStd.fmax) "fmax" else "fmin"
+          if opcode == ExtendedInstruction.OpenClStd.Fmax || opcode == ExtendedInstruction.OpenClStd.Fmin =>
+        val name = if (opcode == ExtendedInstruction.OpenClStd.Fmax) "fmax" else "fmin"
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std $name expects 2 operands, received ${sources.size}"
@@ -5952,9 +5667,9 @@ private[v1_6] object VMInterpreter {
             destination,
             sources(0),
             sources(1),
-            if (opcode == ExtendedInstruction.OpenClStd.fmax) FloatingOperation.Maximum else FloatingOperation.Minimum
+            if (opcode == ExtendedInstruction.OpenClStd.Fmax) FloatingOperation.Maximum else FloatingOperation.Minimum
           )
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.ldexp =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Ldexp =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std ldexp expects 2 operands, received ${sources.size}"
@@ -5963,54 +5678,54 @@ private[v1_6] object VMInterpreter {
       case Some("OpenCL.std")
           if OpenCLUnaryFloatingOpcodes.contains(opcode) =>
         val name = opcode match {
-          case ExtendedInstruction.OpenClStd.acos         => "acos"
-          case ExtendedInstruction.OpenClStd.acosh        => "acosh"
-          case ExtendedInstruction.OpenClStd.acospi       => "acospi"
-          case ExtendedInstruction.OpenClStd.asin         => "asin"
-          case ExtendedInstruction.OpenClStd.asinh        => "asinh"
-          case ExtendedInstruction.OpenClStd.asinpi       => "asinpi"
-          case ExtendedInstruction.OpenClStd.atan         => "atan"
-          case ExtendedInstruction.OpenClStd.atanh        => "atanh"
-          case ExtendedInstruction.OpenClStd.atanpi       => "atanpi"
-          case ExtendedInstruction.OpenClStd.cbrt         => "cbrt"
-          case ExtendedInstruction.OpenClStd.ceil         => "ceil"
-          case ExtendedInstruction.OpenClStd.cos          => "cos"
-          case ExtendedInstruction.OpenClStd.cosh         => "cosh"
-          case ExtendedInstruction.OpenClStd.cospi        => "cospi"
-          case ExtendedInstruction.OpenClStd.exp          => "exp"
-          case ExtendedInstruction.OpenClStd.exp2         => "exp2"
-          case ExtendedInstruction.OpenClStd.exp10        => "exp10"
-          case ExtendedInstruction.OpenClStd.expm1        => "expm1"
-          case ExtendedInstruction.OpenClStd.fabs         => "fabs"
-          case ExtendedInstruction.OpenClStd.floor        => "floor"
-          case ExtendedInstruction.OpenClStd.log          => "log"
-          case ExtendedInstruction.OpenClStd.log2         => "log2"
-          case ExtendedInstruction.OpenClStd.log10        => "log10"
-          case ExtendedInstruction.OpenClStd.log1p        => "log1p"
-          case ExtendedInstruction.OpenClStd.logb         => "logb"
-          case ExtendedInstruction.OpenClStd.rint         => "rint"
-          case ExtendedInstruction.OpenClStd.round        => "round"
-          case ExtendedInstruction.OpenClStd.rsqrt        => "rsqrt"
-          case ExtendedInstruction.OpenClStd.sin          => "sin"
-          case ExtendedInstruction.OpenClStd.sinh         => "sinh"
-          case ExtendedInstruction.OpenClStd.sinpi        => "sinpi"
-          case ExtendedInstruction.OpenClStd.sqrt         => "sqrt"
-          case ExtendedInstruction.OpenClStd.tan          => "tan"
-          case ExtendedInstruction.OpenClStd.tanh         => "tanh"
-          case ExtendedInstruction.OpenClStd.tanpi        => "tanpi"
-          case ExtendedInstruction.OpenClStd.trunc        => "trunc"
-          case ExtendedInstruction.OpenClStd.native_cos   => "native_cos"
-          case ExtendedInstruction.OpenClStd.native_exp   => "native_exp"
-          case ExtendedInstruction.OpenClStd.native_exp2  => "native_exp2"
-          case ExtendedInstruction.OpenClStd.native_exp10 => "native_exp10"
-          case ExtendedInstruction.OpenClStd.native_log   => "native_log"
-          case ExtendedInstruction.OpenClStd.native_log2  => "native_log2"
-          case ExtendedInstruction.OpenClStd.native_log10 => "native_log10"
-          case ExtendedInstruction.OpenClStd.native_recip => "native_recip"
-          case ExtendedInstruction.OpenClStd.native_rsqrt => "native_rsqrt"
-          case ExtendedInstruction.OpenClStd.native_sin   => "native_sin"
-          case ExtendedInstruction.OpenClStd.native_sqrt  => "native_sqrt"
-          case ExtendedInstruction.OpenClStd.native_tan   => "native_tan"
+          case ExtendedInstruction.OpenClStd.Acos        => "acos"
+          case ExtendedInstruction.OpenClStd.Acosh       => "acosh"
+          case ExtendedInstruction.OpenClStd.Acospi      => "acospi"
+          case ExtendedInstruction.OpenClStd.Asin        => "asin"
+          case ExtendedInstruction.OpenClStd.Asinh       => "asinh"
+          case ExtendedInstruction.OpenClStd.Asinpi      => "asinpi"
+          case ExtendedInstruction.OpenClStd.Atan        => "atan"
+          case ExtendedInstruction.OpenClStd.Atanh       => "atanh"
+          case ExtendedInstruction.OpenClStd.Atanpi      => "atanpi"
+          case ExtendedInstruction.OpenClStd.Cbrt        => "cbrt"
+          case ExtendedInstruction.OpenClStd.Ceil        => "ceil"
+          case ExtendedInstruction.OpenClStd.Cos         => "cos"
+          case ExtendedInstruction.OpenClStd.Cosh        => "cosh"
+          case ExtendedInstruction.OpenClStd.Cospi       => "cospi"
+          case ExtendedInstruction.OpenClStd.Exp         => "exp"
+          case ExtendedInstruction.OpenClStd.Exp2        => "exp2"
+          case ExtendedInstruction.OpenClStd.Exp10       => "exp10"
+          case ExtendedInstruction.OpenClStd.Expm1       => "expm1"
+          case ExtendedInstruction.OpenClStd.Fabs        => "fabs"
+          case ExtendedInstruction.OpenClStd.Floor       => "floor"
+          case ExtendedInstruction.OpenClStd.Log         => "log"
+          case ExtendedInstruction.OpenClStd.Log2        => "log2"
+          case ExtendedInstruction.OpenClStd.Log10       => "log10"
+          case ExtendedInstruction.OpenClStd.Log1p       => "log1p"
+          case ExtendedInstruction.OpenClStd.Logb        => "logb"
+          case ExtendedInstruction.OpenClStd.Rint        => "rint"
+          case ExtendedInstruction.OpenClStd.Round       => "round"
+          case ExtendedInstruction.OpenClStd.Rsqrt       => "rsqrt"
+          case ExtendedInstruction.OpenClStd.Sin         => "sin"
+          case ExtendedInstruction.OpenClStd.Sinh        => "sinh"
+          case ExtendedInstruction.OpenClStd.Sinpi       => "sinpi"
+          case ExtendedInstruction.OpenClStd.Sqrt        => "sqrt"
+          case ExtendedInstruction.OpenClStd.Tan         => "tan"
+          case ExtendedInstruction.OpenClStd.Tanh        => "tanh"
+          case ExtendedInstruction.OpenClStd.Tanpi       => "tanpi"
+          case ExtendedInstruction.OpenClStd.Trunc       => "trunc"
+          case ExtendedInstruction.OpenClStd.NativeCos   => "native_cos"
+          case ExtendedInstruction.OpenClStd.NativeExp   => "native_exp"
+          case ExtendedInstruction.OpenClStd.NativeExp2  => "native_exp2"
+          case ExtendedInstruction.OpenClStd.NativeExp10 => "native_exp10"
+          case ExtendedInstruction.OpenClStd.NativeLog   => "native_log"
+          case ExtendedInstruction.OpenClStd.NativeLog2  => "native_log2"
+          case ExtendedInstruction.OpenClStd.NativeLog10 => "native_log10"
+          case ExtendedInstruction.OpenClStd.NativeRecip => "native_recip"
+          case ExtendedInstruction.OpenClStd.NativeRsqrt => "native_rsqrt"
+          case ExtendedInstruction.OpenClStd.NativeSin   => "native_sin"
+          case ExtendedInstruction.OpenClStd.NativeSqrt  => "native_sqrt"
+          case ExtendedInstruction.OpenClStd.NativeTan   => "native_tan"
         }
         if (sources.size != 1)
           Left(Fault.InvalidTask(
@@ -6024,73 +5739,73 @@ private[v1_6] object VMInterpreter {
                     if sourceWidth == resultWidth && sourceLanes == resultLanes =>
                   val result = lanes.map { raw =>
                     def evaluate(value: Double): Double = opcode match {
-                      case ExtendedInstruction.OpenClStd.acos   => Math.acos(value)
-                      case ExtendedInstruction.OpenClStd.acosh  => Math.log(value + Math.sqrt(value * value - 1.0))
-                      case ExtendedInstruction.OpenClStd.acospi => Math.acos(value) / Math.PI
-                      case ExtendedInstruction.OpenClStd.asin   => Math.asin(value)
-                      case ExtendedInstruction.OpenClStd.asinh  => Math.log(value + Math.sqrt(value * value + 1.0))
-                      case ExtendedInstruction.OpenClStd.asinpi => Math.asin(value) / Math.PI
-                      case ExtendedInstruction.OpenClStd.atan   => Math.atan(value)
-                      case ExtendedInstruction.OpenClStd.atanh  => 0.5 * Math.log((1.0 + value) / (1.0 - value))
-                      case ExtendedInstruction.OpenClStd.atanpi => Math.atan(value) / Math.PI
-                      case ExtendedInstruction.OpenClStd.cbrt   => Math.cbrt(value)
-                      case ExtendedInstruction.OpenClStd.ceil   => Math.ceil(value)
-                      case ExtendedInstruction.OpenClStd.cos    => Math.cos(value)
-                      case ExtendedInstruction.OpenClStd.cosh   => Math.cosh(value)
-                      case ExtendedInstruction.OpenClStd.cospi  => openCLCosPi(value)
-                      case ExtendedInstruction.OpenClStd.exp    => Math.exp(value)
-                      case ExtendedInstruction.OpenClStd.exp2   => Math.pow(2.0, value)
-                      case ExtendedInstruction.OpenClStd.exp10  => Math.pow(10.0, value)
-                      case ExtendedInstruction.OpenClStd.expm1  => Math.expm1(value)
-                      case ExtendedInstruction.OpenClStd.fabs   => Math.abs(value)
-                      case ExtendedInstruction.OpenClStd.floor  => Math.floor(value)
-                      case ExtendedInstruction.OpenClStd.log    => Math.log(value)
-                      case ExtendedInstruction.OpenClStd.log2   => Math.log(value) / Math.log(2.0)
-                      case ExtendedInstruction.OpenClStd.log10  => Math.log10(value)
-                      case ExtendedInstruction.OpenClStd.log1p  => Math.log1p(value)
-                      case ExtendedInstruction.OpenClStd.logb   =>
+                      case ExtendedInstruction.OpenClStd.Acos   => Math.acos(value)
+                      case ExtendedInstruction.OpenClStd.Acosh  => Math.log(value + Math.sqrt(value * value - 1.0))
+                      case ExtendedInstruction.OpenClStd.Acospi => Math.acos(value) / Math.PI
+                      case ExtendedInstruction.OpenClStd.Asin   => Math.asin(value)
+                      case ExtendedInstruction.OpenClStd.Asinh  => Math.log(value + Math.sqrt(value * value + 1.0))
+                      case ExtendedInstruction.OpenClStd.Asinpi => Math.asin(value) / Math.PI
+                      case ExtendedInstruction.OpenClStd.Atan   => Math.atan(value)
+                      case ExtendedInstruction.OpenClStd.Atanh  => 0.5 * Math.log((1.0 + value) / (1.0 - value))
+                      case ExtendedInstruction.OpenClStd.Atanpi => Math.atan(value) / Math.PI
+                      case ExtendedInstruction.OpenClStd.Cbrt   => Math.cbrt(value)
+                      case ExtendedInstruction.OpenClStd.Ceil   => Math.ceil(value)
+                      case ExtendedInstruction.OpenClStd.Cos    => Math.cos(value)
+                      case ExtendedInstruction.OpenClStd.Cosh   => Math.cosh(value)
+                      case ExtendedInstruction.OpenClStd.Cospi  => openCLCosPi(value)
+                      case ExtendedInstruction.OpenClStd.Exp    => Math.exp(value)
+                      case ExtendedInstruction.OpenClStd.Exp2   => Math.pow(2.0, value)
+                      case ExtendedInstruction.OpenClStd.Exp10  => Math.pow(10.0, value)
+                      case ExtendedInstruction.OpenClStd.Expm1  => Math.expm1(value)
+                      case ExtendedInstruction.OpenClStd.Fabs   => Math.abs(value)
+                      case ExtendedInstruction.OpenClStd.Floor  => Math.floor(value)
+                      case ExtendedInstruction.OpenClStd.Log    => Math.log(value)
+                      case ExtendedInstruction.OpenClStd.Log2   => Math.log(value) / Math.log(2.0)
+                      case ExtendedInstruction.OpenClStd.Log10  => Math.log10(value)
+                      case ExtendedInstruction.OpenClStd.Log1p  => Math.log1p(value)
+                      case ExtendedInstruction.OpenClStd.Logb   =>
                         if (value.isNaN) Double.NaN
                         else if (value == 0.0) Double.NegativeInfinity
                         else if (value.isInfinite) Double.PositiveInfinity
                         else Math.getExponent(value).toDouble
-                      case ExtendedInstruction.OpenClStd.rint  => Math.rint(value)
-                      case ExtendedInstruction.OpenClStd.round =>
+                      case ExtendedInstruction.OpenClStd.Rint  => Math.rint(value)
+                      case ExtendedInstruction.OpenClStd.Round =>
                         if (value < 0.0) Math.ceil(value - 0.5) else Math.floor(value + 0.5)
-                      case ExtendedInstruction.OpenClStd.rsqrt => 1.0 / Math.sqrt(value)
-                      case ExtendedInstruction.OpenClStd.sin   => Math.sin(value)
-                      case ExtendedInstruction.OpenClStd.sinh  => Math.sinh(value)
-                      case ExtendedInstruction.OpenClStd.sinpi => openCLSinPi(value)
-                      case ExtendedInstruction.OpenClStd.sqrt  => Math.sqrt(value)
-                      case ExtendedInstruction.OpenClStd.tan   => Math.tan(value)
-                      case ExtendedInstruction.OpenClStd.tanh  => Math.tanh(value)
-                      case ExtendedInstruction.OpenClStd.tanpi => openCLTanPi(value)
-                      case ExtendedInstruction.OpenClStd.trunc =>
+                      case ExtendedInstruction.OpenClStd.Rsqrt => 1.0 / Math.sqrt(value)
+                      case ExtendedInstruction.OpenClStd.Sin   => Math.sin(value)
+                      case ExtendedInstruction.OpenClStd.Sinh  => Math.sinh(value)
+                      case ExtendedInstruction.OpenClStd.Sinpi => openCLSinPi(value)
+                      case ExtendedInstruction.OpenClStd.Sqrt  => Math.sqrt(value)
+                      case ExtendedInstruction.OpenClStd.Tan   => Math.tan(value)
+                      case ExtendedInstruction.OpenClStd.Tanh  => Math.tanh(value)
+                      case ExtendedInstruction.OpenClStd.Tanpi => openCLTanPi(value)
+                      case ExtendedInstruction.OpenClStd.Trunc =>
                         if (value < 0.0) Math.ceil(value) else Math.floor(value)
-                      case ExtendedInstruction.OpenClStd.native_cos   => Math.cos(value)
-                      case ExtendedInstruction.OpenClStd.native_exp   => Math.exp(value)
-                      case ExtendedInstruction.OpenClStd.native_exp2  => Math.pow(2.0, value)
-                      case ExtendedInstruction.OpenClStd.native_exp10 => Math.pow(10.0, value)
-                      case ExtendedInstruction.OpenClStd.native_log   => Math.log(value)
-                      case ExtendedInstruction.OpenClStd.native_log2  => Math.log(value) / Math.log(2.0)
-                      case ExtendedInstruction.OpenClStd.native_log10 => Math.log10(value)
-                      case ExtendedInstruction.OpenClStd.native_recip => 1.0 / value
-                      case ExtendedInstruction.OpenClStd.native_rsqrt => 1.0 / Math.sqrt(value)
-                      case ExtendedInstruction.OpenClStd.native_sin   => Math.sin(value)
-                      case ExtendedInstruction.OpenClStd.native_sqrt  => Math.sqrt(value)
-                      case ExtendedInstruction.OpenClStd.native_tan   => Math.tan(value)
+                      case ExtendedInstruction.OpenClStd.NativeCos   => Math.cos(value)
+                      case ExtendedInstruction.OpenClStd.NativeExp   => Math.exp(value)
+                      case ExtendedInstruction.OpenClStd.NativeExp2  => Math.pow(2.0, value)
+                      case ExtendedInstruction.OpenClStd.NativeExp10 => Math.pow(10.0, value)
+                      case ExtendedInstruction.OpenClStd.NativeLog   => Math.log(value)
+                      case ExtendedInstruction.OpenClStd.NativeLog2  => Math.log(value) / Math.log(2.0)
+                      case ExtendedInstruction.OpenClStd.NativeLog10 => Math.log10(value)
+                      case ExtendedInstruction.OpenClStd.NativeRecip => 1.0 / value
+                      case ExtendedInstruction.OpenClStd.NativeRsqrt => 1.0 / Math.sqrt(value)
+                      case ExtendedInstruction.OpenClStd.NativeSin   => Math.sin(value)
+                      case ExtendedInstruction.OpenClStd.NativeSqrt  => Math.sqrt(value)
+                      case ExtendedInstruction.OpenClStd.NativeTan   => Math.tan(value)
                     }
                     resultWidth.raw match {
-                      case 16 if opcode == ExtendedInstruction.OpenClStd.fabs => raw & 0x7fffL
-                      case 32 if opcode == ExtendedInstruction.OpenClStd.fabs => raw & 0x7fffffffL
-                      case 64 if opcode == ExtendedInstruction.OpenClStd.fabs => raw & 0x7fffffffffffffffL
+                      case 16 if opcode == ExtendedInstruction.OpenClStd.Fabs => raw & 0x7fffL
+                      case 32 if opcode == ExtendedInstruction.OpenClStd.Fabs => raw & 0x7fffffffL
+                      case 64 if opcode == ExtendedInstruction.OpenClStd.Fabs => raw & 0x7fffffffffffffffL
                       case 16                                                 =>
                         IEEE754.floatToBinary16(
                           evaluate(IEEE754.binary16ToFloat(Binary16.low(raw)).toDouble).toFloat
-                        ).raw
+                        ).toLong
                       case 32 =>
                         IEEE754.floatToBinary32(
                           evaluate(IEEE754.binary32ToFloat(Binary32.low(raw)).toDouble).toFloat
-                        ).raw
+                        ).toLong
                       case 64 => IEEE754.doubleToBinary64(evaluate(IEEE754.binary64ToDouble(raw)))
                     }
                   }
@@ -6110,18 +5825,18 @@ private[v1_6] object VMInterpreter {
           }
       case Some("OpenCL.std") if OpenCLBinaryFloatingOpcodes.contains(opcode) =>
         val name = opcode match {
-          case ExtendedInstruction.OpenClStd.atan2   => "atan2"
-          case ExtendedInstruction.OpenClStd.atan2pi => "atan2pi"
-          case ExtendedInstruction.OpenClStd.fdim    => "fdim"
-          case ExtendedInstruction.OpenClStd.fmod    => "fmod"
-          case ExtendedInstruction.OpenClStd.hypot   => "hypot"
+          case ExtendedInstruction.OpenClStd.Atan2   => "atan2"
+          case ExtendedInstruction.OpenClStd.Atan2pi => "atan2pi"
+          case ExtendedInstruction.OpenClStd.Fdim    => "fdim"
+          case ExtendedInstruction.OpenClStd.Fmod    => "fmod"
+          case ExtendedInstruction.OpenClStd.Hypot   => "hypot"
           case _                                     => "powr"
         }
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std $name expects 2 operands, received ${sources.size}"
           ))
-        else if (opcode == ExtendedInstruction.OpenClStd.atan2 || opcode == ExtendedInstruction.OpenClStd.hypot)
+        else if (opcode == ExtendedInstruction.OpenClStd.Atan2 || opcode == ExtendedInstruction.OpenClStd.Hypot)
           openCLAtan2OrHypot(
             program,
             values,
@@ -6129,26 +5844,26 @@ private[v1_6] object VMInterpreter {
             destination,
             sources(0),
             sources(1),
-            opcode == ExtendedInstruction.OpenClStd.hypot
+            opcode == ExtendedInstruction.OpenClStd.Hypot
           )
         else
           openCLFloatingElementwise(program, values, resultType, destination, sources, name) { operands =>
             opcode match {
-              case ExtendedInstruction.OpenClStd.atan2pi => Math.atan2(operands(0), operands(1)) / Math.PI
-              case ExtendedInstruction.OpenClStd.fdim    => Math.max(operands(0) - operands(1), 0.0)
-              case ExtendedInstruction.OpenClStd.fmod    => operands(0) % operands(1)
+              case ExtendedInstruction.OpenClStd.Atan2pi => Math.atan2(operands(0), operands(1)) / Math.PI
+              case ExtendedInstruction.OpenClStd.Fdim    => Math.max(operands(0) - operands(1), 0.0)
+              case ExtendedInstruction.OpenClStd.Fmod    => operands(0) % operands(1)
               case _                                     => openCLPowr(operands(0), operands(1))
             }
           }
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.nan =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Nan =>
         if (sources.size != 1)
           Left(Fault.InvalidTask(
             s"OpenCL.std nan expects 1 operand, received ${sources.size}"
           ))
         else openCLNan(program, values, resultType, destination, sources.head)
       case Some("OpenCL.std")
-          if opcode == ExtendedInstruction.OpenClStd.pown || opcode == ExtendedInstruction.OpenClStd.rootn =>
-        val name = if (opcode == ExtendedInstruction.OpenClStd.pown) "pown" else "rootn"
+          if opcode == ExtendedInstruction.OpenClStd.Pown || opcode == ExtendedInstruction.OpenClStd.Rootn =>
+        val name = if (opcode == ExtendedInstruction.OpenClStd.Pown) "pown" else "rootn"
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std $name expects 2 operands, received ${sources.size}"
@@ -6160,52 +5875,52 @@ private[v1_6] object VMInterpreter {
           destination,
           sources(0),
           sources(1),
-          opcode == ExtendedInstruction.OpenClStd.rootn
+          opcode == ExtendedInstruction.OpenClStd.Rootn
         )
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.nextafter =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Nextafter =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std nextafter expects 2 operands, received ${sources.size}"
           ))
         else openCLNextAfter(program, values, resultType, destination, sources(0), sources(1))
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.s_hadd =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.SHadd =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std hadd expects 2 operands, received ${sources.size}"
           ))
         else openCLSignedHalfAdd(program, values, resultType, destination, sources(0), sources(1))
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.s_abs =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.SAbs =>
         if (sources.size != 1)
           Left(Fault.InvalidTask(
             s"OpenCL.std s_abs expects 1 operand, received ${sources.size}"
           ))
         else openCLSignedAbs(program, values, resultType, destination, sources.head)
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.clz =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Clz =>
         if (sources.size != 1)
           Left(Fault.InvalidTask(
             s"OpenCL.std clz expects 1 operand, received ${sources.size}"
           ))
         else openCLCountLeadingZeros(program, values, resultType, destination, sources.head)
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.ctz =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Ctz =>
         if (sources.size != 1)
           Left(Fault.InvalidTask(
             s"OpenCL.std ctz expects 1 operand, received ${sources.size}"
           ))
         else openCLCountTrailingZeros(program, values, resultType, destination, sources.head)
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.popcount =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Popcount =>
         if (sources.size != 1)
           Left(Fault.InvalidTask(
             s"OpenCL.std popcount expects 1 operand, received ${sources.size}"
           ))
         else openCLPopulationCount(program, values, resultType, destination, sources.head)
       case Some("OpenCL.std")
-          if opcode >= ExtendedInstruction.OpenClStd.fclamp && opcode <= ExtendedInstruction.OpenClStd.sign =>
+          if opcode >= ExtendedInstruction.OpenClStd.Fclamp && opcode <= ExtendedInstruction.OpenClStd.Sign =>
         openCLCommon(program, values, resultType, destination, opcode, sources)
       case Some("OpenCL.std")
-          if opcode >= ExtendedInstruction.OpenClStd.cross && opcode <= ExtendedInstruction.OpenClStd.fast_normalize =>
+          if opcode >= ExtendedInstruction.OpenClStd.Cross && opcode <= ExtendedInstruction.OpenClStd.FastNormalize =>
         openCLGeometric(program, values, resultType, destination, opcode, sources)
       case Some("OpenCL.std")
-          if opcode == ExtendedInstruction.OpenClStd.vload_half || opcode == ExtendedInstruction.OpenClStd.vload_halfn || opcode == ExtendedInstruction.OpenClStd.vloada_halfn =>
+          if opcode == ExtendedInstruction.OpenClStd.VloadHalf || opcode == ExtendedInstruction.OpenClStd.VloadHalfn || opcode == ExtendedInstruction.OpenClStd.VloadaHalfn =>
         openCLHalfLoad(
           program,
           values,
@@ -6213,22 +5928,22 @@ private[v1_6] object VMInterpreter {
           resultType,
           destination,
           sources,
-          aligned = opcode == ExtendedInstruction.OpenClStd.vloada_halfn
+          aligned = opcode == ExtendedInstruction.OpenClStd.VloadaHalfn
         )
       case Some("OpenCL.std")
-          if opcode >= ExtendedInstruction.OpenClStd.vstore_half && opcode <= ExtendedInstruction.OpenClStd.vstorea_halfn_r =>
+          if opcode >= ExtendedInstruction.OpenClStd.VstoreHalf && opcode <= ExtendedInstruction.OpenClStd.VstoreaHalfnR =>
         openCLHalfStore(
           program,
           values,
           memory,
           sources,
-          aligned = opcode >= ExtendedInstruction.OpenClStd.vstorea_halfn,
+          aligned = opcode >= ExtendedInstruction.OpenClStd.VstoreaHalfn,
           rounded =
-            opcode == ExtendedInstruction.OpenClStd.vstore_half_r || opcode == ExtendedInstruction.OpenClStd.vstore_halfn_r || opcode == ExtendedInstruction.OpenClStd.vstorea_halfn_r
+            opcode == ExtendedInstruction.OpenClStd.VstoreHalfR || opcode == ExtendedInstruction.OpenClStd.VstoreHalfnR || opcode == ExtendedInstruction.OpenClStd.VstoreaHalfnR
         )
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.vloadn =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Vloadn =>
         openCLVectorLoad(program, values, memory, resultType, destination, sources)
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.vstoren =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Vstoren =>
         if (sources.size != 3)
           Left(Fault.InvalidTask(
             s"OpenCL.std vstoren expects 3 operands, received ${sources.size}"
@@ -6236,20 +5951,20 @@ private[v1_6] object VMInterpreter {
         else
           openCLVectorStore(program, values, memory, sources.head, Vec(sources(1), sources(2)))
       case Some("OpenCL.std")
-          if opcode == ExtendedInstruction.OpenClStd.shuffle || opcode == ExtendedInstruction.OpenClStd.shuffle2 =>
+          if opcode == ExtendedInstruction.OpenClStd.Shuffle || opcode == ExtendedInstruction.OpenClStd.Shuffle2 =>
         openCLShuffle(
           program,
           values,
           resultType,
           destination,
           sources,
-          opcode == ExtendedInstruction.OpenClStd.shuffle2
+          opcode == ExtendedInstruction.OpenClStd.Shuffle2
         )
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.bitselect =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Bitselect =>
         openCLBitselect(program, values, resultType, destination, sources)
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.select =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Select =>
         openCLSelect(program, values, resultType, destination, sources)
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.prefetch =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Prefetch =>
         if (sources.isEmpty)
           Left(Fault.InvalidTask("OpenCL.std prefetch is missing its pointer operand"))
         else address(values, sources.head).map(_ => ())
@@ -6288,8 +6003,8 @@ private[v1_6] object VMInterpreter {
                   case ExtendedInstruction.GlslStd450.Sqrt => Math.sqrt(value)
                 }
                 resultWidth.raw match {
-                  case 16 => IEEE754.floatToBinary16(computed.toFloat).raw
-                  case 32 => IEEE754.floatToBinary32(computed.toFloat).raw
+                  case 16 => IEEE754.floatToBinary16(computed.toFloat).toLong
+                  case 32 => IEEE754.floatToBinary32(computed.toFloat).toLong
                   case 64 => IEEE754.doubleToBinary64(computed)
                 }
               }
@@ -6401,15 +6116,15 @@ private[v1_6] object VMInterpreter {
       sources: Vec[Operand]
   ): Either[Fault, Unit] = {
     val (name, arity) = opcode match {
-      case ExtendedInstruction.OpenClStd.fclamp      => "clamp"      -> 3
-      case ExtendedInstruction.OpenClStd.degrees     => "degrees"    -> 1
-      case ExtendedInstruction.OpenClStd.fmax_common => "fmax"       -> 2
-      case ExtendedInstruction.OpenClStd.fmin_common => "fmin"       -> 2
-      case ExtendedInstruction.OpenClStd.mix         => "mix"        -> 3
-      case ExtendedInstruction.OpenClStd.radians     => "radians"    -> 1
-      case ExtendedInstruction.OpenClStd.step        => "step"       -> 2
-      case ExtendedInstruction.OpenClStd.smoothstep  => "smoothstep" -> 3
-      case _                                         => "sign"       -> 1
+      case ExtendedInstruction.OpenClStd.Fclamp     => "clamp"      -> 3
+      case ExtendedInstruction.OpenClStd.Degrees    => "degrees"    -> 1
+      case ExtendedInstruction.OpenClStd.FmaxCommon => "fmax"       -> 2
+      case ExtendedInstruction.OpenClStd.FminCommon => "fmin"       -> 2
+      case ExtendedInstruction.OpenClStd.Mix        => "mix"        -> 3
+      case ExtendedInstruction.OpenClStd.Radians    => "radians"    -> 1
+      case ExtendedInstruction.OpenClStd.Step       => "step"       -> 2
+      case ExtendedInstruction.OpenClStd.Smoothstep => "smoothstep" -> 3
+      case _                                        => "sign"       -> 1
     }
     if (sources.size != arity)
       Left(Fault.InvalidTask(
@@ -6418,15 +6133,15 @@ private[v1_6] object VMInterpreter {
     else
       openCLFloatingElementwise(program, values, resultType, destination, sources, name) { operands =>
         opcode match {
-          case ExtendedInstruction.OpenClStd.fclamp =>
+          case ExtendedInstruction.OpenClStd.Fclamp =>
             floatingMinimum(floatingMaximum(operands(0), operands(1)), operands(2))
-          case ExtendedInstruction.OpenClStd.degrees     => operands(0) * (180.0 / Math.PI)
-          case ExtendedInstruction.OpenClStd.fmax_common => floatingMaximum(operands(0), operands(1))
-          case ExtendedInstruction.OpenClStd.fmin_common => floatingMinimum(operands(0), operands(1))
-          case ExtendedInstruction.OpenClStd.mix         => operands(0) + (operands(1) - operands(0)) * operands(2)
-          case ExtendedInstruction.OpenClStd.radians     => operands(0) * (Math.PI / 180.0)
-          case ExtendedInstruction.OpenClStd.step        => if (operands(1) < operands(0)) 0.0 else 1.0
-          case ExtendedInstruction.OpenClStd.smoothstep  =>
+          case ExtendedInstruction.OpenClStd.Degrees    => operands(0) * (180.0 / Math.PI)
+          case ExtendedInstruction.OpenClStd.FmaxCommon => floatingMaximum(operands(0), operands(1))
+          case ExtendedInstruction.OpenClStd.FminCommon => floatingMinimum(operands(0), operands(1))
+          case ExtendedInstruction.OpenClStd.Mix        => operands(0) + (operands(1) - operands(0)) * operands(2)
+          case ExtendedInstruction.OpenClStd.Radians    => operands(0) * (Math.PI / 180.0)
+          case ExtendedInstruction.OpenClStd.Step       => if (operands(1) < operands(0)) 0.0 else 1.0
+          case ExtendedInstruction.OpenClStd.Smoothstep =>
             val ratio = (operands(2) - operands(0)) / (operands(1) - operands(0))
             val t     = floatingMinimum(floatingMaximum(ratio, 0.0), 1.0)
             t * t * (3.0 - 2.0 * t)
@@ -6449,17 +6164,17 @@ private[v1_6] object VMInterpreter {
       sources: Vec[Operand]
   ): Either[Fault, Unit] = {
     val name = opcode match {
-      case ExtendedInstruction.OpenClStd.cross         => "cross"
-      case ExtendedInstruction.OpenClStd.distance      => "distance"
-      case ExtendedInstruction.OpenClStd.length        => "length"
-      case ExtendedInstruction.OpenClStd.normalize     => "normalize"
-      case ExtendedInstruction.OpenClStd.fast_distance => "fast_distance"
-      case ExtendedInstruction.OpenClStd.fast_length   => "fast_length"
-      case _                                           => "fast_normalize"
+      case ExtendedInstruction.OpenClStd.Cross        => "cross"
+      case ExtendedInstruction.OpenClStd.Distance     => "distance"
+      case ExtendedInstruction.OpenClStd.Length       => "length"
+      case ExtendedInstruction.OpenClStd.Normalize    => "normalize"
+      case ExtendedInstruction.OpenClStd.FastDistance => "fast_distance"
+      case ExtendedInstruction.OpenClStd.FastLength   => "fast_length"
+      case _                                          => "fast_normalize"
     }
     val arity =
       if (
-        opcode == ExtendedInstruction.OpenClStd.cross || opcode == ExtendedInstruction.OpenClStd.distance || opcode == ExtendedInstruction.OpenClStd.fast_distance
+        opcode == ExtendedInstruction.OpenClStd.Cross || opcode == ExtendedInstruction.OpenClStd.Distance || opcode == ExtendedInstruction.OpenClStd.FastDistance
       ) 2
       else 1
     if (sources.size != arity)
@@ -6508,7 +6223,7 @@ private[v1_6] object VMInterpreter {
       length
     }
     opcode match {
-      case ExtendedInstruction.OpenClStd.cross =>
+      case ExtendedInstruction.OpenClStd.Cross =>
         if (count != 3 && count != 4)
           Left(
             Fault.InvalidTask("OpenCL.std cross requires 3- or 4-component vectors")
@@ -6526,7 +6241,7 @@ private[v1_6] object VMInterpreter {
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
         }
-      case ExtendedInstruction.OpenClStd.distance | ExtendedInstruction.OpenClStd.fast_distance =>
+      case ExtendedInstruction.OpenClStd.Distance | ExtendedInstruction.OpenClStd.FastDistance =>
         if (!floatingShape(program, id(resultType)).contains((commonWidth, 1)))
           Left(Fault.InvalidTask(
             s"OpenCL.std $name result is not a matching floating scalar"
@@ -6544,7 +6259,7 @@ private[v1_6] object VMInterpreter {
           )
           Right(())
         }
-      case ExtendedInstruction.OpenClStd.length | ExtendedInstruction.OpenClStd.fast_length =>
+      case ExtendedInstruction.OpenClStd.Length | ExtendedInstruction.OpenClStd.FastLength =>
         if (!floatingShape(program, id(resultType)).contains((commonWidth, 1)))
           Left(Fault.InvalidTask(
             s"OpenCL.std $name result is not a matching floating scalar"
@@ -6885,8 +6600,8 @@ private[v1_6] object VMInterpreter {
               cosineLanes(index) = doubleToFloating(width, Math.cos(value))
               index += 1
             }
-            val cosineBytes = Array.ofDim[Byte](typeSize(program, id(resultType)))
-            val _           = encodeBits(program, id(resultType), cosineLanes, 0, cosineBytes, 0)
+            val cosineBytes = Array.ofDim[Byte](program.layout.typeSize(id(resultType)))
+            val _           = program.encodeBits(id(resultType), cosineLanes, 0, cosineBytes, 0)
             memory.write(cosinePointer, cosineBytes) match {
               case Left(error) => Left(error)
               case Right(())   =>
@@ -7069,7 +6784,7 @@ private[v1_6] object VMInterpreter {
     val leftId  = id(left)
     val rightId = id(right)
     if (values.scalarType(leftId) >= 0 && values.scalarType(rightId) >= 0) {
-      val width      = scalarWidth(program, id(resultType))
+      val width      = program.layout.scalarWidth(id(resultType))
       val leftValue  = values.scalarBits(leftId)
       val rightValue = values.scalarBits(rightId)
       val result     = operation(leftValue, rightValue) & mask(width)
@@ -7082,7 +6797,7 @@ private[v1_6] object VMInterpreter {
     } else
       (bits(values, left), bits(values, right)) match {
         case (Right(a), Right(b)) =>
-          val width = scalarWidth(program, id(resultType))
+          val width = program.layout.scalarWidth(id(resultType))
           val size  = math.max(a.length, b.length)
           val lanes = Array.tabulate(size)(index => operation(a(index % a.length), b(index % b.length)) & mask(width))
           values.update(id(destination), RuntimeValue.Bits(id(resultType), lanes))
@@ -7100,7 +6815,7 @@ private[v1_6] object VMInterpreter {
       base: Operand,
       shift: Operand,
       opcode: String
-  )(operation: (Long, Long, IntBetween[1, 64]) => Long): Either[Fault, Unit] =
+  )(operation: (Long, Long, Int where Between[1, 64]) => Long): Either[Fault, Unit] =
     (values.get(id(base)), values.get(id(shift))) match {
       case (
             Some(RuntimeValue.Bits(baseType, baseLanes)),
@@ -7247,21 +6962,21 @@ private[v1_6] object VMInterpreter {
       program: Program,
       typeId: Int,
       builtin: Int,
-      invocation: Invocation
+      invocation: InvocationBuiltins
   ): Either[Fault, RuntimeValue] = {
     val lanes: Either[Fault, Array[Long]] = builtin match {
-      case BuiltIn.NumWorkgroups        => Right(invocation.numWorkgroups)
-      case BuiltIn.WorkgroupSize        => Right(invocation.workgroupSize)
-      case BuiltIn.WorkgroupId          => Right(invocation.group)
-      case BuiltIn.LocalInvocationId    => Right(invocation.local)
-      case BuiltIn.GlobalInvocationId   => Right(invocation.global)
+      case BuiltIn.NumWorkgroups        => Right(invocation.numWorkgroupsVector)
+      case BuiltIn.WorkgroupSize        => Right(invocation.workgroupSizeVector)
+      case BuiltIn.WorkgroupId          => Right(invocation.groupVector)
+      case BuiltIn.LocalInvocationId    => Right(invocation.localVector)
+      case BuiltIn.GlobalInvocationId   => Right(invocation.globalVector)
       case BuiltIn.LocalInvocationIndex => Right(Array(
           (invocation.localZ * invocation.workgroupSizeY + invocation.localY) * invocation.workgroupSizeX + invocation.localX
         ))
       case BuiltIn.WorkDim               => Right(Array(invocation.workDim.toLong))
-      case BuiltIn.GlobalSize            => Right(invocation.globalSize)
-      case BuiltIn.EnqueuedWorkgroupSize => Right(invocation.enqueuedWorkgroupSize)
-      case BuiltIn.GlobalOffset          => Right(invocation.globalOffset)
+      case BuiltIn.GlobalSize            => Right(invocation.globalSizeVector)
+      case BuiltIn.EnqueuedWorkgroupSize => Right(invocation.enqueuedWorkgroupSizeVector)
+      case BuiltIn.GlobalOffset          => Right(invocation.globalOffsetVector)
       case BuiltIn.GlobalLinearId        => Right(
           Array(
             (invocation.globalX - invocation.globalOffsetX) + invocation.globalSizeX *
@@ -7297,278 +7012,6 @@ private[v1_6] object VMInterpreter {
     )
   }
 
-  private def decode(program: Program, typeId: Int, bytes: Array[Byte]): Either[Fault, RuntimeValue] =
-    scalarLeafCount(program, typeId).flatMap { count =>
-      try {
-        val lanes = Array.ofDim[Long](count)
-        val used  = decodeBits(program, typeId, bytes, 0, lanes, 0)
-        if (used != lanes.length)
-          Left(Fault.InvalidTask(
-            s"SPIR-V value of type %$typeId decoded $used scalar leaves, expected ${lanes.length}"
-          ))
-        else Right(RuntimeValue.Bits(typeId, lanes))
-      } catch {
-        case error: IllegalArgumentException => Left(Fault.InvalidTask(error.getMessage))
-      }
-    }
-
-  // Dense scalar/vector decoding writes output lanes in place.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def decodeBits(
-      program: Program,
-      typeId: Int,
-      input: Array[Byte],
-      byteStart: Int,
-      lanes: Array[Long],
-      laneStart: Int
-  ): Int = program.runtimeType(typeId) match {
-    case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) |
-        Some(RuntimeType.Event) =>
-      if (laneStart >= lanes.length)
-        throw IllegalArgumentException(s"SPIR-V value of type %$typeId has too many scalar leaves")
-      val width     = scalarWidth(program, typeId)
-      val byteCount = width.toScalarByteWidth
-      val offset    = Math.min(byteStart, input.length)
-      val available = IntBetween.unsafe[0, 8](Math.min(byteCount.raw, input.length - offset))
-      lanes(laneStart) = LittleEndian.decode(input, offset, available) & mask(width)
-      laneStart + 1
-    case Some(RuntimeType.Pointer(_, _)) =>
-      if (laneStart >= lanes.length)
-        throw IllegalArgumentException(s"SPIR-V value of type %$typeId has too many pointer leaves")
-      val offset    = Math.min(byteStart, input.length)
-      val available = IntBetween.unsafe[0, 8](Math.min(8, input.length - offset))
-      lanes(laneStart) = LittleEndian.decode(input, offset, available)
-      laneStart + 1
-    case Some(RuntimeType.VectorType(component, count)) =>
-      var lane  = laneStart
-      var index = 0
-      while (index < count) {
-        lane = decodeBits(program, component, input, byteStart + index * typeSize(program, component), lanes, lane)
-        index += 1
-      }
-      lane
-    case Some(RuntimeType.Array(element, count)) =>
-      val stride = program.arrayStrides.getOrElse(typeId, typeSize(program, element))
-      var lane   = laneStart
-      var index  = 0L
-      while (index < count) {
-        lane = decodeBits(program, element, input, byteStart + Math.toIntExact(index * stride.toLong), lanes, lane)
-        index += 1L
-      }
-      lane
-    case Some(RuntimeType.Structure(members)) =>
-      var lane  = laneStart
-      var index = 0
-      while (index < members.size) {
-        lane = decodeBits(
-          program,
-          members(index),
-          input,
-          byteStart + structMemberOffset(program, typeId, members, index),
-          lanes,
-          lane
-        )
-        index += 1
-      }
-      lane
-    case value => throw IllegalArgumentException(s"SPIR-V type %$typeId cannot be decoded as data: $value")
-  }
-
-  private def encode(program: Program, value: RuntimeValue): Either[Fault, Array[Byte]] = value match {
-    case RuntimeValue.Bits(typeId, lanes) =>
-      try {
-        val bytes = Array.ofDim[Byte](typeSize(program, typeId))
-        val used  = encodeBits(program, typeId, lanes, 0, bytes, 0)
-        if (used != lanes.length)
-          Left(Fault.InvalidTask(
-            s"SPIR-V value of type %$typeId has ${lanes.length} scalar leaves, expected $used"
-          ))
-        else Right(bytes)
-      } catch {
-        case error: IllegalArgumentException => Left(Fault.InvalidTask(error.getMessage))
-      }
-    case RuntimeValue.Address(_, pointer) =>
-      Left(Fault.InvalidTask(s"cannot encode runtime pointer $pointer as process-neutral bytes"))
-  }
-
-  // Dense scalar/vector encoding writes output lanes in place.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def encodeBits(
-      program: Program,
-      typeId: Int,
-      lanes: Array[Long],
-      laneStart: Int,
-      output: Array[Byte],
-      byteStart: Int
-  ): Int = program.runtimeType(typeId) match {
-    case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) |
-        Some(RuntimeType.Event) =>
-      if (laneStart >= lanes.length)
-        throw IllegalArgumentException(s"SPIR-V value of type %$typeId has too few scalar leaves")
-      val width = scalarWidth(program, typeId)
-      LittleEndian.write(
-        lanes(laneStart),
-        output,
-        byteStart,
-        width.toScalarByteWidth
-      )
-      laneStart + 1
-    case Some(RuntimeType.Pointer(_, _)) =>
-      if (laneStart >= lanes.length)
-        throw IllegalArgumentException(s"SPIR-V value of type %$typeId has too few pointer leaves")
-      LittleEndian.write(lanes(laneStart), output, byteStart, 8)
-      laneStart + 1
-    case Some(RuntimeType.VectorType(component, count)) =>
-      var lane  = laneStart
-      var index = 0
-      while (index < count) {
-        lane = encodeBits(program, component, lanes, lane, output, byteStart + index * typeSize(program, component))
-        index += 1
-      }
-      lane
-    case Some(RuntimeType.Array(element, count)) =>
-      val stride = program.arrayStrides.getOrElse(typeId, typeSize(program, element))
-      var lane   = laneStart
-      var index  = 0L
-      while (index < count) {
-        lane = encodeBits(
-          program,
-          element,
-          lanes,
-          lane,
-          output,
-          byteStart + Math.toIntExact(index * stride.toLong)
-        )
-        index += 1L
-      }
-      lane
-    case Some(RuntimeType.Structure(members)) =>
-      var lane  = laneStart
-      var index = 0
-      while (index < members.size) {
-        lane = encodeBits(
-          program,
-          members(index),
-          lanes,
-          lane,
-          output,
-          byteStart + structMemberOffset(program, typeId, members, index)
-        )
-        index += 1
-      }
-      lane
-    case value => throw IllegalArgumentException(s"SPIR-V type %$typeId cannot be encoded as data: $value")
-  }
-
-  private def typeSize(program: Program, typeId: Int): Int =
-    program.cachedTypeSize(typeId)(typeSizeUncached(program, typeId))
-
-  private def nonNegativeTypeSize(
-      program: Program,
-      typeId: Int
-  ): Either[Fault, NonNegative[Int]] = {
-    val size = typeSize(program, typeId)
-    NonNegative.either(size)
-      .leftMap(_ =>
-        Fault.InvalidTask(s"SPIR-V type %$typeId has a negative byte size: $size")
-      )
-  }
-
-  private def scalarMemoryWidth(
-      program: Program,
-      typeId: Int
-  ): Either[Fault, IntBetween[1, 8]] = {
-    val size = typeSize(program, typeId)
-    IntBetween.either[1, 8](size)
-      .leftMap(_ =>
-        Fault.InvalidTask(
-          s"SPIR-V scalar type %$typeId has invalid byte width $size"
-        )
-      )
-  }
-
-  private def typeSizeUncached(program: Program, typeId: Int): Int = program.runtimeType(typeId) match {
-    case Some(RuntimeType.Bool)                     => 1
-    case Some(RuntimeType.Integer(width, _))        => width.raw / 8
-    case Some(RuntimeType.Floating(width))          => width.raw / 8
-    case Some(RuntimeType.Event)                    => 8
-    case Some(RuntimeType.VectorType(component, n)) =>
-      Math.multiplyExact(typeSize(program, component), if (n == 3) 4 else n)
-    case Some(RuntimeType.Array(element, n)) =>
-      Math.toIntExact(Math.multiplyExact(program.arrayStrides.getOrElse(typeId, typeSize(program, element)).toLong, n))
-    case Some(RuntimeType.Structure(members)) => structSize(program, typeId, members)
-    case Some(RuntimeType.Pointer(_, _))      => 8
-    case Some(RuntimeType.Void)               => 0
-    case Some(RuntimeType.Function(_, _))     => 0
-    case None                                 => throw IllegalArgumentException(s"SPIR-V type %$typeId is undefined")
-  }
-
-  // Struct layout carries offset/alignment state and uses the packed-layout fast exit.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
-  private def structSize(program: Program, structureType: Int, members: Vec[Int]): Int = {
-    if (program.packedStructures.contains(structureType))
-      return members.foldLeft(0)((size, member) => Math.addExact(size, typeSize(program, member)))
-    var offset = 0
-    var align  = 1
-    var index  = 0
-    while (index < members.size) {
-      val memberAlign = typeAlignment(program, members(index))
-      offset = program.memberOffsets.getOrElse(structureType -> index, alignUp(offset, memberAlign))
-      offset = Math.addExact(offset, typeSize(program, members(index)))
-      align = math.max(align, memberAlign)
-      index += 1
-    }
-    alignUp(offset, align)
-  }
-
-  // Struct member layout carries offset/alignment state through one ordered scan.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def structMemberOffset(
-      program: Program,
-      structureType: Int,
-      members: Vec[Int],
-      selected: Int
-  ): Int =
-    if (program.packedStructures.contains(structureType))
-      members.take(selected).foldLeft(0)((size, member) => Math.addExact(size, typeSize(program, member)))
-    else program.memberOffsets.get(structureType -> selected).getOrElse {
-      var offset = 0
-      var index  = 0
-      while (index < selected) {
-        offset = alignUp(offset, typeAlignment(program, members(index)))
-        offset = Math.addExact(offset, typeSize(program, members(index)))
-        index += 1
-      }
-      alignUp(offset, typeAlignment(program, members(selected)))
-    }
-
-  private def typeAlignment(program: Program, typeId: Int): Int =
-    program.typeAlignmentCache.getOrElseUpdate(typeId, typeAlignmentUncached(program, typeId))
-
-  private def typeAlignmentUncached(program: Program, typeId: Int): Int = program.runtimeType(typeId) match {
-    case Some(RuntimeType.Structure(_)) if program.packedStructures.contains(typeId) => 1
-    case Some(RuntimeType.Structure(members))           => members.map(typeAlignment(program, _)).maxOption.getOrElse(1)
-    case Some(RuntimeType.Array(element, _))            => typeAlignment(program, element)
-    case Some(RuntimeType.VectorType(component, count)) =>
-      Math.multiplyExact(typeAlignment(program, component), if (count == 3) 4 else count)
-    case Some(RuntimeType.Pointer(_, _)) => 8
-    case _                               => math.max(1, typeSize(program, typeId))
-  }
-
-  private def scalarWidth(program: Program, typeId: Int): IntBetween[1, 64] = program.runtimeType(typeId) match {
-    case Some(RuntimeType.Bool)                     => 8
-    case Some(RuntimeType.Integer(width, _))        => width
-    case Some(RuntimeType.Floating(width))          => width.bitWidth
-    case Some(RuntimeType.Event)                    => 64
-    case Some(RuntimeType.VectorType(component, _)) => scalarWidth(program, component)
-    case value => throw IllegalArgumentException(s"SPIR-V type %$typeId is not scalar or vector: $value")
-  }
-
-  private def pointerPointee(program: Program, typeId: Int): Int = program.runtimeType(typeId) match {
-    case Some(RuntimeType.Pointer(_, pointee)) => pointee
-    case value => throw IllegalArgumentException(s"SPIR-V type %$typeId is not a pointer: $value")
-  }
-
   private def address(values: InvocationValues, operand: Operand): Either[Fault, Pointer] =
     values.get(id(operand)) match {
       case Some(RuntimeValue.Address(_, value)) => Right(value)
@@ -7587,11 +7030,11 @@ private[v1_6] object VMInterpreter {
       pointerOperand: Operand,
       sizeOperand: Operand
   ): Either[Fault, Unit] =
-    (pointerOperand.words.toVec, sizeOperand.words.toVec) match {
+    (pointerOperand.words, sizeOperand.words) match {
       case (Vec(pointerId), Vec(sizeWord)) => values.get(pointerId.raw) match {
-          case Some(RuntimeValue.Address(pointerType, pointer)) => program.runtimeType(pointerType) match {
+          case Some(RuntimeValue.Address(pointerType, pointer)) => program.layout.runtimeType(pointerType) match {
               case Some(RuntimeType.Pointer(_, pointee)) if pointee == pointer.pointee =>
-                val size = sizeWord.toUnsigned.raw
+                val size = sizeWord.toUnsigned.toLong
                 pointer.region match {
                   case Region.Internal(internal) if size != 0L =>
                     val end = pointer.offset + size
@@ -7606,18 +7049,18 @@ private[v1_6] object VMInterpreter {
                 }
               case Some(_) =>
                 Left(Fault.InvalidTask(
-                  s"$opcode target %${pointerId.raw} does not have pointer type"
+                  s"$opcode target %$pointerId does not have pointer type"
                 ))
               case None =>
                 Left(Fault.InvalidTask(
-                  s"$opcode target %${pointerId.raw} has undefined pointer type"
+                  s"$opcode target %$pointerId has undefined pointer type"
                 ))
             }
           case Some(_) => Left(Fault.InvalidTask(
-              s"$opcode target %${pointerId.raw} is not a pointer"
+              s"$opcode target %$pointerId is not a pointer"
             ))
           case None => Left(
-              Fault.InvalidTask(s"$opcode target %${pointerId.raw} is undefined")
+              Fault.InvalidTask(s"$opcode target %$pointerId is undefined")
             )
         }
       case (pointerWords, _) if pointerWords.size != 1 =>
@@ -7701,14 +7144,14 @@ private[v1_6] object VMInterpreter {
     }
   }
 
-  private def numericShape(program: Program, typeId: Int): Option[(IntBetween[1, 64], Int)] =
+  private def numericShape(program: Program, typeId: Int): Option[(Int where Between[1, 64], Int)] =
     integerShape(program, typeId)
       .orElse(floatingShape(program, typeId).map((width, count) => width.bitWidth -> count))
       .orElse {
-        program.runtimeType(typeId) match {
+        program.layout.runtimeType(typeId) match {
           case Some(RuntimeType.Bool) => Some((8, 1))
           case Some(RuntimeType.VectorType(component, count))
-              if program.runtimeType(component).contains(RuntimeType.Bool) => Some((8, count))
+              if program.layout.runtimeType(component).contains(RuntimeType.Bool) => Some((8, count))
           case _ => None
         }
       }
@@ -7723,7 +7166,7 @@ private[v1_6] object VMInterpreter {
     var index    = 0
     while (index < incoming.size) {
       val pair = incoming(index)
-      pair.words.toVec match {
+      pair.words match {
         case Vec(value, parent) => if (parent.raw == predecessor) selected = value.raw
         case words              =>
           return Left(
@@ -8018,7 +7461,7 @@ private[v1_6] object VMInterpreter {
                     case FloatingOperation.Minimum  => floatingMinimum(a, b)
                     case FloatingOperation.Maximum  => floatingMaximum(a, b)
                   }
-                ).raw
+                ).toLong
               case 32 =>
                 val a = IEEE754.binary32ToFloat(Binary32.low(leftLanes(index)))
                 val b = IEEE754.binary32ToFloat(Binary32.low(rightLanes(index)))
@@ -8031,7 +7474,7 @@ private[v1_6] object VMInterpreter {
                     case FloatingOperation.Minimum  => floatingMinimum(a, b)
                     case FloatingOperation.Maximum  => floatingMaximum(a, b)
                   }
-                ).raw
+                ).toLong
               case 64 =>
                 val a = IEEE754.binary64ToDouble(leftLanes(index))
                 val b = IEEE754.binary64ToDouble(rightLanes(index))
@@ -8250,7 +7693,7 @@ private[v1_6] object VMInterpreter {
   private def floatingToUnsigned(
       raw: Long,
       sourceWidth: OneOf[(16, 32, 64)],
-      resultWidth: IntBetween[1, 64]
+      resultWidth: Int where Between[1, 64]
   ): Either[String, Long] = {
     val (exponentBits, fractionBits, bias) = sourceWidth.raw match {
       case 16 => (5, 10, 15)
@@ -8596,7 +8039,7 @@ private[v1_6] object VMInterpreter {
     case Some(RuntimeValue.Bits(sourceType, lanes)) =>
       (booleanLanes(program, sourceType), booleanLanes(program, id(resultType))) match {
         case (Some(count), Some(1)) if lanes.length == count =>
-          val result = if (all) lanes.forall(_ != 0L) else lanes.exists(_ != 0L)
+          val result = if (all) !lanes.contains(0L) else lanes.exists(_ != 0L)
           values.updateScalar(id(destination), id(resultType), if (result) 1L else 0L)
           Right(())
         case _ => Left(Fault.InvalidTask(
@@ -8764,8 +8207,8 @@ private[v1_6] object VMInterpreter {
     val valueId   = id(value)
     val valueType = values.scalarType(valueId)
     val shape     = Option.when(valueType >= 0)(valueType).flatMap(atomicScalarShape(program, _)) match {
-      case Some(result @ (width, 1)) if width.raw == 32 || width.raw == 64 => result
-      case _                                                               =>
+      case Some((width, 1)) if width.raw == 32 || width.raw == 64 => (width.raw.unsafe[Int in (32, 64)], 1)
+      case _                                                      =>
         return Left(
           Fault.InvalidTask(s"$opcode requires a 32- or 64-bit scalar value")
         )
@@ -8811,8 +8254,8 @@ private[v1_6] object VMInterpreter {
     val opcode       = "OpAtomicLoad"
     val resultTypeId = id(resultType)
     val shape        = atomicScalarShape(program, resultTypeId) match {
-      case Some(result @ (width, 1)) if width.raw == 32 || width.raw == 64 => result
-      case _                                                               =>
+      case Some((width, 1)) if width.raw == 32 || width.raw == 64 => (width.raw.unsafe[Int in (32, 64)], 1)
+      case _                                                      =>
         return Left(
           Fault.InvalidTask(s"$opcode requires a 32- or 64-bit scalar result")
         )
@@ -8857,8 +8300,8 @@ private[v1_6] object VMInterpreter {
     val resultTypeId = id(resultType)
     val valueId      = id(value)
     val shape        = atomicScalarShape(program, resultTypeId) match {
-      case Some(result @ (width, 1)) if width.raw == 32 || width.raw == 64 => result
-      case _                                                               =>
+      case Some((width, 1)) if width.raw == 32 || width.raw == 64 => (width.raw.unsafe[Int in (32, 64)], 1)
+      case _                                                      =>
         return Left(
           Fault.InvalidTask(s"$opcode requires a 32- or 64-bit scalar result")
         )
@@ -8908,8 +8351,8 @@ private[v1_6] object VMInterpreter {
     val valueId      = id(value)
     val comparatorId = id(comparator)
     val shape        = atomicScalarShape(program, resultTypeId) match {
-      case Some(result @ (width, 1)) if width.raw == 32 || width.raw == 64 => result
-      case _                                                               =>
+      case Some((width, 1)) if width.raw == 32 || width.raw == 64 => (width.raw.unsafe[Int in (32, 64)], 1)
+      case _                                                      =>
         return Left(
           Fault.InvalidTask(s"$opcode requires a 32- or 64-bit scalar result")
         )
@@ -9031,7 +8474,7 @@ private[v1_6] object VMInterpreter {
       )
     } yield ()
 
-  private def atomicScalarShape(program: Program, typeId: Int): Option[(IntBetween[1, 64], Int)] =
+  private def atomicScalarShape(program: Program, typeId: Int): Option[(Int where Between[1, 64], Int)] =
     integerShape(program, typeId)
       .orElse(floatingShape(program, typeId).map((width, count) => width.bitWidth -> count))
 
@@ -9052,8 +8495,8 @@ private[v1_6] object VMInterpreter {
     val resultTypeId = id(resultType)
     val valueId      = value.map(id(_))
     val shape        = integerShape(program, resultTypeId) match {
-      case Some(result @ (width, 1)) if width.raw == 32 || width.raw == 64 => result
-      case _                                                               =>
+      case Some((width, 1)) if width.raw == 32 || width.raw == 64 => (width.raw.unsafe[Int in (32, 64)], 1)
+      case _                                                      =>
         return Left(
           Fault.InvalidTask(
             s"${operation.opcode} requires a 32- or 64-bit scalar integer result"
@@ -9500,10 +8943,10 @@ private[v1_6] object VMInterpreter {
     case (_, None) => Left(undefined(right))
   }
 
-  private def integerShape(program: Program, typeId: Int): Option[(IntBetween[1, 64], Int)] =
-    program.runtimeType(typeId) match {
+  private def integerShape(program: Program, typeId: Int): Option[(Int where Between[1, 64], Int)] =
+    program.layout.runtimeType(typeId) match {
       case Some(RuntimeType.Integer(width, _))            => Some((width, 1))
-      case Some(RuntimeType.VectorType(component, count)) => program.runtimeType(component) match {
+      case Some(RuntimeType.VectorType(component, count)) => program.layout.runtimeType(component) match {
           case Some(RuntimeType.Integer(width, _)) => Some((width, count))
           case _                                   => None
         }
@@ -9511,33 +8954,33 @@ private[v1_6] object VMInterpreter {
     }
 
   private def floatingShape(program: Program, typeId: Int): Option[(OneOf[(16, 32, 64)], Int)] =
-    program.runtimeType(typeId) match {
+    program.layout.runtimeType(typeId) match {
       case Some(RuntimeType.Floating(width))              => Some((width, 1))
-      case Some(RuntimeType.VectorType(component, count)) => program.runtimeType(component) match {
+      case Some(RuntimeType.VectorType(component, count)) => program.layout.runtimeType(component) match {
           case Some(RuntimeType.Floating(width)) => Some((width, count))
           case _                                 => None
         }
       case _ => None
     }
 
-  private[v1_6] def floatingAddBits(width: OneOf[(16, 32, 64)], left: Long, right: Long): Long = width.raw match {
+  def floatingAddBits(width: OneOf[(16, 32, 64)], left: Long, right: Long): Long = width.raw match {
     case 16 =>
       IEEE754.floatToBinary16(
         IEEE754.binary16ToFloat(Binary16.low(left)) +
           IEEE754.binary16ToFloat(Binary16.low(right))
-      ).raw
+      ).toLong
     case 32 =>
       IEEE754.floatToBinary32(
         IEEE754.binary32ToFloat(Binary32.low(left)) +
           IEEE754.binary32ToFloat(Binary32.low(right))
-      ).raw
+      ).toLong
     case 64 =>
       IEEE754.doubleToBinary64(IEEE754.binary64ToDouble(left) + IEEE754.binary64ToDouble(right))
   }
 
   private def floatingOneBits(width: OneOf[(16, 32, 64)]): Long = width.raw match {
-    case 16 => IEEE754.floatToBinary16(1.0f).raw
-    case 32 => IEEE754.floatToBinary32(1.0f).raw
+    case 16 => IEEE754.floatToBinary16(1.0f).toLong
+    case 32 => IEEE754.floatToBinary32(1.0f).toLong
     case 64 => IEEE754.doubleToBinary64(1.0)
   }
 
@@ -9547,7 +8990,7 @@ private[v1_6] object VMInterpreter {
     case 64 => if (negative) 0xfff0000000000000L else 0x7ff0000000000000L
   }
 
-  private[v1_6] def floatingMultiplyBits(
+  def floatingMultiplyBits(
       width: OneOf[(16, 32, 64)],
       left: Long,
       right: Long
@@ -9556,12 +8999,12 @@ private[v1_6] object VMInterpreter {
       IEEE754.floatToBinary16(
         IEEE754.binary16ToFloat(Binary16.low(left)) *
           IEEE754.binary16ToFloat(Binary16.low(right))
-      ).raw
+      ).toLong
     case 32 =>
       IEEE754.floatToBinary32(
         IEEE754.binary32ToFloat(Binary32.low(left)) *
           IEEE754.binary32ToFloat(Binary32.low(right))
-      ).raw
+      ).toLong
     case 64 =>
       IEEE754.doubleToBinary64(IEEE754.binary64ToDouble(left) * IEEE754.binary64ToDouble(right))
   }
@@ -9575,7 +9018,7 @@ private[v1_6] object VMInterpreter {
             IEEE754.binary16ToFloat(Binary16.low(right)).toDouble,
             IEEE754.binary16ToFloat(Binary16.low(addend)).toDouble
           ).toFloat
-        ).raw
+        ).toLong
       case 32 =>
         IEEE754.floatToBinary32(
           Math.fma(
@@ -9583,14 +9026,14 @@ private[v1_6] object VMInterpreter {
             IEEE754.binary32ToFloat(Binary32.low(right)),
             IEEE754.binary32ToFloat(Binary32.low(addend))
           )
-        ).raw
+        ).toLong
       case 64 =>
         IEEE754.doubleToBinary64(
           Math.fma(IEEE754.binary64ToDouble(left), IEEE754.binary64ToDouble(right), IEEE754.binary64ToDouble(addend))
         )
     }
 
-  private[v1_6] def floatingMinimumBits(
+  def floatingMinimumBits(
       width: OneOf[(16, 32, 64)],
       left: Long,
       right: Long
@@ -9601,19 +9044,19 @@ private[v1_6] object VMInterpreter {
           IEEE754.binary16ToFloat(Binary16.low(left)),
           IEEE754.binary16ToFloat(Binary16.low(right))
         )
-      ).raw
+      ).toLong
     case 32 =>
       IEEE754.floatToBinary32(
         floatingMinimum(
           IEEE754.binary32ToFloat(Binary32.low(left)),
           IEEE754.binary32ToFloat(Binary32.low(right))
         )
-      ).raw
+      ).toLong
     case 64 =>
       IEEE754.doubleToBinary64(floatingMinimum(IEEE754.binary64ToDouble(left), IEEE754.binary64ToDouble(right)))
   }
 
-  private[v1_6] def floatingMaximumBits(
+  def floatingMaximumBits(
       width: OneOf[(16, 32, 64)],
       left: Long,
       right: Long
@@ -9624,14 +9067,14 @@ private[v1_6] object VMInterpreter {
           IEEE754.binary16ToFloat(Binary16.low(left)),
           IEEE754.binary16ToFloat(Binary16.low(right))
         )
-      ).raw
+      ).toLong
     case 32 =>
       IEEE754.floatToBinary32(
         floatingMaximum(
           IEEE754.binary32ToFloat(Binary32.low(left)),
           IEEE754.binary32ToFloat(Binary32.low(right))
         )
-      ).raw
+      ).toLong
     case 64 =>
       IEEE754.doubleToBinary64(floatingMaximum(IEEE754.binary64ToDouble(left), IEEE754.binary64ToDouble(right)))
   }
@@ -9642,7 +9085,7 @@ private[v1_6] object VMInterpreter {
     else if (left == right) {
       if (
         left == 0.0f &&
-        ((IEEE754.floatToBinary32(left).raw.toInt | IEEE754.floatToBinary32(right).raw.toInt) < 0)
+        ((IEEE754.floatToBinary32(left).toInt | IEEE754.floatToBinary32(right).toInt) < 0)
       )
         IEEE754.binary32ToFloat(Binary32(0x80000000L))
       else left
@@ -9654,7 +9097,7 @@ private[v1_6] object VMInterpreter {
     else if (left == right) {
       if (
         left == 0.0f &&
-        ((IEEE754.floatToBinary32(left).raw.toInt & IEEE754.floatToBinary32(right).raw.toInt) >= 0)
+        ((IEEE754.floatToBinary32(left).toInt & IEEE754.floatToBinary32(right).toInt) >= 0)
       )
         0.0f
       else left
@@ -9693,9 +9136,10 @@ private[v1_6] object VMInterpreter {
 
   private def bfloat16ToFloat32Bits(value: Long): Long = (value & 0xffffL) << 16
 
-  private def booleanLanes(program: Program, typeId: Int): Option[Int] = program.runtimeType(typeId) match {
+  private def booleanLanes(program: Program, typeId: Int): Option[Int] = program.layout.runtimeType(typeId) match {
     case Some(RuntimeType.Bool) => Some(1)
-    case Some(RuntimeType.VectorType(component, count)) if program.runtimeType(component).contains(RuntimeType.Bool) =>
+    case Some(RuntimeType.VectorType(component, count))
+        if program.layout.runtimeType(component).contains(RuntimeType.Bool) =>
       Some(count)
     case _ => None
   }
@@ -9706,15 +9150,12 @@ private[v1_6] object VMInterpreter {
       case None        => Left(Fault.InvalidTask(s"SPIR-V label %${id(operand)} is absent in function %${function.id}"))
     }
 
-  private def alignUp(value: Int, alignment: Int): Int =
-    Math.multiplyExact((value + alignment - 1) / alignment, alignment)
-
   private def withExecutionContext(
-      error: Fault,
+      error: Fault | Memory.Pending.type,
       function: Function,
       pc: Int,
       instruction: Instruction
-  ): Fault = error match {
+  ): Fault | Memory.Pending.type = error match {
     case Fault.InvalidTask(message) =>
       Fault.InvalidTask(
         s"$message at function %${function.id}, pc $pc ($instruction)"

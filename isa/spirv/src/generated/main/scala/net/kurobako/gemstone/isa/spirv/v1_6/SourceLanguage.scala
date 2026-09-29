@@ -6,12 +6,12 @@ object SourceLanguage {
   final val Unknown: Int = 0
   final val ESSL: Int = 1
   final val GLSL: Int = 2
-  final val OpenCL_C: Int = 3
-  final val OpenCL_CPP: Int = 4
+  final val OpenCLC: Int = 3
+  final val OpenCLCPP: Int = 4
   final val HLSL: Int = 5
-  final val CPP_for_OpenCL: Int = 6
+  final val CPPForOpenCL: Int = 6
   final val SYCL: Int = 7
-  final val HERO_C: Int = 8
+  final val HEROC: Int = 8
   final val NZSL: Int = 9
   final val WGSL: Int = 10
   final val Slang: Int = 11

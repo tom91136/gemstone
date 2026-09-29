@@ -1,11 +1,31 @@
-import java.nio.file.Path
-import scala.language.implicitConversions
-import scala.sys.process.{Process, ProcessLogger}
-
 import Paths.{given, *}
+import java.nio.file.Files
+import java.nio.file.Path
+import sbt.internal.util.MessageOnlyException
+import scala.language.implicitConversions
+import scala.sys.process.Process
+import scala.sys.process.ProcessLogger
+import scala.util.Using
 
 /** Minimal CMake/CTest command construction shared by the build. */
 object CMake {
+  private def run(command: Seq[String], directory: Path, output: Path, log: String => Unit): Unit = {
+    Files.createDirectories(output.getParent)
+    log(s"${command.head}: $directory (log: $output)")
+    val status = Using.resource(Files.newBufferedWriter(output)) { writer =>
+      def write(line: String): Unit = writer.synchronized {
+        writer.write(line)
+        writer.newLine()
+      }
+      Process(command, directory).!(ProcessLogger(write, write))
+    }
+    if (status != 0) {
+      // Keep the complete log on disk; show enough context without flooding the terminal.
+      Files.readString(output).linesIterator.toVector.takeRight(80).foreach(log)
+      throw MessageOnlyException(s"${command.head} exited with $status; full output: $output")
+    }
+  }
+
   def build(
       source: Path,
       build: Path,
@@ -21,12 +41,11 @@ object CMake {
       target.forall(value => value.nonEmpty && !value.contains('\u0000')),
       "CMake target must be nonempty and cannot contain NUL"
     )
-    val processLogger = ProcessLogger(log, log)
-    val configure     = Seq(cmake, "-S", s"$source", "-B", s"$build") ++ arguments
-    require(Process(configure, source).!(processLogger) == 0, s"CMake configure failed: ${configure.mkString(" ")}")
+    val configure = Seq(cmake, "-S", s"$source", "-B", s"$build") ++ arguments
+    run(configure, source, build.resolve("configure.log"), log)
     val compile = Seq(cmake, "--build", s"$build", "--parallel", s"$parallelism") ++
       target.toSeq.flatMap(value => Seq("--target", value))
-    require(Process(compile, source).!(processLogger) == 0, s"CMake build failed: ${compile.mkString(" ")}")
+    run(compile, source, build.resolve("build.log"), log)
     build
   }
 
@@ -46,6 +65,10 @@ object CMake {
       "--parallel",
       s"$parallelism"
     )
-    require(Process(command, build).!(ProcessLogger(log, log)) == 0, s"CTest failed: ${command.mkString(" ")}")
+    val output = build.resolve("test.log")
+    run(command, build, output, log)
+    Files.readString(output).linesIterator.filter(line =>
+      line.contains("tests passed,") || line.startsWith("Total Test time")
+    ).foreach(log)
   }
 }

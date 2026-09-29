@@ -5,6 +5,6 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 object OverflowModes {
   final val WRAP: Int = 0
   final val SAT: Int = 1
-  final val SAT_ZERO: Int = 2
-  final val SAT_SYM: Int = 3
+  final val SATZERO: Int = 2
+  final val SATSYM: Int = 3
 }

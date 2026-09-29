@@ -1,28 +1,31 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.*
-
-import net.kurobako.gemstone.rpc.ExecutionRPC
-import net.kurobako.gemstone.server.transport.ExecutionRPCProtocol
-import net.kurobako.gemstone.server.transport.Transport.*
-
-import java.io.{BufferedInputStream, ByteArrayInputStream, DataInputStream, InputStream, PushbackInputStream}
+import java.io.BufferedInputStream
+import java.io.ByteArrayInputStream
+import java.io.DataInputStream
+import java.io.InputStream
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
 import java.nio.ByteBuffer
-import java.net.{InetAddress, ServerSocket, Socket}
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.server.protocol.*
 import scala.util.Using
 
-final class RPCInputStreamSuite extends munit.FunSuite {
-  private final class Cleanup(action: () => Unit) extends AutoCloseable {
+class RPCInputStreamSuite extends munit.FunSuite {
+  private class Cleanup(action: () => Unit) extends AutoCloseable {
     override def close(): Unit = action()
   }
-  private final class InputFixture(val input: InputStream, cleanup: () => Unit) extends AutoCloseable {
+  private class InputFixture(val input: InputStream, cleanup: () => Unit) extends AutoCloseable {
     override def close(): Unit = Using.Manager { use =>
       val _ = use(Cleanup(cleanup))
       val _ = use(input)
     }.get
   }
 
-  private final class FragmentedInput(source: InputStream) extends InputStream {
+  private class FragmentedInput(source: InputStream) extends InputStream {
     def read(): Int                                                      = source.read()
     override def read(bytes: Array[Byte], offset: Int, length: Int): Int =
       source.read(bytes, offset, math.min(length, 511))
@@ -33,10 +36,11 @@ final class RPCInputStreamSuite extends munit.FunSuite {
     fully  <- Seq(false, true)
     socket <- Seq(false, true)
   }
-    test(s"client identity peek preserves fragmented large consecutive frames readFully=$fully socket=$socket") {
+    test(s"header parsing preserves fragmented large consecutive frames readFully=$fully socket=$socket") {
       val client = ClientId(0x0102030405060708L)
-      val prefix = ByteBuffer.allocate(ExecutionRPCProtocol.RequestIdentityBytesAfterMagic)
-        .putLong(ExecutionRPC.Schema.fingerprint).putLong(client.raw).array()
+      val tag    = "Launch".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+      val prefix = ByteBuffer.allocate(ExecutionRPC.RequestHeaderBytes.raw - java.lang.Integer.BYTES + tag.length)
+        .putLong(client.toLong).putLong(1L).putLong(2L).putInt(tag.length).putInt(17003).put(tag).array()
       val body    = Array.tabulate[Byte](17003)(index => (index * 17 + 3).toByte)
       val frame   = prefix ++ body
       val data    = frame ++ frame
@@ -66,21 +70,40 @@ final class RPCInputStreamSuite extends munit.FunSuite {
       } else InputFixture(ByteArrayInputStream(data), () => ())
       Using.resource(fixture) { source =>
         val fragmented = FragmentedInput(source.input)
-        val replay     = PushbackInputStream(
-          BufferedInputStream(fragmented, 256),
-          ExecutionRPCProtocol.RequestIdentityBytesAfterMagic
-        )
-        val input = DataInputStream(replay)
+        val input      = DataInputStream(BufferedInputStream(fragmented, 256))
         for (_ <- 0 until 2) {
-          assertEquals(GemstoneRPCServer.peekClientId(input, replay), client)
+          val header = readHeader(input)
+          assertEquals(header.client, client)
           val actual = if (fully) {
-            val bytes = Array.ofDim[Byte](frame.length)
+            val bytes = Array.ofDim[Byte](body.length)
             input.readFully(bytes)
             bytes
-          } else input.readNBytes(frame.length)
-          assert(java.util.Arrays.equals(actual, frame), "client identity peek changed frame bytes or stream position")
+          } else input.readNBytes(body.length)
+          assert(java.util.Arrays.equals(actual, body), "header parsing changed payload bytes or stream position")
         }
         assertEquals(input.read(), -1)
       }
     }
+  test("invalid tag and payload lengths are rejected before reading variable bytes") {
+    for (
+      (tagSize, payloadSize) <- Seq(
+        (0, 0),
+        (-1, 0),
+        (ExecutionRPC.MaximumTagBytes.raw + 1, 0),
+        (4, -1),
+        (4, ExecutionRPC.MaximumPayload.raw + 1)
+      )
+    ) {
+      val prefix = ByteBuffer.allocate(ExecutionRPC.RequestHeaderBytes.raw - 4)
+        .putLong(1L).putLong(1L).putLong(1L).putInt(tagSize).putInt(payloadSize).array()
+      intercept[IllegalArgumentException](readHeader(DataInputStream(ByteArrayInputStream(prefix))))
+    }
+  }
+
+  test("malformed UTF-8 tags are rejected") {
+    val frame = ByteBuffer.allocate(ExecutionRPC.RequestHeaderBytes.raw - 4 + 1)
+      .putLong(1L).putLong(1L).putLong(1L).putInt(1).putInt(0).put(0xff.toByte).array()
+    intercept[java.nio.charset.CharacterCodingException](readHeader(DataInputStream(ByteArrayInputStream(frame))))
+  }
+
 }

@@ -1,0 +1,181 @@
+package net.kurobako.gemstone.server
+
+import java.nio.file.Files
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.environment as env
+import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.server.*
+import net.kurobako.gemstone.server.backend.*
+import net.kurobako.gemstone.server.recording.*
+import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
+import scala.concurrent.duration.*
+import scala.util.Using
+
+/** RPC traffic, forced interleavings, host-memory extensions and workgroups regressions across all APIs. */
+class MemoryCoherenceSuite extends munit.FunSuite {
+  override val munitTimeout: Duration = 150.seconds
+
+  private enum Scenario {
+    case Device, OrdinaryHost, Concurrent, Submission, Overlap, Compare
+
+    def probe: Option[String] = this match {
+      case Submission => Some("submission")
+      case Overlap    => Some("overlap")
+      case Compare    => Some("compare")
+      case _          => None
+    }
+  }
+  import Scenario.*
+
+  private def allocationKinds(api: String): List[String] = api match {
+    case "cuda"      => List("managed", "pinned", "registered")
+    case "hip"       => List("managed", "host", "registered")
+    case "hsa"       => List("region", "pool", "locked")
+    case "levelzero" => List("shared", "host")
+    case "opencl"    => List("svm", "usm_host", "usm_shared")
+  }
+
+  for {
+    api         <- List("cuda", "hip", "hsa", "levelzero", "opencl")
+    atomicWidth <- List(0, 32, 64)
+    fenced      <- if (atomicWidth != 0) List(false, true) else List(false)
+    workItems   <- if (atomicWidth != 0 && !fenced) List(1, 128) else List(1)
+    scenario    <- if (atomicWidth != 0) List(Concurrent) ++
+      (if (!fenced && workItems == 1) List(Submission, Overlap, Compare) else Nil)
+    else List(Device, Concurrent) ++ (if (api == "opencl") Nil else List(OrdinaryHost))
+    if scenario != Compare || atomicWidth == 32
+    allocationKind <- if (scenario == Compare) allocationKinds(api).take(1)
+    else if (scenario == Concurrent || scenario.probe.nonEmpty) allocationKinds(api) else List("default")
+  } test(munit.TestOptions(
+    s"$api $scenario allocation=$allocationKind atomic=$atomicWidth fence=$fenced work-items=$workItems"
+  ).withTags(if (atomicWidth == 0) Set.empty else Set(munit.Tag("atomic")))) {
+    val atomicProbe = atomicWidth != 0
+    val ordinary    = scenario == OrdinaryHost
+    val concurrent  = scenario == Concurrent
+    val directory   = native.directory
+    val client      = directory.resolve(s"gemstone_memory_$api")
+    assert(Files.isExecutable(client), s"missing native memory client: $client")
+    // The C++ fixture runs 32 serial RMW rounds, or 128 lanes in four groups. These independent
+    // expected counts verify that every fixture operation crossed the RPC/checkpoint boundary.
+    Using.resource(checkpoints.Checkpoint(
+      forceContention = atomicProbe,
+      expectedOperations = if (workItems > 1) workItems else 32
+    )) { checkpoint =>
+      val vendors = checkpoint.directory
+      val _ = Files.writeString(vendors.resolve("gemstone.icd"), directory.resolve(API.OpenCL.lib).toString + "\n")
+      val atomicWords = mutable.ArrayBuffer.empty[(Long, Long)]
+      val archive     = checkpoint.directory.resolve("rpc.msgpack")
+      val settings    = Server.Settings(
+        parallelism = 2,
+        record = Some(archive),
+        limits = TaskControl.Limits((if (atomicProbe) 100000 else 10000000).toLong.unsafe[Long > 0]),
+        requestTimeoutMillis = 30000
+      )
+      Using.resource(if (concurrent)
+        Server.start(settings, workgroups => Backends(checkpoint.backends(workgroups)))
+      else Server.start(settings)) {
+        server =>
+          val probes =
+            (if (ordinary) Vector.empty else Vector("rpc_only")) ++
+              scenario.probe.toVector ++
+              (if (workItems > 1) Vector("multilane") else Vector.empty) ++
+              (if (fenced) Vector("fence") else Vector.empty) ++
+              (if (atomicProbe) Vector("atomic") else Vector.empty)
+          val base = native.providerEnvironment ++ Map(
+            env.MemoryProbe          -> probes.mkString(","),
+            env.MemoryAllocationKind -> allocationKind,
+            env.RpcEndpoint          -> server.endpoint.toString,
+            env.RpcClient            -> server.client.raw.toString,
+            "OCL_ICD_VENDORS"        -> vendors.toString
+          ) ++
+            (if (atomicProbe) Map(env.MemoryAtomicBits -> atomicWidth.toString)
+             else Map.empty[String, String]) ++
+            (if (concurrent) Map(env.MemoryConcurrencyDirectory -> checkpoint.directory.toString)
+             else Map.empty[String, String])
+          val paging    = if (ordinary) Map(env.SystemPaging -> "1") else Map.empty[String, String]
+          val arguments = Vector(client.toString) ++ (if (ordinary) Vector("ordinary") else Vector.empty)
+          val result    = native.run(
+            Vec.from(arguments).unsafe,
+            directory,
+            Launch.Environment(
+              base ++ paging,
+              if (ordinary) Set.empty
+              else Set(env.SystemPaging, "UR_ADAPTERS_FORCE_LOAD")
+            ),
+            120.seconds
+          )
+          assertEquals(result.exit, 0, result.diagnostic)
+          result.stdout.linesIterator.filter(_.startsWith("atomic-input ")).foreach { line =>
+            val fields = line.split(' ')
+            val base   = fields(1).toLong
+            val width  = fields(2).toLong
+            atomicWords += ((base, base + width))
+            atomicWords += ((base + 2 * width, base + 3 * width))
+          }
+          if (atomicProbe) assertEquals(atomicWords.size, if (scenario == Overlap) 4 else 2, result.diagnostic)
+          val expected = if (atomicProbe) List(scenario match {
+            case Submission => s"verified asynchronous submission bits=$atomicWidth rounds=32"
+            case Overlap    => s"verified overlapping queues bits=$atomicWidth rounds=32 kernel-publication=1"
+            case Compare    => s"verified failed compare-exchange bits=$atomicWidth rounds=32 atomic-locations=2"
+            case _ if workItems > 1 => s"verified multi-workgroup atomics bits=$atomicWidth lanes=128 groups=4"
+            case _ => s"verified live system atomics bits=$atomicWidth rounds=32 fences=${if (fenced) 1 else 0}"
+          })
+          else if (concurrent) for {
+            layout <- List(0, 1, 2)
+            pass   <- List(0, 1)
+          } yield s"verified concurrency layout=$layout pass=$pass"
+          else if (ordinary) for {
+            layout <- List("contiguous", "strided", "gather", "linked")
+            pass   <- List(0, 1)
+          } yield s"verified $layout pass=$pass"
+          else List("verified host-memory transport pass=0", "verified host-memory transport pass=1")
+          assertEquals(
+            result.stdout.linesIterator.filter(_.startsWith("verified ")).toList,
+            expected,
+            result.diagnostic
+          )
+          if (concurrent)
+            assertEquals(checkpoint.count, if (atomicProbe) 1 else 6)
+          if (atomicProbe && concurrent) {
+            val operations = if (workItems > 1) workItems else 32
+            assertEquals(checkpoint.contendedOperations.get(), operations)
+            assertEquals(checkpoint.contendedAttempts.get(), operations * 3)
+          }
+          assert(server.usage > 0, "the native client did not exercise the real RPC transport")
+      }
+      Using.resource(Journal.open(archive)) { journal =>
+        val hostAllocations = mutable.Set.empty[Long]
+        val requests        = journal.events.filter(_.kind == Journal.Kind.Request)
+        assert(requests.nonEmpty, "recording contains no RPC requests")
+        requests.foreach { event =>
+          val frame        = journal.frame(event)
+          val operationTag = Journal.Frames.operation(frame)
+          val payload      = Journal.Frames.payload(frame)
+          val request      = Wire.Protocol[Operation].decodePayload(operationTag, payload, ExecutionRPC.Limits)
+            .fold(message => fail(message), identity).value
+          request match {
+            case Operation.RegisterAllocationAddress(allocation, _, true) =>
+              val _ = hostAllocations.add(allocation.toLong)
+            case Operation.SupplyHostMemory(_, ranges) =>
+              ranges.foreach { range =>
+                assert(
+                  !atomicWords.exists((begin, end) =>
+                    range.address.raw < end && begin < range.address.raw + range.bytes.size
+                  ),
+                  "an atomic control word was fetched by an ordinary host read"
+                )
+              }
+            case Operation.WriteAllocation(allocation, _, _) =>
+              assert(!hostAllocations.contains(allocation.toLong), "host-backed storage was uploaded speculatively")
+            case Operation.ReleaseAllocation(allocation) => val _ = hostAllocations.remove(allocation.toLong)
+            case _                                       => ()
+          }
+        }
+      }
+    }
+  }
+}

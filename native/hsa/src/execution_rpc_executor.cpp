@@ -16,6 +16,7 @@
 #include "gemstone_execution_rpc.hpp"
 
 #include "completion.hpp"
+#include <environment_keys.hpp>
 
 namespace {
 
@@ -123,11 +124,11 @@ int launch(void *context, uint64_t program_id, const char *kernel_name, gemstone
       converted.emplace_back(ArgumentScalar{std::vector<uint8_t>(input.scalar_bytes, input.scalar_bytes + input.scalar_size)});
     } else if (input.kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION) {
       converted.emplace_back(
-          ArgumentMemory{MemoryRegion{static_cast<int64_t>(input.allocation_id)}, static_cast<int64_t>(input.allocation_offset)});
+          ArgumentMemory{AllocationId{static_cast<int64_t>(input.allocation_id)}, static_cast<int64_t>(input.allocation_offset)});
     } else return -1;
   }
   CompletionId completion{};
-  if (gemstone::environment::present(gemstone::environment::SystemPaging) && !executor.client->call(EnableHostMemory{})) return -1;
+  if (gemstone::environment::enabled(gemstone::environment::SystemPaging) && !executor.client->call(EnableHostMemory{})) return -1;
   const auto result = accept(
       executor,
       executor.client->call(Launch{
@@ -158,7 +159,8 @@ int completionDirtyRanges(void *context, uint64_t completion_id, gemstone_hsa_di
   auto &executor = connection(context);
   if (!count || (capacity != 0 && !ranges)) return -1;
   std::vector<DirtyRange> converted;
-  if (accept(executor, executor.client->call(CompletionDirtyRanges{CompletionId{static_cast<int64_t>(completion_id)}}), &converted) != 0)
+  if (!gemstone::execution::completion_dirty_ranges(*executor.client, CompletionId{static_cast<int64_t>(completion_id)}, converted,
+                                                    executor.error))
     return -1;
   if (converted.size() > UINT32_MAX) return -1;
   *count = static_cast<uint32_t>(converted.size());

@@ -1,19 +1,8 @@
 package net.kurobako.gemstone.isa
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.vm.LaunchGeometry
-
-/** Format-neutral information needed by a native facade to marshal a kernel launch. */
-case class KernelMetadata private (
-    argumentBlockSize: NonNegative[Int],
-    explicitParameterCount: NonNegative[Int],
-    parameters: Vec[KernelMetadata.Parameter],
-    requiredWorkGroupSize: Option[LaunchGeometry.Dimensions],
-    workGroupSizeHint: Option[LaunchGeometry.Dimensions],
-    bindingIndices: Vec[NonNegative[Int]],
-    entryPointId: Option[NonNegative[Int]]
-)
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.vm.*
 
 object KernelMetadata {
   enum ParameterKind {
@@ -23,36 +12,59 @@ object KernelMetadata {
   }
 
   case class Parameter(
-      width: Positive[Int],
-      offset: NonNegative[Int],
+      width: Int > 0,
+      offset: Int >= 0,
       kind: ParameterKind,
       containsPointers: Boolean
   )
 
   def validated(
-      argumentBlockSize: NonNegative[Int],
-      explicitParameterCount: NonNegative[Int],
+      argumentBlockSize: Int >= 0,
+      explicitParameterCount: Int >= 0,
       parameters: Vec[Parameter],
       requiredWorkGroupSize: Option[LaunchGeometry.Dimensions] = None,
       workGroupSizeHint: Option[LaunchGeometry.Dimensions] = None,
-      bindingIndices: Vec[NonNegative[Int]] = Vec.empty,
-      entryPointId: Option[NonNegative[Int]] = None
-  ): Either[String, KernelMetadata] =
-    SymbolValidation
-      .kernelParameters(
-        argumentBlockSize,
-        explicitParameterCount,
-        parameters.map(parameter => (parameter.offset, parameter.width))
+      bindingIndices: Vec[Int >= 0] = Vec.empty,
+      entryPointId: Option[Int >= 0] = None
+  ): Either[NonEmpty[String], KernelMetadata] =
+    for {
+      _ <- Either.cond[NonEmpty[String], Unit](
+        explicitParameterCount.raw <= parameters.size,
+        (),
+        "explicit parameter count exceeds the parameter count"
       )
-      .map(_ =>
-        KernelMetadata(
-          argumentBlockSize,
-          explicitParameterCount,
-          parameters,
-          requiredWorkGroupSize,
-          workGroupSizeHint,
-          bindingIndices,
-          entryPointId
-        )
+      _ <- Either.cond[NonEmpty[String], Unit](
+        parameters.forall(parameter =>
+          parameter.offset.raw.toLong + parameter.width.raw.toLong <= argumentBlockSize.raw.toLong
+        ),
+        (),
+        "kernel parameter lies outside the argument block"
       )
+      _ <- Either.cond[NonEmpty[String], Unit](
+        parameters.monotonic((previous, current) =>
+          previous.offset.raw.toLong + previous.width.raw.toLong <= current.offset.raw.toLong
+        ),
+        (),
+        "kernel parameters must be ordered and non-overlapping"
+      )
+    } yield KernelMetadata(
+      argumentBlockSize,
+      explicitParameterCount,
+      parameters,
+      requiredWorkGroupSize,
+      workGroupSizeHint,
+      bindingIndices,
+      entryPointId
+    )
 }
+
+/** Format-neutral information needed by a native facade to marshal a kernel launch. */
+case class KernelMetadata private (
+    argumentBlockSize: Int >= 0,
+    explicitParameterCount: Int >= 0,
+    parameters: Vec[KernelMetadata.Parameter],
+    requiredWorkGroupSize: Option[LaunchGeometry.Dimensions],
+    workGroupSizeHint: Option[LaunchGeometry.Dimensions],
+    bindingIndices: Vec[Int >= 0],
+    entryPointId: Option[Int >= 0]
+)

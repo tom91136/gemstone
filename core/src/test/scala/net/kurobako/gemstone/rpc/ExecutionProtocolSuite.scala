@@ -1,76 +1,90 @@
 package net.kurobako.gemstone.rpc
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.memory.GuestAddress
-import net.kurobako.gemstone.isa.{GlobalSymbol, KernelMetadata as ISAKernelMetadata}
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionProtocol.{*, given}
-import net.kurobako.gemstone.rpc.Wire.Codec
-import net.kurobako.gemstone.vm.LaunchGeometry
+import net.kurobako.gemstone.rpc.Wire.*
+import net.kurobako.gemstone.vm.*
 
-final class ExecutionProtocolSuite extends munit.FunSuite {
+class ExecutionProtocolSuite extends munit.FunSuite {
   private case class UncheckedKernelMetadata(
-      argumentBlockSize: NonNegative[Int],
-      explicitParameterCount: NonNegative[Int],
-      parameters: Vec[ISAKernelMetadata.Parameter],
+      argumentBlockSize: Int >= 0,
+      explicitParameterCount: Int >= 0,
+      parameters: Vec[KernelMetadata.Parameter],
       requiredWorkGroupSize: Option[LaunchGeometry.Dimensions] = None,
       workGroupSizeHint: Option[LaunchGeometry.Dimensions] = None,
-      bindingIndices: Vec[NonNegative[Int]] = Vec.empty,
-      entryPointId: Option[NonNegative[Int]] = None
+      bindingIndices: Vec[Int >= 0] = Vec.empty,
+      entryPointId: Option[Int >= 0] = None
   ) derives Codec
 
   private case class UncheckedGlobalSymbol(
-      name: NonEmptyString,
+      name: NonEmpty[String],
       virtualAddress: Option[GuestAddress],
-      size: NonNegative[Long],
-      pointerOffsets: Vec[NonNegative[Int]]
+      size: Long >= 0,
+      pointerOffsets: Vec[Int >= 0]
   ) derives Codec
 
-  private case class UncheckedProgramGlobal(size: NonNegative[Long], initial: Vec[Byte]) derives Codec
+  private case class UncheckedProgramGlobal(size: Long >= 0, initial: Vec[Byte]) derives Codec
 
   test("identities and symbol names reject wire sentinels") {
     assert(AllocationId.either(0L).isLeft)
     assert(ProgramId.either(-1L).isLeft)
     assertEquals(CompletionId.either(1L), Right(CompletionId(1L)))
-    assert(NonEmptyString.either("").isLeft)
-    assert(NonEmptyString.either("bad\u0000name").isLeft)
-    assertEquals(NonEmptyString.either("global"), Right(NonEmptyString("global")))
+    def symbol(value: String): Either[String, NonEmpty[String]] =
+      Codec[String].encode(value, ExecutionRPC.Limits).flatMap(Codec[NonEmpty[String]].decode(_, ExecutionRPC.Limits))
+    assert(symbol("").isLeft)
+    assert(symbol("bad\u0000name").isLeft)
+    assertEquals(
+      symbol("global"),
+      Right[Nothing, NonEmpty[String]]("global")
+    )
+  }
+
+  test("NUL restrictions apply to native names at the RPC boundary, in both directions") {
+    val text: NonEmpty[String] = "bad\u0000name"
+    val generic                = Codec.nonEmpty[String]
+    assertEquals(generic.encode(text, ExecutionRPC.Limits).flatMap(generic.decode(_, ExecutionRPC.Limits)), Right(text))
+    assert(Codec[NonEmpty[String]].encode(text, ExecutionRPC.Limits).isLeft)
+    assert(Codec[KernelSymbol]
+      .encode(KernelSymbol(text, "valid"), ExecutionRPC.Limits).isLeft)
+    assert(Wire.Protocol[ExecutionRPC.Operation]
+      .encodePayload(ExecutionRPC.Operation.DescribeKernel(ProgramId(1L), text), ExecutionRPC.Limits).isLeft)
   }
 
   test("kernel metadata enforces its parameter layout at the wire boundary") {
-    val scalar = ISAKernelMetadata.Parameter(
+    val scalar = KernelMetadata.Parameter(
       4,
       0,
-      ISAKernelMetadata.ParameterKind.Scalar,
+      KernelMetadata.ParameterKind.Scalar,
       containsPointers = false
     )
-    val pointer = ISAKernelMetadata.Parameter(
+    val pointer = KernelMetadata.Parameter(
       8,
       4,
-      ISAKernelMetadata.ParameterKind.Allocation,
+      KernelMetadata.ParameterKind.Allocation,
       containsPointers = true
     )
     assertEquals(
-      ISAKernelMetadata.validated(
+      KernelMetadata.validated(
         12,
         2,
         Vec(scalar, pointer)
       ).map(_.parameters),
       Right(Vec(scalar, pointer))
     )
-    assert(ISAKernelMetadata.validated(12, 3, Vec(scalar, pointer)).isLeft)
-    assert(ISAKernelMetadata.validated(
+    assert(KernelMetadata.validated(12, 3, Vec(scalar, pointer)).isLeft)
+    assert(KernelMetadata.validated(
       12,
       2,
       Vec(scalar, pointer.copy(offset = 3))
     ).isLeft)
-    assert(ISAKernelMetadata.validated(8, 2, Vec(scalar, pointer)).isLeft)
+    assert(KernelMetadata.validated(8, 2, Vec(scalar, pointer)).isLeft)
 
     val invalid = UncheckedKernelMetadata(12, 3, Vec(scalar, pointer))
     val decoded = Codec[UncheckedKernelMetadata].encode(invalid, ExecutionRPC.Limits)
-      .flatMap(bytes => Codec[ISAKernelMetadata].decode(bytes, ExecutionRPC.Limits))
+      .flatMap(bytes => Codec[KernelMetadata].decode(bytes, ExecutionRPC.Limits))
     assert(decoded.isLeft)
   }
 
@@ -78,7 +92,7 @@ final class ExecutionProtocolSuite extends munit.FunSuite {
     assert(
       GlobalSymbol
         .validated(
-          NonEmptyString("state"),
+          "state",
           Some(GuestAddress(0x1000L)),
           24L,
           Vec(0, 16)
@@ -86,26 +100,26 @@ final class ExecutionProtocolSuite extends munit.FunSuite {
         .isRight
     )
     assert(GlobalSymbol.validated(
-      NonEmptyString("state"),
+      "state",
       None,
       24L,
       Vec(8, 0)
     ).isLeft)
     assert(GlobalSymbol.validated(
-      NonEmptyString("state"),
+      "state",
       None,
       24L,
       Vec(8, 8)
     ).isLeft)
     assert(GlobalSymbol.validated(
-      NonEmptyString("state"),
+      "state",
       None,
       16L,
       Vec(9)
     ).isLeft)
 
     val invalid = UncheckedGlobalSymbol(
-      NonEmptyString("state"),
+      "state",
       None,
       16L,
       Vec(9)
@@ -117,17 +131,17 @@ final class ExecutionProtocolSuite extends munit.FunSuite {
 
   test("program globals reject initial images larger than their extent") {
     val global =
-      ProgramGlobal.validated(2L, Vec[Byte](1, 2)).fold(message => fail(message), identity)
+      GlobalImage.validated(2L, Vec[Byte](1, 2)).fold(message => fail(message), identity)
     assertEquals(
-      Codec[ProgramGlobal].encode(global, ExecutionRPC.Limits)
-        .flatMap(bytes => Codec[ProgramGlobal].decode(bytes, ExecutionRPC.Limits)),
+      Codec[GlobalImage].encode(global, ExecutionRPC.Limits)
+        .flatMap(bytes => Codec[GlobalImage].decode(bytes, ExecutionRPC.Limits)),
       Right(global)
     )
-    assert(ProgramGlobal.validated(1L, Vec[Byte](1, 2)).isLeft)
+    assert(GlobalImage.validated(1L, Vec[Byte](1, 2)).isLeft)
 
     val invalid = UncheckedProgramGlobal(1L, Vec[Byte](1, 2))
     val decoded = Codec[UncheckedProgramGlobal].encode(invalid, ExecutionRPC.Limits)
-      .flatMap(bytes => Codec[ProgramGlobal].decode(bytes, ExecutionRPC.Limits))
+      .flatMap(bytes => Codec[GlobalImage].decode(bytes, ExecutionRPC.Limits))
     assert(decoded.isLeft)
   }
 }

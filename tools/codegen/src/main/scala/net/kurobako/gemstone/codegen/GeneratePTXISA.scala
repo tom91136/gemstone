@@ -1,26 +1,26 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import net.kurobako.gemstone.Constraint.NonEmptyString
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.string.*
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import scala.annotation.tailrec
 import scala.jdk.CollectionConverters.*
+import scala.util.Try
 import scala.util.matching.Regex
 
 /** Generates the typed instruction model and parser corpus from the pinned NVIDIA PTX HTML document. */
 object GeneratePTXISA {
   private case class SpecificationVersion(
-      source: NonEmptyString,
-      major: NonNegative[Int],
-      minor: NonNegative[Int]
+      source: NonEmpty[String],
+      major: Int >= 0,
+      minor: Int >= 0
   )
   private case class Request(
       tests: Boolean,
@@ -357,7 +357,7 @@ object GeneratePTXISA {
             val names = raw"\.([A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z][A-Za-z0-9_]*)*)".r
               .findAllMatchIn(source.slice(index + 1, end)).flatMap { matched =>
                 val name = matched.group(1)
-                definitions.get(name).getOrElse(Set(name))
+                definitions.getOrElse(name, Set(name))
               }.toSet
             loop(end + 1, required, optional ++ names, complete && names.nonEmpty)
           }
@@ -396,7 +396,7 @@ object GeneratePTXISA {
       case _         => value
     }
     val name =
-      unsigned.takeWhile(character => character.isLetterOrDigit || character == '_').toLowerCase(java.util.Locale.ROOT)
+      unsigned.takeWhile(character => character.isLetterOrDigit || character == '_').toLowerCaseRoot
     if (value.startsWith("[")) "Address" -> true
     else if (value.startsWith("{")) "Vector" -> true
     else if (Set("d", "dst", "p", "q", "r", "result").contains(name)) "Register" -> true
@@ -517,7 +517,7 @@ object GeneratePTXISA {
         case "CpAsyncBulkMBarrier" =>
           "if (modifierNames.contains(\"ignore_oob\")) operands.size == 6 || operands.size == 7 else if (modifierNames.contains(\"multicast::cluster\")) operands.size >= 4 && operands.size <= 6 else operands.size == 4 || operands.size == 5"
         case "CpAsyncBulkTensorMBarrier" =>
-          "if (modifierNames.exists(_.raw.startsWith(\"im2col\")) && modifierNames.contains(\"multicast::cluster\")) operands.size >= 5 && operands.size <= 6 else if (modifierNames.exists(_.raw.startsWith(\"im2col\")) || modifierNames.contains(\"multicast::cluster\")) operands.size >= 4 && operands.size <= 5 else operands.size == 3 || operands.size == 4"
+          "if (modifierNames.exists(_.startsWith(\"im2col\")) && modifierNames.contains(\"multicast::cluster\")) operands.size >= 5 && operands.size <= 6 else if (modifierNames.exists(_.startsWith(\"im2col\")) || modifierNames.contains(\"multicast::cluster\")) operands.size >= 4 && operands.size <= 5 else operands.size == 3 || operands.size == 4"
         case "CpAsyncBulkGroup" | "CpAsyncBulkTensorGroup" | "Call" | "MbarrierTestWait" | "MbarrierTryWait" |
             "Tcgen05Mma" | "Tcgen05MmaSp" =>
           if (allowedTest.isEmpty) "false" else allowedTest
@@ -536,7 +536,7 @@ object GeneratePTXISA {
         case "CpAsyncBulkGroup" =>
           s"if (operands.size == 3) Instruction.CpAsyncBulkGroup(operands(0), operands(1), operands(2), None, None, $remainingModifiers, pred) else if (operands.size == 4 && modifierNames.contains(\"cp_mask\")) Instruction.CpAsyncBulkGroup(operands(0), operands(1), operands(2), None, Some(operands(3)), $remainingModifiers, pred) else Instruction.CpAsyncBulkGroup(operands(0), operands(1), operands(2), Some(operands(3)), operands.lift(4), $remainingModifiers, pred)"
         case "CpAsyncBulkTensorMBarrier" =>
-          s"if (modifierNames.exists(_.raw.startsWith(\"im2col\")) && modifierNames.contains(\"multicast::cluster\")) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), Some(operands(3)), operands.lift(4), operands.lift(5), $remainingModifiers, pred) else if (modifierNames.exists(_.raw.startsWith(\"im2col\"))) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), Some(operands(3)), None, operands.lift(4), $remainingModifiers, pred) else if (modifierNames.contains(\"multicast::cluster\")) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), None, operands.lift(3), operands.lift(4), $remainingModifiers, pred) else Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), None, None, operands.lift(3), $remainingModifiers, pred)"
+          s"if (modifierNames.exists(_.startsWith(\"im2col\")) && modifierNames.contains(\"multicast::cluster\")) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), Some(operands(3)), operands.lift(4), operands.lift(5), $remainingModifiers, pred) else if (modifierNames.exists(_.startsWith(\"im2col\"))) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), Some(operands(3)), None, operands.lift(4), $remainingModifiers, pred) else if (modifierNames.contains(\"multicast::cluster\")) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), None, operands.lift(3), operands.lift(4), $remainingModifiers, pred) else Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), None, None, operands.lift(3), $remainingModifiers, pred)"
         case "CpAsyncBulkTensorGroup" =>
           s"Instruction.CpAsyncBulkTensorGroup(operands(0), operands(1), operands.lift(2), $remainingModifiers, pred)"
         case "Call" =>
@@ -589,13 +589,13 @@ object GeneratePTXISA {
         }
       }
       if (entries.isEmpty) throw IllegalStateException(s"missing PTX metadata for ${shape.opcode}")
-      s"""|() => Metadata(NonEmptyVec.unsafeFromVec(Vec(
+      s"""|() => Metadata(Vec.nonEmpty(
           |        ${entries.mkString(",\n")}
-          |      )))""".stripMargin
+          |      ))""".stripMargin
     }
     val definitions = shapes.map { shape =>
       s"""|    case ${shape.caseName} extends Definition(
-          |    NonEmptyString(${literal(shape.opcode)}),
+          |    ${literal(shape.opcode)},
           |    ${renderDecoder(shape)},
           |    ${renderMetadata(shape)}
           |  )""".stripMargin
@@ -603,35 +603,17 @@ object GeneratePTXISA {
     GeneratedHeader.scala(
       s"PTX instruction model from the pinned NVIDIA ISA ${version.source} specification"
     ) +
-      s"""|package net.kurobako.gemstone.isa.ptx.${packageVersion.raw}
+      s"""|package net.kurobako.gemstone.isa.ptx.$packageVersion
         |
         |import Program.*
         |import ISA.*
         |import Metadata.*
         |
-        |import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-        |import net.kurobako.gemstone.Constraint.NonEmptyString
-        |import net.kurobako.gemstone.{NonEmptyVec, Vec}
-        |import net.kurobako.gemstone.Vec.*
-        |
-        |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
-        |${cases.mkString("\n")}
-        |
-        |  final val operands: Vec[Operand] = operandValues.toVec
-        |
-        |  final def opcode: NonEmptyString = definition.opcode
-        |
-        |  final def decoder: Instruction.Decoder = definition.decoder
-        |
-        |  final def meta: Metadata = definition.meta
-        |
-        |  def mods: Vec[Modifier]
-        |
-        |  def pred: Option[Predication]
-        |
-        |  final def qualifiedOpcode: String = (opcode +: mods.map(_.name)).mkString(".")
-        |
-        |}
+        |import net.kurobako.gemstone.string.*
+        |import net.kurobako.gemstone.constraint.*
+        |import net.kurobako.gemstone.isa.*
+        |import net.kurobako.gemstone.collection.*
+        |import net.kurobako.gemstone.collection.Vec.*
         |
         |${GeneratedHeader.annotation()}object Instruction {
         |  enum DecodeError {
@@ -646,22 +628,21 @@ object GeneratePTXISA {
         |      pred: Option[Predication]
         |  ) => Either[DecodeError, Instruction]
         |
-        |  enum Definition(val opcode: NonEmptyString, val decoder: Decoder, metadata: () => Metadata) {
+        |  enum Definition(val opcode: NonEmpty[String], val decoder: Decoder, metadata: () => Metadata) {
         |${definitions.mkString("\n")}
         |
-        |  final lazy val meta: Metadata = metadata()
+        |  lazy val meta: Metadata = metadata()
         |
-        |  private[$packageVersion] final val fixedMods: Vec[String] = Vec.from(opcode.raw.split('.')).drop(1)
+        |  private[Instruction] val fixedMods: Vec[String] = Vec.from(opcode.split('.')).drop(1)
         |  }
         |
-        |  val version: Version = Version(Positive.unsafe(${version.major}), NonNegative.unsafe(${version.minor}))
+        |  val version: Version = Version(${version.major}, ${version.minor})
         |
         |  val definitions: Vec[Definition] = Definition.values.toVec
         |
-        |  private def normalizeOpcode(value: String): String = value.map(_.toLower)
         |
         |  private lazy val DefinitionsByMnemonic: Map[String, Vec[Definition]] =
-        |    definitions.groupMap(_.opcode.raw.takeWhile(_ != '.'))(value => value)
+        |    definitions.groupMap(_.opcode.takeWhile(_ != '.'))(value => value)
         |
         |  def decode(
         |      opcode: String,
@@ -669,20 +650,20 @@ object GeneratePTXISA {
         |      mods: Vec[Modifier] = Vec.empty,
         |      pred: Option[Predication] = None
         |  ): Either[DecodeError, Instruction] = {
-        |    val opcodeParts = Vec.from(normalizeOpcode(opcode).split('.')).filter(_.nonEmpty)
+        |    val opcodeParts = Vec.from(opcode.toLowerCaseRoot.split('.')).filter(_.nonEmpty)
         |    val name = opcodeParts.headOption.getOrElse("")
-        |    val allModifiers = opcodeParts.drop(1).map(value => Modifier(NonEmptyString.unsafe(value))) ++ mods
+        |    val allModifiers = opcodeParts.drop(1).map(value => Modifier(value.unsafe[NonEmpty[String]])) ++ mods
         |    decodeParsed(name, operands, allModifiers, pred)
         |  }
         |
         |  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-        |  private[$packageVersion] def decodeParsed(
+        |  def decodeParsed(
         |      mnemonic: String,
         |      operands: Vec[Operand],
         |      mods: Vec[Modifier],
         |      pred: Option[Predication]
         |  ): Either[DecodeError, Instruction] = {
-        |    val name = normalizeOpcode(mnemonic)
+        |    val name = mnemonic.toLowerCaseRoot
         |    val allModifiers = mods
         |    val definitions = DefinitionsByMnemonic.getOrElse(name, Vec.empty[Definition])
         |    var specificity = -1
@@ -725,11 +706,31 @@ object GeneratePTXISA {
         |  }
         |
         |  private def fixedModifiersMatch(modifiers: Vec[Modifier], fixed: Vec[String]): Boolean =
-        |    fixed.size <= modifiers.size && fixed.indices.forall(index => modifiers(index).name.raw == fixed(index))
+        |    fixed.size <= modifiers.size && fixed.indices.forall(index => modifiers(index).name == fixed(index))
         |
         |  private def qualifiedOpcode(name: String, modifiers: Vec[Modifier]): String =
         |    (name +: modifiers.map(_.name)).mkString(".")
         |}
+        |
+        |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
+        |${cases.mkString("\n")}
+        |
+        |  val operands: Vec[Operand] = operandValues.toVec
+        |
+        |  final def opcode: NonEmpty[String] = definition.opcode
+        |
+        |  final def decoder: Instruction.Decoder = definition.decoder
+        |
+        |  final def meta: Metadata = definition.meta
+        |
+        |  def mods: Vec[Modifier]
+        |
+        |  def pred: Option[Predication]
+        |
+        |  final def qualifiedOpcode: String = (opcode +: mods.map(_.name)).mkString(".")
+        |
+        |}
+        |
         |""".stripMargin
   }
 
@@ -776,7 +777,7 @@ object GeneratePTXISA {
   }
 
   private def sectionOperations(section: Section): Vector[String] = {
-    val dotted = TitleOpcode.findAllIn(section.title).map(_.toLowerCase(java.util.Locale.ROOT)).toVector
+    val dotted = TitleOpcode.findAllIn(section.title).map(_.toLowerCaseRoot).toVector
       .filter(value => section.mnemonics.contains(value.takeWhile(_ != '.')))
     if (dotted.nonEmpty) dotted.distinct else section.mnemonics
   }
@@ -950,7 +951,7 @@ object GeneratePTXISA {
         .getOrElse(s"operand${position + 1}")
       val identifier = if (selected.headOption.exists(_.isDigit)) s"operand$selected" else selected
       val safe       = if (ScalaKeywords(identifier)) identifier + "Value" else identifier
-      if (safe == "operand" || safe == "value") s"${safe}${position + 1}" else safe
+      if (safe == "operand" || safe == "value") s"$safe${position + 1}" else safe
     }
 
   private def fieldNamePenalty(name: String): Int =
@@ -959,7 +960,7 @@ object GeneratePTXISA {
   private def sourceFieldName(source: String): String = {
     val value = Text.stripLeadingSignGroup(source.trim)
     if (value.startsWith("[")) {
-      val normalized = value.toLowerCase(java.util.Locale.ROOT)
+      val normalized = value.toLowerCaseRoot
       if (normalized.contains("dst")) "destinationAddress"
       else if (normalized.contains("src")) "sourceAddress"
       else if (normalized.contains("mbar") || normalized.contains("bar")) "barrierAddress"
@@ -1052,13 +1053,13 @@ object GeneratePTXISA {
       examples: Vector[(String, String)]
   ): String = {
     val values = examples.map { case (id, source) => s"    ${literal(id)} -> ${literal(source)}" }.mkString(",\n")
-    s"""|package net.kurobako.gemstone.isa.ptx.${packageVersion.raw}
+    s"""|package net.kurobako.gemstone.isa.ptx.$packageVersion
         |
-        |import net.kurobako.gemstone.Vec
+        |import net.kurobako.gemstone.collection.*
         |
         |${GeneratedHeader.scala(
          s"from examples in the pinned NVIDIA PTX ISA ${version.source} specification"
-       )}${GeneratedHeader.annotation()}final class DocumentationSuite extends munit.FunSuite {
+       )}${GeneratedHeader.annotation()}class DocumentationSuite extends munit.FunSuite {
         |  private val examples: Vec[(String, String)] = Vec(
         |$values
         |  )
@@ -1070,7 +1071,7 @@ object GeneratePTXISA {
         |        case Right(_) => Vec.empty[String]
         |      }
         |    }
-        |    assertEquals(failures.toSeq, Seq.empty[String])
+        |    assertEquals(failures, Seq.empty[String])
         |  }
         |
         |  test("all documentation examples round-trip through the canonical printer") {
@@ -1086,7 +1087,7 @@ object GeneratePTXISA {
         |          }
         |      }
         |    }
-        |    assertEquals(failures.toSeq, Seq.empty[String])
+        |    assertEquals(failures, Seq.empty[String])
         |  }
         |}
         |""".stripMargin
@@ -1113,16 +1114,16 @@ object GeneratePTXISA {
       if (index < 0) groups else groups.patch(index, Nil, 1)
     }
     val required = requiredModifiers.map(values =>
-      values.toVector.sorted.map(value => s"NonEmptyString(${literal(value)})")
+      values.toVector.sorted.map(value => s"${literal(value)}")
         .mkString(
           "ModifierGroup(",
           ", ",
           ")"
         )
     ).mkString("Vec(", ", ", ")")
-    val optional = form.optionalModifiers.toVector.sorted.map(value => s"NonEmptyString(${literal(value)})")
+    val optional = form.optionalModifiers.toVector.sorted.map(value => s"${literal(value)}")
       .mkString("_root_.scala.collection.immutable.Set(", ", ", ")")
-    s"InstructionForm(NonEmptyString(${literal(opcode)}), $operands, $required, $optional, ${form.complete})"
+    s"InstructionForm(${literal(opcode)}, $operands, $required, $optional, ${form.complete})"
   }
 
   private def literal(value: String): String = Emission.literal(value)
@@ -1132,20 +1133,20 @@ object GeneratePTXISA {
     Mnemonic.findFirstMatchIn(Predication.replaceFirstIn(
       stripComment(value),
       ""
-    )).map(_.group(1).toLowerCase(java.util.Locale.ROOT))
+    )).map(_.group(1).toLowerCaseRoot)
   private def cleanHeading(value: String): String = Text.normalizeWhitespace(value.replace("\uf0c1", ""))
 
   private def parseSpecificationVersion(value: String): SpecificationVersion =
     value.split('.').toVector match {
       case Vector(major, minor) if major.forall(_.isDigit) && minor.forall(_.isDigit) =>
-        val source = NonEmptyString.either(value)
+        val source = value.refine[NonEmpty[String]]
           .fold(message => throw IllegalArgumentException(s"invalid PTX version '$value': $message"), valid => valid)
-        val majorValue = NonNegative.either(major.toInt)
+        val majorValue = Try(major.toInt.unsafe[Int >= 0]).toEither.left.map(_.getMessage)
           .fold(
             message => throw IllegalArgumentException(s"invalid PTX major version '$major': $message"),
             valid => valid
           )
-        val minorValue = NonNegative.either(minor.toInt)
+        val minorValue = Try(minor.toInt.unsafe[Int >= 0]).toEither.left.map(_.getMessage)
           .fold(
             message => throw IllegalArgumentException(s"invalid PTX minor version '$minor': $message"),
             valid => valid

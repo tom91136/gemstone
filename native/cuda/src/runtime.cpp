@@ -38,6 +38,7 @@
 #include "client.hpp"
 #include "completion.hpp"
 #include "transfer.hpp"
+#include <environment_keys.hpp>
 
 using namespace aspartame;
 using namespace gemstone::cuda;
@@ -48,10 +49,7 @@ namespace {
 
 int32_t ensureRuntimeContext();
 
-gemstone::CommandQueue &commands() {
-  static gemstone::CommandQueue queue(CUDA_ERROR_UNKNOWN);
-  return queue;
-}
+gemstone::CommandQueue &commands();
 
 int32_t enqueueCommand(void *stream, std::function<int32_t()> work) noexcept {
   try {
@@ -3565,7 +3563,7 @@ bool readAllocation(uint64_t id, uint64_t offset, void *bytes, size_t size) noex
   }
 }
 
-bool systemPagingEnabled() noexcept { return gemstone::environment::present(gemstone::environment::SystemPaging); }
+bool systemPagingEnabled() noexcept { return gemstone::environment::enabled(gemstone::environment::SystemPaging); }
 
 Module *findModule(void *handle) {
   const std::lock_guard lock(stateMutex);
@@ -4030,7 +4028,7 @@ int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_
       auto binding = parameter.kind == ParameterKind::Allocation ? pointerBinding(pointer) : std::nullopt;
       if (width == sizeof(pointer) && binding) {
         arguments.emplace_back(
-            ArgumentMemory{MemoryRegion{static_cast<int64_t>(binding->allocation)}, static_cast<int64_t>(binding->offset)});
+            ArgumentMemory{AllocationId{static_cast<int64_t>(binding->allocation)}, static_cast<int64_t>(binding->offset)});
       } else {
         const auto *bytes = static_cast<const uint8_t *>(kernel_params[index]);
         arguments.emplace_back(ArgumentScalar{std::vector<uint8_t>(bytes, bytes + width)});
@@ -4094,3 +4092,11 @@ extern "C" int32_t gemstoneCudaBlas(const BlasRequest &request, BlasResult &resu
 }
 
 } // extern "C"
+
+namespace {
+// CUDA runtimes register module-unload callbacks before their first queued work.
+// Initialize the queue with the provider so it outlives those callbacks, and
+// after the state above so its workers drain before that state is destroyed.
+gemstone::CommandQueue commandQueue(CUDA_ERROR_UNKNOWN);
+gemstone::CommandQueue &commands() { return commandQueue; }
+} // namespace

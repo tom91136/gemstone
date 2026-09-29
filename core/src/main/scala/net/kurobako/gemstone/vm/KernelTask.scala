@@ -1,67 +1,44 @@
 package net.kurobako.gemstone.vm
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-case class KernelTask private (
-    kernelName: NonEmptyString,
-    geometry: LaunchGeometry,
-    privateSegmentBytes: NonNegative[Int],
-    groupSegmentBytes: NonNegative[Int],
-    arguments: Vec[KernelTask.Argument],
-    pointerRelocations: Vec[KernelTask.PointerRelocation],
-    discoverArgumentRelocations: Boolean
-) {
-  def withPointerRelocations(additional: Vec[KernelTask.PointerRelocation]): KernelTask =
-    if (additional.isEmpty) this else copy(pointerRelocations = pointerRelocations ++ additional)
-}
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
 
 object KernelTask {
   enum Argument {
     case Scalar(bytes: Vec[Byte])
-    case Memory(region: MemoryRegion, offset: NonNegative[Long])
-    case Local(size: Positive[Long])
+    case Memory(region: AllocationId, offset: Long >= 0)
+    case Local(size: Long > 0)
   }
 
   enum RelocationSource {
-    case Memory(region: MemoryRegion)
-    case Argument(index: NonNegative[Int])
+    case Memory(region: AllocationId)
+    case Argument(index: Int >= 0)
   }
 
   case class PointerRelocation(
       source: RelocationSource,
-      sourceOffset: NonNegative[Long],
-      target: MemoryRegion,
-      targetOffset: NonNegative[Long]
+      sourceOffset: Long >= 0,
+      target: AllocationId,
+      targetOffset: Long >= 0
   )
 
   def validated(
-      kernelName: NonEmptyString,
+      kernelName: NonEmpty[String],
       groupSize: LaunchGeometry.Dimensions,
       groupCount: LaunchGeometry.Dimensions,
       arguments: Vec[Argument],
       globalSize: Option[LaunchGeometry.GlobalDimensions] = None,
-      privateSegmentBytes: NonNegative[Int] = 0,
-      groupSegmentBytes: NonNegative[Int] = 0,
+      privateSegmentBytes: Int >= 0 = 0,
+      groupSegmentBytes: Int >= 0 = 0,
       pointerRelocations: Vec[PointerRelocation] = Vec.empty,
-      workDim: IntBetween[1, 3] = 3,
+      workDim: Int where Between[1, 3] = 3,
       globalOffset: LaunchGeometry.Coordinates = LaunchGeometry.Coordinates.origin,
       discoverArgumentRelocations: Boolean = false
-  ): Either[String, KernelTask] =
+  ): Either[NonEmpty[String], KernelTask] =
     for {
       geometry <- LaunchGeometry.forLaunch(groupSize, groupCount, globalSize, workDim, globalOffset)
-      _        <- Either.cond(
-        pointerRelocations.forall {
-          case PointerRelocation(RelocationSource.Argument(index), _, _, _) => index.raw < arguments.size
-          case PointerRelocation(RelocationSource.Memory(_), _, _, _)       => true
-        },
-        (),
-        "pointer relocations must have an in-range source argument"
-      )
+      _        <- validateRelocations(pointerRelocations, arguments.size)
     } yield KernelTask(
       kernelName,
       geometry,
@@ -71,4 +48,31 @@ object KernelTask {
       pointerRelocations,
       discoverArgumentRelocations
     )
+  private def validateRelocations(
+      pointerRelocations: Vec[PointerRelocation],
+      argumentCount: Int
+  ): Either[NonEmpty[String], Unit] =
+    Either.cond[NonEmpty[String], Unit](
+      pointerRelocations.forall {
+        case PointerRelocation(RelocationSource.Argument(index), _, _, _) => index.raw < argumentCount
+        case PointerRelocation(RelocationSource.Memory(_), _, _, _)       => true
+      },
+      (),
+      "pointer relocations must have an in-range source argument"
+    )
+
+}
+
+case class KernelTask private (
+    kernelName: NonEmpty[String],
+    geometry: LaunchGeometry,
+    privateSegmentBytes: Int >= 0,
+    groupSegmentBytes: Int >= 0,
+    arguments: Vec[KernelTask.Argument],
+    pointerRelocations: Vec[KernelTask.PointerRelocation],
+    discoverArgumentRelocations: Boolean
+) {
+  def withPointerRelocations(additional: Vec[KernelTask.PointerRelocation]): Either[NonEmpty[String], KernelTask] =
+    KernelTask.validateRelocations(additional, arguments.size)
+      .map(_ => if (additional.isEmpty) this else copy(pointerRelocations = pointerRelocations ++ additional))
 }

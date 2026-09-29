@@ -1,31 +1,28 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import Program.*
 import Metadata.*
-
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.ValidationOutcome
-import Validation.*
-import LLVMOracle.*
-
+import Program.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.string.*
 import scala.collection.mutable
 
-final class LLVMOracleSuite extends munit.FunSuite {
+class LLVMOracleSuite extends munit.FunSuite {
   test("round-trip every LLVM MC oracle instruction covered by the pinned production metadata") {
-    assertEquals(LLVMOracle.sourceFileCount, 770)
-    assertEquals(LLVMOracle.sourceCaseCount, 308161)
-    assertEquals(LLVMOracle.cases.size, LLVMOracle.selectedCaseCount)
-    assert(LLVMOracle.cases.size >= 3000)
-    assertEquals((LLVMOracle.targets ++ LLVMOracle.diagnosticTargets).distinct.size, 46)
+    assertEquals(oracle.sourceFileCount, 770)
+    assertEquals(oracle.sourceCaseCount, 308161)
+    assertEquals(oracle.cases.size, oracle.selectedCaseCount)
+    assert(oracle.cases.size >= 3000)
+    assertEquals((oracle.targets ++ oracle.diagnosticTargets).distinct.size, 46)
     assertEquals(
-      LLVMOracle.targets.view.map(_.family).toSet,
-      Family.values.toSet - Family.CDNA5
+      oracle.targets.view.map(_.isa).toSet,
+      ISA.values.toSet - ISA.CDNA5
     )
     // Streaming the large oracle corpus avoids retaining one result per case.
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var roundTripped = 0
     val unsupported  = mutable.Map.empty[String, Int].withDefaultValue(0)
-    LLVMOracle.cases.foreach { golden =>
+    oracle.cases.foreach { golden =>
       Parser.parse(golden.assembly) match {
         case Left(error) if error.message.startsWith("unknown AMDGPU opcode") => recordUnsupported(error, unsupported)
         case Left(error)   => fail(s"${golden.source}: ${golden.target.name}: $error\n${golden.assembly}")
@@ -45,7 +42,7 @@ final class LLVMOracleSuite extends munit.FunSuite {
     }
     assert(roundTripped >= 3000, s"expected broad LLVM oracle coverage, found $roundTripped")
     assertEquals(unsupported.keySet.toSet, ExpectedUnsupportedOracleOpcodes)
-    assertEquals(roundTripped + unsupported.values.sum, LLVMOracle.cases.size)
+    assertEquals(roundTripped + unsupported.values.sum, oracle.cases.size)
   }
 
   test("every positive oracle is encoded exactly or classified as an unsupported format") {
@@ -57,20 +54,20 @@ final class LLVMOracleSuite extends munit.FunSuite {
     val unsupported       = mutable.Map.empty[String, Int].withDefaultValue(0)
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var paired = 0
-    LLVMOracle.cases.foreach { golden =>
+    oracle.cases.foreach { golden =>
       Parser.parse(golden.assembly) match {
         case Left(error) if error.message.startsWith("unknown AMDGPU opcode") => recordUnsupported(error, unsupported)
         case Left(error)    => fail(s"${golden.source}: ${golden.target.name}: $error\n${golden.assembly}")
         case Right(program) => program.statements match {
             case Vec(Statement.Instruction(instruction)) =>
               val definitions = encodingsFor(instruction, golden.target)
-              val formats     = definitions.map(_.format.raw.toUpperCase(java.util.Locale.ROOT)).distinct
+              val formats     = definitions.map(_.format.toUpperCaseRoot).distinct
               Binary.encode(instruction, golden.target) match {
                 case Right(actual) =>
                   assert(formats.contains("SOPP"), s"encoded an unimplemented format at ${golden.source}: $formats")
                   assertEquals(
-                    actual.toSeq,
-                    golden.bytes.toSeq,
+                    actual,
+                    golden.bytes,
                     s"${golden.source}: ${golden.target.name}: ${golden.assembly}"
                   )
                   encoded += 1
@@ -79,7 +76,7 @@ final class LLVMOracleSuite extends munit.FunSuite {
                     !formats.contains("SOPP"),
                     s"SOPP case escaped encoding at ${golden.source}: ${golden.assembly}"
                   )
-                  assertEquals(declared.toSeq, formats.sorted.toSeq)
+                  assertEquals(declared, formats.sorted)
                   unsupportedFormat += 1
                 case Left(Binary.CodecError.UnsupportedInstruction(_, _)) =>
                   assert(definitions.isEmpty, s"known instruction was classified unknown at ${golden.source}")
@@ -96,14 +93,14 @@ final class LLVMOracleSuite extends munit.FunSuite {
     }
     assert(encoded >= 50, s"expected at least fifty exact SOPP checks, found $encoded")
     assertEquals(unsupported.keySet.toSet, ExpectedUnsupportedOracleOpcodes)
-    assertEquals(encoded + unsupportedFormat + unsupported.values.sum + paired, LLVMOracle.cases.size)
+    assertEquals(encoded + unsupportedFormat + unsupported.values.sum + paired, oracle.cases.size)
   }
 
   test("LLVM diagnostics never pass conservative target validation") {
-    assertEquals(LLVMOracle.sourceDiagnosticCount, 98714)
-    assertEquals(LLVMOracle.diagnostics.size, LLVMOracle.selectedDiagnosticCount)
-    assert(LLVMOracle.diagnostics.size >= 300)
-    LLVMOracle.diagnostics.foreach { diagnostic =>
+    assertEquals(oracle.sourceDiagnosticCount, 98714)
+    assertEquals(oracle.diagnostics.size, oracle.selectedDiagnosticCount)
+    assert(oracle.diagnostics.size >= 300)
+    oracle.diagnostics.foreach { diagnostic =>
       Parser.parse(diagnostic.assembly) match {
         case Left(_)        => ()
         case Right(program) =>
@@ -128,6 +125,7 @@ final class LLVMOracleSuite extends munit.FunSuite {
     counts(opcode) += 1
   }
 
+  @annotation.tailrec
   private def stripEncodingSuffixes(opcode: String): String =
     EncodingSuffixes.collectFirst { case suffix if opcode.endsWith(suffix) => opcode.dropRight(suffix.length) } match {
       case Some(value) => stripEncodingSuffixes(value)

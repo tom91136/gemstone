@@ -1,13 +1,12 @@
+import Paths.{given, *}
 import com.google.common.hash.Hashing
 import com.google.common.io.MoreFiles
 import java.nio.file.Path
+import sbt.io.IO
 import scala.concurrent.duration.*
 import scala.language.implicitConversions
-import sbt.io.IO
 import sttp.client4.*
 import sttp.model.Uri
-
-import Paths.{given, *}
 
 object Fetch {
   case class Request(

@@ -1,9 +1,51 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMExecution.ExecutionFault
+import VMExecution.*
+
+private object VMLaneMask {
+  val MaximumLanes: Int = 1024
+  val WordCount: Int    = MaximumLanes / java.lang.Long.SIZE
+  val Empty: VMLaneMask = VMLaneMask(Array.fill(WordCount)(0L), 0, 0)
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def all(laneCount: Int): Either[ExecutionFault, VMLaneMask] =
+    if (laneCount < 1 || laneCount > MaximumLanes)
+      Left(ExecutionFault.InvalidProgram(
+        s"lane count must be between 1 and $MaximumLanes, found $laneCount"
+      ))
+    else {
+      val words = Array.fill(WordCount)(0L)
+      var lane  = 0
+      while (lane < laneCount) {
+        words(lane >>> 6) |= 1L << (lane & 63)
+        lane += 1
+      }
+      Right(VMLaneMask(words, laneCount, (laneCount + 63) >>> 6))
+    }
+
+  def one(lane: Int): Either[ExecutionFault, VMLaneMask] =
+    if (lane < 0 || lane >= MaximumLanes)
+      Left(ExecutionFault.InvalidProgram(
+        s"lane index must be between 0 and ${MaximumLanes - 1}, found $lane"
+      ))
+    else {
+      val words = Array.fill(WordCount)(0L)
+      words(lane >>> 6) = 1L << (lane & 63)
+      Right(VMLaneMask(words, 1, (lane >>> 6) + 1))
+    }
+
+  /** The single-lane mask, or `Empty` when the lane is out of range. */
+  def ofLane(lane: Int): VMLaneMask = one(lane).getOrElse(Empty)
+
+  def fromBits(value: Long): VMLaneMask = {
+    val words = Array.fill(WordCount)(0L)
+    words(0) = value
+    VMLaneMask(words, java.lang.Long.bitCount(value), if (value == 0L) 0 else 1)
+  }
+}
 
 /** Compact immutable set of active PTX lanes. */
-private[v9_3] final class VMLaneMask private (
+private class VMLaneMask private (
     private val words: Array[Long],
     private val count: Int,
     private val limit: Int
@@ -88,46 +130,4 @@ private[v9_3] final class VMLaneMask private (
   }
 
   override def hashCode(): Int = 31 * count + java.util.Arrays.hashCode(words)
-}
-
-private[v9_3] object VMLaneMask {
-  val MaximumLanes: Int = 1024
-  val WordCount: Int    = MaximumLanes / java.lang.Long.SIZE
-  val Empty: VMLaneMask = VMLaneMask(Array.fill(WordCount)(0L), 0, 0)
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def all(laneCount: Int): Either[ExecutionFault, VMLaneMask] =
-    if (laneCount < 1 || laneCount > MaximumLanes)
-      Left(ExecutionFault.InvalidProgram(
-        s"lane count must be between 1 and $MaximumLanes, found $laneCount"
-      ))
-    else {
-      val words = Array.fill(WordCount)(0L)
-      var lane  = 0
-      while (lane < laneCount) {
-        words(lane >>> 6) |= 1L << (lane & 63)
-        lane += 1
-      }
-      Right(VMLaneMask(words, laneCount, (laneCount + 63) >>> 6))
-    }
-
-  def one(lane: Int): Either[ExecutionFault, VMLaneMask] =
-    if (lane < 0 || lane >= MaximumLanes)
-      Left(ExecutionFault.InvalidProgram(
-        s"lane index must be between 0 and ${MaximumLanes - 1}, found $lane"
-      ))
-    else {
-      val words = Array.fill(WordCount)(0L)
-      words(lane >>> 6) = 1L << (lane & 63)
-      Right(VMLaneMask(words, 1, (lane >>> 6) + 1))
-    }
-
-  /** The single-lane mask, or `Empty` when the lane is out of range. */
-  def ofLane(lane: Int): VMLaneMask = one(lane).getOrElse(Empty)
-
-  def fromBits(value: Long): VMLaneMask = {
-    val words = Array.fill(WordCount)(0L)
-    words(0) = value
-    VMLaneMask(words, java.lang.Long.bitCount(value), if (value == 0L) 0 else 1)
-  }
 }

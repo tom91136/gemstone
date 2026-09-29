@@ -1,0 +1,166 @@
+package net.kurobako.gemstone.server
+
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.environment as env
+import net.kurobako.gemstone.server.*
+import net.kurobako.gemstone.server.protocol.*
+import net.kurobako.gemstone.server.transport.*
+import scala.util.Using
+
+object Launch {
+  case class Environment(set: Map[String, String], unset: Set[String]) {
+    def applyTo(target: java.util.Map[String, String]): Unit = {
+      unset.foreach(target.remove(_))
+      set.foreach { case (name, value) => target.put(name, value) }
+    }
+  }
+
+  type Executable = Executable.Type
+  object Executable extends Newtype[NonEmpty[String]] {
+    override protected def validate(value: NonEmpty[String]): Unit =
+      require(!value.contains('\u0000'), "executable must not contain a NUL character")
+  }
+
+  case class Options(
+      apis: Set[API],
+      serverEndpoint: Option[Endpoint],
+      directory: Path,
+      executable: Executable,
+      arguments: Vec[String]
+  )
+
+  private class RunningProcess(val process: Process) extends AutoCloseable {
+    private val stopping     = AtomicBoolean(false)
+    private val shutdownHook = Thread(() => stop(), "gemstone-launcher-cleanup")
+    sys.runtime.addShutdownHook(shutdownHook)
+
+    private def stop(): Unit =
+      if (stopping.compareAndSet(false, true)) {
+        val descendants = process.descendants()
+        try descendants.forEach { descendant =>
+            val _ = descendant.destroyForcibly()
+          }
+        finally descendants.close()
+        val _ = process.destroyForcibly()
+        try {
+          val _ = process.waitFor(2, TimeUnit.SECONDS)
+        } catch case _: InterruptedException => Thread.currentThread().interrupt()
+      }
+
+    override def close(): Unit = {
+      try sys.runtime.removeShutdownHook(shutdownHook)
+      catch case _: IllegalStateException => ()
+      stop()
+    }
+  }
+
+  // Workaround for Scala Native, whose blocking waitFor path spins in a future
+  // wait while the child runs. Polling with a short sleep avoids that spin.
+  private def waitForChild(process: Process): Int = {
+    while (process.isAlive()) Thread.sleep(20L)
+    process.exitValue()
+  }
+
+  def validateArguments(arguments: Seq[String]): Either[String, Unit] =
+    arguments.zipWithIndex.collectFirst {
+      case (argument, index) if argument.contains('\u0000') =>
+        s"command argument ${index + 1} contains a NUL character"
+    }.toLeft(())
+
+  def validate(options: Options): Either[String, Unit] =
+    validateArguments(options.arguments.toSeq).flatMap { _ =>
+      if (options.apis.isEmpty) Left("at least one API must be enabled")
+      else options.apis.toList.map(api => options.directory.resolve(api.lib)).find(path => !Files.isRegularFile(path))
+        .fold[Either[String, Unit]](Right(()))(path => Left(s"runtime provider is not a regular file: $path"))
+    }
+
+  def run(options: Options): Either[String, Int] = validate(options).flatMap { _ =>
+    launch(options.apis, options.directory, sys.env, options.serverEndpoint) { changes =>
+      val builder = ProcessBuilder((options.executable.raw +: options.arguments)*).inheritIO()
+      changes.applyTo(builder.environment())
+      Using.resource(RunningProcess(builder.start()))(running => waitForChild(running.process))
+    }
+  }
+
+  private class Registration(val endpoint: Endpoint) extends AutoCloseable {
+    val client: ClientId       = Control.register(endpoint)
+    override def close(): Unit = Control.release(endpoint, client)
+  }
+
+  def launch[A](
+      apis: Set[API],
+      directory: Path,
+      inherited: Map[String, String],
+      serverEndpoint: Option[Endpoint] = None
+  )(child: Launch.Environment => A): Either[String, A] =
+    try
+      if (apis.isEmpty) Left("at least one API must be enabled")
+      else serverEndpoint match {
+        case Some(endpoint) => Using.resource(Registration(endpoint)) { registration =>
+            plan(apis, directory, endpoint, registration.client, inherited).map(child)
+          }
+        case None => Server.Settings.fromEnvironment(inherited)
+            .left.map(message => s"invalid execution profile: $message").flatMap { settings =>
+              Using.resource(Server.start(settings)) { running =>
+                plan(apis, directory, running.endpoint, running.client, inherited).map(child)
+              }
+            }
+      }
+    catch { case scala.util.control.NonFatal(error) => Left(throwables.detail(error)) }
+
+  def plan(
+      apis: Set[API],
+      directory: Path,
+      endpoint: Endpoint,
+      client: ClientId,
+      inherited: Map[String, String]
+  ): Either[String, Launch.Environment] =
+    if (apis.isEmpty) Left("at least one compute API must be enabled")
+    else {
+      val root    = directory.toAbsolutePath.normalize()
+      val preload = API.values.view.filter(apis).collect {
+        case api @ (API.CUDA | API.HIP | API.HSA | API.OpenCL) => root.resolve(api.lib)
+      }.toVector
+      val directories = (preload ++ Option.when(apis(API.Vulkan))(root.resolve(API.Vulkan.lib))).flatMap(path =>
+        Option(path.getParent)
+      ).distinct
+      val inheritedPreload     = inherited.get("LD_PRELOAD").filter(_.nonEmpty).toVector
+      val inheritedLibraryPath = inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty).toVector
+      val common               = Map[String, String](
+        env.RpcEndpoint -> endpoint.toString,
+        env.RpcClient   -> s"$client"
+      )
+      val dynamic = Map.newBuilder[String, String]
+      if (preload.nonEmpty) dynamic +=
+        "LD_PRELOAD" -> (preload.map(path => s"$path") ++ inheritedPreload).mkString(":")
+      if (directories.nonEmpty)
+        dynamic +=
+          "LD_LIBRARY_PATH" -> (directories.map(path => s"$path") ++ inheritedLibraryPath).mkString(":")
+      if (apis(API.OpenCL)) {
+        dynamic += "OCL_ICD_FILENAMES" -> s"${root.resolve(API.OpenCL.lib)}"
+        dynamic += "OCL_ICD_VENDORS"   -> s"${root.resolve(API.OpenCL.lib)}"
+      }
+      if (apis(API.LevelZero)) {
+        dynamic += "ZE_ENABLE_ALT_DRIVERS"        -> s"${root.resolve(API.LevelZero.lib)}"
+        dynamic += "ZE_ENABLE_LOADER_DEBUG_TRACE" -> "0"
+      }
+      Right(Launch.Environment(common ++ dynamic.result(), RemovedOverrides))
+    }
+
+  private val RemovedOverrides = Set(
+    env.Record,
+    "HSA_ENABLE_DTIF",
+    "HSA_TOOLS_LIB",
+    "OCL_ICD_VENDORS",
+    "OCL_ICD_FILENAMES",
+    "ONEAPI_DEVICE_SELECTOR",
+    "SYCL_DEVICE_FILTER",
+    "ZE_ENABLE_ALT_DRIVERS"
+  )
+}

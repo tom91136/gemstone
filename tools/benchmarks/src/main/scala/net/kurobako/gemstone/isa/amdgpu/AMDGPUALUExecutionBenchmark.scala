@@ -1,23 +1,19 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import CodeObject.*
-import net.kurobako.gemstone.{PlatformTime, Vec}
-import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.benchmarks.BenchmarkArguments
-import net.kurobako.gemstone.benchmarks.BenchmarkName
-import net.kurobako.gemstone.benchmarks.PlatformMetrics
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
-
+import ELF.*
 import cats.syntax.all.*
 import com.monovore.decline.Opts
-
 import java.nio.file.Path
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.environment as env
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.string.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Using
 
 /** ALU-heavy companion to [[AMDGPUExecutionBenchmark]], isolating instruction and lane dispatch from guest memory. */
@@ -27,34 +23,34 @@ object AMDGPUALUExecutionBenchmark {
   }
 
   private case class Options(
-      measured: Positive[Int],
-      warmup: Option[NonNegative[Int]],
-      instructionCount: NonNegative[Int],
+      measured: Int > 0,
+      warmup: Option[Int >= 0],
+      instructionCount: Int >= 0,
       mode: Mode
   )
   private val options = (
     Opts.option[Int]("measured", help = "Measured dispatches").withDefault(50)
-      .validate("measured dispatches must be positive")(_ > 0).map(Positive.unsafe),
+      .validate("measured dispatches must be positive")(_ > 0).map(_.unsafe[Int > 0]),
     Opts.option[Int]("warmup", help = "Warmup dispatches").validate("warmup dispatches must be non-negative")(_ >= 0)
-      .map(NonNegative.unsafe).orNone,
+      .map(_.unsafe[Int >= 0]).orNone,
     Opts.option[Int]("instructions", help = "ALU instructions per dispatch").withDefault(512)
-      .validate("instruction count must be non-negative")(_ >= 0).map(NonNegative.unsafe),
+      .validate("instruction count must be non-negative")(_ >= 0).map(_.unsafe[Int >= 0]),
     Opts.option[String]("mode", help = "Instruction mode: move or binary").withDefault("move")
       .validate("mode must be move or binary")(value => value == "move" || value == "binary")
       .map(value => if (value == "binary") Mode.Binary else Mode.Move)
   ).mapN(Options(_, _, _, _))
 
   private object RejectingMemory extends Memory with BenchmarkAddressSpace {
-    override protected val regionSizes: Iterable[(MemoryRegion, Long)] = Seq.empty
+    override protected val regionSizes: Iterable[(AllocationId, Long)] = Seq.empty
     override def read(
-        id: MemoryRegion,
-        offset: NonNegative[Long],
-        size: NonNegative[Int]
+        id: AllocationId,
+        offset: Long >= 0,
+        size: Int >= 0
     ): Either[Fault, Vec[Byte]] =
       Left(Fault.Backend("ALU benchmark unexpectedly read memory"))
     override def write(
-        id: MemoryRegion,
-        offset: NonNegative[Long],
+        id: AllocationId,
+        offset: Long >= 0,
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       Left(Fault.Backend("ALU benchmark unexpectedly wrote memory"))
@@ -65,7 +61,7 @@ object AMDGPUALUExecutionBenchmark {
   def run(arguments: Array[String]): Unit = {
     val parsed           = BenchmarkArguments.parse(BenchmarkName("amdgpu-alu"), arguments.toSeq, options)
     val measured         = parsed.measured
-    val warmup           = parsed.warmup.getOrElse(NonNegative.unsafe(math.max(10, measured.raw / 10)))
+    val warmup           = parsed.warmup.getOrElse(math.max(10, measured.raw / 10).unsafe[Int >= 0])
     val instructionCount = parsed.instructionCount
     val mode             = parsed.mode
     val instruction      = mode match {
@@ -79,7 +75,7 @@ object AMDGPUALUExecutionBenchmark {
     val prepared =
       VMCompiler.compile(kernel).fold(failure => throw RuntimeException(failure.message), value => value)
     val dispatch = KernelTask.validated(
-      NonEmptyString("alu"),
+      "alu",
       Dimensions(64, 1, 1),
       Dimensions.One,
       Vec.empty
@@ -89,9 +85,8 @@ object AMDGPUALUExecutionBenchmark {
         prepared,
         dispatch,
         RejectingMemory,
-        RejectingMemory,
-        TaskControl.default,
-        Scheduler.Sequential,
+        TaskControl(),
+        Workgroups.Sequential,
         Vec.empty
       ).fold(
         failure => throw RuntimeException(failure.message),
@@ -104,9 +99,9 @@ object AMDGPUALUExecutionBenchmark {
       iteration += 1
     }
     val (allocatedBefore, elapsed, allocatedAfter) =
-      Using.resource(PlatformMetrics.startRecording(sys.env.get("GEMSTONE_BENCHMARK_JFR").map(Path.of(_)))) { _ =>
+      Using.resource(PlatformMetrics.startRecording(sys.env.get(env.BenchmarkJfr).map(Path.of(_)))) { _ =>
         val before  = PlatformMetrics.allocatedBytes
-        val started = PlatformTime.monotonicNanos
+        val started = platform.monotonicNanos
         iteration = 0
         while (iteration < measured.raw) {
           execute()
@@ -114,12 +109,12 @@ object AMDGPUALUExecutionBenchmark {
         }
         (
           before,
-          NonNegative.unsafe(math.max(0L, PlatformTime.monotonicNanos - started)),
+          math.max(0L, platform.monotonicNanos - started).unsafe[Long >= 0],
           PlatformMetrics.allocatedBytes
         )
       }
     Console.out.println(
-      f"amdgpu-alu benchmark mode=${mode.toString.toLowerCase(java.util.Locale.ROOT)} dispatches=$measured warmup=$warmup instructions_per_dispatch=${instructionCount.raw +
+      f"amdgpu-alu benchmark mode=${mode.toString.toLowerCaseRoot} dispatches=$measured warmup=$warmup instructions_per_dispatch=${instructionCount.raw +
           1} " +
         f"elapsed_ms=${elapsed.raw / 1000000.0}%.3f ns_per_dispatch=${elapsed.raw.toDouble / measured.raw.toDouble}%.1f " +
         f"allocated_bytes_per_dispatch=${(allocatedBefore, allocatedAfter) match {

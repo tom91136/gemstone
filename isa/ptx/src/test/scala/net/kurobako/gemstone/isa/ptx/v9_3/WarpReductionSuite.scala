@@ -1,19 +1,12 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.NonEmptyVec
-
-import Program.*
-
 import VMIR.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-import net.kurobako.gemstone.memory.ArrayCheckedMemory
-import net.kurobako.gemstone.vm.LaunchGeometry
-import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
-
-final class WarpReductionSuite extends munit.FunSuite {
+class WarpReductionSuite extends munit.FunSuite {
   for {
     (operation, signed, negative) <-
       Seq(("min", true, false), ("min", false, false), ("max", true, true), ("max", false, false))
@@ -62,7 +55,7 @@ ret;
       assert(VMInterpreter.execute(
         kernel,
         geometry,
-        Map(NonEmptyString("data") -> Argument.fromLong(memory.allocation.start.raw)),
+        Map(("data": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
         memory
       ).isRight)
       values.zipWithIndex.foreach { case (value, lane) =>

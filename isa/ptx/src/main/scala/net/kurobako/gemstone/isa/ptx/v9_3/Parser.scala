@@ -1,51 +1,34 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
 import Program.*
-
-import net.kurobako.gemstone.Constraint.NonEmpty
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.NonEmptyVec
-import net.kurobako.gemstone.Vec
-
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 import scala.collection.mutable
 import scala.util.control.NoStackTrace
 
-/** Allocation-conscious PTX parser used by program loading. The combinator parser remains the readable grammar and
-  * reference implementation; this cursor parser deliberately keeps its tokens and mutable cursor private.
-  */
-object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
-  override type Error = ParseError
+/** PTX parser used by program loading, with private tokens and a mutable cursor. */
+object Parser extends Decoder[String, Program, ParseError] {
 
-  private case class Token(text: String, offset: Int, line: Int, column: Int, quoted: Boolean = false)
+  private case class Token(text: String, offset: Int >= 0, line: Int > 0, column: Int > 0, quoted: Boolean = false)
 
   private case class Failure(token: Token, expectation: String) extends RuntimeException with NoStackTrace
 
-  private def name(value: String): String = NonEmptyString.unsafe(value).raw
+  private def name(value: String): NonEmpty[String] = value.unsafe[NonEmpty[String]]
 
-  def parse(source: String): Either[ParseError, Program] = {
-    val trimmed = source.trim
-    if (trimmed.isEmpty) Right(Program(Vec.empty))
-    else if (trimmed.indexOf('\u0000') >= 0)
-      Left(ParseError(
-        0,
-        1,
-        1,
-        Vec("PTX source without NUL characters")
-      ))
-    else
-      try Right(Cursor(tokenize(trimmed), trimmed.length).program())
-      catch {
-        case Failure(token, expectation) =>
-          Left(ParseError(
-            NonNegative.unsafe(token.offset),
-            Positive.unsafe(token.line),
-            Positive.unsafe(token.column),
-            Vec(expectation)
-          ))
-      }
-  }
+  def parse(source: String): Either[ParseError, Program] =
+    try {
+      val (tokens, end) = tokenize(source)
+      Right(Cursor(tokens, end).program())
+    } catch {
+      case Failure(token, expectation) =>
+        Left(ParseError(
+          token.offset,
+          token.line,
+          token.column,
+          Vec(expectation)
+        ))
+    }
 
   override def decode(source: String): Either[ParseError, Program] = parse(source)
 
@@ -61,36 +44,40 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
     }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def tokenize(source: String): Array[Token] = {
-    val tokens = mutable.ArrayBuffer.empty[Token]
-    var offset = 0
-    var line   = 1
-    var column = 1
+  private def tokenize(source: String): (Array[Token], Token) = {
+    val tokens           = mutable.ArrayBuffer.empty[Token]
+    var offset: Int >= 0 = 0
+    var line: Int > 0    = 1
+    var column: Int > 0  = 1
 
     def advance(): Unit = {
-      val character = source.charAt(offset)
+      val character = source.charAt(offset.raw)
+      if (character == '\u0000')
+        throw Failure(Token("", offset, line, column), "PTX source without NUL characters")
       offset += 1
       if (character == '\n') { line += 1; column = 1 }
       else column += 1
     }
 
-    def add(text: String, start: Int, startLine: Int, startColumn: Int, quoted: Boolean = false): Unit =
+    def add(text: String, start: Int >= 0, startLine: Int > 0, startColumn: Int > 0, quoted: Boolean = false): Unit =
       tokens += Token(text, start, startLine, startColumn, quoted)
 
-    while (offset < source.length) {
-      val character = source.charAt(offset)
+    while (offset.raw < source.length) {
+      val character = source.charAt(offset.raw)
       if (character.isWhitespace) advance()
-      else if (character == '/' && offset + 1 < source.length && source.charAt(offset + 1) == '/') {
-        while (offset < source.length && source.charAt(offset) != '\n') advance()
-      } else if (character == '/' && offset + 1 < source.length && source.charAt(offset + 1) == '*') {
+      else if (character == '/' && offset.raw + 1 < source.length && source.charAt(offset.raw + 1) == '/') {
+        while (offset.raw < source.length && source.charAt(offset.raw) != '\n') advance()
+      } else if (character == '/' && offset.raw + 1 < source.length && source.charAt(offset.raw + 1) == '*') {
         val start       = offset
         val startLine   = line
         val startColumn = column
         advance()
         advance()
-        while (offset + 1 < source.length && !(source.charAt(offset) == '*' && source.charAt(offset + 1) == '/'))
+        while (
+          offset.raw + 1 < source.length && !(source.charAt(offset.raw) == '*' && source.charAt(offset.raw + 1) == '/')
+        )
           advance()
-        if (offset + 1 >= source.length) throw Failure(Token("", start, startLine, startColumn), "closing */")
+        if (offset.raw + 1 >= source.length) throw Failure(Token("", start, startLine, startColumn), "closing */")
         advance()
         advance()
       } else {
@@ -102,68 +89,64 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
             advance()
             val value  = StringBuilder()
             var closed = false
-            while (offset < source.length && !closed)
-              source.charAt(offset) match {
+            while (offset.raw < source.length && !closed)
+              source.charAt(offset.raw) match {
                 case '"'         => advance(); closed = true
                 case '\n' | '\r' => throw Failure(Token("", start, startLine, startColumn), "closing quote")
-                case '\\' if offset + 1 < source.length =>
+                case '\\' if offset.raw + 1 < source.length =>
                   value.append('\\')
                   advance()
-                  value.append(source.charAt(offset))
+                  value.append(source.charAt(offset.raw))
                   advance()
                 case _ =>
-                  value.append(source.charAt(offset))
+                  value.append(source.charAt(offset.raw))
                   advance()
               }
             if (!closed) throw Failure(Token("", start, startLine, startColumn), "closing quote")
             add(value.result(), start, startLine, startColumn, quoted = true)
-          case ':' if offset + 1 < source.length && source.charAt(offset + 1) == ':' =>
+          case ':' if offset.raw + 1 < source.length && source.charAt(offset.raw + 1) == ':' =>
             advance(); advance(); add("::", start, startLine, startColumn)
           case '.'
-              if offset + 1 < source.length && source.charAt(offset + 1).isDigit &&
+              if offset.raw + 1 < source.length && source.charAt(offset.raw + 1).isDigit &&
                 tokens.lastOption.exists(token =>
-                  token.offset + token.text.length == offset && token.text.forall(_.isDigit)
+                  token.offset.raw + token.text.length == offset.raw && token.text.forall(_.isDigit)
                 ) =>
             val previous = tokens.remove(tokens.size - 1)
             advance()
             while (
-              offset < source.length &&
-              !source.charAt(offset).isWhitespace &&
-              !".,;:{}()[]+-|@!=\"".contains(source.charAt(offset))
+              offset.raw < source.length &&
+              !source.charAt(offset.raw).isWhitespace &&
+              !".,;:{}()[]+-|@!=\"".contains(source.charAt(offset.raw))
             ) advance()
-            add(source.substring(previous.offset, offset), previous.offset, previous.line, previous.column)
+            add(source.substring(previous.offset.raw, offset.raw), previous.offset, previous.line, previous.column)
           case value @ ('.' | ',' | ';' | ':' | '{' | '}' | '(' | ')' | '[' | ']' | '+' | '-' | '|' | '@' | '!' |
               '=') =>
             advance(); add(value.toString, start, startLine, startColumn)
           case _ =>
             while (
-              offset < source.length && !source.charAt(offset).isWhitespace &&
-              !".,;:{}()[]+-|@!=\"".contains(source.charAt(offset))
+              offset.raw < source.length && !source.charAt(offset.raw).isWhitespace &&
+              !".,;:{}()[]+-|@!=\"".contains(source.charAt(offset.raw))
             ) advance()
             if (offset == start) throw Failure(Token(character.toString, start, startLine, startColumn), "PTX token")
-            add(source.substring(start, offset), start, startLine, startColumn)
+            add(source.substring(start.raw, offset.raw), start, startLine, startColumn)
         }
       }
     }
-    tokens.toArray
+    (tokens.toArray, Token("", offset, line, column))
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
-  private final class Cursor(tokens: Array[Token], sourceLength: Int) {
+  private class Cursor(tokens: Array[Token], end: Token) {
     private var index = 0
 
     private def eof: Boolean = index >= tokens.length
 
-    private def current: Token =
-      if (eof) {
-        val last = tokens.last
-        Token("", sourceLength, last.line, last.column + math.max(1, last.text.length))
-      } else tokens(index)
+    private def current: Token = if (eof) end else tokens(index)
 
     private def at(text: String): Boolean = !eof && current.text == text && !current.quoted
 
     private def adjacent: Boolean =
-      index > 0 && current.offset == tokens(index - 1).offset + tokens(index - 1).text.length
+      index > 0 && current.offset.raw == tokens(index - 1).offset.raw + tokens(index - 1).text.length
 
     private def accept(text: String): Boolean =
       if (at(text)) { index += 1; true }
@@ -286,15 +269,15 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
       Statement.Directive(path, Vec.from(arguments), DirectiveTerminator.Semicolon)
     }
 
-    private def dottedPath(): NonEmptyVec[NonEmptyString] = {
-      val parts = mutable.ArrayBuffer.empty[NonEmptyString]
+    private def dottedPath(): NonEmpty[Vec[NonEmpty[String]]] = {
+      val parts = mutable.ArrayBuffer.empty[NonEmpty[String]]
       expect(".")
-      parts += NonEmptyString.unsafe(name(segment(allowSingleColon = false)))
+      parts += name(segment(allowSingleColon = false))
       while (at(".") && adjacent) {
         expect(".")
-        parts += NonEmptyString.unsafe(name(segment(allowSingleColon = false)))
+        parts += name(segment(allowSingleColon = false))
       }
-      NonEmptyVec.unsafeFromVec(Vec.from(parts))
+      Vec.from(parts).unsafe
     }
 
     private def dataDeclaration(): Statement = {
@@ -307,13 +290,15 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
       val address =
         DataAddressSpace.values.find(value => parts.contains(value.mnemonic)).getOrElse(fail("data address space"))
       val kind   = DataType.values.find(value => parts.contains(value.mnemonic)).getOrElse(fail("data type"))
-      val symbol = NonEmptyString.unsafe(name(word()))
+      val symbol = name(word())
       val count  =
         if (accept("[")) {
           val value = if (accept("]")) None
           else {
             val parsed =
-              word().toIntOption.flatMap(Positive.either(_).toOption).getOrElse(fail("positive element count"))
+              word().toIntOption.flatMap(refinementValue => refinementValue.refine[Int > 0].toOption).getOrElse(
+                fail("positive element count")
+              )
             expect("]")
             Some(parsed)
           }
@@ -345,15 +330,16 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
         val value = parts(position)
         if (excluded(value)) position += 1
         else if (value == "align" && position + 1 < parts.size) {
-          val alignment = parts(position + 1).toIntOption.flatMap(Positive.either(_).toOption)
-            .getOrElse(fail("positive alignment"))
+          val alignment =
+            parts(position + 1).toIntOption.flatMap(refinementValue => refinementValue.refine[Int > 0].toOption)
+              .getOrElse(fail("positive alignment"))
           qualifiers += DeclarationQualifier.Alignment(alignment)
           position += 2
         } else if (value.headOption.exists(character => character.isDigit || character == '+' || character == '-')) {
-          qualifiers += DeclarationQualifier.Value(NonEmpty.unsafe(name(value)))
+          qualifiers += DeclarationQualifier.Value(name(value))
           position += 1
         } else {
-          qualifiers += DeclarationQualifier.Attribute(NonEmptyString.unsafe(name(value)))
+          qualifiers += DeclarationQualifier.Attribute(name(value))
           position += 1
         }
       }
@@ -389,12 +375,12 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
             return if (isEntry)
               Statement.Entry(
                 visible,
-                NonEmptyString.unsafe(name(functionName)),
+                name(functionName),
                 functionParameters,
                 body.getOrElse(Vec.empty[Statement])
               )
             else
-              Statement.Function(visible, NonEmptyString.unsafe(name(functionName)), returns, functionParameters, body)
+              Statement.Function(visible, name(functionName), returns, functionParameters, body)
           case _ => fail(".entry or .func")
         }
       }
@@ -420,7 +406,7 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
         if (parts.last == "align" && !eof && current.text.toIntOption.nonEmpty) parts += word()
       }
       val kind = DataType.values.find(value => parts.contains(value.mnemonic)).getOrElse(fail("parameter data type"))
-      val parameterName = NonEmptyString.unsafe(name(word()))
+      val parameterName = name(word())
       val dimensions    = mutable.ArrayBuffer.empty[Operand]
       while (accept("[")) {
         if (!at("]")) dimensions ++= operandsUntil("]")
@@ -435,11 +421,11 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
       if (at(".") && index + 1 < tokens.length && tokens(index + 1).text == "callprototype") {
         while (!eof && !accept(";")) index += 1
         Statement.Directive(
-          NonEmptyVec.unsafeFromVec(Vec(NonEmptyString.unsafe(name("callprototype")))),
+          Vec.nonEmpty(name("callprototype")),
           Vec.empty,
           DirectiveTerminator.Semicolon
         )
-      } else Statement.Label(NonEmptyString.unsafe(name(label)))
+      } else Statement.Label(name(label))
     }
 
     private def instruction(): Statement = {
@@ -452,20 +438,20 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
       val modifiers = mutable.ArrayBuffer.empty[Modifier]
       while (at(".") && adjacent) {
         expect(".")
-        modifiers += Modifier(NonEmptyString.unsafe(name(segment(allowSingleColon = true))))
+        modifiers += Modifier(name(segment(allowSingleColon = true)))
       }
       val operands   = operandsUntil(";")
       val _          = accept(";")
       val normalized = {
         val values = Vec.from(modifiers)
-        if (operation == "vote" && values.exists(_.name.raw == "sync") && values.exists(_.name.raw == "ballot"))
-          Vec(Modifier(NonEmptyString.unsafe(name("sync")))) ++ values.filterNot(_.name.raw == "sync")
+        if (operation == "vote" && values.exists(_.name == "sync") && values.exists(_.name == "ballot"))
+          Vec(Modifier(name("sync"))) ++ values.filterNot(_.name == "sync")
         else values
       }
       Instruction.decodeParsed(name(operation), operands, normalized, predicate) match {
         case Right(value)                                   => Statement.Instruction(value)
         case Left(Instruction.DecodeError.UnknownOpcode(_)) =>
-          Statement.UnsupportedInstruction(NonEmptyString.unsafe(name(operation)), operands, normalized, predicate)
+          Statement.UnsupportedInstruction(name(operation), operands, normalized, predicate)
         case Left(error) => fail(error.toString)
       }
     }
@@ -506,23 +492,20 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
         if (looksLikeRegisterPart(part))
           value = value match {
             case Operand.Symbol(symbol) =>
-              Operand.Register(NonEmptyString.unsafe(name(symbol.raw)), Some(NonEmptyString.unsafe(name(part))))
+              Operand.Register(symbol, Some(name(part)))
             case _ => index = mark; suffix = false; value
           }
         else
           value match {
             case Operand.Address(_) | Operand.Qualified(_, _) =>
-              value = Operand.Qualified(value, NonEmptyString.unsafe(name(part)))
+              value = Operand.Qualified(value, name(part))
             case _ => index = mark; suffix = false
           }
       }
       if (accept("[")) {
-        val values = operandsUntil("]")
+        val key = operand()
         expect("]")
-        values match {
-          case Vec(single) => Operand.Index(value, single)
-          case _           => value
-        }
+        Operand.Index(value, key)
       } else value
     }
 
@@ -545,12 +528,12 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
         expect("]")
         Operand.Address(values)
       } else if (accept(".")) {
-        val values = mutable.ArrayBuffer(NonEmptyString.unsafe(name(segment(allowSingleColon = false))))
+        val values = mutable.ArrayBuffer(name(segment(allowSingleColon = false)))
         while (at(".") && adjacent) {
           expect(".")
-          values += NonEmptyString.unsafe(name(segment(allowSingleColon = false)))
+          values += name(segment(allowSingleColon = false))
         }
-        Operand.Qualifier(NonEmptyVec.unsafeFromVec(Vec.from(values)))
+        Operand.Qualifier(Vec.from(values).unsafe)
       } else {
         val value = word()
         if (value.startsWith("%")) {
@@ -562,12 +545,12 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
           val part = segments.indexWhere(looksLikeRegisterPart(_), 1)
           if (part > 0 && part == segments.size - 1)
             Operand.Register(
-              NonEmptyString.unsafe(name(segments.take(part).mkString("."))),
-              Some(NonEmptyString.unsafe(name(segments.last)))
+              name(segments.take(part).mkString(".")),
+              Some(name(segments.last))
             )
-          else Operand.Register(NonEmptyString.unsafe(name(segments.mkString("."))), None)
-        } else if (number(value)) Operand.Immediate(NonEmpty.unsafe(name(value)))
-        else Operand.Symbol(NonEmptyString.unsafe(name(value)))
+          else Operand.Register(name(segments.mkString(".")), None)
+        } else if (number(value)) Operand.Immediate(name(value))
+        else Operand.Symbol(name(value))
       }
 
     private def segment(allowSingleColon: Boolean): String = {

@@ -17,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
+#include <environment_keys.hpp>
 
 namespace {
 struct ScopedEnv {
@@ -27,7 +28,7 @@ struct ScopedEnv {
 } // namespace
 
 TEST_CASE("OpenCL virtual profile advertises the selected Polyregion device", "[opencl]") {
-  const ScopedEnv profile("GEMSTONE_PROFILE", "rusticl-amd");
+  const ScopedEnv profile(gemstone::environment::Profile, "rusticl-amd");
   cl_platform_id platform = nullptr;
   cl_device_id device = nullptr;
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -61,9 +62,9 @@ TEST_CASE("OpenCL device exposes half precision arithmetic", "[opencl]") {
 
 TEST_CASE("OpenCL generated source converts to SPIR-V", "[opencl]") {
   gemstone_test::RpcFixture server;
-  const auto port = std::to_string(server.port());
-  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
-  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  const auto port = "tcp://127.0.0.1:" + std::to_string(server.port());
+  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
+  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
   cl_platform_id platform = nullptr;
   cl_device_id device = nullptr;
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -91,12 +92,51 @@ TEST_CASE("OpenCL generated source converts to SPIR-V", "[opencl]") {
   REQUIRE((clReleaseContext(context) == CL_SUCCESS));
 }
 
+TEST_CASE("concurrent OpenCL buffer ownership keeps RPC state and bytes intact", "[opencl]") {
+  gemstone_test::RpcFixture server;
+  const auto endpoint = server.endpoint();
+  const ScopedEnv remote(gemstone::environment::RpcEndpoint, endpoint.c_str());
+  const ScopedEnv identity(gemstone::environment::RpcClient, "42");
+  cl_platform_id platform = nullptr;
+  cl_device_id device = nullptr;
+  REQUIRE(clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS);
+  REQUIRE(clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS);
+  cl_int error = CL_SUCCESS;
+  const auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  REQUIRE(context);
+  std::vector<std::future<bool>> workers;
+  // Repeated allocations race connection lookups and exercise native address reuse.
+  for (unsigned worker = 0; worker < 8; ++worker)
+    workers.push_back(std::async(std::launch::async, [context, device, worker] {
+      cl_int status = CL_SUCCESS;
+      const auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &status);
+      if (!queue) return false;
+      bool valid = true;
+      for (unsigned iteration = 0; iteration < 64 && valid; ++iteration) {
+        std::array<unsigned, 4> input{worker, iteration, worker + iteration, 0xabcdef};
+        std::array<unsigned, 4> output{};
+        const auto buffer = clCreateBuffer(context, CL_MEM_COPY_HOST_PTR, sizeof(input), input.data(), &status);
+        if (!buffer) {
+          valid = false;
+          break;
+        }
+        valid = clEnqueueReadBuffer(queue, buffer, CL_TRUE, 0, sizeof(output), output.data(), 0, nullptr, nullptr) == CL_SUCCESS
+                && output == input;
+        valid = clReleaseMemObject(buffer) == CL_SUCCESS && valid;
+      }
+      return clReleaseCommandQueue(queue) == CL_SUCCESS && valid;
+    }));
+  for (auto &worker : workers)
+    CHECK(worker.get());
+  REQUIRE(clReleaseContext(context) == CL_SUCCESS);
+}
+
 TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   gemstone_test::RpcFixture server;
   server.programCatalog({{"groups", "groups"}}, {});
-  const auto port = std::to_string(server.port());
-  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
-  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  const auto port = "tcp://127.0.0.1:" + std::to_string(server.port());
+  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
+  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
 
   cl_platform_id platform = nullptr;
   cl_uint platformCount = 0;
@@ -312,28 +352,43 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   REQUIRE((clReleaseProgram(program) == CL_SUCCESS));
   clSVMFree(context, memory);
 
-  const std::array<uint32_t, 26> specializationWords = {0x07230203, 0x00010600,
-                                                        0,          6,
-                                                        0,          (4U << 16) | 71U,
-                                                        3,          1,
-                                                        101,        (4U << 16) | 71U,
-                                                        5,          1,
-                                                        102,        (4U << 16) | 21U,
-                                                        2,          32,
-                                                        1,          (2U << 16) | 20U,
-                                                        4,          (4U << 16) | 50U,
-                                                        2,          3,
-                                                        7,          (3U << 16) | 49U,
-                                                        4,          5};
+  // Exercise the full unsigned ID range through both directions of RPC.
+  constexpr cl_uint UnsignedSpecId = 0xffffffffU;
+  const std::array<uint32_t, 26> specializationWords = {0x07230203,
+                                                        0x00010600,
+                                                        0,
+                                                        6,
+                                                        0,
+                                                        (4U << 16) | 71U,
+                                                        3,
+                                                        1,
+                                                        UnsignedSpecId,
+                                                        (4U << 16) | 71U,
+                                                        5,
+                                                        1,
+                                                        102,
+                                                        (4U << 16) | 21U,
+                                                        2,
+                                                        32,
+                                                        1,
+                                                        (2U << 16) | 20U,
+                                                        4,
+                                                        (4U << 16) | 50U,
+                                                        2,
+                                                        3,
+                                                        7,
+                                                        (3U << 16) | 49U,
+                                                        4,
+                                                        5};
   cl_program specialized = clCreateProgramWithIL(context, specializationWords.data(), sizeof(specializationWords), &error);
   REQUIRE((specialized && error == CL_SUCCESS));
-  server.specializationTable({{101, 4}, {102, 1}});
+  server.specializationTable({{UnsignedSpecId, 4}, {102, 1}});
   cl_uint constantValue = 42;
   cl_uchar boolValue = 2;
   REQUIRE((clSetProgramSpecializationConstant(specialized, 999, sizeof(constantValue), &constantValue) == CL_INVALID_SPEC_ID));
-  REQUIRE((clSetProgramSpecializationConstant(specialized, 101, 1, &constantValue) == CL_INVALID_VALUE));
-  REQUIRE((clSetProgramSpecializationConstant(specialized, 101, sizeof(constantValue), nullptr) == CL_INVALID_VALUE));
-  REQUIRE((clSetProgramSpecializationConstant(specialized, 101, sizeof(constantValue), &constantValue) == CL_SUCCESS));
+  REQUIRE((clSetProgramSpecializationConstant(specialized, UnsignedSpecId, 1, &constantValue) == CL_INVALID_VALUE));
+  REQUIRE((clSetProgramSpecializationConstant(specialized, UnsignedSpecId, sizeof(constantValue), nullptr) == CL_INVALID_VALUE));
+  REQUIRE((clSetProgramSpecializationConstant(specialized, UnsignedSpecId, sizeof(constantValue), &constantValue) == CL_SUCCESS));
   REQUIRE((clSetProgramSpecializationConstant(specialized, 102, sizeof(boolValue), &boolValue) == CL_SUCCESS));
   constantValue = 99;
   boolValue = 0;
@@ -345,7 +400,7 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
     const auto found = std::find_if(forwarded.begin(), forwarded.end(), [&](const auto &entry) { return entry.first == id; });
     return found == forwarded.end() ? nullptr : &found->second;
   };
-  const auto *constantBytes = forwardedValue(101);
+  const auto *constantBytes = forwardedValue(UnsignedSpecId);
   REQUIRE((constantBytes && constantBytes->size() == sizeof(constantValue)));
   cl_uint forwardedConstant = 0;
   std::memcpy(&forwardedConstant, constantBytes->data(), sizeof(forwardedConstant));
@@ -396,9 +451,9 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
 
 TEST_CASE("OpenCL SVM allocation rejects contradictory and unsupported flags", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = std::to_string(fixture.port());
-  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
-  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
+  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
+  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
   cl_platform_id platform = nullptr;
   cl_device_id device = nullptr;
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -427,9 +482,9 @@ TEST_CASE("OpenCL SVM allocation rejects contradictory and unsupported flags", "
 
 TEST_CASE("Intel USM queries preserve allocation kind and interior identity", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = std::to_string(fixture.port());
-  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
-  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
+  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
+  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
   cl_platform_id platform{};
   cl_device_id device{};
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -474,9 +529,9 @@ TEST_CASE("Intel USM queries preserve allocation kind and interior identity", "[
 
 TEST_CASE("Intel blocking free waits for queued allocation uses", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = std::to_string(fixture.port());
-  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
-  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
+  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
+  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
   cl_platform_id platform{};
   cl_device_id device{};
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -526,9 +581,9 @@ TEST_CASE("Intel blocking free waits for queued allocation uses", "[opencl][unif
 TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declarations", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
   fixture.programCatalog({{"groups", "groups"}}, {});
-  const auto port = std::to_string(fixture.port());
-  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
-  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
+  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
+  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
   cl_platform_id platform{};
   cl_device_id device{};
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -543,7 +598,7 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
   REQUIRE((clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
   auto *other = clSVMAlloc(context, CL_MEM_READ_WRITE, 64, 0);
   REQUIRE((other));
-  for (const std::string mode : {"direct", "indirect-list", "indirect-type", "unrelated"}) {
+  for (const std::string mode : {"direct", "indirect-list", "cleared-list", "indirect-type", "unrelated"}) {
     CAPTURE(mode);
     auto *pointer = clHostMemAllocINTEL(context, nullptr, 64, 0, &error);
     REQUIRE((pointer && error == CL_SUCCESS));
@@ -552,8 +607,15 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
     REQUIRE((clSetKernelArgMemPointerINTEL(kernel, 0, mode == "direct" ? pointer : other) == CL_SUCCESS));
     uint32_t seed = 17;
     REQUIRE((clSetKernelArg(kernel, 1, sizeof(seed), &seed) == CL_SUCCESS));
-    if (mode == "indirect-list")
+    if (mode == "indirect-list" || mode == "cleared-list") {
       REQUIRE((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS, sizeof(pointer), &pointer) == CL_SUCCESS));
+      CHECK((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS, sizeof(pointer), nullptr) == CL_INVALID_VALUE));
+      CHECK((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS, 0, &pointer) == CL_INVALID_VALUE));
+    }
+    if (mode == "cleared-list") {
+      REQUIRE((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS, 0, nullptr) == CL_SUCCESS));
+      REQUIRE((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS, 0, nullptr) == CL_SUCCESS));
+    }
     if (mode == "indirect-type") {
       cl_bool enabled = CL_TRUE;
       REQUIRE((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_INDIRECT_HOST_ACCESS_INTEL, sizeof(enabled), &enabled) == CL_SUCCESS));
@@ -574,7 +636,7 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
     const bool waited = freeing.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout;
     REQUIRE((clSetUserEventStatus(gate, -1) == CL_SUCCESS));
     CHECK((clWaitForEvents(1, &completed) == CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST));
-    CHECK((waited == (mode != "unrelated")));
+    CHECK((waited == (mode != "unrelated" && mode != "cleared-list")));
     REQUIRE((freeing.wait_for(std::chrono::seconds(3)) == std::future_status::ready));
     CHECK((freeing.get() == CL_SUCCESS));
     REQUIRE((clReleaseEvent(completed) == CL_SUCCESS));
@@ -589,9 +651,9 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
 TEST_CASE("OpenCL queued buffer uses reclaim storage after the last handle is released", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
   fixture.programCatalog({{"groups", "groups"}}, {});
-  const auto port = std::to_string(fixture.port());
-  const ScopedEnv rpcPort("GEMSTONE_RPC_PORT", port.c_str());
-  const ScopedEnv rpcClient("GEMSTONE_RPC_CLIENT", "42");
+  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
+  const ScopedEnv rpcPort(gemstone::environment::RpcEndpoint, port.c_str());
+  const ScopedEnv rpcClient(gemstone::environment::RpcClient, "42");
   cl_platform_id platform{};
   cl_device_id device{};
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));

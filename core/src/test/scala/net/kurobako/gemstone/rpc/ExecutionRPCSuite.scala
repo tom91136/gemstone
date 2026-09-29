@@ -1,19 +1,41 @@
 package net.kurobako.gemstone.rpc
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress}
-import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
-import net.kurobako.gemstone.vm.{KernelTask, LaunchGeometry, MemoryRegion}
+import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.vm.*
 
-final class ExecutionRPCSuite extends munit.FunSuite {
+class ExecutionRPCSuite extends munit.FunSuite {
   private val allocation = AllocationId(1L)
-  private val region     = MemoryRegion(1L)
+  private val region     = AllocationId(1L)
   private val program    = ProgramId(2L)
   private val completion = CompletionId(3L)
+
+  test("allocation identifiers reject zero and negative values at the wire boundary") {
+    for (invalid <- Vector(0L, -1L, Long.MinValue)) {
+      val decoded = Wire.Codec[Long].encode(invalid, ExecutionRPC.Limits)
+        .flatMap(Wire.Codec[AllocationId].decode(_, ExecutionRPC.Limits))
+      assert(decoded.isLeft)
+    }
+  }
+
+  test("specialization IDs retain unsigned 32-bit boundaries on the wire") {
+    val codec = Wire.Codec[SpecializationConstant]
+    for (id <- Vec(Binary32(0L), Binary32(0x7fffffffL), Binary32(0x80000000L), Binary32(0xffffffffL))) {
+      val constant = SpecializationConstant(id, Vec[Byte](42))
+      assertEquals(
+        codec.encode(constant, ExecutionRPC.Limits).flatMap(codec.decode(_, ExecutionRPC.Limits)),
+        Right(constant)
+      )
+    }
+    for (invalid <- Vec(-1L, 0x100000000L)) {
+      val encoded = Wire.Codec.derived[(Long, Vec[Byte])].encode((invalid, Vec[Byte](42)), ExecutionRPC.Limits)
+      assert(encoded.flatMap(codec.decode(_, ExecutionRPC.Limits)).isLeft)
+    }
+  }
 
   private val operations: Vector[Operation[?]] = Vector(
     Operation.Ping,
@@ -31,60 +53,60 @@ final class ExecutionRPCSuite extends munit.FunSuite {
     Operation.DescribeSpecialization(Vec[Byte](3, 2, 35, 7)),
     Operation.SpecializeImage(
       Vec[Byte](3, 2, 35, 7),
-      Vec(SpecializationConstant(101, Vec[Byte](1, 2, 3, 4)))
+      Vec(SpecializationConstant(Binary32(0xffffffffL), Vec[Byte](1, 2, 3, 4)))
     ),
     Operation.UnloadProgram(program),
     Operation.DescribeProgram(program),
-    Operation.DescribeKernel(program, NonEmptyString("kernel")),
-    Operation.DescribeImage("spirv-binary", Vec[Byte](3, 2, 35, 7), NonEmptyString("kernel")),
+    Operation.DescribeKernel(program, "kernel"),
+    Operation.DescribeImage("spirv-binary", Vec[Byte](3, 2, 35, 7), "kernel"),
     Operation.Blas(BlasRequest(
-      BlasOperation.Axpy,
-      BlasElement.F32,
-      2,
-      0,
-      0,
-      0,
+      operation = BlasOperation.Axpy,
+      element = BlasElement.F32,
+      count = 2,
+      rows = 0,
+      columns = 0,
+      inner = 0,
       transposeA = false,
       transposeB = false,
-      Vec[Byte](0, 0, 128.toByte, 63),
-      Vec.empty,
-      None,
-      None,
-      None,
-      None,
-      None,
-      0L,
-      0L,
-      0L,
-      0
+      alpha = Vec[Byte](0, 0, 128.toByte, 63),
+      beta = Vec.empty,
+      x = None,
+      y = None,
+      a = None,
+      b = None,
+      c = None,
+      strideA = 0L,
+      strideB = 0L,
+      strideC = 0L,
+      batch = 0
     )),
-    Operation.DescribeGlobal(program, NonEmptyString("global")),
-    Operation.BindProgramGlobal(program, NonEmptyString("global"), allocation, 8L),
-    Operation.WriteProgramGlobal(program, NonEmptyString("global"), 8L, Vec[Byte](4, 5)),
+    Operation.DescribeGlobal(program, "global"),
+    Operation.BindProgramGlobal(program, "global", allocation, 8L),
+    Operation.WriteProgramGlobal(program, "global", 8L, Vec[Byte](4, 5)),
     Operation.Launch(
-      program,
-      NonEmptyString("kernel"),
-      LaunchGeometry.Dimensions.One,
-      LaunchGeometry.Dimensions.One,
-      LaunchGeometry.Dimensions.One.toGlobalDimensions,
-      3,
-      LaunchGeometry.Coordinates(0, 0, 0),
-      0,
-      16,
-      Vec(
+      program = program,
+      kernelName = "kernel",
+      groupSize = LaunchGeometry.Dimensions.One,
+      groupCount = LaunchGeometry.Dimensions.One,
+      globalSize = LaunchGeometry.Dimensions.One.toGlobalDimensions,
+      workDim = 3,
+      globalOffset = LaunchGeometry.Coordinates(0, 0, 0),
+      privateSegmentBytes = 0,
+      groupSegmentBytes = 16,
+      arguments = Vec(
         KernelTask.Argument.Memory(region, 0L),
         KernelTask.Argument.Scalar(Vec[Byte](9))
       ),
-      Vec(KernelTask.PointerRelocation(
-        KernelTask.RelocationSource.Memory(region),
-        0L,
-        region,
-        8L
+      pointerRelocations = Vec(KernelTask.PointerRelocation(
+        source = KernelTask.RelocationSource.Memory(region),
+        sourceOffset = 0L,
+        target = region,
+        targetOffset = 8L
       ))
     ),
     Operation.QueryCompletion(completion),
     Operation.AwaitCompletion(completion),
-    Operation.CompletionDirtyRanges(completion),
+    Operation.CompletionDirtyRanges(completion, 0),
     Operation.CompletionPointerRelocations(completion),
     Operation.CompletionPrints(completion),
     Operation.ReleaseCompletion(completion)
@@ -100,15 +122,58 @@ final class ExecutionRPCSuite extends munit.FunSuite {
     }
   }
 
-  test("operation IDs are stable hashes of fully-qualified message names") {
-    val identifiers = ExecutionRPC.Schema.operations.map(_.request.id)
-    assertEquals(identifiers.distinct.size, operations.map(_.productPrefix).distinct.size)
-    ExecutionRPC.Schema.operations.foreach { operation =>
+  test("operations use their exact names as tags") {
+    val tags = operations.map(operation =>
+      Wire.Protocol[Operation].encodePayload(operation, ExecutionRPC.Limits).toOption.get._1
+    )
+    assertEquals(tags, operations.map(_.productPrefix))
+    assertEquals(tags.distinct.size, ExecutionRPC.Schema.operations.size)
+    assertEquals(ExecutionRPC.Schema.operations.map(_.request.name).toSet, tags.toSet)
+  }
+
+  test("request and reply payloads match fixed MessagePack bytes in both directions") {
+    def request[A](operation: Operation[A], id: String, bytes: Int*): Unit = {
+      val expected = bytes.map(_.toByte).toArray
+      val encoded  = Wire.Protocol[Operation].encodePayload(operation, ExecutionRPC.Limits)
+        .fold(message => fail(message), identity)
+      assertEquals(encoded._1, id)
+      assertEquals(encoded._2.toVector, expected.toVector)
       assertEquals(
-        operation.request.id,
-        Wire.hash64(s"Operation.${operation.request.name}")
+        Wire.Protocol[Operation].decodePayload(id, expected, ExecutionRPC.Limits).map(_.value),
+        Right(operation)
       )
     }
+    def reply[A](operation: Operation[A], value: A, bytes: Int*): Unit = {
+      val expected = bytes.map(_.toByte).toArray
+      assertEquals(operation.replyCodec.encode(value, ExecutionRPC.Limits).map(_.toVector), Right(expected.toVector))
+      assertEquals(operation.replyCodec.decode(expected, ExecutionRPC.Limits), Right(value))
+    }
+    request(Operation.Ping, "Ping", 0x90)
+    request(Operation.ReadAllocation(allocation, 4L, 3), "ReadAllocation", 0x93, 1, 4, 3)
+    request(
+      Operation.WriteAllocation(allocation, 4L, Vec[Byte](1, 2, 3)),
+      "WriteAllocation",
+      0x93,
+      1,
+      4,
+      0xc4,
+      3,
+      1,
+      2,
+      3
+    )
+    request(
+      Operation.DescribeKernel(program, "λ"),
+      "DescribeKernel",
+      0x92,
+      2,
+      0xa2,
+      0xce,
+      0xbb
+    )
+    reply(Operation.Ping, (), 0x90)
+    reply(Operation.RegisterAllocation(AllocationKind.Shared, 8L), AllocationId(128L), 0xd1, 0, 0x80)
+    reply(Operation.ReadAllocation(allocation, 4L, 3), Vec[Byte](1, 2, 3), 0xc4, 3, 1, 2, 3)
   }
 
   test("schema identity covers request and reply shapes") {
@@ -120,28 +185,24 @@ final class ExecutionRPCSuite extends munit.FunSuite {
       ExecutionRPC.Schema.canonical.contains("alias(AllocationId,i64)[positive]"),
       ExecutionRPC.Schema.canonical
     )
-    assert(ExecutionRPC.Schema.canonical.contains("alias(NonEmptyString,text)[minimum-length[1],not-contains[00]]"))
+    assert(ExecutionRPC.Schema.canonical.contains("alias(String,text)[minimum-length[1],not-contains[00]]"))
     assertEquals(
-      ExecutionRPC.Identity.raw,
-      s"${ExecutionRPC.Name.raw}@${java.lang.Long.toUnsignedString(ExecutionRPC.Schema.fingerprint, 16)}"
+      ExecutionRPC.Identity,
+      "gemstone.execution/3"
     )
   }
 
-  test("operation decoding rejects unknown IDs and trailing payload") {
+  test("operation decoding rejects unknown tags and trailing payload") {
     val (id, payload) = Wire.Protocol[Operation].encodePayload(Operation.Ping, ExecutionRPC.Limits)
       .fold(message => fail(message), value => value)
-    assert(Wire.Protocol[Operation].decodePayload(id ^ 1L, payload, ExecutionRPC.Limits).isLeft)
+    assert(Wire.Protocol[Operation].decodePayload(id + "Unknown", payload, ExecutionRPC.Limits).isLeft)
     assert(Wire.Protocol[Operation].decodePayload(id, payload :+ 0.toByte, ExecutionRPC.Limits).isLeft)
   }
 
-  test("newtype codecs validate raw payloads at decode boundaries") {
-    val invalidIdentifier = Wire.Codec[Long].encode(0L, ExecutionRPC.Limits).flatMap(
-      Wire.Codec[AllocationId].decode(_, ExecutionRPC.Limits)
+  test("refined string codecs reject empty wire payloads") {
+    val invalidName = Wire.Codec[String].encode("", ExecutionRPC.Limits).flatMap(
+      Wire.Codec[NonEmpty[String]].decode(_, ExecutionRPC.Limits)
     )
-    val invalidName = Wire.Codec[String].encode("bad\u0000name", ExecutionRPC.Limits).flatMap(
-      Wire.Codec[NonEmptyString].decode(_, ExecutionRPC.Limits)
-    )
-    assert(invalidIdentifier.isLeft)
     assert(invalidName.isLeft)
   }
 

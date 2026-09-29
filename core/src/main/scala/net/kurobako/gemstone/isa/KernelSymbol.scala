@@ -1,5 +1,5 @@
 package net.kurobako.gemstone.isa
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.constraint.*
 
-case class KernelSymbol(name: NonEmptyString, linkageName: NonEmptyString)
+case class KernelSymbol(name: NonEmpty[String], linkageName: NonEmpty[String])

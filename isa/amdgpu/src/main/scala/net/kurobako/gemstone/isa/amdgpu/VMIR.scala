@@ -1,85 +1,15 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.IntBetween
+import ELF.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+private object VMIR {
 
-import scala.compiletime.{constValue, error}
-
-import CodeObject.*
-
-import net.kurobako.gemstone.Vec
-private[amdgpu] object VMIR {
-
-  private[amdgpu] opaque type TransferByteCount = Int
-  private[amdgpu] object TransferByteCount {
-    inline def either(value: Int): Either[String, TransferByteCount] =
-      if (value >= 1 && value <= 16) Right(value) else Left(s"byte count must be between 1 and 16: $value")
-
-    inline def unsafe(value: Int): TransferByteCount =
-      either(value).fold(message => throw IllegalArgumentException(message), identity)
-
-    inline def apply[A <: Int & Singleton](inline value: A): TransferByteCount =
-      inline if (constValue[A] >= 1 && constValue[A] <= 16) value else error("byte count must be between 1 and 16")
-
-    extension (bytes: TransferByteCount) {
-      inline def raw: Int = bytes
-    }
-  }
-
-  private[amdgpu] opaque type NarrowTransferByteCount = Int
-  private[amdgpu] object NarrowTransferByteCount {
-    inline def either(value: Int): Either[String, NarrowTransferByteCount] =
-      if (value >= 1 && value <= 2) Right(value) else Left(s"byte count must be between 1 and 2: $value")
-
-    inline def unsafe(value: Int): NarrowTransferByteCount =
-      either(value).fold(message => throw IllegalArgumentException(message), identity)
-
-    inline def apply[A <: Int & Singleton](inline value: A): NarrowTransferByteCount =
-      inline if (constValue[A] >= 1 && constValue[A] <= 2) value else error("byte count must be between 1 and 2")
-
-    extension (bytes: NarrowTransferByteCount) {
-      inline def raw: Int = bytes
-    }
-  }
-
-  private[amdgpu] opaque type AtomicByteCount = Int
-  private[amdgpu] object AtomicByteCount {
-    inline def either(value: Int): Either[String, AtomicByteCount] =
-      if (value >= 4 && value <= 8) Right(value) else Left(s"atomic byte count must be between 4 and 8: $value")
-
-    inline def unsafe(value: Int): AtomicByteCount =
-      either(value).fold(message => throw IllegalArgumentException(message), identity)
-
-    inline def apply[A <: Int & Singleton](inline value: A): AtomicByteCount =
-      inline if (constValue[A] >= 4 && constValue[A] <= 8) value
-      else error("atomic byte count must be between 4 and 8")
-
-    extension (bytes: AtomicByteCount) {
-      inline def raw: Int = bytes
-    }
-  }
-
-  private[amdgpu] opaque type SubDwordShift = Int
-  private[amdgpu] object SubDwordShift {
-    inline def either(value: Int): Either[String, SubDwordShift] =
-      if (value >= 0 && value <= 24) Right(value) else Left(s"sub-dword shift must be between 0 and 24: $value")
-
-    inline def unsafe(value: Int): SubDwordShift =
-      either(value).fold(message => throw IllegalArgumentException(message), identity)
-
-    inline def apply[A <: Int & Singleton](inline value: A): SubDwordShift =
-      inline if (constValue[A] >= 0 && constValue[A] <= 24) value
-      else error("sub-dword shift must be between 0 and 24")
-
-    extension (shift: SubDwordShift) {
-      inline def raw: Int = shift
-    }
-  }
-
-  private[amdgpu] enum ScalarBranchCondition {
+  enum ScalarBranchCondition {
     case Always, SccZero, SccNonZero, VccZero, VccNonZero, ExecZero, ExecNonZero
   }
 
-  private[amdgpu] enum InstructionSource {
+  enum InstructionSource {
     case Scalar(index: Int)
     case VectorRegister(index: Int)
     case Constant(value: Long)
@@ -93,30 +23,30 @@ private[amdgpu] object VMIR {
     case Literal(value: Long)
   }
 
-  private[amdgpu] enum SubDwordSelection(
-      val width: IntBetween[1, 64],
-      val shift: SubDwordShift,
-      val upperBit: IntBetween[1, 64]
+  enum SubDwordSelection(
+      val width: Int where Between[1, 64],
+      val shift: Int where Between[0, 24],
+      val upperBit: Int where Between[1, 64]
   ) {
-    case Byte0 extends SubDwordSelection(8, SubDwordShift(0), 8)
-    case Byte1 extends SubDwordSelection(8, SubDwordShift(8), 16)
-    case Byte2 extends SubDwordSelection(8, SubDwordShift(16), 24)
-    case Byte3 extends SubDwordSelection(8, SubDwordShift(24), 32)
-    case Word0 extends SubDwordSelection(16, SubDwordShift(0), 16)
-    case Word1 extends SubDwordSelection(16, SubDwordShift(16), 32)
-    case DWord extends SubDwordSelection(32, SubDwordShift(0), 32)
+    case Byte0 extends SubDwordSelection(8, 0: Int where Between[0, 24], 8)
+    case Byte1 extends SubDwordSelection(8, 8: Int where Between[0, 24], 16)
+    case Byte2 extends SubDwordSelection(8, 16: Int where Between[0, 24], 24)
+    case Byte3 extends SubDwordSelection(8, 24: Int where Between[0, 24], 32)
+    case Word0 extends SubDwordSelection(16, 0: Int where Between[0, 24], 16)
+    case Word1 extends SubDwordSelection(16, 16: Int where Between[0, 24], 32)
+    case DWord extends SubDwordSelection(32, 0: Int where Between[0, 24], 32)
   }
 
-  private[amdgpu] enum SubDwordDestinationUnused {
+  enum SubDwordDestinationUnused {
     case Pad, SignExtend, Preserve
   }
 
-  private[amdgpu] enum ScalarUnaryOperation {
+  enum ScalarUnaryOperation {
     case AbsoluteI32, SignExtendI8, SignExtendI16, CountBits32, CountBits64, ReverseBits32
     case Not32, Not64, FirstBitHighI32, ClearBit32, SetBit32
   }
 
-  private[amdgpu] enum ScalarBinaryOperation {
+  enum ScalarBinaryOperation {
     case And32, Or32, MultiplyI32, MultiplyHighU32, MultiplyHighI32, AddI32, SubtractI32
     case ShiftLeft32, ShiftLeftTwoAndAddU32, ShiftRightArithmetic32, BitFieldExtractU32, BitFieldExtractI32,
       ShiftRight32
@@ -124,34 +54,34 @@ private[amdgpu] object VMIR {
     case PackLowLow16, PackLowHigh16, PackHighHigh16, AddU32, AddCarryU32, SubtractU32, SubtractBorrowU32, Xor32
   }
 
-  private[amdgpu] enum ScalarMinMaxOperation {
+  enum ScalarMinMaxOperation {
     case MinimumU32, MaximumU32, MinimumI32, MaximumI32
   }
 
-  private[amdgpu] enum ScalarBinary64Operation {
+  enum ScalarBinary64Operation {
     case And, AndNot, Or, OrNot, Nor, Xor, ShiftLeft, ShiftRight, ShiftRightArithmetic, BitFieldExtractI64
   }
 
-  private[amdgpu] enum AtomicBinaryOperation {
+  enum AtomicBinaryOperation {
     case Add, Subtract, MinimumUnsigned, MaximumUnsigned, MinimumSigned, MaximumSigned, And, Or, Xor
   }
 
-  private[amdgpu] enum ScalarCompareOperation {
+  enum ScalarCompareOperation {
     case EqualI32, NotEqualI32, GreaterI32, GreaterOrEqualI32, LessI32, LessOrEqualI32
     case EqualU32, NotEqualU32, GreaterU32, GreaterOrEqualU32, LessU32, LessOrEqualU32
     case EqualU64, NotEqualU64, BitSet32, BitClear32
   }
 
-  private[amdgpu] enum ScalarImmediateCompareOperation {
+  enum ScalarImmediateCompareOperation {
     case EqualI32, NotEqualI32, GreaterI32, LessI32
     case EqualU32, NotEqualU32, GreaterU32, GreaterOrEqualU32, LessU32, LessOrEqualU32
   }
 
-  private[amdgpu] enum VectorBitFindOperation {
+  enum VectorBitFindOperation {
     case FirstBitLow32, FirstBitHighI32, FirstBitHighU32
   }
 
-  private[amdgpu] enum VectorConvertOperation {
+  enum VectorConvertOperation {
     case FrexpExponentF64, FrexpExponentF32, FrexpMantissaF32, FrexpMantissaF64
     case ReciprocalF32, ReciprocalF64, TruncateF32, FloorF32, RoundNearestEvenF32
     case TruncateF64, FloorF64, FractionF64, RoundNearestEvenF64
@@ -163,11 +93,11 @@ private[amdgpu] object VMIR {
     case F64FromI32, F64FromU32, F64FromF32, F32FromI32, F32FromU32
   }
 
-  private[amdgpu] enum VectorMadF32Operation {
+  enum VectorMadF32Operation {
     case MultiplyAdd, FusedMultiplyAdd
   }
 
-  private[amdgpu] enum VectorBinaryOperation {
+  enum VectorBinaryOperation {
     case AddU32, MultiplyLowU32, MultiplyHighU32, MultiplyHighI32
     case ShiftRightArithmeticI32, ShiftRightArithmeticI16, ShiftLeft32, ShiftRight32, ShiftLeft16, ShiftRight16
     case AddU16, And32, Or32, Xor32, SubtractU16, SubtractU32, SubtractReverseU32
@@ -179,11 +109,11 @@ private[amdgpu] object VMIR {
     case AddCarryU32, AddWithCarryU32, SubtractCarryU32, SubtractWithBorrowU32
   }
 
-  private[amdgpu] enum VectorF32BinaryOperation {
+  enum VectorF32BinaryOperation {
     case Add, Subtract, ReverseSubtract, Multiply, LoadExponent, Maximum, Minimum
   }
 
-  private[amdgpu] enum VectorSubDwordOperation {
+  enum VectorSubDwordOperation {
     case ConditionalMask32
     case AddU32, AddU16, AddF16, AddCarryU32, AddWithCarryU32
     case And32, Or32, Xor32
@@ -194,16 +124,16 @@ private[amdgpu] object VMIR {
     case SubtractReverseU32, SubtractReverseWithBorrowU32
   }
 
-  private[amdgpu] enum VectorBinary64Operation {
+  enum VectorBinary64Operation {
     case LoadExponent, Add, Multiply, Maximum, Minimum
   }
 
-  private[amdgpu] enum VectorPackedBinaryOperation {
+  enum VectorPackedBinaryOperation {
     case AddU16, AddF16, MultiplyLowU16, MultiplyF16, MaximumF16, MinimumF16
     case MaximumI16, MaximumU16, SubtractI16, ShiftRight16
   }
 
-  private[amdgpu] enum VectorTernaryOperation {
+  enum VectorTernaryOperation {
     case Add3U32, Or3B32, Xor3B32
     case Maximum3I32, Maximum3U32, Minimum3I32, Minimum3F32, Minimum3U32
     case Median3I16, Median3I32, Median3U16, Median3U32
@@ -214,7 +144,7 @@ private[amdgpu] object VMIR {
     case XorAddU32, AddShiftLeftU32, ShiftLeftAddU32, ShiftLeftOr32, PermuteBytes32
   }
 
-  private[amdgpu] enum DSAtomicOperation {
+  enum DSAtomicOperation {
     case AddU32, SubtractU32, IncrementU32, DecrementU32
     case MinimumI32, MaximumI32, MinimumU32, MaximumU32
     case AddU64, SubtractU64, IncrementU64, DecrementU64
@@ -223,18 +153,18 @@ private[amdgpu] object VMIR {
     case AddF32, MinimumF32, MaximumF32, AddF64, MinimumF64, MaximumF64
   }
 
-  private[amdgpu] enum VectorComparisonKind {
+  enum VectorComparisonKind {
     case Signed16, Signed32, Signed64, Unsigned16, Unsigned32, Unsigned64
     case Float16, Float32, Float64, ClassFloat32, ClassFloat64
   }
 
-  private[amdgpu] enum VectorComparisonRelation {
+  enum VectorComparisonRelation {
     case Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual
     case NotLess, NotLessOrEqual, NotGreater, NotGreaterOrEqual
     case Ordered, Unordered, NotLessOrGreater, Class
   }
 
-  private[amdgpu] case class VectorComparison(
+  case class VectorComparison(
       kind: VectorComparisonKind,
       relation: VectorComparisonRelation,
       updateExec: Boolean
@@ -568,7 +498,7 @@ private[amdgpu] object VMIR {
         dest: Int,
         address: Int,
         scalarAddress: Option[Int],
-        bytes: TransferByteCount,
+        bytes: Int where Between[1, 16],
         offset: Int,
         coherent: Boolean
     )
@@ -576,7 +506,7 @@ private[amdgpu] object VMIR {
         dest: Int,
         address: Int,
         scalarAddress: Option[Int],
-        bytes: NarrowTransferByteCount,
+        bytes: Int where Between[1, 2],
         offset: Int
     )
     case GlobalLoadD16(dest: Int, address: Int, scalarAddress: Option[Int], offset: Int, high: Boolean)
@@ -584,14 +514,14 @@ private[amdgpu] object VMIR {
         address: Int,
         scalarAddress: Option[Int],
         src: Int,
-        bytes: TransferByteCount,
+        bytes: Int where Between[1, 16],
         offset: Int
     )
     case GlobalStoreD16High(
         address: Int,
         scalarAddress: Option[Int],
         src: Int,
-        bytes: NarrowTransferByteCount,
+        bytes: Int where Between[1, 2],
         offset: Int
     )
     case GlobalAtomicAdd(
@@ -599,7 +529,7 @@ private[amdgpu] object VMIR {
         address: Int,
         scalarAddress: Option[Int],
         src: Int,
-        bytes: AtomicByteCount,
+        bytes: Int where Between[4, 8],
         offset: Int,
         returnValue: Boolean
     )
@@ -608,7 +538,7 @@ private[amdgpu] object VMIR {
         address: Int,
         scalarAddress: Option[Int],
         src: Int,
-        bytes: AtomicByteCount,
+        bytes: Int where Between[4, 8],
         offset: Int,
         returnValue: Boolean
     )
@@ -618,7 +548,7 @@ private[amdgpu] object VMIR {
         address: Int,
         scalarAddress: Option[Int],
         src: Int,
-        bytes: AtomicByteCount,
+        bytes: Int where Between[4, 8],
         offset: Int,
         returnValue: Boolean
     )
@@ -627,7 +557,7 @@ private[amdgpu] object VMIR {
         address: Int,
         scalarAddress: Option[Int],
         src: Int,
-        bytes: AtomicByteCount,
+        bytes: Int where Between[4, 8],
         offset: Int,
         returnValue: Boolean
     )
@@ -637,21 +567,21 @@ private[amdgpu] object VMIR {
         scalarAddress: Option[Int],
         compareSrc: Int,
         swapSrc: Int,
-        bytes: AtomicByteCount,
+        bytes: Int where Between[4, 8],
         offset: Int,
         returnValue: Boolean
     )
-    case FlatLoad(dest: Int, address: Int, bytes: TransferByteCount, offset: Int, coherent: Boolean = false)
-    case FlatLoadSigned(dest: Int, address: Int, bytes: NarrowTransferByteCount, offset: Int)
-    case FlatStore(address: Int, src: Int, bytes: TransferByteCount, offset: Int)
-    case FlatStoreD16High(address: Int, src: Int, bytes: NarrowTransferByteCount, offset: Int)
+    case FlatLoad(dest: Int, address: Int, bytes: Int where Between[1, 16], offset: Int, coherent: Boolean = false)
+    case FlatLoadSigned(dest: Int, address: Int, bytes: Int where Between[1, 2], offset: Int)
+    case FlatStore(address: Int, src: Int, bytes: Int where Between[1, 16], offset: Int)
+    case FlatStoreD16High(address: Int, src: Int, bytes: Int where Between[1, 2], offset: Int)
     case BufferCacheInvalidate
     case BufferLoad(
         dest: Int,
         address: Option[Int],
         resource: Int,
         scalarOffset: Option[Int],
-        bytes: TransferByteCount,
+        bytes: Int where Between[1, 16],
         offset: Int
     )
     case BufferLoadD16(
@@ -659,7 +589,7 @@ private[amdgpu] object VMIR {
         address: Option[Int],
         resource: Int,
         scalarOffset: Option[Int],
-        bytes: NarrowTransferByteCount,
+        bytes: Int where Between[1, 2],
         offset: Int,
         high: Boolean
     )
@@ -668,7 +598,7 @@ private[amdgpu] object VMIR {
         resource: Int,
         scalarOffset: Option[Int],
         src: Int,
-        bytes: TransferByteCount,
+        bytes: Int where Between[1, 16],
         offset: Int
     )
     case BufferStoreD16High(
@@ -676,13 +606,13 @@ private[amdgpu] object VMIR {
         resource: Int,
         scalarOffset: Option[Int],
         src: Int,
-        bytes: NarrowTransferByteCount,
+        bytes: Int where Between[1, 2],
         offset: Int
     )
-    case DSRead(dest: Int, address: Int, bytes: TransferByteCount, offsetA: Int, offsetB: Option[Int])
-    case DSSignedRead(dest: Int, address: Int, bytes: NarrowTransferByteCount, offsetA: Int, offsetB: Option[Int])
-    case DSReadD16(dest: Int, address: Int, bytes: NarrowTransferByteCount, offset: Int, high: Boolean)
-    case DSSignedReadD16(dest: Int, address: Int, bytes: NarrowTransferByteCount, offset: Int, high: Boolean)
+    case DSRead(dest: Int, address: Int, bytes: Int where Between[1, 16], offsetA: Int, offsetB: Option[Int])
+    case DSSignedRead(dest: Int, address: Int, bytes: Int where Between[1, 2], offsetA: Int, offsetB: Option[Int])
+    case DSReadD16(dest: Int, address: Int, bytes: Int where Between[1, 2], offset: Int, high: Boolean)
+    case DSSignedReadD16(dest: Int, address: Int, bytes: Int where Between[1, 2], offset: Int, high: Boolean)
     case DSPermute(dest: Int, address: Int, src: Int, offset: Int)
     case DSBPermute(dest: Int, address: Int, src: Int, offset: Int)
     case DSSwizzle(dest: Int, src: Int, control: Int)
@@ -691,7 +621,7 @@ private[amdgpu] object VMIR {
         dest: Int,
         address: Int,
         src: Int,
-        bytes: AtomicByteCount,
+        bytes: Int where Between[4, 8],
         offset: Int,
         returnValue: Boolean
     )
@@ -699,7 +629,7 @@ private[amdgpu] object VMIR {
         address: Int,
         srcA: Int,
         srcB: Option[Int],
-        bytes: TransferByteCount,
+        bytes: Int where Between[1, 16],
         offsetA: Int,
         offsetB: Option[Int]
     )
@@ -713,11 +643,11 @@ private[amdgpu] object VMIR {
     case Trap(code: Int)
   }
 
-  final class Kernel private[amdgpu] (
+  class Kernel(
       val source: CodeObjectKernel,
-      private[amdgpu] val instructions: Vec[Instruction],
-      private[amdgpu] val instructionIndices: Map[Int, Int],
-      private[amdgpu] val instructionOffsets: Vec[Int],
-      private[amdgpu] val entryInstruction: Int
+      val instructions: Vec[Instruction],
+      val instructionIndices: Map[Int, Int],
+      val instructionOffsets: Vec[Int],
+      val entryInstruction: Int
   )
 }

@@ -1,21 +1,20 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.NonNegative
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import VMLoader.AMDGPUKernelVariants
-import net.kurobako.gemstone.Vec
+import VMLoader.*
+import fixtures.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-final class VMLoaderSuite extends munit.FunSuite with CodeObjectTestSupport {
+class VMLoaderSuite extends munit.FunSuite {
   private object EmptyMemory extends Memory with TestAddressSpace {
-    override protected val regionSizes: Iterable[(MemoryRegion, Long)]                     = Seq.empty
-    override def read(id: MemoryRegion, offset: NonNegative[Long], size: NonNegative[Int]) =
+    override protected val regionSizes: Iterable[(AllocationId, Long)]                               = Seq.empty
+    override def read(id: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
       Right(Vec.empty[Byte])
-    override def write(id: MemoryRegion, offset: NonNegative[Long], bytes: Vec[Byte]) = Right(())
+    override def write(id: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] = Right(())
   }
 
   test("AMDGPU kernel aliases select the indexed implementation matching the code-object target") {
@@ -63,14 +62,14 @@ final class VMLoaderSuite extends munit.FunSuite with CodeObjectTestSupport {
 
     assertEquals(
       AMDGPUKernelVariants.select(Set(generic, gfx906), "gfx900", _ => false),
-      Left("AMDGPU kernel variant wrapped_target_archE has no gfx900 implementation")
+      Left[NonEmpty[String], Nothing]("AMDGPU kernel variant wrapped_target_archE has no gfx900 implementation")
     )
   }
 
   test("AMDGPU code-object loading rejects an invalid ELF header before deferring its index") {
-    val result = CodeObject.Decoder.decode(Vec.empty).left.map(_.message)
+    val result = CodeObject.decode(Vec.empty).left.map(_.message)
 
-    assertEquals(result, Left("expected a little-endian ELF64 code object"))
+    assertEquals(result, Left[NonEmpty[String], Nothing]("expected a little-endian ELF64 code object"))
   }
 
   test("AMDGPU code-object loading defers malformed section-table failures until first launch") {
@@ -84,18 +83,18 @@ final class VMLoaderSuite extends munit.FunSuite with CodeObjectTestSupport {
     header(18) = 224.toByte
     val target = "amdgcn-amd-amdhsa--gfx900\u0000".getBytes(java.nio.charset.StandardCharsets.US_ASCII)
     Array.copy(target, 0, header, 24, target.length)
-    val program = CodeObject.Decoder.decode(Vec.unsafeFromArray(header)).toOption.get
-    val machine = VirtualMachine(Observer.discard, Scheduler.Sequential)
-    val loaded  = machine.load(program).toOption.get
-    val task    = KernelTask.validated(
-      NonEmptyString("kernel"),
+    val program = CodeObject.decode(Vec.unsafeWrapArray(header)).toOption.get
+
+    val loaded = LoadedProgram.load(program).toOption.get
+    val task   = KernelTask.validated(
+      "kernel",
       Dimensions.One,
       Dimensions.One,
       Vec.empty
     ).toOption.get
 
     assertEquals(
-      machine.execute(loaded, task, EmptyMemory, TaskControl.default),
+      loaded.execute(task, EmptyMemory, TaskControl()),
       Left(Fault.InvalidTask("invalid ELF section table"))
     )
   }

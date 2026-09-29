@@ -8,6 +8,7 @@
 
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "../src/runtime.hpp"
+#include <environment_keys.hpp>
 #include <vulkan/vulkan.h>
 
 namespace {
@@ -68,11 +69,11 @@ TEST_CASE("Vulkan instance lookup preserves unavailable functions") {
 }
 
 TEST_CASE("Vulkan llvmpipe profile remains selectable without an ICD") {
-  REQUIRE(setenv("GEMSTONE_PROFILE", "llvmpipe", 1) == 0);
+  REQUIRE(setenv(gemstone::environment::Profile, "llvmpipe", 1) == 0);
   VkPhysicalDeviceProperties properties{};
   vkGetPhysicalDeviceProperties(VK_NULL_HANDLE, &properties);
   REQUIRE(std::string(properties.deviceName).find("llvmpipe") != std::string::npos);
-  REQUIRE(unsetenv("GEMSTONE_PROFILE") == 0);
+  REQUIRE(unsetenv(gemstone::environment::Profile) == 0);
 }
 
 TEST_CASE("Vulkan exposes the allocator buffer plumbing") {
@@ -257,9 +258,9 @@ TEST_CASE("Vulkan descriptor allocation planning preserves overlapping aliases")
 
 TEST_CASE("Vulkan dispatch uses persistent memory and preserves descriptor aliases") {
   gemstone_test::RpcFixture fixture;
-  const auto port = std::to_string(fixture.port());
-  REQUIRE(setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0);
-  REQUIRE(setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0);
+  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
+  REQUIRE(setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0);
+  REQUIRE(setenv(gemstone::environment::RpcClient, "42", 1) == 0);
   fixture.expect({1, 1, 1, 0, 0});
   fixture.kernelWorkGroup({1, 1, 1});
   fixture.kernelBindings({0, 1});
@@ -384,8 +385,8 @@ TEST_CASE("Vulkan dispatch uses persistent memory and preserves descriptor alias
   vkFreeMemory(VK_NULL_HANDLE, memory, nullptr);
   vkDestroyPipeline(VK_NULL_HANDLE, pipeline, nullptr);
   vkDestroyShaderModule(VK_NULL_HANDLE, module, nullptr);
-  REQUIRE(unsetenv("GEMSTONE_RPC_CLIENT") == 0);
-  REQUIRE(unsetenv("GEMSTONE_RPC_PORT") == 0);
+  REQUIRE(unsetenv(gemstone::environment::RpcClient) == 0);
+  REQUIRE(unsetenv(gemstone::environment::RpcEndpoint) == 0);
 }
 
 TEST_CASE("Vulkan descriptor pool capacity is restored by reset") {

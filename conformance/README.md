@@ -150,6 +150,10 @@ cmake --build build/executable --target conformance
 cases, writes a run-local CTest inventory, and starts CTest. Each CTest entry calls `conformance exec`, which applies
 profile skips, takes the physical-device lock, and runs exactly one case in its owning Catch2 executable.
 
+Identified devices take a shared coordination lock and an exclusive PCI/UUID device lock, allowing different devices
+to run concurrently. A runtime without a usable physical identity (for example, some CPU OpenCL runtimes) takes the
+coordination lock exclusively. All participating runners must use the same temporary directory and locking scheme.
+
 Machine profiles select backends, architectures, devices, environment, and explicit skips. Each invocation selects one
 profile; omit `--machine` to use the profile matching the local short hostname.
 `--isolated-launcher` skips duplicate resolved routes and disables physical-device locks because the launcher replaces the
@@ -169,6 +173,8 @@ build/executable/bin/conformance run \
 ```
 
 Pass backend or target names before `--launcher` to narrow a run. `CONFORMANCE_JOBS` controls CTest parallelism.
+Each executed case saves both output streams in its report directory's `output.log`. Failed cases print a bounded excerpt and
+the full log path, including for crashes and timeouts.
 `workloads/compact.toml` and `workloads/full.toml` define the available workload sizes.
 The Level Zero CTS uses Google Test. `levelzero_cases` in a workload selects full case names with `*` and `?` globs;
 an empty list selects the full compiled inventory. The compact workload selects 182 short driver, device,

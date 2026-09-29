@@ -1,36 +1,32 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import CodeObject.*
-import net.kurobako.gemstone.isa.amdgpu.Instruction as AMDGPUInstruction
 import BufferInstructionDefs.*
 import DataShareInstructionDefs.*
+import ELF.*
 import FlatInstructionDefs.*
 import PackedVectorInstructionDefs.*
-import ScalarMemoryInstructionDefs.*
 import SOP1InstructionDefs.*
 import SOP2InstructionDefs.*
 import SOPCInstructionDefs.*
 import SOPKInstructionDefs.*
 import SOPPInstructionDefs.*
-import VectorCompareInstructionDefs.*
+import ScalarMemoryInstructionDefs.*
+import VMIR.*
 import VOP1InstructionDefs.*
 import VOP2InstructionDefs.*
 import VOP3InstructionDefs.*
-import VMIR.*
-
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.Vec.*
-import net.kurobako.gemstone.binary.{Bits, ByteRange, LittleEndian}
-import net.kurobako.gemstone.vm.Fault
-
+import VectorCompareInstructionDefs.*
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.amdgpu.Instruction as AMDGPUInstruction
+import net.kurobako.gemstone.vm.*
 import scala.collection.immutable.IntMap
 
-private[amdgpu] object VMCompiler {
+private object VMCompiler {
   private type VendorInstruction = AMDGPUInstruction.Definition
 
   private def scalarUnaryOperation(opcode: VendorInstruction): Option[ScalarUnaryOperation] = opcode match {
@@ -369,13 +365,13 @@ private[amdgpu] object VMCompiler {
     case _                      => None
   }
 
-  private def dsAtomicByteWidth(operation: DSAtomicOperation): AtomicByteCount = operation match {
+  private def dsAtomicByteWidth(operation: DSAtomicOperation): Int where Between[4, 8] = operation match {
     case DSAtomicOperation.AddU64 | DSAtomicOperation.SubtractU64 | DSAtomicOperation.IncrementU64 |
         DSAtomicOperation.DecrementU64 | DSAtomicOperation.And64 | DSAtomicOperation.Or64 | DSAtomicOperation.Xor64 |
         DSAtomicOperation.MinimumI64 | DSAtomicOperation.MaximumI64 | DSAtomicOperation.MinimumU64 |
         DSAtomicOperation.MaximumU64 | DSAtomicOperation.AddF64 | DSAtomicOperation.MinimumF64 |
-        DSAtomicOperation.MaximumF64 => AtomicByteCount(8)
-    case _ => AtomicByteCount(4)
+        DSAtomicOperation.MaximumF64 => 8: Int where Between[4, 8]
+    case _ => 4: Int where Between[4, 8]
   }
 
   private def dsAtomicReturnsValue(opcode: VendorInstruction): Boolean = opcode match {
@@ -554,15 +550,15 @@ private[amdgpu] object VMCompiler {
       instructionIndices: Map[Int, Int],
       instructionOffsets: Vec[Int]
   )
-  def validate(code: Vec[Byte], target: Target): Either[String, Unit] =
+  def validate(code: Vec[Byte], target: Target): Either[NonEmpty[String], Unit] =
     decodeProgram(code, target).map(_ => ())
 
   /** Decode one instruction for decoder-focused tests without exposing the executable model publicly. */
-  private[amdgpu] def decodeInstruction(
+  def decodeInstruction(
       code: Vec[Byte],
       target: Target
-  ): Either[String, Instruction] =
-    Either.cond(code.size >= 4, (), "truncated instruction at byte 0")
+  ): Either[NonEmpty[String], Instruction] =
+    Either.cond[NonEmpty[String], Unit](code.size >= 4, (), "truncated instruction at byte 0")
       .flatMap(_ => decode(Vec.toArray(code), 0, target).map(_.operation))
 
   private def selfContained(program: DecodedProgram): Boolean = {
@@ -602,7 +598,7 @@ private[amdgpu] object VMCompiler {
           for {
             a <- constant(left)
             b <- constant(right)
-            target = offset.toLong + 4L + Bits.low32(a + b).raw
+            target = offset.toLong + 4L + Bits.low32(a + b).toLong
             instruction <-
               Option.when(target <= Int.MaxValue.toLong)(target.toInt).flatMap(program.instructionIndices.get)
           } yield instruction
@@ -700,12 +696,12 @@ private[amdgpu] object VMCompiler {
       target: Target,
       functionRanges: Vec[(Int, Int)] = Vec.empty,
       deferExternalBranches: Boolean = false
-  ): Either[String, DecodedProgram] = {
+  ): Either[NonEmpty[String], DecodedProgram] = {
     val bytes      = Vec.toArray(code)
     val ranges     = if (functionRanges.nonEmpty) functionRanges else Vec(0 -> bytes.length)
     val result     = Vec.newBuilder[(Int, Instruction)]
     var rangeIndex = 0
-    var failure    = Option.empty[String]
+    var failure    = Option.empty[NonEmpty[String]]
     while (rangeIndex < ranges.length && failure.isEmpty) {
       val rangeStart = ranges(rangeIndex)._1
       val rangeEnd   = math.min(bytes.length, rangeStart + ranges(rangeIndex)._2)
@@ -748,7 +744,8 @@ private[amdgpu] object VMCompiler {
             target match {
               case Some(index)                   => Right(Instruction.Branch(condition, index))
               case None if deferExternalBranches => Right(operation)
-              case None => Left(s"branch at byte $offset targets non-instruction byte $targetOffset")
+              case None                          =>
+                Left[NonEmpty[String], Nothing](s"branch at byte $offset targets non-instruction byte $targetOffset")
             }
           case other => Right(other)
         }
@@ -756,7 +753,7 @@ private[amdgpu] object VMCompiler {
     }
   }
 
-  private def decode(bytes: Array[Byte], offset: Int, target: Target): Either[String, Decoded] = {
+  private def decode(bytes: Array[Byte], offset: Int, target: Target): Either[NonEmpty[String], Decoded] = {
     val word      = unsignedWord(bytes, offset)
     val high2Bits = Bits.unsignedField(word, 30, 2)
     val high4Bits = Bits.unsignedField(word, 28, 4)
@@ -789,7 +786,7 @@ private[amdgpu] object VMCompiler {
       offset: Int,
       word: Long,
       target: Target
-  ): Either[String, Decoded] =
+  ): Either[NonEmpty[String], Decoded] =
     for {
       _      <- requireBytes(bytes, offset, 8)
       opcode <- opcodeDefinition("SMEM", Bits.unsignedIntField(word, 18, 8), target)
@@ -799,15 +796,15 @@ private[amdgpu] object VMCompiler {
         case SLoadDwordx4  => Right(4)
         case SLoadDwordx8  => Right(8)
         case SLoadDwordx16 => Right(16)
-        case other         => Left(s"$other SMEM execution is not implemented")
+        case other         => Left[NonEmpty[String], Nothing](s"$other SMEM execution is not implemented")
       }
       // GFX10+ moved the immediate/SGPR offset selector out of the first
       // dword.  The high seven bits of the second dword carry SOFFSET; the
       // null-register encoding (0x7d on pre-GFX11 targets) denotes an
       // immediate offset.  GFX6--9 retain the explicit IMM bit in dword 0.
       second    = unsignedWord(bytes, offset + 4)
-      immediate = target.family match {
-        case Family.GFX10 | Family.GFX11 | Family.GFX12 =>
+      immediate = target.isa match {
+        case ISA.RDNA1 | ISA.RDNA2 | ISA.RDNA3 | ISA.RDNA3_5 | ISA.RDNA4 =>
           Bits.unsignedField(second, 25, 7) == Decoding.NullOffset
         case _ => Bits.isSet(word, 17)
       }
@@ -827,7 +824,7 @@ private[amdgpu] object VMCompiler {
       offset: Int,
       word: Long,
       target: Target
-  ): Either[String, Decoded] =
+  ): Either[NonEmpty[String], Decoded] =
     for {
       opcode <- opcodeDefinition("SOP1", Bits.unsignedIntField(word, 8, 8), target)
       literal =
@@ -867,7 +864,7 @@ private[amdgpu] object VMCompiler {
         case other =>
           scalarUnaryOperation(other)
             .map(operation => Instruction.SUnary(operation, destination, src))
-            .toRight(s"$other SOP1 execution is not implemented")
+            .toRight[NonEmpty[String]](s"$other SOP1 execution is not implemented")
       }
     } yield Decoded(operation, if (literal.nonEmpty) 8 else 4)
 
@@ -876,7 +873,7 @@ private[amdgpu] object VMCompiler {
       offset: Int,
       word: Long,
       target: Target
-  ): Either[String, Decoded] = {
+  ): Either[NonEmpty[String], Decoded] = {
     val srcAEncoding = Bits.unsignedIntField(word, 0, 8)
     val srcBEncoding = Bits.unsignedIntField(word, 8, 8)
     val hasLiteral   = srcAEncoding == Decoding.LiteralSource || srcBEncoding == Decoding.LiteralSource
@@ -901,12 +898,12 @@ private[amdgpu] object VMCompiler {
               scalarMinMaxOperation(other)
                 .map(operation => Instruction.SMinMax(operation, destination, srcA, srcB))
             )
-            .toRight(s"$other SOP2 execution is not implemented")
+            .toRight[NonEmpty[String]](s"$other SOP2 execution is not implemented")
       }
     } yield Decoded(operation, if (hasLiteral) 8 else 4)
   }
 
-  private def decodeSOPK(word: Long, target: Target): Either[String, Decoded] =
+  private def decodeSOPK(word: Long, target: Target): Either[NonEmpty[String], Decoded] =
     opcodeDefinition("SOPK", Bits.unsignedIntField(word, 23, 5), target).flatMap {
       // Memory and LDS operations finish synchronously before the next instruction.
       case SWaitcntVscnt | SWaitcntLgkmcnt => Right(Decoded(Instruction.Wait, 4))
@@ -948,8 +945,8 @@ private[amdgpu] object VMCompiler {
               4
             )
           )
-          .toRight(s"$compare SOPK execution is not implemented")
-      case other => Left(s"$other SOPK execution is not implemented")
+          .toRight[NonEmpty[String]](s"$compare SOPK execution is not implemented")
+      case other => Left[NonEmpty[String], Nothing](s"$other SOPK execution is not implemented")
     }
 
   private def decodeSOPC(
@@ -957,7 +954,7 @@ private[amdgpu] object VMCompiler {
       offset: Int,
       word: Long,
       target: Target
-  ): Either[String, Decoded] = {
+  ): Either[NonEmpty[String], Decoded] = {
     val srcAEncoding = Bits.low8Int(word)
     val srcBEncoding = Bits.unsignedIntField(word, 8, 8)
     val hasLiteral   = srcAEncoding == Decoding.LiteralSource || srcBEncoding == Decoding.LiteralSource
@@ -976,16 +973,16 @@ private[amdgpu] object VMCompiler {
         case other =>
           scalarCompareOperation(other)
             .map(operation => Instruction.SCmp(operation, srcA, srcB))
-            .toRight(s"$other SOPC execution is not implemented")
+            .toRight[NonEmpty[String]](s"$other SOPC execution is not implemented")
       }
     } yield Decoded(operation, if (hasLiteral) 8 else 4)
   }
 
-  private def decodeSOPP(word: Long, target: Target): Either[String, Decoded] =
+  private def decodeSOPP(word: Long, target: Target): Either[NonEmpty[String], Decoded] =
     opcodeDefinition("SOPP", Bits.unsignedIntField(word, 16, 7), target).flatMap {
       case SWaitcnt | SWaitcntVscnt => Right(Decoded(Instruction.Wait, 4))
       case SNop | SInstPrefetch     => Right(Decoded(Instruction.Wait, 4))
-      // `s_clause` only constrains the hardware scheduler's clause grouping;
+      // `s_clause` only constrains the hardware workgroups's clause grouping;
       // it has no observable effect in the deterministic virtual machine.
       case SClause => Right(Decoded(Instruction.Wait, 4))
       // Wave priority only affects physical scheduling; virtual execution is
@@ -1009,10 +1006,10 @@ private[amdgpu] object VMCompiler {
       case SCbranchExecz  => branch(word, ScalarBranchCondition.ExecZero)
       case SCbranchExecnz => branch(word, ScalarBranchCondition.ExecNonZero)
       case SSleep         => Right(Decoded(Instruction.Wait, 4))
-      case other          => Left(s"$other SOPP execution is not implemented")
+      case other          => Left[NonEmpty[String], Nothing](s"$other SOPP execution is not implemented")
     }
 
-  private def branch(word: Long, condition: ScalarBranchCondition): Either[String, Decoded] = {
+  private def branch(word: Long, condition: ScalarBranchCondition): Either[NonEmpty[String], Decoded] = {
     val immediate    = Bits.low16Int(word)
     val displacement = if ((immediate & 0x8000) == 0) immediate else immediate - 0x10000
     Right(Decoded(Instruction.BranchRelative(condition, displacement), 4))
@@ -1023,7 +1020,7 @@ private[amdgpu] object VMCompiler {
       offset: Int,
       word: Long,
       target: Target
-  ): Either[String, Decoded] = {
+  ): Either[NonEmpty[String], Decoded] = {
     val srcAEncoding = Bits.unsignedIntField(word, 0, 9)
     val opcodeResult = opcodeDefinition("VOP2", Bits.unsignedIntField(word, 25, 7), target)
     val hasLiteral   = srcAEncoding == Decoding.LiteralSource || opcodeResult.exists(opcode =>
@@ -1032,7 +1029,7 @@ private[amdgpu] object VMCompiler {
     val hasSDWA = srcAEncoding == Decoding.SdwaSource
     for {
       _      <- requireBytes(bytes, offset, if (hasLiteral || hasSDWA) 8 else 4)
-      opcode <- opcodeResult.leftMap(error => s"$error (word=0x${word.toHexString})")
+      opcode <- opcodeResult.leftMap[NonEmpty[String]](error => s"$error (word=0x${word.toHexString})")
       extension = Option.when(hasSDWA)(unsignedWord(bytes, offset + 4))
       srcA <- extension match {
         case Some(sdwa) =>
@@ -1059,14 +1056,14 @@ private[amdgpu] object VMCompiler {
       operation <- opcode match {
         case supported if hasSDWA && SDWAVOP2Opcodes.contains(supported) =>
           for {
-            sdwa <- extension.toRight("missing SDWA extension word")
-            _    <- Either.cond(
+            sdwa <- extension.toRight[NonEmpty[String]]("missing SDWA extension word")
+            _    <- Either.cond[NonEmpty[String], Unit](
               Bits.unsignedField(sdwa, 20, 2) == 0L &&
                 Bits.unsignedField(sdwa, 28, 2) == 0L,
               (),
               s"$supported SDWA source modifiers are not implemented"
             )
-            _ <- Either.cond(
+            _ <- Either.cond[NonEmpty[String], Unit](
               Bits.unsignedField(sdwa, 13, 3) == 0L,
               (),
               s"$supported SDWA destination clamp modifiers are not implemented"
@@ -1076,7 +1073,7 @@ private[amdgpu] object VMCompiler {
             srcASelection   <- subDwordSelection(Bits.unsignedIntField(sdwa, 16, 3))
             srcBSelection   <- subDwordSelection(Bits.unsignedIntField(sdwa, 24, 3))
             binaryOperation <- vectorSubDwordOperation(supported)
-              .toRight(s"$supported SDWA execution is not implemented")
+              .toRight[NonEmpty[String]](s"$supported SDWA execution is not implemented")
           } yield Instruction.VBinarySubDword(
             operation = binaryOperation,
             dest = dest,
@@ -1090,13 +1087,13 @@ private[amdgpu] object VMCompiler {
             srcBSignExtend = Bits.isSet(sdwa, 27)
           )
         case unsupported if hasSDWA =>
-          Left(s"$unsupported SDWA execution is not implemented")
+          Left[NonEmpty[String], Nothing](s"$unsupported SDWA execution is not implemented")
         case VMadmkF32 | VFmamkF32 =>
           literal.map(value => Instruction.VMadMkF32(dest = dest, srcA = srcA, multiplier = value, addend = srcB))
-            .toRight(s"$opcode is missing its literal operand")
+            .toRight[NonEmpty[String]](s"$opcode is missing its literal operand")
         case VFmaakF32 =>
           literal.map(value => Instruction.VMadAkF32(dest = dest, srcA = srcA, srcB = srcB, addend = value))
-            .toRight(s"$opcode is missing its literal operand")
+            .toRight[NonEmpty[String]](s"$opcode is missing its literal operand")
         case VDot2F32F16 =>
           Right(Instruction.VDot2F32F16(dest = dest, srcA = srcA, srcB = srcB, accumulate = false))
         case VDot2cF32F16 =>
@@ -1173,7 +1170,7 @@ private[amdgpu] object VMCompiler {
                 clamp = false
               )
             )
-            .toRight(s"$other VOP2 execution is not implemented")
+            .toRight[NonEmpty[String]](s"$other VOP2 execution is not implemented")
       }
     } yield Decoded(operation, if (hasLiteral || hasSDWA) 8 else 4)
   }
@@ -1183,7 +1180,7 @@ private[amdgpu] object VMCompiler {
       offset: Int,
       word: Long,
       target: Target
-  ): Either[String, Decoded] = {
+  ): Either[NonEmpty[String], Decoded] = {
     val sourceEncoding = Bits.unsignedIntField(word, 0, 9)
     val hasLiteral     = sourceEncoding == Decoding.LiteralSource
     val hasDPP         = sourceEncoding == Decoding.DppSource
@@ -1209,12 +1206,12 @@ private[amdgpu] object VMCompiler {
           val dpp     = extension.get
           val control = Bits.unsignedIntField(dpp, 8, 9)
           for {
-            _ <- Either.cond(
+            _ <- Either.cond[NonEmpty[String], Unit](
               control <= 0xff || (control >= 0x100 && control <= 0x13f) || control == 0x142 || control == 0x143,
               (),
               s"$VMovB32 DPP control $control is not implemented"
             )
-            _ <- Either.cond(
+            _ <- Either.cond[NonEmpty[String], Unit](
               Bits.unsignedField(dpp, 20, 4) == 0L,
               (),
               s"$VMovB32 DPP source modifiers are not implemented"
@@ -1229,7 +1226,7 @@ private[amdgpu] object VMCompiler {
             fetchInactive = Bits.isSet(dpp, 18)
           )
         case unsupported if hasDPP =>
-          Left(s"$unsupported DPP execution is not implemented")
+          Left[NonEmpty[String], Nothing](s"$unsupported DPP execution is not implemented")
         case VMovB32     => Right(Instruction.VMove(destination, src))
         case VMovrelsB32 => Right(Instruction.VMoveRelative(destination, src))
         case VMovreldB32 => Right(Instruction.VMoveRelativeDestination(destination, src))
@@ -1246,7 +1243,7 @@ private[amdgpu] object VMCompiler {
               vectorConvertOperation(other)
                 .map(operation => Instruction.VConvert(operation, destination, src))
             )
-            .toRight(s"$other VOP1 execution is not implemented")
+            .toRight[NonEmpty[String]](s"$other VOP1 execution is not implemented")
       }
     } yield Decoded(operation, if (hasLiteral || hasDPP || hasSDWA) 8 else 4)
   }
@@ -1256,7 +1253,7 @@ private[amdgpu] object VMCompiler {
       offset: Int,
       word: Long,
       target: Target
-  ): Either[String, Decoded] = {
+  ): Either[NonEmpty[String], Decoded] = {
     val srcAEncoding = Bits.unsignedIntField(word, 0, 9)
     val hasLiteral   = srcAEncoding == Decoding.LiteralSource
     val hasSDWA      = srcAEncoding == Decoding.SdwaSource
@@ -1282,18 +1279,18 @@ private[amdgpu] object VMCompiler {
       destination = extension.flatMap(sdwa =>
         Option.when(Bits.isSet(sdwa, 15))(Bits.unsignedIntField(sdwa, 8, 7))
       )
-      comparison <- vectorComparison(opcode).toRight(s"$opcode VOPC execution is not implemented")
+      comparison <- vectorComparison(opcode).toRight[NonEmpty[String]](s"$opcode VOPC execution is not implemented")
       operation  <- if (hasSDWA) {
         for {
-          sdwa          <- extension.toRight("missing SDWA extension word")
+          sdwa          <- extension.toRight[NonEmpty[String]]("missing SDWA extension word")
           srcASelection <- subDwordSelection(Bits.unsignedIntField(sdwa, 16, 3))
           srcBSelection <- subDwordSelection(Bits.unsignedIntField(sdwa, 24, 3))
-          _             <- Either.cond(
+          _             <- Either.cond[NonEmpty[String], Unit](
             Bits.unsignedField(sdwa, 20, 2) == 0L,
             (),
             s"$opcode SDWA source modifiers are not implemented"
           )
-          _ <- Either.cond(
+          _ <- Either.cond[NonEmpty[String], Unit](
             SupportedVCompareSDWAOpcodes.contains(opcode),
             (),
             s"$opcode SDWA execution is not implemented"
@@ -1317,7 +1314,7 @@ private[amdgpu] object VMCompiler {
       offset: Int,
       word: Long,
       target: Target
-  ): Either[String, Decoded] =
+  ): Either[NonEmpty[String], Decoded] =
     for {
       _ <- requireBytes(bytes, offset, 8)
       opcodeId = Bits.unsignedIntField(word, 16, 10)
@@ -1332,16 +1329,16 @@ private[amdgpu] object VMCompiler {
         srcCEncoding == Decoding.LiteralSource
       _ <- requireBytes(bytes, offset, if (hasLiteral) 12 else 8)
       literal = Option.when(hasLiteral)(unsignedWord(bytes, offset + 8))
-      srcA <- vectorSource(srcAEncoding, literal).leftMap(error =>
+      srcA <- vectorSource(srcAEncoding, literal).leftMap[NonEmpty[String]](error =>
         s"$error in VOP3 word 0x${word.toHexString}/0x${second.toHexString}"
       )
-      srcB <- vectorSource(srcBEncoding, literal).leftMap(error =>
+      srcB <- vectorSource(srcBEncoding, literal).leftMap[NonEmpty[String]](error =>
         s"$error in VOP3 word 0x${word.toHexString}/0x${second.toHexString}"
       )
-      srcC <- vectorSource(srcCEncoding, literal).leftMap(error =>
+      srcC <- vectorSource(srcCEncoding, literal).leftMap[NonEmpty[String]](error =>
         s"$error in VOP3 word 0x${word.toHexString}/0x${second.toHexString}"
       )
-      _ <- Either.cond(
+      _ <- Either.cond[NonEmpty[String], Unit](
         (second >>> 27) == 0L || vectorComparison(opcode).nonEmpty ||
           SupportedVOP3SourceModifierOpcodes.contains(opcode),
         (),
@@ -1454,7 +1451,7 @@ private[amdgpu] object VMCompiler {
                 negateB = negateB
               )
             )
-            .toRight(s"$opcode VOP3 execution is not implemented")
+            .toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
         case VMbcntLoU32B32 =>
           Right(Instruction.VMaskBitCount(destination, srcA, srcB, high = false))
         case VMbcntHiU32B32 | VMbcntHiU32B32E64 =>
@@ -1479,7 +1476,7 @@ private[amdgpu] object VMCompiler {
                 clamp = clamp
               )
             )
-            .toRight(s"$opcode VOP3 execution is not implemented")
+            .toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
         case VCndmaskB32 => srcC match {
             case InstructionSource.Scalar(_) =>
               Right(Instruction.VCndMask(
@@ -1492,7 +1489,7 @@ private[amdgpu] object VMCompiler {
                 negateA = negateA,
                 negateB = negateB
               ))
-            case _ => Left(s"$opcode condition is not a scalar mask")
+            case _ => Left[NonEmpty[String], Nothing](s"$opcode condition is not a scalar mask")
           }
         case VAddCoU32 =>
           Right(Instruction.VAddCarry(
@@ -1599,14 +1596,18 @@ private[amdgpu] object VMCompiler {
             VAndOrB32 | VBfeI32 | VBfeU32 | VXadU32 | VMadI32I24 | VAddLshlU32 | VLshlAddU32 | VLshlOrB32 | VPermB32 =>
           vectorTernaryOperation(opcode)
             .map(operation => Instruction.VTernary(operation, destination, srcA, srcB, srcC))
-            .toRight(s"$opcode VOP3 execution is not implemented")
+            .toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
         case VPackB32F16 =>
           Right(Instruction.VPackB32F16(destination, srcA, srcB))
         case packed @ (VPkAddU16 | VPkAddF16 | VPkMulLoU16 | VPkMulF16 | VPkMaxF16 | VPkMinF16 | VPkSubI16 | VPkLshrrevB16) =>
           for {
-            _               <- Either.cond((second >>> 29) == 0L, (), s"$packed packed modifiers are not implemented")
+            _ <- Either.cond[NonEmpty[String], Unit](
+              (second >>> 29) == 0L,
+              (),
+              s"$packed packed modifiers are not implemented"
+            )
             packedOperation <- vectorPackedBinaryOperation(packed)
-              .toRight(s"$packed VOP3 execution is not implemented")
+              .toRight[NonEmpty[String]](s"$packed VOP3 execution is not implemented")
           } yield Instruction.VPackedBinary(
             operation = packedOperation,
             dest = destination,
@@ -1629,7 +1630,7 @@ private[amdgpu] object VMCompiler {
                 negateB = negateB
               )
             )
-            .toRight(s"$opcode VOP3 execution is not implemented")
+            .toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
         case VMadU64U32 =>
           Right(Instruction.VMadU64U32(destination, carryDestination, srcA, srcB, srcC))
         case VMadI64I32 =>
@@ -1657,7 +1658,7 @@ private[amdgpu] object VMCompiler {
                 clamp = clamp
               )
             )
-            .toRight(s"$opcode VOP3 execution is not implemented")
+            .toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
         case other =>
           vectorComparison(other)
             .map(comparison =>
@@ -1672,7 +1673,7 @@ private[amdgpu] object VMCompiler {
                 negateB = negateB
               )
             )
-            .toRight(s"$other VOP3 execution is not implemented")
+            .toRight[NonEmpty[String]](s"$other VOP3 execution is not implemented")
       }
     } yield Decoded(operation, if (hasLiteral) 12 else 8)
 
@@ -1685,7 +1686,7 @@ private[amdgpu] object VMCompiler {
       offset: Int,
       word: Long,
       target: Target
-  ): Either[String, Decoded] = {
+  ): Either[NonEmpty[String], Decoded] = {
     val opcodeId = Bits.unsignedIntField(word, 16, 10)
     for {
       _ <- requireBytes(bytes, offset, 8)
@@ -1699,13 +1700,13 @@ private[amdgpu] object VMCompiler {
       opcode <- opcodeDefinition("VOP3P", opcodeId, target)
         .orElse(opcodeDefinition("VOP3", opcodeId, target))
       literal = Option.when(hasLiteral)(unsignedWord(bytes, offset + 8))
-      srcA <- vectorSource(srcAEncoding, literal).leftMap(error =>
+      srcA <- vectorSource(srcAEncoding, literal).leftMap[NonEmpty[String]](error =>
         s"$error in VOP3P word 0x${word.toHexString}/0x${second.toHexString}"
       )
-      srcB <- vectorSource(srcBEncoding, literal).leftMap(error =>
+      srcB <- vectorSource(srcBEncoding, literal).leftMap[NonEmpty[String]](error =>
         s"$error in VOP3P word 0x${word.toHexString}/0x${second.toHexString}"
       )
-      srcC <- vectorSource(srcCEncoding, literal).leftMap(error =>
+      srcC <- vectorSource(srcCEncoding, literal).leftMap[NonEmpty[String]](error =>
         s"$error in VOP3P word 0x${word.toHexString}/0x${second.toHexString}"
       )
       destination     = Bits.unsignedIntField(word, 0, 8)
@@ -1766,9 +1767,13 @@ private[amdgpu] object VMCompiler {
               VPkLshrrevB16
             ) =>
           for {
-            _               <- Either.cond((second >>> 29) == 0L, (), s"$packed packed modifiers are not implemented")
+            _ <- Either.cond[NonEmpty[String], Unit](
+              (second >>> 29) == 0L,
+              (),
+              s"$packed packed modifiers are not implemented"
+            )
             packedOperation <- vectorPackedBinaryOperation(packed)
-              .toRight(s"$packed VOP3P execution is not implemented")
+              .toRight[NonEmpty[String]](s"$packed VOP3P execution is not implemented")
           } yield Instruction.VPackedBinary(
             operation = packedOperation,
             dest = destination,
@@ -1777,7 +1782,7 @@ private[amdgpu] object VMCompiler {
             srcAHighForHigh = Bits.isSet(second, 27),
             srcBHighForHigh = Bits.isSet(second, 28)
           )
-        case other => Left(s"$other VOP3P execution is not implemented")
+        case other => Left[NonEmpty[String], Nothing](s"$other VOP3P execution is not implemented")
       }
     } yield Decoded(operation, if (hasLiteral) 12 else 8)
   }
@@ -1787,20 +1792,24 @@ private[amdgpu] object VMCompiler {
       offset: Int,
       word: Long,
       target: Target
-  ): Either[String, Decoded] =
+  ): Either[NonEmpty[String], Decoded] =
     for {
       _ <- requireBytes(bytes, offset, 8)
       // GCN/CDNA place GDS at bit 16 and OP at 17:24. RDNA moved both
       // fields one bit upward while retaining the two eight-bit offsets.
-      opcodeShift = target.family match {
-        case Family.GFX10 | Family.GFX11 | Family.GFX12 => 18
-        case _                                          => 17
+      opcodeShift = target.isa match {
+        case ISA.RDNA1 | ISA.RDNA2 | ISA.RDNA3 | ISA.RDNA3_5 | ISA.RDNA4 => 18
+        case _                                                           => 17
       }
       rawOpcode = Bits.unsignedIntField(word, opcodeShift, 8)
-      opcode <- opcodeDefinition("DS", rawOpcode, target).leftMap(_ =>
+      opcode <- opcodeDefinition("DS", rawOpcode, target).leftMap[NonEmpty[String]](_ =>
         s"unknown DS opcode $rawOpcode for ${target.name} word=0x${word.toHexString}"
       )
-      _ <- Either.cond(!Bits.isSet(word, opcodeShift - 1), (), s"$opcode GDS execution is not implemented")
+      _ <- Either.cond[NonEmpty[String], Unit](
+        !Bits.isSet(word, opcodeShift - 1),
+        (),
+        s"$opcode GDS execution is not implemented"
+      )
       second   = unsignedWord(bytes, offset + 4)
       address  = Bits.unsignedIntField(second, 0, 8)
       dataA    = Bits.unsignedIntField(second, 8, 8)
@@ -1840,15 +1849,15 @@ private[amdgpu] object VMCompiler {
                 returnValue = dsAtomicReturnsValue(atomic)
               )
             )
-            .toRight(s"$atomic DS execution is not implemented")
-        case DsWriteB8  => Right(Instruction.DSWrite(address, dataA, None, TransferByteCount(1), dsOffset, None))
-        case DsWriteB16 => Right(Instruction.DSWrite(address, dataA, None, TransferByteCount(2), dsOffset, None))
-        case DsWriteB32 => Right(Instruction.DSWrite(address, dataA, None, TransferByteCount(4), dsOffset, None))
-        case DsWriteB64 => Right(Instruction.DSWrite(address, dataA, None, TransferByteCount(8), dsOffset, None))
+            .toRight[NonEmpty[String]](s"$atomic DS execution is not implemented")
+        case DsWriteB8  => Right(Instruction.DSWrite(address, dataA, None, 1: Int where Between[1, 16], dsOffset, None))
+        case DsWriteB16 => Right(Instruction.DSWrite(address, dataA, None, 2: Int where Between[1, 16], dsOffset, None))
+        case DsWriteB32 => Right(Instruction.DSWrite(address, dataA, None, 4: Int where Between[1, 16], dsOffset, None))
+        case DsWriteB64 => Right(Instruction.DSWrite(address, dataA, None, 8: Int where Between[1, 16], dsOffset, None))
         case DsWriteB96 =>
-          Right(Instruction.DSWrite(address, dataA, None, TransferByteCount(12), dsOffset, None))
+          Right(Instruction.DSWrite(address, dataA, None, 12: Int where Between[1, 16], dsOffset, None))
         case DsWriteB128 =>
-          Right(Instruction.DSWrite(address, dataA, None, TransferByteCount(16), dsOffset, None))
+          Right(Instruction.DSWrite(address, dataA, None, 16: Int where Between[1, 16], dsOffset, None))
         case DsWriteB8D16Hi  => Right(Instruction.DSWriteD16HighByte(address, dataA, dsOffset))
         case DsWriteB16D16Hi => Right(Instruction.DSWriteD16High(address, dataA, dsOffset))
         case DsWrite2B32     =>
@@ -1856,7 +1865,7 @@ private[amdgpu] object VMCompiler {
             address,
             dataA,
             Some(dataB),
-            TransferByteCount(4),
+            4: Int where Between[1, 16],
             offsetA * 4,
             Some(offsetB * 4)
           ))
@@ -1865,7 +1874,7 @@ private[amdgpu] object VMCompiler {
             address,
             dataA,
             Some(dataB),
-            TransferByteCount(8),
+            8: Int where Between[1, 16],
             offsetA * 8,
             Some(offsetB * 8)
           ))
@@ -1874,7 +1883,7 @@ private[amdgpu] object VMCompiler {
             address,
             dataA,
             Some(dataB),
-            TransferByteCount(4),
+            4: Int where Between[1, 16],
             offsetA * 64 * 4,
             Some(offsetB * 64 * 4)
           ))
@@ -1883,41 +1892,41 @@ private[amdgpu] object VMCompiler {
             address,
             dataA,
             Some(dataB),
-            TransferByteCount(8),
+            8: Int where Between[1, 16],
             offsetA * 64 * 8,
             Some(offsetB * 64 * 8)
           ))
-        case DsReadU8  => Right(Instruction.DSRead(dest, address, TransferByteCount(1), dsOffset, None))
-        case DsReadU16 => Right(Instruction.DSRead(dest, address, TransferByteCount(2), dsOffset, None))
+        case DsReadU8  => Right(Instruction.DSRead(dest, address, 1: Int where Between[1, 16], dsOffset, None))
+        case DsReadU16 => Right(Instruction.DSRead(dest, address, 2: Int where Between[1, 16], dsOffset, None))
         case DsReadI8  =>
-          Right(Instruction.DSSignedRead(dest, address, NarrowTransferByteCount(1), dsOffset, None))
+          Right(Instruction.DSSignedRead(dest, address, 1: Int where Between[1, 2], dsOffset, None))
         case DsReadI16 =>
-          Right(Instruction.DSSignedRead(dest, address, NarrowTransferByteCount(2), dsOffset, None))
+          Right(Instruction.DSSignedRead(dest, address, 2: Int where Between[1, 2], dsOffset, None))
         case DsReadU8D16 =>
-          Right(Instruction.DSReadD16(dest, address, NarrowTransferByteCount(1), dsOffset, false))
+          Right(Instruction.DSReadD16(dest, address, 1: Int where Between[1, 2], dsOffset, false))
         case DsReadU8D16Hi =>
-          Right(Instruction.DSReadD16(dest, address, NarrowTransferByteCount(1), dsOffset, true))
+          Right(Instruction.DSReadD16(dest, address, 1: Int where Between[1, 2], dsOffset, true))
         case DsReadU16D16 =>
-          Right(Instruction.DSReadD16(dest, address, NarrowTransferByteCount(2), dsOffset, false))
+          Right(Instruction.DSReadD16(dest, address, 2: Int where Between[1, 2], dsOffset, false))
         case DsReadU16D16Hi =>
-          Right(Instruction.DSReadD16(dest, address, NarrowTransferByteCount(2), dsOffset, true))
+          Right(Instruction.DSReadD16(dest, address, 2: Int where Between[1, 2], dsOffset, true))
         case DsReadI8D16 =>
-          Right(Instruction.DSSignedReadD16(dest, address, NarrowTransferByteCount(1), dsOffset, false))
+          Right(Instruction.DSSignedReadD16(dest, address, 1: Int where Between[1, 2], dsOffset, false))
         case DsReadI8D16Hi =>
-          Right(Instruction.DSSignedReadD16(dest, address, NarrowTransferByteCount(1), dsOffset, true))
-        case DsReadB32  => Right(Instruction.DSRead(dest, address, TransferByteCount(4), dsOffset, None))
-        case DsReadB96  => Right(Instruction.DSRead(dest, address, TransferByteCount(12), dsOffset, None))
-        case DsReadB128 => Right(Instruction.DSRead(dest, address, TransferByteCount(16), dsOffset, None))
-        case DsReadB64  => Right(Instruction.DSRead(dest, address, TransferByteCount(8), dsOffset, None))
+          Right(Instruction.DSSignedReadD16(dest, address, 1: Int where Between[1, 2], dsOffset, true))
+        case DsReadB32  => Right(Instruction.DSRead(dest, address, 4: Int where Between[1, 16], dsOffset, None))
+        case DsReadB96  => Right(Instruction.DSRead(dest, address, 12: Int where Between[1, 16], dsOffset, None))
+        case DsReadB128 => Right(Instruction.DSRead(dest, address, 16: Int where Between[1, 16], dsOffset, None))
+        case DsReadB64  => Right(Instruction.DSRead(dest, address, 8: Int where Between[1, 16], dsOffset, None))
         case DsRead2B32 =>
-          Right(Instruction.DSRead(dest, address, TransferByteCount(4), offsetA * 4, Some(offsetB * 4)))
+          Right(Instruction.DSRead(dest, address, 4: Int where Between[1, 16], offsetA * 4, Some(offsetB * 4)))
         case DsRead2B64 =>
-          Right(Instruction.DSRead(dest, address, TransferByteCount(8), offsetA * 8, Some(offsetB * 8)))
+          Right(Instruction.DSRead(dest, address, 8: Int where Between[1, 16], offsetA * 8, Some(offsetB * 8)))
         case DsRead2st64B32 =>
           Right(Instruction.DSRead(
             dest,
             address,
-            TransferByteCount(4),
+            4: Int where Between[1, 16],
             offsetA * 64 * 4,
             Some(offsetB * 64 * 4)
           ))
@@ -1925,11 +1934,11 @@ private[amdgpu] object VMCompiler {
           Right(Instruction.DSRead(
             dest,
             address,
-            TransferByteCount(8),
+            8: Int where Between[1, 16],
             offsetA * 64 * 8,
             Some(offsetB * 64 * 8)
           ))
-        case other => Left(s"$other DS execution is not implemented")
+        case other => Left[NonEmpty[String], Nothing](s"$other DS execution is not implemented")
       }
     } yield Decoded(operation, 8)
 
@@ -1938,7 +1947,7 @@ private[amdgpu] object VMCompiler {
       dest: Int,
       address: Int,
       scalar: Option[Int],
-      bytes: TransferByteCount,
+      bytes: Int where Between[1, 16],
       offset: Int,
       coherent: Boolean
   ): Instruction =
@@ -1958,7 +1967,7 @@ private[amdgpu] object VMCompiler {
       dest: Int,
       address: Int,
       scalar: Option[Int],
-      bytes: NarrowTransferByteCount,
+      bytes: Int where Between[1, 2],
       offset: Int
   ): Instruction =
     if (global)
@@ -1988,7 +1997,7 @@ private[amdgpu] object VMCompiler {
       address: Int,
       scalar: Option[Int],
       src: Int,
-      bytes: TransferByteCount,
+      bytes: Int where Between[1, 16],
       offset: Int
   ): Instruction =
     if (global)
@@ -2000,7 +2009,7 @@ private[amdgpu] object VMCompiler {
       address: Int,
       scalar: Option[Int],
       src: Int,
-      bytes: NarrowTransferByteCount,
+      bytes: Int where Between[1, 2],
       offset: Int
   ): Instruction =
     if (global)
@@ -2019,7 +2028,7 @@ private[amdgpu] object VMCompiler {
       address: Int,
       scalar: Option[Int],
       src: Int,
-      bytes: AtomicByteCount,
+      bytes: Int where Between[4, 8],
       compareOffset: Int,
       offset: Int,
       returnValue: Boolean
@@ -2040,17 +2049,17 @@ private[amdgpu] object VMCompiler {
       offset: Int,
       rawWord: Long,
       target: Target
-  ): Either[String, Decoded] =
+  ): Either[NonEmpty[String], Decoded] =
     for {
       _ <- requireBytes(bytes, offset, 8)
       // RDNA encodes the VMEM coherence/address-mode controls in the bit that
       // was the high offset bit on GFX9.  Keep the raw word for mode
       // selection, but clear that control bit before extracting the offset.
-      word = if (target.family == Family.GFX9) rawWord else rawWord & ~0x1000L
+      word = if (target.isa == ISA.GFX9) rawWord else rawWord & ~0x1000L
       // GFX10+ uses bit 12 for VMEM controls, leaving a signed 12-bit
       // displacement. Normalize negative values into the 13-bit form used
       // by the common execution path; GFX9 already carries signed 13 bits.
-      memoryOffset = if (target.family == Family.GFX9) Bits.signedIntField(word, 0, 13)
+      memoryOffset = if (target.isa == ISA.GFX9) Bits.signedIntField(word, 0, 13)
       else Bits.signedIntField(word, 0, 12)
       second        = unsignedWord(bytes, offset + 4)
       vectorAddress = Bits.unsignedIntField(second, 0, 8)
@@ -2065,44 +2074,92 @@ private[amdgpu] object VMCompiler {
         val scalar = Option.when(!Decoding.isAbsentScalarOffset(scalarAddress))(scalarAddress)
         opcodeDefinition("GLOBAL", Bits.unsignedIntField(word, 18, 7), target).flatMap {
           case GlobalLoadDword =>
-            Right(vmemLoad(true, destination, vectorAddress, scalar, TransferByteCount(4), memoryOffset, returnValue))
+            Right(vmemLoad(
+              true,
+              destination,
+              vectorAddress,
+              scalar,
+              4: Int where Between[1, 16],
+              memoryOffset,
+              returnValue
+            ))
           case GlobalLoadDwordx2 =>
-            Right(vmemLoad(true, destination, vectorAddress, scalar, TransferByteCount(8), memoryOffset, returnValue))
+            Right(vmemLoad(
+              true,
+              destination,
+              vectorAddress,
+              scalar,
+              8: Int where Between[1, 16],
+              memoryOffset,
+              returnValue
+            ))
           case GlobalLoadDwordx3 =>
-            Right(vmemLoad(true, destination, vectorAddress, scalar, TransferByteCount(12), memoryOffset, returnValue))
+            Right(vmemLoad(
+              true,
+              destination,
+              vectorAddress,
+              scalar,
+              12: Int where Between[1, 16],
+              memoryOffset,
+              returnValue
+            ))
           case GlobalLoadDwordx4 =>
-            Right(vmemLoad(true, destination, vectorAddress, scalar, TransferByteCount(16), memoryOffset, returnValue))
+            Right(vmemLoad(
+              true,
+              destination,
+              vectorAddress,
+              scalar,
+              16: Int where Between[1, 16],
+              memoryOffset,
+              returnValue
+            ))
           case GlobalLoadUbyte =>
-            Right(vmemLoad(true, destination, vectorAddress, scalar, TransferByteCount(1), memoryOffset, returnValue))
+            Right(vmemLoad(
+              true,
+              destination,
+              vectorAddress,
+              scalar,
+              1: Int where Between[1, 16],
+              memoryOffset,
+              returnValue
+            ))
           case GlobalLoadSbyte =>
-            Right(vmemLoadSigned(true, destination, vectorAddress, scalar, NarrowTransferByteCount(1), memoryOffset))
+            Right(vmemLoadSigned(true, destination, vectorAddress, scalar, 1: Int where Between[1, 2], memoryOffset))
           case GlobalLoadSshort =>
-            Right(vmemLoadSigned(true, destination, vectorAddress, scalar, NarrowTransferByteCount(2), memoryOffset))
+            Right(vmemLoadSigned(true, destination, vectorAddress, scalar, 2: Int where Between[1, 2], memoryOffset))
           case GlobalLoadShortD16 =>
             Right(vmemLoadD16(true, destination, vectorAddress, scalar, memoryOffset, false))
           case GlobalLoadShortD16Hi =>
             Right(vmemLoadD16(true, destination, vectorAddress, scalar, memoryOffset, true))
           case GlobalLoadUshort =>
-            Right(vmemLoad(true, destination, vectorAddress, scalar, TransferByteCount(2), memoryOffset, returnValue))
+            Right(vmemLoad(
+              true,
+              destination,
+              vectorAddress,
+              scalar,
+              2: Int where Between[1, 16],
+              memoryOffset,
+              returnValue
+            ))
           case GlobalStoreDword =>
-            Right(vmemStore(true, vectorAddress, scalar, dataRegister, TransferByteCount(4), memoryOffset))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 4: Int where Between[1, 16], memoryOffset))
           case GlobalStoreDwordx2 =>
-            Right(vmemStore(true, vectorAddress, scalar, dataRegister, TransferByteCount(8), memoryOffset))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 8: Int where Between[1, 16], memoryOffset))
           case GlobalStoreDwordx3 =>
-            Right(vmemStore(true, vectorAddress, scalar, dataRegister, TransferByteCount(12), memoryOffset))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 12: Int where Between[1, 16], memoryOffset))
           case GlobalStoreDwordx4 =>
-            Right(vmemStore(true, vectorAddress, scalar, dataRegister, TransferByteCount(16), memoryOffset))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 16: Int where Between[1, 16], memoryOffset))
           case GlobalStoreByte =>
-            Right(vmemStore(true, vectorAddress, scalar, dataRegister, TransferByteCount(1), memoryOffset))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 1: Int where Between[1, 16], memoryOffset))
           case GlobalStoreShort =>
-            Right(vmemStore(true, vectorAddress, scalar, dataRegister, TransferByteCount(2), memoryOffset))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 2: Int where Between[1, 16], memoryOffset))
           case GlobalAtomicAdd =>
             Right(Instruction.GlobalAtomicAdd(
               dest = destination,
               address = vectorAddress,
               scalarAddress = scalar,
               src = dataRegister,
-              bytes = AtomicByteCount(4),
+              bytes = 4: Int where Between[4, 8],
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2112,7 +2169,7 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = scalar,
               src = dataRegister,
-              bytes = AtomicByteCount(8),
+              bytes = 8: Int where Between[4, 8],
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2122,7 +2179,7 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = scalar,
               src = dataRegister,
-              bytes = AtomicByteCount(4),
+              bytes = 4: Int where Between[4, 8],
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2132,7 +2189,7 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = scalar,
               src = dataRegister,
-              bytes = AtomicByteCount(8),
+              bytes = 8: Int where Between[4, 8],
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2143,7 +2200,7 @@ private[amdgpu] object VMCompiler {
               vectorAddress,
               scalar,
               dataRegister,
-              AtomicByteCount(4),
+              4: Int where Between[4, 8],
               1,
               memoryOffset,
               returnValue
@@ -2155,55 +2212,103 @@ private[amdgpu] object VMCompiler {
               vectorAddress,
               scalar,
               dataRegister,
-              AtomicByteCount(8),
+              8: Int where Between[4, 8],
               2,
               memoryOffset,
               returnValue
             ))
           case GlobalStoreByteD16Hi =>
-            Right(vmemStoreD16(true, vectorAddress, scalar, dataRegister, NarrowTransferByteCount(1), memoryOffset))
+            Right(vmemStoreD16(true, vectorAddress, scalar, dataRegister, 1: Int where Between[1, 2], memoryOffset))
           case GlobalStoreShortD16Hi =>
-            Right(vmemStoreD16(true, vectorAddress, scalar, dataRegister, NarrowTransferByteCount(2), memoryOffset))
-          case other => Left(s"$other GLOBAL execution is not implemented")
+            Right(vmemStoreD16(true, vectorAddress, scalar, dataRegister, 2: Int where Between[1, 2], memoryOffset))
+          case other => Left[NonEmpty[String], Nothing](s"$other GLOBAL execution is not implemented")
         }
       } else if (scalarAddress == 0 || Decoding.isAbsentScalarOffset(scalarAddress)) {
         opcodeDefinition("FLAT", Bits.unsignedIntField(word, 18, 7), target).flatMap {
           case FlatLoadUbyte =>
-            Right(vmemLoad(false, destination, vectorAddress, None, TransferByteCount(1), memoryOffset, returnValue))
+            Right(vmemLoad(
+              false,
+              destination,
+              vectorAddress,
+              None,
+              1: Int where Between[1, 16],
+              memoryOffset,
+              returnValue
+            ))
           case FlatLoadSbyte =>
-            Right(vmemLoadSigned(false, destination, vectorAddress, None, NarrowTransferByteCount(1), memoryOffset))
+            Right(vmemLoadSigned(false, destination, vectorAddress, None, 1: Int where Between[1, 2], memoryOffset))
           case FlatLoadShortD16 =>
             Right(vmemLoadD16(false, destination, vectorAddress, None, memoryOffset, false))
           case FlatLoadShortD16Hi =>
             Right(vmemLoadD16(false, destination, vectorAddress, None, memoryOffset, true))
           case FlatLoadSshort =>
-            Right(vmemLoadSigned(false, destination, vectorAddress, None, NarrowTransferByteCount(2), memoryOffset))
+            Right(vmemLoadSigned(false, destination, vectorAddress, None, 2: Int where Between[1, 2], memoryOffset))
           case FlatLoadUshort =>
-            Right(vmemLoad(false, destination, vectorAddress, None, TransferByteCount(2), memoryOffset, returnValue))
+            Right(vmemLoad(
+              false,
+              destination,
+              vectorAddress,
+              None,
+              2: Int where Between[1, 16],
+              memoryOffset,
+              returnValue
+            ))
           case FlatLoadDword =>
-            Right(vmemLoad(false, destination, vectorAddress, None, TransferByteCount(4), memoryOffset, returnValue))
+            Right(vmemLoad(
+              false,
+              destination,
+              vectorAddress,
+              None,
+              4: Int where Between[1, 16],
+              memoryOffset,
+              returnValue
+            ))
           case FlatLoadDwordx2 =>
-            Right(vmemLoad(false, destination, vectorAddress, None, TransferByteCount(8), memoryOffset, returnValue))
+            Right(vmemLoad(
+              false,
+              destination,
+              vectorAddress,
+              None,
+              8: Int where Between[1, 16],
+              memoryOffset,
+              returnValue
+            ))
           case FlatLoadDwordx3 =>
-            Right(vmemLoad(false, destination, vectorAddress, None, TransferByteCount(12), memoryOffset, returnValue))
+            Right(vmemLoad(
+              false,
+              destination,
+              vectorAddress,
+              None,
+              12: Int where Between[1, 16],
+              memoryOffset,
+              returnValue
+            ))
           case FlatLoadDwordx4 =>
-            Right(vmemLoad(false, destination, vectorAddress, None, TransferByteCount(16), memoryOffset, returnValue))
+            Right(vmemLoad(
+              false,
+              destination,
+              vectorAddress,
+              None,
+              16: Int where Between[1, 16],
+              memoryOffset,
+              returnValue
+            ))
           case FlatStoreShort =>
-            Right(vmemStore(false, vectorAddress, None, dataRegister, TransferByteCount(2), memoryOffset))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, 2: Int where Between[1, 16], memoryOffset))
           case FlatStoreByte =>
-            Right(vmemStore(false, vectorAddress, None, dataRegister, TransferByteCount(1), memoryOffset))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, 1: Int where Between[1, 16], memoryOffset))
           case FlatStoreByteD16Hi =>
-            Right(vmemStoreD16(false, vectorAddress, None, dataRegister, NarrowTransferByteCount(1), memoryOffset))
+            Right(vmemStoreD16(false, vectorAddress, None, dataRegister, 1: Int where Between[1, 2], memoryOffset))
           case FlatStoreShortD16Hi =>
-            Right(vmemStoreD16(false, vectorAddress, None, dataRegister, NarrowTransferByteCount(2), memoryOffset))
+            Right(vmemStoreD16(false, vectorAddress, None, dataRegister, 2: Int where Between[1, 2], memoryOffset))
           case FlatStoreDword =>
-            Right(vmemStore(false, vectorAddress, None, dataRegister, TransferByteCount(4), memoryOffset))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, 4: Int where Between[1, 16], memoryOffset))
           case FlatStoreDwordx2 =>
-            Right(vmemStore(false, vectorAddress, None, dataRegister, TransferByteCount(8), memoryOffset))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, 8: Int where Between[1, 16], memoryOffset))
           case FlatStoreDwordx3 =>
-            Right(vmemStore(false, vectorAddress, None, dataRegister, TransferByteCount(12), memoryOffset))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, 12: Int where Between[1, 16], memoryOffset))
           case FlatStoreDwordx4 =>
-            Right(vmemStore(false, vectorAddress, None, dataRegister, TransferByteCount(16), memoryOffset))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, 16: Int where Between[1, 16], memoryOffset))
           case FlatAtomicCmpswap | FlatAtomicCmpswapB32 =>
             Right(vmemCompareSwap(
               false,
@@ -2211,7 +2316,7 @@ private[amdgpu] object VMCompiler {
               vectorAddress,
               None,
               dataRegister,
-              AtomicByteCount(4),
+              4: Int where Between[4, 8],
               1,
               memoryOffset,
               returnValue
@@ -2222,7 +2327,7 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = None,
               src = dataRegister,
-              bytes = AtomicByteCount(4),
+              bytes = 4: Int where Between[4, 8],
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2232,7 +2337,7 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = None,
               src = dataRegister,
-              bytes = AtomicByteCount(8),
+              bytes = 8: Int where Between[4, 8],
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2257,7 +2362,7 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = None,
               src = dataRegister,
-              bytes = AtomicByteCount(4),
+              bytes = 4: Int where Between[4, 8],
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2268,14 +2373,17 @@ private[amdgpu] object VMCompiler {
               vectorAddress,
               None,
               dataRegister,
-              AtomicByteCount(8),
+              8: Int where Between[4, 8],
               2,
               memoryOffset,
               returnValue
             ))
-          case other => Left(s"$other FLAT execution is not implemented")
+          case other => Left[NonEmpty[String], Nothing](s"$other FLAT execution is not implemented")
         }
-      } else Left(s"VMEM scalar address s[$scalarAddress:${scalarAddress + 1}] is not implemented")
+      } else Left[
+        NonEmpty[String],
+        Nothing
+      ](s"VMEM scalar address s[$scalarAddress:${scalarAddress + 1}] is not implemented")
     } yield Decoded(operation, 8)
 
   private def decodeMUBUF(
@@ -2283,13 +2391,13 @@ private[amdgpu] object VMCompiler {
       offset: Int,
       word: Long,
       target: Target
-  ): Either[String, Decoded] =
+  ): Either[NonEmpty[String], Decoded] =
     for {
       _ <- requireBytes(bytes, offset, 8)
       second = unsignedWord(bytes, offset + 4)
       opcode <- opcodeDefinition("MUBUF", Bits.unsignedIntField(word, 18, 7), target)
       addressingMode = Bits.unsignedField(word, 12, 6)
-      _ <- Either.cond(
+      _ <- Either.cond[NonEmpty[String], Unit](
         addressingMode == 0L || addressingMode == 1L,
         (),
         s"$opcode buffer addressing/modifiers are not implemented"
@@ -2310,7 +2418,7 @@ private[amdgpu] object VMCompiler {
             address = address,
             resource = resource,
             scalarOffset = scalarOffset,
-            bytes = TransferByteCount(4),
+            bytes = 4: Int where Between[1, 16],
             offset = immediate
           ))
         case BufferLoadUbyte =>
@@ -2319,7 +2427,7 @@ private[amdgpu] object VMCompiler {
             address = address,
             resource = resource,
             scalarOffset = scalarOffset,
-            bytes = TransferByteCount(1),
+            bytes = 1: Int where Between[1, 16],
             offset = immediate
           ))
         case BufferLoadDwordx2 =>
@@ -2328,7 +2436,7 @@ private[amdgpu] object VMCompiler {
             address = address,
             resource = resource,
             scalarOffset = scalarOffset,
-            bytes = TransferByteCount(8),
+            bytes = 8: Int where Between[1, 16],
             offset = immediate
           ))
         case BufferLoadDwordx4 =>
@@ -2337,7 +2445,7 @@ private[amdgpu] object VMCompiler {
             address = address,
             resource = resource,
             scalarOffset = scalarOffset,
-            bytes = TransferByteCount(16),
+            bytes = 16: Int where Between[1, 16],
             offset = immediate
           ))
         case BufferLoadShortD16 =>
@@ -2346,7 +2454,7 @@ private[amdgpu] object VMCompiler {
             address = address,
             resource = resource,
             scalarOffset = scalarOffset,
-            bytes = NarrowTransferByteCount(2),
+            bytes = 2: Int where Between[1, 2],
             offset = immediate,
             high = false
           ))
@@ -2356,7 +2464,7 @@ private[amdgpu] object VMCompiler {
             address = address,
             resource = resource,
             scalarOffset = scalarOffset,
-            bytes = NarrowTransferByteCount(2),
+            bytes = 2: Int where Between[1, 2],
             offset = immediate,
             high = true
           ))
@@ -2366,7 +2474,7 @@ private[amdgpu] object VMCompiler {
             resource = resource,
             scalarOffset = scalarOffset,
             src = dataRegister,
-            bytes = TransferByteCount(2),
+            bytes = 2: Int where Between[1, 16],
             offset = immediate
           ))
         case BufferStoreByte =>
@@ -2375,7 +2483,7 @@ private[amdgpu] object VMCompiler {
             resource = resource,
             scalarOffset = scalarOffset,
             src = dataRegister,
-            bytes = TransferByteCount(1),
+            bytes = 1: Int where Between[1, 16],
             offset = immediate
           ))
         case BufferStoreShortD16Hi =>
@@ -2384,7 +2492,7 @@ private[amdgpu] object VMCompiler {
             resource = resource,
             scalarOffset = scalarOffset,
             src = dataRegister,
-            bytes = NarrowTransferByteCount(2),
+            bytes = 2: Int where Between[1, 2],
             offset = immediate
           ))
         case BufferStoreDword =>
@@ -2393,7 +2501,7 @@ private[amdgpu] object VMCompiler {
             resource = resource,
             scalarOffset = scalarOffset,
             src = dataRegister,
-            bytes = TransferByteCount(4),
+            bytes = 4: Int where Between[1, 16],
             offset = immediate
           ))
         case BufferStoreDwordx2 =>
@@ -2402,7 +2510,7 @@ private[amdgpu] object VMCompiler {
             resource = resource,
             scalarOffset = scalarOffset,
             src = dataRegister,
-            bytes = TransferByteCount(8),
+            bytes = 8: Int where Between[1, 16],
             offset = immediate
           ))
         case BufferStoreDwordx4 =>
@@ -2411,14 +2519,18 @@ private[amdgpu] object VMCompiler {
             resource = resource,
             scalarOffset = scalarOffset,
             src = dataRegister,
-            bytes = TransferByteCount(16),
+            bytes = 16: Int where Between[1, 16],
             offset = immediate
           ))
-        case other => Left(s"$other MUBUF execution is not implemented")
+        case other => Left[NonEmpty[String], Nothing](s"$other MUBUF execution is not implemented")
       }
     } yield Decoded(operation, 8)
 
-  private def opcodeDefinition(format: String, opcode: Int, target: Target): Either[String, VendorInstruction] = {
+  private def opcodeDefinition(
+      format: String,
+      opcode: Int,
+      target: Target
+  ): Either[NonEmpty[String], VendorInstruction] = {
     val definitions = OpcodeIndex.definitions(format, opcode, target)
     // RDNA's FLAT_GLBL encoding is shared by the flat and global mnemonics.
     // Once the decoder has selected the address mode, retain only the
@@ -2430,17 +2542,22 @@ private[amdgpu] object VMCompiler {
       case _        => definitions
     }
     modeDefinitions match {
-      case Vec(name)                                                 => Right(name)
-      case Vec() if format == "VOP3" && target.family == Family.GFX9 =>
-        Gfx9Vop3Aliases.byOpcode.get(opcode).toRight(s"unknown $format opcode $opcode for ${target.name}")
-      case Vec() => Left(s"unknown $format opcode $opcode for ${target.name}")
+      case Vec(name)                                           => Right(name)
+      case Vec() if format == "VOP3" && target.isa == ISA.GFX9 =>
+        Gfx9Vop3Aliases.byOpcode.get(
+          opcode
+        ).toRight[NonEmpty[String]](s"unknown $format opcode $opcode for ${target.name}")
+      case Vec() => Left[NonEmpty[String], Nothing](s"unknown $format opcode $opcode for ${target.name}")
       case aliases if aliases.toSet == Set(VMulLoI32, VMulLoU32) =>
         Right(VMulLoU32)
-      case _ => Left(s"ambiguous $format opcode $opcode for ${target.name}: ${definitions.mkString(", ")}")
+      case _ => Left[
+          NonEmpty[String],
+          Nothing
+        ](s"ambiguous $format opcode $opcode for ${target.name}: ${definitions.mkString(", ")}")
     }
   }
 
-  private def scalarSource(encoding: Int, literal: Option[Long]): Either[String, InstructionSource] =
+  private def scalarSource(encoding: Int, literal: Option[Long]): Either[NonEmpty[String], InstructionSource] =
     if (encoding <= 127) Right(InstructionSource.Scalar(encoding))
     // The virtual execution model has no hardware private-segment base. The
     // compiler still materializes the aperture registers while setting up the
@@ -2449,11 +2566,11 @@ private[amdgpu] object VMCompiler {
     else if (encoding >= 235 && encoding <= 239) Right(InstructionSource.Constant(0L))
     else inlineConstant(encoding, literal)
 
-  private def vectorSource(encoding: Int, literal: Option[Long]): Either[String, InstructionSource] =
+  private def vectorSource(encoding: Int, literal: Option[Long]): Either[NonEmpty[String], InstructionSource] =
     if (encoding >= 256) Right(InstructionSource.VectorRegister(encoding - 256))
     else scalarSource(encoding, literal)
 
-  private def inlineConstant(encoding: Int, literal: Option[Long]): Either[String, InstructionSource] =
+  private def inlineConstant(encoding: Int, literal: Option[Long]): Either[NonEmpty[String], InstructionSource] =
     if (encoding >= 128 && encoding <= 192) Right(InstructionSource.Constant(encoding - 128L))
     else if (encoding >= 193 && encoding <= 208) Right(InstructionSource.Constant(192L - encoding))
     else if (
@@ -2464,16 +2581,18 @@ private[amdgpu] object VMCompiler {
         InstructionSource.Constant(Decoding.InlineFloatingConstants(encoding - Decoding.InlineFloatingFirst))
       )
     else if (encoding == Decoding.LiteralSource)
-      literal.map(raw => InstructionSource.Literal(raw)).toRight("missing literal dword")
-    else Left(s"source encoding $encoding is not implemented")
+      literal.map(raw => InstructionSource.Literal(raw)).toRight[NonEmpty[String]]("missing literal dword")
+    else Left[NonEmpty[String], Nothing](s"source encoding $encoding is not implemented")
 
-  private def subDwordSelection(encoding: Int): Either[String, SubDwordSelection] =
-    SubDwordSelection.values.lift(encoding).toRight(s"unknown SDWA selection $encoding")
+  private def subDwordSelection(encoding: Int): Either[NonEmpty[String], SubDwordSelection] =
+    SubDwordSelection.values.lift(encoding).toRight[NonEmpty[String]](s"unknown SDWA selection $encoding")
 
-  private def subDwordDestinationUnused(encoding: Int): Either[String, SubDwordDestinationUnused] =
-    SubDwordDestinationUnused.values.lift(encoding).toRight(s"unknown SDWA destination-unused mode $encoding")
-  private def requireBytes(bytes: Array[Byte], offset: Int, size: Int): Either[String, Unit] =
-    Either.cond(
+  private def subDwordDestinationUnused(encoding: Int): Either[NonEmpty[String], SubDwordDestinationUnused] =
+    SubDwordDestinationUnused.values.lift(
+      encoding
+    ).toRight[NonEmpty[String]](s"unknown SDWA destination-unused mode $encoding")
+  private def requireBytes(bytes: Array[Byte], offset: Int, size: Int): Either[NonEmpty[String], Unit] =
+    Either.cond[NonEmpty[String], Unit](
       ByteRange.contains(bytes.length, offset.toLong, size.toLong),
       (),
       s"truncated $size-byte instruction"

@@ -1,25 +1,23 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import net.kurobako.gemstone.{NonEmptyVec, Vec}
-import net.kurobako.gemstone.isa.ValidationOutcome
-
 import cats.data.Chain
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 
 object Validation {
   enum Issue {
-    case InvalidHeader(detail: String)
-    case MalformedOperand(opcode: NonEmptyString, detail: String)
+    case InvalidHeader(detail: NonEmpty[String])
+    case MalformedOperand(opcode: NonEmpty[String], detail: NonEmpty[String])
     case MissingKernelCapability
     case MissingKernelEntryPoint
     case MissingOpenCLMemoryModel
     case MissingShaderCapability
     case MissingGLComputeEntryPoint
     case MissingGLSL450MemoryModel
-    case UnsupportedVersion(version: SPIRVVersion)
+    case UnsupportedVersion(version: Version)
 
-    def message: String = this match {
+    def message: NonEmpty[String] = this match {
       case InvalidHeader(detail)            => detail
       case MalformedOperand(opcode, detail) => s"$opcode has a malformed operand: $detail"
       case MissingKernelCapability          => "OpCapability Kernel is required"
@@ -88,8 +86,10 @@ object Validation {
 
   private def validateEnvironment(module: Module, requirements: Requirements): ValidationOutcome[Issue] = {
     val headerIssues =
-      issueWhen(module.header.bound.toUnsigned.raw == 0L)(Issue.InvalidHeader("id bound must be non-zero")) ++
-        issueWhen(module.header.schema.toUnsigned.raw != 0L)(Issue.InvalidHeader("reserved schema word must be zero"))
+      issueWhen(module.header.bound.toUnsigned.toLong == 0L)(Issue.InvalidHeader("id bound must be non-zero")) ++
+        issueWhen(
+          module.header.schema.toUnsigned.toLong != 0L
+        )(Issue.InvalidHeader("reserved schema word must be zero"))
     val unsupported = Option.when(
       module.header.version.major > ISA.version.major ||
         (module.header.version.major == ISA.version.major &&
@@ -97,30 +97,31 @@ object Validation {
     )(Issue.UnsupportedVersion(module.header.version))
     val facts = module.instructions.foldLeft(Facts(false, false, false, Chain.empty)) {
       case (state, Instruction.Capability(capability)) => capability.singleWord match {
-          case Right(word) if word.toUnsigned.raw == requirements.capabilityWord => state.copy(hasCapability = true)
-          case Right(_)                                                          => state
-          case Left(detail)                                                      => state.copy(issues =
-              state.issues.append(Issue.MalformedOperand(NonEmptyString("OpCapability"), detail))
+          case Right(word) if word.toUnsigned.toLong == requirements.capabilityWord => state.copy(hasCapability = true)
+          case Right(_)                                                             => state
+          case Left(detail)                                                         => state.copy(issues =
+              state.issues.append(Issue.MalformedOperand("OpCapability", detail))
             )
         }
       case (state, Instruction.EntryPoint(executionModel, _, _, _)) => executionModel.singleWord match {
-          case Right(word) if word.toUnsigned.raw == requirements.entryPointWord => state.copy(hasEntryPoint = true)
-          case Right(_)                                                          => state
-          case Left(detail)                                                      => state.copy(issues =
-              state.issues.append(Issue.MalformedOperand(NonEmptyString("OpEntryPoint"), detail))
+          case Right(word) if word.toUnsigned.toLong == requirements.entryPointWord => state.copy(hasEntryPoint = true)
+          case Right(_)                                                             => state
+          case Left(detail)                                                         => state.copy(issues =
+              state.issues.append(Issue.MalformedOperand("OpEntryPoint", detail))
             )
         }
       case (state, Instruction.MemoryModel(addressingModel, memoryModel)) =>
         (addressingModel.singleWord, memoryModel.singleWord) match {
           case (Right(addressing), Right(memory)) =>
             state.copy(hasMemoryModel =
-              state.hasMemoryModel || requirements.acceptsMemoryModel(addressing.toUnsigned.raw, memory.toUnsigned.raw)
+              state.hasMemoryModel ||
+                requirements.acceptsMemoryModel(addressing.toUnsigned.toLong, memory.toUnsigned.toLong)
             )
           case (Left(detail), _) => state.copy(issues =
-              state.issues.append(Issue.MalformedOperand(NonEmptyString("OpMemoryModel"), detail))
+              state.issues.append(Issue.MalformedOperand("OpMemoryModel", detail))
             )
           case (_, Left(detail)) => state.copy(issues =
-              state.issues.append(Issue.MalformedOperand(NonEmptyString("OpMemoryModel"), detail))
+              state.issues.append(Issue.MalformedOperand("OpMemoryModel", detail))
             )
         }
       case (state, _) => state
@@ -132,8 +133,8 @@ object Validation {
         issueWhen(!facts.hasMemoryModel)(requirements.missingMemoryModel)).toVector.view
     )
     val unsupportedIssues = Vec.from(unsupported.toVector.view)
-    if (invalidIssues.nonEmpty) ValidationOutcome.Rejected(NonEmptyVec.unsafeFromVec(invalidIssues))
-    else if (unsupportedIssues.nonEmpty) ValidationOutcome.Incomplete(NonEmptyVec.unsafeFromVec(unsupportedIssues))
+    if (invalidIssues.nonEmpty) ValidationOutcome.Rejected(invalidIssues.unsafe)
+    else if (unsupportedIssues.nonEmpty) ValidationOutcome.Incomplete(unsupportedIssues.unsafe)
     else ValidationOutcome.Accepted
   }
 }

@@ -1,15 +1,25 @@
 package net.kurobako.gemstone.benchmarks
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
+import net.kurobako.gemstone.constraint.*
 
-final class BenchmarkRunnerSuite extends munit.FunSuite {
-  test("catalog names are stable and unique") {
+class BenchmarkRunnerSuite extends munit.FunSuite {
+  test("catalog names are nonempty and unique") {
     assert(PlatformBenchmarks.names.toVector.nonEmpty)
     assertEquals(PlatformBenchmarks.names.toVector.distinct, PlatformBenchmarks.names.toVector)
   }
 
   test("unknown cases fail before measurement") {
-    intercept[IllegalArgumentException](BenchmarkRunner.main(Array("run", "missing")))
+    val error = intercept[IllegalArgumentException] {
+      BenchmarkRunner.parse(BenchmarkName("missing"), Vector.empty)
+    }
+    assert(error.getMessage.contains("unknown benchmark: missing"))
+  }
+
+  test("runner rejects negative warmups and nonpositive sample counts") {
+    for (arguments <- Vector(Vector("--warmup", "-1"), Vector("--samples", "0"), Vector("--samples", "-1")))
+      intercept[IllegalArgumentException] {
+        BenchmarkRunner.parse(BenchmarkName("ptx-execution"), arguments)
+      }
   }
 
   test("runner options are typed and leave case arguments intact") {

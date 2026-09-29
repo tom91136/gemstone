@@ -6,7 +6,6 @@
 
 namespace gemstone::opencl {
 inline void populateDispatch(cl_icd_dispatch &dispatch) {
-  dispatch.clGetPlatformIDs = &clGetPlatformIDs;
   dispatch.clGetPlatformInfo = &clGetPlatformInfo;
   dispatch.clGetDeviceIDs = &clGetDeviceIDs;
   dispatch.clGetDeviceInfo = &clGetDeviceInfo;
@@ -37,7 +36,6 @@ inline void populateDispatch(cl_icd_dispatch &dispatch) {
   dispatch.clRetainProgram = &clRetainProgram;
   dispatch.clReleaseProgram = &clReleaseProgram;
   dispatch.clBuildProgram = &clBuildProgram;
-  dispatch.clUnloadCompiler = &clUnloadCompiler;
   dispatch.clGetProgramInfo = &clGetProgramInfo;
   dispatch.clGetProgramBuildInfo = &clGetProgramBuildInfo;
   dispatch.clCreateKernel = &clCreateKernel;
@@ -81,6 +79,12 @@ inline void populateDispatch(cl_icd_dispatch &dispatch) {
   dispatch.clEnqueueAcquireGLObjects = &clEnqueueAcquireGLObjects;
   dispatch.clEnqueueReleaseGLObjects = &clEnqueueReleaseGLObjects;
   dispatch.clGetGLContextInfoKHR = &clGetGLContextInfoKHR;
+  dispatch.clGetDeviceIDsFromD3D10KHR = nullptr;
+  dispatch.clCreateFromD3D10BufferKHR = nullptr;
+  dispatch.clCreateFromD3D10Texture2DKHR = nullptr;
+  dispatch.clCreateFromD3D10Texture3DKHR = nullptr;
+  dispatch.clEnqueueAcquireD3D10ObjectsKHR = nullptr;
+  dispatch.clEnqueueReleaseD3D10ObjectsKHR = nullptr;
   dispatch.clSetEventCallback = &clSetEventCallback;
   dispatch.clCreateSubBuffer = &clCreateSubBuffer;
   dispatch.clSetMemObjectDestructorCallback = &clSetMemObjectDestructorCallback;
@@ -109,6 +113,16 @@ inline void populateDispatch(cl_icd_dispatch &dispatch) {
   dispatch.clEnqueueBarrierWithWaitList = &clEnqueueBarrierWithWaitList;
   dispatch.clGetExtensionFunctionAddressForPlatform = &clGetExtensionFunctionAddressForPlatform;
   dispatch.clCreateFromGLTexture = &clCreateFromGLTexture;
+  dispatch.clGetDeviceIDsFromD3D11KHR = nullptr;
+  dispatch.clCreateFromD3D11BufferKHR = nullptr;
+  dispatch.clCreateFromD3D11Texture2DKHR = nullptr;
+  dispatch.clCreateFromD3D11Texture3DKHR = nullptr;
+  dispatch.clCreateFromDX9MediaSurfaceKHR = nullptr;
+  dispatch.clEnqueueAcquireD3D11ObjectsKHR = nullptr;
+  dispatch.clEnqueueReleaseD3D11ObjectsKHR = nullptr;
+  dispatch.clGetDeviceIDsFromDX9MediaAdapterKHR = nullptr;
+  dispatch.clEnqueueAcquireDX9MediaSurfacesKHR = nullptr;
+  dispatch.clEnqueueReleaseDX9MediaSurfacesKHR = nullptr;
   dispatch.clCreateFromEGLImageKHR = &clCreateFromEGLImageKHR;
   dispatch.clEnqueueAcquireEGLObjectsKHR = &clEnqueueAcquireEGLObjectsKHR;
   dispatch.clEnqueueReleaseEGLObjectsKHR = &clEnqueueReleaseEGLObjectsKHR;
@@ -139,6 +153,7 @@ inline void populateDispatch(cl_icd_dispatch &dispatch) {
   dispatch.clCreateBufferWithProperties = &clCreateBufferWithProperties;
   dispatch.clCreateImageWithProperties = &clCreateImageWithProperties;
   dispatch.clSetContextDestructorCallback = &clSetContextDestructorCallback;
+  dispatch.clGetKernelSuggestedLocalWorkSize = nullptr;
 }
 }
 

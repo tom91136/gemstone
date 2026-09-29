@@ -1,27 +1,26 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.Constraint.NoNulString
-
 import net.kurobako.gemstone.*
-
-import net.kurobako.gemstone.launcher.Environment
-
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.environment as env
+import net.kurobako.gemstone.server.*
 import scala.concurrent.duration.*
 import scala.util.Using
 
 /** Exercises the native CUDA boundary against whichever Scala server is under test. */
-final class CUDABoundarySuite extends munit.FunSuite {
+class CUDABoundarySuite extends munit.FunSuite {
   test("native CUDA client reports an unavailable execution service") {
-    val directory = NativeTestProcess.nativeDirectory
-    Using.resource(GemstoneRPCServer.start()) { server =>
-      val result = NativeTestProcess.run(
-        NonEmptyVec(NoNulString.unsafe(directory.resolve("cuda_execution_unavailable_smoke").toString)),
+    val directory = native.directory
+    Using.resource(Server.start(Server.Settings(parallelism = 2))) { server =>
+      val result = native.run(
+        Vec.nonEmpty(directory.resolve("cuda_execution_unavailable_smoke").toString),
         directory,
-        Environment(
+        Launch.Environment(
           Map(
-            "LD_LIBRARY_PATH"     -> directory.toString,
-            "GEMSTONE_RPC_PORT"   -> server.port.raw.toString,
-            "GEMSTONE_RPC_CLIENT" -> (server.client.raw + 1L).toString
+            "LD_LIBRARY_PATH" -> directory.toString,
+            env.RpcEndpoint   -> server.endpoint.toString,
+            env.RpcClient     -> (server.client.raw + 1L).toString
           ),
           Set.empty
         ),

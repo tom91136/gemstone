@@ -1,21 +1,30 @@
 package net.kurobako.gemstone.rpc
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.{GlobalSymbol, KernelMetadata as ISAKernelMetadata, KernelSymbol, ProgramSymbols}
-import net.kurobako.gemstone.memory.GuestAddress
-import net.kurobako.gemstone.rpc.Wire.Codec
-import net.kurobako.gemstone.vm.{KernelTask, LaunchGeometry, MemoryRegion}
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.rpc.Wire.*
+import net.kurobako.gemstone.vm.*
 
 /** Process-neutral values carried by [[ExecutionRPC]]. */
 object ExecutionProtocol {
-  export net.kurobako.gemstone.Constraint.NonEmptyString
-  export net.kurobako.gemstone.rpc.{AllocationId, CompletionId, ProgramId}
+  export net.kurobako.gemstone.constraint.NonEmpty
+  export net.kurobako.gemstone.rpc.CompletionId
+  export net.kurobako.gemstone.rpc.ProgramId
 
-  given Codec[MemoryRegion] =
-    Codec.domain("MemoryRegion", Codec[Long], Vector.empty)(value => Right(MemoryRegion(value)), _.value)
+  // Refined text in this protocol names native symbols. Keep the C-string restriction
+  // here; ordinary nonempty strings and their codecs permit embedded NUL characters.
+  given nativeName: Codec[NonEmpty[String]] = Codec.validated(Codec.domain(
+    "String",
+    Codec[String],
+    Vector(Wire.Constraint.MinimumLength(1), Wire.Constraint.NotContains("\u0000"))
+  )(value => value.refine[NonEmpty[String]], identity)) { value =>
+    Either.cond(!value.contains('\u0000'), value, "native symbol name must not contain a NUL character")
+  }
+
+  given Codec[AllocationKind] = Codec.derived
 
   given Codec[LaunchGeometry.Dimensions]       = Codec.derived
   given Codec[LaunchGeometry.Coordinates]      = Codec.derived
@@ -24,7 +33,7 @@ object ExecutionProtocol {
   given Codec[KernelTask.RelocationSource]     = Codec.derived
   given Codec[KernelTask.PointerRelocation]    = Codec.derived
 
-  case class HostMemoryRange(address: GuestAddress, size: Positive[Int]) derives Codec
+  case class HostMemoryRange(address: GuestAddress, size: Int > 0) derives Codec
   case class HostMemoryBytes(address: GuestAddress, bytes: Vec[Byte], atomicWidth: Int = 0) derives Codec
   case class HostMemoryAtomic(address: GuestAddress, size: Int, expected: Long, desired: Long) derives Codec
   case class HostMemorySync(ticket: Long, atomic: Option[HostMemoryAtomic]) derives Codec
@@ -34,6 +43,14 @@ object ExecutionProtocol {
       completed: Boolean,
       sync: Option[HostMemorySync] = None
   ) derives Codec
+
+  object ExecutionFailure {
+    def fromFault(fault: Fault): ExecutionFailure = fault match {
+      case Fault.InvalidTask(detail) => InvalidRequest(detail)
+      case Fault.Unsupported(detail) => Unsupported(detail)
+      case _                         => Failed(fault.message)
+    }
+  }
 
   enum ExecutionFailure derives Codec {
     case InvalidRequest(detail: String)
@@ -56,14 +73,6 @@ object ExecutionProtocol {
     }
   }
 
-  object ExecutionFailure {
-    def fromFault(fault: net.kurobako.gemstone.vm.Fault): ExecutionFailure = fault match {
-      case net.kurobako.gemstone.vm.Fault.InvalidTask(detail) => InvalidRequest(detail)
-      case net.kurobako.gemstone.vm.Fault.Unsupported(detail) => Unsupported(detail)
-      case _                                                  => Failed(fault.message)
-    }
-  }
-
   enum CompletionStatus derives Codec {
     case Pending
     case Succeeded
@@ -72,15 +81,15 @@ object ExecutionProtocol {
 
   case class DirtyRange(
       allocation: AllocationId,
-      offset: NonNegative[Long],
-      size: Positive[Int]
+      offset: Long >= 0,
+      size: Int > 0
   ) derives Codec
 
-  given Codec[ISAKernelMetadata.ParameterKind] = Codec.derived
-  given Codec[ISAKernelMetadata.Parameter]     = Codec.derived
+  given Codec[KernelMetadata.ParameterKind] = Codec.derived
+  given Codec[KernelMetadata.Parameter]     = Codec.derived
 
-  given Codec[ISAKernelMetadata] = Codec.validated(Codec.derived[ISAKernelMetadata])(value =>
-    ISAKernelMetadata.validated(
+  given Codec[KernelMetadata] = Codec.validated(Codec.derived[KernelMetadata])(value =>
+    KernelMetadata.validated(
       value.argumentBlockSize,
       value.explicitParameterCount,
       value.parameters,
@@ -117,8 +126,8 @@ object ExecutionProtocol {
     case F64
   }
 
-  case class BlasVector(allocation: AllocationId, offset: NonNegative[Long], increment: Int) derives Codec
-  case class BlasMatrix(allocation: AllocationId, offset: NonNegative[Long], leading: Int) derives Codec
+  case class BlasVector(allocation: AllocationId, offset: Long >= 0, increment: Int) derives Codec
+  case class BlasMatrix(allocation: AllocationId, offset: Long >= 0, leading: Int) derives Codec
 
   case class BlasRequest(
       operation: BlasOperation,
@@ -145,27 +154,16 @@ object ExecutionProtocol {
   case class BlasResult(scalar: Vec[Byte]) derives Codec
 
   case class SpecializationConstant(
-      specId: NonNegative[Int],
+      specId: Binary32,
       value: Vec[Byte]
   ) derives Codec
 
   case class SpecializationInfo(
-      specId: NonNegative[Int],
-      byteSize: Positive[Int]
+      specId: Binary32,
+      byteSize: Int > 0
   ) derives Codec
 
-  case class ProgramGlobal private (size: NonNegative[Long], initial: Vec[Byte])
-
-  object ProgramGlobal {
-    def validated(size: NonNegative[Long], initial: Vec[Byte]): Either[String, ProgramGlobal] =
-      Either.cond(
-        initial.length.toLong <= size.raw,
-        ProgramGlobal(size, initial),
-        "program-global initial contents exceed its size"
-      )
-
-    given Codec[ProgramGlobal] = Codec.validated(Codec.derived[ProgramGlobal])(value =>
-      validated(value.size, value.initial)
-    )
-  }
+  given Codec[GlobalImage] = Codec.validated(Codec.product[GlobalImage]("ProgramGlobal"))(value =>
+    GlobalImage.validated(value.size, value.initial)
+  )
 }

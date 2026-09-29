@@ -1,29 +1,23 @@
 package net.kurobako.gemstone.memory
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
+import net.kurobako.gemstone.constraint.*
 import scala.annotation.targetName
 
 /** A device-visible guest address. */
-opaque type GuestAddress = Long
-
-object GuestAddress {
-  inline def apply(inline value: Long): GuestAddress = value
+type GuestAddress = GuestAddress.Type
+object GuestAddress extends Newtype[Long] {
 
   @targetName("fromNonNegativeLong")
-  inline def apply(inline value: NonNegative[Long]): GuestAddress = value.raw
+  inline def apply(inline value: Long >= 0): GuestAddress = apply(value.raw)
 
   @targetName("fromPositiveLong")
-  inline def apply(inline value: Positive[Long]): GuestAddress = value.raw
-
-  given Ordering[GuestAddress] = Ordering.Long
+  inline def apply(inline value: Long > 0): GuestAddress = apply(value.raw)
 
   extension (address: GuestAddress) {
-    inline def raw: Long = address
 
     /** Device addresses use unsigned 64-bit modular arithmetic. Bounds are checked by the owning memory view. */
-    def offset(bytes: Long): GuestAddress = GuestAddress(address + bytes)
+    def offset(bytes: Long): GuestAddress = GuestAddress(address.raw + bytes)
 
-    def show: String = s"0x${java.lang.Long.toUnsignedString(address, 16)}"
+    def show: String = s"0x${java.lang.Long.toUnsignedString(address.raw, 16)}"
   }
 }

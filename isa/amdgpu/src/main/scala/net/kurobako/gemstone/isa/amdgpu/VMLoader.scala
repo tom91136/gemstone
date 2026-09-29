@@ -1,30 +1,20 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.Vec.*
-import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.isa.{GlobalSymbol, KernelMetadata, KernelSymbol, ProgramSymbols}
-import net.kurobako.gemstone.isa.amdgpu.CodeObject
-import net.kurobako.gemstone.isa.amdgpu.CodeObject.*
-import net.kurobako.gemstone.isa.amdgpu.CodeObjectMetadata
-import net.kurobako.gemstone.isa.amdgpu.VMLoadedProgram.GlobalBinding
-import net.kurobako.gemstone.vm.{Fault, Memory, MemoryRegion}
-
+import ELF.*
 import cats.syntax.all.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.string.*
+import net.kurobako.gemstone.vm.*
 
-import java.util.concurrent.locks.ReentrantLock
-import scala.collection.mutable
-
-/** AMDGPU ELF loader with intentionally lazy full indexing. [[load]] validates the fixed ELF header immediately;
-  * section tables, descriptors, target variants, and kernel instructions are validated when the first kernel is
-  * resolved. Initialization successes and failures are then cached for the lifetime of the loaded program.
+/** Indexes AMDGPU ELF sections, descriptors, and target variants. [[LoadedProgram]] owns lazy initialization and caches
+  * both successful indexes and failures after validating the ELF header at load time.
   */
-private[amdgpu] object VMLoader {
+private object VMLoader {
 
-  private[amdgpu] object AMDGPUKernelVariants {
+  object AMDGPUKernelVariants {
     private object TargetArch {
       private val Marker                                           = "target_archE"
       def unapply(value: String): Option[(String, String, String)] = {
@@ -44,8 +34,6 @@ private[amdgpu] object VMLoader {
     // tag.  It is a sentinel, not a concrete architecture variant.
     private val GenericArch = "4294967295"
 
-    private def upperAscii(value: String): String = value.toUpperCase(java.util.Locale.ROOT)
-
     private def logicalName(name: String): String = name match {
       case TargetArch(prefix, _, suffix) => prefix + "target_archE" + suffix
       case _                             => name
@@ -53,7 +41,7 @@ private[amdgpu] object VMLoader {
 
     private def archSuffix(name: String): Option[String] =
       (name match {
-        case TargetArch(_, revision, _) => Some(upperAscii(revision))
+        case TargetArch(_, revision, _) => Some(revision.toUpperCaseRoot)
         case _                          => None
       }).filter(_ != GenericArch)
 
@@ -62,7 +50,7 @@ private[amdgpu] object VMLoader {
       * family spelling (for example, gfx1036 uses the gfx1030 enum).
       */
     private def archCandidates(targetName: String): Set[String] = {
-      val target = upperAscii(targetName.drop(3))
+      val target = targetName.drop(3).toUpperCaseRoot
       val family =
         if (
           target.length == 4 && target.forall(_.isDigit) &&
@@ -83,7 +71,7 @@ private[amdgpu] object VMLoader {
         targetName: String,
         usable: String => Boolean = _ => true,
         allowUnsupported: Boolean = false
-    ): Either[String, Map[String, String]] = {
+    ): Either[NonEmpty[String], Map[String, String]] = {
       val targets  = archCandidates(targetName)
       val selected = names.groupBy(logicalName(_)).view.map { case (logical, entries) =>
         val variants = entries.view.filter(name => archSuffix(name).nonEmpty).toVec
@@ -105,7 +93,7 @@ private[amdgpu] object VMLoader {
             .filter(usable)
             .orElse(generic.filter(usable))
             .orElse(Option.when(allowUnsupported)(fallback).flatten)
-            .toRight(s"AMDGPU kernel variant $logical has no $targetName implementation")
+            .toRight[NonEmpty[String]](s"AMDGPU kernel variant $logical has no $targetName implementation")
             .map(logical -> _)
           result
         }
@@ -115,275 +103,60 @@ private[amdgpu] object VMLoader {
 
   }
 
-  private case class AMDGPUIndexedProgram(
-      index: CodeObject.Index,
+  case class IndexedProgram(
+      index: ELF.Index,
       aliases: Map[String, String],
       metadata: Map[String, KernelMetadata],
       symbols: ProgramSymbols
   )
 
-  private final class AMDGPUDeferredProgramResolver(
-      initialize: () => Either[Fault, AMDGPUIndexedProgram]
-  ) {
-    private lazy val initialized = initialize()
-
-    def resolveKernel(name: String): Either[Fault, CodeObjectKernel] =
-      initialized.flatMap { program =>
-        program.aliases.get(name)
-          .toRight(Fault.InvalidTask(s"AMDGPU kernel '$name' is not present"))
-          .flatMap(alias =>
-            program.index.kernel(alias)
-              .leftMap(error => Fault.InvalidTask(error.message))
-          )
-      }
-
-    def kernelMetadata(name: String): Either[Fault, KernelMetadata] =
-      initialized.flatMap { program =>
-        val resolved = program.aliases.getOrElse(name, name)
-        program.metadata.get(resolved).orElse(program.metadata.get(name))
-          .toRight(Fault.InvalidTask(
-            s"AMDGPU kernel metadata for '$name' is not present"
-          ))
-      }
-
-    def symbols: Either[Fault, ProgramSymbols] = initialized.map(_.symbols)
-
-    def global(name: NonEmptyString): Either[Fault, (NonNegative[Long], Vec[Byte])] =
-      initialized.flatMap { program =>
-        program.index.globalData(name)
-          .leftMap(error => Fault.Memory(error.message))
-          .map { case (_, initial) => NonNegative.unsafe(initial.size.toLong) -> initial }
-      }
-
-    private case class Bound(value: GlobalBinding, memory: Memory)
-    private val bindingLock = ReentrantLock()
-    private val bound       = mutable.Map.empty[NonEmptyString, Bound]
-
-    def bindings: Vec[GlobalBinding] = bindingLock.withLock {
-      Vec.from(bound.values.view.map(_.value)).distinct
-    }
-
-    // The covered-range scan maintains one cursor while appending disjoint gaps.
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    def bindGlobal(
-        name: NonEmptyString,
-        allocation: MemoryRegion,
-        offset: NonNegative[Long],
-        allocationSize: Positive[Long],
-        memory: Memory
-    ): Either[Fault, Unit] = bindingLock.withLock {
-      initialized match {
-        case Left(error)    => Left(error)
-        case Right(program) =>
-          program.index.globalData(name)
-            .leftMap(error => Fault.Memory(error.message)) match {
-            case Left(error)                    => Left(error)
-            case Right((guestAddress, initial)) =>
-              val address = guestAddress.raw
-              if (
-                offset.raw > allocationSize.raw ||
-                initial.size.toLong > (allocationSize.widen[NonNegative[Long]] - offset).raw ||
-                address < offset.raw || address > Long.MaxValue - initial.size.toLong
-              )
-                Left(Fault.InvalidTask("global binding exceeds allocation or virtual address range"))
-              else {
-                val value = GlobalBinding(
-                  address,
-                  initial.nonNegativeSize,
-                  allocation,
-                  offset,
-                  allocationSize
-                )
-                val old = bound.get(name)
-                if (old.exists(entry => entry.value != value || !(entry.memory eq memory)))
-                  Left(Fault.InvalidTask(
-                    s"global $name is already bound to different storage"
-                  ))
-                else if (old.nonEmpty) Right(())
-                else if (
-                  bound.values.view.exists { entry =>
-                    val other    = entry.value
-                    val overlaps = address < other.address + other.size.raw &&
-                      other.address < address + initial.size
-                    val sameMapping = allocation == other.allocation &&
-                      address - offset.raw == other.address - other.offset.raw &&
-                      allocationSize == other.allocationSize && (entry.memory eq memory)
-                    (overlaps && !sameMapping) || (allocation == other.allocation && !sameMapping)
-                  }
-                ) Left(Fault.InvalidTask("global aliases have conflicting allocation mappings"))
-                else {
-                  // Adding an overlapping symbol alias must not overwrite already-live bound bytes with old initializers.
-                  val covered = bound.values.view.map(_.value).filter(other =>
-                    address < other.address + other.size.raw && other.address < address + initial.size
-                  ).map(other =>
-                    (math.max(address, other.address) - address).toInt ->
-                      (math.min(address + initial.size, other.address + other.size.raw) - address).toInt
-                  ).toVec.sortBy(_._1)
-                  val gaps       = Vec.newBuilder[(Int, Int)]
-                  var coveredEnd = 0
-                  covered.foreach { case (start, end) =>
-                    if (start > coveredEnd) gaps += coveredEnd -> start
-                    coveredEnd = math.max(coveredEnd, end)
-                  }
-                  if (coveredEnd < initial.size) gaps += coveredEnd -> initial.size
-                  val uncovered         = gaps.result()
-                  val initializedMemory = if (uncovered.isEmpty) Right(())
-                  else memory.read(allocation, offset, initial.nonNegativeSize) match {
-                    case Left(error)    => Left(error)
-                    case Right(current) =>
-                      val bytes = Vec.toArray(current)
-                      uncovered.foreach { case (start, end) =>
-                        val _ = initial.slice(start, end).copyToArray(bytes, start, end - start)
-                      }
-                      memory.write(allocation, offset, Vec.unsafeFromArray(bytes))
-                  }
-                  initializedMemory match {
-                    case Left(error) => Left(error)
-                    case Right(_)    =>
-                      bound.update(name, Bound(value, memory))
-                      Right(())
-                  }
-                }
-              }
-          }
-      }
-    }
-
-    def writeGlobal(
-        name: NonEmptyString,
-        offset: NonNegative[Long],
-        bytes: Vec[Byte]
-    ): Either[Fault, Unit] =
-      bindingLock.withLock {
-        initialized match {
-          case Left(error)    => Left(error)
-          case Right(program) =>
-            program.index.global(name)
-              .toRight(Fault.Memory(s"AMDGPU global $name is not present")) match {
-              case Left(error)                 => Left(error)
-              case Right((guestAddress, size)) =>
-                val address = guestAddress.raw
-                if (offset.raw > size.raw || bytes.size.toLong > size.raw.toLong - offset.raw)
-                  Left(Fault.InvalidTask("global write exceeds symbol bounds"))
-                else {
-                  val start   = address + offset.raw
-                  val covered = bound.values.view.find(entry =>
-                    start >= entry.value.address &&
-                      start - entry.value.address <= entry.value.size.raw.toLong - bytes.size
-                  )
-                  covered match {
-                    case Some(entry) =>
-                      entry.memory.write(
-                        entry.value.allocation,
-                        NonNegative.unsafe(entry.value.offset.raw + start - entry.value.address),
-                        bytes
-                      )
-                    case None
-                        if bound.values.view.forall(entry =>
-                          start >= entry.value.address + entry.value.size.raw ||
-                            start + bytes.size <= entry.value.address
-                        ) =>
-                      program.index.writeGlobal(name, offset.raw, bytes).leftMap(error =>
-                        Fault.InvalidTask(error.message)
-                      )
-                    case None =>
-                      bytes.zipWithIndex.foldLeft[Either[Fault, Unit]](Right(())) {
-                        case (result, (byte, index)) =>
-                          result match {
-                            case error @ Left(_) => error
-                            case Right(_)        =>
-                              bound.values.view.find(entry =>
-                                start + index >= entry.value.address &&
-                                  start + index < entry.value.address + entry.value.size.raw
-                              ) match {
-                                case Some(entry) =>
-                                  entry.memory.write(
-                                    entry.value.allocation,
-                                    NonNegative.unsafe(
-                                      entry.value.offset.raw + start + index - entry.value.address
-                                    ),
-                                    Vec(byte)
-                                  )
-                                case None =>
-                                  program.index.writeGlobal(name, offset.raw + index, Vec(byte))
-                                    .leftMap(error => Fault.InvalidTask(error.message))
-                              }
-                          }
-                      }
-                  }
-                }
-            }
-        }
-      }
-
-  }
-
-  private[amdgpu] def load(program: Program): Either[Fault, VMLoadedProgram] = {
+  def index(program: CodeObject): Either[Fault, IndexedProgram] = {
     val image = program.image
-    CodeObject.validateHeader(image)
-      .leftMap(error => Fault.InvalidTask(error.message)).map { _ =>
-        val resolver = AMDGPUDeferredProgramResolver { () =>
-          for {
-            indexed <- CodeObject.index(image)
-              .leftMap(error => Fault.InvalidTask(error.message))
-            manifests <- CodeObjectMetadata.decodeOptional(image)
-              .leftMap(error => Fault.InvalidTask(error.message))
-              .map(_.getOrElse(Vec.empty[CodeObjectMetadata.KernelManifest]))
-            selected <- AMDGPUKernelVariants.select(
-              indexed.kernelNames,
-              indexed.target.name.raw,
-              name =>
-                indexed.kernel(name).exists { kernel =>
-                  val code = Vec.toArray(kernel.code)
-                  code.length != 4 || code(0) != 0x00.toByte || code(1) != 0x00.toByte ||
-                  code(2) != 0x81.toByte || code(3) != 0xbf.toByte
-                },
-              allowUnsupported = true
-            ).leftMap(detail => Fault.InvalidTask(detail))
-            metadata = manifests.view.flatMap(manifest =>
-              Vec(
-                manifest.name.raw                      -> manifest.metadata,
-                manifest.symbol.raw                    -> manifest.metadata,
-                manifest.symbol.raw.stripSuffix(".kd") -> manifest.metadata
-              )
-            ).toMap
-            kernelSymbols <-
-              if (manifests.nonEmpty) manifests.map(manifest => KernelSymbol(manifest.name, manifest.symbol)).distinct
-                .asRight[Fault]
-              else indexed.kernelNames.toSeq.sorted.traverse { name =>
-                for {
-                  kernelName <- NonEmptyString.either(name).leftMap(_ =>
-                    Fault.InvalidTask(
-                      s"invalid AMDGPU kernel name '$name'"
-                    )
-                  )
-                  linkageName <- NonEmptyString.either(name).leftMap(_ =>
-                    Fault.InvalidTask(
-                      s"invalid AMDGPU linkage name '$name'"
-                    )
-                  )
-                } yield KernelSymbol(kernelName, linkageName)
-              }.map(Vec.from)
-            kernelLinkage: Set[String] = kernelSymbols.view.map(_.linkageName.raw: String).toSet
-            globals <- indexed.globals.filterNot(global => kernelLinkage.contains(global.name.raw)).traverse { global =>
-              GlobalSymbol.validated(
-                global.name,
-                Some(global.address),
-                global.size.widen,
-                global.pointerOffsets
-              ).leftMap(detail => Fault.InvalidTask(detail))
-            }
-          } yield AMDGPUIndexedProgram(indexed, selected, metadata, ProgramSymbols(kernelSymbols, globals))
-        }
-        VMLoadedProgram(
-          resolver.resolveKernel(_),
-          resolver.kernelMetadata(_),
-          () => resolver.symbols,
-          resolver.global(_),
-          resolver.writeGlobal(_, _, _),
-          resolver.bindGlobal(_, _, _, _, _),
-          () => resolver.bindings
+    for {
+      indexed <- ELF.index(image)
+        .leftMap(error => Fault.InvalidTask(error.message))
+      manifests <- CodeObjectMetadata.decodeOptional(image)
+        .leftMap(error => Fault.InvalidTask(error.message))
+        .map(_.getOrElse(Vec.empty[CodeObjectMetadata.KernelManifest]))
+      selected <- AMDGPUKernelVariants.select(
+        indexed.kernelNames,
+        indexed.target.name,
+        name =>
+          indexed.kernel(name).exists { kernel =>
+            val code = Vec.toArray(kernel.code)
+            code.length != 4 || code(0) != 0x00.toByte || code(1) != 0x00.toByte ||
+            code(2) != 0x81.toByte || code(3) != 0xbf.toByte
+          },
+        allowUnsupported = true
+      ).leftMap(detail => Fault.InvalidTask(detail))
+      metadata = manifests.view.flatMap(manifest =>
+        Vec(
+          manifest.name                      -> manifest.metadata,
+          manifest.symbol                    -> manifest.metadata,
+          manifest.symbol.stripSuffix(".kd") -> manifest.metadata
         )
+      ).toMap
+      kernelSymbols <-
+        if (manifests.nonEmpty) manifests.map(manifest => KernelSymbol(manifest.name, manifest.symbol)).distinct
+          .asRight[Fault]
+        else indexed.kernelNames.toSeq.sorted.traverse { name =>
+          for {
+            kernelName <- name.refine[NonEmpty[String]].leftMap(_ =>
+              Fault.InvalidTask(
+                s"invalid AMDGPU kernel name '$name'"
+              )
+            )
+          } yield KernelSymbol(kernelName, kernelName)
+        }.map(Vec.from)
+      kernelLinkage: Set[String] = kernelSymbols.view.map(_.linkageName: String).toSet
+      globals <- indexed.globals.filterNot(global => kernelLinkage.contains(global.name)).traverse { global =>
+        GlobalSymbol.validated(
+          global.name,
+          Some(global.address),
+          global.size.toLong,
+          global.pointerOffsets
+        ).leftMap(detail => Fault.InvalidTask(detail))
       }
+    } yield IndexedProgram(indexed, selected, metadata, ProgramSymbols(kernelSymbols, globals))
   }
 }

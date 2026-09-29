@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-final class RegisterFileSuite extends munit.FunSuite {
+class RegisterFileSuite extends munit.FunSuite {
   test("numbered registers map to stable dense slots without requiring a percent prefix") {
     assertEquals(VMRegisterFile.indexRaw("%rd0"), 0)
     assertEquals(VMRegisterFile.indexRaw("rd0"), 0)

@@ -1,15 +1,14 @@
 package net.kurobako.gemstone.vm
 
-import net.kurobako.gemstone.Constraint.Positive
+import net.kurobako.gemstone.constraint.*
 
-enum Fault(val message: String) {
-  case InvalidTask(detail: String) extends Fault(detail)
-  case Memory(detail: String)      extends Fault(detail)
-  case Unsupported(detail: String) extends Fault(detail)
-  case Observer(detail: String)    extends Fault(detail)
-  case Backend(detail: String)     extends Fault(detail)
-  case BudgetExceeded(limit: Positive[Long])
+enum Fault(val message: NonEmpty[String]) {
+  case InvalidTask(detail: NonEmpty[String])   extends Fault(detail)
+  case Memory(detail: NonEmpty[String])        extends Fault(detail)
+  case Unsupported(detail: NonEmpty[String])   extends Fault(detail)
+  case EventHandling(detail: NonEmpty[String]) extends Fault(detail)
+  case Backend(detail: NonEmpty[String])       extends Fault(detail)
+  case BudgetExceeded(limit: Long > 0)
       extends Fault(s"instruction budget of $limit was exhausted")
-  case PendingMemory extends Fault("host memory bytes are pending")
-  case Cancelled     extends Fault("execution was cancelled")
+  case Cancelled extends Fault("execution was cancelled")
 }

@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.memory
 
 /** Unsigned 64-bit address range checks shared by the memory views. */
-private[memory] object AddressRanges {
+private object AddressRanges {
 
   /** True when `[address, address + width)` lies within `[base, base + extent)` under unsigned comparison. */
   def containsUnsigned(base: Long, extent: Long, address: Long, width: Long): Boolean = {

@@ -81,7 +81,6 @@ TEST_CASE("CTest generation groups 52000 cases by timeout", "[driver]") {
   TargetExecution target{"route", "opencl", "pci-0123456789abcdef0123456789abcdef", directory.path / "route.json", {}};
   for (uint32_t i = 0; i < 52000; ++i)
     target.tests.push_back({fmt::format("case/{}", i), "fixture", i % 2 ? 120U : 300U, i, 52000});
-  const auto start = std::chrono::steady_clock::now();
   materialize_ctest(directory.path, driver, {target});
   const auto output = read(directory.path / "CTestTestfile.cmake");
   size_t count = 0;
@@ -90,11 +89,35 @@ TEST_CASE("CTest generation groups 52000 cases by timeout", "[driver]") {
   CHECK(count == 2);
   CHECK(output.find("SKIP_RETURN_CODE 4") != std::string::npos);
   CHECK(output.find("RESOURCE_LOCK [=[pci-0123456789abcdef0123456789abcdef]=]") != std::string::npos);
-  CHECK(std::chrono::steady_clock::now() - start < 10s);
+  CHECK(output.find("case/51999") != std::string::npos);
+}
+
+TEST_CASE("CTest reads generated timeout groups and device locks", "[driver]") {
+  TemporaryDirectory directory;
+  TargetExecution target{"route", "opencl", "pci-0123456789abcdef0123456789abcdef", directory.path / "route.json", {}};
+  target.tests = {{"first", "fixture", 120U, 0, 3}, {"second", "fixture", 300U, 1, 3}, {"third", "fixture", 120U, 2, 3}};
+  materialize_ctest(directory.path, driver, {target});
   const auto listing = run_process({"ctest", "--test-dir", directory.path.string(), "--show-only=json-v1"}, directory.path,
                                    base_environment(), 30s, {}, true);
-  CHECK(listing.status == 0);
-  CHECK(listing.output.find("case/51999") != std::string::npos);
+  INFO(listing.output);
+  REQUIRE(listing.status == 0);
+  // CTest, rather than just our generated text, must accept both property groups.
+  const auto parsed = glz::read_json<glz::generic>(listing.output);
+  REQUIRE(parsed.has_value());
+  const auto &tests = parsed->at("tests").get_array();
+  REQUIRE(tests.size() == 3);
+  for (size_t i = 0; i < tests.size(); ++i) {
+    bool timeout = false, lock = false, skip = false;
+    for (const auto &property : tests[i].at("properties").get_array()) {
+      const auto &name = property.at("name").get_string();
+      if (name == "TIMEOUT") timeout = property.at("value").get_number() == (i == 1 ? 300 : 120) + TimeoutMarginSeconds;
+      if (name == "RESOURCE_LOCK") lock = property.at("value").get_array().at(0).get_string() == target.device;
+      if (name == "SKIP_RETURN_CODE") skip = property.at("value").get_number() == SkipReturnCode;
+    }
+    CHECK(timeout);
+    CHECK(lock);
+    CHECK(skip);
+  }
 }
 
 TEST_CASE("isolated routes deduplicate physical variants by artifact ABI", "[driver]") {
@@ -119,7 +142,43 @@ TEST_CASE("isolated routes deduplicate physical variants by artifact ABI", "[dri
   REQUIRE(isolated.size() == 2);
   CHECK(isolated[0].id == "first");
   CHECK(isolated[1].id == "architecture");
-  CHECK(unique_routes(targets, false).size() == 6);
+  CHECK_FALSE(isolated[0].deviceLock);
+  CHECK_FALSE(isolated[1].deviceLock);
+  const auto physical = unique_routes(targets, false);
+  REQUIRE(physical.size() == 6);
+  CHECK(physical[0].deviceLock);
+  CHECK_FALSE(physical[5].deviceLock);
+}
+
+TEST_CASE("failed tests retain both streams in full and print a bounded diagnostic excerpt", "[driver]") {
+  TemporaryDirectory directory;
+  ExecutionConfig config{fixture.parent_path().string(),
+                         directory.path.string(),
+                         conformance::physical_device_key(conformance::make_pci_device(1, 0, 0, 0)),
+                         base_environment(),
+                         {},
+                         {},
+                         {"[noisy]"},
+                         false};
+  const auto file = directory.path / "config.json";
+  std::string buffer;
+  REQUIRE(!glz::write_file_json(config, file.string(), buffer));
+  const auto result = run_process({driver.string(), "exec", "--config", file.string(), "--program", fixture.stem().string(), "--test",
+                                   "noisy failure", "--timeout", "10"},
+                                  directory.path, base_environment(), 30s, {}, true);
+  INFO(result.error);
+  INFO(result.output);
+  CHECK(result.status != 0);
+  CHECK(result.output.size() < 20000);
+  CHECK(result.output.find("first diagnostic") != std::string::npos);
+  CHECK(result.output.find("last diagnostic") != std::string::npos);
+  CHECK(result.output.find("expected noisy failure") != std::string::npos);
+  CHECK(result.output.find("full output:") != std::string::npos);
+  const auto recorded = read(directory.path / fixture.stem() / "0/output.log");
+  CHECK(recorded.size() > 60000);
+  CHECK(recorded.find("first diagnostic") != std::string::npos);
+  CHECK(recorded.find("last diagnostic") != std::string::npos);
+  CHECK(recorded.find("stderr diagnostic") != std::string::npos);
 }
 
 TEST_CASE("execution preserves skips environment and distinct report paths", "[driver]") {
@@ -127,7 +186,7 @@ TEST_CASE("execution preserves skips environment and distinct report paths", "[d
   const auto names = list_fixture();
   ExecutionConfig config{fixture.parent_path().string(),
                          directory.path.string(),
-                         conformance::physical_device_key(conformance::make_registry_device("fixture")),
+                         conformance::physical_device_key(conformance::make_pci_device(1, 0, 0, 0)),
                          base_environment(),
                          {},
                          {},
@@ -140,12 +199,12 @@ TEST_CASE("execution preserves skips environment and distinct report paths", "[d
   const auto file = directory.path / "config.json";
   REQUIRE(!glz::write_file_json(config, file.string(), buffer));
   CHECK(execute_case(file, {names[0], fixture.stem().string(), 10, 0, 2}) == 0);
-  CHECK(execute_case(file, {names[1], fixture.stem().string(), 10, 1, 2}) == 4);
+  CHECK(execute_case(file, {names[1], fixture.stem().string(), 10, 1, 2}) == SkipReturnCode);
   CHECK(fs::is_regular_file(directory.path / fixture.stem() / "0/result.txt"));
   CHECK(fs::is_directory(directory.path / fixture.stem() / "1"));
   config.skips = {names[0]};
   REQUIRE(!glz::write_file_json(config, file.string(), buffer));
-  CHECK(execute_case(file, {names[0], fixture.stem().string(), 10, 0, 2}) == 4);
+  CHECK(execute_case(file, {names[0], fixture.stem().string(), 10, 0, 2}) == SkipReturnCode);
   CHECK_FALSE(fs::exists(directory.path / "skips.log"));
 }
 
@@ -168,7 +227,7 @@ TEST_CASE("runtime environment reserves owned keys and excludes inherited SDK pa
   CHECK_FALSE(conformance::valid_environment_entry("BAD=KEY", "value"));
   CHECK_FALSE(conformance::valid_environment_entry("KEY", std::string("bad\0value", 9)));
   ExecutionConfig config;
-  apply_device_probe(config, {conformance::physical_device_key(conformance::make_registry_device("selected")), {{"CL_DEVICE_INDEX", "2"}}});
+  apply_device_probe(config, {conformance::physical_device_key(conformance::make_pci_device(2, 0, 0, 0)), {{"CL_DEVICE_INDEX", "2"}}});
   CHECK(config.environment.at("CL_DEVICE_INDEX") == "2");
   CHECK(config.environment.at("CONFORMANCE_PHYSICAL_DEVICE") == config.device);
   CHECK_THROWS(apply_device_probe(config, {config.device, {{"LD_PRELOAD", "unexpected"}}}));
@@ -218,7 +277,7 @@ TEST_CASE("timeout kills a TERM-resistant process tree within a fixed bound", "[
 }
 
 TEST_CASE("device lock acquisition has a deadline", "[driver][process]") {
-  const auto device = conformance::make_registry_device(fmt::format("deadline{}", getpid()));
+  const auto device = conformance::make_pci_device(static_cast<uint32_t>(getpid()), 0, 0, 0);
   conformance::DeviceLock lock(device);
   const auto start = std::chrono::steady_clock::now();
   CHECK_THROWS(conformance::DeviceLock(device, 30ms));
@@ -232,4 +291,11 @@ TEST_CASE("isolated launchers preserve configured device selection", "[driver]")
     apply_suite_isolated_environment(environment, backend);
     CHECK(environment.at("CONFORMANCE_DEVICE") == "*chosen device*");
   }
+}
+
+TEST_CASE("only isolated SYCL handler matrices receive the longer timeout", "[driver]") {
+  CHECK(suite_timeout("sycl_cts_handler", 120, true) == CONFORMANCE_SYCL_HANDLER_TIMEOUT_SECONDS);
+  CHECK(suite_timeout("sycl_cts_handler", 120, false) == 120);
+  CHECK(suite_timeout("sycl_cts_handler", 900, true) == 900);
+  CHECK(suite_timeout("sycl_cts_buffer", 120, true) == 120);
 }

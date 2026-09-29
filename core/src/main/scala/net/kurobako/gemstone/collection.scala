@@ -1,0 +1,110 @@
+package net.kurobako.gemstone
+
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.FutureTask
+import java.util.concurrent.locks.ReentrantLock
+import net.kurobako.gemstone.concurrent.*
+import net.kurobako.gemstone.constraint.*
+import scala.collection.immutable.ArraySeq
+import scala.collection.mutable
+import scala.jdk.CollectionConverters.*
+import scala.reflect.ClassTag
+
+object collection {
+
+  object Vec {
+    def empty[A: ClassTag]: Vec[A] = ArraySeq.empty[A]
+
+    def apply[A: ClassTag](values: A*): Vec[A] = ArraySeq(values*)
+
+    def nonEmpty[A: ClassTag](first: A, rest: A*): NonEmpty[Vec[A]] =
+      ArraySeq.from(first +: rest).unsafe
+
+    def from[A: ClassTag](values: IterableOnce[A]): Vec[A] = ArraySeq.from(values)
+
+    /** Wraps the array without copying. The caller must transfer ownership and never mutate the array again. */
+    def unsafeWrapArray[A](values: Array[A]): Vec[A] = ArraySeq.unsafeWrapArray(values)
+
+    def fill[A: ClassTag](count: Int)(value: => A): Vec[A] = ArraySeq.fill(count)(value)
+
+    def tabulate[A: ClassTag](count: Int)(value: Int => A): Vec[A] = ArraySeq.tabulate(count)(value)
+
+    def newBuilder[A: ClassTag]: mutable.Builder[A, Vec[A]] = ArraySeq.newBuilder[A]
+
+    extension [A: ClassTag](values: IterableOnce[A]) def toVec: Vec[A] = from(values)
+
+    extension [A](values: Vec[A]) {
+      def nonNegativeSize: Int >= 0 = values.size.unsafe[Int >= 0]
+    }
+
+    extension [A](values: NonEmpty[Vec[A]]) {
+      def positiveSize: Int > 0 = values.size.unsafe[Int > 0]
+    }
+
+    /** Copies a runtime collection into mutable storage for a Java/native interop boundary. */
+    def toArray[A: ClassTag](values: Vec[A]): Array[A] = values.toArray
+
+    def unapplySeq[A](values: Vec[A]): Some[Seq[A]] = Some(values)
+
+    def sameElements[A](left: Vec[A], right: Vec[A]): Boolean = left.sameElements(right)
+  }
+
+  extension [A](values: Vec[A]) {
+
+    /** Every adjacent pair satisfies ordered; empty and singleton vectors are monotonic. */
+    def monotonic(ordered: (A, A) => Boolean): Boolean = {
+      @scala.annotation.tailrec
+      def loop(index: Int): Boolean =
+        index >= values.size || (ordered(values(index - 1), values(index)) && loop(index + 1))
+      loop(1)
+    }
+  }
+
+  /** The immutable, indexed collection used by Gemstone runtime models.
+    *
+    * Runtime code constructs collections through [[Vec]] rather than naming the backing representation. This keeps
+    * collection experiments local to this namespace. Array ownership transfer is explicit through `unsafeWrapArray`.
+    */
+  type Vec[+A] = ArraySeq[A]
+
+  object LRUCache {
+    @SuppressWarnings(Array("scalafix:GemstoneNoExplicitNew"))
+    def apply[K, V](capacity: Int > 0): LRUCache[K, V] = new LRUCache(capacity)
+  }
+
+  /** Bounded LRU reuse of immutable results. Different keys compute concurrently; identical keys share in-flight work.
+    */
+  class LRUCache[K, V] private (capacity: Int > 0) {
+    private val lock = ReentrantLock()
+
+    // Java's LinkedHashMap supplies access ordering; Scala's mutable LinkedHashMap is insertion ordered.
+    private val mutableEntries  = java.util.LinkedHashMap[K, FutureTask[V]](capacity.raw, 0.75f, true)
+    private val mutableInFlight = mutable.HashMap.empty[K, FutureTask[V]]
+
+    def get(key: K)(compute: => V): V = {
+      val (entry, owner) = lock.withLock {
+        Option(mutableEntries.get(key)) match {
+          case Some(entry) => entry -> false
+          case None        => mutableInFlight.get(key) match {
+              case Some(entry) => entry -> false
+              case None        =>
+                val entry = FutureTask[V](() => compute)
+                val _     = mutableInFlight.put(key, entry)
+                entry -> true
+            }
+        }
+      }
+      if (owner) {
+        entry.run()
+        lock.withLock {
+          val _ = mutableInFlight.remove(key)
+          val _ = mutableEntries.put(key, entry)
+          while (mutableEntries.size() > capacity.raw)
+            mutableEntries.keySet().asScala.headOption.foreach(oldest => mutableEntries.remove(oldest))
+        }
+      }
+      try entry.get()
+      catch { case error: ExecutionException => throw error.getCause }
+    }
+  }
+}

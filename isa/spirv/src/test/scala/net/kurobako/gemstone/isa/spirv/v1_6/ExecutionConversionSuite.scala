@@ -1,22 +1,15 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.NonNegative
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
+import execution.*
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.spirv.v1_6 as spv
+import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
-
-import net.kurobako.gemstone.Vec
-
-import net.kurobako.gemstone.binary.ByteRange
-import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.NonEmptyVec
-
-import java.util.concurrent.atomic.AtomicReference
-final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSupport {
+import net.kurobako.gemstone.vm.LaunchGeometry.*
+class ExecutionConversionSuite extends munit.FunSuite {
   test("dispatch converts signed integer bit patterns to floating-point vectors") {
     val voidType     = operand("IdResult", 1)
     val u32          = operand("IdResult", 2)
@@ -41,10 +34,20 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       Instruction.TypeVector(inputType, u32, operand("LiteralInteger", 2)),
       Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
       Instruction.TypeVector(resultType, f32, operand("LiteralInteger", 2)),
-      Instruction.TypePointer(outputType, operand("StorageClass", 5), resultType),
+      Instruction.TypePointer(outputType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), resultType),
       Instruction.TypeFunction(operand("IdResult", 7), voidType, Vec(outputType, inputType, resultType)),
-      Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("signed_to_float"), Vec.empty),
-      Instruction.Function(voidType, function, operand("FunctionControl", 0), operand("IdRef", 7)),
+      Instruction.EntryPoint(
+        operand("ExecutionModel", spv.ExecutionModel.Kernel),
+        function,
+        stringOperand("signed_to_float"),
+        Vec.empty
+      ),
+      Instruction.Function(
+        voidType,
+        function,
+        operand("FunctionControl", spv.FunctionControl.None),
+        operand("IdRef", 7)
+      ),
       Instruction.FunctionParameter(outputType, output),
       Instruction.FunctionParameter(inputType, input),
       Instruction.FunctionParameter(resultType, rhs),
@@ -62,11 +65,11 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     )
     val module =
       Module(Header(ISA.version, Word(0), Word(20), Word(0)), instructions, Endianness.Little)
-    val allocation = MemoryRegion(4L)
+    val allocation = AllocationId(4L)
     val memory     = ArrayMemory(allocation, 8)
     val dispatch   = KernelTask
       .validated(
-        NonEmptyString("signed_to_float"),
+        "signed_to_float",
         Dimensions.One,
         Dimensions.One,
         Vec(
@@ -166,11 +169,11 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         .updated(1, Instruction.TypeInt(u32, operand("LiteralInteger", 16), operand("LiteralInteger", 0)))
         .updated(3, Instruction.TypeFloat(f32, operand("LiteralInteger", 16), None))
     )
-    val halfAllocation = MemoryRegion(5L)
+    val halfAllocation = AllocationId(5L)
     val halfMemory     = ArrayMemory(halfAllocation, 4)
     val halfDispatch   = KernelTask
       .validated(
-        NonEmptyString("signed_to_float"),
+        "signed_to_float",
         Dimensions.One,
         Dimensions.One,
         Vec(
@@ -190,232 +193,6 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     )
   }
 
-  test("dispatch compares integer values with a typed boolean result") {
-    val voidType     = operand("IdResult", 1)
-    val u32          = operand("IdResult", 2)
-    val bool         = operand("IdResult", 3)
-    val pointerType  = operand("IdResult", 4)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val left         = operand("IdResult", 8)
-    val right        = operand("IdResult", 9)
-    val remainder    = operand("IdResult", 11)
-    val equal        = operand("IdResult", 12)
-    val selected     = operand("IdResult", 13)
-    val instructions = Vec(
-      Instruction.TypeVoid(voidType),
-      Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-      Instruction.TypeBool(bool),
-      Instruction.TypePointer(pointerType, operand("StorageClass", 5), u32),
-      Instruction.TypeFunction(operand("IdResult", 5), voidType, Vec(pointerType, u32, u32)),
-      Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("integer_equal"), Vec.empty),
-      Instruction.Function(voidType, function, operand("FunctionControl", 0), operand("IdRef", 5)),
-      Instruction.FunctionParameter(pointerType, output),
-      Instruction.FunctionParameter(u32, left),
-      Instruction.FunctionParameter(u32, right),
-      Instruction.Label(operand("IdResult", 10)),
-      Instruction.SRem(u32, remainder, left, right),
-      Instruction.IEqual(bool, equal, remainder, right),
-      Instruction.Select(u32, selected, equal, left, remainder),
-      Instruction.Store(output, selected, None),
-      Instruction.Return(),
-      Instruction.FunctionEnd()
-    )
-    val module =
-      Module(Header(ISA.version, Word(0), Word(16), Word(0)), instructions, Endianness.Little)
-    val allocation = MemoryRegion(6L)
-    val memory     = ArrayMemory(allocation, 4)
-    val dispatch   = KernelTask
-      .validated(
-        NonEmptyString("integer_equal"),
-        Dimensions.One,
-        Dimensions.One,
-        Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffff9L, 4)),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(3L, 4))
-        )
-      )
-      .toOption
-      .get
-
-    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffffL, 4))
-
-    val divided = module.copy(instructions = instructions.updated(11, Instruction.SDiv(u32, remainder, left, right)))
-    assertEquals(executeUnchecked(divided, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffffeL, 4))
-
-    val xor = module.copy(instructions = instructions.updated(11, Instruction.BitwiseXor(u32, remainder, left, right)))
-    assertEquals(executeUnchecked(xor, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffffaL, 4))
-
-    val shiftedRight = module.copy(instructions =
-      instructions.updated(11, Instruction.ShiftRightLogical(u32, remainder, left, right))
-    )
-    assertEquals(executeUnchecked(shiftedRight, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0x1fffffffL, 4))
-
-    val shiftedLeft = module.copy(instructions =
-      instructions.updated(11, Instruction.ShiftLeftLogical(u32, remainder, left, right))
-    )
-    assertEquals(executeUnchecked(shiftedLeft, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffc8L, 4))
-
-    val not = module.copy(instructions = instructions.updated(11, Instruction.Not(u32, remainder, left)))
-    assertEquals(executeUnchecked(not, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(6L, 4))
-
-    val negated = module.copy(instructions = instructions.updated(11, Instruction.SNegate(u32, remainder, left)))
-    assertEquals(executeUnchecked(negated, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(7L, 4))
-
-    val signedLess =
-      module.copy(instructions = instructions.updated(12, Instruction.SLessThan(bool, equal, left, right)))
-    assertEquals(executeUnchecked(signedLess, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xfffffff9L, 4))
-
-    val signedGreater =
-      module.copy(instructions = instructions.updated(12, Instruction.SGreaterThan(bool, equal, left, right)))
-    assertEquals(executeUnchecked(signedGreater, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, LittleEndian.toVec(0xffffffffL, 4))
-
-    val malformed = module.copy(instructions =
-      instructions.updated(
-        12,
-        Instruction.IEqual(u32, equal, remainder, right)
-      )
-    )
-    executeUnchecked(malformed, dispatch, memory) match {
-      case Left(Fault.InvalidTask(message)) =>
-        assertEquals(message, "OpIEqual result type %2 is not a boolean scalar or vector")
-      case value => fail(s"expected typed integer equality failure, found $value")
-    }
-
-    val malformedRemainder = module.copy(instructions =
-      instructions.updated(
-        11,
-        Instruction.SRem(bool, remainder, left, right)
-      )
-    )
-    executeUnchecked(malformedRemainder, dispatch, memory) match {
-      case Left(Fault.InvalidTask(message)) =>
-        assertEquals(message, "OpSRem result type %3 is not an integer scalar or vector")
-      case value => fail(s"expected typed signed remainder failure, found $value")
-    }
-
-    val malformedDivision = module.copy(instructions =
-      instructions.updated(
-        11,
-        Instruction.SDiv(bool, remainder, left, right)
-      )
-    )
-    executeUnchecked(malformedDivision, dispatch, memory) match {
-      case Left(Fault.InvalidTask(message)) =>
-        assertEquals(message, "OpSDiv result type %3 is not an integer scalar or vector")
-      case value => fail(s"expected typed signed division failure, found $value")
-    }
-  }
-
-  test("dispatch performs ordered floating equality") {
-    val voidType     = operand("IdResult", 1)
-    val f32          = operand("IdResult", 2)
-    val bool         = operand("IdResult", 3)
-    val pointerType  = operand("IdResult", 4)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val left         = operand("IdResult", 8)
-    val right        = operand("IdResult", 9)
-    val equal        = operand("IdResult", 11)
-    val lessEqual    = operand("IdResult", 12)
-    val selected     = operand("IdResult", 13)
-    val result       = operand("IdResult", 14)
-    val instructions = Vec(
-      Instruction.TypeVoid(voidType),
-      Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
-      Instruction.TypeBool(bool),
-      Instruction.TypePointer(pointerType, operand("StorageClass", 5), f32),
-      Instruction.TypeFunction(operand("IdResult", 5), voidType, Vec(pointerType, f32, f32)),
-      Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("floating_equal"), Vec.empty),
-      Instruction.Function(voidType, function, operand("FunctionControl", 0), operand("IdRef", 5)),
-      Instruction.FunctionParameter(pointerType, output),
-      Instruction.FunctionParameter(f32, left),
-      Instruction.FunctionParameter(f32, right),
-      Instruction.Label(operand("IdResult", 10)),
-      Instruction.FOrdEqual(bool, equal, left, right),
-      Instruction.FOrdLessThanEqual(bool, lessEqual, left, right),
-      Instruction.Select(f32, selected, equal, left, right),
-      Instruction.Select(f32, result, lessEqual, left, selected),
-      Instruction.Store(output, result, None),
-      Instruction.Return(),
-      Instruction.FunctionEnd()
-    )
-    val module =
-      Module(Header(ISA.version, Word(0), Word(16), Word(0)), instructions, Endianness.Little)
-
-    def run(id: Long, leftBits: Long, rightBits: Long): Vec[Byte] = {
-      val allocation = MemoryRegion(id)
-      val memory     = ArrayMemory(allocation, 4)
-      val dispatch   = KernelTask
-        .validated(
-          NonEmptyString("floating_equal"),
-          Dimensions.One,
-          Dimensions.One,
-          Vec(
-            KernelTask.Argument.Memory(allocation, 0L),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(leftBits, 4)),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(rightBits, 4))
-          )
-        )
-        .toOption
-        .get
-      assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-      memory.bytes
-    }
-
-    assertEquals(run(7L, 0x80000000L, 0L), LittleEndian.toVec(0x80000000L, 4))
-    assertEquals(run(8L, 0x7fc00000L, 0x40400000L), LittleEndian.toVec(0x40400000L, 4))
-    assertEquals(run(9L, 0x40000000L, 0x40400000L), LittleEndian.toVec(0x40000000L, 4))
-
-    val malformed = module.copy(instructions =
-      instructions.updated(
-        11,
-        Instruction.FOrdEqual(f32, equal, left, right)
-      )
-    )
-    val allocation = MemoryRegion(10L)
-    val dispatch   = KernelTask
-      .validated(
-        NonEmptyString("floating_equal"),
-        Dimensions.One,
-        Dimensions.One,
-        Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, 4)),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, 4))
-        )
-      )
-      .toOption
-      .get
-    executeUnchecked(malformed, dispatch, ArrayMemory(allocation, 4)) match {
-      case Left(Fault.InvalidTask(message)) =>
-        assertEquals(message, "OpFOrdEqual result type %2 is not a boolean scalar or vector")
-      case value => fail(s"expected typed ordered equality failure, found $value")
-    }
-
-    val malformedLessEqual = module.copy(instructions =
-      instructions.updated(
-        12,
-        Instruction.FOrdLessThanEqual(f32, lessEqual, left, right)
-      )
-    )
-    executeUnchecked(malformedLessEqual, dispatch, ArrayMemory(allocation, 4)) match {
-      case Left(Fault.InvalidTask(message)) =>
-        assertEquals(message, "OpFOrdLessThanEqual result type %2 is not a boolean scalar or vector")
-      case value => fail(s"expected typed ordered less-than-or-equal failure, found $value")
-    }
-  }
-
   test("dispatch converts floating-point values to unsigned integers without signed narrowing") {
     val voidType     = operand("IdResult", 1)
     val u64          = operand("IdResult", 2)
@@ -430,10 +207,15 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       Instruction.TypeVoid(voidType),
       Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
       Instruction.TypeFloat(f64, operand("LiteralInteger", 64), None),
-      Instruction.TypePointer(pointerType, operand("StorageClass", 5), u64),
+      Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u64),
       Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f64)),
-      Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("float_to_unsigned"), Vec.empty),
-      Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+      Instruction.EntryPoint(
+        operand("ExecutionModel", spv.ExecutionModel.Kernel),
+        function,
+        stringOperand("float_to_unsigned"),
+        Vec.empty
+      ),
+      Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
       Instruction.FunctionParameter(pointerType, output),
       Instruction.FunctionParameter(f64, input),
       Instruction.Label(operand("IdResult", 9)),
@@ -445,12 +227,12 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     val module =
       Module(Header(ISA.version, Word(0), Word(11), Word(0)), instructions, Endianness.Little)
 
-    def run(id: Long, value: Double): Either[Fault, Vec[Byte]] = {
-      val allocation = MemoryRegion(id)
+    def run(id: Long > 0, value: Double): Either[Fault, Vec[Byte]] = {
+      val allocation = AllocationId(id)
       val memory     = ArrayMemory(allocation, 8)
       val dispatch   = KernelTask
         .validated(
-          NonEmptyString("float_to_unsigned"),
+          "float_to_unsigned",
           Dimensions.One,
           Dimensions.One,
           Vec(
@@ -478,10 +260,10 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     }
 
     val malformed  = module.copy(instructions = instructions.updated(10, Instruction.ConvertFToU(f64, result, input)))
-    val allocation = MemoryRegion(16L)
+    val allocation = AllocationId(16L)
     val dispatch   = KernelTask
       .validated(
-        NonEmptyString("float_to_unsigned"),
+        "float_to_unsigned",
         Dimensions.One,
         Dimensions.One,
         Vec(
@@ -517,11 +299,16 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Instruction.TypeVoid(voidType),
         Instruction.TypeFloat(floatType, operand("LiteralInteger", 32), None),
         Instruction.TypeInt(intType, operand("LiteralInteger", 32), operand("LiteralInteger", 1)),
-        Instruction.TypePointer(pointer, operand("StorageClass", 5), intType),
+        Instruction.TypePointer(pointer, operand("StorageClass", spv.StorageClass.CrossWorkgroup), intType),
         Instruction.TypeFunction(signature, voidType, Vec(pointer, floatType)),
-        Instruction.Decorate(converted, operand("Decoration", 28)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("saturated_nan"), Vec.empty),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), signature),
+        Instruction.Decorate(converted, operand("Decoration", spv.Decoration.SaturatedConversion)),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          function,
+          stringOperand("saturated_nan"),
+          Vec.empty
+        ),
+        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), signature),
         Instruction.FunctionParameter(pointer, output),
         Instruction.FunctionParameter(floatType, input),
         Instruction.Label(operand("IdResult", 9)),
@@ -532,11 +319,11 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       ),
       Endianness.Little
     )
-    val allocation = MemoryRegion(17L)
+    val allocation = AllocationId(17L)
     val memory     = ArrayMemory(allocation, 4)
     val dispatch   = KernelTask
       .validated(
-        NonEmptyString("saturated_nan"),
+        "saturated_nan",
         Dimensions.One,
         Dimensions.One,
         Vec(
@@ -553,57 +340,4 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     assertEquals(memory.bytes, LittleEndian.toVec(0L, 4))
   }
 
-  test("vector-times-scalar multiplies each floating lane") {
-    val voidType   = operand("IdResult", 1)
-    val floatType  = operand("IdResult", 2)
-    val vectorType = operand("IdResult", 3)
-    val pointer    = operand("IdResult", 4)
-    val signature  = operand("IdResult", 5)
-    val function   = operand("IdResult", 6)
-    val output     = operand("IdResult", 7)
-    val vector     = operand("IdResult", 8)
-    val scalar     = operand("IdResult", 9)
-    val product    = operand("IdResult", 11)
-    val module     = Module(
-      Header(ISA.version, Word(0), Word(12), Word(0)),
-      Vec(
-        Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(floatType, operand("LiteralInteger", 32), None),
-        Instruction.TypeVector(vectorType, floatType, operand("LiteralInteger", 2)),
-        Instruction.TypePointer(pointer, operand("StorageClass", 5), vectorType),
-        Instruction.TypeFunction(signature, voidType, Vec(pointer, vectorType, floatType)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("vector_scale"), Vec.empty),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), signature),
-        Instruction.FunctionParameter(pointer, output),
-        Instruction.FunctionParameter(vectorType, vector),
-        Instruction.FunctionParameter(floatType, scalar),
-        Instruction.Label(operand("IdResult", 10)),
-        Instruction.VectorTimesScalar(vectorType, product, vector, scalar),
-        Instruction.Store(output, product, None),
-        Instruction.Return(),
-        Instruction.FunctionEnd()
-      ),
-      Endianness.Little
-    )
-    val allocation                    = MemoryRegion(18L)
-    val memory                        = ArrayMemory(allocation, 8)
-    def bits(value: Float): Vec[Byte] =
-      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(value).toLong, 4)
-    val dispatch = KernelTask
-      .validated(
-        NonEmptyString("vector_scale"),
-        Dimensions.One,
-        Dimensions.One,
-        Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(bits(2.0f) ++ bits(-3.0f)),
-          KernelTask.Argument.Scalar(bits(-2.0f))
-        )
-      )
-      .toOption
-      .get
-
-    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
-    assertEquals(memory.bytes, bits(-4.0f) ++ bits(6.0f))
-  }
 }

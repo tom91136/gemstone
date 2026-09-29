@@ -96,18 +96,30 @@ bool await_completion(Client &client, CompletionId completion, std::string &erro
   }
 }
 
+bool completion_dirty_ranges(Client &client, CompletionId completion, std::vector<DirtyRange> &ranges, std::string &error) {
+  ranges.clear();
+  for (;;) {
+    if (ranges.size() > INT32_MAX) {
+      error = "completion dirty range offset exceeds the supported range";
+      return false;
+    }
+    auto page = client.call(CompletionDirtyRanges{completion, static_cast<int32_t>(ranges.size())});
+    if (!page) {
+      error = page.error().detail;
+      return false;
+    }
+    ranges.insert(ranges.end(), page.value().begin(), page.value().end());
+    if (page.value().size() < MaximumElements) return true;
+  }
+}
+
 bool collect_completion(Client &client, CompletionId completion, CompletionResult &result, std::string &error, bool hostMemory) {
   result.dirty_ranges.clear();
   result.pointer_relocations.clear();
   error.clear();
 
   bool succeeded = await_completion(client, completion, error, hostMemory);
-  if (succeeded) {
-    auto ranges = client.call(CompletionDirtyRanges{completion});
-    succeeded = static_cast<bool>(ranges);
-    if (succeeded) result.dirty_ranges = std::move(ranges.value());
-    else error = ranges.error().detail;
-  }
+  if (succeeded) succeeded = completion_dirty_ranges(client, completion, result.dirty_ranges, error);
   if (succeeded) {
     auto relocations = client.call(CompletionPointerRelocations{completion});
     succeeded = static_cast<bool>(relocations);

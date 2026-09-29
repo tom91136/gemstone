@@ -18,9 +18,9 @@ object ImageChannelOrder {
   final val RGBx: Int = 12
   final val Depth: Int = 13
   final val DepthStencil: Int = 14
-  final val sRGB: Int = 15
-  final val sRGBx: Int = 16
-  final val sRGBA: Int = 17
-  final val sBGRA: Int = 18
+  final val SRGB: Int = 15
+  final val SRGBx: Int = 16
+  final val SRGBA: Int = 17
+  final val SBGRA: Int = 18
   final val ABGR: Int = 19
 }

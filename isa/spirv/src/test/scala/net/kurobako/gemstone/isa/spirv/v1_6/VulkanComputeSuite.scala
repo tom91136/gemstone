@@ -1,18 +1,15 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.IntBetween
+import execution.*
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.spirv.v1_6 as spv
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.*
 
-import net.kurobako.gemstone.Constraint.NonNegative
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.KernelMetadata
-import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.vm.{Event, KernelTask, LaunchGeometry, MemoryRegion, Observer, Scheduler, TaskControl}
-import net.kurobako.gemstone.NonEmptyVec
-
-final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport {
+class VulkanComputeSuite extends munit.FunSuite {
   private def bytes(module: Module): Vec[Byte] =
     ISA.encode(module).fold(error => fail(error.message), identity)
 
@@ -24,42 +21,63 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
     val module = Module(
       Header(ISA.version, Word(0), Word(64), Word(0)),
       Vec(
-        Instruction.EntryPoint(operand("ExecutionModel", 5), first, stringOperand("first"), Vec(left)),
-        Instruction.EntryPoint(operand("ExecutionModel", 5), second, stringOperand("second"), Vec(right)),
-        Instruction.Decorate(left, operand("Decoration", 33, 0)),
-        Instruction.Decorate(left, operand("Decoration", 34, 0)),
-        Instruction.Decorate(right, operand("Decoration", 33, 1)),
-        Instruction.Decorate(right, operand("Decoration", 34, 0)),
-        Instruction.Function(operand("IdResultType", 1), first, operand("FunctionControl", 0), operand("IdRef", 2)),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.GLCompute),
+          first,
+          stringOperand("first"),
+          Vec(left)
+        ),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", spv.ExecutionModel.GLCompute),
+          second,
+          stringOperand("second"),
+          Vec(right)
+        ),
+        Instruction.Decorate(left, operand("Decoration", spv.Decoration.Binding, 0)),
+        Instruction.Decorate(left, operand("Decoration", spv.Decoration.DescriptorSet, 0)),
+        Instruction.Decorate(right, operand("Decoration", spv.Decoration.Binding, 1)),
+        Instruction.Decorate(right, operand("Decoration", spv.Decoration.DescriptorSet, 0)),
+        Instruction.Function(
+          operand("IdResultType", 1),
+          first,
+          operand("FunctionControl", spv.FunctionControl.None),
+          operand("IdRef", 2)
+        ),
         Instruction.FunctionEnd(),
-        Instruction.Function(operand("IdResultType", 1), second, operand("FunctionControl", 0), operand("IdRef", 2)),
+        Instruction.Function(
+          operand("IdResultType", 1),
+          second,
+          operand("FunctionControl", spv.FunctionControl.None),
+          operand("IdRef", 2)
+        ),
         Instruction.FunctionEnd()
       ),
       Endianness.Little
     )
     val program = VMCompiler.compileUnchecked(module).fold(error => fail(error.message), identity)
-    val loaded  = VMLoadedProgram(program)
-    assertEquals(VMInterpreter.descriptorVariables(loaded, NonEmptyString("first")), Vec(30))
-    assertEquals(VMInterpreter.descriptorVariables(loaded, NonEmptyString("second")), Vec(31))
+    val loaded  = VMProgramRuntime(program)
+    assertEquals(loaded.descriptorVariables("first"), Vec(30))
+    assertEquals(loaded.descriptorVariables("second"), Vec(31))
   }
 
   test("GLCompute specialization constant operations decode and load") {
-    val module = ISA.decode(bytes(VulkanComputeFixture.specialization)).fold(error => fail(error.message), identity)
+    val module = ISA.decode(bytes(vulkan.specialization)).fold(error => fail(error.message), identity)
     assert(module.instructions.exists {
       case Instruction.SpecConstantOp(_, _, _, _) => true
       case _                                      => false
     })
-    val machine = VirtualMachine(Validation.Environment.VulkanCompute, Observer.discard[Event], Scheduler.Sequential)
-    val loaded  = machine.load(module).fold(error => fail(error.message), identity)
-    assert(machine.kernelNames(loaded).contains(NonEmptyString("main")))
+
+    val loaded =
+      LoadedProgram.load(module, Validation.Environment.VulkanCompute).fold(error => fail(error.message), identity)
+    assert(loaded.kernelNames.contains("main"))
   }
 
   test("GLCompute entry point exposes storage and uniform descriptor bindings") {
-    val image    = bytes(VulkanComputeFixture.fma)
-    val module   = ISA.decode(image).fold(error => fail(error.message), identity)
-    val machine  = VirtualMachine(Validation.Environment.VulkanCompute, Observer.discard[Event], Scheduler.Sequential)
-    val loaded   = machine.load(module).fold(error => fail(error.message), identity)
-    val metadata = machine.kernel(loaded, NonEmptyString("main")).fold(error => fail(error.message), identity)
+    val image  = bytes(vulkan.fma)
+    val module = ISA.decode(image).fold(error => fail(error.message), identity)
+    val loaded =
+      LoadedProgram.load(module, Validation.Environment.VulkanCompute).fold(error => fail(error.message), identity)
+    val metadata = loaded.kernel("main").fold(error => fail(error.message), identity)
     assertEquals(metadata.explicitParameterCount.raw, 2)
     assertEquals(
       metadata.parameters.map(_.kind),
@@ -68,19 +86,19 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
   }
 
   test("GLCompute FMA reads uniform data and writes a storage buffer") {
-    val image      = bytes(VulkanComputeFixture.fma)
-    val module     = ISA.decode(image).fold(error => fail(error.message), identity)
-    val machine    = VirtualMachine(Validation.Environment.VulkanCompute, Observer.discard[Event], Scheduler.Sequential)
-    val loaded     = machine.load(module).fold(error => fail(error.message), identity)
-    val allocation = MemoryRegion(501L)
+    val image  = bytes(vulkan.fma)
+    val module = ISA.decode(image).fold(error => fail(error.message), identity)
+    val loaded =
+      LoadedProgram.load(module, Validation.Environment.VulkanCompute).fold(error => fail(error.message), identity)
+    val allocation = AllocationId(501L)
     val memory     = ArrayMemory(allocation, 16)
     for ((offset, bits) <- Vec(4L -> 0x40000000L, 8L -> 0x40400000L, 12L -> 0x40800000L))
       assertEquals(
-        memory.write(allocation, NonNegative.unsafe(offset), LittleEndian.toVec(bits, 4)),
+        memory.write(allocation, offset.unsafe[Long >= 0], LittleEndian.toVec(bits, 4)),
         Right(())
       )
     val task = KernelTask.validated(
-      NonEmptyString("main"),
+      "main",
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
       Vec(
@@ -88,24 +106,24 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
         KernelTask.Argument.Memory(allocation, 4L)
       )
     ).fold(message => fail(message), identity)
-    val _ = machine.execute(loaded, task, memory, TaskControl.default).fold(error => fail(error.message), identity)
+    val _ = loaded.execute(task, memory, TaskControl()).fold(error => fail(error.message), identity)
     assertEquals(memory.bytes.take(4), LittleEndian.toVec(0x41200000L, 4))
   }
 
   test("GLSL.std.450 Sin executes in a GLCompute shader") {
-    val image      = bytes(VulkanComputeFixture.sin)
-    val module     = ISA.decode(image).fold(error => fail(error.message), identity)
-    val machine    = VirtualMachine(Validation.Environment.VulkanCompute, Observer.discard[Event], Scheduler.Sequential)
-    val loaded     = machine.load(module).fold(error => fail(error.message), identity)
-    val allocation = MemoryRegion(502L)
+    val image  = bytes(vulkan.sin)
+    val module = ISA.decode(image).fold(error => fail(error.message), identity)
+    val loaded =
+      LoadedProgram.load(module, Validation.Environment.VulkanCompute).fold(error => fail(error.message), identity)
+    val allocation = AllocationId(502L)
     val memory     = ArrayMemory(allocation, 16)
     for ((offset, bits) <- Vec(4L -> 0x40000000L, 8L -> 0x40400000L, 12L -> 0x40800000L))
       assertEquals(
-        memory.write(allocation, NonNegative.unsafe(offset), LittleEndian.toVec(bits, 4)),
+        memory.write(allocation, offset.unsafe[Long >= 0], LittleEndian.toVec(bits, 4)),
         Right(())
       )
     val task = KernelTask.validated(
-      NonEmptyString("main"),
+      "main",
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
       Vec(
@@ -113,25 +131,26 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
         KernelTask.Argument.Memory(allocation, 4L)
       )
     ).fold(message => fail(message), identity)
-    val _      = machine.execute(loaded, task, memory, TaskControl.default).fold(error => fail(error.message), identity)
-    val result = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, 4).toInt)
+    val _      = loaded.execute(task, memory, TaskControl()).fold(error => fail(error.message), identity)
+    val result =
+      java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, 4).toInt)
     assertEqualsDouble(result.toDouble, 4.0 + math.sin(2.0), 0.000001)
   }
 
   test("GLSL.std.450 Pow executes in a GLCompute shader") {
-    val image      = bytes(VulkanComputeFixture.pow)
-    val module     = ISA.decode(image).fold(error => fail(error.message), identity)
-    val machine    = VirtualMachine(Validation.Environment.VulkanCompute, Observer.discard[Event], Scheduler.Sequential)
-    val loaded     = machine.load(module).fold(error => fail(error.message), identity)
-    val allocation = MemoryRegion(503L)
+    val image  = bytes(vulkan.pow)
+    val module = ISA.decode(image).fold(error => fail(error.message), identity)
+    val loaded =
+      LoadedProgram.load(module, Validation.Environment.VulkanCompute).fold(error => fail(error.message), identity)
+    val allocation = AllocationId(503L)
     val memory     = ArrayMemory(allocation, 16)
     for ((offset, bits) <- Vec(4L -> 0x40000000L, 8L -> 0x40400000L, 12L -> 0x40800000L))
       assertEquals(
-        memory.write(allocation, NonNegative.unsafe(offset), LittleEndian.toVec(bits, 4)),
+        memory.write(allocation, offset.unsafe[Long >= 0], LittleEndian.toVec(bits, 4)),
         Right(())
       )
     val task = KernelTask.validated(
-      NonEmptyString("main"),
+      "main",
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
       Vec(
@@ -139,8 +158,9 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
         KernelTask.Argument.Memory(allocation, 4L)
       )
     ).fold(message => fail(message), identity)
-    val _      = machine.execute(loaded, task, memory, TaskControl.default).fold(error => fail(error.message), identity)
-    val result = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, 4).toInt)
+    val _      = loaded.execute(task, memory, TaskControl()).fold(error => fail(error.message), identity)
+    val result =
+      java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, 4).toInt)
     assertEqualsDouble(result.toDouble, 12.0, 0.000001)
   }
 }

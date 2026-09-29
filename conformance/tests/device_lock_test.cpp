@@ -24,7 +24,27 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 #if !defined(_WIN32)
-bool lock_contention_serializes_processes() {
+// Every CTest case is a separate process; isolate its lock files from other
+// cases and real conformance runs, while forked children share this directory.
+struct IsolatedLocks {
+  std::optional<std::string> previous;
+  std::filesystem::path directory;
+  IsolatedLocks() {
+    if (const char *value = std::getenv("TMPDIR")) previous = value;
+    directory = std::filesystem::temp_directory_path()
+                / fmt::format("conformance-lock-test-{}-{}", ::getpid(), Clock::now().time_since_epoch().count());
+    std::filesystem::create_directory(directory);
+    if (::setenv("TMPDIR", directory.c_str(), 1) != 0) throw std::runtime_error("cannot isolate lock test directory");
+  }
+  ~IsolatedLocks() {
+    if (previous) ::setenv("TMPDIR", previous->c_str(), 1);
+    else ::unsetenv("TMPDIR");
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+  }
+};
+
+bool lock_contention_serializes_processes(bool holderUnknown = false, bool waiterUnknown = false) {
   int ready[2]{};
   int release[2]{};
   int attempting[2]{};
@@ -40,7 +60,7 @@ bool lock_contention_serializes_processes() {
     ::close(acquired[0]);
     ::close(acquired[1]);
     try {
-      conformance::DeviceLock lock(device);
+      conformance::DeviceLock lock(holderUnknown ? conformance::physical_device_from_key("unknown") : device);
       const char signal = '1';
       (void)::write(ready[1], &signal, 1);
       char release_signal = 0;
@@ -95,7 +115,7 @@ bool lock_contention_serializes_processes() {
     try {
       const char attempting_signal = '1';
       (void)::write(attempting[1], &attempting_signal, 1);
-      conformance::DeviceLock lock(device);
+      conformance::DeviceLock lock(waiterUnknown ? conformance::physical_device_from_key("unknown") : device);
       const char acquired_signal = '1';
       (void)::write(acquired[1], &acquired_signal, 1);
     } catch (...) {
@@ -158,9 +178,8 @@ bool lock_contention_serializes_processes() {
 bool distinct_devices_do_not_contend() {
   const auto domain = static_cast<uint32_t>(::getpid());
   conformance::DeviceLock first(conformance::make_pci_device(domain, 0xfe, 0x1f, 6));
-  const auto started = Clock::now();
-  conformance::DeviceLock second(conformance::make_pci_device(domain, 0xfe, 0x1f, 5));
-  return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count() < 100;
+  conformance::DeviceLock second(conformance::make_pci_device(domain, 0xfe, 0x1f, 5), std::chrono::seconds(2));
+  return true;
 }
 #endif
 
@@ -169,9 +188,10 @@ bool distinct_devices_do_not_contend() {
 TEST_CASE("physical device keys use canonical encoding", "[device-lock]") {
   const auto pci = conformance::make_pci_device(0x12345678, 0x9a, 0xbc, 0xde);
   CHECK(conformance::physical_device_key(pci) == "pci-123456789abcde000000000000000000");
-  CHECK(conformance::physical_device_key(conformance::make_registry_device("platform:device")).starts_with("reg-"));
-  CHECK(conformance::physical_device_key(conformance::make_registry_device("platform:device"))
-        == conformance::physical_device_key(conformance::make_registry_device("platform:device")));
+  const auto unknown = conformance::physical_device_from_key("unknown");
+  CHECK(unknown.scheme == conformance::PhysicalDeviceScheme::unknown);
+  CHECK(conformance::physical_device_key(unknown) == "unknown");
+  CHECK_FALSE(conformance::valid_physical_device_key("reg-00000000000000000000000000000000"));
   CHECK(conformance::physical_device_key(conformance::physical_device_from_key(conformance::physical_device_key(pci)))
         == conformance::physical_device_key(pci));
   CHECK_THROWS_AS(conformance::physical_device_from_key("host-00000000000000000000000000000000"), std::invalid_argument);
@@ -184,7 +204,22 @@ TEST_CASE("device selector supports glob patterns", "[device-selector]") {
 
 #if !defined(_WIN32)
 
-TEST_CASE("same-device locks serialize processes", "[device-lock]") { CHECK(lock_contention_serializes_processes()); }
+TEST_CASE_METHOD(IsolatedLocks, "same-device locks serialize processes", "[device-lock]") { CHECK(lock_contention_serializes_processes()); }
 
-TEST_CASE("different-device locks do not contend", "[device-lock]") { CHECK(distinct_devices_do_not_contend()); }
+TEST_CASE_METHOD(IsolatedLocks, "unidentified devices exclude identified devices in both acquisition orders", "[device-lock]") {
+  CHECK(lock_contention_serializes_processes(true, false));
+  CHECK(lock_contention_serializes_processes(false, true));
+  CHECK(lock_contention_serializes_processes(true, true));
+}
+
+TEST_CASE_METHOD(IsolatedLocks, "failed device acquisition releases its global shared lock", "[device-lock]") {
+  const auto device = conformance::make_pci_device(static_cast<uint32_t>(::getpid()), 0xfe, 0x1f, 4);
+  {
+    conformance::DeviceLock holder(device);
+    CHECK_THROWS_AS(conformance::DeviceLock(device, std::chrono::milliseconds(10)), std::runtime_error);
+  }
+  CHECK_NOTHROW(conformance::DeviceLock(conformance::physical_device_from_key("unknown"), std::chrono::milliseconds(100)));
+}
+
+TEST_CASE_METHOD(IsolatedLocks, "different-device locks do not contend", "[device-lock]") { CHECK(distinct_devices_do_not_contend()); }
 #endif

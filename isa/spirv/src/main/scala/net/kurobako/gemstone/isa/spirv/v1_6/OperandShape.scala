@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
+import net.kurobako.gemstone.constraint.*
 
 case class OperandShape(
-    kind: NonEmptyString,
-    name: NonEmptyString,
+    kind: NonEmpty[String],
+    name: NonEmpty[String],
     quantifier: OperandQuantifier
 )

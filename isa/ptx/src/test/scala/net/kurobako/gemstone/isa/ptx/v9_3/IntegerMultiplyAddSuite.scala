@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
 import VMIR.*
+import net.kurobako.gemstone.constraint.*
 
-final class IntegerMultiplyAddSuite extends munit.FunSuite {
+class IntegerMultiplyAddSuite extends munit.FunSuite {
   private val boundaryValues = Vector(
     0L,
     1L,
@@ -15,7 +16,7 @@ final class IntegerMultiplyAddSuite extends munit.FunSuite {
     -1L
   )
 
-  private def unsigned(value: Long, width: BitWidth): BigInt = {
+  private def unsigned(value: Long, width: Int where (Between[8, 64] & MultipleOf[8])): BigInt = {
     val bits = BigInt(java.lang.Long.toUnsignedString(value))
     bits & ((BigInt(1) << width.raw) - 1)
   }
@@ -42,11 +43,36 @@ final class IntegerMultiplyAddSuite extends munit.FunSuite {
 
   test("primitive multiply-add matches unsigned wide arithmetic") {
     val operations = Vector(
-      IntegerMultiplyAddOperation.Low(BitWidth(32), BitWidth(32), carryIn = false, carryOut = false),
-      IntegerMultiplyAddOperation.Low(BitWidth(32), BitWidth(64), carryIn = false, carryOut = false),
-      IntegerMultiplyAddOperation.Low(BitWidth(64), BitWidth(64), carryIn = true, carryOut = true),
-      IntegerMultiplyAddOperation.High(BitWidth(32), BitWidth(32), carryIn = true, carryOut = true),
-      IntegerMultiplyAddOperation.High(BitWidth(64), BitWidth(64), carryIn = true, carryOut = true)
+      IntegerMultiplyAddOperation.Low(
+        32: Int where (Between[8, 64] & MultipleOf[8]),
+        32: Int where (Between[8, 64] & MultipleOf[8]),
+        carryIn = false,
+        carryOut = false
+      ),
+      IntegerMultiplyAddOperation.Low(
+        32: Int where (Between[8, 64] & MultipleOf[8]),
+        64: Int where (Between[8, 64] & MultipleOf[8]),
+        carryIn = false,
+        carryOut = false
+      ),
+      IntegerMultiplyAddOperation.Low(
+        64: Int where (Between[8, 64] & MultipleOf[8]),
+        64: Int where (Between[8, 64] & MultipleOf[8]),
+        carryIn = true,
+        carryOut = true
+      ),
+      IntegerMultiplyAddOperation.High(
+        32: Int where (Between[8, 64] & MultipleOf[8]),
+        32: Int where (Between[8, 64] & MultipleOf[8]),
+        carryIn = true,
+        carryOut = true
+      ),
+      IntegerMultiplyAddOperation.High(
+        64: Int where (Between[8, 64] & MultipleOf[8]),
+        64: Int where (Between[8, 64] & MultipleOf[8]),
+        carryIn = true,
+        carryOut = true
+      )
     )
     val random = scala.util.Random(0x5eedL)
     val values = boundaryValues ++ Vector.fill(256)(random.nextLong())

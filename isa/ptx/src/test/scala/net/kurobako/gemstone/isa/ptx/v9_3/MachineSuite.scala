@@ -1,14 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.NonEmptyVec
-
 import VMIR.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 
-import net.kurobako.gemstone.Vec
-
-final class MachineSuite extends munit.FunSuite {
-  test("an executable program is immutable and bounds checked") {
+class MachineSuite extends munit.FunSuite {
+  test("an executable program looks up valid PCs and rejects out-of-range PCs") {
     val program = ExecutableProgram(Vec("first", "second"))
     assertEquals(program.at(Pc.Entry), Some("first"))
     assertEquals(program.at(Pc(2)), None)
@@ -17,10 +14,16 @@ final class MachineSuite extends munit.FunSuite {
   test("lane masks support CUDA-sized blocks and set operations") {
     val mask = VMLaneMask.all(256).toOption.get
     assertEquals(mask.size, 256)
-    val selected = mask.filterLanes(_ % 32 == 0)
-    assertEquals(selected.size, 8)
-    assertEquals(selected.union(mask.subtract(selected)).size, 256)
-    assertEquals(selected.intersect(mask.subtract(selected)).size, 0)
+    val selected  = mask.filterLanes(_ % 32 == 0)
+    val remaining = mask.subtract(selected)
+    val reunited  = selected.union(remaining)
+    val overlap   = selected.intersect(remaining)
+    (0 until 256).foreach { lane =>
+      assertEquals(selected.contains(lane), lane  % 32 == 0, s"selected lane $lane")
+      assertEquals(remaining.contains(lane), lane % 32 != 0, s"remaining lane $lane")
+      assert(reunited.contains(lane), s"missing reunited lane $lane")
+      assert(!overlap.contains(lane), s"unexpected overlapping lane $lane")
+    }
   }
 
   test("lane mask exposes each warp's active bits") {

@@ -1,21 +1,16 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import VMIR.*
-
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.{Bits, ByteRange}
-import net.kurobako.gemstone.binary.IEEE754
-import net.kurobako.gemstone.binary.LittleEndian
+import fixtures.*
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions}
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.charset.StandardCharsets
-import java.util.concurrent.Executors
+class AMDGPUModifierSuite extends munit.FunSuite {
+  // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
-final class AMDGPUModifierSuite extends munit.FunSuite with CodeObjectTestSupport {
   test("gfx900 unsupported VOP1 DPP operations fail closed") {
     val result = VMCompiler.decodeInstruction(
       Vec[Byte](
@@ -68,10 +63,10 @@ final class AMDGPUModifierSuite extends munit.FunSuite with CodeObjectTestSuppor
   }
 
   test("VOP3 floating-point clamp uses the [0, 1] range and preserves NaN") {
-    assertEquals(VMInterpreter.clampF32(-2.0f), 0.0f)
-    assertEquals(VMInterpreter.clampF32(0.5f), 0.5f)
-    assertEquals(VMInterpreter.clampF32(2.0f), 1.0f)
-    assert(VMInterpreter.clampF32(Float.NaN).isNaN)
+    assertEquals(VMArithmetic.clampF32(-2.0f), 0.0f)
+    assertEquals(VMArithmetic.clampF32(0.5f), 0.5f)
+    assertEquals(VMArithmetic.clampF32(2.0f), 1.0f)
+    assert(VMArithmetic.clampF32(Float.NaN).isNaN)
   }
 
   test("VOP3 f32 FMA preserves the absolute modifier on source 2") {
@@ -342,8 +337,8 @@ final class AMDGPUModifierSuite extends munit.FunSuite with CodeObjectTestSuppor
   }
 
   test("gfx900 scalar unsigned minimum accepts a literal operand") {
-    assertEquals(VMInterpreter.unsignedMin32(300L, 256L), 256L)
-    assertEquals(VMInterpreter.unsignedMin32(0xffffffffL, 256L), 256L)
+    assertEquals(VMArithmetic.unsignedMin32(300L, 256L), 256L)
+    assertEquals(VMArithmetic.unsignedMin32(0xffffffffL, 256L), 256L)
     assertEquals(
       VMCompiler.validate(
         Vec[Byte](
@@ -367,23 +362,23 @@ final class AMDGPUModifierSuite extends munit.FunSuite with CodeObjectTestSuppor
   }
 
   test("f64 literal dwords provide the high half of a binary64 value") {
-    assertEquals(VMInterpreter.floatingLiteralToDouble(0x40140000L), 5.0)
-    assertEquals(VMInterpreter.floatingLiteralToDouble(0xc0040000L), -2.5)
-    assert(VMInterpreter.floatingLiteralToDouble(0x7ff80000L).isNaN)
+    assertEquals(VMArithmetic.floatingLiteralToDouble(0x40140000L), 5.0)
+    assertEquals(VMArithmetic.floatingLiteralToDouble(0xc0040000L), -2.5)
+    assert(VMArithmetic.floatingLiteralToDouble(0x7ff80000L).isNaN)
   }
 
   test("gfx900 scalar min/max SCC reports whether source zero won") {
-    assertEquals(VMInterpreter.scalarMinMax(ScalarMinMaxOperation.MinimumU32, 3L, 4L), (3L, true))
-    assertEquals(VMInterpreter.scalarMinMax(ScalarMinMaxOperation.MinimumU32, 4L, 3L), (3L, false))
-    assertEquals(VMInterpreter.scalarMinMax(ScalarMinMaxOperation.MaximumU32, 4L, 3L), (4L, true))
-    assertEquals(VMInterpreter.scalarMinMax(ScalarMinMaxOperation.MaximumU32, 3L, 4L), (4L, false))
+    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MinimumU32, 3L, 4L), (3L, true))
+    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MinimumU32, 4L, 3L), (3L, false))
+    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MaximumU32, 4L, 3L), (4L, true))
+    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MaximumU32, 3L, 4L), (4L, false))
     assertEquals(
-      VMInterpreter.scalarMinMax(ScalarMinMaxOperation.MinimumI32, 0xffffffffL, 1L),
+      VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MinimumI32, 0xffffffffL, 1L),
       (0xffffffffL, true)
     )
-    assertEquals(VMInterpreter.scalarMinMax(ScalarMinMaxOperation.MaximumI32, 0xffffffffL, 1L), (1L, false))
-    assertEquals(VMInterpreter.scalarMinMax(ScalarMinMaxOperation.MinimumU32, 7L, 7L), (7L, false))
-    assertEquals(VMInterpreter.scalarMinMax(ScalarMinMaxOperation.MaximumI32, 7L, 7L), (7L, false))
+    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MaximumI32, 0xffffffffL, 1L), (1L, false))
+    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MinimumU32, 7L, 7L), (7L, false))
+    assertEquals(VMArithmetic.scalarMinMax(ScalarMinMaxOperation.MaximumI32, 7L, 7L), (7L, false))
   }
 
   test("gfx900 initial work-item VGPRs use multidimensional local IDs") {
@@ -396,8 +391,8 @@ final class AMDGPUModifierSuite extends munit.FunSuite with CodeObjectTestSuppor
   }
 
   test("gfx900 SOPK signed multiply uses a sign-extended immediate and reports overflow") {
-    assertEquals(VMInterpreter.signedMultiplyImmediate(0xffffffffL, 0x300), (0xfffffd00L, false))
-    assertEquals(VMInterpreter.signedMultiplyImmediate(Int.MaxValue.toLong, 2), (0xfffffffeL, true))
+    assertEquals(VMArithmetic.signedMultiplyImmediate(0xffffffffL, 0x300), (0xfffffd00L, false))
+    assertEquals(VMArithmetic.signedMultiplyImmediate(Int.MaxValue.toLong, 2), (0xfffffffeL, true))
     assertEquals(
       VMCompiler.validate(
         Vec[Byte](0x00, 0x03, 0x82.toByte, 0xb7.toByte, 0x00, 0x00, 0x81.toByte, 0xbf.toByte),
@@ -408,8 +403,8 @@ final class AMDGPUModifierSuite extends munit.FunSuite with CodeObjectTestSuppor
   }
 
   test("gfx900 VOP2 unsigned subtraction returns the low word and borrow flag") {
-    assertEquals(VMInterpreter.unsignedSubtract32(9L, 4L), (5L, false))
-    assertEquals(VMInterpreter.unsignedSubtract32(0L, 1L), (0xffffffffL, true))
+    assertEquals(VMArithmetic.unsignedSubtract32(9L, 4L), (5L, false))
+    assertEquals(VMArithmetic.unsignedSubtract32(0L, 1L), (0xffffffffL, true))
     assertEquals(
       VMCompiler.validate(
         Vec[Byte](0x0e, 0x02, 0x02, 0x34, 0x00, 0x00, 0x81.toByte, 0xbf.toByte),
@@ -420,9 +415,9 @@ final class AMDGPUModifierSuite extends munit.FunSuite with CodeObjectTestSuppor
   }
 
   test("gfx900 VOP2 chained subtraction consumes and replaces the borrow flag") {
-    assertEquals(VMInterpreter.unsignedSubtractWithBorrow32(9L, 4L, true), (4L, false))
-    assertEquals(VMInterpreter.unsignedSubtractWithBorrow32(9L, 4L, false), (5L, false))
-    assertEquals(VMInterpreter.unsignedSubtractWithBorrow32(0L, 0xffffffffL, false), (1L, true))
+    assertEquals(VMArithmetic.unsignedSubtractWithBorrow32(9L, 4L, true), (4L, false))
+    assertEquals(VMArithmetic.unsignedSubtractWithBorrow32(9L, 4L, false), (5L, false))
+    assertEquals(VMArithmetic.unsignedSubtractWithBorrow32(0L, 0xffffffffL, false), (1L, true))
     assertEquals(
       VMCompiler.validate(
         Vec[Byte](0x03, 0x05, 0x04, 0x3a, 0x00, 0x00, 0x81.toByte, 0xbf.toByte),
@@ -472,4 +467,146 @@ final class AMDGPUModifierSuite extends munit.FunSuite with CodeObjectTestSuppor
     )
   }
 
+  test("gfx900 SDWA low 16-bit multiplication validates") {
+    assertEquals(
+      VMCompiler.validate(
+        Vec[Byte](
+          0xf9.toByte,
+          0x06,
+          0x2e,
+          0x52,
+          0x16,
+          0x06,
+          0x06,
+          0x05,
+          0x00,
+          0x00,
+          0x81.toByte,
+          0xbf.toByte
+        ),
+        Target("gfx900")
+      ),
+      Right(())
+    )
+  }
+
+  test("gfx900 SDWA signed 24-bit multiplication preserves the decoded sub-dword operands") {
+    val instruction = VMCompiler.decodeInstruction(
+      Vec[Byte](
+        0xf9.toByte,
+        0x00,
+        0x3c,
+        0x0c,
+        0x35,
+        0x06,
+        0x0c,
+        0x86.toByte
+      ),
+      Target("gfx900")
+    )
+
+    instruction match {
+      case Right(
+            Instruction.VBinarySubDword(
+              actualOpcode,
+              30,
+              InstructionSource.VectorRegister(53),
+              InstructionSource.Scalar(0),
+              SubDwordSelection.DWord,
+              SubDwordDestinationUnused.Pad,
+              SubDwordSelection.Word0,
+              SubDwordSelection.DWord,
+              true,
+              false
+            )
+          ) => assertEquals(actualOpcode, VectorSubDwordOperation.MultiplyI24)
+      case other => fail(s"decoded SDWA instruction lost its operand selections: $other")
+    }
+  }
+
+  test("gfx900 SDWA cndmask decodes with sub-dword selections") {
+    val instruction = VMCompiler.decodeInstruction(
+      Vec[Byte](
+        0xf9.toByte,
+        0x04,
+        0x00,
+        0x00,
+        0x01,
+        0x10,
+        0x01,
+        0x02
+      ),
+      Target("gfx900")
+    )
+
+    instruction match {
+      case Right(
+            Instruction.VBinarySubDword(
+              actualOpcode,
+              0,
+              InstructionSource.VectorRegister(1),
+              InstructionSource.VectorRegister(2),
+              SubDwordSelection.Byte0,
+              SubDwordDestinationUnused.Preserve,
+              SubDwordSelection.Byte1,
+              SubDwordSelection.Byte2,
+              false,
+              false
+            )
+          ) => assertEquals(actualOpcode, VectorSubDwordOperation.ConditionalMask32)
+      case other => fail(s"decoded SDWA cndmask lost its operand selections: $other")
+    }
+  }
+
+  test("gfx900 SDWA signed 16-bit maximum validates") {
+    assertEquals(
+      VMCompiler.validate(
+        Vec[Byte](
+          0xf9.toByte,
+          0x20,
+          0x12,
+          0x60,
+          0x05,
+          0x06,
+          0x08,
+          0x08,
+          0x00,
+          0x00,
+          0x81.toByte,
+          0xbf.toByte
+        ),
+        Target("gfx900")
+      ),
+      Right(())
+    )
+  }
+
+  test("gfx900 SDWA half-precision minimum validates and uses floating-point ordering") {
+    assertEquals(
+      VMCompiler.validate(
+        Vec[Byte](
+          0xf9.toByte,
+          0x04,
+          0x02,
+          0x5c,
+          0x03,
+          0x04,
+          0x04,
+          0x04,
+          0x00,
+          0x00,
+          0x81.toByte,
+          0xbf.toByte
+        ),
+        Target("gfx900")
+      ),
+      Right(())
+    )
+    val positive = IEEE754.floatToBinary16(1.5f)
+    val negative = IEEE754.floatToBinary16(-2.0f)
+    assertEquals(
+      IEEE754.binary16ToFloat(VMArithmetic.minimumF16(positive.toLong, negative.toLong)),
+      -2.0f
+    )
+  }
 }

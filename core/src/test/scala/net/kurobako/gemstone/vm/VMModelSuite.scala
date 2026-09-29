@@ -1,16 +1,18 @@
 package net.kurobako.gemstone.vm
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.*
+import scala.util.Using
 
-final class VMModelSuite extends munit.FunSuite {
+class VMModelSuite extends munit.FunSuite {
   test("kernel task excludes runtime identity and validates relocation sources") {
-    val arguments = Vec[KernelTask.Argument](KernelTask.Argument.Memory(MemoryRegion(7L), 0L))
+    val arguments = Vec[KernelTask.Argument](KernelTask.Argument.Memory(AllocationId(7L), 0L))
     val valid     = KernelTask.validated(
-      NonEmptyString("fill"),
+      "fill",
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
       arguments,
@@ -18,7 +20,7 @@ final class VMModelSuite extends munit.FunSuite {
         KernelTask.PointerRelocation(
           KernelTask.RelocationSource.Argument(0),
           0L,
-          MemoryRegion(8L),
+          AllocationId(8L),
           0L
         )
       )
@@ -26,7 +28,7 @@ final class VMModelSuite extends munit.FunSuite {
     assert(valid.isRight)
 
     val invalid = KernelTask.validated(
-      NonEmptyString("fill"),
+      "fill",
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
       arguments,
@@ -34,12 +36,17 @@ final class VMModelSuite extends munit.FunSuite {
         KernelTask.PointerRelocation(
           KernelTask.RelocationSource.Argument(1),
           0L,
-          MemoryRegion(8L),
+          AllocationId(8L),
           0L
         )
       )
     )
     assert(invalid.isLeft)
+    val invalidUpdate = valid.toOption.get.withPointerRelocations(Vec(
+      KernelTask.PointerRelocation(KernelTask.RelocationSource.Argument(1), 0L, AllocationId(8L), 0L)
+    ))
+    assert(invalidUpdate.isLeft)
+    assertEquals(valid.toOption.get.withPointerRelocations(Vec.empty), valid)
   }
 
   test("launch geometry maps partial and virtual work-group extents") {
@@ -117,21 +124,53 @@ final class VMModelSuite extends munit.FunSuite {
 
   test("task control accounts for instructions and observes cancellation") {
     val limited =
-      TaskControl.forScheduler(TaskLimits(maxInstructions = 2L, quantum = 1))
+      TaskControl(TaskControl.Limits(maxInstructions = 2L))
     assert(limited.checkpoint().isRight)
     assert(limited.checkpoint().isRight)
     assertEquals(limited.checkpoint(), Left(Fault.BudgetExceeded(2L)))
     assert(limited.usedInstructions.raw == 2L)
 
-    val cancellation = TaskControl.Cancellation.Source()
-    val cancelled    = TaskControl.forScheduler(cancellation = cancellation)
-    cancellation.cancel()
+    val cancelled = TaskControl()
+    cancelled.cancel()
+    cancelled.cancel()
+    assert(cancelled.isCancelled)
     assertEquals(cancelled.checkpoint(), Left(Fault.Cancelled))
+  }
+
+  test("instruction budgets are shared across workers and reject an oversized charge without consuming it") {
+    val control  = TaskControl(TaskControl.Limits(1000L))
+    val accepted = AtomicInteger()
+    Using.resource(threads.Pool(4)) { pool =>
+      val task: Runnable = () =>
+        while (!Thread.currentThread().isInterrupted && control.checkpoint().isRight) {
+          val _ = accepted.incrementAndGet()
+        }
+      val workers = Vector.fill(4)(pool.executor.submit(task))
+      workers.foreach(_.get(5, TimeUnit.SECONDS))
+    }
+    assertEquals(accepted.get(), 1000)
+    assertEquals(control.usedInstructions.raw, 1000L)
+    assertEquals(control.remainingInstructions.raw, 0L)
+
+    val limited = TaskControl(TaskControl.Limits(Long.MaxValue))
+    assertEquals(limited.checkpoint(Long.MaxValue - 1L), Right(()))
+    assertEquals(limited.checkpoint(2), Left(Fault.BudgetExceeded(Long.MaxValue)))
+    assertEquals(limited.remainingInstructions.raw, 1L)
+    assertEquals(limited.checkpoint(), Right(()))
+  }
+
+  test("default controls have independent cancellation flags") {
+    val first  = TaskControl()
+    val second = TaskControl()
+    first.cancel()
+    assertEquals(first.checkpoint(), Left(Fault.Cancelled))
+    assertEquals(first.usedInstructions.raw, 0L)
+    assertEquals(second.checkpoint(), Right(()))
   }
 
   test("sequential scheduling stops at the first fault") {
     val visited = AtomicInteger()
-    val result  = Scheduler.Sequential.forEach(5L, parallel = false) { index =>
+    val result  = Workgroups.Sequential.forEach(5L, parallel = false) { index =>
       val _ = visited.incrementAndGet()
       if (index.raw == 2L) Left(Fault.Backend("stop")) else Right(())
     }
@@ -139,14 +178,4 @@ final class VMModelSuite extends munit.FunSuite {
     assertEquals(visited.get(), 3)
   }
 
-  test("observer failure is explicit") {
-    val observer: Observer[Event] = (context, _) => Left(Observer.Error(s"closed:${context.value}"))
-    assertEquals(
-      observer.observe(
-        ObservationContext(7L),
-        Event.Print("value=%d", Vec(Event.PrintArgument.Integer(Vec(1L), 32)))
-      ),
-      Left(Observer.Error("closed:7"))
-    )
-  }
 }

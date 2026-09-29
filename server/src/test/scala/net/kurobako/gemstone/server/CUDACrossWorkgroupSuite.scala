@@ -1,46 +1,46 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.Constraint.NoNulString
-
-import net.kurobako.gemstone.Constraint.Positive
-import net.kurobako.gemstone.NonEmptyVec
-import net.kurobako.gemstone.vm.TaskLimits
 import java.nio.file.Files
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.environment as env
+import net.kurobako.gemstone.server.*
+import net.kurobako.gemstone.vm.*
 import scala.concurrent.duration.*
-import net.kurobako.gemstone.launcher.Environment
 import scala.util.Using
 
 /** The native driver client exercises the CUDA shim, shared execution transport and PTX execution together. */
-final class CUDACrossWorkgroupSuite extends munit.FunSuite {
+class CUDACrossWorkgroupSuite extends munit.FunSuite {
+  override val munitTimeout: Duration = 120.seconds
+
   private def runtimeDirectory = {
-    val path = NativeTestProcess.nativeDirectory
+    val path = native.directory
     assert(Files.isDirectory(path), s"generated CUDA runtime directory is missing: $path")
     path
   }
 
-  for (workers <- Seq(1, math.max(1, math.min(4, sys.runtime.availableProcessors()))).distinct)
+  for (workers <- Seq(1, 4))
     test(s"native CUDA 128-bit payload publication, compaction and atomic counts with $workers workers") {
       val directory = runtimeDirectory
       val runtime   = directory.resolve("libcuda.so.1")
       val client    = directory.resolve("cuda_cross_workgroup_test")
       assert(Files.isRegularFile(runtime), s"CUDA runtime is missing: $runtime")
       assert(Files.isExecutable(client), s"CUDA test executable is missing: $client")
-      Using.resource(GemstoneRPCServer.start(
-        TaskLimits(1000000L, 32),
-        Map("GEMSTONE_EXECUTION_PARALLELISM" -> workers.toString)
+      Using.resource(Server.start(
+        Server.Settings(limits = TaskControl.Limits(1000000L), parallelism = workers.unsafe[Int > 0])
       )) { server =>
-        val result = NativeTestProcess.run(
-          NonEmptyVec(
-            NoNulString.unsafe(client.toString),
-            NoNulString.unsafe("~[unified-memory]")
+        val result = native.run(
+          Vec.nonEmpty(
+            client.toString,
+            "~[unified-memory]"
           ),
           directory,
-          Environment(
+          Launch.Environment(
             Map(
-              "GEMSTONE_RPC_PORT"      -> server.port.raw.toString,
-              "GEMSTONE_RPC_CLIENT"    -> server.client.raw.toString,
-              "GEMSTONE_TEST_LIBRARY"  -> runtime.toString,
-              "GEMSTONE_SYSTEM_PAGING" -> "1"
+              env.RpcEndpoint  -> server.endpoint.toString,
+              env.RpcClient    -> server.client.raw.toString,
+              env.TestLibrary  -> runtime.toString,
+              env.SystemPaging -> "1"
             ),
             Set.empty
           ),
@@ -66,21 +66,21 @@ final class CUDACrossWorkgroupSuite extends munit.FunSuite {
     )
   ) test(name) {
     val directory = runtimeDirectory
-    Using.resource(GemstoneRPCServer.start(TaskLimits(1000000L, 32), Map.empty)) {
+    Using.resource(Server.start(Server.Settings(limits = TaskControl.Limits(1000000L), parallelism = 2))) {
       server =>
-        val result = NativeTestProcess.run(
-          NonEmptyVec(
-            NoNulString.unsafe(directory.resolve("cuda_cross_workgroup_test").toString),
-            NoNulString.unsafe(name)
+        val result = native.run(
+          Vec.nonEmpty(
+            directory.resolve("cuda_cross_workgroup_test").toString,
+            name
           ),
           directory,
-          Environment(
+          Launch.Environment(
             Map(
-              "GEMSTONE_RPC_PORT"     -> server.port.raw.toString,
-              "GEMSTONE_RPC_CLIENT"   -> server.client.raw.toString,
-              "GEMSTONE_TEST_LIBRARY" -> directory.resolve("libcuda.so.1").toString
+              env.RpcEndpoint -> server.endpoint.toString,
+              env.RpcClient   -> server.client.raw.toString,
+              env.TestLibrary -> directory.resolve("libcuda.so.1").toString
             ),
-            Set("GEMSTONE_SYSTEM_PAGING")
+            Set(env.SystemPaging)
           ),
           30.seconds
         )

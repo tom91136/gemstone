@@ -1,22 +1,20 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.KernelMetadata
-
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 
-final class CodeObjectMetadataSuite extends munit.FunSuite {
+class CodeObjectMetadataSuite extends munit.FunSuite {
   test("decode the server-owned AMDGPU launch manifest") {
-    val result = CodeObjectMetadata.decode(Vec.unsafeFromArray(codeObject(hidden = false))).toOption.get
+    val result = CodeObjectMetadata.decode(Vec.unsafeWrapArray(codeObject(hidden = false))).toOption.get
 
     assertEquals(result.size, 1)
     val kernel = result.head
-    assertEquals(kernel.name, NonEmptyString("add"))
-    assertEquals(kernel.symbol, NonEmptyString("add.kd"))
+    assertEquals(kernel.name, "add")
+    assertEquals(kernel.symbol, "add.kd")
     assertEquals(kernel.metadata.argumentBlockSize.raw, 20)
     assertEquals(kernel.metadata.explicitParameterCount.raw, 3)
     assertEquals(kernel.hiddenArguments, Vec.empty[CodeObjectMetadata.HiddenArgument])
@@ -33,7 +31,7 @@ final class CodeObjectMetadataSuite extends munit.FunSuite {
   }
 
   test("exclude hidden AMDGPU fields from the explicit parameter count") {
-    val manifest = CodeObjectMetadata.decode(Vec.unsafeFromArray(codeObject(hidden = true))).toOption.get.head
+    val manifest = CodeObjectMetadata.decode(Vec.unsafeWrapArray(codeObject(hidden = true))).toOption.get.head
     val metadata = manifest.metadata
 
     assertEquals(metadata.argumentBlockSize.raw, 24)
@@ -45,7 +43,15 @@ final class CodeObjectMetadataSuite extends munit.FunSuite {
     )
   }
 
-  private def codeObject(hidden: Boolean): Array[Byte] = {
+  test("reject uint64 metadata sizes outside the supported signed range") {
+    val oversized =
+      Array(0xcf.toByte, 0x80.toByte, 0.toByte, 0.toByte, 0.toByte, 0.toByte, 0.toByte, 0.toByte, 0.toByte)
+    val result = CodeObjectMetadata.decode(Vec.from(codeObject(hidden = false, blockSize = Some(oversized))))
+    assert(result.isLeft)
+    assert(result.swap.toOption.get.message.contains("exceeds supported range"))
+  }
+
+  private def codeObject(hidden: Boolean, blockSize: Option[Array[Byte]] = None): Array[Byte] = {
     val arguments = Seq(
       argument(0, 8, "global_buffer"),
       argument(8, 8, "global_buffer"),
@@ -59,7 +65,7 @@ final class CodeObjectMetadataSuite extends munit.FunSuite {
       Array((0x90 | arguments.size).toByte),
       concat(arguments*),
       string(".kernarg_segment_size"),
-      unsigned(if (hidden) 24 else 20),
+      blockSize.getOrElse(unsigned(if (hidden) 24 else 20)),
       string(".name"),
       string("add"),
       string(".symbol"),

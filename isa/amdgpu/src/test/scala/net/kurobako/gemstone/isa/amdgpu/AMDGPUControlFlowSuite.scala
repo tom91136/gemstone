@@ -1,40 +1,30 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.Positive
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import VirtualMachine.*
-
-import CodeObject.*
+import ELF.*
 import VMIR.*
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.{Bits, ByteRange}
-import net.kurobako.gemstone.binary.IEEE754
-import net.kurobako.gemstone.binary.LittleEndian
+import fixtures.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.charset.StandardCharsets
-import java.util.concurrent.Executors
+class AMDGPUControlFlowSuite extends munit.FunSuite {
+  // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
-final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSupport {
   test("vector condition masks follow the wave width") {
     val mask = 0x8000000100000001L
-    assertEquals(VMInterpreter.waveConditionMask(mask, LaneCount(32)), 1L)
-    assertEquals(VMInterpreter.waveConditionMask(mask, LaneCount(64)), mask)
+    assertEquals(VMArithmetic.waveConditionMask(mask, 32: Int where Between[1, 64]), 1L)
+    assertEquals(VMArithmetic.waveConditionMask(mask, 64: Int where Between[1, 64]), mask)
   }
 
   test("gfx900 VOP3 mask bit counts compose across both halves of a wave") {
     val executionMask = 0xf000000f0000000fL
-    assertEquals(VMInterpreter.mbCount(-1L, executionMask, 0, false, 0L), 0L)
-    assertEquals(VMInterpreter.mbCount(-1L, executionMask, 4, false, 0L), 4L)
-    assertEquals(VMInterpreter.mbCount(-1L, executionMask, 32, false, 0L), 4L)
-    assertEquals(VMInterpreter.mbCount(-1L, executionMask, 60, true, 8L), 12L)
-    assertEquals(VMInterpreter.mbCount(-1L, executionMask, 64 - 1, true, 8L), 15L)
+    assertEquals(VMArithmetic.mbCount(-1L, executionMask, 0, false, 0L), 0L)
+    assertEquals(VMArithmetic.mbCount(-1L, executionMask, 4, false, 0L), 4L)
+    assertEquals(VMArithmetic.mbCount(-1L, executionMask, 32, false, 0L), 4L)
+    assertEquals(VMArithmetic.mbCount(-1L, executionMask, 60, true, 8L), 12L)
+    assertEquals(VMArithmetic.mbCount(-1L, executionMask, 64 - 1, true, 8L), 15L)
     assertEquals(
       VMCompiler.validate(
         Vec[Byte](
@@ -66,7 +56,7 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
   }
 
   test("gfx900 bit reverse accepts canonical inline floating constants as raw bits") {
-    assertEquals(VMInterpreter.bitReverse32(0x3f000000L), 0x000000fcL)
+    assertEquals(VMArithmetic.bitReverse32(0x3f000000L), 0x000000fcL)
     assertEquals(
       VMCompiler.validate(
         Vec[Byte](
@@ -86,8 +76,8 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
   }
 
   test("gfx900 unsigned 24-bit vector multiply and multiply-add mask their multiplicands") {
-    assertEquals(VMInterpreter.unsignedMultiply24(0x1ffffffL, 2L), 0x1fffffeL)
-    assertEquals(VMInterpreter.unsignedMultiplyAdd24(0xffffffL, 2L, 3L), 0x2000001L)
+    assertEquals(VMArithmetic.unsignedMultiply24(0x1ffffffL, 2L), 0x1fffffeL)
+    assertEquals(VMArithmetic.unsignedMultiplyAdd24(0xffffffL, 2L, 3L), 0x2000001L)
     assertEquals(
       VMCompiler.validate(
         Vec[Byte](
@@ -138,11 +128,11 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
   }
 
   test("gfx900 DS bpermute selects a source lane from a byte address") {
-    assertEquals(VMInterpreter.bpermuteSourceLane(0L), 0)
-    assertEquals(VMInterpreter.bpermuteSourceLane(4L * 37L), 37)
-    assertEquals(VMInterpreter.bpermuteSourceLane(4L * 69L), 5)
-    assertEquals(VMInterpreter.bpermuteSourceLane(0L, 124L), 31)
-    assertEquals(VMInterpreter.bpermuteSourceLane(4L * 37L, 124L), 4)
+    assertEquals(VMArithmetic.bpermuteSourceLane(0L), 0)
+    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 37L), 37)
+    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 69L), 5)
+    assertEquals(VMArithmetic.bpermuteSourceLane(0L, 124L), 31)
+    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 37L, 124L), 4)
     assertEquals(
       VMCompiler.validate(
         Vec[Byte](
@@ -166,10 +156,10 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
   }
 
   test("gfx1036 DS permute selects a destination lane from a byte address") {
-    assertEquals(VMInterpreter.permuteDestinationLane(0L, 0L, WaveSize(32)), 0)
-    assertEquals(VMInterpreter.permuteDestinationLane(4L * 29L, 0L, WaveSize(32)), 29)
-    assertEquals(VMInterpreter.permuteDestinationLane(0L, 124L, WaveSize(32)), 31)
-    assertEquals(VMInterpreter.permuteDestinationLane(4L * 37L, 124L, WaveSize(32)), 4)
+    assertEquals(VMArithmetic.permuteDestinationLane(0L, 0L, 32: Int in (32, 64)), 0)
+    assertEquals(VMArithmetic.permuteDestinationLane(4L * 29L, 0L, 32: Int in (32, 64)), 29)
+    assertEquals(VMArithmetic.permuteDestinationLane(0L, 124L, 32: Int in (32, 64)), 31)
+    assertEquals(VMArithmetic.permuteDestinationLane(4L * 37L, 124L, 32: Int in (32, 64)), 4)
     assertEquals(
       VMCompiler.decodeInstruction(
         Vec[Byte](0x00, 0x00, 0xc8.toByte, 0xda.toByte, 0x01, 0x02, 0x00, 0x05),
@@ -186,8 +176,8 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
   }
 
   test("gfx900 reverse unsigned vector subtraction wraps to 32 bits") {
-    assertEquals(VMInterpreter.unsignedSubtractReverse32(20L, 19L), 0xffffffffL)
-    assertEquals(VMInterpreter.unsignedSubtractReverse32(20L, 99L), 79L)
+    assertEquals(VMArithmetic.unsignedSubtractReverse32(20L, 19L), 0xffffffffL)
+    assertEquals(VMArithmetic.unsignedSubtractReverse32(20L, 99L), 79L)
     assertEquals(
       VMCompiler.validate(
         Vec[Byte](0x94.toByte, 0x06, 0x0a, 0x6c, 0x00, 0x00, 0x81.toByte, 0xbf.toByte),
@@ -198,8 +188,8 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
   }
 
   test("gfx900 signed 24-bit vector multiply sign-extends both operands") {
-    assertEquals(VMInterpreter.signedMultiply24(0xffffd8L, 0xfffffeL), 80L)
-    assertEquals(VMInterpreter.signedMultiply24(0x1000001L, 3L), 3L)
+    assertEquals(VMArithmetic.signedMultiply24(0xffffd8L, 0xfffffeL), 80L)
+    assertEquals(VMArithmetic.signedMultiply24(0x1000001L, 3L), 3L)
     assertEquals(
       VMCompiler.validate(
         Vec[Byte](
@@ -224,22 +214,22 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
 
   test("gfx900 DPP routes quad, row-rotate, and row-broadcast sources") {
     assertEquals(
-      Vec.tabulate(8)(lane => VMInterpreter.dppQuadSourceLane(lane, 0xb1)),
+      Vec.tabulate(8)(lane => VMArithmetic.dppQuadSourceLane(lane, 0xb1)),
       Vec(1, 0, 3, 2, 5, 4, 7, 6)
     )
-    assert((0 until 64).forall(lane => VMInterpreter.dppLaneEnabled(lane, 0xf, 0xf)))
-    assert(!VMInterpreter.dppLaneEnabled(0, 0xe, 0xf))
-    assert(!VMInterpreter.dppLaneEnabled(1, 0xf, 0xd))
+    assert((0 until 64).forall(lane => VMArithmetic.dppLaneEnabled(lane, 0xf, 0xf)))
+    assert(!VMArithmetic.dppLaneEnabled(0, 0xe, 0xf))
+    assert(!VMArithmetic.dppLaneEnabled(1, 0xf, 0xd))
     assertEquals(
-      Vec(0, 4, 15, 16).map(VMInterpreter.dppSourceLane(_, 0x124)),
+      Vec(0, 4, 15, 16).map(VMArithmetic.dppSourceLane(_, 0x124)),
       Vec(Some(12), Some(0), Some(11), Some(28))
     )
     assertEquals(
-      Vec(0, 16, 32, 48).map(VMInterpreter.dppSourceLane(_, 0x142)),
+      Vec(0, 16, 32, 48).map(VMArithmetic.dppSourceLane(_, 0x142)),
       Vec(None, Some(15), None, Some(47))
     )
     assertEquals(
-      Vec(0, 16, 32, 48).map(VMInterpreter.dppSourceLane(_, 0x143)),
+      Vec(0, 16, 32, 48).map(VMArithmetic.dppSourceLane(_, 0x143)),
       Vec(None, None, Some(31), Some(31))
     )
     assertEquals(
@@ -323,9 +313,18 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
       0x81.toByte,
       0xbf.toByte
     )
-    val kernel   = CodeObjectKernel("branch", Target("gfx900"), 0, 0, 0, 0x80, 0x0a, code)
+    val kernel = CodeObjectKernel(
+      name = "branch",
+      target = Target("gfx900"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
+      computePgmRsrc2 = 0x80,
+      kernelCodeProperties = 0x0a,
+      code = code
+    )
     val dispatch = KernelTask.validated(
-      NonEmptyString("branch"),
+      "branch",
       Dimensions.One,
       Dimensions.One,
       Vec.empty
@@ -334,7 +333,7 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
     val executable = compileKernel(kernel)
     assertEquals(executeKernel(executable, dispatch, TestMemory()), Right(()))
     val limited =
-      TaskControl.forScheduler(TaskLimits(maxInstructions = 1L, quantum = 1))
+      TaskControl(TaskControl.Limits(maxInstructions = 1L))
     assert(
       executeKernel(executable, dispatch, TestMemory(), limited).left
         .exists(_.message.contains("instruction budget of 1"))
@@ -373,17 +372,17 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
       0xbf.toByte
     )
     val kernel = CodeObjectKernel(
-      "divergent_barrier",
-      Target("gfx1036"),
-      0,
-      0,
-      0,
+      name = "divergent_barrier",
+      target = Target("gfx1036"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
       computePgmRsrc2 = 0x880,
       kernelCodeProperties = 0,
-      code
+      code = code
     )
     val dispatch = KernelTask.validated(
-      NonEmptyString("divergent_barrier"),
+      "divergent_barrier",
       testDimensions(64, 1, 1),
       Dimensions.One,
       Vec.empty

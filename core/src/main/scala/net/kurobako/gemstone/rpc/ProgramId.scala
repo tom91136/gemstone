@@ -1,10 +1,13 @@
 package net.kurobako.gemstone.rpc
 
-import net.kurobako.gemstone.Constraint.{LongBetween, Newtype}
-
-/** A strictly positive program identifier. */
-object ProgramId extends Newtype[LongBetween[1L, Long.MaxValue.type]]("program id") {
-  extension (id: ProgramId) def next: ProgramId = unsafe(Math.addExact(id.raw, 1L))
-}
+import net.kurobako.gemstone.constraint.*
 
 type ProgramId = ProgramId.Type
+
+/** A strictly positive program identifier. */
+object ProgramId extends Newtype[Long > 0] {
+  extension (id: ProgramId) {
+    def toLong: Long    = id.raw
+    def next: ProgramId = apply(id.unwrap + 1L)
+  }
+}

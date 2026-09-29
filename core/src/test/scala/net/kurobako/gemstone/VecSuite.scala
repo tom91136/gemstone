@@ -1,9 +1,10 @@
 package net.kurobako.gemstone
 
 import cats.syntax.all.*
+import net.kurobako.gemstone.collection.*
 import scala.reflect.ClassTag
 
-final class VecSuite extends munit.FunSuite {
+class VecSuite extends munit.FunSuite {
   test("constructors own immutable indexed storage") {
     val mutableSource = scala.collection.mutable.ArrayBuffer(1, 2, 3)
     val values        = Vec.from(mutableSource)
@@ -13,9 +14,14 @@ final class VecSuite extends munit.FunSuite {
     assertEquals(values(1), 2)
   }
 
-  test("empty collections retain the element runtime type") {
+  test("empty collections produce the platform array representation for their element type") {
     def genericEmpty[A: ClassTag]: Vec[A] = Vec.empty
-    assertEquals(genericEmpty[String].length, 0)
+    val references                        = Vec.toArray(genericEmpty[String])
+    val primitives                        = Vec.toArray(genericEmpty[Int])
+    assertEquals(references.length, 0)
+    assertEquals(primitives.length, 0)
+    assertEquals(references.getClass, Array.empty[String].getClass)
+    assertEquals(primitives.getClass, Array.empty[Int].getClass)
   }
 
   test("sequence extraction is representation-neutral") {
@@ -30,10 +36,4 @@ final class VecSuite extends munit.FunSuite {
     assertEquals(parsed, Right(Vec(1, 2, 3)))
   }
 
-  test("byte keys retain content equality while caching their hash") {
-    val left  = ByteKey(Vec[Byte](1, 2, 3))
-    val right = ByteKey(Vec[Byte](1, 2, 3))
-    assertEquals(left, right)
-    assertEquals(left.hashCode, right.hashCode)
-  }
 }

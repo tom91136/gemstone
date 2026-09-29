@@ -1,29 +1,22 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
 import Program.*
 import VMIR.{Instruction as _, *}
-
-import net.kurobako.gemstone.Constraint.NonEmpty
-import net.kurobako.gemstone.Constraint.NonEmptyString
-import net.kurobako.gemstone.Vec
-
-import net.kurobako.gemstone.memory.GuestAddress
-import net.kurobako.gemstone.vm.LaunchGeometry.Axis
-
 import cats.syntax.all.*
-
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 
-private[v9_3] object VMCompiler {
+private object VMCompiler {
 
   enum SourceError {
     case Syntax(error: ParseError)
     case MissingEntry
     case Compilation(error: Error)
 
-    def message: String = this match {
+    def message: NonEmpty[String] = this match {
       case Syntax(error)      => error.message
       case MissingEntry       => "missing .entry declaration"
       case Compilation(error) => error.message
@@ -41,13 +34,13 @@ private[v9_3] object VMCompiler {
     }
 
   enum Error {
-    case Invalid(detail: String)
+    case Invalid(detail: NonEmpty[String])
     case Unsupported(instruction: NonEmpty[String], detail: String)
 
-    def message: String = this match {
+    def message: NonEmpty[String] = this match {
       case Invalid(detail)                  => detail
       case Unsupported(instruction, detail) =>
-        s"unsupported instruction: ${instruction.raw} ($detail)"
+        s"unsupported instruction: $instruction ($detail)"
     }
   }
 
@@ -55,7 +48,7 @@ private[v9_3] object VMCompiler {
 
   def parameterLayout(
       entry: Statement.Entry
-  ): Either[Error, Vec[(KernelParameter, NonNegative[Int])]] =
+  ): Either[Error, Vec[(KernelParameter, Int >= 0)]] =
     for {
       parameters <- lowerParameters(entry.parameters)
       offsets    <- parameterOffsets(entry.parameters, parameters)
@@ -67,22 +60,22 @@ private[v9_3] object VMCompiler {
   def compile(
       entry: Statement.Entry,
       functions: Vec[Statement.Function],
-      globalSymbols: Map[NonEmptyString, GuestAddress]
+      globalSymbols: Map[NonEmpty[String], GuestAddress]
   ): Either[Error, Kernel] = compile(entry, functions, globalSymbols, Map.empty)
 
   def compile(
       entry: Statement.Entry,
       functions: Vec[Statement.Function],
-      globalSymbols: Map[NonEmptyString, GuestAddress],
-      additionalSharedSymbols: Map[NonEmptyString, Long]
+      globalSymbols: Map[NonEmpty[String], GuestAddress],
+      additionalSharedSymbols: Map[NonEmpty[String], Long]
   ): Either[Error, Kernel] =
     compile(entry, functions, globalSymbols, additionalSharedSymbols, Vec.empty)
 
   def compile(
       entry: Statement.Entry,
       functions: Vec[Statement.Function],
-      globalSymbols: Map[NonEmptyString, GuestAddress],
-      additionalSharedSymbols: Map[NonEmptyString, Long],
+      globalSymbols: Map[NonEmpty[String], GuestAddress],
+      additionalSharedSymbols: Map[NonEmpty[String], Long],
       additionalEntries: Vec[Statement.Entry]
   ): Either[Error, Kernel] = {
     val Statement.Entry(_, name, parameters, body) = entry
@@ -109,7 +102,7 @@ private[v9_3] object VMCompiler {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def registerChunkCount(
       program: ExecutableProgram[PredicatedInstruction],
-      functions: Map[NonEmptyString, DeviceFunction]
+      functions: Map[NonEmpty[String], DeviceFunction]
   ): Int = {
     var highest                   = -1
     def inspect(value: Any): Unit = value match {
@@ -136,12 +129,12 @@ private[v9_3] object VMCompiler {
       program: ExecutableProgram[PredicatedInstruction],
       functions: Vec[Statement.Function],
       entries: Vec[Statement.Entry],
-      functionNames: Set[NonEmptyString]
-  ): Either[Error, Map[NonEmptyString, DeviceFunction]] = {
+      functionNames: Set[NonEmpty[String]]
+  ): Either[Error, Map[NonEmpty[String], DeviceFunction]] = {
     val functionDefinitions = functions.view.map(function => function.name -> function).toMap
     val entryDefinitions    = entries.view.map(entry => entry.name -> entry).toMap
-    val pending             = mutable.Queue.empty[NonEmptyString]
-    val lowered             = mutable.Map.empty[NonEmptyString, DeviceFunction]
+    val pending             = mutable.Queue.empty[NonEmpty[String]]
+    val lowered             = mutable.Map.empty[NonEmpty[String], DeviceFunction]
 
     def enqueueCalls(value: ExecutableProgram[PredicatedInstruction]): Unit =
       value.instructions.foreach {
@@ -196,13 +189,13 @@ private[v9_3] object VMCompiler {
   )
   private def lowerProgram(
       body: Vec[Statement],
-      functionNames: Set[NonEmptyString]
+      functionNames: Set[NonEmpty[String]]
   ): Either[Error, ExecutableProgram[PredicatedInstruction]] = {
     val flat = flattenScoped(body) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
-    val labels           = mutable.Map.empty[NonEmptyString, Pc]
+    val labels           = mutable.Map.empty[NonEmpty[String], Pc]
     var instructionIndex = 0
     var statementIndex   = 0
     while (statementIndex < flat.size) {
@@ -210,14 +203,14 @@ private[v9_3] object VMCompiler {
         case Statement.Label(label) =>
           if (labels.contains(label))
             return Left(Error.Invalid(s"duplicate label: $label"))
-          labels(label) = Pc.unsafe(instructionIndex)
+          labels(label) = instructionIndex.unsafe[Pc]
         case Statement.Instruction(_)                                       => instructionIndex += 1
         case Statement.UnsupportedInstruction(opcode, operands, mods, pred) =>
           val qualified = (opcode +: mods.map(_.name)).mkString(".")
           val rendered  = pred.map(value => s"${Printer.render(value)} ").getOrElse("") +
             qualified + (if (operands.isEmpty) "" else operands.map(Printer.render).mkString(" ", ", ", "")) + ";"
           return Left(
-            Error.Unsupported(NonEmpty.unsafe(rendered), "instruction is not implemented")
+            Error.Unsupported(rendered.unsafe[NonEmpty[String]], "instruction is not implemented")
           )
         case _ => ()
       }
@@ -250,7 +243,7 @@ private[v9_3] object VMCompiler {
 
   private def lowerFunction(
       function: Statement.Function,
-      functionNames: Set[NonEmptyString]
+      functionNames: Set[NonEmpty[String]]
   ): Either[Error, DeviceFunction] = {
     val Statement.Function(_, name, returnParameters, parameters, body) = function
     body match {
@@ -275,7 +268,7 @@ private[v9_3] object VMCompiler {
 
   private def lowerEntryFunction(
       entry: Statement.Entry,
-      functionNames: Set[NonEmptyString]
+      functionNames: Set[NonEmpty[String]]
   ): Either[Error, DeviceFunction] = {
     val Statement.Entry(_, name, parameters, body) = entry
     for {
@@ -299,8 +292,8 @@ private[v9_3] object VMCompiler {
   private def parameterOffsets(
       declarations: Vec[Parameter],
       parameters: Vec[KernelParameter]
-  ): Either[Error, Vec[NonNegative[Int]]] = {
-    val result = Vec.newBuilder[NonNegative[Int]]
+  ): Either[Error, Vec[Int >= 0]] = {
+    val result = Vec.newBuilder[Int >= 0]
     var offset = 0L
     var index  = 0
     while (index < declarations.size) {
@@ -313,7 +306,7 @@ private[v9_3] object VMCompiler {
       if (offset > Int.MaxValue.toLong - padding)
         return invalid(s"kernel parameter ${declaration.name} offset exceeds the supported range")
       offset += padding
-      result += NonNegative.unsafe(offset.toInt)
+      result += offset.toInt.unsafe[Int >= 0]
       if (offset > Int.MaxValue.toLong - parameter.widthBytes.raw.toLong)
         return invalid(s"kernel parameter ${declaration.name} layout exceeds the supported range")
       offset += parameter.widthBytes.raw.toLong
@@ -329,15 +322,15 @@ private[v9_3] object VMCompiler {
     var index  = 0
     while (index < parameters.length) {
       val parameter = parameters(index)
-      val width     = Positive.unsafe(parameter.elementType.widthBits.raw / 8)
-      val elements  = parameter.dimensions.foldLeft[Either[Error, Positive[Long]]](Right(1L)) {
+      val width     = (parameter.elementType.widthBits.raw / 8).unsafe[Int > 0]
+      val elements  = parameter.dimensions.foldLeft[Either[Error, Long > 0]](Right(1L)) {
         (current, value) =>
           for {
             count   <- current
             element <- immediate(value)
             product <-
               if (element > 0 && count.raw <= Int.MaxValue.toLong / element)
-                Right(Positive.unsafe(count.raw * element))
+                Right((count.raw * element).unsafe[Long > 0])
               else invalid(s"kernel parameter ${parameter.name} has an invalid array dimension: $element")
           } yield product
       }
@@ -353,7 +346,7 @@ private[v9_3] object VMCompiler {
             case DeclarationQualifier.Attribute(name) => name.raw == "ptr"
             case _                                    => false
           }
-          result += KernelParameter(parameter.name, Positive.unsafe(totalWidth.toInt), pointer)
+          result += KernelParameter(parameter.name, totalWidth.toInt.unsafe[Int > 0], pointer)
       }
       index += 1
     }
@@ -366,7 +359,7 @@ private[v9_3] object VMCompiler {
   private def flattenScoped(statements: Vec[Statement]): Either[Error, Vec[Statement]] = {
     var nextScope = 0
 
-    def registerNames(operand: Operand): collection.View[NonEmptyString] = operand match {
+    def registerNames(operand: Operand): scala.collection.View[NonEmpty[String]] = operand match {
       case Operand.Register(name, _)    => Vector(name).view
       case Operand.Symbol(name)         => Vector(name).view
       case Operand.VectorLiteral(items) => items.view.flatMap(registerNames(_))
@@ -375,7 +368,7 @@ private[v9_3] object VMCompiler {
       case _                            => Vector.empty.view
     }
 
-    def declaredRegisters(body: Vec[Statement]): Vec[NonEmptyString] =
+    def declaredRegisters(body: Vec[Statement]): Vec[NonEmpty[String]] =
       Vec.toVec(body.view.flatMap {
         case Statement.Directive(path, arguments, _)
             if path.head.raw == "reg" =>
@@ -383,7 +376,7 @@ private[v9_3] object VMCompiler {
         case _ => Vector.empty.view
       }).distinct
 
-    def renameOperand(operand: Operand, names: Map[NonEmptyString, NonEmptyString]): Operand = operand match {
+    def renameOperand(operand: Operand, names: Map[NonEmpty[String], NonEmpty[String]]): Operand = operand match {
       case Operand.Register(name, part)                 => Operand.Register(names.getOrElse(name, name), part)
       case Operand.Symbol(name) if names.contains(name) =>
         Operand.Register(names(name), None)
@@ -403,7 +396,7 @@ private[v9_3] object VMCompiler {
 
     def renameInstruction(
         instruction: Instruction,
-        names: Map[NonEmptyString, NonEmptyString]
+        names: Map[NonEmpty[String], NonEmpty[String]]
     ): Either[Error, Instruction] = {
       val operands = instruction.operands.map(renameOperand(_, names))
       val pred     = instruction.pred.map(value => value.copy(operand = renameOperand(value.operand, names)))
@@ -416,7 +409,7 @@ private[v9_3] object VMCompiler {
 
     def visit(
         body: Vec[Statement],
-        names: Map[NonEmptyString, NonEmptyString]
+        names: Map[NonEmpty[String], NonEmpty[String]]
     ): Either[Error, Vec[Statement]] = {
       val result = Vec.newBuilder[Statement]
       var index  = 0
@@ -426,7 +419,7 @@ private[v9_3] object VMCompiler {
             val scope = nextScope
             nextScope += 1
             val scopedNames = declaredRegisters(nested).foldLeft(names) { (current, name) =>
-              current.updated(name, NonEmptyString.unsafe(s"${name.raw}$$scope$scope"))
+              current.updated(name, s"$name$$scope$scope")
             }
             visit(nested, scopedNames) match {
               case Left(error)  => return Left(error)
@@ -476,7 +469,7 @@ private[v9_3] object VMCompiler {
       address: Operand,
       source: Operand,
       opcode: String
-  ): Either[Error, (NonEmptyString, Value, Value, BitWidth, VMIR.AtomicSpace)] =
+  ): Either[Error, (NonEmpty[String], Value, Value, Int where (Between[8, 64] & MultipleOf[8]), VMIR.AtomicSpace)] =
     for {
       destinationName <- registerName(destination)
       addressValue    <- addressValue(address)
@@ -485,14 +478,15 @@ private[v9_3] object VMCompiler {
       destinationName,
       addressValue,
       sourceValue,
-      if (opcode.endsWith("64")) BitWidth(64) else BitWidth(32),
+      if (opcode.endsWith("64")) 64: Int where (Between[8, 64] & MultipleOf[8])
+      else 32: Int where (Between[8, 64] & MultipleOf[8]),
       atomicSpace(opcode)
     )
 
   private def lowerInstruction(
       instruction: Instruction,
-      labels: Map[NonEmptyString, Pc],
-      functionNames: Set[NonEmptyString]
+      labels: Map[NonEmpty[String], Pc],
+      functionNames: Set[NonEmpty[String]]
   ): Either[Error, PredicatedInstruction] = {
     val lowered = instruction match {
       case Instruction.Ld(destination, address, None, None, modifiers, _)
@@ -549,7 +543,7 @@ private[v9_3] object VMCompiler {
         } yield VMIR.Instruction.MovePredicate(destinationName, sourceValue)
       case Instruction.Activemask(destination, _, _) =>
         registerName(destination).map(destinationName =>
-          VMIR.Instruction.Move(destinationName, Value.ActiveMask, BitWidth(32))
+          VMIR.Instruction.Move(destinationName, Value.ActiveMask, 32: Int where (Between[8, 64] & MultipleOf[8]))
         )
       case Instruction.Mov(destination, source, _, _)
           if Set("mov.u32", "mov.s32", "mov.b32").contains(instruction.qualifiedOpcode) &&
@@ -558,7 +552,7 @@ private[v9_3] object VMCompiler {
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, BitWidth(32))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 32: Int where (Between[8, 64] & MultipleOf[8]))
       case Instruction.Mov(destination, source, modifiers, _)
           if Set("mov.u8", "mov.s8", "mov.b8", "mov.u16", "mov.s16", "mov.b16").contains(instruction.qualifiedOpcode) =>
         for {
@@ -573,14 +567,14 @@ private[v9_3] object VMCompiler {
           destinationNames <- splitRegisterNames(destination)
           sourceValue      <- value(source)
           _                <- requirePair(destinationNames, "mov.b64 destination")
-        } yield VMIR.Instruction.MoveSplit(destinationNames, sourceValue, PartWidth(32))
+        } yield VMIR.Instruction.MoveSplit(destinationNames, sourceValue, 32: Int in (16, 32))
       case Instruction.Mov(destination, source, _, _)
           if instruction.qualifiedOpcode == "mov.b32" && Operand.isVectorLiteral(destination) =>
         for {
           destinationNames <- splitRegisterNames(destination)
           sourceValue      <- value(source)
           _                <- requirePair(destinationNames, "mov.b32 destination")
-        } yield VMIR.Instruction.MoveSplit(destinationNames, sourceValue, PartWidth(16))
+        } yield VMIR.Instruction.MoveSplit(destinationNames, sourceValue, 16: Int in (16, 32))
       case Instruction.Mov(destination, source, _, _)
           if (instruction.qualifiedOpcode == "mov.u64" || instruction.qualifiedOpcode == "mov.b64") &&
             Operand.isVectorLiteral(source) =>
@@ -588,32 +582,32 @@ private[v9_3] object VMCompiler {
           destinationName <- registerName(destination)
           sourceValues    <- vectorValues(source)
           _               <- requirePair(sourceValues, "mov.b64 source")
-        } yield VMIR.Instruction.MoveCombine(destinationName, sourceValues, PartWidth(32))
+        } yield VMIR.Instruction.MoveCombine(destinationName, sourceValues, 32: Int in (16, 32))
       case Instruction.Mov(destination, source, _, _)
           if instruction.qualifiedOpcode == "mov.b32" && Operand.isVectorLiteral(source) =>
         for {
           destinationName <- registerName(destination)
           sourceValues    <- vectorValues(source)
           _               <- requirePair(sourceValues, "mov.b32 source")
-        } yield VMIR.Instruction.MoveCombine(destinationName, sourceValues, PartWidth(16))
+        } yield VMIR.Instruction.MoveCombine(destinationName, sourceValues, 16: Int in (16, 32))
       case Instruction.Mov(destination, source, _, _)
           if instruction.qualifiedOpcode == "mov.u64" || instruction.qualifiedOpcode == "mov.b64" =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- functionValue(source, functionNames, promoteUnknown = false)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, BitWidth(64))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
       case Instruction.Mov(destination, source, _, _)
           if instruction.qualifiedOpcode == "mov.f32" =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, BitWidth(32))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 32: Int where (Between[8, 64] & MultipleOf[8]))
       case Instruction.Mov(destination, source, _, _)
           if instruction.qualifiedOpcode == "mov.f64" =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, BitWidth(64))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
       case Instruction.Neg(destination, source, modifiers, _) if !instruction.qualifiedOpcode.contains(".f") =>
         for {
           destinationName <- registerName(destination)
@@ -642,7 +636,7 @@ private[v9_3] object VMCompiler {
           width
         )
       case Instruction.RcpApproxFtzF64(destination, source, modifiers, _) =>
-        floatUnary(FloatUnaryOperation.Reciprocal, destination, source, modifiers, Some(FloatWidth(64)))
+        floatUnary(FloatUnaryOperation.Reciprocal, destination, source, modifiers, Some(64: Int in (16, 32, 64)))
       case Instruction.Rcp(destination, source, modifiers, _)
           if instruction.qualifiedOpcode.startsWith("rcp.") =>
         floatUnary(FloatUnaryOperation.Reciprocal, destination, source, modifiers)
@@ -652,7 +646,7 @@ private[v9_3] object VMCompiler {
           destination,
           source,
           modifiers,
-          Some(FloatWidth(64))
+          Some(64: Int in (16, 32, 64))
         )
       case Instruction.Rsqrt(destination, source, modifiers, _)
           if instruction.qualifiedOpcode.startsWith("rsqrt.") =>
@@ -769,7 +763,7 @@ private[v9_3] object VMCompiler {
           destinationName,
           leftValue,
           rightValue,
-          BitWidth(64)
+          64: Int where (Between[8, 64] & MultipleOf[8])
         )
       case Instruction.Mul(destination, left, right, _, _) if instruction.qualifiedOpcode == "mul.wide.s32" =>
         for {
@@ -781,7 +775,7 @@ private[v9_3] object VMCompiler {
           destinationName,
           leftValue,
           rightValue,
-          BitWidth(64)
+          64: Int where (Between[8, 64] & MultipleOf[8])
         )
       case Instruction.Mul(destination, left, right, _, _) if instruction.qualifiedOpcode == "mul.wide.u16" =>
         for {
@@ -793,7 +787,7 @@ private[v9_3] object VMCompiler {
           destinationName,
           leftValue,
           rightValue,
-          BitWidth(32)
+          32: Int where (Between[8, 64] & MultipleOf[8])
         )
       case Instruction.Mul(destination, left, right, _, _) if instruction.qualifiedOpcode == "mul.wide.s16" =>
         for {
@@ -805,7 +799,7 @@ private[v9_3] object VMCompiler {
           destinationName,
           leftValue,
           rightValue,
-          BitWidth(32)
+          32: Int where (Between[8, 64] & MultipleOf[8])
         )
       case Instruction.Div(destination, left, right, modifiers, _)
           if instruction.qualifiedOpcode.endsWith(".f16") ||
@@ -878,7 +872,8 @@ private[v9_3] object VMCompiler {
           leftValue,
           rightValue,
           addendValue,
-          instruction.qualifiedOpcode.endsWith(".bf16x2")
+          instruction.qualifiedOpcode.endsWith(".bf16x2"),
+          saturate = instruction.mods.exists(_.name == "sat")
         )
       case Instruction.Fma(destination, left, right, addend, _, _)
           if instruction.qualifiedOpcode.endsWith(".bf16") =>
@@ -898,7 +893,13 @@ private[v9_3] object VMCompiler {
           width           <- floatWidth(modifiers)
         } yield VMIR.Instruction.FusedMultiplyAdd(destinationName, leftValue, rightValue, addendValue, width)
       case Instruction.Shl(destination, left, right, _, _) if instruction.qualifiedOpcode == "shl.b32" =>
-        integerBinary(IntegerOperation.ShiftLeft, BitWidth(32), destination, left, right)
+        integerBinary(
+          IntegerOperation.ShiftLeft,
+          32: Int where (Between[8, 64] & MultipleOf[8]),
+          destination,
+          left,
+          right
+        )
       case Instruction.Shl(destination, left, right, modifiers, _) if instruction.qualifiedOpcode.startsWith("shl.") =>
         integerWidth(modifiers).flatMap(integerBinary(IntegerOperation.ShiftLeft, _, destination, left, right))
       case Instruction.Shr(destination, left, right, modifiers, _)
@@ -1099,15 +1100,16 @@ private[v9_3] object VMCompiler {
           leftValue       <- value(left)
           rightValue      <- value(right)
           addendValue     <- value(addend)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) BitWidth(32) else BitWidth(64)
+          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
+          else 64: Int where (Between[8, 64] & MultipleOf[8])
         } yield VMIR.Instruction.MultiplyAdd(
           destination = destinationName,
           left = leftValue,
           right = rightValue,
           addend = addendValue,
           operation = IntegerMultiplyAddOperation.Low(
-            width,
-            width,
+            operandWidth = width,
+            resultWidth = width,
             carryIn = false,
             carryOut = instruction.qualifiedOpcode.contains(".cc.")
           )
@@ -1121,13 +1123,15 @@ private[v9_3] object VMCompiler {
           leftValue       <- value(left)
           rightValue      <- value(right)
           addendValue     <- value(addend)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) BitWidth(32) else BitWidth(64)
+          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
+          else 64: Int where (Between[8, 64] & MultipleOf[8])
         } yield VMIR.Instruction.MultiplyAdd(
           destination = destinationName,
           left = leftValue,
           right = rightValue,
           addend = addendValue,
-          operation = IntegerMultiplyAddOperation.Low(width, width, carryIn = false, carryOut = true)
+          operation =
+            IntegerMultiplyAddOperation.Low(operandWidth = width, resultWidth = width, carryIn = false, carryOut = true)
         )
       case Instruction.Mad(destination, left, right, addend, _, _)
           if instruction.qualifiedOpcode.contains(".wide.") && instruction.qualifiedOpcode.endsWith(".u32") =>
@@ -1142,7 +1146,12 @@ private[v9_3] object VMCompiler {
           right = rightValue,
           addend = addendValue,
           operation =
-            IntegerMultiplyAddOperation.Low(BitWidth(32), BitWidth(64), carryIn = false, carryOut = false)
+            IntegerMultiplyAddOperation.Low(
+              operandWidth = 32: Int where (Between[8, 64] & MultipleOf[8]),
+              resultWidth = 64: Int where (Between[8, 64] & MultipleOf[8]),
+              carryIn = false,
+              carryOut = false
+            )
         )
       case Instruction.Madc(destination, left, right, addend, _, _)
           if (instruction.qualifiedOpcode.contains(".lo.") || instruction.qualifiedOpcode.contains(".hi.")) &&
@@ -1153,17 +1162,18 @@ private[v9_3] object VMCompiler {
           leftValue       <- value(left)
           rightValue      <- value(right)
           addendValue     <- value(addend)
-          width     = if (instruction.qualifiedOpcode.endsWith("32")) BitWidth(32) else BitWidth(64)
+          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
+          else 64: Int where (Between[8, 64] & MultipleOf[8])
           operation = if (instruction.qualifiedOpcode.contains(".hi."))
             IntegerMultiplyAddOperation.High(
-              width,
-              width,
+              operandWidth = width,
+              resultWidth = width,
               carryIn = true,
               carryOut = instruction.qualifiedOpcode.contains(".cc.")
             )
           else IntegerMultiplyAddOperation.Low(
-            width,
-            width,
+            operandWidth = width,
+            resultWidth = width,
             carryIn = true,
             carryOut = instruction.qualifiedOpcode.contains(".cc.")
           )
@@ -1181,7 +1191,8 @@ private[v9_3] object VMCompiler {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) BitWidth(32) else BitWidth(64)
+          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
+          else 64: Int where (Between[8, 64] & MultipleOf[8])
         } yield VMIR.Instruction.IntegerAddWithCarry(
           destinationName,
           leftValue,
@@ -1197,7 +1208,8 @@ private[v9_3] object VMCompiler {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) BitWidth(32) else BitWidth(64)
+          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
+          else 64: Int where (Between[8, 64] & MultipleOf[8])
         } yield VMIR.Instruction.IntegerAddWithCarry(
           destinationName,
           leftValue,
@@ -1213,7 +1225,8 @@ private[v9_3] object VMCompiler {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) BitWidth(32) else BitWidth(64)
+          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
+          else 64: Int where (Between[8, 64] & MultipleOf[8])
         } yield VMIR.Instruction.IntegerSubWithBorrow(
           destinationName,
           leftValue,
@@ -1229,7 +1242,8 @@ private[v9_3] object VMCompiler {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) BitWidth(32) else BitWidth(64)
+          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
+          else 64: Int where (Between[8, 64] & MultipleOf[8])
         } yield VMIR.Instruction.IntegerSubWithBorrow(
           destinationName,
           leftValue,
@@ -1240,16 +1254,28 @@ private[v9_3] object VMCompiler {
         )
       case Instruction.Add(destination, left, right, _, _)
           if instruction.qualifiedOpcode == "add.u32" || instruction.qualifiedOpcode == "add.s32" =>
-        integerBinary(IntegerOperation.Add, BitWidth(32), destination, left, right)
+        integerBinary(IntegerOperation.Add, 32: Int where (Between[8, 64] & MultipleOf[8]), destination, left, right)
       case Instruction.Add(destination, left, right, _, _)
           if instruction.qualifiedOpcode == "add.u64" || instruction.qualifiedOpcode == "add.s64" =>
-        integerBinary(IntegerOperation.Add, BitWidth(64), destination, left, right)
+        integerBinary(IntegerOperation.Add, 64: Int where (Between[8, 64] & MultipleOf[8]), destination, left, right)
       case Instruction.Sub(destination, left, right, _, _)
           if instruction.qualifiedOpcode == "sub.u32" || instruction.qualifiedOpcode == "sub.s32" =>
-        integerBinary(IntegerOperation.Subtract, BitWidth(32), destination, left, right)
+        integerBinary(
+          IntegerOperation.Subtract,
+          32: Int where (Between[8, 64] & MultipleOf[8]),
+          destination,
+          left,
+          right
+        )
       case Instruction.Sub(destination, left, right, _, _)
           if instruction.qualifiedOpcode == "sub.u64" || instruction.qualifiedOpcode == "sub.s64" =>
-        integerBinary(IntegerOperation.Subtract, BitWidth(64), destination, left, right)
+        integerBinary(
+          IntegerOperation.Subtract,
+          64: Int where (Between[8, 64] & MultipleOf[8]),
+          destination,
+          left,
+          right
+        )
       case Instruction.And(destination, left, right, _, _)
           if instruction.qualifiedOpcode == "and.pred" =>
         predicateBinary(PredicateOperation.And, destination, left, right)
@@ -1355,23 +1381,23 @@ private[v9_3] object VMCompiler {
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, BitWidth(64))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
       case Instruction.Cvta(destination, source, _, _) if instruction.qualifiedOpcode == "cvta.local.u64" =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, BitWidth(64))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
       case Instruction.Cvta(destination, source, _, _) if instruction.qualifiedOpcode == "cvta.to.local.u64" =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, BitWidth(64))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
       case Instruction.Cvta(destination, source, _, _)
           if instruction.qualifiedOpcode == "cvta.shared.u64" || instruction.qualifiedOpcode == "cvta.to.shared.u64" =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, BitWidth(64))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
       case Instruction.Cvt(destination, Some(source), None, None, None, None, modifiers, _) =>
         val types = modifiers.map(_.name.raw).flatMap(name => ConversionType.values.find(_.mnemonic == name))
         if (types.size < 2) invalid(s"expected conversion source and destination types: ${instruction.qualifiedOpcode}")
@@ -1417,7 +1443,7 @@ private[v9_3] object VMCompiler {
           sourceValue  <- value(source)
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.AtomicExchange(
-          NonEmptyString("_"),
+          "_": NonEmpty[String],
           addressValue,
           sourceValue,
           width,
@@ -1626,7 +1652,7 @@ private[v9_3] object VMCompiler {
           destinationValue <- addressValue(destination)
           sourceValue      <- addressValue(source)
           size             <- immediate(copySize).flatMap { value =>
-            if (Set(4L, 8L, 16L).contains(value)) Right(Positive.unsafe(value.toInt))
+            if (Set(4L, 8L, 16L).contains(value)) Right(value.toInt.unsafe[Int > 0])
             else invalid(s"cp.async copy size must be 4, 8, or 16 bytes, found $value")
           }
         } yield VMIR.Instruction.AsyncCopy(destinationValue, sourceValue, size)
@@ -1732,8 +1758,8 @@ private[v9_3] object VMCompiler {
           destinationName <- registerName(destination)
           addressValue    <- addressValue(address)
           sourceValue     <- value(source)
-          width = if (atomicOpcode(instruction.qualifiedOpcode).endsWith(".f64")) FloatWidth(64)
-          else FloatWidth(32)
+          width = if (atomicOpcode(instruction.qualifiedOpcode).endsWith(".f64")) 64: Int in (16, 32, 64)
+          else 32: Int in (16, 32, 64)
         } yield VMIR.Instruction.AtomicAddFloat(destinationName, addressValue, sourceValue, width)
       case Instruction.Setp(destination, left, right, None, modifiers, _) =>
         lowerSetPredicate(destination, left, right, modifiers)
@@ -1747,7 +1773,7 @@ private[v9_3] object VMCompiler {
           else PredicateOperation.Or
           checkedBarrierId <-
             if (barrierId >= 0L && barrierId <= Int.MaxValue.toLong)
-              Right(NonNegative.unsafe(barrierId.toInt))
+              Right(barrierId.toInt.unsafe[Int >= 0])
             else invalid(s"barrier id is outside Int range: $barrierId")
         } yield VMIR.Instruction.BarrierReduce(destinationName, checkedBarrierId, predicateName, operation)
       case Instruction.Bra(target, _, _)
@@ -1764,7 +1790,7 @@ private[v9_3] object VMCompiler {
       case Instruction.Bar(barrier, None, None, None, _, _) if instruction.qualifiedOpcode == "bar.sync" =>
         immediate(barrier).flatMap { value =>
           if (value >= 0L && value <= Int.MaxValue.toLong)
-            Right(VMIR.Instruction.BarrierSync(NonNegative.unsafe(value.toInt)))
+            Right(VMIR.Instruction.BarrierSync(value.toInt.unsafe[Int >= 0]))
           else invalid(s"barrier id is outside Int range: $value")
         }
       case Instruction.Membar(_, _) if instruction.qualifiedOpcode.startsWith("membar.") =>
@@ -1803,7 +1829,7 @@ private[v9_3] object VMCompiler {
 
   private def integerBinary(
       operation: IntegerOperation,
-      width: BitWidth,
+      width: Int where (Between[8, 64] & MultipleOf[8]),
       destination: Operand,
       left: Operand,
       right: Operand
@@ -1846,7 +1872,7 @@ private[v9_3] object VMCompiler {
       destination: Operand,
       source: Operand,
       modifiers: Vec[Modifier],
-      fixedWidth: Option[FloatWidth] = None
+      fixedWidth: Option[Int in (16, 32, 64)] = None
   ): Either[Error, VMIR.Instruction] =
     for {
       destinationName <- registerName(destination)
@@ -1916,7 +1942,7 @@ private[v9_3] object VMCompiler {
           for {
             leftValue  <- value(left)
             rightValue <- value(right)
-            width      <- BitWidth.either(kindAndWidth._2)
+            width      <- kindAndWidth._2.refine[Int where (Between[8, 64] & MultipleOf[8])]
               .leftMap(message => Error.Invalid(s"invalid setp width: $message"))
           } yield VMIR.Instruction.SetPredicate(
             destinationName,
@@ -1936,17 +1962,17 @@ private[v9_3] object VMCompiler {
         predicateRegisterName(operand).map(name => Some(ExecutionPredicate(name, negated)))
     }
 
-  private def predicateRegisterName(operand: Operand): Either[Error, NonEmptyString] =
+  private def predicateRegisterName(operand: Operand): Either[Error, NonEmpty[String]] =
     registerName(operand, "predicate register")
 
-  private def registerName(operand: Operand, describe: String = "register"): Either[Error, NonEmptyString] =
+  private def registerName(operand: Operand, describe: String = "register"): Either[Error, NonEmpty[String]] =
     operand match {
       case Operand.Register(name, None) => Right(name)
       case Operand.Symbol(name)         => Right(name)
       case other                        => invalid(s"expected $describe, found ${Printer.render(other)}")
     }
 
-  private def valueRegisterName(operand: Operand): Either[Error, NonEmptyString] = operand match {
+  private def valueRegisterName(operand: Operand): Either[Error, NonEmpty[String]] = operand match {
     case Operand.Register(name, None)                         => Right(name)
     case Operand.Symbol(name) if isBareRegisterName(name.raw) => Right(name)
     case other => invalid(s"expected register, found ${Printer.render(other)}")
@@ -1954,7 +1980,7 @@ private[v9_3] object VMCompiler {
 
   private def valueDestination(
       operand: Operand
-  ): Either[Error, (NonEmptyString, Option[NonEmptyString])] = operand match {
+  ): Either[Error, (NonEmpty[String], Option[NonEmpty[String]])] = operand match {
     case Operand.WithPredicate(base, predicate) =>
       for {
         destinationName <- valueRegisterName(base)
@@ -1963,9 +1989,9 @@ private[v9_3] object VMCompiler {
     case other => valueRegisterName(other).map(_ -> None)
   }
 
-  private def registerNames(operand: Operand): Either[Error, Vec[NonEmptyString]] = operand match {
+  private def registerNames(operand: Operand): Either[Error, Vec[NonEmpty[String]]] = operand match {
     case Operand.VectorLiteral(items) =>
-      items.foldLeft[Either[Error, Vec[NonEmptyString]]](Right(Vec.empty)) { (current, item) =>
+      items.foldLeft[Either[Error, Vec[NonEmpty[String]]]](Right(Vec.empty)) { (current, item) =>
         for {
           names <- current
           name  <- registerName(item)
@@ -1985,13 +2011,13 @@ private[v9_3] object VMCompiler {
     case other => value(other).map(Vec(_))
   }
 
-  private def splitRegisterNames(operand: Operand): Either[Error, Vec[NonEmptyString]] = operand match {
+  private def splitRegisterNames(operand: Operand): Either[Error, Vec[NonEmpty[String]]] = operand match {
     case Operand.VectorLiteral(items) =>
-      items.foldLeft[Either[Error, Vec[NonEmptyString]]](Right(Vec.empty)) { (current, item) =>
+      items.foldLeft[Either[Error, Vec[NonEmpty[String]]]](Right(Vec.empty)) { (current, item) =>
         for {
           names <- current
           name  <- item match {
-            case Operand.Symbol(name) if name.raw == "_" => Right(NonEmptyString("_"))
+            case Operand.Symbol(name) if name.raw == "_" => Right("_": NonEmpty[String])
             case other                                   => registerName(other)
           }
         } yield names :+ name
@@ -2014,22 +2040,22 @@ private[v9_3] object VMCompiler {
       rightName       <- predicateRegisterName(right)
     } yield VMIR.Instruction.PredicateBinary(operation, destinationName, leftName, rightName)
 
-  private def callParameters(operand: Option[Operand]): Either[Error, Vec[NonEmptyString]] = operand match {
+  private def callParameters(operand: Option[Operand]): Either[Error, Vec[NonEmpty[String]]] = operand match {
     case None        => Right(Vec.empty)
     case Some(value) => callParameters(value)
   }
 
-  private def callParameters(operand: Operand): Either[Error, Vec[NonEmptyString]] = operand match {
+  private def callParameters(operand: Operand): Either[Error, Vec[NonEmpty[String]]] = operand match {
     case Operand.Symbol(name)         => Right(Vec(name))
     case Operand.Parenthesized(items) =>
-      items.foldLeft[Either[Error, Vec[NonEmptyString]]](Right(Vec.empty)) { (current, item) =>
+      items.foldLeft[Either[Error, Vec[NonEmpty[String]]]](Right(Vec.empty)) { (current, item) =>
         for {
           names <- current
           value <- callParameters(item)
         } yield names ++ value
       }
     case Operand.VectorLiteral(items) =>
-      items.foldLeft[Either[Error, Vec[NonEmptyString]]](Right(Vec.empty)) { (current, item) =>
+      items.foldLeft[Either[Error, Vec[NonEmpty[String]]]](Right(Vec.empty)) { (current, item) =>
         for {
           names <- current
           value <- callParameters(item)
@@ -2040,7 +2066,7 @@ private[v9_3] object VMCompiler {
 
   private def functionValue(
       operand: Operand,
-      functionNames: Set[NonEmptyString],
+      functionNames: Set[NonEmpty[String]],
       promoteUnknown: Boolean
   ): Either[Error, Value] = operand match {
     case Operand.Symbol(name)
@@ -2050,7 +2076,7 @@ private[v9_3] object VMCompiler {
     case other                => value(other)
   }
 
-  private def sharedSymbols(body: Vec[Statement]): Map[NonEmptyString, Long] = {
+  private def sharedSymbols(body: Vec[Statement]): Map[NonEmpty[String], Long] = {
     val declarations = flatten(body).collect {
       case Statement.Data(DataAddressSpace.Shared, _, _, name, _, _) => Iterator.single(name)
       case Statement.Directive(path, arguments, _)
@@ -2075,13 +2101,13 @@ private[v9_3] object VMCompiler {
 
   private def parameterAddress(
       operand: Operand
-  ): Either[Error, (NonEmptyString, NonNegative[Int])] = operand match {
+  ): Either[Error, (NonEmpty[String], Int >= 0)] = operand match {
     case Operand.Address(Vec(Operand.Symbol(name))) =>
       Right(name -> 0)
     case Operand.Address(Vec(Operand.Add(Operand.Symbol(name), offset))) =>
       immediate(offset).flatMap(value =>
         if (value >= 0L && value <= Int.MaxValue.toLong)
-          Right(name -> NonNegative.unsafe(value.toInt))
+          Right(name -> value.toInt.unsafe[Int >= 0])
         else invalid(s"parameter offset is outside Int range: $value")
       )
     case other => invalid(s"expected parameter address, found ${Printer.render(other)}")
@@ -2108,31 +2134,34 @@ private[v9_3] object VMCompiler {
     case other                => value(other)
   }
 
-  private def integerWidth(modifiers: Vec[Modifier]): Either[Error, BitWidth] =
+  private def integerWidth(modifiers: Vec[Modifier]): Either[Error, Int where (Between[8, 64] & MultipleOf[8])] =
     scalarBitWidth(modifiers, "integer type")
 
-  private def floatWidth(modifiers: Vec[Modifier]): Either[Error, FloatWidth] =
-    modifiers.reverseIterator.collectFirst {
+  private def floatWidth(modifiers: Vec[Modifier]): Either[Error, Int in (16, 32, 64)] =
+    modifiers.reverse.view.collectFirst {
       case Modifier(name) if Set("f16", "f32", "f64").contains(name.raw) => name.raw.drop(1).toInt
     }.toRight(Error.Invalid(
       s"expected an f16, f32, or f64 type in ${modifiers.map(_.name.raw).mkString(".")}"
     ))
       .flatMap(width =>
-        FloatWidth.either(width).leftMap(message => Error.Invalid(message))
+        width.refine[Int in (16, 32, 64)].leftMap(message => Error.Invalid(message))
       )
 
-  private def scalarWidth(modifiers: Vec[Modifier]): Either[Error, BitWidth] =
+  private def scalarWidth(modifiers: Vec[Modifier]): Either[Error, Int where (Between[8, 64] & MultipleOf[8])] =
     scalarBitWidth(modifiers, "scalar type")
 
-  private def scalarBitWidth(modifiers: Vec[Modifier], describe: String): Either[Error, BitWidth] =
-    modifiers.reverseIterator.collectFirst {
+  private def scalarBitWidth(
+      modifiers: Vec[Modifier],
+      describe: String
+  ): Either[Error, Int where (Between[8, 64] & MultipleOf[8])] =
+    modifiers.reverse.view.collectFirst {
       case Modifier(name) if isScalarType(name.raw) => scalarTypeWidth(name.raw)
     }.filter(Set(8, 16, 32, 64).contains)
       .toRight(Error.Invalid(
         s"expected an 8, 16, 32, or 64-bit $describe in ${modifiers.map(_.name.raw).mkString(".")}"
       ))
       .flatMap(width =>
-        BitWidth.either(width).leftMap(message => Error.Invalid(message))
+        width.refine[Int where (Between[8, 64] & MultipleOf[8])].leftMap(message => Error.Invalid(message))
       )
 
   private def isScalarType(name: String): Boolean =
@@ -2218,9 +2247,5 @@ private[v9_3] object VMCompiler {
   private def isSignedScalarOpcode(opcode: String): Boolean =
     opcode.endsWith(".s8") || opcode.endsWith(".s16") || opcode.endsWith(".s32") || opcode.endsWith(".s64")
 
-  private def invalid[A](detail: String): Either[Error, A] =
-    NonEmptyString.either(detail) match {
-      case Left(_)        => Left(Error.Invalid("invalid PTX input"))
-      case Right(refined) => Left(Error.Invalid(refined.raw))
-    }
+  private def invalid[A](detail: NonEmpty[String]): Either[Error, A] = Left(Error.Invalid(detail))
 }

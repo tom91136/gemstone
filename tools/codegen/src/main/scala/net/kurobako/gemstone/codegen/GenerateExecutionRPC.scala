@@ -1,13 +1,10 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.Constraint.Positive
-
-import net.kurobako.gemstone.rpc.ExecutionRPC
-import net.kurobako.gemstone.rpc.Wire
-import net.kurobako.gemstone.rpc.Wire.{Alternative, Field, OperationShape, Shape}
-import com.monovore.decline.{Command, Opts}
-
+import com.monovore.decline.Command
+import com.monovore.decline.Opts
 import java.nio.file.Path
+import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.rpc.Wire.*
 import scala.collection.mutable
 
 /** Derives the native execution client and its Glaze MessagePack codecs from the Scala operation enum. */
@@ -32,7 +29,6 @@ object GenerateExecutionRPC {
     Console.out.println(s"generated ${files.size} execution RPC files")
   }
 
-  private def hex(value: Long): String          = f"0x$value%016xULL"
   private def identifier(value: String): String = {
     val result = value.map(character => if (character.isLetterOrDigit || character == '_') character else '_')
     if (result.headOption.exists(_.isDigit)) s"_$result" else result
@@ -46,6 +42,8 @@ object GenerateExecutionRPC {
       case Wire.Constraint.Positive0              => "Positive0"
       case Wire.Constraint.IntInterval(min, max)  => s"Interval${numberName(min)}To${numberName(max)}"
       case Wire.Constraint.LongInterval(min, max) => s"Interval${numberName(min)}To${numberName(max)}"
+      case Wire.Constraint.OneOf(values)          => s"OneOf${values.map(numberName(_)).mkString("Or")}"
+      case Wire.Constraint.MultipleOf(divisor)    => s"MultipleOf${numberName(divisor)}"
       case Wire.Constraint.MinimumLength(min)     => s"MinimumLength$min"
       case Wire.Constraint.NotContains(value)     =>
         s"NotContains${value.getBytes(java.nio.charset.StandardCharsets.UTF_8).view.map(byte => f"${byte & 0xff}%02x").mkString}"
@@ -57,7 +55,7 @@ object GenerateExecutionRPC {
     case _                        => false
   }
 
-  private final class Model(protocol: Wire.ProtocolShape) {
+  private class Model(protocol: Wire.ProtocolShape) {
     private val definitions = mutable.LinkedHashMap.empty[String, Shape]
 
     private def add(name: String, shape: Shape): Unit = {
@@ -143,7 +141,7 @@ object GenerateExecutionRPC {
     case other => throw IllegalArgumentException(s"unnamed RPC definition: $other")
   }
 
-  private def metaDefinition(named: Named, model: Model): Vector[String] = named.shape match {
+  private def metaDefinition(named: Named): Vector[String] = named.shape match {
     case Shape.Alias(_, _, _) =>
       Vector(s"template <> struct glz::meta<${qualified(named.name)}> { static constexpr auto value = &${qualified(
           named.name
@@ -195,12 +193,12 @@ object GenerateExecutionRPC {
     val calls       = protocol.operations.map { operation =>
       s"  Result<${model.cppType(operation.reply)}> call(const ${identifier(operation.request.name)} &request);"
     }.mkString("\n")
-    val operationIds = protocol.operations.map(operation =>
-      s"inline constexpr uint64_t ${identifier(operation.request.name)} = ${hex(operation.request.id)};"
+    val operationTags = protocol.operations.map(operation =>
+      s"inline constexpr std::string_view ${identifier(operation.request.name)} = ${Emission.literal(operation.request.name)};"
     ).mkString("\n")
     val metas = Vector(
       s"template <> struct glz::meta<${qualified("Unit")}> { static constexpr auto value = glz::object(); };"
-    ) ++ model.named.flatMap(metaDefinition(_, model)) ++
+    ) ++ model.named.flatMap(metaDefinition(_)) ++
       protocol.operations.flatMap(operation => requestMeta(operation))
     GeneratedHeader.cpp("from ExecutionRPC.Operation") +
       s"""|#ifndef GEMSTONE_EXECUTION_RPC_HPP
@@ -227,20 +225,22 @@ object GenerateExecutionRPC {
        |inline constexpr uint32_t MaximumPayload = ${ExecutionRPC.MaximumPayload}U;
        |inline constexpr uint32_t MaximumElements = ${ExecutionRPC.MaximumElements}U;
        |inline constexpr uint32_t MaximumTextBytes = ${ExecutionRPC.MaximumTextBytes}U;
-       |inline constexpr uint64_t SchemaFingerprint = ${hex(protocol.fingerprint)};
-       |inline constexpr size_t RequestFingerprintOffset = ${ExecutionRPC.RequestFingerprintOffset}U;
+       |inline constexpr uint32_t HelloMagic = ${ExecutionRPC.HelloMagic}U;
+       |inline constexpr uint32_t HelloResponseMagic = ${ExecutionRPC.HelloResponseMagic}U;
+       |inline constexpr uint32_t MaximumSchemaBytes = ${ExecutionRPC.MaximumSchemaBytes}U;
+       |inline constexpr uint32_t MaximumTagBytes = ${ExecutionRPC.MaximumTagBytes}U;
+       |inline constexpr std::string_view Schema = ${Emission.literal(protocol.canonical)};
        |inline constexpr size_t RequestClientOffset = ${ExecutionRPC.RequestClientOffset}U;
        |inline constexpr size_t RequestSessionHighOffset = ${ExecutionRPC.RequestSessionHighOffset}U;
        |inline constexpr size_t RequestSessionLowOffset = ${ExecutionRPC.RequestSessionLowOffset}U;
-       |inline constexpr size_t RequestOperationOffset = ${ExecutionRPC.RequestOperationOffset}U;
+       |inline constexpr size_t RequestTagSizeOffset = ${ExecutionRPC.RequestTagSizeOffset}U;
        |inline constexpr size_t RequestPayloadSizeOffset = ${ExecutionRPC.RequestPayloadSizeOffset}U;
        |inline constexpr size_t RequestHeaderBytes = ${ExecutionRPC.RequestHeaderBytes}U;
-       |inline constexpr size_t ResponseFingerprintOffset = ${ExecutionRPC.ResponseFingerprintOffset}U;
        |inline constexpr size_t ResponseStatusOffset = ${ExecutionRPC.ResponseStatusOffset}U;
        |inline constexpr size_t ResponsePayloadSizeOffset = ${ExecutionRPC.ResponsePayloadSizeOffset}U;
        |inline constexpr size_t ResponseHeaderBytes = ${ExecutionRPC.ResponseHeaderBytes}U;
        |namespace operation {
-       |$operationIds
+       |$operationTags
        |}
        |
        |struct Unit {};
@@ -297,20 +297,12 @@ object GenerateExecutionRPC {
     GeneratedHeader.cpp("from ExecutionRPC.Operation") +
       s"""|#define _POSIX_C_SOURCE 200112L
        |#include "gemstone_execution_rpc.hpp"
+       |#include <gemstone/environment.hpp>
        |#include "process_identity.hpp"
        |
-       |#include <arpa/inet.h>
-       |#include <cerrno>
-       |#include <cstdlib>
-       |#include <cstring>
-       |#include <limits>
+       |#include "connection.hpp"
        |#include <mutex>
-       |#include <netdb.h>
-       |#include <netinet/tcp.h>
        |#include <string_view>
-       |#include <sys/socket.h>
-       |#include <sys/time.h>
-       |#include <type_traits>
        |#include <unistd.h>
        |
        |namespace gemstone::execution {
@@ -321,123 +313,45 @@ object GenerateExecutionRPC {
        |  bool structs_as_arrays = true;
        |};
        |
-       |int socketTimeoutSeconds() {
-       |  constexpr int fallback = 300;
-       |  const char *raw = std::getenv("GEMSTONE_RPC_TIMEOUT_SECONDS");
-       |  if (!raw || raw[0] == '\\0') return fallback;
-       |  char *end = nullptr; errno = 0; const long value = std::strtol(raw, &end, 10);
-       |  return errno == 0 && end && *end == '\\0' && value > 0 && value <= std::numeric_limits<int>::max()
-       |             ? static_cast<int>(value) : fallback;
-       |}
-       |
-       |void appendU32(std::vector<uint8_t> &out, uint32_t value) {
-       |  out.push_back(static_cast<uint8_t>(value >> 24));
-       |  out.push_back(static_cast<uint8_t>(value >> 16));
-       |  out.push_back(static_cast<uint8_t>(value >> 8));
-       |  out.push_back(static_cast<uint8_t>(value));
-       |}
-       |
-       |void appendU64(std::vector<uint8_t> &out, uint64_t value) {
-       |  appendU32(out, static_cast<uint32_t>(value >> 32));
-       |  appendU32(out, static_cast<uint32_t>(value));
-       |}
-       |
-       |uint32_t readU32(const uint8_t *data) {
-       |  return (static_cast<uint32_t>(data[0]) << 24) | (static_cast<uint32_t>(data[1]) << 16) | (static_cast<uint32_t>(data[2]) << 8)
-       |         | static_cast<uint32_t>(data[3]);
-       |}
-       |
-       |uint64_t readU64(const uint8_t *data) { return (static_cast<uint64_t>(readU32(data)) << 32) | readU32(data + 4); }
-       |
        |std::string failureDetail(const ExecutionFailure &failure) {
        |  return std::visit([](const auto &value) { return value.detail; }, failure);
-       |}
-       |
-       |bool parseClient(const char *text, uint64_t &value) {
-       |  if (text == nullptr || text[0] == '\\0' || text[0] == '-') return false;
-       |  errno = 0; char *end = nullptr; const auto parsed = std::strtoull(text, &end, 10);
-       |  if (errno == ERANGE || end == text || *end != '\\0' || parsed == 0) return false;
-       |  value = static_cast<uint64_t>(parsed); return true;
-       |}
-       |
-       |bool sendAll(int fd, const uint8_t *data, size_t size) {
-       |  while (size != 0) { const auto sent = ::send(fd, data, size, MSG_NOSIGNAL); if (sent < 0 && errno == EINTR) continue; if (sent <= 0) return false; data += sent; size -= static_cast<size_t>(sent); } return true;
-       |}
-       |bool receiveAll(int fd, uint8_t *data, size_t size) {
-       |  while (size != 0) { const auto received = ::recv(fd, data, size, 0); if (received < 0 && errno == EINTR) continue; if (received <= 0) return false; data += received; size -= static_cast<size_t>(received); } return true;
        |}
        |
        |} // namespace
        |
        |class Client::Impl {
        | public:
-       |  Impl(uint64_t client, uint64_t high, uint64_t low) : client_(client), sessionHigh_(high), sessionLow_(low) {}
-       |  ~Impl() { if (fd_ >= 0) ::close(fd_); }
+       |  Impl(uint64_t client, uint64_t high, uint64_t low) : connection_(client, high, low) {}
        |  std::string error() const { std::lock_guard<std::mutex> guard(mutex_); return error_; }
        |
-       |  template <class T, class Request> Result<T> call(uint64_t operation, const Request &request) {
+       |  template <class T, class Request> Result<T> call(std::string_view operation, const Request &request) {
        |    std::lock_guard<std::mutex> guard(mutex_); error_.clear();
        |    std::string payload;
        |    if (glz::write<GlazeOptions{}>(request, payload)) return failed<T>("execution request encoding failed");
        |    if (payload.size() > MaximumPayload) return failed<T>("execution request exceeds the encoding limits");
        |    std::vector<uint8_t> response; uint32_t status = 0;
-       |    if (!exchange(operation, payload, status, response)) return Result<T>::failure(Error{error_});
+       |    if (!connection_.exchange(operation, payload, status, response)) return failed<T>(connection_.error());
        |    const std::string_view body(reinterpret_cast<const char *>(response.data()), response.size());
        |    if (status == 1) {
        |      ExecutionFailure failure{};
-       |      if (glz::read<GlazeOptions{}>(failure, body)) { poison(); return failed<T>("execution failure response is invalid"); }
+       |      if (glz::read<GlazeOptions{}>(failure, body)) { connection_.poison(); return failed<T>("execution failure response is invalid"); }
        |      error_ = failureDetail(failure); return Result<T>::failure(Error{error_});
        |    }
        |    T value{};
-       |    if (glz::read<GlazeOptions{}>(value, body)) { poison(); return failed<T>("execution response payload is invalid"); }
+       |    if (glz::read<GlazeOptions{}>(value, body)) { connection_.poison(); return failed<T>("execution response payload is invalid"); }
        |    return Result<T>::success(std::move(value));
        |  }
        |
        | private:
        |  template <class T> Result<T> failed(std::string detail) { error_ = std::move(detail); return Result<T>::failure(Error{error_}); }
-       |  void poison() { if (fd_ >= 0) ::close(fd_); fd_ = -1; if (established_) poisoned_ = true; }
-       |  bool connectServer() {
-       |    if (fd_ >= 0) return true;
-       |    if (poisoned_) { error_ = "execution session was lost; create a fresh client and rebuild its state"; return false; }
-       |    const char *port = std::getenv("GEMSTONE_RPC_PORT"); if (port == nullptr || port[0] == '\\0') { error_ = "GEMSTONE_RPC_PORT is not set"; return false; }
-       |    addrinfo hints{}; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM; addrinfo *addresses = nullptr;
-       |    if (::getaddrinfo("127.0.0.1", port, &hints, &addresses) != 0) { error_ = "cannot resolve the Gemstone RPC endpoint"; return false; }
-       |    int connected = -1; for (auto *address = addresses; address != nullptr; address = address->ai_next) { connected = ::socket(address->ai_family, address->ai_socktype, address->ai_protocol); if (connected < 0) continue; if (::connect(connected, address->ai_addr, address->ai_addrlen) == 0) break; ::close(connected); connected = -1; }
-       |    ::freeaddrinfo(addresses); if (connected < 0) { error_ = "cannot connect to the Gemstone RPC endpoint"; return false; }
-       |    const timeval timeout{socketTimeoutSeconds(), 0}; const int noDelay = 1;
-       |    if (::setsockopt(connected, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay)) != 0 ||
-       |        ::setsockopt(connected, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0 ||
-       |        ::setsockopt(connected, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) != 0) {
-       |      ::close(connected); error_ = "cannot configure the Gemstone RPC connection"; return false;
-       |    }
-       |    fd_ = connected; established_ = true; return true;
-       |  }
-       |  bool exchange(uint64_t operation, const std::string &payload, uint32_t &status, std::vector<uint8_t> &response) {
-       |    if (!connectServer()) return false;
-       |    std::vector<uint8_t> header;
-       |    appendU32(header, RequestMagic); appendU64(header, SchemaFingerprint); appendU64(header, client_);
-       |    appendU64(header, sessionHigh_); appendU64(header, sessionLow_); appendU64(header, operation);
-       |    appendU32(header, static_cast<uint32_t>(payload.size()));
-       |    if (!sendAll(fd_, header.data(), header.size())
-       |        || (!payload.empty() && !sendAll(fd_, reinterpret_cast<const uint8_t *>(payload.data()), payload.size()))) {
-       |      poison(); error_ = "execution request transport failed"; return false;
-       |    }
-       |    uint8_t headerBytes[ResponseHeaderBytes];
-       |    if (!receiveAll(fd_, headerBytes, sizeof(headerBytes))) { poison(); error_ = "execution response transport failed"; return false; }
-       |    const uint32_t magic = readU32(headerBytes); const uint64_t fingerprint = readU64(headerBytes + 4);
-       |    status = readU32(headerBytes + 12); const uint32_t size = readU32(headerBytes + 16);
-       |    if (magic != ResponseMagic || fingerprint != SchemaFingerprint || status > 1 || size > MaximumPayload) {
-       |      poison(); error_ = "execution response header is invalid"; return false;
-       |    }
-       |    response.resize(size); if (!response.empty() && !receiveAll(fd_, response.data(), response.size())) { poison(); error_ = "execution response body is truncated"; return false; }
-       |    return true;
-       |  }
-       |  mutable std::mutex mutex_; int fd_ = -1; bool established_ = false; bool poisoned_ = false;
-       |  uint64_t client_; uint64_t sessionHigh_; uint64_t sessionLow_; std::string error_;
+       |  mutable std::mutex mutex_;
+       |  Connection connection_;
+       |  std::string error_;
        |};
        |
        |std::unique_ptr<Client> Client::fromEnvironment() {
-       |  uint64_t client = 0; if (!parseClient(std::getenv("GEMSTONE_RPC_CLIENT"), client)) return nullptr;
+       |  const auto client = environment::unsignedValue(environment::RpcClient, 0, std::numeric_limits<int64_t>::max());
+       |  if (client == 0) return nullptr;
        |  const auto incarnation = processIncarnation(); if (incarnation == 0) return nullptr;
        |  return std::unique_ptr<Client>(new Client(std::make_unique<Impl>(client, static_cast<uint32_t>(::getpid()), incarnation)));
        |}

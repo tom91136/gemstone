@@ -1,38 +1,37 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
 import Program.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.string.*
 
-import net.kurobako.gemstone.Vec
-
-final class InstructionSuite extends munit.FunSuite {
+class InstructionSuite extends munit.FunSuite {
   test("every generated form descriptor decodes directly to its parameterized enum case") {
-    val opcodes = Instruction.definitions.map(_.opcode).distinct.sortBy(_.raw)
+    val opcodes = Instruction.definitions.map(_.opcode).distinct.sorted
     assertEquals(opcodes.size, 2407)
     Instruction.definitions.foreach { definition =>
-      definition.decoder.operandCounts.foreach { operandCount =>
+      definition.operandCounts.foreach { operandCount =>
         val operands = operandsFor(operandCount)
-        val modifier = Modifier(NonEmptyString("test"), Some(NonEmptyString("value")))
-        val decoded  = definition.decoder(operands, Vec(modifier))
+        val modifier = Modifier("test", Some("value"))
+        val decoded  = definition.decode(operands, Vec(modifier))
         assertEquals(decoded.size, 1, s"${definition.toString}: ambiguous or missing form")
         val instruction = decoded.head
         assertEquals(instruction.definition, definition)
         assertEquals(instruction.opcode, definition.opcode)
         assertEquals(instruction.meta, definition.meta)
         assertEquals(instruction.operands, operands)
-        assertEquals(instruction.mods.toSeq, Seq(modifier))
+        assertEquals(instruction.mods, Seq(modifier))
       }
     }
   }
 
   test("generated runtime class names are portable to case-insensitive filesystems") {
     val classNames = Instruction.definitions.flatMap { definition =>
-      definition.decoder.operandCounts.flatMap { operandCount =>
-        definition.decoder(
+      definition.operandCounts.flatMap { operandCount =>
+        definition.decode(
           operandsFor(operandCount),
           Vec.empty
-        ).map(_.getClass.getName.toLowerCase(java.util.Locale.ROOT))
+        ).map(_.getClass.getName.toLowerCaseRoot)
       }
     }
     assertEquals(classNames.distinct.size, classNames.size)

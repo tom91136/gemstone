@@ -1,22 +1,22 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.NonNegative
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.spirv.v1_6 as spv
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.isa.ValidationOutcome
-import net.kurobako.gemstone.NonEmptyVec
-
-final class ValidationSuite extends munit.FunSuite {
+class ValidationSuite extends munit.FunSuite {
   test("OpenCL compute environment is accepted") {
     val module = Module(
       Header(ISA.version, Word(0), Word(10), Word(0)),
       Vec(
-        Instruction.Capability(operand("Capability", 6)),
-        Instruction.MemoryModel(operand("AddressingModel", 2), operand("MemoryModel", 2)),
+        Instruction.Capability(operand("Capability", spv.Capability.Kernel)),
+        Instruction.MemoryModel(
+          operand("AddressingModel", spv.AddressingModel.Physical64),
+          operand("MemoryModel", spv.MemoryModel.OpenCL)
+        ),
         Instruction.EntryPoint(
-          operand("ExecutionModel", 6),
+          operand("ExecutionModel", spv.ExecutionModel.Kernel),
           operand("IdRef", 1),
           operand("LiteralString", 0),
           Vec.empty
@@ -31,10 +31,13 @@ final class ValidationSuite extends munit.FunSuite {
     val module = Module(
       Header(ISA.version, Word(0), Word(10), Word(0)),
       Vec(
-        Instruction.Capability(operand("Capability", 1)),
-        Instruction.MemoryModel(operand("AddressingModel", 0), operand("MemoryModel", 1)),
+        Instruction.Capability(operand("Capability", spv.Capability.Shader)),
+        Instruction.MemoryModel(
+          operand("AddressingModel", spv.AddressingModel.Logical),
+          operand("MemoryModel", spv.MemoryModel.GLSL450)
+        ),
         Instruction.EntryPoint(
-          operand("ExecutionModel", 5),
+          operand("ExecutionModel", spv.ExecutionModel.GLCompute),
           operand("IdRef", 1),
           operand("LiteralString", 0),
           Vec.empty
@@ -59,8 +62,11 @@ final class ValidationSuite extends munit.FunSuite {
     val module = Module(
       Header(ISA.version, Word(0), Word(1), Word(0)),
       Vec(
-        Instruction.Capability(operand("Capability", 6)),
-        Instruction.MemoryModel(operand("AddressingModel", 2), operand("MemoryModel", 2))
+        Instruction.Capability(operand("Capability", spv.Capability.Kernel)),
+        Instruction.MemoryModel(
+          operand("AddressingModel", spv.AddressingModel.Physical64),
+          operand("MemoryModel", spv.MemoryModel.OpenCL)
+        )
       ),
       Endianness.Little
     )
@@ -80,8 +86,8 @@ final class ValidationSuite extends munit.FunSuite {
     )
   }
 
-  private def operand(kind: String, value: Int): Operand = Operand(
-    NonEmptyString.either(kind).fold(message => fail(message), valid => valid),
+  private def operand(kind: NonEmpty[String], value: Int): Operand = Operand(
+    kind,
     Vec.nonEmpty(Word(value))
   )
 }

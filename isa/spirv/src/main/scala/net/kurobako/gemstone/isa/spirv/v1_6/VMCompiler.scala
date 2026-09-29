@@ -1,28 +1,21 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Constraint.{IntBetween, OneOf}
-
-import net.kurobako.gemstone.Constraint.NoNulString
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
+import VMCollectives.*
 import VMIR.*
-import VMCollectives.openCLBroadcastScope
-
-import net.kurobako.gemstone.{NonEmptyVec, Vec}
-import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.isa.ValidationOutcome
-import net.kurobako.gemstone.vm.Fault
-
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 import scala.util.control.NonFatal
 
-private[v1_6] object VMCompiler {
-  import Operand.{id, unsigned}
+private object VMCompiler {
+  import Operand.*
 
   // OpSpecConstantOp can embed any pure opcode; the evaluator supports these two.
-  private val CompositeExtractOpcode = Instruction.Definition.CompositeExtract.opcodeNumber.raw.toLong
-  private val UDivOpcode             = Instruction.Definition.UDiv.opcodeNumber.raw.toLong
+  private val CompositeExtractOpcode = Instruction.Definition.CompositeExtract.opcodeNumber.toInt.toLong
+  private val UDivOpcode             = Instruction.Definition.UDiv.opcodeNumber.toInt.toLong
 
   private def isFunctionEnd(instruction: Instruction): Boolean = instruction match {
     case Instruction.FunctionEnd() => true
@@ -47,9 +40,9 @@ private[v1_6] object VMCompiler {
     Validation.validate(module, environment) match {
       case ValidationOutcome.Accepted         => compileUnchecked(module)
       case ValidationOutcome.Rejected(issues) =>
-        Left(Fault.InvalidTask(issues.toVector.map(_.message).mkString("invalid SPIR-V module: ", "; ", "")))
+        Left(Fault.InvalidTask(s"invalid SPIR-V module: ${issues.map(_.message).mkString("; ")}"))
       case ValidationOutcome.Incomplete(issues) =>
-        Left(Fault.Unsupported(issues.toVector.map(_.message).mkString("unsupported SPIR-V module: ", "; ", "")))
+        Left(Fault.Unsupported(s"unsupported SPIR-V module: ${issues.map(_.message).mkString("; ")}"))
     }
 
   // Module compilation fills indexed tables in one pass and stops at the first malformed instruction.
@@ -63,8 +56,8 @@ private[v1_6] object VMCompiler {
     val types                   = mutable.HashMap.empty[Int, RuntimeType]
     val constants               = mutable.HashMap.empty[Int, Constant]
     val globals                 = mutable.HashMap.empty[Int, Global]
-    val descriptorSets          = mutable.HashMap.empty[Int, Int]
-    val descriptorSlots         = mutable.HashMap.empty[Int, Int]
+    val descriptorSets          = mutable.HashMap.empty[Int, Int >= 0]
+    val descriptorSlots         = mutable.HashMap.empty[Int, Int >= 0]
     val builtins                = mutable.HashMap.empty[Int, Int]
     val arrayStrides            = mutable.HashMap.empty[Int, Int]
     val memberOffsets           = mutable.HashMap.empty[(Int, Int), Int]
@@ -72,30 +65,28 @@ private[v1_6] object VMCompiler {
     val byValueParameters       = mutable.HashSet.empty[Int]
     val saturatedConversions    = mutable.HashSet.empty[Int]
     val roundingModes           = mutable.HashMap.empty[Int, Int]
-    val extendedInstructionSets = mutable.HashMap.empty[Int, NonEmptyString]
-    val entryPoints             = mutable.HashMap.empty[NonEmptyString, Int]
-    val entryPointInterfaces    = mutable.HashMap.empty[NonEmptyString, Set[Int]]
-    val vulkanEntries           = mutable.HashSet.empty[NonEmptyString]
+    val extendedInstructionSets = mutable.HashMap.empty[Int, NonEmpty[String]]
+    val entryPoints             = mutable.HashMap.empty[NonEmpty[String], Int]
+    val entryPointInterfaces    = mutable.HashMap.empty[NonEmpty[String], Set[Int]]
+    val vulkanEntries           = mutable.HashSet.empty[NonEmpty[String]]
     val subgroupSizes           = mutable.HashMap.empty[Int, Int]
-    val workGroupSizes          = mutable.HashMap.empty[Int, (Int, Int, Int)]
-    val workGroupSizeHints      = mutable.HashMap.empty[Int, (Int, Int, Int)]
+    val workGroupSizes          = mutable.HashMap.empty[Int, LaunchGeometry.Dimensions]
+    val workGroupSizeHints      = mutable.HashMap.empty[Int, LaunchGeometry.Dimensions]
     val functions               = mutable.HashMap.empty[Int, Function]
-    val functionNames           = mutable.HashMap.empty[Int, NoNulString]
+    val functionNames           = mutable.HashMap.empty[Int, String]
 
     module.instructions.foreach {
       case Instruction.Name(target, name) =>
-        functionNames.update(id(target), NoNulString.unsafe(literalString(name)))
+        functionNames.update(id(target), literalString(name))
       case Instruction.Decorate(target, decoration)
           if decoration.words.length >= 2 && unsigned(decoration) == 41L =>
         // Optimized/linker-produced modules may omit OpName for imported
         // builtins but retain their LinkageAttributes decoration.
         functionNames.update(
           id(target),
-          NoNulString.unsafe(
-            literalString(decoration.copy(words =
-              NonEmptyVec.unsafeFromVec(Vec.from(decoration.words.toVector.drop(1)))
-            ))
-          )
+          literalString(decoration.copy(words =
+            decoration.words.drop(1).unsafe
+          ))
         )
       case _ => ()
     }
@@ -110,7 +101,10 @@ private[v1_6] object VMCompiler {
           if (bits < 8 || bits > 64 || bits % 8 != 0)
             return Left(Fault.Unsupported(s"SPIR-V integer width $bits is unsupported"))
           // The preceding guard proves the SPIR-V scalar bit-width range at the decode boundary.
-          types.update(id(dest), RuntimeType.Integer(IntBetween.unsafe[1, 64](bits), unsigned(signedness) != 0L))
+          types.update(
+            id(dest),
+            RuntimeType.Integer(bits.unsafe[Int where Between[1, 64]], unsigned(signedness) != 0L)
+          )
         case Instruction.TypeFloat(dest, width, _) =>
           val bits = id(width)
           if (!Vec(16, 32, 64).contains(bits))
@@ -118,7 +112,7 @@ private[v1_6] object VMCompiler {
               Fault.Unsupported(s"SPIR-V floating-point width $bits is unsupported")
             )
           // The preceding closed-domain check proves the supported interchange width.
-          types.update(id(dest), RuntimeType.Floating(OneOf.unsafe[(16, 32, 64)](bits)))
+          types.update(id(dest), RuntimeType.Floating(bits.unsafe[OneOf[(16, 32, 64)]]))
         case Instruction.TypeVector(dest, component, count) =>
           val componentCount = id(count)
           if (componentCount <= 0)
@@ -205,39 +199,51 @@ private[v1_6] object VMCompiler {
             Global(id(resultType), id(storageClass), initializer.map(id(_)))
           )
         case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 && unsigned(decoration) == 11L =>
-          builtins.update(id(target), decoration.words.getUnsafe(1).raw)
-        case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 && unsigned(decoration) == 33L =>
-          descriptorSlots.update(id(target), Math.toIntExact(decoration.words.getUnsafe(1).toUnsigned.raw))
-        case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 && unsigned(decoration) == 34L =>
-          descriptorSets.update(id(target), Math.toIntExact(decoration.words.getUnsafe(1).toUnsigned.raw))
+          builtins.update(id(target), decoration.words(1).raw)
+        case Instruction.Decorate(target, decoration)
+            if decoration.words.length >= 2 && unsigned(decoration) == Decoration.Binding =>
+          decoration.words(1).raw.refine[Int >= 0] match {
+            case Left(_) => return Left(Fault.Unsupported(
+                s"SPIR-V descriptor binding ${decoration.words(1).toUnsigned.toLong} exceeds the supported index range"
+              ))
+            case Right(value) => descriptorSlots.update(id(target), value)
+          }
+        case Instruction.Decorate(target, decoration)
+            if decoration.words.length >= 2 && unsigned(decoration) == Decoration.DescriptorSet =>
+          decoration.words(1).raw.refine[Int >= 0] match {
+            case Left(_) => return Left(Fault.Unsupported(
+                s"SPIR-V descriptor set ${decoration.words(1).toUnsigned.toLong} exceeds the supported index range"
+              ))
+            case Right(value) => descriptorSets.update(id(target), value)
+          }
         case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 && unsigned(decoration) == 6L =>
-          arrayStrides.update(id(target), Math.toIntExact(decoration.words.getUnsafe(1).toUnsigned.raw))
+          arrayStrides.update(id(target), Math.toIntExact(decoration.words(1).toUnsigned.toLong))
         case Instruction.Decorate(target, decoration) if unsigned(decoration) == 10L =>
           val _ = packedStructures.add(id(target))
         case Instruction.Decorate(target, decoration)
             if decoration.words.length >= 2 && unsigned(decoration) == 38L &&
-              decoration.words.getUnsafe(1).toUnsigned.raw == 2L =>
+              decoration.words(1).toUnsigned.toLong == 2L =>
           val _ = byValueParameters.add(id(target)) // FuncParamAttr ByVal
         case Instruction.Decorate(target, decoration) if unsigned(decoration) == 28L =>
           val _ = saturatedConversions.add(id(target))
         case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 && unsigned(decoration) == 39L =>
-          roundingModes.update(id(target), decoration.words.getUnsafe(1).raw)
+          roundingModes.update(id(target), decoration.words(1).raw)
         case Instruction.MemberDecorate(structureType, member, decoration)
             if decoration.words.length >= 2 && unsigned(decoration) == 35L =>
           memberOffsets.update(
             id(structureType) -> Math.toIntExact(unsigned(member)),
-            Math.toIntExact(decoration.words.getUnsafe(1).toUnsigned.raw)
+            Math.toIntExact(decoration.words(1).toUnsigned.toLong)
           )
         case Instruction.ExtInstImport(dest, name) =>
           val decodedName = literalString(name)
-          NonEmptyString.either(decodedName) match {
+          decodedName.refine[NonEmpty[String]] match {
             case Left(_) =>
               return Left(Fault.InvalidTask("SPIR-V extended instruction-set name is empty"))
             case Right(instructionSetName) => extendedInstructionSets.update(id(dest), instructionSetName)
           }
         case Instruction.EntryPoint(executionModel, entryPoint, name, interfaces) =>
           val decodedName = literalString(name)
-          NonEmptyString.either(decodedName) match {
+          decodedName.refine[NonEmpty[String]] match {
             case Left(_) =>
               return Left(
                 Fault.InvalidTask(s"invalid SPIR-V entry-point name '$decodedName'")
@@ -252,33 +258,33 @@ private[v1_6] object VMCompiler {
         case Instruction.ExecutionMode(entryPoint, mode) =>
           unsigned(mode) match {
             case 35L if mode.words.length >= 2 =>
-              val size = mode.words.getUnsafe(1).toUnsigned.raw
+              val size = mode.words(1).toUnsigned.toLong
               if (size == 0L || size > Int.MaxValue.toLong)
                 return Left(Fault.InvalidTask(s"SPIR-V SubgroupSize $size is invalid"))
               subgroupSizes.update(id(entryPoint), size.toInt)
             case 17L if mode.words.length >= 4 =>
-              localSize(mode.words.getUnsafe(1), mode.words.getUnsafe(2), mode.words.getUnsafe(3)).foreach(size =>
+              localSize(mode.words(1), mode.words(2), mode.words(3)).foreach(size =>
                 workGroupSizes.update(id(entryPoint), size)
               )
             case 18L if mode.words.length >= 4 =>
-              localSize(mode.words.getUnsafe(1), mode.words.getUnsafe(2), mode.words.getUnsafe(3)).foreach(size =>
+              localSize(mode.words(1), mode.words(2), mode.words(3)).foreach(size =>
                 workGroupSizeHints.update(id(entryPoint), size)
               )
             case 38L if mode.words.length >= 4 =>
-              localSizeId(constants, mode.words.getUnsafe(1), mode.words.getUnsafe(2), mode.words.getUnsafe(3))
+              localSizeId(constants, mode.words(1), mode.words(2), mode.words(3))
                 .foreach(size => workGroupSizes.update(id(entryPoint), size))
             case 39L if mode.words.length >= 4 =>
-              localSizeId(constants, mode.words.getUnsafe(1), mode.words.getUnsafe(2), mode.words.getUnsafe(3))
+              localSizeId(constants, mode.words(1), mode.words(2), mode.words(3))
                 .foreach(size => workGroupSizeHints.update(id(entryPoint), size))
             case _ => ()
           }
         case Instruction.ExecutionModeId(entryPoint, mode) =>
           unsigned(mode) match {
             case 38L if mode.words.length >= 4 =>
-              localSizeId(constants, mode.words.getUnsafe(1), mode.words.getUnsafe(2), mode.words.getUnsafe(3))
+              localSizeId(constants, mode.words(1), mode.words(2), mode.words(3))
                 .foreach(size => workGroupSizes.update(id(entryPoint), size))
             case 39L if mode.words.length >= 4 =>
-              localSizeId(constants, mode.words.getUnsafe(1), mode.words.getUnsafe(2), mode.words.getUnsafe(3))
+              localSizeId(constants, mode.words(1), mode.words(2), mode.words(3))
                 .foreach(size => workGroupSizeHints.update(id(entryPoint), size))
             case _ => ()
           }
@@ -309,6 +315,29 @@ private[v1_6] object VMCompiler {
       }
       index += 1
     }
+    // Resolve constant builtins after the complete stream, including forward declarations.
+    // OpenCL also uses WorkgroupSize on input variables; those are supplied by the dispatch.
+    val builtinSize = builtins.toSeq.collect {
+      case (variable, BuiltIn.WorkgroupSize) if constants.contains(variable) => variable
+    }.sorted.foldLeft[Either[Fault, Option[LaunchGeometry.Dimensions]]](Right(None)) { (result, variable) =>
+      result.flatMap { previous =>
+        constants(variable) match {
+          case Constant.Bits(_, lanes) if lanes.size == 3 =>
+            positiveTriple(lanes(0), lanes(1), lanes(2))
+              .toRight(
+                Fault.InvalidTask(s"SPIR-V WorkgroupSize %$variable has invalid dimensions: ${lanes.mkString(", ")}")
+              )
+              .flatMap { size =>
+                if (previous.exists(_ != size)) Left(Fault.InvalidTask("SPIR-V WorkgroupSize constants disagree"))
+                else Right(Some(size))
+              }
+          case _ => Left(Fault.InvalidTask(s"SPIR-V WorkgroupSize %$variable must have three integer components"))
+        }
+      }
+    } match {
+      case Left(error)  => return Left(error)
+      case Right(value) => value
+    }
     val definedFunctions = functions.toMap
     val definedNames     = functionNames.toMap
     Right(
@@ -333,6 +362,7 @@ private[v1_6] object VMCompiler {
         vulkanEntries = vulkanEntries.toSet,
         subgroupSizes = subgroupSizes.toMap,
         workGroupSizes = workGroupSizes.toMap,
+        builtinWorkGroupSize = builtinSize,
         workGroupSizeHints = workGroupSizeHints.toMap,
         functions = definedFunctions,
         functionNames = definedNames,
@@ -389,7 +419,7 @@ private[v1_6] object VMCompiler {
 
   private def isDirectCollective(
       instruction: Instruction,
-      functionNames: Map[Int, NoNulString]
+      functionNames: Map[Int, String]
   ): Boolean =
     instruction match {
       case _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax |
@@ -401,7 +431,7 @@ private[v1_6] object VMCompiler {
           _: Instruction.GroupNonUniformBallot |
           _: Instruction.ControlBarrier => true
       case Instruction.FunctionCall(_, _, called, _) =>
-        functionNames.get(id(called)).exists(name => isOpenCLCollective(name.raw))
+        functionNames.get(id(called)).exists(name => isOpenCLCollective(name))
       case _ => false
     }
 
@@ -414,8 +444,8 @@ private[v1_6] object VMCompiler {
   // Composite decoding walks operands directly and exits on the first invalid constituent.
   @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def constantComposite(
-      types: collection.Map[Int, RuntimeType],
-      constants: collection.Map[Int, Constant],
+      types: scala.collection.Map[Int, RuntimeType],
+      constants: scala.collection.Map[Int, Constant],
       resultType: Operand,
       destination: Operand,
       constituents: Vec[Operand]
@@ -448,20 +478,20 @@ private[v1_6] object VMCompiler {
     )
   }
 
-  private def positiveTriple(x: Long, y: Long, z: Long): Option[(Int, Int, Int)] =
+  private def positiveTriple(x: Long, y: Long, z: Long): Option[LaunchGeometry.Dimensions] =
     if (x <= 0L || y <= 0L || z <= 0L || x > Int.MaxValue.toLong || y > Int.MaxValue.toLong || z > Int.MaxValue.toLong)
       None
-    else Some((x.toInt, y.toInt, z.toInt))
+    else Some(LaunchGeometry.Dimensions(x.toInt.unsafe, y.toInt.unsafe, z.toInt.unsafe))
 
-  private def localSize(x: Word, y: Word, z: Word): Option[(Int, Int, Int)] =
-    positiveTriple(x.toUnsigned.raw, y.toUnsigned.raw, z.toUnsigned.raw)
+  private def localSize(x: Word, y: Word, z: Word): Option[LaunchGeometry.Dimensions] =
+    positiveTriple(x.toUnsigned.toLong, y.toUnsigned.toLong, z.toUnsigned.toLong)
 
   private def localSizeId(
-      constants: collection.Map[Int, Constant],
+      constants: scala.collection.Map[Int, Constant],
       x: Word,
       y: Word,
       z: Word
-  ): Option[(Int, Int, Int)] =
+  ): Option[LaunchGeometry.Dimensions] =
     for {
       xValue <- constants.get(x.raw).flatMap(scalarBits(_))
       yValue <- constants.get(y.raw).flatMap(scalarBits(_))
@@ -479,14 +509,14 @@ private[v1_6] object VMCompiler {
     var result = 0L
     var index  = 0
     while (index < operand.words.length && index < 2) {
-      result |= operand.words.getUnsafe(index).toUnsigned.raw << (index * 32)
+      result |= operand.words(index).toUnsigned.toLong << (index * 32)
       index += 1
     }
     result
   }
 
   private def literalString(operand: Operand): String = {
-    val bytes = operand.words.toVector.flatMap { word =>
+    val bytes = operand.words.flatMap { word =>
       LittleEndian.toVec(word.raw.toLong, 4)
     }.takeWhile(_ != 0)
     String(bytes.toArray, java.nio.charset.StandardCharsets.UTF_8)

@@ -1,35 +1,32 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import CodeObject.*
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.benchmarks.BenchmarkArguments
-import net.kurobako.gemstone.benchmarks.BenchmarkName
-import net.kurobako.gemstone.benchmarks.PlatformMetrics
-import net.kurobako.gemstone.Constraint.NonEmptyString
+import ELF.*
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
+import net.kurobako.gemstone.vm.LaunchGeometry.*
+import scala.collection.immutable.ArraySeq
 
-/** Warmed vector-load allocation probe using owned snapshots, matching ExecutionService read ownership. */
+/** Warmed vector-load allocation probe using owned snapshots, matching ExecutionSession read ownership. */
 object VectorMemoryBenchmark {
-  private val input  = MemoryRegion(1)
-  private val output = MemoryRegion(2)
-  private final class Memory extends net.kurobako.gemstone.vm.Memory with BenchmarkAddressSpace {
-    val source      = Array.tabulate[Byte](1024)(i => (i * 17).toByte)
-    val destination = Array.ofDim[Byte](1024)
-    override protected val regionSizes: Iterable[(MemoryRegion, Long)] =
+  private val input  = AllocationId(1)
+  private val output = AllocationId(2)
+  private class Memory extends vm.Memory with BenchmarkAddressSpace {
+    val source: Array[Byte]      = Array.tabulate[Byte](1024)(i => (i * 17).toByte)
+    val destination: Array[Byte] = Array.ofDim[Byte](1024)
+    override protected val regionSizes: Iterable[(AllocationId, Long)] =
       Seq(input -> source.length.toLong, output -> destination.length.toLong)
-    def read(id: MemoryRegion, offset: NonNegative[Long], size: NonNegative[Int]) =
-      Right(Vec.unsafeFromArray(java.util.Arrays.copyOfRange(
+    def read(id: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, ArraySeq[Byte]] =
+      Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(
         source,
         offset.raw.toInt,
         offset.raw.toInt + size.raw
       )))
-    def write(id: MemoryRegion, offset: NonNegative[Long], bytes: Vec[Byte]) = {
+    def write(id: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] = {
       val _ = bytes.copyToArray(destination, offset.raw.toInt, bytes.size)
       Right(())
     }
@@ -52,7 +49,7 @@ object VectorMemoryBenchmark {
       code
     )).fold(error => throw IllegalStateException(error.message), value => value)
     val dispatch = KernelTask.validated(
-      NonEmptyString("kernel"),
+      "kernel",
       Dimensions(64, 1, 1),
       Dimensions.One,
       Vec(
@@ -60,17 +57,16 @@ object VectorMemoryBenchmark {
         KernelTask.Argument.Memory(output, 0L)
       )
     ).fold(error => throw IllegalStateException(error), value => value)
-    val memory                      = Memory()
-    def run(n: Positive[Int]): Unit = {
+    val memory                = Memory()
+    def run(n: Int > 0): Unit = {
       var i = 0
       while (i < n.raw) {
         VMInterpreter.execute(
           kernel,
           dispatch,
           memory,
-          memory,
-          TaskControl.default,
-          Scheduler.Sequential,
+          TaskControl(),
+          Workgroups.Sequential,
           Vec.empty
         ).fold(
           e => throw IllegalStateException(e.toString),

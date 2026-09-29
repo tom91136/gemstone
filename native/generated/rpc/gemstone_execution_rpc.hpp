@@ -18,52 +18,54 @@
 
 namespace gemstone::execution {
 
-inline constexpr uint32_t RequestMagic = static_cast<uint32_t>(0x474d4532);
-inline constexpr uint32_t ResponseMagic = static_cast<uint32_t>(0x474d4632);
+inline constexpr uint32_t RequestMagic = static_cast<uint32_t>(0x474d4533);
+inline constexpr uint32_t ResponseMagic = static_cast<uint32_t>(0x474d4633);
 inline constexpr uint32_t MaximumPayload = 134217728U;
 inline constexpr uint32_t MaximumElements = 16384U;
 inline constexpr uint32_t MaximumTextBytes = 8192U;
-inline constexpr uint64_t SchemaFingerprint = 0x5972750acc285ed3ULL;
-inline constexpr size_t RequestFingerprintOffset = 4U;
-inline constexpr size_t RequestClientOffset = 12U;
-inline constexpr size_t RequestSessionHighOffset = 20U;
-inline constexpr size_t RequestSessionLowOffset = 28U;
-inline constexpr size_t RequestOperationOffset = 36U;
-inline constexpr size_t RequestPayloadSizeOffset = 44U;
-inline constexpr size_t RequestHeaderBytes = 48U;
-inline constexpr size_t ResponseFingerprintOffset = 4U;
-inline constexpr size_t ResponseStatusOffset = 12U;
-inline constexpr size_t ResponsePayloadSizeOffset = 16U;
-inline constexpr size_t ResponseHeaderBytes = 20U;
+inline constexpr uint32_t HelloMagic = 1196247091U;
+inline constexpr uint32_t HelloResponseMagic = 1196247347U;
+inline constexpr uint32_t MaximumSchemaBytes = 1048576U;
+inline constexpr uint32_t MaximumTagBytes = 256U;
+inline constexpr std::string_view Schema = "protocol(gemstone.execution){Ping:product(Ping){}=>unit,EnableHostMemory:product(EnableHostMemory){}=>unit,PollHostMemory:product(PollHostMemory){completion:alias(CompletionId,i64)[positive]}=>product(HostMemoryBatch){reads:seq[product(HostMemoryRange){address:alias(GuestAddress,i64)[],size:alias(Int,i32)[positive]}],writes:seq[product(HostMemoryBytes){address:alias(GuestAddress,i64)[],bytes:seq[i8],atomicWidth:i32}],completed:bool,sync:option[product(HostMemorySync){ticket:i64,atomic:option[product(HostMemoryAtomic){address:alias(GuestAddress,i64)[],size:i32,expected:i64,desired:i64}]}]},SupplyHostMemory:product(SupplyHostMemory){completion:alias(CompletionId,i64)[positive],ranges:seq[product(HostMemoryBytes){address:alias(GuestAddress,i64)[],bytes:seq[i8],atomicWidth:i32}]}=>unit,RegisterAllocation:product(RegisterAllocation){kind:sum(AllocationKind){Device:product(Device){},Managed:product(Managed){},Shared:product(Shared){},Host:product(Host){}},size:alias(Long,i64)[positive]}=>alias(AllocationId,i64)[positive],SupplyHostSync:product(SupplyHostSync){completion:alias(CompletionId,i64)[positive],ticket:i64,observed:i64}=>unit,RegisterAllocationAddress:product(RegisterAllocationAddress){allocation:alias(AllocationId,i64)[positive],nativeBase:alias(GuestAddress,i64)[],hostBacked:bool}=>unit,ReleaseAllocation:product(ReleaseAllocation){allocation:alias(AllocationId,i64)[positive]}=>unit,WriteAllocation:product(WriteAllocation){allocation:alias(AllocationId,i64)[positive],offset:alias(Long,i64)[positive0],bytes:seq[i8]}=>unit,ReadAllocation:product(ReadAllocation){allocation:alias(AllocationId,i64)[positive],offset:alias(Long,i64)[positive0],size:alias(Int,i32)[positive0]}=>seq[i8],LoadProgram:product(LoadProgram){encoding:text,image:seq[i8]}=>alias(ProgramId,i64)[positive],DescribeSpecialization:product(DescribeSpecialization){image:seq[i8]}=>seq[product(SpecializationInfo){specId:alias(Binary32,i64)[long-interval[0,4294967295]],byteSize:alias(Int,i32)[positive]}],SpecializeImage:product(SpecializeImage){image:seq[i8],constants:seq[product(SpecializationConstant){specId:alias(Binary32,i64)[long-interval[0,4294967295]],value:seq[i8]}]}=>seq[i8],UnloadProgram:product(UnloadProgram){program:alias(ProgramId,i64)[positive]}=>unit,DescribeProgram:product(DescribeProgram){program:alias(ProgramId,i64)[positive]}=>product(ProgramSymbols){kernels:seq[product(KernelSymbol){name:alias(String,text)[minimum-length[1],not-contains[00]],linkageName:alias(String,text)[minimum-length[1],not-contains[00]]}],globals:seq[product(GlobalSymbol){name:alias(String,text)[minimum-length[1],not-contains[00]],virtualAddress:option[alias(GuestAddress,i64)[]],size:alias(Long,i64)[positive0],pointerOffsets:seq[alias(Int,i32)[positive0]]}]},DescribeKernel:product(DescribeKernel){program:alias(ProgramId,i64)[positive],name:alias(String,text)[minimum-length[1],not-contains[00]]}=>product(KernelMetadata){argumentBlockSize:alias(Int,i32)[positive0],explicitParameterCount:alias(Int,i32)[positive0],parameters:seq[product(Parameter){width:alias(Int,i32)[positive],offset:alias(Int,i32)[positive0],kind:sum(ParameterKind){Scalar:product(Scalar){},Allocation:product(Allocation){},Local:product(Local){}},containsPointers:bool}],requiredWorkGroupSize:option[product(Dimensions){x:alias(Int,i32)[positive],y:alias(Int,i32)[positive],z:alias(Int,i32)[positive]}],workGroupSizeHint:option[product(Dimensions){x:alias(Int,i32)[positive],y:alias(Int,i32)[positive],z:alias(Int,i32)[positive]}],bindingIndices:seq[alias(Int,i32)[positive0]],entryPointId:option[alias(Int,i32)[positive0]]},DescribeImage:product(DescribeImage){encoding:text,image:seq[i8],name:alias(String,text)[minimum-length[1],not-contains[00]]}=>product(KernelMetadata){argumentBlockSize:alias(Int,i32)[positive0],explicitParameterCount:alias(Int,i32)[positive0],parameters:seq[product(Parameter){width:alias(Int,i32)[positive],offset:alias(Int,i32)[positive0],kind:sum(ParameterKind){Scalar:product(Scalar){},Allocation:product(Allocation){},Local:product(Local){}},containsPointers:bool}],requiredWorkGroupSize:option[product(Dimensions){x:alias(Int,i32)[positive],y:alias(Int,i32)[positive],z:alias(Int,i32)[positive]}],workGroupSizeHint:option[product(Dimensions){x:alias(Int,i32)[positive],y:alias(Int,i32)[positive],z:alias(Int,i32)[positive]}],bindingIndices:seq[alias(Int,i32)[positive0]],entryPointId:option[alias(Int,i32)[positive0]]},Blas:product(Blas){request:product(BlasRequest){operation:sum(BlasOperation){Axpy:product(Axpy){},Scal:product(Scal){},Copy:product(Copy){},Dot:product(Dot){},Nrm2:product(Nrm2){},Asum:product(Asum){},Gemv:product(Gemv){},Gemm:product(Gemm){},GemmStridedBatched:product(GemmStridedBatched){}},element:sum(BlasElement){F16:product(F16){},F32:product(F32){},F64:product(F64){}},count:i32,rows:i32,columns:i32,inner:i32,transposeA:bool,transposeB:bool,alpha:seq[i8],beta:seq[i8],x:option[product(BlasVector){allocation:alias(AllocationId,i64)[positive],offset:alias(Long,i64)[positive0],increment:i32}],y:option[product(BlasVector){allocation:alias(AllocationId,i64)[positive],offset:alias(Long,i64)[positive0],increment:i32}],a:option[product(BlasMatrix){allocation:alias(AllocationId,i64)[positive],offset:alias(Long,i64)[positive0],leading:i32}],b:option[product(BlasMatrix){allocation:alias(AllocationId,i64)[positive],offset:alias(Long,i64)[positive0],leading:i32}],c:option[product(BlasMatrix){allocation:alias(AllocationId,i64)[positive],offset:alias(Long,i64)[positive0],leading:i32}],strideA:i64,strideB:i64,strideC:i64,batch:i32}}=>product(BlasResult){scalar:seq[i8]},DescribeGlobal:product(DescribeGlobal){program:alias(ProgramId,i64)[positive],name:alias(String,text)[minimum-length[1],not-contains[00]]}=>product(ProgramGlobal){size:alias(Long,i64)[positive0],initial:seq[i8]},BindProgramGlobal:product(BindProgramGlobal){program:alias(ProgramId,i64)[positive],name:alias(String,text)[minimum-length[1],not-contains[00]],allocation:alias(AllocationId,i64)[positive],offset:alias(Long,i64)[positive0]}=>unit,WriteProgramGlobal:product(WriteProgramGlobal){program:alias(ProgramId,i64)[positive],name:alias(String,text)[minimum-length[1],not-contains[00]],offset:alias(Long,i64)[positive0],bytes:seq[i8]}=>unit,Launch:product(Launch){program:alias(ProgramId,i64)[positive],kernelName:alias(String,text)[minimum-length[1],not-contains[00]],groupSize:product(Dimensions){x:alias(Int,i32)[positive],y:alias(Int,i32)[positive],z:alias(Int,i32)[positive]},groupCount:product(Dimensions){x:alias(Int,i32)[positive],y:alias(Int,i32)[positive],z:alias(Int,i32)[positive]},globalSize:product(GlobalDimensions){x:alias(Long,i64)[positive],y:alias(Long,i64)[positive],z:alias(Long,i64)[positive]},workDim:alias(Int,i32)[int-interval[1,3]],globalOffset:product(Coordinates){x:alias(Int,i32)[positive0],y:alias(Int,i32)[positive0],z:alias(Int,i32)[positive0]},privateSegmentBytes:alias(Int,i32)[positive0],groupSegmentBytes:alias(Int,i32)[positive0],arguments:seq[sum(Argument){Scalar:product(Scalar){bytes:seq[i8]},Memory:product(Memory){region:alias(AllocationId,i64)[positive],offset:alias(Long,i64)[positive0]},Local:product(Local){size:alias(Long,i64)[positive]}}],pointerRelocations:seq[product(PointerRelocation){source:sum(RelocationSource){Memory:product(Memory){region:alias(AllocationId,i64)[positive]},Argument:product(Argument){index:alias(Int,i32)[positive0]}},sourceOffset:alias(Long,i64)[positive0],target:alias(AllocationId,i64)[positive],targetOffset:alias(Long,i64)[positive0]}],discoverArgumentRelocations:bool}=>alias(CompletionId,i64)[positive],QueryCompletion:product(QueryCompletion){completion:alias(CompletionId,i64)[positive]}=>sum(CompletionStatus){Pending:product(Pending){},Succeeded:product(Succeeded){},Failed:product(Failed){error:sum(ExecutionFailure){InvalidRequest:product(InvalidRequest){detail:text},NotFound:product(NotFound){detail:text},Unsupported:product(Unsupported){detail:text},Failed:product(Failed){detail:text}}}},AwaitCompletion:product(AwaitCompletion){completion:alias(CompletionId,i64)[positive]}=>unit,CompletionDirtyRanges:product(CompletionDirtyRanges){completion:alias(CompletionId,i64)[positive],offset:alias(Int,i32)[positive0]}=>seq[product(DirtyRange){allocation:alias(AllocationId,i64)[positive],offset:alias(Long,i64)[positive0],size:alias(Int,i32)[positive]}],CompletionPointerRelocations:product(CompletionPointerRelocations){completion:alias(CompletionId,i64)[positive]}=>seq[product(PointerRelocation){source:sum(RelocationSource){Memory:product(Memory){region:alias(AllocationId,i64)[positive]},Argument:product(Argument){index:alias(Int,i32)[positive0]}},sourceOffset:alias(Long,i64)[positive0],target:alias(AllocationId,i64)[positive],targetOffset:alias(Long,i64)[positive0]}],CompletionPrints:product(CompletionPrints){completion:alias(CompletionId,i64)[positive]}=>text,ReleaseCompletion:product(ReleaseCompletion){completion:alias(CompletionId,i64)[positive]}=>unit};failure=sum(ExecutionFailure){InvalidRequest:product(InvalidRequest){detail:text},NotFound:product(NotFound){detail:text},Unsupported:product(Unsupported){detail:text},Failed:product(Failed){detail:text}}";
+inline constexpr size_t RequestClientOffset = 4U;
+inline constexpr size_t RequestSessionHighOffset = 12U;
+inline constexpr size_t RequestSessionLowOffset = 20U;
+inline constexpr size_t RequestTagSizeOffset = 28U;
+inline constexpr size_t RequestPayloadSizeOffset = 32U;
+inline constexpr size_t RequestHeaderBytes = 36U;
+inline constexpr size_t ResponseStatusOffset = 4U;
+inline constexpr size_t ResponsePayloadSizeOffset = 8U;
+inline constexpr size_t ResponseHeaderBytes = 12U;
 namespace operation {
-inline constexpr uint64_t Ping = 0xfe6050c5d9e5b2f0ULL;
-inline constexpr uint64_t EnableHostMemory = 0x427c0ec0880d913aULL;
-inline constexpr uint64_t PollHostMemory = 0x5f758336f94460f8ULL;
-inline constexpr uint64_t SupplyHostMemory = 0xf062de3285328d0eULL;
-inline constexpr uint64_t RegisterAllocation = 0x3ab2cfea883bea23ULL;
-inline constexpr uint64_t SupplyHostSync = 0xd852c98d040d805aULL;
-inline constexpr uint64_t RegisterAllocationAddress = 0xe96fefec41f65bf1ULL;
-inline constexpr uint64_t ReleaseAllocation = 0x91cc677536b84617ULL;
-inline constexpr uint64_t WriteAllocation = 0x5c2847c6c97d6de9ULL;
-inline constexpr uint64_t ReadAllocation = 0x0bda0feff7f85a9aULL;
-inline constexpr uint64_t LoadProgram = 0xaae065c73584df40ULL;
-inline constexpr uint64_t DescribeSpecialization = 0x9fa04c9645f3afdcULL;
-inline constexpr uint64_t SpecializeImage = 0x02d7de1c949c2f70ULL;
-inline constexpr uint64_t UnloadProgram = 0xa0921649cb123a5dULL;
-inline constexpr uint64_t DescribeProgram = 0xa2a840d71e8875b7ULL;
-inline constexpr uint64_t DescribeKernel = 0x93b338a220a4fb14ULL;
-inline constexpr uint64_t DescribeImage = 0xe4bd817496f5c2a6ULL;
-inline constexpr uint64_t Blas = 0xe75a445a9652b322ULL;
-inline constexpr uint64_t DescribeGlobal = 0xd1f288733a2ee8faULL;
-inline constexpr uint64_t BindProgramGlobal = 0x0c1ffca104520e8aULL;
-inline constexpr uint64_t WriteProgramGlobal = 0x6ae071f2e120bb82ULL;
-inline constexpr uint64_t Launch = 0x3987746602c2539bULL;
-inline constexpr uint64_t QueryCompletion = 0x8f8213a2ccfd27d2ULL;
-inline constexpr uint64_t AwaitCompletion = 0x678f0d5d863467d8ULL;
-inline constexpr uint64_t CompletionDirtyRanges = 0x45bdd3ff0f446a90ULL;
-inline constexpr uint64_t CompletionPointerRelocations = 0x128e5851a288e89aULL;
-inline constexpr uint64_t CompletionPrints = 0xfd4bcd954c0c4b36ULL;
-inline constexpr uint64_t ReleaseCompletion = 0x7d37075e20a4c797ULL;
+inline constexpr std::string_view Ping = "Ping";
+inline constexpr std::string_view EnableHostMemory = "EnableHostMemory";
+inline constexpr std::string_view PollHostMemory = "PollHostMemory";
+inline constexpr std::string_view SupplyHostMemory = "SupplyHostMemory";
+inline constexpr std::string_view RegisterAllocation = "RegisterAllocation";
+inline constexpr std::string_view SupplyHostSync = "SupplyHostSync";
+inline constexpr std::string_view RegisterAllocationAddress = "RegisterAllocationAddress";
+inline constexpr std::string_view ReleaseAllocation = "ReleaseAllocation";
+inline constexpr std::string_view WriteAllocation = "WriteAllocation";
+inline constexpr std::string_view ReadAllocation = "ReadAllocation";
+inline constexpr std::string_view LoadProgram = "LoadProgram";
+inline constexpr std::string_view DescribeSpecialization = "DescribeSpecialization";
+inline constexpr std::string_view SpecializeImage = "SpecializeImage";
+inline constexpr std::string_view UnloadProgram = "UnloadProgram";
+inline constexpr std::string_view DescribeProgram = "DescribeProgram";
+inline constexpr std::string_view DescribeKernel = "DescribeKernel";
+inline constexpr std::string_view DescribeImage = "DescribeImage";
+inline constexpr std::string_view Blas = "Blas";
+inline constexpr std::string_view DescribeGlobal = "DescribeGlobal";
+inline constexpr std::string_view BindProgramGlobal = "BindProgramGlobal";
+inline constexpr std::string_view WriteProgramGlobal = "WriteProgramGlobal";
+inline constexpr std::string_view Launch = "Launch";
+inline constexpr std::string_view QueryCompletion = "QueryCompletion";
+inline constexpr std::string_view AwaitCompletion = "AwaitCompletion";
+inline constexpr std::string_view CompletionDirtyRanges = "CompletionDirtyRanges";
+inline constexpr std::string_view CompletionPointerRelocations = "CompletionPointerRelocations";
+inline constexpr std::string_view CompletionPrints = "CompletionPrints";
+inline constexpr std::string_view ReleaseCompletion = "ReleaseCompletion";
 }
 
 struct Unit {};
@@ -137,27 +139,31 @@ struct ProgramId {
   int64_t value{};
 };
 
+struct Binary32 {
+  int64_t value{};
+};
+
 struct SpecializationInfo {
-  IntPositive0 specId{};
+  Binary32 specId{};
   IntPositive byteSize{};
 };
 
 struct SpecializationConstant {
-  IntPositive0 specId{};
+  Binary32 specId{};
   std::vector<uint8_t> value{};
 };
 
-struct NonEmptyString {
+struct StringMinimumLength1NotContains00 {
   std::string value{};
 };
 
 struct KernelSymbol {
-  NonEmptyString name{};
-  NonEmptyString linkageName{};
+  StringMinimumLength1NotContains00 name{};
+  StringMinimumLength1NotContains00 linkageName{};
 };
 
 struct GlobalSymbol {
-  NonEmptyString name{};
+  StringMinimumLength1NotContains00 name{};
   std::optional<GuestAddress> virtualAddress{};
   LongPositive0 size{};
   std::vector<IntPositive0> pointerOffsets{};
@@ -274,15 +280,11 @@ struct Coordinates {
   IntPositive0 z{};
 };
 
-struct MemoryRegion {
-  int64_t value{};
-};
-
 struct ArgumentScalar {
   std::vector<uint8_t> bytes{};
 };
 struct ArgumentMemory {
-  MemoryRegion region{};
+  AllocationId region{};
   LongPositive0 offset{};
 };
 struct ArgumentLocal {
@@ -292,7 +294,7 @@ struct ArgumentLocal {
 using Argument = std::variant<ArgumentScalar, ArgumentMemory, ArgumentLocal>;
 
 struct RelocationSourceMemory {
-  MemoryRegion region{};
+  AllocationId region{};
 };
 struct RelocationSourceArgument {
   IntPositive0 index{};
@@ -303,7 +305,7 @@ using RelocationSource = std::variant<RelocationSourceMemory, RelocationSourceAr
 struct PointerRelocation {
   RelocationSource source{};
   LongPositive0 sourceOffset{};
-  MemoryRegion target{};
+  AllocationId target{};
   LongPositive0 targetOffset{};
 };
 
@@ -408,13 +410,13 @@ struct DescribeProgram {
 
 struct DescribeKernel {
   ProgramId program{};
-  NonEmptyString name{};
+  StringMinimumLength1NotContains00 name{};
 };
 
 struct DescribeImage {
   std::string encoding{};
   std::vector<uint8_t> image{};
-  NonEmptyString name{};
+  StringMinimumLength1NotContains00 name{};
 };
 
 struct Blas {
@@ -423,26 +425,26 @@ struct Blas {
 
 struct DescribeGlobal {
   ProgramId program{};
-  NonEmptyString name{};
+  StringMinimumLength1NotContains00 name{};
 };
 
 struct BindProgramGlobal {
   ProgramId program{};
-  NonEmptyString name{};
+  StringMinimumLength1NotContains00 name{};
   AllocationId allocation{};
   LongPositive0 offset{};
 };
 
 struct WriteProgramGlobal {
   ProgramId program{};
-  NonEmptyString name{};
+  StringMinimumLength1NotContains00 name{};
   LongPositive0 offset{};
   std::vector<uint8_t> bytes{};
 };
 
 struct Launch {
   ProgramId program{};
-  NonEmptyString kernelName{};
+  StringMinimumLength1NotContains00 kernelName{};
   Dimensions groupSize{};
   Dimensions groupCount{};
   GlobalDimensions globalSize{};
@@ -465,6 +467,7 @@ struct AwaitCompletion {
 
 struct CompletionDirtyRanges {
   CompletionId completion{};
+  IntPositive0 offset{};
 };
 
 struct CompletionPointerRelocations {
@@ -551,9 +554,9 @@ template <> struct glz::meta<gemstone::execution::AllocationId> { static constex
 template <> struct glz::meta<gemstone::execution::LongPositive0> { static constexpr auto value = &gemstone::execution::LongPositive0::value; };
 template <> struct glz::meta<gemstone::execution::IntPositive0> { static constexpr auto value = &gemstone::execution::IntPositive0::value; };
 template <> struct glz::meta<gemstone::execution::ProgramId> { static constexpr auto value = &gemstone::execution::ProgramId::value; };
-template <> struct glz::meta<gemstone::execution::NonEmptyString> { static constexpr auto value = &gemstone::execution::NonEmptyString::value; };
+template <> struct glz::meta<gemstone::execution::Binary32> { static constexpr auto value = &gemstone::execution::Binary32::value; };
+template <> struct glz::meta<gemstone::execution::StringMinimumLength1NotContains00> { static constexpr auto value = &gemstone::execution::StringMinimumLength1NotContains00::value; };
 template <> struct glz::meta<gemstone::execution::IntInterval1To3> { static constexpr auto value = &gemstone::execution::IntInterval1To3::value; };
-template <> struct glz::meta<gemstone::execution::MemoryRegion> { static constexpr auto value = &gemstone::execution::MemoryRegion::value; };
 template <> struct glz::meta<gemstone::execution::Argument> {
   static constexpr std::string_view tag = "t";
   static constexpr std::string_view content = "v";

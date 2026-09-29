@@ -1,9 +1,10 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import Program.*
+import net.kurobako.gemstone.isa.*
 
 /** Canonical AMDGPU assembly printer. */
-object Printer extends net.kurobako.gemstone.isa.Printer[Program] {
+object Printer extends Printer[Program] {
   override def render(program: Program): String = program.statements.map(renderStatement(_)).mkString("\n")
 
   def render(instruction: Instruction): String = {
@@ -12,7 +13,7 @@ object Printer extends net.kurobako.gemstone.isa.Printer[Program] {
       modifier.value.fold(modifier.name)(value => s"${modifier.name}:$value")
     }
     val tail = operands ++ modifiers
-    if (tail.isEmpty) instruction.opcode.raw
+    if (tail.isEmpty) instruction.opcode
     else {
       val operandText  = operands.mkString(", ")
       val modifierText = modifiers.mkString(" ")

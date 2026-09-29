@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <string_view>
@@ -22,6 +24,10 @@ inline bool suite_uses_catch_sharding(std::string_view program) {
 
 inline std::string_view suite_timeout_environment(std::string_view program) {
   return program.starts_with("opencl_cts_") ? std::string_view("CONFORMANCE_OPENCL_CTS_TIMEOUT") : std::string_view{};
+}
+
+inline uint32_t suite_timeout(std::string_view program, uint32_t seconds, bool isolated) {
+  return isolated && program == "sycl_cts_handler" ? std::max(seconds, uint32_t{CONFORMANCE_SYCL_HANDLER_TIMEOUT_SECONDS}) : seconds;
 }
 
 inline void apply_suite_isolated_environment(std::map<std::string, std::string> &environment, std::string_view backend) {

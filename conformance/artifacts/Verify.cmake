@@ -87,7 +87,6 @@ function(conformance_verify_relocation artifact support)
   endif()
 
   set(runtime_environment
-    "CONFORMANCE_ARTIFACT_ROOT=${relocated_artifact}"
     "CONFORMANCE_SUPPORT_ROOT=${relocated_support}")
   if(WIN32)
     list(APPEND runtime_environment

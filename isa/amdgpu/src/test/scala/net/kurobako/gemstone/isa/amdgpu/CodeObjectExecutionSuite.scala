@@ -1,37 +1,29 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.IntBetween
-
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import CodeObject.*
+import ELF.*
 import VMIR.*
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.memory.GuestAddress
-import net.kurobako.gemstone.binary.{Bits, ByteRange}
-import net.kurobako.gemstone.binary.IEEE754
-import net.kurobako.gemstone.binary.LittleEndian
+import fixtures.*
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
+import net.kurobako.gemstone.vm.AddressSpace.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.charset.StandardCharsets
-import java.util.concurrent.Executors
+class CodeObjectExecutionSuite extends munit.FunSuite {
+  // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
-final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestSupport {
   test("a linked code object fills its GOT slot from an absolute 64-bit relocation") {
     // HIP reaches a device global through a .got slot when the symbol is not
     // directly addressable, so the slot has to hold the symbol address before
     // the first kernel reads it.
-    val indexed = CodeObject.index(Vec.unsafeFromArray(minimalCodeObject(globalPointer = true))).toOption.get
+    val indexed = ELF.index(Vec.unsafeWrapArray(minimalCodeObject(globalPointer = true))).toOption.get
     val kernel  = indexed.kernel("kernel").toOption.get
     assertEquals(
       kernel.globalMemory.find(_._1 == 0x4000L).map(_._2.take(8).toSeq),
-      Some(LittleEndian.toVec(0x3000L, 8).toSeq)
+      Some(LittleEndian.toVec(0x3000L, 8))
     )
   }
 
@@ -67,24 +59,23 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       0xbf.toByte // s_endpgm
     )
     val kernel = CodeObjectKernel(
-      "vcc_scratch_counter",
-      Target("gfx1036"),
-      0,
-      0,
-      0,
+      name = "vcc_scratch_counter",
+      target = Target("gfx1036"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
       computePgmRsrc2 = 0x880,
       kernelCodeProperties = 0,
-      code
+      code = code
     )
     val dispatch = KernelTask.validated(
-      NonEmptyString("vcc_scratch_counter"),
+      "vcc_scratch_counter",
       testDimensions(32, 1, 1),
       Dimensions.One,
       Vec.empty
     ).toOption.get
-    val control = TaskControl.forScheduler(TaskLimits(
-      maxInstructions = 4096L,
-      quantum = 64
+    val control = TaskControl(TaskControl.Limits(
+      maxInstructions = 4096L
     ))
     assertEquals(executeKernel(compileKernel(kernel), dispatch, TestMemory(), control), Right(()))
   }
@@ -93,21 +84,21 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     val end         = Vec[Byte](0x00, 0x00, 0x81.toByte, 0xbf.toByte)
     val unsupported = Vec.fill(4)(0xff.toByte)
     val kernel      = CodeObjectKernel(
-      "selected",
-      Target("gfx1030"),
-      0,
-      0,
-      0,
-      0,
-      0,
-      end,
+      name = "selected",
+      target = Target("gfx1030"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
+      computePgmRsrc2 = 0,
+      kernelCodeProperties = 0,
+      code = end,
       codeAddress = 0x1004L,
       textAddress = 0x1000L,
       text = unsupported ++ end,
       functionSizes = Map(0x1000L -> 4, 0x1004L -> 4)
     )
     val dispatch = KernelTask.validated(
-      NonEmptyString("selected"),
+      "selected",
       Dimensions.One,
       Dimensions.One,
       Vec.empty
@@ -137,21 +128,21 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       val branch = LittleEndian.toVec(0xbf820000L, 4)
       val end    = LittleEndian.toVec(0xbf810000L, 4)
       val kernel = CodeObjectKernel(
-        "skip_linked_trap",
-        Target.unsafe(architecture),
-        0,
-        0,
-        0,
-        0,
-        0,
-        branch,
+        name = "skip_linked_trap",
+        target = architecture.unsafe[Target],
+        kernargSize = 0,
+        groupSegmentSize = 0,
+        privateSegmentSize = 0,
+        computePgmRsrc2 = 0,
+        kernelCodeProperties = 0,
+        code = branch,
         codeAddress = 0x1004L,
         textAddress = 0x1000L,
         text = trap ++ branch ++ end,
         functionSizes = Map(0x1000L -> 4, 0x1004L -> 4, 0x1008L -> 4)
       )
       val dispatch = KernelTask.validated(
-        NonEmptyString("skip_linked_trap"),
+        "skip_linked_trap",
         Dimensions.One,
         Dimensions.One,
         Vec.empty
@@ -163,18 +154,18 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       val code = Vec[Long](0xbf920000L | trapId.toLong, 0xbf810000L)
         .flatMap(word => LittleEndian.toVec(word, 4))
       val kernel = CodeObjectKernel(
-        "execute_trap",
-        Target.unsafe(architecture),
-        0,
-        0,
-        0,
-        0,
-        0,
-        code,
+        name = "execute_trap",
+        target = architecture.unsafe[Target],
+        kernargSize = 0,
+        groupSegmentSize = 0,
+        privateSegmentSize = 0,
+        computePgmRsrc2 = 0,
+        kernelCodeProperties = 0,
+        code = code,
         codeAddress = 0x1000L
       )
       val dispatch = KernelTask.validated(
-        NonEmptyString("execute_trap"),
+        "execute_trap",
         Dimensions.One,
         Dimensions.One,
         Vec.empty
@@ -192,21 +183,21 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     val code        = words.flatMap(word => LittleEndian.toVec(word, 4))
     val unsupported = Vec.fill(4)(0xff.toByte)
     val kernel      = CodeObjectKernel(
-      "local_jump",
-      Target("gfx1030"),
-      0,
-      0,
-      0,
-      0,
-      0,
-      code,
+      name = "local_jump",
+      target = Target("gfx1030"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
+      computePgmRsrc2 = 0,
+      kernelCodeProperties = 0,
+      code = code,
       codeAddress = 0x1004L,
       textAddress = 0x1000L,
       text = unsupported ++ code,
       functionSizes = Map(0x1000L -> 4, 0x1004L -> code.size)
     )
     val dispatch = KernelTask.validated(
-      NonEmptyString("local_jump"),
+      "local_jump",
       Dimensions.One,
       Dimensions.One,
       Vec.empty
@@ -243,28 +234,28 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     val code = Vec[Byte](0x00, 0x10, 0x68, 0xe0.toByte, 0x01, 0x00, 0x01, 0x80.toByte)
     assertEquals(
       VMCompiler.decodeInstruction(code, Target("gfx1030")),
-      Right(Instruction.BufferStore(Some(1), 4, None, 0, TransferByteCount(2), 0))
+      Right(Instruction.BufferStore(Some(1), 4, None, 0, 2: Int where Between[1, 16], 0))
     )
     // Point the buffer descriptor at allocation 1 and store v0's low half at byte offset 1.
     val words = Vec[Long](0xbe840380L, 0xbe8503ffL, 0x00004000L, 0xbe860388L, 0xbe870380L,
       0x7e0002ffL, 0x12345678L, 0x7e020281L, 0xe0681000L, 0x80010001L, 0xbf810000L)
     val kernel = CodeObjectKernel(
-      "store_short",
-      Target("gfx1030"),
-      0,
-      0,
-      0,
-      0,
-      0,
-      words.flatMap(word => LittleEndian.toVec(word, 4))
+      name = "store_short",
+      target = Target("gfx1030"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
+      computePgmRsrc2 = 0,
+      kernelCodeProperties = 0,
+      code = words.flatMap(word => LittleEndian.toVec(word, 4))
     )
     val memory     = TestMemory()
-    val allocation = MemoryRegion(1L)
+    val allocation = AllocationId(1L)
     memory.allocate(allocation, 8)
     memory.putInt(allocation, 0, 0xa5a5a5a5)
     memory.putInt(allocation, 4, 0xa5a5a5a5)
     val dispatch = KernelTask.validated(
-      NonEmptyString("store_short"),
+      "store_short",
       Dimensions.One,
       Dimensions.One,
       Vec.empty
@@ -297,20 +288,20 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       0xbf810000L
     )
     val kernel = CodeObjectKernel(
-      "scratch_swizzle",
-      Target("gfx1030"),
-      0,
-      0,
-      4752,
-      0,
-      1,
-      words.flatMap(word => LittleEndian.toVec(word, 4))
+      name = "scratch_swizzle",
+      target = Target("gfx1030"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 4752,
+      computePgmRsrc2 = 0,
+      kernelCodeProperties = 1,
+      code = words.flatMap(word => LittleEndian.toVec(word, 4))
     )
     val memory     = TestMemory()
-    val allocation = MemoryRegion(1L)
+    val allocation = AllocationId(1L)
     memory.allocate(allocation, 8)
     val dispatch = KernelTask.validated(
-      NonEmptyString("scratch_swizzle"),
+      "scratch_swizzle",
       Dimensions.One,
       Dimensions.One,
       Vec.empty
@@ -329,20 +320,20 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       0xbe830380L, 0xe0700000L, 0x80000100L, 0xbf810000L
     )
     val kernel = CodeObjectKernel(
-      "frexp_mantissa_modified",
-      Target("gfx1030"),
-      0,
-      0,
-      0,
-      0,
-      0,
-      words.flatMap(word => LittleEndian.toVec(word, 4))
+      name = "frexp_mantissa_modified",
+      target = Target("gfx1030"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
+      computePgmRsrc2 = 0,
+      kernelCodeProperties = 0,
+      code = words.flatMap(word => LittleEndian.toVec(word, 4))
     )
     val memory     = TestMemory()
-    val allocation = MemoryRegion(1L)
+    val allocation = AllocationId(1L)
     memory.allocate(allocation, 8)
     val dispatch = KernelTask.validated(
-      NonEmptyString("frexp_mantissa_modified"),
+      "frexp_mantissa_modified",
       Dimensions.One,
       Dimensions.One,
       Vec.empty
@@ -358,20 +349,20 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       0xbe830380L, 0xe0740000L, 0x80000200L, 0xbf810000L
     )
     val kernel = CodeObjectKernel(
-      "f64_from_f32_modified",
-      Target("gfx1030"),
-      0,
-      0,
-      0,
-      0,
-      0,
-      words.flatMap(word => LittleEndian.toVec(word, 4))
+      name = "f64_from_f32_modified",
+      target = Target("gfx1030"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
+      computePgmRsrc2 = 0,
+      kernelCodeProperties = 0,
+      code = words.flatMap(word => LittleEndian.toVec(word, 4))
     )
     val memory     = TestMemory()
-    val allocation = MemoryRegion(1L)
+    val allocation = AllocationId(1L)
     memory.allocate(allocation, 8)
     val dispatch = KernelTask.validated(
-      NonEmptyString("f64_from_f32_modified"),
+      "f64_from_f32_modified",
       Dimensions.One,
       Dimensions.One,
       Vec.empty
@@ -444,7 +435,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       functionSizes = Map(0x1000L -> 20, 0x1018L -> 16)
     )
     val dispatch = KernelTask.validated(
-      NonEmptyString("linked_call"),
+      "linked_call",
       Dimensions.One,
       Dimensions.One,
       Vec.empty
@@ -455,7 +446,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       Right(Instruction.SMove(4, InstructionSource.Literal(0x1018L)))
     )
     assertEquals(
-      VMCompiler.decodeInstruction(code.drop(8).take(4), Target("gfx900")),
+      VMCompiler.decodeInstruction(code.slice(8, 12), Target("gfx900")),
       Right(Instruction.SMove(5, InstructionSource.Constant(0L)))
     )
     assertEquals(executeKernel(compileKernel(kernel), dispatch, TestMemory()), Right(()))
@@ -473,33 +464,47 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     )
     val code   = words.flatMap(word => LittleEndian.toVec(word, 4))
     val target = Target("gfx900")
-    val kernel = CodeObjectKernel("vector_copy", target, 80, 0, 0, 0x80, 0x0b, code)
+    val kernel = CodeObjectKernel(
+      name = "vector_copy",
+      target = target,
+      kernargSize = 80,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
+      computePgmRsrc2 = 0x80,
+      kernelCodeProperties = 0x0b,
+      code = code
+    )
     val memory = TestMemory()
-    val input  = MemoryRegion(1L)
-    val output = MemoryRegion(2L)
-    val unused = MemoryRegion(3L)
+    val input  = AllocationId(1L)
+    val output = AllocationId(2L)
+    val unused = AllocationId(3L)
     memory.allocate(input, 256)
     memory.allocate(output, 256)
     memory.allocate(unused, 256)
     val expected = Array.tabulate(64)(index => index * 97 - 11)
     expected.zipWithIndex.foreach { case (value, index) =>
-      memory.putInt(input, NonNegative.unsafe(index * 4), value)
+      memory.putInt(input, (index * 4).unsafe[Int >= 0], value)
     }
 
-    val batches = scala.collection.mutable.ArrayBuffer.empty[Vec[(GuestAddress, NonNegative[Int])]]
-    final class TrackedMemory extends Memory with AddressSpace {
+    val batches = scala.collection.mutable.ArrayBuffer.empty[Vec[(GuestAddress, Int >= 0)]]
+    class TrackedMemory extends AddressSpace {
       private val pending                                = java.util.concurrent.atomic.AtomicBoolean(!rawPointers)
       override def flushHostReads(): Either[Fault, Unit] = { pending.set(false); Right(()) }
-      override def read(region: MemoryRegion, offset: NonNegative[Long], size: NonNegative[Int]) =
-        if (pending.get()) Left(Fault.PendingMemory) else memory.read(region, offset, size)
-      override def write(region: MemoryRegion, offset: NonNegative[Long], bytes: Vec[Byte]) =
+      override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
+        awaitRead(readDeferred(region, offset, size))
+      override def readDeferred(region: AllocationId, offset: Long >= 0, size: Int >= 0): Memory.ReadResult[Vec[Byte]] =
+        if (pending.get()) Left(Memory.Pending) else memory.read(region, offset, size)
+      override def write(region: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
         memory.write(region, offset, bytes)
-      override def address(region: MemoryRegion, offset: NonNegative[Long])    = memory.address(region, offset)
-      override def locate(address: GuestAddress, size: NonNegative[Int])       = memory.locate(address, size)
-      override def prepareReads(ranges: Vec[(GuestAddress, NonNegative[Int])]) = { batches += ranges; Right(()) }
+      override def address(region: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] =
+        memory.address(region, offset)
+      override def locate(address: GuestAddress, size: Int >= 0): Either[Fault, Location] = memory.locate(address, size)
+      override def prepareReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] = {
+        batches += ranges; Right(())
+      }
     }
     val tracked                                            = TrackedMemory()
-    def pointer(region: MemoryRegion): KernelTask.Argument =
+    def pointer(region: AllocationId): KernelTask.Argument =
       if (rawPointers) KernelTask.Argument.Scalar(LittleEndian.toVec(
         memory.address(region, 0L).toOption.get.raw,
         8
@@ -519,7 +524,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       zero
     )
     val dispatch = KernelTask.validated(
-      NonEmptyString("vector_copy"),
+      "vector_copy",
       testDimensions(64, 1, 1),
       Dimensions.One,
       arguments
@@ -531,12 +536,12 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       assertEquals(batches.head.size, 64)
       assertEquals(batches.head.map(_._2.raw).sum, 256)
       assertEquals(
-        batches.head.map(_._1.raw).toSeq,
-        (0 until 64).map(i => memory.address(input, NonNegative.unsafe(i * 4L)).toOption.get.raw)
+        batches.head.map(_._1.raw),
+        (0 until 64).map(i => memory.address(input, (i * 4L).unsafe[Long >= 0]).toOption.get.raw)
       )
     }
     assertEquals(
-      Array.tabulate(64)(index => memory.getInt(output, NonNegative.unsafe(index * 4))).toSeq,
+      Array.tabulate(64)(index => memory.getInt(output, (index * 4).unsafe[Int >= 0])).toSeq,
       expected.toSeq
     )
   }

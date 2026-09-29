@@ -1,22 +1,21 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Constraint.NonEmptyString
-
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.Vec.*
-import net.kurobako.gemstone.isa.ValidationOutcome
 import Metadata.*
 import Program.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.string.*
 
 /** Conservative target-aware validation. An outcome is `Accepted` only when all constraints for an implemented format
   * are enforced. Known but not-yet-normalized formats are fail-closed as `Incomplete`.
   */
 object Validation {
   enum Issue {
-    case WrongFamily(target: Target, expected: Family)
-    case UnsupportedInstruction(opcode: NonEmptyString, target: Target)
-    case InvalidInstruction(opcode: NonEmptyString, message: String)
-    case Incomplete(detail: String)
+    case UnsupportedInstruction(opcode: NonEmpty[String], target: Target)
+    case InvalidInstruction(opcode: NonEmpty[String], message: NonEmpty[String])
+    case Incomplete(detail: NonEmpty[String])
   }
 
   def validate(
@@ -42,7 +41,7 @@ object Validation {
         Vec.nonEmpty(Issue.UnsupportedInstruction(instruction.opcode, target))
       )
     else {
-      val formats = definitions.map(_.format.raw.toUpperCase(java.util.Locale.ROOT)).distinct
+      val formats = definitions.map(_.format.toUpperCaseRoot).distinct
       if (formats.contains("SOPP")) validateSOPP(instruction, target, definitions)
       else unsupported(
         s"operand constraints are not normalized for ${formats.sorted.mkString(",")}"
@@ -53,7 +52,7 @@ object Validation {
   private def validateSOPP(
       instruction: Instruction,
       target: Target,
-      definitions: Vec[Encoding]
+      definitions: Vec[Metadata.Encoding]
   ): ValidationOutcome[Issue] = {
     val explicitSignatures = definitions.map(_.operands.filter(!_.implicitOperand)).filter(_.nonEmpty).distinct
     if (instruction.mods.nonEmpty)
@@ -79,7 +78,7 @@ object Validation {
           validateSOPPOperand(operand, info).toVec
         }
         if (errors.isEmpty) availabilityUnknown(instruction, target)
-        else invalid(instruction, errors.mkString("; "))
+        else invalid(instruction, s"invalid operands: ${errors.mkString("; ")}")
       }
     }
   }
@@ -88,7 +87,7 @@ object Validation {
       operand: Operand,
       info: OperandInfo
   ): Option[String] =
-    if (info.kind.raw == "LABEL")
+    if (info.kind == "LABEL")
       operand match {
         case Operand.IntegerLiteral(value, _) if value >= -32768 && value <= 32767 => None
         case Operand.Identifier(_)                                                 => None
@@ -106,7 +105,7 @@ object Validation {
 
   private def invalid(
       instruction: Instruction,
-      message: String
+      message: NonEmpty[String]
   ): ValidationOutcome[Issue] =
     ValidationOutcome.Rejected(
       Vec.nonEmpty(Issue.InvalidInstruction(instruction.opcode, message))
@@ -118,7 +117,7 @@ object Validation {
     )
 
   private def unsupported(
-      detail: String
+      detail: NonEmpty[String]
   ): ValidationOutcome[Issue] =
     ValidationOutcome.Incomplete(
       Vec.nonEmpty(Issue.Incomplete(detail))

@@ -31,6 +31,15 @@ TEST_CASE("z skipped", "[fixture][skip]") { SKIP("native skip fixture"); }
 
 TEST_CASE("not selected failure", "[failure]") { FAIL("wrong shard or spec selected"); }
 
+TEST_CASE("noisy failure", "[noisy]") {
+  std::cout << "first diagnostic\n";
+  for (int i = 0; i < 5000; ++i)
+    std::cout << "progress line\n";
+  std::cout << "last diagnostic\n";
+  std::cerr << "stderr diagnostic\n";
+  FAIL("expected noisy failure");
+}
+
 int main(int argc, char **argv) {
   if (argc > 1 && std::string_view(argv[1]) == "--process-tree") {
 #if !defined(_WIN32)

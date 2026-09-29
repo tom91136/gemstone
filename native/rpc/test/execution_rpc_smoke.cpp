@@ -20,7 +20,6 @@ TEST_CASE("execution RPC end-to-end smoke test", "[rpc][integration]") {
   auto allocationResult = memoryClient->call(RegisterAllocation{AllocationKind::Shared, 8});
   REQUIRE((allocationResult));
   const auto allocation = allocationResult.value();
-  if (std::getenv("GEMSTONE_EXECUTION_HOLD_ALLOCATION") != nullptr) std::this_thread::sleep_for(std::chrono::milliseconds(750));
   REQUIRE((memoryClient->call(WriteAllocation{allocation, 0, {1, 2, 3, 4}})));
 
   auto programResult = executionClient->call(LoadProgram{"spirv-binary", {3, 2, 35, 7}});
@@ -33,7 +32,7 @@ TEST_CASE("execution RPC end-to-end smoke test", "[rpc][integration]") {
   REQUIRE((catalog.value().kernels[0].linkageName.value == "add.kd"));
 
   std::vector<Argument> arguments{
-      ArgumentMemory{MemoryRegion{allocation.value}, 2},
+      ArgumentMemory{AllocationId{allocation.value}, 2},
       ArgumentScalar{{9, 8}},
       ArgumentLocal{64},
   };
@@ -68,7 +67,7 @@ TEST_CASE("execution RPC end-to-end smoke test", "[rpc][integration]") {
 
   auto relocations = executionClient->call(CompletionPointerRelocations{completion});
   REQUIRE((relocations && relocations.value().empty()));
-  auto dirtyRanges = memoryClient->call(CompletionDirtyRanges{completion});
+  auto dirtyRanges = memoryClient->call(CompletionDirtyRanges{completion, 0});
   REQUIRE((dirtyRanges && dirtyRanges.value().size() == 1));
   const auto &dirty = dirtyRanges.value()[0];
   REQUIRE((dirty.allocation.value == allocation.value && dirty.offset.value == 0 && dirty.size.value == 8));

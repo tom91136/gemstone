@@ -1,11 +1,10 @@
 package fix
 
 import scala.meta.*
-
 import scalafix.v1.*
 
 /** Enforces Scala 3 creator applications. */
-final class GemstoneNoExplicitNew extends SyntacticRule("GemstoneNoExplicitNew") {
+class GemstoneNoExplicitNew extends SyntacticRule("GemstoneNoExplicitNew") {
   override def fix(using document: SyntacticDocument): Patch = document.tree.collect {
     case term: Term.New =>
       Patch.lint(

@@ -1,8 +1,10 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Vec
+import Program.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 
-final class ParserSuite extends munit.FunSuite {
+class ParserSuite extends munit.FunSuite {
   private val modules = Vec(
     "// comment\n.version 9.3\n.target sm_100, texmode_independent\n.address_size 64",
     ".extern .func __assertfail(.param .b64 message);",
@@ -20,9 +22,26 @@ final class ParserSuite extends munit.FunSuite {
     "shfl.sync.up.b32 Ry|p, -Rx, 0x1, 0x1f, 0xffffffff;"
   )
 
+  private val statementKinds = Vec(
+    Vec("Directive", "Directive", "Directive"),
+    Vec("Function"),
+    Vec("Entry"),
+    Vec("Entry"),
+    Vec("Data"),
+    Vec("Data"),
+    Vec("Block"),
+    Vec("Instruction"),
+    Vec("Instruction"),
+    Vec("Directive", "Directive"),
+    Vec("Instruction"),
+    Vec("Instruction")
+  )
+
   modules.zipWithIndex.foreach { case (source, index) =>
     test(s"parses representative module $index") {
-      assert(Parser.parse(source).isRight, Parser.parse(source).left.toString)
+      val parsed = Parser.parse(source).fold(error => fail(error.message), identity)
+      assertEquals(parsed.statements.map(_.productPrefix), statementKinds(index))
+      assert(Parser.parse(source + "\n/* unterminated").isLeft)
     }
   }
 
@@ -33,6 +52,94 @@ final class ParserSuite extends munit.FunSuite {
       (0 until 64).foreach(value => source.append(s"add.u32 %r1, %r0, ${value + 1}; "))
       source.append("ret; }\n")
     }
-    assert(Parser.parse(source.result()).isRight)
+    val program = Parser.parse(source.result()).fold(error => fail(error.message), identity)
+    assertEquals(program.statements.size, 259)
+    val entries = program.statements.collect { case entry: Statement.Entry => entry }
+    assertEquals(entries.map(_.name.raw), Vec.from((0 until 256).map(index => s"kernel_$index")))
+    entries.foreach { entry =>
+      assertEquals(entry.parameters, Vec.empty[Parameter])
+      val instructions = entry.body.collect { case Statement.Instruction(value) => value }
+      assertEquals(entry.body.size, 67, entry.name)
+      assertEquals(instructions.size, 66, entry.name)
+      assertEquals(
+        instructions.head,
+        Instruction.Mov(
+          Operand.Register("%r0", None),
+          Operand.Register("%tid.x", None),
+          Vec(Modifier("u32")),
+          None
+        )
+      )
+      (0 until 64).foreach { index =>
+        assertEquals(
+          instructions(index + 1),
+          Instruction.Add(
+            Operand.Register("%r1", None),
+            Operand.Register("%r0", None),
+            Operand.Immediate((index + 1).toString.unsafe[NonEmpty[String]]),
+            Vec(Modifier("u32")),
+            None
+          ),
+          s"${entry.name}, add $index"
+        )
+      }
+      assertEquals(instructions.last, Instruction.Ret(Vec.empty, None))
+    }
+    assert(Parser.parse(source.result() + "/* unterminated").isLeft)
   }
+  test("lexer errors retain positions across lines and comments") {
+    val comment      = ".version 9.3\n  /* unfinished"
+    val commentError = Parser.parse(comment).swap.toOption.get
+    assertEquals(commentError.offset.raw, comment.indexOf("/*"))
+    assertEquals(commentError.line.raw, 2)
+    assertEquals(commentError.column.raw, 3)
+
+    val quoted     = ".version 9.3\n// ignored\n.file 1 \"unfinished"
+    val quoteError = Parser.parse(quoted).swap.toOption.get
+    assertEquals(quoteError.offset.raw, quoted.indexOf('"'))
+    assertEquals(quoteError.line.raw, 3)
+    assertEquals(quoteError.column.raw, 9)
+  }
+
+  test("diagnostics use original source positions including leading whitespace and trailing comments") {
+    val unclosed     = "\n  /* unfinished"
+    val commentError = Parser.parse(unclosed).swap.toOption.get
+    assertEquals(commentError.offset.raw, 3)
+    assertEquals(commentError.line.raw, 2)
+    assertEquals(commentError.column.raw, 3)
+
+    val source   = "\n{\n  ret;\n// still inside the block\n  "
+    val endError = Parser.parse(source).swap.toOption.get
+    assertEquals(endError.offset.raw, source.length)
+    assertEquals(endError.line.raw, 5)
+    assertEquals(endError.column.raw, 3)
+    assertEquals(Parser.parse("\n // comment\n /* complete */ \n"), Right(Program(Vec.empty)))
+  }
+
+  test("NUL bytes are rejected at their original position even at source edges or inside comments") {
+    val sources = Seq("\u0000ret;", "ret;\u0000", "\n// comment\u0000", ".file 1 \"a\u0000b\";")
+    sources.foreach { source =>
+      val error = Parser.parse(source).swap.toOption.getOrElse(fail("NUL source was accepted"))
+      assertEquals(error.offset.raw, source.indexOf('\u0000'), clues(source))
+    }
+  }
+
+  test("indexed operands preserve one index and reject missing or extra indices") {
+    val parsed = Parser.parseStatement("mov.u32 %r0, table[4];").fold(error => fail(error.message), identity)
+    parsed match {
+      case Statement.Instruction(instruction) =>
+        assertEquals(
+          instruction.operands,
+          Vec(
+            Operand.Register("%r0", None),
+            Operand.Index(Operand.Symbol("table"), Operand.Immediate("4"))
+          )
+        )
+      case other => fail(s"expected an instruction, found $other")
+    }
+    Seq("table[]", "table[1,2]", "table[1,]", "table[1").foreach { operand =>
+      assert(Parser.parseStatement(s"mov.u32 %r0, $operand;").isLeft, clues(operand))
+    }
+  }
+
 }

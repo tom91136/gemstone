@@ -1,29 +1,22 @@
 package net.kurobako.gemstone
 
-import net.kurobako.gemstone.Constraint.Positive
-
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
-final class LRUCacheSuite extends munit.FunSuite {
-  private case class BlockedWorker(thread: Thread, release: CountDownLatch)
-
-  private given Using.Releasable[BlockedWorker] with {
-    override def release(worker: BlockedWorker): Unit = {
-      worker.release.countDown()
-      worker.thread.join()
-    }
-  }
-
-  test("values are reused and the least recently used value is evicted") {
-    val cache = LRUCache[String, String](2)
-    assertEquals(cache.get("a")("value-a"), "value-a")
-    assertEquals(cache.get("b")("value-b"), "value-b")
-    assertEquals(cache.get("a")(fail("duplicate computation")), "value-a")
-    assertEquals(cache.get("c")("value-c"), "value-c")
-    assertEquals(cache.get("a")(fail("a should remain cached")), "value-a")
-    assertEquals(cache.get("b")("recomputed-b"), "recomputed-b")
+class LRUCacheSuite extends munit.FunSuite {
+  test("values are reused by byte content and the least recently used value is evicted") {
+    val cache = LRUCache[Vec[Byte], String](2)
+    assertEquals(cache.get(Vec[Byte](1, 2))("value-a"), "value-a")
+    assertEquals(cache.get(Vec[Byte](3, 4))("value-b"), "value-b")
+    assertEquals(cache.get(Vec[Byte](1, 2))(fail("duplicate computation")), "value-a")
+    assertEquals(cache.get(Vec[Byte](5, 6))("value-c"), "value-c")
+    assertEquals(cache.get(Vec[Byte](1, 2))(fail("a should remain cached")), "value-a")
+    assertEquals(cache.get(Vec[Byte](3, 4))("recomputed-b"), "recomputed-b")
   }
 
   test("failed computation wakes subsequent readers with the original error") {
@@ -34,66 +27,67 @@ final class LRUCacheSuite extends munit.FunSuite {
   }
 
   test("concurrent readers share one in-flight computation") {
-    val cache          = LRUCache[String, Int](2)
-    val entered        = CountDownLatch(8)
-    val release        = CountDownLatch(1)
-    val calls          = AtomicInteger()
-    val mutableResults = Array.ofDim[Int](8)
-    val mutableWorkers = Vector.newBuilder[Thread]
-    mutableResults.indices.foreach { index =>
-      val worker = Thread { () =>
+    val cache   = LRUCache[String, Int](2)
+    val entered = CountDownLatch(8)
+    val release = CountDownLatch(1)
+    val calls   = AtomicInteger()
+    // MUnit serializes assertion condition evaluation. Worker waits must not hold that assertion lock.
+    Using.resource(threads.Pool(8)) { pool =>
+      val workers = Vector.fill(8)(pool.executor.submit { () =>
         entered.countDown()
-        mutableResults(index) = cache.get("same") {
+        cache.get("same") {
           val _ = calls.incrementAndGet()
-          release.await()
+          if (!release.await(5, TimeUnit.SECONDS)) throw IllegalStateException("readers were not released")
           42
         }
-      }
-      val _ = mutableWorkers += worker
+      })
+      try assert(entered.await(5, TimeUnit.SECONDS), "readers did not start")
+      finally release.countDown()
+      assertEquals(workers.map(_.get(5, TimeUnit.SECONDS)), Vector.fill(8)(42))
+      assertEquals(calls.get(), 1)
     }
-    val workers = mutableWorkers.result()
-    workers.foreach(_.start())
-    entered.await()
-    release.countDown()
-    workers.foreach(_.join())
-    assertEquals(calls.get(), 1)
-    assert(mutableResults.forall(_ == 42))
   }
 
   test("single-flight remains exact while the completed LRU is at capacity") {
-    val cache         = LRUCache[String, Int](1)
-    val firstEntered  = CountDownLatch(1)
-    val releaseFirst  = CountDownLatch(1)
-    val secondEntered = CountDownLatch(1)
-    val releaseSecond = CountDownLatch(1)
-    val secondCalls   = AtomicInteger()
-
-    val first = Thread { () =>
-      val _ = cache.get("first") {
-        firstEntered.countDown()
-        releaseFirst.await()
-        1
-      }
-    }
-    first.start()
-    firstEntered.await()
-
-    Using.resource(BlockedWorker(first, releaseFirst)) { _ =>
-      val second = Thread { () =>
-        val _ = cache.get("second") {
-          val _ = secondCalls.incrementAndGet()
-          secondEntered.countDown()
-          releaseSecond.await()
-          2
+    val cache        = LRUCache[String, Int](1)
+    val firstEntered = CountDownLatch(1)
+    val releaseFirst = CountDownLatch(1)
+    val secondCalls  = AtomicInteger()
+    Using.resource(threads.Pool(2)) { pool =>
+      val first = pool.executor.submit(() =>
+        cache.get("first") {
+          firstEntered.countDown()
+          if (!releaseFirst.await(5, TimeUnit.SECONDS))
+            throw IllegalStateException("first computation was not released")
+          1
         }
-      }
-      second.start()
-      secondEntered.await()
-      releaseSecond.countDown()
-      second.join()
-
-      assertEquals(cache.get("second")(3), 2)
-      assertEquals(secondCalls.get(), 1)
+      )
+      try {
+        assert(firstEntered.await(5, TimeUnit.SECONDS), "first computation did not start")
+        val second = pool.executor.submit(() =>
+          cache.get("second") {
+            val _ = secondCalls.incrementAndGet()
+            2
+          }
+        )
+        assertEquals(second.get(5, TimeUnit.SECONDS), 2)
+        assertEquals(cache.get("second")(3), 2)
+        assertEquals(secondCalls.get(), 1)
+      } finally releaseFirst.countDown()
+      assertEquals(first.get(5, TimeUnit.SECONDS), 1)
     }
   }
+  test("interrupted computations complete their shared cache entry") {
+    val cache       = LRUCache[String, Int](1)
+    val interrupted = InterruptedException("stop")
+    val first       = try { val _ = cache.get("key")(throw interrupted); None }
+    catch { case error: InterruptedException => Some(error) }
+    assert(first.contains(interrupted))
+    Using.resource(threads.Pool(1)) { pool =>
+      val retry    = pool.executor.submit(() => cache.get("key")(42))
+      val observed = intercept[java.util.concurrent.ExecutionException](retry.get(5, TimeUnit.SECONDS))
+      assert(observed.getCause eq interrupted)
+    }
+  }
+
 }

@@ -1,45 +1,37 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.Constraint.{NonNegative, Positive}
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.rpc.ExecutionProtocol.{AllocationId, ExecutionFailure}
-import net.kurobako.gemstone.memory.AllocationKind
-import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
-import net.kurobako.gemstone.server.transport.ServerControl
-import net.kurobako.gemstone.server.transport.Transport.*
-
 import java.io.DataInputStream
 import java.io.DataOutputStream
-import java.net.Socket
 import java.nio.ByteBuffer
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.Executors
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.TimeUnit
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.server.*
+import net.kurobako.gemstone.server.protocol.*
+import net.kurobako.gemstone.server.transport.*
+import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
 /** Socket-level isolation coverage shared by both server implementations. */
-final class SharedServerSuite extends munit.FunSuite {
-  private final class ExecutorPool(size: Positive[Int]) extends AutoCloseable {
-    val service                = Executors.newFixedThreadPool(size.raw)
-    override def close(): Unit = { val _ = service.shutdownNow() }
-  }
+class SharedServerSuite extends munit.FunSuite {
 
   private def control[A](
-      port: RPCPort,
+      endpoint: Endpoint,
       operation: Int,
       client: Option[ClientId] = None
   )(read: DataInputStream => A): A =
-    Using.resource(Socket("127.0.0.1", port.raw)) { socket =>
-      socket.setSoTimeout(10000)
-      val output = DataOutputStream(socket.getOutputStream)
-      output.writeInt(ServerControl.Magic)
-      output.writeInt(operation)
-      client.foreach(id => output.writeLong(id.raw))
-      output.flush()
-      read(DataInputStream(socket.getInputStream))
+    Using.resource(transport.connect(endpoint, 10000)) { socket =>
+      val output = DataOutputStream(socket.output)
+      Control.writeRequest(output, operation, client)
+      val bytes = Control.readResponse(DataInputStream(socket.input), operation)
+      read(DataInputStream(java.io.ByteArrayInputStream(bytes)))
     }
-  private def register(client: ExecutionRPCTestClient, size: Positive[Long]): AllocationId =
+  private def register(client: connections.Client, size: Long > 0): AllocationId =
     client.call(Operation.RegisterAllocation(AllocationKind.Shared, size)).fold(
       error => fail(error.message),
       value => value
@@ -48,15 +40,15 @@ final class SharedServerSuite extends munit.FunSuite {
   private def int(bytes: Vec[Byte]): Int = ByteBuffer.wrap(Vec.toArray(bytes)).getInt()
   test("shared clients cannot access each other's allocations or identify as each other") {
     Using.Manager { use =>
-      val server = use(GemstoneRPCServer.start())
-      val a      = control(server.port, ServerControl.RegisterClient)(input =>
+      val server = use(Server.start(Server.Settings(parallelism = 2)))
+      val a      = control(server.endpoint, protocol.Control.RegisterClient)(input =>
         ClientId.either(input.readLong()).fold(message => fail(message), value => value)
       )
-      val b = control(server.port, ServerControl.RegisterClient)(input =>
+      val b = control(server.endpoint, protocol.Control.RegisterClient)(input =>
         ClientId.either(input.readLong()).fold(message => fail(message), value => value)
       )
-      val first  = use(ExecutionRPCTestClient(server.port, a))
-      val second = use(ExecutionRPCTestClient(server.port, b))
+      val first  = use(connections.Client(server.endpoint, a))
+      val second = use(connections.Client(server.endpoint, b))
       assert(a != b)
       val firstAllocation = register(first, 4L)
       assert(first.call(Operation.ReadAllocation(
@@ -75,9 +67,10 @@ final class SharedServerSuite extends munit.FunSuite {
         0L,
         4
       )).isRight)
-      assertEquals(control(server.port, ServerControl.ReleaseClient, Some(a))(_.readInt()), 0)
-      val _ = intercept[java.io.EOFException](
-        first.call(Operation.ReadAllocation(firstAllocation, 0L, 4))
+      assertEquals(control(server.endpoint, protocol.Control.ReleaseClient, Some(a))(_.readInt()), 0)
+      assertEquals(
+        first.call(Operation.ReadAllocation(firstAllocation, 0L, 4)),
+        Left(ExecutionFailure.NotFound("client session was closed"))
       )
       assert(second.call(Operation.ReadAllocation(
         secondAllocation,
@@ -87,19 +80,19 @@ final class SharedServerSuite extends munit.FunSuite {
     }.get
   }
 
-  for (count <- Vector[Positive[Int]](3, 5, 9))
+  for (count <- Vector[Int > 0](3, 5, 9))
     test(s"$count simultaneous clients retain independent server-issued allocation state") {
       scala.util.Using.Manager { use =>
-        val server  = use(GemstoneRPCServer.start())
+        val server  = use(Server.start(Server.Settings(parallelism = 2)))
         val clients = Vector.fill(count.raw)(
-          use(ExecutionRPCTestClient(
-            server.port,
-            control(server.port, ServerControl.RegisterClient)(input =>
+          use(connections.Client(
+            server.endpoint,
+            control(server.endpoint, protocol.Control.RegisterClient)(input =>
               ClientId.either(input.readLong()).fold(message => fail(message), value => value)
             )
           ))
         )
-        val executor = use(ExecutorPool(count)).service
+        val executor = use(threads.Pool(count.raw)).executor
         val written  = CyclicBarrier(count.raw)
         type RoundResult = (expected: Int, write: Either[ExecutionFailure, Unit], read: Either[ExecutionFailure, Int])
         val results = Vector.newBuilder[CompletableFuture[Either[ExecutionFailure, Vector[RoundResult]]]]
@@ -110,7 +103,7 @@ final class SharedServerSuite extends munit.FunSuite {
                 case Left(error)       => Left(error)
                 case Right(allocation) => Right(Vector.tabulate(3) { round =>
                     val expected = index * 97 + round
-                    val bytes    = Vec.unsafeFromArray(ByteBuffer.allocate(4).putInt(expected).array())
+                    val bytes    = Vec.unsafeWrapArray(ByteBuffer.allocate(4).putInt(expected).array())
                     val write    = client.call(Operation.WriteAllocation(allocation, 0L, bytes))
                     val _        = written.await(10, TimeUnit.SECONDS)
                     (
@@ -140,16 +133,16 @@ final class SharedServerSuite extends munit.FunSuite {
 
   test("process incarnation separates reused PIDs while same-process connections share state") {
     scala.util.Using.Manager { use =>
-      val server = use(GemstoneRPCServer.start())
-      val client = control(server.port, ServerControl.RegisterClient)(input =>
+      val server = use(Server.start(Server.Settings(parallelism = 2)))
+      val client = control(server.endpoint, protocol.Control.RegisterClient)(input =>
         ClientId.either(input.readLong()).fold(message => fail(message), value => value)
       )
-      val first      = use(ExecutionRPCTestClient(server.port, client, 42L, 17L))
-      val same       = use(ExecutionRPCTestClient(server.port, client, 42L, 17L))
-      val reused     = use(ExecutionRPCTestClient(server.port, client, 42L, 18L))
-      val other      = use(ExecutionRPCTestClient(server.port, client, 43L, 17L))
+      val first      = use(connections.Client(server.endpoint, client, 42L, 17L))
+      val same       = use(connections.Client(server.endpoint, client, 42L, 17L))
+      val reused     = use(connections.Client(server.endpoint, client, 42L, 18L))
+      val other      = use(connections.Client(server.endpoint, client, 43L, 17L))
       val allocation = register(first, 4L)
-      val value      = Vec.unsafeFromArray(ByteBuffer.allocate(4).putInt(123).array())
+      val value      = Vec.unsafeWrapArray(ByteBuffer.allocate(4).putInt(123).array())
       assert(first.call(Operation.WriteAllocation(allocation, 0L, value)).isRight)
       assertEquals(
         same.call(Operation.ReadAllocation(allocation, 0L, 4)).map(int(_)),
