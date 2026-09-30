@@ -134,21 +134,15 @@ object PrintRenderer {
           if (lengthSpecifier == "hh") 8
           else if (lengthSpecifier == "h") 16 else if (lengthSpecifier == "l") 64 else width.unsafe
         if (conversion == 'c') formatted(flagsAndSize, 'c', (bits(lane) & 0xff).toInt)
-        else if (conversion == 'd' || conversion == 'i')
-          formatted(flagsAndSize, 'd', Bits.signExtend(bits(lane), effectiveWidth))
-        else if (conversion == 'u') formatted(flagsAndSize, 'd', bits(lane) & Bits.mask(effectiveWidth))
-        else if (conversion == 'o' || conversion == 'x' || conversion == 'X')
-          formatted(flagsAndSize, conversion, bits(lane) & Bits.mask(effectiveWidth))
+        else if ("diuoxX".indexOf(conversion) >= 0)
+          integer(flagsAndSize, conversion, bits(lane), effectiveWidth.raw)
         else Left(s"device printf conversion %$conversion is unsupported")
       }
     case PrintArgument.Floating(bits, width) =>
       if (lane >= bits.size || (width != 16 && width != 32 && width != 64))
         Left("device printf floating argument is invalid")
       else if ("aAeEfFgG".indexOf(conversion) < 0) Left(s"device printf conversion %$conversion is unsupported")
-      else if (conversion == 'a' || conversion == 'A') {
-        val rendered = hexFloat(IEEE754.toDouble(bits(lane), width.unsafe[OneOf[(16, 32, 64)]]))
-        Right(if (conversion == 'A') rendered.toUpperCaseRoot else rendered)
-      } else formatted(flagsAndSize, conversion, IEEE754.toDouble(bits(lane), width.unsafe[OneOf[(16, 32, 64)]]))
+      else floating(flagsAndSize, conversion, IEEE754.toDouble(bits(lane), width.unsafe[OneOf[(16, 32, 64)]]))
     case PrintArgument.Pointer(address) =>
       if (lane != 0 || conversion != 'p') Left(s"device printf conversion %$conversion is unsupported")
       else Right(s"0x${java.lang.Long.toHexString(address)}")
@@ -157,16 +151,122 @@ object PrintRenderer {
       else formatted(flagsAndSize, 's', value)
   }
 
-  private def formatted(specifier: String, conversion: Char, value: Long): Either[String, String] =
-    formatValue(specifier, conversion, java.lang.Long.valueOf(value))
+  private case class Format(flags: String, width: Int, precision: Option[Int])
+
+  private def formatOptions(specifier: String): Either[String, Format] = {
+    val flagsEnd       = scanWhile(specifier, 0, character => "-+ #0".indexOf(character) >= 0)
+    val precisionStart = specifier.indexOf('.', flagsEnd)
+    val widthText      = specifier.substring(flagsEnd, if (precisionStart < 0) specifier.length else precisionStart)
+    val precisionText  = if (precisionStart < 0) "" else specifier.substring(precisionStart + 1)
+    def size(text: String): Option[Int] =
+      if (text.isEmpty) Some(0) else text.toIntOption.filter(value => value >= 0)
+    for {
+      width     <- size(widthText).toRight("device printf width exceeds the limit")
+      precision <- size(precisionText).toRight("device printf precision exceeds the limit")
+    } yield Format(specifier.take(flagsEnd), width, Option.when(precisionStart >= 0)(precision))
+  }
+
+  private def padNumber(format: Format, sign: String, prefix: String, digits: String, zeroes: Boolean): String = {
+    val padding = math.max(0, format.width - sign.length - prefix.length - digits.length)
+    if (format.flags.contains('-')) sign + prefix + digits + " " * padding
+    else if (zeroes && format.flags.contains('0')) sign + prefix + "0" * padding + digits
+    else " " * padding + sign + prefix + digits
+  }
+
+  private def sign(negative: Boolean, flags: String): String =
+    if (negative) "-" else if (flags.contains('+')) "+" else if (flags.contains(' ')) " " else ""
+
+  // Java Formatter rejects integer precision and treats unsigned decimal as signed.
+  private def integer(specifier: String, conversion: Char, bits: Long, width: Int): Either[String, String] =
+    formatOptions(specifier).map { format =>
+      val signed = conversion == 'd' || conversion == 'i'
+      val value  = if (signed) BigInt(Bits.signExtend(bits, width.unsafe[Int where Between[1, 64]]))
+      else BigInt(bits) & ((BigInt(1) << width) - 1)
+      val base      = if (conversion == 'o') 8 else if (conversion == 'x' || conversion == 'X') 16 else 10
+      val digits    = if (format.precision.contains(0) && value == 0) "" else value.abs.toString(base)
+      val padded    = "0" * math.max(0, format.precision.getOrElse(0) - digits.length) + digits
+      val magnitude =
+        if (format.flags.contains('#') && conversion == 'o' && !padded.startsWith("0")) "0" + padded else padded
+      val prefix   = if (format.flags.contains('#') && base == 16 && value != 0) "0x" else ""
+      val rendered = padNumber(
+        format,
+        if (signed) sign(value < 0, format.flags) else "",
+        prefix,
+        magnitude,
+        format.precision.isEmpty
+      )
+      if (conversion == 'X') rendered.toUpperCaseRoot else rendered
+    }
+
+  private def floating(specifier: String, conversion: Char, value: Double): Either[String, String] =
+    formatOptions(specifier).map { format =>
+      val negative    = java.lang.Double.doubleToRawLongBits(value) < 0
+      val lower       = conversion.toLower
+      val hexadecimal = lower == 'a' && value.isFinite
+      val digits      = if (value.isNaN) "nan"
+      else if (value.isInfinite) "inf"
+      else if (hexadecimal) hexFloat(math.abs(value), format.precision, format.flags.contains('#'))
+      else decimalFloat(math.abs(value), lower, format.precision.getOrElse(6), format.flags.contains('#'))
+      val rendered = padNumber(
+        format,
+        sign(negative && !value.isNaN, format.flags),
+        if (hexadecimal) "0x" else "",
+        digits,
+        value.isFinite
+      )
+      if (conversion.isUpper) rendered.toUpperCaseRoot else rendered
+    }
+
+  // Start with the exact binary value, then round once using the C default
+  // ties-to-even rule. Decimal string conversion first would change ties.
+  private def decimalFloat(value: Double, conversion: Char, precision: Int, alternate: Boolean): String = {
+    val exact                                       = BigDecimal.exact(value).bigDecimal
+    val rounding                                    = java.math.RoundingMode.HALF_EVEN
+    def exponent(number: java.math.BigDecimal): Int =
+      if (number.signum() == 0) 0 else number.precision() - number.scale() - 1
+    def point(text: String): String = if (alternate && !text.contains('.')) text + "." else text
+    def trim(text: String): String  =
+      if (alternate || !text.contains('.')) text else text.reverse.dropWhile(_ == '0').stripPrefix(".").reverse
+    def scientific(number: java.math.BigDecimal, digits: Int, strip: Boolean): String = {
+      val power    = exponent(number)
+      val mantissa = point(number.movePointLeft(power).setScale(digits, rounding).toPlainString)
+      (if (strip) trim(mantissa) else mantissa) + "e" + (if (power < 0) "-" else "+") +
+        (if (math.abs(power) < 10) "0" else "") + math.abs(power).toString
+    }
+    if (conversion == 'f') point(exact.setScale(precision, rounding).toPlainString)
+    else if (conversion == 'e')
+      scientific(exact.round(java.math.MathContext(precision + 1, rounding)), precision, strip = false)
+    else {
+      val significant = math.max(1, precision)
+      val rounded     = exact.round(java.math.MathContext(significant, rounding))
+      val power       = exponent(rounded)
+      if (power < -4 || power >= significant) scientific(rounded, significant - 1, strip = true)
+      else trim(point(rounded.setScale(significant - power - 1, rounding).toPlainString))
+    }
+  }
+
+  private def hexFloat(value: Double, precision: Option[Int], alternate: Boolean): String = {
+    val bits            = java.lang.Double.doubleToRawLongBits(value)
+    val encodedExponent = ((bits >>> 52) & 0x7ffL).toInt
+    val exponent        = if (value == 0.0) 0 else if (encodedExponent == 0) -1022 else encodedExponent - 1023
+    val significand     = (bits & 0xfffffffffffffL) | (if (encodedExponent == 0) 0L else 1L << 52)
+    val digits          = precision.getOrElse(13)
+    val shift           = 52 - math.min(13, digits) * 4
+    val quotient        = significand >>> shift
+    val remainder       = significand & ((1L << shift) - 1)
+    val half            = if (shift == 0) 0L else 1L << (shift - 1)
+    val rounded         = quotient +
+      (if (shift != 0 && (remainder > half || (remainder == half && (quotient & 1L) != 0))) 1L else 0L)
+    val text     = java.lang.Long.toHexString(rounded)
+    val padded   = "0" * math.max(0, math.min(13, digits) + 1 - text.length) + text
+    val fraction = padded.drop(1) + "0" * math.max(0, digits - 13)
+    val retained = if (precision.isEmpty) fraction.reverse.dropWhile(_ == '0').reverse else fraction
+    padded.take(1) + (if (retained.nonEmpty || alternate) "." + retained else "") + "p" +
+      (if (exponent < 0) "" else "+") + exponent.toString
+  }
 
   private def formatted(specifier: String, conversion: Char, value: Int): Either[String, String] =
     formatValue(specifier, conversion, java.lang.Integer.valueOf(value))
-
-  private def formatted(specifier: String, conversion: Char, value: Double): Either[String, String] =
-    // Java Formatter has no %F; C uses %f with uppercase infinity/NaN spelling.
-    if (conversion == 'F') formatValue(specifier, 'f', java.lang.Double.valueOf(value)).map(_.toUpperCaseRoot)
-    else formatValue(specifier, conversion, java.lang.Double.valueOf(value))
 
   private def formatted(specifier: String, conversion: Char, value: String): Either[String, String] =
     formatValue(specifier, conversion, value)
@@ -175,16 +275,4 @@ object PrintRenderer {
     try Right(string.formatRoot(s"%$specifier$conversion", value))
     catch { case _: java.util.IllegalFormatException => Left(s"device printf cannot format %$conversion") }
 
-  private def hexFloat(value: Double): String = {
-    val bits     = java.lang.Double.doubleToRawLongBits(value)
-    val negative = bits < 0
-    val exponent = ((bits >>> 52) & 0x7ffL).toInt - 1023
-    val mantissa = bits & 0xfffffffffffffL
-    val sign     = if (negative) "-" else ""
-    if (value.isNaN) "nan"
-    else if (value.isInfinite) s"${sign}inf"
-    else if ((bits & 0x7fffffffffffffffL) == 0L) s"${sign}0x0p+0"
-    else if (exponent == -1023) s"${sign}0x0.${java.lang.Long.toHexString(mantissa)}p-1022"
-    else s"${sign}0x1.${java.lang.Long.toHexString(mantissa)}p${if (exponent >= 0) "+" else ""}$exponent"
-  }
 }

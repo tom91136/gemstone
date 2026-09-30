@@ -11,8 +11,8 @@ object WorkerPool {
   case class Measurement(taskCount: Long >= 0, workers: Int, elapsedNanos: Long)
 }
 
-/** One fixed CPU pool. Jobs rotate after each chunk, and nested dispatch callers help the same queue. A launch only
-  * stays on the calling thread when it is too small to amortise queue traffic; claiming a range per dequeue keeps that
+/** One fixed CPU pool. Jobs rotate after each chunk; nested callers execute only their awaited job. A launch only stays
+  * on the calling thread when it is too small to amortise queue traffic; claiming a range per dequeue keeps that
   * threshold low.
   */
 class WorkerPool(
@@ -51,11 +51,11 @@ class WorkerPool(
     thread
   }
 
-  /** Roughly four claims per worker keeps the queue touched a bounded number of times without starving a worker. */
+  /** Bound each claim so a large dispatch cannot monopolize workers while another client waits. */
   private def grainFor(count: Long): Int = {
     val perWorker = parallelism.raw.toLong * 4L
     val grain     = if (count <= perWorker) 1L else (count - 1L) / perWorker + 1L
-    math.max(1L, math.min(count, math.min(grain, Int.MaxValue.toLong))).toInt
+    math.max(1L, math.min(count, math.min(grain, 128L))).toInt
   }
 
   private def enqueue(
@@ -66,16 +66,19 @@ class WorkerPool(
     val job = Job(count, grainFor(count.raw), task)
     if (count.raw > 0L) {
       queue.append(job)
-      workReady.signal()
+      workReady.signalAll()
     }
     job
   }
 
   private def take(until: Option[Job]): Option[(Job, Long, Int)] = lock.withLock {
-    while (!closed && queue.isEmpty && until.forall(!_.finished)) workReady.await()
+    // Helping another job can trap this caller in a long group even after its own
+    // dispatch completes. Idle workers still share the full queue.
+    def eligible: Int = queue.indexWhere(job => until.forall(_ eq job))
+    while (!closed && eligible < 0 && until.forall(!_.finished)) workReady.await()
     if (closed || until.exists(_.finished)) None
     else {
-      val job   = queue.removeHead()
+      val job   = queue.remove(eligible)
       val start = job.next
       val end   = math.min(job.count.raw, start + job.grain.toLong)
       job.next = end

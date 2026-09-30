@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.server
 
 import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
@@ -24,10 +25,13 @@ object Connection {
   ): Unit =
     Using.resource(channel) { channel =>
       Using.Manager { use =>
-        val buffered  = BufferedInputStream(channel.input)
-        val recording = journal.map(writer => use(Recording(writer, buffered, channel.output)))
-        val input     = use(DataInputStream(recording.fold[java.io.InputStream](buffered)(_.input)))
-        val output    = use(DataOutputStream(recording.fold[java.io.OutputStream](channel.output)(_.output)))
+        val buffered       = BufferedInputStream(channel.input)
+        val bufferedOutput = BufferedOutputStream(channel.output)
+        val recording      = journal.map(writer => use(Recording(writer, buffered, bufferedOutput)))
+        // The channel owns the streams. Frames flush explicitly; closing a buffered
+        // wrapper after a failed write would retry an already-partial response.
+        val input  = DataInputStream(recording.fold[java.io.InputStream](buffered)(_.input))
+        val output = DataOutputStream(recording.fold[java.io.OutputStream](bufferedOutput)(_.output))
         @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
         var bound = Option.empty[(ClientId, SessionId)]
         @SuppressWarnings(Array("scalafix:DisableSyntax.var"))

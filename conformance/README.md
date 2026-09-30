@@ -70,7 +70,7 @@ outputs remain up to date. Consumers need only declare the resulting artifacts.
 
 ## Artifacts
 
-The outer CMake project expands a named target set into serial container builds. Architecture targets depend on their
+The outer CMake project expands a named target set into container builds. Architecture targets depend on their
 backend's support target and export this layout:
 
 ```text
@@ -110,8 +110,7 @@ cmake -S artifacts -B build/artifacts -G Ninja \
   -DCUDA_ARCHITECTURES=sm_89,sm_90 -DAMDGPU_ARCHITECTURES=gfx1036,gfx1100
 ```
 
-The outer matrix is always serial; each artifact build retains its internal parallelism. Ninja avoids unchanged entries,
-and Podman caches only reusable toolchain images. Compilation runs in disposable containers, so intermediate build trees
+Ninja avoids unchanged entries, and Podman caches reusable toolchain images. Compilation runs in disposable containers, so intermediate build trees
 do not consume persistent container storage. Set `CONTAINER_EXECUTABLE=docker` to use Docker. Build one entry with
 `cmake --build build/artifacts --target cuda-sm_89`.
 
@@ -133,6 +132,19 @@ cmake -S artifacts -B build/gfx803 -G Ninja \
   -DCONFORMANCE_TARGET_SET=legacy-gfx803
 cmake --build build/gfx803
 ```
+
+### Build concurrency
+
+Share a job budget across outer and container builds with GNU Make >=4.4, Ninja >=1.13, and `setsid`:
+
+```console
+sh artifacts/jobserver.sh --jobs 4 -- cmake --build build/artifacts --target artifacts
+```
+
+`CONFORMANCE_ARTIFACT_PARALLELISM` caps active artifact pipelines (default 1).
+Do not add inner `--parallel`/`-j` flags: they bypass the shared budget. Cancellation stops the invocation's containers.
+Without the wrapper, each container uses `CMAKE_BUILD_PARALLEL_LEVEL` or four jobs; budgets are not shared.
+The container images provide Ninja 1.13.2. Compiler-internal threads and memory are not bounded by job tokens.
 
 ## Driver
 
@@ -175,20 +187,39 @@ build/executable/bin/conformance run \
 Pass backend or target names before `--launcher` to narrow a run. `CONFORMANCE_JOBS` controls CTest parallelism.
 Each executed case saves both output streams in its report directory's `output.log`. Failed cases print a bounded excerpt and
 the full log path, including for crashes and timeouts.
-`workloads/compact.toml` and `workloads/full.toml` define the available workload sizes.
-The Level Zero CTS uses Google Test. `levelzero_cases` in a workload selects full case names with `*` and `?` globs;
-an empty list selects the full compiled inventory. The compact workload selects 182 short driver, device,
-context, queue, event, fence, memory, SPIR-V kernel, specialization constant, and verified copy cases.
-Its queue and event selection includes asynchronous submission, host-signaled dependencies, and event lifetime.
-Memory cases include cross-context copies, indirect pointer copies, allocation-property queries, memory lifetime,
-and shared-system prefetch and region copies. Shared/system kernel transfers include 4 KB cases in compact
-and additional 6 KB cases in full.
-The Level Zero selection also covers SPIR-V function pointers, linked modules, and virtual memory mappings.
-Linking separate SPIR-V modules uses `spirv-link` from the host's `PATH` (included in the conformance container).
-The full workload selects 550 Level Zero cases from the 20,362-case compiled inventory, including every compact case.
-It broadens API, kernel, allocation, SVM, and copy coverage with small parameter samples. Compact also includes short
-SYCL context, device, event, queue, kernel, and work-item cases plus OpenCL memory-host-flag cases. The large Level Zero
-memory/copy sweeps and OpenCL CTS `thread_dimensions` program are outside the one-hour combined workload budget.
+### Workloads
+
+| `--workload` | Selection |
+| --- | --- |
+| `compact` / `full` | Smaller / broader regression coverage across backends |
+| `opencl-cts` / `sycl-cts` | All compiled cases from that CTS |
+| `opencl-cts-bounded` | OpenCL CTS excluding exhaustive integer, half-store, image-size and thread-dimension sweeps |
+| `sycl-cts-bounded` | SYCL CTS excluding the full-type `range_api` launch of roughly 8.7 trillion work-items |
+
+No backend suffix is required: targets with no matching tests are omitted. An entirely empty selection is an error.
+Workloads filter compiled tests; they do not enable additional build categories or guarantee a runtime.
+The combined one-hour target for `full` depends on the runner and concurrency.
+
+The TOML files in [workloads](workloads) record the exact selections:
+`include_programs` accepts program-name globs; exact `exclude_programs` entries take precedence.
+`specs` filters Catch2 names; `levelzero_cases` filters Google Test names. Empty program or Level Zero filters select all.
+Level Zero module-linking cases require `spirv-link` on `PATH` (provided by the container).
+
+SYCL defaults to `SYCL_CTS_ENABLE_FULL_CONFORMANCE=OFF`. Configure the artifact builder with
+`-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=ON` for the full type/operation matrix; existing CMake caches retain their setting.
+Use separate build/output directories to retain both variants. Workload selection does not change this option.
+
+OpenCL stress controls are independent of workload selection:
+
+| Environment variable | Purpose |
+| --- | --- |
+| `CONFORMANCE_OPENCL_CTS_ELEMENTS` | Input count; empty retains the upstream default |
+| `CONFORMANCE_OPENCL_CTS_WIMPY` | Reduced stress; `0` disables it |
+| `CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS` / `CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS` | C11 atomic stress; empty retains upstream defaults |
+| `CONFORMANCE_OPENCL_CTS_TIMEOUT` | Per-case deadline in seconds; default 600 |
+
+Isolated launchers default to 1,024 elements and wimpy mode unless overridden. Emulator profiles reduce atomic
+stress to 16 iterations and 128 threads. Effective settings are recorded in each run's `ctest/targets/*.json`.
 
 ## Unit tests
 
@@ -202,40 +233,24 @@ ctest --test-dir build/unit --output-on-failure
 
 ### Shared memory cases
 
-The project-owned unified suite registers `memory/<allocation>/<scenario>` cases
-for CUDA, HIP, HSA, Level Zero, OpenCL and SYCL. Every allocation runs the same
-seven access and ordering scenarios: contiguous, stride-17, indexed gather, a dependent 4,096-node
-linked traversal, same-queue events, cross-queue events, and synchronized CPU
-pointer replacement. Access patterns run twice with CPU edits, interior pointers
-and guards. Pointer replacement uses one kernel and a host worker, so it does not
-require two kernels to make simultaneous progress. Four additional atomic scenarios
-check acquire/release publication, explicit fences, returned RMW values across
-128 work-items, and failed compare-exchange publication. Compact runs use 32-bit
-words; full runs also cover 64-bit words, subject to device capabilities.
+The unified suite registers `memory/<allocation>/<scenario>` for CUDA, HIP, HSA, Level Zero, OpenCL and SYCL.
+Shared cases cover contiguous, strided, gather and 4,096-node linked access; queue ordering; CPU pointer replacement;
+and publication, fences, RMW and compare-exchange. Access checks include CPU edits, interior pointers and guards.
+Compact uses default allocations and 32-bit words; full adds allocation types and 64-bit operations.
 
-| Backend | Compact allocation | Additional full allocations | Compact cases | Full cases |
-| --- | --- | --- | ---: | ---: |
-| CUDA | managed | pinned, registered | 11 | 45 |
-| HIP | managed | host, registered | 11 | 45 |
-| HSA | region | pool, locked | 11 | 45 |
-| Level Zero | shared | host | 11 | 30 |
-| OpenCL | SVM | Intel host/shared USM | 11 | 45 |
-| SYCL | shared | host | 11 | 30 |
-| **One target per backend** | | | **66** | **240** |
+| Backend | Default allocation | Additional full allocations |
+| --- | --- | --- |
+| CUDA | managed | pinned, registered |
+| HIP | managed | host, registered |
+| HSA | region | pool, locked |
+| Level Zero | shared | host |
+| OpenCL | SVM | Intel host/shared USM |
+| SYCL | shared | host |
 
-These counts are named cases before capability skips, not upstream CTS counts.
-The existing workload selectors include default allocations in both workloads
-and tag additional allocations `[full-matrix]`. They add 114 compact or 368 full
-kernel launches. Runtime prerequisites are checked per allocation/operation;
-missing optional features produce explicit skips. The CUDA PTX fixture currently
-requires sm_80 or newer; OpenCL requires SPIR-V input and fine-grained SVM or the
-Intel USM extension. Host pointer graphs require identical host/device addresses.
-Generated kernels remain in the build tree and are embedded into the artifacts.
+Missing optional capabilities produce explicit skips. CUDA fixtures require sm_80 or newer; OpenCL requires SPIR-V
+input and fine-grained SVM or Intel USM. Host pointer graphs require identical host/device addresses.
+Generated kernels stay in the build tree and are embedded into artifacts.
 
-Shared scenario templates live in `unified/src/memory_cases.hpp`, with the
-registration list in `unified/src/cases/memory.inl`. Each API directory owns its
-`memory.cpp` entry point, capability checks and `memory.hpp` adapter. CUDA PTX
-fixtures live in `unified/src/cuda/`; `unified/src/memory_kernel.cl` is shared by
-HIP, HSA, OpenCL and Level Zero.
-
-The public scenarios and API adapters have one shared definition.
+Shared templates and registrations live in `unified/src/memory_cases.hpp` and `unified/src/cases/memory.inl`.
+Each API directory owns its `memory.cpp` entry point and `memory.hpp` adapter. CUDA PTX lives in `unified/src/cuda/`;
+`unified/src/memory_kernel.cl` is shared by HIP, HSA, OpenCL and Level Zero.

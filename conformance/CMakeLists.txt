@@ -188,6 +188,10 @@ if(BUILD_TESTING OR CONFORMANCE_BUILD_UNIFIED OR CONFORMANCE_BUILD_CTS OR
 endif()
 
 if(BUILD_TESTING)
+  if(UNIX)
+    add_test(NAME conformance_jobserver
+      COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/JobserverTest.cmake")
+  endif()
 
   add_executable(conformance_fixture tests/fixture.cpp)
   target_compile_features(conformance_fixture PRIVATE cxx_std_23)

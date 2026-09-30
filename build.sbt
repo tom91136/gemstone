@@ -313,8 +313,6 @@ def withConformanceLauncher[A](
     |if [ -z "$$${environmentName("OPENCL_LLVM_LINK")}" ] && [ -x "$$toolchain/bin/compiler/llvm-link" ]; then
     |  export ${environmentName("OPENCL_LLVM_LINK")}="$$toolchain/bin/compiler/llvm-link"
     |fi
-    |export CONFORMANCE_OPENCL_CTS_WIMPY=1
-    |export CONFORMANCE_OPENCL_CTS_TIMEOUT=600
     |""".stripMargin
   try {
     Files.writeString(script, configured + "\n" + routing + "exec " + command.map(quoted).mkString(" ") + " \"$@\"\n")
@@ -1428,11 +1426,21 @@ lazy val conformance = project.in(file("conformance"))
           s"-DCONFORMANCE_DEPENDENCY_DIRECTORY=$root/target/conformance/deps",
           s"-DCONFORMANCE_WORK_DIRECTORY=$root/target/conformance/work",
           s"-DCONFORMANCE_ARTIFACT_PARALLELISM=$artifactParallelism",
+          s"-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=${if (environmentFlag("SYCL_CTS_ENABLE_FULL_CONFORMANCE")) "ON"
+            else "OFF"}",
           s"-DCONFORMANCE_OFFLINE=${if (offline) "ON" else "OFF"}"
         ),
         parallelism = (Global / buildParallelism).value,
         log = log.info,
-        target = Some("artifacts")
+        target = Some("artifacts"),
+        jobserver = Seq(
+          "sh",
+          s"${baseDirectory.value}/artifacts/jobserver.sh",
+          "--cmake",
+          (Global / cmakeExecutable).value,
+          "--ninja",
+          (Global / ninjaExecutable).value
+        )
       )
       artifacts
     },
@@ -1528,6 +1536,15 @@ lazy val conformance = project.in(file("conformance"))
       // Stay below the compressed-reference limit; 32 GiB disables it on the supported JVM.
       val serverHeap  = s"${math.max(8L, math.min(28L, jobs.toLong * 6L))}g"
       val environment = Map(
+        "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS" -> sys.env.getOrElse(
+          "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS",
+          "16"
+        ),
+        "CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS" -> sys.env.getOrElse("CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS", "128"),
+        "CONFORMANCE_OPENCL_CTS_ELEMENTS"       -> sys.env.getOrElse("CONFORMANCE_OPENCL_CTS_ELEMENTS", "256"),
+        "CONFORMANCE_OPENCL_CTS_WIMPY"          -> sys.env.getOrElse("CONFORMANCE_OPENCL_CTS_WIMPY", "1"),
+        "CONFORMANCE_OPENCL_CTS_TIMEOUT"        -> sys.env.getOrElse("CONFORMANCE_OPENCL_CTS_TIMEOUT", "600"),
+
         "CONFORMANCE_JOBS"                            -> jobs.toString,
         environmentName("EXECUTION_PARALLELISM")      -> workers.toString,
         environmentName("NATIVE_DIRECTORY")           -> s"$nativeDirectory",

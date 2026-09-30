@@ -1,0 +1,3 @@
+# Every compiled standard SYCL CTS case, independently of the bounded CI workloads.
+# Build with SYCL_CTS_ENABLE_FULL_CONFORMANCE=ON for the complete type matrices.
+include_programs = ['sycl_cts_*']

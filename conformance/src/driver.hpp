@@ -34,6 +34,8 @@ struct RunOptions {
 };
 struct Workload {
   std::vector<std::string> specs{"*"};
+  // Discovery-time program-name globs. Empty selects all; exact exclusions win.
+  std::vector<std::string> include_programs;
   // Full Google Test names or globs for the Level Zero CTS. Empty selects all.
   std::vector<std::string> levelzero_cases;
   // Discovery-time exclusion: these programs are never enumerated, so they
@@ -63,6 +65,8 @@ struct ProcessResult {
 };
 
 int32_t configured_jobs(std::optional<std::string_view> configured, uint32_t hardware_concurrency);
+std::vector<ScheduledCase> discover_cases(const RunOptions &configuration, const Workload &workload, const std::filesystem::path &artifact,
+                                          const std::map<std::string, std::string> &environment, const std::string &id);
 std::vector<std::string> catch_case_names(std::string_view json, std::string_view program);
 std::vector<std::string> gtest_case_names(std::string_view listing, std::string_view program);
 std::vector<std::string> catch_shard_arguments(const std::vector<std::string> &specs, uint32_t index, uint32_t count);

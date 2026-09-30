@@ -13,8 +13,10 @@ using namespace aspartame;
 
 std::map<std::string, std::string> base_environment() {
   std::map<std::string, std::string> result;
-  for (const auto *name : {"HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "SystemRoot", "WINDIR", "COMSPEC",
-                           "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"}) {
+  for (const auto *name :
+       {"HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "SystemRoot", "WINDIR", "COMSPEC", "DISPLAY",
+        "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "CONFORMANCE_OPENCL_CTS_ELEMENTS", "CONFORMANCE_OPENCL_CTS_WIMPY",
+        "CONFORMANCE_OPENCL_CTS_TIMEOUT", "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS", "CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS"}) {
     if (const auto *value = std::getenv(name)) result[name] = value;
   }
 #if defined(_WIN32)

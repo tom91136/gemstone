@@ -243,7 +243,26 @@ private object VMInterpreter {
       groupCount <- dispatch.geometry.groupCount.volume
         .leftMap(detail => Fault.InvalidTask(detail))
       _ <- {
-        val dispatchMemory = VMDispatchMemory(kernel, kernarg, Array.ofDim[Byte](64), allocations, memory)
+        // Kernels using enable_sgpr_dispatch_ptr read the HSA packet directly;
+        // OpenMP derives its grid-stride loop increment from grid_size_x.
+        val packet = Array.ofDim[Byte](64)
+        LittleEndian.write(2L, packet, 0, 2)
+        LittleEndian.write(dispatch.geometry.workDim.raw.toLong, packet, 2, 2)
+        LittleEndian.write(dispatch.geometry.groupSize.x.raw.toLong, packet, 4, 2)
+        LittleEndian.write(dispatch.geometry.groupSize.y.raw.toLong, packet, 6, 2)
+        LittleEndian.write(dispatch.geometry.groupSize.z.raw.toLong, packet, 8, 2)
+        LittleEndian.write(dispatch.geometry.globalExtent.x.raw, packet, 12, 4)
+        LittleEndian.write(dispatch.geometry.globalExtent.y.raw, packet, 16, 4)
+        LittleEndian.write(dispatch.geometry.globalExtent.z.raw, packet, 20, 4)
+        LittleEndian.write(math.max(kernel.privateSegmentSize, dispatch.privateSegmentBytes.raw).toLong, packet, 24, 4)
+        LittleEndian.write(
+          effectiveGroupSegmentSize(kernel.groupSegmentSize, dispatch.groupSegmentBytes.raw).toLong,
+          packet,
+          28,
+          4
+        )
+        LittleEndian.write(KernargAddress, packet, 40, 8)
+        val dispatchMemory = VMDispatchMemory(kernel, kernarg, packet, allocations, memory)
         def runGroupIndex(index: Long >= 0): Either[Fault, Unit] =
           dispatch.geometry.groupCoordinates(index.raw)
             .leftMap(detail => Fault.InvalidTask(detail))

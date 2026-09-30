@@ -107,7 +107,8 @@ class ExecutionRPCSuite extends munit.FunSuite {
     Operation.QueryCompletion(completion),
     Operation.AwaitCompletion(completion),
     Operation.CompletionDirtyRanges(completion, 0),
-    Operation.CompletionPointerRelocations(completion),
+    Operation.CompletionPointerRelocations(completion, 0),
+    Operation.CompletionPointerRelocations(completion, 16384),
     Operation.CompletionPrints(completion),
     Operation.ReleaseCompletion(completion)
   )

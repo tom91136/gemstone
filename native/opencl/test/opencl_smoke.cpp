@@ -598,8 +598,12 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
   REQUIRE((clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
   auto *other = clSVMAlloc(context, CL_MEM_READ_WRITE, 64, 0);
   REQUIRE((other));
-  for (const std::string mode : {"direct", "indirect-list", "cleared-list", "indirect-type", "unrelated"}) {
+  for (const std::string mode :
+       {"direct", "indirect-list", "cleared-list", "usm-indirect-list", "usm-cleared-list", "indirect-type", "unrelated"}) {
     CAPTURE(mode);
+    const auto info = mode.starts_with("usm-") ? CL_KERNEL_EXEC_INFO_USM_PTRS_INTEL : CL_KERNEL_EXEC_INFO_SVM_PTRS;
+    const bool indirectList = mode.ends_with("indirect-list");
+    const bool clearedList = mode.ends_with("cleared-list");
     auto *pointer = clHostMemAllocINTEL(context, nullptr, 64, 0, &error);
     REQUIRE((pointer && error == CL_SUCCESS));
     auto kernel = clCreateKernel(program, "groups", &error);
@@ -607,14 +611,15 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
     REQUIRE((clSetKernelArgMemPointerINTEL(kernel, 0, mode == "direct" ? pointer : other) == CL_SUCCESS));
     uint32_t seed = 17;
     REQUIRE((clSetKernelArg(kernel, 1, sizeof(seed), &seed) == CL_SUCCESS));
-    if (mode == "indirect-list" || mode == "cleared-list") {
-      REQUIRE((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS, sizeof(pointer), &pointer) == CL_SUCCESS));
-      CHECK((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS, sizeof(pointer), nullptr) == CL_INVALID_VALUE));
-      CHECK((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS, 0, &pointer) == CL_INVALID_VALUE));
+    if (indirectList || clearedList) {
+      REQUIRE((clSetKernelExecInfo(kernel, info, sizeof(pointer), &pointer) == CL_SUCCESS));
+      CHECK((clSetKernelExecInfo(kernel, info, sizeof(pointer), nullptr) == CL_INVALID_VALUE));
+      CHECK((clSetKernelExecInfo(kernel, info, 0, &pointer) == CL_INVALID_VALUE));
     }
-    if (mode == "cleared-list") {
-      REQUIRE((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS, 0, nullptr) == CL_SUCCESS));
-      REQUIRE((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS, 0, nullptr) == CL_SUCCESS));
+    if (clearedList) {
+      REQUIRE((clSetKernelExecInfo(kernel, info, 0, nullptr) == CL_SUCCESS));
+      CHECK((clSetKernelExecInfo(kernel, info, sizeof(pointer), nullptr) == CL_INVALID_VALUE));
+      CHECK((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM, 0, nullptr) == CL_INVALID_VALUE));
     }
     if (mode == "indirect-type") {
       cl_bool enabled = CL_TRUE;
@@ -625,6 +630,7 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
     const size_t one = 1;
     cl_event completed{};
     REQUIRE((clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &one, &one, 1, &gate, &completed) == CL_SUCCESS));
+    if (indirectList) REQUIRE((clSetKernelExecInfo(kernel, info, 0, nullptr) == CL_SUCCESS));
     // Drop all caller handles: queued snapshots still own the program/context and declarations.
     REQUIRE((clReleaseKernel(kernel) == CL_SUCCESS));
     std::promise<void> started;
@@ -636,7 +642,7 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
     const bool waited = freeing.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout;
     REQUIRE((clSetUserEventStatus(gate, -1) == CL_SUCCESS));
     CHECK((clWaitForEvents(1, &completed) == CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST));
-    CHECK((waited == (mode != "unrelated" && mode != "cleared-list")));
+    CHECK((waited == (mode != "unrelated" && !clearedList)));
     REQUIRE((freeing.wait_for(std::chrono::seconds(3)) == std::future_status::ready));
     CHECK((freeing.get() == CL_SUCCESS));
     REQUIRE((clReleaseEvent(completed) == CL_SUCCESS));

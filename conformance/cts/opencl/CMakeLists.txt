@@ -1,11 +1,12 @@
 find_package(OpenCL REQUIRED)
 
 # Keep the catalogue useful without compiling the multi-day numerical, image,
-# vector, and exhaustive conversion categories.
+# and exhaustive conversion categories. Workloads select bounded integer, half,
+# and vector cases within the compiled categories.
 set(opencl_cts_categories
   api atomics basic buffers c11_atomics commonfns compiler computeinfo events contractions device_partition
-  device_timer generic_address_space geometrics mem_host_flags multiples
-  non_uniform_work_group pipes printf profiling relationals spirv_new subgroups svm thread_dimensions workgroups)
+  device_timer generic_address_space geometrics half integer_ops mem_host_flags multiples
+  non_uniform_work_group pipes printf profiling relationals spirv_new subgroups svm thread_dimensions vectors workgroups)
 conformance_fetch_url(opencl_cts opencl_cts_source)
 conformance_fetch_url(opencl_opencl_headers opencl_headers)
 conformance_fetch_url(opencl_spirv_headers spirv_headers)
@@ -15,40 +16,7 @@ file(REMOVE_RECURSE "${staged_source}")
 file(COPY "${opencl_cts_source}/" DESTINATION "${staged_source}")
 file(COPY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/adapter.cpp" "${staged_source}/conformance_adapter.cpp")
 
-# The upstream imagedim cases do not currently honor the harness's wimpy
-# mode, making one CPU-emulator case take hours while still exercising the
-# same dimension combinations. Keep the full CTS unchanged and bound only its
-# explicitly reduced workload.
-set(image_dimensions "${staged_source}/test_conformance/basic/test_imagedim.cpp")
-file(READ "${image_dimensions}" image_dimensions_content)
-set(image_dimensions_include [=[#include "testBase.h"
-]=])
-string(FIND "${image_dimensions_content}" "${image_dimensions_include}" image_dimensions_include_patch)
-if(image_dimensions_include_patch EQUAL -1)
-  message(FATAL_ERROR "Pinned OpenCL CTS imagedim include integration point changed")
-endif()
-string(REPLACE "${image_dimensions_include}" [=[#include "testBase.h"
-#include "harness/parseParameters.h"
-]=] image_dimensions_content "${image_dimensions_content}")
-set(image_dimensions_before [=[    max_img_width = std::min(max_image2d_width, max_img_dim);
-    max_img_height = std::min(max_image2d_height, max_img_dim);
-]=])
-set(image_dimensions_after [=[    max_img_width = std::min(max_image2d_width, max_img_dim);
-    max_img_height = std::min(max_image2d_height, max_img_dim);
-    if (gWimpyMode)
-    {
-        max_img_width = std::min(max_img_width, size_t{ 512 });
-        max_img_height = std::min(max_img_height, size_t{ 512 });
-    }
-]=])
-string(FIND "${image_dimensions_content}" "${image_dimensions_before}" image_dimensions_patch)
-if(image_dimensions_patch EQUAL -1)
-  message(FATAL_ERROR "Pinned OpenCL CTS imagedim integration point changed")
-endif()
-string(REPLACE "${image_dimensions_before}" "${image_dimensions_after}"
-  image_dimensions_content "${image_dimensions_content}")
-file(WRITE "${image_dimensions}" "${image_dimensions_content}")
-
+# Wrap upstream entry points for Catch discovery and reporting.
 set(common "${staged_source}/test_conformance/CMakeCommon.txt")
 file(READ "${common}" common_content)
 set(before [=[add_executable(${${MODULE_NAME}_OUT} ${${MODULE_NAME}_SOURCES})]=])

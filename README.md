@@ -117,6 +117,13 @@ Omit `--machine` to select the profile matching the local short hostname.
 
 See [conformance/README.md](conformance/README.md) for target sets, toolchains, profiles, and standalone commands.
 
+CTS workloads need no backend suffix, e.g. `conformance/emulate --workload sycl-cts-bounded`.
+OpenCL emulation defaults to 256 elements, wimpy mode, and 16 atomic iterations with up to 128 threads.
+Use `CONFORMANCE_JOBS=1` for serial execution. `compact` and `full` are regression selections;
+see the conformance guide for CTS controls. For full SYCL type coverage, build with
+`SYCL_CTS_ENABLE_FULL_CONFORMANCE=1`. `CMAKE_BUILD_PARALLEL_LEVEL` sets the shared build job budget;
+`CONFORMANCE_ARTIFACT_PARALLELISM` caps concurrent artifact pipelines.
+
 ## Benchmarks
 
 ```console

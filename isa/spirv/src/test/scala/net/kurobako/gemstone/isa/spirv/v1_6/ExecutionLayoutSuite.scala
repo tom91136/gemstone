@@ -415,6 +415,63 @@ class ExecutionLayoutSuite extends munit.FunSuite {
     assertEquals(memory.bytes, LittleEndian.toVec(29L, 4))
   }
 
+  for (specialized <- Vec(false, true))
+    test(s"nested composite constants materialize null pointer leaves (specialized=$specialized)") {
+      val voidType     = operand("IdResult", 1)
+      val u32          = operand("IdResult", 2)
+      val pointer      = operand("IdResult", 3)
+      val length       = operand("IdResult", 4)
+      val arrayType    = operand("IdResult", 5)
+      val structure    = operand("IdResult", 6)
+      val outputType   = operand("IdResult", 7)
+      val functionType = operand("IdResult", 8)
+      val nullPointer  = operand("IdResult", 9)
+      val array        = operand("IdResult", 10)
+      val tag          = operand("IdResult", 11)
+      val initial      = operand("IdResult", 12)
+      val function     = operand("IdResult", 13)
+      val output       = operand("IdResult", 14)
+      def composite(resultType: Operand, destination: Operand, constituents: Vec[Operand]): Instruction =
+        if (specialized) Instruction.SpecConstantComposite(resultType, destination, constituents)
+        else Instruction.ConstantComposite(resultType, destination, constituents)
+      val module = Module(
+        Header(ISA.version, Word(0), Word(20), Word(0)),
+        Vec(
+          Instruction.TypeVoid(voidType),
+          Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+          Instruction.TypePointer(pointer, operand("StorageClass", 5), u32),
+          Instruction.Constant(u32, length, operand("LiteralContextDependentNumber", 2)),
+          Instruction.TypeArray(arrayType, pointer, length),
+          Instruction.TypeStruct(structure, Vec(u32, arrayType)),
+          Instruction.TypePointer(outputType, operand("StorageClass", 5), structure),
+          Instruction.TypeFunction(functionType, voidType, Vec(outputType)),
+          Instruction.ConstantNull(pointer, nullPointer),
+          composite(arrayType, array, Vec(nullPointer, nullPointer)),
+          Instruction.Constant(u32, tag, operand("LiteralContextDependentNumber", 17)),
+          composite(structure, initial, Vec(tag, array)),
+          Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("nulls"), Vec.empty),
+          Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+          Instruction.FunctionParameter(outputType, output),
+          Instruction.Label(operand("IdResult", 15)),
+          Instruction.Store(output, initial, None),
+          Instruction.Return(),
+          Instruction.FunctionEnd()
+        ),
+        Endianness.Little
+      )
+      val allocation = AllocationId(20L)
+      val memory     = ArrayMemory(allocation, 24)
+      assertEquals(memory.write(allocation, 0L, Vec.fill(24)(0xff.toByte)), Right(()))
+      val dispatch = KernelTask.validated(
+        "nulls",
+        Dimensions.One,
+        Dimensions.One,
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
+      ).toOption.get
+      assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
+      assertEquals(memory.bytes, LittleEndian.toVec(17L, 4) ++ Vec.fill(20)(0.toByte))
+    }
+
   test("Workgroup and Private variables are rematerialized at their SPIR-V lifetime boundaries") {
     def module(storageClass: Int, entryPoint: String): Module = {
       val voidType      = operand("IdResult", 1)

@@ -20,6 +20,18 @@ RUN apt-get update \
        binutils build-essential ca-certificates cmake ninja-build patchelf \
     && rm -rf /var/lib/apt/lists/*
 
+# One static Ninja works across the different toolchain base distributions.
+FROM ubuntu-build-base AS jobserver-ninja
+RUN apt-get update && apt-get install --no-install-recommends --yes curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL https://codeload.github.com/ninja-build/ninja/tar.gz/refs/tags/v1.13.2 -o /tmp/ninja.tar.gz \
+    && echo "974d6b2f4eeefa25625d34da3cb36bdcebe7fbce40f4c16ac0835fd1c0cbae17  /tmp/ninja.tar.gz" | sha256sum --check --strict \
+    && mkdir /tmp/ninja-src \
+    && tar -xzf /tmp/ninja.tar.gz --strip-components=1 -C /tmp/ninja-src \
+    && cmake -S /tmp/ninja-src -B /tmp/ninja-build -G Ninja -DBUILD_TESTING=OFF \
+       -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
+    && cmake --build /tmp/ninja-build --parallel 2
+
 # Source for the relocatable OpenCL compiler subset. The runtime needs an
 # OpenCL C to SPIR-V toolchain at execution time; bundling the same icpx the
 # SYCL toolchain uses keeps OpenCL artifacts self-contained instead of relying
@@ -39,6 +51,9 @@ COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/compile
 COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/compiler/llvm-link /opt/intel/oneapi/compiler/latest/bin/compiler/llvm-link
 COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/lib/clang /opt/intel/oneapi/compiler/latest/lib/clang
 
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
+
 FROM docker.io/library/ubuntu@sha256:61ebaa5cc23ca45450db85eac015435199ec569e28ec222ea13f2aed2110b8a6 AS toolchain-levelzero
 USER root
 ARG DEBIAN_FRONTEND=noninteractive
@@ -50,6 +65,9 @@ RUN apt-get update \
 
 # Compile project-owned Level Zero kernels from source in the artifact build.
 COPY --from=toolchain-opencl /opt/intel/oneapi/compiler /opt/intel/oneapi/compiler
+
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
 FROM ubuntu-build-base AS rocm-repository
 ARG DEBIAN_FRONTEND=noninteractive
@@ -84,6 +102,9 @@ ENV PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}" \
     LIBRARY_PATH=/opt/rocm/lib \
     LD_LIBRARY_PATH=/opt/rocm/lib
 
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
+
 FROM rocm-repository AS toolchain-hsa
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
@@ -94,6 +115,9 @@ ENV PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}" \
     CPATH=/opt/rocm/include \
     LIBRARY_PATH=/opt/rocm/lib \
     LD_LIBRARY_PATH=/opt/rocm/lib
+
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
 FROM ${CUDA_IMAGE} AS toolchain-cuda
 USER root
@@ -120,6 +144,9 @@ ENV PATH="/opt/cmake/bin:/usr/local/cuda/bin:${PATH}" \
     LIBRARY_PATH=/usr/local/cuda/targets/x86_64-linux/lib \
     LD_LIBRARY_PATH=/usr/local/cuda/targets/x86_64-linux/lib:/usr/local/cuda/compat
 
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
+
 FROM ${SYCL_IMAGE} AS toolchain-sycl
 USER root
 ARG DEBIAN_FRONTEND=noninteractive
@@ -139,6 +166,9 @@ ENV PATH="/opt/intel/oneapi/compiler/latest/bin:${PATH}" \
     LD_LIBRARY_PATH=/opt/intel/oneapi/compiler/latest/lib:/opt/intel/oneapi/mkl/latest/lib:/opt/intel/oneapi/tbb/latest/lib:/opt/intel/oneapi/umf/latest/lib \
     CMAKE_PREFIX_PATH=/opt/intel/oneapi/compiler/latest:/opt/intel/oneapi/dpl/latest:/opt/intel/oneapi/mkl/latest:/opt/intel/oneapi/tbb/latest:/opt/intel/oneapi/umf/latest
 
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
+
 FROM ${NVHPC_IMAGE} AS toolchain-openacc
 USER root
 ARG DEBIAN_FRONTEND=noninteractive
@@ -154,3 +184,5 @@ ENV NVHPC_ROOT="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}" \
     CPATH="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/include" \
     LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/lib" \
     LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/lib"
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING

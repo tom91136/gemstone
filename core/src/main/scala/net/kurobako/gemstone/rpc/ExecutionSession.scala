@@ -29,17 +29,34 @@ class ExecutionSession(
   private val SyntheticAddressBase   = 0x400000000000L
   private val SyntheticAddressStride = 0x100000000L
 
-  /** Mutable byte storage is deliberately confined behind this session's state lock. Allocation traffic is the
-    * simulator's hot data path; rebuilding a multi-megabyte immutable collection for every mirrored chunk creates
-    * unbounded GC latency. Neither the array nor a mutable view crosses the VM memory boundary.
+  /** Allocation aliases share storage and its locks. Disjoint cache lines can progress independently; overlapping
+    * scalar, bulk and atomic accesses acquire the same stripes in ascending order.
     */
+  private class AllocationStorage(val bytes: Array[Byte]) {
+    private val locks     = Array.fill(math.min(64, ((bytes.length.toLong + 63L) / 64L).toInt))(ReentrantLock())
+    def lockAll(): Unit   = locks.foreach(_.lock())
+    def unlockAll(): Unit = locks.reverseIterator.foreach(_.unlock())
+    def access[A](offset: Int, size: Int)(operation: => A): A = {
+      val first = offset / 64
+      val last  = if (size == 0) first else (offset + size - 1) / 64
+      if (first == last) locks(first % locks.length).withLock(operation)
+      else {
+        val selected = if (last - first + 1 >= locks.length) locks
+        else (first to last).map(_ % locks.length).sorted.map(locks(_)).toArray
+        selected.foreach(_.lock())
+        try operation
+        finally selected.reverseIterator.foreach(_.unlock())
+      }
+    }
+  }
   private case class RemoteAllocation(
       kind: AllocationKind,
-      bytes: Array[Byte],
+      storage: AllocationStorage,
       address: Option[GuestAddress] = None,
       hostBacked: Boolean = false
   ) {
-    val size: Int > 0 = bytes.length.unsafe[Int > 0]
+    def bytes: Array[Byte] = storage.bytes
+    val size: Int > 0      = bytes.length.unsafe[Int > 0]
   }
 
   /** Program retention and binding reservations share the session state lock. */
@@ -77,26 +94,41 @@ class ExecutionSession(
       val allocations: Set[AllocationId],
       val control: TaskControl
   ) {
-    private var currentStatus: CompletionStatus                = CompletionStatus.Pending
-    private var relocations: Vec[KernelTask.PointerRelocation] = Vec.empty
-    private var output: Vec[Event.Print]                       = Vec.empty
-    def status: CompletionStatus                               = currentStatus
-    def pointerRelocations: Vec[KernelTask.PointerRelocation]  = relocations
-    def prints: Vec[Event.Print]                               = output
-    def finish(result: CompletionStatus): Unit                 = {
+    private var currentStatus: CompletionStatus = CompletionStatus.Pending
+    private val relocations                     = mutable.LinkedHashMap.empty[
+      (KernelTask.RelocationSource, Long >= 0),
+      KernelTask.PointerRelocation
+    ]
+    // Read only after successful completion, just like the dirty-range snapshot.
+    private lazy val allPointerRelocations = Vec.from(relocations.values)
+    private var output: Vec[Event.Print]   = Vec.empty
+
+    def status: CompletionStatus                                                = currentStatus
+    def pointerRelocations(offset: Int >= 0): Vec[KernelTask.PointerRelocation] =
+      if (offset.raw >= allPointerRelocations.length) Vec.empty
+      else allPointerRelocations.slice(
+        offset.raw,
+        offset.raw + math.min(ExecutionRPC.MaximumElements.raw, allPointerRelocations.length - offset.raw)
+      )
+    def prints: Vec[Event.Print]               = output
+    def finish(result: CompletionStatus): Unit = {
       require(result != CompletionStatus.Pending, "execution cannot finish as pending")
       if (currentStatus == CompletionStatus.Pending) currentStatus = result
     }
-    def record(relocation: KernelTask.PointerRelocation): Unit =
-      relocations = relocations.filterNot(existing =>
-        existing.source == relocation.source && existing.sourceOffset == relocation.sourceOffset
-      ) :+ relocation
+    def record(relocation: KernelTask.PointerRelocation): Unit = {
+      val key = (relocation.source, relocation.sourceOffset)
+      // Replacing a pointer keeps the order of its final store.
+      val _ = relocations.remove(key)
+      relocations.update(key, relocation)
+    }
     def record(event: Event.Print): Either[ExecutionFailure, Unit] =
       if (output.size >= ExecutionRPC.MaximumElements.raw)
         Left(ExecutionFailure.Failed("device printf event limit exceeded"))
       else { output = output.appended(event); Right(()) }
-    val hostMemory: HostMemoryMirror                 = HostMemoryMirror()
-    private val dirtyWrites                          = mutable.HashMap.empty[AllocationId, WrittenRanges]
+    val hostMemory: HostMemoryMirror = HostMemoryMirror()
+    // Each worker owns its intervals; merge only after all workgroups complete.
+    private val dirtyWrites =
+      java.util.concurrent.ConcurrentHashMap[Thread, mutable.HashMap[AllocationId, WrittenRanges]]()
     private var exchange: Option[HostSyncExchange]   = None
     private var readWaiters                          = 0
     def hostSync: Option[HostSyncExchange]           = exchange
@@ -112,14 +144,22 @@ class ExecutionSession(
       readWaiters -= 1
     }
     def markDirty(id: AllocationId, offset: Int, size: Int): Unit =
-      dirtyWrites.getOrElseUpdate(id, WrittenRanges()).add(offset, size)
-    private lazy val allDirtyRanges: Vec[DirtyRange] = Vec.from(
-      dirtyWrites.toArray.sortBy(_._1.raw).view.flatMap { case (allocationId, written) =>
+      dirtyWrites.computeIfAbsent(Thread.currentThread(), _ => mutable.HashMap.empty)
+        .getOrElseUpdate(id, WrittenRanges()).add(offset, size)
+    private lazy val allDirtyRanges: Vec[DirtyRange] = {
+      val merged = mutable.HashMap.empty[AllocationId, WrittenRanges]
+      dirtyWrites.values().forEach { writes =>
+        writes.foreach { (id, ranges) =>
+          val target = merged.getOrElseUpdate(id, WrittenRanges())
+          ranges.chunks(65536).foreach((offset, size) => target.add(offset, size))
+        }
+      }
+      Vec.from(merged.toArray.sortBy(_._1.raw).view.flatMap { (allocationId, written) =>
         written.chunks(65536).map { (offset, size) =>
           DirtyRange(allocationId, offset.toLong.unsafe[Long >= 0], size.unsafe[Int > 0])
         }
-      }
-    )
+      })
+    }
     def dirtyRanges(offset: Int >= 0): Vec[DirtyRange] =
       if (offset.raw >= allDirtyRanges.length) Vec.empty
       else allDirtyRanges.slice(
@@ -164,7 +204,10 @@ class ExecutionSession(
       else { state = HostSyncState.Acknowledged(value); true }
   }
   private val hostSyncLock = ReentrantLock()
-  private val nextHostSync = java.util.concurrent.atomic.AtomicLong()
+  // A CAS guess only; native storage validates it after host writes or address reuse.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private var lastHostAtomic = Option.empty[HostMemoryAtomic]
+  private val nextHostSync   = java.util.concurrent.atomic.AtomicLong()
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   @volatile private var hostMemoryEnabled = false
 
@@ -175,7 +218,7 @@ class ExecutionSession(
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var executionWorkers = 0
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private var closed = false
+  @volatile private var closed = false
 
   def registerAllocation(
       size: Long > 0,
@@ -187,7 +230,7 @@ class ExecutionSession(
       Left(ExecutionFailure.InvalidRequest(s"allocation size is outside the supported range: $size"))
     else {
       val id         = current.nextAllocation
-      val allocation = RemoteAllocation(kind, Array.ofDim[Byte](size.raw.toInt))
+      val allocation = RemoteAllocation(kind, AllocationStorage(Array.ofDim[Byte](size.raw.toInt)))
       state.set(
         current.copy(
           allocations = current.allocations.updated(id, allocation),
@@ -241,8 +284,12 @@ class ExecutionSession(
     else if (current.completions.values.view.exists(_.allocations.contains(id)))
       Left(ExecutionFailure.InvalidRequest(s"allocation ${id.toLong} is retained by completion"))
     else {
-      state.set(current.copy(allocations = current.allocations.removed(id)))
-      Right(())
+      val storage = current.allocations(id).storage
+      storage.lockAll()
+      try {
+        state.set(current.copy(allocations = current.allocations.removed(id)))
+        Right(())
+      } finally storage.unlockAll()
     }
   }
 
@@ -291,8 +338,12 @@ class ExecutionSession(
 
   def blas(request: BlasRequest): Either[ExecutionFailure, BlasResult] =
     stateLock.withLock {
-      BlasMath.execute(request, id => state.get().allocations.get(id).map(_.bytes))
-        .left.map(ExecutionFailure.InvalidRequest(_))
+      val allocations = state.get().allocations
+      val storage     = allocations.values.map(_.storage).toVector
+      storage.foreach(_.lockAll())
+      try BlasMath.execute(request, id => allocations.get(id).map(_.bytes))
+          .left.map(ExecutionFailure.InvalidRequest(_))
+      finally storage.reverseIterator.foreach(_.unlockAll())
     }
 
   def describeImage(
@@ -708,16 +759,20 @@ class ExecutionSession(
     else if (address.raw <= 0 || address.raw > Long.MaxValue - size.raw || !hostAccessible(address, size.raw))
       Left(Fault.Memory("host atomic address is unavailable or overflows"))
     else hostSyncLock.withLock {
-      val mask                                = if (size.raw == 4) 0xffffffffL else -1L
-      var expected                            = 0L
+      val mask     = if (size.raw == 4) 0xffffffffL else -1L
+      var expected = lastHostAtomic.filter(request => request.address == address && request.size == size.raw)
+        .fold(0L)(_.desired) & mask
       var result: Option[Either[Fault, Long]] = None
       while (result.isEmpty) {
         val desired  = update(expected) & mask
-        val observed = synchronizeHost(id, Some(HostMemoryAtomic(address, size.raw, expected, desired))).map(_ & mask)
+        val request  = HostMemoryAtomic(address, size.raw, expected, desired)
+        val observed = synchronizeHost(id, Some(request)).map(_ & mask)
         observed match {
           case Left(error)                       => result = Some(Left(error))
-          case Right(value) if value == expected => result = Some(Right(value))
-          case Right(value)                      => expected = value
+          case Right(value) if value == expected =>
+            lastHostAtomic = Some(request)
+            result = Some(Right(value))
+          case Right(value) => expected = value
         }
       }
       result.get
@@ -794,8 +849,11 @@ class ExecutionSession(
       succeededCompletion(id)(execution => Right(execution.dirtyRanges(offset)))
     }
 
-  def completionPointerRelocations(id: CompletionId): Either[ExecutionFailure, Vec[KernelTask.PointerRelocation]] =
-    stateLock.withLock(succeededCompletion(id)(record => Right(record.pointerRelocations)))
+  def completionPointerRelocations(
+      id: CompletionId,
+      offset: Int >= 0
+  ): Either[ExecutionFailure, Vec[KernelTask.PointerRelocation]] =
+    stateLock.withLock(succeededCompletion(id)(record => Right(record.pointerRelocations(offset))))
 
   def completionPrints(id: CompletionId): Either[ExecutionFailure, String] =
     stateLock.withLock(succeededCompletion(id)(record => renderPrints(record.prints)))
@@ -823,35 +881,44 @@ class ExecutionSession(
     }
   }
 
+  private def accessAllocation[A](
+      id: AllocationId,
+      offset: Long >= 0,
+      size: Int,
+      completion: Option[CompletionId] = None
+  )(operation: (RemoteAllocation, Int) => A): Either[ExecutionFailure, A] =
+    if (closed && completion.isEmpty) Left(ExecutionFailure.Failed("execution session is closed"))
+    else state.get().allocations.get(id).toRight(
+      ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered")
+    ).flatMap { allocation =>
+      checkedRange(allocation.bytes.length, offset, size).left.map(error =>
+        ExecutionFailure.InvalidRequest(s"allocation ${id.toLong}: ${error.message}")
+      ).flatMap { start =>
+        allocation.storage.access(start, size) {
+          if (!state.get().allocations.contains(id))
+            Left(ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered"))
+          else Right(operation(allocation, start))
+        }
+      }
+    }
+
   def read(
       id: AllocationId,
       offset: Long >= 0,
       size: Int >= 0
-  ): Either[ExecutionFailure, Vec[Byte]] = stateLock.withLock {
-    state.get().allocations.get(id).toRight(
-      ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered")
-    ).flatMap { allocation =>
-      checkedRange(allocation.bytes.length, offset, size.raw).left.map(error =>
-        ExecutionFailure.InvalidRequest(s"allocation ${id.toLong}: ${error.message}")
-      ).map { start =>
-        Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(allocation.bytes, start, start + size.raw))
-      }
+  ): Either[ExecutionFailure, Vec[Byte]] =
+    accessAllocation(id, offset, size.raw) { (allocation, start) =>
+      Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(allocation.bytes, start, start + size.raw))
     }
-  }
 
   def readValue(
       id: AllocationId,
       offset: Long >= 0,
       size: Int where Between[1, 8]
-  ): Either[ExecutionFailure, Long] = stateLock.withLock {
-    state.get().allocations.get(id).toRight(
-      ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered")
-    ).flatMap { allocation =>
-      checkedRange(allocation.bytes.length, offset, size.raw).left.map(error =>
-        ExecutionFailure.InvalidRequest(s"allocation ${id.toLong}: ${error.message}")
-      ).map(start => LittleEndian.decode(allocation.bytes, start, size.scalarByteWidth))
-    }
-  }
+  ): Either[ExecutionFailure, Long] =
+    accessAllocation(id, offset, size.raw)((allocation, start) =>
+      LittleEndian.decode(allocation.bytes, start, size.scalarByteWidth)
+    )
 
   def write(id: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[ExecutionFailure, Unit] =
     write(id, offset, bytes, None)
@@ -1132,21 +1199,11 @@ class ExecutionSession(
       offset: Long >= 0,
       bytes: Vec[Byte],
       completion: Option[CompletionId]
-  ): Either[ExecutionFailure, Unit] = stateLock.withLock {
-    if (closed && completion.isEmpty) Left(ExecutionFailure.Failed("execution session is closed"))
-    else state.get().allocations.get(id) match {
-      case None             => Left(ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered"))
-      case Some(allocation) =>
-        checkedRange(allocation.bytes.length, offset, bytes.nonNegativeSize.raw) match {
-          case Left(error) =>
-            Left(ExecutionFailure.InvalidRequest(s"allocation ${id.toLong}: ${error.message}"))
-          case Right(start) =>
-            val _ = bytes.copyToArray(allocation.bytes, start, bytes.length)
-            if (bytes.nonEmpty) markDirty(completion, id, start, bytes.size)
-            Right(())
-        }
+  ): Either[ExecutionFailure, Unit] =
+    accessAllocation(id, offset, bytes.size, completion) { (allocation, start) =>
+      val _ = bytes.copyToArray(allocation.bytes, start, bytes.length)
+      if (bytes.nonEmpty) markDirty(completion, id, start, bytes.size)
     }
-  }
 
   private def writeValue(
       id: AllocationId,
@@ -1154,44 +1211,25 @@ class ExecutionSession(
       value: Long,
       size: Int where Between[1, 8],
       completion: Option[CompletionId]
-  ): Either[ExecutionFailure, Unit] = stateLock.withLock {
-    if (closed && completion.isEmpty) Left(ExecutionFailure.Failed("execution session is closed"))
-    else state.get().allocations.get(id) match {
-      case None             => Left(ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered"))
-      case Some(allocation) =>
-        checkedRange(allocation.bytes.length, offset, size.raw) match {
-          case Left(error) =>
-            Left(ExecutionFailure.InvalidRequest(s"allocation ${id.toLong}: ${error.message}"))
-          case Right(start) =>
-            LittleEndian.write(value, allocation.bytes, start, size.scalarByteWidth)
-            markDirty(completion, id, start, size.raw)
-            Right(())
-        }
+  ): Either[ExecutionFailure, Unit] =
+    accessAllocation(id, offset, size.raw, completion) { (allocation, start) =>
+      LittleEndian.write(value, allocation.bytes, start, size.scalarByteWidth)
+      markDirty(completion, id, start, size.raw)
     }
-  }
 
   private def atomicModifyValue(
       id: AllocationId,
       offset: Long >= 0,
       size: Int where Between[1, 8],
       completion: Option[CompletionId]
-  )(update: Long => Long): Either[ExecutionFailure, Long] = stateLock.withLock {
-    if (closed && completion.isEmpty) Left(ExecutionFailure.Failed("execution session is closed"))
-    else state.get().allocations.get(id) match {
-      case None             => Left(ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered"))
-      case Some(allocation) =>
-        checkedRange(allocation.bytes.length, offset, size.raw) match {
-          case Left(error) =>
-            Left(ExecutionFailure.InvalidRequest(s"allocation ${id.toLong}: ${error.message}"))
-          case Right(start) =>
-            val width    = size.scalarByteWidth
-            val previous = LittleEndian.decode(allocation.bytes, start, width)
-            LittleEndian.write(update(previous), allocation.bytes, start, width)
-            markDirty(completion, id, start, size.raw)
-            Right(previous)
-        }
+  )(update: Long => Long): Either[ExecutionFailure, Long] =
+    accessAllocation(id, offset, size.raw, completion) { (allocation, start) =>
+      val width    = size.scalarByteWidth
+      val previous = LittleEndian.decode(allocation.bytes, start, width)
+      LittleEndian.write(update(previous), allocation.bytes, start, width)
+      markDirty(completion, id, start, size.raw)
+      previous
     }
-  }
 
   private def markDirty(
       completion: Option[CompletionId],

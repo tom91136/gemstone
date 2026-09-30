@@ -7,6 +7,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 import scala.util.control.NonFatal
 
@@ -424,9 +425,10 @@ private object VMCompiler {
     instruction match {
       case _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax |
           _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd |
-          _: Instruction.GroupIMulKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin |
+          _: Instruction.GroupIMulKHR | _: Instruction.GroupBitwiseAndKHR | _: Instruction.GroupBitwiseOrKHR | _: Instruction.GroupBitwiseXorKHR | _: Instruction.GroupLogicalAndKHR | _: Instruction.GroupLogicalOrKHR | _: Instruction.GroupLogicalXorKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin |
           _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR |
-          _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleUpINTEL |
+          _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleXorINTEL |
+          _: Instruction.SubgroupShuffleUpINTEL |
           _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast |
           _: Instruction.GroupNonUniformBallot |
           _: Instruction.ControlBarrier => true
@@ -456,13 +458,9 @@ private object VMCompiler {
       val constituent = constituents(index)
       constants.get(id(constituent)) match {
         case Some(Constant.Bits(_, values)) => lanes ++= values
-        case Some(_)                        =>
-          return Left(
-            Fault.InvalidTask(
-              s"SPIR-V composite constant %${id(destination)} contains pointer %${id(constituent)}"
-            )
-          )
-        case None => return Left(undefined(constituent))
+        // Composite leaves use the same zero pointer representation as OpConstantNull aggregates.
+        case Some(Constant.NullPointer(_, _, _)) => lanes += 0L
+        case None                                => return Left(undefined(constituent))
       }
       index += 1
     }

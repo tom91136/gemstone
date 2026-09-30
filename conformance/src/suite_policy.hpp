@@ -32,13 +32,14 @@ inline uint32_t suite_timeout(std::string_view program, uint32_t seconds, bool i
 
 inline void apply_suite_isolated_environment(std::map<std::string, std::string> &environment, std::string_view backend) {
   if (backend != "opencl") return;
-  environment["CONFORMANCE_OPENCL_CTS_ELEMENTS"] = "1024";
-  environment["CONFORMANCE_OPENCL_CTS_WIMPY"] = "1";
-  environment["CONFORMANCE_OPENCL_CTS_TIMEOUT"] = CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS;
+  environment.try_emplace("CONFORMANCE_OPENCL_CTS_ELEMENTS", "1024");
+  environment.try_emplace("CONFORMANCE_OPENCL_CTS_WIMPY", "1");
+  environment.try_emplace("CONFORMANCE_OPENCL_CTS_TIMEOUT", CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS);
 }
 
 inline bool suite_environment_key(std::string_view key) {
-  return key == "CONFORMANCE_OPENCL_CTS_ELEMENTS" || key == "CONFORMANCE_OPENCL_CTS_TIMEOUT" || key == "CONFORMANCE_OPENCL_CTS_WIMPY";
+  return key == "CONFORMANCE_OPENCL_CTS_ELEMENTS" || key == "CONFORMANCE_OPENCL_CTS_TIMEOUT" || key == "CONFORMANCE_OPENCL_CTS_WIMPY"
+         || key == "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS" || key == "CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS";
 }
 
 } // namespace conformance::driver

@@ -4,11 +4,35 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace gemstone::execution {
+
+namespace {
+// Completion records are immutable until ReleaseCompletion, so offsets can be retried safely.
+template <class Request, class Record>
+bool collectPages(Client &client, CompletionId completion, std::vector<Record> &records, std::string &error) {
+  for (;;) {
+    if (records.size() > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+      error = "completion metadata exceeds the offset range";
+      return false;
+    }
+    auto page = client.call(Request{completion, static_cast<int32_t>(records.size())});
+    if (!page) {
+      error = page.error().detail;
+      return false;
+    }
+    const auto count = page.value().size();
+    records.insert(records.end(), std::make_move_iterator(page.value().begin()), std::make_move_iterator(page.value().end()));
+    if (count < MaximumElements) return true;
+  }
+}
+
+} // namespace
 
 bool await_completion(Client &client, CompletionId completion, std::string &error, bool hostMemory) {
   if (!hostMemory) {
@@ -98,19 +122,8 @@ bool await_completion(Client &client, CompletionId completion, std::string &erro
 
 bool completion_dirty_ranges(Client &client, CompletionId completion, std::vector<DirtyRange> &ranges, std::string &error) {
   ranges.clear();
-  for (;;) {
-    if (ranges.size() > INT32_MAX) {
-      error = "completion dirty range offset exceeds the supported range";
-      return false;
-    }
-    auto page = client.call(CompletionDirtyRanges{completion, static_cast<int32_t>(ranges.size())});
-    if (!page) {
-      error = page.error().detail;
-      return false;
-    }
-    ranges.insert(ranges.end(), page.value().begin(), page.value().end());
-    if (page.value().size() < MaximumElements) return true;
-  }
+  error.clear();
+  return collectPages<CompletionDirtyRanges>(client, completion, ranges, error);
 }
 
 bool collect_completion(Client &client, CompletionId completion, CompletionResult &result, std::string &error, bool hostMemory) {
@@ -120,12 +133,7 @@ bool collect_completion(Client &client, CompletionId completion, CompletionResul
 
   bool succeeded = await_completion(client, completion, error, hostMemory);
   if (succeeded) succeeded = completion_dirty_ranges(client, completion, result.dirty_ranges, error);
-  if (succeeded) {
-    auto relocations = client.call(CompletionPointerRelocations{completion});
-    succeeded = static_cast<bool>(relocations);
-    if (succeeded) result.pointer_relocations = std::move(relocations.value());
-    else error = relocations.error().detail;
-  }
+  if (succeeded) succeeded = collectPages<CompletionPointerRelocations>(client, completion, result.pointer_relocations, error);
   if (succeeded) {
     auto prints = client.call(CompletionPrints{completion});
     succeeded = static_cast<bool>(prints);

@@ -13,20 +13,20 @@ import net.kurobako.gemstone.constraint.*
 object Specialization {
   case class Constant(specId: Binary32, byteSize: Int > 0)
 
-  private val DecorateOpcode           = Instruction.Definition.Decorate.opcodeNumber.toInt
-  private val SpecIdDecoration         = Decoration.SpecId
-  private val TypeBoolOpcode           = Instruction.Definition.TypeBool.opcodeNumber.toInt
-  private val TypeIntOpcode            = Instruction.Definition.TypeInt.opcodeNumber.toInt
-  private val TypeFloatOpcode          = Instruction.Definition.TypeFloat.opcodeNumber.toInt
-  private val SpecConstantTrueOpcode   = Instruction.Definition.SpecConstantTrue.opcodeNumber.toInt
-  private val SpecConstantFalseOpcode  = Instruction.Definition.SpecConstantFalse.opcodeNumber.toInt
-  private val SpecConstantNumberOpcode = Instruction.Definition.SpecConstant.opcodeNumber.toInt
+  private val DecorateOpcode           = Instruction.Definition.Decorate.opcodeNumber.raw
+  private val SpecIdDecoration         = 1
+  private val TypeBoolOpcode           = Instruction.Definition.TypeBool.opcodeNumber.raw
+  private val TypeIntOpcode            = Instruction.Definition.TypeInt.opcodeNumber.raw
+  private val TypeFloatOpcode          = Instruction.Definition.TypeFloat.opcodeNumber.raw
+  private val SpecConstantTrueOpcode   = Instruction.Definition.SpecConstantTrue.opcodeNumber.raw
+  private val SpecConstantFalseOpcode  = Instruction.Definition.SpecConstantFalse.opcodeNumber.raw
+  private val SpecConstantNumberOpcode = Instruction.Definition.SpecConstant.opcodeNumber.raw
 
   private case class TypeInfo(byteSize: Int > 0, boolean: Boolean)
   private case class Declaration(offset: Int, words: Int, typeId: Int, opcode: Int)
   private case class Located(offset: Int, byteSize: Int > 0, boolean: Boolean)
   private case class ModuleIndex(
-      specIds: Map[Binary32, Int],
+      specIds: Map[Binary32, Vector[Int]],
       types: Map[Int, TypeInfo],
       declarations: Map[Int, Declaration]
   )
@@ -35,7 +35,9 @@ object Specialization {
     index(image).map { module =>
       Vec.from(
         module.specIds.keys.toVector.sortBy(_.toLong).flatMap(specId =>
-          locate(module, specId).map(constant => Constant(specId, constant.byteSize))
+          module.specIds(specId).headOption.flatMap(id => locate(module, id)).map(constant =>
+            Constant(specId, constant.byteSize)
+          )
         )
       )
     }
@@ -49,27 +51,35 @@ object Specialization {
           accumulated.flatMap { _ =>
             // Values that do not name a constant in this module have no effect.
             if (!module.specIds.contains(specId)) Right(())
-            else
-              locate(module, specId) match {
-                case None => Left(s"specialization constant $specId is not a scalar constant")
-                case Some(constant) if value.size != constant.byteSize.raw =>
-                  Left(s"specialization constant $specId expects ${constant.byteSize} bytes")
-                case Some(constant) =>
-                  val header = LittleEndian.decodeInt32(bytes, constant.offset)
-                  if (constant.boolean)
-                    LittleEndian.write(
-                      ((header & 0xffff0000) |
-                        (if (value(0) == 0) SpecConstantFalseOpcode else SpecConstantTrueOpcode)).toLong,
-                      bytes,
-                      constant.offset,
-                      4
-                    )
-                  else {
-                    java.util.Arrays.fill(bytes, constant.offset + 12, constant.offset + (header >>> 16) * 4, 0.toByte)
-                    val _ = value.copyToArray(bytes, constant.offset + 12)
-                  }
-                  Right(())
+            else module.specIds(specId).foldLeft[Either[String, Unit]](Right(())) { (previous, id) =>
+              previous.flatMap { _ =>
+                locate(module, id) match {
+                  case None => Left(s"specialization constant $specId is not a scalar constant")
+                  case Some(constant) if value.size != constant.byteSize.raw =>
+                    Left(s"specialization constant $specId expects ${constant.byteSize} bytes")
+                  case Some(constant) =>
+                    val header = LittleEndian.decodeInt32(bytes, constant.offset)
+                    if (constant.boolean)
+                      LittleEndian.write(
+                        ((header & 0xffff0000) |
+                          (if (value(0) == 0) SpecConstantFalseOpcode else SpecConstantTrueOpcode)).toLong,
+                        bytes,
+                        constant.offset,
+                        4
+                      )
+                    else {
+                      java.util.Arrays.fill(
+                        bytes,
+                        constant.offset + 12,
+                        constant.offset + (header >>> 16) * 4,
+                        0.toByte
+                      )
+                      val _ = value.copyToArray(bytes, constant.offset + 12)
+                    }
+                    Right(())
+                }
               }
+            }
           }
       }.map(_ => Vec.from(bytes))
     }
@@ -80,7 +90,7 @@ object Specialization {
     if (bytes.length < 20 || bytes.length % 4 != 0 || LittleEndian.decodeInt32(bytes, 0) != Binary.Magic)
       Left("invalid SPIR-V module")
     else {
-      var specIds      = Map.empty[Binary32, Int]
+      var specIds      = Map.empty[Binary32, Vector[Int]]
       var types        = Map.empty[Int, TypeInfo]
       var declarations = Map.empty[Int, Declaration]
       var offset       = 20
@@ -92,12 +102,13 @@ object Specialization {
         if (count == 0 || count > (bytes.length - offset) / 4)
           failure = Some("malformed SPIR-V instruction stream")
         else {
-          if (opcode == DecorateOpcode && count >= 4 && LittleEndian.decodeInt32(bytes, offset + 8) == SpecIdDecoration)
-            specIds =
-              specIds.updated(
-                Bits.unsigned32(LittleEndian.decodeInt32(bytes, offset + 12)),
-                LittleEndian.decodeInt32(bytes, offset + 4)
-              )
+          if (
+            opcode == DecorateOpcode && count >= 4 && LittleEndian.decodeInt32(bytes, offset + 8) == SpecIdDecoration
+          ) {
+            val specId = Bits.unsigned32(LittleEndian.decodeInt32(bytes, offset + 12))
+            val id     = LittleEndian.decodeInt32(bytes, offset + 4)
+            specIds = specIds.updated(specId, specIds.getOrElse(specId, Vector.empty) :+ id)
+          }
           if (opcode == TypeBoolOpcode && count >= 2)
             types = types.updated(LittleEndian.decodeInt32(bytes, offset + 4), TypeInfo(1, boolean = true))
           if ((opcode == TypeIntOpcode || opcode == TypeFloatOpcode) && count >= 3) {
@@ -124,17 +135,15 @@ object Specialization {
     }
   }
 
-  private def locate(module: ModuleIndex, specId: Binary32): Option[Located] =
-    module.specIds.get(specId).flatMap { id =>
-      module.declarations.get(id).flatMap { declaration =>
-        module.types.get(declaration.typeId).flatMap { typeInfo =>
-          val specConstant =
-            declaration.opcode == SpecConstantTrueOpcode || declaration.opcode == SpecConstantFalseOpcode
-          val expectedWords = 3 + (if (typeInfo.boolean) 0 else (typeInfo.byteSize.raw + 3) / 4)
-          Option.when(typeInfo.boolean == specConstant && declaration.words == expectedWords)(
-            Located(declaration.offset, typeInfo.byteSize, typeInfo.boolean)
-          )
-        }
+  private def locate(module: ModuleIndex, id: Int): Option[Located] =
+    module.declarations.get(id).flatMap { declaration =>
+      module.types.get(declaration.typeId).flatMap { typeInfo =>
+        val specConstant =
+          declaration.opcode == SpecConstantTrueOpcode || declaration.opcode == SpecConstantFalseOpcode
+        val expectedWords = 3 + (if (typeInfo.boolean) 0 else (typeInfo.byteSize.raw + 3) / 4)
+        Option.when(typeInfo.boolean == specConstant && declaration.words == expectedWords)(
+          Located(declaration.offset, typeInfo.byteSize, typeInfo.boolean)
+        )
       }
     }
 }

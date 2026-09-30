@@ -64,6 +64,35 @@ string(REPLACE "${invalid_group_count}" "mult_th_group_dim.groupCountX = 1;"
   module_content "${module_content}")
 file(WRITE "${module_cpp}" "${module_content}")
 
+# The sampler guard accepts UNSUPPORTED_FEATURE and then uses an uninitialized image module.
+# Query capability instead; this also avoids leaking the guard's temporary sampler.
+set(args_cpp "${staged_source}/conformance_tests/core/test_module/src/test_kernel_args.cpp")
+file(READ "${args_cpp}" args_content)
+set(sampler_guard [=[bool sampler_support() {
+  ze_sampler_desc_t descriptor = {};
+  descriptor.stype = ZE_STRUCTURE_TYPE_SAMPLER_DESC;
+  ze_sampler_handle_t sampler = nullptr;
+  if (zeSamplerCreate(lzt::get_default_context(),
+                      lzt::zeDevice::get_instance()->get_device(), &descriptor,
+                      &sampler) == ZE_RESULT_ERROR_UNINITIALIZED) {
+    return false;
+  } else {
+    return true;
+  }
+}]=])
+set(sampler_capability [=[bool sampler_support() {
+  ze_device_image_properties_t properties{};
+  properties.stype = ZE_STRUCTURE_TYPE_IMAGE_PROPERTIES;
+  return zeDeviceGetImageProperties(lzt::zeDevice::get_instance()->get_device(), &properties) == ZE_RESULT_SUCCESS
+      && properties.maxSamplers > 0;
+}]=])
+string(FIND "${args_content}" "${sampler_guard}" sampler_at)
+if(sampler_at EQUAL -1)
+  message(FATAL_ERROR "Pinned Level Zero CTS sampler guard integration point changed")
+endif()
+string(REPLACE "${sampler_guard}" "${sampler_capability}" args_content "${args_content}")
+file(WRITE "${args_cpp}" "${args_content}")
+
 # Upstream initializes a device before Google Test can list cases. Artifacts
 # must expose their inventory during relocation checks without a GPU present.
 foreach(program IN LISTS levelzero_cts_programs)

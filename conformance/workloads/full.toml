@@ -1,5 +1,10 @@
 # Catch test specifications, interpreted by every suite's own Catch session.
-specs = ["~[compact-matrix]"]
+# The CUDA big-index regressions traverse billions of elements; defer them to long runs.
+# Include private/local and global-array struct layouts, verified at upstream default sizes.
+# Integer operator sweeps (including quick variants) and half stores exhaust large input domains.
+# Full-conformance range_api submits trillions of work-items; defer that one case.
+# Defer upstream image-dimension sweeps without changing their tested sizes.
+specs = ['~"regressions/cuda-thrust/for-each-with-big-indexes"~"regressions/cuda-thrust/adjacent-difference-with-big-indexes"~"cts/opencl/basic/imagedim_*"~"range_api"~[compact-matrix]~"cts/opencl/integer_ops/quick_*"~"cts/opencl/integer_ops/char_*"~"cts/opencl/integer_ops/uchar_*"~"cts/opencl/integer_ops/short_*"~"cts/opencl/integer_ops/ushort_*"~"cts/opencl/integer_ops/int_*"~"cts/opencl/integer_ops/uint_*"~"cts/opencl/integer_ops/long_*"~"cts/opencl/integer_ops/ulong_*"~"cts/opencl/half/vstore*"']
 # Level Zero runs a bounded expansion of compact. The upstream suite has
 # over 20,000 cases, mostly allocation and copy parameter sweeps.
 levelzero_cases = [
@@ -206,5 +211,9 @@ levelzero_cases = [
   "KernelOffsetTests/zeKernelLaunchTestsP.*/11",
   "ParameterizedTests/zeCommandListAppendMemoryBackToBackTests.*/1",
 ]
-# The thread-dimension sweeps carry 30-minute case timeouts.
-exclude_programs = ["opencl_cts_thread_dimensions"]
+# The thread-dimension sweeps carry 30-minute case timeouts. Large generated
+# SYCL accessor/swizzle matrices belong to the separate sycl-cts workload.
+exclude_programs = [
+  "opencl_cts_thread_dimensions",
+  "sycl_cts_accessor_generic", "sycl_cts_accessor_placeholder", "sycl_cts_vector_swizzles"
+]

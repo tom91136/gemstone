@@ -94,8 +94,8 @@ object ExecutionHandler {
       encode(request, service.awaitCompletion(completion))
     case request @ Operation.CompletionDirtyRanges(completion, offset) =>
       encode(request, service.completionDirtyRanges(completion, offset))
-    case request @ Operation.CompletionPointerRelocations(completion) =>
-      encode(request, service.completionPointerRelocations(completion))
+    case request @ Operation.CompletionPointerRelocations(completion, offset) =>
+      encode(request, service.completionPointerRelocations(completion, offset))
     case request @ Operation.CompletionPrints(completion) =>
       encode(request, service.completionPrints(completion))
     case request @ Operation.ReleaseCompletion(completion) =>

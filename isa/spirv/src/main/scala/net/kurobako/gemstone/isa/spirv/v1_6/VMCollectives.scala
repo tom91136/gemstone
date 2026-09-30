@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 
 import VMInvocation.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.*
 
 private object VMCollectives {
   def openCLBroadcastScope(name: String): Option[Int] =
@@ -18,6 +19,12 @@ private object VMCollectives {
     case SignedMax
     case IntegerAdd
     case IntegerMultiply
+    case BitwiseAnd
+    case BitwiseOr
+    case BitwiseXor
+    case LogicalAnd
+    case LogicalOr
+    case LogicalXor
     case FloatingAdd
     case FloatingMin
     case FloatingMax

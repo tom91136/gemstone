@@ -6,8 +6,14 @@
 #include <sstream>
 #include <thread>
 
+#include <catch2/catch_test_case_info.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/interfaces/catch_interfaces_registry_hub.hpp>
+#include <catch2/internal/catch_test_registry.hpp>
+#include <catch2/internal/catch_test_spec_parser.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <glaze/json.hpp>
+#include <glaze/toml.hpp>
 
 #include "conformance/device.hpp"
 
@@ -54,6 +60,126 @@ TEST_CASE("Catch JSON inventories preserve names and reject malformed input", "[
   CHECK_THROWS(catch_case_names(R"({"version":9,"listings":{"tests":[]}})", "bad"));
   CHECK_THROWS(catch_case_names(R"({"version":1,"listings":{"tests":[{"name":"same"},{"name":"same"}]}})", "duplicate"));
   CHECK(catch_case_names(R"({"version":1,"listings":{"tests":[]}})", "empty selection").empty());
+}
+
+TEST_CASE("workload program globs select discovery without changing native case names", "[driver]") {
+  TemporaryDirectory directory;
+  const std::vector<std::string> programs{"alpha_cts_one", "alpha_cts_two", "beta_cts_three", "unrelated"};
+  std::ofstream manifest(directory.path / "test-programs.txt");
+  for (const auto &program : programs) {
+    fs::copy_file(fixture, directory.path / (program + fixture.extension().string()));
+    manifest << program << "\t10\n";
+  }
+  manifest.close();
+  RunOptions options;
+  Workload workload;
+  REQUIRE(!glz::read_toml(workload, std::string(R"(specs = ['[fixture]']
+include_programs = ['alpha_cts_*']
+)")));
+  std::vector<std::string> expectedPrograms{"alpha_cts_one", "alpha_cts_two"};
+  SECTION("empty inclusion preserves existing all-program discovery") {
+    workload.include_programs.clear();
+    expectedPrograms = programs;
+  }
+  SECTION("a glob rejects unrelated programs") {}
+  SECTION("multiple patterns and question marks match program names") {
+    workload.include_programs = {"alpha_cts_?ne", "beta_cts_*"};
+    expectedPrograms = {"alpha_cts_one", "beta_cts_three"};
+  }
+  SECTION("exact exclusions take precedence over matching inclusion") {
+    workload.exclude_programs = {"alpha_cts_two"};
+    expectedPrograms = {"alpha_cts_one"};
+  }
+  SECTION("exclusions retain their existing exact-name semantics") { workload.exclude_programs = {"alpha_cts_*"}; }
+  SECTION("an unmatched inclusion reports an empty selection") {
+    workload.include_programs = {"absent_*"};
+    CHECK(discover_cases(options, workload, directory.path, base_environment(), "fixture").empty());
+    return;
+  }
+  const auto tests = discover_cases(options, workload, directory.path, base_environment(), "fixture");
+  const auto names = list_fixture();
+  REQUIRE(tests.size() == expectedPrograms.size() * names.size());
+  for (size_t index = 0; index < tests.size(); ++index) {
+    CHECK(tests[index].program == expectedPrograms[index / names.size()]);
+    CHECK(tests[index].identity == names[index % names.size()]);
+    CHECK(tests[index].count == names.size());
+    CHECK(tests[index].index == index % names.size());
+  }
+}
+
+TEST_CASE("workloads omit unrelated targets and reject an entirely empty selection", "[driver]") {
+  TemporaryDirectory directory;
+  RunOptions options;
+  options.profiles = directory.path / "profiles";
+  options.artifacts = directory.path / "artifacts";
+  options.output = directory.path / "reports";
+  options.machine = "fixture";
+  fs::create_directories(options.profiles);
+  fs::create_directories(directory.path / "workloads");
+  std::ofstream(options.profiles / "fixture.toml") << R"([[targets]]
+backend = "opencl"
+deviceLock = false
+[[targets]]
+backend = "sycl"
+deviceLock = false
+)";
+  for (const auto &backend : {"opencl", "sycl"}) {
+    const auto artifact = options.artifacts / backend;
+    fs::create_directories(artifact);
+    std::ofstream(artifact / "artifact.toml") << "backend = '" << backend << "'\n";
+    std::ofstream(artifact / "test-programs.txt") << backend << "_cts_fixture\t10\n";
+    fs::copy_file(fixture, artifact / (std::string(backend) + "_cts_fixture" + fixture.extension().string()));
+    fs::copy_file(fixture, artifact / ("conformance-device" + fixture.extension().string()));
+  }
+  std::string inclusion;
+  bool empty = false;
+  SECTION("compact and full style workloads select all backends") {}
+  SECTION("SYCL-only workload needs no selector or unrelated device probe") {
+    inclusion = "include_programs = ['sycl_cts_*']\n";
+    fs::remove(options.artifacts / "opencl" / ("conformance-device" + fixture.extension().string()));
+  }
+  SECTION("OpenCL-only workload needs no selector") { inclusion = "include_programs = ['opencl_cts_*']\n"; }
+  SECTION("explicit target selection still narrows the run") { options.selectors = {"sycl"}; }
+  SECTION("no program matches anywhere is an error") {
+    inclusion = "include_programs = ['absent_*']\n";
+    empty = true;
+  }
+  SECTION("no cases match anywhere is an error") { empty = true; }
+  std::ofstream(directory.path / "workloads/compact.toml")
+      << inclusion << (empty && inclusion.empty() ? "specs = ['[absent]']\n" : "specs = ['[pass]']\n");
+  if (empty) {
+    CHECK_THROWS_WITH(run(options, driver), "conformance workload selected no tests: compact");
+  } else {
+    CHECK(run(options, driver) == 0);
+    for (const auto &report : fs::directory_iterator(options.output / "fixture")) {
+      const auto inventory = read(report.path() / "ctest/CTestTestfile.cmake");
+      CHECK((inventory.find("opencl_cts_fixture") != std::string::npos)
+            == (options.selectors.empty() && inclusion.find("sycl_cts") == std::string::npos));
+      CHECK((inventory.find("sycl_cts_fixture") != std::string::npos) == (inclusion.find("opencl_cts") == std::string::npos));
+    }
+  }
+}
+
+TEST_CASE("bounded workloads exclude CUDA regressions that walk billions of indices", "[driver][workload-budget]") {
+  for (const auto &name : {"compact", "full"}) {
+    DYNAMIC_SECTION(name) {
+      Workload workload;
+      const auto file = fs::path(CONFORMANCE_PROFILE_DIRECTORY).parent_path() / "workloads" / (std::string(name) + ".toml");
+      REQUIRE(!glz::read_toml(workload, read(file)));
+      Catch::TestSpecParser parser(Catch::getRegistryHub().getTagAliasRegistry());
+      for (const auto &spec : workload.specs)
+        parser.parse(spec);
+      const auto selection = parser.testSpec();
+      for (const auto &test :
+           {"regressions/cuda-thrust/for-each-with-big-indexes", "regressions/cuda-thrust/adjacent-difference-with-big-indexes"}) {
+        CAPTURE(test);
+        const Catch::TestCaseInfo info("", {test, "[unified][regression]"}, {__FILE__, __LINE__});
+        CHECK_FALSE(selection.matches(info));
+      }
+      const Catch::TestCaseInfo shortCase("", {"stress/i8/full/dependency_diamond", "[unified]"}, {__FILE__, __LINE__});
+      CHECK(selection.matches(shortCase));
+    }
+  }
 }
 
 TEST_CASE("Google Test inventories retain parameterized cases and reject duplicates", "[driver]") {
@@ -257,6 +383,23 @@ TEST_CASE("driver job count and physical keys reject invalid values", "[driver]"
 }
 #if !defined(_WIN32)
 
+TEST_CASE("CTS workload settings reach the isolated child environment", "[driver]") {
+  for (const auto &[key, value] : std::map<std::string, std::string>{{"CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS", "37"},
+                                                                     {"CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS", "64"},
+                                                                     {"CONFORMANCE_OPENCL_CTS_ELEMENTS", "16384"},
+                                                                     {"CONFORMANCE_OPENCL_CTS_WIMPY", "0"},
+                                                                     {"CONFORMANCE_OPENCL_CTS_TIMEOUT", "30"}}) {
+    const auto *old = std::getenv(key.c_str());
+    const auto saved = old ? std::optional<std::string>(old) : std::nullopt;
+    REQUIRE(setenv(key.c_str(), value.c_str(), 1) == 0);
+    auto environment = base_environment();
+    if (saved) REQUIRE(setenv(key.c_str(), saved->c_str(), 1) == 0);
+    else REQUIRE(unsetenv(key.c_str()) == 0);
+    apply_suite_isolated_environment(environment, "opencl");
+    CHECK(environment.at(key) == value);
+  }
+}
+
 TEST_CASE("timeout kills a TERM-resistant process tree within a fixed bound", "[driver][process]") {
   const auto start = std::chrono::steady_clock::now();
   const auto result = run_process({fixture.string(), "--process-tree"}, fixture.parent_path(), base_environment(), 250ms, {}, true);
@@ -298,4 +441,19 @@ TEST_CASE("only isolated SYCL handler matrices receive the longer timeout", "[dr
   CHECK(suite_timeout("sycl_cts_handler", 120, false) == 120);
   CHECK(suite_timeout("sycl_cts_handler", 900, true) == 900);
   CHECK(suite_timeout("sycl_cts_buffer", 120, true) == 120);
+}
+
+TEST_CASE("isolated OpenCL launchers preserve explicit CTS workload settings", "[driver]") {
+  std::map<std::string, std::string> environment{{"CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS", "37"},
+                                                 {"CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS", "64"},
+                                                 {"CONFORMANCE_OPENCL_CTS_ELEMENTS", "16384"},
+                                                 {"CONFORMANCE_OPENCL_CTS_WIMPY", "0"},
+                                                 {"CONFORMANCE_OPENCL_CTS_TIMEOUT", "30"}};
+  const auto configured = environment;
+  apply_suite_isolated_environment(environment, "opencl");
+  CHECK(environment == configured);
+
+  environment["CONFORMANCE_OPENCL_CTS_ELEMENTS"] = "";
+  apply_suite_isolated_environment(environment, "opencl");
+  CHECK(environment.at("CONFORMANCE_OPENCL_CTS_ELEMENTS").empty());
 }

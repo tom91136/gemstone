@@ -32,14 +32,14 @@ class PrintRendererSuite extends munit.FunSuite {
     assertEquals(render("%+08.2F", floating(1.5)), Right("+0001.50"))
     assertEquals(render("%.1F", floating(-0.0)), Right("-0.0"))
     assertEquals(render("%F", floating(Double.NaN)), Right("NAN"))
-    assertEquals(render("%F", floating(Double.NegativeInfinity)), Right("-INFINITY"))
+    assertEquals(render("%F", floating(Double.NegativeInfinity)), Right("-INF"))
   }
 
   test("renders half precision and hex floats") {
     assertEquals(render("%f", PrintArgument.Floating(Vec(0x3c00L), 16)), Right("1.000000"))
     assertEquals(
       render("%a", PrintArgument.Floating(Vec(java.lang.Double.doubleToRawLongBits(1.0)), 64)),
-      Right("0x1.0p+0")
+      Right("0x1p+0")
     )
   }
 
@@ -70,4 +70,55 @@ class PrintRendererSuite extends munit.FunSuite {
       Right("1" * count)
     )
   }
+
+  test("integer precision follows C padding and suppresses zero digits") {
+    for (
+      (format, expected) <- Seq(
+        "[%.0u]"   -> "[]",
+        "[%.u]"    -> "[]",
+        "[%5.0u]"  -> "[     ]",
+        "[%-5.0u]" -> "[     ]",
+        "[%05.0u]" -> "[     ]",
+        "[%#.0o]"  -> "[0]",
+        "[%#.0x]"  -> "[]",
+        "[%+.0d]"  -> "[+]",
+        "[% .0d]"  -> "[ ]",
+        "[%.0i]"   -> "[]"
+      )
+    ) assertEquals(render(format, PrintArgument.Integer(Vec(0L), 32)), Right(expected), format)
+    assertEquals(render("[%.0v4u]", PrintArgument.Integer(Vec(0L, 1L, 0L, 42L), 32)), Right("[,1,,42]"))
+    assertEquals(render("[%+.0hhd]", PrintArgument.Integer(Vec(256L), 32)), Right("[+]"))
+    assertEquals(render("%u", PrintArgument.Integer(Vec(-1L), 64)), Right("18446744073709551615"))
+    assertEquals(render("%08.4x", PrintArgument.Integer(Vec(255L), 32)), Right("    00ff"))
+  }
+
+  for (
+    (format, value, expected) <- Seq(
+      ("%0f", 0.6, "0.600000"),
+      ("%4G", 0.0000023, "2.3E-06"),
+      ("%g", 1.0, "1"),
+      ("%#g", 1.0, "1.00000"),
+      ("%8g", 0.023, "   0.023"),
+      ("%f", Double.PositiveInfinity, "inf"),
+      ("%F", Double.PositiveInfinity, "INF"),
+      ("%08f", Double.NegativeInfinity, "    -inf"),
+      ("%f", Double.NaN, "nan"),
+      ("%F", Double.NaN, "NAN"),
+      ("%.0f", 2.5, "2"),
+      ("%.2f", 2.675, "2.67"),
+      ("%+.1f", -0.0, "-0.0"),
+      ("%.1a", 1.5, "0x1.8p+0"),
+      ("%.13A", -65818.078125, "-0X1.011A140000000P+16"),
+      ("%.1a", 1.03125, "0x1.0p+0"),
+      ("%.1a", 1.09375, "0x1.2p+0"),
+      ("%#.0a", 1.0, "0x1.p+0"),
+      ("%.3g", 999.9, "1e+03")
+    )
+  ) test(s"C floating conversion $format of $value") {
+    assertEquals(
+      render(format, PrintArgument.Floating(Vec(java.lang.Double.doubleToRawLongBits(value)), 64)),
+      Right(expected)
+    )
+  }
+
 }

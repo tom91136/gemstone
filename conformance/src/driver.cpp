@@ -203,7 +203,7 @@ uint32_t parse_timeout(std::string_view value, const fs::path &manifest) {
     throw std::runtime_error(fmt::format("invalid timeout in {}", manifest.string()));
   return static_cast<uint32_t>(result);
 }
-std::vector<TestProgram> test_programs(const fs::path &artifact) {
+std::vector<TestProgram> test_programs(const fs::path &artifact, const Workload &workload) {
   const auto manifest = artifact / "test-programs.txt";
   std::ifstream input(manifest);
   if (!input) throw std::runtime_error("artifact has no test program manifest: " + manifest.string());
@@ -225,6 +225,12 @@ std::vector<TestProgram> test_programs(const fs::path &artifact) {
     result.push_back({std::move(name), std::move(path), parse_timeout(std::string_view(line).substr(separator + 1), manifest)});
   }
   if (result.empty()) throw std::runtime_error("artifact contains no test programs: " + artifact.string());
+  std::erase_if(result, [&](const TestProgram &program) {
+    return std::ranges::find(workload.exclude_programs, program.name) != workload.exclude_programs.end()
+           || (!workload.include_programs.empty() && std::ranges::none_of(workload.include_programs, [&](const std::string &pattern) {
+                return glob_matches(pattern.c_str(), program.name.c_str());
+              }));
+  });
   return result;
 }
 namespace {
@@ -286,8 +292,7 @@ DeviceProbeResult probe_device(const RunOptions &configuration, const fs::path &
 std::vector<ScheduledCase> discover_cases(const RunOptions &configuration, const Workload &workload, const fs::path &artifact,
                                           const std::map<std::string, std::string> &environment, const std::string &id) {
   std::vector<ScheduledCase> tests;
-  for (const auto &program : test_programs(artifact)) {
-    if (std::ranges::find(workload.exclude_programs, program.name) != workload.exclude_programs.end()) continue;
+  for (const auto &program : test_programs(artifact, workload)) {
     const bool gtest = suite_uses_gtest(program.name);
     auto command = gtest ? std::vector<std::string>{program.path.string(), "--gtest_list_tests"}
                          : std::vector<std::string>{program.path.string(), "--list-tests", "--reporter", "json", "--order", "lex"};
@@ -311,13 +316,14 @@ std::vector<ScheduledCase> discover_cases(const RunOptions &configuration, const
     for (uint32_t index = 0; index < count; ++index)
       tests.push_back({std::move(names[index]), program.name, timeout, index, count});
   }
-  if (tests.empty()) throw std::runtime_error("conformance target selected no tests: " + id);
   return tests;
 }
-TargetExecution prepare_target(const RunOptions &configuration, const Workload &workload, const profile::ResolvedTarget &target,
-                               const fs::path &run_directory) {
+std::optional<TargetExecution> prepare_target(const RunOptions &configuration, const Workload &workload,
+                                              const profile::ResolvedTarget &target, const fs::path &run_directory) {
   const auto artifact = artifact_directory(configuration, target);
   const auto metadata = validate_artifact(artifact, target);
+  // Program filters can exclude a backend without loading its runtime or probing a device.
+  if (test_programs(artifact, workload).empty()) return std::nullopt;
   const auto support = support_directory(configuration, target, metadata);
   if (!fs::is_directory(support)) throw std::runtime_error("missing artifact support: " + support.string());
   auto environment = base_environment();
@@ -342,9 +348,10 @@ TargetExecution prepare_target(const RunOptions &configuration, const Workload &
   const auto verified = probe_device(configuration, artifact, exec.environment, target.id);
   if (verified.device != exec.device) throw std::runtime_error("device selection changed after propagation for " + target.id);
   auto tests = discover_cases(configuration, workload, artifact, exec.environment, target.id);
+  if (tests.empty()) return std::nullopt;
   const auto path = run_directory / "ctest/targets" / (target.id + ".json");
   write_execution_config(path, exec);
-  return {target.id, target.backend, exec.deviceLock ? exec.device : "", path, std::move(tests)};
+  return TargetExecution{target.id, target.backend, exec.deviceLock ? exec.device : "", path, std::move(tests)};
 }
 void materialize_ctest(const fs::path &directory, const fs::path &driver, const std::vector<TargetExecution> &targets) {
   std::ofstream file(directory / "CTestTestfile.cmake", std::ios::binary | std::ios::trunc);
@@ -444,12 +451,16 @@ int32_t run(RunOptions configuration, const fs::path &driver) {
   for (const auto &target :
        unique_routes(profile::resolve_targets(resolved_profile, configuration.selectors), configuration.isolated_launcher)) {
     auto value = prepare_target(configuration, workload, target, reports);
-    std::cout << "conformance target " << value.id;
-    if (!value.device.empty()) std::cout << " resolved to " << value.device;
-    std::cout << " with " << value.tests.size() << " test(s)\n";
-    prepared.push_back(std::move(value));
+    if (!value) {
+      std::cout << "conformance target " << target.id << " omitted: no tests match workload " << configuration.workload << '\n';
+      continue;
+    }
+    std::cout << "conformance target " << value->id;
+    if (!value->device.empty()) std::cout << " resolved to " << value->device;
+    std::cout << " with " << value->tests.size() << " test(s)\n";
+    prepared.push_back(std::move(*value));
   }
-  if (prepared.empty()) throw std::runtime_error("no conformance targets selected");
+  if (prepared.empty()) throw std::runtime_error("conformance workload selected no tests: " + configuration.workload);
   materialize_ctest(ctest_directory, driver, prepared);
   const auto *jobs = std::getenv("CONFORMANCE_JOBS");
   const auto count =

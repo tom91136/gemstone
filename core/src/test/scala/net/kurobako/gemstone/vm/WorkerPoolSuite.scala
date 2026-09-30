@@ -7,6 +7,112 @@ import net.kurobako.gemstone.constraint.*
 import scala.util.Using
 
 class WorkerPoolSuite extends munit.FunSuite {
+  test("large dispatches yield to queued work within a bounded number of groups") {
+    val entered = java.util.concurrent.CountDownLatch(1)
+    val release = java.util.concurrent.CountDownLatch(1)
+    val visited = AtomicInteger()
+    Using.resource(WorkerPool(1)) { pool =>
+      val large = java.util.concurrent.FutureTask[Either[Fault, Unit]](() =>
+        pool.parallelFor(65536L) { index =>
+          if (index.raw == 0L) {
+            entered.countDown()
+            assert(release.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+          }
+          val _ = visited.incrementAndGet()
+          Right(())
+        }
+      )
+      val caller = Thread(large, "large-dispatch-regression")
+      caller.start()
+      val short = java.util.concurrent.FutureTask[Int](() => visited.get())
+      try {
+        assert(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+        pool.execute(short)
+      } finally release.countDown()
+      val precedingGroups = short.get(5L, java.util.concurrent.TimeUnit.SECONDS)
+      assertEquals(large.get(5L, java.util.concurrent.TimeUnit.SECONDS), Right(()))
+      caller.join()
+      assert(precedingGroups <= 256, s"queued work waited for $precedingGroups groups from one dispatch")
+    }
+  }
+
+  test("joining workgroups does not enter an unrelated launch that can block the caller") {
+    val entered       = java.util.concurrent.CountDownLatch(1)
+    val releaseGroup  = java.util.concurrent.CountDownLatch(1)
+    val releaseLaunch = java.util.concurrent.CountDownLatch(1)
+    Using.resource(WorkerPool(1)) { pool =>
+      val outer = java.util.concurrent.FutureTask[Either[Fault, Unit]](() =>
+        pool.parallelFor(3L) { index =>
+          if (index.raw == 0L) {
+            entered.countDown()
+            assert(releaseGroup.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+          }
+          Right(())
+        }
+      )
+      val unrelated = java.util.concurrent.FutureTask[Boolean](() =>
+        releaseLaunch.await(5L, java.util.concurrent.TimeUnit.SECONDS)
+      )
+      pool.execute(outer)
+      val completed = try {
+        assert(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+        pool.execute(unrelated)
+        releaseGroup.countDown()
+        try { outer.get(1L, java.util.concurrent.TimeUnit.SECONDS); true }
+        catch { case _: java.util.concurrent.TimeoutException => false }
+      } finally {
+        releaseGroup.countDown()
+        releaseLaunch.countDown()
+      }
+      assertEquals(outer.get(5L, java.util.concurrent.TimeUnit.SECONDS), Right(()))
+      assert(unrelated.get(5L, java.util.concurrent.TimeUnit.SECONDS))
+      assert(completed, "a workgroup join entered an unrelated launch before returning to its own caller")
+    }
+  }
+
+  test("a workgroup join cannot be trapped in another dispatch's long group") {
+    val entered      = java.util.concurrent.CountDownLatch(1)
+    val releaseGroup = java.util.concurrent.CountDownLatch(1)
+    val releaseOther = java.util.concurrent.CountDownLatch(1)
+    Using.resource(WorkerPool(1)) { pool =>
+      val outer = java.util.concurrent.FutureTask[Either[Fault, Unit]](() =>
+        pool.parallelFor(3L) { index =>
+          if (index.raw == 0L) {
+            entered.countDown()
+            assert(releaseGroup.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+          }
+          Right(())
+        }
+      )
+      val other = java.util.concurrent.FutureTask[Either[Fault, Unit]](() =>
+        pool.parallelFor(1L) { _ =>
+          assert(releaseOther.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+          Right(())
+        }
+      )
+      val caller = Thread(other, "independent-workgroup-caller")
+      pool.execute(outer)
+      val completed = try {
+        assert(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+        caller.start()
+        // WAITING here means parallelFor has enqueued its job and is awaiting completion.
+        val deadline = platform.monotonicNanos + java.util.concurrent.TimeUnit.SECONDS.toNanos(5L)
+        while (caller.getState != Thread.State.WAITING && platform.monotonicNanos < deadline) Thread.`yield`()
+        assertEquals(caller.getState, Thread.State.WAITING)
+        releaseGroup.countDown()
+        try { outer.get(1L, java.util.concurrent.TimeUnit.SECONDS); true }
+        catch { case _: java.util.concurrent.TimeoutException => false }
+      } finally {
+        releaseGroup.countDown()
+        releaseOther.countDown()
+      }
+      assertEquals(outer.get(5L, java.util.concurrent.TimeUnit.SECONDS), Right(()))
+      assertEquals(other.get(5L, java.util.concurrent.TimeUnit.SECONDS), Right(()))
+      caller.join()
+      assert(completed, "a completed dispatch's caller was executing another dispatch's long group")
+    }
+  }
+
   test("bounded workgroups visit each task index exactly once") {
     Using.resource(WorkerPool(2, minGroups = 1, minWorkItems = 1)) { workgroups =>
       val visited = AtomicIntegerArray(32)

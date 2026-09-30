@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 project(conformance_artifacts LANGUAGES NONE)
 
 if(NOT CMAKE_GENERATOR MATCHES "^Ninja")
-  message(FATAL_ERROR "The conformance artifact matrix requires Ninja to enforce serial container builds")
+  message(FATAL_ERROR "The conformance artifact matrix requires Ninja job pools")
 endif()
 
 set(CONFORMANCE_TARGET_SET default CACHE STRING "Named conformance artifact target set")
@@ -215,12 +215,12 @@ file(GLOB_RECURSE artifact_inputs CONFIGURE_DEPENDS "${CONFORMANCE_SOURCE_DIRECT
 list(FILTER artifact_inputs EXCLUDE REGEX "/(artifacts|build|profiles|target|tests|workloads)/")
 list(FILTER artifact_inputs EXCLUDE REGEX "/README\\.md$")
 set(artifact_scripts
+  "${CMAKE_CURRENT_LIST_DIR}/Jobserver.cmake"
+  "${CMAKE_CURRENT_LIST_DIR}/jobserver.sh"
   "${CMAKE_CURRENT_LIST_DIR}/Assemble.cmake"
   "${CMAKE_CURRENT_LIST_DIR}/Verify.cmake")
 
-# Container steps run concurrently with equal CPU shares, so a lone artifact
-# uses the whole machine while several share it (elastic scheduling). Bound the
-# value by memory, not cores: each toolchain build can need several GiB.
+# Bound active artifact pipelines; the shared jobserver bounds build commands.
 set(CONFORMANCE_ARTIFACT_PARALLELISM 1 CACHE STRING
   "Number of artifact container builds to run concurrently")
 set_property(GLOBAL PROPERTY JOB_POOLS "container_build=${CONFORMANCE_ARTIFACT_PARALLELISM}")
@@ -234,6 +234,7 @@ option(CONFORMANCE_OFFLINE "Require cached dependencies and disable network fetc
 set(CONFORMANCE_WORK_DIRECTORY "${CMAKE_BINARY_DIR}/work" CACHE PATH
   "Persistent per-artifact build directory")
 option(CONFORMANCE_CLEAN_WORK "Discard persistent artifact build trees first" OFF)
+option(SYCL_CTS_ENABLE_FULL_CONFORMANCE "Build the complete upstream SYCL CTS type and operation matrices" OFF)
 
 include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/DependencyCache.cmake")
 include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/Dependencies.cmake")
@@ -284,6 +285,8 @@ function(artifact_arguments backend architecture output_mode result)
       "-DCONFORMANCE_SUPPORT_KEY=${support}")
   elseif(backend STREQUAL "openacc")
     list(APPEND arguments "-DCUDA_ARCHITECTURES=${architecture}")
+  elseif(backend STREQUAL "sycl")
+    list(APPEND arguments "-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=${SYCL_CTS_ENABLE_FULL_CONFORMANCE}")
   elseif(backend STREQUAL "hip" OR backend STREQUAL "hsa")
     list(APPEND arguments "-DAMDGPU_ARCHITECTURES=${architecture}")
     if(backend STREQUAL "hip" AND architecture STREQUAL "gfx803")

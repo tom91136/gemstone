@@ -280,8 +280,10 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE((hsa_executable_symbol_get_info(kernel, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) == HSA_STATUS_SUCCESS));
   hsa_queue_t *queue = nullptr;
   REQUIRE((hsa_queue_create(gpu, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, UINT32_MAX, UINT32_MAX, &queue) == HSA_STATUS_SUCCESS));
+  // One range per group crosses the RPC page boundary. Verify the final group is copied back.
+  constexpr uint32_t outputCount = gemstone::execution::MaximumElements + 1;
   void *output = nullptr;
-  REQUIRE((hsa_amd_memory_pool_allocate(pools.front(), 12 * sizeof(uint32_t), 0, &output) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_pool_allocate(pools.front(), outputCount * sizeof(uint32_t), 0, &output) == HSA_STATUS_SUCCESS));
   fixture.checkAllocationAddress(output);
   struct alignas(16) Arguments {
     void *output;
@@ -291,13 +293,13 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE((hsa_amd_memory_pool_allocate(pools.front(), sizeof(Arguments), 0, &argument_memory) == HSA_STATUS_SUCCESS));
   auto *arguments = static_cast<Arguments *>(argument_memory);
   *arguments = Arguments{output, 37};
-  fixture.expect({4, 3, 12, 0, arguments->seed});
+  fixture.expect({1, outputCount, outputCount, 0, arguments->seed});
   auto *packet = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address);
   std::memset(packet, 0, sizeof(*packet));
   packet->setup = 1;
-  packet->workgroup_size_x = 4;
+  packet->workgroup_size_x = 1;
   packet->workgroup_size_y = packet->workgroup_size_z = 1;
-  packet->grid_size_x = 12;
+  packet->grid_size_x = outputCount;
   packet->grid_size_y = packet->grid_size_z = 1;
   packet->kernel_object = object;
   packet->kernarg_address = arguments;
@@ -309,7 +311,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   while (hsa_queue_load_read_index_scacquire(queue) != 1 && std::chrono::steady_clock::now() < deadline)
     std::this_thread::yield();
   REQUIRE((hsa_queue_load_read_index_scacquire(queue) == 1));
-  for (uint32_t index = 0; index < 12; ++index)
+  for (uint32_t index = 0; index < outputCount; ++index)
     REQUIRE((static_cast<uint32_t *>(output)[index] == 37 + index));
   fixture.check();
   // A device-to-host copy submitted while a dispatch is still running must
@@ -577,6 +579,67 @@ struct MemoryLockSession {
   ~MemoryLockSession() { (void)hsa_shut_down(); }
 };
 } // namespace
+
+TEST_CASE("HSA failed dispatch notifies the queue callback", "[hsa][queue-error]") {
+  MemoryLockSession session;
+  hsa_agent_t gpu{};
+  REQUIRE((hsa_iterate_agents(
+               [](hsa_agent_t agent, void *data) {
+                 hsa_device_type_t type{};
+                 if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+                 if (type == HSA_DEVICE_TYPE_GPU) *static_cast<hsa_agent_t *>(data) = agent;
+                 return HSA_STATUS_SUCCESS;
+               },
+               &gpu)
+           == HSA_STATUS_SUCCESS));
+  struct Notification {
+    std::atomic<unsigned> calls{0};
+    hsa_status_t status = HSA_STATUS_SUCCESS;
+    hsa_queue_t *queue = nullptr;
+    bool reentered = false;
+    hsa_status_t destroyed = HSA_STATUS_ERROR;
+  } notification;
+  hsa_queue_t *queue = nullptr;
+  REQUIRE((hsa_queue_create(
+               gpu, 64, HSA_QUEUE_TYPE_MULTI,
+               [](hsa_status_t status, hsa_queue_t *queue, void *data) {
+                 auto &event = *static_cast<Notification *>(data);
+                 event.status = status;
+                 event.queue = queue;
+                 // Callbacks must be able to query the runtime without deadlocking.
+                 (void)hsa_queue_load_read_index_scacquire(queue);
+                 event.reentered = true;
+                 event.destroyed = hsa_queue_destroy(queue);
+                 event.calls.fetch_add(1, std::memory_order_release);
+               },
+               &notification, UINT32_MAX, UINT32_MAX, &queue)
+           == HSA_STATUS_SUCCESS));
+  hsa_signal_t completion{};
+  REQUIRE((hsa_signal_create(1, 0, nullptr, &completion) == HSA_STATUS_SUCCESS));
+  auto *packet = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address);
+  *packet = {};
+  packet->setup = 1;
+  packet->workgroup_size_x = packet->workgroup_size_y = packet->workgroup_size_z = 1;
+  packet->grid_size_x = packet->grid_size_y = packet->grid_size_z = 1;
+  packet->kernel_object = 0xbad; // Unknown kernel: fail without executing RPC work.
+  packet->completion_signal = completion;
+  __atomic_store_n(&packet->header, uint16_t(HSA_PACKET_TYPE_KERNEL_DISPATCH), __ATOMIC_RELEASE);
+  hsa_queue_store_write_index_screlease(queue, 1);
+  hsa_signal_store_screlease(queue->doorbell_signal, 0);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (notification.calls.load(std::memory_order_acquire) == 0 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  CHECK((notification.calls.load(std::memory_order_acquire) == 1));
+  if (notification.calls.load(std::memory_order_acquire) != 0) {
+    CHECK((notification.status != HSA_STATUS_SUCCESS));
+    CHECK((notification.queue == queue));
+    CHECK(notification.reentered);
+    CHECK((notification.destroyed == HSA_STATUS_SUCCESS));
+  }
+  CHECK((hsa_signal_load_scacquire(completion) < 0));
+  if (notification.calls.load(std::memory_order_acquire) == 0) REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(completion) == HSA_STATUS_SUCCESS));
+}
 
 TEST_CASE("HSA locked interior view addresses the requested bytes", "[hsa][unified-memory]") {
   MemoryLockSession session;

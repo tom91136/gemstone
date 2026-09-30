@@ -16,8 +16,12 @@ object CMake {
       def write(line: String): Unit = writer.synchronized {
         writer.write(line)
         writer.newLine()
+        writer.flush()
+        if (line.startsWith("[artifact]") || line.startsWith("Artifact build:")) log(line)
       }
-      Process(command, directory).!(ProcessLogger(write, write))
+      val child = Process(command, directory).run(ProcessLogger(write, write))
+      try child.exitValue()
+      finally child.destroy()
     }
     if (status != 0) {
       // Keep the complete log on disk; show enough context without flooding the terminal.
@@ -33,7 +37,8 @@ object CMake {
       arguments: Seq[String],
       parallelism: Int,
       log: String => Unit,
-      target: Option[String] = None
+      target: Option[String] = None,
+      jobserver: Seq[String] = Seq.empty
   ): Path = {
     require(cmake.nonEmpty && !cmake.contains('\u0000'), "CMake command must be nonempty and cannot contain NUL")
     require(parallelism > 0, s"CMake parallelism must be positive: $parallelism")
@@ -43,8 +48,10 @@ object CMake {
     )
     val configure = Seq(cmake, "-S", s"$source", "-B", s"$build") ++ arguments
     run(configure, source, build.resolve("configure.log"), log)
-    val compile = Seq(cmake, "--build", s"$build", "--parallel", s"$parallelism") ++
-      target.toSeq.flatMap(value => Seq("--target", value))
+    val compile =
+      (if (jobserver.nonEmpty) jobserver ++ Seq("--jobs", parallelism.toString, "--", cmake, "--build", s"$build")
+       else Seq(cmake, "--build", s"$build", "--parallel", s"$parallelism")) ++
+        target.toSeq.flatMap(value => Seq("--target", value))
     run(compile, source, build.resolve("build.log"), log)
     build
   }

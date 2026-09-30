@@ -283,6 +283,117 @@ class ExecutionConversionSuite extends munit.FunSuite {
     }
   }
 
+  for {
+    sourceWidth <- Seq(16, 32, 64)
+    resultWidth <- Seq(8, 16, 32, 64)
+    lanes       <- Seq(1, 4)
+  }
+    test(s"unsigned conversion honors rounding and saturation at $sourceWidth to $resultWidth bits, $lanes lanes") {
+      val samples  = Seq(2.3, 3.8, 2.5, 3.5)
+      val expected = Seq(Seq(2L, 4L, 2L, 4L), Seq(2L, 3L, 2L, 3L), Seq(3L, 4L, 3L, 4L), Seq(2L, 3L, 2L, 3L))
+      for {
+        mode     <- 0 to 3
+        start    <- samples.indices
+        saturate <- Seq(false, true)
+      }
+        checkUnsignedConversion(
+          sourceWidth,
+          resultWidth,
+          mode,
+          saturate,
+          Seq.tabulate(lanes)(lane => samples((start + lane) % samples.size)),
+          Seq.tabulate(lanes)(lane => expected(mode)((start + lane) % samples.size))
+        )
+      for (mode <- Seq(0, 1, 2))
+        checkUnsignedConversion(sourceWidth, resultWidth, mode, false, Seq.fill(lanes)(-0.5), Seq.fill(lanes)(0L))
+      val maximum = ((BigInt(1) << resultWidth) - 1).toLong
+      for (
+        (value, expected) <- Seq((Double.NaN, 0L), (Double.NegativeInfinity, 0L), (Double.PositiveInfinity, maximum))
+      )
+        checkUnsignedConversion(sourceWidth, resultWidth, 0, true, Seq.fill(lanes)(value), Seq.fill(lanes)(expected))
+      if (resultWidth == 64 && sourceWidth != 16)
+        checkUnsignedConversion(
+          sourceWidth,
+          resultWidth,
+          0,
+          true,
+          Seq.fill(lanes)(Math.scalb(1.0, 63)),
+          Seq.fill(lanes)(Long.MinValue)
+        )
+    }
+
+  private def checkUnsignedConversion(
+      sourceWidth: Int,
+      resultWidth: Int,
+      mode: Int,
+      saturate: Boolean,
+      inputValues: Seq[Double],
+      expected: Seq[Long]
+  ): Unit = {
+    val lanes       = inputValues.size
+    val voidType    = operand("IdResult", 1)
+    val floatScalar = operand("IdResult", 2)
+    val intScalar   = operand("IdResult", 3)
+    val floatType   = if (lanes == 1) floatScalar else operand("IdResult", 11)
+    val intType     = if (lanes == 1) intScalar else operand("IdResult", 12)
+    val pointer     = operand("IdResult", 4)
+    val signature   = operand("IdResult", 5)
+    val function    = operand("IdResult", 6)
+    val output      = operand("IdResult", 7)
+    val input       = operand("IdResult", 8)
+    val converted   = operand("IdResult", 10)
+    val types       = Vec[Instruction](
+      Instruction.TypeVoid(voidType),
+      Instruction.TypeFloat(floatScalar, operand("LiteralInteger", sourceWidth), None),
+      Instruction.TypeInt(intScalar, operand("LiteralInteger", resultWidth), operand("LiteralInteger", 0))
+    ) ++
+      (if (lanes == 1) Vec.empty[Instruction]
+       else Vec[Instruction](
+         Instruction.TypeVector(floatType, floatScalar, operand("LiteralInteger", lanes)),
+         Instruction.TypeVector(intType, intScalar, operand("LiteralInteger", lanes))
+       ))
+    val decorations = Vec[Instruction](Instruction.Decorate(converted, operand("Decoration", 39, mode))) ++
+      (if (saturate) Vec[Instruction](Instruction.Decorate(converted, operand("Decoration", 28)))
+       else Vec.empty[Instruction])
+    val instructions = types ++ decorations ++ Vec[Instruction](
+      Instruction.TypePointer(pointer, operand("StorageClass", 5), intType),
+      Instruction.TypeFunction(signature, voidType, Vec(pointer, floatType)),
+      Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("convert"), Vec.empty),
+      Instruction.Function(voidType, function, operand("FunctionControl", 0), signature),
+      Instruction.FunctionParameter(pointer, output),
+      Instruction.FunctionParameter(floatType, input),
+      Instruction.Label(operand("IdResult", 9)),
+      Instruction.ConvertFToU(intType, converted, input),
+      Instruction.Store(output, converted, None),
+      Instruction.Return(),
+      Instruction.FunctionEnd()
+    )
+    val module      = Module(Header(ISA.version, Word(0), Word(13), Word(0)), instructions, Endianness.Little)
+    val allocation  = AllocationId(27L)
+    val memory      = ArrayMemory(allocation, lanes * resultWidth / 8)
+    val sourceBytes = Vec.from(inputValues.flatMap { value =>
+      val bits = sourceWidth match {
+        case 16 => IEEE754.doubleToBinary16(value).raw.toLong
+        case 32 => java.lang.Float.floatToRawIntBits(value.toFloat).toLong
+        case _  => java.lang.Double.doubleToRawLongBits(value)
+      }
+      LittleEndian.toVec(bits, (sourceWidth / 8).refine[Int where Between[0, 8]].toOption.get)
+    })
+    val task = KernelTask.validated(
+      "convert",
+      Dimensions.One,
+      Dimensions.One,
+      Vec(KernelTask.Argument.Memory(allocation, 0L), KernelTask.Argument.Scalar(sourceBytes))
+    ).toOption.get
+    assertEquals(executeUnchecked(module, task, memory), Right(()))
+    assertEquals(
+      memory.bytes,
+      Vec.from(expected.flatMap(value =>
+        LittleEndian.toVec(value, (resultWidth / 8).refine[Int where Between[0, 8]].toOption.get)
+      ))
+    )
+  }
+
   test("saturated float-to-signed conversion maps NaN to zero") {
     val voidType  = operand("IdResult", 1)
     val floatType = operand("IdResult", 2)

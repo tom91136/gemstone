@@ -1,5 +1,6 @@
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -86,6 +87,9 @@ struct MockServer {
   uint64_t allocationId = 0;
   std::atomic<uint32_t> writeRequests{0};
   std::atomic<bool> failNextCompletion{false};
+  std::atomic<bool> pauseCompletion{false};
+  std::atomic<bool> completionEntered{false};
+  std::atomic<uint8_t> lastLaunchByte8{0};
 
 private:
   void serve() {
@@ -307,6 +311,7 @@ private:
     REQUIRE((tail != nullptr && tail->bytes.size() == sizeof(uint32_t)));
     REQUIRE((request.pointerRelocations.empty()));
     REQUIRE((!request.discoverArgumentRelocations));
+    lastLaunchByte8 = allocation[8];
     std::memcpy(allocation.data() + 4, seed->bytes.data(), sizeof(uint32_t));
     std::vector<uint8_t> response;
     gemstone_test::encodePayload(response, CompletionId{static_cast<int64_t>(completionId)});
@@ -325,6 +330,9 @@ private:
     const auto completion = hostMemory ? gemstone_test::decodePayload<PollHostMemory>(payload).completion
                                        : gemstone_test::decodePayload<AwaitCompletion>(payload).completion;
     REQUIRE((completion.value == static_cast<int64_t>(completionId)));
+    completionEntered = true;
+    while (pauseCompletion.load())
+      std::this_thread::yield();
     if (failNextCompletion.exchange(false)) {
       std::vector<uint8_t> failure;
       gemstone_test::encodePayload(failure, ExecutionFailure{ExecutionFailureFailed{"completion failed"}});
@@ -687,16 +695,37 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   REQUIRE((zeKernelSetArgumentValue(kernel, 1, sizeof(changedAfterRecording), &changedAfterRecording) == ZE_RESULT_SUCCESS));
   REQUIRE((zeKernelSetGroupSize(kernel, 8, 1, 1) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandListClose(list) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
+  ze_command_list_handle_t copyList = nullptr;
+  REQUIRE(zeCommandListCreateImmediate(context, device, &queueDesc, &copyList) == ZE_RESULT_SUCCESS);
+  server.pauseCompletion = true;
+  ze_result_t launchStatus = ZE_RESULT_NOT_READY;
+  std::thread launchThread([&] { launchStatus = zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr); });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!server.completionEntered.load() && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  const bool entered = server.completionEntered.load();
+  const uint8_t concurrentByte = 0x5a;
+  // A legal disjoint copy after upload, but before the kernel's four-byte
+  // download, must still be visible to the next kernel on this allocation.
+  const auto copyStatus =
+      entered ? zeCommandListAppendMemoryCopy(copyList, static_cast<uint8_t *>(memory) + 8, &concurrentByte, 1, nullptr, 0, nullptr)
+              : ZE_RESULT_NOT_READY;
+  server.pauseCompletion = false;
+  launchThread.join();
+  REQUIRE(zeCommandListDestroy(copyList) == ZE_RESULT_SUCCESS);
+  REQUIRE(entered);
+  REQUIRE(copyStatus == ZE_RESULT_SUCCESS);
+  REQUIRE(launchStatus == ZE_RESULT_SUCCESS);
   REQUIRE((*reinterpret_cast<uint32_t *>(static_cast<uint8_t *>(memory) + 4) == expected));
   REQUIRE((server.writeRequests.load(std::memory_order_relaxed) == 1));
-  // The kernel wrote four bytes, so the download only validates part of its
-  // page; the page fingerprint stays stale and the next launch re-uploads it.
+  // The next upload must preserve the disjoint host copy alongside the kernel result.
   REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
-  REQUIRE((server.writeRequests.load(std::memory_order_relaxed) == 2));
-  static_cast<uint8_t *>(memory)[8] = 0x5a;
+  CHECK((server.writeRequests.load(std::memory_order_relaxed) == 2));
+  CHECK(server.lastLaunchByte8.load() == concurrentByte);
+  static_cast<uint8_t *>(memory)[8] = 0x6b;
   REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
-  REQUIRE((server.writeRequests.load(std::memory_order_relaxed) == 3));
+  CHECK((server.writeRequests.load(std::memory_order_relaxed) == 3));
+  CHECK(server.lastLaunchByte8.load() == 0x6b);
 
   ze_fence_desc_t fenceDesc{};
   fenceDesc.stype = ZE_STRUCTURE_TYPE_FENCE_DESC;
@@ -707,6 +736,86 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   REQUIRE((zeFenceHostSynchronize(failedFence, 1'000'000'000ULL) == ZE_RESULT_ERROR_DEVICE_LOST));
   REQUIRE((zeFenceQueryStatus(failedFence) == ZE_RESULT_ERROR_DEVICE_LOST));
   REQUIRE((zeFenceDestroy(failedFence) == ZE_RESULT_SUCCESS));
+
+  REQUIRE((zeKernelSetGroupSize(kernel, 4, 1, 1) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeKernelSetArgumentValue(kernel, 1, sizeof(expected), &expected) == ZE_RESULT_SUCCESS));
+  // A failed asynchronous launch must complete its event with the error and
+  // unblock dependent copies, including events on cancelled later commands.
+  for (const unsigned mode : {0U, 1U, 2U, 3U}) {
+    CAPTURE(mode);
+    const bool immediate = mode == 1;
+    ze_event_pool_desc_t poolDesc{};
+    poolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+    poolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
+    poolDesc.count = 3;
+    ze_event_pool_handle_t pool = nullptr;
+    REQUIRE((zeEventPoolCreate(context, &poolDesc, 0, nullptr, &pool) == ZE_RESULT_SUCCESS));
+    std::array<ze_event_handle_t, 3> events{};
+    for (uint32_t index = 0; index < events.size(); ++index) {
+      ze_event_desc_t desc{};
+      desc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
+      desc.index = index;
+      desc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
+      desc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
+      REQUIRE((zeEventCreate(pool, &desc, &events[index]) == ZE_RESULT_SUCCESS));
+    }
+    ze_command_queue_desc_t asyncDesc{};
+    asyncDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+    asyncDesc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+    ze_command_queue_handle_t producerQueue = nullptr, consumerQueue = nullptr;
+    REQUIRE((zeCommandQueueCreate(context, device, &asyncDesc, &producerQueue) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeCommandQueueCreate(context, device, &asyncDesc, &consumerQueue) == ZE_RESULT_SUCCESS));
+    ze_command_list_handle_t producer = nullptr, consumer = nullptr, outer = nullptr;
+    if (mode >= 2) REQUIRE((zeCommandListCreateImmediate(context, device, &asyncDesc, &outer) == ZE_RESULT_SUCCESS));
+    if (immediate) REQUIRE((zeCommandListCreateImmediate(context, device, &asyncDesc, &producer) == ZE_RESULT_SUCCESS));
+    else REQUIRE((zeCommandListCreate(context, device, &listDesc, &producer) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeCommandListCreate(context, device, &listDesc, &consumer) == ZE_RESULT_SUCCESS));
+    const uint32_t source = 0xabcdef01;
+    uint32_t cancelled = 0, destination = 0;
+    REQUIRE(
+        (zeCommandListAppendMemoryCopy(consumer, &destination, &source, sizeof(source), events[2], 1, &events[1]) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeCommandListClose(consumer) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeCommandQueueExecuteCommandLists(consumerQueue, 1, &consumer, nullptr) == ZE_RESULT_SUCCESS));
+    server.failNextCompletion.store(true);
+    REQUIRE((zeCommandListAppendLaunchKernel(mode == 3 ? outer : producer, kernel, &groups, events[0], 0, nullptr) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeCommandListAppendMemoryCopy(producer, &cancelled, &source, sizeof(source), events[1], 0, nullptr) == ZE_RESULT_SUCCESS));
+    if (!immediate) {
+      REQUIRE((zeCommandListClose(producer) == ZE_RESULT_SUCCESS));
+      if (mode == 0) REQUIRE((zeCommandQueueExecuteCommandLists(producerQueue, 1, &producer, nullptr) == ZE_RESULT_SUCCESS));
+      else REQUIRE((zeCommandListImmediateAppendCommandListsExp(outer, 1, &producer, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
+    }
+    std::array<ze_result_t, 3> statuses{};
+    for (size_t index = 0; index < events.size(); ++index) {
+      statuses[index] = zeEventHostSynchronize(events[index], 1'000'000'000ULL);
+      // Unblock the old implementation before reporting failures so the red
+      // regression can always clean up its worker threads.
+      if (statuses[index] == ZE_RESULT_NOT_READY) REQUIRE((zeEventHostSignal(events[index]) == ZE_RESULT_SUCCESS));
+    }
+    CHECK((zeCommandQueueSynchronize(consumerQueue, 1'000'000'000ULL) == ZE_RESULT_ERROR_DEVICE_LOST));
+    for (size_t index = 0; index < events.size(); ++index) {
+      CAPTURE(index);
+      CHECK((statuses[index] == ZE_RESULT_ERROR_DEVICE_LOST));
+      CHECK((zeEventQueryStatus(events[index]) == ZE_RESULT_ERROR_DEVICE_LOST));
+      ze_kernel_timestamp_result_t timestamp{};
+      CHECK((zeEventQueryKernelTimestamp(events[index], &timestamp) == ZE_RESULT_ERROR_DEVICE_LOST));
+    }
+    CHECK((cancelled == 0));
+    CHECK((destination == 0));
+    if (mode == 0) CHECK((zeCommandQueueSynchronize(producerQueue, 1'000'000'000ULL) == ZE_RESULT_ERROR_DEVICE_LOST));
+    if (outer) REQUIRE((zeCommandListDestroy(outer) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeCommandListDestroy(producer) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeCommandListDestroy(consumer) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeCommandQueueDestroy(producerQueue) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeCommandQueueDestroy(consumerQueue) == ZE_RESULT_SUCCESS));
+    for (const auto event : events) {
+      REQUIRE((zeEventHostReset(event) == ZE_RESULT_SUCCESS));
+      CHECK((zeEventQueryStatus(event) == ZE_RESULT_NOT_READY));
+      REQUIRE((zeEventHostSignal(event) == ZE_RESULT_SUCCESS));
+      CHECK((zeEventHostSynchronize(event, 0) == ZE_RESULT_SUCCESS));
+      REQUIRE((zeEventDestroy(event) == ZE_RESULT_SUCCESS));
+    }
+    REQUIRE((zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS));
+  }
 
   REQUIRE((zeKernelDestroy(kernel) == ZE_RESULT_SUCCESS));
   REQUIRE((zeModuleDestroy(module) == ZE_RESULT_SUCCESS));
@@ -719,7 +828,7 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
 TEST_CASE("Level Zero cross-workgroup API", "[level-zero][rpc]") { crossWorkgroupApi(); }
 
 namespace {
-void ordinaryHostPointer(unsigned storageKind, bool primeBase) {
+void ordinaryHostPointer(unsigned storageKind, bool primeBase, bool requiredGroupSize = false) {
   gemstone_test::RpcFixture server;
   const auto port = "tcp://127.0.0.1:" + std::to_string(server.port());
   REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
@@ -737,6 +846,8 @@ void ordinaryHostPointer(unsigned storageKind, bool primeBase) {
   ze_module_desc_t moduleDesc{};
   moduleDesc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
   moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+  // The Scala backend describes work-group requirements through the shared RPC metadata.
+  if (requiredGroupSize) server.kernelWorkGroup({4, 1, 1});
   moduleDesc.inputSize = sizeof(server.spirv);
   moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(server.spirv);
   ze_module_handle_t module = nullptr;
@@ -758,7 +869,7 @@ void ordinaryHostPointer(unsigned storageKind, bool primeBase) {
   const uint32_t seed = 29;
   REQUIRE((zeKernelSetArgumentValue(kernel, 0, sizeof(base), &base) == ZE_RESULT_SUCCESS));
   REQUIRE((zeKernelSetArgumentValue(kernel, 1, sizeof(seed), &seed) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeKernelSetGroupSize(kernel, 4, 1, 1) == ZE_RESULT_SUCCESS));
+  if (!requiredGroupSize) REQUIRE((zeKernelSetGroupSize(kernel, 4, 1, 1) == ZE_RESULT_SUCCESS));
 
   ze_command_queue_desc_t queueDesc{};
   queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
@@ -804,6 +915,8 @@ void ordinaryHostPointer(unsigned storageKind, bool primeBase) {
 TEST_CASE("Level Zero kernel accepts an interior ordinary host pointer", "[level-zero][rpc][unified-memory]") {
   ordinaryHostPointer(0, true);
 }
+
+TEST_CASE("Level Zero kernel defaults to its required group size", "[level-zero][rpc]") { ordinaryHostPointer(0, false, true); }
 
 TEST_CASE("Level Zero first launch accepts an interior heap pointer", "[level-zero][rpc][unified-memory]") {
   ordinaryHostPointer(0, false);

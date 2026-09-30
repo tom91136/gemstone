@@ -1,3 +1,4 @@
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -132,8 +133,9 @@ public:
   void invoke() const override {
     (void)conformance::physical_device();
     std::vector<std::string> arguments{"opencl_cts_" CONFORMANCE_CTS_CATEGORY, name_};
-    if (const auto *wimpy = std::getenv("CONFORMANCE_OPENCL_CTS_WIMPY"); wimpy && std::string_view(wimpy) == "1")
-      arguments.emplace_back("--wimpy");
+    const auto *wimpy = std::getenv("CONFORMANCE_OPENCL_CTS_WIMPY");
+    const bool reduced = wimpy && std::string_view(wimpy) == "1";
+    if (reduced) arguments.emplace_back("--wimpy");
     if (std::string_view(CONFORMANCE_CTS_CATEGORY) == "compiler" || std::string_view(CONFORMANCE_CTS_CATEGORY) == "spirv_new") {
       const auto *support = std::getenv("CONFORMANCE_SUPPORT_ROOT");
       if (!support || !*support) FAIL("CONFORMANCE_SUPPORT_ROOT is required");
@@ -148,6 +150,23 @@ public:
       arguments.push_back(std::string(support) + "/data/secondIncludeTestDirectory");
     }
     if (const auto *elements = std::getenv("CONFORMANCE_OPENCL_CTS_ELEMENTS"); elements && *elements) arguments.emplace_back(elements);
+    // Explicit upstream stress controls; unset or empty retains upstream defaults.
+    if (std::string_view(CONFORMANCE_CTS_CATEGORY) == "c11_atomics") {
+      for (const auto &[key, option] : {std::pair{"CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS", "-internalIterations"},
+                                        std::pair{"CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS", "-maxDeviceThreads"}}) {
+        if (const auto *value = std::getenv(key); value && *value) {
+          const std::string_view text(value);
+          int count = 0;
+          const auto parsed = std::from_chars(text.data(), text.data() + text.size(), count);
+          INFO(key << "=" << value);
+          REQUIRE(parsed.ec == std::errc{});
+          REQUIRE(parsed.ptr == text.data() + text.size());
+          REQUIRE(count > 0);
+          arguments.emplace_back(option);
+          arguments.emplace_back(value);
+        }
+      }
+    }
     const auto passed_before = gTestsPassed;
     REQUIRE(invoke_upstream(std::move(arguments)) == 0);
     if (gTestsPassed == passed_before) SKIP("OpenCL CTS skipped this test for the selected device");

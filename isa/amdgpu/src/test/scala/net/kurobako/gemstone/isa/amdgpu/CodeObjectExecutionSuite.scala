@@ -15,6 +15,47 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 class CodeObjectExecutionSuite extends munit.FunSuite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
+  test("dispatch pointer exposes launch dimensions and segment sizes to OpenMP kernels") {
+    // LLVM gfx1030: copy the first eight AQL packet dwords to the output.
+    // OpenMP uses grid_size_x at byte 12 as its loop stride.
+    val words = Vec[Long](
+      0xf40c0200L, 0xfa000000L, 0xf4040101L, 0xfa000000L, 0xbf8cc07fL,
+      0x7e000280L, 0x7e020208L, 0x7e040209L, 0x7e06020aL, 0x7e08020bL,
+      0x7e0a020cL, 0x7e0c020dL, 0x7e0e020eL, 0x7e10020fL,
+      0xdc788000L, 0x00040100L, 0xdc788010L, 0x00040500L, 0xbf810000L
+    )
+    val kernel = CodeObjectKernel(
+      name = "dispatch_packet",
+      target = Target("gfx1030"),
+      kernargSize = 8,
+      groupSegmentSize = 32,
+      privateSegmentSize = 16,
+      computePgmRsrc2 = 0,
+      kernelCodeProperties = 0x0a,
+      code = words.flatMap(LittleEndian.toVec(_, 4))
+    )
+    val output = AllocationId(1)
+    val memory = TestMemory()
+    memory.allocate(output, 32)
+    val task = KernelTask.validated(
+      "dispatch_packet",
+      testDimensions(2, 3, 4),
+      testDimensions(2, 2, 2),
+      Vec(KernelTask.Argument.Memory(output, 0L)),
+      globalSize = Some(GlobalDimensions(3L, 5L, 7L)),
+      privateSegmentBytes = 64,
+      groupSegmentBytes = 128
+    ).toOption.get
+    assertEquals(executeKernel(compileKernel(kernel), task, memory), Right(()))
+    assertEquals(memory.getInt(output, 4), 2 | (3 << 16))
+    assertEquals(memory.getInt(output, 8), 4)
+    assertEquals(memory.getInt(output, 12), 3)
+    assertEquals(memory.getInt(output, 16), 5)
+    assertEquals(memory.getInt(output, 20), 7)
+    assertEquals(memory.getInt(output, 24), 64)
+    assertEquals(memory.getInt(output, 28), 160)
+  }
+
   test("a linked code object fills its GOT slot from an absolute 64-bit relocation") {
     // HIP reaches a device global through a .got slot when the symbol is not
     // directly addressable, so the slot has to hold the symbol address before

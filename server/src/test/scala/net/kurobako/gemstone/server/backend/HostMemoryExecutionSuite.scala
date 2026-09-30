@@ -113,7 +113,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }
       assert(done)
       assertEquals(service.awaitCompletion(completion), Right(()))
-      afterCompletion(service.completionPointerRelocations(completion).toOption.get)
+      afterCompletion(service.completionPointerRelocations(completion, 0).toOption.get)
       assertEquals(service.releaseCompletion(completion), Right(()))
       (reads.toVector, writes.toMap, batches)
     }
@@ -207,6 +207,49 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     assertEquals(batches, 0)
     assertEquals(reads.map(_.size.raw).sum, 0)
     assertEquals(writes, bytes(0x1000, 39, 4))
+  }
+
+  for {
+    width   <- List(32, 64)
+    changed <- List(false, true)
+  } test(s"host atomic $width-bit hints avoid redundant RPCs and retry native changes, changed=$changed") {
+    val initial     = if (width == 32) 0xfffffffeL else Long.MinValue + 7L
+    val replacement = if (width == 32) 20L else 0x678900000014L
+    val size        = width / 8
+    val source      = header + s"""
+      .visible .entry probe(.param .u64 counter, .param .u64 output) {
+        .reg .u64 %p, %q; .reg .u$width %first, %second;
+        ld.param.u64 %p, [counter]; ld.param.u64 %q, [output];
+        atom.global.add.u$width %first, [%p], 1;
+        atom.global.add.u$width %second, [%p], 1;
+        st.global.u$width [%q], %first;
+        st.global.u$width [%q+$size], %second;
+        ret;
+      }"""
+    val requests       = mutable.ArrayBuffer.empty[HostMemoryAtomic]
+    val replaced       = java.util.concurrent.atomic.AtomicBoolean(false)
+    val (_, writes, _) = runImage(
+      PTX.encoding,
+      Vec.from(source.getBytes(StandardCharsets.UTF_8)),
+      1,
+      Vec(scalar(0x1000), scalar(0x8000)),
+      bytes(0x1000, initial, size),
+      beforeSync = (sync, native) => {
+        sync.atomic.foreach { request =>
+          val _ = requests.addOne(request)
+        }
+        val afterFirst = bytes(0x1000, initial + 1, size).forall((address, byte) => native.get(address).contains(byte))
+        if (changed && sync.atomic.nonEmpty && afterFirst && replaced.compareAndSet(false, true))
+          bytes(0x1000, replacement, size)
+        else Map.empty
+      }
+    )
+    val second = if (changed) replacement else initial + 1
+    assertEquals(
+      writes,
+      bytes(0x1000, second + 1, size) ++ bytes(0x8000, initial, size) ++ bytes(0x8000 + size, second, size)
+    )
+    assert(requests.size <= (if (changed) 4 else 3), s"redundant native atomic RPCs: $requests")
   }
 
   for (width <- List(32, 64))

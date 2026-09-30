@@ -1,5 +1,9 @@
 # Compact matrix registrations retain the smaller size/type sets.
-specs = ["~[full-matrix]~[regression]"]
+# Vector step and array alignment are bounded; struct cases expand a large type/layout matrix.
+# Integer operator sweeps (including quick variants) and half stores exhaust large input domains.
+# Full-conformance range_api submits trillions of work-items; defer that one case.
+# Defer upstream image-dimension sweeps without changing their tested sizes.
+specs = ['~"cts/opencl/basic/imagedim_*"~"range_api"~[full-matrix]~[regression]~"cts/opencl/vectors/vec_align_struct*"~"cts/opencl/vectors/vec_align_packed_struct*"~"cts/opencl/integer_ops/quick_*"~"cts/opencl/integer_ops/char_*"~"cts/opencl/integer_ops/uchar_*"~"cts/opencl/integer_ops/short_*"~"cts/opencl/integer_ops/ushort_*"~"cts/opencl/integer_ops/int_*"~"cts/opencl/integer_ops/uint_*"~"cts/opencl/integer_ops/long_*"~"cts/opencl/integer_ops/ulong_*"~"cts/opencl/half/vstore*"']
 levelzero_cases = [
   # Shared/system memory transfers across page boundaries (bounded kernel sizes).
   "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.*/svm_to_usm_non_atomic_regular_4KB",
@@ -171,7 +175,9 @@ exclude_programs = [
   "opencl_cts_generic_address_space", "opencl_cts_geometrics",
   "opencl_cts_multiples", "opencl_cts_non_uniform_work_group", "opencl_cts_pipes",
   "opencl_cts_printf", "opencl_cts_profiling", "opencl_cts_thread_dimensions", "opencl_cts_workgroups",
-  "sycl_cts_accessor_basic", "sycl_cts_bit_cast", "sycl_cts_device_event",
+  "sycl_cts_accessor_basic", "sycl_cts_accessor_generic", "sycl_cts_accessor_placeholder",
+  "sycl_cts_vector_swizzles",
+  "sycl_cts_bit_cast", "sycl_cts_device_event",
   "sycl_cts_device_selector", "sycl_cts_error",
   "sycl_cts_function_objects", "sycl_cts_host_accessor", "sycl_cts_id",
   "sycl_cts_kernel_args", "sycl_cts_language",

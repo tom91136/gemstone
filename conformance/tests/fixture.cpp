@@ -58,5 +58,9 @@ int main(int argc, char **argv) {
     return 0;
 #endif
   }
+  if (std::filesystem::path(argv[0]).stem() == "conformance-device") {
+    std::cout << R"({"device":"pci-0123456789abcdef0123456789abcdef","environment":{"CL_DEVICE_INDEX":"0"}})";
+    return 0;
+  }
   return Catch::Session().run(argc, argv);
 }

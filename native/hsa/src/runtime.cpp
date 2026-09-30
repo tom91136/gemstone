@@ -183,6 +183,7 @@ struct RuntimeState {
   std::unordered_map<uint64_t, GlobalStorageRef> global_storage;
   std::condition_variable async_changed;
   std::vector<std::shared_ptr<AsyncHandler>> async_handlers;
+  std::vector<QueueRef> queue_errors;
   std::vector<std::thread> async_workers;
   bool async_stopping = false;
 };
@@ -583,6 +584,17 @@ void failPacket(RuntimeState &runtime, const void *packet, size_t packet_size, i
   if (signal != 0) publicSignalFail(&runtime, signal, code);
 }
 
+void reportQueueError(RuntimeState &runtime, uint64_t queue_id) {
+  std::lock_guard<std::mutex> guard(runtime.lock);
+  for (const auto &[_, queue] : runtime.queues) {
+    if (queue->value.id == queue_id && queue->callback) {
+      runtime.queue_errors.push_back(queue);
+      runtime.async_changed.notify_all();
+      break;
+    }
+  }
+}
+
 gemstone_hsa_packet_result consume(uint64_t queue_id, uint64_t packet_id, const void *packet, size_t packet_size, void *opaque) {
   auto &runtime = *static_cast<RuntimeState *>(opaque);
   // A queue producer may recycle a ring slot as soon as it observes the
@@ -592,6 +604,7 @@ gemstone_hsa_packet_result consume(uint64_t queue_id, uint64_t packet_id, const 
   // observed as an unsupported transient type).
   if (!packet || packet_size == 0) {
     failPacket(runtime, packet, packet_size, -6);
+    reportQueueError(runtime, queue_id);
     return GEMSTONE_HSA_PACKET_ACCEPTED;
   }
   std::vector<uint8_t> stable_packet(packet_size);
@@ -610,14 +623,19 @@ gemstone_hsa_packet_result consume(uint64_t queue_id, uint64_t packet_id, const 
   if (result == GEMSTONE_HSA_PACKET_ACCEPTED && mirrorBack(runtime) != 0) {
     if (completion.handle != 0) publicSignalFail(&runtime, completion.handle, -3);
     else failPacket(runtime, stable, packet_size, -3);
+    reportQueueError(runtime, queue_id);
     return GEMSTONE_HSA_PACKET_FATAL;
   }
   if (completion.handle != 0) {
     const int published = completion.failed || result != GEMSTONE_HSA_PACKET_ACCEPTED
                               ? publicSignalFail(&runtime, completion.handle, completion.failed ? completion.error : -3)
                               : releaseDeferredSignal(runtime, completion.handle);
-    if (published != 0) return GEMSTONE_HSA_PACKET_FATAL;
+    if (published != 0) {
+      reportQueueError(runtime, queue_id);
+      return GEMSTONE_HSA_PACKET_FATAL;
+    }
   }
+  if (completion.failed || result == GEMSTONE_HSA_PACKET_FATAL) reportQueueError(runtime, queue_id);
   return result;
 }
 
@@ -636,6 +654,17 @@ void runAsyncHandlers(RuntimeState &runtime) {
   while (!runtime.async_stopping) {
     runtime.async_changed.wait_for(lock, std::chrono::microseconds(100));
     if (runtime.async_stopping) break;
+    if (!runtime.queue_errors.empty()) {
+      auto queue = std::move(runtime.queue_errors.front());
+      runtime.queue_errors.erase(runtime.queue_errors.begin());
+      lock.unlock();
+      // Queue callbacks may re-enter the runtime or destroy their queue. Run on
+      // the notification pool, never on the queue consumer or under its locks.
+      queue->callback(HSA_STATUS_ERROR_EXCEPTION, &queue->value, queue->callback_data);
+      queue.reset();
+      lock.lock();
+      continue;
+    }
     const auto ready = std::find_if(runtime.async_handlers.begin(), runtime.async_handlers.end(), [](const auto &entry) {
       const auto current = __atomic_load_n(&entry->signal->value, __ATOMIC_ACQUIRE);
       return entry->signal->live.load(std::memory_order_acquire) && signalCondition(current, entry->condition, entry->compare);
@@ -1708,6 +1737,7 @@ extern "C" hsa_status_t hsa_queue_destroy(hsa_queue_t *queue) {
     value->doorbell->doorbell = nullptr;
     runtime.signals.erase(value->value.doorbell_signal.handle);
     runtime.queues.erase(found);
+    runtime.queue_errors ^= filter([&](const auto &entry) { return entry != value; });
   }
   return HSA_STATUS_SUCCESS;
 }

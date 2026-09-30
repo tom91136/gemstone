@@ -7,6 +7,7 @@ import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
@@ -38,6 +39,8 @@ private object VMMemory {
   class DirtyPage {
     val bytes: Array[Byte] = Array.ofDim[Byte](4096)
     private val dirty      = Array.ofDim[Long](64)
+
+    def clear(): Unit = java.util.Arrays.fill(dirty, 0L)
 
     def update(offset: Int, value: Byte): Unit = {
       bytes(offset) = value
@@ -114,6 +117,18 @@ private object VMMemory {
     private var nextVirtualAddress = 0x0000100000000000L
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var nextExceptionalAddress = Long.MinValue
+
+    // Atomic loops frequently flush a scalar store. Retain at most one cleared
+    // page instead of allocating another 4 KiB buffer for each iteration.
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    private var recycledPage = Option.empty[DirtyPage]
+
+    private def acquireDirtyPage(): DirtyPage = recycledPage match {
+      case Some(page) =>
+        recycledPage = None
+        page
+      case None => DirtyPage()
+    }
 
     /** IdentityHashMap uses null for a missing Java entry; confine it to this interop pattern. */
     @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.return"))
@@ -408,7 +423,7 @@ private object VMMemory {
             while (index < bytes.length) {
               val absolute   = pointer.offset + index.toLong
               val pageOffset = (absolute & 4095L).toInt
-              pending.getOrElseUpdate(absolute >>> 12, DirtyPage()).update(pageOffset, bytes(index))
+              pending.getOrElseUpdate(absolute >>> 12, acquireDirtyPage()).update(pageOffset, bytes(index))
               index += 1
             }
             Right(())
@@ -445,7 +460,7 @@ private object VMMemory {
               val absolute   = pointer.offset + index.toLong
               val pageOffset = (absolute & 4095L).toInt
               pending
-                .getOrElseUpdate(absolute >>> 12, DirtyPage())
+                .getOrElseUpdate(absolute >>> 12, acquireDirtyPage())
                 .update(pageOffset, byte)
             }
             Right(())
@@ -546,7 +561,9 @@ private object VMMemory {
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
     def flush(): Either[Fault, Unit] = {
+      if (writes.isEmpty) return Right(())
       val allocations = writes.view.toArray.sortBy(_._1.toLong)
+      var recycle     = Option.empty[DirtyPage]
       var allocation  = 0
       while (allocation < allocations.length) {
         val (id, pending) = allocations(allocation)
@@ -554,7 +571,8 @@ private object VMMemory {
         var pageIndex     = 0
         while (pageIndex < pages.length) {
           val (number, page) = pages(pageIndex)
-          var offset         = 0
+          if (recycle.isEmpty) recycle = Some(page)
+          var offset = 0
           while (offset < page.bytes.length) {
             offset = page.nextDirtyByte(offset)
             if (offset < page.bytes.length) {
@@ -573,6 +591,12 @@ private object VMMemory {
           pageIndex += 1
         }
         allocation += 1
+      }
+      // Do not clear any page until every write succeeds: failed flushes must
+      // retain their pending bytes, including pages already sent to memory.
+      recycle.foreach { page =>
+        page.clear()
+        recycledPage = Some(page)
       }
       writes.clear()
       Right(())

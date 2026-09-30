@@ -47,18 +47,21 @@ private object atomic {
     "flatmax"  -> 0xe0,
     "flatand"  -> 0xe4,
     "flator"   -> 0xe8,
-    "flatxor"  -> 0xec
+    "flatxor"  -> 0xec,
+    "flatinc"  -> 0xf0
   )
-  // The flat atomic opcode is the fourth word of the encoded instruction. The
-  // flatcas fixture is reused as the base, so splice that word rather than
+  // The flat atomic opcode occupies bytes 2 and 3 of the instruction. The
+  // flatcas fixture is reused as the base, so splice those bytes rather than
   // replacing a byte pair that may recur elsewhere in the stream.
   private val flatOpcodeHexOffset                                      = 132
   def bytes(opcode: String, width: Int, returning: Boolean): Vec[Byte] = {
     val image =
       if (opcode.startsWith("flat") && opcode != "flatcas") {
         val source      = images(("flatcas", width, returning))
-        val replacement = if (width == 64) if (returning) "41dd" else "40dd"
-        else f"${flatOpcodeBytes(opcode) + (if (returning) 1 else 0)}%02x" + "dc"
+        val replacement = if (width == 64) {
+          val base = if (opcode == "flatinc") 0x70 else 0x40
+          f"${base + (if (returning) 1 else 0)}%02x" + "dd"
+        } else f"${flatOpcodeBytes(opcode) + (if (returning) 1 else 0)}%02x" + "dc"
         source.substring(0, flatOpcodeHexOffset) + replacement + source.substring(flatOpcodeHexOffset + 4)
       } else images((opcode, width, returning))
     Vec.from(image.grouped(2).map(Integer.parseInt(_, 16).toByte))

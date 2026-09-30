@@ -119,4 +119,75 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
     assert(!mirror.hasDirty)
   }
 
+  test("matrix-sized writes fit a bounded heap and drain exactly") {
+    val mirror = HostMemoryMirror()
+    val block  = Vec.from((0 until 65536).map(index => (index % 251).toByte))
+    val base   = 0x100003L
+    // The SYCL namespace CTS writes a 24 MB matrix. Keep its memory scale while
+    // testing bookkeeping directly, without executing six million work-items.
+    for (index <- 0 until 384) mirror.write(base + index.toLong * block.size, block)
+    mirror.invalidateClean()
+    for (batch <- 0 until 24) {
+      val result = mirror.takeDirty()
+      assertEquals(result.size, 16)
+      result.zipWithIndex.foreach { case (range, index) =>
+        assertEquals(range.address.raw, base + (batch.toLong * 16 + index) * block.size)
+        assertEquals(range.bytes, block)
+      }
+    }
+    assert(!mirror.hasDirty)
+    assertEquals(mirror.read(base - 1, 1), None)
+    assertEquals(mirror.read(base + 384L * block.size, 1), None)
+    mirror.invalidateClean()
+    assertEquals(mirror.read(base, 1), None)
+  }
+
+  test("page boundaries preserve holes and in-flight writes from other lanes") {
+    val mirror = HostMemoryMirror()
+    val base   = 0x1ffeL
+    assertEquals(mirror.read(base, 4), None)
+    assertEquals(mirror.requests(), Vec(HostMemoryRange(GuestAddress(base), 4)))
+    mirror.write(base + 2, Vec[Byte](9))
+    assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(base), Vec[Byte](1, 2, 3, 4)))).isRight)
+    assertEquals(mirror.read(base, 4), Some(Vec[Byte](1, 2, 9, 4)))
+    mirror.invalidateClean()
+    assertEquals(mirror.read(base + 2, 1), Some(Vec[Byte](9)))
+    assertEquals(mirror.read(base + 1, 1), None)
+    assertEquals(mirror.read(base + 3, 1), None)
+    assertEquals(mirror.takeDirty(), Vec(HostMemoryBytes(GuestAddress(base + 2), Vec[Byte](9))))
+    mirror.invalidateClean()
+    assertEquals(mirror.read(base + 2, 1), None)
+  }
+
+  test("dense scalar writes preserve their atomic width across publication pages") {
+    val mirror = HostMemoryMirror()
+    val word   = Vec[Byte](1, 2, 3, 4)
+    for (index <- 0 until 262144) mirror.write(0x100000L + index.toLong * 4, word, 4)
+    mirror.invalidateClean()
+    val batch = mirror.takeDirty()
+    assertEquals(batch.size, 16)
+    batch.zipWithIndex.foreach { case (range, index) =>
+      assertEquals(range.address.raw, 0x100000L + index.toLong * 65536)
+      assertEquals(range.atomicWidth, 4)
+      assertEquals(range.bytes, Vec.from((0 until 65536).map(offset => word(offset % 4))))
+    }
+    assert(!mirror.hasDirty)
+  }
+
+  test("overlapping stores retire wider atomic markers without merging incompatible widths") {
+    val mirror = HostMemoryMirror()
+    mirror.write(0x1ff8, Vec.fill(8)(1.toByte), 8)
+    mirror.write(0x1ffc, Vec.fill(4)(2.toByte), 4)
+    mirror.write(0x2000, Vec.fill(4)(3.toByte), 4)
+    mirror.write(0x2001, Vec[Byte](9))
+    assertEquals(
+      mirror.takeDirty(),
+      Vec(
+        HostMemoryBytes(GuestAddress(0x1ff8), Vec.fill(4)(1.toByte)),
+        HostMemoryBytes(GuestAddress(0x1ffc), Vec.fill(4)(2.toByte), 4),
+        HostMemoryBytes(GuestAddress(0x2000), Vec[Byte](3, 9, 3, 3))
+      )
+    )
+  }
+
 }

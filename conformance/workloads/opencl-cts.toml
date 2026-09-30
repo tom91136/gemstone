@@ -1,0 +1,4 @@
+# Every compiled OpenCL CTS case, independently of the bounded CI workloads.
+# This selects the built catalogue; it does not enable omitted CTS categories
+# or change the element count and stress settings supplied through the environment.
+include_programs = ['opencl_cts_*']

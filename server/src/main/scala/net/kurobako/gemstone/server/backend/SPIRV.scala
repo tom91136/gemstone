@@ -28,11 +28,12 @@ class SPIRV(
     override val encoding: String = "spirv-binary",
     workgroups: Workgroups = Workgroups.Sequential
 ) extends RuntimeBackend {
+  private val decoder = SharedDecoder()
   override def load(
       image: Vec[Byte]
   ): Either[ExecutionFailure, RuntimeBackend.Program] =
     for {
-      module <- ISA.decode(image).left.map(error => ExecutionFailure.InvalidRequest(error.message))
+      module <- decoder.decode(image).left.map(error => ExecutionFailure.InvalidRequest(error.message))
       loaded <-
         LoadedProgram.load(module, environment).left.map(error => ExecutionFailure.InvalidRequest(error.message))
     } yield Program(loaded)

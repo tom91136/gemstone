@@ -1,6 +1,7 @@
 #ifndef GEMSTONE_LEVELZERO_OBJECTS_HPP
 #define GEMSTONE_LEVELZERO_OBJECTS_HPP
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -23,21 +24,7 @@
 
 namespace gemstone::levelzero {
 
-enum class Kind : uint32_t {
-  Driver,
-  Device,
-  Context,
-  Queue,
-  List,
-  EventPool,
-  Event,
-  Fence,
-  Module,
-  BuildLog,
-  Kernel,
-  PhysicalMemory,
-  Sampler
-};
+enum class Kind : uint32_t { Driver, Device, Context, Queue, List, EventPool, Event, Fence, Module, BuildLog, Kernel, PhysicalMemory };
 
 inline gemstone::rpc::LiveHandles liveHandles;
 
@@ -66,13 +53,15 @@ public:
   }
   ~HandleUse() {
     if (!value_) return;
-    bool last = false;
+    bool reclaim = false;
     {
       std::lock_guard lock(value_->usersMutex);
-      last = value_->users.fetch_sub(1, std::memory_order_acq_rel) == 1;
+      const bool last = value_->users.fetch_sub(1, std::memory_order_acq_rel) == 1;
+      reclaim = last && value_->destroyRequested.load(std::memory_order_acquire);
+      // A waiter may destroy the handle as soon as this lock is released.
+      value_->usersChanged.notify_all();
     }
-    value_->usersChanged.notify_all();
-    if (last && value_->destroyRequested.load(std::memory_order_acquire)) delete value_;
+    if (reclaim) delete value_;
   }
   T *get() const { return value_; }
   T *operator->() const { return value_; }
@@ -85,7 +74,10 @@ private:
 
 template <class T> ze_result_t destroyHandle(T *value) {
   if (!value) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
-  if (value->users.load(std::memory_order_acquire) != 0) return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
+  {
+    std::lock_guard lock(value->usersMutex);
+    if (value->users.load(std::memory_order_acquire) != 0) return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
+  }
   delete value;
   return ZE_RESULT_SUCCESS;
 }
@@ -113,6 +105,7 @@ struct Event final : Handle {
   std::mutex mutex;
   std::condition_variable changed;
   bool signalled = false;
+  ze_result_t completionResult = ZE_RESULT_SUCCESS;
   uint64_t kernelStart = 0;
   uint64_t kernelEnd = 0;
 };
@@ -122,6 +115,22 @@ using CommandAction = std::function<ze_result_t()>;
 struct RecordedCommand {
   CommandAction action;
   std::function<void()> release;
+  std::function<void(ze_result_t)> complete;
+
+  ze_result_t execute(ze_result_t result = ZE_RESULT_SUCCESS) {
+    if (result == ZE_RESULT_SUCCESS) {
+      try {
+        result = action();
+      } catch (...) {
+        result = ZE_RESULT_ERROR_UNKNOWN;
+      }
+    }
+    // Completion permits callers to free allocations and destroy kernels.
+    // Release execution ownership before publishing either success or failure.
+    releaseResources();
+    if (complete) complete(result);
+    return result;
+  }
 
   void releaseResources() {
     if (release) release();
@@ -200,13 +209,7 @@ struct CommandList final : Handle, WorkerLoop<CommandList, RecordedCommand> {
     worker.join();
   }
   ze_result_t execute(RecordedCommand &command) {
-    ze_result_t result = ZE_RESULT_ERROR_UNKNOWN;
-    try {
-      result = command.action();
-    } catch (...) {
-      result = ZE_RESULT_ERROR_UNKNOWN;
-    }
-    command.releaseResources();
+    const auto result = command.execute(failure);
     command = {};
     return result;
   }
@@ -250,13 +253,10 @@ struct Fence final : Handle {
   explicit Fence(Queue *queueValue) : Handle(Kind::Fence), queue(queueValue) {}
   HandleUse<Queue> queue;
   Event event;
+  // Reset clears the signal, but a completed submission may still retain the
+  // fence while its worker releases internal references.
+  bool pending = false;
   ze_result_t completionResult = ZE_RESULT_SUCCESS;
-};
-
-struct Sampler final : Handle {
-  explicit Sampler(Context *contextValue) : Handle(Kind::Sampler), context(contextValue) {}
-  HandleUse<Context> context;
-  ze_sampler_desc_t descriptor{};
 };
 
 struct BuildLog final : Handle {
@@ -306,6 +306,7 @@ struct Kernel final : Handle {
   };
   std::vector<Argument> arguments;
   std::vector<KernelParameterMetadata> parameters;
+  std::array<uint32_t, 3> requiredGroupSize{};
 };
 
 struct Allocation;

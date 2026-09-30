@@ -68,6 +68,78 @@ class ExecutionSessionSuite extends munit.FunSuite {
     override def close(): Unit = closed.set(true)
   }
 
+  test("an atomic update does not block writes to an unrelated allocation") {
+    Using.resource(ExecutionSession(List(Backend()))) { service =>
+      val first   = service.registerAllocation(8L, AllocationKind.Device).toOption.get
+      val second  = service.registerAllocation(8L, AllocationKind.Device).toOption.get
+      val entered = CountDownLatch(1)
+      val release = CountDownLatch(1)
+      val written = CountDownLatch(1)
+      val atomic  = FutureTask[Either[ExecutionFailure, Long]](() =>
+        service.atomicModifyValue(first, 0L, 8) { previous =>
+          entered.countDown()
+          assert(release.await(5L, TimeUnit.SECONDS))
+          previous + 1L
+        }
+      )
+      val writer = FutureTask[Either[ExecutionFailure, Unit]] { () =>
+        val result = service.writeValue(second, 0L, 42L, 8)
+        written.countDown()
+        result
+      }
+      val atomicThread = Thread(atomic, "paused-allocation-atomic")
+      val writeThread  = Thread(writer, "unrelated-allocation-write")
+      atomicThread.start()
+      val independent = try {
+        assert(entered.await(5L, TimeUnit.SECONDS))
+        writeThread.start()
+        written.await(1L, TimeUnit.SECONDS)
+      } finally release.countDown()
+      assertEquals(atomic.get(5L, TimeUnit.SECONDS), Right(0L))
+      assertEquals(writer.get(5L, TimeUnit.SECONDS), Right(()))
+      atomicThread.join()
+      writeThread.join()
+      assertEquals(service.readValue(second, 0L, 8), Right(42L))
+      assert(independent, "one allocation's atomic update held the session lock across an unrelated write")
+    }
+  }
+
+  test("an atomic update does not block a disjoint range in the same allocation") {
+    Using.resource(ExecutionSession(List(Backend()))) { service =>
+      val first   = service.registerAllocation(256L, AllocationKind.Device).toOption.get
+      val second  = first
+      val entered = CountDownLatch(1)
+      val release = CountDownLatch(1)
+      val written = CountDownLatch(1)
+      val atomic  = FutureTask[Either[ExecutionFailure, Long]](() =>
+        service.atomicModifyValue(first, 0L, 8) { previous =>
+          entered.countDown()
+          assert(release.await(5L, TimeUnit.SECONDS))
+          previous + 1L
+        }
+      )
+      val writer = FutureTask[Either[ExecutionFailure, Unit]] { () =>
+        val result = service.writeValue(second, 128L, 42L, 8)
+        written.countDown()
+        result
+      }
+      val atomicThread = Thread(atomic, "paused-allocation-atomic")
+      val writeThread  = Thread(writer, "unrelated-allocation-write")
+      atomicThread.start()
+      val independent = try {
+        assert(entered.await(5L, TimeUnit.SECONDS))
+        writeThread.start()
+        written.await(1L, TimeUnit.SECONDS)
+      } finally release.countDown()
+      assertEquals(atomic.get(5L, TimeUnit.SECONDS), Right(0L))
+      assertEquals(writer.get(5L, TimeUnit.SECONDS), Right(()))
+      atomicThread.join()
+      writeThread.join()
+      assertEquals(service.readValue(second, 128L, 8), Right(42L))
+      assert(independent, "one allocation's atomic update held the session lock across an unrelated write")
+    }
+  }
+
   test("service translates API ownership into a VM task and records VM events") {
     val backend = Backend()
     Using.resource(ExecutionSession(List(backend))) { service =>
@@ -145,6 +217,114 @@ class ExecutionSessionSuite extends munit.FunSuite {
       assertEquals(bytes, Vec.from(0 until count * 2).map(index => if (index % 2 == 0) 42.toByte else 0.toByte))
       assertEquals(service.releaseCompletion(completion), Right(()))
       assert(service.completionDirtyRanges(completion, 0).isLeft)
+    }
+  }
+
+  test("parallel sparse writes and cross-stripe atomics retain exact writeback") {
+    Using.resource(WorkerPool(4)) { workers =>
+      class ParallelBackend extends Backend {
+        override def load(image: Vec[Byte]): Either[ExecutionFailure, RuntimeBackend.Program] = Right(ParallelProgram())
+        private class ParallelProgram extends Program(AtomicBoolean()) {
+          override def execute(
+              task: KernelTask,
+              memory: Memory,
+              control: TaskControl,
+              handler: Event => Either[Fault, Unit]
+          ): Either[ExecutionFailure, Unit] = {
+            val KernelTask.Argument.Memory(region, _) = task.arguments.head: @unchecked
+            workers.parallelFor(128L) { index =>
+              val offset = ((index.raw * 31L % 128L) * 16L).unsafe[Long >= 0]
+              for {
+                _ <- memory.writeValue(region, offset, index.raw + 1L, 8)
+                _ <- memory.atomicModifyValue(region, 4095L, 8)(_ + 1L)
+              } yield ()
+            }.left.map(ExecutionFailure.fromFault(_))
+          }
+        }
+      }
+      Using.resource(ExecutionSession(List(ParallelBackend()))) { service =>
+        val allocation = service.registerAllocation(8192L, AllocationKind.Device).toOption.get
+        val program    = service.load(encoding, Vec[Byte](1)).toOption.get
+        val task       = KernelTask.validated(
+          "parallel",
+          LaunchGeometry.Dimensions.One,
+          LaunchGeometry.Dimensions.One,
+          Vec(KernelTask.Argument.Memory(allocation, 0L))
+        ).toOption.get
+        val completion = service.launch(program, task).toOption.get
+        assertEquals(service.awaitCompletion(completion), Right(()))
+        assertEquals(service.readValue(allocation, 4095L, 8), Right(128L))
+        val expected =
+          Vec.from(0 until 128).map(index => DirtyRange(allocation, (index.toLong * 16L).unsafe[Long >= 0], 8))
+            .appended(DirtyRange(allocation, 4095L, 8))
+        assertEquals(service.completionDirtyRanges(completion, 0), Right(expected))
+        (0 until 128).foreach { index =>
+          val offset = ((index.toLong * 31L % 128L) * 16L).unsafe[Long >= 0]
+          assertEquals(service.readValue(allocation, offset, 8), Right(index.toLong + 1L))
+          assertEquals(service.readValue(allocation, (offset.raw + 8L).unsafe[Long >= 0], 8), Right(0L))
+        }
+      }
+    }
+  }
+
+  test("pointer relocation metadata is paged without losing identities or offsets") {
+    val count = ExecutionRPC.MaximumElements.raw + 1
+    class RelocationBackend extends Backend {
+      override def load(image: Vec[Byte]): Either[ExecutionFailure, RuntimeBackend.Program] = Right(RelocationProgram())
+      private class RelocationProgram extends Program(AtomicBoolean()) {
+        override def execute(
+            task: KernelTask,
+            memory: Memory,
+            control: TaskControl,
+            handler: Event => Either[Fault, Unit]
+        ): Either[ExecutionFailure, Unit] = {
+          val KernelTask.Argument.Memory(region, _) = task.arguments.head: @unchecked
+          (0 until count).foldLeft[Either[ExecutionFailure, Unit]](Right(())) { (result, index) =>
+            result.flatMap(_ =>
+              handler(Event.PointerRelocation(region, (index.toLong * 16).unsafe[Long >= 0], region, 0L))
+                .left.map(ExecutionFailure.fromFault(_))
+            )
+          }
+        }
+      }
+    }
+    Using.resource(ExecutionSession(List(RelocationBackend()))) { session =>
+      val allocation =
+        session.registerAllocation((count.toLong * 16).unsafe[Long > 0], AllocationKind.Shared).toOption.get
+      val program = session.load(encoding, Vec[Byte](1)).toOption.get
+      val task    = KernelTask.validated(
+        "write",
+        LaunchGeometry.Dimensions.One,
+        LaunchGeometry.Dimensions.One,
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
+      ).toOption.get
+      val completion = session.launch(program, task).toOption.get
+      assertEquals(session.awaitCompletion(completion), Right(()))
+      val first  = session.completionPointerRelocations(completion, 0).toOption.get
+      val second = session.completionPointerRelocations(completion, ExecutionRPC.MaximumElements).toOption.get
+      assertEquals(first.size, ExecutionRPC.MaximumElements.raw)
+      assertEquals(second.size, 1)
+      assertEquals(session.completionPointerRelocations(completion, 0), Right(first))
+      assertEquals((first ++ second).map(_.sourceOffset.raw), Vec.tabulate(count)(_.toLong * 16))
+      assert((first ++ second).forall(value =>
+        value.source == KernelTask.RelocationSource.Memory(allocation) &&
+          value.target == allocation && value.targetOffset.raw == 0L
+      ))
+      for (page <- Vec(first, second))
+        assert(ExecutionRPC.Operation.CompletionPointerRelocations(
+          completion,
+          0
+        ).replyCodec.encode(page, ExecutionRPC.Limits).isRight)
+      assertEquals(
+        session.completionPointerRelocations(completion, count.unsafe[Int >= 0]),
+        Right(Vec.empty[KernelTask.PointerRelocation])
+      )
+      assertEquals(
+        session.completionPointerRelocations(completion, Int.MaxValue),
+        Right(Vec.empty[KernelTask.PointerRelocation])
+      )
+      assertEquals(session.releaseCompletion(completion), Right(()))
+      assert(session.completionPointerRelocations(completion, 0).isLeft)
     }
   }
 
@@ -641,7 +821,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
       val completion = session.launch(program, task).toOption.get
       assertEquals(session.awaitCompletion(completion), Right(()))
       assertEquals(
-        session.completionPointerRelocations(completion),
+        session.completionPointerRelocations(completion, 0),
         Right(Vec(
           KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(first), 8L, second, 2L),
           KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(second), 0L, first, 3L),
@@ -651,7 +831,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
       events.set(Vec.empty)
       val next = session.launch(program, task).toOption.get
       assertEquals(session.awaitCompletion(next), Right(()))
-      assertEquals(session.completionPointerRelocations(next), Right(Vec.empty[KernelTask.PointerRelocation]))
+      assertEquals(session.completionPointerRelocations(next, 0), Right(Vec.empty[KernelTask.PointerRelocation]))
     }
   }
 

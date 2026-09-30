@@ -96,7 +96,7 @@ object ExecutionRPC {
     // Stable pages of at most MaximumElements records; a short page ends the result.
     case CompletionDirtyRanges(completion: CompletionId, offset: Int >= 0)
         extends Operation[Vec[DirtyRange]]
-    case CompletionPointerRelocations(completion: CompletionId)
+    case CompletionPointerRelocations(completion: CompletionId, offset: Int >= 0)
         extends Operation[Vec[KernelTask.PointerRelocation]]
     case CompletionPrints(completion: CompletionId)
         extends Operation[String]

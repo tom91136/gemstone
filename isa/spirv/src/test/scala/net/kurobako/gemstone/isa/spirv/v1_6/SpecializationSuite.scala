@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.spirv.v1_6.Specialization.*
 import net.kurobako.gemstone.isa.spirv.v1_6 as spv
 
@@ -103,4 +104,62 @@ class SpecializationSuite extends munit.FunSuite {
     )
   }
 
+  for {
+    specId     <- Seq(100L, 0x80000000L, 0xffffffffL)
+    typeOpcode <- Seq(20L, 21L, 22L)
+    width      <- if (typeOpcode == 20) Seq(8) else if (typeOpcode == 21) Seq(8, 16, 32, 64) else Seq(16, 32, 64)
+  } test(s"specialize updates every SpecId alias for spec $specId type $typeOpcode and width $width") {
+    val boolean     = typeOpcode == 20
+    val decorations = Seq[Long](
+      0x07230203,
+      0x00010600,
+      0,
+      6,
+      0,
+      (4L << 16) | 71,
+      3,
+      1,
+      specId,
+      (4L << 16) | 71,
+      4,
+      1,
+      specId,
+      (4L << 16) | 71,
+      5,
+      1,
+      101
+    )
+    val declaration = if (boolean) Seq((2L << 16) | 20, 2L)
+    else if (typeOpcode == 21) Seq((4L << 16) | 21, 2L, width.toLong, 0L)
+    else Seq((3L << 16) | 22, 2L, width.toLong)
+    val constants = Seq(3L, 4L, 5L).flatMap { id =>
+      if (boolean) Seq((3L << 16) | (if (id == 4) 48L else 49L), 2L, id)
+      else Seq(((3L + (width + 31) / 32) << 16) | 50L, 2L, id, id) ++ (if (width == 64) Seq(0L) else Seq.empty)
+    }
+    val source = decorations ++ declaration ++ constants
+    val image  = Vec.from(source.flatMap(value => (0 until 4).map(byte => ((value >>> (byte * 8)) & 0xff).toByte)))
+    assertEquals(
+      Specialization.describe(image),
+      Right(Vec(
+        Constant(Binary32(specId.unsafe[Long where Between[0L, 4294967295L]]), (width / 8).unsafe[Int > 0]),
+        Constant(Binary32(101L), (width / 8).unsafe[Int > 0])
+      ).sortBy(_.specId.toLong))
+    )
+    for (zero <- Seq(false, true)) {
+      val replacement = Vec.tabulate(width / 8)(i => if (zero) 0.toByte else (0xa0 + i).toByte)
+      val patched     = Specialization.specialize(
+        image,
+        Map(Binary32(specId.unsafe[Long where Between[0L, 4294967295L]]) -> replacement)
+      ).toOption.get
+      val first = decorations.size + declaration.size
+      val count = if (boolean) 3 else 3 + (width + 31) / 32
+      for (index <- 0 until 3) {
+        val offset = first + index * count
+        if (index == 2)
+          assertEquals(patched.slice(offset * 4, (offset + count) * 4), image.slice(offset * 4, (offset + count) * 4))
+        else if (boolean) assertEquals(word(patched, offset), (3L << 16) | (if (zero) 49L else 48L))
+        else assertEquals(patched.slice((offset + 3) * 4, (offset + 3) * 4 + width / 8), replacement)
+      }
+    }
+  }
 }

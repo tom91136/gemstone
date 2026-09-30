@@ -45,22 +45,39 @@ class ConnectionSuite extends munit.FunSuite {
     def close(): Unit                 = ()
   }
 
-  test("a response write failure closes the connection without attempting a second response") {
-    val attempts = AtomicInteger()
-    class FailingOutput extends OutputStream {
-      private val helloBytes               = AtomicInteger()
-      override def write(value: Int): Unit =
-        if (helloBytes.incrementAndGet() > 8) {
-          attempts.incrementAndGet()
-          throw IOException("broken output")
+  for (recording <- List(false, true))
+    test(s"a response write failure closes the connection without attempting a second response, recording=$recording") {
+      val attempts = AtomicInteger()
+      class FailingOutput extends OutputStream {
+        private val helloBytes               = AtomicInteger()
+        override def write(value: Int): Unit =
+          if (helloBytes.incrementAndGet() > 8) {
+            attempts.incrementAndGet()
+            throw IOException("broken output")
+          }
+      }
+      val output = FailingOutput()
+      files.temporary { directory =>
+        val archive = directory.resolve("capture.msgpack")
+        Using.resource(Journal.Writer(archive, Journal.Header(Journal.ProtocolIdentity(ExecutionRPC.Identity)))) {
+          writer =>
+            Using.resource(Clients(() => ExecutionSession(Nil), owner => writer.clientClosed(owner))) { clients =>
+              Connection.serve(
+                StreamsChannel(ByteArrayInputStream(frame), output),
+                clients,
+                1000,
+                Option.when(recording)(writer),
+                () => ()
+              )
+              assertEquals(attempts.get(), 1)
+            }
         }
+        if (recording) Using.resource(Journal.open(archive)) { reader =>
+          assert(!reader.summary.replayable)
+          assertEquals(reader.events.count(_.kind == Journal.Kind.Response), 0)
+        }
+      }
     }
-    val output = FailingOutput()
-    Using.resource(Clients(() => ExecutionSession(Nil))) { clients =>
-      Connection.serve(StreamsChannel(ByteArrayInputStream(frame), output), clients, 1000, None, () => ())
-      assertEquals(attempts.get(), 1)
-    }
-  }
 
   test("a session factory failure is an execution failure, not malformed input") {
     val output = ByteArrayOutputStream()

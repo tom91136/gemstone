@@ -2799,7 +2799,7 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArgSVMPointer(cl_kernel value, cl_uin
 CL_API_ENTRY cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel value, cl_kernel_exec_info name, size_t size, const void *valueData) {
   auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
   if (!kernel) return CL_INVALID_KERNEL;
-  if (name == CL_KERNEL_EXEC_INFO_SVM_PTRS && size == 0 && !valueData) {
+  if ((name == CL_KERNEL_EXEC_INFO_SVM_PTRS || name == CL_KERNEL_EXEC_INFO_USM_PTRS_INTEL) && size == 0 && !valueData) {
     kernel->indirectAllocations.erase(name);
     return CL_SUCCESS;
   }

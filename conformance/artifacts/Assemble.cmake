@@ -30,6 +30,12 @@ endif()
 set(backend_cmake_arguments)
 if(BACKEND STREQUAL "hip")
   list(APPEND backend_cmake_arguments -DCMAKE_HIP_PLATFORM=amd)
+elseif(BACKEND STREQUAL "sycl")
+  if(NOT DEFINED SYCL_CTS_ENABLE_FULL_CONFORMANCE)
+    set(SYCL_CTS_ENABLE_FULL_CONFORMANCE OFF)
+  endif()
+  list(APPEND backend_cmake_arguments
+    "-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=${SYCL_CTS_ENABLE_FULL_CONFORMANCE}")
 endif()
 
 if(BACKEND MATCHES "^(cuda|openacc)$")
@@ -99,9 +105,17 @@ execute_process(
     -DBUILD_TESTING=OFF
     ${backend_cmake_arguments}
   COMMAND_ERROR_IS_FATAL ANY)
+# Refuse silent oversubscription if an old image receives a shared jobserver.
+if("$ENV{MAKEFLAGS}" MATCHES "--jobserver-auth=fifo:")
+  execute_process(COMMAND ninja --version OUTPUT_VARIABLE ninja_version
+    OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+  if(ninja_version VERSION_LESS "1.13")
+    message(FATAL_ERROR "Shared artifact builds require Ninja >= 1.13; rebuild the toolchain image")
+  endif()
+endif()
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --build "${build}"
-    --target conformance-artifact --parallel
+    --target conformance-artifact
   COMMAND_ERROR_IS_FATAL ANY)
 
 function(write_metadata destination support)

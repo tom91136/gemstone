@@ -10,6 +10,59 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 class ExecutionAtomicSuite extends munit.FunSuite {
+
+  test("repeated atomic flushes preserve fresh backing bytes and sparse cross-page stores") {
+    val allocation                     = AllocationId(201L)
+    val backing                        = ArrayMemory(allocation, 12288)
+    val memory                         = VMMemory.MemoryState(backing, Vec.empty, _ => Right(()))
+    val pointer                        = VMMemory.Pointer(VMMemory.Region.External(allocation), 0L, 0, 5)
+    val width: Int where Between[1, 8] = 4
+    val expected                       = Array.ofDim[Byte](12288)
+    for {
+      round  <- 1 to 3
+      offset <- Seq(0L, 62L, 4094L, 8192L, 8L)
+    } {
+      // Another writer changes every byte after the preceding flush. Only the
+      // current store may overlay that new content, even when a page is reused.
+      java.util.Arrays.fill(expected, round.toByte)
+      assertEquals(backing.write(allocation, 0L, Vec.from(expected)), Right(()))
+      assertEquals(memory.readScalar(pointer.copy(offset = offset), width), Right(0x01010101L * round))
+      assertEquals(memory.writeScalar(pointer.copy(offset = offset), 0x12345678L, width), Right(()))
+      LittleEndian.write(0x12345678L, expected, offset.toInt, 4)
+      assertEquals(memory.atomicReadScalar(pointer.copy(offset = offset), width), Right(0x12345678L))
+      assertEquals(backing.bytes, Vec.from(expected))
+      assertEquals(memory.flush(), Right(()))
+      assertEquals(backing.bytes, Vec.from(expected))
+    }
+  }
+
+  test("failed flush retains pending pages until a successful retry") {
+    val allocation = AllocationId(202L)
+    val backing    = ArrayMemory(allocation, 8200)
+    val reject     = java.util.concurrent.atomic.AtomicBoolean(true)
+    val failure    = Fault.InvalidTask("injected write failure")
+    class FailingStorage extends Memory {
+      override def read(id: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
+        backing.read(id, offset, size)
+      override def write(id: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
+        if (offset.raw == 4096L && reject.getAndSet(false)) Left(failure)
+        else backing.write(id, offset, bytes)
+    }
+    val memory                         = VMMemory.MemoryState(FailingStorage(), Vec.empty, _ => Right(()))
+    val pointer                        = VMMemory.Pointer(VMMemory.Region.External(allocation), 4094L, 0, 5)
+    val width: Int where Between[1, 8] = 4
+    assertEquals(memory.writeScalar(pointer, 0x12345678L, width), Right(()))
+    assertEquals(memory.flush(), Left(failure))
+    assertEquals(memory.readScalar(pointer, width), Right(0x12345678L))
+    assertEquals(memory.flush(), Right(()))
+    assertEquals(memory.readScalar(pointer, width), Right(0x12345678L))
+    assertEquals(backing.write(allocation, 0L, Vec.fill(8200)(9.toByte)), Right(()))
+    assertEquals(memory.writeScalar(pointer.copy(offset = 8L), 7L, width), Right(()))
+    assertEquals(memory.flush(), Right(()))
+    assertEquals(memory.readScalar(pointer, width), Right(0x09090909L))
+    assertEquals(memory.readScalar(pointer.copy(offset = 8L), width), Right(7L))
+  }
+
   test("atomic flag test-and-set returns the prior state and clear resets the flag") {
     val voidType     = operand("IdResult", 1)
     val u32          = operand("IdResult", 2)

@@ -85,6 +85,10 @@ private object VMInterpreter {
     ExtendedInstruction.OpenClStd.Cos,
     ExtendedInstruction.OpenClStd.Cosh,
     ExtendedInstruction.OpenClStd.Cospi,
+    ExtendedInstruction.OpenClStd.Erf,
+    ExtendedInstruction.OpenClStd.Erfc,
+    ExtendedInstruction.OpenClStd.Tgamma,
+    ExtendedInstruction.OpenClStd.Lgamma,
     ExtendedInstruction.OpenClStd.Exp,
     ExtendedInstruction.OpenClStd.Exp2,
     ExtendedInstruction.OpenClStd.Exp10,
@@ -125,7 +129,10 @@ private object VMInterpreter {
     ExtendedInstruction.OpenClStd.Atan2pi,
     ExtendedInstruction.OpenClStd.Fdim,
     ExtendedInstruction.OpenClStd.Fmod,
+    ExtendedInstruction.OpenClStd.Remainder,
     ExtendedInstruction.OpenClStd.Hypot,
+    ExtendedInstruction.OpenClStd.NativeDivide,
+    ExtendedInstruction.OpenClStd.NativePowr,
     ExtendedInstruction.OpenClStd.Powr
   )
 
@@ -655,7 +662,7 @@ private object VMInterpreter {
       executeArithmetic(program, execution, instruction)
     case _: Instruction.IsNormal | _: Instruction.SignBitSet | _: Instruction.ULessThan | _: Instruction.UGreaterThan | _: Instruction.ULessThanEqual | _: Instruction.UGreaterThanEqual | _: Instruction.SGreaterThan | _: Instruction.SGreaterThanEqual | _: Instruction.SLessThan | _: Instruction.SLessThanEqual | _: Instruction.Select =>
       executeComparison(program, execution, instruction)
-    case _: Instruction.ControlBarrier | _: Instruction.MemoryBarrier | _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax | _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd | _: Instruction.GroupIMulKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin | _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR | _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast | _: Instruction.GroupNonUniformBallot =>
+    case _: Instruction.ControlBarrier | _: Instruction.MemoryBarrier | _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax | _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd | _: Instruction.GroupIMulKHR | _: Instruction.GroupBitwiseAndKHR | _: Instruction.GroupBitwiseOrKHR | _: Instruction.GroupBitwiseXorKHR | _: Instruction.GroupLogicalAndKHR | _: Instruction.GroupLogicalOrKHR | _: Instruction.GroupLogicalXorKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin | _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR | _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleXorINTEL | _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast | _: Instruction.GroupNonUniformBallot =>
       executeCollective(program, execution, memory, instruction)
     case _: Instruction.FunctionCall | _: Instruction.FunctionPointerCallINTEL =>
       executeCall(program, execution, memory, instruction)
@@ -2117,6 +2124,40 @@ private object VMInterpreter {
       instruction: Instruction
   ): Either[Fault, Unit] = {
     val values = execution.values
+    def suspendTypedOperation(
+        resultType: Operand,
+        destination: Operand,
+        scope: Operand,
+        operation: Operand,
+        source: Operand,
+        kind: CollectiveKind,
+        opcode: String,
+        logical: Boolean
+    ): Either[Fault, Unit] =
+      collectiveTypedOperation(
+        program,
+        values,
+        execution.currentFunction.id,
+        execution.pc,
+        resultType,
+        destination,
+        scope,
+        operation,
+        source,
+        kind,
+        opcode,
+        logical
+      ).map { request =>
+        suspend(
+          execution,
+          execution.currentFunction,
+          execution.pc,
+          execution.currentLabel,
+          execution.predecessor,
+          execution.instructionCount,
+          request
+        )
+      }
     instruction match {
       case Instruction.ControlBarrier(executionScope, memoryScope, semantics) =>
         controlBarrier(
@@ -2196,7 +2237,7 @@ private object VMInterpreter {
             return Right(())
         }
       case Instruction.GroupUMin(resultType, dest, executionScope, operation, value) =>
-        collectiveIntegerExtremum(
+        collectiveTypedOperation(
           program,
           values,
           execution.currentFunction.id,
@@ -2223,7 +2264,7 @@ private object VMInterpreter {
             return Right(())
         }
       case Instruction.GroupUMax(resultType, dest, executionScope, operation, value) =>
-        collectiveIntegerExtremum(
+        collectiveTypedOperation(
           program,
           values,
           execution.currentFunction.id,
@@ -2250,7 +2291,7 @@ private object VMInterpreter {
             return Right(())
         }
       case Instruction.GroupSMin(resultType, dest, executionScope, operation, value) =>
-        collectiveIntegerExtremum(
+        collectiveTypedOperation(
           program,
           values,
           execution.currentFunction.id,
@@ -2277,7 +2318,7 @@ private object VMInterpreter {
             return Right(())
         }
       case Instruction.GroupSMax(resultType, dest, executionScope, operation, value) =>
-        collectiveIntegerExtremum(
+        collectiveTypedOperation(
           program,
           values,
           execution.currentFunction.id,
@@ -2328,6 +2369,72 @@ private object VMInterpreter {
             )
             return Right(())
         }
+      case Instruction.GroupBitwiseAndKHR(resultType, dest, executionScope, operation, value) =>
+        return suspendTypedOperation(
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value,
+          CollectiveKind.BitwiseAnd,
+          "OpGroupBitwiseAndKHR",
+          false
+        )
+      case Instruction.GroupBitwiseOrKHR(resultType, dest, executionScope, operation, value) =>
+        return suspendTypedOperation(
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value,
+          CollectiveKind.BitwiseOr,
+          "OpGroupBitwiseOrKHR",
+          false
+        )
+      case Instruction.GroupBitwiseXorKHR(resultType, dest, executionScope, operation, value) =>
+        return suspendTypedOperation(
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value,
+          CollectiveKind.BitwiseXor,
+          "OpGroupBitwiseXorKHR",
+          false
+        )
+      case Instruction.GroupLogicalAndKHR(resultType, dest, executionScope, operation, value) =>
+        return suspendTypedOperation(
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value,
+          CollectiveKind.LogicalAnd,
+          "OpGroupLogicalAndKHR",
+          true
+        )
+      case Instruction.GroupLogicalOrKHR(resultType, dest, executionScope, operation, value) =>
+        return suspendTypedOperation(
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value,
+          CollectiveKind.LogicalOr,
+          "OpGroupLogicalOrKHR",
+          true
+        )
+      case Instruction.GroupLogicalXorKHR(resultType, dest, executionScope, operation, value) =>
+        return suspendTypedOperation(
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value,
+          CollectiveKind.LogicalXor,
+          "OpGroupLogicalXorKHR",
+          true
+        )
       case Instruction.GroupIMulKHR(resultType, dest, executionScope, operation, value) =>
         collectiveIntegerMultiply(
           program,
@@ -2466,6 +2573,30 @@ private object VMInterpreter {
           dest,
           data,
           invocationId
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.SubgroupShuffleXorINTEL(resultType, dest, data, invocationId) =>
+        collectiveShuffle(
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          data,
+          invocationId,
+          execution.invocation.subgroupLocal
         ) match {
           case Left(error)    => return Left(error)
           case Right(request) =>
@@ -3235,7 +3366,7 @@ private object VMInterpreter {
           case Right(())   => executions.foreach(_.memoryReady())
         }
       }
-      resolveCollectives(program, executions) match {
+      resolveCollectives(program, executions, memory) match {
         case Left(error)                                                      => return Left(error)
         case Right(0) if !hadPendingMemory && executions.exists(!_.completed) =>
           val waiting = executions.view
@@ -3270,7 +3401,8 @@ private object VMInterpreter {
   )
   private def resolveCollectives(
       program: Program,
-      executions: mutable.ArrayBuffer[InvocationState]
+      executions: mutable.ArrayBuffer[InvocationState],
+      memory: MemoryState
   ): Either[Fault, Int] = {
     var resolved  = 0
     val subgroups = executions.view.map(_.invocation.subgroupIndex).toSet.toArray.sorted
@@ -3285,7 +3417,7 @@ private object VMInterpreter {
           !execution.completed && execution.suspended.exists(sameCollective(_, requests.head))
         )
       )
-        resolveCollective(program, participants, requests.head) match {
+        resolveCollective(program, participants, requests.head, memory) match {
           case Left(error) => return Left(error)
           case Right(())   => resolved += 1
         }
@@ -3297,7 +3429,7 @@ private object VMInterpreter {
           if executions.forall(execution =>
             !execution.completed && execution.suspended.exists(sameCollective(_, request))
           ) =>
-        resolveCollective(program, Vec.from(executions), request) match {
+        resolveCollective(program, Vec.from(executions), request, memory) match {
           case Left(error) => return Left(error)
           case Right(())   => resolved += 1
         }
@@ -3340,7 +3472,8 @@ private object VMInterpreter {
   private def resolveCollective(
       program: Program,
       participants: Vec[InvocationState],
-      expected: CollectiveRequest
+      expected: CollectiveRequest,
+      memory: MemoryState
   ): Either[Fault, Unit] = {
     val requests = participants.map(_.suspended.get)
     def scan(
@@ -3362,13 +3495,19 @@ private object VMInterpreter {
       outputs.result()
     }
     expected.payload match {
-      case CollectivePayload.Barrier(_, _) =>
-        participants.foreach { execution =>
-          val request = execution.suspended.get
-          execution.pc = request.pc + 1
-          execution.resume()
+      case CollectivePayload.Barrier(memoryScope, semantics) =>
+        // Group participants share a mirror; broader scopes must also publish to
+        // and refresh host memory. Fence once at rendezvous, before lanes resume.
+        val fence = if (semantics == 0L) Right(())
+        else if (memoryScope == 2 || memoryScope == 3 || memoryScope == 4) memory.flush()
+        else memory.fence()
+        fence.map { _ =>
+          participants.foreach { execution =>
+            val request = execution.suspended.get
+            execution.pc = request.pc + 1
+            execution.resume()
+          }
         }
-        Right(())
       case CollectivePayload.Shuffle(resultType, _, _, _) =>
         val shuffleRequests = requests.collect {
           case CollectiveRequest(_, _, _, _, CollectivePayload.Shuffle(_, destination, data, invocationId), _, _) =>
@@ -3392,10 +3531,9 @@ private object VMInterpreter {
                             Right(existing :+ retag(data, resultType))
                           case _ => Left(Fault.InvalidTask("subgroup shuffle source is not suspended"))
                         }
-                      case None =>
-                        Left(Fault.InvalidTask(
-                          s"subgroup shuffle source lane $sourceLocal is absent"
-                        ))
+                      // SYCL selection/permutation permits an out-of-range source with
+                      // an unspecified result. Retain this lane's input in that case.
+                      case None => Right(existing :+ retag(request._2._2, resultType))
                     }
                   case _ => Left(Fault.InvalidTask("subgroup shuffle invocation id must be scalar"))
                 }
@@ -3618,6 +3756,34 @@ private object VMInterpreter {
                   Right(scan(inputs, 0L, resultType)((left, right) => (left + right) & mask(width)))
                 }
               }
+            case CollectiveKind.BitwiseAnd | CollectiveKind.BitwiseOr | CollectiveKind.BitwiseXor |
+                CollectiveKind.LogicalAnd | CollectiveKind.LogicalOr | CollectiveKind.LogicalXor =>
+              val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
+              if (inputs.size != requests.size || inputs.isEmpty)
+                Left(Fault.InvalidTask(s"${expected.kind} participants do not all provide matching values"))
+              else {
+                val logical    = booleanLanes(program, resultType).nonEmpty
+                val resultMask = if (logical) 1L else mask(integerShape(program, resultType).get._1)
+                val identity   = expected.kind match {
+                  case CollectiveKind.BitwiseAnd | CollectiveKind.LogicalAnd => resultMask
+                  case _                                                     => 0L
+                }
+                def combine(left: Long, right: Long): Long = {
+                  val normalized = if (logical) { if (right != 0L) 1L else 0L }
+                  else right
+                  (expected.kind match {
+                    case CollectiveKind.BitwiseAnd | CollectiveKind.LogicalAnd => left & normalized
+                    case CollectiveKind.BitwiseOr | CollectiveKind.LogicalOr   => left | normalized
+                    case _                                                     => left ^ normalized
+                  }) & resultMask
+                }
+                if (expected.operation == 0) {
+                  val reduced = Array.tabulate(inputs.head.length) { lane =>
+                    inputs.view.foldLeft(identity)((acc, input) => combine(acc, input(lane)))
+                  }
+                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
+                } else Right(scan(inputs, identity, resultType)(combine(_, _)))
+              }
             case CollectiveKind.IntegerMultiply =>
               val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
@@ -3706,6 +3872,11 @@ private object VMInterpreter {
                   participants.indexWhere(_.invocation.subgroupLocal.toLong == x)
                 case (_, Vec(x)) =>
                   participants.indexWhere(_.invocation.localX == x)
+                case (_, Vec(x, y)) =>
+                  participants.indexWhere(execution =>
+                    execution.invocation.localX == x && execution.invocation.localY == y &&
+                      execution.invocation.localZ == 0
+                  )
                 case (_, Vec(x, y, z)) =>
                   participants.indexWhere(execution =>
                     execution.invocation.localX == x && execution.invocation.localY == y &&
@@ -3803,8 +3974,8 @@ private object VMInterpreter {
       semantics: Operand
   ): Either[Fault, CollectiveRequest] =
     (scalar(values, executionScope), scalar(values, memoryScope), scalar(values, semantics)) match {
-      case (Right(executionScope @ (2L | 3L)), Right(memoryScope @ (2L | 3L)), Right(memorySemantics))
-          if (memorySemantics & ~0xffdeL) == 0L &&
+      case (Right(executionScope @ (2L | 3L)), Right(memoryScope), Right(memorySemantics))
+          if memoryScope >= 0L && memoryScope <= 6L && (memorySemantics & ~0xffdeL) == 0L &&
             Vec(0L, 2L, 4L, 8L, 16L).contains(memorySemantics & 0x1eL) =>
         Right(
           CollectiveRequest(
@@ -3819,9 +3990,9 @@ private object VMInterpreter {
         Left(Fault.Unsupported(
           s"OpControlBarrier execution scope $scope is not Subgroup or Workgroup"
         ))
-      case (Right(_), Right(scope), _) if scope != 2L && scope != 3L =>
-        Left(Fault.Unsupported(
-          s"OpControlBarrier memory scope $scope is not Subgroup or Workgroup"
+      case (Right(_), Right(scope), _) if scope < 0L || scope > 6L =>
+        Left(Fault.InvalidTask(
+          s"OpControlBarrier has invalid memory scope $scope"
         ))
       case (Right(_), Right(_), Right(memorySemantics)) =>
         Left(
@@ -4002,7 +4173,7 @@ private object VMInterpreter {
       case (_, None)        => Left(undefined(pred))
     }
 
-  private def collectiveIntegerExtremum(
+  private def collectiveTypedOperation(
       program: Program,
       values: InvocationValues,
       function: Int,
@@ -4013,13 +4184,16 @@ private object VMInterpreter {
       operation: Operand,
       source: Operand,
       kind: CollectiveKind,
-      opcode: String
+      opcode: String,
+      logical: Boolean = false
   ): Either[Fault, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
       case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
           if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
-            integerShape(program, id(resultType)) == integerShape(program, sourceType) &&
-            integerShape(program, sourceType).exists(_._2 == lanes.length) =>
+            (if (logical) booleanLanes(program, id(resultType)) == booleanLanes(program, sourceType) &&
+             booleanLanes(program, sourceType).contains(lanes.length)
+             else integerShape(program, id(resultType)) == integerShape(program, sourceType) &&
+             integerShape(program, sourceType).exists(_._2 == lanes.length)) =>
         Right(
           CollectiveRequest(
             kind,
@@ -4042,7 +4216,7 @@ private object VMInterpreter {
         ))
       case (Right(_), Some(_)) =>
         Left(Fault.InvalidTask(
-          s"$opcode requires matching integer scalar or vector types"
+          s"$opcode requires matching ${if (logical) "boolean" else "integer"} scalar or vector types"
         ))
       case (Left(error), _) => Left(error)
       case (_, None)        => Left(undefined(source))
@@ -4321,12 +4495,13 @@ private object VMInterpreter {
       resultType: Operand,
       destination: Operand,
       data: Operand,
-      invocationId: Operand
+      invocationId: Operand,
+      sourceXor: Int = 0
   ): Either[Fault, CollectiveRequest] =
     (values.get(id(data)), values.get(id(invocationId))) match {
       case (
             Some(dataValue @ RuntimeValue.Bits(dataType, dataLanes)),
-            Some(invocationValue @ RuntimeValue.Bits(_, Array(_)))
+            Some(RuntimeValue.Bits(selectorType, Array(selector)))
           )
           if dataType == id(resultType) && dataLanes.nonEmpty =>
         Right(
@@ -4335,7 +4510,12 @@ private object VMInterpreter {
             function,
             pc,
             3,
-            CollectivePayload.Shuffle(id(resultType), id(destination), dataValue, invocationValue)
+            CollectivePayload.Shuffle(
+              id(resultType),
+              id(destination),
+              dataValue,
+              RuntimeValue.Bits(selectorType, Array(selector ^ sourceXor.toLong))
+            )
           )
         )
       case (Some(_), Some(RuntimeValue.Bits(_, lanes))) if lanes.length != 1 =>
@@ -4410,7 +4590,7 @@ private object VMInterpreter {
             Some(RuntimeValue.Bits(localIdType, lanes))
           )
           if sourceType == id(resultType) && integerShape(program, localIdType).exists { case (_, count) =>
-            count == lanes.length && Vec(1, 3).contains(count)
+            count == lanes.length && Vec(1, 2, 3).contains(count)
           } =>
         val width: Int where Between[1, 64] = integerShape(program, localIdType).map(_._1).getOrElse(64)
         Right(
@@ -4432,7 +4612,7 @@ private object VMInterpreter {
       case (Right(_), _, _)    =>
         Left(
           Fault.InvalidTask(
-            "OpGroupBroadcast requires matching result/source bit types and a scalar or three-lane integer local id"
+            "OpGroupBroadcast requires matching result/source bit types and a scalar, two-lane or three-lane integer local id"
           )
         )
       case (Left(error), _, _) => Left(error)
@@ -5214,12 +5394,12 @@ private object VMInterpreter {
             val result = Array.tabulate(count) { index =>
               width.raw match {
                 case 16 =>
-                  IEEE754.floatToBinary16(
-                    Math.nextAfter(
-                      IEEE754.binary16ToFloat(Binary16.low(leftLanes(index))),
-                      IEEE754.binary16ToFloat(Binary16.low(rightLanes(index)))
-                    )
-                  ).toLong
+                  val from = floatingToDouble(width, leftLanes(index))
+                  val to   = floatingToDouble(width, rightLanes(index))
+                  if (from.isNaN || to.isNaN) doubleToFloating(width, Double.NaN)
+                  else if (from == to) rightLanes(index)
+                  else if (from == 0.0) if (to < 0.0) 0x8001L else 1L
+                  else leftLanes(index) + (if ((to > from) == (from > 0.0)) 1L else -1L)
                 case 32 =>
                   IEEE754.floatToBinary32(
                     Math.nextAfter(
@@ -5287,29 +5467,114 @@ private object VMInterpreter {
         Left(Fault.InvalidTask("OpenCL.std hadd operands are not integer values"))
     }
 
-  private def openCLSignedAbs(
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
+  private def openCLIntegerArithmetic(
       program: Program,
       values: InvocationValues,
       resultType: Operand,
       destination: Operand,
-      source: Operand
+      opcode: Int,
+      sources: Vec[Operand]
+  ): Either[Fault, Unit] = {
+    import ExtendedInstruction.OpenClStd.*
+    val arity = opcode match {
+      case `SClamp` | `UClamp` | `SMadHi` | `UMadHi` | `SMadSat` | `UMadSat` | `SMad24` | `UMad24` => 3
+      case _                                                                                       => 2
+    }
+    val widening     = opcode == SUpsample || opcode == UUpsample
+    val smallProduct = opcode == SMul24 || opcode == UMul24 || opcode == SMad24 || opcode == UMad24
+    if (sources.size != arity)
+      return Left(
+        Fault.InvalidTask(s"OpenCL.std integer opcode $opcode expects $arity operands, received ${sources.size}")
+      )
+    integerShape(program, id(resultType)) match {
+      case Some((width, count))
+          if (width.raw == 8 || width.raw == 16 || width.raw == 32 || width.raw == 64) &&
+            (!widening || width.raw != 8) && (!smallProduct || width.raw == 32) =>
+        val inputWidth = if (widening) (width.raw / 2).refine[Int where Between[1, 64]].toOption.get else width
+        val inputs     = Array.ofDim[Array[Long]](arity)
+        var index      = 0
+        while (index < arity) {
+          values.get(id(sources(index))) match {
+            case Some(RuntimeValue.Bits(sourceType, lanes))
+                if integerShape(program, sourceType).contains(inputWidth -> count) && lanes.length == count =>
+              inputs(index) = lanes
+            case None => return Left(undefined(sources(index)))
+            case _    => return Left(
+                Fault.InvalidTask(s"OpenCL.std integer opcode $opcode requires matching integer scalar/vector types")
+              )
+          }
+          index += 1
+        }
+        val signed = opcode match {
+          case `SAbsDiff` | `SAddSat` | `SRhadd` | `SClamp` | `SMadHi` | `SMadSat` |
+              `SMulHi` | `SSubSat` | `SUpsample` | `SMad24` | `SMul24` => true
+          case _ => false
+        }
+        // Preserve wide intermediates until saturation or high-half extraction, including 64-bit products.
+        val modulus                                = BigInt(1) << inputWidth.raw
+        val maximum                                = if (signed) (modulus >> 1) - 1 else modulus - 1
+        val minimum                                = if (signed) -(modulus >> 1) else BigInt(0)
+        val productWidth: Int where Between[1, 64] = if (smallProduct) 24 else inputWidth
+        val productMask                            = (BigInt(1) << productWidth.raw) - 1
+        def integer(raw: Long): BigInt             =
+          if (signed) BigInt(signExtend(raw, inputWidth)) else BigInt(raw) & (modulus - 1)
+        def factor(raw: Long): BigInt =
+          if (signed) BigInt(signExtend(raw, productWidth)) else BigInt(raw) & productMask
+        val result = Array.tabulate(count) { lane =>
+          val left       = factor(inputs(0)(lane))
+          val right      = factor(inputs(1)(lane))
+          val third      = if (arity == 3) integer(inputs(2)(lane)) else BigInt(0)
+          val calculated = opcode match {
+            case `SAbsDiff` | `UAbsDiff` => (left - right).abs
+            case `SAddSat` | `UAddSat`   => (left + right).max(minimum).min(maximum)
+            case `SSubSat` | `USubSat`   => (left - right).max(minimum).min(maximum)
+            case `SClamp` | `UClamp`     => left.max(right).min(third)
+            case `UHadd`                 => (left + right) >> 1
+            case `SRhadd` | `URhadd`     => (left + right + 1) >> 1
+            case `SMulHi` | `UMulHi`     => (left * right) >> width.raw
+            case `SMadHi` | `UMadHi`     => ((left * right) >> width.raw) + third
+            case `SMadSat` | `UMadSat`   => (left * right + third).max(minimum).min(maximum)
+            case `Rotate`                =>
+              val shift = right.toInt & (width.raw - 1)
+              (left << shift) | (left >> (width.raw - shift))
+            case `SUpsample` | `UUpsample` => (left << inputWidth.raw) | (right & (modulus - 1))
+            case `SMul24` | `UMul24`       => left * right
+            case `SMad24` | `UMad24`       => left * right + third
+          }
+          calculated.toLong & mask(width)
+        }
+        values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+        Right(())
+      case _ =>
+        Left(Fault.InvalidTask(s"OpenCL.std integer opcode $opcode requires an 8, 16, 32 or 64-bit integer result"))
+    }
+  }
+
+  private def openCLAbs(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      source: Operand,
+      signed: Boolean
   ): Either[Fault, Unit] = values.get(id(source)) match {
     case Some(RuntimeValue.Bits(sourceType, lanes)) =>
       (integerShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
             if sourceWidth == resultWidth && sourceLanes == resultLanes && lanes.length == sourceLanes =>
           val result = lanes.map { raw =>
-            val signed = signExtend(raw, sourceWidth)
-            (if (signed < 0L) -signed else signed) & mask(resultWidth)
+            val value = if (signed) signExtend(raw, sourceWidth) else raw
+            (if (signed && value < 0L) -value else value) & mask(resultWidth)
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
         case _ =>
           Left(Fault.InvalidTask(
-            "OpenCL.std s_abs requires matching integer scalar/vector types"
+            "OpenCL.std abs requires matching integer scalar/vector types"
           ))
       }
-    case Some(_) => Left(Fault.InvalidTask("OpenCL.std s_abs operand is a pointer"))
+    case Some(_) => Left(Fault.InvalidTask("OpenCL.std abs operand is a pointer"))
     case None    => Left(undefined(source))
   }
 
@@ -5538,8 +5803,17 @@ private object VMInterpreter {
       instruction: Operand,
       sources: Vec[Operand]
   ): Memory.ReadResult[Unit] = {
-    val setId  = id(set)
-    val opcode = id(instruction)
+    val setId         = id(set)
+    val encodedOpcode = id(instruction)
+    // The half_* family permits reduced precision; the native implementation
+    // supplies at least that accuracy, including the binary divide/powr forms.
+    val opcode =
+      if (
+        program.extendedInstructionSets.get(setId).contains("OpenCL.std") &&
+        encodedOpcode >= ExtendedInstruction.OpenClStd.HalfCos && encodedOpcode <= ExtendedInstruction.OpenClStd.HalfTan
+      )
+        encodedOpcode + ExtendedInstruction.OpenClStd.NativeCos - ExtendedInstruction.OpenClStd.HalfCos
+      else encodedOpcode
     program.extendedInstructionSets.get(setId) match {
       case None =>
         Left(Fault.InvalidTask(s"OpExtInst references undefined import %$setId"))
@@ -5606,12 +5880,21 @@ private object VMInterpreter {
           sources(2),
           opcode == ExtendedInstruction.OpenClStd.Fma
         )
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Maxmag =>
+      case Some("OpenCL.std")
+          if opcode == ExtendedInstruction.OpenClStd.Maxmag || opcode == ExtendedInstruction.OpenClStd.Minmag =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std maxmag expects 2 operands, received ${sources.size}"
           ))
-        else openCLMaxMag(program, values, resultType, destination, sources(0), sources(1))
+        else openCLMagnitude(
+          program,
+          values,
+          resultType,
+          destination,
+          sources(0),
+          sources(1),
+          opcode == ExtendedInstruction.OpenClStd.Maxmag
+        )
       case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Pow =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
@@ -5644,12 +5927,21 @@ private object VMInterpreter {
                 case _ => if (java.lang.Long.compareUnsigned(left, right) <= 0) left else right
               }
           }
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Sincos =>
+      case Some("OpenCL.std")
+          if opcode == ExtendedInstruction.OpenClStd.Sincos ||
+            opcode == ExtendedInstruction.OpenClStd.Fract || opcode == ExtendedInstruction.OpenClStd.Modf ||
+            opcode == ExtendedInstruction.OpenClStd.Frexp || opcode == ExtendedInstruction.OpenClStd.LgammaR =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
-            s"OpenCL.std sincos expects 2 operands, received ${sources.size}"
+            s"OpenCL.std pointer math opcode $opcode expects 2 operands, received ${sources.size}"
           ))
-        else openCLSinCos(program, values, memory, resultType, destination, sources(0), sources(1))
+        else openCLPointerMath(program, values, memory, resultType, destination, sources(0), sources(1), opcode)
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Ilogb =>
+        if (sources.size != 1) Left(Fault.InvalidTask("OpenCL.std ilogb requires one operand"))
+        else openCLIlogb(program, values, resultType, destination, sources.head)
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Remquo =>
+        if (sources.size != 3) Left(Fault.InvalidTask("OpenCL.std remquo requires three operands"))
+        else openCLRemquo(program, values, memory, resultType, destination, sources)
       case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Printf =>
         openCLPrintf(program, values, memory, resultType, destination, sources)
       case Some("OpenCL.std")
@@ -5692,6 +5984,10 @@ private object VMInterpreter {
           case ExtendedInstruction.OpenClStd.Cos         => "cos"
           case ExtendedInstruction.OpenClStd.Cosh        => "cosh"
           case ExtendedInstruction.OpenClStd.Cospi       => "cospi"
+          case ExtendedInstruction.OpenClStd.Erf         => "erf"
+          case ExtendedInstruction.OpenClStd.Erfc        => "erfc"
+          case ExtendedInstruction.OpenClStd.Tgamma      => "tgamma"
+          case ExtendedInstruction.OpenClStd.Lgamma      => "lgamma"
           case ExtendedInstruction.OpenClStd.Exp         => "exp"
           case ExtendedInstruction.OpenClStd.Exp2        => "exp2"
           case ExtendedInstruction.OpenClStd.Exp10       => "exp10"
@@ -5740,19 +6036,23 @@ private object VMInterpreter {
                   val result = lanes.map { raw =>
                     def evaluate(value: Double): Double = opcode match {
                       case ExtendedInstruction.OpenClStd.Acos   => Math.acos(value)
-                      case ExtendedInstruction.OpenClStd.Acosh  => Math.log(value + Math.sqrt(value * value - 1.0))
+                      case ExtendedInstruction.OpenClStd.Acosh  => OpenCLMath.acosh(value)
                       case ExtendedInstruction.OpenClStd.Acospi => Math.acos(value) / Math.PI
                       case ExtendedInstruction.OpenClStd.Asin   => Math.asin(value)
-                      case ExtendedInstruction.OpenClStd.Asinh  => Math.log(value + Math.sqrt(value * value + 1.0))
+                      case ExtendedInstruction.OpenClStd.Asinh  => OpenCLMath.asinh(value)
                       case ExtendedInstruction.OpenClStd.Asinpi => Math.asin(value) / Math.PI
                       case ExtendedInstruction.OpenClStd.Atan   => Math.atan(value)
-                      case ExtendedInstruction.OpenClStd.Atanh  => 0.5 * Math.log((1.0 + value) / (1.0 - value))
+                      case ExtendedInstruction.OpenClStd.Atanh  => OpenCLMath.atanh(value)
                       case ExtendedInstruction.OpenClStd.Atanpi => Math.atan(value) / Math.PI
                       case ExtendedInstruction.OpenClStd.Cbrt   => Math.cbrt(value)
                       case ExtendedInstruction.OpenClStd.Ceil   => Math.ceil(value)
                       case ExtendedInstruction.OpenClStd.Cos    => Math.cos(value)
                       case ExtendedInstruction.OpenClStd.Cosh   => Math.cosh(value)
                       case ExtendedInstruction.OpenClStd.Cospi  => openCLCosPi(value)
+                      case ExtendedInstruction.OpenClStd.Erf    => OpenCLMath.erf(value)
+                      case ExtendedInstruction.OpenClStd.Erfc   => OpenCLMath.erfc(value)
+                      case ExtendedInstruction.OpenClStd.Tgamma => OpenCLMath.tgamma(value)
+                      case ExtendedInstruction.OpenClStd.Lgamma => OpenCLMath.lgamma(value)
                       case ExtendedInstruction.OpenClStd.Exp    => Math.exp(value)
                       case ExtendedInstruction.OpenClStd.Exp2   => Math.pow(2.0, value)
                       case ExtendedInstruction.OpenClStd.Exp10  => Math.pow(10.0, value)
@@ -5767,7 +6067,7 @@ private object VMInterpreter {
                         if (value.isNaN) Double.NaN
                         else if (value == 0.0) Double.NegativeInfinity
                         else if (value.isInfinite) Double.PositiveInfinity
-                        else Math.getExponent(value).toDouble
+                        else openCLExponent(value).toDouble
                       case ExtendedInstruction.OpenClStd.Rint  => Math.rint(value)
                       case ExtendedInstruction.OpenClStd.Round =>
                         if (value < 0.0) Math.ceil(value - 0.5) else Math.floor(value + 0.5)
@@ -5799,9 +6099,9 @@ private object VMInterpreter {
                       case 32 if opcode == ExtendedInstruction.OpenClStd.Fabs => raw & 0x7fffffffL
                       case 64 if opcode == ExtendedInstruction.OpenClStd.Fabs => raw & 0x7fffffffffffffffL
                       case 16                                                 =>
-                        IEEE754.floatToBinary16(
-                          evaluate(IEEE754.binary16ToFloat(Binary16.low(raw)).toDouble).toFloat
-                        ).toLong
+                        IEEE754.doubleToBinary16(
+                          evaluate(IEEE754.binary16ToFloat(Binary16.low(raw)).toDouble)
+                        ).raw
                       case 32 =>
                         IEEE754.floatToBinary32(
                           evaluate(IEEE754.binary32ToFloat(Binary32.low(raw)).toDouble).toFloat
@@ -5825,12 +6125,15 @@ private object VMInterpreter {
           }
       case Some("OpenCL.std") if OpenCLBinaryFloatingOpcodes.contains(opcode) =>
         val name = opcode match {
-          case ExtendedInstruction.OpenClStd.Atan2   => "atan2"
-          case ExtendedInstruction.OpenClStd.Atan2pi => "atan2pi"
-          case ExtendedInstruction.OpenClStd.Fdim    => "fdim"
-          case ExtendedInstruction.OpenClStd.Fmod    => "fmod"
-          case ExtendedInstruction.OpenClStd.Hypot   => "hypot"
-          case _                                     => "powr"
+          case ExtendedInstruction.OpenClStd.Atan2        => "atan2"
+          case ExtendedInstruction.OpenClStd.Atan2pi      => "atan2pi"
+          case ExtendedInstruction.OpenClStd.Fdim         => "fdim"
+          case ExtendedInstruction.OpenClStd.Fmod         => "fmod"
+          case ExtendedInstruction.OpenClStd.Remainder    => "remainder"
+          case ExtendedInstruction.OpenClStd.Hypot        => "hypot"
+          case ExtendedInstruction.OpenClStd.NativeDivide => "native_divide"
+          case ExtendedInstruction.OpenClStd.NativePowr   => "native_powr"
+          case _                                          => "powr"
         }
         if (sources.size != 2)
           Left(Fault.InvalidTask(
@@ -5849,10 +6152,12 @@ private object VMInterpreter {
         else
           openCLFloatingElementwise(program, values, resultType, destination, sources, name) { operands =>
             opcode match {
-              case ExtendedInstruction.OpenClStd.Atan2pi => Math.atan2(operands(0), operands(1)) / Math.PI
-              case ExtendedInstruction.OpenClStd.Fdim    => Math.max(operands(0) - operands(1), 0.0)
-              case ExtendedInstruction.OpenClStd.Fmod    => operands(0) % operands(1)
-              case _                                     => openCLPowr(operands(0), operands(1))
+              case ExtendedInstruction.OpenClStd.Atan2pi      => Math.atan2(operands(0), operands(1)) / Math.PI
+              case ExtendedInstruction.OpenClStd.Fdim         => Math.max(operands(0) - operands(1), 0.0)
+              case ExtendedInstruction.OpenClStd.NativeDivide => operands(0) / operands(1)
+              case ExtendedInstruction.OpenClStd.Fmod         => operands(0) % operands(1)
+              case ExtendedInstruction.OpenClStd.Remainder    => Math.IEEEremainder(operands(0), operands(1))
+              case _                                          => openCLPowr(operands(0), operands(1))
             }
           }
       case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Nan =>
@@ -5883,18 +6188,34 @@ private object VMInterpreter {
             s"OpenCL.std nextafter expects 2 operands, received ${sources.size}"
           ))
         else openCLNextAfter(program, values, resultType, destination, sources(0), sources(1))
+      case Some("OpenCL.std")
+          if (opcode >= ExtendedInstruction.OpenClStd.SAbsDiff && opcode <= ExtendedInstruction.OpenClStd.UClamp &&
+            opcode != ExtendedInstruction.OpenClStd.SHadd) ||
+            (opcode >= ExtendedInstruction.OpenClStd.SMadHi && opcode <= ExtendedInstruction.OpenClStd.SMadSat) ||
+            (opcode >= ExtendedInstruction.OpenClStd.SMulHi && opcode <= ExtendedInstruction.OpenClStd.SUpsample) ||
+            (opcode >= ExtendedInstruction.OpenClStd.SMad24 && opcode <= ExtendedInstruction.OpenClStd.UMul24) ||
+            (opcode >= ExtendedInstruction.OpenClStd.UAbsDiff && opcode <= ExtendedInstruction.OpenClStd.UMadHi) =>
+        openCLIntegerArithmetic(program, values, resultType, destination, opcode, sources)
       case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.SHadd =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std hadd expects 2 operands, received ${sources.size}"
           ))
         else openCLSignedHalfAdd(program, values, resultType, destination, sources(0), sources(1))
-      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.SAbs =>
+      case Some("OpenCL.std")
+          if opcode == ExtendedInstruction.OpenClStd.SAbs || opcode == ExtendedInstruction.OpenClStd.UAbs =>
         if (sources.size != 1)
           Left(Fault.InvalidTask(
-            s"OpenCL.std s_abs expects 1 operand, received ${sources.size}"
+            s"OpenCL.std abs expects 1 operand, received ${sources.size}"
           ))
-        else openCLSignedAbs(program, values, resultType, destination, sources.head)
+        else openCLAbs(
+          program,
+          values,
+          resultType,
+          destination,
+          sources.head,
+          opcode == ExtendedInstruction.OpenClStd.SAbs
+        )
       case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.Clz =>
         if (sources.size != 1)
           Left(Fault.InvalidTask(
@@ -6024,33 +6345,41 @@ private object VMInterpreter {
   private def openCLSinPi(value: Double): Double =
     if (!value.isFinite) Double.NaN
     else if (value == Math.rint(value)) Math.copySign(0.0, value)
-    else Math.sin(Math.PI * value)
+    else {
+      val reduced   = Math.IEEEremainder(value, 2.0)
+      val x         = Math.abs(reduced)
+      val magnitude = if (x <= 0.25) Math.sin(Math.PI * x)
+      else if (x <= 0.75) Math.cos(Math.PI * (0.5 - x))
+      else Math.sin(Math.PI * (1.0 - x))
+      Math.copySign(magnitude, reduced)
+    }
 
   private def openCLCosPi(value: Double): Double =
     if (!value.isFinite) Double.NaN
     else {
-      val floor      = Math.floor(value)
-      val fractional = value - floor
-      if (fractional == 0.5) 0.0
-      else if (fractional == 0.0) if ((floor.toLong & 1L) == 0L) 1.0 else -1.0
-      else Math.cos(Math.PI * value)
+      val x = Math.abs(Math.IEEEremainder(value, 2.0))
+      if (x == 0.5) 0.0
+      else if (x <= 0.25) Math.cos(Math.PI * x)
+      else if (x <= 0.75) Math.sin(Math.PI * (0.5 - x))
+      else -Math.cos(Math.PI * (1.0 - x))
     }
 
   private def openCLTanPi(value: Double): Double =
     if (!value.isFinite) Double.NaN
     else {
-      val floor      = Math.floor(value)
-      val fractional = value - floor
-      if (fractional == 0.0) {
-        val signSource = if ((Math.abs(floor.toLong) & 1L) == 0L) value else -value
-        Math.copySign(0.0, signSource)
-      } else if (fractional == 0.5) {
-        if ((floor.toLong & 1L) == 0L) Double.PositiveInfinity else Double.NegativeInfinity
-      } else Math.tan(Math.PI * value)
+      val period  = Math.IEEEremainder(value, 2.0)
+      val reduced = Math.IEEEremainder(value, 1.0)
+      val x       = Math.abs(reduced)
+      if (x == 0.0) Math.copySign(0.0, if (Math.abs(period) == 1.0) -value else value)
+      else if (x == 0.5) Math.copySign(Double.PositiveInfinity, period)
+      else Math.copySign(if (x <= 0.25) Math.tan(Math.PI * x) else 1.0 / Math.tan(Math.PI * (0.5 - x)), reduced)
     }
 
   private def openCLPowr(base: Double, exponent: Double): Double =
-    if (base < 0.0 || ((base == 0.0 || base == Double.PositiveInfinity) && exponent == 0.0)) Double.NaN
+    if (
+      base.isNaN || exponent.isNaN || base < 0.0 || (base == 1.0 && exponent.isInfinity) ||
+      ((base == 0.0 || base == Double.PositiveInfinity) && exponent == 0.0)
+    ) Double.NaN
     else if (base == 0.0) {
       if (exponent < 0.0) Double.PositiveInfinity else 0.0
     } else Math.pow(base, exponent)
@@ -6142,9 +6471,11 @@ private object VMInterpreter {
           case ExtendedInstruction.OpenClStd.Radians    => operands(0) * (Math.PI / 180.0)
           case ExtendedInstruction.OpenClStd.Step       => if (operands(1) < operands(0)) 0.0 else 1.0
           case ExtendedInstruction.OpenClStd.Smoothstep =>
-            val ratio = (operands(2) - operands(0)) / (operands(1) - operands(0))
+            val width                        = floatingShape(program, id(resultType)).get._1
+            def round(value: Double): Double = floatingToDouble(width, doubleToFloating(width, value))
+            val ratio = round(round(operands(2) - operands(0)) / round(operands(1) - operands(0)))
             val t     = floatingMinimum(floatingMaximum(ratio, 0.0), 1.0)
-            t * t * (3.0 - 2.0 * t)
+            round(t * t) * round(3.0 - round(2.0 * t))
           case _ =>
             if (operands(0) > 0.0) 1.0
             else if (operands(0) < 0.0) -1.0
@@ -6575,58 +6906,157 @@ private object VMInterpreter {
       case _ => Left(Fault.InvalidTask(s"OpenCL.std ${if (fused) "fma" else "mad"} operands are not floating-point"))
     }
 
-  // Sin/cos writes paired results through one indexed component loop.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def openCLSinCos(
+  // Pointer-output builtins use the same typed write path for every address space.
+  private def openCLPointerMath(
       program: Program,
       values: InvocationValues,
       memory: MemoryState,
       resultType: Operand,
       destination: Operand,
       source: Operand,
-      cosine: Operand
+      output: Operand,
+      opcode: Int
   ): Either[Fault, Unit] =
-    (values.get(id(source)), address(values, cosine)) match {
-      case (Some(RuntimeValue.Bits(sourceType, sourceLanes)), Right(cosinePointer)) =>
+    (values.get(id(source)), address(values, output)) match {
+      case (Some(RuntimeValue.Bits(sourceType, sourceLanes)), Right(pointer)) =>
         (floatingShape(program, sourceType), floatingShape(program, id(resultType))) match {
-          case (Some((width, count)), Some((resultWidth, resultCount)))
-              if width == resultWidth && count == resultCount && sourceLanes.length == count =>
-            val sineLanes   = Array.ofDim[Long](count)
-            val cosineLanes = Array.ofDim[Long](count)
-            var index       = 0
-            while (index < count) {
-              val value = floatingToDouble(width, sourceLanes(index))
-              sineLanes(index) = doubleToFloating(width, Math.sin(value))
-              cosineLanes(index) = doubleToFloating(width, Math.cos(value))
-              index += 1
-            }
-            val cosineBytes = Array.ofDim[Byte](program.layout.typeSize(id(resultType)))
-            val _           = program.encodeBits(id(resultType), cosineLanes, 0, cosineBytes, 0)
-            memory.write(cosinePointer, cosineBytes) match {
-              case Left(error) => Left(error)
-              case Right(())   =>
-                values.update(id(destination), RuntimeValue.Bits(id(resultType), sineLanes))
-                Right(())
+          case (Some((width, count)), Some(resultShape))
+              if resultShape == (width, count) && sourceLanes.length == count =>
+            val integerOutput =
+              opcode == ExtendedInstruction.OpenClStd.Frexp || opcode == ExtendedInstruction.OpenClStd.LgammaR
+            val validPointer = if (integerOutput)
+              integerShape(program, pointer.pointee).contains((32, count))
+            else floatingShape(program, pointer.pointee).contains((width, count))
+            if (!validPointer) Left(Fault.InvalidTask("OpenCL.std pointer math output type does not match input"))
+            else {
+              val paired = sourceLanes.map { raw =>
+                val x                = floatingToDouble(width, raw)
+                val (result, stored) = opcode match {
+                  case ExtendedInstruction.OpenClStd.Sincos  => (Math.sin(x), doubleToFloating(width, Math.cos(x)))
+                  case ExtendedInstruction.OpenClStd.LgammaR =>
+                    (OpenCLMath.lgamma(x), OpenCLMath.gammaSign(x).toLong & 0xffffffffL)
+                  case ExtendedInstruction.OpenClStd.Frexp =>
+                    val exponent = if (x == 0.0 || !x.isFinite) 0 else openCLExponent(x) + 1
+                    (Math.scalb(x, -exponent), exponent.toLong & 0xffffffffL)
+                  case ExtendedInstruction.OpenClStd.Modf =>
+                    val integral = if (x < 0.0) Math.ceil(x) else Math.floor(x)
+                    val fraction = if (x.isInfinite) Math.copySign(0.0, x) else Math.copySign(x - integral, x)
+                    (fraction, doubleToFloating(width, integral))
+                  case _ =>
+                    val integral = Math.floor(x)
+                    val maximum  = width.raw match {
+                      case 16 => 1.0 - Math.scalb(1.0, -11)
+                      case 32 => Math.nextDown(1.0f).toDouble
+                      case 64 => Math.nextDown(1.0)
+                    }
+                    val fraction = if (x.isNaN) x
+                    else if (x == 0.0 || x.isInfinite) Math.copySign(0.0, x)
+                    else Math.min(x - integral, maximum)
+                    (fraction, doubleToFloating(width, integral))
+                }
+                (doubleToFloating(width, result), stored)
+              }
+              val bytes = Array.ofDim[Byte](program.layout.typeSize(pointer.pointee))
+              val _     = program.encodeBits(pointer.pointee, paired.map(_._2), 0, bytes, 0)
+              memory.write(pointer, bytes).map { _ =>
+                values.update(id(destination), RuntimeValue.Bits(id(resultType), paired.map(_._1)))
+              }
             }
           case _ =>
-            Left(
-              Fault.InvalidTask(
-                "OpenCL.std sincos requires matching floating-point scalar/vector types"
-              )
-            )
+            Left(Fault.InvalidTask("OpenCL.std pointer math requires matching floating-point scalar/vector types"))
         }
       case (None, _)        => Left(undefined(source))
       case (_, Left(error)) => Left(error)
-      case _                => Left(Fault.InvalidTask("OpenCL.std sincos source is not floating-point"))
+      case _                => Left(Fault.InvalidTask("OpenCL.std pointer math source is not floating-point"))
     }
 
-  private def openCLMaxMag(
+  private def openCLIlogb(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      source: Operand
+  ): Either[Fault, Unit] = values.get(id(source)) match {
+    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+      (floatingShape(program, sourceType), integerShape(program, id(resultType))) match {
+        case (Some((width, count)), Some((resultWidth, resultCount)))
+            if resultWidth.raw == 32 && count == resultCount =>
+          val result = lanes.map { raw =>
+            val x        = floatingToDouble(width, raw)
+            val exponent = if (x == 0.0) Int.MinValue else if (!x.isFinite) Int.MaxValue else openCLExponent(x)
+            exponent.toLong & 0xffffffffL
+          }
+          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          Right(())
+        case _ => Left(Fault.InvalidTask("OpenCL.std ilogb requires floating input and matching i32 result lanes"))
+      }
+    case None => Left(undefined(source))
+    case _    => Left(Fault.InvalidTask("OpenCL.std ilogb input is not floating-point"))
+  }
+
+  private def openCLRemquo(
+      program: Program,
+      values: InvocationValues,
+      memory: MemoryState,
+      resultType: Operand,
+      destination: Operand,
+      sources: Vec[Operand]
+  ): Either[Fault, Unit] =
+    (values.get(id(sources(0))), values.get(id(sources(1))), address(values, sources(2))) match {
+      case (Some(RuntimeValue.Bits(leftType, left)), Some(RuntimeValue.Bits(rightType, right)), Right(pointer)) =>
+        floatingShape(program, id(resultType)) match {
+          case Some(shape @ (width, count))
+              if floatingShape(program, leftType).contains(shape) &&
+                floatingShape(program, rightType).contains(shape) &&
+                integerShape(program, pointer.pointee).contains((32, count)) =>
+            val remainders = Array.tabulate(count)(lane =>
+              doubleToFloating(
+                width,
+                Math.IEEEremainder(floatingToDouble(width, left(lane)), floatingToDouble(width, right(lane)))
+              )
+            )
+            val quotients = Array.tabulate(count) { lane =>
+              val x = floatingToDouble(width, left(lane))
+              val y = floatingToDouble(width, right(lane))
+              if (!x.isFinite || y.isNaN || y == 0.0 || y.isInfinite) 0L
+              else {
+                // Exact binary inputs avoid quotient rounding errors and overflow in x/y.
+                val quotient = java.math.BigDecimal(x).divide(
+                  java.math.BigDecimal(y),
+                  0,
+                  java.math.RoundingMode.HALF_EVEN
+                ).toBigInteger
+                (quotient.abs.intValue & 0x7f).toLong * quotient.signum
+              }
+            }
+            val bytes = Array.ofDim[Byte](program.layout.typeSize(pointer.pointee))
+            val _     = program.encodeBits(pointer.pointee, quotients, 0, bytes, 0)
+            memory.write(pointer, bytes).map { _ =>
+              values.update(id(destination), RuntimeValue.Bits(id(resultType), remainders))
+            }
+          case _ =>
+            Left(Fault.InvalidTask("OpenCL.std remquo requires matching floating operands and i32 pointer lanes"))
+        }
+      case (None, _, _)        => Left(undefined(sources(0)))
+      case (_, None, _)        => Left(undefined(sources(1)))
+      case (_, _, Left(error)) => Left(error)
+      case _                   => Left(Fault.InvalidTask("OpenCL.std remquo operands are not floating-point"))
+    }
+
+  private def openCLExponent(value: Double): Int = {
+    val exponent = Math.getExponent(value)
+    if (exponent == java.lang.Double.MIN_EXPONENT - 1) Math.getExponent(Math.scalb(value, 54)) - 54
+    else exponent
+  }
+
+  private def openCLMagnitude(
       program: Program,
       values: InvocationValues,
       resultType: Operand,
       destination: Operand,
       left: Operand,
-      right: Operand
+      right: Operand,
+      maximum: Boolean
   ): Either[Fault, Unit] = (values.get(id(left)), values.get(id(right))) match {
     case (Some(RuntimeValue.Bits(leftType, leftLanes)), Some(RuntimeValue.Bits(rightType, rightLanes))) =>
       (
@@ -6641,21 +7071,22 @@ private object VMInterpreter {
             val leftValue  = floatingToDouble(width, leftLanes(index))
             val rightValue = floatingToDouble(width, rightLanes(index))
             val selected   =
-              if (Math.abs(leftValue) > Math.abs(rightValue)) leftValue
-              else if (Math.abs(rightValue) > Math.abs(leftValue)) rightValue
-              else Math.max(leftValue, rightValue)
+              if (Math.abs(leftValue) > Math.abs(rightValue)) { if (maximum) leftValue else rightValue }
+              else if (Math.abs(rightValue) > Math.abs(leftValue)) { if (maximum) rightValue else leftValue }
+              else if (maximum) floatingMaximum(leftValue, rightValue)
+              else floatingMinimum(leftValue, rightValue)
             doubleToFloating(width, selected)
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
         case _ =>
           Left(Fault.InvalidTask(
-            "OpenCL.std maxmag requires matching floating-point types"
+            "OpenCL.std magnitude selection requires matching floating-point types"
           ))
       }
     case (None, _) => Left(undefined(left))
     case (_, None) => Left(undefined(right))
-    case _         => Left(Fault.InvalidTask("OpenCL.std maxmag operands are not floating-point"))
+    case _         => Left(Fault.InvalidTask("OpenCL.std magnitude selection operands are not floating-point"))
   }
 
   private def openCLPow(
@@ -7566,13 +7997,14 @@ private object VMInterpreter {
   }
 
   /** FPRoundingMode decoration values: RTE, RTZ, RTP, RTN. */
-  private def roundedToLong(value: Double, mode: Option[Int]): Long = mode match {
-    case Some(0) => math.rint(value).toLong
-    case Some(1) => if (value < 0) math.ceil(value).toLong else math.floor(value).toLong
-    case Some(2) => math.ceil(value).toLong
-    case Some(3) => math.floor(value).toLong
-    case _       => value.toLong
+  private def roundedIntegral(value: Double, mode: Option[Int]): Double = mode match {
+    case Some(0) => math.rint(value)
+    case Some(2) => math.ceil(value)
+    case Some(3) => math.floor(value)
+    case _       => if (value < 0.0) math.ceil(value) else math.floor(value)
   }
+
+  private def roundedToLong(value: Double, mode: Option[Int]): Long = roundedIntegral(value, mode).toLong
 
   private def convertFloatToSigned(
       program: Program,
@@ -7641,26 +8073,17 @@ private object VMInterpreter {
           val converted = Array.ofDim[Long](lanes.length)
           var index     = 0
           while (index < lanes.length) {
-            if (saturate) {
-              val floating  = floatingToDouble(sourceWidth, lanes(index))
-              val saturated =
-                if (floating.isNaN || floating <= 0.0) 0L
-                else if (resultWidth.raw >= 64) roundedToLong(floating, mode)
-                else {
-                  val maximum = (1L << resultWidth.raw) - 1L
-                  if (floating >= maximum.toDouble) maximum else roundedToLong(floating, mode)
-                }
-              converted(index) = saturated & mask(resultWidth)
-            } else
-              floatingToUnsigned(lanes(index), sourceWidth, resultWidth) match {
-                case Left(detail) =>
-                  return Left(
-                    Fault.InvalidTask(
-                      s"OpConvertFToU source lane $index cannot be represented as an unsigned $resultWidth-bit integer: $detail"
-                    )
-                  )
-                case Right(value) => converted(index) = value
-              }
+            val floating = roundedIntegral(floatingToDouble(sourceWidth, lanes(index)), mode)
+            val result   = if (saturate && (floating.isNaN || floating <= 0.0)) Right(0L)
+            else if (saturate && floating >= Math.scalb(1.0, resultWidth.raw)) Right(mask(resultWidth))
+            else floatingToUnsigned(IEEE754.doubleToBinary64(floating), 64, resultWidth)
+            result match {
+              case Left(detail) =>
+                return Left(Fault.InvalidTask(
+                  s"OpConvertFToU source lane $index cannot be represented as an unsigned $resultWidth-bit integer: $detail"
+                ))
+              case Right(value) => converted(index) = value
+            }
             index += 1
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), converted))
@@ -8095,8 +8518,9 @@ private object VMInterpreter {
     case Remainder extends UnsignedIntegerOperation("OpUMod")
   }
 
-  // Vector arithmetic uses indexed lanes and exits before division by zero.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
+  // OpenCL integer division by zero yields an unspecified value without trapping.
+  // Choose zero for that lane and continue computing the remaining lanes.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def unsignedIntegerArithmetic(
       program: Program,
       values: InvocationValues,
@@ -8127,15 +8551,13 @@ private object VMInterpreter {
             while (index < count) {
               val dividend = leftLanes(index) & mask(width)
               val divisor  = rightLanes(index) & mask(width)
-              if (divisor == 0L)
-                return Left(Fault.InvalidTask(
-                  s"${operation.opcode} divisor lane $index is zero"
-                ))
               result(index) =
-                (operation match {
-                  case UnsignedIntegerOperation.Divide    => java.lang.Long.divideUnsigned(dividend, divisor)
-                  case UnsignedIntegerOperation.Remainder => java.lang.Long.remainderUnsigned(dividend, divisor)
-                }) & mask(width)
+                if (divisor == 0L) 0L
+                else
+                  (operation match {
+                    case UnsignedIntegerOperation.Divide    => java.lang.Long.divideUnsigned(dividend, divisor)
+                    case UnsignedIntegerOperation.Remainder => java.lang.Long.remainderUnsigned(dividend, divisor)
+                  }) & mask(width)
               index += 1
             }
             values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
@@ -8662,8 +9084,8 @@ private object VMInterpreter {
     }
   }
 
-  // Vector arithmetic uses indexed lanes and exits before division overflow or zero.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
+  // Exceptional integer results do not abort other lanes; scalar and vector paths agree.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def signedIntegerArithmetic(
       program: Program,
       values: InvocationValues,
@@ -8685,27 +9107,15 @@ private object VMInterpreter {
       ) match {
         case (Some((width, 1)), Some((leftWidth, 1)), Some((rightWidth, 1)))
             if width == leftWidth && width == rightWidth =>
-          val divisor = signExtend(values.scalarBits(rightId), width)
-          if (divisor == 0L)
-            Left(Fault.InvalidTask(s"${operation.opcode} divisor lane 0 is zero"))
-          else {
-            val dividend = signExtend(values.scalarBits(leftId), width)
-            val minimum  = if (width.raw == 64) Long.MinValue else -(1L << (width.raw - 1))
-            if (dividend == minimum && divisor == -1L)
-              Left(
-                Fault.InvalidTask(
-                  s"${operation.opcode} lane 0 has the undefined minimum-signed-value divided by -1 case"
-                )
-              )
-            else {
-              val result = operation match {
-                case SignedIntegerOperation.Divide    => dividend / divisor
-                case SignedIntegerOperation.Remainder => dividend % divisor
-              }
-              values.updateScalar(id(destination), id(resultType), result & mask(width))
-              Right(())
-            }
+          val divisor  = signExtend(values.scalarBits(rightId), width)
+          val dividend = signExtend(values.scalarBits(leftId), width)
+          val result   = if (divisor == 0L) 0L
+          else operation match {
+            case SignedIntegerOperation.Divide    => dividend / divisor
+            case SignedIntegerOperation.Remainder => dividend % divisor
           }
+          values.updateScalar(id(destination), id(resultType), result & mask(width))
+          Right(())
         case (None, _, _) =>
           Left(
             Fault.InvalidTask(
@@ -8744,29 +9154,15 @@ private object VMInterpreter {
           ) match {
             case (Some((width, 1)), Some((leftWidth, 1)), Some((rightWidth, 1)))
                 if width == leftWidth && width == rightWidth =>
-              val divisor = signExtend(rightValue, width)
-              if (divisor == 0L)
-                Left(
-                  Fault.InvalidTask(s"${operation.opcode} divisor lane 0 is zero")
-                )
-              else {
-                val dividend = signExtend(leftValue, width)
-                val minimum  = if (width.raw == 64) Long.MinValue else -(1L << (width.raw - 1))
-                if (dividend == minimum && divisor == -1L)
-                  Left(
-                    Fault.InvalidTask(
-                      s"${operation.opcode} lane 0 has the undefined minimum-signed-value divided by -1 case"
-                    )
-                  )
-                else {
-                  val result = operation match {
-                    case SignedIntegerOperation.Divide    => dividend / divisor
-                    case SignedIntegerOperation.Remainder => dividend % divisor
-                  }
-                  values.update(id(destination), RuntimeValue.Bits(id(resultType), Array(result & mask(width))))
-                  Right(())
-                }
+              val divisor  = signExtend(rightValue, width)
+              val dividend = signExtend(leftValue, width)
+              val result   = if (divisor == 0L) 0L
+              else operation match {
+                case SignedIntegerOperation.Divide    => dividend / divisor
+                case SignedIntegerOperation.Remainder => dividend % divisor
               }
+              values.update(id(destination), RuntimeValue.Bits(id(resultType), Array(result & mask(width))))
+              Right(())
             case (None, _, _) =>
               Left(
                 Fault.InvalidTask(
@@ -8804,24 +9200,14 @@ private object VMInterpreter {
               val result         = Array.ofDim[Long](count)
               var index          = 0
               while (index < count) {
-                val divisor = signExtend(rightLanes(index), width)
-                if (divisor == 0L)
-                  return Left(Fault.InvalidTask(
-                    s"${operation.opcode} divisor lane $index is zero"
-                  ))
+                val divisor  = signExtend(rightLanes(index), width)
                 val dividend = signExtend(leftLanes(index), width)
-                val minimum  = if (width.raw == 64) Long.MinValue else -(1L << (width.raw - 1))
-                if (dividend == minimum && divisor == -1L)
-                  return Left(
-                    Fault.InvalidTask(
-                      s"${operation.opcode} lane $index has the undefined minimum-signed-value divided by -1 case"
-                    )
-                  )
                 result(index) =
-                  (operation match {
-                    case SignedIntegerOperation.Divide    => dividend / divisor
-                    case SignedIntegerOperation.Remainder => dividend % divisor
-                  }) & mask(width)
+                  (if (divisor == 0L) 0L
+                   else operation match {
+                     case SignedIntegerOperation.Divide    => dividend / divisor
+                     case SignedIntegerOperation.Remainder => dividend % divisor
+                   }) & mask(width)
                 index += 1
               }
               values.update(id(destination), RuntimeValue.Bits(id(resultType), result))

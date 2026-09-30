@@ -62,21 +62,23 @@ class AtomicOperationSuite extends munit.FunSuite {
       "flatand",
       "flator",
       "flatxor",
+      "flatinc",
       "inc"
     )
-    width     <- if (op.startsWith("flat") && op != "flatcas" && op != "flatswap") Seq(32) else Seq(32, 64)
+    width <-
+      if (op.startsWith("flat") && op != "flatcas" && op != "flatswap" && op != "flatinc") Seq(32) else Seq(32, 64)
     returning <- Seq(false, true)
     groups    <- Seq(1, 5)
-    scenario  <- if (op == "inc") Seq("below", "equal", "above", "high")
+    scenario  <- if (op.endsWith("inc")) Seq("below", "equal", "above", "high")
     else if (op.endsWith("cas")) Seq("equal", "different", "same-operands") else Seq("add")
   } test(s"$op width=$width return=$returning groups=$groups scenario=$scenario") {
     val mask = if (width == 64) -1L else 0xffffffffL
     val old  =
       (scenario match {
-        case "below" => 9L; case "equal" if op == "inc"               => 10L; case "above" => 11L;
+        case "below" => 9L; case "equal" if op.endsWith("inc")        => 10L; case "above" => 11L;
         case "high"  => Long.MinValue | 0x80000000L; case "different" => 9L; case _        => 7L
       }) & mask
-    val operand = if (op == "inc") 10L else if (scenario == "same-operands") 7L else 9L
+    val operand = if (op.endsWith("inc")) 10L else if (scenario == "same-operands") 7L else 9L
     val code    = atomic.bytes(op, width, returning)
     val kernel  = CodeObjectKernel(
       name = "atomic",
@@ -101,7 +103,7 @@ class AtomicOperationSuite extends munit.FunSuite {
     val memory   = Memory(groups, old)
     val expected = (0 until groups).scanLeft(old) { (previous, _) =>
       if (op == "add" || op == "flatadd") (previous + operand) & mask
-      else if (op == "inc") { if (java.lang.Long.compareUnsigned(previous, operand) >= 0) 0L else previous + 1 }
+      else if (op.endsWith("inc")) { if (java.lang.Long.compareUnsigned(previous, operand) >= 0) 0L else previous + 1 }
       else if (op == "flatswap") operand & mask
       else if (op == "flatsub") (previous - operand) & mask
       else if (op == "flatmin") Math.min(previous, operand)

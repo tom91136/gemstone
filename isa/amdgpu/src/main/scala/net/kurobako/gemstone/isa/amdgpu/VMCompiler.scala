@@ -2309,6 +2309,16 @@ private object VMCompiler {
             Right(vmemStore(false, vectorAddress, None, dataRegister, 12: Int where Between[1, 16], memoryOffset))
           case FlatStoreDwordx4 =>
             Right(vmemStore(false, vectorAddress, None, dataRegister, 16: Int where Between[1, 16], memoryOffset))
+          case opcode @ (FlatAtomicInc | FlatAtomicIncX2) =>
+            Right(Instruction.GlobalAtomicInc(
+              dest = destination,
+              address = vectorAddress,
+              scalarAddress = None,
+              src = dataRegister,
+              bytes = (if (opcode == FlatAtomicIncX2) 8 else 4): Int where Between[4, 8],
+              offset = memoryOffset,
+              returnValue = returnValue
+            ))
           case FlatAtomicCmpswap | FlatAtomicCmpswapB32 =>
             Right(vmemCompareSwap(
               false,
