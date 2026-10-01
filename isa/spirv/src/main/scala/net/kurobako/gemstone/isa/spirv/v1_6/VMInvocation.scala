@@ -4,9 +4,11 @@ import VMCollectives.Request as CollectiveRequest
 import VMIR.*
 import VMMemory.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 
 private object VMInvocation {
   enum RuntimeValue {
@@ -331,6 +333,22 @@ private object VMInvocation {
     }
 
   }
+  // One request per dynamic derivative site. Lanes are ordered (0,0), (1,0), (0,1), (1,1).
+  case class QuadRequest(
+      function: Int,
+      pc: Int,
+      resultType: Int,
+      destination: Int,
+      operand: Array[Long],
+      operation: Int
+  )
+
+  case class FragmentRegion(function: Int, header: Int, merge: Int, loop: Boolean)
+  enum FragmentJoin {
+    case Merge(label: Int)
+    case FunctionReturn(function: Int)
+  }
+
   // PC, call stack and collective suspension are the mutable state of one invocation machine.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   class InvocationState(
@@ -356,11 +374,23 @@ private object VMInvocation {
       case Status.WaitingCollective(request) => Some(request)
       case _                                 => None
     }
-    def complete(): Unit                                                    = status = Status.Completed
-    def awaitMemory(): Unit                                                 = status = Status.WaitingMemory
-    def memoryReady(): Unit                                                 = if (memoryPending) status = Status.Running
-    def suspend(request: CollectiveRequest): Unit                           = status = Status.WaitingCollective(request)
-    def resume(): Unit                                                      = status = Status.Running
+    def complete(): Unit                                  = status = Status.Completed
+    def awaitMemory(): Unit                               = status = Status.WaitingMemory
+    def memoryReady(): Unit                               = if (memoryPending) status = Status.Running
+    def suspend(request: CollectiveRequest): Unit         = status = Status.WaitingCollective(request)
+    def resume(): Unit                                    = status = Status.Running
+    lazy val fragmentRegions: ArrayBuffer[FragmentRegion] = mutable.ArrayBuffer.empty[FragmentRegion]
+    var fragmentJoin: Option[FragmentJoin]                = None
+    var fragmentReturnReady                               = false
+    var quadRequest: Option[QuadRequest]                  = None
+    var gradients: Option[(Array[Double], Array[Double])] = None
+    var fragmentQuad                                      = false
+    var subgroupReconvergence                             = false
+    var helperInvocation                                  = false
+    var fragmentInvocation                                = false
+    var fragmentKilled                                    = false
+    var sampleMask: Option[Pointer]                       = None
+
     def reset(nextInvocation: InvocationBuiltins, function: Function): Unit = {
       invocation = nextInvocation
       currentFunction = function
@@ -370,6 +400,17 @@ private object VMInvocation {
       instructionCount = 0L
       calls.clear()
       status = Status.Running
+      quadRequest = None
+      if (fragmentQuad || subgroupReconvergence) fragmentRegions.clear()
+      fragmentJoin = None
+      fragmentReturnReady = false
+      gradients = None
+      fragmentQuad = false
+      subgroupReconvergence = false
+      helperInvocation = false
+      fragmentInvocation = false
+      fragmentKilled = false
+      sampleMask = None
     }
   }
 }

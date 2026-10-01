@@ -1,0 +1,4 @@
+# Complete official mustpass inventory from the pinned CTS artifact.
+# Run with the vulkan10.linux machine profile. This includes failing required
+# functionality; unsupported optional functionality is reported separately.
+vulkan_mustpass = "mustpass/vk-default.txt"

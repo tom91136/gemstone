@@ -10,6 +10,62 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 class ExecutionControlFlowSuite extends munit.FunSuite {
+  for {
+    width  <- Seq(8, 16, 32, 64)
+    signed <- Seq(false, true)
+  }
+    test(s"OpSwitch compares $width-bit literals at selector width, signed=$signed") {
+      def ref(n: Int): Operand    = operand("IdRef", n)
+      def result(n: Int): Operand = operand("IdResult", n)
+      val literal                 = if (width == 64) operand("PairLiteralIntegerIdRef", -7, -1, 22)
+      else operand("PairLiteralIntegerIdRef", -7, 22)
+      val module = Module(
+        Header(ISA.version, Word(0), Word(32), Word(0)),
+        Vec(
+          Instruction.TypeVoid(result(1)),
+          Instruction.TypeInt(
+            result(2),
+            operand("LiteralInteger", width),
+            operand("LiteralInteger", if (signed) 1 else 0)
+          ),
+          Instruction.TypeInt(result(3), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+          Instruction.TypePointer(result(4), operand("StorageClass", 5), ref(3)),
+          Instruction.TypeFunction(result(5), ref(1), Vec(ref(4), ref(2))),
+          Instruction.Constant(ref(3), result(6), operand("LiteralContextDependentNumber", 99)),
+          Instruction.Constant(ref(3), result(7), operand("LiteralContextDependentNumber", 0)),
+          Instruction.EntryPoint(operand("ExecutionModel", 6), ref(10), stringOperand("switch"), Vec.empty),
+          Instruction.Function(ref(1), result(10), operand("FunctionControl", 0), ref(5)),
+          Instruction.FunctionParameter(ref(4), result(11)),
+          Instruction.FunctionParameter(ref(2), result(12)),
+          Instruction.Label(result(20)),
+          Instruction.Switch(ref(12), ref(21), Vec(literal)),
+          Instruction.Label(result(21)),
+          Instruction.Store(ref(11), ref(7), None),
+          Instruction.Return(),
+          Instruction.Label(result(22)),
+          Instruction.Store(ref(11), ref(6), None),
+          Instruction.Return(),
+          Instruction.FunctionEnd()
+        ),
+        Endianness.Little
+      )
+      for ((selector, expected) <- Seq(-7L -> 99L, 7L -> 0L)) {
+        val region = AllocationId(30L)
+        val memory = ArrayMemory(region, 4)
+        val task   = KernelTask.validated(
+          "switch",
+          Dimensions.One,
+          Dimensions.One,
+          Vec(
+            KernelTask.Argument.Memory(region, 0L),
+            KernelTask.Argument.Scalar(LittleEndian.toVec(selector, (width / 8).unsafe[Int where Between[0, 8]]))
+          )
+        ).fold(fail(_), identity)
+        assertEquals(executeUnchecked(module, task, memory), Right(()))
+        assertEquals(LittleEndian.decode(memory.bytes, 0, 4), expected)
+      }
+    }
+
   test("indirect function call rejects a pointer from another program") {
     val voidType       = operand("IdResult", 1)
     val u32            = operand("IdResult", 2)

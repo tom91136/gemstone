@@ -1,6 +1,7 @@
 #include "completion.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include "rpc_fixture.hpp"
 #include <environment_keys.hpp>
@@ -8,10 +9,10 @@
 using namespace gemstone::execution;
 
 TEST_CASE("Completion collection retrieves every bounded metadata page", "[rpc]") {
+  enum class Statistics { Omit, Read, Fail };
+  const auto statisticsMode = GENERATE(Statistics::Omit, Statistics::Read, Statistics::Fail);
   gemstone_test::RpcFixture fixture;
-  const auto endpoint = fixture.endpoint();
-  REQUIRE(setenv(gemstone::environment::RpcEndpoint, endpoint.c_str(), 1) == 0);
-  REQUIRE(setenv(gemstone::environment::RpcClient, "42", 1) == 0);
+  const gemstone_test::RpcEnvironment environment(fixture);
   auto client = Client::fromEnvironment();
   REQUIRE(client);
   for (const uint32_t count : {1U, MaximumElements, MaximumElements + 1}) {
@@ -35,7 +36,22 @@ TEST_CASE("Completion collection retrieves every bounded metadata page", "[rpc]"
     REQUIRE(completion);
     CompletionResult result;
     std::string error;
-    REQUIRE(collect_completion(*client, completion.value(), result, error));
+    GraphicsStatistics statistics{99}; // Collection must replace, or clear, a previous result.
+    if (statisticsMode == Statistics::Fail) fixture.failNextGraphicsStatistics();
+    const bool success =
+        collect_completion(*client, completion.value(), result, error, false, statisticsMode == Statistics::Omit ? nullptr : &statistics);
+    if (statisticsMode == Statistics::Fail) {
+      REQUIRE_FALSE(success);
+      REQUIRE_FALSE(error.empty());
+      REQUIRE(statistics.occlusionSamples.value == 0);
+      REQUIRE(client->call(ReleaseAllocation{allocation.value()}));
+      REQUIRE(client->call(UnloadProgram{program.value()}));
+      fixture.check(); // Releasing the failed completion allows the next launch to proceed.
+      continue;
+    }
+    REQUIRE(success);
+    if (statisticsMode == Statistics::Read) REQUIRE(statistics.occlusionSamples.value == 17);
+
     REQUIRE(result.dirty_ranges.size() == count);
     for (uint32_t index = 0; index < count; ++index) {
       const auto &range = result.dirty_ranges[index];
@@ -48,6 +64,4 @@ TEST_CASE("Completion collection retrieves every bounded metadata page", "[rpc]"
     REQUIRE(client->call(UnloadProgram{program.value()}));
     fixture.check();
   }
-  unsetenv(gemstone::environment::RpcEndpoint);
-  unsetenv(gemstone::environment::RpcClient);
 }

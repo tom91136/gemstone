@@ -63,9 +63,7 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
 
 TEST_CASE("HIP primary context can be pushed", "[hip]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   REQUIRE((hipInit(0) == hipSuccess));
   hipCtx_t context = nullptr;
   REQUIRE((hipDevicePrimaryCtxRetain(&context, 0) == hipSuccess));
@@ -92,9 +90,7 @@ TEST_CASE("HIP stream callback reports completed work", "[hip]") {
 
 TEST_CASE("HIP driver-style asynchronous copies use the stream", "[hip]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   void *first = nullptr;
   void *second = nullptr;
   REQUIRE((hipMalloc(&first, sizeof(uint32_t)) == hipSuccess));
@@ -268,9 +264,7 @@ void crossWorkgroupLaunchAndCopyback() {
                           {2, 36, 1, 1},
                           {2, 38, 1, 1},
                           {2, 80, 1, 1}});
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   void *managed = nullptr;
   REQUIRE((hipMallocManaged(&managed, 256) == hipSuccess));
   hipPointerAttribute_t attributes{};
@@ -366,9 +360,7 @@ void crossWorkgroupLaunchAndCopyback() {
 
 void registeredHostCopy() {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1);
-  setenv(gemstone::environment::RpcClient, "42", 1);
+  const gemstone_test::RpcEnvironment environment(fixture);
   for (bool pinned : {false, true}) {
     std::array<uint32_t, 4> ordinary{};
     uint32_t *host = ordinary.data();
@@ -399,9 +391,7 @@ void registeredHostCopy() {
 
 void pointerAttributes() {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1);
-  setenv(gemstone::environment::RpcClient, "42", 1);
+  const gemstone_test::RpcEnvironment environment(fixture);
   uint8_t ordinary[32]{};
   hipPointerAttribute_t info{};
   REQUIRE((hipPointerGetAttributes(&info, ordinary) == hipErrorInvalidValue));
@@ -430,9 +420,7 @@ void pointerAttributes() {
 
 void deviceResetLifetime() {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   void *memory = nullptr;
   hipStream_t stream = nullptr;
   hipEvent_t event = nullptr;
@@ -535,8 +523,6 @@ TEST_CASE("HIP launch-buffer and runtime behavior", "[hip]") {
   REQUIRE((properties.maxThreadsPerMultiProcessor == 1024));
   REQUIRE((properties.maxSharedMemoryPerMultiProcessor == 64U * 1024U));
 
-  unsetenv(gemstone::environment::RpcEndpoint);
-  unsetenv(gemstone::environment::RpcClient);
   int count = -1;
   REQUIRE((hipGetDeviceCount(&count) == hipErrorNoDevice));
   REQUIRE((count == 0));
@@ -555,9 +541,7 @@ TEST_CASE("HIP device-reset lifetime", "[hip]") { deviceResetLifetime(); }
 
 TEST_CASE("HIP registered host memory exposes its device pointer", "[hip][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   REQUIRE((unsetenv(gemstone::environment::SystemPaging) == 0));
   std::array<uint32_t, 8> host{11, 22, 33, 44, 55, 66, 77, 88};
   REQUIRE((hipHostRegister(host.data(), sizeof(host), hipHostRegisterMapped) == hipSuccess));
@@ -574,9 +558,7 @@ TEST_CASE("HIP registered host memory exposes its device pointer", "[hip][unifie
 
 TEST_CASE("HIP allocated mapped host memory exposes its device pointer", "[hip][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   void *host = nullptr;
   REQUIRE((hipHostMalloc(&host, 64, hipHostMallocMapped) == hipSuccess));
   void *device = nullptr;
@@ -587,9 +569,7 @@ TEST_CASE("HIP allocated mapped host memory exposes its device pointer", "[hip][
 
 TEST_CASE("HIP registered host flags round trip", "[hip][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   std::array<uint32_t, 8> host{};
   const unsigned requested = hipHostRegisterMapped | hipHostRegisterPortable;
   REQUIRE((hipHostRegister(host.data(), sizeof(host), requested) == hipSuccess));
@@ -601,9 +581,7 @@ TEST_CASE("HIP registered host flags round trip", "[hip][unified-memory]") {
 
 TEST_CASE("HIP registered subranges retain ownership and permit address reuse", "[hip][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   REQUIRE((unsetenv(gemstone::environment::SystemPaging) == 0));
   std::array<uint32_t, 16> host{};
   for (unsigned iteration = 0; iteration < 3; ++iteration) {
@@ -623,9 +601,7 @@ namespace {
 void unifiedMemoryRoundTrip(unsigned kind) {
   gemstone_test::RpcFixture fixture;
   fixture.kernelMetadata(12, 2, {{8, 0, 2, 0}, {4, 8, 1, 0}});
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   REQUIRE((unsetenv(gemstone::environment::SystemPaging) == 0));
   std::array<uint32_t, 16> storage{};
   void *memory = storage.data();
@@ -669,9 +645,7 @@ TEST_CASE("HIP registered interior kernel writes and host edits round trip", "[h
 
 TEST_CASE("HIP free waits for queued memory uses", "[hip]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE(setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0);
-  REQUIRE(setenv(gemstone::environment::RpcClient, "42", 1) == 0);
+  const gemstone_test::RpcEnvironment environment(fixture);
   gemstone_test::queuedLifetime(
       [](size_t size) {
         void *p{};

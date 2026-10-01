@@ -4,6 +4,7 @@ import cats.syntax.all.*
 import com.monovore.decline.Opts
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
@@ -18,9 +19,9 @@ object HSAVectorCopyBenchmark {
   private val name    = BenchmarkName("hsa-vector-copy")
   private val options = (
     Opts.option[Int]("groups", help = "64-item workgroups per dispatch").withDefault(1)
-      .validate("groups must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("groups must be positive"),
     Opts.option[Int]("iterations", help = "Dispatches per sample").withDefault(5)
-      .validate("iterations must be positive")(_ > 0).map(_.unsafe[Int > 0])
+      .refined[Int > 0]("iterations must be positive")
   ).mapN(Options(_, _))
 
   private class CopyMemory(elements: Int) extends Memory with BenchmarkAddressSpace {

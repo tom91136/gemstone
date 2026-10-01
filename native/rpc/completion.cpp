@@ -126,12 +126,20 @@ bool completion_dirty_ranges(Client &client, CompletionId completion, std::vecto
   return collectPages<CompletionDirtyRanges>(client, completion, ranges, error);
 }
 
-bool collect_completion(Client &client, CompletionId completion, CompletionResult &result, std::string &error, bool hostMemory) {
+bool collect_completion(Client &client, CompletionId completion, CompletionResult &result, std::string &error, bool hostMemory,
+                        GraphicsStatistics *graphics) {
+  if (graphics) *graphics = {};
   result.dirty_ranges.clear();
   result.pointer_relocations.clear();
   error.clear();
 
   bool succeeded = await_completion(client, completion, error, hostMemory);
+  if (succeeded && graphics) {
+    const auto statistics = client.call(ReadGraphicsStatistics{completion});
+    succeeded = bool(statistics);
+    if (succeeded) *graphics = statistics.value();
+    else error = statistics.error().detail;
+  }
   if (succeeded) succeeded = completion_dirty_ranges(client, completion, result.dirty_ranges, error);
   if (succeeded) succeeded = collectPages<CompletionPointerRelocations>(client, completion, result.pointer_relocations, error);
   if (succeeded) {

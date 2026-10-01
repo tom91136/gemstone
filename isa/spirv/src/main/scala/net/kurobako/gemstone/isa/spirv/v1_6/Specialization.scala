@@ -14,7 +14,7 @@ object Specialization {
   case class Constant(specId: Binary32, byteSize: Int > 0)
 
   private val DecorateOpcode           = Instruction.Definition.Decorate.opcodeNumber.raw
-  private val SpecIdDecoration         = 1
+  private val SpecIdDecoration         = Decoration.SpecId
   private val TypeBoolOpcode           = Instruction.Definition.TypeBool.opcodeNumber.raw
   private val TypeIntOpcode            = Instruction.Definition.TypeInt.opcodeNumber.raw
   private val TypeFloatOpcode          = Instruction.Definition.TypeFloat.opcodeNumber.raw
@@ -55,14 +55,15 @@ object Specialization {
               previous.flatMap { _ =>
                 locate(module, id) match {
                   case None => Left(s"specialization constant $specId is not a scalar constant")
-                  case Some(constant) if value.size != constant.byteSize.raw =>
+                  case Some(constant)
+                      if value.size != constant.byteSize.raw && !(constant.boolean && value.size == 4) =>
                     Left(s"specialization constant $specId expects ${constant.byteSize} bytes")
                   case Some(constant) =>
                     val header = LittleEndian.decodeInt32(bytes, constant.offset)
                     if (constant.boolean)
                       LittleEndian.write(
                         ((header & 0xffff0000) |
-                          (if (value(0) == 0) SpecConstantFalseOpcode else SpecConstantTrueOpcode)).toLong,
+                          (if (value.forall(_ == 0)) SpecConstantFalseOpcode else SpecConstantTrueOpcode)).toLong,
                         bytes,
                         constant.offset,
                         4

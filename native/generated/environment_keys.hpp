@@ -35,5 +35,7 @@ inline constexpr char SystemPaging[] = "GEMSTONE_SYSTEM_PAGING";
 inline constexpr char TargetArch[] = "GEMSTONE_TARGET_ARCH";
 inline constexpr char TestLibrary[] = "GEMSTONE_TEST_LIBRARY";
 inline constexpr char Trace[] = "GEMSTONE_TRACE";
+inline constexpr char VulkanApiVersion[] = "GEMSTONE_VULKAN_API_VERSION";
 inline constexpr char VulkanDump[] = "GEMSTONE_VULKAN_DUMP";
+inline constexpr char VulkanValidateAllocators[] = "GEMSTONE_VULKAN_VALIDATE_ALLOCATORS";
 } // namespace gemstone::environment

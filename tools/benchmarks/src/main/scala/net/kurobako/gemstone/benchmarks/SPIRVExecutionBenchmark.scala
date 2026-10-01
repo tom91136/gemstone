@@ -5,6 +5,7 @@ import com.monovore.decline.Opts
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import net.kurobako.gemstone.*
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -42,14 +43,14 @@ object SPIRVExecutionBenchmark {
   private val name    = BenchmarkName("spirv-execution")
   private val options = (
     Opts.option[Int]("iterations", help = "Measured dispatches").withDefault(20)
-      .validate("iterations must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("iterations must be positive"),
     Opts.option[Int]("groups", help = "Workgroups per dispatch").withDefault(256)
-      .validate("groups must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("groups must be positive"),
     Opts.option[Int]("instructions", help = "Integer additions per invocation").withDefault(64)
-      .validate("instructions must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("instructions must be positive"),
     Opts.option[Int]("parallelism", help = "VMInterpreter worker count")
       .withDefault(sys.runtime.availableProcessors())
-      .validate("parallelism must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("parallelism must be positive"),
     Opts.option[String]("recording", help = "JFR output path").map(Path.of(_)).orNone
   ).mapN(Options(_, _, _, _, _))
 

@@ -263,7 +263,13 @@ foreach(target IN LISTS sycl_cts_targets)
       "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-sycl-strict>"
       "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-user-defined-warnings>"
       "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-return-type>"
-      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-cpp>")
+      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-cpp>"
+      # The pinned CTS uses deprecated syntax and intentional edge/negative cases.
+      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-constant-logical-operand>"
+      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-deprecated-literal-operator>"
+      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-c++23-lambda-attributes>"
+      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM>:-Wno-sycl-aspect-mismatch>"
+      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-implicit-const-int-float-conversion>")
   endif()
   set(timeout ${CONFORMANCE_TIMEOUT_CTS})
   if(SYCL_CTS_ENABLE_FULL_CONFORMANCE)

@@ -22,6 +22,14 @@ class BenchmarkRunnerSuite extends munit.FunSuite {
       }
   }
 
+  test("runner reports all invalid options together before measurement") {
+    val error = intercept[IllegalArgumentException] {
+      BenchmarkRunner.parse(BenchmarkName("ptx-execution"), Vector("--warmup", "-1", "--samples", "0"))
+    }
+    assert(error.getMessage.contains("warmups must be non-negative"))
+    assert(error.getMessage.contains("samples must be positive"))
+  }
+
   test("runner options are typed and leave case arguments intact") {
     val options = BenchmarkRunner.parse(
       BenchmarkName("ptx-execution"),

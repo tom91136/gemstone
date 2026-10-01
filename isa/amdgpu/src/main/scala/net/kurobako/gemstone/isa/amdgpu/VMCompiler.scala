@@ -791,11 +791,11 @@ private object VMCompiler {
       _      <- requireBytes(bytes, offset, 8)
       opcode <- opcodeDefinition("SMEM", Bits.unsignedIntField(word, 18, 8), target)
       count  <- opcode match {
-        case SLoadDword    => Right(1)
-        case SLoadDwordx2  => Right(2)
-        case SLoadDwordx4  => Right(4)
-        case SLoadDwordx8  => Right(8)
-        case SLoadDwordx16 => Right(16)
+        case SLoadDword    => Right(1: Int in (1, 2, 4, 8, 16))
+        case SLoadDwordx2  => Right(2: Int in (1, 2, 4, 8, 16))
+        case SLoadDwordx4  => Right(4: Int in (1, 2, 4, 8, 16))
+        case SLoadDwordx8  => Right(8: Int in (1, 2, 4, 8, 16))
+        case SLoadDwordx16 => Right(16: Int in (1, 2, 4, 8, 16))
         case other         => Left[NonEmpty[String], Nothing](s"$other SMEM execution is not implemented")
       }
       // GFX10+ moved the immediate/SGPR offset selector out of the first

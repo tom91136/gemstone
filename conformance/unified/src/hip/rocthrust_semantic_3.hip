@@ -106,7 +106,7 @@ template <class Value> inline void check_dereference() {
       INFO(where + ": kernel launch failed");
       REQUIRE((launch == hipSuccess));
     }
-    hipGetLastError();
+    (void)hipGetLastError(); // Clear the previous error before exercising the iterator kernel.
   };
   {
     unified_dereference_copy<<<1, 1>>>(source.begin(), source.end(), output.begin());
@@ -185,7 +185,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/device-delete/i32/n11", "[unified][roc
 template <class Value> inline void check_universal_vector() {
 #if defined(__HIPCC__)
   void *probe = nullptr;
-  if (hipMallocManaged(&probe, sizeof(Value)) == hipSuccess) hipFree(probe);
+  if (hipMallocManaged(&probe, sizeof(Value)) == hipSuccess) REQUIRE(hipFree(probe) == hipSuccess);
   else
     SKIP("universal-memory-vector: hipMallocManaged is unavailable on this "
          "device");

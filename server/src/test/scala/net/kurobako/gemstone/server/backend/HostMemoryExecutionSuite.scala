@@ -3,9 +3,11 @@ package net.kurobako.gemstone.server.backend
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.isa.spirv.v1_6.{ISA as SPIRVISA, *}
+import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.isa.spirv.v1_6.{ISA as SPIRVISA, SPIRV as _, *}
 import net.kurobako.gemstone.isa.spirv.v1_6 as spv
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
@@ -15,10 +17,11 @@ import scala.collection.mutable
 import scala.util.Using
 
 class HostMemoryExecutionSuite extends munit.FunSuite {
-  private def encoded(value: Long, size: Int): Vec[Byte] =
-    LittleEndian.toVec(value, size.unsafe[Int where Between[0, 8]])
-  private def scalar(value: Long, size: Int = 8): KernelTask.Argument = KernelTask.Argument.Scalar(encoded(value, size))
-  private def bytes(address: Long, value: Long, size: Int): Map[Long, Byte] =
+  private def encoded(value: Long, size: Int where Between[0, 8]): Vec[Byte] =
+    LittleEndian.toVec(value, size)
+  private def scalar(value: Long, size: Int where Between[0, 8] = 8): KernelTask.Argument =
+    KernelTask.Argument.Scalar(encoded(value, size))
+  private def bytes(address: Long, value: Long, size: Int where Between[0, 8]): Map[Long, Byte] =
     encoded(value, size).zipWithIndex.map((byte, index) => (address + index.toLong) -> byte).toMap
 
   private object Async extends scala.concurrent.ExecutionContext {
@@ -82,11 +85,12 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         batch.sync.foreach { sync =>
           native ++= beforeSync(sync, native.toMap)
           val observed = sync.atomic.fold(0L) { request =>
-            val observed = (0 until request.size).foldLeft(0L)((value, index) =>
+            val size     = request.size.unsafe[Int where Between[1, 8]]
+            val observed = (0 until size.raw).foldLeft(0L)((value, index) =>
               value | ((native(request.address.raw + index).toLong & 255L) << (index * 8))
             )
             if (observed == request.expected) {
-              val updated = bytes(request.address.raw, request.desired, request.size)
+              val updated = bytes(request.address.raw, request.desired, size)
               native ++= updated
               writes ++= updated
             }
@@ -210,12 +214,12 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
   }
 
   for {
-    width   <- List(32, 64)
+    width   <- List[Int in (16, 32, 64)](32, 64)
     changed <- List(false, true)
   } test(s"host atomic $width-bit hints avoid redundant RPCs and retry native changes, changed=$changed") {
-    val initial     = if (width == 32) 0xfffffffeL else Long.MinValue + 7L
-    val replacement = if (width == 32) 20L else 0x678900000014L
-    val size        = width / 8
+    val initial     = if (width.raw == 32) 0xfffffffeL else Long.MinValue + 7L
+    val replacement = if (width.raw == 32) 20L else 0x678900000014L
+    val size        = width.scalarByteWidth
     val source      = header + s"""
       .visible .entry probe(.param .u64 counter, .param .u64 output) {
         .reg .u64 %p, %q; .reg .u$width %first, %second;
@@ -247,12 +251,12 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     val second = if (changed) replacement else initial + 1
     assertEquals(
       writes,
-      bytes(0x1000, second + 1, size) ++ bytes(0x8000, initial, size) ++ bytes(0x8000 + size, second, size)
+      bytes(0x1000, second + 1, size) ++ bytes(0x8000, initial, size) ++ bytes(0x8000 + size.raw, second, size)
     )
     assert(requests.size <= (if (changed) 4 else 3), s"redundant native atomic RPCs: $requests")
   }
 
-  for (width <- List(32, 64))
+  for (width <- List[Int in (16, 32, 64)](32, 64))
     test(s"PTX scoped $width-bit atomics publish writes and invalidate earlier cached reads") {
       val source = header + s"""
       .visible .entry probe(.param .u64 input, .param .u64 output) {
@@ -268,15 +272,15 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         Vec.from(source.getBytes(StandardCharsets.UTF_8)),
         1,
         Vec(scalar(0x1000), scalar(0x8000)),
-        bytes(0x1000, 41, width / 8),
+        bytes(0x1000, 41, width.scalarByteWidth),
         List(0x1000L -> encoded(0, 8), 0x8000L -> encoded(0, 8)),
         hostBacked = true
       )
-      assertEquals(writes, bytes(0x1000, 42, width / 8) ++ bytes(0x8000, 42, width / 8))
+      assertEquals(writes, bytes(0x1000, 42, width.scalarByteWidth) ++ bytes(0x8000, 42, width.scalarByteWidth))
     }
 
   for {
-    width   <- List(32, 64)
+    width   <- List[Int in (16, 32, 64)](32, 64)
     release <- List(false, true)
     rmw     <- List(false, true)
   } test(s"PTX device-backed flag orders host payload, width=$width release=$release rmw=$rmw") {
@@ -303,17 +307,20 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec.empty,
-      bytes(0x1000, 7, width / 8) ++ bytes(0x3000, 0, 4),
-      List(0x2000L -> encoded(1, width / 8)),
+      bytes(0x1000, 7, width.scalarByteWidth) ++ bytes(0x3000, 0, 4),
+      List(0x2000L -> encoded(1, width.scalarByteWidth)),
       beforeRead = (range, native) =>
         if (range.address.raw == 0x3000) {
           if (release) {
-            assertEquals((0 until width / 8).map(i => native(0x1000L + i)), encoded(73, width / 8))
+            assertEquals(
+              (0 until width.scalarByteWidth.raw).map(i => native(0x1000L + i)),
+              encoded(73, width.scalarByteWidth)
+            )
             Map.empty
-          } else bytes(0x1000, 73, width / 8)
+          } else bytes(0x1000, 73, width.scalarByteWidth)
         } else Map.empty
     )
-    assertEquals(writes.filter((address, _) => address >= 0x8000), bytes(0x8000, 73, width / 8))
+    assertEquals(writes.filter((address, _) => address >= 0x8000), bytes(0x8000, 73, width.scalarByteWidth))
   }
 
   test("registered host memory fetches exact bytes, without reading poisoned allocation holes") {

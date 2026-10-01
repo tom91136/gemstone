@@ -1,0 +1,3 @@
+# Official pinned CTS mustpass manifest. This is separate from bounded iteration suites.
+include_programs = ['vulkan_cts']
+vulkan_mustpass = "mustpass/vk-default.txt"

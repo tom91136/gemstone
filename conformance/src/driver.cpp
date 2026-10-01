@@ -7,7 +7,9 @@
 #include <limits>
 #include <memory>
 #include <ranges>
+#include <regex>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 #include <tuple>
@@ -44,6 +46,7 @@ struct TestProgram {
   std::string name;
   fs::path path;
   uint32_t timeout_seconds;
+  std::string format;
 };
 struct CatchCase {
   std::string name;
@@ -57,17 +60,27 @@ struct CatchReport {
 };
 
 namespace {
+struct WorkloadFields {
+  std::string extends;
+  std::optional<std::vector<std::string>> specs, include_programs, levelzero_cases, vulkan_cases, exclude_programs;
+  std::optional<std::string> vulkan_mustpass;
+};
 bool valid_identifier(std::string_view value) {
   return !value.empty() && std::ranges::all_of(value, [](char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
   });
 }
 void validate_run_options(RunOptions &c) {
-  if (c.profiles.empty() || c.artifacts.empty() || c.output.empty())
-    throw std::invalid_argument("run requires --profiles, --artifacts and --output");
+  if (c.artifacts.empty() || c.output.empty()) throw std::invalid_argument("run requires --artifacts and --output");
+  if (c.direct) {
+    if (!c.profiles.empty() || c.machine) throw std::invalid_argument("--direct cannot use --profiles or --machine");
+    if (c.workloads.empty()) throw std::invalid_argument("--direct requires --workloads");
+  } else if (c.profiles.empty()) throw std::invalid_argument("profile runs require --profiles");
   if (!valid_identifier(c.workload) || c.workload == "." || c.workload == "..") throw std::invalid_argument("invalid workload name");
   if (c.isolated_launcher && c.launcher.empty()) throw std::invalid_argument("--isolated-launcher requires --launcher -- command ...");
-  c.profiles = fs::absolute(c.profiles).lexically_normal();
+  if (!c.profiles.empty()) c.profiles = fs::absolute(c.profiles).lexically_normal();
+  if (c.workloads.empty()) c.workloads = c.profiles.parent_path() / "workloads";
+  c.workloads = fs::absolute(c.workloads).lexically_normal();
   c.artifacts = fs::absolute(c.artifacts).lexically_normal();
   c.output = fs::absolute(c.output).lexically_normal();
 }
@@ -98,6 +111,53 @@ std::vector<std::string> catch_case_names(std::string_view json, std::string_vie
     result.push_back(std::move(test.name));
   }
   return result;
+}
+std::vector<std::string> deqp_case_names(std::string_view listing) {
+  std::istringstream input{std::string(listing)};
+  return deqp_case_names(input);
+}
+std::vector<std::string> deqp_case_names(std::istream &input) {
+  std::set<std::string> names;
+  std::string line;
+  while (std::getline(input, line)) {
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    if (!line.starts_with("TEST: ")) continue;
+    auto name = line.substr(6);
+    if (!name.starts_with("dEQP-VK.") || !valid_identifier(name) || !names.insert(name).second)
+      throw std::runtime_error("invalid or duplicate dEQP case: " + name);
+  }
+  if (!input.eof()) throw std::runtime_error("cannot read dEQP inventory");
+  if (names.empty()) throw std::runtime_error("empty dEQP inventory");
+  return {names.begin(), names.end()};
+}
+int32_t deqp_result(std::string_view qpa, std::string_view identity) {
+  // QPA is a framed stream of XML documents. A successful process exit also
+  // covers zero tests and NotSupported, so require one complete matching case.
+  const std::string begin = "#beginTestCaseResult " + std::string(identity) + "\n";
+  const auto first = qpa.find("#beginTestCaseResult ");
+  const auto end = qpa.find("#endTestCaseResult", first);
+  if (first == std::string_view::npos || !qpa.substr(first).starts_with(begin) || end == std::string_view::npos
+      || qpa.find("#beginTestCaseResult ", first + 1) != std::string_view::npos
+      || qpa.find("#endTestCaseResult", end + 1) != std::string_view::npos)
+    throw std::runtime_error("missing, incomplete, or mismatched dEQP result");
+  const std::string document(qpa.substr(first + begin.size(), end - first - begin.size()));
+  const auto header = document.find("<TestCaseResult ");
+  const auto headerEnd = document.find('>', header);
+  if (header == std::string::npos || headerEnd == std::string::npos
+      || document.substr(header, headerEnd - header).find("CasePath=\"" + std::string(identity) + "\"") == std::string::npos)
+    throw std::runtime_error("mismatched dEQP XML case");
+  static const std::regex result(R"re(<Result StatusCode="([A-Za-z]+)">[^<]*</Result>\s*</TestCaseResult>\s*$)re");
+  std::smatch match;
+  if (!std::regex_search(document, match, result) || document.find("<Result ") != static_cast<size_t>(match.position()))
+    throw std::runtime_error("invalid dEQP terminal result");
+  const auto status = match[1].str();
+  std::cout << "dEQP " << identity << ": " << status << '\n';
+  // Vulkan CTS explicitly permits quality and compatibility warnings. The
+  // original status stays in the QPA and console output for separate reporting.
+  if (status == "Pass" || status == "QualityWarning" || status == "CompatibilityWarning") return 0;
+  if (status == "NotSupported") return 4;
+  // Do not apply waivers implicitly.
+  return 1;
 }
 std::vector<std::string> gtest_case_names(std::string_view listing, std::string_view program) {
   std::vector<std::string> result;
@@ -186,12 +246,30 @@ std::vector<std::string> launched(const std::vector<std::string> &launcher, std:
   return result;
 }
 Workload load_workload(const RunOptions &configuration) {
-  const auto file = configuration.profiles.parent_path() / "workloads" / (configuration.workload + ".toml");
-  if (!fs::is_regular_file(file)) throw std::invalid_argument("conformance workload does not exist: " + file.string());
-  Workload workload;
-  std::string buffer;
-  if (const auto error = glz::read_file_toml(workload, file.string(), buffer); error)
-    throw std::invalid_argument("cannot load conformance workload " + file.string() + ":\n" + glz::format_error(error, buffer));
+  std::set<std::string> active;
+  const auto read = [&](auto &&self, const std::string &name) -> Workload {
+    if (!valid_identifier(name) || name == "." || name == "..") throw std::invalid_argument("invalid workload name: " + name);
+    if (!active.insert(name).second) throw std::invalid_argument("cyclic workload inheritance: " + name);
+    const auto file = configuration.workloads / (name + ".toml");
+    if (!fs::is_regular_file(file)) throw std::invalid_argument("conformance workload does not exist: " + file.string());
+    std::string buffer;
+    WorkloadFields fields;
+    if (const auto error = glz::read_file_toml(fields, file.string(), buffer); error)
+      throw std::invalid_argument("cannot load conformance workload " + file.string() + ":\n" + glz::format_error(error, buffer));
+    auto workload = fields.extends.empty() ? Workload{} : self(self, fields.extends);
+    const auto replace = [](auto &destination, auto &source) {
+      if (source) destination = std::move(*source);
+    };
+    replace(workload.specs, fields.specs);
+    replace(workload.include_programs, fields.include_programs);
+    replace(workload.levelzero_cases, fields.levelzero_cases);
+    replace(workload.vulkan_cases, fields.vulkan_cases);
+    replace(workload.vulkan_mustpass, fields.vulkan_mustpass);
+    replace(workload.exclude_programs, fields.exclude_programs);
+    active.erase(name);
+    return workload;
+  };
+  auto workload = read(read, configuration.workload);
   if (workload.specs.empty()) throw std::invalid_argument("conformance workload needs at least one Catch test spec");
   return workload;
 }
@@ -222,7 +300,12 @@ std::vector<TestProgram> test_programs(const fs::path &artifact, const Workload 
     auto path = artifact / name;
 #endif
     if (!fs::is_regular_file(path)) throw std::runtime_error("missing conformance test program: " + path.string());
-    result.push_back({std::move(name), std::move(path), parse_timeout(std::string_view(line).substr(separator + 1), manifest)});
+    const auto formatAt = line.find('\t', separator + 1);
+    if (formatAt == std::string::npos) throw std::runtime_error("missing test program format: " + manifest.string());
+    const auto format = line.substr(formatAt + 1);
+    if (format != "catch2" && format != "gtest" && format != "deqp") throw std::runtime_error("invalid test program format");
+    result.push_back({std::move(name), std::move(path),
+                      parse_timeout(std::string_view(line).substr(separator + 1, formatAt - separator - 1), manifest), format});
   }
   if (result.empty()) throw std::runtime_error("artifact contains no test programs: " + artifact.string());
   std::erase_if(result, [&](const TestProgram &program) {
@@ -289,18 +372,169 @@ DeviceProbeResult probe_device(const RunOptions &configuration, const fs::path &
     throw std::runtime_error("invalid device probe JSON for " + id + ": " + glz::format_error(error, result.output));
   return parsed;
 }
+std::vector<std::string> deqp_case_selections(const std::vector<std::string> &patterns) {
+  constexpr size_t limit = 16 * 1024;
+  if (patterns.empty()) throw std::runtime_error("Vulkan CTS requires an explicit vulkan_cases selection");
+  std::vector<std::string> batches;
+  std::string batch;
+  for (const auto &pattern : patterns) {
+    if (pattern.empty() || pattern.size() > limit) throw std::runtime_error("invalid Vulkan CTS selector length");
+    if (!batch.empty() && batch.size() + 1 + pattern.size() > limit) {
+      batches.push_back(std::move(batch));
+      batch.clear();
+    }
+    if (!batch.empty()) batch += ',';
+    batch += pattern;
+  }
+  if (!batch.empty()) batches.push_back(std::move(batch));
+  return batches;
+}
+std::optional<std::string> deqp_exact_case_list(const std::vector<std::string> &patterns) {
+  if (patterns.empty()) throw std::runtime_error("Vulkan CTS requires an explicit vulkan_cases selection");
+  for (const auto &pattern : patterns)
+    if (pattern.empty() || pattern.size() > 16 * 1024) throw std::runtime_error("invalid Vulkan CTS selector length");
+  // The CTS file parser accepts literal paths, not wildcard expressions. Restrict
+  // file contents to path characters so a selector cannot introduce another line.
+  if (!std::ranges::all_of(patterns, valid_identifier)) return std::nullopt;
+  const std::set<std::string> names(patterns.begin(), patterns.end());
+  std::string result;
+  for (const auto &name : names)
+    result += name + '\n';
+  return result;
+}
+std::vector<std::string> deqp_mustpass_cases(const fs::path &root, const fs::path &manifest, const std::vector<std::string> &patterns) {
+  const auto base = fs::canonical(root);
+  std::set<fs::path> active;
+  std::set<std::string> selected, literals, matched;
+  std::vector<std::string> globs;
+  for (const auto &pattern : patterns) {
+    if (pattern.empty()) throw std::runtime_error("empty Vulkan CTS selector");
+    if (valid_identifier(pattern)) literals.insert(pattern);
+    else globs.push_back(pattern);
+  }
+  const auto read = [&](auto &self, const fs::path &relative) -> void {
+    if (relative.is_absolute()) throw std::runtime_error("Vulkan mustpass paths must be artifact-relative");
+    const auto path = fs::canonical(base / relative);
+    const auto within = path.lexically_relative(base);
+    if (within.empty() || *within.begin() == "..") throw std::runtime_error("Vulkan mustpass path escapes artifact data");
+    if (!active.insert(path).second) throw std::runtime_error("cyclic Vulkan mustpass manifest: " + path.string());
+    std::ifstream file(path);
+    if (!file) throw std::runtime_error("cannot read Vulkan mustpass manifest: " + path.string());
+    std::string line;
+    while (std::getline(file, line)) {
+      const auto begin = line.find_first_not_of(" \t\r");
+      if (begin == std::string::npos || line[begin] == '#') continue;
+      line = line.substr(begin, line.find_last_not_of(" \t\r") - begin + 1);
+      if (!line.starts_with("dEQP-VK.")) {
+        self(self, within.parent_path() / line);
+        continue;
+      }
+      if (!valid_identifier(line)) throw std::runtime_error("invalid Vulkan mustpass case: " + line);
+      bool keep = patterns.empty();
+      if (literals.contains(line)) {
+        matched.insert(line);
+        keep = true;
+      }
+      for (const auto &pattern : globs)
+        if (glob_matches(pattern.c_str(), line.c_str())) {
+          matched.insert(pattern);
+          keep = true;
+        }
+      if (keep && !selected.insert(line).second) throw std::runtime_error("duplicate Vulkan mustpass case: " + line);
+    }
+    if (!file.eof()) throw std::runtime_error("cannot read Vulkan mustpass manifest: " + path.string());
+    active.erase(path);
+  };
+  read(read, manifest);
+  for (const auto &pattern : patterns)
+    if (!matched.contains(pattern)) throw std::runtime_error("Vulkan CTS selector matches no mustpass cases: " + pattern);
+  if (selected.empty()) throw std::runtime_error("empty Vulkan mustpass selection");
+  return {selected.begin(), selected.end()};
+}
 std::vector<ScheduledCase> discover_cases(const RunOptions &configuration, const Workload &workload, const fs::path &artifact,
-                                          const std::map<std::string, std::string> &environment, const std::string &id) {
+                                          const std::map<std::string, std::string> &environment, const std::string &id,
+                                          const fs::path &reports) {
   std::vector<ScheduledCase> tests;
   for (const auto &program : test_programs(artifact, workload)) {
-    const bool gtest = suite_uses_gtest(program.name);
+    const bool gtest = program.format == "gtest";
+    const bool deqp = program.format == "deqp";
     auto command = gtest ? std::vector<std::string>{program.path.string(), "--gtest_list_tests"}
                          : std::vector<std::string>{program.path.string(), "--list-tests", "--reporter", "json", "--order", "lex"};
-    if (!gtest) command.insert(command.end(), workload.specs.begin(), workload.specs.end());
-    const auto listing = run_process(launched(configuration.launcher, std::move(command)), artifact, environment, 10min,
-                                     fmt::format("[{}/{} discovery] ", id, program.name), true);
-    if (listing.status != 0) throw std::runtime_error(fmt::format("test discovery failed for {}/{}: {}", id, program.name, listing.error));
-    auto names = gtest ? gtest_case_names(listing.output, program.name) : catch_case_names(listing.output, program.name);
+    std::vector<std::vector<std::string>> discoveryCommands;
+    bool exactDeqpSelection = false;
+    auto vulkanCases = workload.vulkan_cases;
+    if (deqp && !workload.vulkan_mustpass.empty())
+      vulkanCases =
+          deqp_mustpass_cases(fs::path(environment.at("CONFORMANCE_SUPPORT_ROOT")) / "data/vulkan", workload.vulkan_mustpass, vulkanCases);
+    if (deqp) {
+      if (vulkanCases.empty()) throw std::runtime_error("Vulkan CTS requires an explicit vulkan_cases selection");
+      std::vector<std::string> selections;
+      std::vector<std::string> literals, patterns;
+      for (const auto &selection : vulkanCases)
+        (valid_identifier(selection) ? literals : patterns).push_back(selection);
+      exactDeqpSelection = patterns.empty();
+      if (!literals.empty()) {
+        const auto path = reports / (program.name + "-discovery-cases.txt");
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file << *deqp_exact_case_list(literals);
+        file.close();
+        if (!file) throw std::runtime_error("cannot write Vulkan CTS selection: " + path.string());
+        selections.push_back("--deqp-caselist-file=" + path.string());
+      }
+      if (!patterns.empty())
+        for (const auto &selection : deqp_case_selections(patterns))
+          selections.push_back("--deqp-case=" + selection);
+      for (const auto &selection : selections)
+        discoveryCommands.push_back(
+            {program.path.string(), "--deqp-runmode=stdout-caselist", "--deqp-shadercache=disable", selection,
+             "--deqp-archive-dir=" + (fs::path(environment.at("CONFORMANCE_SUPPORT_ROOT")) / "data/vulkan").string()});
+    } else {
+      if (!gtest) command.insert(command.end(), workload.specs.begin(), workload.specs.end());
+      discoveryCommands.push_back(std::move(command));
+    }
+    std::vector<std::string> names;
+    std::set<std::string> discovered;
+    for (auto &discovery : discoveryCommands) {
+      // dEQP inventories can exceed hundreds of megabytes. Spool them to disk
+      // and parse line by line instead of keeping a capped process capture.
+      const auto listingPath = reports / (program.name + "-discovery.log");
+      std::ofstream log;
+      if (deqp) {
+        log.open(listingPath, std::ios::binary | std::ios::trunc);
+        if (!log) throw std::runtime_error("cannot write discovery log: " + listingPath.string());
+      }
+      const auto listing = run_process(launched(configuration.launcher, std::move(discovery)), artifact, environment, 10min,
+                                       fmt::format("[{}/{} discovery] ", id, program.name), !deqp, deqp ? &log : nullptr);
+      if (deqp) {
+        log.close();
+        if (!log) throw std::runtime_error("cannot write discovery log: " + listingPath.string());
+      }
+      if (listing.status != 0)
+        throw std::runtime_error(fmt::format("test discovery failed for {}/{} (exit {}): {}", id, program.name, listing.status,
+                                             deqp ? listingPath.string() : listing.error));
+      std::ifstream input;
+      if (deqp) input.open(listingPath);
+      const auto batch = deqp    ? deqp_case_names(input)
+                         : gtest ? gtest_case_names(listing.output, program.name)
+                                 : catch_case_names(listing.output, program.name);
+      for (const auto &name : batch)
+        if (discovered.insert(name).second) names.push_back(name);
+    }
+    if (deqp) {
+      if (exactDeqpSelection) {
+        const std::set<std::string> selected(vulkanCases.begin(), vulkanCases.end());
+        for (const auto &name : selected)
+          if (!discovered.contains(name)) throw std::runtime_error("Vulkan CTS selector matches no cases: " + name);
+        std::erase_if(names, [&](const auto &name) { return !selected.contains(name); });
+      } else {
+        for (const auto &pattern : vulkanCases)
+          if (std::ranges::none_of(names, [&](const auto &name) { return glob_matches(pattern.c_str(), name.c_str()); }))
+            throw std::runtime_error("Vulkan CTS selector matches no cases: " + pattern);
+        std::erase_if(names, [&](const auto &name) {
+          return std::ranges::none_of(vulkanCases, [&](const auto &pattern) { return glob_matches(pattern.c_str(), name.c_str()); });
+        });
+      }
+    }
     if (gtest && !workload.levelzero_cases.empty())
       std::erase_if(names, [&](const std::string &name) {
         return std::ranges::none_of(workload.levelzero_cases,
@@ -347,7 +581,7 @@ std::optional<TargetExecution> prepare_target(const RunOptions &configuration, c
   // Re-probe with the exact child environment: selection must survive visibility remapping.
   const auto verified = probe_device(configuration, artifact, exec.environment, target.id);
   if (verified.device != exec.device) throw std::runtime_error("device selection changed after propagation for " + target.id);
-  auto tests = discover_cases(configuration, workload, artifact, exec.environment, target.id);
+  auto tests = discover_cases(configuration, workload, artifact, exec.environment, target.id, reports);
   if (tests.empty()) return std::nullopt;
   const auto path = run_directory / "ctest/targets" / (target.id + ".json");
   write_execution_config(path, exec);
@@ -393,18 +627,34 @@ int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
     std::cout << "SKIP " << test.identity << ": machine profile\n";
     return SkipReturnCode;
   }
-  const bool gtest = suite_uses_gtest(test.program);
-  const bool sharded = suite_uses_catch_sharding(test.program);
-  auto arguments = gtest ? std::vector<std::string>{"--gtest_filter=" + test.identity}
-                         : catch_shard_arguments(config.specs, sharded ? test.index : 0, sharded ? test.count : 1);
-  auto program = fs::path(config.directory) / test.program;
-#ifdef _WIN32
-  program += ".exe";
-#endif
-  arguments.insert(arguments.begin(), program.string());
+  const auto programs = test_programs(config.directory, Workload{});
+  const auto selected = std::ranges::find(programs, test.program, &TestProgram::name);
+  if (selected == programs.end()) throw std::runtime_error("test program absent from manifest");
+  const bool gtest = selected->format == "gtest";
+  const bool deqp = selected->format == "deqp";
+  const auto &program = selected->path;
+  std::vector<std::string> arguments;
   const auto report = fs::path(config.report_directory) / test.program / fmt::to_string(test.index);
   fs::create_directories(report);
   auto environment = config.environment;
+  if (deqp) {
+    arguments = {program.string(),
+                 "--deqp-case=" + test.identity,
+                 "--deqp-log-filename=" + (report / "result.qpa").string(),
+                 "--deqp-archive-dir=" + (fs::path(environment.at("CONFORMANCE_SUPPORT_ROOT")) / "data/vulkan").string(),
+                 "--deqp-log-images=disable",
+                 "--deqp-log-shader-sources=disable",
+                 "--deqp-shadercache=disable",
+                 "--deqp-vk-device-id=" + environment.at("CONFORMANCE_VULKAN_DEVICE_ID")};
+    fs::remove(report / "result.qpa");
+  } else {
+    if (gtest) arguments = {"--gtest_filter=" + test.identity};
+    else {
+      const bool sharded = suite_uses_catch_sharding(test.program);
+      arguments = catch_shard_arguments(config.specs, sharded ? test.index : 0, sharded ? test.count : 1);
+    }
+    arguments.insert(arguments.begin(), program.string());
+  }
   environment["CONFORMANCE_TEST_IDENTITY"] = test.identity;
   environment["CONFORMANCE_REPORT_DIRECTORY"] = report.string();
   std::unique_ptr<DeviceLock> lock;
@@ -432,13 +682,25 @@ int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
               << std::string_view(excerpt).substr(ExcerptBytes);
   }
   if (result.status != 0 || size > ExcerptBytes * 2) std::cout << "\nconformance: exit status " << result.status << '\n';
-  return result.status;
+  if (result.status != 0 || !deqp) return result.status;
+  std::ifstream qpa(report / "result.qpa", std::ios::binary);
+  return deqp_result(std::string(std::istreambuf_iterator<char>(qpa), {}), test.identity);
 }
 int32_t run(RunOptions configuration, const fs::path &driver) {
   validate_run_options(configuration);
-  const auto resolved_profile = profile::resolve_profile(configuration.profiles, configuration.machine);
+  std::vector<profile::ResolvedTarget> targets;
+  std::string name = "direct";
+  if (configuration.direct) targets = profile::direct_targets(configuration.selectors);
+  else {
+    const auto resolved = profile::resolve_profile(configuration.profiles, configuration.machine);
+    name = resolved.name;
+    targets = unique_routes(profile::resolve_targets(resolved, configuration.selectors), configuration.isolated_launcher);
+  }
+  // Validate the complete requested inventory before probing or scheduling any target.
+  for (const auto &target : targets)
+    (void)validate_artifact(artifact_directory(configuration, target), target);
   const auto workload = load_workload(configuration);
-  const auto root = configuration.output / resolved_profile.name;
+  const auto root = configuration.output / name;
   fs::create_directories(root);
   fs::path reports;
   for (uint64_t attempt = 0;; ++attempt) {
@@ -448,8 +710,12 @@ int32_t run(RunOptions configuration, const fs::path &driver) {
   const auto ctest_directory = reports / "ctest";
   fs::create_directories(ctest_directory / "targets");
   std::vector<TargetExecution> prepared;
-  for (const auto &target :
-       unique_routes(profile::resolve_targets(resolved_profile, configuration.selectors), configuration.isolated_launcher)) {
+  std::cout << "conformance execution: "
+            << (configuration.isolated_launcher  ? "isolated launcher"
+                : configuration.launcher.empty() ? "direct runtime"
+                                                 : "launcher")
+            << "; targets: " << (configuration.direct ? "explicit routes" : name) << '\n';
+  for (const auto &target : targets) {
     auto value = prepare_target(configuration, workload, target, reports);
     if (!value) {
       std::cout << "conformance target " << target.id << " omitted: no tests match workload " << configuration.workload << '\n';

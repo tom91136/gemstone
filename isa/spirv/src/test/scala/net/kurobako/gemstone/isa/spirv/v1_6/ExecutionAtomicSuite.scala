@@ -63,6 +63,87 @@ class ExecutionAtomicSuite extends munit.FunSuite {
     assertEquals(memory.readScalar(pointer.copy(offset = 8L), width), Right(7L))
   }
 
+  for {
+    storageClass <- Vec(2, 12)
+    width        <- Vec(32, 64)
+  }
+    test(s"$width-bit descriptor atomics preserve prior values in storage class $storageClass") {
+      def ref(value: Int): Operand             = operand("IdRef", value)
+      val scalarWidth: Int where Between[0, 8] = if (width == 32) 4 else 8
+      val module                               = Module(
+        Header(ISA.version, Word(0), Word(64), Word(0)),
+        Vec(
+          Instruction.TypeVoid(ref(1)),
+          Instruction.TypeInt(ref(2), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+          Instruction.TypeInt(ref(3), operand("LiteralInteger", width), operand("LiteralInteger", 0)),
+          Instruction.TypeRuntimeArray(ref(4), ref(3)),
+          Instruction.TypeStruct(ref(5), Vec(ref(4))),
+          Instruction.TypePointer(ref(6), operand("StorageClass", storageClass), ref(5)),
+          Instruction.TypePointer(ref(7), operand("StorageClass", storageClass), ref(3)),
+          Instruction.TypeFunction(ref(8), ref(1), Vec.empty),
+          Instruction.Constant(ref(2), ref(9), operand("LiteralContextDependentNumber", 0)),
+          Instruction.Constant(ref(2), ref(10), operand("LiteralContextDependentNumber", 1)),
+          Instruction.Constant(ref(2), ref(11), operand("LiteralContextDependentNumber", 2)),
+          Instruction.Constant(ref(2), ref(12), operand("LiteralContextDependentNumber", 3)),
+          Instruction.Constant(ref(2), ref(13), operand("LiteralContextDependentNumber", 4)),
+          Instruction.Constant(
+            ref(3),
+            ref(14),
+            if (width == 32) operand("LiteralContextDependentNumber", 5)
+            else operand("LiteralContextDependentNumber", 5, 0)
+          ),
+          Instruction.Constant(
+            ref(3),
+            ref(15),
+            if (width == 32) operand("LiteralContextDependentNumber", 7)
+            else operand("LiteralContextDependentNumber", 7, 0)
+          ),
+          Instruction.Decorate(ref(4), operand("Decoration", 6, width / 8)),
+          Instruction.Decorate(ref(5), operand("Decoration", if (storageClass == 2) 3 else 2)),
+          Instruction.MemberDecorate(ref(5), operand("LiteralInteger", 0), operand("Decoration", 35, 0)),
+          Instruction.Decorate(ref(16), operand("Decoration", 33, 0)),
+          Instruction.Decorate(ref(16), operand("Decoration", 34, 0)),
+          Instruction.Variable(ref(6), ref(16), operand("StorageClass", storageClass), None),
+          Instruction.EntryPoint(
+            operand("ExecutionModel", 5),
+            ref(17),
+            stringOperand("descriptor_atomics"),
+            Vec(ref(16))
+          ),
+          Instruction.ExecutionMode(ref(17), operand("ExecutionMode", 17, 1, 1, 1)),
+          Instruction.Function(ref(1), ref(17), operand("FunctionControl", 0), ref(8)),
+          Instruction.Label(ref(18)),
+          Instruction.AccessChain(ref(7), ref(19), ref(16), Vec(ref(9), ref(9))),
+          Instruction.AccessChain(ref(7), ref(20), ref(16), Vec(ref(9), ref(10))),
+          Instruction.AccessChain(ref(7), ref(21), ref(16), Vec(ref(9), ref(11))),
+          Instruction.AccessChain(ref(7), ref(22), ref(16), Vec(ref(9), ref(12))),
+          Instruction.AccessChain(ref(7), ref(23), ref(16), Vec(ref(9), ref(13))),
+          Instruction.AtomicStore(ref(19), ref(10), ref(9), ref(15)),
+          Instruction.AtomicLoad(ref(3), ref(24), ref(19), ref(10), ref(9)),
+          Instruction.AtomicExchange(ref(3), ref(25), ref(19), ref(10), ref(9), ref(14)),
+          Instruction.AtomicCompareExchange(ref(3), ref(26), ref(19), ref(10), ref(9), ref(9), ref(15), ref(14)),
+          Instruction.AtomicCompareExchange(ref(3), ref(27), ref(19), ref(10), ref(9), ref(9), ref(14), ref(14)),
+          Instruction.Store(ref(20), ref(24), None),
+          Instruction.Store(ref(21), ref(25), None),
+          Instruction.Store(ref(22), ref(26), None),
+          Instruction.Store(ref(23), ref(27), None),
+          Instruction.Return(),
+          Instruction.FunctionEnd()
+        ),
+        Endianness.Little
+      )
+      val allocation = AllocationId(121L)
+      val memory     = ArrayMemory(allocation, 5 * width / 8)
+      val task       = KernelTask.validated(
+        "descriptor_atomics",
+        Dimensions.One,
+        Dimensions.One,
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
+      ).toOption.get
+      assertEquals(executeUnchecked(module, task, memory), Right(()))
+      assertEquals(memory.bytes, Vec(7L, 7L, 7L, 5L, 7L).flatMap(LittleEndian.toVec(_, scalarWidth)))
+    }
+
   test("atomic flag test-and-set returns the prior state and clear resets the flag") {
     val voidType     = operand("IdResult", 1)
     val u32          = operand("IdResult", 2)

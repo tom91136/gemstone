@@ -1,0 +1,3 @@
+# The bounded selection is shared with full. Explicit fields replace inherited values.
+extends = "cts-bounded"
+include_programs = ['vulkan_cts']

@@ -19,9 +19,12 @@
 #include <stdint.h>
 #include <unistd.h>
 
+#include <gemstone/test_support.hpp>
+
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "wire.hpp"
 #include <arpa/inet.h>
+#include <environment_keys.hpp>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -83,6 +86,7 @@ public:
   struct ExpectedAllocationArgument {
     size_t alias;
     uint64_t offset;
+    std::optional<uint64_t> range = std::nullopt;
   };
   explicit RpcFixture(bool unixSocket = false) {
     if (unixSocket) {
@@ -202,6 +206,10 @@ public:
     std::lock_guard lock(stateMutex_);
     bindingIndices_ = std::move(bindings);
   }
+  void shaderDescriptors(std::vector<ShaderDescriptor> descriptors) {
+    std::lock_guard lock(stateMutex_);
+    shaderDescriptors_ = std::move(descriptors);
+  }
   void specializationTable(std::map<uint32_t, uint32_t> sizes) {
     std::lock_guard lock(stateMutex_);
     specializationSizes_ = std::move(sizes);
@@ -280,6 +288,7 @@ public:
     std::lock_guard lock(stateMutex_);
     GEMSTONE_RPC_REQUIRE(!active_ && launches_ > 0 && awaited_ == launches_);
   }
+  void failNextGraphicsStatistics() { failGraphicsStatistics_ = true; }
   void failNextCompletion() { failCompletion_ = true; }
   void pauseNextCompletion() {
     completionEntered_ = false;
@@ -500,6 +509,23 @@ private:
           constants.emplace_back(static_cast<uint32_t>(constant.specId.value), constant.value);
         lastSpecialization_ = std::move(constants);
         encodePayload(result, request.image);
+      } else if (operationTag == operation::PrepareShader) {
+        const auto request = decodePayload<PrepareShader>(payload);
+        GEMSTONE_RPC_REQUIRE(shaderDescriptors_.has_value());
+        GEMSTONE_RPC_REQUIRE(!request.entry.value.empty());
+        lastSpecialization_.clear();
+        for (const auto &constant : request.constants)
+          lastSpecialization_.emplace_back(static_cast<uint32_t>(constant.specId.value), constant.value);
+        PreparedShader prepared{};
+        prepared.image = request.image;
+        prepared.entry = {request.entry.value};
+        prepared.stage = request.stage;
+        prepared.descriptors = *shaderDescriptors_;
+        if (requiredWorkGroupSize_)
+          prepared.workgroup =
+              ShaderWorkgroup{static_cast<int32_t>((*requiredWorkGroupSize_)[0]), static_cast<int32_t>((*requiredWorkGroupSize_)[1]),
+                              static_cast<int32_t>((*requiredWorkGroupSize_)[2])};
+        encodePayload(result, prepared);
       } else if (operationTag == operation::UnloadProgram) {
         encodePayload(result, Unit{});
       } else if (operationTag == operation::DescribeKernel) {
@@ -612,6 +638,12 @@ private:
         decodePayload<CompletionPointerRelocations>(payload);
         GEMSTONE_RPC_REQUIRE(completed_);
         encodePayload(result, std::vector<PointerRelocation>{});
+      } else if (operationTag == operation::ReadGraphicsStatistics) {
+        const auto request = decodePayload<ReadGraphicsStatistics>(payload);
+        GEMSTONE_RPC_REQUIRE(completed_ && active_ && request.completion.value == static_cast<int64_t>(completion_));
+        failed = failGraphicsStatistics_.exchange(false);
+        // A distinctive fixture result, independent of simulated compute writes.
+        encodePayload(result, GraphicsStatistics{17});
       } else if (operationTag == operation::CompletionPrints) {
         decodePayload<CompletionPrints>(payload);
         GEMSTONE_RPC_REQUIRE(completed_);
@@ -687,6 +719,7 @@ private:
         const auto expected = allocationArguments_->at(index);
         const auto id = static_cast<uint64_t>(memory->region.value);
         const auto offset = static_cast<uint64_t>(memory->offset.value);
+        GEMSTONE_RPC_REQUIRE((memory->range ? std::optional<uint64_t>(memory->range->value) : std::nullopt) == expected.range);
         const auto [alias, inserted] = aliases.emplace(expected.alias, id);
         GEMSTONE_RPC_REQUIRE((inserted || alias->second == id) && offset == expected.offset);
         actual.emplace_back(id, offset);
@@ -717,6 +750,7 @@ private:
     if (const auto *memory = std::get_if<ArgumentMemory>(&arguments[0])) {
       outputId_ = static_cast<uint64_t>(memory->region.value);
       base = static_cast<uint64_t>(memory->offset.value);
+      GEMSTONE_RPC_REQUIRE(!memory->range);
     } else {
       const auto *scalar = std::get_if<ArgumentScalar>(&arguments[0]);
       GEMSTONE_RPC_REQUIRE(scalar != nullptr && hostMemoryEnabled_ && scalar->bytes.size() == 8);
@@ -797,6 +831,7 @@ private:
   uint32_t kernelExplicitParameterCount_ = 2;
   std::vector<KernelParameter> kernelParameters_{{8, 0, 2, 0}, {4, 8, 1, 0}};
   std::optional<std::array<uint32_t, 3>> requiredWorkGroupSize_;
+  std::optional<std::vector<ShaderDescriptor>> shaderDescriptors_;
   std::vector<uint32_t> bindingIndices_;
   std::vector<ProgramKernel> programKernels_{{"add", "add.kd"}};
   std::vector<ProgramGlobal> programGlobals_;
@@ -816,6 +851,7 @@ private:
   std::map<uint64_t, bool> hostBacked_;
   std::map<std::string, std::pair<uint64_t, std::vector<uint8_t>>> expectedGlobals_;
   std::vector<std::pair<uint64_t, uint32_t>> ranges_;
+  std::atomic_bool failGraphicsStatistics_{false};
   std::atomic_bool failCompletion_{false};
   std::atomic_bool pauseCompletion_{false}, completionEntered_{false};
   std::atomic_uint64_t pauseReleaseAddress_{0};
@@ -827,6 +863,16 @@ private:
   uint32_t polls_ = 0;
   std::atomic<unsigned> launches_{0}, pending_{0}, awaited_{0}, programLoads_{0};
   bool active_ = false, completed_ = false;
+};
+class RpcEnvironment {
+  Environment endpoint;
+  Environment client;
+
+public:
+  explicit RpcEnvironment(const std::string &endpoint)
+      : endpoint(gemstone::environment::RpcEndpoint, endpoint.c_str()),
+        client(gemstone::environment::RpcClient, std::to_string(RpcFixture::clientId).c_str()) {}
+  explicit RpcEnvironment(const RpcFixture &fixture) : RpcEnvironment(fixture.endpoint()) {}
 };
 } // namespace gemstone_test
 #undef GEMSTONE_RPC_REQUIRE

@@ -138,9 +138,9 @@ private object VMInterpreter {
       arguments.foldLeft[Either[NonEmpty[String], Int]](Right(0)) { (total, argument) =>
         total.flatMap { current =>
           val size: Either[NonEmpty[String], Int] = argument match {
-            case KernelTask.Argument.Scalar(bytes) => Right(bytes.length)
-            case KernelTask.Argument.Memory(_, _)  => Right(8)
-            case KernelTask.Argument.Local(_)      => Left("gfx900 local kernargs are not implemented")
+            case KernelTask.Argument.Scalar(bytes)   => Right(bytes.length)
+            case KernelTask.Argument.Memory(_, _, _) => Right(8)
+            case KernelTask.Argument.Local(_)        => Left("gfx900 local kernargs are not implemented")
           }
           size.flatMap(value =>
             Either.cond[NonEmpty[String], Int](
@@ -178,7 +178,7 @@ private object VMInterpreter {
             val _ = bytes.copyToArray(packed, packedOffset, bytes.length)
             packedOffset += bytes.length
           }
-        case KernelTask.Argument.Memory(region, offset) =>
+        case KernelTask.Argument.Memory(region, offset, _) =>
           if (packedOffset == kernargSize) failure = Some(Fault.InvalidTask(
             s"kernel descriptor requires $kernargSize kernarg bytes, received trailing argument $argumentIndex"
           ))
@@ -589,11 +589,11 @@ private object VMInterpreter {
     // aperture explicitly before falling back to per-lane scratch or the
     // dispatch allocation map.
 
-    def flatLoad(lane: Int, address: Long, size: Int): Either[Fault, Vec[Byte]] =
-      if (address >= 0L && address <= lds.length.toLong - size.toLong)
-        readLDS(lds, address, size).map(Vec.unsafeWrapArray)
-      else if (address >= 0L && address <= scratch(lane).length.toLong - size.toLong)
-        Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(scratch(lane), address.toInt, address.toInt + size)))
+    def flatLoad(lane: Int, address: Long, size: Int >= 0): Either[Fault, Vec[Byte]] =
+      if (address >= 0L && address <= lds.length.toLong - size.raw.toLong)
+        readLDS(lds, address, size.raw).map(Vec.unsafeWrapArray)
+      else if (address >= 0L && address <= scratch(lane).length.toLong - size.raw.toLong)
+        Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(scratch(lane), address.toInt, address.toInt + size.raw)))
       else
         dispatchMemory.readBytes(address, size)
 
@@ -689,10 +689,10 @@ private object VMInterpreter {
         Left(Fault.Backend("unresolved AMDGPU branch reached execution"))
       case Instruction.SLoad(dest, count, base, offset, scalarOffset) =>
         val address = pair(scalar, base) + offset.toLong + scalarOffset.fold(0L)(register => scalar(register))
-        dispatchMemory.readBytes(address, count * 4) match {
+        dispatchMemory.readBytes(address, count.widen[GreaterThan[0]] * 4) match {
           case Left(error)  => Left(error)
           case Right(bytes) =>
-            (0 until count).foreach { register =>
+            (0 until count.raw).foreach { register =>
               scalar(dest + register) = unsignedInt(bytes, register * 4)
             }
             Right(Some(index + 1))
@@ -2444,34 +2444,28 @@ private object VMInterpreter {
           base != 0L && (start >= 0L && start <= Bits.low32(scalar(resource + 2)).toLong - size.toLong)
         )(base + start)
       }
-      def prepare(size: Int, addressOf: Int => Option[Long]): Either[Fault, Unit] = {
+      def prepare(size: Int >= 0, addressOf: Int => Option[Long]): Either[Fault, Unit] = {
         val ranges = Vec.from((0 until lanes.raw).filter(active(_)).flatMap(addressOf).filter { address =>
-          dispatchMemory.isExternal(address, size)
-        }.map(address => (GuestAddress(address), size.unsafe[Int >= 0])))
+          dispatchMemory.isExternal(address, size.raw)
+        }.map(address => (GuestAddress(address), size)))
         if (ranges.isEmpty) Right(()) else dispatchMemory.prepareReads(ranges)
       }
       instruction match {
-        case Instruction.GlobalLoad(_, address, scalarAddress, rawSize, offset, false) =>
-          val size = rawSize.raw
+        case Instruction.GlobalLoad(_, address, scalarAddress, size, offset, false) =>
           prepare(size, global(address, scalarAddress, offset))
-        case Instruction.GlobalLoadSigned(_, address, scalarAddress, rawSize, offset) =>
-          val size = rawSize.raw
+        case Instruction.GlobalLoadSigned(_, address, scalarAddress, size, offset) =>
           prepare(size, global(address, scalarAddress, offset))
         case Instruction.GlobalLoadD16(_, address, scalarAddress, offset, _) =>
           prepare(2, global(address, scalarAddress, offset))
-        case Instruction.FlatLoad(_, address, rawSize, offset, false) =>
-          val size = rawSize.raw
-          prepare(size, flat(address, offset, size))
-        case Instruction.FlatLoadSigned(_, address, rawSize, offset) =>
-          val size = rawSize.raw
-          prepare(size, flat(address, offset, size))
+        case Instruction.FlatLoad(_, address, size, offset, false) =>
+          prepare(size, flat(address, offset, size.raw))
+        case Instruction.FlatLoadSigned(_, address, size, offset) =>
+          prepare(size, flat(address, offset, size.raw))
         case Instruction.VFlatLoadD16(_, address, offset, _) => prepare(2, flat(address, offset, 2))
-        case Instruction.BufferLoad(_, address, resource, scalarOffset, rawSize, offset) =>
-          val size = rawSize.raw
-          prepare(size, buffer(address, resource, scalarOffset, offset, size))
-        case Instruction.BufferLoadD16(_, address, resource, scalarOffset, rawSize, offset, _) =>
-          val size = rawSize.raw
-          prepare(size, buffer(address, resource, scalarOffset, offset, size))
+        case Instruction.BufferLoad(_, address, resource, scalarOffset, size, offset) =>
+          prepare(size, buffer(address, resource, scalarOffset, offset, size.raw))
+        case Instruction.BufferLoadD16(_, address, resource, scalarOffset, size, offset, _) =>
+          prepare(size, buffer(address, resource, scalarOffset, offset, size.raw))
         case _ => Right(())
       }
     }
@@ -2951,7 +2945,7 @@ private object VMInterpreter {
                   case Right(value) => writeVectorValue(vector, dest, lane, value, byteCount)
                 }
               else
-                dispatchMemory.readBytes(address, byteCount) match {
+                dispatchMemory.readBytes(address, rawByteCount) match {
                   case Left(error)  => failure = error
                   case Right(bytes) => writeVectorBytes(vector, dest, lane, bytes)
                 }
@@ -2971,7 +2965,7 @@ private object VMInterpreter {
               val address = scalarAddress
                 .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)).toLong)
                 .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-              dispatchMemory.readBytes(address, byteCount) match {
+              dispatchMemory.readBytes(address, rawByteCount) match {
                 case Left(error)  => Left(error)
                 case Right(bytes) =>
                   val value = Bits.signExtend(LittleEndian.decode(bytes, 0, scalarByteCount), bitWidth)
@@ -3188,7 +3182,7 @@ private object VMInterpreter {
                   val scalarWidth = byteCount.unsafe[Int where Between[1, 8]]
                   dispatchMemory.atomicModifyValue(address, scalarWidth)(identity)
                     .map(value => LittleEndian.toVec(value, scalarWidth))
-                } else flatLoad(lane, address, byteCount)
+                } else flatLoad(lane, address, rawByteCount)
               bytes match {
                 case Left(error)  => Left(error)
                 case Right(bytes) =>
@@ -3207,7 +3201,7 @@ private object VMInterpreter {
             else if (!active(lane)) loadLane(lane + 1)
             else {
               val address = pair(vector, addressRegister, lane) + flatOffset(offset)
-              val bytes   = flatLoad(lane, address, byteCount)
+              val bytes   = flatLoad(lane, address, rawByteCount)
               bytes match {
                 case Left(error)  => Left(error)
                 case Right(bytes) =>
@@ -3283,7 +3277,7 @@ private object VMInterpreter {
                 writeVectorBytes(vector, dest, lane, Array.fill(byteCount)(0.toByte))
                 loadLane(lane + 1)
               } else if (base != 0L)
-                dispatchMemory.readBytes(base + start, byteCount) match {
+                dispatchMemory.readBytes(base + start, rawByteCount) match {
                   case Left(error)  => Left(error)
                   case Right(bytes) =>
                     writeVectorBytes(vector, dest, lane, bytes)
@@ -3315,7 +3309,7 @@ private object VMInterpreter {
                 if (base != 0L && (start < 0L || start > range - byteCount.toLong))
                   Right(Vec.fill(byteCount)(0.toByte))
                 else if (base != 0L)
-                  dispatchMemory.readBytes(base + start, byteCount)
+                  dispatchMemory.readBytes(base + start, rawByteCount)
                 else if (start < 0L || start > scratch(lane).length.toLong - byteCount.toLong)
                   Left(Fault.Backend(
                     s"buffer D16 load ${operations(index)} at instruction $index lane $lane offset $start size $byteCount exceeds private scratch ${scratch(lane).length}"

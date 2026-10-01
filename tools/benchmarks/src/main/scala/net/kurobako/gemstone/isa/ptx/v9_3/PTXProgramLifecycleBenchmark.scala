@@ -7,6 +7,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
@@ -59,17 +60,17 @@ object PTXProgramLifecycleBenchmark {
       .validate("operation must be decode or launch")(value => value == "decode" || value == "launch")
       .map(value => if (value == "launch") Operation.Launch else Operation.Decode),
     Opts.option[Int]("iterations", help = "Measured lifecycle operations").withDefault(20)
-      .validate("iterations must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("iterations must be positive"),
     Opts.option[Int]("images", help = "Distinct images rotated by decode operations").withDefault(8)
-      .validate("images must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("images must be positive"),
     Opts.option[Int]("entries", help = "Entries in the generated PTX fixture").withDefault(256)
-      .validate("entries must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("entries must be positive"),
     Opts.option[Int]("instructions", help = "Arithmetic instructions generated per entry").withDefault(0)
-      .validate("instructions must be non-negative")(_ >= 0).map(_.unsafe[Int >= 0]),
+      .refined[Int >= 0]("instructions must be non-negative"),
     Opts.option[String]("source", help = "Optional PTX source file").map(Path.of(_)).orNone,
     Opts.option[String]("kernel", help = "Parameterless entry used by launch operations").withDefault("benchmark")
-      .validate("kernel must be non-empty and contain no NUL")(value => value.nonEmpty && !value.contains('\u0000'))
-      .map(_.unsafe[NonEmpty[String]]),
+      .validate("kernel must be non-empty and contain no NUL")(value => !value.contains('\u0000'))
+      .refined[NonEmpty[String]]("kernel must be non-empty and contain no NUL"),
     Opts.option[String]("recording", help = "JFR output path").map(Path.of(_)).orNone
   ).mapN(Options(_, _, _, _, _, _, _, _))
 

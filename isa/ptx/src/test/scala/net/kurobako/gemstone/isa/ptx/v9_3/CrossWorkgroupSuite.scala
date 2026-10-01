@@ -15,8 +15,8 @@ import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 class CrossWorkgroupSuite extends munit.FunSuite {
-  private val groupCounts = Seq(1, 2, 3, 5, 9) // P=4: includes P+1 and 2P+1.
-  private val widths      = Seq(31, 32, 33)
+  private val groupCounts = Seq[Int > 0](1, 2, 3, 5, 9) // P=4: includes P+1 and 2P+1.
+  private val widths      = Seq[Int > 0](31, 32, 33)
   private val header      = ".version 8.0\n.target sm_80\n.address_size 64\n"
 
   private class Workers extends Workgroups with AutoCloseable {
@@ -102,7 +102,7 @@ class CrossWorkgroupSuite extends munit.FunSuite {
 
   private def kernel(body: String): Kernel =
     VMCompiler.compile(header + body).fold(error => fail(error.message), value => value)
-  private def geometry(groups: Int, lanes: Int, count: Int): LaunchGeometry =
+  private def geometry(groups: Int > 0, lanes: Int > 0, count: Int > 0): LaunchGeometry =
     LaunchGeometry.forLaunch(
       dimensions(lanes),
       dimensions(groups),
@@ -110,9 +110,9 @@ class CrossWorkgroupSuite extends munit.FunSuite {
     ).toOption.get
   private def run(
       kernel: Kernel,
-      groups: Int,
-      lanes: Int,
-      count: Int,
+      groups: Int > 0,
+      lanes: Int > 0,
+      count: Int > 0,
       memory: Memory,
       arguments: Map[NonEmpty[String], Argument],
       workers: Workgroups
@@ -248,7 +248,7 @@ class CrossWorkgroupSuite extends munit.FunSuite {
     test(s"128-bit payload plus release flag: groups=$groups parallel=$parallel") {
       withWorkers(parallel) { workers =>
         for (lanes <- widths) {
-          val memory = Memory(24 + groups * 16)
+          val memory = Memory(24 + groups.raw * 16)
           for (_ <- 0 until 2) {
             memory.clear()
             memory.flagRead = CountDownLatch(1)
@@ -257,12 +257,12 @@ class CrossWorkgroupSuite extends munit.FunSuite {
               publication,
               groups,
               lanes,
-              groups * lanes - lanes / 2,
+              (groups.raw * lanes.raw - lanes.raw / 2).unsafe[Int > 0],
               memory,
               Map(("memory": NonEmpty[String]) -> Argument.fromLong(memory.base.raw)),
               workers
             )
-            (0 until groups).foreach { group =>
+            (0 until groups.raw).foreach { group =>
               assertEquals(memory.word(24 + group * 16L, 8), 0x1122334455667788L)
               assertEquals(memory.word(32 + group * 16L, 8), 0x1020304050607080L)
             }
@@ -275,10 +275,10 @@ class CrossWorkgroupSuite extends munit.FunSuite {
       withWorkers(parallel) { workers =>
         for {
           lanes <- widths
-          tail  <- Seq(0, lanes / 2)
+          tail  <- Seq(0, lanes.raw / 2)
         } {
-          val count  = groups * lanes - tail
-          val memory = Memory(groups * 8 + count * 4)
+          val count  = (groups.raw * lanes.raw - tail).unsafe[Int > 0]
+          val memory = Memory(groups.raw * 8 + count.raw * 4)
           for (_ <- 0 until 2) {
             memory.clear()
             memory.delayPrefix = parallel && groups > 1
@@ -291,25 +291,25 @@ class CrossWorkgroupSuite extends munit.FunSuite {
               memory,
               Map(
                 ("descriptors": NonEmpty[String]) -> Argument.fromLong(memory.base.raw),
-                ("output": NonEmpty[String])      -> Argument.fromLong(memory.base.raw + groups * 8L),
+                ("output": NonEmpty[String])      -> Argument.fromLong(memory.base.raw + groups.raw * 8L),
                 ("count": NonEmpty[String])       -> Argument(
                   LittleEndian.toVec(
-                    count,
+                    count.raw.toLong,
                     4
                   ).unsafe
                 )
               ),
               workers
             )
-            val expected = (0 until count).filter(_ % 2 == 0)
-            assertEquals(memory.word((groups - 1) * 8L + 4), expected.size.toLong)
+            val expected = (0 until count.raw).filter(_ % 2 == 0)
+            assertEquals(memory.word((groups.raw - 1) * 8L + 4), expected.size.toLong)
             if (memory.delayPrefix) assertEquals(memory.prefixRead.getCount, 0L)
             expected.zipWithIndex.foreach { case (value, index) =>
-              assertEquals(memory.word(groups * 8L + index * 4L), value.toLong)
+              assertEquals(memory.word(groups.raw * 8L + index * 4L), value.toLong)
             }
-            (0 until groups).foreach { group =>
+            (0 until groups.raw).foreach { group =>
               assertEquals(memory.word(group * 8L), 101L)
-              assertEquals(memory.word(group * 8L + 4), (Math.min(count, (group + 1) * lanes) + 1L) / 2)
+              assertEquals(memory.word(group * 8L + 4), (Math.min(count.raw, (group + 1) * lanes.raw) + 1L) / 2)
             }
           }
         }
@@ -317,9 +317,9 @@ class CrossWorkgroupSuite extends munit.FunSuite {
     }
     test(s"4096-element CUB remove/partition prefix regression: groups=$groups parallel=$parallel") {
       withWorkers(parallel) { workers =>
-        val count  = 4096
-        val tile   = (count + groups - 1) / groups
-        val values = (0 until count).map(index => (index * 17 + 11) % 23 - 11)
+        val count: Int > 0 = 4096
+        val tile           = (count.raw + groups.raw - 1) / groups.raw
+        val values         = (0 until count.raw).map(index => (index * 17 + 11) % 23 - 11)
         for (retainEven <- Seq(false, true)) {
           // Same deterministic input and predicates as the previously failing CUB cases.
           // Independent output expectations use the host collection filter, not a tile scan.
@@ -340,7 +340,7 @@ class CrossWorkgroupSuite extends munit.FunSuite {
             "setp.ne.u32 %p3, %r8, 0;",
             "setp.eq.u32 %p3, %r8, 0;"
           ))
-          val memory = Memory(groups * 8 + count * 4)
+          val memory = Memory(groups.raw * 8 + count.raw * 4)
           for (_ <- 0 until 2) {
             memory.clear()
             memory.delayPrefix = parallel && groups > 1
@@ -353,20 +353,20 @@ class CrossWorkgroupSuite extends munit.FunSuite {
               memory,
               Map(
                 ("descriptors": NonEmpty[String]) -> Argument.fromLong(memory.base.raw),
-                ("output": NonEmpty[String])      -> Argument.fromLong(memory.base.raw + groups * 8L),
+                ("output": NonEmpty[String])      -> Argument.fromLong(memory.base.raw + groups.raw * 8L),
                 ("count": NonEmpty[String])       -> Argument(
                   LittleEndian.toVec(
-                    count,
+                    count.raw.toLong,
                     4
                   ).unsafe
                 )
               ),
               workers
             )
-            assertEquals(memory.word((groups - 1) * 8L + 4), expected.size.toLong)
+            assertEquals(memory.word((groups.raw - 1) * 8L + 4), expected.size.toLong)
             if (memory.delayPrefix) assertEquals(memory.prefixRead.getCount, 0L)
             expected.zipWithIndex.foreach { case (value, index) =>
-              assertEquals(memory.word(groups * 8L + index * 4L), value.toLong & 0xffffffffL)
+              assertEquals(memory.word(groups.raw * 8L + index * 4L), value.toLong & 0xffffffffL)
             }
           }
         }
@@ -375,8 +375,8 @@ class CrossWorkgroupSuite extends munit.FunSuite {
     test(s"atomic counts and per-group shared/per-lane local isolation: groups=$groups parallel=$parallel") {
       withWorkers(parallel) { workers =>
         for (lanes <- widths) {
-          val count  = groups * lanes - lanes / 2
-          val memory = Memory(8 + count * 4)
+          val count  = (groups.raw * lanes.raw - lanes.raw / 2).unsafe[Int > 0]
+          val memory = Memory(8 + count.raw * 4)
           for (epoch <- 1 to 2) {
             run(
               parallelIsolation,
@@ -395,7 +395,7 @@ class CrossWorkgroupSuite extends munit.FunSuite {
               ),
               workers
             )
-            (0 until count).foreach(index =>
+            (0 until count.raw).foreach(index =>
               assertEquals(memory.word(8 + index * 4L), ((epoch + 10) * 1000 + index).toLong)
             )
             run(
@@ -415,8 +415,10 @@ class CrossWorkgroupSuite extends munit.FunSuite {
               ),
               workers
             )
-            assertEquals(memory.word(0), (count * epoch).toLong)
-            (0 until count).foreach(index => assertEquals(memory.word(8 + index * 4L), (epoch * 1000 + index).toLong))
+            assertEquals(memory.word(0), (count.raw * epoch).toLong)
+            (0 until count.raw).foreach(index =>
+              assertEquals(memory.word(8 + index * 4L), (epoch * 1000 + index).toLong)
+            )
           }
         }
       }

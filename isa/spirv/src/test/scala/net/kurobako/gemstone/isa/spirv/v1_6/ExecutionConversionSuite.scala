@@ -253,6 +253,7 @@ class ExecutionConversionSuite extends munit.FunSuite {
       run(14L, java.lang.Math.scalb(1.0, 63)),
       Right(LittleEndian.toVec(Long.MinValue, 8))
     )
+    assertEquals(run(15L, -0.75), Right(LittleEndian.toVec(0L, 8)))
     run(15L, -1.0) match {
       case Left(Fault.InvalidTask(message)) =>
         assert(message.contains("negative values are outside the unsigned range"))

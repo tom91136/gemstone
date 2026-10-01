@@ -4,6 +4,8 @@ import VMCollectives.{Kind as CollectiveKind, Payload as CollectivePayload, Requ
 import VMIR.*
 import VMInvocation.*
 import VMMemory.*
+import VMShaderInterface.*
+import cats.syntax.all.*
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.*
@@ -30,6 +32,7 @@ import scala.util.control.NonFatal
 private object VMInterpreter {
   import Operand.*
   private type Program = VMProgramRuntime
+  private val LegacyWorkgroupLinearId = 35
 
   private def isPhi(instruction: Instruction): Boolean = instruction match {
     case Instruction.Phi(_, _, _) => true
@@ -37,12 +40,14 @@ private object VMInterpreter {
   }
 
   private enum FloatingOperation(val opcode: String) {
-    case Add      extends FloatingOperation("OpFAdd")
-    case Subtract extends FloatingOperation("OpFSub")
-    case Multiply extends FloatingOperation("OpFMul")
-    case Divide   extends FloatingOperation("OpFDiv")
-    case Minimum  extends FloatingOperation("OpenCL.std fmin")
-    case Maximum  extends FloatingOperation("OpenCL.std fmax")
+    case Add       extends FloatingOperation("OpFAdd")
+    case Subtract  extends FloatingOperation("OpFSub")
+    case Multiply  extends FloatingOperation("OpFMul")
+    case Divide    extends FloatingOperation("OpFDiv")
+    case Remainder extends FloatingOperation("OpFRem")
+    case Modulo    extends FloatingOperation("OpFMod")
+    case Minimum   extends FloatingOperation("OpenCL.std fmin")
+    case Maximum   extends FloatingOperation("OpenCL.std fmax")
   }
 
   private enum FloatingComparison(val opcode: String) {
@@ -182,12 +187,12 @@ private object VMInterpreter {
       ).flatMap { function =>
         Either.cond(
           (if (program.vulkanEntries.contains(dispatch.kernelName))
-             program.descriptorVariables(dispatch.kernelName).size
+             argumentVariables(program, dispatch.kernelName).size
            else function.parameters.size) == dispatch.arguments.size,
           (),
           Fault.InvalidTask(
             s"SPIR-V entry point ${dispatch.kernelName} expects ${
-                if (program.vulkanEntries.contains(dispatch.kernelName)) program.descriptorVariables(dispatch.kernelName).size
+                if (program.vulkanEntries.contains(dispatch.kernelName)) argumentVariables(program, dispatch.kernelName).size
                 else function.parameters.size
               } arguments, " +
               s"received ${dispatch.arguments.size}"
@@ -212,27 +217,38 @@ private object VMInterpreter {
       handler: Event => Either[Fault, Unit],
       metrics: VMMetrics
   ): Either[Fault, Unit] = {
-    val initialGlobals = program.materializeGlobals(storageClass => storageClass != 4 && storageClass != 6) match {
+    val initialGlobals = program.materializeGlobals(storageClass =>
+      storageClass != StorageClass.Workgroup && storageClass != StorageClass.Private
+    ) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
     val globalValues = if (!program.vulkanEntries.contains(dispatch.kernelName)) initialGlobals
     else {
-      program.descriptorVariables(dispatch.kernelName).zip(dispatch.arguments).foldLeft[Either[
-        Fault,
-        Map[Int, RuntimeValue]
-      ]](Right(initialGlobals)) {
-        case (result, (variable, KernelTask.Argument.Memory(allocation, offset))) => result.flatMap { values =>
+      argumentVariables(
+        program,
+        dispatch.kernelName
+      ).zip(dispatch.arguments).foldLeft[Either[Fault, Map[Int, RuntimeValue]]](Right(initialGlobals)) {
+        case (result, (variable, KernelTask.Argument.Memory(allocation, offset, range))) => result.flatMap { values =>
             program.globals.get(variable).toRight(Fault.InvalidTask(s"SPIR-V descriptor %$variable has no variable"))
               .map { global =>
                 val pointee = program.layout.pointerPointee(global.pointerType)
-                values.updated(
-                  variable,
-                  RuntimeValue.Address(
-                    global.pointerType,
-                    Pointer(Region.External(allocation), offset.raw, pointee, global.storageClass)
-                  )
+                val leaf    = Pointer(
+                  Region.External(allocation),
+                  offset.raw,
+                  pointee,
+                  global.storageClass,
+                  bounds = range.map(size => offset.raw -> Math.addExact(offset.raw, size.raw))
                 )
+                val pointer = program.layout.runtimeType(pointee) match {
+                  case Some(RuntimeType.Array(member, _)) if program.descriptorBindings.contains(variable) =>
+                    val previous = values.get(variable).collect {
+                      case RuntimeValue.Address(_, pointer) => pointer.descriptors.getOrElse(Vector.empty)
+                    }.getOrElse(Vector.empty)
+                    leaf.copy(descriptors = Some(previous :+ leaf.copy(pointee = member)))
+                  case _ => leaf
+                }
+                values.updated(variable, RuntimeValue.Address(global.pointerType, pointer))
               }
           }
         case (_, (variable, _)) => Left(Fault.InvalidTask(s"SPIR-V descriptor %$variable requires a memory argument"))
@@ -241,12 +257,33 @@ private object VMInterpreter {
         case Right(value) => value
       }
     }
+    val stageInterfaces   = stageInterfaceVariables(program, dispatch.kernelName).toSet
+    val stageInitializers = stageInterfaces.toVector.flatMap { variable =>
+      program.globals.get(variable).filter(_.storageClass == StorageClass.Output).flatMap(_.initializer).map {
+        initializer =>
+          variable -> program.encode(program.constants(initializer))
+      }
+    }
+    val fragment = program.module.instructions.exists {
+      case Instruction.EntryPoint(model, entry, _, _) => id(model) == 4 && id(entry) == function.id
+      case _                                          => false
+    }
+    val helperVariable =
+      stageInterfaces.find(variable => program.builtins.get(variable).contains(BuiltIn.HelperInvocation))
+    val maskVariable = stageInterfaces.find(variable =>
+      program.builtins.get(variable).contains(BuiltIn.SampleMask) && program.globals.get(
+        variable
+      ).exists(_.storageClass == StorageClass.Output)
+    )
     val groupSize  = dispatch.geometry.groupSize
     val totalLocal = groupSize.volumeInt match {
       case Left(message) => return Left(Fault.InvalidTask(message))
       case Right(value)  => value
     }
-    val subgroup          = program.subgroupSizes.getOrElse(function.id, math.max(1, math.min(32, totalLocal.raw)))
+    val subgroup = program.subgroupSizes.getOrElse(
+      function.id,
+      if (program.vulkanEntries.nonEmpty) 32 else math.max(1, math.min(32, totalLocal.raw))
+    )
     val enqueuedSubgroups = (totalLocal.raw.toLong + subgroup.toLong - 1L) / subgroup.toLong
     val hasCollectives    = program.collectiveFunctions.contains(function.id) || memory.defersHostReads
     val baseScalars = BaseScalarValues(program.constants, globalValues, program.module.header.bound.toUnsigned.toLong)
@@ -350,9 +387,10 @@ private object VMInterpreter {
             case Right(value) => value
           }
           val subgroupIndex = linearLocal / subgroup
-          val subgroupSize  = math.min(subgroup, activeLocalCount.raw - subgroupIndex * subgroup)
-          val numSubgroups  = (activeLocalCount.raw.toLong + subgroup.toLong - 1L) / subgroup.toLong
-          val invocation    = reusableExecution match {
+          val subgroupSize  = if (program.vulkanEntries.nonEmpty) subgroup
+          else math.min(subgroup, activeLocalCount.raw - subgroupIndex * subgroup)
+          val numSubgroups = (activeLocalCount.raw.toLong + subgroup.toLong - 1L) / subgroup.toLong
+          val invocation   = reusableExecution match {
             case null => InvocationBuiltins(
                 group,
                 local,
@@ -384,13 +422,43 @@ private object VMInterpreter {
               )
               execution.invocation
           }
+          // Stage arguments are arrays of invocation records. Vertex inputs and
+          // interpolated fragment inputs use the same typed memory operations as
+          // descriptors; each invocation receives its own input/output slice.
+          val stageValues = stageInterfaces.view.flatMap { variable =>
+            globalValues.get(variable).collect { case RuntimeValue.Address(pointerType, pointer) =>
+              variable -> RuntimeValue.Address(
+                pointerType,
+                pointer.copy(
+                  offset = Math.addExact(
+                    pointer.offset,
+                    Math.multiplyExact(global.x.raw, program.layout.typeSize(pointer.pointee).toLong)
+                  )
+                )
+              )
+            }
+          }.toMap
+          // Output initializers apply to each invocation's record, including
+          // invocations that never execute an explicit store to that output.
+          var initializerIndex = 0
+          while (initializerIndex < stageInitializers.size) {
+            val (variable, bytes) = stageInitializers(initializerIndex)
+            stageValues.get(variable) match {
+              case Some(RuntimeValue.Address(_, pointer)) => bytes.flatMap(groupState.write(pointer, _)) match {
+                  case Left(error) => return Left(error)
+                  case Right(())   => ()
+                }
+              case _ => return Left(Fault.InvalidTask(s"SPIR-V output %$variable has no invocation record"))
+            }
+            initializerIndex += 1
+          }
           prepareInvocation(
             program,
             function,
             dispatch.arguments,
             shared,
             invocation,
-            globalValues ++ workgroupValues ++ privateValues,
+            globalValues ++ workgroupValues ++ privateValues ++ stageValues,
             if (collectiveValues.nonEmpty) collectiveValues(linearLocal) else reusableValues,
             reusableExecution,
             groupState,
@@ -400,6 +468,20 @@ private object VMInterpreter {
           ) match {
             case Left(error)  => return Left(error)
             case Right(value) =>
+              value.fragmentInvocation = fragment
+              value.sampleMask =
+                maskVariable.flatMap(stageValues.get).collect { case RuntimeValue.Address(_, pointer) => pointer }
+              value.fragmentQuad = fragment && groupSize.x.raw == 4 && groupSize.y.raw == 1 && groupSize.z.raw == 1
+              value.subgroupReconvergence = program.usesNonUniformCollectives && !fragment
+              value.helperInvocation = helperVariable.flatMap(stageValues.get) match {
+                case Some(RuntimeValue.Address(_, pointer)) =>
+                  val flag = memory.awaitRead(groupState.readScalar(pointer, 1))
+                  flag match {
+                    case Left(error)  => return Left(error)
+                    case Right(value) => value != 0
+                  }
+                case _ => false
+              }
               if (collectiveValues.nonEmpty) collectiveValues(linearLocal) = Some(value.values)
               if (hasCollectives) {
                 val _ = executions.nn += value
@@ -506,11 +588,25 @@ private object VMInterpreter {
           trackTouched
         )
     }
-    val globals     = program.globals.view.toVector
+    val entry      = program.entryPoints.view.collectFirst { case (name, entryId) if entryId == function.id => name }
+    val shader     = entry.exists(program.vulkanEntries.contains)
+    val interfaces = entry.flatMap(program.ir.entryPointInterfaces.get).getOrElse(Set.empty)
+    val globals    = program.globals.view.filter { case (variable, global) =>
+      !shader || (global.storageClass != StorageClass.Input && global.storageClass != StorageClass.Output) || interfaces.contains(
+        variable
+      )
+    }.toVector
     var globalIndex = 0
     while (globalIndex < globals.size) {
       val (variable, global) = globals(globalIndex)
       program.builtins.get(variable) match {
+        case Some(_) if globalValues.get(variable).exists {
+              case RuntimeValue.Address(_, pointer) => pointer.region match {
+                  case Region.External(_) => true
+                  case _                  => false
+                }
+              case _ => false
+            } => ()
         case Some(builtin) =>
           val pointee = program.layout.pointerPointee(global.pointerType)
           val value   = builtinValue(program, pointee, builtin, invocation) match {
@@ -582,6 +678,7 @@ private object VMInterpreter {
       control: TaskControl,
       metrics: VMMetrics
   ): Either[Fault, Unit] = {
+    memory.helperInvocation = execution.helperInvocation
     while (execution.pc < execution.currentFunction.end) {
       execution.instructionCount += 1L
       metrics.recordInstruction()
@@ -598,7 +695,10 @@ private object VMInterpreter {
           case Left(error: Fault) => return Left(error)
           case Right(_)           => ()
         }
-      if (execution.completed || execution.suspended.nonEmpty) return InstructionCompleted
+      if (
+        execution.completed || execution.suspended.nonEmpty || execution.quadRequest.nonEmpty || execution.fragmentJoin.nonEmpty
+      )
+        return InstructionCompleted
     }
     Left(Fault.InvalidTask(
       s"SPIR-V function %${execution.currentFunction.id} " +
@@ -639,31 +739,80 @@ private object VMInterpreter {
       memory: MemoryState,
       instruction: Instruction
   ): Memory.ReadResult[Unit] = instruction match {
-    case _: Instruction.Line | _: Instruction.NoLine =>
+    case Instruction.Kill() =>
+      if (!execution.fragmentInvocation) Left(Fault.InvalidTask("OpKill requires a fragment invocation"))
+      else {
+        val cleared = execution.sampleMask match {
+          case Some(pointer) => memory.write(pointer, Array.ofDim[Byte](program.layout.typeSize(pointer.pointee)))
+          case None          => Right(())
+        }
+        cleared.map { _ =>
+          execution.fragmentKilled = true
+          execution.complete()
+          execution.calls.clear()
+        }
+      }
+    case _: Instruction.Nop | _: Instruction.Line | _: Instruction.NoLine =>
       execution.pc += 1
       Right(())
     case _: Instruction.FunctionParameter | _: Instruction.Label | _: Instruction.Phi =>
       executePhi(program, execution, instruction)
     case _: Instruction.Variable | _: Instruction.Load | _: Instruction.Store | _: Instruction.CopyMemory | _: Instruction.CopyMemorySized | _: Instruction.GroupAsyncCopy | _: Instruction.GroupWaitEvents =>
       executeMemory(program, execution, memory, instruction)
-    case _: Instruction.Bitcast | _: Instruction.BitCount | _: Instruction.PtrCastToGeneric | _: Instruction.GenericCastToPtr | _: Instruction.GenericCastToPtrExplicit | _: Instruction.PtrAccessChain | _: Instruction.InBoundsPtrAccessChain | _: Instruction.AccessChain | _: Instruction.InBoundsAccessChain | _: Instruction.CompositeExtract | _: Instruction.CompositeConstruct | _: Instruction.CompositeInsert | _: Instruction.VectorExtractDynamic | _: Instruction.VectorInsertDynamic =>
+    case _: Instruction.DPdx | _: Instruction.DPdy | _: Instruction.Fwidth |
+        _: Instruction.DPdxFine | _: Instruction.DPdyFine | _: Instruction.FwidthFine |
+        _: Instruction.DPdxCoarse | _: Instruction.DPdyCoarse | _: Instruction.FwidthCoarse =>
+      executeDerivative(program, execution, instruction)
+    case _: Instruction.ImageQueryLod | _: Instruction.ImageQuerySamples | _: Instruction.SampledImage | _: Instruction.Image | _: Instruction.ImageFetch | _: Instruction.ImageQuerySizeLod | _: Instruction.ImageQueryLevels | _: Instruction.ImageSampleImplicitLod | _: Instruction.ImageSampleExplicitLod | _: Instruction.ImageSampleDrefImplicitLod | _: Instruction.ImageSampleDrefExplicitLod |
+        _: Instruction.ImageSampleProjImplicitLod | _: Instruction.ImageSampleProjExplicitLod |
+        _: Instruction.ImageSampleProjDrefImplicitLod | _: Instruction.ImageSampleProjDrefExplicitLod |
+        _: Instruction.ImageGather | _: Instruction.ImageDrefGather =>
+      executeSampling(program, execution, memory, instruction)
+    case _: Instruction.ImageRead | _: Instruction.ImageWrite | _: Instruction.ImageTexelPointer | _: Instruction.ImageQuerySize =>
+      executeImage(program, execution, memory, instruction)
+    case _: Instruction.BitFieldUExtract | _: Instruction.BitFieldSExtract | _: Instruction.BitFieldInsert | _: Instruction.BitReverse =>
+      executeBitField(program, execution, instruction)
+    case _: Instruction.ArrayLength | _: Instruction.Bitcast | _: Instruction.BitCount | _: Instruction.PtrCastToGeneric | _: Instruction.GenericCastToPtr | _: Instruction.GenericCastToPtrExplicit | _: Instruction.PtrAccessChain | _: Instruction.InBoundsPtrAccessChain | _: Instruction.AccessChain | _: Instruction.InBoundsAccessChain | _: Instruction.CompositeExtract | _: Instruction.CompositeConstruct | _: Instruction.CompositeInsert | _: Instruction.VectorExtractDynamic | _: Instruction.VectorInsertDynamic =>
       executeComposite(program, execution, memory, instruction)
     case _: Instruction.VectorShuffle | _: Instruction.ExtInst =>
       executeExtended(program, execution, memory, instruction)
-    case _: Instruction.UConvert | _: Instruction.SConvert | _: Instruction.ConvertPtrToU | _: Instruction.ConvertUToPtr | _: Instruction.ConvertSToF | _: Instruction.ConvertUToF | _: Instruction.ConvertFToS | _: Instruction.ConvertFToU | _: Instruction.FConvert | _: Instruction.Undef | _: Instruction.CopyObject | _: Instruction.LifetimeStart | _: Instruction.LifetimeStop =>
+    case _: Instruction.CopyLogical | _: Instruction.UConvert | _: Instruction.SConvert | _: Instruction.ConvertPtrToU | _: Instruction.ConvertUToPtr | _: Instruction.ConvertSToF | _: Instruction.ConvertUToF | _: Instruction.ConvertFToS | _: Instruction.ConvertFToU | _: Instruction.FConvert | _: Instruction.QuantizeToF16 | _: Instruction.Undef | _: Instruction.CopyObject | _: Instruction.LifetimeStart | _: Instruction.LifetimeStop =>
       executeConversion(program, execution, memory, instruction)
-    case _: Instruction.IAdd | _: Instruction.ISub | _: Instruction.IMul | _: Instruction.UDiv | _: Instruction.UMod | _: Instruction.SDiv | _: Instruction.SRem | _: Instruction.SNegate =>
+    case _: Instruction.IAddCarry | _: Instruction.ISubBorrow | _: Instruction.UMulExtended | _: Instruction.SMulExtended =>
+      val (t, d, a, b, operation) = instruction match {
+        case Instruction.IAddCarry(t, d, a, b)    => (t, d, a, b, 0)
+        case Instruction.ISubBorrow(t, d, a, b)   => (t, d, a, b, 1)
+        case Instruction.UMulExtended(t, d, a, b) => (t, d, a, b, 2)
+        case Instruction.SMulExtended(t, d, a, b) => (t, d, a, b, 3)
+        case _ => throw IllegalStateException("extended integer instruction dispatch mismatch")
+      }
+      integerExtended(program, execution.values, t, d, a, b, operation).map(_ => execution.pc += 1)
+    case _: Instruction.IAdd | _: Instruction.ISub | _: Instruction.IMul | _: Instruction.UDiv | _: Instruction.UMod | _: Instruction.SDiv | _: Instruction.SRem | _: Instruction.SMod | _: Instruction.SNegate =>
       executeInteger(program, execution, instruction)
-    case _: Instruction.AtomicStore | _: Instruction.AtomicLoad | _: Instruction.AtomicExchange | _: Instruction.AtomicCompareExchange | _: Instruction.AtomicCompareExchangeWeak | _: Instruction.AtomicFlagTestAndSet | _: Instruction.AtomicFlagClear | _: Instruction.AtomicFAddEXT | _: Instruction.AtomicFMinEXT | _: Instruction.AtomicFMaxEXT | _: Instruction.AtomicIAdd | _: Instruction.AtomicUMin | _: Instruction.AtomicIIncrement | _: Instruction.AtomicIDecrement | _: Instruction.AtomicISub | _: Instruction.AtomicSMin | _: Instruction.AtomicSMax | _: Instruction.AtomicUMax | _: Instruction.AtomicAnd | _: Instruction.AtomicOr | _: Instruction.AtomicXor | _: Instruction.FAdd | _: Instruction.FSub | _: Instruction.FMul | _: Instruction.Dot | _: Instruction.FDiv | _: Instruction.VectorTimesScalar =>
+    case _: Instruction.AtomicStore | _: Instruction.AtomicLoad | _: Instruction.AtomicExchange | _: Instruction.AtomicCompareExchange | _: Instruction.AtomicCompareExchangeWeak | _: Instruction.AtomicFlagTestAndSet | _: Instruction.AtomicFlagClear | _: Instruction.AtomicFAddEXT | _: Instruction.AtomicFMinEXT | _: Instruction.AtomicFMaxEXT | _: Instruction.AtomicIAdd | _: Instruction.AtomicUMin | _: Instruction.AtomicIIncrement | _: Instruction.AtomicIDecrement | _: Instruction.AtomicISub | _: Instruction.AtomicSMin | _: Instruction.AtomicSMax | _: Instruction.AtomicUMax | _: Instruction.AtomicAnd | _: Instruction.AtomicOr | _: Instruction.AtomicXor | _: Instruction.FAdd | _: Instruction.FSub | _: Instruction.FMul | _: Instruction.Dot | _: Instruction.FDiv | _: Instruction.FRem | _: Instruction.FMod | _: Instruction.VectorTimesScalar =>
       executeAtomic(program, execution, memory, instruction)
+    case _: Instruction.Transpose | _: Instruction.MatrixTimesScalar | _: Instruction.VectorTimesMatrix |
+        _: Instruction.MatrixTimesVector | _: Instruction.MatrixTimesMatrix | _: Instruction.OuterProduct =>
+      val (resultType, dest, operation, sources) = instruction match {
+        case Instruction.Transpose(t, d, a)            => (t, d, MatrixOperation.Transpose, Vec(a))
+        case Instruction.MatrixTimesScalar(t, d, a, b) => (t, d, MatrixOperation.Scale, Vec(a, b))
+        case Instruction.VectorTimesMatrix(t, d, a, b) => (t, d, MatrixOperation.VectorMatrix, Vec(a, b))
+        case Instruction.MatrixTimesVector(t, d, a, b) => (t, d, MatrixOperation.MatrixVector, Vec(a, b))
+        case Instruction.MatrixTimesMatrix(t, d, a, b) => (t, d, MatrixOperation.Multiply, Vec(a, b))
+        case Instruction.OuterProduct(t, d, a, b)      => (t, d, MatrixOperation.OuterProduct, Vec(a, b))
+        case _ => throw IllegalStateException("matrix instruction dispatch mismatch")
+      }
+      floatingMatrix(program, execution.values, resultType, dest, operation, sources).map(_ => execution.pc += 1)
     case _: Instruction.FNegate | _: Instruction.ShiftLeftLogical =>
       executeFloatingAndShift(program, execution, instruction)
     case _: Instruction.ShiftRightLogical | _: Instruction.ShiftRightArithmetic | _: Instruction.BitwiseOr | _: Instruction.BitwiseXor | _: Instruction.BitwiseAnd | _: Instruction.Not | _: Instruction.IEqual | _: Instruction.INotEqual | _: Instruction.LogicalEqual | _: Instruction.LogicalNotEqual | _: Instruction.LogicalOr | _: Instruction.LogicalAnd | _: Instruction.LogicalNot | _: Instruction.Any | _: Instruction.All | _: Instruction.FOrdEqual | _: Instruction.FOrdNotEqual | _: Instruction.FUnordEqual | _: Instruction.FUnordNotEqual | _: Instruction.FUnordLessThan | _: Instruction.FUnordGreaterThan | _: Instruction.FUnordLessThanEqual | _: Instruction.FUnordGreaterThanEqual | _: Instruction.Unordered | _: Instruction.Ordered | _: Instruction.FOrdLessThanEqual | _: Instruction.FOrdLessThan | _: Instruction.FOrdGreaterThan | _: Instruction.FOrdGreaterThanEqual | _: Instruction.IsInf | _: Instruction.IsNan | _: Instruction.IsFinite =>
       executeArithmetic(program, execution, instruction)
     case _: Instruction.IsNormal | _: Instruction.SignBitSet | _: Instruction.ULessThan | _: Instruction.UGreaterThan | _: Instruction.ULessThanEqual | _: Instruction.UGreaterThanEqual | _: Instruction.SGreaterThan | _: Instruction.SGreaterThanEqual | _: Instruction.SLessThan | _: Instruction.SLessThanEqual | _: Instruction.Select =>
       executeComparison(program, execution, instruction)
-    case _: Instruction.ControlBarrier | _: Instruction.MemoryBarrier | _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax | _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd | _: Instruction.GroupIMulKHR | _: Instruction.GroupBitwiseAndKHR | _: Instruction.GroupBitwiseOrKHR | _: Instruction.GroupBitwiseXorKHR | _: Instruction.GroupLogicalAndKHR | _: Instruction.GroupLogicalOrKHR | _: Instruction.GroupLogicalXorKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin | _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR | _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleXorINTEL | _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast | _: Instruction.GroupNonUniformBallot =>
+    case _: Instruction.ControlBarrier | _: Instruction.MemoryBarrier | _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax | _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd | _: Instruction.GroupIMulKHR | _: Instruction.GroupBitwiseAndKHR | _: Instruction.GroupBitwiseOrKHR | _: Instruction.GroupBitwiseXorKHR | _: Instruction.GroupLogicalAndKHR | _: Instruction.GroupLogicalOrKHR | _: Instruction.GroupLogicalXorKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin | _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR | _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleXorINTEL | _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast =>
       executeCollective(program, execution, memory, instruction)
+    case value if VMCollectives.isNonUniform(value) =>
+      executeNonUniform(program, execution, value)
     case _: Instruction.FunctionCall | _: Instruction.FunctionPointerCallINTEL =>
       executeCall(program, execution, memory, instruction)
     case _: Instruction.Branch | _: Instruction.BranchConditional | _: Instruction.Switch | _: Instruction.ReturnValue | _: Instruction.Return | _: Instruction.AssumeTrueKHR | _: Instruction.LoopMerge | _: Instruction.SelectionMerge =>
@@ -690,6 +839,17 @@ private object VMInterpreter {
       case Instruction.Label(label)            =>
         execution.currentLabel = id(label)
         execution.pc += 1
+        if (execution.fragmentQuad || execution.subgroupReconvergence) {
+          val merge = execution.fragmentRegions.indexWhere(_.merge == id(label))
+          if (merge >= 0) {
+            execution.fragmentRegions.remove(merge + 1, execution.fragmentRegions.size - merge - 1)
+            execution.fragmentJoin = Some(FragmentJoin.Merge(id(label)))
+          } else {
+            // A continue may bypass nested selection merges on its way to the loop header.
+            val header = execution.fragmentRegions.indexWhere(r => r.loop && r.header == id(label))
+            if (header >= 0) execution.fragmentRegions.remove(header + 1, execution.fragmentRegions.size - header - 1)
+          }
+        }
       case Instruction.Phi(_, _, _) =>
         val updates = mutable.ArrayBuffer.empty[(Int, RuntimeValue)]
         var phiPc   = execution.pc
@@ -765,7 +925,12 @@ private object VMInterpreter {
               0L,
               pointee,
               id(storageClass),
-              Option.when(slots.nonEmpty)(slots)
+              Option.when(slots.nonEmpty)(slots),
+              bounds = Option.when(
+                program.vulkanEntries.nonEmpty && (id(storageClass) == StorageClass.Private || id(
+                  storageClass
+                ) == StorageClass.Function)
+              )(0L -> buffer.length.toLong)
             )
           )
         )
@@ -775,6 +940,48 @@ private object VMInterpreter {
           case Left(error)   => return Left(error)
           case Right(source) =>
             program.layout.runtimeType(id(resultType)) match {
+              case Some(RuntimeType.MultisampledTexture(_, _)) | Some(RuntimeType.InputAttachment(
+                    _,
+                    _
+                  )) | Some(RuntimeType.StorageImage(_, _, _, _, _, _)) | Some(RuntimeType.Texture(
+                    _,
+                    _,
+                    _,
+                    _
+                  )) | Some(RuntimeType.CubeTexture(_, _)) | Some(RuntimeType.Sampler) =>
+                values.update(id(dest), RuntimeValue.Address(id(resultType), source))
+                execution.pc += 1
+              case Some(RuntimeType.SampledImage(imageType))
+                  if program.layout.runtimeType(imageType).exists {
+                    case RuntimeType.Texture(_, _, true, _) => true
+                    case _                                  => false
+                  } =>
+                // GLSL samplerBuffer types use OpTypeSampledImage, but Vulkan
+                // uniform texel buffers carry an image view without a sampler.
+                values.update(id(dest), RuntimeValue.Address(id(resultType), source.copy(pointee = imageType)))
+                execution.pc += 1
+              case Some(RuntimeType.SampledImage(imageType)) =>
+                val loaded = for {
+                  size  <- memory.readScalar(source.copy(offset = source.offset + 8), 8)
+                  image <- memory.descriptorRelocatedPointer(
+                    source,
+                    imageType,
+                    0
+                  ).toRight(Fault.InvalidTask("sampled-image descriptor is missing its image relocation"))
+                  _ <- Either.cond(
+                    size >= 16 && size <= Int.MaxValue && image.offset >= 0 && image.offset <= Long.MaxValue - size,
+                    (),
+                    Fault.InvalidTask("invalid sampled-image descriptor bounds")
+                  )
+                } yield image.copy(
+                  bounds = Some(image.offset -> (image.offset + size)),
+                  sampler = Some(source.copy(offset = source.offset + 16))
+                )
+                loaded match {
+                  case Left(error)  => return Left(error)
+                  case Right(image) =>
+                    values.update(id(dest), RuntimeValue.Address(id(resultType), image)); execution.pc += 1
+                }
               case Some(RuntimeType.Pointer(_, _)) =>
                 loadPointer(program, memory, source, id(resultType)) match {
                   case Left(error) =>
@@ -792,6 +999,11 @@ private object VMInterpreter {
                         values.updateScalar(id(dest), id(resultType), loaded)
                         execution.pc += 1
                     }
+                }
+              case _ if mappedMatrixStorage(program, source) =>
+                loadMatrixStorage(program, memory, source) match {
+                  case Left(error)  => return Left(error)
+                  case Right(value) => values.update(id(dest), retag(value, id(resultType))); execution.pc += 1
                 }
               case _ => program.layout.nonNegativeTypeSize(id(resultType)) match {
                   case Left(error) => return Left(error)
@@ -839,6 +1051,11 @@ private object VMInterpreter {
                   case Left(error) => return Left(error)
                   case Right(())   => execution.pc += 1
                 }
+              case Some(value: RuntimeValue.Bits) if mappedMatrixStorage(program, target) =>
+                storeMatrixStorage(program, memory, target, value) match {
+                  case Left(error) => return Left(error)
+                  case Right(())   => execution.pc += 1
+                }
               case Some(value) => program.encode(value) match {
                   case Left(error)    => return Left(error)
                   case Right(encoded) => memory.write(target, encoded) match {
@@ -853,6 +1070,14 @@ private object VMInterpreter {
         }
       case Instruction.CopyMemory(target, source, _, _) =>
         (address(values, target), address(values, source)) match {
+          case (Right(destination), Right(origin))
+              if mappedMatrixStorage(program, destination) || mappedMatrixStorage(program, origin) =>
+            loadMatrixStorage(program, memory, origin).flatMap(value =>
+              storeMatrixStorage(program, memory, destination, value)
+            ) match {
+              case Left(error) => return Left(error)
+              case Right(())   => execution.pc += 1
+            }
           case (Right(destination), Right(origin)) =>
             program.layout.nonNegativeTypeSize(origin.pointee) match {
               case Left(error) => return Left(error)
@@ -946,6 +1171,1277 @@ private object VMInterpreter {
     InstructionCompleted
   }
 
+  // Vulkan storage-image ABI: width, height, depth, SPIR-V ImageFormat (four LE u32s), then texels.
+  // Image objects retain an address so descriptor aliases and image atomics share the memory model.
+  private def imageFloatComponents(format: Int): Int = format match {
+    case ImageDescriptor.Format.DecodedRgb32f => 3 // Decoded RGB-only compressed view; alpha defaults to one.
+    case ImageFormat.Rgba32f                  => 4
+    case ImageFormat.Rg32f                    => 2
+    case ImageFormat.R32f | ImageDescriptor.Format.D32SfloatS8Depth => 1
+    case _                                                          => 0
+  }
+  private def imageIsInteger(format: Int): Boolean =
+    format == ImageDescriptor.Format.S8Uint || format == ImageDescriptor.Format.D32SfloatS8Stencil || IntegerImageFormat(
+      format
+    ).isDefined
+  private def imageWordComponents(format: Int): Int = imageFloatComponents(format)
+
+  private def readIntegerTexel(
+      memory: MemoryState,
+      pointer: Pointer,
+      layout: IntegerImageFormat.Layout,
+      valid: Boolean = true
+  ): Memory.ReadResult[Array[Long]] =
+    (0 until layout.components).foldLeft[Memory.ReadResult[Array[Long]]](Right(Array(
+      0L,
+      0L,
+      0L,
+      if (valid) 1L else 0L
+    ))) {
+      (result, lane) =>
+        for {
+          data <- result
+          word <- memory.readScalar(
+            pointer.copy(offset = pointer.offset + layout.offset(lane), pointee = pointer.pointee),
+            layout.componentBytes
+          )
+        } yield { data(lane) = layout.decode(word, lane); data }
+    }
+
+  private def readNormalizedTexel(
+      memory: MemoryState,
+      pointer: Pointer,
+      layout: NormalizedImageFormat.Layout,
+      valid: Boolean = true
+  ): Memory.ReadResult[Array[Double]] =
+    (0 until layout.components).foldLeft[Memory.ReadResult[Array[Double]]](Right(Array(
+      0.0,
+      0.0,
+      0.0,
+      if (valid) 1.0 else 0.0
+    ))) {
+      (result, lane) =>
+        for {
+          data <- result
+          word <-
+            memory.readScalar(pointer.copy(offset = pointer.offset + layout.channel(lane)), 1)
+        } yield { data(lane) = layout.decode(word, lane); data }
+    }
+
+  private def readNarrowTexel(
+      memory: MemoryState,
+      pointer: Pointer,
+      layout: NarrowImageFormat.Layout,
+      valid: Boolean = true
+  ): Memory.ReadResult[Array[Double]] =
+    (0 until layout.components).foldLeft[Memory.ReadResult[Array[Double]]](Right(Array(
+      0.0,
+      0.0,
+      0.0,
+      if (valid) 1.0 else 0.0
+    ))) {
+      (result, lane) =>
+        for {
+          data <- result
+          word <- memory.readScalar(
+            pointer.copy(offset = pointer.offset + layout.offset(lane), pointee = pointer.pointee),
+            layout.elementBytes
+          )
+        } yield { data(lane) = layout.decode(word, lane); data }
+    }
+
+  private case class ImageLevel(
+      pixels: Pointer,
+      width: Long,
+      height: Long,
+      format: Int,
+      samples: Int = 1,
+      layers: Long = 1,
+      depth: Long = 1
+  )
+
+  private def imageLevels(memory: MemoryState, image: Pointer): Memory.ReadResult[Int] =
+    for {
+      format <-
+        memory.readScalar(image.copy(offset = image.offset + ImageDescriptor.Layout.Format), 4)
+      levels <- if ((format & ImageDescriptor.Flags.LevelTable) == 0) Right(1L)
+      else memory.readScalar(image.copy(offset = image.offset + ImageDescriptor.Layout.Levels), 4)
+      _ <- Either.cond(levels >= 1 && levels <= 15, (), Fault.InvalidTask("invalid image level count"))
+    } yield levels.toInt
+
+  // Swizzles apply after filtering and missing-component/border replacement.
+  // Bit 29 adds four VkComponentSwizzle words following the V2 level table.
+  private def swizzleImage(
+      memory: MemoryState,
+      image: Pointer,
+      values: Array[Double]
+  ): Memory.ReadResult[Array[Double]] =
+    memory.readScalar(
+      image.copy(offset = image.offset + ImageDescriptor.Layout.Format),
+      4
+    ).flatMap { format =>
+      if ((format & ImageDescriptor.Flags.Swizzle) == 0) Right(values)
+      else for {
+        _ <- Either.cond(
+          (format & ImageDescriptor.Flags.LevelTable) != 0,
+          (),
+          Fault.InvalidTask("swizzle requires a V2 image view")
+        )
+        levels <- imageLevels(memory, image)
+        _      <- Either.cond(
+          image.bounds.exists { case (begin, end) =>
+            image.offset >= begin && ImageDescriptor.Layout.LevelTable + ImageDescriptor.Layout.SwizzleBytes + levels * ImageDescriptor.Layout.LevelBytes <= end - image.offset
+          },
+          (),
+          Fault.InvalidTask("image swizzle exceeds descriptor")
+        )
+        result <-
+          (0 until 4).foldLeft[Memory.ReadResult[Array[Double]]](Right(Array.ofDim[Double](4))) { (result, lane) =>
+            for {
+              out       <- result
+              component <- memory.readScalar(
+                image.copy(offset =
+                  image.offset + ImageDescriptor.Layout.LevelTable + levels * ImageDescriptor.Layout.LevelBytes + lane * 4
+                ),
+                4
+              )
+              _ <- Either.cond(
+                component <= ImageDescriptor.Swizzle.A,
+                (),
+                Fault.InvalidTask("invalid image component swizzle")
+              )
+            } yield {
+              out(lane) = if (component == ImageDescriptor.Swizzle.Identity) values(lane)
+              else if (component == ImageDescriptor.Swizzle.Zero) 0.0
+              else if (component == ImageDescriptor.Swizzle.One) 1.0
+              else values(component.toInt - ImageDescriptor.Swizzle.R);
+              out
+            }
+          }
+      } yield result
+    }
+
+  // V2 views carry a level table and a relocated pointer to shared texels. V1
+  // descriptors retain the inline single-level layout used by portable VM clients.
+  // Format bit 30 marks a volume: header word 2 is base-view depth, shifted by
+  // the view-relative mip. Without that bit, V2 word 2 is the constant layer count.
+  private def imageLevel(
+      memory: MemoryState,
+      image: Pointer,
+      level: Int,
+      expectedFormat: Int = -1,
+      texelBuffer: Boolean = false
+  ): Memory.ReadResult[ImageLevel] =
+    for {
+      rawFormat <-
+        memory.readScalar(image.copy(offset = image.offset + ImageDescriptor.Layout.Format), 4)
+      format = (rawFormat & ImageDescriptor.Flags.FormatMask).toInt
+      volume = (rawFormat & ImageDescriptor.Flags.Volume) != 0
+      levels <- imageLevels(memory, image)
+      _      <- Either.cond(
+        level >= 0 && level < levels && ImageTexelCodec.texelBytes(
+          format
+        ) != 0 && (expectedFormat < 0 || format == expectedFormat),
+        (),
+        Fault.InvalidTask(s"invalid image level $level of $levels or format $format (expected $expectedFormat)")
+      )
+      data <- if ((rawFormat & ImageDescriptor.Flags.LevelTable) != 0) {
+        val table = image.offset + ImageDescriptor.Layout.LevelTable + level * ImageDescriptor.Layout.LevelBytes
+        for {
+          _ <- Either.cond(
+            image.bounds.exists { case (begin, end) =>
+              image.offset >= begin && ImageDescriptor.Layout.LevelTable + levels * ImageDescriptor.Layout.LevelBytes <= end - image.offset
+            },
+            (),
+            Fault.InvalidTask("image level table exceeds descriptor")
+          )
+          size <- memory.readScalar(
+            image.copy(offset = image.offset + ImageDescriptor.Layout.TexelBytes),
+            8
+          )
+          base <- memory.descriptorRelocatedPointer(
+            image.copy(offset = image.offset + ImageDescriptor.Layout.Texels),
+            image.pointee,
+            image.storageClass
+          ).toRight(Fault.InvalidTask("image view is missing its texel relocation"))
+          width  <- memory.readScalar(image.copy(offset = table), 4)
+          height <-
+            memory.readScalar(image.copy(offset = table + ImageDescriptor.Layout.LevelHeight), 4)
+          offset <-
+            memory.readScalar(image.copy(offset = table + ImageDescriptor.Layout.LevelOffset), 8)
+          slices <- memory.readScalar(
+            image.copy(offset = image.offset + ImageDescriptor.Layout.Slices),
+            4
+          )
+          rawSamples <- memory.readScalar(
+            image.copy(offset = image.offset + ImageDescriptor.Layout.Samples),
+            4
+          )
+          layers          = if (volume) 1L else slices
+          depth           = if (volume) Math.max(1L, slices >> level) else 1L
+          samples         = if (rawSamples == 0L) 1 else rawSamples.toInt
+          bytes           = width * height * ImageTexelCodec.texelBytes(format) * samples * layers * depth
+          validDimensions = width > 0 && height > 0 && (
+            if (texelBuffer) !volume && layers == 1 && width <= 0xffffffffL && height == 1
+            else if (volume) samples == 1 && slices >= 1 && slices <= 2048 && width <= 2048 && height <= 2048
+            else width <= 16384 && height <= 16384
+          )
+          _ <- Either.cond(
+            validDimensions && (samples == 1 || samples == 4) && layers >= 1 && layers <= 2048 &&
+              size > 0 && size <= Int.MaxValue && offset >= 0 && offset <= size && bytes <= size - offset &&
+              base.offset >= 0 && base.offset <= Long.MaxValue - size,
+            (),
+            Fault.InvalidTask("image level exceeds texel allocation")
+          )
+        } yield ImageLevel(
+          base.copy(
+            offset = base.offset + offset,
+            bounds = Some((base.offset + offset) -> (base.offset + offset + bytes))
+          ),
+          width,
+          height,
+          format,
+          samples,
+          layers,
+          depth
+        )
+      } else for {
+        width  <- memory.readScalar(image, 4)
+        height <- memory.readScalar(image.copy(offset = image.offset + 4), 4)
+        depth  <-
+          memory.readScalar(image.copy(offset = image.offset + ImageDescriptor.Layout.Slices), 4)
+        bytes           = width * height * depth * ImageTexelCodec.texelBytes(format)
+        validDimensions = width > 0 && height > 0 && (
+          if (texelBuffer) !volume && width <= 0xffffffffL && height == 1 && depth == 1
+          else if (volume) depth >= 1 && depth <= 2048 && width <= 2048 && height <= 2048
+          else width <= 16384 && height <= 16384 && depth == 1
+        )
+        _ <- Either.cond(
+          validDimensions && image.bounds.exists {
+            case (begin, end) => image.offset >= begin && 16 + bytes <= end - image.offset
+          },
+          (),
+          Fault.InvalidTask("invalid storage-image descriptor")
+        )
+      } yield ImageLevel(
+        image.copy(
+          offset = image.offset + ImageDescriptor.Layout.Texels,
+          bounds = Some(
+            (image.offset + ImageDescriptor.Layout.Texels) -> (image.offset + ImageDescriptor.Layout.Texels + bytes)
+          )
+        ),
+        width,
+        height,
+        format,
+        depth = depth
+      )
+    } yield data
+
+  private def imageTexel(
+      program: Program,
+      memory: MemoryState,
+      values: InvocationValues,
+      image: Operand,
+      coordinate: Operand
+  ): Memory.ReadResult[(Pointer, Int)] =
+    for {
+      source    <- address(values, image)
+      imageType <- program.layout.runtimeType(source.pointee) match {
+        case Some(RuntimeType.StorageImage(sampledType, format, dimensions, texelBuffer, arrayed, cube)) =>
+          Right((sampledType, format, dimensions, texelBuffer, arrayed || cube))
+        case _ => Left(Fault.InvalidTask("image operand does not identify a storage image"))
+      }
+      data   <- imageLevel(memory, source, 0, if (program.vulkanEntries.nonEmpty) -1 else imageType._2, imageType._4)
+      coords <- bits(values, coordinate)
+      _      <- Either.cond(
+        coords.length == imageType._3 + (if (imageType._5) 1 else 0),
+        (),
+        Fault.InvalidTask("image coordinate component count does not match dimensionality")
+      )
+    } yield {
+      val width      = data.width
+      val height     = data.height
+      val x          = coords(0).toInt.toLong
+      val y          = if (imageType._3 == 1) 0L else coords(1).toInt.toLong
+      val z          = if (imageType._3 == 3) coords(2).toInt.toLong else 0L
+      val layer      = if (imageType._5) coords(imageType._3).toInt.toLong else 0L
+      val begin      = data.pixels.offset
+      val texelBytes = ImageTexelCodec.texelBytes(data.format)
+      val end        = begin + width * height * data.layers * data.depth * texelBytes
+      val offset     =
+        if (
+          x < 0 || y < 0 || x >= width || y >= height || z < 0 || z >= data.depth || layer < 0 || layer >= data.layers
+        ) end
+        else begin + (((layer * data.depth + z) * height + y) * width + x) * texelBytes
+      (
+        data.pixels.copy(
+          offset = offset,
+          pointee = imageType._1,
+          storageClass = StorageClass.Image,
+          bounds = Some(begin -> end)
+        ),
+        data.format
+      )
+    }
+
+  // Sampler ABI: min/mag filters, U/V address modes, unnormalized, compare enable/op,
+  // border color, float bias/min/max LOD, mipmap mode, then W address mode.
+  // The trailing W word is only required for volume sampling; older 2D clients retain 48-byte packets.
+  private def sampleTexel(
+      memory: MemoryState,
+      image: Pointer,
+      format: Int,
+      width: Long,
+      x: Long,
+      y: Long
+  ): Memory.ReadResult[Array[Double]] = {
+    val pointer =
+      image.copy(offset =
+        image.offset + (y * width + x) * ImageTexelCodec.texelBytes(
+          format
+        ) + (if (format == ImageDescriptor.Format.D32SfloatS8Stencil) 4 else 0)
+      )
+    val components = imageWordComponents(format)
+    if (IntegerImageFormat(format).isDefined) {
+      val layout = IntegerImageFormat(format).get
+      readIntegerTexel(memory, pointer, layout).map(_.map(v => if (layout.signed) v.toInt.toDouble else v.toDouble))
+    } else if (NarrowImageFormat(format).isDefined) {
+      readNarrowTexel(memory, pointer, NarrowImageFormat(format).get)
+    } else if (NormalizedImageFormat(format).isDefined) {
+      readNormalizedTexel(memory, pointer, NormalizedImageFormat(format).get)
+    } else if (components != 0) {
+      (0 until components).foldLeft[Memory.ReadResult[Array[Double]]](Right(Array(0.0, 0.0, 0.0, 1.0))) {
+        (result, lane) =>
+          for {
+            data <- result
+            word <- memory.readScalar(pointer.copy(offset = pointer.offset + lane * 4), 4)
+          } yield {
+            data(lane) =
+              if (imageIsInteger(format)) word.toDouble else IEEE754.binary32ToFloat(Binary32.low(word)).toDouble;
+            data
+          }
+      }
+    } else memory.readScalar(
+      pointer,
+      if (format == ImageDescriptor.Format.D16Unorm) 2
+      else if (format == ImageDescriptor.Format.S8Uint || format == ImageDescriptor.Format.D32SfloatS8Stencil)
+        1
+      else 4
+    ).map {
+      word =>
+        if (format == ImageDescriptor.Format.D16Unorm) Array(word.toDouble / 65535.0, 0.0, 0.0, 1.0)
+        else if (
+          format == ImageFormat.R32ui || format == ImageDescriptor.Format.S8Uint || format == ImageDescriptor.Format.D32SfloatS8Stencil
+        ) Array(word.toDouble, 0.0, 0.0, 1.0)
+        else Array.tabulate(4) { lane =>
+          val component = if (format == ImageDescriptor.Format.Bgra8Unorm && lane < 3) 2 - lane else lane
+          val value     = ((word >>> (component * 8)) & 255).toDouble
+          if (format == ImageFormat.Rgba8ui) value else value / 255.0
+        }
+    }
+  }
+  private def sampleAddress(value: Long, size: Long, mode: Int): Option[Long] = mode match {
+    case ImageDescriptor.AddressMode.Repeat         => Some(Math.floorMod(value, size))
+    case ImageDescriptor.AddressMode.MirroredRepeat =>
+      val wrapped = Math.floorMod(value, 2 * size); Some(if (wrapped >= size) 2 * size - 1 - wrapped else wrapped)
+    case ImageDescriptor.AddressMode.ClampToEdge       => Some(Math.max(0L, Math.min(size - 1, value)))
+    case ImageDescriptor.AddressMode.ClampToBorder     => Option.when(value >= 0 && value < size)(value)
+    case ImageDescriptor.AddressMode.MirrorClampToEdge =>
+      Some(Math.max(0L, Math.min(size - 1, if (value < 0) -value - 1 else value)))
+    case _ => None
+  }
+  private def sampleCompare(op: Int, reference: Double, depth: Double): Double = {
+    val pass = op match {
+      case ImageDescriptor.CompareOp.Never          => false
+      case ImageDescriptor.CompareOp.Less           => reference < depth
+      case ImageDescriptor.CompareOp.Equal          => reference == depth
+      case ImageDescriptor.CompareOp.LessOrEqual    => reference <= depth
+      case ImageDescriptor.CompareOp.Greater        => reference > depth
+      case ImageDescriptor.CompareOp.NotEqual       => reference != depth
+      case ImageDescriptor.CompareOp.GreaterOrEqual => reference >= depth
+      case ImageDescriptor.CompareOp.Always         => true
+      case _                                        => false
+    }
+    if (pass) 1.0 else 0.0
+  }
+  private val imageZeroOffset    = Array(0L, 0L, 0L)
+  private val imageGatherOffsets = Array((0L, 1L), (1L, 1L), (1L, 0L), (0L, 0L))
+
+  // ConstOffset is measured in texels at the selected level, and never moves
+  // the array layer. These bounds match VkPhysicalDeviceLimits.
+  private def imageConstOffset(
+      values: InvocationValues,
+      operand: Int,
+      dimensions: Int
+  ): Memory.ReadResult[Array[Long]] =
+    values.get(operand) match {
+      case Some(RuntimeValue.Bits(_, lanes)) if lanes.length == dimensions =>
+        val offset = lanes.map(_.toInt.toLong)
+        Either.cond(
+          offset.forall(v => v >= -8 && v <= 7),
+          offset,
+          Fault.InvalidTask("image ConstOffset exceeds device limits")
+        )
+      case _ => Left(Fault.InvalidTask("image ConstOffset dimensionality does not match"))
+    }
+
+  private def imageGradientLod(
+      level: ImageLevel,
+      direction: Array[Double],
+      dx: Array[Double],
+      dy: Array[Double],
+      dimensions: Int,
+      projection: Option[CubeMap.Projection],
+      unnormalized: Boolean
+  ): Double = {
+    val width    = if (unnormalized) 1.0 else level.width.toDouble
+    val height   = if (unnormalized) 1.0 else level.height.toDouble
+    val (gx, gy) = projection match {
+      case Some(p) =>
+        val x = CubeMap.gradient(p.face, direction, dx); val y = CubeMap.gradient(p.face, direction, dy)
+        (Array(x._1, x._2), Array(y._1, y._2))
+      case None => (dx, dy)
+    }
+    val rho = if (dimensions == 1) Math.max(Math.abs(gx(0) * width), Math.abs(gy(0) * width))
+    else if (dimensions == 3 && projection.isEmpty) {
+      val depth = if (unnormalized) 1.0 else level.depth.toDouble
+      Math.max(
+        Math.hypot(Math.hypot(gx(0) * width, gx(1) * height), gx(2) * depth),
+        Math.hypot(Math.hypot(gy(0) * width, gy(1) * height), gy(2) * depth)
+      )
+    } else Math.max(Math.hypot(gx(0) * width, gx(1) * height), Math.hypot(gy(0) * width, gy(1) * height))
+    Math.log(rho) / Math.log(2.0)
+  }
+
+  private def sampleImage(
+      memory: MemoryState,
+      values: InvocationValues,
+      image: Pointer,
+      coords: Array[Long],
+      dref: Option[Double],
+      explicit: Boolean,
+      mods: Option[Operand],
+      gradients: Option[(Array[Double], Array[Double])],
+      dimensions: Int,
+      arrayed: Boolean,
+      cube: Boolean,
+      gather: Option[Int],
+      vulkan: Boolean
+  ): Memory.ReadResult[Array[Long]] = {
+    def float(word: Long): Double = IEEE754.binary32ToFloat(Binary32.low(word)).toDouble
+    val volume                    = dimensions == 3 && !cube
+    for {
+      sampler <- image.sampler.toRight(Fault.InvalidTask("sample operation has no sampler"))
+      words   <-
+        (0 until (if (volume) 13 else 12)).foldLeft[Memory.ReadResult[Array[Long]]](Right(Array.ofDim[Long](if (volume)
+          13
+        else 12))) { (result, index) =>
+          for {
+            data <- result
+            word <- memory.readScalar(sampler.copy(offset = sampler.offset + index * 4), 4)
+          } yield { data(index) = word; data }
+        }
+      formatWord <- memory.readScalar(image.copy(offset = image.offset + 12), 4)
+      format = (formatWord & ImageDescriptor.Flags.FormatMask).toInt
+      levels <- imageLevels(memory, image)
+      _      <- Either.cond(
+        coords.length >= dimensions + (if (arrayed) 1 else 0) && coords.take(dimensions + (if (arrayed) 1
+                                                                                           else 0)).forall(w =>
+          java.lang.Double.isFinite(float(w))
+        ),
+        (),
+        Fault.InvalidTask("invalid sample coordinate dimensionality")
+      )
+      direction  = coords.take(dimensions).map(float(_))
+      projection = if (cube) Some(CubeMap.project(direction(0), direction(1), direction(2))) else None
+      _ <- Either.cond(
+        !cube || words(ImageDescriptor.SamplerWord.Unnormalized) == 0,
+        (),
+        Fault.InvalidTask("cube sampling requires normalized coordinates")
+      )
+      operands    = mods.map(_.words.toVector.map(_.raw).toArray).getOrElse(Array(0))
+      mask        = operands.headOption.getOrElse(-1)
+      lodMask     = mask & (ImageOperands.Bias | ImageOperands.Lod | ImageOperands.Grad)
+      offsetIndex = 1 + (if (lodMask == ImageOperands.Grad) 2 else if (lodMask != 0) 1 else 0)
+      _ <- Either.cond(
+        if (gather.isDefined)
+          mask == 0 || mask == ImageOperands.ConstOffset || mask == ImageOperands.Offset || mask == ImageOperands.ConstOffsets
+        else
+          (mask & ~(ImageOperands.Bias | ImageOperands.Lod | ImageOperands.Grad | ImageOperands.ConstOffset)) == 0 && (lodMask == 0 || lodMask == ImageOperands.Bias || lodMask == ImageOperands.Lod || lodMask == ImageOperands.Grad),
+        (),
+        Fault.Unsupported("unsupported sample/gather image operands")
+      )
+      _ <- Either.cond(
+        operands.length == offsetIndex + (if (
+                                            (mask & (ImageOperands.ConstOffset | ImageOperands.Offset | ImageOperands.ConstOffsets)) != 0
+                                          ) 1
+                                          else 0),
+        (),
+        Fault.InvalidTask("invalid sample operand count")
+      )
+      offset <- if ((mask & (ImageOperands.ConstOffset | ImageOperands.Offset)) == 0) Right(imageZeroOffset)
+      else if (cube) Left(Fault.InvalidTask("cube sampling does not allow ConstOffset"))
+      else imageConstOffset(values, operands(offsetIndex), dimensions)
+      gatherOffsets <- if ((mask & ImageOperands.ConstOffsets) == 0) Right(imageGatherOffsets)
+      else if (cube) Left(Fault.InvalidTask("cube gather does not allow ConstOffsets"))
+      else values.get(operands(offsetIndex)) match {
+        case Some(RuntimeValue.Bits(_, lanes)) if lanes.length == 8 =>
+          val offsets = lanes.map(_.toInt.toLong)
+          Either.cond(
+            offsets.forall(v => v >= -8 && v <= 7),
+            Array.tabulate(4)(i => (offsets(i * 2), offsets(i * 2 + 1))),
+            Fault.InvalidTask("gather ConstOffsets exceeds device limits")
+          )
+        case _ => Left(Fault.InvalidTask("gather ConstOffsets requires four two-dimensional offsets"))
+      }
+      lod <- if (lodMask == ImageOperands.Bias || lodMask == ImageOperands.Lod) {
+        values.get(operands(1)) match {
+          case Some(RuntimeValue.Bits(_, lanes)) if lanes.length == 1 => Right(float(lanes(0)))
+          case _ => Left(Fault.InvalidTask("sample LOD is not scalar"))
+        }
+      } else Right(0.0)
+      resolvedGradients <- if (lodMask == ImageOperands.Grad) {
+        (values.get(operands(1)), values.get(operands(2))) match {
+          case (Some(RuntimeValue.Bits(_, dx)), Some(RuntimeValue.Bits(_, dy))) =>
+            Right(Some((dx.take(dimensions).map(float(_)), dy.take(dimensions).map(float(_)))))
+          case _ => Left(Fault.InvalidTask("sample gradients are not floating values"))
+        }
+      } else Right(gradients.map((dx, dy) => (dx.take(dimensions), dy.take(dimensions))))
+      _ <- Either.cond(
+        gather.isDefined || !explicit || lodMask == ImageOperands.Lod || lodMask == ImageOperands.Grad,
+        (),
+        Fault.Unsupported("explicit sampling requires Lod or Grad")
+      )
+      _ <- Either.cond(
+        gather.isDefined || explicit || gradients.nonEmpty || words(ImageDescriptor.SamplerWord.MinFilter) == words(
+          ImageDescriptor.SamplerWord.MagFilter
+        ) || float(words(ImageDescriptor.SamplerWord.MaxLod)) <= 0 || float(
+          words(ImageDescriptor.SamplerWord.MinLod)
+        ) > 0,
+        (),
+        Fault.Unsupported("implicit LOD with distinct min/mag filters needs fragment derivatives")
+      )
+      baseLod <- if (lodMask == ImageOperands.Lod) Right(lod)
+      else resolvedGradients match {
+        case None           => Right(0.0)
+        case Some((dx, dy)) => imageLevel(memory, image, 0).flatMap { level =>
+            Either.cond(
+              dx.length == dimensions && dy.length == dimensions,
+              (),
+              Fault.InvalidTask("sample gradient dimensionality does not match")
+            ).map { _ =>
+              imageGradientLod(
+                level,
+                direction,
+                dx,
+                dy,
+                dimensions,
+                projection,
+                words(ImageDescriptor.SamplerWord.Unnormalized) != 0
+              )
+            }
+          }
+      }
+      // Sampler bias applies to both explicit and implicit LOD. Shader Bias is
+      // combined with it before the device's maxSamplerLodBias clamp.
+      bias = Math.max(
+        -16.0,
+        Math.min(
+          16.0,
+          float(words(ImageDescriptor.SamplerWord.MipLodBias)) + (if (lodMask == ImageOperands.Bias) lod else 0.0)
+        )
+      )
+      lambda = Math.max(
+        float(words(ImageDescriptor.SamplerWord.MinLod)),
+        Math.min(float(words(ImageDescriptor.SamplerWord.MaxLod)), baseLod + bias)
+      )
+      filter = if (gather.isDefined) ImageDescriptor.Filter.Linear
+      else if (lambda > 0) words(ImageDescriptor.SamplerWord.MinFilter).toInt
+      else words(ImageDescriptor.SamplerWord.MagFilter).toInt
+      _ <- Either.cond(
+        filter == ImageDescriptor.Filter.Nearest || filter == ImageDescriptor.Filter.Linear,
+        (),
+        Fault.Unsupported("sample filter is not nearest or linear")
+      )
+      _ <- Either.cond(
+        gather.isDefined || filter == ImageDescriptor.Filter.Nearest || !imageIsInteger(format),
+        (),
+        Fault.InvalidTask("integer images require nearest filtering")
+      )
+      reference = dref.getOrElse(0.0)
+      _ <-
+        Either.cond(
+          vulkan || dref.isDefined == (words(ImageDescriptor.SamplerWord.CompareEnable) != 0),
+          (),
+          Fault.InvalidTask("depth comparison and sampler disagree")
+        )
+      _ <- Either.cond(
+        gather.isDefined || explicit || gradients.nonEmpty || levels == 1 || float(
+          words(ImageDescriptor.SamplerWord.MinLod)
+        ) == float(
+          words(ImageDescriptor.SamplerWord.MaxLod)
+        ) || float(words(ImageDescriptor.SamplerWord.MaxLod)) <= 0,
+        (),
+        Fault.Unsupported("implicit mip selection needs fragment derivatives")
+      )
+      result <- {
+        def atLevel(level: Int): Memory.ReadResult[Array[Double]] = imageLevel(memory, image, level).flatMap { data =>
+          val layerCount = if (cube) data.layers / 6 else data.layers
+          val layer      =
+            if (arrayed) Math.max(0L, Math.min(layerCount - 1, Math.rint(float(coords(dimensions))).toLong)) else 0L
+          def layerPixels(index: Long): Pointer =
+            data.pixels.copy(offset =
+              data.pixels.offset + index * data.width * data.height * ImageTexelCodec.texelBytes(format)
+            )
+          val sx =
+            projection.fold(float(coords(0)))(_.s) * (if (words(ImageDescriptor.SamplerWord.Unnormalized) != 0) 1.0
+                                                      else data.width.toDouble) + offset(0)
+          val sy = if (dimensions == 1) 0.5
+          else projection.fold(float(coords(1)))(_.t) * (if (words(ImageDescriptor.SamplerWord.Unnormalized) != 0) 1.0
+                                                         else data.height.toDouble) + offset(1)
+          val sz = if (volume) float(coords(2)) * (if (words(ImageDescriptor.SamplerWord.Unnormalized) != 0) 1.0
+                                                   else data.depth.toDouble) + offset(2)
+          else 0.5
+          val components =
+            if (
+              format == ImageDescriptor.Format.D16Unorm || format == ImageDescriptor.Format.S8Uint || format == ImageDescriptor.Format.D32SfloatS8Stencil
+            ) 1
+            else IntegerImageFormat(
+              format
+            ).fold(NormalizedImageFormat(format).fold(
+              NarrowImageFormat(format).fold(imageWordComponents(format))(_.components)
+            )(_.components))(_.components) match {
+              case 0     => 4
+              case count => count
+            }
+          val border = Array.tabulate(4) { lane =>
+            if (lane >= components) { if (lane == 3) 1.0 else 0.0 }
+            else if (
+              words(
+                ImageDescriptor.SamplerWord.BorderColor
+              ) >= ImageDescriptor.BorderColor.FloatOpaqueWhite || (lane == 3 && words(
+                ImageDescriptor.SamplerWord.BorderColor
+              ) >= ImageDescriptor.BorderColor.FloatOpaqueBlack)
+            ) 1.0
+            else 0.0
+          }
+          def compare(data: Array[Double]): Array[Double] =
+            if (dref.isDefined) Array(sampleCompare(
+              words(ImageDescriptor.SamplerWord.CompareOp).toInt,
+              if (format == ImageDescriptor.Format.D16Unorm) Math.max(0.0, Math.min(1.0, reference)) else reference,
+              data(0)
+            ))
+            else data
+          def texel(x: Long, y: Long, z: Long): Memory.ReadResult[Array[Double]] = projection match {
+            case Some(p) =>
+              if (data.width != data.height || data.layers < 6 || data.layers % 6 != 0)
+                Left(Fault.InvalidTask("cube image requires square faces in groups of six"))
+              else {
+                val neighbors = CubeMap.taps(p.face, x, y, data.width, filter == ImageDescriptor.Filter.Linear)
+                // Cube corners have no unique neighbor. Selecting the incident
+                // face is permitted and preserves integer and Dref gather values.
+                val taps = if (gather.isDefined) neighbors.take(1) else neighbors
+                taps.foldLeft[Memory.ReadResult[Array[Double]]](Right(Array.fill(if (dref.isDefined) 1 else 4)(0.0))) {
+                  (result, tap) =>
+                    for {
+                      sum   <- result
+                      value <- sampleTexel(memory, layerPixels(layer * 6 + tap.face), format, data.width, tap.x, tap.y)
+                    } yield { val v = compare(value); Array.tabulate(sum.length)(i => sum(i) + v(i) / taps.size) }
+                }
+              }
+            case None =>
+              val fetched =
+                (
+                  sampleAddress(x, data.width, words(ImageDescriptor.SamplerWord.AddressU).toInt),
+                  sampleAddress(y, data.height, words(ImageDescriptor.SamplerWord.AddressV).toInt),
+                  if (volume) sampleAddress(z, data.depth, words(ImageDescriptor.SamplerWord.AddressW).toInt)
+                  else Some(0L)
+                ) match {
+                  case (Some(ix), Some(iy), Some(iz)) =>
+                    sampleTexel(memory, layerPixels(layer), format, data.width, ix, iz * data.height + iy)
+                  case _ => Right(border)
+                }
+              fetched.map(compare(_))
+          }
+          if (gather.isDefined) {
+            val x = Math.floor(sx - 0.5).toLong; val y = Math.floor(sy - 0.5).toLong
+            gatherOffsets.foldLeft[Memory.ReadResult[Array[Double]]](Right(Array.empty[Double])) { (result, delta) =>
+              for {
+                accumulated <- result
+                value       <- texel(x + delta._1, y + delta._2, 0)
+                mapped      <- if (dref.isEmpty) swizzleImage(memory, image, value) else Right(value)
+              } yield accumulated :+ mapped(gather.get)
+            }
+          } else if (filter == ImageDescriptor.Filter.Nearest)
+            texel(Math.floor(sx).toLong, Math.floor(sy).toLong, Math.floor(sz).toLong)
+          else {
+            val x  = Math.floor(sx - 0.5).toLong; val y = Math.floor(sy - 0.5).toLong
+            val fx = sx - 0.5 - x; val fy               = sy - 0.5 - y
+            def plane(z: Long): Memory.ReadResult[Array[Double]] = for {
+              a <- texel(x, y, z)
+              b <- texel(x + 1, y, z)
+              c <- texel(x, y + 1, z)
+              d <- texel(x + 1, y + 1, z)
+            } yield Array.tabulate(a.length)(i =>
+              (1 - fy) * ((1 - fx) * a(i) + fx * b(i)) + fy * ((1 - fx) * c(i) + fx * d(i))
+            )
+            if (!volume) plane(0)
+            else {
+              val z  = Math.floor(sz - 0.5).toLong
+              val fz = sz - 0.5 - z
+              for {
+                a <- plane(z)
+                b <- plane(z + 1)
+              } yield Array.tabulate(a.length)(i => (1 - fz) * a(i) + fz * b(i))
+            }
+          }
+        }
+        val selected = Math.max(0.0, Math.min(levels - 1.0, lambda))
+        if (gather.isDefined) atLevel(0)
+        else if (words(ImageDescriptor.SamplerWord.MipmapMode) == ImageDescriptor.MipmapMode.Nearest)
+          atLevel(Math.floor(selected + 0.5).toInt)
+        else {
+          val low      = Math.floor(selected).toInt
+          val fraction = selected - low
+          for {
+            a <- atLevel(low)
+            b <- atLevel(Math.min(low + 1, levels - 1))
+          } yield Array.tabulate(a.length)(i => if (fraction == 0) a(i) else a(i) * (1 - fraction) + b(i) * fraction)
+        }
+      }
+      swizzled <- if (dref.isEmpty && gather.isEmpty) swizzleImage(memory, image, result) else Right(result)
+    } yield swizzled.map(value =>
+      if (imageIsInteger(format) && dref.isEmpty) value.toLong & 0xffffffffL
+      else IEEE754.floatToBinary32(value.toFloat).raw.toLong & 0xffffffffL
+    )
+  }
+  private def executeDerivative(
+      program: Program,
+      execution: InvocationState,
+      instruction: Instruction
+  ): Memory.ReadResult[Unit] = {
+    val (resultType, destination, operand, operation) = instruction match {
+      case Instruction.DPdx(t, d, v)         => (t, d, v, 0)
+      case Instruction.DPdy(t, d, v)         => (t, d, v, 1)
+      case Instruction.Fwidth(t, d, v)       => (t, d, v, 2)
+      case Instruction.DPdxFine(t, d, v)     => (t, d, v, 0)
+      case Instruction.DPdyFine(t, d, v)     => (t, d, v, 1)
+      case Instruction.FwidthFine(t, d, v)   => (t, d, v, 2)
+      case Instruction.DPdxCoarse(t, d, v)   => (t, d, v, 3)
+      case Instruction.DPdyCoarse(t, d, v)   => (t, d, v, 4)
+      case Instruction.FwidthCoarse(t, d, v) => (t, d, v, 5)
+      case _                                 => throw IllegalArgumentException("not a derivative instruction")
+    }
+    for {
+      _ <- Either.cond(
+        execution.fragmentQuad,
+        (),
+        Fault.InvalidTask("fragment derivatives require an aligned four-lane quad")
+      )
+      shape <-
+        floatingShape(program, id(resultType)).toRight(Fault.InvalidTask("derivative result is not floating point"))
+      _    <- Either.cond(shape._1.raw == 32, (), Fault.Unsupported("derivatives currently require 32-bit components"))
+      data <- bits(execution.values, operand)
+      _    <- Either.cond(data.length == shape._2, (), Fault.InvalidTask("derivative operand shape mismatch"))
+    } yield execution.quadRequest = Some(QuadRequest(
+      execution.currentFunction.id,
+      execution.pc,
+      id(resultType),
+      id(destination),
+      data,
+      operation
+    ))
+  }
+
+  private def executeSampling(
+      program: Program,
+      execution: InvocationState,
+      memory: MemoryState,
+      instruction: Instruction
+  ): Memory.ReadResult[Unit] = {
+    val values = execution.values
+    def sample(
+        resultType: Operand,
+        dest: Operand,
+        source: Operand,
+        coordinate: Operand,
+        dref: Option[Operand],
+        explicit: Boolean,
+        mods: Option[Operand],
+        projective: Boolean = false,
+        gatherComponent: Option[Operand] = None,
+        gatherDepth: Boolean = false
+    ): Memory.ReadResult[Unit] = for {
+      image      <- address(values, source)
+      dimensions <- program.layout.runtimeType(image.pointee) match {
+        case Some(RuntimeType.Texture(_, dimensions, false, arrayed)) => Right((dimensions, arrayed, false))
+        case Some(RuntimeType.CubeTexture(_, arrayed))                => Right((3, arrayed, true))
+        case _ => Left(Fault.InvalidTask("sampling requires an image view, not a texel buffer"))
+      }
+      raw <- bits(values, coordinate)
+      _   <- Either.cond(
+        !projective || (!dimensions._2 && !dimensions._3 && raw.length > dimensions._1),
+        (),
+        Fault.InvalidTask("projective sampling requires non-array 1D, 2D or 3D coordinates and q")
+      )
+      q = if (projective) IEEE754.binary32ToFloat(Binary32.low(raw(dimensions._1))) else 1.0f
+      // Implicit derivatives are taken after projection. Explicit Grad values
+      // already describe the projected coordinates and pass through unchanged.
+      coords = if (projective) raw.take(dimensions._1).map(w =>
+        IEEE754.floatToBinary32(IEEE754.binary32ToFloat(Binary32.low(w)) / q).raw.toLong & 0xffffffffL
+      )
+      else raw
+      reference <- dref match {
+        case Some(value) =>
+          scalar(values, value).map(w => Some((IEEE754.binary32ToFloat(Binary32.low(w)) / q).toDouble))
+        case None => Right(None)
+      }
+      gather <- if (gatherDepth) Right(Some(0))
+      else gatherComponent match {
+        case None            => Right(None)
+        case Some(component) => scalar(values, component).flatMap(c =>
+            Either.cond(c >= 0 && c <= 3, Some(c.toInt), Fault.InvalidTask("gather component must be in [0,3]"))
+          )
+      }
+      _ <- Either.cond(
+        gather.isEmpty || dimensions._1 == 2 || dimensions._3,
+        (),
+        Fault.InvalidTask("gather requires a 2D or cube image")
+      )
+      _ <- if (gather.isEmpty && !explicit && execution.fragmentQuad && execution.gradients.isEmpty) {
+        execution.quadRequest = Some(QuadRequest(
+          execution.currentFunction.id,
+          execution.pc,
+          id(resultType),
+          id(dest),
+          coords,
+          6
+        ))
+        Right(())
+      } else sampleImage(
+        memory,
+        values,
+        image,
+        coords,
+        reference,
+        explicit,
+        mods,
+        execution.gradients,
+        dimensions._1,
+        dimensions._2,
+        dimensions._3,
+        gather,
+        program.vulkanEntries.nonEmpty
+      ).map { result =>
+        execution.gradients = None
+        values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
+      }
+    } yield ()
+    val result = instruction match {
+      case Instruction.SampledImage(resultType, dest, source, sampler) =>
+        for {
+          image <- address(values, source)
+          state <- address(values, sampler)
+        } yield values.update(id(dest), RuntimeValue.Address(id(resultType), image.copy(sampler = Some(state))))
+      case Instruction.Image(resultType, dest, source) => address(values, source).map(image =>
+          values.update(id(dest), RuntimeValue.Address(id(resultType), image.copy(sampler = None)))
+        )
+      case Instruction.ImageSampleImplicitLod(t, d, i, c, m)        => sample(t, d, i, c, None, false, m)
+      case Instruction.ImageSampleExplicitLod(t, d, i, c, m)        => sample(t, d, i, c, None, true, Some(m))
+      case Instruction.ImageSampleDrefImplicitLod(t, d, i, c, r, m) => sample(t, d, i, c, Some(r), false, m)
+      case Instruction.ImageSampleDrefExplicitLod(t, d, i, c, r, m) => sample(t, d, i, c, Some(r), true, Some(m))
+      case Instruction.ImageSampleProjImplicitLod(t, d, i, c, m)    =>
+        sample(t, d, i, c, None, false, m, projective = true)
+      case Instruction.ImageSampleProjExplicitLod(t, d, i, c, m) =>
+        sample(t, d, i, c, None, true, Some(m), projective = true)
+      case Instruction.ImageSampleProjDrefImplicitLod(t, d, i, c, r, m) =>
+        sample(t, d, i, c, Some(r), false, m, projective = true)
+      case Instruction.ImageSampleProjDrefExplicitLod(t, d, i, c, r, m) =>
+        sample(t, d, i, c, Some(r), true, Some(m), projective = true)
+      case Instruction.ImageGather(t, d, i, c, component, m) =>
+        sample(t, d, i, c, None, false, m, gatherComponent = Some(component))
+      case Instruction.ImageDrefGather(t, d, i, c, r, m) => sample(t, d, i, c, Some(r), false, m, gatherDepth = true)
+      case Instruction.ImageQueryLod(t, d, i, c)         =>
+        for {
+          coords     <- bits(values, c)
+          image      <- address(values, i)
+          dimensions <- program.layout.runtimeType(image.pointee) match {
+            case Some(RuntimeType.Texture(_, n, false, _)) => Right((n, false))
+            case Some(RuntimeType.CubeTexture(_, _))       => Right((3, true))
+            case _ => Left(Fault.InvalidTask("LOD query requires a sampled 1D, 2D, 3D or cube image"))
+          }
+          _ <- Either.cond(
+            coords.length >= dimensions._1,
+            (),
+            Fault.InvalidTask("LOD query coordinate shape does not match image")
+          )
+          _ <- if (execution.fragmentQuad && execution.gradients.isEmpty) {
+            execution.quadRequest =
+              Some(QuadRequest(execution.currentFunction.id, execution.pc, id(t), id(d), coords, 6))
+            Right(())
+          } else for {
+            sampler     <- image.sampler.toRight(Fault.InvalidTask("LOD query has no sampler"))
+            level       <- imageLevel(memory, image, 0)
+            levels      <- imageLevels(memory, image)
+            biasBits    <- memory.readScalar(sampler.copy(offset = sampler.offset + 32), 4)
+            minBits     <- memory.readScalar(sampler.copy(offset = sampler.offset + 36), 4)
+            maxBits     <- memory.readScalar(sampler.copy(offset = sampler.offset + 40), 4)
+            mipmap      <- memory.readScalar(sampler.copy(offset = sampler.offset + 44), 4)
+            resultShape <- floatingShape(program, id(t)).filter((w, n) => w.raw == 32 && n == 2)
+              .toRight(Fault.InvalidTask("LOD query result must be float32 vec2"))
+          } yield {
+            def float(bits: Long): Double = IEEE754.binary32ToFloat(Binary32.low(bits)).toDouble
+            val direction                 = coords.take(dimensions._1).map(float(_))
+            val projection                =
+              if (dimensions._2) Some(CubeMap.project(direction(0), direction(1), direction(2))) else None
+            val base = execution.gradients.fold(Double.NegativeInfinity) { case (dx, dy) =>
+              imageGradientLod(level, direction, dx, dy, dimensions._1, projection, false)
+            }
+            val lod     = base + Math.max(-16.0, Math.min(16.0, float(biasBits)))
+            val clamped = Math.max(0.0, Math.min(levels - 1.0, Math.max(float(minBits), Math.min(float(maxBits), lod))))
+            val selected = if (mipmap == ImageDescriptor.MipmapMode.Nearest)
+              Math.max(0.0, Math.ceil(clamped + 0.5) - 1.0)
+            else clamped
+            values.update(
+              id(d),
+              RuntimeValue.Bits(id(t), Array(selected, lod).map(v => doubleToFloating(resultShape._1, v)))
+            )
+            execution.gradients = None
+          }
+        } yield ()
+      case Instruction.ImageQueryLevels(t, d, i) =>
+        for {
+          image  <- address(values, i)
+          levels <- imageLevels(memory, image)
+        } yield values.update(id(d), RuntimeValue.Bits(id(t), Array(levels.toLong)))
+      case Instruction.ImageQuerySizeLod(t, d, i, lod) =>
+        for {
+          level      <- scalar(values, lod)
+          image      <- address(values, i)
+          dimensions <- program.layout.runtimeType(image.pointee) match {
+            case Some(RuntimeType.Texture(_, dimensions, false, arrayed)) => Right((dimensions, arrayed, false))
+            case Some(RuntimeType.CubeTexture(_, arrayed))                => Right((2, arrayed, true))
+            case _ => Left(Fault.InvalidTask("image mip size query requires a sampled image"))
+          }
+          levels <- imageLevels(memory, image)
+          bounded = if (program.vulkanEntries.nonEmpty) Math.max(0, Math.min(levels - 1, level.toInt)) else level.toInt
+          data <- imageLevel(memory, image, bounded)
+        } yield values.update(
+          id(d),
+          RuntimeValue.Bits(
+            id(t),
+            (if (dimensions._1 == 1) Array(data.width)
+             else if (dimensions._1 == 3) Array(data.width, data.height, data.depth)
+             else Array(data.width, data.height)) ++ (if (dimensions._2)
+                                                        Array(if (dimensions._3) data.layers / 6 else data.layers)
+                                                      else Array.empty[Long])
+          )
+        )
+      case Instruction.ImageQuerySamples(t, d, i) =>
+        for {
+          image <- address(values, i)
+          data  <- imageLevel(memory, image, 0)
+        } yield values.update(id(d), RuntimeValue.Bits(id(t), Array(data.samples.toLong)))
+      case Instruction.ImageFetch(t, d, i, c, mods) =>
+        for {
+          image     <- address(values, i)
+          imageType <- program.layout.runtimeType(image.pointee) match {
+            case Some(RuntimeType.Texture(_, dimensions, buffer, arrayed)) =>
+              Right((dimensions, buffer, false, arrayed))
+            case Some(RuntimeType.MultisampledTexture(_, arrayed)) => Right((2, false, true, arrayed))
+            case _ => Left(Fault.InvalidTask("texel fetch requires a sampled image"))
+          }
+          operands      = mods.map(_.words.toVector.map(_.raw).toArray).getOrElse(Array(0))
+          mask          = operands.headOption.getOrElse(-1)
+          selectionMask = if (imageType._3) ImageOperands.Sample else ImageOperands.Lod
+          hasSelection  = (mask & selectionMask) != 0
+          hasOffset     = (mask & ImageOperands.ConstOffset) != 0
+          _ <- Either.cond(
+            (mask & ~(selectionMask | (ImageOperands.SignExtend | ImageOperands.ZeroExtend) | (if (
+                                                                                                 imageType._2 || imageType._3
+                                                                                               ) 0
+                                                                                               else
+                                                                                                 ImageOperands.ConstOffset))) == 0 &&
+              (mask & (ImageOperands.SignExtend | ImageOperands.ZeroExtend)) != (ImageOperands.SignExtend | ImageOperands.ZeroExtend) &&
+              (!imageType._3 || hasSelection) && (!imageType._2 || (mask & ~(ImageOperands.SignExtend | ImageOperands.ZeroExtend)) == 0),
+            (),
+            Fault.Unsupported("texel fetch requires matching Lod or Sample with optional ConstOffset")
+          )
+          _ <- Either.cond(
+            operands.length == 1 + (if (hasSelection) 1 else 0) + (if (hasOffset) 1 else 0),
+            (),
+            Fault.InvalidTask("invalid texel fetch operand count")
+          )
+          operand <- if (!hasSelection) Right(0)
+          else values.get(operands(1)) match {
+            case Some(RuntimeValue.Bits(_, lanes)) if lanes.length == 1 => Right(lanes(0).toInt)
+            case _ => Left(Fault.InvalidTask("texel fetch LOD or sample is not scalar"))
+          }
+          offset <- if (!hasOffset) Right(imageZeroOffset)
+          else imageConstOffset(values, operands(if (hasSelection) 2 else 1), imageType._1)
+          data <- imageLevel(memory, image, if (imageType._3) 0 else operand, texelBuffer = imageType._2)
+          _    <- Either.cond(
+            imageType._3 || data.samples == 1,
+            (),
+            Fault.InvalidTask("multisample image needs a multisampled texture type")
+          )
+          coords <- bits(values, c)
+          _      <- Either.cond(
+            coords.length == imageType._1 + (if (imageType._4) 1 else 0),
+            (),
+            Fault.InvalidTask("texel fetch coordinate dimensionality does not match")
+          )
+          x      = coords(0).toInt.toLong + offset(0)
+          y      = if (imageType._1 == 1) 0L else coords(1).toInt.toLong + offset(1)
+          z      = if (imageType._1 == 3) coords(2).toInt.toLong + offset(2) else 0L
+          sample = if (imageType._3) operand else 0
+          layer  = if (imageType._4) coords(imageType._1).toInt.toLong else 0L
+          texel <-
+            if (
+              x < 0 || y < 0 || x >= data.width || y >= data.height || z < 0 || z >= data.depth || sample < 0 || sample >= data.samples || layer < 0 || layer >= data.layers
+            )
+              Right(Array.fill(4)(0.0))
+            else sampleTexel(
+              memory,
+              data.pixels,
+              data.format,
+              data.width * data.samples,
+              x * data.samples + sample,
+              (layer * data.depth + z) * data.height + y
+            )
+          swizzled <- swizzleImage(memory, image, texel)
+        } yield values.update(
+          id(d),
+          RuntimeValue.Bits(
+            id(t),
+            swizzled.map(v =>
+              if (imageIsInteger(data.format)) v.toLong & 0xffffffffL
+              else IEEE754.floatToBinary32(v.toFloat).raw.toLong & 0xffffffffL
+            )
+          )
+        )
+      case _ => Left(Fault.Unsupported("sampled image instruction is not implemented"))
+    }
+    result.map(_ => if (execution.quadRequest.isEmpty) execution.pc += 1)
+  }
+
+  private def readInputAttachment(
+      program: Program,
+      memory: MemoryState,
+      values: InvocationValues,
+      image: Operand,
+      coordinate: Operand,
+      mods: Option[Operand]
+  ): Memory.ReadResult[Array[Long]] = for {
+    source    <- address(values, image)
+    imageType <- program.layout.runtimeType(source.pointee) match {
+      case Some(RuntimeType.InputAttachment(component, multisampled)) => Right(component -> multisampled)
+      case _ => Left(Fault.InvalidTask("subpass read requires an input attachment"))
+    }
+    data <- imageLevel(memory, source, 0)
+    _    <-
+      Either.cond(imageType._2 == (data.samples > 1), (), Fault.InvalidTask("input attachment sample count mismatch"))
+    coord <- bits(values, coordinate)
+    _ <- Either.cond(coord.length == 2, (), Fault.InvalidTask("input attachment coordinates require two components"))
+    position <- program.builtins.view.collectFirst {
+      case (variable, 15) if values.get(variable).exists { case RuntimeValue.Address(_, _) => true; case _ => false } =>
+        variable
+    }.flatMap(v => values.get(v)) match {
+      case Some(RuntimeValue.Address(_, pointer)) => Right(pointer)
+      case _ => Left(Fault.InvalidTask("input attachment requires a fragment position record"))
+    }
+    px     <- memory.readScalar(position, 4)
+    py     <- memory.readScalar(position.copy(offset = position.offset + 4), 4)
+    sample <- mods match {
+      case Some(m)
+          if imageType._2 && m.words.length == 2 && (m.words.head.raw & ~(ImageOperands.SignExtend | ImageOperands.ZeroExtend)) == ImageOperands.Sample &&
+            (m.words.head.raw & (ImageOperands.SignExtend | ImageOperands.ZeroExtend)) != (ImageOperands.SignExtend | ImageOperands.ZeroExtend) =>
+        values.get(m.words.apply(1).raw) match {
+          case Some(RuntimeValue.Bits(_, lanes)) if lanes.length == 1 => Right(lanes(0).toInt)
+          case _ => Left(Fault.InvalidTask("input attachment sample index is not scalar"))
+        }
+      case None if !imageType._2 => Right(0)
+      case Some(m)
+          if !imageType._2 && m.words.length == 1 &&
+            (m.words.head.raw == 0 || m.words.head.raw == ImageOperands.SignExtend || m.words.head.raw == ImageOperands.ZeroExtend) =>
+        Right(0)
+      case _ => Left(Fault.Unsupported("input attachment operands require a sample index only for multisampled images"))
+    }
+    x = Math.floor(IEEE754.binary32ToFloat(Binary32.low(px)).toDouble).toLong + coord(0).toInt
+    y = Math.floor(IEEE754.binary32ToFloat(Binary32.low(py)).toDouble).toLong + coord(1).toInt
+    texel <- if (x < 0 || y < 0 || x >= data.width || y >= data.height || sample < 0 || sample >= data.samples)
+      Right(Array.fill(4)(0.0))
+    else sampleTexel(memory, data.pixels, data.format, data.width * data.samples, x * data.samples + sample, y)
+  } yield
+    if (imageIsInteger(data.format)) texel.map(_.toLong & 0xffffffffL)
+    else texel.map(x => IEEE754.floatToBinary32(x.toFloat).raw.toLong & 0xffffffffL)
+
+  private def executeImage(
+      program: Program,
+      execution: InvocationState,
+      memory: MemoryState,
+      instruction: Instruction
+  ): Memory.ReadResult[Unit] = {
+    val values = execution.values
+    val result = instruction match {
+      case Instruction.ImageRead(resultType, dest, image, coordinate, mods)
+          if address(values, image).toOption.exists(p =>
+            program.layout.runtimeType(p.pointee).exists {
+              case RuntimeType.InputAttachment(_, _) => true; case _ => false
+            }
+          ) =>
+        readInputAttachment(program, memory, values, image, coordinate, mods)
+          .map(lanes => values.update(id(dest), RuntimeValue.Bits(id(resultType), lanes)))
+
+      case Instruction.ImageRead(resultType, dest, image, coordinate, mods) =>
+        for {
+          _ <- Either.cond(
+            mods.forall(m =>
+              m.words.length == 1 && (unsigned(m) == 0L || unsigned(m) == ImageOperands.SignExtend || unsigned(
+                m
+              ) == ImageOperands.ZeroExtend)
+            ),
+            (),
+            Fault.Unsupported("unsupported storage image read operands")
+          )
+          texel <- imageTexel(program, memory, values, image, coordinate)
+          lanes <- {
+            val (pointer, format) = texel
+            val valid             = pointer.bounds.exists { case (_, end) => pointer.offset < end }
+            val components        = imageWordComponents(format)
+            if (IntegerImageFormat(format).isDefined)
+              readIntegerTexel(memory, pointer, IntegerImageFormat(format).get, valid)
+            else if (NarrowImageFormat(format).isDefined)
+              readNarrowTexel(memory, pointer, NarrowImageFormat(format).get, valid).map(_.map(value =>
+                IEEE754.floatToBinary32(value.toFloat).raw.toLong & 0xffffffffL
+              ))
+            else if (NormalizedImageFormat(format).isDefined)
+              readNormalizedTexel(memory, pointer, NormalizedImageFormat(format).get, valid).map(_.map(value =>
+                IEEE754.floatToBinary32(value.toFloat).raw.toLong & 0xffffffffL
+              ))
+            else if (components != 0) {
+              val initial = Array(0L, 0L, 0L, if (valid) if (imageIsInteger(format)) 1L else 0x3f800000L else 0L)
+              (0 until components).foldLeft[Memory.ReadResult[Array[Long]]](Right(initial)) { (result, lane) =>
+                for {
+                  data <- result
+                  word <- memory.readScalar(pointer.copy(offset = pointer.offset + lane * 4), 4)
+                } yield { data(lane) = word; data }
+              }
+            } else memory.readScalar(pointer, 4).map { value =>
+              if (format == ImageFormat.Rgba8) Array.tabulate(4)(lane =>
+                IEEE754.floatToBinary32(((value >>> (lane * 8)) & 255L).toFloat / 255.0f).raw.toLong
+              )
+              else if (format == ImageFormat.Rgba8ui) Array.tabulate(4)(lane => (value >>> (lane * 8)) & 255L)
+              else Array(value, 0L, 0L, if (valid) 1L else 0L)
+            }
+          }
+        } yield values.update(id(dest), RuntimeValue.Bits(id(resultType), lanes))
+      case Instruction.ImageWrite(image, coordinate, texel, mods) =>
+        for {
+          _ <- Either.cond(
+            mods.forall(m =>
+              m.words.length == 1 && (unsigned(m) == 0L || unsigned(m) == ImageOperands.SignExtend || unsigned(
+                m
+              ) == ImageOperands.ZeroExtend)
+            ),
+            (),
+            Fault.Unsupported("unsupported storage image write operands")
+          )
+          target <- imageTexel(program, memory, values, image, coordinate)
+          lanes  <- bits(values, texel)
+          _      <- Either.cond(lanes.length == 4, (), Fault.InvalidTask("image texel requires four components"))
+          _      <- if (IntegerImageFormat(target._2).isDefined) {
+            val layout = IntegerImageFormat(target._2).get
+            if (layout.packed) memory.writeScalar(target._1, layout.encodePacked(lanes), 4)
+            else (0 until layout.components).foldLeft[Memory.ReadResult[Unit]](Right(())) { (result, lane) =>
+              result.flatMap(_ =>
+                memory.writeScalar(
+                  target._1.copy(offset = target._1.offset + lane * layout.componentBytes.raw),
+                  layout.encode(lanes(lane)),
+                  layout.componentBytes
+                )
+              )
+            }
+          } else if (NarrowImageFormat(target._2).isDefined) {
+            val layout = NarrowImageFormat(target._2).get
+            val floats = lanes.map(v => IEEE754.binary32ToFloat(Binary32.low(v)).toDouble)
+            if (layout.encoding != ImageFormats.NarrowEncoding.Half)
+              memory.writeScalar(
+                target._1,
+                layout.encodePacked(floats),
+                layout.texelBytes
+              )
+            else (0 until layout.components).foldLeft[Memory.ReadResult[Unit]](Right(())) { (result, lane) =>
+              result.flatMap(_ =>
+                memory.writeScalar(
+                  target._1.copy(offset = target._1.offset + layout.offset(lane), pointee = target._1.pointee),
+                  layout.encodeLane(floats(lane), lane),
+                  2
+                )
+              )
+            }
+          } else if (NormalizedImageFormat(target._2).isDefined) {
+            val layout = NormalizedImageFormat(target._2).get
+            (0 until layout.components).foldLeft[Memory.ReadResult[Unit]](Right(())) { (result, lane) =>
+              result.flatMap(_ =>
+                memory.writeScalar(
+                  target._1.copy(offset = target._1.offset + layout.channel(lane)),
+                  layout.encode(IEEE754.binary32ToFloat(Binary32.low(lanes(lane))).toDouble, lane),
+                  1
+                )
+              )
+            }
+          } else if (imageWordComponents(target._2) != 0)
+            (0 until imageWordComponents(target._2)).foldLeft[Memory.ReadResult[Unit]](Right(())) { (result, lane) =>
+              result.flatMap(_ =>
+                memory.writeScalar(
+                  target._1.copy(offset = target._1.offset + lane * 4),
+                  lanes(lane),
+                  4
+                )
+              )
+            }
+          else memory.writeScalar(target._1, lanes(0), 4)
+        } yield ()
+      case Instruction.ImageTexelPointer(resultType, dest, image, coordinate, sample) =>
+        for {
+          sampleIndex <- scalar(values, sample)
+          _           <- Either.cond(sampleIndex == 0, (), Fault.InvalidTask("storage image has only sample zero"))
+          target      <- imageTexel(program, memory, values, image, coordinate)
+          _           <- Either.cond(
+            target._2 == 33 || target._2 == 24,
+            (),
+            Fault.Unsupported("image atomics require R32ui or R32i")
+          )
+        } yield values.update(id(dest), RuntimeValue.Address(id(resultType), target._1))
+      case Instruction.ImageQuerySize(resultType, dest, image) =>
+        for {
+          pointer   <- address(values, image)
+          imageType <- program.layout.runtimeType(pointer.pointee) match {
+            case Some(RuntimeType.StorageImage(_, format, dimensions, buffer, arrayed, cube)) =>
+              Right((format, dimensions, buffer, arrayed, cube))
+            case Some(RuntimeType.Texture(_, 1, true, false))      => Right((-1, 1, true, false, false))
+            case Some(RuntimeType.MultisampledTexture(_, arrayed)) => Right((-1, 2, false, arrayed, false))
+            case _ => Left(Fault.InvalidTask("image size query requires a storage image or texel buffer"))
+          }
+          shape <-
+            imageLevel(memory, pointer, 0, if (program.vulkanEntries.nonEmpty) -1 else imageType._1, imageType._3)
+        } yield values.update(
+          id(dest),
+          RuntimeValue.Bits(
+            id(resultType),
+            (if (imageType._2 == 1) Array(shape.width)
+             else if (imageType._2 == 3) Array(shape.width, shape.height, shape.depth)
+             else Array(shape.width, shape.height)) ++ (if (imageType._4)
+                                                          Array(if (imageType._5) shape.layers / 6 else shape.layers)
+                                                        else Array.empty[Long])
+          )
+        )
+      case _ => Left(Fault.Unsupported(s"${instruction.opcode} image execution is not implemented"))
+    }
+    result.map(_ => execution.pc += 1)
+  }
+
   // Composite operations scan variable operands and retain the first validation failure.
   @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def executeComposite(
@@ -1037,6 +2533,36 @@ private object VMInterpreter {
         accessChain(program, values, memory, resultType, dest, base, Some(element), indexes) match {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
+        }
+      case Instruction.ArrayLength(resultType, dest, structure, arrayMember) =>
+        val result = values.get(id(structure)) match {
+          case Some(RuntimeValue.Address(_, pointer)) => program.layout.runtimeType(pointer.pointee) match {
+              case Some(RuntimeType.Structure(members)) =>
+                val member = unsigned(arrayMember).toInt
+                if (member < 0 || member >= members.size)
+                  Left(Fault.InvalidTask("OpArrayLength member is outside its structure"))
+                else program.layout.runtimeType(members(member)) match {
+                  case Some(RuntimeType.Array(element, 0)) =>
+                    val stride = program.arrayStrides.getOrElse(members(member), program.layout.typeSize(element))
+                    pointer.bounds.toRight(Fault.InvalidTask("OpArrayLength requires a bounded descriptor")).flatMap {
+                      case (_, end) =>
+                        val offset = Math.addExact(
+                          pointer.offset,
+                          program.layout.structMemberOffset(pointer.pointee, members, member).toLong
+                        )
+                        if (stride <= 0 || offset > end)
+                          Left(Fault.InvalidTask("OpArrayLength array is outside its descriptor"))
+                        else Right((end - offset) / stride)
+                    }
+                  case _ => Left(Fault.InvalidTask("OpArrayLength requires a runtime array member"))
+                }
+              case _ => Left(Fault.InvalidTask("OpArrayLength requires a structure pointer"))
+            }
+          case _ => Left(Fault.InvalidTask("OpArrayLength requires a pointer"))
+        }
+        result match {
+          case Left(error)   => return Left(error)
+          case Right(length) => values.updateScalar(id(dest), id(resultType), length); execution.pc += 1
         }
       case Instruction.AccessChain(resultType, dest, base, indexes) =>
         accessChain(program, values, memory, resultType, dest, base, None, indexes) match {
@@ -1289,6 +2815,19 @@ private object VMInterpreter {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
+      case Instruction.QuantizeToF16(resultType, dest, source) =>
+        values.get(id(source)) match {
+          case Some(RuntimeValue.Bits(t, lanes))
+              if t == id(resultType) &&
+                floatingShape(program, t).exists { case (width, count) =>
+                  width.raw == 32 && count == lanes.length
+                } =>
+            values.update(id(dest), RuntimeValue.Bits(t, lanes.map(quantizeToF16)))
+            execution.pc += 1
+          case Some(_) =>
+            return Left(Fault.InvalidTask("OpQuantizeToF16 requires matching float32 scalar or vector types"))
+          case None => return Left(undefined(source))
+        }
       case Instruction.FConvert(resultType, dest, source) =>
         convertFloating(program, values, resultType, dest, source) match {
           case Left(error) => return Left(error)
@@ -1302,6 +2841,13 @@ private object VMInterpreter {
             execution.pc += 1
         }
       case Instruction.CopyObject(resultType, dest, source) =>
+        values.get(id(source)) match {
+          case Some(value) =>
+            values.update(id(dest), retag(value, id(resultType)))
+            execution.pc += 1
+          case None => return Left(undefined(source))
+        }
+      case Instruction.CopyLogical(resultType, dest, source) =>
         values.get(id(source)) match {
           case Some(value) =>
             values.update(id(dest), retag(value, id(resultType)))
@@ -1325,6 +2871,64 @@ private object VMInterpreter {
   }
 
   // Integer dispatch exits immediately when operand or type validation fails.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
+  private def executeBitField(
+      program: Program,
+      execution: InvocationState,
+      instruction: Instruction
+  ): Either[Fault, Unit] = {
+    val values                                         = execution.values
+    val (t, d, base, insert, offset, count, operation) = instruction match {
+      case Instruction.BitFieldUExtract(t, d, b, o, c)  => (t, d, b, None, Some(o), Some(c), 0)
+      case Instruction.BitFieldSExtract(t, d, b, o, c)  => (t, d, b, None, Some(o), Some(c), 1)
+      case Instruction.BitFieldInsert(t, d, b, i, o, c) => (t, d, b, Some(i), Some(o), Some(c), 2)
+      case Instruction.BitReverse(t, d, b)              => (t, d, b, None, None, None, 3)
+      case _                                            => return Left(Fault.Unsupported("unknown bit-field operation"))
+    }
+    for {
+      shape  <- integerShape(program, id(t)).toRight(Fault.InvalidTask("bit-field result requires integer components"))
+      source <- values.get(id(base)) match {
+        case Some(RuntimeValue.Bits(bt, lanes))
+            if integerShape(program, bt).contains(shape) && lanes.length == shape._2 => Right(lanes)
+        case _ => Left(Fault.InvalidTask("bit-field base shape does not match result"))
+      }
+      added <- insert match {
+        case Some(i) => values.get(id(i)) match {
+            case Some(RuntimeValue.Bits(it, lanes))
+                if integerShape(program, it).contains(shape) && lanes.length == shape._2 => Right(lanes)
+            case _ => Left(Fault.InvalidTask("bit-field inserted value shape does not match result"))
+          }
+        case None => Right(Array.empty[Long])
+      }
+      off <- offset.fold[Either[Fault, Long]](Right(0L))(scalar(values, _))
+      len <- count.fold[Either[Fault, Long]](Right(0L))(scalar(values, _))
+      validRange = off >= 0 && len >= 0 && off <= shape._1.raw && len <= shape._1.raw - off
+      _ <- Either.cond(
+        validRange || program.vulkanEntries.nonEmpty,
+        (),
+        Fault.InvalidTask("bit-field range exceeds component width")
+      )
+    } yield {
+      val fieldMask = if (!validRange) 0L else if (len == 64) -1L else (1L << len.toInt) - 1L
+      val result    = source.indices.map { lane =>
+        val word = source(lane) & mask(shape._1)
+        // Invalid shader ranges have undefined results. Keep the operation local to its
+        // result instead of losing the device, including when that result is discarded.
+        val value = if (!validRange) { if (operation == 2) word else 0L }
+        else if (operation == 3) java.lang.Long.reverse(word) >>> (64 - shape._1.raw)
+        else if (len == 0) { if (operation == 2) word else 0L }
+        else if (operation == 2) (word & ~(fieldMask << off.toInt)) | ((added(lane) & fieldMask) << off.toInt)
+        else {
+          val extracted = (word >>> off.toInt) & fieldMask
+          if (operation == 1) (extracted << (64 - len.toInt)) >> (64 - len.toInt) else extracted
+        }
+        value & mask(shape._1)
+      }.toArray
+      values.update(id(d), RuntimeValue.Bits(id(t), result))
+      execution.pc += 1
+    }
+  }
+
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeInteger(
       program: Program,
@@ -1401,6 +3005,19 @@ private object VMInterpreter {
           left,
           right,
           SignedIntegerOperation.Remainder
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.SMod(resultType, dest, left, right) =>
+        signedIntegerArithmetic(
+          program,
+          values,
+          resultType,
+          dest,
+          left,
+          right,
+          SignedIntegerOperation.Modulo
         ) match {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
@@ -1734,6 +3351,16 @@ private object VMInterpreter {
         }
       case Instruction.Dot(resultType, dest, left, right) =>
         floatingDot(program, values, resultType, dest, left, right) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FRem(resultType, dest, left, right) =>
+        floatingBinary(program, values, resultType, dest, left, right, FloatingOperation.Remainder) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FMod(resultType, dest, left, right) =>
+        floatingBinary(program, values, resultType, dest, left, right, FloatingOperation.Modulo) match {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
@@ -2113,6 +3740,297 @@ private object VMInterpreter {
         return Left(Fault.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
+  }
+
+  private def executeNonUniform(
+      program: Program,
+      execution: InvocationState,
+      instruction: Instruction
+  ): Either[Fault, Unit] = {
+    val values   = execution.values
+    val function = execution.currentFunction.id
+    val pc       = execution.pc
+    def valueRequest(
+        kind: CollectiveKind,
+        t: Operand,
+        d: Operand,
+        scope: Operand,
+        source: Operand,
+        operation: Int = 0,
+        predicateResult: Boolean = false
+    ): Either[Fault, CollectiveRequest] =
+      (scalar(values, scope), values.get(id(source))) match {
+        case (Right(3L), Some(value @ RuntimeValue.Bits(sourceType, _)))
+            if (predicateResult && booleanLanes(program, id(t)).contains(1)) || sourceType == id(t) =>
+          Right(CollectiveRequest(
+            kind,
+            function,
+            pc,
+            3,
+            CollectivePayload.Value(id(t), id(d), value),
+            operation,
+            nonUniform = true
+          ))
+        case (Left(error), _) => Left(error)
+        case (_, None)        => Left(undefined(source))
+        case _                =>
+          Left(Fault.InvalidTask("subgroup operation requires Subgroup scope and compatible value/result types"))
+      }
+    def arithmetic(
+        kind: CollectiveKind,
+        t: Operand,
+        d: Operand,
+        scope: Operand,
+        operation: Operand,
+        source: Operand,
+        cluster: Option[Operand]
+    ): Either[Fault, CollectiveRequest] = {
+      val logical =
+        kind == CollectiveKind.LogicalAnd || kind == CollectiveKind.LogicalOr || kind == CollectiveKind.LogicalXor
+      if (cluster.nonEmpty || unsigned(operation) > 2L)
+        Left(Fault.Unsupported("clustered subgroup reductions are not implemented"))
+      else if (if (logical) booleanLanes(program, id(t)).isEmpty else integerShape(program, id(t)).isEmpty)
+        Left(Fault.InvalidTask("subgroup arithmetic operand type is incompatible with its operation"))
+      else valueRequest(kind, t, d, scope, source, id(operation))
+    }
+    def shuffle(
+        t: Operand,
+        d: Operand,
+        scope: Operand,
+        source: Operand,
+        lane: Operand,
+        mode: Int
+    ): Either[Fault, CollectiveRequest] =
+      for {
+        request <- valueRequest(CollectiveKind.Shuffle, t, d, scope, source)
+        index   <- scalar(values, lane)
+        _       <- Either.cond(
+          integerShape(
+            program,
+            values.get(id(lane)).collect { case RuntimeValue.Bits(t, _) => t }.getOrElse(-1)
+          ).contains(32 -> 1),
+          (),
+          Fault.InvalidTask("subgroup shuffle lane must be a 32-bit scalar integer")
+        )
+      } yield {
+        val local    = execution.invocation.subgroupLocal.toLong
+        val selected = mode match {
+          case 1 => local ^ index
+          case 2 => local - index
+          case 3 => local + index
+          case _ => index
+        }
+        val data = values.get(id(source)).get
+        request.copy(payload =
+          CollectivePayload.Shuffle(
+            id(t),
+            id(d),
+            data,
+            RuntimeValue.Bits(
+              values.get(id(lane)).collect { case RuntimeValue.Bits(t, _) => t }.getOrElse(-1),
+              Array(selected)
+            )
+          )
+        )
+      }
+    instruction match {
+      case _: Instruction.GroupNonUniformFAdd | _: Instruction.GroupNonUniformFMul |
+          _: Instruction.GroupNonUniformFMin | _: Instruction.GroupNonUniformFMax =>
+        executeNonUniformFloating(program, execution, instruction)
+      case _: Instruction.GroupNonUniformInverseBallot | _: Instruction.GroupNonUniformBallotBitExtract |
+          _: Instruction.GroupNonUniformBallotBitCount | _: Instruction.GroupNonUniformBallotFindLSB |
+          _: Instruction.GroupNonUniformBallotFindMSB => executeNonUniformBallot(program, execution, instruction)
+      case _ =>
+        val request = instruction match {
+          case Instruction.GroupNonUniformElect(t, d, scope) =>
+            scalar(values, scope).flatMap { value =>
+              if (value != 3L || !booleanLanes(program, id(t)).contains(1))
+                Left(Fault.InvalidTask("subgroup election requires Subgroup scope and boolean result"))
+              else Right(CollectiveRequest(
+                CollectiveKind.Elect,
+                function,
+                pc,
+                3,
+                CollectivePayload.Value(id(t), id(d), RuntimeValue.Bits(id(t), Array(1L))),
+                nonUniform = true
+              ))
+            }
+          case Instruction.GroupNonUniformAll(t, d, scope, value) =>
+            collectiveBoolean(
+              program,
+              values,
+              function,
+              pc,
+              t,
+              d,
+              scope,
+              value,
+              CollectiveKind.All,
+              "OpGroupNonUniformAll"
+            )
+          case Instruction.GroupNonUniformAny(t, d, scope, value) =>
+            collectiveBoolean(
+              program,
+              values,
+              function,
+              pc,
+              t,
+              d,
+              scope,
+              value,
+              CollectiveKind.Any,
+              "OpGroupNonUniformAny"
+            )
+          case Instruction.GroupNonUniformAllEqual(t, d, scope, value) =>
+            valueRequest(CollectiveKind.AllEqual, t, d, scope, value, predicateResult = true)
+          case Instruction.GroupNonUniformBroadcastFirst(t, d, scope, value) =>
+            valueRequest(CollectiveKind.BroadcastFirst, t, d, scope, value)
+          case Instruction.GroupNonUniformBroadcast(t, d, scope, value, lane)   => shuffle(t, d, scope, value, lane, 0)
+          case Instruction.GroupNonUniformShuffle(t, d, scope, value, lane)     => shuffle(t, d, scope, value, lane, 0)
+          case Instruction.GroupNonUniformShuffleXor(t, d, scope, value, lane)  => shuffle(t, d, scope, value, lane, 1)
+          case Instruction.GroupNonUniformShuffleUp(t, d, scope, value, lane)   => shuffle(t, d, scope, value, lane, 2)
+          case Instruction.GroupNonUniformShuffleDown(t, d, scope, value, lane) => shuffle(t, d, scope, value, lane, 3)
+          case Instruction.GroupNonUniformBallot(t, d, scope, value)            =>
+            collectiveBallot(program, values, function, pc, t, d, scope, value)
+          case Instruction.GroupNonUniformIAdd(t, d, scope, operation, value, cluster) =>
+            arithmetic(CollectiveKind.IntegerAdd, t, d, scope, operation, value, cluster)
+          case Instruction.GroupNonUniformIMul(t, d, scope, operation, value, cluster) =>
+            arithmetic(CollectiveKind.IntegerMultiply, t, d, scope, operation, value, cluster)
+          case Instruction.GroupNonUniformSMin(t, d, scope, operation, value, cluster) =>
+            arithmetic(CollectiveKind.SignedMin, t, d, scope, operation, value, cluster)
+          case Instruction.GroupNonUniformUMin(t, d, scope, operation, value, cluster) =>
+            arithmetic(CollectiveKind.UnsignedMin, t, d, scope, operation, value, cluster)
+          case Instruction.GroupNonUniformSMax(t, d, scope, operation, value, cluster) =>
+            arithmetic(CollectiveKind.SignedMax, t, d, scope, operation, value, cluster)
+          case Instruction.GroupNonUniformUMax(t, d, scope, operation, value, cluster) =>
+            arithmetic(CollectiveKind.UnsignedMax, t, d, scope, operation, value, cluster)
+          case Instruction.GroupNonUniformBitwiseAnd(t, d, scope, operation, value, cluster) =>
+            arithmetic(CollectiveKind.BitwiseAnd, t, d, scope, operation, value, cluster)
+          case Instruction.GroupNonUniformBitwiseOr(t, d, scope, operation, value, cluster) =>
+            arithmetic(CollectiveKind.BitwiseOr, t, d, scope, operation, value, cluster)
+          case Instruction.GroupNonUniformBitwiseXor(t, d, scope, operation, value, cluster) =>
+            arithmetic(CollectiveKind.BitwiseXor, t, d, scope, operation, value, cluster)
+          case Instruction.GroupNonUniformLogicalAnd(t, d, scope, operation, value, cluster) =>
+            arithmetic(CollectiveKind.LogicalAnd, t, d, scope, operation, value, cluster)
+          case Instruction.GroupNonUniformLogicalOr(t, d, scope, operation, value, cluster) =>
+            arithmetic(CollectiveKind.LogicalOr, t, d, scope, operation, value, cluster)
+          case Instruction.GroupNonUniformLogicalXor(t, d, scope, operation, value, cluster) =>
+            arithmetic(CollectiveKind.LogicalXor, t, d, scope, operation, value, cluster)
+          case _ => Left(Fault.Unsupported(s"${instruction.opcode} subgroup execution is not implemented"))
+        }
+        request.flatMap { pending =>
+          if (pending.scope != 3) Left(Fault.InvalidTask("nonuniform operations require Subgroup scope"))
+          else {
+            suspend(
+              execution,
+              execution.currentFunction,
+              pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              pending.copy(nonUniform = true)
+            )
+            Right(())
+          }
+        }
+    }
+  }
+
+  private def executeNonUniformBallot(
+      program: Program,
+      execution: InvocationState,
+      instruction: Instruction
+  ): Either[Fault, Unit] = {
+    val (t, d, scope, source, mode, index) = instruction match {
+      case Instruction.GroupNonUniformInverseBallot(t, d, scope, source)         => (t, d, scope, source, -1, None)
+      case Instruction.GroupNonUniformBallotBitExtract(t, d, scope, source, bit) => (t, d, scope, source, -1, Some(bit))
+      case Instruction.GroupNonUniformBallotBitCount(t, d, scope, operation, source) =>
+        (t, d, scope, source, id(operation), None)
+      case Instruction.GroupNonUniformBallotFindLSB(t, d, scope, source) => (t, d, scope, source, 3, None)
+      case Instruction.GroupNonUniformBallotFindMSB(t, d, scope, source) => (t, d, scope, source, 4, None)
+      case _ => throw IllegalStateException("subgroup ballot dispatch mismatch")
+    }
+    val bit =
+      index.fold[Either[Fault, Long]](Right(execution.invocation.subgroupLocal.toLong))(scalar(execution.values, _))
+    (scalar(execution.values, scope), execution.values.get(id(source)), bit) match {
+      case (Right(3L), Some(RuntimeValue.Bits(sourceType, words)), Right(local))
+          if integerShape(program, sourceType).contains(32 -> 4) && words.length == 4 &&
+            (if (mode == -1) booleanLanes(program, id(t)).contains(1)
+             else integerShape(program, id(t)).contains(32 -> 1)) =>
+        def set(bit: Int): Boolean = (words(bit / 32) & (1L << (bit % 32))) != 0
+        val result                 = mode match {
+          case -1 => if (local >= 0 && local < 128 && set(local.toInt)) 1L else 0L
+          case 0  => (0 until execution.invocation.subgroupSize).count(set(_)).toLong
+          case 1  => (0 to execution.invocation.subgroupLocal).count(set(_)).toLong
+          case 2  => (0 until execution.invocation.subgroupLocal).count(set(_)).toLong
+          case 3  => (0 until execution.invocation.subgroupSize).find(set(_)).fold(0xffffffffL)(_.toLong)
+          case 4  => (0 until execution.invocation.subgroupSize).reverse.find(set(_)).fold(0xffffffffL)(_.toLong)
+          case _  => -1L
+        }
+        if (result < 0) Left(Fault.InvalidTask("invalid subgroup ballot operation"))
+        else {
+          execution.values.update(id(d), RuntimeValue.Bits(id(t), Array(result)))
+          execution.pc += 1
+          Right(())
+        }
+      case (Left(error), _, _) => Left(error)
+      case (_, _, Left(error)) => Left(error)
+      case (_, None, _)        => Left(undefined(source))
+      case _ => Left(Fault.InvalidTask("subgroup ballot requires Subgroup scope, uint4 value and compatible result"))
+    }
+  }
+
+  private def executeNonUniformFloating(
+      program: Program,
+      execution: InvocationState,
+      instruction: Instruction
+  ): Either[Fault, Unit] = {
+    val (resultType, destination, scope, operation, value, cluster, kind) = instruction match {
+      case Instruction.GroupNonUniformFAdd(t, d, s, o, v, c) => (t, d, s, o, v, c, CollectiveKind.FloatingAdd)
+      case Instruction.GroupNonUniformFMul(t, d, s, o, v, c) => (t, d, s, o, v, c, CollectiveKind.FloatingMultiply)
+      case Instruction.GroupNonUniformFMin(t, d, s, o, v, c) => (t, d, s, o, v, c, CollectiveKind.FloatingMin)
+      case Instruction.GroupNonUniformFMax(t, d, s, o, v, c) => (t, d, s, o, v, c, CollectiveKind.FloatingMax)
+      case _ => throw IllegalStateException("nonuniform floating dispatch mismatch")
+    }
+    val values   = execution.values
+    val function = execution.currentFunction.id
+    val pc       = execution.pc
+    val request  = if (cluster.nonEmpty) Left(Fault.Unsupported("clustered subgroup reductions are not implemented"))
+    else kind match {
+      case CollectiveKind.FloatingAdd =>
+        collectiveFloatingAdd(program, values, function, pc, resultType, destination, scope, operation, value)
+      case CollectiveKind.FloatingMultiply =>
+        collectiveFloatingMultiply(program, values, function, pc, resultType, destination, scope, operation, value)
+      case _ =>
+        collectiveFloatingExtremum(
+          program,
+          values,
+          function,
+          pc,
+          resultType,
+          destination,
+          scope,
+          operation,
+          value,
+          kind,
+          instruction.opcode.toString
+        )
+    }
+    request.flatMap { pending =>
+      if (pending.scope != 3) Left(Fault.InvalidTask("nonuniform floating operations require Subgroup scope"))
+      else {
+        suspend(
+          execution,
+          execution.currentFunction,
+          pc,
+          execution.currentLabel,
+          execution.predecessor,
+          execution.instructionCount,
+          pending.copy(nonUniform = true)
+        )
+        Right(())
+      }
+    }
   }
 
   // Collective dispatch returns as soon as it emits a rendezvous or encounters an invalid operand.
@@ -2684,30 +4602,6 @@ private object VMInterpreter {
             )
             return Right(())
         }
-      case Instruction.GroupNonUniformBallot(resultType, dest, executionScope, pred) =>
-        collectiveBallot(
-          program,
-          values,
-          execution.currentFunction.id,
-          execution.pc,
-          resultType,
-          dest,
-          executionScope,
-          pred
-        ) match {
-          case Left(error)    => return Left(error)
-          case Right(request) =>
-            suspend(
-              execution,
-              execution.currentFunction,
-              execution.pc,
-              execution.currentLabel,
-              execution.predecessor,
-              execution.instructionCount,
-              request
-            )
-            return Right(())
-        }
       case other =>
         return Left(Fault.Unsupported(s"${other.opcode} execution is not implemented"))
     }
@@ -3248,8 +5142,9 @@ private object VMInterpreter {
         scalar(values, selector) match {
           case Left(error)  => return Left(error)
           case Right(value) =>
-            var target = default
-            var index  = 0
+            val selectorMask = mask(program.layout.scalarWidth(values.scalarType(id(selector))))
+            var target       = default
+            var index        = 0
             while (index < targets.size) {
               val pair    = targets(index)
               val literal = pair.words match {
@@ -3267,7 +5162,7 @@ private object VMInterpreter {
               if (pair.words.length != 2 && pair.words.length != 3)
                 return Left(Fault.InvalidTask("OpSwitch has an incomplete literal/label pair"))
               val label = pair.words.last
-              if (literal == value)
+              if ((literal & selectorMask) == (value & selectorMask))
                 target = Operand("IdRef", Vec.nonEmpty(label))
               index += 1
             }
@@ -3277,7 +5172,12 @@ private object VMInterpreter {
               case Right(pc)   => execution.pc = pc
             }
         }
+      case _: Instruction.ReturnValue | _: Instruction.Return
+          if (execution.fragmentQuad || execution.subgroupReconvergence) && !execution.fragmentReturnReady =>
+        finishFragmentReturn(execution)
+        execution.fragmentJoin = Some(FragmentJoin.FunctionReturn(execution.currentFunction.id))
       case Instruction.ReturnValue(value) =>
+        finishFragmentReturn(execution)
         val returned = values.get(id(value)) match {
           case Some(result) => result
           case None         => return Left(undefined(value))
@@ -3291,7 +5191,9 @@ private object VMInterpreter {
             execution.currentLabel = frame.currentLabel
             execution.predecessor = frame.predecessor
         }
-      case Instruction.Return() => execution.calls.removeLastOption() match {
+      case Instruction.Return() =>
+        finishFragmentReturn(execution)
+        execution.calls.removeLastOption() match {
           case None =>
             execution.complete()
             return Right(())
@@ -3309,12 +5211,56 @@ private object VMInterpreter {
                 )
             }
         }
-      case Instruction.AssumeTrueKHR(_) | Instruction.LoopMerge(_, _, _) | Instruction.SelectionMerge(_, _) =>
+      case Instruction.LoopMerge(merge, _, _) =>
+        enterFragmentRegion(execution, id(merge), loop = true)
         execution.pc += 1
-      case other =>
+      case Instruction.SelectionMerge(merge, _) =>
+        enterFragmentRegion(execution, id(merge), loop = false)
+        execution.pc += 1
+      case Instruction.AssumeTrueKHR(_) => execution.pc += 1
+      case other                        =>
         return Left(Fault.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
+  }
+
+  private def enterFragmentRegion(execution: InvocationState, merge: Int, loop: Boolean): Unit =
+    if (
+      (execution.fragmentQuad || execution.subgroupReconvergence) && !execution.fragmentRegions.exists(_.merge == merge)
+    )
+      execution.fragmentRegions += FragmentRegion(execution.currentFunction.id, execution.currentLabel, merge, loop)
+
+  private def finishFragmentReturn(execution: InvocationState): Unit = {
+    execution.fragmentReturnReady = false
+    if (execution.fragmentQuad || execution.subgroupReconvergence)
+      execution.fragmentRegions.filterInPlace(_.function != execution.currentFunction.id)
+  }
+
+  // Pause at structured merges and function returns so a lane cannot evaluate a
+  // later, uniform derivative while its neighbors are still in divergent code.
+  private def resolveFragmentJoins(executions: mutable.ArrayBuffer[InvocationState]): Int = {
+    val ready = executions.flatMap(_.fragmentJoin).distinct.filter { join =>
+      executions.forall { execution =>
+        val participates = join match {
+          case FragmentJoin.Merge(label)             => execution.fragmentRegions.exists(_.merge == label)
+          case FragmentJoin.FunctionReturn(function) =>
+            execution.currentFunction.id == function || execution.calls.exists(_.function.id == function)
+        }
+        !participates || execution.completed || execution.fragmentKilled || execution.fragmentJoin.contains(join)
+      }
+    }
+    executions.foreach { execution =>
+      execution.fragmentJoin.filter(ready.contains).foreach { join =>
+        join match {
+          case FragmentJoin.Merge(label) =>
+            val index = execution.fragmentRegions.indexWhere(_.merge == label)
+            execution.fragmentRegions.remove(index, execution.fragmentRegions.size - index)
+          case FragmentJoin.FunctionReturn(_) => execution.fragmentReturnReady = true
+        }
+        execution.fragmentJoin = None
+      }
+    }
+    ready.size
   }
 
   private def suspend(
@@ -3352,7 +5298,9 @@ private object VMInterpreter {
       var index = 0
       while (index < executions.size) {
         val execution = executions(index)
-        if (!execution.completed && execution.suspended.isEmpty)
+        if (
+          !execution.completed && execution.suspended.isEmpty && execution.quadRequest.isEmpty && execution.fragmentJoin.isEmpty
+        )
           resumeInvocation(program, execution, memory, control, metrics) match {
             case Left(error) => return Left(error)
             case Right(())   => ()
@@ -3366,7 +5314,9 @@ private object VMInterpreter {
           case Right(())   => executions.foreach(_.memoryReady())
         }
       }
-      resolveCollectives(program, executions, memory) match {
+      // A deferred read is a transport suspension, not subgroup divergence.
+      // Resume those lanes before choosing the active set at a collective.
+      if (!hadPendingMemory) resolveCollectives(program, executions, memory) match {
         case Left(error)                                                      => return Left(error)
         case Right(0) if !hadPendingMemory && executions.exists(!_.completed) =>
           val waiting = executions.view
@@ -3404,14 +5354,33 @@ private object VMInterpreter {
       executions: mutable.ArrayBuffer[InvocationState],
       memory: MemoryState
   ): Either[Fault, Int] = {
-    var resolved  = 0
+    var resolved = resolveQuad(executions) match {
+      case Left(error)  => return Left(error)
+      case Right(count) => count
+    }
     val subgroups = executions.view.map(_.invocation.subgroupIndex).toSet.toArray.sorted
     var index     = 0
     while (index < subgroups.length) {
       val subgroup     = subgroups(index)
       val participants = Vec.from(executions.view.filter(_.invocation.subgroupIndex == subgroup))
-      val requests     = participants.flatMap(_.suspended)
+      resolved += resolveFragmentJoins(mutable.ArrayBuffer.from(participants))
+      val requests   = participants.flatMap(_.suspended)
+      val nonUniform = requests.filter(r => r.scope == 3 && r.nonUniform)
+      val sites      = nonUniform.foldLeft(Vector.empty[CollectiveRequest]) { (sites, request) =>
+        if (sites.exists(sameCollective(_, request))) sites else sites :+ request
+      }
+      var siteIndex = 0
+      while (siteIndex < sites.size) {
+        val site   = sites(siteIndex)
+        val active = participants.filter(_.suspended.exists(sameCollective(_, site)))
+        resolveCollective(program, active, site, memory) match {
+          case Left(error) => return Left(error)
+          case Right(())   => resolved += 1
+        }
+        siteIndex += 1
+      }
       if (
+        nonUniform.isEmpty &&
         requests.nonEmpty && requests.head.scope == 3 &&
         participants.forall(execution =>
           !execution.completed && execution.suspended.exists(sameCollective(_, requests.head))
@@ -3438,9 +5407,52 @@ private object VMInterpreter {
     Right(resolved)
   }
 
+  private def resolveQuad(executions: mutable.ArrayBuffer[InvocationState]): Either[Fault, Int] = {
+    val requests = executions.flatMap(_.quadRequest)
+    if (requests.isEmpty) Right(0)
+    else if (executions.size != 4) Left(Fault.InvalidTask("fragment derivatives require four lanes"))
+    else {
+      val laneRequests                                                = executions.map(_.quadRequest).toVector
+      def value(lane: Int, component: Int, site: QuadRequest): Double =
+        // Non-participating neighbors have undefined operands at this dynamic
+        // site. Choose zero without executing their paths or reviving killed lanes.
+        laneRequests(lane).filter(r =>
+          r.function == site.function && r.pc == site.pc &&
+            r.operation == site.operation && r.operand.length == site.operand.length
+        ).fold(0.0)(r =>
+          IEEE754.binary32ToFloat(Binary32.low(r.operand(component))).toDouble
+        )
+      executions.zipWithIndex.foreach { (execution, lane) =>
+        execution.quadRequest.foreach { request =>
+          val coarse = request.operation >= 3 && request.operation <= 5
+          val left   = if (coarse) 0 else lane & 2
+          val top    = if (coarse) 0 else lane & 1
+          val dx = Array.tabulate(request.operand.length)(i => value(left + 1, i, request) - value(left, i, request))
+          val dy = Array.tabulate(request.operand.length)(i => value(top + 2, i, request) - value(top, i, request))
+          if (request.operation == 6) execution.gradients = Some((dx, dy))
+          else {
+            val data = Array.tabulate(dx.length) { i =>
+              val result = request.operation % 3 match {
+                case 0 => dx(i)
+                case 1 => dy(i)
+                case _ => Math.abs(dx(i)) + Math.abs(dy(i))
+              }
+              IEEE754.floatToBinary32(result.toFloat).raw.toLong & 0xffffffffL
+            }
+            execution.values.update(request.destination, RuntimeValue.Bits(request.resultType, data))
+            execution.pc += 1
+          }
+          execution.quadRequest = None
+        }
+      }
+      Right(1)
+    }
+  }
+
   private def sameCollective(left: CollectiveRequest, right: CollectiveRequest): Boolean =
     left.kind == right.kind && left.function == right.function && left.pc == right.pc &&
       left.scope == right.scope && left.operation == right.operation && left.selector == right.selector &&
+      left.nonUniform == right.nonUniform &&
       ((left.payload, right.payload) match {
         case (CollectivePayload.Value(leftType, _, _), CollectivePayload.Value(rightType, _, _)) =>
           leftType == rightType
@@ -3510,7 +5522,7 @@ private object VMInterpreter {
         }
       case CollectivePayload.Shuffle(resultType, _, _, _) =>
         val shuffleRequests = requests.collect {
-          case CollectiveRequest(_, _, _, _, CollectivePayload.Shuffle(_, destination, data, invocationId), _, _) =>
+          case CollectiveRequest(_, _, _, _, CollectivePayload.Shuffle(_, destination, data, invocationId), _, _, _) =>
             (destination, data, invocationId)
         }
         if (shuffleRequests.size != requests.size)
@@ -3527,7 +5539,7 @@ private object VMInterpreter {
                     participants.find(_.invocation.subgroupLocal.toLong == sourceLocal) match {
                       case Some(sourceExecution) =>
                         sourceExecution.suspended match {
-                          case Some(CollectiveRequest(_, _, _, _, CollectivePayload.Shuffle(_, _, data, _), _, _)) =>
+                          case Some(CollectiveRequest(_, _, _, _, CollectivePayload.Shuffle(_, _, data, _), _, _, _)) =>
                             Right(existing :+ retag(data, resultType))
                           case _ => Left(Fault.InvalidTask("subgroup shuffle source is not suspended"))
                         }
@@ -3563,6 +5575,7 @@ private object VMInterpreter {
                 _,
                 CollectivePayload.ShuffleUp(_, destination, previous, current, requestDelta),
                 _,
+                _,
                 _
               ) =>
             (destination, previous, current, requestDelta)
@@ -3590,6 +5603,7 @@ private object VMInterpreter {
                               _,
                               _,
                               CollectivePayload.ShuffleUp(_, _, previous, current, _),
+                              _,
                               _,
                               _
                             )
@@ -3629,6 +5643,7 @@ private object VMInterpreter {
                 _,
                 CollectivePayload.ShuffleDown(_, destination, current, next, requestDelta),
                 _,
+                _,
                 _
               ) =>
             (destination, current, next, requestDelta)
@@ -3653,6 +5668,7 @@ private object VMInterpreter {
                             _,
                             _,
                             CollectivePayload.ShuffleDown(_, _, current, next, _),
+                            _,
                             _,
                             _
                           )) => Right(if (useNext) next else current)
@@ -3683,7 +5699,7 @@ private object VMInterpreter {
         }
       case CollectivePayload.Value(resultType, _, _) =>
         val requestValues = requests.collect {
-          case CollectiveRequest(_, _, _, _, CollectivePayload.Value(_, _, value), _, _) =>
+          case CollectiveRequest(_, _, _, _, CollectivePayload.Value(_, _, value), _, _, _) =>
             value
         }
         if (requestValues.size != requests.size)
@@ -3692,6 +5708,24 @@ private object VMInterpreter {
           )
         else {
           val results = expected.kind match {
+            case CollectiveKind.Elect =>
+              Right(Vec.from(participants.indices.map(i =>
+                RuntimeValue.Bits(resultType, Array(if (i == 0) 1L else 0L))
+              )))
+            case CollectiveKind.BroadcastFirst => Right(Vec.fill(participants.size)(requestValues.head))
+            case CollectiveKind.AllEqual       =>
+              val inputs = requestValues.collect { case RuntimeValue.Bits(t, lanes) => (t, lanes) }
+              val equal  = inputs.size == requestValues.size && inputs.tail.forall { case (t, lanes) =>
+                val first = inputs.head._2
+                lanes.length == first.length && lanes.indices.forall { lane =>
+                  floatingShape(program, t) match {
+                    case Some((width, _)) =>
+                      floatingToDouble(width, lanes(lane)) == floatingToDouble(width, first(lane))
+                    case None => lanes(lane) == first(lane)
+                  }
+                }
+              }
+              Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, Array(if (equal) 1L else 0L))))
             case CollectiveKind.Any =>
               val any = requestValues.exists {
                 case RuntimeValue.Bits(_, Array(value)) => value != 0L
@@ -3950,7 +5984,8 @@ private object VMInterpreter {
             function,
             pc,
             3,
-            CollectivePayload.Value(id(resultType), id(destination), value)
+            CollectivePayload.Value(id(resultType), id(destination), value),
+            nonUniform = true
           )
         )
       case (Right(scope), _) if scope != 3L =>
@@ -4039,8 +6074,8 @@ private object VMInterpreter {
         )
       )
       _ <- Either.cond(
-        (destination.storageClass == 4 && source.storageClass == 5) ||
-          (destination.storageClass == 5 && source.storageClass == 4),
+        (destination.storageClass == StorageClass.Workgroup && source.storageClass == StorageClass.CrossWorkgroup) ||
+          (destination.storageClass == StorageClass.CrossWorkgroup && source.storageClass == StorageClass.Workgroup),
         (),
         Fault.InvalidTask(
           s"OpGroupAsyncCopy requires Workgroup/CrossWorkgroup pointers, got ${destination.storageClass}/${source.storageClass}"
@@ -4058,7 +6093,7 @@ private object VMInterpreter {
             val strideBytes = Math.multiplyExact(strideValue, elementSize.toLong)
             val packedBytes = Math.toIntExact(Math.multiplyExact(count, elementSize.toLong))
             val sourceBytes =
-              if (destination.storageClass == 4) {
+              if (destination.storageClass == StorageClass.Workgroup) {
                 val sourceSpan =
                   if (count == 0L) 0
                   else Math.toIntExact(Math.addExact(Math.multiplyExact(count - 1L, strideBytes), elementSize.toLong))
@@ -4082,7 +6117,7 @@ private object VMInterpreter {
                 }
               } else memory.read(source, packedBytes.unsafe[Int >= 0])
             sourceBytes.flatMap { packed =>
-              if (destination.storageClass == 5 && strideValue != 1L) {
+              if (destination.storageClass == StorageClass.CrossWorkgroup && strideValue != 1L) {
                 @tailrec
                 def writeElement(index: Long): Either[Fault, Unit] =
                   if (index == count) Right(())
@@ -4630,7 +6665,7 @@ private object VMInterpreter {
   ): Either[Fault, RuntimeValue] =
     program.layout.runtimeType(parameterType) match {
       case Some(RuntimeType.Pointer(storageClass, pointee)) => argument match {
-          case KernelTask.Argument.Memory(allocation, offset) =>
+          case KernelTask.Argument.Memory(allocation, offset, _) =>
             program.layout.pointerLeafOffsets(pointee, 0L) match {
               case Right(leaves) if leaves.isEmpty =>
                 Right(RuntimeValue.Address(
@@ -4651,8 +6686,8 @@ private object VMInterpreter {
           case KernelTask.Argument.Scalar(bytes)
               if !byValue && bytes.toArray.forall(_ == 0) &&
                 !program.layout.runtimeType(pointee).exists {
-                  case RuntimeType.Structure(_) | RuntimeType.Array(_, _) => true
-                  case _                                                  => false
+                  case RuntimeType.Structure(_) | RuntimeType.Array(_, _) | RuntimeType.MatrixType(_, _) => true
+                  case _                                                                                 => false
                 } =>
             Right(RuntimeValue.Address(parameterType, Pointer(Region.Null, 0L, pointee, storageClass)))
           case KernelTask.Argument.Scalar(bytes)
@@ -4672,7 +6707,7 @@ private object VMInterpreter {
               case None => Left(Fault.InvalidTask("missing SVM pointer relocation"))
             }
           case KernelTask.Argument.Scalar(bytes)
-              if !byValue && bytes.size == 8 && (storageClass == 5 || storageClass == 8) =>
+              if !byValue && bytes.size == 8 && (storageClass == StorageClass.CrossWorkgroup || storageClass == StorageClass.Generic) =>
             memory.integerPointer(
               LittleEndian.decode(bytes, 0, 8),
               pointee,
@@ -4888,14 +6923,17 @@ private object VMInterpreter {
       element: Option[Operand],
       indexes: Vec[Operand]
   ): Either[Fault, Unit] = {
-    val source = address(values, base) match {
+    var source = address(values, base) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
     val initial = element match {
       case Some(value) =>
         scalar(values, value).map(index =>
-          (memory.elementOffset(source, index, program.layout.typeSize(source.pointee)), source.pointee)
+          (
+            memory.elementOffset(source, index, program.layout.storageTypeSize(source.pointee, source.matrixLayout)),
+            source.pointee
+          )
         )
       case None => Right((source.offset, source.pointee))
     }
@@ -4903,9 +6941,10 @@ private object VMInterpreter {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
-    var offset   = baseOffset
-    var typeId   = baseType
-    var position = 0
+    var matrixLayout = source.matrixLayout
+    var offset       = baseOffset
+    var typeId       = baseType
+    var position     = 0
     while (position < indexes.size) {
       val index = scalar(values, indexes(position)) match {
         case Left(error)  => return Left(error)
@@ -4918,12 +6957,34 @@ private object VMInterpreter {
               Fault.InvalidTask(s"structure member index $index is out of range")
             )
           offset += program.layout.structMemberOffset(typeId, members, index.toInt)
+          matrixLayout = program.layout.memberMatrixLayouts.get(typeId -> index.toInt)
           typeId = members(index.toInt)
         case Some(RuntimeType.Array(member, _)) =>
-          offset += index * program.arrayStrides.getOrElse(typeId, program.layout.typeSize(member))
+          source.descriptors match {
+            case Some(descriptors) =>
+              if (index < 0 || index >= descriptors.size || element.nonEmpty)
+                return Left(Fault.InvalidTask(s"descriptor array index $index is out of range"))
+              source = descriptors(index.toInt)
+              offset = source.offset
+            case None =>
+              offset += index * program.arrayStrides.getOrElse(
+                typeId,
+                program.layout.storageTypeSize(member, matrixLayout)
+              )
+          }
           typeId = member
+        case Some(RuntimeType.MatrixType(column, _)) =>
+          val stride = if (matrixLayout.exists(_.rowMajor)) program.layout.runtimeType(column) match {
+            case Some(RuntimeType.VectorType(component, _)) => program.layout.typeSize(component)
+            case _ => return Left(Fault.InvalidTask("invalid matrix column type"))
+          }
+          else matrixLayout.map(_.stride).getOrElse(program.layout.typeSize(column))
+          offset += index * stride
+          matrixLayout = matrixLayout.filter(_.rowMajor)
+          typeId = column
         case Some(RuntimeType.VectorType(component, _)) =>
-          offset += index * program.layout.typeSize(component)
+          offset += index * matrixLayout.filter(_.rowMajor).map(_.stride).getOrElse(program.layout.typeSize(component))
+          matrixLayout = None
           typeId = component
         case Some(value) =>
           return Left(Fault.InvalidTask(s"cannot index through SPIR-V type $value"))
@@ -4936,7 +6997,10 @@ private object VMInterpreter {
     val pointee    = program.layout.pointerPointee(outputType)
     values.update(
       id(destination),
-      RuntimeValue.Address(outputType, Pointer(source.region, offset, pointee, source.storageClass, source.slots))
+      RuntimeValue.Address(
+        outputType,
+        source.copy(offset = offset, pointee = pointee, matrixLayout = matrixLayout)
+      )
     )
     Right(())
   }
@@ -5056,6 +7120,12 @@ private object VMInterpreter {
             case Right(leaves) => offset += Math.toIntExact(selected * leaves.toLong)
           }
           current = component
+        case Some(RuntimeType.MatrixType(column, count)) if selected < count.toLong =>
+          program.layout.scalarLeafCount(column) match {
+            case Left(error)   => return Left(error)
+            case Right(leaves) => offset += Math.toIntExact(selected * leaves.toLong)
+          }
+          current = column
         case Some(RuntimeType.Array(element, count)) if selected < count =>
           program.layout.scalarLeafCount(element) match {
             case Left(error)   => return Left(error)
@@ -5818,8 +7888,65 @@ private object VMInterpreter {
       case None =>
         Left(Fault.InvalidTask(s"OpExtInst references undefined import %$setId"))
       case Some("GLSL.std.450")
-          if opcode == ExtendedInstruction.GlslStd450.FAbs || opcode == ExtendedInstruction.GlslStd450.Sin || opcode == ExtendedInstruction.GlslStd450.Cos || opcode == ExtendedInstruction.GlslStd450.Sqrt =>
+          if opcode >= ExtendedInstruction.GlslStd450.Round && opcode <= ExtendedInstruction.GlslStd450.InverseSqrt && opcode != ExtendedInstruction.GlslStd450.SAbs && opcode != ExtendedInstruction.GlslStd450.SSign && opcode != ExtendedInstruction.GlslStd450.Atan2 && opcode != ExtendedInstruction.GlslStd450.Pow =>
         glslUnaryFloating(program, values, resultType, destination, opcode, sources)
+      case Some("GLSL.std.450")
+          if opcode == ExtendedInstruction.GlslStd450.FMin || opcode == ExtendedInstruction.GlslStd450.FMax || opcode == ExtendedInstruction.GlslStd450.FClamp || opcode == ExtendedInstruction.GlslStd450.NMin || opcode == ExtendedInstruction.GlslStd450.NMax || opcode == ExtendedInstruction.GlslStd450.NClamp =>
+        glslNumericMinMax(program, values, resultType, destination, opcode, sources)
+      case Some("GLSL.std.450")
+          if opcode == ExtendedInstruction.GlslStd450.SAbs || opcode == ExtendedInstruction.GlslStd450.SSign || opcode == ExtendedInstruction.GlslStd450.UMin || opcode == ExtendedInstruction.GlslStd450.SMin || opcode == ExtendedInstruction.GlslStd450.UMax || opcode == ExtendedInstruction.GlslStd450.SMax ||
+            opcode == ExtendedInstruction.GlslStd450.UClamp || opcode == ExtendedInstruction.GlslStd450.SClamp || opcode == ExtendedInstruction.GlslStd450.FindILsb || opcode == ExtendedInstruction.GlslStd450.FindSMsb || opcode == ExtendedInstruction.GlslStd450.FindUMsb =>
+        glslInteger(program, values, resultType, destination, opcode, sources)
+      case Some("GLSL.std.450")
+          if opcode == ExtendedInstruction.GlslStd450.Determinant || opcode == ExtendedInstruction.GlslStd450.MatrixInverse =>
+        glslMatrix(program, values, resultType, destination, opcode, sources)
+      case Some("GLSL.std.450")
+          if opcode == ExtendedInstruction.GlslStd450.Length || opcode == ExtendedInstruction.GlslStd450.Distance =>
+        glslLengthDistance(program, values, resultType, destination, opcode, sources)
+      case Some("GLSL.std.450")
+          if opcode >= ExtendedInstruction.GlslStd450.PackSnorm4x8 && opcode <= ExtendedInstruction.GlslStd450.UnpackDouble2x32 =>
+        glslPack(program, values, resultType, destination, opcode, sources)
+      case Some("GLSL.std.450")
+          if opcode == ExtendedInstruction.GlslStd450.Modf || opcode == ExtendedInstruction.GlslStd450.ModfStruct || opcode == ExtendedInstruction.GlslStd450.Frexp || opcode == ExtendedInstruction.GlslStd450.FrexpStruct =>
+        glslDecompose(program, values, memory, resultType, destination, opcode, sources)
+      case Some("GLSL.std.450") if opcode == ExtendedInstruction.GlslStd450.Atan2 =>
+        if (sources.size != 2) Left(Fault.InvalidTask("GLSL Atan2 expects two operands"))
+        else openCLAtan2OrHypot(program, values, resultType, destination, sources(0), sources(1), false)
+      case Some("GLSL.std.450")
+          if opcode == ExtendedInstruction.GlslStd450.FMix || opcode == ExtendedInstruction.GlslStd450.Step || opcode == ExtendedInstruction.GlslStd450.SmoothStep =>
+        val arity = if (opcode == ExtendedInstruction.GlslStd450.Step) 2 else 3
+        if (sources.size != arity) Left(Fault.InvalidTask(s"GLSL opcode $opcode expects $arity operands"))
+        else
+          openCLFloatingElementwise(program, values, resultType, destination, sources, opcode.toString, "GLSL.std.450") {
+            a =>
+              opcode match {
+                case ExtendedInstruction.GlslStd450.FMix => a(0) * (1.0 - a(2)) + a(1) * a(2)
+                case ExtendedInstruction.GlslStd450.Step => if (a(1) < a(0)) 0.0 else 1.0
+                case _                                   =>
+                  val t = Math.max(0.0, Math.min(1.0, (a(2) - a(0)) / (a(1) - a(0))))
+                  t * t * (3.0 - 2.0 * t)
+              }
+          }
+      case Some("GLSL.std.450") if opcode == ExtendedInstruction.GlslStd450.Fma =>
+        if (sources.size != 3) Left(Fault.InvalidTask("GLSL Fma expects three operands"))
+        else openCLMad(program, values, resultType, destination, sources(0), sources(1), sources(2), true)
+      case Some("GLSL.std.450") if opcode == ExtendedInstruction.GlslStd450.Ldexp =>
+        if (sources.size != 2) Left(Fault.InvalidTask("GLSL Ldexp expects two operands"))
+        else openCLLdexp(program, values, resultType, destination, sources(0), sources(1), glsl = true)
+      case Some("GLSL.std.450")
+          if opcode == ExtendedInstruction.GlslStd450.Cross || opcode == ExtendedInstruction.GlslStd450.Normalize =>
+        openCLGeometric(
+          program,
+          values,
+          resultType,
+          destination,
+          if (opcode == ExtendedInstruction.GlslStd450.Cross) ExtendedInstruction.OpenClStd.Cross
+          else ExtendedInstruction.OpenClStd.Normalize,
+          sources
+        )
+      case Some("GLSL.std.450")
+          if opcode >= ExtendedInstruction.GlslStd450.FaceForward && opcode <= ExtendedInstruction.GlslStd450.Refract =>
+        glslGeometric(program, values, resultType, destination, opcode, sources)
       case Some("GLSL.std.450") if opcode == ExtendedInstruction.GlslStd450.Pow =>
         if (sources.size != 2)
           Left(Fault.InvalidTask("GLSL.std.450 Pow expects two operands"))
@@ -6296,6 +8423,392 @@ private object VMInterpreter {
     }
   }
 
+  private def glslLengthDistance(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      opcode: Int,
+      sources: Vec[Operand]
+  ): Either[Fault, Unit] =
+    if (sources.size != (if (opcode == ExtendedInstruction.GlslStd450.Length) 1 else 2))
+      Left(Fault.InvalidTask("GLSL Length/Distance operand count is invalid"))
+    else for {
+      resultShape <- floatingShape(
+        program,
+        id(resultType)
+      ).toRight(Fault.InvalidTask("GLSL Length/Distance result must be floating point"))
+      operands <- sources.traverse { source =>
+        values.get(id(source)) match {
+          case Some(RuntimeValue.Bits(typeId, lanes)) => floatingShape(
+              program,
+              typeId
+            ).toRight(Fault.InvalidTask("GLSL Length/Distance operand must be floating point")).map(shape =>
+              (shape, lanes)
+            )
+          case _ => Left(Fault.InvalidTask("GLSL Length/Distance operand is missing"))
+        }
+      }
+      _ <- Either.cond(
+        resultShape._2 == 1 && operands.forall { case (shape, lanes) =>
+          shape == operands.head._1 && shape._1 == resultShape._1 && lanes.length == shape._2
+        },
+        (),
+        Fault.InvalidTask("GLSL Length/Distance types do not match")
+      )
+    } yield {
+      val width  = resultShape._1
+      val length = operands.head._2.indices.foldLeft(0.0) { (length, lane) =>
+        val a     = floatingToDouble(width, operands(0)._2(lane))
+        val value = if (opcode == ExtendedInstruction.GlslStd450.Length) a
+        else floatingToDouble(width, doubleToFloating(width, a - floatingToDouble(width, operands(1)._2(lane))))
+        Math.hypot(length, value)
+      }
+      values.update(id(destination), RuntimeValue.Bits(id(resultType), Array(doubleToFloating(width, length))))
+    }
+
+  private def glslMatrix(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      opcode: Int,
+      sources: Vec[Operand]
+  ): Either[Fault, Unit] =
+    if (sources.size != 1) Left(Fault.InvalidTask("GLSL matrix operation requires one operand"))
+    else values.get(id(sources.head)) match {
+      case Some(RuntimeValue.Bits(typeId, lanes)) => matrixShape(program, typeId) match {
+          case Some(shape @ (width, rows, columns))
+              if rows == columns && lanes.length == rows * columns &&
+                (if (opcode == ExtendedInstruction.GlslStd450.Determinant)
+                   floatingShape(program, id(resultType)).contains(width -> 1)
+                 else matrixShape(program, id(resultType)).contains(shape)) =>
+            val matrix = Vector.tabulate(rows, columns)((r, c) => floatingToDouble(width, lanes(c * rows + r)))
+            def minor(m: Vector[Vector[Double]], row: Int, column: Int): Vector[Vector[Double]] =
+              m.zipWithIndex.collect {
+                case (values, r) if r != row =>
+                  values.zipWithIndex.collect { case (value, c) if c != column => value }
+              }
+            def determinant(m: Vector[Vector[Double]]): Double =
+              if (m.size == 1) m.head.head
+              else (1 until m.size).foldLeft(m.head.head * determinant(minor(m, 0, 0))) { (sum, column) =>
+                val term = m.head(column) * determinant(minor(m, 0, column))
+                if (column % 2 == 0) sum + term else sum - term
+              }
+            val det    = determinant(matrix)
+            val result = if (opcode == ExtendedInstruction.GlslStd450.Determinant) Array(doubleToFloating(width, det))
+            else Array.tabulate(rows * columns) { lane =>
+              val r        = lane % rows
+              val c        = lane / rows
+              val cofactor = determinant(minor(matrix, c, r))
+              doubleToFloating(width, (if ((r + c) % 2 == 0) cofactor else -cofactor) / det)
+            }
+            values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+            Right(())
+          case _ => Left(Fault.InvalidTask("GLSL determinant/inverse requires matching square matrix types"))
+        }
+      case None => Left(undefined(sources.head))
+      case _    => Left(Fault.InvalidTask("GLSL determinant/inverse operand is not matrix data"))
+    }
+
+  private def glslInteger(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      opcode: Int,
+      sources: Vec[Operand]
+  ): Either[Fault, Unit] = {
+    val unary =
+      opcode == ExtendedInstruction.GlslStd450.SAbs || opcode == ExtendedInstruction.GlslStd450.SSign || opcode >= ExtendedInstruction.GlslStd450.FindILsb
+    val required = if (unary) 1
+    else if (opcode == ExtendedInstruction.GlslStd450.UClamp || opcode == ExtendedInstruction.GlslStd450.SClamp) 3
+    else 2
+    if (sources.size != required) Left(Fault.InvalidTask(s"GLSL integer opcode $opcode has the wrong operand count"))
+    else integerShape(program, id(resultType)).toRight(
+      Fault.InvalidTask(s"GLSL integer opcode $opcode requires an integer type")
+    ).flatMap { case shape @ (width, count) =>
+      if (opcode >= ExtendedInstruction.GlslStd450.FindILsb && width.raw != 32)
+        Left(Fault.InvalidTask("GLSL integer bit searches require 32-bit components"))
+      else sources.traverse { source =>
+        values.get(id(source)) match {
+          case Some(RuntimeValue.Bits(typeId, lanes))
+              if integerShape(program, typeId).contains(shape) && lanes.length == count => Right(lanes)
+          case None => Left(undefined(source))
+          case _    => Left(Fault.InvalidTask(s"GLSL integer opcode $opcode operand types do not match"))
+        }
+      }.map { operands =>
+        // The instruction selects signedness independently of the operand type's signedness.
+        val signed =
+          opcode == ExtendedInstruction.GlslStd450.SMin || opcode == ExtendedInstruction.GlslStd450.SMax || opcode == ExtendedInstruction.GlslStd450.SClamp
+        def less(a: Long, b: Long): Boolean =
+          if (signed) signExtend(a, width) < signExtend(b, width)
+          else java.lang.Long.compareUnsigned(a, b) < 0
+        def minimum(a: Long, b: Long): Long = if (less(b, a)) b else a
+        def maximum(a: Long, b: Long): Long = if (less(a, b)) b else a
+        val result                          = Array.tabulate(count) { lane =>
+          val a     = operands(0)(lane) & mask(width)
+          val b     = if (unary) 0L else operands(1)(lane) & mask(width)
+          val value = opcode match {
+            case ExtendedInstruction.GlslStd450.SAbs     => if (signExtend(a, width) < 0) -a else a
+            case ExtendedInstruction.GlslStd450.SSign    => java.lang.Long.signum(signExtend(a, width)).toLong
+            case ExtendedInstruction.GlslStd450.FindILsb =>
+              if (a == 0) -1L else java.lang.Long.numberOfTrailingZeros(a).toLong
+            case ExtendedInstruction.GlslStd450.FindSMsb =>
+              val bits = if (signExtend(a, width) < 0) ~a & mask(width) else a
+              (63 - java.lang.Long.numberOfLeadingZeros(bits)).toLong
+            case ExtendedInstruction.GlslStd450.FindUMsb => (63 - java.lang.Long.numberOfLeadingZeros(a)).toLong
+            case ExtendedInstruction.GlslStd450.UMin | ExtendedInstruction.GlslStd450.SMin => minimum(a, b)
+            case ExtendedInstruction.GlslStd450.UMax | ExtendedInstruction.GlslStd450.SMax => maximum(a, b)
+            case _ => minimum(maximum(a, b), operands(2)(lane) & mask(width))
+          }
+          value & mask(width)
+        }
+        values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+      }
+    }
+  }
+
+  private def glslNumericMinMax(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      opcode: Int,
+      sources: Vec[Operand]
+  ): Either[Fault, Unit] = {
+    val required =
+      if (opcode == ExtendedInstruction.GlslStd450.FClamp || opcode == ExtendedInstruction.GlslStd450.NClamp) 3 else 2
+    if (sources.size != required) Left(Fault.InvalidTask("GLSL numeric min/max has the wrong operand count"))
+    else floatingShape(
+      program,
+      id(resultType)
+    ).toRight(Fault.InvalidTask("GLSL numeric min/max requires a floating type")).flatMap {
+      case shape @ (width, count) =>
+        sources.traverse { source =>
+          values.get(id(source)) match {
+            case Some(RuntimeValue.Bits(typeId, lanes))
+                if floatingShape(program, typeId).contains(shape) && lanes.length == count => Right(lanes)
+            case None => Left(undefined(source))
+            case _    => Left(Fault.InvalidTask("GLSL numeric min/max operand types do not match"))
+          }
+        }.map { operands =>
+          // FMin/FMax permit this same numeric operand preference for NaNs as NMin/NMax.
+          def minimum(a: Double, b: Double): Double = if (a.isNaN) b else if (b.isNaN) a else Math.min(a, b)
+          def maximum(a: Double, b: Double): Double = if (a.isNaN) b else if (b.isNaN) a else Math.max(a, b)
+          val result                                = Array.tabulate(count) { lane =>
+            val a     = floatingToDouble(width, operands(0)(lane))
+            val b     = floatingToDouble(width, operands(1)(lane))
+            val value = opcode match {
+              case ExtendedInstruction.GlslStd450.FMin | ExtendedInstruction.GlslStd450.NMin => minimum(a, b)
+              case ExtendedInstruction.GlslStd450.FMax | ExtendedInstruction.GlslStd450.NMax => maximum(a, b)
+              case _ => minimum(maximum(a, b), floatingToDouble(width, operands(2)(lane)))
+            }
+            doubleToFloating(width, value)
+          }
+          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+        }
+    }
+  }
+
+  private def glslPack(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      opcode: Int,
+      sources: Vec[Operand]
+  ): Either[Fault, Unit] =
+    if (sources.size != 1) Left(Fault.InvalidTask("GLSL packing expects one operand"))
+    else values.get(id(sources.head)) match {
+      case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+        val sourceFloat = floatingShape(program, sourceType).map((w, n) => w.raw -> n)
+        val resultFloat = floatingShape(program, id(resultType)).map((w, n) => w.raw -> n)
+        val sourceInt   = signedIntegerShape(program, sourceType).map((w, n, signed) => (w.raw, n, signed))
+        val resultInt   = signedIntegerShape(program, id(resultType)).map((w, n, signed) => (w.raw, n, signed))
+        val count       =
+          if (
+            opcode == ExtendedInstruction.GlslStd450.PackSnorm4x8 || opcode == ExtendedInstruction.GlslStd450.PackUnorm4x8 || opcode == ExtendedInstruction.GlslStd450.UnpackSnorm4x8 || opcode == ExtendedInstruction.GlslStd450.UnpackUnorm4x8
+          ) 4
+          else 2
+        val result =
+          if (
+            opcode <= ExtendedInstruction.GlslStd450.PackHalf2x16 && sourceFloat.contains(
+              32 -> count
+            ) && resultInt.contains((
+              32,
+              1,
+              false
+            )) && lanes.length == count
+          ) {
+            val bits   = if (count == 4) 8 else 16
+            val signed =
+              opcode == ExtendedInstruction.GlslStd450.PackSnorm4x8 || opcode == ExtendedInstruction.GlslStd450.PackSnorm2x16
+            val scale  = if (signed) (1 << (bits - 1)) - 1 else (1 << bits) - 1
+            val packed = lanes.zipWithIndex.foldLeft(0L) { case (acc, (raw, lane)) =>
+              val value = IEEE754.binary32ToFloat(Binary32.low(raw))
+              val word  = if (opcode == ExtendedInstruction.GlslStd450.PackHalf2x16)
+                IEEE754.floatToBinary16(value).raw.toLong
+              else Math.round(Math.max(if (signed) -1.0 else 0.0, Math.min(1.0, value.toDouble)) * scale)
+              acc | ((word & ((1L << bits) - 1)) << (bits * lane))
+            }
+            Some(Array(packed))
+          } else if (
+            opcode == ExtendedInstruction.GlslStd450.PackDouble2x32 && sourceInt.contains((
+              32,
+              2,
+              false
+            )) && resultFloat.contains(64 -> 1) && lanes.length == 2
+          )
+            Some(Array((lanes(0) & 0xffffffffL) | (lanes(1) << 32)))
+          else if (
+            opcode == ExtendedInstruction.GlslStd450.UnpackDouble2x32 && sourceFloat.contains(
+              64 -> 1
+            ) && resultInt.contains((32, 2, false)) && lanes.length == 1
+          )
+            Some(Array(lanes(0) & 0xffffffffL, lanes(0) >>> 32))
+          else if (
+            opcode >= ExtendedInstruction.GlslStd450.UnpackSnorm2x16 && opcode <= ExtendedInstruction.GlslStd450.UnpackUnorm4x8 && sourceInt.contains(
+              (
+                32,
+                1,
+                false
+              )
+            ) && resultFloat.contains(32 -> count) && lanes.length == 1
+          ) {
+            val bits   = if (count == 4) 8 else 16
+            val signed =
+              opcode == ExtendedInstruction.GlslStd450.UnpackSnorm2x16 || opcode == ExtendedInstruction.GlslStd450.UnpackSnorm4x8
+            Some(Array.tabulate(count) { lane =>
+              val word  = (lanes(0) >>> (bits * lane)) & ((1L << bits) - 1)
+              val value = if (opcode == ExtendedInstruction.GlslStd450.UnpackHalf2x16)
+                IEEE754.binary16ToFloat(Binary16.low(word))
+              else if (signed) Math.max(
+                -1.0,
+                ((word ^ (1L << (bits - 1))) - (1L << (bits - 1))).toDouble / ((1 << (bits - 1)) - 1)
+              ).toFloat
+              else (word.toDouble / ((1 << bits) - 1)).toFloat
+              IEEE754.floatToBinary32(value).raw.toLong
+            })
+          } else None
+        result match {
+          case Some(bits) => values.update(id(destination), RuntimeValue.Bits(id(resultType), bits)); Right(())
+          case None       => Left(Fault.InvalidTask(s"GLSL packing opcode $opcode has invalid operand or result types"))
+        }
+      case Some(_) => Left(Fault.InvalidTask("GLSL packing operand is a pointer"))
+      case None    => Left(undefined(sources.head))
+    }
+
+  private def glslDecompose(
+      program: Program,
+      values: InvocationValues,
+      memory: MemoryState,
+      resultType: Operand,
+      destination: Operand,
+      opcode: Int,
+      sources: Vec[Operand]
+  ): Either[Fault, Unit] = {
+    val pointerForm = opcode == ExtendedInstruction.GlslStd450.Modf || opcode == ExtendedInstruction.GlslStd450.Frexp
+    val modf = opcode == ExtendedInstruction.GlslStd450.Modf || opcode == ExtendedInstruction.GlslStd450.ModfStruct
+    if (sources.size != (if (pointerForm) 2 else 1))
+      Left(Fault.InvalidTask("GLSL decomposition has an incorrect operand count"))
+    else values.get(id(sources.head)) match {
+      case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+        val output = if (pointerForm) values.get(id(sources(1))) match {
+          case Some(RuntimeValue.Address(_, pointer)) if id(resultType) == sourceType =>
+            Some((pointer.pointee, Some(pointer)))
+          case _ => None
+        }
+        else program.layout.runtimeType(id(resultType)) match {
+          case Some(RuntimeType.Structure(members)) if members.size == 2 && members(0) == sourceType =>
+            Some((members(1), None))
+          case _ => None
+        }
+        (floatingShape(program, sourceType), output) match {
+          case (Some((width, count)), Some((outputType, pointer)))
+              if lanes.length == count &&
+                (if (modf) outputType == sourceType
+                 else integerShape(program, outputType).exists((_, n) => n == count)) =>
+            val fractional = Array.ofDim[Long](count)
+            val integral   = Array.ofDim[Long](count)
+            for (lane <- 0 until count) {
+              val value = floatingToDouble(width, lanes(lane))
+              if (modf) {
+                val integer  = if (value < 0.0) Math.ceil(value) else Math.floor(value)
+                val fraction =
+                  if (value.isInfinity) Math.copySign(0.0, value) else Math.copySign(value - integer, value)
+                fractional(lane) = doubleToFloating(width, fraction)
+                integral(lane) = doubleToFloating(width, integer)
+              } else {
+                val exponent = if (value == 0.0 || !value.isFinite) 0
+                else {
+                  val initial = Math.getExponent(value)
+                  (if (initial == -1023) Math.getExponent(Math.scalb(value, 54)) - 54 else initial) + 1
+                }
+                fractional(lane) = doubleToFloating(width, Math.scalb(value, -exponent))
+                integral(lane) = exponent.toLong & mask(integerShape(program, outputType).get._1)
+              }
+            }
+            val written = pointer match {
+              case Some(address) =>
+                program.encode(RuntimeValue.Bits(outputType, integral)).flatMap(memory.write(address, _))
+              case None => Right(())
+            }
+            written.map { _ =>
+              values.update(
+                id(destination),
+                RuntimeValue.Bits(id(resultType), if (pointerForm) fractional else fractional ++ integral)
+              )
+            }
+          case _ => Left(Fault.InvalidTask("GLSL decomposition has incompatible operand or result types"))
+        }
+      case None => Left(undefined(sources.head))
+      case _    => Left(Fault.InvalidTask("GLSL decomposition requires floating-point input"))
+    }
+  }
+
+  private def glslGeometric(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      opcode: Int,
+      sources: Vec[Operand]
+  ): Either[Fault, Unit] = {
+    val arity = if (opcode == ExtendedInstruction.GlslStd450.Reflect) 2 else 3
+    floatingShape(program, id(resultType)) match {
+      case Some((width, count)) if sources.size == arity =>
+        sources.zipWithIndex.traverse { (source, index) =>
+          val expected = if (opcode == ExtendedInstruction.GlslStd450.Refract && index == 2) 1 else count
+          values.get(id(source)) match {
+            case Some(RuntimeValue.Bits(t, lanes))
+                if floatingShape(program, t).contains(width -> expected) && lanes.length == expected =>
+              Right(lanes.map(floatingToDouble(width, _)))
+            case None => Left(undefined(source))
+            case _    => Left(Fault.InvalidTask("GLSL geometric operand types do not match"))
+          }
+        }.map { operands =>
+          val dot = if (opcode == ExtendedInstruction.GlslStd450.FaceForward)
+            operands(2).zip(operands(1)).map(_ * _).sum
+          else operands(0).zip(operands(1)).map(_ * _).sum
+          val result = Array.tabulate(count) { lane =>
+            val value = opcode match {
+              case ExtendedInstruction.GlslStd450.FaceForward =>
+                if (dot < 0.0) operands(0)(lane) else -operands(0)(lane)
+              case ExtendedInstruction.GlslStd450.Reflect => operands(0)(lane) - 2.0 * dot * operands(1)(lane)
+              case _                                      =>
+                val eta = operands(2)(0)
+                val k   = 1.0 - eta * eta * (1.0 - dot * dot)
+                if (k < 0.0) 0.0 else eta * operands(0)(lane) - (eta * dot + Math.sqrt(k)) * operands(1)(lane)
+            }
+            doubleToFloating(width, value)
+          }
+          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+        }
+      case _ => Left(Fault.InvalidTask("GLSL geometric result or operand count is invalid"))
+    }
+  }
+
   private def glslUnaryFloating(
       program: Program,
       values: InvocationValues,
@@ -6319,9 +8832,46 @@ private object VMInterpreter {
               else {
                 val value    = floatingToDouble(sourceWidth, raw)
                 val computed = opcode match {
-                  case ExtendedInstruction.GlslStd450.Sin  => Math.sin(value)
-                  case ExtendedInstruction.GlslStd450.Cos  => Math.cos(value)
-                  case ExtendedInstruction.GlslStd450.Sqrt => Math.sqrt(value)
+                  case ExtendedInstruction.GlslStd450.Round | ExtendedInstruction.GlslStd450.RoundEven =>
+                    Math.rint(value)
+                  case ExtendedInstruction.GlslStd450.Trunc   => if (value < 0) Math.ceil(value) else Math.floor(value)
+                  case ExtendedInstruction.GlslStd450.FSign   => if (value < 0) -1.0 else if (value > 0) 1.0 else 0.0
+                  case ExtendedInstruction.GlslStd450.Floor   => Math.floor(value)
+                  case ExtendedInstruction.GlslStd450.Ceil    => Math.ceil(value)
+                  case ExtendedInstruction.GlslStd450.Fract   => value - Math.floor(value)
+                  case ExtendedInstruction.GlslStd450.Radians => value * (Math.PI / 180.0)
+                  case ExtendedInstruction.GlslStd450.Degrees => value * (180.0 / Math.PI)
+                  case ExtendedInstruction.GlslStd450.Sin     => Math.sin(value)
+                  case ExtendedInstruction.GlslStd450.Cos     => Math.cos(value)
+                  case ExtendedInstruction.GlslStd450.Tan     => Math.tan(value)
+                  case ExtendedInstruction.GlslStd450.Asin    => Math.asin(value)
+                  case ExtendedInstruction.GlslStd450.Acos    => Math.acos(value)
+                  case ExtendedInstruction.GlslStd450.Atan    => Math.atan(value)
+                  case ExtendedInstruction.GlslStd450.Sinh | ExtendedInstruction.GlslStd450.Cosh =>
+                    // GLSL defines these through exp at the operand precision.
+                    // Preserve intermediate overflow, including values where exp(x)/2 would otherwise fit.
+                    val positive = floatingToDouble(sourceWidth, doubleToFloating(sourceWidth, Math.exp(value)))
+                    val negative = floatingToDouble(sourceWidth, doubleToFloating(sourceWidth, Math.exp(-value)))
+                    val combined =
+                      if (opcode == ExtendedInstruction.GlslStd450.Sinh) positive - negative else positive + negative
+                    floatingToDouble(sourceWidth, doubleToFloating(sourceWidth, combined)) / 2.0
+                  case ExtendedInstruction.GlslStd450.Tanh  => Math.tanh(value)
+                  case ExtendedInstruction.GlslStd450.Asinh =>
+                    val a = Math.abs(value)
+                    Math.copySign(
+                      if (a > 1e150) Math.log(a) + Math.log(2.0)
+                      else Math.log1p(a + a * a / (1.0 + Math.sqrt(1.0 + a * a))),
+                      value
+                    )
+                  case ExtendedInstruction.GlslStd450.Acosh => if (value > 1e150) Math.log(value) + Math.log(2.0)
+                    else Math.log(value + Math.sqrt(value - 1.0) * Math.sqrt(value + 1.0))
+                  case ExtendedInstruction.GlslStd450.Atanh       => 0.5 * Math.log1p(2.0 * value / (1.0 - value))
+                  case ExtendedInstruction.GlslStd450.Exp         => Math.exp(value)
+                  case ExtendedInstruction.GlslStd450.Log         => Math.log(value)
+                  case ExtendedInstruction.GlslStd450.Exp2        => Math.pow(2.0, value)
+                  case ExtendedInstruction.GlslStd450.Log2        => Math.log(value) / Math.log(2.0)
+                  case ExtendedInstruction.GlslStd450.Sqrt        => Math.sqrt(value)
+                  case ExtendedInstruction.GlslStd450.InverseSqrt => 1.0 / Math.sqrt(value)
                 }
                 resultWidth.raw match {
                   case 16 => IEEE754.floatToBinary16(computed.toFloat).toLong
@@ -6392,11 +8942,12 @@ private object VMInterpreter {
       resultType: Operand,
       destination: Operand,
       sources: Vec[Operand],
-      name: String
+      name: String,
+      instructionSet: String = "OpenCL.std"
   )(operation: Array[Double] => Double): Either[Fault, Unit] =
     floatingShape(program, id(resultType)) match {
       case None =>
-        Left(Fault.InvalidTask(s"OpenCL.std $name result is not floating-point"))
+        Left(Fault.InvalidTask(s"$instructionSet $name result is not floating-point"))
       case Some((width, count)) =>
         val sourceLanes  = Array.ofDim[Array[Long]](sources.size)
         val sourceCounts = Array.ofDim[Int](sources.size)
@@ -6411,13 +8962,13 @@ private object VMInterpreter {
                 case _ =>
                   return Left(
                     Fault.InvalidTask(
-                      s"OpenCL.std $name operand ${sourceIndex + 1} does not match result shape ($width,$count)"
+                      s"$instructionSet $name operand ${sourceIndex + 1} does not match result shape ($width,$count)"
                     )
                   )
               }
             case Some(_) =>
               return Left(Fault.InvalidTask(
-                s"OpenCL.std $name operand ${sourceIndex + 1} is a pointer"
+                s"$instructionSet $name operand ${sourceIndex + 1} is a pointer"
               ))
             case None => return Left(undefined(sources(sourceIndex)))
           }
@@ -7172,7 +9723,8 @@ private object VMInterpreter {
       resultType: Operand,
       destination: Operand,
       source: Operand,
-      exponent: Operand
+      exponent: Operand,
+      glsl: Boolean = false
   ): Either[Fault, Unit] = (values.get(id(source)), values.get(id(exponent))) match {
     case (Some(RuntimeValue.Bits(sourceType, sourceLanes)), Some(RuntimeValue.Bits(exponentType, exponentLanes))) =>
       (
@@ -7185,17 +9737,19 @@ private object VMInterpreter {
               Some((resultWidth, resultCount)),
               Some((exponentWidth, exponentCount))
             )
-            if width == resultWidth && count == resultCount && exponentWidth.raw == 32 && exponentCount == count &&
+            if width == resultWidth && count == resultCount && (glsl || exponentWidth.raw == 32) && exponentCount == count &&
               sourceLanes.length == count && exponentLanes.length == count =>
           val result = Array.tabulate(count) { index =>
-            val scale = signExtend(exponentLanes(index), exponentWidth).toInt
+            val exponentValue = signExtend(exponentLanes(index), exponentWidth)
+            val scale         = Math.max(Int.MinValue.toLong, Math.min(Int.MaxValue.toLong, exponentValue)).toInt
             doubleToFloating(width, Math.scalb(floatingToDouble(width, sourceLanes(index)), scale))
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
         case _ =>
           Left(Fault.InvalidTask(
-            "OpenCL.std ldexp requires matching floating values and i32 exponents"
+            if (glsl) "GLSL Ldexp requires matching floating values and integer exponents"
+            else "OpenCL.std ldexp requires matching floating values and i32 exponents"
           ))
       }
     case (None, _) => Left(undefined(source))
@@ -7396,8 +9950,14 @@ private object VMInterpreter {
       invocation: InvocationBuiltins
   ): Either[Fault, RuntimeValue] = {
     val lanes: Either[Fault, Array[Long]] = builtin match {
-      case BuiltIn.NumWorkgroups        => Right(invocation.numWorkgroupsVector)
-      case BuiltIn.WorkgroupSize        => Right(invocation.workgroupSizeVector)
+      case BuiltIn.NumWorkgroups                                 => Right(invocation.numWorkgroupsVector)
+      case BuiltIn.WorkgroupSize                                 => Right(invocation.workgroupSizeVector)
+      case BuiltIn.WorkgroupId if program.vulkanEntries.nonEmpty =>
+        Right(Array(
+          invocation.groupX + invocation.globalOffsetX / invocation.enqueuedWorkgroupSizeX,
+          invocation.groupY + invocation.globalOffsetY / invocation.enqueuedWorkgroupSizeY,
+          invocation.groupZ + invocation.globalOffsetZ / invocation.enqueuedWorkgroupSizeZ
+        ))
       case BuiltIn.WorkgroupId          => Right(invocation.groupVector)
       case BuiltIn.LocalInvocationId    => Right(invocation.localVector)
       case BuiltIn.GlobalInvocationId   => Right(invocation.globalVector)
@@ -7415,13 +9975,35 @@ private object VMInterpreter {
                 invocation.globalSizeY * (invocation.globalZ - invocation.globalOffsetZ))
           )
         )
-      case BuiltIn.SubgroupSize              => Right(Array(invocation.subgroupSize.toLong))
-      case BuiltIn.SubgroupMaxSize           => Right(Array(invocation.maxSubgroupSize.toLong))
-      case BuiltIn.NumSubgroups              => Right(Array(invocation.numSubgroups))
-      case BuiltIn.NumEnqueuedSubgroups      => Right(Array(invocation.enqueuedSubgroups))
-      case BuiltIn.SubgroupId                => Right(Array(invocation.subgroupIndex.toLong))
-      case BuiltIn.SubgroupLocalInvocationId => Right(Array(invocation.subgroupLocal.toLong))
-      case value                             => Left(Fault.Unsupported(s"SPIR-V BuiltIn $value is not implemented"))
+      case LegacyWorkgroupLinearId => Right(
+          Array(
+            invocation.groupX + invocation.numWorkgroupsX *
+              (invocation.groupY + invocation.numWorkgroupsY * invocation.groupZ)
+          )
+        )
+      case maskKind @ (BuiltIn.SubgroupEqMask | BuiltIn.SubgroupGeMask | BuiltIn.SubgroupGtMask | BuiltIn.SubgroupLeMask | BuiltIn.SubgroupLtMask) =>
+        Right(Array.tabulate(4) { word =>
+          (0 until 32).foldLeft(0L) { (bits, bit) =>
+            val lane     = word * 32 + bit
+            val selected = maskKind match {
+              case BuiltIn.SubgroupEqMask => lane == invocation.subgroupLocal
+              case BuiltIn.SubgroupGeMask => lane >= invocation.subgroupLocal
+              case BuiltIn.SubgroupGtMask => lane > invocation.subgroupLocal
+              case BuiltIn.SubgroupLeMask => lane <= invocation.subgroupLocal
+              case _                      => lane < invocation.subgroupLocal
+            }
+            if (lane < invocation.subgroupSize && selected) bits | (1L << bit) else bits
+          }
+        })
+      // The Vulkan runtime exposes one physical device in each device group.
+      case BuiltIn.DeviceIndex if program.vulkanEntries.nonEmpty => Right(Array(0L))
+      case BuiltIn.SubgroupSize                                  => Right(Array(invocation.subgroupSize.toLong))
+      case BuiltIn.SubgroupMaxSize                               => Right(Array(invocation.maxSubgroupSize.toLong))
+      case BuiltIn.NumSubgroups                                  => Right(Array(invocation.numSubgroups))
+      case BuiltIn.NumEnqueuedSubgroups                          => Right(Array(invocation.enqueuedSubgroups))
+      case BuiltIn.SubgroupId                                    => Right(Array(invocation.subgroupIndex.toLong))
+      case BuiltIn.SubgroupLocalInvocationId                     => Right(Array(invocation.subgroupLocal.toLong))
+      case value => Left(Fault.Unsupported(s"SPIR-V BuiltIn $value is not implemented"))
     }
     lanes.flatMap(values =>
       integerShape(program, typeId) match {
@@ -7441,6 +10023,71 @@ private object VMInterpreter {
           )
       }
     )
+  }
+
+  private def mappedMatrixStorage(program: Program, pointer: Pointer): Boolean =
+    pointer.matrixLayout.nonEmpty || program.layout.hasMatrixStorage(pointer.pointee) ||
+      (program.vulkanEntries.nonEmpty && program.layout.runtimeType(pointer.pointee).exists {
+        // Composite memory accesses operate on members, preserving padding and
+        // independently applying descriptor bounds to each scalar element.
+        case RuntimeType.Structure(_) | RuntimeType.Array(_, _) => true
+        case _                                                  => false
+      })
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
+  private def loadMatrixStorage(
+      program: Program,
+      memory: MemoryState,
+      pointer: Pointer
+  ): Memory.ReadResult[RuntimeValue.Bits] = {
+    val leaves = program.layout.matrixStorageLeaves(pointer.pointee, pointer.matrixLayout)
+    val lanes  = Array.ofDim[Long](leaves.size)
+    var index  = 0
+    while (index < leaves.size) {
+      val (offset, scalar) = leaves(index)
+      val size             = program.layout.scalarMemoryWidth(scalar) match {
+        case Left(error)  => return Left(error)
+        case Right(value) => value
+      }
+      memory.readScalar(
+        pointer.copy(offset = Math.addExact(pointer.offset, offset), pointee = scalar, matrixLayout = None),
+        size
+      ) match {
+        case Left(error)  => return Left(error)
+        case Right(value) => lanes(index) = value
+      }
+      index += 1
+    }
+    Right(RuntimeValue.Bits(pointer.pointee, lanes))
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
+  private def storeMatrixStorage(
+      program: Program,
+      memory: MemoryState,
+      pointer: Pointer,
+      value: RuntimeValue.Bits
+  ): Either[Fault, Unit] = {
+    val leaves = program.layout.matrixStorageLeaves(pointer.pointee, pointer.matrixLayout)
+    if (leaves.size != value.lanes.length) return Left(Fault.InvalidTask("matrix storage scalar count does not match"))
+    var index = 0
+    while (index < leaves.size) {
+      val (offset, scalar) = leaves(index)
+      val size             = program.layout.scalarMemoryWidth(scalar) match {
+        case Left(error)  => return Left(error)
+        case Right(value) => value
+      }
+      memory.writeScalar(
+        pointer.copy(offset = Math.addExact(pointer.offset, offset), pointee = scalar, matrixLayout = None),
+        value.lanes(index),
+        size
+      ) match {
+        case Left(error) => return Left(error)
+        case Right(())   => ()
+      }
+      index += 1
+    }
+    Right(())
   }
 
   private def address(values: InvocationValues, operand: Operand): Either[Fault, Pointer] =
@@ -7885,12 +10532,16 @@ private object VMInterpreter {
                 val b = IEEE754.binary16ToFloat(Binary16.low(rightLanes(index)))
                 IEEE754.floatToBinary16(
                   operation match {
-                    case FloatingOperation.Add      => a + b
-                    case FloatingOperation.Subtract => a - b
-                    case FloatingOperation.Multiply => a * b
-                    case FloatingOperation.Divide   => a / b
-                    case FloatingOperation.Minimum  => floatingMinimum(a, b)
-                    case FloatingOperation.Maximum  => floatingMaximum(a, b)
+                    case FloatingOperation.Add       => a + b
+                    case FloatingOperation.Subtract  => a - b
+                    case FloatingOperation.Multiply  => a * b
+                    case FloatingOperation.Divide    => a / b
+                    case FloatingOperation.Remainder => a % b
+                    case FloatingOperation.Modulo    =>
+                      val remainder = a % b
+                      if (remainder != 0 && (remainder < 0) != (b < 0)) remainder + b else remainder
+                    case FloatingOperation.Minimum => floatingMinimum(a, b)
+                    case FloatingOperation.Maximum => floatingMaximum(a, b)
                   }
                 ).toLong
               case 32 =>
@@ -7898,12 +10549,16 @@ private object VMInterpreter {
                 val b = IEEE754.binary32ToFloat(Binary32.low(rightLanes(index)))
                 IEEE754.floatToBinary32(
                   operation match {
-                    case FloatingOperation.Add      => a + b
-                    case FloatingOperation.Subtract => a - b
-                    case FloatingOperation.Multiply => a * b
-                    case FloatingOperation.Divide   => a / b
-                    case FloatingOperation.Minimum  => floatingMinimum(a, b)
-                    case FloatingOperation.Maximum  => floatingMaximum(a, b)
+                    case FloatingOperation.Add       => a + b
+                    case FloatingOperation.Subtract  => a - b
+                    case FloatingOperation.Multiply  => a * b
+                    case FloatingOperation.Divide    => a / b
+                    case FloatingOperation.Remainder => a % b
+                    case FloatingOperation.Modulo    =>
+                      val remainder = a % b
+                      if (remainder != 0 && (remainder < 0) != (b < 0)) remainder + b else remainder
+                    case FloatingOperation.Minimum => floatingMinimum(a, b)
+                    case FloatingOperation.Maximum => floatingMaximum(a, b)
                   }
                 ).toLong
               case 64 =>
@@ -7911,12 +10566,16 @@ private object VMInterpreter {
                 val b = IEEE754.binary64ToDouble(rightLanes(index))
                 IEEE754.doubleToBinary64(
                   operation match {
-                    case FloatingOperation.Add      => a + b
-                    case FloatingOperation.Subtract => a - b
-                    case FloatingOperation.Multiply => a * b
-                    case FloatingOperation.Divide   => a / b
-                    case FloatingOperation.Minimum  => floatingMinimum(a, b)
-                    case FloatingOperation.Maximum  => floatingMaximum(a, b)
+                    case FloatingOperation.Add       => a + b
+                    case FloatingOperation.Subtract  => a - b
+                    case FloatingOperation.Multiply  => a * b
+                    case FloatingOperation.Divide    => a / b
+                    case FloatingOperation.Remainder => a % b
+                    case FloatingOperation.Modulo    =>
+                      val remainder = a % b
+                      if (remainder != 0 && (remainder < 0) != (b < 0)) remainder + b else remainder
+                    case FloatingOperation.Minimum => floatingMinimum(a, b)
+                    case FloatingOperation.Maximum => floatingMaximum(a, b)
                   }
                 )
             }
@@ -7969,8 +10628,23 @@ private object VMInterpreter {
       (floatingShape(program, sourceType), floatingShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
             if sourceLanes == resultLanes && lanes.length == sourceLanes =>
+          val rounding  = program.ir.roundingModes.getOrElse(id(destination), FPRoundingMode.RTE)
           val converted = lanes.map { raw =>
-            doubleToFloating(resultWidth, floatingToDouble(sourceWidth, raw))
+            val value = floatingToDouble(sourceWidth, raw)
+            val bits  = doubleToFloating(resultWidth, value)
+            // The nearest encoding differs from a directed result by at most
+            // one representable value, including overflow and subnormal edges.
+            // Equal infinities, signed zeros and NaNs need no adjustment.
+            if (rounding == FPRoundingMode.RTE || resultWidth.raw >= sourceWidth.raw) bits
+            else {
+              val nearest = floatingToDouble(resultWidth, bits)
+              rounding match {
+                case FPRoundingMode.RTZ if math.abs(nearest) > math.abs(value) => bits - 1L // RTZ
+                case FPRoundingMode.RTP if nearest < value => bits + (if (value < 0.0) -1L else 1L) // RTP
+                case FPRoundingMode.RTN if nearest > value => bits + (if (value > 0.0) -1L else 1L) // RTN
+                case _                                     => bits
+              }
+            }
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), converted))
           Right(())
@@ -7998,10 +10672,10 @@ private object VMInterpreter {
 
   /** FPRoundingMode decoration values: RTE, RTZ, RTP, RTN. */
   private def roundedIntegral(value: Double, mode: Option[Int]): Double = mode match {
-    case Some(0) => math.rint(value)
-    case Some(2) => math.ceil(value)
-    case Some(3) => math.floor(value)
-    case _       => if (value < 0.0) math.ceil(value) else math.floor(value)
+    case Some(FPRoundingMode.RTE) => math.rint(value)
+    case Some(FPRoundingMode.RTP) => math.ceil(value)
+    case Some(FPRoundingMode.RTN) => math.floor(value)
+    case _                        => if (value < 0.0) math.ceil(value) else math.floor(value)
   }
 
   private def roundedToLong(value: Double, mode: Option[Int]): Long = roundedIntegral(value, mode).toLong
@@ -8020,7 +10694,7 @@ private object VMInterpreter {
           val converted = lanes.map { raw =>
             val floating = floatingToDouble(sourceWidth, raw)
             val signed   =
-              if (program.saturatedConversions.contains(id(destination))) {
+              if (program.saturatedConversions.contains(id(destination)) || program.vulkanEntries.nonEmpty) {
                 val minimum = if (resultWidth.raw == 64) Long.MinValue else -(1L << (resultWidth.raw - 1))
                 val maximum = if (resultWidth.raw == 64) Long.MaxValue else (1L << (resultWidth.raw - 1)) - 1L
                 if (floating.isNaN) 0L
@@ -8078,6 +10752,8 @@ private object VMInterpreter {
             else if (saturate && floating >= Math.scalb(1.0, resultWidth.raw)) Right(mask(resultWidth))
             else floatingToUnsigned(IEEE754.doubleToBinary64(floating), 64, resultWidth)
             result match {
+              case Left(_) if program.vulkanEntries.nonEmpty =>
+                converted(index) = if (floating.isNaN || floating <= 0.0) 0L else mask(resultWidth)
               case Left(detail) =>
                 return Left(Fault.InvalidTask(
                   s"OpConvertFToU source lane $index cannot be represented as an unsigned $resultWidth-bit integer: $detail"
@@ -8132,8 +10808,8 @@ private object VMInterpreter {
     val magnitudeIsZero = encodedExponent == 0L && fraction == 0L
 
     if (encodedExponent == exponentMask) Left("NaN and infinity are not integers")
+    else if (encodedExponent < bias) Right(0L) // Truncation of either sign below one is representable.
     else if (negative && !magnitudeIsZero) Left("negative values are outside the unsigned range")
-    else if (encodedExponent == 0L) Right(0L)
     else {
       val exponent    = encodedExponent.toInt - bias
       val significand = BigInt((1L << fractionBits) | fraction)
@@ -8244,9 +10920,11 @@ private object VMInterpreter {
           s"$opcode result type %$resultId is not an integer scalar or vector"
         ))
       case Some((width, count)) =>
-        val leftType  = values.scalarType(leftId)
-        val rightType = values.scalarType(rightId)
-        if (count == 1 && leftType == resultId && rightType == resultId) {
+        val leftType                      = values.scalarType(leftId)
+        val rightType                     = values.scalarType(rightId)
+        def matches(typeId: Int): Boolean =
+          typeId == resultId || integerShape(program, typeId).contains(width -> count)
+        if (count == 1 && matches(leftType) && matches(rightType)) {
           values.updateScalar(
             id(destination),
             resultId,
@@ -8259,7 +10937,7 @@ private object VMInterpreter {
                   Some(RuntimeValue.Bits(leftRuntimeType, leftLanes)),
                   Some(RuntimeValue.Bits(rightRuntimeType, rightLanes))
                 )
-                if leftRuntimeType == resultId && rightRuntimeType == resultId &&
+                if matches(leftRuntimeType) && matches(rightRuntimeType) &&
                   leftLanes.length == count && rightLanes.length == count =>
               values.update(
                 id(destination),
@@ -8295,12 +10973,21 @@ private object VMInterpreter {
         Left(Fault.InvalidTask(
           s"OpNot result type %$resultId is not an integer scalar or vector"
         ))
-      case Some((width, count)) if count == 1 && values.scalarType(sourceId) == resultId =>
+      case Some((width, count))
+          if count == 1 &&
+            (values.scalarType(sourceId) == resultId || integerShape(
+              program,
+              values.scalarType(sourceId)
+            ).contains(width -> count)) =>
         values.updateScalar(id(destination), resultId, ~values.scalarBits(sourceId) & mask(width))
         Right(())
       case Some((width, count)) =>
         values.get(sourceId) match {
-          case Some(RuntimeValue.Bits(runtimeType, lanes)) if runtimeType == resultId && lanes.length == count =>
+          case Some(RuntimeValue.Bits(runtimeType, lanes))
+              if (runtimeType == resultId || integerShape(
+                program,
+                runtimeType
+              ).contains(width -> count)) && lanes.length == count =>
             values.update(id(destination), RuntimeValue.Bits(resultId, lanes.map(value => ~value & mask(width))))
             Right(())
           case Some(_) =>
@@ -8314,40 +11001,82 @@ private object VMInterpreter {
     }
   }
 
+  private def integerExtended(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      left: Operand,
+      right: Operand,
+      operation: Int
+  ): Either[Fault, Unit] = {
+    val member = program.layout.runtimeType(id(resultType)) match {
+      case Some(RuntimeType.Structure(members)) if members.size == 2 && members(0) == members(1) => Some(members(0))
+      case _                                                                                     => None
+    }
+    (member.flatMap(signedIntegerShape(program, _)), values.get(id(left)), values.get(id(right))) match {
+      case (Some((width, count, signed)), Some(RuntimeValue.Bits(aType, a)), Some(RuntimeValue.Bits(bType, b)))
+          if member.contains(
+            aType
+          ) && aType == bType && a.length == count && b.length == count && (operation == 3 || !signed) =>
+        val result   = Array.ofDim[Long](count * 2)
+        val wordMask = mask(width)
+        for (lane <- 0 until count) {
+          val x    = a(lane) & wordMask
+          val y    = b(lane) & wordMask
+          val low  = (if (operation == 0) x + y else if (operation == 1) x - y else x * y) & wordMask
+          val high = operation match {
+            case 0                   => if (java.lang.Long.compareUnsigned(low, x) < 0) 1L else 0L
+            case 1                   => if (java.lang.Long.compareUnsigned(x, y) < 0) 1L else 0L
+            case _ if width.raw < 64 =>
+              if (operation == 3) (signExtend(x, width) * signExtend(y, width)) >> width.raw
+              else (x * y) >>> width.raw
+            case _ =>
+              // Four 32-bit products give the high half without host-specific intrinsics.
+              val x0       = x & 0xffffffffL
+              val y0       = y & 0xffffffffL
+              val x1       = x >>> 32
+              val y1       = y >>> 32
+              val t        = x1 * y0 + ((x0 * y0) >>> 32)
+              val middle   = (t & 0xffffffffL) + x0 * y1
+              val unsigned = x1 * y1 + (t >>> 32) + (middle >>> 32)
+              if (operation == 3) unsigned - (if (x < 0) y else 0L) - (if (y < 0) x else 0L)
+              else unsigned
+          }
+          result(lane) = low
+          result(count + lane) = high & wordMask
+        }
+        values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+        Right(())
+      case (_, None, _) => Left(undefined(left))
+      case (_, _, None) => Left(undefined(right))
+      case _            => Left(
+          Fault.InvalidTask("extended integer arithmetic requires a two-member integer structure and matching operands")
+        )
+    }
+  }
+
   private def integerBitCount(
       program: Program,
       values: InvocationValues,
       resultType: Operand,
       destination: Operand,
       base: Operand
-  ): Either[Fault, Unit] = {
-    val resultId = id(resultType)
-    val baseId   = id(base)
-    integerShape(program, resultId) match {
-      case None =>
-        Left(Fault.InvalidTask(
-          s"OpBitCount result type %$resultId is not an integer scalar or vector"
-        ))
-      case Some((width, count)) =>
-        val operation: Long => Long = value =>
-          bitCount(value, width).toLong
-        if (count == 1 && values.scalarType(baseId) == resultId) {
-          values.updateScalar(id(destination), resultId, operation(values.scalarBits(baseId)) & mask(width))
+  ): Either[Fault, Unit] = values.get(id(base)) match {
+    case Some(RuntimeValue.Bits(baseType, lanes)) =>
+      (integerShape(program, id(resultType)), integerShape(program, baseType)) match {
+        case (Some((resultWidth, count)), Some((baseWidth, baseCount)))
+            if count == baseCount && lanes.length == count =>
+          values.update(
+            id(destination),
+            RuntimeValue.Bits(id(resultType), lanes.map(value => bitCount(value, baseWidth).toLong & mask(resultWidth)))
+          )
           Right(())
-        } else
-          values.get(baseId) match {
-            case Some(RuntimeValue.Bits(baseType, lanes))
-                if baseType == resultId && lanes.length == count =>
-              values.update(
-                id(destination),
-                RuntimeValue.Bits(resultId, lanes.map(value => operation(value) & mask(width)))
-              )
-              Right(())
-            case Some(_) =>
-              Left(Fault.InvalidTask("OpBitCount requires a matching integer scalar or vector base"))
-            case None => Left(undefined(base))
-          }
-    }
+        case _ =>
+          Left(Fault.InvalidTask("OpBitCount requires integer operands and results with equal component counts"))
+      }
+    case Some(_) => Left(Fault.InvalidTask("OpBitCount base is not an integer value"))
+    case None    => Left(undefined(base))
   }
 
   private def logicalBinary(
@@ -8410,6 +11139,117 @@ private object VMInterpreter {
         case (None, _) => Left(undefined(left))
         case (_, None) => Left(undefined(right))
       }
+  }
+
+  private enum MatrixOperation {
+    case Transpose, Scale, VectorMatrix, MatrixVector, Multiply, OuterProduct
+  }
+
+  private def matrixShape(program: Program, typeId: Int): Option[(Int in (16, 32, 64), Int, Int)] =
+    program.layout.runtimeType(typeId) match {
+      case Some(RuntimeType.MatrixType(column, columns)) =>
+        floatingShape(program, column).map { case (width, rows) => (width, rows, columns) }
+      case _ => None
+    }
+
+  private def floatingMatrix(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      operation: MatrixOperation,
+      sources: Vec[Operand]
+  ): Either[Fault, Unit] = {
+    val required = if (operation == MatrixOperation.Transpose) 1 else 2
+    if (sources.size != required) Left(Fault.InvalidTask(s"matrix $operation has the wrong operand count"))
+    else sources.traverse { source =>
+      values.get(id(source)) match {
+        case Some(RuntimeValue.Bits(typeId, lanes)) => Right((typeId, lanes))
+        case None                                   => Left(undefined(source))
+        case _ => Left(Fault.InvalidTask(s"matrix $operation requires data operands"))
+      }
+    }.flatMap { operands =>
+      val resultId     = id(resultType)
+      val leftType     = operands(0)._1
+      val left         = operands(0)._2
+      val rightType    = if (required == 2) operands(1)._1 else leftType
+      val right        = if (required == 2) operands(1)._2 else left
+      val resultMatrix = matrixShape(program, resultId)
+      val leftMatrix   = matrixShape(program, leftType)
+      val rightMatrix  = matrixShape(program, rightType)
+      val resultVector = floatingShape(program, resultId)
+      val leftVector   = floatingShape(program, leftType)
+      val rightVector  = floatingShape(program, rightType)
+      // Every matrix is a sequence of columns. Storage padding is not part of a value's lanes.
+      def product(
+          width: Int in (16, 32, 64),
+          rows: Int,
+          columns: Int,
+          inner: Int,
+          a: (Int, Int) => Long,
+          b: (Int, Int) => Long
+      ): Array[Long] =
+        Array.tabulate(rows * columns) { lane =>
+          val row    = lane % rows
+          val column = lane / rows
+          (0 until inner).foldLeft(doubleToFloating(width, 0.0)) { (sum, k) =>
+            floatingAddBits(width, sum, floatingMultiplyBits(width, a(row, k), b(k, column)))
+          }
+        }
+      val result = operation match {
+        case MatrixOperation.Transpose => (leftMatrix, resultMatrix) match {
+            case (Some((width, rows, columns)), Some((outWidth, outRows, outColumns)))
+                if width == outWidth && rows == outColumns && columns == outRows && left.length == rows * columns =>
+              Some(Array.tabulate(left.length)(lane => left((lane % outRows) * rows + lane / outRows)))
+            case _ => None
+          }
+        case MatrixOperation.Scale => (leftMatrix, rightVector) match {
+            case (Some(shape @ (width, rows, columns)), Some((scalarWidth, 1)))
+                if resultMatrix.contains(
+                  shape
+                ) && width == scalarWidth && left.length == rows * columns && right.length == 1 =>
+              Some(left.map(floatingMultiplyBits(width, _, right(0))))
+            case _ => None
+          }
+        case MatrixOperation.Multiply => (leftMatrix, rightMatrix, resultMatrix) match {
+            case (
+                  Some((width, rows, inner)),
+                  Some((rightWidth, rightRows, columns)),
+                  Some((outWidth, outRows, outColumns))
+                )
+                if width == rightWidth && width == outWidth && inner == rightRows && outRows == rows && outColumns == columns &&
+                  left.length == rows * inner && right.length == inner * columns =>
+              Some(product(width, rows, columns, inner, (r, k) => left(k * rows + r), (k, c) => right(c * inner + k)))
+            case _ => None
+          }
+        case MatrixOperation.MatrixVector => (leftMatrix, rightVector, resultVector) match {
+            case (Some((width, rows, columns)), Some((rightWidth, count)), Some((outWidth, outCount)))
+                if width == rightWidth && width == outWidth && columns == count && rows == outCount &&
+                  left.length == rows * columns && right.length == count =>
+              Some(product(width, rows, 1, columns, (r, k) => left(k * rows + r), (k, _) => right(k)))
+            case _ => None
+          }
+        case MatrixOperation.VectorMatrix => (leftVector, rightMatrix, resultVector) match {
+            case (Some((width, count)), Some((rightWidth, rows, columns)), Some((outWidth, outCount)))
+                if width == rightWidth && width == outWidth && rows == count && columns == outCount &&
+                  left.length == count && right.length == rows * columns =>
+              Some(product(width, 1, columns, rows, (_, k) => left(k), (k, c) => right(c * rows + k)))
+            case _ => None
+          }
+        case MatrixOperation.OuterProduct => (leftVector, rightVector, resultMatrix) match {
+            case (Some((width, rows)), Some((rightWidth, columns)), Some((outWidth, outRows, outColumns)))
+                if width == rightWidth && width == outWidth && rows == outRows && columns == outColumns &&
+                  left.length == rows && right.length == columns =>
+              Some(Array.tabulate(rows * columns)(lane =>
+                floatingMultiplyBits(width, left(lane % rows), right(lane / rows))
+              ))
+            case _ => None
+          }
+      }
+      result.toRight(Fault.InvalidTask(s"matrix $operation operand/result shapes do not match")).map { lanes =>
+        values.update(id(destination), RuntimeValue.Bits(resultId, lanes))
+      }
+    }
   }
 
   // Dot products accumulate directly across vector lanes.
@@ -8511,6 +11351,7 @@ private object VMInterpreter {
   private enum SignedIntegerOperation(val opcode: String) {
     case Divide    extends SignedIntegerOperation("OpSDiv")
     case Remainder extends SignedIntegerOperation("OpSRem")
+    case Modulo    extends SignedIntegerOperation("OpSMod")
   }
 
   private enum UnsignedIntegerOperation(val opcode: String) {
@@ -8614,8 +11455,39 @@ private object VMInterpreter {
     case Xor             extends AtomicIntegerOperation("OpAtomicXor")
   }
 
-  // Atomic validation exits before any invalid memory update.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
+  private def atomicWidth(program: Program, typeId: Int, opcode: String): Either[Fault, Int in (32, 64)] =
+    Option.when(typeId >= 0)(typeId).flatMap(atomicScalarShape(program, _)) match {
+      case Some((width, 1)) if width.raw == 32 || width.raw == 64 => Right(width.raw.unsafe[Int in (32, 64)])
+      case _ => Left(Fault.InvalidTask(s"$opcode requires a 32- or 64-bit scalar type"))
+    }
+
+  // Uniform includes legacy BufferBlock storage buffers, alongside StorageBuffer.
+  private def atomicStorage(storage: Int): Boolean = storage match {
+    case StorageClass.Uniform | StorageClass.Workgroup | StorageClass.CrossWorkgroup | StorageClass.Generic |
+        StorageClass.AtomicCounter | StorageClass.Image | StorageClass.StorageBuffer | StorageClass.PhysicalStorageBuffer =>
+      true
+    case _ => false
+  }
+
+  private def atomicTarget(
+      values: InvocationValues,
+      pointer: Operand,
+      typeId: Int,
+      opcode: String
+  ): Either[Fault, Pointer] = for {
+    target <- address(values, pointer)
+    _      <- Either.cond(
+      target.pointee == typeId,
+      (),
+      Fault.InvalidTask(s"$opcode pointer pointee %${target.pointee} does not match type %$typeId")
+    )
+    _ <- Either.cond(
+      atomicStorage(target.storageClass),
+      (),
+      Fault.InvalidTask(s"$opcode pointer storage class ${target.storageClass} does not support atomic access")
+    )
+  } yield target
+
   private def atomicStore(
       program: Program,
       values: InvocationValues,
@@ -8628,41 +11500,14 @@ private object VMInterpreter {
     val opcode    = "OpAtomicStore"
     val valueId   = id(value)
     val valueType = values.scalarType(valueId)
-    val shape     = Option.when(valueType >= 0)(valueType).flatMap(atomicScalarShape(program, _)) match {
-      case Some((width, 1)) if width.raw == 32 || width.raw == 64 => (width.raw.unsafe[Int in (32, 64)], 1)
-      case _                                                      =>
-        return Left(
-          Fault.InvalidTask(s"$opcode requires a 32- or 64-bit scalar value")
-        )
-    }
-    val target = address(values, pointer) match {
-      case Left(error)  => return Left(error)
-      case Right(value) => value
-    }
-    if (target.pointee != valueType)
-      return Left(
-        Fault.InvalidTask(
-          s"$opcode pointer pointee %${target.pointee} does not match value type %$valueType"
-        )
-      )
-    if (!Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
-      return Left(
-        Fault.InvalidTask(
-          s"$opcode pointer storage class ${target.storageClass} does not support atomic access"
-        )
-      )
-    validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
-      val width = shape._1
-      memory.atomicWriteScalar(
-        target,
-        values.scalarBits(valueId) & mask(width),
-        width.toMemoryValueByteWidth
-      )
-    }
+    for {
+      width  <- atomicWidth(program, valueType, opcode)
+      target <- atomicTarget(values, pointer, valueType, opcode)
+      _      <- validateAtomicControls(values, scope, semantics, opcode)
+      _      <- memory.atomicWriteScalar(target, values.scalarBits(valueId) & mask(width), width.toMemoryValueByteWidth)
+    } yield ()
   }
 
-  // Atomic validation exits before any invalid memory access.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def atomicLoad(
       program: Program,
       values: InvocationValues,
@@ -8675,38 +11520,14 @@ private object VMInterpreter {
   ): Either[Fault, Unit] = {
     val opcode       = "OpAtomicLoad"
     val resultTypeId = id(resultType)
-    val shape        = atomicScalarShape(program, resultTypeId) match {
-      case Some((width, 1)) if width.raw == 32 || width.raw == 64 => (width.raw.unsafe[Int in (32, 64)], 1)
-      case _                                                      =>
-        return Left(
-          Fault.InvalidTask(s"$opcode requires a 32- or 64-bit scalar result")
-        )
-    }
-    val target = address(values, pointer) match {
-      case Left(error)  => return Left(error)
-      case Right(value) => value
-    }
-    if (target.pointee != resultTypeId)
-      return Left(
-        Fault.InvalidTask(
-          s"$opcode pointer pointee %${target.pointee} does not match result type %$resultTypeId"
-        )
-      )
-    if (!Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
-      return Left(
-        Fault.InvalidTask(
-          s"$opcode pointer storage class ${target.storageClass} does not support atomic access"
-        )
-      )
-    validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
-      memory.atomicReadScalar(target, shape._1.toMemoryValueByteWidth).map(value =>
-        values.updateScalar(id(destination), resultTypeId, value & mask(shape._1))
-      )
-    }
+    for {
+      width  <- atomicWidth(program, resultTypeId, opcode)
+      target <- atomicTarget(values, pointer, resultTypeId, opcode)
+      _      <- validateAtomicControls(values, scope, semantics, opcode)
+      result <- memory.atomicReadScalar(target, width.toMemoryValueByteWidth)
+    } yield values.updateScalar(id(destination), resultTypeId, result & mask(width))
   }
 
-  // Atomic validation exits before any invalid memory update.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def atomicExchange(
       program: Program,
       values: InvocationValues,
@@ -8721,40 +11542,20 @@ private object VMInterpreter {
     val opcode       = "OpAtomicExchange"
     val resultTypeId = id(resultType)
     val valueId      = id(value)
-    val shape        = atomicScalarShape(program, resultTypeId) match {
-      case Some((width, 1)) if width.raw == 32 || width.raw == 64 => (width.raw.unsafe[Int in (32, 64)], 1)
-      case _                                                      =>
-        return Left(
-          Fault.InvalidTask(s"$opcode requires a 32- or 64-bit scalar result")
-        )
-    }
-    if (values.scalarType(valueId) != resultTypeId)
-      return Left(
+    for {
+      width <- atomicWidth(program, resultTypeId, opcode)
+      _     <- Either.cond(
+        values.scalarType(valueId) == resultTypeId,
+        (),
         Fault.InvalidTask(s"$opcode requires matching result and value types")
       )
-    val target = address(values, pointer) match {
-      case Left(error)  => return Left(error)
-      case Right(value) => value
-    }
-    if (target.pointee != resultTypeId)
-      return Left(
-        Fault.InvalidTask(s"$opcode pointer pointee does not match result type")
-      )
-    if (!Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
-      return Left(Fault.InvalidTask(
-        s"$opcode pointer storage class does not support atomic access"
-      ))
-    validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
-      memory.atomicModifyScalar(target, shape._1.toMemoryValueByteWidth)(_ =>
-        values.scalarBits(valueId) & mask(shape._1)
-      ).map {
-        previous => values.updateScalar(id(destination), resultTypeId, previous & mask(shape._1))
-      }
-    }
+      target   <- atomicTarget(values, pointer, resultTypeId, opcode)
+      _        <- validateAtomicControls(values, scope, semantics, opcode)
+      previous <-
+        memory.atomicModifyScalar(target, width.toMemoryValueByteWidth)(_ => values.scalarBits(valueId) & mask(width))
+    } yield values.updateScalar(id(destination), resultTypeId, previous & mask(width))
   }
 
-  // Atomic validation exits before any invalid memory update.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def atomicCompareExchange(
       program: Program,
       values: InvocationValues,
@@ -8772,38 +11573,22 @@ private object VMInterpreter {
     val resultTypeId = id(resultType)
     val valueId      = id(value)
     val comparatorId = id(comparator)
-    val shape        = atomicScalarShape(program, resultTypeId) match {
-      case Some((width, 1)) if width.raw == 32 || width.raw == 64 => (width.raw.unsafe[Int in (32, 64)], 1)
-      case _                                                      =>
-        return Left(
-          Fault.InvalidTask(s"$opcode requires a 32- or 64-bit scalar result")
-        )
-    }
-    if (values.scalarType(valueId) != resultTypeId || values.scalarType(comparatorId) != resultTypeId)
-      return Left(Fault.InvalidTask(
-        s"$opcode requires matching result, value, and comparator types"
-      ))
-    val target = address(values, pointer) match {
-      case Left(error)  => return Left(error)
-      case Right(value) => value
-    }
-    if (target.pointee != resultTypeId)
-      return Left(
-        Fault.InvalidTask(s"$opcode pointer pointee does not match result type")
-      )
-    if (!Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
-      return Left(Fault.InvalidTask(
-        s"$opcode pointer storage class does not support atomic access"
-      ))
     for {
-      _      <- validateAtomicControls(values, scope, equal, opcode)
-      _      <- validateAtomicControls(values, scope, unequal, opcode)
-      result <- memory.atomicModifyScalar(target, shape._1.toMemoryValueByteWidth) { previous =>
-        if ((previous & mask(shape._1)) == (values.scalarBits(comparatorId) & mask(shape._1)))
-          values.scalarBits(valueId) & mask(shape._1)
+      width <- atomicWidth(program, resultTypeId, opcode)
+      _     <- Either.cond(
+        values.scalarType(valueId) == resultTypeId && values.scalarType(comparatorId) == resultTypeId,
+        (),
+        Fault.InvalidTask(s"$opcode requires matching result, value, and comparator types")
+      )
+      target   <- atomicTarget(values, pointer, resultTypeId, opcode)
+      _        <- validateAtomicControls(values, scope, equal, opcode)
+      _        <- validateAtomicControls(values, scope, unequal, opcode)
+      previous <- memory.atomicModifyScalar(target, width.toMemoryValueByteWidth) { previous =>
+        if ((previous & mask(width)) == (values.scalarBits(comparatorId) & mask(width)))
+          values.scalarBits(valueId) & mask(width)
         else previous
       }
-    } yield values.updateScalar(id(destination), resultTypeId, result & mask(shape._1))
+    } yield values.updateScalar(id(destination), resultTypeId, previous & mask(width))
   }
 
   private def atomicFlagTestAndSet(
@@ -8865,7 +11650,7 @@ private object VMInterpreter {
         Fault.InvalidTask(s"$opcode requires a pointer to a 32-bit integer flag")
       )
       _ <- Either.cond(
-        Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass),
+        atomicStorage(target.storageClass),
         (),
         Fault.InvalidTask(s"$opcode pointer storage class does not support atomic access")
       )
@@ -9006,18 +11791,10 @@ private object VMInterpreter {
       return Left(
         Fault.InvalidTask(s"$opcode requires matching result and value types")
       )
-    val target = address(values, pointer) match {
+    val target = atomicTarget(values, pointer, resultTypeId, opcode) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
-    if (target.pointee != resultTypeId)
-      return Left(
-        Fault.InvalidTask(s"$opcode pointer pointee does not match result type")
-      )
-    if (!Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
-      return Left(Fault.InvalidTask(
-        s"$opcode pointer storage class does not support atomic access"
-      ))
     validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
       val width    = shape._1
       val bitWidth = width.bitWidth
@@ -9058,18 +11835,10 @@ private object VMInterpreter {
       return Left(
         Fault.InvalidTask(s"$opcode requires matching result and value types")
       )
-    val target = address(values, pointer) match {
+    val target = atomicTarget(values, pointer, resultTypeId, opcode) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
-    if (target.pointee != resultTypeId)
-      return Left(
-        Fault.InvalidTask(s"$opcode pointer pointee does not match result type")
-      )
-    if (!Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
-      return Left(Fault.InvalidTask(
-        s"$opcode pointer storage class does not support atomic access"
-      ))
     validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
       val width    = shape._1
       val bitWidth = width.bitWidth
@@ -9113,6 +11882,9 @@ private object VMInterpreter {
           else operation match {
             case SignedIntegerOperation.Divide    => dividend / divisor
             case SignedIntegerOperation.Remainder => dividend % divisor
+            case SignedIntegerOperation.Modulo    =>
+              val remainder = dividend % divisor
+              if (remainder != 0 && (remainder < 0) != (divisor < 0)) remainder + divisor else remainder
           }
           values.updateScalar(id(destination), id(resultType), result & mask(width))
           Right(())
@@ -9160,6 +11932,9 @@ private object VMInterpreter {
               else operation match {
                 case SignedIntegerOperation.Divide    => dividend / divisor
                 case SignedIntegerOperation.Remainder => dividend % divisor
+                case SignedIntegerOperation.Modulo    =>
+                  val remainder = dividend % divisor
+                  if (remainder != 0 && (remainder < 0) != (divisor < 0)) remainder + divisor else remainder
               }
               values.update(id(destination), RuntimeValue.Bits(id(resultType), Array(result & mask(width))))
               Right(())
@@ -9207,6 +11982,9 @@ private object VMInterpreter {
                    else operation match {
                      case SignedIntegerOperation.Divide    => dividend / divisor
                      case SignedIntegerOperation.Remainder => dividend % divisor
+                     case SignedIntegerOperation.Modulo    =>
+                       val remainder = dividend % divisor
+                       if (remainder != 0 && (remainder < 0) != (divisor < 0)) remainder + divisor else remainder
                    }) & mask(width)
                 index += 1
               }

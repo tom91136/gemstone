@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 
 /** GLCompute modules that cover the descriptor-binding and `GLSL.std.450` execution paths without an external
   * assembler.
@@ -151,7 +152,11 @@ private object vulkan {
       Instruction.Return(),
       Instruction.FunctionEnd()
     )
-    Module(Header(ISA.version, Word(0), Word(64), Word(0)), instructions, Endianness.Little)
+    Module(
+      Header(if (interface) ISA.version else Version(1, 3), Word(0), Word(64), Word(0)),
+      instructions,
+      Endianness.Little
+    )
   }
 
   /** Computes `a * b + c` from a uniform struct into a storage buffer. */

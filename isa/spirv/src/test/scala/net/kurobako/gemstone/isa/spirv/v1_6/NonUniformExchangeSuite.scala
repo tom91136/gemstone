@@ -1,0 +1,160 @@
+package net.kurobako.gemstone.isa.spirv.v1_6
+
+import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
+import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
+
+class NonUniformExchangeSuite extends munit.FunSuite {
+  private def ref(n: Int): Operand = operand("IdRef", n)
+  private def lit(n: Int): Operand = operand("LiteralInteger", n)
+
+  for {
+    width  <- Seq(8, 16, 32, 64)
+    lanes  <- Seq(1, 2, 3, 4)
+    kind   <- Seq("broadcast", "first", "shuffle", "xor", "up", "down")
+    branch <- Seq("uniform", "divergent", "return")
+  } test(s"nonuniform $kind $width x $lanes $branch reconverges across partial subgroups") {
+    val count                                     = 69 // Two complete subgroups and one partial subgroup.
+    val valueType                                 = if (lanes == 1) 3 else 4
+    val storageLanes                              = if (lanes == 3) 4 else lanes
+    def collective(destination: Int): Instruction =
+      kind match {
+        case "broadcast" =>
+          Instruction.GroupNonUniformBroadcast(ref(valueType), ref(destination), ref(12), ref(25), ref(44))
+        case "first"   => Instruction.GroupNonUniformBroadcastFirst(ref(valueType), ref(destination), ref(12), ref(25))
+        case "shuffle" =>
+          Instruction.GroupNonUniformShuffle(ref(valueType), ref(destination), ref(12), ref(25), ref(43))
+        case "xor" => Instruction.GroupNonUniformShuffleXor(ref(valueType), ref(destination), ref(12), ref(25), ref(11))
+        case "up"  => Instruction.GroupNonUniformShuffleUp(ref(valueType), ref(destination), ref(12), ref(25), ref(13))
+        case _ => Instruction.GroupNonUniformShuffleDown(ref(valueType), ref(destination), ref(12), ref(25), ref(13))
+      }
+
+    val conditional = if (branch == "uniform") Vec.empty[Instruction]
+    else Vec(
+      Instruction.BitwiseAnd(ref(2), ref(26), ref(22), ref(13)),
+      Instruction.IEqual(ref(9), ref(27), ref(26), ref(13)),
+      Instruction.SelectionMerge(ref(33), operand("SelectionControl", SelectionControl.None)),
+      Instruction.BranchConditional(ref(27), ref(30), ref(31), Vec.empty),
+      Instruction.Label(ref(30))
+    )
+    val merge = if (branch == "uniform") Vec.empty[Instruction]
+    else Vec(
+      Instruction.Branch(ref(33)),
+      Instruction.Label(ref(31)),
+      if (branch == "return") Instruction.Return() else Instruction.Branch(ref(33)),
+      Instruction.Label(ref(33))
+    )
+    val module = Module(
+      Header(ISA.version, Word(0), Word(48), Word(0)),
+      Vec(
+        Instruction.TypeVoid(ref(1)),
+        Instruction.TypeInt(ref(2), lit(32), lit(0)),
+        Instruction.TypeInt(ref(3), lit(width), lit(0)),
+        Instruction.TypeVector(ref(4), ref(3), lit(4)),
+        Instruction.TypePointer(ref(5), operand("StorageClass", StorageClass.CrossWorkgroup), ref(valueType)),
+        Instruction.TypeVector(ref(6), ref(2), lit(3)),
+        Instruction.TypePointer(ref(7), operand("StorageClass", StorageClass.Input), ref(6)),
+        Instruction.Variable(ref(7), ref(8), operand("StorageClass", StorageClass.Input), None),
+        Instruction.Decorate(ref(8), operand("Decoration", Decoration.BuiltIn, 27)),
+        Instruction.TypeBool(ref(9)),
+        Instruction.TypeFunction(ref(10), ref(1), Vec(ref(5), ref(5))),
+        Instruction.Constant(ref(2), ref(11), operand("LiteralContextDependentNumber", 2)),
+        Instruction.Constant(ref(2), ref(40), operand("LiteralContextDependentNumber", 32)),
+        Instruction.Constant(ref(2), ref(12), operand("LiteralContextDependentNumber", 3)),
+        Instruction.Constant(ref(2), ref(13), operand("LiteralContextDependentNumber", 1)),
+        Instruction.Constant(ref(2), ref(14), operand("LiteralContextDependentNumber", 0)),
+        Instruction.Constant(ref(2), ref(15), operand("LiteralContextDependentNumber", count)),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", ExecutionModel.Kernel),
+          ref(16),
+          stringOperand("reduce"),
+          Vec(ref(8))
+        ),
+        Instruction.Function(ref(1), ref(16), operand("FunctionControl", FunctionControl.None), ref(10)),
+        Instruction.FunctionParameter(ref(5), ref(18)),
+        Instruction.FunctionParameter(ref(5), ref(19)),
+        Instruction.Label(ref(20)),
+        Instruction.Load(ref(6), ref(21), ref(8), None),
+        Instruction.CompositeExtract(ref(2), ref(22), ref(21), Vec(lit(0))),
+        Instruction.PtrAccessChain(ref(5), ref(23), ref(18), ref(22), Vec.empty),
+        Instruction.PtrAccessChain(ref(5), ref(24), ref(19), ref(22), Vec.empty),
+        Instruction.Load(ref(valueType), ref(25), ref(23), None),
+        Instruction.UDiv(ref(2), ref(37), ref(22), ref(40)),
+        Instruction.BitwiseAnd(ref(2), ref(38), ref(37), ref(13)),
+        Instruction.ShiftLeftLogical(ref(2), ref(39), ref(38), ref(13)),
+        Instruction.IAdd(ref(2), ref(44), ref(39), ref(13)),
+        Instruction.BitwiseAnd(ref(2), ref(42), ref(22), ref(11)),
+        Instruction.IAdd(ref(2), ref(43), ref(42), ref(13))
+      ).map {
+        case Instruction.TypeVector(t, component, _) if t == ref(4) =>
+          Instruction.TypeVector(t, component, lit(math.max(2, lanes)))
+        case instruction => instruction
+      } ++ conditional ++ Vec(
+        collective(28),
+        Instruction.Store(ref(24), ref(28), None)
+      ) ++ merge ++ Vec(
+        Instruction.IAdd(ref(2), ref(34), ref(22), ref(15)),
+        Instruction.PtrAccessChain(ref(5), ref(35), ref(19), ref(34), Vec.empty),
+        collective(36),
+        Instruction.Store(ref(35), ref(36), None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val bytes                                    = (width / 8).unsafe[Int where Between[0, 8]]
+    def input(thread: Int, component: Int): Long =
+      (thread * 37L + component * 13L) & (if (width == 64) -1L else (1L << width) - 1)
+    def encode(value: Long): Vec[Byte] = LittleEndian.toVec(value, bytes)
+    val source = Vec.from((0 until count).flatMap(t => (0 until storageLanes).flatMap(c => encode(input(t, c)))))
+    val region = AllocationId(1L)
+    val memory = ArrayMemory(region, source.size * 3)
+    assertEquals(
+      memory.write(region, 0L, source ++ Vec.fill(source.size * 2)(0x55.toByte)),
+      Right(())
+    )
+    val task = KernelTask.validated(
+      "reduce",
+      Dimensions(
+        69,
+        1,
+        1
+      ),
+      Dimensions.One,
+      Vec(
+        KernelTask.Argument.Memory(region, 0L),
+        KernelTask.Argument.Memory(region, source.size.toLong.unsafe[Long >= 0])
+      )
+    ).toOption.get
+    assertEquals(executeUnchecked(module, task, memory), Right(()))
+    for {
+      output <- 0 until 2
+      thread <- 0 until count
+    } {
+      val masked     = branch != "uniform" && (output == 0 || branch == "return")
+      val start      = thread / 32 * 32
+      val local      = thread - start
+      val sourceLane = kind match {
+        case "broadcast" => ((thread / 32 & 1) << 1) + 1
+        case "first"     => if (masked) 1 else 0
+        case "shuffle"   => (local & 2) + 1
+        case "xor"       => local ^ 2
+        case "up"        => local - 1
+        case _           => local + 1
+      }
+      val sourceThread = start + sourceLane
+      val inactive     = masked && thread % 2 == 0
+      val defined = sourceLane >= 0 && sourceLane < 32 && sourceThread < count && (!masked || sourceThread % 2 == 1)
+      if (inactive || defined) {
+        val expected = if (inactive) Vec.fill(lanes * width / 8)(0x55.toByte)
+        else Vec.from((0 until lanes).flatMap(c => encode(input(sourceThread, c))))
+        val offset = source.size + (output * count + thread) * storageLanes * width / 8
+        assertEquals(memory.bytes.slice(offset, offset + lanes * width / 8), expected, s"output=$output lane=$thread")
+      }
+    }
+  }
+}

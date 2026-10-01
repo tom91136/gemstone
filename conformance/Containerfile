@@ -38,6 +38,16 @@ RUN curl -fsSL https://codeload.github.com/ninja-build/ninja/tar.gz/refs/tags/v1
 # on a compiler installed on the host.
 FROM ${SYCL_IMAGE} AS oneapi-opencl-compiler
 
+FROM ubuntu-build-base AS toolchain-vulkan
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+       python3 python3-lxml pkg-config git libpng-dev zlib1g-dev libvulkan-dev glslc spirv-headers mesa-vulkan-drivers \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
+
 FROM ubuntu-build-base AS toolchain-opencl
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
@@ -102,6 +112,10 @@ ENV PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}" \
     LIBRARY_PATH=/opt/rocm/lib \
     LD_LIBRARY_PATH=/opt/rocm/lib
 
+# Make vendor runtimes discoverable by both the loader and CMake dependency scanning.
+RUN printf '%s\n' /opt/rocm/lib /opt/rocm/llvm/lib \
+    > /etc/ld.so.conf.d/conformance.conf && ldconfig
+
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
@@ -115,6 +129,10 @@ ENV PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}" \
     CPATH=/opt/rocm/include \
     LIBRARY_PATH=/opt/rocm/lib \
     LD_LIBRARY_PATH=/opt/rocm/lib
+
+# Make vendor runtimes discoverable by both the loader and CMake dependency scanning.
+RUN printf '%s\n' /opt/rocm/lib /opt/rocm/llvm/lib \
+    > /etc/ld.so.conf.d/conformance.conf && ldconfig
 
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
@@ -165,6 +183,10 @@ ENV PATH="/opt/intel/oneapi/compiler/latest/bin:${PATH}" \
     LIBRARY_PATH=/opt/intel/oneapi/compiler/latest/lib:/opt/intel/oneapi/mkl/latest/lib:/opt/intel/oneapi/tbb/latest/lib:/opt/intel/oneapi/umf/latest/lib \
     LD_LIBRARY_PATH=/opt/intel/oneapi/compiler/latest/lib:/opt/intel/oneapi/mkl/latest/lib:/opt/intel/oneapi/tbb/latest/lib:/opt/intel/oneapi/umf/latest/lib \
     CMAKE_PREFIX_PATH=/opt/intel/oneapi/compiler/latest:/opt/intel/oneapi/dpl/latest:/opt/intel/oneapi/mkl/latest:/opt/intel/oneapi/tbb/latest:/opt/intel/oneapi/umf/latest
+
+# Make vendor runtimes discoverable by both the loader and CMake dependency scanning.
+RUN printf '%s\n' /opt/intel/oneapi/compiler/latest/lib /opt/intel/oneapi/mkl/latest/lib /opt/intel/oneapi/tbb/latest/lib /opt/intel/oneapi/umf/latest/lib \
+    > /etc/ld.so.conf.d/conformance.conf && ldconfig
 
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING

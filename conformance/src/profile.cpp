@@ -25,7 +25,7 @@ namespace conformance::profile {
 using namespace aspartame;
 namespace {
 
-constexpr std::array<std::string_view, 7> supported_backends{"cuda", "hip", "hsa", "opencl", "sycl", "levelzero", "openacc"};
+constexpr std::array<std::string_view, 8> supported_backends{"cuda", "hip", "hsa", "opencl", "sycl", "levelzero", "vulkan", "openacc"};
 
 std::string target_id(const ProfileTarget &target) { return target.name.value_or(target.backend); }
 
@@ -48,6 +48,15 @@ bool architecture(std::string_view value, std::string_view prefix, bool hexadeci
   return std::ranges::all_of(value.substr(prefix.size()), [hexadecimal](char character) {
     return (character >= '0' && character <= '9') || (hexadecimal && character >= 'a' && character <= 'f');
   });
+}
+
+void validate_route(std::string_view backend, const std::optional<std::string> &arch) {
+  if (!supported(backend)) throw std::invalid_argument(fmt::format("unknown backend: {}", backend));
+  if (backend == "cuda" || backend == "openacc") {
+    if (!arch || !architecture(*arch, "sm_", false)) throw std::invalid_argument(fmt::format("{} requires an sm_ architecture", backend));
+  } else if (backend == "hip" || backend == "hsa") {
+    if (!arch || !architecture(*arch, "gfx", true)) throw std::invalid_argument(fmt::format("{} requires a gfx architecture", backend));
+  } else if (arch) throw std::invalid_argument(fmt::format("{} cannot set an architecture", backend));
 }
 
 std::string normalize_name(std::string value) {
@@ -80,15 +89,7 @@ void validate(std::string_view name, const Profile &profile) {
     if (!ids.insert(id).second) throw std::invalid_argument(fmt::format("machine profile {} repeats target name: {}", name, id));
     by_backend[target.backend].push_back(&target);
 
-    if (target.backend == "cuda" || target.backend == "openacc") {
-      if (!target.architecture || !architecture(*target.architecture, "sm_", false))
-        throw std::invalid_argument(fmt::format("machine profile {} requires an sm_ architecture for {}", name, target.backend));
-    } else if (target.backend == "hip" || target.backend == "hsa") {
-      if (!target.architecture || !architecture(*target.architecture, "gfx", true))
-        throw std::invalid_argument(fmt::format("machine profile {} requires a gfx architecture for {}", name, target.backend));
-    } else if (target.architecture) {
-      throw std::invalid_argument(fmt::format("machine profile {} cannot set an architecture for {}", name, target.backend));
-    }
+    validate_route(target.backend, target.architecture);
     for (const auto &[key, value] : target.environment) {
       if (!valid_environment_entry(key, value))
         throw std::invalid_argument(fmt::format("machine profile {} has a blank environment variable for {}", name, target.backend));
@@ -197,6 +198,21 @@ std::vector<ResolvedTarget> resolve_targets(const Profile &profile, const std::v
              return planned;
            })
          | to_vector();
+}
+
+std::vector<ResolvedTarget> direct_targets(const std::vector<std::string> &routes) {
+  if (routes.empty()) throw std::invalid_argument("--direct requires explicit backend[/architecture] targets");
+  std::vector<ResolvedTarget> result;
+  std::set<std::string> seen;
+  for (const auto &route : routes) {
+    const auto slash = route.find('/');
+    const auto backend = route.substr(0, slash);
+    const auto arch = slash == std::string::npos ? std::nullopt : std::optional(route.substr(slash + 1));
+    validate_route(backend, arch);
+    if (!seen.insert(route).second) throw std::invalid_argument("duplicate direct target: " + route);
+    result.push_back({backend + (arch ? "-" + *arch : ""), backend, arch, {}, false});
+  }
+  return result;
 }
 
 void validate_all(const std::filesystem::path &directory) {

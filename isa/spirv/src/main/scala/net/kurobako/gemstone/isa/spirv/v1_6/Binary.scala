@@ -31,7 +31,7 @@ object Binary {
     }
   }
 
-  val Magic: Int = 0x07230203
+  val Magic: Int = SPIRV.Magic
 
   def decode(bytes: Vec[Byte]): Either[BinaryError, RawModule] =
     for {

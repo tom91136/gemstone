@@ -10,8 +10,8 @@ object API {
     .toRight(s"unsupported compute API: $value")
 
   def defaults: Set[API] =
-    if (Properties.isLinux) Set(HSA, CUDA, OpenCL, LevelZero)
-    else Set(HIP, CUDA, OpenCL, LevelZero)
+    if (Properties.isLinux) Set(HSA, CUDA, OpenCL, Vulkan, LevelZero)
+    else Set(HIP, CUDA, OpenCL, Vulkan, LevelZero)
 }
 
 enum API(val id: String, val unixLib: String, val windowsLib: String) {

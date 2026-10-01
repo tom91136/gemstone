@@ -46,22 +46,22 @@ private class VMDispatchMemory(
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def readBytes(
       address: Long,
-      size: Int
+      size: Int >= 0
   ): Either[Fault, Vec[Byte]] = {
     val binding = aliasedRegion(address)
     if (binding != null)
       memory.read(
         binding.allocation,
         (binding.offset.raw + address - binding.address).unsafe[Long >= 0],
-        size.unsafe[Int >= 0]
+        size
       )
-    else localRead(address, size, KernargAddress, kernarg)
-      .orElse(localRead(address, size, DispatchAddress, dispatch))
-      .orElse(localRead(address, size, readOnlyAddress, readOnly))
-      .orElse(globalRead(address, size)) match {
+    else localRead(address, size.raw, KernargAddress, kernarg)
+      .orElse(localRead(address, size.raw, DispatchAddress, dispatch))
+      .orElse(localRead(address, size.raw, readOnlyAddress, readOnly))
+      .orElse(globalRead(address, size.raw)) match {
       case Some(bytes) => Right(Vec.unsafeWrapArray(bytes))
       case None        =>
-        memory.read(GuestAddress(address), size.unsafe[Int >= 0]).leftMap {
+        memory.read(GuestAddress(address), size).leftMap {
           case Fault.Memory(message) =>
             Fault.Memory(s"AMDGPU memory read address=0x${address.toHexString} size=$size: ${message}")
           case other => other

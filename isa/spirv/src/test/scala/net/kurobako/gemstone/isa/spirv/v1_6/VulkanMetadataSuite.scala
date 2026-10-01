@@ -72,12 +72,13 @@ class VulkanMetadataSuite extends munit.FunSuite {
     )
   }
 
-  test("required work-group size comes from the WorkgroupSize builtin") {
+  test("WorkgroupSize builtin overrides a conflicting LocalSize execution mode") {
     val entry  = operand("IdResult", 7)
     val module = Module(
       Header(ISA.version, Word(0), Word(64), Word(0)),
       Vec(
         entryPoint(entry),
+        Instruction.ExecutionMode(entry, operand("ExecutionMode", 17, 1, 1, 1)),
         Instruction.TypeInt(operand("IdResult", 2), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
         Instruction.TypeVector(operand("IdResult", 3), operand("IdResult", 2), operand("LiteralInteger", 3)),
         Instruction.SpecConstant(operand("IdResult", 2), operand("IdResult", 20), operand("LiteralInteger", 4)),

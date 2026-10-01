@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import VMIR.*
+import VMMemory.*
 import cats.syntax.all.*
 import java.util.concurrent.atomic.AtomicIntegerArray
 import net.kurobako.gemstone.binary.Widths.*
@@ -21,6 +22,76 @@ private class VMTypeLayout(ir: VMIR.Program) {
     }
     dense
   }
+
+  val memberMatrixLayouts: Map[(Int, Int), VMMemory.MatrixLayout] = {
+    val strides  = scala.collection.mutable.Map.empty[(Int, Int), Int]
+    val rowMajor = scala.collection.mutable.Set.empty[(Int, Int)]
+    ir.module.instructions.foreach {
+      case Instruction.MemberDecorate(structure, member, decoration) =>
+        val key = Operand.id(structure) -> Operand.id(member)
+        if (Operand.unsigned(decoration) == Decoration.RowMajor) rowMajor += key
+        if (Operand.unsigned(decoration) == Decoration.MatrixStride && decoration.words.length >= 2)
+          strides.update(key, Math.toIntExact(decoration.words.apply(1).toUnsigned.raw))
+      case _ => ()
+    }
+    strides.view.map { case (key, stride) => key -> VMMemory.MatrixLayout(stride, rowMajor.contains(key)) }.toMap
+  }
+  private val matrixStorageTypes             = TrieMap.empty[Int, Boolean]
+  private val matrixLeafOffsets              = TrieMap.empty[(Int, Option[MatrixLayout]), Vector[(Long, Int)]]
+  def hasMatrixStorage(typeId: Int): Boolean =
+    matrixStorageTypes.getOrElseUpdate(
+      typeId,
+      runtimeType(typeId) match {
+        case Some(RuntimeType.Structure(members)) => members.zipWithIndex.exists { case (member, index) =>
+            memberMatrixLayouts.contains(typeId -> index) || hasMatrixStorage(member)
+          }
+        case Some(RuntimeType.Array(element, _)) => hasMatrixStorage(element)
+        case _                                   => false
+      }
+    )
+
+  // Enumerate logical scalar lanes in column order and map them to their physical bytes.
+  // Loading/storing only these leaves preserves padding and supports row-major column views.
+  def matrixStorageLeaves(typeId: Int, layout: Option[MatrixLayout]): Vector[(Long, Int)] =
+    matrixLeafOffsets.getOrElseUpdate(
+      typeId -> layout, {
+        def shifted(element: Int, context: Option[MatrixLayout], base: Long): Vector[(Long, Int)] =
+          matrixStorageLeaves(element, context).map { case (offset, scalar) =>
+            Math.addExact(base, offset) -> scalar
+          }
+        runtimeType(typeId) match {
+          case Some(RuntimeType.Structure(members)) => members.zipWithIndex.toVector.flatMap { case (member, index) =>
+              shifted(
+                member,
+                memberMatrixLayouts.get(typeId -> index),
+                structMemberOffset(typeId, members, index).toLong
+              )
+            }
+          case Some(RuntimeType.Array(element, count)) =>
+            val stride = ir.arrayStrides.getOrElse(typeId, storageTypeSize(element, layout))
+            Vector.tabulate(Math.toIntExact(count))(index => shifted(element, layout, index.toLong * stride)).flatten
+          case Some(RuntimeType.MatrixType(column, columns)) =>
+            runtimeType(column) match {
+              case Some(RuntimeType.VectorType(component, rows)) =>
+                val scalarBytes = typeSize(component)
+                val stride      = layout.map(_.stride).getOrElse(typeSize(column))
+                if (stride <= 0) throw IllegalArgumentException("invalid matrix stride")
+                Vector.tabulate(columns, rows) { (c, r) =>
+                  val offset = if (layout.exists(_.rowMajor)) r.toLong * stride + c.toLong * scalarBytes
+                  else c.toLong * stride + r.toLong * scalarBytes
+                  offset -> component
+                }.flatten
+              case _ => throw IllegalArgumentException("invalid matrix column type")
+            }
+          case Some(RuntimeType.VectorType(component, count)) =>
+            val stride = layout.filter(_.rowMajor).map(_.stride).getOrElse(typeSize(component))
+            Vector.tabulate(count)(index => index.toLong * stride -> component)
+          case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) |
+              Some(RuntimeType.Pointer(_, _)) => Vector(0L -> typeId)
+          case value => throw IllegalArgumentException(s"unsupported matrix storage leaf $value")
+        }
+      }
+    )
 
   def runtimeType(id: Int): Option[RuntimeType] =
     if (id >= 0 && id < typeLookup.length) typeLookup(id) else ir.types.get(id)
@@ -68,14 +139,47 @@ private class VMTypeLayout(ir: VMIR.Program) {
       )
   }
 
+  def storageTypeSize(typeId: Int, layout: Option[MatrixLayout]): Int =
+    (runtimeType(typeId), layout) match {
+      case (Some(RuntimeType.MatrixType(column, columns)), Some(value)) =>
+        val rows = runtimeType(column) match {
+          case Some(RuntimeType.VectorType(_, count)) => count
+          case _                                      => throw IllegalArgumentException("invalid matrix column type")
+        }
+        if (value.stride <= 0) throw IllegalArgumentException("invalid matrix stride")
+        Math.multiplyExact(if (value.rowMajor) rows else columns, value.stride)
+      case (Some(RuntimeType.VectorType(component, count)), Some(value)) if value.rowMajor =>
+        Math.addExact(Math.multiplyExact(count - 1, value.stride), typeSize(component))
+      case (Some(RuntimeType.Array(element, count)), Some(_)) =>
+        Math.toIntExact(Math.multiplyExact(
+          ir.arrayStrides.getOrElse(typeId, storageTypeSize(element, layout)).toLong,
+          count
+        ))
+      case _ => typeSize(typeId)
+    }
+
   private def typeSizeUncached(typeId: Int): Int = runtimeType(typeId) match {
-    case Some(RuntimeType.Bool)                     => 1
-    case Some(RuntimeType.Integer(width, _))        => width.raw / 8
-    case Some(RuntimeType.Floating(width))          => width.raw / 8
-    case Some(RuntimeType.Event)                    => 8
+    case Some(RuntimeType.Bool)              => 1
+    case Some(RuntimeType.Integer(width, _)) => width.raw / 8
+    case Some(RuntimeType.Floating(width))   => width.raw / 8
+    case Some(RuntimeType.MultisampledTexture(_, _)) | Some(RuntimeType.InputAttachment(
+          _,
+          _
+        )) | Some(RuntimeType.Event) | Some(RuntimeType.StorageImage(
+          _,
+          _,
+          _,
+          _,
+          _,
+          _
+        )) | Some(RuntimeType.Texture(_, _, _, _)) | Some(RuntimeType.CubeTexture(
+          _,
+          _
+        )) | Some(RuntimeType.Sampler) | Some(RuntimeType.SampledImage(_)) => 8
     case Some(RuntimeType.VectorType(component, n)) =>
-      Math.multiplyExact(typeSize(component), if (n == 3) 4 else n)
-    case Some(RuntimeType.Array(element, n)) =>
+      Math.multiplyExact(typeSize(component), if (n == 3 && ir.vulkanEntries.isEmpty) 4 else n)
+    case Some(RuntimeType.MatrixType(column, count)) => Math.multiplyExact(typeSize(column), count)
+    case Some(RuntimeType.Array(element, n))         =>
       Math.toIntExact(Math.multiplyExact(ir.arrayStrides.getOrElse(typeId, typeSize(element)).toLong, n))
     case Some(RuntimeType.Structure(members)) => structSize(typeId, members)
     case Some(RuntimeType.Pointer(_, _))      => 8
@@ -95,7 +199,10 @@ private class VMTypeLayout(ir: VMIR.Program) {
     while (index < members.size) {
       val memberAlign = typeAlignment(members(index))
       offset = ir.memberOffsets.getOrElse(structureType -> index, alignUp(offset, memberAlign))
-      offset = Math.addExact(offset, typeSize(members(index)))
+      offset = Math.addExact(
+        offset,
+        storageTypeSize(members(index), memberMatrixLayouts.get(structureType -> index))
+      )
       align = math.max(align, memberAlign)
       index += 1
     }
@@ -111,18 +218,19 @@ private class VMTypeLayout(ir: VMIR.Program) {
   ): Int =
     if (ir.packedStructures.contains(structureType))
       members.take(selected).foldLeft(0)((size, member) => Math.addExact(size, typeSize(member)))
-    else ir.memberOffsets.getOrElse(
-      structureType -> selected, {
-        var offset = 0
-        var index  = 0
-        while (index < selected) {
-          offset = alignUp(offset, typeAlignment(members(index)))
-          offset = Math.addExact(offset, typeSize(members(index)))
-          index += 1
-        }
-        alignUp(offset, typeAlignment(members(selected)))
+    else ir.memberOffsets.get(structureType -> selected).getOrElse {
+      var offset = 0
+      var index  = 0
+      while (index < selected) {
+        offset = alignUp(offset, typeAlignment(members(index)))
+        offset = Math.addExact(
+          offset,
+          storageTypeSize(members(index), memberMatrixLayouts.get(structureType -> index))
+        )
+        index += 1
       }
-    )
+      alignUp(offset, typeAlignment(members(selected)))
+    }
 
   def typeAlignment(typeId: Int): Int =
     typeAlignmentCache.getOrElseUpdate(typeId, typeAlignmentUncached(typeId))
@@ -130,6 +238,7 @@ private class VMTypeLayout(ir: VMIR.Program) {
   private def typeAlignmentUncached(typeId: Int): Int = runtimeType(typeId) match {
     case Some(RuntimeType.Structure(_)) if ir.packedStructures.contains(typeId) => 1
     case Some(RuntimeType.Structure(members))           => members.map(typeAlignment(_)).maxOption.getOrElse(1)
+    case Some(RuntimeType.MatrixType(column, _))        => typeAlignment(column)
     case Some(RuntimeType.Array(element, _))            => typeAlignment(element)
     case Some(RuntimeType.VectorType(component, count)) =>
       Math.multiplyExact(typeAlignment(component), if (count == 3) 4 else count)

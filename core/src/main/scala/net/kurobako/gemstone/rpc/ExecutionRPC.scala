@@ -2,6 +2,8 @@ package net.kurobako.gemstone.rpc
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.graphics.GraphicsProtocol.*
+import net.kurobako.gemstone.graphics.ShaderMetadata.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionProtocol.{*, given}
@@ -55,6 +57,14 @@ object ExecutionRPC {
         extends Operation[Vec[SpecializationInfo]]
     case SpecializeImage(image: Vec[Byte], constants: Vec[SpecializationConstant])
         extends Operation[Vec[Byte]]
+    case PrepareShader(
+        image: Vec[Byte],
+        entry: NonEmpty[String],
+        stage: ShaderStageKind,
+        constants: Vec[SpecializationConstant]
+    )                                                     extends Operation[PreparedShader]
+    case SubmitGraphics(submission: GraphicsSubmission)   extends Operation[CompletionId]
+    case ReadGraphicsStatistics(completion: CompletionId) extends Operation[GraphicsStatistics]
     case UnloadProgram(program: ProgramId)
         extends Operation[Unit]
     case DescribeProgram(program: ProgramId)
@@ -87,7 +97,8 @@ object ExecutionRPC {
         groupSegmentBytes: Int >= 0,
         arguments: Vec[KernelTask.Argument],
         pointerRelocations: Vec[KernelTask.PointerRelocation],
-        discoverArgumentRelocations: Boolean = false
+        discoverArgumentRelocations: Boolean = false,
+        descriptorBindings: Vec[DescriptorBinding] = Vec.empty
     ) extends Operation[CompletionId]
     case QueryCompletion(completion: CompletionId)
         extends Operation[CompletionStatus]

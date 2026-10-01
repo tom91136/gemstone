@@ -3,6 +3,8 @@ package net.kurobako.gemstone.rpc
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.graphics.GraphicsProtocol.*
+import net.kurobako.gemstone.graphics.ShaderMetadata.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
@@ -13,6 +15,68 @@ class ExecutionRPCSuite extends munit.FunSuite {
   private val region     = AllocationId(1L)
   private val program    = ProgramId(2L)
   private val completion = CompletionId(3L)
+
+  test("graphics closed domains reject invalid wire values and preserve descriptor alternatives") {
+    def decodeInt[A: Wire.Codec](value: Int): Either[String, A] =
+      Wire.Codec[Int].encode(value, ExecutionRPC.Limits).flatMap(Wire.Codec[A].decode(_, ExecutionRPC.Limits))
+    assert(decodeInt[GraphicsFormat](-1).isLeft)
+    assert(decodeInt[GraphicsFormat](GraphicsFormat.values.length).isLeft)
+    GraphicsFormat.values.foreach(format => assertEquals(decodeInt[GraphicsFormat](format.ordinal), Right(format)))
+    assert(decodeInt[GraphicsFilter](2).isLeft)
+    assert(decodeInt[GraphicsSwizzle](7).isLeft)
+    assert(decodeInt[GraphicsAddressMode](-1).isLeft)
+    assert(decodeInt[Int in (1, 4)](2).isLeft)
+    assert(decodeInt[Int in (2, 4)](1).isLeft)
+    assert(decodeInt[Int where Between[0, 3]](4).isLeft)
+    assertEquals(decodeInt[GraphicsFilter](1), Right(GraphicsFilter.Linear))
+    val sampler = GraphicsSampler(
+      minFilter = GraphicsFilter.Linear,
+      magFilter = GraphicsFilter.Nearest,
+      addressU = GraphicsAddressMode.Repeat,
+      addressV = GraphicsAddressMode.ClampToBorder,
+      addressW = GraphicsAddressMode.MirrorClampToEdge,
+      unnormalized = false,
+      compareEnable = true,
+      compareOp = GraphicsCompare.GreaterOrEqual,
+      borderColor = GraphicsBorderColor.FloatOpaqueWhite,
+      mipLodBias = -0.75f,
+      minLod = 0f,
+      maxLod = 4f,
+      mipmapMode = GraphicsMipmapMode.Linear
+    )
+    val image = GraphicsImage(
+      GraphicsRange(allocation, 0L, 16L),
+      Vec.nonEmpty(GraphicsImageLevel(GraphicsExtent(1, 1, 1), 0L, 16L, 16L, 16L)),
+      1,
+      1,
+      GraphicsFormat.Rgba32f,
+      false
+    )
+    val components  = GraphicsComponents(GraphicsSwizzle.B, GraphicsSwizzle.G, GraphicsSwizzle.R, GraphicsSwizzle.One)
+    val descriptors = Vec(
+      GraphicsDescriptor.Image(image, components),
+      GraphicsDescriptor.Sampler(sampler),
+      GraphicsDescriptor.Combined(image, components, sampler)
+    )
+    val codec    = Wire.Codec[Vec[DescriptorBinding]]
+    val bindings = descriptors.zipWithIndex.map((descriptor, index) => DescriptorBinding(index.unsafe, descriptor))
+    assertEquals(
+      codec.encode(bindings, ExecutionRPC.Limits).flatMap(codec.decode(_, ExecutionRPC.Limits)),
+      Right(bindings)
+    )
+    assert(scala.compiletime.testing.typeCheckErrors("""
+      import net.kurobako.gemstone.graphics.GraphicsProtocol.*
+      val filter: GraphicsFilter = GraphicsAddressMode.Repeat
+    """).nonEmpty)
+    assert(scala.compiletime.testing.typeCheckErrors("""
+      import net.kurobako.gemstone.graphics.GraphicsProtocol.*
+      val format: GraphicsFormat = GraphicsShaderFormat.R32f
+    """).nonEmpty)
+    assert(scala.compiletime.testing.typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      val samples: Int in (1, 4) = 2
+    """).nonEmpty)
+  }
 
   test("allocation identifiers reject zero and negative values at the wire boundary") {
     for (invalid <- Vector(0L, -1L, Long.MinValue)) {
@@ -55,6 +119,14 @@ class ExecutionRPCSuite extends munit.FunSuite {
       Vec[Byte](3, 2, 35, 7),
       Vec(SpecializationConstant(Binary32(0xffffffffL), Vec[Byte](1, 2, 3, 4)))
     ),
+    Operation.PrepareShader(
+      Vec[Byte](3, 2, 35, 7),
+      "main",
+      ShaderStageKind.Fragment,
+      Vec(SpecializationConstant(Binary32(101L), Vec[Byte](1, 2, 3, 4)))
+    ),
+    Operation.SubmitGraphics(GraphicsSubmission(Vec.empty)),
+    Operation.ReadGraphicsStatistics(completion),
     Operation.UnloadProgram(program),
     Operation.DescribeProgram(program),
     Operation.DescribeKernel(program, "kernel"),

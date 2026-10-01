@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 import VMIR.*
 import execution.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
@@ -227,11 +228,11 @@ class AtomicExecutionSuite extends munit.FunSuite {
   for {
     space  <- Seq("global", "shared")
     width  <- Seq(32, 64)
-    groups <- Seq(1, 5)
+    groups <- Seq[Int > 0](1, 5)
   }
     test(s"unsigned atomic min $space/$width over $groups groups preserves high-bit ordering") {
-      val memory = ArrayCheckedMemory.allocate((8 * (groups + 1)).unsafe[Int >= 0], GuestAddress(0x100000L))
-      val max    = if (width == 64) -1L else 0xffffffffL
+      val memory                             = ArrayCheckedMemory.allocate((groups + 1) * 8, GuestAddress(0x100000L))
+      val max                                = if (width == 64) -1L else 0xffffffffL
       val byteWidth: Int where Between[1, 8] = if (width == 64) 8 else 4
       memory.writeLittleEndian(memory.allocation.start, max, byteWidth).toOption.get
       val init   = if (space == "shared") s"st.shared.u$width [scratch], $max;" else ""
@@ -265,7 +266,7 @@ ret;
         memory
       )
       assert(result.isRight, result.toString)
-      for (group <- 0 until groups)
+      for (group <- 0 until groups.raw)
         assertEquals(memory.readLittleEndian(memory.allocation.start.offset(8 + group * 8), byteWidth), Right(1L))
     }
 

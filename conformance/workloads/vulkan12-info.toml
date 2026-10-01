@@ -1,0 +1,3 @@
+# Required-feature, property, limit, and driver-identity diagnostics.
+vulkan_mustpass = "mustpass/vk-default.txt"
+vulkan_cases = ["dEQP-VK.info.*", "dEQP-VK.api.info.*", "dEQP-VK.api.driver_properties.*"]

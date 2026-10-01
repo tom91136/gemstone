@@ -33,5 +33,7 @@ object environment {
   val TargetArch: String = "GEMSTONE_TARGET_ARCH"
   val TestLibrary: String = "GEMSTONE_TEST_LIBRARY"
   val Trace: String = "GEMSTONE_TRACE"
+  val VulkanApiVersion: String = "GEMSTONE_VULKAN_API_VERSION"
   val VulkanDump: String = "GEMSTONE_VULKAN_DUMP"
+  val VulkanValidateAllocators: String = "GEMSTONE_VULKAN_VALIDATE_ALLOCATORS"
 }

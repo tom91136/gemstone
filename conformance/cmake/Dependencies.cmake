@@ -5,6 +5,8 @@ include_guard(GLOBAL)
 # name|kind|url|sha256
 # kind is `archive` (extracted) or `file` (a single downloaded file).
 set(CONFORMANCE_DEPENDENCY_SOURCES
+  "conformance_imgui|archive|https://codeload.github.com/ocornut/imgui/tar.gz/f1cc2ae15e53a861a874c3034aae6798fde194ab|f30be7f3e2136615b1848a9afb72f6dfd8a60820ddf1c1a85997bf3b722e7cfc"
+  "conformance_llama|archive|https://codeload.github.com/ggml-org/llama.cpp/tar.gz/e9f824d8c0f011662a742c9d15d4aa18a41e32c0|caf033a18e7edcf9395ad843fc5dccfc85c2310729e4697054ae21eb29b576a5"
   "glaze|archive|https://github.com/stephenberry/glaze/archive/refs/tags/v7.9.1.tar.gz|d6dee391276f5375672c35d06058e4fd8f1f30f62bae163a004b3bd13a4e2ae3"
   "magic_enum|archive|https://github.com/Neargye/magic_enum/archive/refs/tags/v0.9.8.tar.gz|1e54959a3f3cb675938d858603ad69d0f3f7c82439fc2bf86d7232daec2bd10e"
   "fire|file|https://raw.githubusercontent.com/kongaskristjan/fire-hpp/c31b9d6593ee4edfdf9df875d006e26d9a8df879/include/fire-hpp/fire.hpp|f9b82674d0c0a7322043fe837bce895d5798d18585f0e4b1ff105418a8a9e2f8"
@@ -23,4 +25,11 @@ set(CONFORMANCE_DEPENDENCY_SOURCES
   "conformance_minibude|archive|https://codeload.github.com/UoB-HPC/miniBUDE/tar.gz/570f66c1fd0c29b7f3ab6fa96fba87f4561aa44c|4c1d349785771c1fca818a7abd69dc789d6f5b77990c76ea29a94f1fdec5aa9e"
   "conformance_cloverleaf|archive|https://codeload.github.com/UoB-HPC/CloverLeaf/tar.gz/3e10ff9268d3704a744e5a2a4ea3c62831078082|d914a1ee547dec35818851b4cac8f6aeeb2ba067168e5826266598019445f25f"
   "conformance_tealeaf|archive|https://codeload.github.com/UoB-HPC/TeaLeaf/tar.gz/e70261c0be40537da75b258108ed2898f84f3c58|f454ab1cc89e750e0a6695bf65ce41cd3ebd64ba3e109a5109d02ae534bc6d16"
-  "conformance_kokkos|archive|https://codeload.github.com/kokkos/kokkos/tar.gz/62d2b6c879b74b6ae7bd06eb3e5e80139c4708e6|2738406dba3a8edd57c9da845009807d9c5f6ce64d6c098d479470a39bbb3ff9")
+  "conformance_kokkos|archive|https://codeload.github.com/kokkos/kokkos/tar.gz/62d2b6c879b74b6ae7bd06eb3e5e80139c4708e6|2738406dba3a8edd57c9da845009807d9c5f6ce64d6c098d479470a39bbb3ff9"
+  "conformance_vulkan_cts|archive|https://codeload.github.com/KhronosGroup/VK-GL-CTS/tar.gz/f6a29701220f34dd1407513bfe80d74ca7b392ce|d8741d45c2663193cc43b17d8f4e6fa230fa238f943bb4db3fa538ecb07503f3"
+  "conformance_vulkan_spirv_tools|archive|https://codeload.github.com/KhronosGroup/SPIRV-Tools/tar.gz/2d14d2e76aa7de72404b17078eda15c20a6a0389|3c3683ec1b88d51de6e2f178cbab3a8e4d0b6546413db9e55335286820e56264"
+  "conformance_vulkan_glslang|archive|https://codeload.github.com/KhronosGroup/glslang/tar.gz/715c8500e7cd67f2eba9e60e98852a1ed49d2f15|85c20114a55296a747b837ad500613f958e958ece214f1c05219b5f4a4073432"
+  "conformance_vulkan_spirv_headers|archive|https://codeload.github.com/KhronosGroup/SPIRV-Headers/tar.gz/6dd7ba990830f7c15ac1345ff3b43ef6ffdad216|f1168d541510143dba6def246364c453a0a1c6876bbe98d8ede8c69ee478b50f"
+  "conformance_vulkan_docs|archive|https://codeload.github.com/KhronosGroup/Vulkan-Docs/tar.gz/4abe0260bbd8e59930786eed645481808a3fe6f1|5f7ddba72b2cf40b55853539d732a74fd11e60452bd06ac40c786259f54f9a42"
+  "conformance_vulkan_amber|archive|https://codeload.github.com/google/amber/tar.gz/53a4c8934bf7335d27c694e9fdac9ae1b180c0d2|48138d03652be8b3590e310427a3037f4f7b320e55fe7c3dd37397d146b4b454"
+  "conformance_vulkan_jsoncpp|archive|https://codeload.github.com/open-source-parsers/jsoncpp/tar.gz/9059f5cad030ba11d37818847443a53918c327b1|e7a12f50c2125abc9e4b2a38f399393503b6eebd5b4ab75ebb7df1664e768ce7")

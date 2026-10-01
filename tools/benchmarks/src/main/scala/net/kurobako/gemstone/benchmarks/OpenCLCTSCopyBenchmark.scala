@@ -3,6 +3,7 @@ package net.kurobako.gemstone.benchmarks
 import cats.syntax.all.*
 import com.monovore.decline.Opts
 import net.kurobako.gemstone.*
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -30,15 +31,15 @@ object OpenCLCTSCopyBenchmark {
         value == "global-to-local" || value == "local-to-global"
       ),
     Opts.option[Int]("groups", help = "Workgroups per dispatch").withDefault(16)
-      .validate("groups must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("groups must be positive"),
     Opts.option[Int]("local-size", help = "Work items per group").withDefault(8)
-      .validate("local-size must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("local-size must be positive"),
     Opts.option[Int]("stride", help = "Element stride (1 is contiguous)").withDefault(2)
-      .validate("stride must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("stride must be positive"),
     Opts.option[Int]("iterations", help = "Dispatches per sample").withDefault(3)
-      .validate("iterations must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("iterations must be positive"),
     Opts.option[Int]("parallelism", help = "VM worker count").withDefault(1)
-      .validate("parallelism must be positive")(_ > 0).map(_.unsafe[Int > 0])
+      .refined[Int > 0]("parallelism must be positive")
   ).mapN(Options(_, _, _, _, _, _))
 
   private val inputRegion  = AllocationId(1)

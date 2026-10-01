@@ -4,6 +4,7 @@ import cats.syntax.all.*
 import com.monovore.decline.Opts
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
 
@@ -24,9 +25,9 @@ object PTXRegisterIndexBenchmark {
       .validate("kind must be numbered or named")(value => value == "numbered" || value == "named")
       .map(value => if (value == "named") RegisterKind.Named else RegisterKind.Numbered),
     Opts.option[Int]("names", help = "Distinct register names").withDefault(6144)
-      .validate("names must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("names must be positive"),
     Opts.option[Int]("iterations", help = "Register index operations").withDefault(1000000)
-      .validate("iterations must be positive")(_ > 0).map(_.unsafe[Int > 0])
+      .refined[Int > 0]("iterations must be positive")
   ).mapN(Options(_, _, _))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))

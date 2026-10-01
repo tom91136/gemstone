@@ -15,9 +15,7 @@
 
 TEST_CASE("chunked transfer round-trips allocation bytes") {
   gemstone_test::RpcFixture fixture(GENERATE(false, true));
-  const auto endpoint = fixture.endpoint();
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, endpoint.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
 
   auto client = gemstone::execution::Client::fromEnvironment();
   REQUIRE((client != nullptr));
@@ -30,9 +28,6 @@ TEST_CASE("chunked transfer round-trips allocation bytes") {
   std::vector<uint8_t> output(input.size(), 0);
   REQUIRE((gemstone::execution::transferAllocation(*client, registered.value(), 0, output.data(), output.size(), false, 3)));
   REQUIRE((output == input));
-
-  unsetenv(gemstone::environment::RpcEndpoint);
-  unsetenv(gemstone::environment::RpcClient);
 }
 
 TEST_CASE("completion collection follows full dirty-range pages through the final short page") {
@@ -40,9 +35,7 @@ TEST_CASE("completion collection follows full dirty-range pages through the fina
   const auto count = GENERATE(MaximumElements, MaximumElements + 3);
   gemstone_test::RpcFixture fixture;
   fixture.expect({1, count, count, 0, 0});
-  const auto endpoint = fixture.endpoint();
-  REQUIRE(setenv(gemstone::environment::RpcEndpoint, endpoint.c_str(), 1) == 0);
-  REQUIRE(setenv(gemstone::environment::RpcClient, "42", 1) == 0);
+  const gemstone_test::RpcEnvironment environment(fixture);
   auto client = Client::fromEnvironment();
   REQUIRE(client);
   const auto allocation = client->call(RegisterAllocation{AllocationKind::Device, static_cast<int64_t>(count) * 4});
@@ -71,16 +64,12 @@ TEST_CASE("completion collection follows full dirty-range pages through the fina
     CHECK(result.dirty_ranges[index].size.value == 4);
   }
   fixture.check();
-  unsetenv(gemstone::environment::RpcEndpoint);
-  unsetenv(gemstone::environment::RpcClient);
 }
 
 TEST_CASE("sparse writeback batches reads and leaves host gaps untouched") {
   using namespace gemstone::execution;
   gemstone_test::RpcFixture fixture;
-  const auto endpoint = fixture.endpoint();
-  REQUIRE(setenv(gemstone::environment::RpcEndpoint, endpoint.c_str(), 1) == 0);
-  REQUIRE(setenv(gemstone::environment::RpcClient, "42", 1) == 0);
+  const gemstone_test::RpcEnvironment environment(fixture);
   auto client = Client::fromEnvironment();
   REQUIRE(client);
   const auto allocation = client->call(RegisterAllocation{AllocationKind::Device, 16});
@@ -115,6 +104,4 @@ TEST_CASE("sparse writeback batches reads and leaves host gaps untouched") {
   CHECK(largeOutput == largeInput);
   CHECK(host.front() == 42);
   CHECK(fixture.reads() == reads + 4);
-  unsetenv(gemstone::environment::RpcEndpoint);
-  unsetenv(gemstone::environment::RpcClient);
 }

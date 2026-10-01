@@ -6,6 +6,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cuda.h>
 
+#include <gemstone/test_support.hpp>
+
 #include <environment_keys.hpp>
 
 namespace {
@@ -106,8 +108,8 @@ bool driverEntryPointQueryWorks() {
 } // namespace
 
 TEST_CASE("CUDA facade fails closed without execution service", "[cuda]") {
-  unsetenv(gemstone::environment::RpcClient);
-  unsetenv(gemstone::environment::RpcEndpoint);
+  const gemstone_test::Environment noClient(gemstone::environment::RpcClient, nullptr);
+  const gemstone_test::Environment noEndpoint(gemstone::environment::RpcEndpoint, nullptr);
   const CUresult status = cuInit(0);
   REQUIRE((status == CUDA_ERROR_NOT_INITIALIZED));
   REQUIRE((targetSelectionWorks()));

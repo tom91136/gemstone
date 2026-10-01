@@ -55,7 +55,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
         handler: Event => Either[Fault, Unit]
     ): Either[ExecutionFailure, Unit] =
       task.arguments.headOption match {
-        case Some(KernelTask.Argument.Memory(region, offset)) =>
+        case Some(KernelTask.Argument.Memory(region, offset, _)) =>
           for {
             _ <- memory.write(region, offset, Vec[Byte](42)).left.map(ExecutionFailure.fromFault(_))
             _ <- handler(
@@ -176,7 +176,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
             control: TaskControl,
             handler: Event => Either[Fault, Unit]
         ): Either[ExecutionFailure, Unit] = task.arguments.headOption match {
-          case Some(KernelTask.Argument.Memory(region, _)) =>
+          case Some(KernelTask.Argument.Memory(region, _, _)) =>
             (0 until count).foldLeft[Either[ExecutionFailure, Unit]](Right(())) { (result, index) =>
               result.flatMap(_ =>
                 memory.write(region, (index.toLong * 2).unsafe[Long >= 0], Vec[Byte](42))
@@ -231,7 +231,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
               control: TaskControl,
               handler: Event => Either[Fault, Unit]
           ): Either[ExecutionFailure, Unit] = {
-            val KernelTask.Argument.Memory(region, _) = task.arguments.head: @unchecked
+            val KernelTask.Argument.Memory(region, _, _) = task.arguments.head: @unchecked
             workers.parallelFor(128L) { index =>
               val offset = ((index.raw * 31L % 128L) * 16L).unsafe[Long >= 0]
               for {
@@ -278,7 +278,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
             control: TaskControl,
             handler: Event => Either[Fault, Unit]
         ): Either[ExecutionFailure, Unit] = {
-          val KernelTask.Argument.Memory(region, _) = task.arguments.head: @unchecked
+          val KernelTask.Argument.Memory(region, _, _) = task.arguments.head: @unchecked
           (0 until count).foldLeft[Either[ExecutionFailure, Unit]](Right(())) { (result, index) =>
             result.flatMap(_ =>
               handler(Event.PointerRelocation(region, (index.toLong * 16).unsafe[Long >= 0], region, 0L))

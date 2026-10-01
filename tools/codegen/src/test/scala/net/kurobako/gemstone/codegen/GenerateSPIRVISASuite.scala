@@ -5,7 +5,7 @@ import java.nio.file.Path
 
 class GenerateSPIRVISASuite extends munit.FunSuite {
   private val grammar  = """{
-    "major_version":1,"minor_version":6,"revision":1,
+    "magic_number":"0x07230203", "major_version":1,"minor_version":6,"revision":1,
     "instructions":[
       {"opname":"OpFixture","opcode":7,"class":"Miscellaneous","operands":[
         {"kind":"IdResult"},
@@ -33,7 +33,14 @@ class GenerateSPIRVISASuite extends munit.FunSuite {
   }
 
   private def generate(input: Path, ext: Path, output: Path): Unit =
-    GenerateSPIRVISA.main(Array("instructions", input.toString, ext.toString, output.toString, "v1_6"))
+    GenerateSPIRVISA.main(Array(
+      "instructions",
+      input.toString,
+      ext.toString,
+      output.toString,
+      output.resolveSibling("native").toString,
+      "v1_6"
+    ))
 
   private def source(output: Path, name: String): String =
     Files.readString(output.resolve("net/kurobako/gemstone/isa/spirv/v1_6").resolve(name))

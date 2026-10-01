@@ -1,5 +1,3 @@
-# Standard SYCL CTS, excluding the full-type range_api launch of approximately
-# 8.7 trillion work-items. The omitted case is deferred, not a passing result.
-# Build type coverage is controlled separately by SYCL_CTS_ENABLE_FULL_CONFORMANCE.
+# The bounded selection is shared with full. Explicit fields replace inherited values.
+extends = "cts-bounded"
 include_programs = ['sycl_cts_*']
-specs = ['~"range_api"']

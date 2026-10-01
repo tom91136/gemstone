@@ -20,6 +20,7 @@ object GenerateSPIRVISA {
       grammar: Path,
       extinst: Path,
       sourceRoot: Path,
+      nativeRoot: Path,
       packageVersion: String
   ) extends Request
   private case class ExtendedInstructionSet(name: String, objectName: String, instructions: Vector[(String, Int)])
@@ -49,6 +50,7 @@ object GenerateSPIRVISA {
       operands: Vector[Operand]
   )
   private case class Grammar(
+      magic: Long,
       major: Int where Between[0, 255],
       minor: Int where Between[0, 255],
       revision: Int >= 0,
@@ -69,8 +71,9 @@ object GenerateSPIRVISA {
         Opts.argument[String]("grammar").map(Path.of(_)),
         Opts.argument[String]("extinst-directory").map(Path.of(_)),
         Opts.argument[String]("generated-source-root").map(Path.of(_)),
+        Opts.argument[String]("generated-native-root").map(Path.of(_)),
         Opts.argument[String]("package-version")
-      ).mapN(Instructions(_, _, _, _))),
+      ).mapN(Instructions(_, _, _, _, _))),
       Command("tests", "Generate reference tests")((
         Opts.argument[String]("grammar").map(Path.of(_)),
         Opts.argument[String]("tests").map(Path.of(_)),
@@ -81,7 +84,7 @@ object GenerateSPIRVISA {
   )
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) {
-    case Instructions(grammarPath, extinstDirectory, sourceRoot, packageVersion) =>
+    case Instructions(grammarPath, extinstDirectory, sourceRoot, nativeRoot, packageVersion) =>
       val version    = checkedPackageVersion(packageVersion)
       val grammar    = readGrammar(grammarPath)
       val extended   = readExtendedInstructions(extinstDirectory)
@@ -92,10 +95,17 @@ object GenerateSPIRVISA {
       syncRoot(
         sourceRoot,
         (Map(
+          base.resolve("SPIRV.scala")               -> renderConstants(grammar, version),
+          base.resolve("ImageFormats.scala")        -> ImageFormats.scalaSource(version),
+          base.resolve("ImageDescriptor.scala")     -> ImageDescriptorABI.scalaSource(version),
           base.resolve("ExtendedInstruction.scala") -> renderExtendedInstructions(extended, version)
         ) ++ renderInstructions(grammar, version).map { case (name, content) => base.resolve(name) -> content } ++
           enumerants).toMap
       )
+      val _ = GeneratedFiles.write(nativeRoot.resolve("gemstone_image_formats.hpp"), ImageFormats.nativeSource)
+      val nativeOutput = nativeRoot.resolve("gemstone_spirv_constants.hpp")
+      val _            = GeneratedFiles.write(nativeOutput, renderNativeConstants(grammar))
+      val _ = GeneratedFiles.write(nativeRoot.resolve("gemstone_image_descriptor.hpp"), ImageDescriptorABI.nativeSource)
       Console.out.println(
         s"generated ${grammar.entries.size} typed SPIR-V core instructions and ${extended.map(_.instructions.size).sum} extended instructions"
       )
@@ -165,6 +175,7 @@ object GenerateSPIRVISA {
       case _ => throw IllegalArgumentException("operand kind is not an object")
     }
     Grammar(
+      magic = parseUnsigned(valueField(root, "magic_number")),
       major = versionField(root, "major_version"),
       minor = versionField(root, "minor_version"),
       revision = Try(numberField(root, "revision").unsafe[Int >= 0]).toEither.left.map(_.getMessage)
@@ -683,13 +694,66 @@ object GenerateSPIRVISA {
           |""".stripMargin
   }
 
+  // These domains are consumed by reflection and execution on both sides of the RPC ABI.
+  private val ConstantKinds = Set(
+    "BuiltIn",
+    "Decoration",
+    "ExecutionModel",
+    "ExecutionMode",
+    "StorageClass",
+    "Dim",
+    "ImageFormat",
+    "ImageOperands",
+    "FPRoundingMode",
+    "FunctionParameterAttribute",
+    "Scope",
+    "GroupOperation"
+  )
+
+  private def constantGroups(grammar: Grammar): Vector[(String, Vector[(String, Long)])] =
+    Vector("Opcode" ->
+      grammar.entries.toVector.map(entry => entry.name.raw.stripPrefix("Op") -> entry.opcode.toLong)) ++
+      grammar.kinds.toVector.filter(kind => ConstantKinds(kind.kind.raw)).map { kind =>
+        kind.kind.raw -> kind.enumerants.map { enumerant =>
+          val name = enumerant.name.raw
+          (if (name.head.isDigit) s"_$name" else name) -> enumerant.value
+        }
+      }
+
+  private def renderConstants(grammar: Grammar, packageVersion: ScalaPackageVersion): String = {
+    val groups = constantGroups(grammar).filter(_._1 == "Opcode").map { case (kind, values) =>
+      val fields = values.map { case (name, value) =>
+        val safe = if (ScalaKeywords(name)) s"`$name`" else name
+        s"    final val $safe: Int = ${value.toInt}"
+      }.mkString("\n")
+      s"  object $kind {\n$fields\n  }"
+    }.mkString("\n\n")
+    GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
+      s"""|package net.kurobako.gemstone.isa.spirv.${packageVersion.raw}
+          |
+          |${GeneratedHeader.annotation()}object SPIRV {
+          |  final val Magic: Int = ${grammar.magic}
+          |$groups
+          |}
+          |""".stripMargin
+  }
+
+  private def renderNativeConstants(grammar: Grammar): String = {
+    val groups = constantGroups(grammar).map { case (kind, values) =>
+      val fields = values.map { case (name, value) => s"inline constexpr uint32_t $name = ${value}u;" }.mkString("\n")
+      s"namespace $kind {\n$fields\n} // namespace $kind"
+    }.mkString("\n\n")
+    GeneratedHeader.cpp("from the pinned Khronos SPIR-V core grammar") +
+      s"#pragma once\n\n#include <cstdint>\n\nnamespace gemstone::spirv {\ninline constexpr uint32_t Magic = ${grammar.magic}u;\n$groups\n} // namespace gemstone::spirv\n"
+  }
+
   private def renderEnumerants(kind: OperandKind, packageVersion: ScalaPackageVersion): String = {
     val raw        = kind.kind
     val objectName = if (ScalaKeywords(raw)) s"`$raw`" else raw
     val values     = kind.enumerants.map { enumerant =>
       val name: String = enumerant.name
       val safe         = Identifiers.upperCamel(name, "Value", "Value")
-      s"    final val $safe: Int = ${enumerant.value}"
+      s"    final val $safe: Int = ${enumerant.value.toInt}"
     }.mkString("\n")
     GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
       s"""|package net.kurobako.gemstone.isa.spirv.$packageVersion

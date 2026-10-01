@@ -9,36 +9,31 @@
 #include <environment_keys.hpp>
 
 TEST_CASE("client manager distinguishes disabled, misconfigured, and ready states") {
-  unsetenv(gemstone::environment::RpcEndpoint);
-  unsetenv(gemstone::environment::RpcClient);
+  const gemstone_test::Environment noEndpoint(gemstone::environment::RpcEndpoint, nullptr);
+  const gemstone_test::Environment noClient(gemstone::environment::RpcClient, nullptr);
   gemstone::execution::ClientManager disabled;
   REQUIRE((disabled.mode() == gemstone::execution::ClientMode::Disabled));
   REQUIRE((disabled.client() == nullptr));
 
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, "tcp://127.0.0.1:1", 1) == 0));
-  gemstone::execution::ClientManager partial;
-  REQUIRE((partial.mode() == gemstone::execution::ClientMode::Misconfigured));
-  REQUIRE((partial.client() == nullptr));
-  unsetenv(gemstone::environment::RpcEndpoint);
+  {
+    const gemstone_test::Environment endpoint(gemstone::environment::RpcEndpoint, "tcp://127.0.0.1:1");
+    gemstone::execution::ClientManager partial;
+    REQUIRE((partial.mode() == gemstone::execution::ClientMode::Misconfigured));
+    REQUIRE((partial.client() == nullptr));
+  }
 
   gemstone_test::RpcFixture fixture(GENERATE(false, true));
-  const auto endpoint = fixture.endpoint();
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, endpoint.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   gemstone::execution::ClientManager ready;
   REQUIRE((ready.mode() == gemstone::execution::ClientMode::Ready));
   REQUIRE((ready.client() != nullptr));
-  unsetenv(gemstone::environment::RpcEndpoint);
-  unsetenv(gemstone::environment::RpcClient);
 }
 
 TEST_CASE("an established client never reconnects after losing its session") {
   std::unique_ptr<gemstone::execution::Client> client;
   {
     gemstone_test::RpcFixture fixture(GENERATE(false, true));
-    const auto endpoint = fixture.endpoint();
-    REQUIRE(setenv(gemstone::environment::RpcEndpoint, endpoint.c_str(), 1) == 0);
-    REQUIRE(setenv(gemstone::environment::RpcClient, "42", 1) == 0);
+    const gemstone_test::RpcEnvironment environment(fixture);
     client = gemstone::execution::Client::fromEnvironment();
     REQUIRE(client);
     REQUIRE(client->call(gemstone::execution::Ping{}));
@@ -47,6 +42,24 @@ TEST_CASE("an established client never reconnects after losing its session") {
   const auto lost = client->call(gemstone::execution::Ping{});
   REQUIRE_FALSE(lost);
   REQUIRE(lost.error().detail.find("session was lost") != std::string::npos);
-  unsetenv(gemstone::environment::RpcEndpoint);
-  unsetenv(gemstone::environment::RpcClient);
+}
+
+TEST_CASE("test environment restores absent and empty values after unwinding") {
+  using gemstone_test::Environment;
+  const auto *key = gemstone::environment::RpcEndpoint;
+  const Environment absent(key, nullptr);
+  {
+    const Environment empty(key, "");
+    REQUIRE(std::getenv(key));
+    REQUIRE(std::string(std::getenv(key)).empty());
+    CHECK_THROWS_AS(([&] {
+                      const Environment configured(key, "tcp://127.0.0.1:1");
+                      REQUIRE(std::string(std::getenv(key)) == "tcp://127.0.0.1:1");
+                      throw std::runtime_error("test scope unwinding");
+                    }()),
+                    std::runtime_error);
+    REQUIRE(std::getenv(key));
+    CHECK(std::string(std::getenv(key)).empty());
+  }
+  CHECK(std::getenv(key) == nullptr);
 }

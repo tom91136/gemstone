@@ -6,7 +6,7 @@ foreach(variable IN ITEMS BACKEND CONFORMANCE_OUTPUT)
   endif()
 endforeach()
 
-set(supported_backends cuda hip hsa opencl sycl levelzero openacc)
+set(supported_backends cuda hip hsa opencl sycl levelzero vulkan openacc)
 if(NOT BACKEND IN_LIST supported_backends)
   message(FATAL_ERROR "Unsupported conformance backend: ${BACKEND}")
 endif()
@@ -14,7 +14,11 @@ endif()
 foreach(variable IN ITEMS
     BUILD_UNIFIED BUILD_CTS BUILD_MINIAPPS HIP_ENABLE_ROCBLAS)
   if(NOT DEFINED ${variable})
-    set(${variable} ON)
+    if(variable STREQUAL "BUILD_UNIFIED" AND BACKEND MATCHES "^vulkan$")
+      set(${variable} OFF)
+    else()
+      set(${variable} ON)
+    endif()
   endif()
 endforeach()
 if(NOT DEFINED MINIAPP_MODELS)
@@ -85,14 +89,29 @@ set(build "${work}/build")
 set(ENV{HOME} "${work}/home")
 file(MAKE_DIRECTORY "$ENV{HOME}")
 
+find_program(artifact_ninja NAMES ninja REQUIRED)
+# Refuse silent oversubscription if an old image receives a shared jobserver.
+if("$ENV{MAKEFLAGS}" MATCHES "--jobserver-auth=fifo:")
+  execute_process(COMMAND "${artifact_ninja}" --version OUTPUT_VARIABLE ninja_version
+    OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+  if(ninja_version VERSION_LESS "1.13")
+    message(FATAL_ERROR "Shared artifact builds require Ninja >= 1.13; rebuild the toolchain image")
+  endif()
+endif()
+set(rocm_argument)
+if(BACKEND MATCHES "^(hip|hsa)$")
+  set(rocm_argument "-DROCM_VERSION=${ROCM_VERSION}")
+endif()
+
 execute_process(
   COMMAND "${CMAKE_COMMAND}"
     -S /source/conformance
     -B "${build}"
     -G Ninja
+    "-DCMAKE_MAKE_PROGRAM=${artifact_ninja}"
     -DCMAKE_BUILD_TYPE=Release
     -DCONFORMANCE_BACKEND=${BACKEND}
-    -DROCM_VERSION=${ROCM_VERSION}
+    ${rocm_argument}
     -DCONFORMANCE_BUILD_UNIFIED=${BUILD_UNIFIED}
     -DCONFORMANCE_BUILD_CTS=${BUILD_CTS}
     -DCONFORMANCE_BUILD_MINIAPPS=${BUILD_MINIAPPS}
@@ -105,14 +124,6 @@ execute_process(
     -DBUILD_TESTING=OFF
     ${backend_cmake_arguments}
   COMMAND_ERROR_IS_FATAL ANY)
-# Refuse silent oversubscription if an old image receives a shared jobserver.
-if("$ENV{MAKEFLAGS}" MATCHES "--jobserver-auth=fifo:")
-  execute_process(COMMAND ninja --version OUTPUT_VARIABLE ninja_version
-    OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-  if(ninja_version VERSION_LESS "1.13")
-    message(FATAL_ERROR "Shared artifact builds require Ninja >= 1.13; rebuild the toolchain image")
-  endif()
-endif()
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --build "${build}"
     --target conformance-artifact

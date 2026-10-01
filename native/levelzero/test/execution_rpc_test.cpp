@@ -303,6 +303,7 @@ private:
     const auto *memory = std::get_if<ArgumentMemory>(&request.arguments[0]);
     REQUIRE((memory != nullptr && static_cast<uint64_t>(memory->region.value) == allocationId));
     REQUIRE((memory->offset.value == 4));
+    REQUIRE(!memory->range);
     const auto *seed = std::get_if<ArgumentScalar>(&request.arguments[1]);
     REQUIRE((seed != nullptr && seed->bytes.size() == 4));
     const auto *local = std::get_if<ArgumentLocal>(&request.arguments[2]);
@@ -380,9 +381,7 @@ ze_device_handle_t gemstoneDevice(ze_driver_handle_t *selectedDriver) {
 
 void crossWorkgroupApi() {
   gemstone_test::RpcFixture server;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(server.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(server);
   REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
   ze_driver_handle_t driver = nullptr;
   auto device = gemstoneDevice(&driver);
@@ -520,8 +519,7 @@ void crossWorkgroupApi() {
 TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   MockServer server;
   const auto port = "tcp://127.0.0.1:" + std::to_string(server.port);
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(port);
   REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
 
   ze_driver_handle_t driver = nullptr;
@@ -830,9 +828,7 @@ TEST_CASE("Level Zero cross-workgroup API", "[level-zero][rpc]") { crossWorkgrou
 namespace {
 void ordinaryHostPointer(unsigned storageKind, bool primeBase, bool requiredGroupSize = false) {
   gemstone_test::RpcFixture server;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(server.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(server);
   REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
 
   ze_driver_handle_t driver = nullptr;

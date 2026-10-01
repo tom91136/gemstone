@@ -5,8 +5,8 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
-import net.kurobako.gemstone.isa.spirv.v1_6.*
 import net.kurobako.gemstone.isa.spirv.v1_6.ISA as SPIRVISA
+import net.kurobako.gemstone.isa.spirv.v1_6.{SPIRV as _, *}
 import net.kurobako.gemstone.isa.spirv.v1_6 as spv
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*

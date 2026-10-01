@@ -1,10 +1,3 @@
-# OpenCL CTS without exhaustive integer operator and half-store sweeps.
-# Keep standalone integer operations, all half loads/round trips, and vector layouts.
-# Thread-dimension sweeps are also deferred because of their long case budgets.
-# Element counts and C11 atomic stress are controlled separately by
-# CONFORMANCE_OPENCL_CTS_ELEMENTS, CONFORMANCE_OPENCL_CTS_WIMPY, and
-# CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS / CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS.
+# The bounded selection is shared with full. Explicit fields replace inherited values.
+extends = "cts-bounded"
 include_programs = ['opencl_cts_*']
-exclude_programs = ['opencl_cts_thread_dimensions']
-# Defer upstream image-dimension sweeps without changing their tested sizes.
-specs = ['~"cts/opencl/basic/imagedim_*"~"cts/opencl/integer_ops/quick_*"~"cts/opencl/integer_ops/char_*"~"cts/opencl/integer_ops/uchar_*"~"cts/opencl/integer_ops/short_*"~"cts/opencl/integer_ops/ushort_*"~"cts/opencl/integer_ops/int_*"~"cts/opencl/integer_ops/uint_*"~"cts/opencl/integer_ops/long_*"~"cts/opencl/integer_ops/ulong_*"~"cts/opencl/half/vstore*"']

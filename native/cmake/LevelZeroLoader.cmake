@@ -31,6 +31,7 @@ function(gemstone_add_level_zero_loader)
       "-DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
       "-DCMAKE_BUILD_TYPE=Release"
       "-DBUILD_STATIC=OFF"
+      "-DCMAKE_BUILD_RPATH=$ORIGIN"
       "-DBUILD_L0_LOADER_TESTS=OFF"
       "-DCMAKE_BUILD_RPATH=$ORIGIN"
       "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
@@ -40,7 +41,7 @@ function(gemstone_add_level_zero_loader)
     COMMAND "${CMAKE_COMMAND}" --build "${build}" --target ze_loader ze_tracing_layer --parallel
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${build}/lib/libze_loader.so.1" "${loader}"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${build}/lib/libze_tracing_layer.so.1" "${tracing}"
-    DEPENDS "${source}/CMakeLists.txt"
+    DEPENDS "${source}/CMakeLists.txt" "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
     COMMENT "Building the pinned oneAPI Level Zero loader"
     VERBATIM)
   add_custom_target(level_zero_loader DEPENDS "${loader}" "${tracing}")

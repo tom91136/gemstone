@@ -162,4 +162,92 @@ class SpecializationSuite extends munit.FunSuite {
       }
     }
   }
+
+  test("Vulkan boolean specialization consumes all four VkBool32 bytes") {
+    for (value <- Vector(0L, 1L, 0x100L, 0x80000000L)) {
+      val result = Specialization.specialize(
+        module,
+        Map(Binary32(102L) -> bytes(value), Binary32(999L) -> Vec[Byte](1))
+      ).toOption.get
+      assertEquals(word(result, 23) & 65535L, if (value == 0L) 49L else 48L)
+    }
+    assert(Specialization.specialize(module, Map(Binary32(102L) -> Vec[Byte](1, 0))).isLeft)
+  }
+
+  test("specialization updates every scalar sharing a SpecId") {
+    val sharedWords = Vector[Long](
+      0x07230203,
+      0x10000,
+      0,
+      20,
+      0,
+      (4 << 16) | 71,
+      5,
+      1,
+      17,
+      (4 << 16) | 71,
+      6,
+      1,
+      17,
+      (4 << 16) | 71,
+      7,
+      1,
+      17,
+      (4 << 16) | 71,
+      8,
+      1,
+      17,
+      (4 << 16) | 71,
+      9,
+      1,
+      18,
+      (4 << 16) | 21,
+      1,
+      32,
+      1,
+      (4 << 16) | 21,
+      2,
+      32,
+      0,
+      (3 << 16) | 22,
+      3,
+      32,
+      (2 << 16) | 20,
+      4,
+      (4 << 16) | 50,
+      1,
+      5,
+      13,
+      (4 << 16) | 50,
+      2,
+      6,
+      21,
+      (4 << 16) | 50,
+      3,
+      7,
+      0x41880000,
+      (3 << 16) | 49,
+      4,
+      8,
+      (4 << 16) | 50,
+      2,
+      9,
+      42
+    )
+    val image = Vec.from(sharedWords.flatMap(bytes(_)))
+    for (value <- Vector(0L, 0x4000001fL, 0x80000000L)) {
+      val result = Specialization.specialize(image, Map(Binary32(17L) -> bytes(value))).toOption.get
+      @scala.annotation.tailrec
+      def verify(at: Int, checked: Int): Unit =
+        if (at == sharedWords.size) assertEquals(checked, 5)
+        else {
+          val header = word(result, at)
+          val opcode = header & 65535L
+          if (opcode == 50L) assertEquals(word(result, at + 3), if (word(result, at + 2) == 9L) 42L else value)
+          if (opcode == 48L || opcode == 49L) assertEquals(opcode, if (value == 0L) 49L else 48L)
+          verify(at + (header >>> 16).toInt, checked + (if (opcode >= 48L && opcode <= 50L) 1 else 0))
+        }
+      verify(5, 0)
+    }
+  }
 }

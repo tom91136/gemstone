@@ -1,7 +1,7 @@
 # GPU conformance
 
 This independent CMake/CTest project builds relocatable artifacts for `cuda`, `hip`, `hsa`, `opencl`, `sycl`,
-`levelzero`, and `openacc`. Commands in this file run from this directory.
+`levelzero`, `vulkan`, and `openacc`. Commands in this file run from this directory.
 
 Each backend has test programs, a runtime closure, and a data bundle plus one small overlay per compiled
 architecture. CUDA support bundles are keyed by SDK because overlays built by different CUDA generations cannot safely
@@ -84,12 +84,13 @@ hsa/gfx1030/
 opencl/
 sycl/
 levelzero/
+vulkan/
 ```
 
 Support directories contain the shared `lib/`, `data/`, and `licenses/` payloads; the root driver is built once,
 outside every backend artifact. Architecture directories are flat and
 contain `artifact.toml`, `conformance-device`, `test-programs.txt`, and their test executables. Architecture
-metadata names the exact support bundle it needs. The driver asks each executable for its Catch2 or Google Test inventory,
+metadata names the exact support bundle it needs. The driver asks each executable for its Catch2, Google Test, or dEQP inventory,
 filters it through the selected workload, and materializes one lean CTest entry per selected case.
 
 Configure and build the default target set from this directory:
@@ -101,12 +102,12 @@ cmake --build build/artifacts
 
 Artifacts are written to `build/artifacts/output`.
 
-`artifacts/targets/default.cmake` selects CUDA `sm_89`, HIP and HSA `gfx1030`, OpenCL, SYCL, and Level Zero. Extend or replace
+`artifacts/targets/default.cmake` selects CUDA `sm_89`, HIP and HSA `gfx1030`, OpenCL, SYCL, Level Zero, and Vulkan. Extend or replace
 the matrix at configure time:
 
 ```console
 cmake -S artifacts -B build/artifacts -G Ninja \
-  -DCONFORMANCE_BACKENDS=cuda,hip,hsa,opencl,sycl,levelzero \
+  -DCONFORMANCE_BACKENDS=cuda,hip,hsa,opencl,sycl,levelzero,vulkan \
   -DCUDA_ARCHITECTURES=sm_89,sm_90 -DAMDGPU_ARCHITECTURES=gfx1036,gfx1100
 ```
 
@@ -158,9 +159,9 @@ cmake -S . -B build/executable -G Ninja \
 cmake --build build/executable --target conformance
 ```
 
-`conformance run` is the profile coordinator. It resolves artifacts, probes their physical devices, discovers Catch2
+`conformance run` is the profile coordinator. It resolves artifacts, probes their physical devices, discovers test
 cases, writes a run-local CTest inventory, and starts CTest. Each CTest entry calls `conformance exec`, which applies
-profile skips, takes the physical-device lock, and runs exactly one case in its owning Catch2 executable.
+profile skips, takes the physical-device lock, and runs exactly one case in its owning executable.
 
 Identified devices take a shared coordination lock and an exclusive PCI/UUID device lock, allowing different devices
 to run concurrently. A runtime without a usable physical identity (for example, some CPU OpenCL runtimes) takes the
@@ -191,16 +192,25 @@ the full log path, including for crashes and timeouts.
 
 | `--workload` | Selection |
 | --- | --- |
-| `compact` / `full` | Smaller / broader regression coverage across backends |
+| `compact` | Broad iteration suite: compact unified matrices, CTS samples and small miniapps |
+| `full` | Unified tests and miniapps plus all three bounded CTS selections |
+| `cts-bounded` | The OpenCL, SYCL and Vulkan bounded CTS selections together |
 | `opencl-cts` / `sycl-cts` | All compiled cases from that CTS |
+| `vulkan-cts` | The pinned official Vulkan mustpass manifest |
+| `vulkan-cts-bounded` | Explicit API, compute, graphics and shader regression cases |
 | `opencl-cts-bounded` | OpenCL CTS excluding exhaustive integer, half-store, image-size and thread-dimension sweeps |
 | `sycl-cts-bounded` | SYCL CTS excluding the full-type `range_api` launch of roughly 8.7 trillion work-items |
 
 No backend suffix is required: targets with no matching tests are omitted. An entirely empty selection is an error.
 Workloads filter compiled tests; they do not enable additional build categories or guarantee a runtime.
-The combined one-hour target for `full` depends on the runner and concurrency.
+On the development host, the warm-run budgets are ten minutes for `compact` and one hour for `full`,
+including discovery, excluding compilation. Actual times depend on load and concurrency.
+Compact defers long copy/shuffle cases and fluid miniapps to full. Both use compact unified matrices;
+exhaustive CTS and large matrices are separate stress workloads.
 
 The TOML files in [workloads](workloads) record the exact selections:
+`extends` loads a base workload; explicitly supplied fields replace inherited values (including empty lists).
+`full` and standalone bounded CTS workloads share `cts-bounded` to keep their CTS selections aligned.
 `include_programs` accepts program-name globs; exact `exclude_programs` entries take precedence.
 `specs` filters Catch2 names; `levelzero_cases` filters Google Test names. Empty program or Level Zero filters select all.
 Level Zero module-linking cases require `spirv-link` on `PATH` (provided by the container).
@@ -220,6 +230,38 @@ OpenCL stress controls are independent of workload selection:
 
 Isolated launchers default to 1,024 elements and wimpy mode unless overridden. Emulator profiles reduce atomic
 stress to 16 iterations and 128 threads. Effective settings are recorded in each run's `ctest/targets/*.json`.
+
+## Vulkan
+
+The `vulkan` artifact builds Khronos VK-GL-CTS `vulkan-cts-1.4.6.2` and miniapps in
+`toolchain-vulkan`, using sources pinned in `cmake/Dependencies.cmake`. All run headlessly;
+no display server or presentation surface is required.
+
+Build just Vulkan from this directory:
+
+```console
+cmake -S artifacts -B build/vulkan -G Ninja -DCONFORMANCE_BACKENDS=vulkan -DROCM_VERSION=7.1.1
+cmake --build build/vulkan --target vulkan
+```
+
+Workloads select cases from the full CTS executable; empty selections and unmatched selectors fail.
+Version-specific workloads use the pinned upstream mustpass manifests.
+
+dEQP runs one case per process on the selected device, with shader caching disabled.
+`Pass`, `QualityWarning` and `CompatibilityWarning` pass; `NotSupported` skips. Other results,
+incomplete results and nonzero exits fail. QPA logs remain alongside CTest reports.
+
+GGML tests addition, F16-to-F32 conversion, F16/F32 matrix multiplication and softmax through
+llama.cpp's Vulkan backend, checking against host references. No model download is needed.
+Direct CMake builds can select `CONFORMANCE_MINIAPP_MODELS=ggml:vulkan`.
+
+Dear ImGui uses upstream demo scenes and its Vulkan renderer: primitives/gradients in compact,
+plus application layout and framebuffer resize in full. Each renders three frames. The build
+compiles upstream GLSL and generates reference PPMs with the container's lavapipe, packaging them
+beside the executable in `imgui/`; no binaries are checked in. Comparisons allow three units of
+error per RGB channel, with at most 0.2% of pixels exceeding that tolerance. Failures save actual,
+reference and amplified-difference images in the test report directory. Direct CMake builds can
+select `CONFORMANCE_MINIAPP_MODELS=imgui:vulkan` and require `glslc` and lavapipe.
 
 ## Unit tests
 
@@ -254,3 +296,22 @@ Generated kernels stay in the build tree and are embedded into artifacts.
 Shared templates and registrations live in `unified/src/memory_cases.hpp` and `unified/src/cases/memory.inl`.
 Each API directory owns its `memory.cpp` entry point and `memory.hpp` adapter. CUDA PTX lives in `unified/src/cuda/`;
 `unified/src/memory_kernel.cl` is shared by HIP, HSA, OpenCL and Level Zero.
+
+Vulkan CTS deadlines can be set with `CONFORMANCE_VULKAN_CTS_TIMEOUT` in the target
+environment. Isolated runs default to 600 seconds; the full `vulkan10.linux` profile
+uses 7,200 seconds for long randomized stress cases. QualityWarning and
+CompatibilityWarning are accepted under the upstream Vulkan CTS criteria and remain
+visible in QPA logs. Waivers are not applied implicitly.
+
+### Direct artifact targets
+
+Launchers can select artifact routes without a machine profile:
+
+```console
+conformance run --direct --workloads workloads --artifacts artifacts --output results \
+  --workload compact vulkan cuda/sm_89 --isolated-launcher --launcher -- /path/to/launcher
+```
+
+`--direct` requires explicit `backend[/architecture]` routes and rejects `--profiles` and `--machine`.
+It uses no profile environment, device selectors, skips or device locks. Every requested artifact must exist.
+The caller owns the route inventory and launcher; the conformance runner has no emulator-specific defaults.

@@ -6,6 +6,7 @@ import com.monovore.decline.Opts
 import java.nio.file.Path
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -30,11 +31,13 @@ object AMDGPUALUExecutionBenchmark {
   )
   private val options = (
     Opts.option[Int]("measured", help = "Measured dispatches").withDefault(50)
-      .validate("measured dispatches must be positive")(_ > 0).map(_.unsafe[Int > 0]),
-    Opts.option[Int]("warmup", help = "Warmup dispatches").validate("warmup dispatches must be non-negative")(_ >= 0)
-      .map(_.unsafe[Int >= 0]).orNone,
+      .refined[Int > 0]("measured dispatches must be positive"),
+    Opts.option[Int](
+      "warmup",
+      help = "Warmup dispatches"
+    ).refined[Int >= 0]("warmup dispatches must be non-negative").orNone,
     Opts.option[Int]("instructions", help = "ALU instructions per dispatch").withDefault(512)
-      .validate("instruction count must be non-negative")(_ >= 0).map(_.unsafe[Int >= 0]),
+      .refined[Int >= 0]("instruction count must be non-negative"),
     Opts.option[String]("mode", help = "Instruction mode: move or binary").withDefault("move")
       .validate("mode must be move or binary")(value => value == "move" || value == "binary")
       .map(value => if (value == "binary") Mode.Binary else Mode.Move)

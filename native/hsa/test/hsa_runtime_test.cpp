@@ -24,9 +24,7 @@
 
 TEST_CASE("HSA system paging ISA feature", "[hsa]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   REQUIRE((setenv(gemstone::environment::SystemPaging, "1", 1) == 0));
   REQUIRE((hsa_init() == HSA_STATUS_SUCCESS));
   hsa_agent_t gpu{};
@@ -75,8 +73,8 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   // The public provider must fail closed when no identified Gemstone
   // execution endpoint is configured; it must not fall back to a physical
   // ROCr installation in the process.
-  unsetenv(gemstone::environment::RpcEndpoint);
-  unsetenv(gemstone::environment::RpcClient);
+  const gemstone_test::Environment noEndpoint(gemstone::environment::RpcEndpoint, nullptr);
+  const gemstone_test::Environment noClient(gemstone::environment::RpcClient, nullptr);
   REQUIRE((hsa_init() == HSA_STATUS_ERROR_NOT_INITIALIZED));
 
   const char *message = nullptr;
@@ -103,9 +101,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE(
       (hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, table.size(), table.data()) == HSA_STATUS_ERROR_NOT_INITIALIZED));
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   REQUIRE((hsa_init() == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_init() == HSA_STATUS_SUCCESS));
   // A kernel with no explicit or implicit arguments has no kernarg allocation.
@@ -569,13 +565,9 @@ namespace {
 // Explicit registrations must work without the optional process-map fallback.
 struct MemoryLockSession {
   gemstone_test::RpcFixture server;
-  MemoryLockSession() {
-    const auto port = "tcp://127.0.0.1:" + std::to_string(server.port());
-    REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-    REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
-    REQUIRE((unsetenv(gemstone::environment::SystemPaging) == 0));
-    REQUIRE((hsa_init() == HSA_STATUS_SUCCESS));
-  }
+  gemstone_test::RpcEnvironment environment{server};
+  gemstone_test::Environment paging{gemstone::environment::SystemPaging, nullptr};
+  MemoryLockSession() { REQUIRE((hsa_init() == HSA_STATUS_SUCCESS)); }
   ~MemoryLockSession() { (void)hsa_shut_down(); }
 };
 } // namespace

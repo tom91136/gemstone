@@ -13,6 +13,7 @@ object Validation {
     case MissingKernelEntryPoint
     case MissingOpenCLMemoryModel
     case MissingShaderCapability
+    case MissingGraphicsEntryPoint
     case MissingGLComputeEntryPoint
     case MissingGLSL450MemoryModel
     case UnsupportedVersion(version: Version)
@@ -24,6 +25,7 @@ object Validation {
       case MissingKernelEntryPoint          => "an OpEntryPoint Kernel is required"
       case MissingOpenCLMemoryModel         => "an OpenCL physical-addressing OpMemoryModel is required"
       case MissingShaderCapability          => "OpCapability Shader is required"
+      case MissingGraphicsEntryPoint        => "an OpEntryPoint Vertex or Fragment is required"
       case MissingGLComputeEntryPoint       => "an OpEntryPoint GLCompute is required"
       case MissingGLSL450MemoryModel        => "a Logical GLSL450 OpMemoryModel is required"
       case UnsupportedVersion(version)      =>
@@ -35,6 +37,7 @@ object Validation {
     case OpenCLCompute
     case OpenCLLibrary
     case VulkanCompute
+    case VulkanGraphics
   }
 
   private val Kernel = 6L
@@ -59,9 +62,13 @@ object Validation {
     if (condition) Chain.one(issue) else Chain.empty
 
   def validate(module: Module, environment: Environment): ValidationOutcome[Issue] = environment match {
-    case Environment.OpenCLCompute => validateEnvironment(module, openCL(requireEntryPoint = true))
-    case Environment.OpenCLLibrary => validateEnvironment(module, openCL(requireEntryPoint = false))
-    case Environment.VulkanCompute => validateEnvironment(module, VulkanRequirements)
+    case Environment.OpenCLCompute  => validateEnvironment(module, openCL(requireEntryPoint = true))
+    case Environment.OpenCLLibrary  => validateEnvironment(module, openCL(requireEntryPoint = false))
+    case Environment.VulkanCompute  => validateEnvironment(module, VulkanRequirements)
+    case Environment.VulkanGraphics => validateEnvironment(
+        module,
+        VulkanRequirements.copy(entryPointWord = 0L, missingEntryPoint = Issue.MissingGraphicsEntryPoint)
+      )
   }
 
   private def openCL(requireEntryPoint: Boolean): Requirements = Requirements(
@@ -104,9 +111,11 @@ object Validation {
             )
         }
       case (state, Instruction.EntryPoint(executionModel, _, _, _)) => executionModel.singleWord match {
-          case Right(word) if word.toUnsigned.toLong == requirements.entryPointWord => state.copy(hasEntryPoint = true)
-          case Right(_)                                                             => state
-          case Left(detail)                                                         => state.copy(issues =
+          case Right(word)
+              if word.toUnsigned.toLong == requirements.entryPointWord ||
+                (requirements.entryPointWord == 0L && word.toUnsigned.toLong == 4L) => state.copy(hasEntryPoint = true)
+          case Right(_)     => state
+          case Left(detail) => state.copy(issues =
               state.issues.append(Issue.MalformedOperand("OpEntryPoint", detail))
             )
         }

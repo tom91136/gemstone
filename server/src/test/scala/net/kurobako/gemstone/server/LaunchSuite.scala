@@ -30,8 +30,8 @@ class LaunchSuite extends munit.FunSuite {
 
   test("platform defaults model the native runtime stack") {
     val expected =
-      if (Properties.isLinux) Set(API.HSA, API.CUDA, API.OpenCL, API.LevelZero)
-      else Set(API.HIP, API.CUDA, API.OpenCL, API.LevelZero)
+      if (Properties.isLinux) Set(API.HSA, API.CUDA, API.OpenCL, API.Vulkan, API.LevelZero)
+      else Set(API.HIP, API.CUDA, API.OpenCL, API.Vulkan, API.LevelZero)
     assertEquals(API.defaults, expected)
   }
 

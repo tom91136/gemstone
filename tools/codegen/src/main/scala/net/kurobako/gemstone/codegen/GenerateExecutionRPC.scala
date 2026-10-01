@@ -3,6 +3,7 @@ package net.kurobako.gemstone.codegen
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
 import java.nio.file.Path
+import net.kurobako.gemstone.graphics.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.Wire.*
 import scala.collection.mutable
@@ -66,7 +67,8 @@ object GenerateExecutionRPC {
     }
 
     private def register(shape: Shape): Unit = shape match {
-      case Shape.UnitValue | Shape.BooleanValue | Shape.Int8 | Shape.Int32 | Shape.Int64 | Shape.Text => ()
+      case Shape.UnitValue | Shape.BooleanValue | Shape.Int8 | Shape.Int32 | Shape.Int64 | Shape.Float32 | Shape.Float64 | Shape.Text =>
+        ()
       case Shape.Sequence(element)                            => register(element)
       case Shape.Optional(element)                            => register(element)
       case value @ Shape.Alias(name, underlying, constraints) =>
@@ -100,6 +102,8 @@ object GenerateExecutionRPC {
       case Shape.Int8                        => "uint8_t"
       case Shape.Int32                       => "int32_t"
       case Shape.Int64                       => "int64_t"
+      case Shape.Float32                     => "float"
+      case Shape.Float64                     => "double"
       case Shape.Text                        => "std::string"
       case Shape.Sequence(element)           => s"std::vector<${cppType(element)}>"
       case Shape.Optional(element)           => s"std::optional<${cppType(element)}>"
@@ -142,6 +146,20 @@ object GenerateExecutionRPC {
   }
 
   private def metaDefinition(named: Named): Vector[String] = named.shape match {
+    case Shape.Alias(_, Shape.Sequence(_), _) =>
+      val name = qualified(named.name)
+      // Glaze 7.9.1 propagates a wrapper's no_header flag into sequence elements.
+      // The sequence tag is already supplied, but each element still has its own header.
+      Vector(
+        s"template <> struct glz::meta<$name> { static constexpr auto value = &$name::value; };",
+        s"""template <> struct glz::from<glz::MSGPACK, $name> {
+           |  template <auto Opts, class Value, glz::is_context Ctx, class It, class End>
+           |  static void op(Value&& value, uint8_t tag, Ctx&& ctx, It& it, const End& end) noexcept {
+           |    using Sequence = std::remove_cvref_t<decltype(value.value)>;
+           |    glz::from<glz::MSGPACK, Sequence>::template op<glz::no_header_off<Opts>()>(value.value, tag, ctx, it, end);
+           |  }
+           |};""".stripMargin
+      )
     case Shape.Alias(_, _, _) =>
       Vector(s"template <> struct glz::meta<${qualified(named.name)}> { static constexpr auto value = &${qualified(
           named.name
@@ -186,6 +204,75 @@ object GenerateExecutionRPC {
     case other => throw IllegalArgumentException(s"operation ${operation.request.name} is not a product: $other")
   }
 
+  private def validation(protocol: Wire.ProtocolShape, model: Model): String = {
+    def integer(value: Long): String =
+      if (value == Long.MinValue) "std::numeric_limits<int64_t>::min()" else s"${value}LL"
+    def constraint(value: Wire.Constraint, underlying: Shape): String = value match {
+      case Wire.Constraint.Positive               => "value.value > 0"
+      case Wire.Constraint.Positive0              => "value.value >= 0"
+      case Wire.Constraint.IntInterval(min, max)  => s"value.value >= ${integer(min)} && value.value <= ${integer(max)}"
+      case Wire.Constraint.LongInterval(min, max) => s"value.value >= ${integer(min)} && value.value <= ${integer(max)}"
+      case Wire.Constraint.OneOf(values)          =>
+        values.map(value => s"value.value == ${integer(value)}").mkString("(", " || ", ")")
+      case Wire.Constraint.MultipleOf(divisor) => s"value.value % ${integer(divisor)} == 0"
+      case Wire.Constraint.MinimumLength(min)  =>
+        val size = if (underlying == Shape.Text) "textLength(value.value)" else "value.value.size()"
+        s"$size >= ${min}U"
+      case Wire.Constraint.NotContains(value) =>
+        val bytes   = value.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        val literal = bytes.view.map(byte => f"\\x${byte & 0xff}%02x").mkString
+        s"value.value.find(std::string_view(\"$literal\", ${bytes.length})) == std::string::npos"
+    }
+    val products = model.named.flatMap { named =>
+      named.shape match {
+        case Shape.Sum(_, alternatives) if !alternatives.forall(isNullary(_)) =>
+          alternatives.map(alternative =>
+            Named(alternativeName(named.name, identifier(alternative.name)), alternative.shape)
+          ) :+ named
+        case _ => Vector(named)
+      }
+    } ++ protocol.operations.map(operation => Named(identifier(operation.request.name), operation.request.shape))
+    val declarations = products.map(named => s"inline bool valid(const ${named.name} &);").mkString("\n")
+    val definitions  = products.map { named =>
+      val check = named.shape match {
+        case Shape.Alias(_, underlying, constraints) =>
+          (Vector("valid(value.value)") ++ constraints.map(constraint(_, underlying))).mkString(" && ")
+        case Shape.Product(_, fields) =>
+          if (fields.isEmpty) "true"
+          else fields.map(field => s"valid(value.${identifier(field.name)})").mkString(" && ")
+        case Shape.Sum(_, alternatives) if alternatives.forall(isNullary(_)) =>
+          s"static_cast<uint8_t>(value) < ${alternatives.size}"
+        case Shape.Sum(_, _) =>
+          "!value.valueless_by_exception() && std::visit([](const auto &item) { return valid(item); }, value)"
+        case _ => "valid(value.value)"
+      }
+      val parameter = if (check == "true") "" else "value"
+      s"inline bool valid(const ${named.name} &$parameter) { return $check; }"
+    }.mkString("\n")
+    s"""namespace wire {
+       |$declarations
+       |inline bool valid(const Unit &) { return true; }
+       |template <class T> requires std::is_arithmetic_v<T> inline bool valid(T) { return true; }
+       |inline bool valid(const std::string &value) { return value.size() <= MaximumTextBytes; }
+       |// Scala string refinements count UTF-16 code units, not UTF-8 bytes.
+       |inline size_t textLength(std::string_view value) {
+       |  size_t length = 0;
+       |  for (const unsigned char byte : value) {
+       |    if ((byte & 0xc0) != 0x80) length += byte >= 0xf0 ? 2 : 1;
+       |  }
+       |  return length;
+       |}
+       |template <class T> inline bool valid(const std::vector<T> &);
+       |template <class T> inline bool valid(const std::optional<T> &value) { return !value || valid(*value); }
+       |template <class T> inline bool valid(const std::vector<T> &value) {
+       |  if constexpr (std::is_same_v<T, uint8_t>) return value.size() <= MaximumPayload;
+       |  else return value.size() <= MaximumElements && std::all_of(value.begin(), value.end(), [](const auto &item) { return valid(item); });
+       |}
+       |$definitions
+       |} // namespace wire
+       |""".stripMargin
+  }
+
   private def header(protocol: Wire.ProtocolShape): String = {
     val model       = Model(protocol)
     val definitions = model.named.map(definition(_, model)).mkString("\n\n")
@@ -207,6 +294,9 @@ object GenerateExecutionRPC {
        |#include <stddef.h>
        |#include <stdint.h>
        |#include <array>
+       |#include <algorithm>
+       |#include <limits>
+       |#include <type_traits>
        |#include <memory>
        |#include <optional>
        |#include <string>
@@ -222,6 +312,7 @@ object GenerateExecutionRPC {
        |
        |inline constexpr uint32_t RequestMagic = static_cast<uint32_t>(0x${ExecutionRPC.RequestMagic.toHexString});
        |inline constexpr uint32_t ResponseMagic = static_cast<uint32_t>(0x${ExecutionRPC.ResponseMagic.toHexString});
+       |inline constexpr uint32_t GraphicsPushConstantBytes = ${GraphicsProtocol.PushConstantBytes}U;
        |inline constexpr uint32_t MaximumPayload = ${ExecutionRPC.MaximumPayload}U;
        |inline constexpr uint32_t MaximumElements = ${ExecutionRPC.MaximumElements}U;
        |inline constexpr uint32_t MaximumTextBytes = ${ExecutionRPC.MaximumTextBytes}U;
@@ -248,6 +339,8 @@ object GenerateExecutionRPC {
        |$definitions
        |
        |$requests
+       |
+       |${validation(protocol, model)}
        |
        |struct Error {
        |  std::string detail;
@@ -326,6 +419,7 @@ object GenerateExecutionRPC {
        |
        |  template <class T, class Request> Result<T> call(std::string_view operation, const Request &request) {
        |    std::lock_guard<std::mutex> guard(mutex_); error_.clear();
+       |    if (!wire::valid(request)) return failed<T>("execution request violates wire constraints or encoding limits");
        |    std::string payload;
        |    if (glz::write<GlazeOptions{}>(request, payload)) return failed<T>("execution request encoding failed");
        |    if (payload.size() > MaximumPayload) return failed<T>("execution request exceeds the encoding limits");
@@ -334,11 +428,11 @@ object GenerateExecutionRPC {
        |    const std::string_view body(reinterpret_cast<const char *>(response.data()), response.size());
        |    if (status == 1) {
        |      ExecutionFailure failure{};
-       |      if (glz::read<GlazeOptions{}>(failure, body)) { connection_.poison(); return failed<T>("execution failure response is invalid"); }
+       |      if (glz::read<GlazeOptions{}>(failure, body) || !wire::valid(failure)) { connection_.poison(); return failed<T>("execution failure response is invalid"); }
        |      error_ = failureDetail(failure); return Result<T>::failure(Error{error_});
        |    }
        |    T value{};
-       |    if (glz::read<GlazeOptions{}>(value, body)) { connection_.poison(); return failed<T>("execution response payload is invalid"); }
+       |    if (glz::read<GlazeOptions{}>(value, body) || !wire::valid(value)) { connection_.poison(); return failed<T>("execution response payload is invalid"); }
        |    return Result<T>::success(std::move(value));
        |  }
        |

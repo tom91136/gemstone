@@ -83,7 +83,7 @@ sbt 'gemstoneRun --apis cuda,opencl -- <command> [argument ...]'
 ```
 
 Available APIs are `cuda`, `hip`, `hsa`, `opencl`, `vulkan`, and `levelzero`. The Linux default is
-`hsa,cuda,opencl,levelzero`, allowing a vendor HIP runtime to use Gemstone HSA.
+`hsa,cuda,opencl,vulkan,levelzero`, allowing a vendor HIP runtime to use Gemstone HSA.
 SYCL adapter selection remains the application's responsibility.
 
 The launcher owns a server for the child process unless given `--server <endpoint>`.
@@ -106,13 +106,16 @@ replay checks the recorded schema before execution.
 ```console
 sbt conformance/build
 sbt 'conformance/run --machine <machine> --workload compact'
-sbt 'conformance/emulate --machine <machine> --workload compact'
+sbt 'conformance/emulate --workload compact'
 ```
 
 Builds write artifacts to `target/conformance/artifacts`. `run` uses the existing artifacts directly;
 `emulate` runs them through a shared Gemstone server with an isolated client per test process.
-Use `--workload full` for the full workload, or append a backend/target name to narrow the selection.
-Omit `--machine` to select the profile matching the local short hostname.
+Use `--workload full` for the bounded regression suite, including OpenCL, SYCL and Vulkan CTS.
+`run` uses machine profiles; omitting `--machine` selects the local short hostname.
+`emulate` uses `conformanceEmulationTargets` from `build.sbt`, independently of the host profile:
+CUDA sm_89, HIP/HSA gfx1030, OpenCL, SYCL, Level Zero and Vulkan. Append a backend or route such as
+`vulkan` or `cuda/sm_89` to narrow the selection. Missing selected artifacts are errors.
 `CONFORMANCE_JOBS` controls emulated CTest parallelism.
 
 See [conformance/README.md](conformance/README.md) for target sets, toolchains, profiles, and standalone commands.
@@ -123,6 +126,15 @@ Use `CONFORMANCE_JOBS=1` for serial execution. `compact` and `full` are regressi
 see the conformance guide for CTS controls. For full SYCL type coverage, build with
 `SYCL_CTS_ENABLE_FULL_CONFORMANCE=1`. `CMAKE_BUILD_PARALLEL_LEVEL` sets the shared build job budget;
 `CONFORMANCE_ARTIFACT_PARALLELISM` caps concurrent artifact pipelines.
+
+### Vulkan
+
+Vulkan supports compute and headless graphics. Native code manages API objects and queues;
+Scala executes shaders, rasterization and image operations through the shared execution service.
+
+The default target is Vulkan 1.2. Set `GEMSTONE_VULKAN_API_VERSION=1.0` in the launcher environment
+to select 1.0, and use the corresponding `vulkan10` or `vulkan12` conformance workload.
+The implementation is not certified.
 
 ## Benchmarks
 

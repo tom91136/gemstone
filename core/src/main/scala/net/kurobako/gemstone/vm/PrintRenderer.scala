@@ -135,7 +135,7 @@ object PrintRenderer {
           else if (lengthSpecifier == "h") 16 else if (lengthSpecifier == "l") 64 else width.unsafe
         if (conversion == 'c') formatted(flagsAndSize, 'c', (bits(lane) & 0xff).toInt)
         else if ("diuoxX".indexOf(conversion) >= 0)
-          integer(flagsAndSize, conversion, bits(lane), effectiveWidth.raw)
+          integer(flagsAndSize, conversion, bits(lane), effectiveWidth)
         else Left(s"device printf conversion %$conversion is unsupported")
       }
     case PrintArgument.Floating(bits, width) =>
@@ -177,11 +177,16 @@ object PrintRenderer {
     if (negative) "-" else if (flags.contains('+')) "+" else if (flags.contains(' ')) " " else ""
 
   // Java Formatter rejects integer precision and treats unsigned decimal as signed.
-  private def integer(specifier: String, conversion: Char, bits: Long, width: Int): Either[String, String] =
+  private def integer(
+      specifier: String,
+      conversion: Char,
+      bits: Long,
+      width: Int where Between[1, 64]
+  ): Either[String, String] =
     formatOptions(specifier).map { format =>
       val signed = conversion == 'd' || conversion == 'i'
-      val value  = if (signed) BigInt(Bits.signExtend(bits, width.unsafe[Int where Between[1, 64]]))
-      else BigInt(bits) & ((BigInt(1) << width) - 1)
+      val value  = if (signed) BigInt(Bits.signExtend(bits, width))
+      else BigInt(bits) & ((BigInt(1) << width.raw) - 1)
       val base      = if (conversion == 'o') 8 else if (conversion == 'x' || conversion == 'X') 16 else 10
       val digits    = if (format.precision.contains(0) && value == 0) "" else value.abs.toString(base)
       val padded    = "0" * math.max(0, format.precision.getOrElse(0) - digits.length) + digits

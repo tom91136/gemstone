@@ -41,6 +41,13 @@ TEST_CASE("noisy failure", "[noisy]") {
 }
 
 int main(int argc, char **argv) {
+  if (argc > 1 && std::string_view(argv[1]) == "--large-inventory") {
+    const std::string group = "GROUP: " + std::string(1024 - 8, 'x') + "\n";
+    for (size_t i = 0; i < 129 * 1024; ++i)
+      std::cout << group;
+    std::cout << "TEST: dEQP-VK.last.case\n";
+    return 0;
+  }
   if (argc > 1 && std::string_view(argv[1]) == "--process-tree") {
 #if !defined(_WIN32)
     std::signal(SIGTERM, SIG_IGN);

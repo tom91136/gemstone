@@ -40,6 +40,11 @@ object ExecutionHandler {
       encode(request, service.describeSpecialization(image))
     case request @ Operation.SpecializeImage(image, constants) =>
       encode(request, service.specializeImage(image, constants))
+    case request @ Operation.PrepareShader(image, entry, stage, constants) =>
+      encode(request, service.prepareShader(image, entry, stage, constants))
+    case request @ Operation.SubmitGraphics(submission)         => encode(request, service.submitGraphics(submission))
+    case request @ Operation.ReadGraphicsStatistics(completion) =>
+      encode(request, service.readGraphicsStatistics(completion))
     case request @ Operation.UnloadProgram(program) =>
       encode(request, service.unload(program))
     case request @ Operation.DescribeProgram(program) =>
@@ -68,7 +73,8 @@ object ExecutionHandler {
           groupSegmentBytes,
           arguments,
           pointerRelocations,
-          discoverArgumentRelocations
+          discoverArgumentRelocations,
+          descriptorBindings
         ) =>
       val created = KernelTask.validated(
         kernelName = kernelName,
@@ -85,7 +91,7 @@ object ExecutionHandler {
       ).leftMap(message => ExecutionFailure.InvalidRequest(message))
       val result = created match {
         case Left(error) => Left(error)
-        case Right(task) => service.launch(program, task)
+        case Right(task) => service.launch(program, task, descriptorBindings)
       }
       encode(request, result)
     case request @ Operation.QueryCompletion(completion) =>

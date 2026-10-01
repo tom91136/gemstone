@@ -38,6 +38,8 @@ object Wire {
     case Int8
     case Int32
     case Int64
+    case Float32
+    case Float64
     case Text
     case Sequence(element: Shape)
     case Optional(element: Shape)
@@ -116,6 +118,15 @@ object Wire {
         writeRawByte(0xd2)
         writeRawInt(value)
       }
+
+    def writeFloat(value: Float): Unit = {
+      writeRawByte(0xca)
+      writeRawInt(java.lang.Float.floatToRawIntBits(value))
+    }
+    def writeDouble(value: Double): Unit = {
+      writeRawByte(0xcb)
+      writeRawLong(java.lang.Double.doubleToRawLongBits(value))
+    }
 
     def writeLong(value: Long): Unit =
       if (value >= Int.MinValue && value <= Int.MaxValue) writeInt(value.toInt)
@@ -247,6 +258,16 @@ object Wire {
       case other => Left(f"expected boolean, found 0x$other%02x")
     }
 
+    def readFloat(): Either[String, Float] = readRawByte().flatMap {
+      case 0xca  => readRawInt().map(java.lang.Float.intBitsToFloat(_))
+      case other => Left(f"expected float32, found 0x$other%02x")
+    }
+    def readDouble(): Either[String, Double] = readRawByte().flatMap {
+      case 0xcb  => readRawLong().map(java.lang.Double.longBitsToDouble(_))
+      case 0xca  => readRawInt().map(value => java.lang.Float.intBitsToFloat(value).toDouble)
+      case other => Left(f"expected floating value, found 0x$other%02x")
+    }
+
     def readLong(): Either[String, Long] = readRawByte().flatMap {
       case marker if marker <= 0x7f => Right(marker.toLong)
       case marker if marker >= 0xe0 => Right(marker.toByte.toLong)
@@ -356,8 +377,10 @@ object Wire {
           else Right(value.toByte)
         }
     )
-    given Codec[Int]  = instance(Shape.Int32, (writer, value) => writer.writeInt(value), _.readInt())
-    given Codec[Long] = instance(Shape.Int64, (writer, value) => writer.writeLong(value), _.readLong())
+    given Codec[Int]    = instance(Shape.Int32, (writer, value) => writer.writeInt(value), _.readInt())
+    given Codec[Float]  = instance(Shape.Float32, (writer, value) => writer.writeFloat(value), _.readFloat())
+    given Codec[Double] = instance(Shape.Float64, (writer, value) => writer.writeDouble(value), _.readDouble())
+    given Codec[Long]   = instance(Shape.Int64, (writer, value) => writer.writeLong(value), _.readLong())
 
     /** A codec for a domain type backed by a primitive base, carrying the wire constraints of the original refinement.
       */
@@ -563,18 +586,22 @@ object Wire {
       case _: (head *: tail) => summonInline[Codec[head]] +: codecsOf[tail]
     }
 
+    private type Half[T <: Tuple] = scala.compiletime.ops.int./[Tuple.Size[T], 2]
+
     // Mutation branches duplicate recursive inline expansion beyond the JVM method-size limit.
     @SuppressWarnings(Array("stryker4s.mutation.StringLiteral"))
     private inline def casesOf[Types <: Tuple]: Vector[(String, Codec[Any])] =
       inline erasedValue[Types] match {
-        case _: EmptyTuple     => Vector.empty
-        case _: (head *: tail) =>
+        case _: EmptyTuple           => Vector.empty
+        case _: (head *: EmptyTuple) =>
           val codec = derived[head](using summonInline[Mirror.Of[head]])
           val name  = codec.shape match {
             case Shape.Product(value, _) => value
             case value                   => throw IllegalArgumentException(s"sum case is not a product: $value")
           }
-          (name, codec.erased) +: casesOf[tail]
+          Vector(name -> codec.erased)
+        // Split large enums so derivation depth grows logarithmically.
+        case _ => casesOf[Tuple.Take[Types, Half[Types]]] ++ casesOf[Tuple.Drop[Types, Half[Types]]]
       }
   }
 
@@ -774,6 +801,8 @@ object Wire {
         case Shape.Int8                             => "i8"
         case Shape.Int32                            => "i32"
         case Shape.Int64                            => "i64"
+        case Shape.Float32                          => "f32"
+        case Shape.Float64                          => "f64"
         case Shape.Text                             => "text"
         case Shape.Sequence(element)                => s"seq[${render(element)}]"
         case Shape.Optional(element)                => s"option[${render(element)}]"

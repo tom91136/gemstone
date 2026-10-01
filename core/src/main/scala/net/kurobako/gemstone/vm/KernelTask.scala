@@ -7,7 +7,7 @@ import net.kurobako.gemstone.memory.*
 object KernelTask {
   enum Argument {
     case Scalar(bytes: Vec[Byte])
-    case Memory(region: AllocationId, offset: Long >= 0)
+    case Memory(region: AllocationId, offset: Long >= 0, range: Option[Long > 0] = None)
     case Local(size: Long > 0)
   }
 
@@ -72,6 +72,9 @@ case class KernelTask private (
     pointerRelocations: Vec[KernelTask.PointerRelocation],
     discoverArgumentRelocations: Boolean
 ) {
+  def withArguments(arguments: Vec[KernelTask.Argument]): Either[NonEmpty[String], KernelTask] =
+    Either.cond(arguments.size == this.arguments.size, copy(arguments = arguments), "argument count cannot change")
+
   def withPointerRelocations(additional: Vec[KernelTask.PointerRelocation]): Either[NonEmpty[String], KernelTask] =
     KernelTask.validateRelocations(additional, arguments.size)
       .map(_ => if (additional.isEmpty) this else copy(pointerRelocations = pointerRelocations ++ additional))

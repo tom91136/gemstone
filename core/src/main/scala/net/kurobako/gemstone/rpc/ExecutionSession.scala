@@ -10,6 +10,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.graphics.*
+import net.kurobako.gemstone.graphics.GraphicsProtocol.*
+import net.kurobako.gemstone.graphics.ShaderMetadata.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
@@ -24,7 +27,8 @@ class ExecutionSession(
     taskLimits: TaskControl.Limits = TaskControl.Limits.Default,
     executionContext: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.parasitic,
     parallelism: Int > 0 = 1,
-    specialization: Option[RuntimeBackend.Specialization] = None
+    specialization: Option[RuntimeBackend.Specialization] = None,
+    graphics: Option[GraphicsBackend] = None
 ) extends AutoCloseable {
   private val SyntheticAddressBase   = 0x400000000000L
   private val SyntheticAddressStride = 0x100000000L
@@ -88,14 +92,18 @@ class ExecutionSession(
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private class Execution(
       val id: CompletionId,
-      val program: ProgramId,
-      val loaded: RuntimeBackend.Program,
-      val task: KernelTask,
+      val program: Option[ProgramId],
+      val execute: (
+          Memory,
+          TaskControl,
+          Event => Either[Fault, Unit]
+      ) => Either[ExecutionFailure, Option[GraphicsStatistics]],
       val allocations: Set[AllocationId],
       val control: TaskControl
   ) {
-    private var currentStatus: CompletionStatus = CompletionStatus.Pending
-    private val relocations                     = mutable.LinkedHashMap.empty[
+    private var currentGraphicsStatistics: Option[GraphicsStatistics] = None
+    private var currentStatus: CompletionStatus                       = CompletionStatus.Pending
+    private val relocations                                           = mutable.LinkedHashMap.empty[
       (KernelTask.RelocationSource, Long >= 0),
       KernelTask.PointerRelocation
     ]
@@ -103,6 +111,7 @@ class ExecutionSession(
     private lazy val allPointerRelocations = Vec.from(relocations.values)
     private var output: Vec[Event.Print]   = Vec.empty
 
+    def graphicsStatistics: Option[GraphicsStatistics]                          = currentGraphicsStatistics
     def status: CompletionStatus                                                = currentStatus
     def pointerRelocations(offset: Int >= 0): Vec[KernelTask.PointerRelocation] =
       if (offset.raw >= allPointerRelocations.length) Vec.empty
@@ -110,10 +119,13 @@ class ExecutionSession(
         offset.raw,
         offset.raw + math.min(ExecutionRPC.MaximumElements.raw, allPointerRelocations.length - offset.raw)
       )
-    def prints: Vec[Event.Print]               = output
-    def finish(result: CompletionStatus): Unit = {
+    def prints: Vec[Event.Print]                                                              = output
+    def finish(result: CompletionStatus, statistics: Option[GraphicsStatistics] = None): Unit = {
       require(result != CompletionStatus.Pending, "execution cannot finish as pending")
-      if (currentStatus == CompletionStatus.Pending) currentStatus = result
+      if (currentStatus == CompletionStatus.Pending) {
+        currentGraphicsStatistics = statistics
+        currentStatus = result
+      }
     }
     def record(relocation: KernelTask.PointerRelocation): Unit = {
       val key = (relocation.source, relocation.sourceOffset)
@@ -366,6 +378,15 @@ class ExecutionSession(
   def describeSpecialization(image: Vec[Byte]): Either[ExecutionFailure, Vec[SpecializationInfo]] =
     specializer.flatMap(_.describe(image))
 
+  def prepareShader(
+      image: Vec[Byte],
+      entry: NonEmpty[String],
+      stage: ShaderStageKind,
+      constants: Vec[SpecializationConstant]
+  ): Either[ExecutionFailure, PreparedShader] =
+    graphics.toRight(ExecutionFailure.Unsupported("graphics backend is unavailable"))
+      .flatMap(_.prepare(image, entry, stage, constants))
+
   def specializeImage(
       image: Vec[Byte],
       constants: Vec[SpecializationConstant]
@@ -383,7 +404,7 @@ class ExecutionSession(
         Left(ExecutionFailure.InvalidRequest(s"program ${id.toLong} has a global binding in progress"))
       else if (
         current.completions.values.view.exists(record =>
-          record.program == id && record.status == CompletionStatus.Pending
+          record.program.contains(id) && record.status == CompletionStatus.Pending
         )
       )
         Left(ExecutionFailure.InvalidRequest(s"program ${id.toLong} is retained by pending execution"))
@@ -430,7 +451,9 @@ class ExecutionSession(
         if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
         else if (!current.programs.get(id).exists(_.available))
           Left(ExecutionFailure.NotFound(s"program ${id.toLong} is not loaded"))
-        else if (current.completions.values.view.exists(r => r.program == id && r.status == CompletionStatus.Pending))
+        else if (
+          current.completions.values.view.exists(r => r.program.contains(id) && r.status == CompletionStatus.Pending)
+        )
           Left(ExecutionFailure.InvalidRequest("cannot bind globals during pending execution"))
         else current.allocations.get(allocation) match {
           case None =>
@@ -513,7 +536,29 @@ class ExecutionSession(
     }
   }
 
-  def launch(program: ProgramId, task: KernelTask): Either[ExecutionFailure, CompletionId] = {
+  // Called after validation while holding stateLock; workers start after that lock is released.
+  private def enqueue(
+      current: State,
+      program: Option[ProgramId],
+      references: Set[AllocationId]
+  )(execute: (
+      Memory,
+      TaskControl,
+      Event => Either[Fault, Unit]
+  ) => Either[ExecutionFailure, Option[GraphicsStatistics]])
+      : CompletionId = {
+    val id        = current.nextCompletion
+    val execution = Execution(id, program, execute, references, TaskControl(taskLimits))
+    state.set(current.copy(completions = current.completions.updated(id, execution), nextCompletion = id.next))
+    pendingExecutions.enqueue(execution)
+    id
+  }
+
+  def launch(
+      program: ProgramId,
+      task: KernelTask,
+      descriptorBindings: Vec[DescriptorBinding] = Vec.empty
+  ): Either[ExecutionFailure, CompletionId] = {
     val accepted = stateLock.withLock {
       val current = state.get()
       if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
@@ -530,52 +575,88 @@ class ExecutionSession(
               task.withPointerRelocations(relocations).left.map(ExecutionFailure.InvalidRequest(_))
             )
         prepared.flatMap { effective =>
-          validateTask(effective, current) match {
-            case Left(error) => Left(error)
-            case Right(_)    =>
-              val id = current.nextCompletion
-
-              val control =
-                TaskControl(taskLimits)
-              val execution = Execution(
-                id,
-                program,
-                loaded,
-                effective,
-                // Address registration makes storage discoverable; ownership comes
-                // from this dispatch's arguments, relocations, and bound globals.
-                referencedAllocations(effective) ++ current.programs(program).allocations,
-                control
-              )
-              state.set(current.copy(
-                completions = current.completions.updated(id, execution),
-                nextCompletion = current.nextCompletion.next
-              ))
-              pendingExecutions.enqueue(execution)
-              Right(id)
+          val images = if (descriptorBindings.isEmpty) Right(Set.empty[AllocationId])
+          else graphics.toRight(ExecutionFailure.Unsupported("descriptor preparation backend is unavailable")).flatMap(
+            _.validateDescriptorBindings(
+              descriptorBindings,
+              effective.arguments.size,
+              id => current.allocations.get(id).map(_.bytes.length.toLong)
+            )
+              .left.map(ExecutionFailure.InvalidRequest(_))
+          )
+          for {
+            _               <- validateTask(effective, current)
+            imageReferences <- images
+          } yield enqueue(
+            current,
+            Some(program),
+            referencedAllocations(effective) ++ current.programs(program).allocations ++ imageReferences
+          ) {
+            (memory, control, handler) =>
+              if (descriptorBindings.isEmpty) loaded.execute(effective, memory, control, handler).map(_ => None)
+              else graphics.get.withDescriptorBindings(descriptorBindings, memory, control) {
+                (preparedMemory, descriptors, relocations) =>
+                  val replacements = descriptorBindings.zip(descriptors).map { (binding, range) =>
+                    binding.argument.raw -> KernelTask.Argument.Memory(range.allocation, range.offset, Some(range.size))
+                  }.toMap
+                  effective.withArguments(Vec.from(effective.arguments.zipWithIndex.map { (argument, index) =>
+                    replacements.getOrElse(index, argument)
+                  })).flatMap(_.withPointerRelocations(relocations)).left.map(ExecutionFailure.InvalidRequest(
+                    _
+                  )).flatMap { prepared =>
+                    loaded.execute(prepared, preparedMemory, control, handler).map(_ => None)
+                  }
+              }
           }
         }
       }
     }
-    accepted.foreach { _ =>
-      val startWorker = stateLock.withLock {
-        if (closed || pendingExecutions.isEmpty || executionWorkers >= parallelism.raw) false
-        else {
-          executionWorkers += 1
-          true
-        }
-      }
-      if (startWorker)
-        try executionContext.execute(() => runPendingExecutions())
-        catch {
-          case scala.util.control.NonFatal(error) => failPendingExecutions(
-              ExecutionFailure.Failed(
-                s"cannot schedule execution: ${throwables.detail(error)}"
-              )
-            )
-        }
-    }
+    accepted.foreach(_ => startExecutionWorker())
     accepted
+  }
+
+  def submitGraphics(submission: GraphicsSubmission): Either[ExecutionFailure, CompletionId] = {
+    val accepted = stateLock.withLock {
+      val current = state.get()
+      if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
+      else graphics.toRight(ExecutionFailure.Unsupported("graphics backend is unavailable")).flatMap { backend =>
+        backend.validate(submission, id => current.allocations.get(id).map(_.bytes.length.toLong))
+          .left.map(ExecutionFailure.InvalidRequest(_)).map { references =>
+            enqueue(current, None, references) { (memory, control, handler) =>
+              backend.execute(submission, memory, control, handler).map(Some(_))
+            }
+          }
+      }
+    }
+    accepted.foreach(_ => startExecutionWorker())
+    accepted
+  }
+
+  def readGraphicsStatistics(id: CompletionId): Either[ExecutionFailure, GraphicsStatistics] = stateLock.withLock {
+    completionRecord(id).flatMap { record =>
+      if (record.status != CompletionStatus.Succeeded)
+        Left(ExecutionFailure.InvalidRequest("graphics completion has not succeeded"))
+      else record.graphicsStatistics.toRight(ExecutionFailure.InvalidRequest("completion is not a graphics submission"))
+    }
+  }
+
+  private def startExecutionWorker(): Unit = {
+    val startWorker = stateLock.withLock {
+      if (closed || pendingExecutions.isEmpty || executionWorkers >= parallelism.raw) false
+      else {
+        executionWorkers += 1
+        true
+      }
+    }
+    if (startWorker)
+      try executionContext.execute(() => runPendingExecutions())
+      catch {
+        case scala.util.control.NonFatal(error) => failPendingExecutions(
+            ExecutionFailure.Failed(
+              s"cannot schedule execution: ${throwables.detail(error)}"
+            )
+          )
+      }
   }
 
   private def runPendingExecutions(): Unit = {
@@ -589,29 +670,26 @@ class ExecutionSession(
         case None            => ()
         case Some(execution) =>
           val id     = execution.id
-          val status =
+          val result =
             try
               programLifecycleLock.readLock().withLock {
-                execution.loaded.execute(
-                  execution.task,
+                execution.execute(
                   completionMemory(id),
                   execution.control,
                   event => handleEvent(id, event)
                 )
               }
-                .fold(error => CompletionStatus.Failed(error), _ => CompletionStatus.Succeeded)
             catch {
               case scala.util.control.NonFatal(error) =>
-                CompletionStatus.Failed(
-                  ExecutionFailure.Failed(
-                    s"program executor failed: ${throwables.detail(error)}"
-                  )
-                )
+                Left(ExecutionFailure.Failed(s"program executor failed: ${throwables.detail(error)}"))
             }
           val following = stateLock.withLock {
             val current = state.get()
             current.completions.get(id).foreach { record =>
-              record.finish(status)
+              result.fold(
+                error => record.finish(CompletionStatus.Failed(error)),
+                statistics => record.finish(CompletionStatus.Succeeded, statistics)
+              )
               stateChanged.signalAll()
             }
             dequeueLocked()
@@ -1291,15 +1369,18 @@ class ExecutionSession(
 
   private def validateTask(task: KernelTask, current: State): Either[ExecutionFailure, Unit] =
     task.arguments.collectFirst {
-      case KernelTask.Argument.Memory(region, _) if !current.allocations.contains(region) =>
+      case KernelTask.Argument.Memory(region, _, _) if !current.allocations.contains(region) =>
         val id = region
         ExecutionFailure.NotFound(s"kernel argument refers to unregistered allocation ${id.toLong}")
-      case KernelTask.Argument.Memory(region, offset)
+      case KernelTask.Argument.Memory(region, offset, _)
           if offset.raw > current.allocations(region).bytes.length.toLong =>
         val id = region
         ExecutionFailure.InvalidRequest(
           s"kernel argument offset $offset is outside allocation ${id.toLong}"
         )
+      case KernelTask.Argument.Memory(region, offset, Some(range))
+          if range.raw > current.allocations(region).bytes.length.toLong - offset.raw =>
+        ExecutionFailure.InvalidRequest("kernel argument range exceeds its allocation")
     }.toLeft(()).flatMap { _ =>
       task.pointerRelocations.collectFirst {
         case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(region), _, _, _)
@@ -1341,7 +1422,7 @@ class ExecutionSession(
 
   private def referencedAllocations(task: KernelTask): Set[AllocationId] =
     task.arguments.collect {
-      case KernelTask.Argument.Memory(region, _) => region
+      case KernelTask.Argument.Memory(region, _, _) => region
     }.toSet ++ task.pointerRelocations.foldLeft(Set.empty[AllocationId]) { (allocations, relocation) =>
       val withTarget = allocations + relocation.target
       relocation.source match {

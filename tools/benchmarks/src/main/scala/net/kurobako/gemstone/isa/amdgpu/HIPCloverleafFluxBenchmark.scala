@@ -4,6 +4,7 @@ import cats.syntax.all.*
 import com.monovore.decline.Opts
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
@@ -19,10 +20,9 @@ object HIPCloverleafFluxBenchmark {
   private val explicitArgumentBytes = 8 * 8 + 4 + 4 + 8
   private val options               = (
     Opts.option[Int]("cells", help = "Cells per dispatch").withDefault(64)
-      .validate("cells must be positive")(_ > 0)
-      .map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("cells must be positive"),
     Opts.option[Int]("iterations", help = "Dispatches per sample").withDefault(20)
-      .validate("iterations must be positive")(_ > 0).map(_.unsafe[Int > 0])
+      .refined[Int > 0]("iterations must be positive")
   ).mapN(Options(_, _))
 
   private class FluxMemory(length: Int) extends Memory with BenchmarkAddressSpace {

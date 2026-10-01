@@ -194,7 +194,7 @@ foreach(variable IN ITEMS CONFORMANCE_BACKENDS CUDA_ARCHITECTURES AMDGPU_ARCHITE
   list(REMOVE_DUPLICATES "${variable}")
 endforeach()
 
-set(supported_backends cuda hip hsa opencl sycl levelzero openacc)
+set(supported_backends cuda hip hsa opencl sycl levelzero vulkan openacc)
 foreach(backend IN LISTS CONFORMANCE_BACKENDS)
   if(NOT backend IN_LIST supported_backends)
     message(FATAL_ERROR "Unsupported conformance backend: ${backend}")
@@ -211,9 +211,10 @@ if("hip" IN_LIST CONFORMANCE_BACKENDS OR "hsa" IN_LIST CONFORMANCE_BACKENDS)
   endif()
 endif()
 
-file(GLOB_RECURSE artifact_inputs CONFIGURE_DEPENDS "${CONFORMANCE_SOURCE_DIRECTORY}/*")
-list(FILTER artifact_inputs EXCLUDE REGEX "/(artifacts|build|profiles|target|tests|workloads)/")
-list(FILTER artifact_inputs EXCLUDE REGEX "/README\\.md$")
+file(GLOB_RECURSE artifact_inputs CONFIGURE_DEPENDS
+  RELATIVE "${CONFORMANCE_SOURCE_DIRECTORY}" "${CONFORMANCE_SOURCE_DIRECTORY}/*")
+list(FILTER artifact_inputs EXCLUDE REGEX "(^|/)(artifacts|build|profiles|target|tests|workloads)/")
+list(FILTER artifact_inputs EXCLUDE REGEX "(^|/)README\\.md$")
 set(artifact_scripts
   "${CMAKE_CURRENT_LIST_DIR}/Jobserver.cmake"
   "${CMAKE_CURRENT_LIST_DIR}/jobserver.sh"
@@ -315,7 +316,29 @@ function(add_artifact backend architecture output)
     "-DCONFORMANCE_WORK_DIRECTORY=/work")
   set(work_directory "${CONFORMANCE_WORK_DIRECTORY}/${name}")
 
-  set(dependencies ${artifact_inputs} ${artifact_scripts} "${toolchain_stamp}")
+  # CTS directories and unified backend implementations belong only to their
+  # backend. Everything else remains shared, including headers used across
+  # backends and CMake files that select sources or package runtime libraries.
+  set(dependencies ${artifact_scripts} "${toolchain_stamp}")
+  foreach(input IN LISTS artifact_inputs)
+    if(input MATCHES "^cts/([^/]+)/" AND NOT CMAKE_MATCH_1 STREQUAL backend)
+      continue()
+    endif()
+    if(input MATCHES "^unified/")
+      if(backend MATCHES "^(vulkan|openacc)$")
+        continue()
+      endif()
+      if(input MATCHES "^unified/src/([^/]+)/")
+        if(CMAKE_MATCH_1 IN_LIST supported_backends AND NOT CMAKE_MATCH_1 STREQUAL backend)
+          continue()
+        endif()
+      endif()
+    endif()
+    if(input MATCHES "^miniapps/" AND backend MATCHES "^(hsa|levelzero)$")
+      continue()
+    endif()
+    list(APPEND dependencies "${CONFORMANCE_SOURCE_DIRECTORY}/${input}")
+  endforeach()
   if(NOT CONFORMANCE_OFFLINE)
     list(APPEND dependencies "${conformance_dependency_stamp}")
   endif()

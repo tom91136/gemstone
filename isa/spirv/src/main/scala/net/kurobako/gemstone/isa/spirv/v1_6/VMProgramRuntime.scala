@@ -4,6 +4,7 @@ import VMIR.*
 import VMInvocation.*
 import VMMemory.*
 import cats.syntax.all.*
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Bits.*
 import net.kurobako.gemstone.binary.Widths.*
@@ -17,6 +18,8 @@ import scala.collection.concurrent.TrieMap
 
 private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
   export ir.*
+  val usesNonUniformCollectives: Boolean = ir.module.instructions.exists(VMCollectives.isNonUniform)
+
   val layout: VMTypeLayout = VMTypeLayout(ir)
 
   // Zero identifies direct VM execution; published namespaces are bound once.
@@ -149,7 +152,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
     }.map(_._1).toRight(Fault.Memory(s"SPIR-V global '$name' is not present")).flatMap { id =>
       materializeGlobals(storageClass => storageClass != 4 && storageClass != 6, useBindings = false)
         .flatMap(_.get(id) match {
-          case Some(RuntimeValue.Address(_, Pointer(Region.Internal(storage), _, _, _, _))) =>
+          case Some(RuntimeValue.Address(_, Pointer(Region.Internal(storage), _, _, _, _, _, _, _, _))) =>
             Right(id -> storage.bytes)
           case _ => Left(Fault.Memory(s"SPIR-V global '$name' has no storage"))
         })
@@ -209,44 +212,12 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
       }
     }
 
-  def descriptorVariables(name: NonEmpty[String]): Vec[Int] = {
-    val declared = this.ir.entryPointInterfaces.getOrElse(name, Set.empty)
-    val scoped   = this.descriptorBindings.filter { case (variable, _) => declared.contains(variable) }
-    // Before SPIR-V 1.4, descriptor globals were not required in OpEntryPoint's
-    // interface. Retain compatibility with those modules when none are listed.
-    val bindings = if (scoped.nonEmpty) scoped else this.descriptorBindings
-    Vec.from(bindings.toSeq.sortBy { case (variable, (set, binding)) =>
-      (set, binding, variable)
-    }.map(_._1))
-  }
-
+  def descriptorVariables(name: NonEmpty[String]): Vec[Int] = VMShaderInterface.argumentVariables(this, name)
   private def vulkanKernelMetadata(name: NonEmpty[String]): Either[Fault, KernelMetadata] =
-    this.entryPoints.get(name).flatMap(this.functions.get) match {
-      case None    => Left(Fault.InvalidTask(s"SPIR-V entry point $name has no function body"))
-      case Some(_) =>
-        val functionId  = this.entryPoints(name)
-        val descriptors = descriptorVariables(name)
-        val parameters  = descriptors.indices.map(index =>
-          KernelMetadata.Parameter(
-            8,
-            (index * 8).unsafe[Int >= 0],
-            KernelMetadata.ParameterKind.Allocation,
-            containsPointers = false
-          )
-        )
-        KernelMetadata.validated(
-          descriptors.nonNegativeSize * 8,
-          descriptors.nonNegativeSize,
-          Vec.from(parameters),
-          requiredWorkGroupSize = workGroupSize(functionId),
-          workGroupSizeHint = workGroupSizeHint(functionId),
-          bindingIndices =
-            Vec.from(descriptors.map(variable => this.descriptorBindings(variable)._2))
-        ).leftMap(detail => Fault.InvalidTask(detail))
-    }
+    VMShaderInterface.metadata(this, name)
 
   def workGroupSize(functionId: Int): Option[LaunchGeometry.Dimensions] =
-    this.workGroupSizes.get(functionId).orElse(this.builtinWorkGroupSize)
+    this.builtinWorkGroupSize.orElse(this.workGroupSizes.get(functionId))
 
   def workGroupSizeHint(functionId: Int): Option[LaunchGeometry.Dimensions] =
     this.workGroupSizeHints.get(functionId)
@@ -333,7 +304,14 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
         val pointer = (if (useBindings) this.boundGlobals.get(variable) else None) match {
           case Some(binding) =>
             Pointer(Region.External(binding.region), binding.offset.raw, pointee, global.storageClass)
-          case None => Pointer(Region.Internal(InternalMemory(bytes)), 0L, pointee, global.storageClass)
+          case None => Pointer(
+              Region.Internal(InternalMemory(bytes)),
+              0L,
+              pointee,
+              global.storageClass,
+              bounds = Option.when(vulkanEntries.nonEmpty && global.storageClass == StorageClass.Private)(0L ->
+                bytes.length.toLong)
+            )
         }
         values += variable -> RuntimeValue.Address(global.pointerType, pointer)
       }
@@ -346,14 +324,25 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
     this.layout.scalarLeafCount(typeId).flatMap { count =>
       try {
         val lanes = Array.ofDim[Long](count)
-        val used  = decodeBits(typeId, bytes, 0, lanes, 0)
+        val used  = if (layout.hasMatrixStorage(typeId)) {
+          val leaves = layout.matrixStorageLeaves(typeId, None)
+          leaves.zipWithIndex.foreach { case ((offset, scalar), lane) =>
+            lanes(lane) =
+              LittleEndian.decode(
+                bytes,
+                Math.toIntExact(offset),
+                this.layout.typeSize(scalar).unsafe[Int where Between[0, 8]]
+              )
+          }
+          leaves.size
+        } else decodeBits(typeId, bytes, 0, lanes, 0)
         if (used != lanes.length)
           Left(Fault.InvalidTask(
             s"SPIR-V value of type %$typeId decoded $used scalar leaves, expected ${lanes.length}"
           ))
         else Right(RuntimeValue.Bits(typeId, lanes))
       } catch {
-        case error: IllegalArgumentException => Left(Fault.InvalidTask(s"invalid SPIR-V value: ${error.getMessage}"))
+        case error: IllegalArgumentException => Left(Fault.InvalidTask(throwables.detail(error)))
       }
     }
 
@@ -391,6 +380,14 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
         index += 1
       }
       lane
+    case Some(RuntimeType.MatrixType(column, count)) =>
+      var lane  = laneStart
+      var index = 0
+      while (index < count) {
+        lane = decodeBits(column, input, byteStart + index * this.layout.typeSize(column), lanes, lane)
+        index += 1
+      }
+      lane
     case Some(RuntimeType.Array(element, count)) =>
       val stride = this.arrayStrides.getOrElse(typeId, this.layout.typeSize(element))
       var lane   = laneStart
@@ -421,14 +418,27 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
     case RuntimeValue.Bits(typeId, lanes) =>
       try {
         val bytes = Array.ofDim[Byte](this.layout.typeSize(typeId))
-        val used  = encodeBits(typeId, lanes, 0, bytes, 0)
+        val used  = if (layout.hasMatrixStorage(typeId)) {
+          val leaves = layout.matrixStorageLeaves(typeId, None)
+          if (leaves.size != lanes.length)
+            throw IllegalArgumentException("matrix storage initializer scalar count does not match")
+          leaves.zipWithIndex.foreach { case ((offset, scalar), lane) =>
+            LittleEndian.write(
+              lanes(lane),
+              bytes,
+              Math.toIntExact(offset),
+              this.layout.typeSize(scalar).unsafe[Int where Between[0, 8]]
+            )
+          }
+          leaves.size
+        } else encodeBits(typeId, lanes, 0, bytes, 0)
         if (used != lanes.length)
           Left(Fault.InvalidTask(
             s"SPIR-V value of type %$typeId has ${lanes.length} scalar leaves, expected $used"
           ))
         else Right(bytes)
       } catch {
-        case error: IllegalArgumentException => Left(Fault.InvalidTask(s"invalid SPIR-V value: ${error.getMessage}"))
+        case error: IllegalArgumentException => Left(Fault.InvalidTask(throwables.detail(error)))
       }
     case RuntimeValue.Address(_, pointer) =>
       Left(Fault.InvalidTask(s"cannot encode runtime pointer $pointer as process-neutral bytes"))
@@ -465,6 +475,14 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
       var index = 0
       while (index < count) {
         lane = encodeBits(component, lanes, lane, output, byteStart + index * this.layout.typeSize(component))
+        index += 1
+      }
+      lane
+    case Some(RuntimeType.MatrixType(column, count)) =>
+      var lane  = laneStart
+      var index = 0
+      while (index < count) {
+        lane = encodeBits(column, lanes, lane, output, byteStart + index * this.layout.typeSize(column))
         index += 1
       }
       lane

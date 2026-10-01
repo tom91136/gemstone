@@ -265,21 +265,21 @@ TEST_CASE("algorithms/roc-thrust-semantic/device-global-symbol-roundtrip/i32/n11
   int32_t *marker = nullptr;
   if (hipMalloc(reinterpret_cast<void **>(&target), sizeof(int32_t)) != hipSuccess
       || hipMalloc(reinterpret_cast<void **>(&marker), sizeof(int32_t)) != hipSuccess) {
-    hipFree(target);
-    hipFree(marker);
+    (void)hipFree(target);
+    (void)hipFree(marker);
     throw std::runtime_error("device-global-symbol-roundtrip: hipMalloc failed");
   }
   int32_t zero = 0;
   if (hipMemcpy(target, &zero, sizeof(int32_t), hipMemcpyHostToDevice) != hipSuccess
       || hipMemcpy(marker, &zero, sizeof(int32_t), hipMemcpyHostToDevice) != hipSuccess) {
-    hipFree(target);
-    hipFree(marker);
+    (void)hipFree(target);
+    (void)hipFree(marker);
     throw std::runtime_error("device-global-symbol-roundtrip: destination initialisation failed");
   }
   void *slot = target;
   if (hipMemcpyToSymbol(unified_device_global_slot, &slot, sizeof(slot)) != hipSuccess) {
-    hipFree(target);
-    hipFree(marker);
+    (void)hipFree(target);
+    (void)hipFree(marker);
     throw std::runtime_error("device-global-symbol-roundtrip: hipMemcpyToSymbol failed");
   }
   unified_publish_through_device_global<<<1, 1>>>(marker);
@@ -289,10 +289,13 @@ TEST_CASE("algorithms/roc-thrust-semantic/device-global-symbol-roundtrip/i32/n11
   const bool copied = launch == hipSuccess && hipMemcpy(&published, target, sizeof(int32_t), hipMemcpyDeviceToHost) == hipSuccess
                       && hipMemcpy(&observed_marker, marker, sizeof(int32_t), hipMemcpyDeviceToHost) == hipSuccess;
   void *cleared = nullptr;
-  hipMemcpyToSymbol(unified_device_global_slot, &cleared, sizeof(cleared));
-  hipFree(target);
-  hipFree(marker);
+  const auto reset = hipMemcpyToSymbol(unified_device_global_slot, &cleared, sizeof(cleared));
+  const auto freedTarget = hipFree(target);
+  const auto freedMarker = hipFree(marker);
   if (!copied) throw std::runtime_error("device-global-symbol-roundtrip: kernel launch or read-back failed");
+  REQUIRE(reset == hipSuccess);
+  REQUIRE(freedTarget == hipSuccess);
+  REQUIRE(freedMarker == hipSuccess);
   {
     INFO("device-global-symbol-roundtrip: kernel did not read the initialised "
          "device global");

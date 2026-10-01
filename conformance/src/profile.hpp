@@ -39,5 +39,6 @@ std::string local_hostname();
 Profile resolve_profile(const std::filesystem::path &directory, const std::optional<std::string> &requested = std::nullopt,
                         const std::optional<std::string> &hostname = std::nullopt);
 std::vector<ResolvedTarget> resolve_targets(const Profile &profile, const std::vector<std::string> &selectors);
+std::vector<ResolvedTarget> direct_targets(const std::vector<std::string> &routes);
 void validate_all(const std::filesystem::path &directory);
 } // namespace conformance::profile

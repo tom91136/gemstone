@@ -34,6 +34,8 @@
   #include <CL/cl_ext.h>
 #elif defined(CONFORMANCE_DEVICE_SYCL)
   #include <sycl/sycl.hpp>
+#elif defined(CONFORMANCE_DEVICE_VULKAN)
+  #include <vulkan/vulkan.h>
 #elif defined(CONFORMANCE_DEVICE_LEVELZERO)
   #include <level_zero/ze_api.h>
 #endif
@@ -363,6 +365,48 @@ static DeviceSelection discover_physical_device() {
       && std::ranges::any_of(uuid, [](uint8_t byte) { return byte != 0; }))
     return selection(make_uuid_device(uuid));
   return selection(PhysicalDevice{PhysicalDeviceScheme::unknown, {}});
+#elif defined(CONFORMANCE_DEVICE_VULKAN)
+  VkApplicationInfo application{};
+  application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+  uint32_t instanceVersion = VK_API_VERSION_1_0;
+  if (const auto enumerateVersion =
+          reinterpret_cast<PFN_vkEnumerateInstanceVersion>(vkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceVersion")))
+    if (enumerateVersion(&instanceVersion) != VK_SUCCESS) throw std::runtime_error("cannot query Vulkan instance version");
+  application.apiVersion = std::min(instanceVersion, VK_API_VERSION_1_1);
+  VkInstanceCreateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+  info.pApplicationInfo = &application;
+  VkInstance instance = VK_NULL_HANDLE;
+  if (vkCreateInstance(&info, nullptr, &instance) != VK_SUCCESS) throw std::runtime_error("cannot initialize Vulkan");
+  struct InstanceGuard {
+    VkInstance value;
+    ~InstanceGuard() { vkDestroyInstance(value, nullptr); }
+  } guard{instance};
+  uint32_t count = 0;
+  if (vkEnumeratePhysicalDevices(instance, &count, nullptr) != VK_SUCCESS) throw std::runtime_error("cannot count Vulkan devices");
+  std::vector<VkPhysicalDevice> devices(count);
+  if (vkEnumeratePhysicalDevices(instance, &count, devices.data()) != VK_SUCCESS) throw std::runtime_error("cannot list Vulkan devices");
+  std::vector<PhysicalDevice> identities;
+  std::vector<std::string> descriptions;
+  for (const auto device : devices) {
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(device, &properties);
+    VkPhysicalDeviceIDProperties identity{};
+    identity.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+    if (application.apiVersion >= VK_API_VERSION_1_1 && properties.apiVersion >= VK_API_VERSION_1_1) {
+      VkPhysicalDeviceProperties2 extended{};
+      extended.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      extended.pNext = &identity;
+      vkGetPhysicalDeviceProperties2(device, &extended);
+    }
+    const auto description = fmt::format("vulkan:{}:{}:{}", properties.vendorID, properties.deviceID, properties.deviceName);
+    descriptions.push_back(description);
+    identities.push_back(std::ranges::any_of(identity.deviceUUID, [](uint8_t b) { return b != 0; })
+                             ? make_uuid_device(identity.deviceUUID)
+                             : PhysicalDevice{PhysicalDeviceScheme::unknown, {}});
+  }
+  const auto index = select_device(descriptions);
+  return {identities[index], {{"CONFORMANCE_VULKAN_DEVICE_ID", fmt::to_string(index + 1)}}};
 #elif defined(CONFORMANCE_DEVICE_LEVELZERO)
   if (zeInit(0) != ZE_RESULT_SUCCESS) throw std::runtime_error("cannot initialize Level Zero");
   uint32_t driver_count = 0;

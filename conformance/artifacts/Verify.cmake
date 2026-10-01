@@ -111,7 +111,13 @@ function(conformance_verify_relocation artifact support)
   file(STRINGS "${relocated_artifact}/test-programs.txt" programs)
   foreach(entry IN LISTS programs)
     string(REGEX REPLACE "\t.*$" "" program "${entry}")
-    if(program MATCHES "^levelzero_cts_")
+    if(entry MATCHES "\tdeqp$")
+      execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${runtime_environment}
+        "${relocated_artifact}/${program}${CMAKE_EXECUTABLE_SUFFIX}" --deqp-runmode=stdout-caselist --deqp-shadercache=disable
+        --deqp-case=dEQP-VK.api.smoke.* "--deqp-archive-dir=${relocated_support}/data/vulkan"
+        WORKING_DIRECTORY "${relocated_artifact}"
+        RESULT_VARIABLE status OUTPUT_VARIABLE probe_output ERROR_VARIABLE probe_error)
+    elseif(program MATCHES "^levelzero_cts_")
       execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${runtime_environment}
         "${relocated_artifact}/${program}${CMAKE_EXECUTABLE_SUFFIX}" --gtest_list_tests
         RESULT_VARIABLE status OUTPUT_VARIABLE probe_output ERROR_VARIABLE probe_error)
@@ -125,7 +131,11 @@ function(conformance_verify_relocation artifact support)
       message(FATAL_ERROR
         "relocated conformance program ${program} cannot discover tests:\n${probe_output}${probe_error}")
     endif()
-    if(program MATCHES "^levelzero_cts_")
+    if(entry MATCHES "\tdeqp$")
+      if(NOT probe_output MATCHES "TEST: dEQP-VK")
+        message(FATAL_ERROR "relocated Vulkan CTS discovered no cases")
+      endif()
+    elseif(program MATCHES "^levelzero_cts_")
       if(NOT probe_output MATCHES "\n[ \t]+[A-Za-z_]")
         file(REMOVE_RECURSE "${relocated_root}")
         message(FATAL_ERROR "relocated conformance program ${program} discovered no Google Test cases")

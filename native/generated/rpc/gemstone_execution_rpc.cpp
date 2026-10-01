@@ -30,6 +30,7 @@ class Client::Impl {
 
   template <class T, class Request> Result<T> call(std::string_view operation, const Request &request) {
     std::lock_guard<std::mutex> guard(mutex_); error_.clear();
+    if (!wire::valid(request)) return failed<T>("execution request violates wire constraints or encoding limits");
     std::string payload;
     if (glz::write<GlazeOptions{}>(request, payload)) return failed<T>("execution request encoding failed");
     if (payload.size() > MaximumPayload) return failed<T>("execution request exceeds the encoding limits");
@@ -38,11 +39,11 @@ class Client::Impl {
     const std::string_view body(reinterpret_cast<const char *>(response.data()), response.size());
     if (status == 1) {
       ExecutionFailure failure{};
-      if (glz::read<GlazeOptions{}>(failure, body)) { connection_.poison(); return failed<T>("execution failure response is invalid"); }
+      if (glz::read<GlazeOptions{}>(failure, body) || !wire::valid(failure)) { connection_.poison(); return failed<T>("execution failure response is invalid"); }
       error_ = failureDetail(failure); return Result<T>::failure(Error{error_});
     }
     T value{};
-    if (glz::read<GlazeOptions{}>(value, body)) { connection_.poison(); return failed<T>("execution response payload is invalid"); }
+    if (glz::read<GlazeOptions{}>(value, body) || !wire::valid(value)) { connection_.poison(); return failed<T>("execution response payload is invalid"); }
     return Result<T>::success(std::move(value));
   }
 
@@ -113,6 +114,18 @@ Result<std::vector<SpecializationInfo>> Client::call(const DescribeSpecializatio
 
 Result<std::vector<uint8_t>> Client::call(const SpecializeImage &request) {
   return implementation_->call<std::vector<uint8_t>>(operation::SpecializeImage, request);
+}
+
+Result<PreparedShader> Client::call(const PrepareShader &request) {
+  return implementation_->call<PreparedShader>(operation::PrepareShader, request);
+}
+
+Result<CompletionId> Client::call(const SubmitGraphics &request) {
+  return implementation_->call<CompletionId>(operation::SubmitGraphics, request);
+}
+
+Result<GraphicsStatistics> Client::call(const ReadGraphicsStatistics &request) {
+  return implementation_->call<GraphicsStatistics>(operation::ReadGraphicsStatistics, request);
 }
 
 Result<Unit> Client::call(const UnloadProgram &request) {

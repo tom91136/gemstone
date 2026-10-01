@@ -6,6 +6,7 @@ import com.monovore.decline.Opts
 import java.nio.file.Path
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
@@ -33,11 +34,11 @@ object PTXExecutionBenchmark {
       .validate("mode must be vector or tiny")(value => value == "vector" || value == "tiny")
       .map(value => if (value == "tiny") GeometryMode.Tiny else GeometryMode.Vector),
     Opts.option[Int]("measured", help = "Launches per measured round").withDefault(100)
-      .validate("measured launches must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("measured launches must be positive"),
     Opts.option[Int]("warmup", help = "Warmup launches").withDefault(1000)
-      .validate("warmup launches must be non-negative")(_ >= 0).map(_.unsafe[Int >= 0]),
+      .refined[Int >= 0]("warmup launches must be non-negative"),
     Opts.option[Int]("rounds", help = "Measured rounds").withDefault(5)
-      .validate("measured rounds must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("measured rounds must be positive"),
     Opts.option[String]("recording", help = "JFR output path").map(Path.of(_)).orNone
   ).mapN(Options(_, _, _, _, _))
   private val source = """.version 8.0

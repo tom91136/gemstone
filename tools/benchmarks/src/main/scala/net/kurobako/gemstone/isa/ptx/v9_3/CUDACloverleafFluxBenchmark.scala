@@ -6,6 +6,7 @@ import com.monovore.decline.Opts
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.*
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -17,9 +18,9 @@ object CUDACloverleafFluxBenchmark {
   private val name    = BenchmarkName("cuda-cloverleaf-flux")
   private val options = (
     Opts.option[Int]("cells", help = "Cells per dispatch").withDefault(64)
-      .validate("cells must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+      .refined[Int > 0]("cells must be positive"),
     Opts.option[Int]("iterations", help = "Dispatches per sample").withDefault(20)
-      .validate("iterations must be positive")(_ > 0).map(_.unsafe[Int > 0])
+      .refined[Int > 0]("iterations must be positive")
   ).mapN(Options(_, _))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))

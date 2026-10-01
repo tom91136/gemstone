@@ -172,7 +172,7 @@ private object VMIR {
 
   enum Instruction {
 
-    case SLoad(dest: Int, count: Int, base: Int, offset: Int, scalarOffset: Option[Int])
+    case SLoad(dest: Int, count: Int in (1, 2, 4, 8, 16), base: Int, offset: Int, scalarOffset: Option[Int])
     case SMove(dest: Int, src: InstructionSource)
     case SMoveImmediate(dest: Int, value: Int)
     case SMultiplyImmediate(dest: Int, value: Int)

@@ -69,15 +69,7 @@ TEST_CASE("Level Zero immediate sampler kernels require implemented image suppor
 
 TEST_CASE("Level Zero kernel group sizes honor device limits and required dimensions", "[level-zero]") {
   gemstone_test::RpcFixture server;
-  const auto endpoint = server.endpoint();
-  REQUIRE(setenv(gemstone::environment::RpcEndpoint, endpoint.c_str(), 1) == 0);
-  REQUIRE(setenv(gemstone::environment::RpcClient, "42", 1) == 0);
-  struct ResetEnvironment {
-    ~ResetEnvironment() {
-      unsetenv(gemstone::environment::RpcEndpoint);
-      unsetenv(gemstone::environment::RpcClient);
-    }
-  } resetEnvironment;
+  const gemstone_test::RpcEnvironment environment(server);
   server.kernelMetadata(0, 0, {});
   REQUIRE(zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS);
   uint32_t count = 1;

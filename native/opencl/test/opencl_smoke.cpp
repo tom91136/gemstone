@@ -19,16 +19,8 @@
 #include "../../rpc/test/rpc_fixture.hpp"
 #include <environment_keys.hpp>
 
-namespace {
-struct ScopedEnv {
-  const char *name;
-  ScopedEnv(const char *name, const char *value) : name(name) { REQUIRE((setenv(name, value, 1) == 0)); }
-  ~ScopedEnv() { (void)unsetenv(name); }
-};
-} // namespace
-
 TEST_CASE("OpenCL virtual profile advertises the selected Polyregion device", "[opencl]") {
-  const ScopedEnv profile(gemstone::environment::Profile, "rusticl-amd");
+  const gemstone_test::Environment profile(gemstone::environment::Profile, "rusticl-amd");
   cl_platform_id platform = nullptr;
   cl_device_id device = nullptr;
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -62,9 +54,7 @@ TEST_CASE("OpenCL device exposes half precision arithmetic", "[opencl]") {
 
 TEST_CASE("OpenCL generated source converts to SPIR-V", "[opencl]") {
   gemstone_test::RpcFixture server;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(server.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(server);
   cl_platform_id platform = nullptr;
   cl_device_id device = nullptr;
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -94,9 +84,7 @@ TEST_CASE("OpenCL generated source converts to SPIR-V", "[opencl]") {
 
 TEST_CASE("concurrent OpenCL buffer ownership keeps RPC state and bytes intact", "[opencl]") {
   gemstone_test::RpcFixture server;
-  const auto endpoint = server.endpoint();
-  const ScopedEnv remote(gemstone::environment::RpcEndpoint, endpoint.c_str());
-  const ScopedEnv identity(gemstone::environment::RpcClient, "42");
+  const gemstone_test::RpcEnvironment environment(server);
   cl_platform_id platform = nullptr;
   cl_device_id device = nullptr;
   REQUIRE(clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS);
@@ -134,9 +122,7 @@ TEST_CASE("concurrent OpenCL buffer ownership keeps RPC state and bytes intact",
 TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   gemstone_test::RpcFixture server;
   server.programCatalog({{"groups", "groups"}}, {});
-  const auto port = "tcp://127.0.0.1:" + std::to_string(server.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(server);
 
   cl_platform_id platform = nullptr;
   cl_uint platformCount = 0;
@@ -451,9 +437,7 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
 
 TEST_CASE("OpenCL SVM allocation rejects contradictory and unsupported flags", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   cl_platform_id platform = nullptr;
   cl_device_id device = nullptr;
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -482,9 +466,7 @@ TEST_CASE("OpenCL SVM allocation rejects contradictory and unsupported flags", "
 
 TEST_CASE("Intel USM queries preserve allocation kind and interior identity", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   cl_platform_id platform{};
   cl_device_id device{};
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -529,9 +511,7 @@ TEST_CASE("Intel USM queries preserve allocation kind and interior identity", "[
 
 TEST_CASE("Intel blocking free waits for queued allocation uses", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   cl_platform_id platform{};
   cl_device_id device{};
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -581,9 +561,7 @@ TEST_CASE("Intel blocking free waits for queued allocation uses", "[opencl][unif
 TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declarations", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
   fixture.programCatalog({{"groups", "groups"}}, {});
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  REQUIRE((setenv(gemstone::environment::RpcEndpoint, port.c_str(), 1) == 0));
-  REQUIRE((setenv(gemstone::environment::RpcClient, "42", 1) == 0));
+  const gemstone_test::RpcEnvironment environment(fixture);
   cl_platform_id platform{};
   cl_device_id device{};
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
@@ -657,9 +635,7 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
 TEST_CASE("OpenCL queued buffer uses reclaim storage after the last handle is released", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
   fixture.programCatalog({{"groups", "groups"}}, {});
-  const auto port = "tcp://127.0.0.1:" + std::to_string(fixture.port());
-  const ScopedEnv rpcPort(gemstone::environment::RpcEndpoint, port.c_str());
-  const ScopedEnv rpcClient(gemstone::environment::RpcClient, "42");
+  const gemstone_test::RpcEnvironment environment(fixture);
   cl_platform_id platform{};
   cl_device_id device{};
   REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));

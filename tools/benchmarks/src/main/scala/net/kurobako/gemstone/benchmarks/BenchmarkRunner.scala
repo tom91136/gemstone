@@ -4,6 +4,7 @@ import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
 import net.kurobako.gemstone.*
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
 
 object BenchmarkRunner {
@@ -17,17 +18,17 @@ object BenchmarkRunner {
       Command("run", "Run one benchmark")((
         Opts.argument[String]("case")
           .validate("benchmark name must be non-empty and contain no NUL")(value =>
-            value.nonEmpty && !value.contains('\u0000')
+            !value.contains('\u0000')
           )
-          .map(value => value.unsafe[BenchmarkName])
+          .refined[BenchmarkName]("benchmark name must be non-empty and contain no NUL")
           .mapValidated { name =>
             if (PlatformBenchmarks.names.contains(name)) name.validNel
             else s"unknown benchmark: $name".invalidNel
           },
         Opts.option[Int]("warmup", help = "Warmup iterations").withDefault(1)
-          .validate("warmups must be non-negative")(_ >= 0).map(_.unsafe[Int >= 0]),
+          .refined[Int >= 0]("warmups must be non-negative"),
         Opts.option[Int]("samples", help = "Measured samples").withDefault(5)
-          .validate("samples must be positive")(_ > 0).map(_.unsafe[Int > 0]),
+          .refined[Int > 0]("samples must be positive"),
         Opts.arguments[String]("case-argument").orEmpty
       ).mapN { (name, warmups, samples, rest) =>
         Run(BenchmarkOptions(warmups, samples, BenchmarkInvocation(name, rest.toVector)))

@@ -115,7 +115,8 @@ object Server {
             taskLimits = settings.limits,
             executionContext = pool,
             parallelism = pool.parallelism,
-            specialization = capabilities.specialization
+            specialization = capabilities.specialization,
+            graphics = capabilities.graphics
           ),
         owner => journal.foreach(_.clientClosed(owner))
       ))

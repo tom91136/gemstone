@@ -1,9 +1,51 @@
-# Compact matrix registrations retain the smaller size/type sets.
-# Vector step and array alignment are bounded; struct cases expand a large type/layout matrix.
-# Integer operator sweeps (including quick variants) and half stores exhaust large input domains.
-# Full-conformance range_api submits trillions of work-items; defer that one case.
-# Defer upstream image-dimension sweeps without changing their tested sizes.
-specs = ['~"cts/opencl/basic/imagedim_*"~"range_api"~[full-matrix]~[regression]~"cts/opencl/vectors/vec_align_struct*"~"cts/opencl/vectors/vec_align_packed_struct*"~"cts/opencl/integer_ops/quick_*"~"cts/opencl/integer_ops/char_*"~"cts/opencl/integer_ops/uchar_*"~"cts/opencl/integer_ops/short_*"~"cts/opencl/integer_ops/ushort_*"~"cts/opencl/integer_ops/int_*"~"cts/opencl/integer_ops/uint_*"~"cts/opencl/integer_ops/long_*"~"cts/opencl/integer_ops/ulong_*"~"cts/opencl/half/vstore*"']
+# Fast cross-backend iteration: compact unified matrices, bounded CTS and small miniapps.
+# Vulkan has one regression example per semantic family; full adds parameter variants.
+# Defer measured long OpenCL copies/shuffles, SYCL copies/wide types and fluid miniapps
+# to full. Upstream case sizes and pass/fail criteria remain unchanged.
+specs = ['~"cts/opencl/basic/imagedim_*"~"range_api"~[full-matrix]~[regression]~"cts/opencl/vectors/vec_align_struct*"~"cts/opencl/vectors/vec_align_packed_struct*"~"cts/opencl/integer_ops/quick_*"~"cts/opencl/integer_ops/char_*"~"cts/opencl/integer_ops/uchar_*"~"cts/opencl/integer_ops/short_*"~"cts/opencl/integer_ops/ushort_*"~"cts/opencl/integer_ops/int_*"~"cts/opencl/integer_ops/uint_*"~"cts/opencl/integer_ops/long_*"~"cts/opencl/integer_ops/ulong_*"~"cts/opencl/half/vstore*"~"cts/opencl/basic/async_*"~"cts/opencl/basic/prefetch"~"cts/opencl/basic/astype"~"cts/opencl/basic/hiloeo"~"cts/opencl/basic/explicit_s2v"~"cts/opencl/relationals/shuffle_*"~"Tests the API for sycl::handler::copy*"~"group_async_work_group_copy_core"~"*WideTypes*"~"miniapps/cloverleaf/*"~"miniapps/tealeaf/*"']
+exclude_programs = [
+  "opencl_cts_buffers",
+  "opencl_cts_c11_atomics",
+  "opencl_cts_contractions",
+  "opencl_cts_device_partition",
+  "opencl_cts_device_timer",
+  "opencl_cts_generic_address_space",
+  "opencl_cts_geometrics",
+  "opencl_cts_multiples",
+  "opencl_cts_non_uniform_work_group",
+  "opencl_cts_pipes",
+  "opencl_cts_printf",
+  "opencl_cts_profiling",
+  "opencl_cts_thread_dimensions",
+  "opencl_cts_workgroups",
+  "sycl_cts_accessor_basic",
+  "sycl_cts_accessor_generic",
+  "sycl_cts_accessor_placeholder",
+  "sycl_cts_vector_swizzles",
+  "sycl_cts_bit_cast",
+  "sycl_cts_device_event",
+  "sycl_cts_device_selector",
+  "sycl_cts_error",
+  "sycl_cts_function_objects",
+  "sycl_cts_host_accessor",
+  "sycl_cts_id",
+  "sycl_cts_kernel_args",
+  "sycl_cts_language",
+  "sycl_cts_namespace",
+  "sycl_cts_platform",
+  "sycl_cts_pointers",
+  "sycl_cts_property",
+  "babelstream_omp_target",
+  "babelstream_kokkos",
+  "minibude_omp_target",
+  "minibude_kokkos",
+  "cloverleaf_omp_target",
+  "cloverleaf_kokkos",
+  "cloverleaf_sycl_acc",
+  "tealeaf_omp_target",
+  "tealeaf_kokkos",
+  "tealeaf_sycl_acc",
+]
 levelzero_cases = [
   # Shared/system memory transfers across page boundaries (bounded kernel sizes).
   "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.*/svm_to_usm_non_atomic_regular_4KB",
@@ -169,21 +211,375 @@ levelzero_cases = [
   "TestIncreasingNumberCommandListsWithSynchronize/zeCommandQueueExecuteCommandListTestsSynchronize.*/1",
   "TestIncreasingNumberCommandListsWithCommandQueueFence/zeCommandQueueExecuteCommandListTestsFence.*/1",
 ]
-exclude_programs = [
-  "opencl_cts_buffers", "opencl_cts_c11_atomics", "opencl_cts_contractions",
-  "opencl_cts_device_partition", "opencl_cts_device_timer",
-  "opencl_cts_generic_address_space", "opencl_cts_geometrics",
-  "opencl_cts_multiples", "opencl_cts_non_uniform_work_group", "opencl_cts_pipes",
-  "opencl_cts_printf", "opencl_cts_profiling", "opencl_cts_thread_dimensions", "opencl_cts_workgroups",
-  "sycl_cts_accessor_basic", "sycl_cts_accessor_generic", "sycl_cts_accessor_placeholder",
-  "sycl_cts_vector_swizzles",
-  "sycl_cts_bit_cast", "sycl_cts_device_event",
-  "sycl_cts_device_selector", "sycl_cts_error",
-  "sycl_cts_function_objects", "sycl_cts_host_accessor", "sycl_cts_id",
-  "sycl_cts_kernel_args", "sycl_cts_language",
-  "sycl_cts_namespace", "sycl_cts_platform",
-  "sycl_cts_pointers", "sycl_cts_property",
-  "babelstream_omp_target", "babelstream_kokkos", "minibude_omp_target", "minibude_kokkos",
-  "cloverleaf_omp_target", "cloverleaf_kokkos", "cloverleaf_sycl_acc",
-  "tealeaf_omp_target", "tealeaf_kokkos", "tealeaf_sycl_acc"
+vulkan_cases = [
+  # api.buffer_view
+  "dEQP-VK.api.buffer_view.access.dedicated_alloc.buffer_view_memory_test_complete_with_buffer_dedicated_alloc_image_dedicated_alloc_compute",
+  # api.command_buffers
+  "dEQP-VK.api.command_buffers.allocate_many_primary",
+  # api.copy_and_blit
+  "dEQP-VK.api.copy_and_blit.core.image_to_image.all_formats.depth_stencil.2d_to_2d.d32_sfloat_s8_uint_d32_sfloat_s8_uint_separate_layouts.general_general",
+  # api.descriptor_set
+  "dEQP-VK.api.descriptor_set.descriptor_set_layout.empty_set.normal",
+  # api.device_init
+  "dEQP-VK.api.device_init.create_device.basic",
+  # api.extension_duplicates
+  "dEQP-VK.api.extension_duplicates.device.by_names",
+  # api.get_device_proc_addr
+  "dEQP-VK.api.get_device_proc_addr.non_enabled",
+  # api.image_clearing
+  "dEQP-VK.api.image_clearing.core.clear_depth_stencil_attachment.cube_layers.d32_sfloat_s8_uint_separate_layouts_depth",
+  # api.info
+  "dEQP-VK.api.info.vulkan1p2_limits_validation.general",
+  # api.smoke
+  "dEQP-VK.api.smoke.asm_triangle",
+  # api.version_check
+  "dEQP-VK.api.version_check.entry_points",
+  # binding_model.descriptor_copy
+  "dEQP-VK.binding_model.descriptor_copy.compute.storage_buffer_dynamic_1",
+  # binding_model.dynamic_offset
+  "dEQP-VK.binding_model.dynamic_offset.shader_reuse_differing_layout_compute",
+  # binding_model.shader_access
+  "dEQP-VK.binding_model.shader_access.primary_cmd_buf.bind.storage_buffer.compute.descriptor_array.offset_view_nonzero",
+  # clipping.clip_volume
+  "dEQP-VK.clipping.clip_volume.inside.triangle_list",
+  # compute.pipeline.basic
+  "dEQP-VK.compute.pipeline.basic.concurrent_compute",
+  # compute.pipeline.builtin_var
+  "dEQP-VK.compute.pipeline.builtin_var.global_invocation_id",
+  # compute.pipeline.device_group
+  "dEQP-VK.compute.pipeline.device_group.device_index",
+  # compute.pipeline.indirect_dispatch
+  "dEQP-VK.compute.pipeline.indirect_dispatch.gen_in_compute.empty_command",
+  # device_group.afr
+  "dEQP-VK.device_group.afr",
+  # device_group.afr_dedicated
+  "dEQP-VK.device_group.afr_dedicated",
+  # device_group.afr_sys
+  "dEQP-VK.device_group.afr_sys",
+  # draw.renderpass.basic_draw
+  "dEQP-VK.draw.renderpass.basic_draw.draw_indexed_indirect.triangle_list.3_multi_command",
+  # draw.renderpass.differing_interpolation
+  "dEQP-VK.draw.renderpass.differing_interpolation.flat_0",
+  # draw.renderpass.indexed_draw
+  "dEQP-VK.draw.renderpass.indexed_draw.draw_indexed_triangle_list",
+  # draw.renderpass.indirect_draw
+  "dEQP-VK.draw.renderpass.indirect_draw.indexed.indirect_draw_instanced.no_first_instance.triangle_list",
+  # draw.renderpass.instanced
+  "dEQP-VK.draw.renderpass.instanced.draw_indexed_indirect_vk_primitive_topology_line_strip",
+  # draw.renderpass.multiple_interpolation
+  "dEQP-VK.draw.renderpass.multiple_interpolation.separate.no_sample_decoration.1_sample",
+  # draw.renderpass.output_location
+  "dEQP-VK.draw.renderpass.output_location.array.b8g8r8a8-unorm-highp",
+  # dynamic_state.monolithic.compute_transfer
+  "dEQP-VK.dynamic_state.monolithic.compute_transfer.single.compute.stencil_compare_mask.after",
+  # dynamic_state.monolithic.discard
+  "dEQP-VK.dynamic_state.monolithic.discard.stencil",
+  # dynamic_state.monolithic.ds_state
+  "dEQP-VK.dynamic_state.monolithic.ds_state.depth_bounds_2",
+  # dynamic_state.monolithic.general_state
+  "dEQP-VK.dynamic_state.monolithic.general_state.static_stencil_mask_zero",
+  # dynamic_state.monolithic.rs_state
+  "dEQP-VK.dynamic_state.monolithic.rs_state.nonzero_depth_bias_clamp",
+  # fragment_operations.early_fragment
+  "dEQP-VK.fragment_operations.early_fragment.early_fragment_tests_depth",
+  # fragment_operations.occlusion_query
+  "dEQP-VK.fragment_operations.occlusion_query.conservative_test_clear_color",
+  # fragment_operations.scissor
+  "dEQP-VK.fragment_operations.scissor.lines.inside",
+  # fragment_operations.transient_attachment_bit
+  "dEQP-VK.fragment_operations.transient_attachment_bit.stencil_load_store_op_test_local_bit",
+  # glsl.440
+  "dEQP-VK.glsl.440.linkage.varying.component.frag_out.ivec2.as_int_int",
+  # glsl.arrays
+  "dEQP-VK.glsl.arrays.constructor.bool_mat3_fragment",
+  # glsl.atomic_operations
+  "dEQP-VK.glsl.atomic_operations.add_signed_compute",
+  # glsl.builtin
+  "dEQP-VK.glsl.builtin.precision.determinant.highp.mat2",
+  # glsl.constant_expressions
+  "dEQP-VK.glsl.constant_expressions.operators.math_float_fragment",
+  # glsl.conversions
+  "dEQP-VK.glsl.conversions.matrix_combine.bool_bool_bool_bool_bool_bool_to_mat2x3_fragment",
+  # glsl.crash_test
+  "dEQP-VK.glsl.crash_test.divbyzero_comp",
+  # glsl.derivate
+  "dEQP-VK.glsl.derivate.dfdx.constant.float",
+  # glsl.discard
+  "dEQP-VK.glsl.discard.basic_always",
+  # glsl.functions
+  "dEQP-VK.glsl.functions.datatypes.float_mat2_fragment",
+  # glsl.helper_invocations
+  "dEQP-VK.glsl.helper_invocations.load_from_image",
+  # glsl.indexing
+  "dEQP-VK.glsl.indexing.matrix_subscript.mat2_dynamic_loop_write_dynamic_loop_read_fragment",
+  # glsl.invariance
+  "dEQP-VK.glsl.invariance.highp.gl_position.common_subexpression_1",
+  # glsl.linkage
+  "dEQP-VK.glsl.linkage.varying.basic_types.mat2",
+  # glsl.logical_copy
+  "dEQP-VK.glsl.logical_copy.initialized_struct",
+  # glsl.matrix
+  "dEQP-VK.glsl.matrix.add.const.highp_mat2_float_fragment",
+  # glsl.opaque_type_indexing
+  "dEQP-VK.glsl.opaque_type_indexing.atomic_counter.const_expression_compute",
+  # glsl.precise
+  "dEQP-VK.glsl.precise.extended_instructions.cross_highp_highp",
+  # glsl.scoping
+  "dEQP-VK.glsl.scoping.valid.variable_from_outer_scope_visible_in_initializer_fragment",
+  # glsl.struct
+  "dEQP-VK.glsl.struct.local.basic_equal_fragment",
+  # glsl.switch
+  "dEQP-VK.glsl.switch.basic_dynamic_fragment",
+  # glsl.texture_functions
+  "dEQP-VK.glsl.texture_functions.texelfetchoffset.clamp_to_border.sampler1d_fixed_vertex",
+  # glsl.texture_gather
+  "dEQP-VK.glsl.texture_gather.graphics.basic.2d.depth32f.base_level.level_1",
+  # graphicsfuzz
+  "dEQP-VK.graphicsfuzz.access-new-vector-inside-if-condition",
+  # image.atomic_operations
+  "dEQP-VK.image.atomic_operations.add.1d.notransfer.normal_read.normal_img.r32ui_end_result",
+  # image.extend_operands_spirv1p4
+  "dEQP-VK.image.extend_operands_spirv1p4.r32g32b32a32_uint.read.matched_sign.normal_precision",
+  # image.extended_usage_bit_compatibility
+  "dEQP-VK.image.extended_usage_bit_compatibility.image_format_properties.e5b9g9r9_ufloat_pack32_linear_color_attachment_bit",
+  # image.image_size
+  "dEQP-VK.image.image_size.1d.readonly_1",
+  # image.load_store
+  "dEQP-VK.image.load_store.with_format.2d.r32_sfloat",
+  # image.mutable
+  "dEQP-VK.image.mutable.2d.b8g8r8a8_unorm_r32_sfloat_clear_copy",
+  # image.store
+  "dEQP-VK.image.store.with_format.2d.r32_sfloat",
+  # image.subresource_layout
+  "dEQP-VK.image.subresource_layout.3d.1_level.r16g16_uint",
+  # imageless_framebuffer.color
+  "dEQP-VK.imageless_framebuffer.color",
+  # imageless_framebuffer.color_resolve
+  "dEQP-VK.imageless_framebuffer.color_resolve",
+  # imageless_framebuffer.different_attachments
+  "dEQP-VK.imageless_framebuffer.different_attachments",
+  # imageless_framebuffer.multisubpass
+  "dEQP-VK.imageless_framebuffer.multisubpass",
+  # info.device_mandatory_features
+  "dEQP-VK.info.device_mandatory_features",
+  # info.device_properties
+  "dEQP-VK.info.device_properties",
+  # memory.allocation
+  "dEQP-VK.memory.allocation.basic.size_128.forward.count_1",
+  # memory.binding
+  "dEQP-VK.memory.binding.aliasing.suballocated.image_8_8",
+  # memory.requirements
+  "dEQP-VK.memory.requirements.dedicated_allocation.buffer.regular",
+  # multiview.clear_attachments
+  "dEQP-VK.multiview.clear_attachments.no_queries.5_10_5_10",
+  # multiview.depth
+  "dEQP-VK.multiview.depth.no_queries.3_6_12_9_6_12_9_3_6_12_9_3",
+  # multiview.depth_without_fragment_shader
+  "dEQP-VK.multiview.depth_without_fragment_shader.no_queries.3_6_12_9_6_12_9_3_6_12_9_3",
+  # multiview.draw_indexed
+  "dEQP-VK.multiview.draw_indexed.no_queries.5_10_5_10",
+  # multiview.draw_indirect
+  "dEQP-VK.multiview.draw_indirect.no_queries.5_10_5_10",
+  # multiview.draw_indirect_indexed
+  "dEQP-VK.multiview.draw_indirect_indexed.no_queries.5_10_5_10",
+  # multiview.index
+  "dEQP-VK.multiview.index.fragment_shader.no_queries.5_10_5_10",
+  # multiview.input_attachments
+  "dEQP-VK.multiview.input_attachments.no_queries.5_10_5_10",
+  # multiview.input_instance
+  "dEQP-VK.multiview.input_instance.no_queries.5_10_5_10",
+  # multiview.instanced
+  "dEQP-VK.multiview.instanced.no_queries.5_10_5_10",
+  # multiview.masks
+  "dEQP-VK.multiview.masks.no_queries.1_2_4_8_16_32",
+  # multiview.multisample
+  "dEQP-VK.multiview.multisample.no_queries.5_10_5_10",
+  # multiview.multisample_resolve
+  "dEQP-VK.multiview.multisample_resolve.no_queries.5_10_5_10",
+  # multiview.non_precise_queries
+  "dEQP-VK.multiview.non_precise_queries.cmd_copy_query_pool_results.5_10_5_10",
+  # multiview.non_precise_queries_with_availability
+  "dEQP-VK.multiview.non_precise_queries_with_availability.cmd_copy_query_pool_results.5_10_5_10",
+  # multiview.readback_explicit_clear
+  "dEQP-VK.multiview.readback_explicit_clear.no_queries.5_10_5_10",
+  # multiview.readback_implicit_clear
+  "dEQP-VK.multiview.readback_implicit_clear.no_queries.5_10_5_10",
+  # multiview.renderpass2
+  "dEQP-VK.multiview.renderpass2.clear_attachments.no_queries.5_10_5_10",
+  # multiview.secondary_cmd_buffer
+  "dEQP-VK.multiview.secondary_cmd_buffer.no_queries.5_10_5_10",
+  # multiview.stencil
+  "dEQP-VK.multiview.stencil.no_queries.3_6_12_9_6_12_9_3_6_12_9_3",
+  # multiview.view_mask_iteration
+  "dEQP-VK.multiview.view_mask_iteration.5_10_5_10",
+  # pipeline.monolithic.blend
+  "dEQP-VK.pipeline.monolithic.blend.clamp.b8g8r8a8_unorm",
+  # pipeline.monolithic.cache
+  "dEQP-VK.pipeline.monolithic.cache.compute_tests.compute_stage",
+  # pipeline.monolithic.depth
+  "dEQP-VK.pipeline.monolithic.depth.format.d32_sfloat_s8_uint_separate_layouts.compare_ops.line_list_less_greater_less_or_equal_never_depth_bounds_test",
+  # pipeline.monolithic.empty_fs
+  "dEQP-VK.pipeline.monolithic.empty_fs.geom_empty_fs",
+  # pipeline.monolithic.framebuffer_attachment
+  "dEQP-VK.pipeline.monolithic.framebuffer_attachment.2d_19x27_32x32",
+  # pipeline.monolithic.image
+  "dEQP-VK.pipeline.monolithic.image.suballocation.sampling_type.combined.view_type.2d.format.eac_r11_snorm_block.count_1.size.13x13",
+  # pipeline.monolithic.image_view
+  "dEQP-VK.pipeline.monolithic.image_view.view_type.2d.format.eac_r11_snorm_block.component_swizzle.a_r_g_b",
+  # pipeline.monolithic.input_assembly
+  "dEQP-VK.pipeline.monolithic.input_assembly.primitive_restart.index_type_uint16.no_restart_triangle_fan",
+  # pipeline.monolithic.interface_matching
+  "dEQP-VK.pipeline.monolithic.interface_matching.decoration_mismatch.out_component0_in_none_loose_variable_vert_out_frag_in",
+  # pipeline.monolithic.multisample
+  "dEQP-VK.pipeline.monolithic.multisample.alpha_to_coverage.samples_4.alpha_invisible",
+  # pipeline.monolithic.multisample_interpolation
+  "dEQP-VK.pipeline.monolithic.multisample_interpolation.centroid_qualifier_inside_primitive.128_128_1.samples_4",
+  # pipeline.monolithic.push_constant
+  "dEQP-VK.pipeline.monolithic.push_constant.graphics_pipeline.count_1_shader_vert_frag",
+  # pipeline.monolithic.sampler
+  "dEQP-VK.pipeline.monolithic.sampler.view_type.2d.format.b8g8r8a8_unorm.address_modes.all_mode_clamp_to_border_opaque_black",
+  # pipeline.monolithic.spec_constant
+  "dEQP-VK.pipeline.monolithic.spec_constant.graphics.vertex.basic.unused_single",
+  # pipeline.monolithic.stencil
+  "dEQP-VK.pipeline.monolithic.stencil.format.d32_sfloat_s8_uint_separate_layouts.states.fail_decw.pass_decw.dfail_decw.comp_always.any",
+  # pipeline.monolithic.timestamp
+  "dEQP-VK.pipeline.monolithic.timestamp.basic_compute_tests.compute_shader_stage_out_of_render_pass",
+  # pipeline.monolithic.vertex_input
+  "dEQP-VK.pipeline.monolithic.vertex_input.misc.stride_change_vert_frag",
+  # query_pool.occlusion_query
+  "dEQP-VK.query_pool.occlusion_query.basic_conservative",
+  # rasterization.depth_bias
+  "dEQP-VK.rasterization.depth_bias.d16_unorm_constant_one_greater",
+  # rasterization.discard
+  "dEQP-VK.rasterization.discard.line_list.query_pipeline_false",
+  # rasterization.flatshading
+  "dEQP-VK.rasterization.flatshading.triangles",
+  # rasterization.frag_side_effects
+  "dEQP-VK.rasterization.frag_side_effects.color_at_beginning.alpha_coverage_after",
+  # rasterization.interpolation
+  "dEQP-VK.rasterization.interpolation.basic.triangles",
+  # rasterization.interpolation_multisample_4_bit
+  "dEQP-VK.rasterization.interpolation_multisample_4_bit.lines",
+  # rasterization.line_continuity
+  "dEQP-VK.rasterization.line_continuity.line-strip",
+  # rasterization.primitives
+  "dEQP-VK.rasterization.primitives.no_stipple.non_strict_line_strip",
+  # rasterization.primitives_multisample_4_bit
+  "dEQP-VK.rasterization.primitives_multisample_4_bit.no_stipple.non_strict_lines",
+  # rasterization.provoking_vertex
+  "dEQP-VK.rasterization.provoking_vertex.draw.default.line_list",
+  # rasterization.rasterization_order_attachment_access
+  "dEQP-VK.rasterization.rasterization_order_attachment_access.depth.samples_1.multi_draw_barriers",
+  # renderpasses.renderpass1.dedicated_allocation
+  "dEQP-VK.renderpasses.renderpass1.dedicated_allocation.formats.r32_sfloat.clear.draw",
+  # renderpasses.renderpass1.depth_stencil_write_conditions
+  "dEQP-VK.renderpasses.renderpass1.depth_stencil_write_conditions.depth_kill_write_d32sf",
+  # renderpasses.renderpass1.no_draws
+  "dEQP-VK.renderpasses.renderpass1.no_draws.no_draw_clear_load_store",
+  # renderpasses.renderpass1.remaining_array_layers
+  "dEQP-VK.renderpasses.renderpass1.remaining_array_layers.multi_layer_fb.1_1",
+  # renderpasses.renderpass1.suballocation
+  "dEQP-VK.renderpasses.renderpass1.suballocation.multisample.separate_stencil_usage.d32_sfloat_s8_uint.samples_4.test_depth",
+  # renderpasses.renderpass2.dedicated_allocation
+  "dEQP-VK.renderpasses.renderpass2.dedicated_allocation.formats.b8g8r8a8_unorm.input.clear.store.draw",
+  # renderpasses.renderpass2.depth_stencil_resolve
+  "dEQP-VK.renderpasses.renderpass2.depth_stencil_resolve.misc.properties",
+  # renderpasses.renderpass2.no_draws
+  "dEQP-VK.renderpasses.renderpass2.no_draws.no_draw_clear_load_store",
+  # renderpasses.renderpass2.suballocation
+  "dEQP-VK.renderpasses.renderpass2.suballocation.multisample.separate_stencil_usage.d32_sfloat_s8_uint.samples_4.test_depth",
+  # robustness.buffer_access
+  "dEQP-VK.robustness.buffer_access.compute.mat4_copy.out_of_alloc.oob_storage_read",
+  # robustness.non_robust_buffer_access
+  "dEQP-VK.robustness.non_robust_buffer_access.unexecuted_oob_overflow",
+  # robustness.robustness1_vertex_access
+  "dEQP-VK.robustness.robustness1_vertex_access.out_of_bounds_stride_0",
+  # robustness.vertex_access
+  "dEQP-VK.robustness.vertex_access.a2b10g10r10_unorm_pack32.draw.instance_out_of_bounds",
+  # spirv_assembly.instruction.compute
+  "dEQP-VK.spirv_assembly.instruction.compute.16bit_storage.struct_mixed_types.uniform_buffer_block",
+  # spirv_assembly.instruction.function_params
+  "dEQP-VK.spirv_assembly.instruction.function_params.sampler_param",
+  # spirv_assembly.instruction.graphics
+  "dEQP-VK.spirv_assembly.instruction.graphics.16bit_storage.struct_mixed_types.uniform_buffer_block_frag",
+  # spirv_assembly.instruction.spirv1p4
+  "dEQP-VK.spirv_assembly.instruction.spirv1p4.opcopylogical.nested_arrays_different_inner_stride",
+  # spirv_assembly.type.scalar
+  "dEQP-VK.spirv_assembly.type.scalar.i16.switch_vert",
+  # ssbo.layout
+  "dEQP-VK.ssbo.layout.2_level_array.std140.bool",
+  # ssbo.readonly
+  "dEQP-VK.ssbo.readonly.layout.basic_unsized_array.std140.column_major_mat3x4",
+  # ssbo.unsized_array_length
+  "dEQP-VK.ssbo.unsized_array_length.float_no_offset_explicit_size",
+  # subgroups.arithmetic
+  "dEQP-VK.subgroups.arithmetic.compute.subgroupadd_dvec3",
+  # subgroups.ballot
+  "dEQP-VK.subgroups.ballot.compute.compute",
+  # subgroups.ballot_broadcast
+  "dEQP-VK.subgroups.ballot_broadcast.compute.subgroupbroadcast_bool",
+  # subgroups.ballot_other
+  "dEQP-VK.subgroups.ballot_other.compute.subgroupballotbitcount",
+  # subgroups.basic
+  "dEQP-VK.subgroups.basic.compute.subgroupbarrier",
+  # subgroups.builtin_mask_var
+  "dEQP-VK.subgroups.builtin_mask_var.compute.subgroupeqmask",
+  # subgroups.builtin_var
+  "dEQP-VK.subgroups.builtin_var.compute.numsubgroups",
+  # subgroups.shuffle
+  "dEQP-VK.subgroups.shuffle.compute.subgroupshuffle_bool",
+  # subgroups.vote
+  "dEQP-VK.subgroups.vote.compute.subgroupallequal_bool",
+  # synchronization.basic.binary_semaphore
+  "dEQP-VK.synchronization.basic.binary_semaphore.chain",
+  # synchronization.basic.event
+  "dEQP-VK.synchronization.basic.event.device_set_reset",
+  # synchronization.basic.fence
+  "dEQP-VK.synchronization.basic.fence.empty_submit",
+  # synchronization.basic.timeline_semaphore
+  "dEQP-VK.synchronization.basic.timeline_semaphore.chain",
+  # texture.compressed
+  "dEQP-VK.texture.compressed.eac_r11_snorm_block_2d_compute_npot_compute",
+  # texture.compressed_3D
+  "dEQP-VK.texture.compressed_3D.eac_r11_snorm_block_3d_npot_compute",
+  # texture.explicit_lod
+  "dEQP-VK.texture.explicit_lod.2d.derivatives.linear_linear_mipmap_linear",
+  # texture.filtering
+  "dEQP-VK.texture.filtering.cube.combinations.linear.linear.clamp_to_edge.mirrored_repeat.seamless",
+  # texture.mipmap
+  "dEQP-VK.texture.mipmap.cubemap.basic.nearest_nearest_linear_clamp",
+  # texture.shadow
+  "dEQP-VK.texture.shadow.cube.linear.greater_d32_sfloat",
+  # texture.swizzle
+  "dEQP-VK.texture.swizzle.component_mapping.color.b10g11r11_ufloat_pack32_2d_npot_aaaa",
+  # texture.texel_buffer
+  "dEQP-VK.texture.texel_buffer.uniform.packed.a2b10g10r10-uint-pack32",
+  # ubo.2_level_array
+  "dEQP-VK.ubo.2_level_array.std140.bvec4.both",
+  # ubo.2_level_struct_array
+  "dEQP-VK.ubo.2_level_struct_array.per_block_buffer.std140_instance_array_both_comp_access",
+  # ubo.3_level_array
+  "dEQP-VK.ubo.3_level_array.std140.bool.both",
+  # ubo.instance_array_basic_type
+  "dEQP-VK.ubo.instance_array_basic_type.std140.bvec2.both",
+  # ubo.link_by_binding
+  "dEQP-VK.ubo.link_by_binding.per_block_buf_single_instance",
+  # ubo.multi_basic_types
+  "dEQP-VK.ubo.multi_basic_types.per_block_buffer.std140_instance_array_mixed",
+  # ubo.multi_nested_struct
+  "dEQP-VK.ubo.multi_nested_struct.per_block_buffer.std140_both",
+  # ubo.random
+  "dEQP-VK.ubo.random.basic_types.0",
+  # ubo.single_basic_array
+  "dEQP-VK.ubo.single_basic_array.std140.bvec3.both",
+  # ubo.single_basic_type
+  "dEQP-VK.ubo.single_basic_type.std430.highp.column_major_mat3.fragment",
+  # ubo.single_nested_struct
+  "dEQP-VK.ubo.single_nested_struct.per_block_buffer.std140_both",
+  # ubo.single_nested_struct_array
+  "dEQP-VK.ubo.single_nested_struct_array.per_block_buffer.std140_both",
+  # ubo.single_struct
+  "dEQP-VK.ubo.single_struct.per_block_buffer.std140_both",
+  # ubo.single_struct_array
+  "dEQP-VK.ubo.single_struct_array.per_block_buffer.std140_both",
 ]

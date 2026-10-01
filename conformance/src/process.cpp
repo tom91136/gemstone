@@ -39,6 +39,7 @@ class LineSink {
   std::string prefix_, pending_;
   std::string *capture_;
   std::ostream *log_;
+  bool overflow_ = false;
 
 public:
   LineSink(std::ostream *stream, std::string prefix, std::string *capture = nullptr, std::ostream *log = nullptr)
@@ -49,8 +50,8 @@ public:
       log_->flush();
     }
     if (capture_) {
-      if (capture_->size() + size > 128 * 1024 * 1024) return;
-      capture_->append(reinterpret_cast<const char *>(data), size);
+      if (capture_->size() + size > 128 * 1024 * 1024) overflow_ = true;
+      else if (!overflow_) capture_->append(reinterpret_cast<const char *>(data), size);
     }
     if (!stream_) return;
     pending_.append(reinterpret_cast<const char *>(data), size);
@@ -62,6 +63,7 @@ public:
     pending_.erase(0, begin);
     if (pending_.size() > 16384) finish();
   }
+  bool overflow() const { return overflow_; }
   void finish() {
     if (stream_ && !pending_.empty()) {
       std::osyncstream(*stream_) << prefix_ << pending_ << '\n';
@@ -179,9 +181,15 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
   LineSink stdout_sink(capture_output || output_log ? nullptr : &std::cout, prefix, capture_output ? &output : nullptr, output_log);
   LineSink stderr_sink(capture_output || output_log ? nullptr : &std::cerr, prefix, capture_output ? &error_output : nullptr, output_log);
 
+  const auto completed = [&](int32_t status) {
+    if (stdout_sink.overflow() || stderr_sink.overflow())
+      throw std::runtime_error("process output exceeded the 128 MiB capture limit: " + command.front());
+    return ProcessResult{status, std::move(output), std::move(error_output)};
+  };
+
   const auto timed_out = [&] {
     std::cerr << prefix << "conformance: process tree timed out: " << command.front() << '\n';
-    return ProcessResult{124, std::move(output), std::move(error_output)};
+    return completed(124);
   };
 
 #if defined(_WIN32)
@@ -293,7 +301,7 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
   GetExitCodeProcess(information.hProcess, &status);
   if (job) CloseHandle(job);
   CloseHandle(information.hProcess);
-  return {static_cast<int32_t>(status), std::move(output), std::move(error_output)};
+  return completed(static_cast<int32_t>(status));
 #else
   int output_pipe[2], error_pipe[2];
   if (::pipe(output_pipe) != 0) throw std::runtime_error("cannot create output pipes for " + command.front());
@@ -414,8 +422,8 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
     closeStreams();
     return timed_out();
   }
-  if (interrupted) return {128 + interrupted, std::move(output), std::move(error_output)};
-  return {static_cast<int32_t>(status), std::move(output), std::move(error_output)};
+  if (interrupted) return completed(128 + interrupted);
+  return completed(static_cast<int32_t>(status));
 #endif
 }
 

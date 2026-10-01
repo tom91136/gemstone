@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
@@ -18,6 +19,21 @@ private object VMIR {
     case Pointer(storageClass: Int, pointee: Int)
     case Function(result: Int, parameters: Vec[Int])
     case Event
+    case StorageImage(
+        sampledType: Int,
+        format: Int,
+        dimensions: Int = 2,
+        texelBuffer: Boolean = false,
+        arrayed: Boolean = false,
+        cube: Boolean = false
+    )
+    case Texture(sampledType: Int, dimensions: Int = 2, texelBuffer: Boolean = false, arrayed: Boolean = false)
+    case Sampler
+    case CubeTexture(sampledType: Int, arrayed: Boolean)
+    case SampledImage(imageType: Int)
+    case MatrixType(column: Int, count: Int)
+    case InputAttachment(sampledType: Int, multisampled: Boolean)
+    case MultisampledTexture(sampledType: Int, arrayed: Boolean = false)
   }
 
   enum Constant {
@@ -52,6 +68,7 @@ private object VMIR {
       entryPoints: Map[NonEmpty[String], Int],
       entryPointInterfaces: Map[NonEmpty[String], Set[Int]],
       vulkanEntries: Set[NonEmpty[String]],
+      graphicsEntries: Set[NonEmpty[String]],
       subgroupSizes: Map[Int, Int],
       workGroupSizes: Map[Int, LaunchGeometry.Dimensions],
       builtinWorkGroupSize: Option[LaunchGeometry.Dimensions],
@@ -60,6 +77,15 @@ private object VMIR {
       functionNames: Map[Int, String],
       collectiveFunctions: Set[Int]
   )
+
+  // Quantization retains a float32 representation but flushes values smaller
+  // than the minimum normal half to signed zero, as OpQuantizeToF16 requires.
+  def quantizeToF16(bits: Long): Long = {
+    val value      = IEEE754.binary32ToFloat(Binary32.low(bits))
+    val half: Long = if (Math.abs(value) < Math.scalb(1.0f, -14)) (bits >>> 16) & 0x8000L
+    else IEEE754.floatToBinary16(value).raw
+    IEEE754.floatToBinary32(IEEE754.binary16ToFloat(Binary16.low(half.toLong))).raw.toLong
+  }
 
   def zeroValue(
       types: scala.collection.Map[Int, RuntimeType],
@@ -71,6 +97,12 @@ private object VMIR {
     types.get(typeId) match {
       case Some(RuntimeType.Pointer(storageClass, pointee)) =>
         Right(Constant.NullPointer(typeId, pointee, storageClass))
+      case Some(_: RuntimeType.Texture | _: RuntimeType.StorageImage | _: RuntimeType.CubeTexture |
+          _: RuntimeType.MultisampledTexture | _: RuntimeType.InputAttachment | _: RuntimeType.SampledImage | RuntimeType.Sampler)
+          if opcode == "OpUndef" =>
+        // Opaque values are represented by resource addresses. An undefined
+        // handle can be carried through dead code without allocating a resource.
+        Right(Constant.NullPointer(typeId, typeId, 0))
       case _ =>
         scalarLeafCount(types, typeId) match {
           case Right(count)                     => Right(Constant.Bits(typeId, Vec.fill(count)(0L)))
@@ -90,6 +122,8 @@ private object VMIR {
     case Some(RuntimeType.Pointer(_, _))                => Right(1)
     case Some(RuntimeType.VectorType(component, count)) =>
       scalarLeafCount(types, component).flatMap(value => checkedLeafCount(typeId, value.toLong * count.toLong))
+    case Some(RuntimeType.MatrixType(column, count)) =>
+      scalarLeafCount(types, column).flatMap(value => checkedLeafCount(typeId, value.toLong * count.toLong))
     case Some(RuntimeType.Array(element, count)) =>
       scalarLeafCount(types, element).flatMap(value => checkedLeafCount(typeId, value.toLong * count))
     case Some(RuntimeType.Structure(members)) =>

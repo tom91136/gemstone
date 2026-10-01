@@ -4,6 +4,7 @@ import VMExecution.*
 import VMIR.*
 import execution.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -56,7 +57,7 @@ class InterpreterSuite extends munit.FunSuite {
     val a      = base
     val b      = base.offset(64L)
     val output = base.offset(128L)
-    val values = Vec(1, 2, 3, 4)
+    val values = Vec.nonEmpty(1, 2, 3, 4)
 
     values.indices.foreach { index =>
       memory.writeInt32(a.offset(index.toLong * 4L), values(index)).toOption.get
@@ -66,7 +67,7 @@ class InterpreterSuite extends munit.FunSuite {
     VMInterpreter
       .execute(
         kernel,
-        geometry(blocks = 1, threads = values.size),
+        geometry(blocks = 1, threads = values.positiveSize),
         Map(
           ("input_a": NonEmpty[String]) -> Argument.fromLong(a.raw),
           ("input_b": NonEmpty[String]) -> Argument.fromLong(b.raw),

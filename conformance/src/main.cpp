@@ -9,6 +9,7 @@ int conformance_main(std::vector<std::string> positional = fire::arg({0, "comman
                      std::string profiles = fire::arg("--profiles", ""), std::string artifacts = fire::arg("--artifacts", ""),
                      std::string output = fire::arg("--output", ""), std::string machine = fire::arg("--machine", ""),
                      std::string workload = fire::arg("--workload", "compact"), std::string ctest = fire::arg("--ctest", "ctest"),
+                     bool direct = fire::arg("--direct"), std::string workloads = fire::arg("--workloads", ""),
                      bool isolated = fire::arg("--isolated-launcher"), bool launcher = fire::arg("--launcher"),
                      std::string config = fire::arg("--config", ""), std::string program = fire::arg("--program", ""),
                      std::string test = fire::arg("--test", ""),
@@ -30,6 +31,8 @@ int conformance_main(std::vector<std::string> positional = fire::arg({0, "comman
     if (command == "run") {
       conformance::driver::RunOptions c;
       c.profiles = profiles;
+      c.workloads = workloads;
+      c.direct = direct;
       c.artifacts = artifacts;
       c.output = output;
       c.ctest = ctest;

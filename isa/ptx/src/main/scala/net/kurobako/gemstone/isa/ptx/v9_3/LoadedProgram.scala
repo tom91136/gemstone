@@ -76,7 +76,7 @@ object LoadedProgram {
               )
               relocated <- relocateVMArgument(index, bytes, relocations, addresses)
             } yield values.updated(parameter.name, Argument(relocated.unsafe))
-          case KernelTask.Argument.Memory(region, offset) =>
+          case KernelTask.Argument.Memory(region, offset, _) =>
             for {
               _ <- Either.cond(
                 parameter.widthBytes.raw == 8,
