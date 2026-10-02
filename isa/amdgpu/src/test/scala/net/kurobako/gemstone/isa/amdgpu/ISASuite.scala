@@ -63,5 +63,9 @@ class ISASuite extends munit.FunSuite {
     assertEquals(Target("gfx1036").isa, ISA.RDNA2)
     assertEquals(Target("gfx1103").isa, ISA.RDNA3)
     assertEquals(Target("gfx1170").isa, ISA.GFX11_7)
+    assertEquals(Target("gfx90c").isa, ISA.GFX9)
+    assertEquals(Target("gfx1201").isa, ISA.RDNA4)
+    assertEquals(Target.either("gfx90c").map(_.isa), Right(ISA.GFX9))
+    assertEquals(Target.either("gfx1201").map(_.isa), Right(ISA.RDNA4))
   }
 }

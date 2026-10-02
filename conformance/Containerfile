@@ -171,6 +171,7 @@ RUN archive="cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
     && tar -xzf "${archive}" --strip-components=1 -C /opt/cmake \
     && rm "${archive}"
 ENV PATH="/opt/cmake/bin:/usr/local/cuda/bin:${PATH}" \
+    CXX=/usr/bin/g++ \
     CUDAToolkit_ROOT=/usr/local/cuda \
     CPATH=/usr/local/cuda/targets/x86_64-linux/include \
     LIBRARY_PATH=/usr/local/cuda/targets/x86_64-linux/lib \

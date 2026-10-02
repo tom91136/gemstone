@@ -31,9 +31,15 @@ if(NOT CONFORMANCE_SUPPORT_KEY MATCHES "^[A-Za-z0-9][A-Za-z0-9._-]*$")
   message(FATAL_ERROR "Invalid conformance support key: ${CONFORMANCE_SUPPORT_KEY}")
 endif()
 
-set(backend_cmake_arguments "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}")
+set(backend_cmake_arguments)
 if(BACKEND STREQUAL "hip")
   list(APPEND backend_cmake_arguments -DCMAKE_HIP_PLATFORM=amd)
+elseif(BACKEND STREQUAL "cuda")
+  # Keep compiler selection in the work signature, including across image upgrades.
+  list(APPEND backend_cmake_arguments
+    "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}"
+    "-DCMAKE_CXX_COMPILER=$ENV{CXX}"
+    "-DCMAKE_CUDA_HOST_COMPILER=$ENV{CUDAHOSTCXX}")
 elseif(BACKEND STREQUAL "sycl")
   if(NOT DEFINED SYCL_CTS_ENABLE_FULL_CONFORMANCE)
     set(SYCL_CTS_ENABLE_FULL_CONFORMANCE OFF)

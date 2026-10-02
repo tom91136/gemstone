@@ -89,6 +89,18 @@ function(patch_exact path before after)
   file(WRITE "${path}" "${content}")
 endfunction()
 
+# Kokkos uses these family prefixes to select wave32 versus wave64.
+function(kokkos_architecture output)
+  list(GET CMAKE_HIP_ARCHITECTURES 0 architecture)
+  if(architecture MATCHES "^gfx1")
+    string(REPLACE "gfx" "NAVI" arch "${architecture}")
+  else()
+    string(REPLACE "gfx" "VEGA" arch "${architecture}")
+  endif()
+  string(TOUPPER "${arch}" arch)
+  set(${output} "${arch}" PARENT_SCOPE)
+endfunction()
+
 function(stage_miniapp app model destination)
   file(REMOVE_RECURSE "${destination}")
   file(COPY "${miniapp_${app}_source}/" DESTINATION "${destination}")
@@ -114,28 +126,17 @@ function(stage_miniapp app model destination)
         endif()]=])
     patch_exact("${destination}/.kokkos/core/src/HIP/Kokkos_HIP_Instance.cpp"
       "hipProp.gcnArch" "hipProp.gcnArchName")
+    kokkos_architecture(kokkos_arch)
     patch_exact("${destination}/.kokkos/cmake/kokkos_arch.cmake"
       [=[LIST(APPEND SUPPORTED_AMD_GPUS       MI200    MI100    MI50/60  RX7900XTX  V620/W6800)
 LIST(APPEND SUPPORTED_AMD_ARCHS      VEGA90A  VEGA908  VEGA906  NAVI1100   NAVI1030)
 LIST(APPEND CORRESPONDING_AMD_FLAGS  gfx90a   gfx908   gfx906   gfx1100    gfx1030)]=]
-      [=[LIST(APPEND SUPPORTED_AMD_GPUS       MI350    MI300    MI200    MI100    MI50/60  RX9070    RX9060    STRIX1    RX7900XTX  V620/W6800  TONGA)
-LIST(APPEND SUPPORTED_AMD_ARCHS      VEGA950  VEGA942  VEGA90A  VEGA908  VEGA906  NAVI1201  NAVI1200  NAVI1150  NAVI1100   NAVI1030   VEGA803)
-LIST(APPEND CORRESPONDING_AMD_FLAGS  gfx950   gfx942   gfx90a   gfx908   gfx906   gfx1201   gfx1200   gfx1150   gfx1100    gfx1030    gfx803)]=])
-    patch_exact("${destination}/.kokkos/cmake/KokkosCore_config.h.in"
-      [=[#cmakedefine KOKKOS_ARCH_VEGA90A
-#cmakedefine KOKKOS_ARCH_NAVI
-#cmakedefine KOKKOS_ARCH_NAVI1030
-#cmakedefine KOKKOS_ARCH_NAVI1100]=]
-      [=[#cmakedefine KOKKOS_ARCH_VEGA90A
-#cmakedefine KOKKOS_ARCH_VEGA942
-#cmakedefine KOKKOS_ARCH_VEGA950
-#cmakedefine KOKKOS_ARCH_VEGA803
-#cmakedefine KOKKOS_ARCH_NAVI
-#cmakedefine KOKKOS_ARCH_NAVI1030
-#cmakedefine KOKKOS_ARCH_NAVI1100
-#cmakedefine KOKKOS_ARCH_NAVI1150
-#cmakedefine KOKKOS_ARCH_NAVI1200
-#cmakedefine KOKKOS_ARCH_NAVI1201]=])
+      "LIST(APPEND SUPPORTED_AMD_GPUS ${CMAKE_HIP_ARCHITECTURES})\nLIST(APPEND SUPPORTED_AMD_ARCHS ${kokkos_arch})\nLIST(APPEND CORRESPONDING_AMD_FLAGS ${CMAKE_HIP_ARCHITECTURES})")
+    set(config "${destination}/.kokkos/cmake/KokkosCore_config.h.in")
+    file(STRINGS "${config}" existing REGEX "^#cmakedefine KOKKOS_ARCH_${kokkos_arch}$")
+    if(NOT existing)
+      file(APPEND "${config}" "\n#cmakedefine KOKKOS_ARCH_${kokkos_arch}\n")
+    endif()
   endif()
   set(primary_model_${CONFORMANCE_BACKEND} "${CONFORMANCE_BACKEND}")
   set(primary_model_opencl ocl)
@@ -173,34 +174,8 @@ function(configure_kokkos stage)
       NAVI1030 NAVI1100 NAVI1150 NAVI1200 NAVI1201)
     set(Kokkos_ARCH_${kokkos_arch} OFF CACHE BOOL "" FORCE)
   endforeach()
-  foreach(architecture IN LISTS CMAKE_HIP_ARCHITECTURES)
-    if(architecture STREQUAL "gfx803")
-      set(kokkos_arch VEGA803)
-    elseif(architecture STREQUAL "gfx90a")
-      set(kokkos_arch VEGA90A)
-    elseif(architecture STREQUAL "gfx908")
-      set(kokkos_arch VEGA908)
-    elseif(architecture STREQUAL "gfx906")
-      set(kokkos_arch VEGA906)
-    elseif(architecture STREQUAL "gfx942")
-      set(kokkos_arch VEGA942)
-    elseif(architecture STREQUAL "gfx950")
-      set(kokkos_arch VEGA950)
-    elseif(architecture MATCHES "^gfx103[0-6]$")
-      set(kokkos_arch NAVI1030)
-    elseif(architecture MATCHES "^gfx110[0-3]$")
-      set(kokkos_arch NAVI1100)
-    elseif(architecture MATCHES "^gfx115[0-1]$")
-      set(kokkos_arch NAVI1150)
-    elseif(architecture STREQUAL "gfx1200")
-      set(kokkos_arch NAVI1200)
-    elseif(architecture STREQUAL "gfx1201")
-      set(kokkos_arch NAVI1201)
-    else()
-      message(FATAL_ERROR "Pinned Kokkos has no architecture mapping for ${architecture}")
-    endif()
-    set(Kokkos_ARCH_${kokkos_arch} ON CACHE BOOL "" FORCE)
-  endforeach()
+  kokkos_architecture(kokkos_arch)
+  set(Kokkos_ARCH_${kokkos_arch} ON CACHE BOOL "" FORCE)
   execute_process(COMMAND "${CMAKE_CXX_COMPILER}" --print-resource-dir
     RESULT_VARIABLE resource_status OUTPUT_VARIABLE resource_directory
     OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)

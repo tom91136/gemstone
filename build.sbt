@@ -368,6 +368,12 @@ def withConformanceLauncher[A](
     |    fi ;;
     |  levelzero|vulkan) export CONFORMANCE_DEVICE='*Gemstone*' ;;
     |esac
+    |if [ "$$CONFORMANCE_TARGET_BACKEND" = cuda ]; then
+    |  case "$$CONFORMANCE_CUDA_CODE" in
+    |    ptx|sass) export ${environmentName("CUDA_CODE")}="$$CONFORMANCE_CUDA_CODE" ;;
+    |    *) echo 'CUDA conformance requires an explicit ptx or sass route' >&2; exit 2 ;;
+    |  esac
+    |fi
     |toolchain="$$CONFORMANCE_SUPPORT_ROOT/opencl-toolchain"
     |if [ -z "$$${environmentName("OPENCL_COMPILER")}" ] && [ -x "$$toolchain/bin/icpx" ]; then
     |  export ${environmentName("OPENCL_COMPILER")}="$$toolchain/bin/icpx"
@@ -740,7 +746,8 @@ lazy val nativeArtifact            = taskKey[Path]("Built native runtime directo
 lazy val conformanceExecutable     = taskKey[Path]("Built native conformance executable.")
 lazy val generateBenchmarkFixtures = inputKey[Path]("Build selected benchmark fixtures in pinned toolchain containers.")
 lazy val gemstoneRun               = inputKey[Unit]("Build Gemstone and run a command through selected compute APIs.")
-lazy val conformanceEmulationTargets = settingKey[Seq[String]]("Backend/architecture routes tested through Gemstone.")
+lazy val conformanceTargetSet      = settingKey[String]("Conformance artifact matrix used by builds and emulation.")
+lazy val conformanceEmulationTargets = taskKey[Seq[String]]("Backend/architecture routes tested through Gemstone.")
 lazy val emulate                     = inputKey[Unit]("Run conformance through Gemstone.")
 lazy val cmakeExecutable             = settingKey[String]("CMake command used by native builds.")
 lazy val ctestExecutable             = settingKey[String]("CTest command used by native tests.")
@@ -1790,7 +1797,7 @@ lazy val conformance = project.in(file("conformance"))
       val arguments = Def.spaceDelimited("[target-set]").parsed
       if (arguments.size > 1)
         throw MessageOnlyException("usage: conformance/build [target-set]")
-      val targetSet = arguments.headOption.getOrElse("default")
+      val targetSet = arguments.headOption.getOrElse(conformanceTargetSet.value)
       if (!targetSet.matches("[A-Za-z0-9_-]+"))
         throw MessageOnlyException(s"invalid conformance target set: $targetSet")
       val root                = (LocalRootProject / baseDirectory).value.absolute
@@ -1883,15 +1890,16 @@ lazy val conformance = project.in(file("conformance"))
         error = log.error
       )
     },
-    conformanceEmulationTargets := Seq(
-      "cuda/sm_89",
-      "hip/gfx1030",
-      "hsa/gfx1030",
-      "opencl",
-      "sycl",
-      "levelzero",
-      "vulkan"
-    ),
+    conformanceTargetSet        := "complete",
+    conformanceEmulationTargets := Def.uncached {
+      val command = Seq(
+        (Global / cmakeExecutable).value,
+        s"-DCONFORMANCE_TARGET_SET=${conformanceTargetSet.value}",
+        "-P",
+        s"${baseDirectory.value}/artifacts/Targets.cmake"
+      )
+      Process(command).!!.linesIterator.filter(_.nonEmpty).toVector
+    },
     emulate := {
       val root  = (LocalRootProject / baseDirectory).value.absolute
       val input = Def.spaceDelimited("[--workload name] [backend[/architecture] ...]").parsed
@@ -1910,13 +1918,18 @@ lazy val conformance = project.in(file("conformance"))
       if (inventory.isEmpty) throw MessageOnlyException("conformanceEmulationTargets is empty")
       if (selectors.contains("all") && selectors.size != 1)
         throw MessageOnlyException("all cannot be combined with target selectors")
+      def matches(route: String, selector: String): Boolean = {
+        val artifact = route.replaceFirst("^cuda-(ptx|sass)/", "cuda/")
+        route == selector || route.takeWhile(_ != '/') == selector ||
+        artifact == selector || artifact.takeWhile(_ != '/') == selector
+      }
       selectors.filterNot(_ == "all").foreach { selector =>
-        if (!inventory.exists(route => route == selector || route.takeWhile(_ != '/') == selector))
+        if (!inventory.exists(route => matches(route, selector)))
           throw MessageOnlyException(s"unknown emulation target $selector; available: ${inventory.mkString(", ")}")
       }
       val targets = inventory.filter(route =>
         selectors.isEmpty || selectors.contains("all") ||
-          selectors.contains(route) || selectors.contains(route.takeWhile(_ != '/'))
+          selectors.exists(selector => matches(route, selector))
       )
       val arguments       = Seq("--workload", workload) ++ targets
       val nativeDirectory = (native / nativeArtifact).value.absolute

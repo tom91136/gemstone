@@ -208,13 +208,28 @@ std::vector<ResolvedTarget> direct_targets(const std::vector<std::string> &route
   if (routes.empty()) throw std::invalid_argument("--direct requires explicit backend[/architecture] targets");
   std::vector<ResolvedTarget> result;
   std::set<std::string> seen;
+  const auto append = [&](ResolvedTarget target) {
+    if (!seen.insert(target.id).second) throw std::invalid_argument("duplicate direct target: " + target.id);
+    result.push_back(std::move(target));
+  };
   for (const auto &route : routes) {
     const auto slash = route.find('/');
-    const auto backend = route.substr(0, slash);
+    const auto selector = route.substr(0, slash);
+    const auto backend = selector == "cuda-ptx" || selector == "cuda-sass" ? "cuda" : selector;
     const auto arch = slash == std::string::npos ? std::nullopt : std::optional(route.substr(slash + 1));
     validate_route(backend, arch);
-    if (!seen.insert(route).second) throw std::invalid_argument("duplicate direct target: " + route);
-    result.push_back({backend + (arch ? "-" + *arch : ""), backend, arch, {}, false});
+    if (backend == "cuda") {
+      for (const auto *mode : {"ptx", "sass"}) {
+        const auto name = std::string("cuda-") + mode;
+        if (selector != "cuda" && selector != name) continue;
+        const bool ptx = std::string_view(mode) == "ptx";
+        append({name + "-" + *arch,
+                backend,
+                arch,
+                {{"CONFORMANCE_CUDA_CODE", mode}, {"CUDA_FORCE_PTX_JIT", ptx ? "1" : "0"}, {"CUDA_DISABLE_PTX_JIT", ptx ? "0" : "1"}},
+                false});
+      }
+    } else append({backend + (arch ? "-" + *arch : ""), backend, arch, {}, false});
   }
   return result;
 }

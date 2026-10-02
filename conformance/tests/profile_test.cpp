@@ -113,17 +113,44 @@ TEST_CASE("all shipped machine profiles are valid", "[profile]") {
 TEST_CASE("direct routes are explicit and contain no machine policy", "[profile]") {
   using conformance::profile::direct_targets;
   const auto targets = direct_targets({"cuda/sm_89", "hip/gfx1030", "hsa/gfx1030", "opencl", "sycl", "levelzero", "vulkan"});
-  REQUIRE(targets.size() == 7);
-  CHECK(targets.front().id == "cuda-sm_89");
+  REQUIRE(targets.size() == 8);
+  CHECK(targets.front().id == "cuda-ptx-sm_89");
   CHECK(targets.front().architecture == "sm_89");
   CHECK(targets.back().backend == "vulkan");
   for (const auto &target : targets) {
-    CHECK(target.environment.empty());
+    if (target.backend != "cuda") CHECK(target.environment.empty());
     CHECK_FALSE(target.deviceLock);
   }
   CHECK_THROWS(direct_targets({}));
-  for (const auto &route : {"all", "cuda", "hip", "hsa/sm_89", "cuda/../../escape", "vulkan/gfx1030", "unknown"})
+  for (const auto &route : {"all", "cuda", "cuda-ptx", "cuda-sass", "cuda-sass/gfx1030", "cuda-auto/sm_89", "hip", "hsa/sm_89",
+                            "cuda/../../escape", "vulkan/gfx1030", "unknown"})
     CHECK_THROWS(direct_targets({route}));
   CHECK_THROWS(direct_targets({"vulkan", "vulkan"}));
-  CHECK(direct_targets({"cuda/sm_89", "cuda/sm_80"}).size() == 2);
+  CHECK(direct_targets({"cuda/sm_89", "cuda/sm_80"}).size() == 4);
+}
+
+TEST_CASE("direct CUDA routes select strict PTX and SASS independently from the same artifact", "[profile]") {
+  using conformance::profile::direct_targets;
+  const auto targets = direct_targets({"cuda-ptx/sm_89", "cuda-sass/sm_89"});
+  REQUIRE(targets.size() == 2);
+  for (size_t i = 0; i < targets.size(); ++i) {
+    const auto &target = targets[i];
+    const auto mode = i == 0 ? "ptx" : "sass";
+    CHECK(target.id == std::string("cuda-") + mode + "-sm_89");
+    CHECK(target.backend == "cuda");
+    CHECK(target.architecture == "sm_89");
+    CHECK(target.environment.at("CONFORMANCE_CUDA_CODE") == mode);
+    CHECK(target.environment.at("CUDA_FORCE_PTX_JIT") == (i == 0 ? "1" : "0"));
+    CHECK(target.environment.at("CUDA_DISABLE_PTX_JIT") == (i == 0 ? "0" : "1"));
+    CHECK(target.routeSkips.empty());
+    CHECK_FALSE(target.deviceLock);
+  }
+  const auto both = direct_targets({"cuda/sm_89"});
+  REQUIRE(both.size() == targets.size());
+  for (size_t i = 0; i < targets.size(); ++i) {
+    CHECK(both[i].id == targets[i].id);
+    CHECK(both[i].environment == targets[i].environment);
+  }
+  CHECK_THROWS(direct_targets({"cuda/sm_89", "cuda-ptx/sm_89"}));
+  CHECK_THROWS(direct_targets({"cuda-sass/sm_89", "cuda-sass/sm_89"}));
 }

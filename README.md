@@ -161,9 +161,14 @@ Builds write artifacts to `target/conformance/artifacts`. `run` uses the existin
 `emulate` runs them through a shared Gemstone server with an isolated client per test process.
 Use `--workload full` for the bounded regression suite, including OpenCL, SYCL and Vulkan CTS.
 `run` uses machine profiles; omitting `--machine` selects the local short hostname.
-`emulate` uses `conformanceEmulationTargets` from `build.sbt`, independently of the host profile:
-CUDA sm_89, HIP/HSA gfx1030, OpenCL, SYCL, Level Zero and Vulkan. Append a backend or route such as
-`vulkan` or `cuda/sm_89` to narrow the selection. Missing selected artifacts are errors.
+Builds and emulation use `conformanceTargetSet` (default `complete`): 13 CUDA architectures, each tested as PTX and SASS,
+27 GFX targets each for HIP and HSA, OpenCL, SYCL, Level Zero and Vulkan. Both compact and full
+run this entire matrix, independently of machine profiles. Append a backend or route such as
+`vulkan`, `cuda-ptx/sm_89` or `cuda-sass/sm_89` to narrow execution. `cuda` and `cuda/sm_89`
+select both code variants; `cuda-ptx` and `cuda-sass` select one across all CUDA architectures.
+The 84 execution routes share 71 artifacts. Missing selected artifacts are errors.
+For the smaller matrix, set `conformance / conformanceTargetSet := "default"` before building and running.
+The full architecture matrix multiplies runtime compared with a single architecture per backend.
 `CONFORMANCE_JOBS` controls emulated CTest parallelism.
 
 See [conformance/README.md](conformance/README.md) for target sets, toolchains, profiles, and standalone commands.

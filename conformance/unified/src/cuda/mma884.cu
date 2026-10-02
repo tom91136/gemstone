@@ -37,7 +37,12 @@ CUmodule load_module() {
   return module;
 }
 
-uint16_t half_bits(int value) { return __half_as_ushort(__int2half_rn(value)); }
+uint16_t half_bits(int value) {
+  const auto half = __int2half_rn(value);
+  uint16_t bits{};
+  std::memcpy(&bits, &half, sizeof(bits));
+  return bits;
+}
 uint32_t float_bits(float value) {
   uint32_t bits{};
   std::memcpy(&bits, &value, sizeof(bits));

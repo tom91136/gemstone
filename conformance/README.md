@@ -124,7 +124,14 @@ cmake --build build/complete
 ```
 
 CUDA `sm_35`, `sm_50`, `sm_60`, and `sm_70` use CUDA 11.8; `sm_75` through `sm_120` use CUDA 13.3. The complete AMD
-matrix spans `gfx803` through `gfx1201`. The `gfx803` HIP overlay remains intentionally limited: it keeps rocThrust and
+matrix spans `gfx803` through `gfx1201`. This is a selected matrix of real GPU SKUs, not every LLVM processor name.
+Runners can obtain its routes without configuring or building artifacts:
+
+```console
+cmake -DCONFORMANCE_TARGET_SET=complete -P artifacts/Targets.cmake
+```
+
+The `gfx803` HIP overlay remains intentionally limited: it keeps rocThrust and
 viable miniapps, while rocBLAS cases are omitted because current ROCm releases no longer ship a matching kernel
 library. Use the independent `legacy-gfx803` target set when that is the only artifact required.
 
@@ -148,7 +155,8 @@ Without the wrapper, each container uses `CMAKE_BUILD_PARALLEL_LEVEL` or four jo
 The container images provide Ninja 1.13.2. Compiler-internal threads and memory are not bounded by job tokens.
 
 CUDA conformance exposes two explicit routes, `cuda-ptx` and `cuda-sass`, in each
-NVIDIA machine profile. They use the same CUDA `sm_*` artifact but set
+NVIDIA machine profile. Profile-free runs use `cuda-ptx/sm_*` and `cuda-sass/sm_*`;
+`cuda/sm_*` expands to both. They use the same CUDA `sm_*` artifact but set
 `CONFORMANCE_CUDA_CODE=ptx` or `sass` to select the matching explicit memory
 fixture, set `GEMSTONE_CUDA_CODE=ptx` or `sass` for Gemstone, and set NVIDIA's documented
 `CUDA_FORCE_PTX_JIT` / `CUDA_DISABLE_PTX_JIT` variables for physical CUDA runs.
