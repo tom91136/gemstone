@@ -8,13 +8,13 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
 class FragmentDiscardSuite extends munit.FunSuite {
-  private def ref(n: Int)  = operand("IdRef", n)
-  private def dest(n: Int) = operand("IdResult", n)
-  private def lit(n: Int)  = operand("LiteralInteger", n)
+  private def ref(n: Int)  = operand(OperandKind.IdRef, n)
+  private def dest(n: Int) = operand(OperandKind.IdResult, n)
+  private def lit(n: Int)  = operand(OperandKind.LiteralInteger, n)
   private def discardBlock(load: Int, condition: Int, merge: Int, killed: Int): Vec[Instruction] = Vec(
     Instruction.Load(ref(2), dest(load), ref(6), None),
     Instruction.FOrdLessThan(ref(12), dest(condition), ref(load), ref(35)),
-    Instruction.SelectionMerge(ref(merge), operand("SelectionControl", SelectionControl.None)),
+    Instruction.SelectionMerge(ref(merge), operand(OperandKind.SelectionControl, SelectionControl.None)),
     Instruction.BranchConditional(ref(condition), ref(killed), ref(merge), Vec.empty),
     Instruction.Label(dest(killed)),
     Instruction.Kill(),
@@ -23,51 +23,51 @@ class FragmentDiscardSuite extends munit.FunSuite {
   private def module(nested: Boolean, derivative: Boolean): Module = Module(
     Header(ISA.version, Word(0), Word(70), Word(0)),
     Vec(
-      Instruction.Capability(operand("Capability", Capability.Shader)),
+      Instruction.Capability(operand(OperandKind.Capability, Capability.Shader)),
       Instruction.MemoryModel(
-        operand("AddressingModel", AddressingModel.Logical),
-        operand("MemoryModel", MemoryModel.GLSL450)
+        operand(OperandKind.AddressingModel, AddressingModel.Logical),
+        operand(OperandKind.MemoryModel, MemoryModel.GLSL450)
       ),
       Instruction.EntryPoint(
-        operand("ExecutionModel", ExecutionModel.Fragment),
+        operand(OperandKind.ExecutionModel, ExecutionModel.Fragment),
         ref(20),
         stringOperand("main"),
         Vec(ref(6), ref(7), ref(13), ref(16), ref(44))
       ),
-      Instruction.ExecutionMode(ref(20), operand("ExecutionMode", ExecutionMode.OriginUpperLeft)),
-      Instruction.Decorate(ref(6), operand("Decoration", Decoration.Location, 0)),
-      Instruction.Decorate(ref(7), operand("Decoration", Decoration.Location, 0)),
-      Instruction.Decorate(ref(16), operand("Decoration", Decoration.BuiltIn, 23)),
-      Instruction.Decorate(ref(44), operand("Decoration", Decoration.BuiltIn, 20)),
-      Instruction.Decorate(ref(13), operand("Decoration", Decoration.Binding, 0)),
-      Instruction.Decorate(ref(13), operand("Decoration", Decoration.DescriptorSet, 0)),
-      Instruction.Decorate(ref(9), operand("Decoration", Decoration.Block)),
-      Instruction.MemberDecorate(ref(9), lit(0), operand("Decoration", Decoration.Offset, 0)),
-      Instruction.MemberDecorate(ref(9), lit(1), operand("Decoration", Decoration.Offset, 4)),
+      Instruction.ExecutionMode(ref(20), operand(OperandKind.ExecutionMode, ExecutionMode.OriginUpperLeft)),
+      Instruction.Decorate(ref(6), operand(OperandKind.Decoration, Decoration.Location, 0)),
+      Instruction.Decorate(ref(7), operand(OperandKind.Decoration, Decoration.Location, 0)),
+      Instruction.Decorate(ref(16), operand(OperandKind.Decoration, Decoration.BuiltIn, 23)),
+      Instruction.Decorate(ref(44), operand(OperandKind.Decoration, Decoration.BuiltIn, 20)),
+      Instruction.Decorate(ref(13), operand(OperandKind.Decoration, Decoration.Binding, 0)),
+      Instruction.Decorate(ref(13), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+      Instruction.Decorate(ref(9), operand(OperandKind.Decoration, Decoration.Block)),
+      Instruction.MemberDecorate(ref(9), lit(0), operand(OperandKind.Decoration, Decoration.Offset, 0)),
+      Instruction.MemberDecorate(ref(9), lit(1), operand(OperandKind.Decoration, Decoration.Offset, 4)),
       Instruction.TypeVoid(dest(1)),
       Instruction.TypeFloat(dest(2), lit(32), None),
-      Instruction.TypePointer(dest(3), operand("StorageClass", StorageClass.Input), ref(2)),
-      Instruction.TypePointer(dest(4), operand("StorageClass", StorageClass.Output), ref(2)),
+      Instruction.TypePointer(dest(3), operand(OperandKind.StorageClass, StorageClass.Input), ref(2)),
+      Instruction.TypePointer(dest(4), operand(OperandKind.StorageClass, StorageClass.Output), ref(2)),
       Instruction.TypeFunction(dest(5), ref(1), Vec.empty),
       Instruction.TypeInt(dest(8), lit(32), lit(0)),
       Instruction.TypeStruct(dest(9), Vec(ref(8), ref(8))),
-      Instruction.TypePointer(dest(10), operand("StorageClass", StorageClass.StorageBuffer), ref(9)),
-      Instruction.TypePointer(dest(11), operand("StorageClass", StorageClass.StorageBuffer), ref(8)),
+      Instruction.TypePointer(dest(10), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(9)),
+      Instruction.TypePointer(dest(11), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(8)),
       Instruction.TypeBool(dest(12)),
-      Instruction.TypePointer(dest(14), operand("StorageClass", StorageClass.Input), ref(12)),
-      Instruction.Constant(ref(8), dest(15), operand("LiteralContextDependentNumber", 0)),
-      Instruction.Constant(ref(8), dest(17), operand("LiteralContextDependentNumber", 1)),
-      Instruction.Constant(ref(2), dest(35), operand("LiteralContextDependentNumber", 0x40400000)),
-      Instruction.Constant(ref(8), dest(43), operand("LiteralContextDependentNumber", -1)),
+      Instruction.TypePointer(dest(14), operand(OperandKind.StorageClass, StorageClass.Input), ref(12)),
+      Instruction.Constant(ref(8), dest(15), operand(OperandKind.LiteralContextDependentNumber, 0)),
+      Instruction.Constant(ref(8), dest(17), operand(OperandKind.LiteralContextDependentNumber, 1)),
+      Instruction.Constant(ref(2), dest(35), operand(OperandKind.LiteralContextDependentNumber, 0x40400000)),
+      Instruction.Constant(ref(8), dest(43), operand(OperandKind.LiteralContextDependentNumber, -1)),
       Instruction.TypeArray(dest(40), ref(8), ref(17)),
-      Instruction.TypePointer(dest(41), operand("StorageClass", StorageClass.Output), ref(40)),
+      Instruction.TypePointer(dest(41), operand(OperandKind.StorageClass, StorageClass.Output), ref(40)),
       Instruction.ConstantComposite(ref(40), dest(42), Vec(ref(43))),
-      Instruction.Variable(ref(3), dest(6), operand("StorageClass", StorageClass.Input), None),
-      Instruction.Variable(ref(4), dest(7), operand("StorageClass", StorageClass.Output), None),
-      Instruction.Variable(ref(10), dest(13), operand("StorageClass", StorageClass.StorageBuffer), None),
-      Instruction.Variable(ref(14), dest(16), operand("StorageClass", StorageClass.Input), None),
-      Instruction.Variable(ref(41), dest(44), operand("StorageClass", StorageClass.Output), Some(ref(42))),
-      Instruction.Function(ref(1), dest(20), operand("FunctionControl", FunctionControl.None), ref(5)),
+      Instruction.Variable(ref(3), dest(6), operand(OperandKind.StorageClass, StorageClass.Input), None),
+      Instruction.Variable(ref(4), dest(7), operand(OperandKind.StorageClass, StorageClass.Output), None),
+      Instruction.Variable(ref(10), dest(13), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), None),
+      Instruction.Variable(ref(14), dest(16), operand(OperandKind.StorageClass, StorageClass.Input), None),
+      Instruction.Variable(ref(41), dest(44), operand(OperandKind.StorageClass, StorageClass.Output), Some(ref(42))),
+      Instruction.Function(ref(1), dest(20), operand(OperandKind.FunctionControl, FunctionControl.None), ref(5)),
       Instruction.Label(dest(21)),
       Instruction.AccessChain(ref(11), dest(26), ref(13), Vec(ref(15))),
       Instruction.AtomicIAdd(ref(8), dest(27), ref(26), ref(17), ref(15), ref(17))
@@ -83,7 +83,7 @@ class FragmentDiscardSuite extends munit.FunSuite {
         Instruction.FunctionEnd()
       ) ++
       (if (nested) Vec(
-         Instruction.Function(ref(1), dest(50), operand("FunctionControl", FunctionControl.None), ref(5)),
+         Instruction.Function(ref(1), dest(50), operand(OperandKind.FunctionControl, FunctionControl.None), ref(5)),
          Instruction.Label(dest(51))
        ) ++ discardBlock(55, 56, 57, 58) ++ Vec(Instruction.Return(), Instruction.FunctionEnd())
        else Vec.empty[Instruction]),

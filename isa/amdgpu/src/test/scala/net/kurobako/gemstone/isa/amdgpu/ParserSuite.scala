@@ -1,8 +1,9 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import Program.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.amdgpu.asm.*
+import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
 
 class ParserSuite extends munit.FunSuite {
   private def roundTrip(source: String): Unit = {
@@ -39,10 +40,17 @@ class ParserSuite extends munit.FunSuite {
     roundTrip("v_pk_add_f32 v4, v8, v12 neg_lo:[1,0] neg_hi:[1,0]")
   }
 
-  test("parse programs without retaining comments") {
+  test("program comments survive canonical printing") {
     val source = ".text\nentry:\n  s_nop 0 // delay\n  s_endpgm"
     val parsed = Parser.parse(source).fold(error => fail(error.toString), value => value)
-    assertEquals(Printer.render(parsed), ".text\nentry:\ns_nop 0\ns_endpgm")
+    assertEquals(Printer.render(parsed), ".text\nentry:\ns_nop 0\n// delay\ns_endpgm")
+    assertEquals(Parser.parse(Printer.render(parsed)), Right(parsed))
+    val quoted = Parser.parse(".ascii \"http://gpu#source\" # retained").fold(error => fail(error.toString), identity)
+    assertEquals(
+      quoted.statements,
+      Vec(Statement.Directive(".ascii", "\"http://gpu#source\""), Statement.Comment("# retained"))
+    )
+    assertEquals(Parser.parse(Printer.render(quoted)), Right(quoted))
   }
 
   test("operand parsing preserves register identity, numeric value, and expression structure") {
@@ -130,7 +138,7 @@ class ParserSuite extends munit.FunSuite {
     }
   }
 
-  test("programs preserve directives, labels, and instruction pairs while dropping whole comments") {
+  test("programs preserve directives, labels, instruction pairs, and whole comments") {
     val source =
       "# comment # again\n// comment // again\n\n.text\n.p2align 8\nentry:\ns_nop 0 :: s_endpgm // stop # ignored"
     val nop = Parser.parseInstruction("s_nop 0").fold(error => fail(error.toString), identity)
@@ -138,10 +146,13 @@ class ParserSuite extends munit.FunSuite {
     assertEquals(
       Parser.parse(source),
       Right(Program(Vec(
+        Statement.Comment("# comment # again"),
+        Statement.Comment("// comment // again"),
         Statement.Directive(".text", ""),
         Statement.Directive(".p2align", "8"),
         Statement.Label("entry"),
-        Statement.InstructionPair(nop, end)
+        Statement.InstructionPair(nop, end),
+        Statement.Comment("// stop # ignored")
       )))
     )
     assert(Parser.parseInstruction("").isLeft)

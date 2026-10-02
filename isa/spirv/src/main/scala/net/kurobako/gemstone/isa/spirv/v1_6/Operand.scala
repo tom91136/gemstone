@@ -9,7 +9,7 @@ object Operand {
   def unsigned(operand: Operand): Long = operand.words.head.toUnsigned.toLong
 }
 
-case class Operand(kind: NonEmpty[String], words: NonEmpty[Vec[Word]]) {
+case class Operand(kind: OperandKind, words: NonEmpty[Vec[Word]]) {
   def singleWord: Either[NonEmpty[String], Word] =
     Either.cond(words.length == 1, words.head, s"$kind contains ${words.length} words")
 }

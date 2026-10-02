@@ -5,23 +5,27 @@ import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 
 class SpecializationConstantSuite extends munit.FunSuite {
   private def evaluate(width: Int, opcode: Int, left: Long, right: Long): Long = {
-    val integer              = operand("IdResult", 1)
-    val a                    = operand("IdResult", 2)
-    val b                    = operand("IdResult", 3)
-    val out                  = operand("IdResult", 4)
+    val integer              = operand(OperandKind.IdResult, 1)
+    val a                    = operand(OperandKind.IdResult, 2)
+    val b                    = operand(OperandKind.IdResult, 3)
+    val out                  = operand(OperandKind.IdResult, 4)
     def literal(value: Long) =
-      if (width == 64) operand("LiteralContextDependentNumber", value.toInt, (value >>> 32).toInt)
-      else operand("LiteralContextDependentNumber", value.toInt)
+      if (width == 64) operand(OperandKind.LiteralContextDependentNumber, value.toInt, (value >>> 32).toInt)
+      else operand(OperandKind.LiteralContextDependentNumber, value.toInt)
     val module = Module(
       Header(ISA.version, Word(0), Word(5), Word(0)),
       Vec(
-        Instruction.TypeInt(integer, operand("LiteralInteger", width), operand("LiteralInteger", 1)),
+        Instruction.TypeInt(
+          integer,
+          operand(OperandKind.LiteralInteger, width),
+          operand(OperandKind.LiteralInteger, 1)
+        ),
         Instruction.SpecConstant(integer, a, literal(left)),
         Instruction.SpecConstant(integer, b, literal(right)),
         Instruction.SpecConstantOp(
           integer,
           out,
-          operand("LiteralSpecConstantOpInteger", opcode),
+          operand(OperandKind.LiteralSpecConstantOpInteger, opcode),
           if (opcode == 126 || opcode == 200) Vec(a) else Vec(a, b)
         )
       ),
@@ -61,29 +65,41 @@ class SpecializationConstantSuite extends munit.FunSuite {
     val module = Module(
       Header(ISA.version, Word(0), Word(8), Word(0)),
       Vec(
-        Instruction.TypeInt(operand("IdResult", 1), operand("LiteralInteger", 8), operand("LiteralInteger", 0)),
-        Instruction.TypeVector(operand("IdResult", 2), operand("IdRef", 1), operand("LiteralInteger", 2)),
+        Instruction.TypeInt(
+          operand(OperandKind.IdResult, 1),
+          operand(OperandKind.LiteralInteger, 8),
+          operand(OperandKind.LiteralInteger, 0)
+        ),
+        Instruction.TypeVector(
+          operand(OperandKind.IdResult, 2),
+          operand(OperandKind.IdRef, 1),
+          operand(OperandKind.LiteralInteger, 2)
+        ),
         Instruction.Constant(
-          operand("IdRef", 1),
-          operand("IdResult", 3),
-          operand("LiteralContextDependentNumber", 255)
+          operand(OperandKind.IdRef, 1),
+          operand(OperandKind.IdResult, 3),
+          operand(OperandKind.LiteralContextDependentNumber, 255)
         ),
-        Instruction.Constant(operand("IdRef", 1), operand("IdResult", 4), operand("LiteralContextDependentNumber", 2)),
-        Instruction.SpecConstantComposite(
-          operand("IdRef", 2),
-          operand("IdResult", 5),
-          Vec(operand("IdRef", 3), operand("IdRef", 4))
+        Instruction.Constant(
+          operand(OperandKind.IdRef, 1),
+          operand(OperandKind.IdResult, 4),
+          operand(OperandKind.LiteralContextDependentNumber, 2)
         ),
         Instruction.SpecConstantComposite(
-          operand("IdRef", 2),
-          operand("IdResult", 6),
-          Vec(operand("IdRef", 4), operand("IdRef", 4))
+          operand(OperandKind.IdRef, 2),
+          operand(OperandKind.IdResult, 5),
+          Vec(operand(OperandKind.IdRef, 3), operand(OperandKind.IdRef, 4))
+        ),
+        Instruction.SpecConstantComposite(
+          operand(OperandKind.IdRef, 2),
+          operand(OperandKind.IdResult, 6),
+          Vec(operand(OperandKind.IdRef, 4), operand(OperandKind.IdRef, 4))
         ),
         Instruction.SpecConstantOp(
-          operand("IdRef", 2),
-          operand("IdResult", 7),
-          operand("LiteralSpecConstantOpInteger", 128),
-          Vec(operand("IdRef", 5), operand("IdRef", 6))
+          operand(OperandKind.IdRef, 2),
+          operand(OperandKind.IdResult, 7),
+          operand(OperandKind.LiteralSpecConstantOpInteger, 128),
+          Vec(operand(OperandKind.IdRef, 5), operand(OperandKind.IdRef, 6))
         )
       ),
       Endianness.Little

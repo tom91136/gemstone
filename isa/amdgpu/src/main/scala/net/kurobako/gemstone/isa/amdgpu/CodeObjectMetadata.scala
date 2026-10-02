@@ -1,13 +1,11 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
-import net.kurobako.gemstone.string.*
 
 /** AMDGPU MessagePack metadata from the ELF note already owned by the Scala code-object decoder. */
 object CodeObjectMetadata {
@@ -29,39 +27,16 @@ object CodeObjectMetadata {
   /** Decode kernel metadata when present. Metadata-free ELF code objects still have usable symbols, globals, and code;
     * callers that only need those facilities must not reject the entire object.
     */
-  def decodeOptional(image: Vec[Byte]): Either[CodeObject.Error, Option[Vec[KernelManifest]]] = {
-    val bytes = Vec.toArray(image)
-    ELF.validateHeader(image).flatMap { _ =>
-      val buffer      = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-      val tableOffset = buffer.getLong(40)
-      val entrySize   = buffer.getShort(58) & 0xffff
-      val count       = buffer.getShort(60) & 0xffff
-      Either.cond(
-        entrySize >= 64 && count > 0 && ByteRange.contains(bytes.length, tableOffset, entrySize.toLong * count),
-        (),
-        CodeObject.Error.Invalid("invalid ELF section table")
-      ).flatMap { _ =>
-        (0 until count).foldLeft[Either[CodeObject.Error, Option[Vec[KernelManifest]]]](Right(None)) {
-          case (result, index) => result.flatMap {
-              case found @ Some(_) => Right(found)
-              case None            =>
-                val start       = Math.toIntExact(tableOffset + index.toLong * entrySize)
-                val sectionType = buffer.getInt(start + 4)
-                val offset      = buffer.getLong(start + 24)
-                val size        = buffer.getLong(start + 32)
-                if (sectionType != 7) Right(None)
-                else
-                  Either.cond(
-                    offset >= 0L && size >= 0L && size <= Int.MaxValue &&
-                      ByteRange.contains(bytes.length, offset, size),
-                    (),
-                    CodeObject.Error.Invalid("invalid ELF note section range")
-                  ).flatMap(_ => decodeNotes(bytes, offset.toInt, size.toInt))
-            }
-        }
+  def decodeOptional(image: Vec[Byte]): Either[CodeObject.Error, Option[Vec[KernelManifest]]] =
+    ELF.notes(image).flatMap(decodeNotes(_))
+
+  def decodeNotes(notes: Vec[Vec[Byte]]): Either[CodeObject.Error, Option[Vec[KernelManifest]]] =
+    notes.foldLeft[Either[CodeObject.Error, Option[Vec[KernelManifest]]]](Right(None)) { (result, note) =>
+      result.flatMap {
+        case found @ Some(_) => Right(found)
+        case None            => decodeNotes(Vec.toArray(note), 0, note.size)
       }
     }
-  }
 
   private def decodeNotes(
       bytes: Array[Byte],
@@ -75,9 +50,9 @@ object CodeObjectMetadata {
     ): Either[CodeObject.Error, Vec[KernelManifest]] =
       if (offset > limit - 12) Right(found)
       else {
-        val nameSize          = Integer.toUnsignedLong(littleInt(bytes, offset))
-        val descriptionSize   = Integer.toUnsignedLong(littleInt(bytes, offset + 4))
-        val noteType          = littleInt(bytes, offset + 8)
+        val nameSize          = Integer.toUnsignedLong(LittleEndian.decodeInt32(bytes, offset))
+        val descriptionSize   = Integer.toUnsignedLong(LittleEndian.decodeInt32(bytes, offset + 4))
+        val noteType          = LittleEndian.decodeInt32(bytes, offset + 8)
         val payload           = offset + 12
         val paddedName        = alignFour(nameSize)
         val paddedDescription = alignFour(descriptionSize)
@@ -179,15 +154,19 @@ object CodeObjectMetadata {
           }
         }
       }.flatMap { fields =>
-        (fields.name, fields.symbol, fields.argumentBlockSize, fields.parameters) match {
+        val parameters = fields.parameters.orElse(Option.when(fields.argumentBlockSize.contains(0))(Vec.empty[(
+            KernelMetadata.Parameter,
+            Option[String]
+        )]))
+        (fields.name, fields.symbol, fields.argumentBlockSize, parameters) match {
           case (Some(name), Some(symbol), Some(blockSize), Some(parameters)) =>
             val sorted = parameters.sortBy(_._1.offset)
             for {
               refinedName <- name.refine[NonEmpty[String]].left.map(_ =>
-                CodeObject.Error.Invalid("AMDGPU kernel name must be non-empty and contain no NUL")
+                CodeObject.Error.Invalid("AMDGPU kernel name must be non-empty")
               )
               refinedSymbol <- symbol.refine[NonEmpty[String]].left.map(_ =>
-                CodeObject.Error.Invalid("AMDGPU kernel symbol must be non-empty and contain no NUL")
+                CodeObject.Error.Invalid("AMDGPU kernel symbol must be non-empty")
               )
               metadata <-
                 KernelMetadata.validated(blockSize, sorted.count(_._2.isEmpty).unsafe[Int >= 0], sorted.map(_._1))
@@ -200,21 +179,6 @@ object CodeObjectMetadata {
                 HiddenArgument(kind, parameter.offset, parameter.width)
               }
             )
-          case (Some(name), Some(symbol), Some(blockSize), None) if blockSize.raw == 0 =>
-            for {
-              refinedName <- name.refine[NonEmpty[String]].left.map(_ =>
-                CodeObject.Error.Invalid("AMDGPU kernel name must be non-empty and contain no NUL")
-              )
-              refinedSymbol <- symbol.refine[NonEmpty[String]].left.map(_ =>
-                CodeObject.Error.Invalid("AMDGPU kernel symbol must be non-empty and contain no NUL")
-              )
-              metadata <- KernelMetadata.validated(
-                0,
-                0,
-                Vec.empty[KernelMetadata.Parameter]
-              )
-                .left.map(detail => CodeObject.Error.Invalid(detail))
-            } yield KernelManifest(refinedName, refinedSymbol, metadata, Vec.empty)
           case _ => Left(CodeObject.Error.Invalid(
               "AMDGPU kernel metadata is missing name, symbol, kernarg size, or arguments"
             ))
@@ -244,160 +208,21 @@ object CodeObjectMetadata {
 
   private def alignFour(value: Long): Long = Math.addExact(value, 3L) & ~3L
 
-  private def littleInt(bytes: Array[Byte], offset: Int): Int =
-    LittleEndian.decodeInt32(bytes, offset)
-
-  /** Cursor mutation is confined to this single-pass MessagePack reader. */
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private class Reader(bytes: Array[Byte], start: Int, size: Int) {
-    private val limit  = start + size
-    private var cursor = start
+    private val input = msgpack.Reader(
+      bytes = bytes,
+      start = start,
+      size = size,
+      maximumElements = MaximumContainerEntries
+    )
+    private def checked[A](result: Either[String, A]): Either[CodeObject.Error, A] =
+      result.left.map(message => CodeObject.Error.Invalid(message.unsafe[NonEmpty[String]]))
 
-    def finished: Boolean = cursor == limit
-
-    def string: Either[CodeObject.Error, String] = readByte("truncated MessagePack string").flatMap { tag =>
-      val size =
-        if ((tag & 0xe0) == 0xa0) Right(tag & 0x1f)
-        else tag match {
-          case 0xd9 => readUnsignedInt(1, "truncated str8 size")
-          case 0xda => readUnsignedInt(2, "truncated str16 size")
-          case 0xdb => readUnsigned(4, "truncated str32 size").flatMap(value =>
-              Either.cond(
-                value >= 0L && value <= Int.MaxValue,
-                value.toInt,
-                CodeObject.Error.Invalid("MessagePack string is too large")
-              )
-            )
-          case _ => Left(CodeObject.Error.Invalid("AMDGPU metadata key is not a string"))
-        }
-      size match {
-        case Left(error)                         => Left(error)
-        case Right(length) if length > remaining =>
-          Left(CodeObject.Error.Invalid("truncated MessagePack string"))
-        case Right(length) =>
-          val value = decodeUtf8(bytes, cursor, length)
-            .left.map(_ => CodeObject.Error.Invalid("MessagePack string is not valid UTF-8"))
-          cursor += length
-          value
-      }
-    }
-
-    def uint32: Either[CodeObject.Error, Int >= 0] = readByte("truncated MessagePack integer").flatMap {
-      case tag if tag <= 0x7f => Right(tag)
-      case 0xcc               => readUnsignedInt(1, "truncated uint8")
-      case 0xcd               => readUnsignedInt(2, "truncated uint16")
-      case 0xce               => readUnsigned(4, "truncated uint32").flatMap(unsignedInt(_))
-      case 0xcf               => readUnsigned(8, "truncated uint64").flatMap(unsignedInt(_))
-      case _                  => Left(CodeObject.Error.Invalid("AMDGPU metadata integer is negative or malformed"))
-    }.map(_.unsafe[Int >= 0])
-
-    def mapSize: Either[CodeObject.Error, Int]   = containerSize(array = false)
-    def arraySize: Either[CodeObject.Error, Int] = containerSize(array = true)
-
-    def skip(depth: Int = 0): Either[CodeObject.Error, Unit] =
-      Either.cond(depth <= MaximumDepth, (), CodeObject.Error.Invalid("MessagePack nesting is too deep")).flatMap { _ =>
-        readByte("truncated MessagePack value").flatMap { tag =>
-          if (tag <= 0x7f || tag >= 0xe0 || tag == 0xc0 || tag == 0xc2 || tag == 0xc3) Right(())
-          else if ((tag & 0xe0) == 0xa0) skipBytes(tag & 0x1f)
-          else {
-            val count =
-              if ((tag & 0xf0) == 0x90) Right(tag & 0x0f)
-              else if ((tag & 0xf0) == 0x80) Right(2 * (tag & 0x0f))
-              else tag match {
-                case 0xcc | 0xd0 => skipBytes(1).map(_ => 0)
-                case 0xcd | 0xd1 => skipBytes(2).map(_ => 0)
-                case 0xce | 0xd2 => skipBytes(4).map(_ => 0)
-                case 0xcf | 0xd3 => skipBytes(8).map(_ => 0)
-                case 0xd9        => readUnsigned(1, "truncated str8 size").flatMap(skipLength(_))
-                case 0xda        => readUnsigned(2, "truncated str16 size").flatMap(skipLength(_))
-                case 0xdb        => readUnsigned(4, "truncated str32 size").flatMap(skipLength(_))
-                case 0xdc        => readUnsignedInt(2, "truncated array16 size")
-                case 0xdd        => readUnsigned(4, "truncated array32 size").flatMap(containerCount(_, 1))
-                case 0xde        => readUnsignedInt(2, "truncated map16 size").map(_ * 2)
-                case 0xdf        => readUnsigned(4, "truncated map32 size").flatMap(containerCount(_, 2))
-                case _           => Left(CodeObject.Error.Invalid("unsupported MessagePack type in AMDGPU metadata"))
-              }
-            count.flatMap { entries =>
-              Either.cond(
-                entries <= 2 * MaximumContainerEntries,
-                (),
-                CodeObject.Error.Invalid("MessagePack container is unreasonably large")
-              ).flatMap(_ =>
-                (0 until entries).foldLeft[Either[CodeObject.Error, Unit]](Right(()))((result, _) =>
-                  result.flatMap(_ => skip(depth + 1))
-                )
-              )
-            }
-          }
-        }
-      }
-
-    private def remaining: Int = limit - cursor
-
-    private def readByte(error: NonEmpty[String]): Either[CodeObject.Error, Int] =
-      if (remaining < 1) Left(CodeObject.Error.Invalid(error))
-      else {
-        val result = bytes(cursor) & 0xff
-        cursor += 1
-        Right(result)
-      }
-
-    private def readUnsigned(
-        length: Int,
-        error: NonEmpty[String]
-    ): Either[CodeObject.Error, Long] =
-      if (remaining < length) Left(CodeObject.Error.Invalid(error))
-      else {
-        val result = (0 until length).foldLeft(0L)((value, index) => (value << 8) | (bytes(cursor + index) & 0xffL))
-        cursor += length
-        Right(result)
-      }
-
-    private def readUnsignedInt(length: Int, error: NonEmpty[String]): Either[CodeObject.Error, Int] =
-      readUnsigned(length, error).flatMap(unsignedInt(_))
-
-    private def skipBytes(length: Int): Either[CodeObject.Error, Unit] =
-      if (length > remaining) Left(CodeObject.Error.Invalid("truncated MessagePack value"))
-      else { cursor += length; Right(()) }
-
-    private def skipLength(length: Long): Either[CodeObject.Error, Int] =
-      Either.cond(length <= Int.MaxValue, length.toInt, CodeObject.Error.Invalid("MessagePack value is too large"))
-        .flatMap(skipBytes(_)).map(_ => 0)
-
-    private def unsignedInt(value: Long): Either[CodeObject.Error, Int] =
-      Either.cond(
-        value >= 0L && value <= Int.MaxValue,
-        value.toInt,
-        CodeObject.Error.Invalid("AMDGPU metadata integer exceeds supported range")
-      )
-
-    private def containerCount(value: Long, multiplier: Int): Either[CodeObject.Error, Int] =
-      Either.cond(
-        value <= MaximumContainerEntries,
-        value.toInt * multiplier,
-        CodeObject.Error.Invalid("MessagePack container is unreasonably large")
-      )
-
-    private def containerSize(array: Boolean): Either[CodeObject.Error, Int] =
-      readByte("truncated MessagePack container").flatMap { tag =>
-        val count =
-          if (array && (tag & 0xf0) == 0x90) Right(tag & 0x0f)
-          else if (!array && (tag & 0xf0) == 0x80) Right(tag & 0x0f)
-          else if (array && tag == 0xdc) readUnsignedInt(2, "truncated array16 size")
-          else if (array && tag == 0xdd) readUnsigned(4, "truncated array32 size").flatMap(containerCount(_, 1))
-          else if (!array && tag == 0xde) readUnsignedInt(2, "truncated map16 size")
-          else if (!array && tag == 0xdf) readUnsigned(4, "truncated map32 size").flatMap(containerCount(_, 1))
-          else Left(CodeObject.Error.Invalid(
-            if (array) "AMDGPU metadata value is not an array" else "AMDGPU metadata value is not a map"
-          ))
-        count.flatMap(value =>
-          Either.cond(
-            value <= MaximumContainerEntries,
-            value,
-            CodeObject.Error.Invalid("MessagePack container is unreasonably large")
-          )
-        )
-      }
+    def finished: Boolean                          = input.remaining == 0
+    def string: Either[CodeObject.Error, String]   = checked(input.readString(strict = true))
+    def uint32: Either[CodeObject.Error, Int >= 0] = checked(input.readUnsignedInt()).map(_.unsafe[Int >= 0])
+    def mapSize: Either[CodeObject.Error, Int]     = checked(input.readMapHeader())
+    def arraySize: Either[CodeObject.Error, Int]   = checked(input.readArrayHeader())
+    def skip(): Either[CodeObject.Error, Unit]     = checked(input.skip(MaximumDepth))
   }
-
 }

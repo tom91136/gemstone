@@ -499,16 +499,16 @@ class SampledImageSuite extends munit.FunSuite {
       })
   }
     test(s"stage $model combined=$combined ${sample.name}") {
-      def ref(n: Int)              = operand("IdRef", n)
-      def dest(n: Int)             = operand("IdResult", n)
-      def lit(n: Int)              = operand("LiteralInteger", n)
+      def ref(n: Int)              = operand(OperandKind.IdRef, n)
+      def dest(n: Int)             = operand(OperandKind.IdResult, n)
+      def lit(n: Int)              = operand(OperandKind.LiteralInteger, n)
       def fc(n: Int, value: Float) = Instruction.Constant(
         ref(3),
         dest(n),
-        operand("LiteralContextDependentNumber", java.lang.Float.floatToRawIntBits(value))
+        operand(OperandKind.LiteralContextDependentNumber, java.lang.Float.floatToRawIntBits(value))
       )
       def imageOperands(mask: Int, ids: Int*) = operand(
-        "ImageOperands",
+        OperandKind.ImageOperands,
         (Seq(mask | (if (sample.offset.isDefined) 8 else 0)) ++ ids ++
           (if (sample.offset.isDefined) Seq(64) else Seq.empty))*
       )
@@ -562,13 +562,13 @@ class SampledImageSuite extends munit.FunSuite {
       val module = Module(
         Header(ISA.version, Word(0), Word(70), Word(0)),
         Vec(
-          Instruction.Capability(operand("Capability", Capability.Shader)),
+          Instruction.Capability(operand(OperandKind.Capability, Capability.Shader)),
           Instruction.MemoryModel(
-            operand("AddressingModel", AddressingModel.Logical),
-            operand("MemoryModel", MemoryModel.GLSL450)
+            operand(OperandKind.AddressingModel, AddressingModel.Logical),
+            operand(OperandKind.MemoryModel, MemoryModel.GLSL450)
           ),
           Instruction.EntryPoint(
-            operand("ExecutionModel", model),
+            operand(OperandKind.ExecutionModel, model),
             ref(21),
             stringOperand("main"),
             (if (combined) Vec(ref(12), ref(13)) else Vec(ref(12), ref(30), ref(13))) ++
@@ -577,17 +577,21 @@ class SampledImageSuite extends munit.FunSuite {
         ) ++
           (model match {
             case 5 =>
-              Vec(Instruction.ExecutionMode(ref(21), operand("ExecutionMode", ExecutionMode.LocalSize, 1, 1, 1)))
-            case 4 => Vec(Instruction.ExecutionMode(ref(21), operand("ExecutionMode", ExecutionMode.OriginUpperLeft)))
+              Vec(Instruction.ExecutionMode(
+                ref(21),
+                operand(OperandKind.ExecutionMode, ExecutionMode.LocalSize, 1, 1, 1)
+              ))
+            case 4 =>
+              Vec(Instruction.ExecutionMode(ref(21), operand(OperandKind.ExecutionMode, ExecutionMode.OriginUpperLeft)))
             case _ => Vec.empty[Instruction]
           }) ++
           Vec(
-            Instruction.Decorate(ref(12), operand("Decoration", Decoration.Binding, 0)),
-            Instruction.Decorate(ref(12), operand("Decoration", Decoration.DescriptorSet, 0)),
-            Instruction.Decorate(ref(13), operand("Decoration", Decoration.Binding, 2)),
-            Instruction.Decorate(ref(13), operand("Decoration", Decoration.DescriptorSet, 0)),
-            Instruction.Decorate(ref(8), operand("Decoration", Decoration.Block)),
-            Instruction.MemberDecorate(ref(8), lit(0), operand("Decoration", Decoration.Offset, 0)),
+            Instruction.Decorate(ref(12), operand(OperandKind.Decoration, Decoration.Binding, 0)),
+            Instruction.Decorate(ref(12), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+            Instruction.Decorate(ref(13), operand(OperandKind.Decoration, Decoration.Binding, 2)),
+            Instruction.Decorate(ref(13), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+            Instruction.Decorate(ref(8), operand(OperandKind.Decoration, Decoration.Block)),
+            Instruction.MemberDecorate(ref(8), lit(0), operand(OperandKind.Decoration, Decoration.Offset, 0)),
             Instruction.TypeVoid(dest(1)),
             Instruction.TypeInt(dest(2), lit(32), lit(0)),
             Instruction.TypeFloat(dest(3), lit(32), None),
@@ -599,76 +603,98 @@ class SampledImageSuite extends munit.FunSuite {
             Instruction.TypeImage(
               dest(6),
               ref(3),
-              operand("Dim", sample.dimensions - 1),
+              operand(OperandKind.Dim, sample.dimensions - 1),
               lit(if (sample.compare) 1 else 0),
               lit(if (sample.arrayLayer.isDefined) 1 else 0),
               lit(0),
               lit(1),
-              operand("ImageFormat", ImageFormat.Unknown),
+              operand(OperandKind.ImageFormat, ImageFormat.Unknown),
               None
             ),
-            Instruction.TypePointer(dest(7), operand("StorageClass", StorageClass.UniformConstant), ref(6)),
+            Instruction.TypePointer(dest(7), operand(OperandKind.StorageClass, StorageClass.UniformConstant), ref(6)),
             Instruction.TypeSampler(dest(26)),
-            Instruction.TypePointer(dest(27), operand("StorageClass", StorageClass.UniformConstant), ref(26)),
+            Instruction.TypePointer(dest(27), operand(OperandKind.StorageClass, StorageClass.UniformConstant), ref(26)),
             Instruction.TypeSampledImage(dest(28), ref(6)),
-            Instruction.TypePointer(dest(29), operand("StorageClass", StorageClass.UniformConstant), ref(28)),
+            Instruction.TypePointer(dest(29), operand(OperandKind.StorageClass, StorageClass.UniformConstant), ref(28)),
             Instruction.TypeStruct(dest(8), Vec(ref(5))),
-            Instruction.TypePointer(dest(9), operand("StorageClass", StorageClass.StorageBuffer), ref(8)),
-            Instruction.TypePointer(dest(10), operand("StorageClass", StorageClass.StorageBuffer), ref(5)),
+            Instruction.TypePointer(dest(9), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(8)),
+            Instruction.TypePointer(dest(10), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(5)),
             Instruction.TypeFunction(dest(11), ref(1), Vec.empty),
             Instruction.Variable(
               ref(if (combined) 29 else 7),
               dest(12),
-              operand("StorageClass", StorageClass.UniformConstant),
+              operand(OperandKind.StorageClass, StorageClass.UniformConstant),
               None
             ),
-            Instruction.Variable(ref(9), dest(13), operand("StorageClass", StorageClass.StorageBuffer), None)
+            Instruction.Variable(ref(9), dest(13), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), None)
           ) ++
           (if (sample.alias) Vec(
              Instruction.TypeImage(
                dest(40),
                ref(3),
-               operand("Dim", Dim.Value2D),
+               operand(OperandKind.Dim, Dim.Value2D),
                lit(0),
                lit(0),
                lit(0),
                lit(2),
-               operand("ImageFormat", ImageFormat.R32f),
+               operand(OperandKind.ImageFormat, ImageFormat.R32f),
                None
              ),
-             Instruction.TypePointer(dest(41), operand("StorageClass", StorageClass.UniformConstant), ref(40)),
-             Instruction.Decorate(ref(42), operand("Decoration", Decoration.Binding, 3)),
-             Instruction.Decorate(ref(42), operand("Decoration", Decoration.DescriptorSet, 0)),
-             Instruction.Variable(ref(41), dest(42), operand("StorageClass", StorageClass.UniformConstant), None)
+             Instruction.TypePointer(
+               dest(41),
+               operand(OperandKind.StorageClass, StorageClass.UniformConstant),
+               ref(40)
+             ),
+             Instruction.Decorate(ref(42), operand(OperandKind.Decoration, Decoration.Binding, 3)),
+             Instruction.Decorate(ref(42), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+             Instruction.Variable(
+               ref(41),
+               dest(42),
+               operand(OperandKind.StorageClass, StorageClass.UniformConstant),
+               None
+             )
            )
            else Vec.empty[Instruction]) ++
           (if (combined) Vec.empty[Instruction]
            else Vec(
-             Instruction.Decorate(ref(30), operand("Decoration", Decoration.Binding, 1)),
-             Instruction.Decorate(ref(30), operand("Decoration", Decoration.DescriptorSet, 0)),
-             Instruction.Variable(ref(27), dest(30), operand("StorageClass", StorageClass.UniformConstant), None)
+             Instruction.Decorate(ref(30), operand(OperandKind.Decoration, Decoration.Binding, 1)),
+             Instruction.Decorate(ref(30), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+             Instruction.Variable(
+               ref(27),
+               dest(30),
+               operand(OperandKind.StorageClass, StorageClass.UniformConstant),
+               None
+             )
            )) ++
           Vec(
-            Instruction.Constant(ref(2), dest(14), operand("LiteralContextDependentNumber", 0)),
-            Instruction.Constant(ref(2), dest(51), operand("LiteralContextDependentNumber", sample.lod.toInt)),
+            Instruction.Constant(ref(2), dest(14), operand(OperandKind.LiteralContextDependentNumber, 0)),
+            Instruction.Constant(
+              ref(2),
+              dest(51),
+              operand(OperandKind.LiteralContextDependentNumber, sample.lod.toInt)
+            ),
             Instruction.Constant(
               ref(2),
               dest(62),
-              operand("LiteralContextDependentNumber", sample.offset.fold(0)(_._1))
+              operand(OperandKind.LiteralContextDependentNumber, sample.offset.fold(0)(_._1))
             ),
             Instruction.Constant(
               ref(2),
               dest(63),
-              operand("LiteralContextDependentNumber", sample.offset.fold(0)(_._2))
+              operand(OperandKind.LiteralContextDependentNumber, sample.offset.fold(0)(_._2))
             ),
             if (sample.dimensions == 1) Instruction.Constant(
               ref(2),
               dest(64),
-              operand("LiteralContextDependentNumber", sample.offset.fold(0)(_._1))
+              operand(OperandKind.LiteralContextDependentNumber, sample.offset.fold(0)(_._1))
             )
             else Instruction.ConstantComposite(ref(43), dest(64), Vec(ref(62), ref(63))),
             fc(68, sample.projectiveQ.getOrElse(1f)),
-            Instruction.Constant(ref(2), dest(69), operand("LiteralContextDependentNumber", sample.gatherComponent)),
+            Instruction.Constant(
+              ref(2),
+              dest(69),
+              operand(OperandKind.LiteralContextDependentNumber, sample.gatherComponent)
+            ),
             fc(58, sample.gradientX),
             fc(59, sample.gradientY),
             fc(66, sample.gradientZ),
@@ -701,7 +727,7 @@ class SampledImageSuite extends munit.FunSuite {
           (if (sample.alias) Vec(Instruction.ConstantComposite(ref(43), dest(44), Vec(ref(14), ref(14))))
            else Vec.empty[Instruction]) ++
           Vec(
-            Instruction.Function(ref(1), dest(21), operand("FunctionControl", FunctionControl.None), ref(11)),
+            Instruction.Function(ref(1), dest(21), operand(OperandKind.FunctionControl, FunctionControl.None), ref(11)),
             Instruction.Label(dest(22))
           ) ++
           (if (sample.alias) Vec(

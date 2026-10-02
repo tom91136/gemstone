@@ -48,8 +48,6 @@ object Program {
 
   case class Predication(negated: Boolean, operand: Operand)
 
-  case class Modifier(name: NonEmpty[String])
-
   enum DirectiveSeparator {
     case Space
     case Comma
@@ -97,23 +95,37 @@ object Program {
       qualifiers: Vec[DeclarationQualifier],
       elementType: DataType,
       name: NonEmpty[String],
-      dimensions: Vec[Operand]
+      dimensions: Vec[Option[Operand]]
   )
 
+  enum Linkage(val mnemonic: String) {
+    case Default extends Linkage("")
+    case Visible extends Linkage("visible")
+    case Extern  extends Linkage("extern")
+    case Weak    extends Linkage("weak")
+  }
+
+  enum Extent {
+    case Scalar, Unsized
+    case Sized(elements: Int > 0)
+  }
+
   enum Statement {
+    case Comment(text: NonEmpty[String])
     case Label(name: NonEmpty[String])
     case Data(
         addressSpace: DataAddressSpace,
         qualifiers: Vec[DeclarationQualifier],
         elementType: DataType,
         name: NonEmpty[String],
-        count: Option[Int > 0],
+        extent: Extent,
         initializer: Vec[Operand]
     )
     case Directive(
         path: NonEmpty[Vec[NonEmpty[String]]],
         arguments: Vec[DirectiveArgument],
-        terminator: DirectiveTerminator
+        terminator: DirectiveTerminator,
+        initializer: Vec[Operand] = Vec.empty
     )
     case Instruction(value: PTXInstruction)
 
@@ -126,14 +138,27 @@ object Program {
         mods: Vec[Modifier],
         pred: Option[Predication]
     )
+    case CallPrototype(
+        name: NonEmpty[String],
+        returns: Vec[Parameter],
+        parameters: Vec[Parameter],
+        directives: Vec[Statement.Directive]
+    )
     case Block(body: Vec[Statement])
-    case Entry(visible: Boolean, name: NonEmpty[String], parameters: Vec[Parameter], body: Vec[Statement])
+    case Entry(
+        linkage: Linkage,
+        name: NonEmpty[String],
+        parameters: Vec[Parameter],
+        body: Option[Vec[Statement]],
+        directives: Vec[Statement.Directive]
+    )
     case Function(
-        visible: Boolean,
+        linkage: Linkage,
         name: NonEmpty[String],
         returnParameters: Vec[Parameter],
         parameters: Vec[Parameter],
-        body: Option[Vec[Statement]]
+        body: Option[Vec[Statement]],
+        directives: Vec[Statement.Directive]
     )
   }
 

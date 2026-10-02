@@ -22,8 +22,8 @@ class BitFieldSuite extends munit.FunSuite {
   } test(
     s"$operation: $width bits, $count lanes, signedness $resultSigned/$leftSigned/$rightSigned, offset $offset length $length"
   ) {
-    def ref(n: Int): Operand            = operand("IdRef", n)
-    def literal(n: Int): Operand        = operand("LiteralInteger", n)
+    def ref(n: Int): Operand            = operand(OperandKind.IdRef, n)
+    def literal(n: Int): Operand        = operand(OperandKind.LiteralInteger, n)
     def valueType(signed: Int): Operand = ref((if (count == 1) 2 else 4) + signed)
     val resultType                      = valueType(resultSigned)
     val leftType                        = valueType(leftSigned)
@@ -42,18 +42,18 @@ class BitFieldSuite extends munit.FunSuite {
         Instruction.TypeInt(ref(3), literal(width), literal(1)),
         Instruction.TypeVector(ref(4), ref(2), literal(4)),
         Instruction.TypeVector(ref(5), ref(3), literal(4)),
-        Instruction.TypePointer(ref(6), operand("StorageClass", StorageClass.CrossWorkgroup), resultType),
+        Instruction.TypePointer(ref(6), operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), resultType),
         Instruction.TypeInt(ref(14), literal(32), literal(1)),
-        Instruction.Constant(ref(14), ref(15), operand("LiteralContextDependentNumber", offset)),
-        Instruction.Constant(ref(14), ref(16), operand("LiteralContextDependentNumber", length)),
+        Instruction.Constant(ref(14), ref(15), operand(OperandKind.LiteralContextDependentNumber, offset)),
+        Instruction.Constant(ref(14), ref(16), operand(OperandKind.LiteralContextDependentNumber, length)),
         Instruction.TypeFunction(ref(7), ref(1), Vec(ref(6), leftType, rightType)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, ExecutionModel.Kernel),
           ref(8),
           stringOperand("bits"),
           Vec.empty
         ),
-        Instruction.Function(ref(1), ref(8), operand("FunctionControl", FunctionControl.None), ref(7)),
+        Instruction.Function(ref(1), ref(8), operand(OperandKind.FunctionControl, FunctionControl.None), ref(7)),
         Instruction.FunctionParameter(ref(6), ref(9)),
         Instruction.FunctionParameter(leftType, ref(10)),
         Instruction.FunctionParameter(rightType, ref(11)),

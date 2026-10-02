@@ -8,9 +8,9 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
 class FragmentQuadSuite extends munit.FunSuite {
-  private def ref(n: Int)                                                          = operand("IdRef", n)
-  private def dest(n: Int)                                                         = operand("IdResult", n)
-  private def lit(n: Int)                                                          = operand("LiteralInteger", n)
+  private def ref(n: Int)  = operand(OperandKind.IdRef, n)
+  private def dest(n: Int) = operand(OperandKind.IdResult, n)
+  private def lit(n: Int)  = operand(OperandKind.LiteralInteger, n)
   private def derivative(name: String, destination: Int, source: Int): Instruction = name match {
     case "dx"          => Instruction.DPdx(ref(2), dest(destination), ref(source))
     case "dy"          => Instruction.DPdy(ref(2), dest(destination), ref(source))
@@ -25,7 +25,7 @@ class FragmentQuadSuite extends munit.FunSuite {
   private def divergentFlow(flow: String): Vec[Instruction] = flow match {
     case "selection" => Vec(
         Instruction.FOrdLessThan(ref(12), dest(33), ref(22), ref(37)),
-        Instruction.SelectionMerge(ref(44), operand("SelectionControl", SelectionControl.None)),
+        Instruction.SelectionMerge(ref(44), operand(OperandKind.SelectionControl, SelectionControl.None)),
         Instruction.BranchConditional(ref(33), ref(40), ref(44), Vec.empty),
         Instruction.Label(dest(40)),
         derivative("dx", 41, 23),
@@ -35,8 +35,12 @@ class FragmentQuadSuite extends munit.FunSuite {
     case "loop" | "break" | "continue" => Vec(
         Instruction.Branch(ref(40)),
         Instruction.Label(dest(40)),
-        Instruction.Phi(ref(2), dest(42), Vec(operand("PairIdRefIdRef", 36, 21), operand("PairIdRefIdRef", 46, 43))),
-        Instruction.LoopMerge(ref(44), ref(43), operand("LoopControl", LoopControl.None))
+        Instruction.Phi(
+          ref(2),
+          dest(42),
+          Vec(operand(OperandKind.PairIdRefIdRef, 36, 21), operand(OperandKind.PairIdRefIdRef, 46, 43))
+        ),
+        Instruction.LoopMerge(ref(44), ref(43), operand(OperandKind.LoopControl, LoopControl.None))
       ) ++
         (if (flow != "break") Vec(
            Instruction.FOrdLessThan(ref(12), dest(33), ref(42), ref(22)),
@@ -47,13 +51,13 @@ class FragmentQuadSuite extends munit.FunSuite {
            Instruction.Branch(ref(41)),
            Instruction.Label(dest(41)),
            Instruction.FOrdLessThan(ref(12), dest(33), ref(42), ref(22)),
-           Instruction.SelectionMerge(ref(47), operand("SelectionControl", SelectionControl.None)),
+           Instruction.SelectionMerge(ref(47), operand(OperandKind.SelectionControl, SelectionControl.None)),
            Instruction.BranchConditional(ref(33), ref(47), ref(44), Vec.empty),
            Instruction.Label(dest(47))
          )) ++
         (if (flow == "continue") Vec(
            Instruction.FOrdLessThan(ref(12), dest(48), ref(42), ref(37)),
-           Instruction.SelectionMerge(ref(47), operand("SelectionControl", SelectionControl.None)),
+           Instruction.SelectionMerge(ref(47), operand(OperandKind.SelectionControl, SelectionControl.None)),
            Instruction.BranchConditional(ref(48), ref(43), ref(47), Vec.empty),
            Instruction.Label(dest(47))
          )
@@ -78,13 +82,13 @@ class FragmentQuadSuite extends munit.FunSuite {
         Instruction.Function(
           ref(if (flow == "call") 1 else 2),
           dest(60),
-          operand("FunctionControl", FunctionControl.None),
+          operand(OperandKind.FunctionControl, FunctionControl.None),
           ref(if (flow == "call") 5 else 70)
         ),
         Instruction.Label(dest(61)),
         Instruction.Load(ref(2), dest(62), ref(6), None),
         Instruction.FOrdLessThan(ref(12), dest(63), ref(62), ref(37)),
-        Instruction.SelectionMerge(ref(64), operand("SelectionControl", SelectionControl.None)),
+        Instruction.SelectionMerge(ref(64), operand(OperandKind.SelectionControl, SelectionControl.None)),
         Instruction.BranchConditional(ref(63), ref(66), ref(64), Vec.empty),
         Instruction.Label(dest(66)),
         ret,
@@ -97,58 +101,58 @@ class FragmentQuadSuite extends munit.FunSuite {
   private def module(operation: String, repeated: Boolean, flow: String): Module = Module(
     Header(ISA.version, Word(0), Word(80), Word(0)),
     Vec(
-      Instruction.Capability(operand("Capability", Capability.Shader)),
-      Instruction.Capability(operand("Capability", Capability.DerivativeControl)),
+      Instruction.Capability(operand(OperandKind.Capability, Capability.Shader)),
+      Instruction.Capability(operand(OperandKind.Capability, Capability.DerivativeControl)),
       Instruction.MemoryModel(
-        operand("AddressingModel", AddressingModel.Logical),
-        operand("MemoryModel", MemoryModel.GLSL450)
+        operand(OperandKind.AddressingModel, AddressingModel.Logical),
+        operand(OperandKind.MemoryModel, MemoryModel.GLSL450)
       ),
       Instruction.EntryPoint(
-        operand("ExecutionModel", ExecutionModel.Fragment),
+        operand(OperandKind.ExecutionModel, ExecutionModel.Fragment),
         ref(20),
         stringOperand("main"),
         Vec(ref(6), ref(7), ref(13), ref(16))
       ),
-      Instruction.ExecutionMode(ref(20), operand("ExecutionMode", ExecutionMode.OriginUpperLeft)),
-      Instruction.Decorate(ref(6), operand("Decoration", Decoration.Location, 0)),
-      Instruction.Decorate(ref(7), operand("Decoration", Decoration.Location, 0)),
-      Instruction.Decorate(ref(16), operand("Decoration", Decoration.BuiltIn, 23)),
-      Instruction.Decorate(ref(13), operand("Decoration", Decoration.Binding, 0)),
-      Instruction.Decorate(ref(13), operand("Decoration", Decoration.DescriptorSet, 0)),
-      Instruction.Decorate(ref(9), operand("Decoration", Decoration.Block)),
-      Instruction.MemberDecorate(ref(9), lit(0), operand("Decoration", Decoration.Offset, 0)),
-      Instruction.MemberDecorate(ref(9), lit(1), operand("Decoration", Decoration.Offset, 4)),
+      Instruction.ExecutionMode(ref(20), operand(OperandKind.ExecutionMode, ExecutionMode.OriginUpperLeft)),
+      Instruction.Decorate(ref(6), operand(OperandKind.Decoration, Decoration.Location, 0)),
+      Instruction.Decorate(ref(7), operand(OperandKind.Decoration, Decoration.Location, 0)),
+      Instruction.Decorate(ref(16), operand(OperandKind.Decoration, Decoration.BuiltIn, 23)),
+      Instruction.Decorate(ref(13), operand(OperandKind.Decoration, Decoration.Binding, 0)),
+      Instruction.Decorate(ref(13), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+      Instruction.Decorate(ref(9), operand(OperandKind.Decoration, Decoration.Block)),
+      Instruction.MemberDecorate(ref(9), lit(0), operand(OperandKind.Decoration, Decoration.Offset, 0)),
+      Instruction.MemberDecorate(ref(9), lit(1), operand(OperandKind.Decoration, Decoration.Offset, 4)),
       Instruction.TypeVoid(dest(1)),
       Instruction.TypeFloat(dest(2), lit(32), None),
-      Instruction.TypePointer(dest(3), operand("StorageClass", StorageClass.Input), ref(2)),
-      Instruction.TypePointer(dest(4), operand("StorageClass", StorageClass.Output), ref(2)),
+      Instruction.TypePointer(dest(3), operand(OperandKind.StorageClass, StorageClass.Input), ref(2)),
+      Instruction.TypePointer(dest(4), operand(OperandKind.StorageClass, StorageClass.Output), ref(2)),
       Instruction.TypeFunction(dest(5), ref(1), Vec.empty),
       Instruction.TypeFunction(dest(70), ref(2), Vec.empty),
       Instruction.Constant(
         ref(2),
         dest(35),
-        operand("LiteralContextDependentNumber", java.lang.Float.floatToRawIntBits(1f))
+        operand(OperandKind.LiteralContextDependentNumber, java.lang.Float.floatToRawIntBits(1f))
       ),
-      Instruction.Constant(ref(2), dest(36), operand("LiteralContextDependentNumber", 0)),
+      Instruction.Constant(ref(2), dest(36), operand(OperandKind.LiteralContextDependentNumber, 0)),
       Instruction.Constant(
         ref(2),
         dest(37),
-        operand("LiteralContextDependentNumber", java.lang.Float.floatToRawIntBits(3f))
+        operand(OperandKind.LiteralContextDependentNumber, java.lang.Float.floatToRawIntBits(3f))
       ),
       Instruction.TypeInt(dest(8), lit(32), lit(0)),
       Instruction.TypeStruct(dest(9), Vec(ref(8), ref(2))),
-      Instruction.TypePointer(dest(10), operand("StorageClass", StorageClass.StorageBuffer), ref(9)),
-      Instruction.TypePointer(dest(11), operand("StorageClass", StorageClass.StorageBuffer), ref(8)),
-      Instruction.TypePointer(dest(31), operand("StorageClass", StorageClass.StorageBuffer), ref(2)),
+      Instruction.TypePointer(dest(10), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(9)),
+      Instruction.TypePointer(dest(11), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(8)),
+      Instruction.TypePointer(dest(31), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(2)),
       Instruction.TypeBool(dest(12)),
-      Instruction.TypePointer(dest(14), operand("StorageClass", StorageClass.Input), ref(12)),
-      Instruction.Constant(ref(8), dest(15), operand("LiteralContextDependentNumber", 0)),
-      Instruction.Constant(ref(8), dest(17), operand("LiteralContextDependentNumber", 1)),
-      Instruction.Variable(ref(3), dest(6), operand("StorageClass", StorageClass.Input), None),
-      Instruction.Variable(ref(4), dest(7), operand("StorageClass", StorageClass.Output), None),
-      Instruction.Variable(ref(10), dest(13), operand("StorageClass", StorageClass.StorageBuffer), None),
-      Instruction.Variable(ref(14), dest(16), operand("StorageClass", StorageClass.Input), None),
-      Instruction.Function(ref(1), dest(20), operand("FunctionControl", FunctionControl.None), ref(5)),
+      Instruction.TypePointer(dest(14), operand(OperandKind.StorageClass, StorageClass.Input), ref(12)),
+      Instruction.Constant(ref(8), dest(15), operand(OperandKind.LiteralContextDependentNumber, 0)),
+      Instruction.Constant(ref(8), dest(17), operand(OperandKind.LiteralContextDependentNumber, 1)),
+      Instruction.Variable(ref(3), dest(6), operand(OperandKind.StorageClass, StorageClass.Input), None),
+      Instruction.Variable(ref(4), dest(7), operand(OperandKind.StorageClass, StorageClass.Output), None),
+      Instruction.Variable(ref(10), dest(13), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), None),
+      Instruction.Variable(ref(14), dest(16), operand(OperandKind.StorageClass, StorageClass.Input), None),
+      Instruction.Function(ref(1), dest(20), operand(OperandKind.FunctionControl, FunctionControl.None), ref(5)),
       Instruction.Label(dest(21)),
       Instruction.Load(ref(2), dest(22), ref(6), None),
       // Helpers may read their own output variables even though raster output is discarded.

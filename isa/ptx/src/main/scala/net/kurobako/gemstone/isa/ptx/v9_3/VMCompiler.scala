@@ -25,7 +25,7 @@ private object VMCompiler {
 
   def compile(source: String): Either[SourceError, Kernel] =
     Parser.parse(source).leftMap(SourceError.Syntax(_)).flatMap { program =>
-      program.statements.collectFirst { case entry: Statement.Entry => entry }
+      program.statements.collectFirst { case entry: Statement.Entry if entry.body.nonEmpty => entry }
         .toRight(SourceError.MissingEntry)
         .flatMap(entry =>
           compile(entry, program.statements.collect { case function: Statement.Function => function })
@@ -78,12 +78,13 @@ private object VMCompiler {
       additionalSharedSymbols: Map[NonEmpty[String], Long],
       additionalEntries: Vec[Statement.Entry]
   ): Either[Error, Kernel] = {
-    val Statement.Entry(_, name, parameters, body) = entry
-    val functionNames                              = functions.view.map(_.name).toSet ++
+    val Statement.Entry(_, name, parameters, definition, _) = entry
+    val functionNames                                       = functions.view.map(_.name).toSet ++
       additionalEntries.view
         .map(entry => entry.name)
         .toSet
     for {
+      body              <- definition.toRight(Error.Invalid(s"entry $name has no body"))
       loweredParameters <- lowerParameters(parameters)
       loweredProgram    <- lowerProgram(body, functionNames)
       loweredFunctions  <- lowerReachableFunctions(loweredProgram, functions, additionalEntries, functionNames)
@@ -206,12 +207,10 @@ private object VMCompiler {
           labels(label) = instructionIndex.unsafe[Pc]
         case Statement.Instruction(_)                                       => instructionIndex += 1
         case Statement.UnsupportedInstruction(opcode, operands, mods, pred) =>
-          val qualified = (opcode +: mods.map(_.name)).mkString(".")
-          val rendered  = pred.map(value => s"${Printer.render(value)} ").getOrElse("") +
-            qualified + (if (operands.isEmpty) "" else operands.map(Printer.render).mkString(" ", ", ", "")) + ";"
-          return Left(
-            Error.Unsupported(rendered.unsafe[NonEmpty[String]], "instruction is not implemented")
-          )
+          return Left(Error.Unsupported(
+            opcode,
+            s"instruction is not implemented (modifiers: $mods, operands: $operands, predicate: $pred)"
+          ))
         case _ => ()
       }
       statementIndex += 1
@@ -227,9 +226,9 @@ private object VMCompiler {
             case Left(error) =>
               val contextual = error match {
                 case Error.Invalid(detail) =>
-                  Error.Invalid(s"${Printer.render(instruction)}: $detail")
+                  Error.Invalid(s"${instruction.qualifiedOpcode}: $detail")
                 case Error.Unsupported(_, detail) =>
-                  Error.Unsupported(Printer.render(instruction), detail)
+                  Error.Unsupported(instruction.opcode, detail)
               }
               return Left(contextual)
             case Right(value) => lowered += value
@@ -245,7 +244,7 @@ private object VMCompiler {
       function: Statement.Function,
       functionNames: Set[NonEmpty[String]]
   ): Either[Error, DeviceFunction] = {
-    val Statement.Function(_, name, returnParameters, parameters, body) = function
+    val Statement.Function(_, name, returnParameters, parameters, body, _) = function
     body match {
       case None             => Left(Error.Invalid(s"function $name has no body"))
       case Some(statements) =>
@@ -270,8 +269,9 @@ private object VMCompiler {
       entry: Statement.Entry,
       functionNames: Set[NonEmpty[String]]
   ): Either[Error, DeviceFunction] = {
-    val Statement.Entry(_, name, parameters, body) = entry
+    val Statement.Entry(_, name, parameters, definition, _) = entry
     for {
+      body              <- definition.toRight(Error.Invalid(s"entry $name has no body"))
       loweredParameters <- lowerParameters(parameters)
       offsets           <- parameterOffsets(parameters, loweredParameters)
       program           <- lowerProgram(body, functionNames)
@@ -327,7 +327,9 @@ private object VMCompiler {
         (current, value) =>
           for {
             count   <- current
-            element <- immediate(value)
+            element <- value.toRight(
+              Error.Invalid(s"kernel parameter ${parameter.name} has an unsized dimension")
+            ).flatMap(immediate(_))
             product <-
               if (element > 0 && count.raw <= Int.MaxValue.toLong / element)
                 Right((count.raw * element).unsafe[Long > 0])
@@ -370,7 +372,7 @@ private object VMCompiler {
 
     def declaredRegisters(body: Vec[Statement]): Vec[NonEmpty[String]] =
       Vec.toVec(body.view.flatMap {
-        case Statement.Directive(path, arguments, _)
+        case Statement.Directive(path, arguments, _, _)
             if path.head.raw == "reg" =>
           arguments.view.flatMap(argument => registerNames(argument.operand))
         case _ => Vector.empty.view
@@ -402,7 +404,7 @@ private object VMCompiler {
       val pred     = instruction.pred.map(value => value.copy(operand = renameOperand(value.operand, names)))
       instruction.decoder(operands, instruction.mods, pred).leftMap(error =>
         Error.Invalid(
-          s"failed to preserve scoped instruction ${Printer.render(instruction)}: $error"
+          s"failed to preserve scoped instruction ${instruction.qualifiedOpcode}: $error"
         )
       )
     }
@@ -451,36 +453,72 @@ private object VMCompiler {
 
   // The native host CAS path provides sequential consistency, satisfying these
   // weaker PTX atomic orders. Keep unsupported qualifier combinations explicit.
-  private def atomicOpcode(opcode: String): String =
-    opcode.replaceFirst(
-      "^atom\\.(?:(?:relaxed|acquire|release|acq_rel)\\.)?(?:cta|gpu|sys)\\.global\\.",
-      "atom.global."
-    )
+  private val AtomicOrders = Set(Modifier.Relaxed, Modifier.Acquire, Modifier.Release, Modifier.AcqRel)
+  private val AtomicScopes = Set(Modifier.Cta, Modifier.Gpu, Modifier.Sys)
 
-  private def atomicSpace(opcode: String): VMIR.AtomicSpace = {
-    val normalized = atomicOpcode(opcode)
-    if (normalized.startsWith("atom.global.")) VMIR.AtomicSpace.Global
-    else if (normalized.startsWith("atom.shared.")) VMIR.AtomicSpace.Shared
-    else VMIR.AtomicSpace.Generic
+  private def atomicSignature(signature: InstructionSignature): InstructionSignature = {
+    val modifiers = signature.modifiers match {
+      case scope +: Modifier.Global +: rest if AtomicScopes(scope) => Modifier.Global +: rest
+      case order +: scope +: Modifier.Global +: rest if AtomicOrders(order) && AtomicScopes(scope) =>
+        Modifier.Global +: rest
+      case other => other
+    }
+    signature.copy(modifiers = modifiers)
+  }
+
+  private def atomicSpace(signature: InstructionSignature): VMIR.AtomicSpace =
+    atomicSignature(signature).modifiers.headOption match {
+      case Some(Modifier.Global) => VMIR.AtomicSpace.Global
+      case Some(Modifier.Shared) => VMIR.AtomicSpace.Shared
+      case _                     => VMIR.AtomicSpace.Generic
+    }
+
+  private def atomicBinaryForm(signature: InstructionSignature): Boolean = {
+    val modifiers = signature.modifiers match {
+      case (Modifier.Global | Modifier.Shared) +: rest => rest
+      case other                                       => other
+    }
+    modifiers match {
+      case Vec(Modifier.Max, Modifier.U32 | Modifier.U64)                              => true
+      case Vec(Modifier.And | Modifier.Or | Modifier.Xor, Modifier.B32 | Modifier.B64) => true
+      case _                                                                           => false
+    }
+  }
+
+  private def orderedMemoryForm(signature: InstructionSignature, load: Boolean): Boolean = signature.modifiers match {
+    case Vec(order, scope, Modifier.Global, Modifier.U32 | Modifier.U64 | Modifier.B32 | Modifier.B64) =>
+      AtomicScopes(scope) && (order == Modifier.Relaxed || order == (if (load) Modifier.Acquire else Modifier.Release))
+    case _ => false
+  }
+
+  private def fenceForm(signature: InstructionSignature): Boolean = {
+    val scopes = Set(Modifier.Cta, Modifier.Gpu, Modifier.Sys, Modifier.Cluster)
+    signature.modifiers match {
+      case Vec(scope)        => scopes(scope)
+      case Vec(order, scope) => Set(Modifier.Sc, Modifier.AcqRel, Modifier.Acquire, Modifier.Release)(order) &&
+        scopes(scope)
+      case _ => false
+    }
   }
 
   private def atomicIntegerOperands(
       destination: Operand,
       address: Operand,
       source: Operand,
-      opcode: String
+      signature: InstructionSignature
   ): Either[Error, (NonEmpty[String], Value, Value, Int where (Between[8, 64] & MultipleOf[8]), VMIR.AtomicSpace)] =
     for {
       destinationName <- registerName(destination)
       addressValue    <- addressValue(address)
       sourceValue     <- value(source)
+      width: (Int where (Between[8, 64] & MultipleOf[8])) =
+        if (signature.modifiers.lastOption.exists(_.bitWidth == 64)) 64 else 32
     } yield (
       destinationName,
       addressValue,
       sourceValue,
-      if (opcode.endsWith("64")) 64: Int where (Between[8, 64] & MultipleOf[8])
-      else 32: Int where (Between[8, 64] & MultipleOf[8]),
-      atomicSpace(opcode)
+      width,
+      atomicSpace(signature)
     )
 
   private def lowerInstruction(
@@ -488,9 +526,12 @@ private object VMCompiler {
       labels: Map[NonEmpty[String], Pc],
       functionNames: Set[NonEmpty[String]]
   ): Either[Error, PredicatedInstruction] = {
-    val lowered = instruction match {
+    val signature  = instruction.signature
+    val qualifiers = signature.modifiers
+    val lowered    = instruction match {
       case Instruction.Ld(destination, address, None, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("ld.param.") && isDirectParameterAddress(address) =>
+          if (signature.opcode == Opcode.Ld && qualifiers.startsWith(Vec(Modifier.Param)) && qualifiers.size > 1) &&
+            isDirectParameterAddress(address) =>
         for {
           destinationNames   <- registerNames(destination)
           parameterAndOffset <- parameterAddress(address)
@@ -500,10 +541,10 @@ private object VMCompiler {
           parameterAndOffset._1,
           parameterAndOffset._2,
           width,
-          instruction.qualifiedOpcode.contains(".s")
+          qualifiers.exists(_.isSigned)
         )
       case Instruction.St(address, source, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("st.param.") =>
+          if signature.opcode == Opcode.St && qualifiers.startsWith(Vec(Modifier.Param)) && qualifiers.size > 1 =>
         for {
           parameterAndOffset <- parameterAddress(address)
           sourceValue        <- value(source)
@@ -515,7 +556,7 @@ private object VMCompiler {
           width
         )
       case Instruction.Ld(destination, address, None, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("ld.param.") =>
+          if signature.opcode == Opcode.Ld && qualifiers.startsWith(Vec(Modifier.Param)) && qualifiers.size > 1 =>
         for {
           destinationNames <- registerNames(destination)
           addressValue     <- addressValue(address)
@@ -526,105 +567,112 @@ private object VMCompiler {
               destinationNames,
               addressValue,
               width,
-              instruction.qualifiedOpcode.contains(".s")
+              qualifiers.exists(_.isSigned)
             )
           else
             VMIR.Instruction.LoadParameterIndirect(
               destinationNames.head,
               addressValue,
               width,
-              instruction.qualifiedOpcode.contains(".s")
+              qualifiers.exists(_.isSigned)
             )
       case Instruction.Mov(destination, source, _, _)
-          if instruction.qualifiedOpcode == "mov.pred" =>
+          if signature.matches(Opcode.Mov, Modifier.Pred) =>
         for {
           destinationName <- predicateRegisterName(destination)
           sourceValue     <- value(source)
         } yield VMIR.Instruction.MovePredicate(destinationName, sourceValue)
       case Instruction.Activemask(destination, _, _) =>
         registerName(destination).map(destinationName =>
-          VMIR.Instruction.Move(destinationName, Value.ActiveMask, 32: Int where (Between[8, 64] & MultipleOf[8]))
+          VMIR.Instruction.Move(destinationName, Value.ActiveMask, 32)
         )
       case Instruction.Mov(destination, source, _, _)
-          if Set("mov.u32", "mov.s32", "mov.b32").contains(instruction.qualifiedOpcode) &&
+          if Set(
+            InstructionSignature(Opcode.Mov, Vec(Modifier.U32)),
+            InstructionSignature(Opcode.Mov, Vec(Modifier.S32)),
+            InstructionSignature(Opcode.Mov, Vec(Modifier.B32))
+          ).contains(signature) &&
             !Operand.isVectorLiteral(destination) &&
             !Operand.isVectorLiteral(source) =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, 32: Int where (Between[8, 64] & MultipleOf[8]))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 32)
       case Instruction.Mov(destination, source, modifiers, _)
-          if Set("mov.u8", "mov.s8", "mov.b8", "mov.u16", "mov.s16", "mov.b16").contains(instruction.qualifiedOpcode) =>
+          if Set(
+            InstructionSignature(Opcode.Mov, Vec(Modifier.U8)),
+            InstructionSignature(Opcode.Mov, Vec(Modifier.S8)),
+            InstructionSignature(Opcode.Mov, Vec(Modifier.B8)),
+            InstructionSignature(Opcode.Mov, Vec(Modifier.U16)),
+            InstructionSignature(Opcode.Mov, Vec(Modifier.S16)),
+            InstructionSignature(Opcode.Mov, Vec(Modifier.B16))
+          ).contains(signature) =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
           width           <- integerWidth(modifiers)
         } yield VMIR.Instruction.Move(destinationName, sourceValue, width)
       case Instruction.Mov(destination, source, _, _)
-          if (instruction.qualifiedOpcode == "mov.u64" || instruction.qualifiedOpcode == "mov.b64") &&
+          if (signature.matches(Opcode.Mov, Modifier.U64) || signature.matches(Opcode.Mov, Modifier.B64)) &&
             Operand.isVectorLiteral(destination) =>
         for {
           destinationNames <- splitRegisterNames(destination)
           sourceValue      <- value(source)
           _                <- requirePair(destinationNames, "mov.b64 destination")
-        } yield VMIR.Instruction.MoveSplit(destinationNames, sourceValue, 32: Int in (16, 32))
+        } yield VMIR.Instruction.MoveSplit(destinationNames, sourceValue, 32)
       case Instruction.Mov(destination, source, _, _)
-          if instruction.qualifiedOpcode == "mov.b32" && Operand.isVectorLiteral(destination) =>
+          if signature.matches(Opcode.Mov, Modifier.B32) && Operand.isVectorLiteral(destination) =>
         for {
           destinationNames <- splitRegisterNames(destination)
           sourceValue      <- value(source)
           _                <- requirePair(destinationNames, "mov.b32 destination")
-        } yield VMIR.Instruction.MoveSplit(destinationNames, sourceValue, 16: Int in (16, 32))
+        } yield VMIR.Instruction.MoveSplit(destinationNames, sourceValue, 16)
       case Instruction.Mov(destination, source, _, _)
-          if (instruction.qualifiedOpcode == "mov.u64" || instruction.qualifiedOpcode == "mov.b64") &&
+          if (signature.matches(Opcode.Mov, Modifier.U64) || signature.matches(Opcode.Mov, Modifier.B64)) &&
             Operand.isVectorLiteral(source) =>
         for {
           destinationName <- registerName(destination)
           sourceValues    <- vectorValues(source)
           _               <- requirePair(sourceValues, "mov.b64 source")
-        } yield VMIR.Instruction.MoveCombine(destinationName, sourceValues, 32: Int in (16, 32))
+        } yield VMIR.Instruction.MoveCombine(destinationName, sourceValues, 32)
       case Instruction.Mov(destination, source, _, _)
-          if instruction.qualifiedOpcode == "mov.b32" && Operand.isVectorLiteral(source) =>
+          if signature.matches(Opcode.Mov, Modifier.B32) && Operand.isVectorLiteral(source) =>
         for {
           destinationName <- registerName(destination)
           sourceValues    <- vectorValues(source)
           _               <- requirePair(sourceValues, "mov.b32 source")
-        } yield VMIR.Instruction.MoveCombine(destinationName, sourceValues, 16: Int in (16, 32))
+        } yield VMIR.Instruction.MoveCombine(destinationName, sourceValues, 16)
       case Instruction.Mov(destination, source, _, _)
-          if instruction.qualifiedOpcode == "mov.u64" || instruction.qualifiedOpcode == "mov.b64" =>
+          if signature.matches(Opcode.Mov, Modifier.U64) || signature.matches(Opcode.Mov, Modifier.B64) =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- functionValue(source, functionNames, promoteUnknown = false)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64)
       case Instruction.Mov(destination, source, _, _)
-          if instruction.qualifiedOpcode == "mov.f32" =>
+          if signature.matches(Opcode.Mov, Modifier.F32) =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, 32: Int where (Between[8, 64] & MultipleOf[8]))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 32)
       case Instruction.Mov(destination, source, _, _)
-          if instruction.qualifiedOpcode == "mov.f64" =>
+          if signature.matches(Opcode.Mov, Modifier.F64) =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
-      case Instruction.Neg(destination, source, modifiers, _) if !instruction.qualifiedOpcode.contains(".f") =>
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64)
+      case Instruction.Neg(destination, source, modifiers, _) if !qualifiers.exists(_.isFloating) =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
           width           <- integerWidth(modifiers)
         } yield VMIR.Instruction.IntegerUnary(IntegerUnaryOperation.Negate, destinationName, sourceValue, width)
-      case Instruction.Neg(destination, source, modifiers, _) if instruction.qualifiedOpcode.contains(".f") =>
-        for {
-          destinationName <- registerName(destination)
-          sourceValue     <- value(source)
-          width           <- floatWidth(modifiers)
-        } yield VMIR.Instruction.FloatUnary(FloatUnaryOperation.Negate, destinationName, sourceValue, width)
+      case Instruction.Neg(destination, source, modifiers, _) if qualifiers.exists(_.isFloating) =>
+        floatUnary(FloatUnaryOperation.Negate, destination, source, modifiers)
       case Instruction.Abs(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("abs.f") =>
+          if qualifiers.exists(_.isFloating) =>
         floatUnary(FloatUnaryOperation.Absolute, destination, source, modifiers)
       case Instruction.Abs(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("abs.") =>
+          if signature.opcode == Opcode.Abs && qualifiers.nonEmpty =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
@@ -635,42 +683,42 @@ private object VMCompiler {
           sourceValue,
           width
         )
-      case Instruction.RcpApproxFtzF64(destination, source, modifiers, _) =>
-        floatUnary(FloatUnaryOperation.Reciprocal, destination, source, modifiers, Some(64: Int in (16, 32, 64)))
+      case Instruction.RcpApproxFtzF64(destination, source, _, _) =>
+        floatUnary(FloatUnaryOperation.Reciprocal, destination, source, qualifiers, Some(64))
       case Instruction.Rcp(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("rcp.") =>
+          if signature.opcode == Opcode.Rcp && qualifiers.nonEmpty =>
         floatUnary(FloatUnaryOperation.Reciprocal, destination, source, modifiers)
-      case Instruction.RsqrtApproxFtzF64(destination, source, modifiers, _) =>
+      case Instruction.RsqrtApproxFtzF64(destination, source, _, _) =>
         floatUnary(
           FloatUnaryOperation.ReciprocalSquareRoot,
           destination,
           source,
-          modifiers,
-          Some(64: Int in (16, 32, 64))
+          qualifiers,
+          Some(64)
         )
       case Instruction.Rsqrt(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("rsqrt.") =>
+          if signature.opcode == Opcode.Rsqrt && qualifiers.nonEmpty =>
         floatUnary(FloatUnaryOperation.ReciprocalSquareRoot, destination, source, modifiers)
       case Instruction.Sqrt(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("sqrt.") =>
+          if signature.opcode == Opcode.Sqrt && qualifiers.nonEmpty =>
         floatUnary(FloatUnaryOperation.SquareRoot, destination, source, modifiers)
       case Instruction.Ex2(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("ex2.") =>
+          if signature.opcode == Opcode.Ex2 && qualifiers.nonEmpty =>
         floatUnary(FloatUnaryOperation.Exponent2, destination, source, modifiers)
       case Instruction.Lg2(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("lg2.") =>
+          if signature.opcode == Opcode.Lg2 && qualifiers.nonEmpty =>
         floatUnary(FloatUnaryOperation.Log2, destination, source, modifiers)
       case Instruction.Sin(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("sin.") =>
+          if signature.opcode == Opcode.Sin && qualifiers.nonEmpty =>
         floatUnary(FloatUnaryOperation.Sine, destination, source, modifiers)
       case Instruction.Cos(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("cos.") =>
+          if signature.opcode == Opcode.Cos && qualifiers.nonEmpty =>
         floatUnary(FloatUnaryOperation.Cosine, destination, source, modifiers)
       case Instruction.Tanh(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("tanh.") =>
+          if signature.opcode == Opcode.Tanh && qualifiers.nonEmpty =>
         floatUnary(FloatUnaryOperation.Tanh, destination, source, modifiers)
       case Instruction.Not(destination, source, modifiers, _) =>
-        if (instruction.qualifiedOpcode == "not.pred")
+        if (signature.matches(Opcode.Not, Modifier.Pred))
           for {
             destinationName <- predicateRegisterName(destination)
             sourceName      <- predicateRegisterName(source)
@@ -687,7 +735,7 @@ private object VMCompiler {
             width
           )
       case Instruction.Popc(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("popc.") =>
+          if signature.opcode == Opcode.Popc && qualifiers.nonEmpty =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
@@ -699,7 +747,7 @@ private object VMCompiler {
           width
         )
       case Instruction.Clz(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("clz.") =>
+          if signature.opcode == Opcode.Clz && qualifiers.nonEmpty =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
@@ -711,7 +759,7 @@ private object VMCompiler {
           width
         )
       case Instruction.Bfind(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("bfind.") =>
+          if signature.opcode == Opcode.Bfind && qualifiers.nonEmpty =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
@@ -720,12 +768,12 @@ private object VMCompiler {
           destinationName,
           sourceValue,
           width,
-          instruction.qualifiedOpcode.contains(".s"),
-          instruction.qualifiedOpcode.contains(".shiftamt.")
+          qualifiers.exists(_.isSigned),
+          qualifiers.contains(Modifier.Shiftamt)
         )
       case Instruction.Dp4a(destination, left, right, addend, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("dp4a.") =>
-        val types = modifiers.map(_.name.raw).filter(Set("s32", "u32"))
+          if signature.opcode == Opcode.Dp4a && qualifiers.nonEmpty =>
+        val types = modifiers.filter(Set(Modifier.S32, Modifier.U32))
         if (types.size != 2) invalid(s"expected two dp4a operand types: ${instruction.qualifiedOpcode}")
         else
           for {
@@ -738,11 +786,11 @@ private object VMCompiler {
             leftValue,
             rightValue,
             addendValue,
-            types.head == "s32",
-            types(1) == "s32"
+            types.head == Modifier.S32,
+            types(1) == Modifier.S32
           )
       case Instruction.Brev(destination, source, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("brev.") =>
+          if signature.opcode == Opcode.Brev && qualifiers.nonEmpty =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
@@ -753,7 +801,8 @@ private object VMCompiler {
           sourceValue,
           width
         )
-      case Instruction.Mul(destination, left, right, _, _) if instruction.qualifiedOpcode == "mul.wide.u32" =>
+      case Instruction.Mul(destination, left, right, _, _)
+          if signature.matches(Opcode.Mul, Modifier.Wide, Modifier.U32) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
@@ -763,9 +812,10 @@ private object VMCompiler {
           destinationName,
           leftValue,
           rightValue,
-          64: Int where (Between[8, 64] & MultipleOf[8])
+          64
         )
-      case Instruction.Mul(destination, left, right, _, _) if instruction.qualifiedOpcode == "mul.wide.s32" =>
+      case Instruction.Mul(destination, left, right, _, _)
+          if signature.matches(Opcode.Mul, Modifier.Wide, Modifier.S32) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
@@ -775,9 +825,10 @@ private object VMCompiler {
           destinationName,
           leftValue,
           rightValue,
-          64: Int where (Between[8, 64] & MultipleOf[8])
+          64
         )
-      case Instruction.Mul(destination, left, right, _, _) if instruction.qualifiedOpcode == "mul.wide.u16" =>
+      case Instruction.Mul(destination, left, right, _, _)
+          if signature.matches(Opcode.Mul, Modifier.Wide, Modifier.U16) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
@@ -787,9 +838,10 @@ private object VMCompiler {
           destinationName,
           leftValue,
           rightValue,
-          32: Int where (Between[8, 64] & MultipleOf[8])
+          32
         )
-      case Instruction.Mul(destination, left, right, _, _) if instruction.qualifiedOpcode == "mul.wide.s16" =>
+      case Instruction.Mul(destination, left, right, _, _)
+          if signature.matches(Opcode.Mul, Modifier.Wide, Modifier.S16) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
@@ -799,18 +851,18 @@ private object VMCompiler {
           destinationName,
           leftValue,
           rightValue,
-          32: Int where (Between[8, 64] & MultipleOf[8])
+          32
         )
       case Instruction.Div(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.endsWith(".f16") ||
-            instruction.qualifiedOpcode.endsWith(".f32") ||
-            instruction.qualifiedOpcode.endsWith(".f64") =>
+          if qualifiers.endsWith(Vec(Modifier.F16)) ||
+            qualifiers.endsWith(Vec(Modifier.F32)) ||
+            qualifiers.endsWith(Vec(Modifier.F64)) =>
         floatBinary(FloatOperation.Divide, destination, left, right, modifiers)
       case Instruction.Div(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("div.") =>
+          if signature.opcode == Opcode.Div && qualifiers.nonEmpty =>
         integerWidth(modifiers).flatMap { width =>
           integerBinary(
-            IntegerOperation.Divide(instruction.qualifiedOpcode.contains(".s")),
+            IntegerOperation.Divide(qualifiers.exists(_.isSigned)),
             width,
             destination,
             left,
@@ -818,10 +870,10 @@ private object VMCompiler {
           )
         }
       case Instruction.Rem(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("rem.") =>
+          if signature.opcode == Opcode.Rem && qualifiers.nonEmpty =>
         integerWidth(modifiers).flatMap { width =>
           integerBinary(
-            IntegerOperation.Remainder(instruction.qualifiedOpcode.contains(".s")),
+            IntegerOperation.Remainder(qualifiers.exists(_.isSigned)),
             width,
             destination,
             left,
@@ -829,13 +881,13 @@ private object VMCompiler {
           )
         }
       case Instruction.Mul(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("mul.lo.") =>
+          if signature.opcode == Opcode.Mul && qualifiers.startsWith(Vec(Modifier.Lo)) && qualifiers.size > 1 =>
         integerWidth(modifiers).flatMap(integerBinary(IntegerOperation.MultiplyLow, _, destination, left, right))
       case Instruction.Mul(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("mul.hi.") =>
+          if signature.opcode == Opcode.Mul && qualifiers.startsWith(Vec(Modifier.Hi)) && qualifiers.size > 1 =>
         integerWidth(modifiers).flatMap { width =>
           integerBinary(
-            IntegerOperation.MultiplyHigh(instruction.qualifiedOpcode.contains(".s")),
+            IntegerOperation.MultiplyHigh(qualifiers.exists(_.isSigned)),
             width,
             destination,
             left,
@@ -843,25 +895,25 @@ private object VMCompiler {
           )
         }
       case Instruction.Mul(destination, left, right, _, _)
-          if instruction.qualifiedOpcode.endsWith(".f16x2") || instruction.qualifiedOpcode.endsWith(".bf16x2") =>
+          if qualifiers.endsWith(Vec(Modifier.F16x2)) || qualifiers.endsWith(Vec(Modifier.Bf16x2)) =>
         packedFloatBinary(
           FloatOperation.Multiply,
           destination,
           left,
           right,
-          instruction.qualifiedOpcode.endsWith(".bf16x2")
+          qualifiers.endsWith(Vec(Modifier.Bf16x2))
         )
       case Instruction.Mul(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("mul.") &&
-            (instruction.qualifiedOpcode.endsWith(".f16") ||
-              instruction.qualifiedOpcode.endsWith(".f32") ||
-              instruction.qualifiedOpcode.endsWith(".f64")) =>
+          if (signature.opcode == Opcode.Mul && qualifiers.nonEmpty) &&
+            (qualifiers.endsWith(Vec(Modifier.F16)) ||
+              qualifiers.endsWith(Vec(Modifier.F32)) ||
+              qualifiers.endsWith(Vec(Modifier.F64))) =>
         floatBinary(FloatOperation.Multiply, destination, left, right, modifiers)
       case Instruction.CopySign(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("copysign.") =>
+          if signature.opcode == Opcode.CopySign && qualifiers.nonEmpty =>
         floatBinary(FloatOperation.CopySign, destination, left, right, modifiers)
       case Instruction.Fma(destination, left, right, addend, _, _)
-          if instruction.qualifiedOpcode.endsWith(".f16x2") || instruction.qualifiedOpcode.endsWith(".bf16x2") =>
+          if qualifiers.endsWith(Vec(Modifier.F16x2)) || qualifiers.endsWith(Vec(Modifier.Bf16x2)) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
@@ -872,11 +924,11 @@ private object VMCompiler {
           leftValue,
           rightValue,
           addendValue,
-          instruction.qualifiedOpcode.endsWith(".bf16x2"),
-          saturate = instruction.mods.exists(_.name == "sat")
+          qualifiers.endsWith(Vec(Modifier.Bf16x2)),
+          saturate = qualifiers.contains(Modifier.Sat)
         )
       case Instruction.Fma(destination, left, right, addend, _, _)
-          if instruction.qualifiedOpcode.endsWith(".bf16") =>
+          if qualifiers.endsWith(Vec(Modifier.Bf16)) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
@@ -884,29 +936,64 @@ private object VMCompiler {
           addendValue     <- value(addend)
         } yield VMIR.Instruction.FusedMultiplyAddBf16(destinationName, leftValue, rightValue, addendValue)
       case Instruction.Fma(destination, left, right, addend, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("fma.") =>
+          if signature.opcode == Opcode.Fma && qualifiers.nonEmpty =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
           addendValue     <- value(addend)
           width           <- floatWidth(modifiers)
-        } yield VMIR.Instruction.FusedMultiplyAdd(destinationName, leftValue, rightValue, addendValue, width)
-      case Instruction.Shl(destination, left, right, _, _) if instruction.qualifiedOpcode == "shl.b32" =>
+        } yield VMIR.Instruction.FusedMultiplyAdd(
+          destinationName,
+          leftValue,
+          rightValue,
+          addendValue,
+          width,
+          floatControl(modifiers)
+        )
+      case Instruction.Shl(destination, left, right, _, _) if signature.matches(Opcode.Shl, Modifier.B32) =>
         integerBinary(
           IntegerOperation.ShiftLeft,
-          32: Int where (Between[8, 64] & MultipleOf[8]),
+          32,
           destination,
           left,
           right
         )
-      case Instruction.Shl(destination, left, right, modifiers, _) if instruction.qualifiedOpcode.startsWith("shl.") =>
+      case Instruction.Shl(destination, left, right, modifiers, _)
+          if signature.opcode == Opcode.Shl && qualifiers.nonEmpty =>
         integerWidth(modifiers).flatMap(integerBinary(IntegerOperation.ShiftLeft, _, destination, left, right))
       case Instruction.Shr(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("shr.u") || instruction.qualifiedOpcode.startsWith("shr.b") =>
+          if (signature.opcode == Opcode.Shr && qualifiers.nonEmpty && Set(
+            Modifier.U16,
+            Modifier.U16x2,
+            Modifier.U2,
+            Modifier.U32,
+            Modifier.U4,
+            Modifier.U64,
+            Modifier.U8,
+            Modifier.U8x4
+          )(qualifiers(0))) ||
+            (signature.opcode == Opcode.Shr && qualifiers.nonEmpty && Set(
+              Modifier.B1024,
+              Modifier.B128,
+              Modifier.B16,
+              Modifier.B32,
+              Modifier.B64,
+              Modifier.B8,
+              Modifier.B8x16
+            )(qualifiers(0))) =>
         integerWidth(modifiers).flatMap(integerBinary(IntegerOperation.ShiftRightLogical, _, destination, left, right))
       case Instruction.Shr(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("shr.s") =>
+          if signature.opcode == Opcode.Shr && qualifiers.nonEmpty && Set(
+            Modifier.S16,
+            Modifier.S16x2,
+            Modifier.S2,
+            Modifier.S32,
+            Modifier.S4,
+            Modifier.S64,
+            Modifier.S8,
+            Modifier.S8x4
+          )(qualifiers(0)) =>
         integerWidth(modifiers).flatMap(integerBinary(
           IntegerOperation.ShiftRightArithmetic,
           _,
@@ -915,7 +1002,7 @@ private object VMCompiler {
           right
         ))
       case Instruction.Shf(destination, low, high, amount, _, _)
-          if instruction.qualifiedOpcode.startsWith("shf.") && instruction.qualifiedOpcode.endsWith(".b32") =>
+          if (signature.opcode == Opcode.Shf && qualifiers.nonEmpty) && qualifiers.endsWith(Vec(Modifier.B32)) =>
         for {
           destinationName <- registerName(destination)
           lowValue        <- value(low)
@@ -926,11 +1013,14 @@ private object VMCompiler {
           lowValue,
           highValue,
           amountValue,
-          instruction.qualifiedOpcode.startsWith("shf.l."),
-          instruction.qualifiedOpcode.contains(".clamp.")
+          signature.opcode == Opcode.Shf && qualifiers.startsWith(Vec(Modifier.L)) && qualifiers.size > 1,
+          qualifiers.contains(Modifier.Clamp)
         )
       case Instruction.ShflSync(destination, source, delta, clamp, memberMask, modifiers, _)
-          if Set("shfl.sync.down.b32", "shfl.sync.down.b64").contains(instruction.qualifiedOpcode) =>
+          if Set(
+            InstructionSignature(Opcode.Shfl, Vec(Modifier.Sync, Modifier.Down, Modifier.B32)),
+            InstructionSignature(Opcode.Shfl, Vec(Modifier.Sync, Modifier.Down, Modifier.B64))
+          ).contains(signature) =>
         for {
           destinationInfo <- valueDestination(destination)
           sourceValue     <- value(source)
@@ -948,7 +1038,10 @@ private object VMCompiler {
           width = width
         )
       case Instruction.ShflSync(destination, source, delta, clamp, memberMask, modifiers, _)
-          if Set("shfl.sync.up.b32", "shfl.sync.up.b64").contains(instruction.qualifiedOpcode) =>
+          if Set(
+            InstructionSignature(Opcode.Shfl, Vec(Modifier.Sync, Modifier.Up, Modifier.B32)),
+            InstructionSignature(Opcode.Shfl, Vec(Modifier.Sync, Modifier.Up, Modifier.B64))
+          ).contains(signature) =>
         for {
           destinationInfo <- valueDestination(destination)
           sourceValue     <- value(source)
@@ -966,7 +1059,10 @@ private object VMCompiler {
           width = width
         )
       case Instruction.ShflSync(destination, source, index, clamp, memberMask, modifiers, _)
-          if Set("shfl.sync.idx.b32", "shfl.sync.idx.b64").contains(instruction.qualifiedOpcode) =>
+          if Set(
+            InstructionSignature(Opcode.Shfl, Vec(Modifier.Sync, Modifier.Idx, Modifier.B32)),
+            InstructionSignature(Opcode.Shfl, Vec(Modifier.Sync, Modifier.Idx, Modifier.B64))
+          ).contains(signature) =>
         for {
           destinationInfo <- valueDestination(destination)
           sourceValue     <- value(source)
@@ -984,7 +1080,10 @@ private object VMCompiler {
           width = width
         )
       case Instruction.ShflSync(destination, source, index, clamp, memberMask, modifiers, _)
-          if Set("shfl.sync.bfly.b32", "shfl.sync.bfly.b64").contains(instruction.qualifiedOpcode) =>
+          if Set(
+            InstructionSignature(Opcode.Shfl, Vec(Modifier.Sync, Modifier.Bfly, Modifier.B32)),
+            InstructionSignature(Opcode.Shfl, Vec(Modifier.Sync, Modifier.Bfly, Modifier.B64))
+          ).contains(signature) =>
         for {
           destinationInfo <- valueDestination(destination)
           sourceValue     <- value(source)
@@ -1001,32 +1100,33 @@ private object VMCompiler {
           memberMask = memberMaskValue,
           width = width
         )
-      case Instruction.Vote(destination, Some(predicate), _, _) if instruction.qualifiedOpcode == "vote.ballot.b32" =>
+      case Instruction.Vote(destination, Some(predicate), _, _)
+          if signature.matches(Opcode.Vote, Modifier.Ballot, Modifier.B32) =>
         for {
           destinationName <- registerName(destination)
           predicateName   <- predicateRegisterName(predicate)
         } yield VMIR.Instruction.VoteBallot(destinationName, predicateName, Value.Immediate(0xffffffffL))
       case Instruction.VoteSync(destination, Some(predicate), Some(memberMask), _, _)
-          if instruction.qualifiedOpcode == "vote.sync.ballot.b32" =>
+          if signature.matches(Opcode.Vote, Modifier.Sync, Modifier.Ballot, Modifier.B32) =>
         for {
           destinationName <- registerName(destination)
           predicateName   <- predicateRegisterName(predicate)
           memberMaskValue <- value(memberMask)
         } yield VMIR.Instruction.VoteBallot(destinationName, predicateName, memberMaskValue)
       case Instruction.VoteSync(destination, Some(predicate), Some(memberMask), _, _)
-          if instruction.qualifiedOpcode == "vote.sync.all.pred" ||
-            instruction.qualifiedOpcode == "vote.sync.any.pred" ||
-            instruction.qualifiedOpcode == "vote.sync.uni.pred" =>
+          if signature.matches(Opcode.Vote, Modifier.Sync, Modifier.All, Modifier.Pred) ||
+            signature.matches(Opcode.Vote, Modifier.Sync, Modifier.Any, Modifier.Pred) ||
+            signature.matches(Opcode.Vote, Modifier.Sync, Modifier.Uni, Modifier.Pred) =>
         for {
           destinationName <- predicateRegisterName(destination)
           predicateName   <- predicateRegisterName(predicate)
           memberMaskValue <- value(memberMask)
-          operation = if (instruction.qualifiedOpcode.endsWith(".all.pred")) VoteOperation.All
-          else if (instruction.qualifiedOpcode.endsWith(".any.pred")) VoteOperation.Any
+          operation = if (qualifiers.endsWith(Vec(Modifier.All, Modifier.Pred))) VoteOperation.All
+          else if (qualifiers.endsWith(Vec(Modifier.Any, Modifier.Pred))) VoteOperation.Any
           else VoteOperation.Uniform
         } yield VMIR.Instruction.VotePredicate(destinationName, predicateName, memberMaskValue, operation)
       case Instruction.Bfe(destination, source, start, widthValue, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("bfe.") =>
+          if signature.opcode == Opcode.Bfe && qualifiers.nonEmpty =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
@@ -1039,10 +1139,10 @@ private object VMCompiler {
           start = startValue,
           widthValue = widthOperand,
           width = width,
-          signed = instruction.qualifiedOpcode.contains(".s")
+          signed = qualifiers.exists(_.isSigned)
         )
       case Instruction.Bfi(destination, insertValue, baseValue, bitPosition, bitLength, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("bfi.") =>
+          if signature.opcode == Opcode.Bfi && qualifiers.nonEmpty =>
         for {
           destinationName <- registerName(destination)
           insertOperand   <- value(insertValue)
@@ -1059,29 +1159,29 @@ private object VMCompiler {
           width = width
         )
       case Instruction.Bmsk(destination, start, widthValue, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("bmsk.") =>
+          if signature.opcode == Opcode.Bmsk && qualifiers.nonEmpty =>
         for {
           destinationName <- registerName(destination)
           startValue      <- value(start)
           widthOperand    <- value(widthValue)
           mode            <- modifiers.view.collectFirst {
-            case Modifier(name) if name.raw == "clamp" => BitMaskMode.Clamp
-            case Modifier(name) if name.raw == "wrap"  => BitMaskMode.Wrap
+            case Modifier.Clamp => BitMaskMode.Clamp
+            case Modifier.Wrap  => BitMaskMode.Wrap
           }
             .toRight(Error.Invalid("bmsk requires .clamp or .wrap"))
-          _ <- modifiers.map(_.name.raw).find(_.startsWith("b32")).toRight(
+          _ <- modifiers.find(_ == Modifier.B32).toRight(
             Error.Invalid("bmsk requires a .b32 width")
           )
         } yield VMIR.Instruction.BitMask(destinationName, startValue, widthOperand, mode)
       case Instruction.Prmt(destination, left, right, control, _, _)
-          if instruction.qualifiedOpcode.startsWith("prmt.b32") =>
+          if signature.opcode == Opcode.Prmt && qualifiers.startsWith(Vec(Modifier.B32)) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
           controlValue    <- value(control)
-          suffix = instruction.qualifiedOpcode.split('.').drop(2).headOption.getOrElse("")
-          mode <- BytePermuteMode.values.find(_.suffix == suffix).toRight(
+          suffix = qualifiers.drop(1).headOption
+          mode <- BytePermuteMode.values.find(_.modifier == suffix).toRight(
             Error.Invalid(s"unsupported prmt mode: $suffix")
           )
         } yield VMIR.Instruction.BytePermute(
@@ -1092,16 +1192,16 @@ private object VMCompiler {
           mode
         )
       case Instruction.Mad(destination, left, right, addend, _, _)
-          if instruction.qualifiedOpcode.contains(".lo.") &&
-            (instruction.qualifiedOpcode.endsWith(".s32") || instruction.qualifiedOpcode.endsWith(".u32") ||
-              instruction.qualifiedOpcode.endsWith(".s64") || instruction.qualifiedOpcode.endsWith(".u64")) =>
+          if qualifiers.contains(Modifier.Lo) &&
+            (qualifiers.endsWith(Vec(Modifier.S32)) || qualifiers.endsWith(Vec(Modifier.U32)) ||
+              qualifiers.endsWith(Vec(Modifier.S64)) || qualifiers.endsWith(Vec(Modifier.U64))) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
           addendValue     <- value(addend)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
-          else 64: Int where (Between[8, 64] & MultipleOf[8])
+          width: (Int where (Between[8, 64] & MultipleOf[8])) =
+            if (qualifiers.lastOption.exists(_.bitWidth == 32)) 32 else 64
         } yield VMIR.Instruction.MultiplyAdd(
           destination = destinationName,
           left = leftValue,
@@ -1111,20 +1211,20 @@ private object VMCompiler {
             operandWidth = width,
             resultWidth = width,
             carryIn = false,
-            carryOut = instruction.qualifiedOpcode.contains(".cc.")
+            carryOut = qualifiers.contains(Modifier.Cc)
           )
         )
       case Instruction.MadCc(destination, left, right, addend, _, _)
-          if instruction.qualifiedOpcode.contains(".lo.") &&
-            (instruction.qualifiedOpcode.endsWith(".s32") || instruction.qualifiedOpcode.endsWith(".u32") ||
-              instruction.qualifiedOpcode.endsWith(".s64") || instruction.qualifiedOpcode.endsWith(".u64")) =>
+          if qualifiers.contains(Modifier.Lo) &&
+            (qualifiers.endsWith(Vec(Modifier.S32)) || qualifiers.endsWith(Vec(Modifier.U32)) ||
+              qualifiers.endsWith(Vec(Modifier.S64)) || qualifiers.endsWith(Vec(Modifier.U64))) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
           addendValue     <- value(addend)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
-          else 64: Int where (Between[8, 64] & MultipleOf[8])
+          width: (Int where (Between[8, 64] & MultipleOf[8])) =
+            if (qualifiers.lastOption.exists(_.bitWidth == 32)) 32 else 64
         } yield VMIR.Instruction.MultiplyAdd(
           destination = destinationName,
           left = leftValue,
@@ -1134,7 +1234,7 @@ private object VMCompiler {
             IntegerMultiplyAddOperation.Low(operandWidth = width, resultWidth = width, carryIn = false, carryOut = true)
         )
       case Instruction.Mad(destination, left, right, addend, _, _)
-          if instruction.qualifiedOpcode.contains(".wide.") && instruction.qualifiedOpcode.endsWith(".u32") =>
+          if qualifiers.contains(Modifier.Wide) && qualifiers.endsWith(Vec(Modifier.U32)) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
@@ -1147,35 +1247,35 @@ private object VMCompiler {
           addend = addendValue,
           operation =
             IntegerMultiplyAddOperation.Low(
-              operandWidth = 32: Int where (Between[8, 64] & MultipleOf[8]),
-              resultWidth = 64: Int where (Between[8, 64] & MultipleOf[8]),
+              operandWidth = 32,
+              resultWidth = 64,
               carryIn = false,
               carryOut = false
             )
         )
       case Instruction.Madc(destination, left, right, addend, _, _)
-          if (instruction.qualifiedOpcode.contains(".lo.") || instruction.qualifiedOpcode.contains(".hi.")) &&
-            (instruction.qualifiedOpcode.endsWith(".s32") || instruction.qualifiedOpcode.endsWith(".u32") ||
-              instruction.qualifiedOpcode.endsWith(".s64") || instruction.qualifiedOpcode.endsWith(".u64")) =>
+          if (qualifiers.contains(Modifier.Lo) || qualifiers.contains(Modifier.Hi)) &&
+            (qualifiers.endsWith(Vec(Modifier.S32)) || qualifiers.endsWith(Vec(Modifier.U32)) ||
+              qualifiers.endsWith(Vec(Modifier.S64)) || qualifiers.endsWith(Vec(Modifier.U64))) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
           addendValue     <- value(addend)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
-          else 64: Int where (Between[8, 64] & MultipleOf[8])
-          operation = if (instruction.qualifiedOpcode.contains(".hi."))
+          width: (Int where (Between[8, 64] & MultipleOf[8])) =
+            if (qualifiers.lastOption.exists(_.bitWidth == 32)) 32 else 64
+          operation = if (qualifiers.contains(Modifier.Hi))
             IntegerMultiplyAddOperation.High(
               operandWidth = width,
               resultWidth = width,
               carryIn = true,
-              carryOut = instruction.qualifiedOpcode.contains(".cc.")
+              carryOut = qualifiers.contains(Modifier.Cc)
             )
           else IntegerMultiplyAddOperation.Low(
             operandWidth = width,
             resultWidth = width,
             carryIn = true,
-            carryOut = instruction.qualifiedOpcode.contains(".cc.")
+            carryOut = qualifiers.contains(Modifier.Cc)
           )
         } yield VMIR.Instruction.MultiplyAdd(
           destination = destinationName,
@@ -1185,14 +1285,14 @@ private object VMCompiler {
           operation = operation
         )
       case Instruction.AddCc(destination, left, right, _, _)
-          if instruction.qualifiedOpcode.endsWith(".u32") || instruction.qualifiedOpcode.endsWith(".s32") ||
-            instruction.qualifiedOpcode.endsWith(".u64") || instruction.qualifiedOpcode.endsWith(".s64") =>
+          if qualifiers.endsWith(Vec(Modifier.U32)) || qualifiers.endsWith(Vec(Modifier.S32)) ||
+            qualifiers.endsWith(Vec(Modifier.U64)) || qualifiers.endsWith(Vec(Modifier.S64)) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
-          else 64: Int where (Between[8, 64] & MultipleOf[8])
+          width: (Int where (Between[8, 64] & MultipleOf[8])) =
+            if (qualifiers.lastOption.exists(_.bitWidth == 32)) 32 else 64
         } yield VMIR.Instruction.IntegerAddWithCarry(
           destinationName,
           leftValue,
@@ -1202,31 +1302,31 @@ private object VMCompiler {
           carryOut = true
         )
       case Instruction.Addc(destination, left, right, _, _)
-          if instruction.qualifiedOpcode.endsWith(".u32") || instruction.qualifiedOpcode.endsWith(".s32") ||
-            instruction.qualifiedOpcode.endsWith(".u64") || instruction.qualifiedOpcode.endsWith(".s64") =>
+          if qualifiers.endsWith(Vec(Modifier.U32)) || qualifiers.endsWith(Vec(Modifier.S32)) ||
+            qualifiers.endsWith(Vec(Modifier.U64)) || qualifiers.endsWith(Vec(Modifier.S64)) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
-          else 64: Int where (Between[8, 64] & MultipleOf[8])
+          width: (Int where (Between[8, 64] & MultipleOf[8])) =
+            if (qualifiers.lastOption.exists(_.bitWidth == 32)) 32 else 64
         } yield VMIR.Instruction.IntegerAddWithCarry(
           destinationName,
           leftValue,
           rightValue,
           width,
           carryIn = true,
-          carryOut = instruction.qualifiedOpcode.contains(".cc.")
+          carryOut = qualifiers.contains(Modifier.Cc)
         )
       case Instruction.SubCc(destination, left, right, _, _)
-          if instruction.qualifiedOpcode.endsWith(".u32") || instruction.qualifiedOpcode.endsWith(".s32") ||
-            instruction.qualifiedOpcode.endsWith(".u64") || instruction.qualifiedOpcode.endsWith(".s64") =>
+          if qualifiers.endsWith(Vec(Modifier.U32)) || qualifiers.endsWith(Vec(Modifier.S32)) ||
+            qualifiers.endsWith(Vec(Modifier.U64)) || qualifiers.endsWith(Vec(Modifier.S64)) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
-          else 64: Int where (Between[8, 64] & MultipleOf[8])
+          width: (Int where (Between[8, 64] & MultipleOf[8])) =
+            if (qualifiers.lastOption.exists(_.bitWidth == 32)) 32 else 64
         } yield VMIR.Instruction.IntegerSubWithBorrow(
           destinationName,
           leftValue,
@@ -1236,129 +1336,129 @@ private object VMCompiler {
           borrowOut = true
         )
       case Instruction.Subc(destination, left, right, _, _)
-          if instruction.qualifiedOpcode.endsWith(".u32") || instruction.qualifiedOpcode.endsWith(".s32") ||
-            instruction.qualifiedOpcode.endsWith(".u64") || instruction.qualifiedOpcode.endsWith(".s64") =>
+          if qualifiers.endsWith(Vec(Modifier.U32)) || qualifiers.endsWith(Vec(Modifier.S32)) ||
+            qualifiers.endsWith(Vec(Modifier.U64)) || qualifiers.endsWith(Vec(Modifier.S64)) =>
         for {
           destinationName <- registerName(destination)
           leftValue       <- value(left)
           rightValue      <- value(right)
-          width = if (instruction.qualifiedOpcode.endsWith("32")) 32: Int where (Between[8, 64] & MultipleOf[8])
-          else 64: Int where (Between[8, 64] & MultipleOf[8])
+          width: (Int where (Between[8, 64] & MultipleOf[8])) =
+            if (qualifiers.lastOption.exists(_.bitWidth == 32)) 32 else 64
         } yield VMIR.Instruction.IntegerSubWithBorrow(
           destinationName,
           leftValue,
           rightValue,
           width,
           borrowIn = true,
-          borrowOut = instruction.qualifiedOpcode.contains(".cc.")
+          borrowOut = qualifiers.contains(Modifier.Cc)
         )
       case Instruction.Add(destination, left, right, _, _)
-          if instruction.qualifiedOpcode == "add.u32" || instruction.qualifiedOpcode == "add.s32" =>
-        integerBinary(IntegerOperation.Add, 32: Int where (Between[8, 64] & MultipleOf[8]), destination, left, right)
+          if signature.matches(Opcode.Add, Modifier.U32) || signature.matches(Opcode.Add, Modifier.S32) =>
+        integerBinary(IntegerOperation.Add, 32, destination, left, right)
       case Instruction.Add(destination, left, right, _, _)
-          if instruction.qualifiedOpcode == "add.u64" || instruction.qualifiedOpcode == "add.s64" =>
-        integerBinary(IntegerOperation.Add, 64: Int where (Between[8, 64] & MultipleOf[8]), destination, left, right)
+          if signature.matches(Opcode.Add, Modifier.U64) || signature.matches(Opcode.Add, Modifier.S64) =>
+        integerBinary(IntegerOperation.Add, 64, destination, left, right)
       case Instruction.Sub(destination, left, right, _, _)
-          if instruction.qualifiedOpcode == "sub.u32" || instruction.qualifiedOpcode == "sub.s32" =>
+          if signature.matches(Opcode.Sub, Modifier.U32) || signature.matches(Opcode.Sub, Modifier.S32) =>
         integerBinary(
           IntegerOperation.Subtract,
-          32: Int where (Between[8, 64] & MultipleOf[8]),
+          32,
           destination,
           left,
           right
         )
       case Instruction.Sub(destination, left, right, _, _)
-          if instruction.qualifiedOpcode == "sub.u64" || instruction.qualifiedOpcode == "sub.s64" =>
+          if signature.matches(Opcode.Sub, Modifier.U64) || signature.matches(Opcode.Sub, Modifier.S64) =>
         integerBinary(
           IntegerOperation.Subtract,
-          64: Int where (Between[8, 64] & MultipleOf[8]),
+          64,
           destination,
           left,
           right
         )
       case Instruction.And(destination, left, right, _, _)
-          if instruction.qualifiedOpcode == "and.pred" =>
+          if signature.matches(Opcode.And, Modifier.Pred) =>
         predicateBinary(PredicateOperation.And, destination, left, right)
       case Instruction.Or(destination, left, right, _, _)
-          if instruction.qualifiedOpcode == "or.pred" =>
+          if signature.matches(Opcode.Or, Modifier.Pred) =>
         predicateBinary(PredicateOperation.Or, destination, left, right)
       case Instruction.Xor(destination, left, right, _, _)
-          if instruction.qualifiedOpcode == "xor.pred" =>
+          if signature.matches(Opcode.Xor, Modifier.Pred) =>
         predicateBinary(PredicateOperation.Xor, destination, left, right)
       case Instruction.And(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("and.") =>
+          if signature.opcode == Opcode.And && qualifiers.nonEmpty =>
         integerWidth(modifiers).flatMap(integerBinary(IntegerOperation.BitwiseAnd, _, destination, left, right))
       case Instruction.Or(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("or.") =>
+          if signature.opcode == Opcode.Or && qualifiers.nonEmpty =>
         integerWidth(modifiers).flatMap(integerBinary(IntegerOperation.BitwiseOr, _, destination, left, right))
       case Instruction.Xor(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("xor.") =>
+          if signature.opcode == Opcode.Xor && qualifiers.nonEmpty =>
         integerWidth(modifiers).flatMap(integerBinary(IntegerOperation.BitwiseXor, _, destination, left, right))
       case Instruction.Add(destination, left, right, _, _)
-          if instruction.qualifiedOpcode.endsWith(".f16x2") || instruction.qualifiedOpcode.endsWith(".bf16x2") =>
+          if qualifiers.endsWith(Vec(Modifier.F16x2)) || qualifiers.endsWith(Vec(Modifier.Bf16x2)) =>
         packedFloatBinary(
           FloatOperation.Add,
           destination,
           left,
           right,
-          instruction.qualifiedOpcode.endsWith(".bf16x2")
+          qualifiers.endsWith(Vec(Modifier.Bf16x2))
         )
       case Instruction.Add(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("add.") &&
-            (instruction.qualifiedOpcode.endsWith(".f16") ||
-              instruction.qualifiedOpcode.endsWith(".f32") ||
-              instruction.qualifiedOpcode.endsWith(".f64")) =>
+          if (signature.opcode == Opcode.Add && qualifiers.nonEmpty) &&
+            (qualifiers.endsWith(Vec(Modifier.F16)) ||
+              qualifiers.endsWith(Vec(Modifier.F32)) ||
+              qualifiers.endsWith(Vec(Modifier.F64))) =>
         floatBinary(FloatOperation.Add, destination, left, right, modifiers)
       case Instruction.Sub(destination, left, right, _, _)
-          if instruction.qualifiedOpcode.endsWith(".f16x2") || instruction.qualifiedOpcode.endsWith(".bf16x2") =>
+          if qualifiers.endsWith(Vec(Modifier.F16x2)) || qualifiers.endsWith(Vec(Modifier.Bf16x2)) =>
         packedFloatBinary(
           FloatOperation.Subtract,
           destination,
           left,
           right,
-          instruction.qualifiedOpcode.endsWith(".bf16x2")
+          qualifiers.endsWith(Vec(Modifier.Bf16x2))
         )
       case Instruction.Sub(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("sub.") &&
-            (instruction.qualifiedOpcode.endsWith(".f16") ||
-              instruction.qualifiedOpcode.endsWith(".f32") ||
-              instruction.qualifiedOpcode.endsWith(".f64")) =>
+          if (signature.opcode == Opcode.Sub && qualifiers.nonEmpty) &&
+            (qualifiers.endsWith(Vec(Modifier.F16)) ||
+              qualifiers.endsWith(Vec(Modifier.F32)) ||
+              qualifiers.endsWith(Vec(Modifier.F64))) =>
         floatBinary(FloatOperation.Subtract, destination, left, right, modifiers)
       case Instruction.Add(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("add.") =>
+          if signature.opcode == Opcode.Add && qualifiers.nonEmpty =>
         integerWidth(modifiers).flatMap(integerBinary(IntegerOperation.Add, _, destination, left, right))
       case Instruction.Sub(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("sub.") =>
+          if signature.opcode == Opcode.Sub && qualifiers.nonEmpty =>
         integerWidth(modifiers).flatMap(integerBinary(IntegerOperation.Subtract, _, destination, left, right))
       case Instruction.Min(destination, left, right, _, _, _)
-          if instruction.qualifiedOpcode.endsWith(".f16x2") || instruction.qualifiedOpcode.endsWith(".bf16x2") =>
+          if qualifiers.endsWith(Vec(Modifier.F16x2)) || qualifiers.endsWith(Vec(Modifier.Bf16x2)) =>
         packedFloatBinary(
           FloatOperation.Minimum,
           destination,
           left,
           right,
-          instruction.qualifiedOpcode.endsWith(".bf16x2")
+          qualifiers.endsWith(Vec(Modifier.Bf16x2))
         )
       case Instruction.Min(destination, left, right, _, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("min.f") =>
+          if qualifiers.exists(_.isFloating) =>
         floatBinary(FloatOperation.Minimum, destination, left, right, modifiers)
       case Instruction.Max(destination, left, right, _, _, _)
-          if instruction.qualifiedOpcode.endsWith(".f16x2") || instruction.qualifiedOpcode.endsWith(".bf16x2") =>
+          if qualifiers.endsWith(Vec(Modifier.F16x2)) || qualifiers.endsWith(Vec(Modifier.Bf16x2)) =>
         packedFloatBinary(
           FloatOperation.Maximum,
           destination,
           left,
           right,
-          instruction.qualifiedOpcode.endsWith(".bf16x2")
+          qualifiers.endsWith(Vec(Modifier.Bf16x2))
         )
       case Instruction.Max(destination, left, right, _, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("max.f") =>
+          if qualifiers.exists(_.isFloating) =>
         floatBinary(FloatOperation.Maximum, destination, left, right, modifiers)
       case Instruction.Min(destination, left, right, _, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("min.") =>
+          if signature.opcode == Opcode.Min && qualifiers.nonEmpty =>
         integerWidth(modifiers).flatMap { width =>
           integerBinary(
-            IntegerOperation.Minimum(instruction.qualifiedOpcode.contains(".s")),
+            IntegerOperation.Minimum(qualifiers.exists(_.isSigned)),
             width,
             destination,
             left,
@@ -1366,10 +1466,10 @@ private object VMCompiler {
           )
         }
       case Instruction.Max(destination, left, right, _, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("max.") =>
+          if signature.opcode == Opcode.Max && qualifiers.nonEmpty =>
         integerWidth(modifiers).flatMap { width =>
           integerBinary(
-            IntegerOperation.Maximum(instruction.qualifiedOpcode.contains(".s")),
+            IntegerOperation.Maximum(qualifiers.exists(_.isSigned)),
             width,
             destination,
             left,
@@ -1377,29 +1477,33 @@ private object VMCompiler {
           )
         }
       case Instruction.Cvta(destination, source, _, _)
-          if instruction.qualifiedOpcode == "cvta.global.u64" || instruction.qualifiedOpcode == "cvta.to.global.u64" =>
+          if signature.matches(Opcode.Cvta, Modifier.Global, Modifier.U64) ||
+            signature.matches(Opcode.Cvta, Modifier.To, Modifier.Global, Modifier.U64) =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
-      case Instruction.Cvta(destination, source, _, _) if instruction.qualifiedOpcode == "cvta.local.u64" =>
-        for {
-          destinationName <- registerName(destination)
-          sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
-      case Instruction.Cvta(destination, source, _, _) if instruction.qualifiedOpcode == "cvta.to.local.u64" =>
-        for {
-          destinationName <- registerName(destination)
-          sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64)
       case Instruction.Cvta(destination, source, _, _)
-          if instruction.qualifiedOpcode == "cvta.shared.u64" || instruction.qualifiedOpcode == "cvta.to.shared.u64" =>
+          if signature.matches(Opcode.Cvta, Modifier.Local, Modifier.U64) =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64)
+      case Instruction.Cvta(destination, source, _, _)
+          if signature.matches(Opcode.Cvta, Modifier.To, Modifier.Local, Modifier.U64) =>
+        for {
+          destinationName <- registerName(destination)
+          sourceValue     <- value(source)
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64)
+      case Instruction.Cvta(destination, source, _, _)
+          if signature.matches(Opcode.Cvta, Modifier.Shared, Modifier.U64) ||
+            signature.matches(Opcode.Cvta, Modifier.To, Modifier.Shared, Modifier.U64) =>
+        for {
+          destinationName <- registerName(destination)
+          sourceValue     <- value(source)
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64)
       case Instruction.Cvt(destination, Some(source), None, None, None, None, modifiers, _) =>
-        val types = modifiers.map(_.name.raw).flatMap(name => ConversionType.values.find(_.mnemonic == name))
+        val types = modifiers.flatMap(modifier => ConversionType.values.find(_.modifier == modifier))
         if (types.size < 2) invalid(s"expected conversion source and destination types: ${instruction.qualifiedOpcode}")
         else
           for {
@@ -1410,12 +1514,11 @@ private object VMCompiler {
             sourceValue,
             types.last,
             types(types.size - 2),
-            modifiers.view.map(_.name.raw)
-              .flatMap(name => ConversionRounding.values.find(_.mnemonic == name))
+            modifiers.view.flatMap(modifier => ConversionRounding.values.find(_.modifier == modifier))
               .headOption
           )
       case Instruction.Selp(destination, whenTrue, whenFalse, predicate, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("selp.") =>
+          if signature.opcode == Opcode.Selp && qualifiers.nonEmpty =>
         for {
           destinationName <- registerName(destination)
           falseValue      <- value(whenFalse)
@@ -1424,7 +1527,7 @@ private object VMCompiler {
           width           <- scalarWidth(modifiers)
         } yield VMIR.Instruction.Select(destinationName, trueValue, falseValue, predicateName, width)
       case Instruction.Ld(destination, address, None, None, modifiers, _)
-          if instruction.qualifiedOpcode.matches("ld\\.(acquire|relaxed)\\.(cta|gpu|sys)\\.global\\.[ub](32|64)") =>
+          if orderedMemoryForm(signature, load = true) =>
         for {
           destinationName <- registerName(destination)
           addressValue    <- addressValue(address)
@@ -1437,7 +1540,7 @@ private object VMCompiler {
           VMIR.AtomicSpace.Global
         )
       case Instruction.St(address, source, None, modifiers, _)
-          if instruction.qualifiedOpcode.matches("st\\.(release|relaxed)\\.(cta|gpu|sys)\\.global\\.[ub](32|64)") =>
+          if orderedMemoryForm(signature, load = false) =>
         for {
           addressValue <- addressValue(address)
           sourceValue  <- value(source)
@@ -1450,9 +1553,9 @@ private object VMCompiler {
           VMIR.AtomicSpace.Global
         )
       case Instruction.Ld(destination, address, None, None, modifiers, _)
-          if (instruction.qualifiedOpcode.split('.') match {
-            case Array("ld", scalar) => isScalarType(scalar)
-            case _                   => false
+          if (qualifiers match {
+            case Vec(scalar) => scalar.bitWidth > 0
+            case _           => false
           }) &&
             !Operand.isVectorLiteral(destination) =>
         for {
@@ -1463,13 +1566,13 @@ private object VMCompiler {
           destinationName,
           addressValue,
           width,
-          instruction.qualifiedOpcode.contains(".s")
+          qualifiers.exists(_.isSigned)
         )
       case Instruction.Ld(destination, address, None, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("ld.") &&
-            !instruction.qualifiedOpcode.contains(".param.") &&
-            !instruction.qualifiedOpcode.contains(".shared.") &&
-            !instruction.qualifiedOpcode.contains(".local.") &&
+          if (signature.opcode == Opcode.Ld && qualifiers.nonEmpty) &&
+            !qualifiers.contains(Modifier.Param) &&
+            !qualifiers.contains(Modifier.Shared) &&
+            !qualifiers.contains(Modifier.Local) &&
             Operand.isVectorLiteral(destination) =>
         for {
           destinationNames <- registerNames(destination)
@@ -1479,10 +1582,10 @@ private object VMCompiler {
           destinationNames,
           addressValue,
           width,
-          isSignedScalarOpcode(instruction.qualifiedOpcode)
+          qualifiers.lastOption.exists(_.isSigned)
         )
       case Instruction.Ld(destination, address, None, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("ld.") && instruction.qualifiedOpcode.contains(".global.") =>
+          if (signature.opcode == Opcode.Ld && qualifiers.nonEmpty) && qualifiers.contains(Modifier.Global) =>
         for {
           destinationName <- registerName(destination)
           addressValue    <- addressValue(address)
@@ -1491,14 +1594,14 @@ private object VMCompiler {
           destinationName,
           addressValue,
           width,
-          isSignedScalarOpcode(instruction.qualifiedOpcode)
+          qualifiers.lastOption.exists(_.isSigned)
         )
       case Instruction.Ld(destination, address, None, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("ld.") &&
-            !instruction.qualifiedOpcode.contains(".param.") &&
-            !instruction.qualifiedOpcode.contains(".shared.") &&
-            !instruction.qualifiedOpcode.contains(".local.") &&
-            !instruction.qualifiedOpcode.contains(".global.") &&
+          if (signature.opcode == Opcode.Ld && qualifiers.nonEmpty) &&
+            !qualifiers.contains(Modifier.Param) &&
+            !qualifiers.contains(Modifier.Shared) &&
+            !qualifiers.contains(Modifier.Local) &&
+            !qualifiers.contains(Modifier.Global) &&
             !Operand.isVectorLiteral(destination) =>
         for {
           destinationName <- registerName(destination)
@@ -1508,12 +1611,11 @@ private object VMCompiler {
           destinationName,
           addressValue,
           width,
-          isSignedScalarOpcode(instruction.qualifiedOpcode)
+          qualifiers.lastOption.exists(_.isSigned)
         )
       case Instruction.LdGlobalNc(destination, address, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith(
-            "ld.global.nc."
-          ) && Operand.isVectorLiteral(destination) =>
+          if (signature.opcode == Opcode.Ld && qualifiers.startsWith(Vec(Modifier.Global, Modifier.Nc)) &&
+            qualifiers.size > 2) && Operand.isVectorLiteral(destination) =>
         for {
           destinationNames <- registerNames(destination)
           addressValue     <- addressValue(address)
@@ -1522,10 +1624,11 @@ private object VMCompiler {
           destinationNames,
           addressValue,
           width,
-          instruction.qualifiedOpcode.contains(".s")
+          qualifiers.exists(_.isSigned)
         )
       case Instruction.LdGlobalNc(destination, address, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("ld.global.nc.") =>
+          if signature.opcode == Opcode.Ld && qualifiers.startsWith(Vec(Modifier.Global, Modifier.Nc)) &&
+            qualifiers.size > 2 =>
         for {
           destinationName <- registerName(destination)
           addressValue    <- addressValue(address)
@@ -1534,12 +1637,12 @@ private object VMCompiler {
           destinationName,
           addressValue,
           width,
-          isSignedScalarOpcode(instruction.qualifiedOpcode)
+          qualifiers.lastOption.exists(_.isSigned)
         )
       case Instruction.St(address, source, None, modifiers, _)
-          if (instruction.qualifiedOpcode.split('.') match {
-            case Array("st", scalar) => isScalarType(scalar)
-            case _                   => false
+          if (qualifiers match {
+            case Vec(scalar) => scalar.bitWidth > 0
+            case _           => false
           }) &&
             !Operand.isVectorLiteral(source) =>
         for {
@@ -1548,9 +1651,9 @@ private object VMCompiler {
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.StoreGeneric(addressValue, sourceValue, width)
       case Instruction.St(address, source, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("st.") &&
-            !instruction.qualifiedOpcode.contains(".shared.") &&
-            !instruction.qualifiedOpcode.contains(".local.") &&
+          if (signature.opcode == Opcode.St && qualifiers.nonEmpty) &&
+            !qualifiers.contains(Modifier.Shared) &&
+            !qualifiers.contains(Modifier.Local) &&
             Operand.isVectorLiteral(source) =>
         for {
           addressValue <- addressValue(address)
@@ -1558,9 +1661,9 @@ private object VMCompiler {
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.StoreGenericVector(addressValue, sourceNames, width)
       case Instruction.St(address, source, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("st.") &&
-            !instruction.qualifiedOpcode.contains(".shared.") &&
-            !instruction.qualifiedOpcode.contains(".local.") &&
+          if (signature.opcode == Opcode.St && qualifiers.nonEmpty) &&
+            !qualifiers.contains(Modifier.Shared) &&
+            !qualifiers.contains(Modifier.Local) &&
             !Operand.isVectorLiteral(source) =>
         for {
           addressValue <- addressValue(address)
@@ -1568,7 +1671,7 @@ private object VMCompiler {
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.StoreGlobal(addressValue, sourceValue, width)
       case Instruction.Ld(destination, address, None, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("ld.") && instruction.qualifiedOpcode.contains(".shared.") &&
+          if (signature.opcode == Opcode.Ld && qualifiers.nonEmpty) && qualifiers.contains(Modifier.Shared) &&
             Operand.isVectorLiteral(destination) =>
         for {
           destinationNames <- registerNames(destination)
@@ -1578,10 +1681,10 @@ private object VMCompiler {
           destinationNames,
           addressValue,
           width,
-          isSignedScalarOpcode(instruction.qualifiedOpcode)
+          qualifiers.lastOption.exists(_.isSigned)
         )
       case Instruction.Ld(destination, address, None, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("ld.") && instruction.qualifiedOpcode.contains(".shared.") =>
+          if (signature.opcode == Opcode.Ld && qualifiers.nonEmpty) && qualifiers.contains(Modifier.Shared) =>
         for {
           destinationName <- registerName(destination)
           addressValue    <- addressValue(address)
@@ -1590,10 +1693,10 @@ private object VMCompiler {
           destinationName,
           addressValue,
           width,
-          isSignedScalarOpcode(instruction.qualifiedOpcode)
+          qualifiers.lastOption.exists(_.isSigned)
         )
       case Instruction.St(address, source, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("st.") && instruction.qualifiedOpcode.contains(".shared.") &&
+          if (signature.opcode == Opcode.St && qualifiers.nonEmpty) && qualifiers.contains(Modifier.Shared) &&
             Operand.isVectorLiteral(source) =>
         for {
           addressValue <- addressValue(address)
@@ -1601,14 +1704,14 @@ private object VMCompiler {
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.StoreSharedVector(addressValue, sourceNames, width)
       case Instruction.St(address, source, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("st.") && instruction.qualifiedOpcode.contains(".shared.") =>
+          if (signature.opcode == Opcode.St && qualifiers.nonEmpty) && qualifiers.contains(Modifier.Shared) =>
         for {
           addressValue <- addressValue(address)
           sourceValue  <- value(source)
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.StoreShared(addressValue, sourceValue, width)
       case Instruction.Ld(destination, address, None, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("ld.") && instruction.qualifiedOpcode.contains(".local.") &&
+          if (signature.opcode == Opcode.Ld && qualifiers.nonEmpty) && qualifiers.contains(Modifier.Local) &&
             Operand.isVectorLiteral(destination) =>
         for {
           destinationNames <- registerNames(destination)
@@ -1618,10 +1721,10 @@ private object VMCompiler {
           destinationNames,
           addressValue,
           width,
-          isSignedScalarOpcode(instruction.qualifiedOpcode)
+          qualifiers.lastOption.exists(_.isSigned)
         )
       case Instruction.Ld(destination, address, None, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("ld.") && instruction.qualifiedOpcode.contains(".local.") =>
+          if (signature.opcode == Opcode.Ld && qualifiers.nonEmpty) && qualifiers.contains(Modifier.Local) =>
         for {
           destinationName <- registerName(destination)
           addressValue    <- addressValue(address)
@@ -1630,10 +1733,10 @@ private object VMCompiler {
           destinationName,
           addressValue,
           width,
-          isSignedScalarOpcode(instruction.qualifiedOpcode)
+          qualifiers.lastOption.exists(_.isSigned)
         )
       case Instruction.St(address, source, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("st.") && instruction.qualifiedOpcode.contains(".local.") &&
+          if (signature.opcode == Opcode.St && qualifiers.nonEmpty) && qualifiers.contains(Modifier.Local) &&
             Operand.isVectorLiteral(source) =>
         for {
           addressValue <- addressValue(address)
@@ -1641,7 +1744,7 @@ private object VMCompiler {
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.StoreLocalVector(addressValue, sourceNames, width)
       case Instruction.St(address, source, None, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("st.") && instruction.qualifiedOpcode.contains(".local.") =>
+          if (signature.opcode == Opcode.St && qualifiers.nonEmpty) && qualifiers.contains(Modifier.Local) =>
         for {
           addressValue <- addressValue(address)
           sourceValue  <- value(source)
@@ -1660,45 +1763,43 @@ private object VMCompiler {
       case Instruction.CpAsyncWaitAll(_, _)      => Right(VMIR.Instruction.AsyncWait)
       case Instruction.CpAsyncWaitGroup(_, _, _) => Right(VMIR.Instruction.AsyncWait)
       case Instruction.ReduxSync(destination, source, memberMask, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("redux.sync.") =>
+          if signature.opcode == Opcode.Redux && qualifiers.startsWith(Vec(Modifier.Sync)) && qualifiers.size > 1 =>
         for {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
           memberMaskValue <- value(memberMask)
           width           <- integerWidth(modifiers)
           operation       <-
-            if (instruction.qualifiedOpcode.contains(".add.")) Right(IntegerOperation.Add)
-            else if (instruction.qualifiedOpcode.contains(".min."))
-              Right(IntegerOperation.Minimum(modifiers.exists(_.name.raw == s"s${width.raw}")))
-            else if (instruction.qualifiedOpcode.contains(".max."))
-              Right(IntegerOperation.Maximum(modifiers.exists(_.name.raw == s"s${width.raw}")))
+            if (qualifiers.contains(Modifier.Add)) Right(IntegerOperation.Add)
+            else if (qualifiers.contains(Modifier.Min))
+              Right(IntegerOperation.Minimum(modifiers.exists(value => value.isSigned && value.bitWidth == width.raw)))
+            else if (qualifiers.contains(Modifier.Max))
+              Right(IntegerOperation.Maximum(modifiers.exists(value => value.isSigned && value.bitWidth == width.raw)))
             else invalid(s"unsupported redux.sync operation ${instruction.qualifiedOpcode}")
         } yield VMIR.Instruction.WarpReduce(destinationName, sourceValue, memberMaskValue, operation, width)
       case Instruction.Atom(destination, address, source, None, _, _)
-          if atomicOpcode(instruction.qualifiedOpcode).matches(
-            "atom\\.(global\\.|shared\\.)?(max\\.u|and\\.b|or\\.b|xor\\.b)(32|64)"
-          ) =>
-        atomicIntegerOperands(destination, address, source, instruction.qualifiedOpcode).map {
+          if atomicBinaryForm(atomicSignature(signature)) =>
+        atomicIntegerOperands(destination, address, source, signature).map {
           case (destinationName, addressValue, sourceValue, width, space) =>
             val operation =
-              if (atomicOpcode(instruction.qualifiedOpcode).contains(".max.")) IntegerOperation.Maximum(false)
-              else if (atomicOpcode(instruction.qualifiedOpcode).contains(".and.")) IntegerOperation.BitwiseAnd
-              else if (atomicOpcode(instruction.qualifiedOpcode).contains(".or.")) IntegerOperation.BitwiseOr
+              if (atomicSignature(signature).modifiers.contains(Modifier.Max)) IntegerOperation.Maximum(false)
+              else if (atomicSignature(signature).modifiers.contains(Modifier.And)) IntegerOperation.BitwiseAnd
+              else if (atomicSignature(signature).modifiers.contains(Modifier.Or)) IntegerOperation.BitwiseOr
               else IntegerOperation.BitwiseXor
             VMIR.Instruction.AtomicBinary(destinationName, addressValue, sourceValue, width, space, operation)
         }
       case Instruction.Atom(destination, address, comparator, Some(source), _, _)
           if Set(
-            "atom.cas.b32",
-            "atom.cas.b64",
-            "atom.global.cas.b32",
-            "atom.global.cas.b64",
-            "atom.shared.cas.b32",
-            "atom.shared.cas.b64"
-          )(atomicOpcode(instruction.qualifiedOpcode)) =>
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Cas, Modifier.B32)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Cas, Modifier.B64)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Global, Modifier.Cas, Modifier.B32)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Global, Modifier.Cas, Modifier.B64)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Shared, Modifier.Cas, Modifier.B32)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Shared, Modifier.Cas, Modifier.B64))
+          )(atomicSignature(signature)) =>
         for {
           comparatorValue <- value(comparator)
-          operands        <- atomicIntegerOperands(destination, address, source, instruction.qualifiedOpcode)
+          operands        <- atomicIntegerOperands(destination, address, source, signature)
         } yield {
           val (destinationName, addressValue, sourceValue, width, space) = operands
           VMIR.Instruction.AtomicCompareExchange(
@@ -1712,64 +1813,65 @@ private object VMCompiler {
         }
       case Instruction.Atom(destination, address, source, None, _, _)
           if Set(
-            "atom.exch.b32",
-            "atom.exch.b64",
-            "atom.global.exch.b32",
-            "atom.global.exch.b64",
-            "atom.shared.exch.b32",
-            "atom.shared.exch.b64"
-          )(atomicOpcode(instruction.qualifiedOpcode)) =>
-        atomicIntegerOperands(destination, address, source, instruction.qualifiedOpcode).map {
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Exch, Modifier.B32)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Exch, Modifier.B64)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Global, Modifier.Exch, Modifier.B32)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Global, Modifier.Exch, Modifier.B64)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Shared, Modifier.Exch, Modifier.B32)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Shared, Modifier.Exch, Modifier.B64))
+          )(atomicSignature(signature)) =>
+        atomicIntegerOperands(destination, address, source, signature).map {
           case (destinationName, addressValue, sourceValue, width, space) =>
             VMIR.Instruction.AtomicExchange(destinationName, addressValue, sourceValue, width, space)
         }
       case Instruction.Atom(destination, address, source, None, _, _)
           if Set(
-            "atom.add.u32",
-            "atom.add.u64",
-            "atom.global.add.u32",
-            "atom.global.add.u64",
-            "atom.shared.add.u32",
-            "atom.shared.add.u64"
-          )(atomicOpcode(instruction.qualifiedOpcode)) =>
-        atomicIntegerOperands(destination, address, source, instruction.qualifiedOpcode).map {
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Add, Modifier.U32)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Add, Modifier.U64)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Global, Modifier.Add, Modifier.U32)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Global, Modifier.Add, Modifier.U64)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Shared, Modifier.Add, Modifier.U32)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Shared, Modifier.Add, Modifier.U64))
+          )(atomicSignature(signature)) =>
+        atomicIntegerOperands(destination, address, source, signature).map {
           case (destinationName, addressValue, sourceValue, width, space) =>
             VMIR.Instruction.AtomicAdd(destinationName, addressValue, sourceValue, width, space)
         }
       case Instruction.Atom(destination, address, source, None, _, _)
           if Set(
-            "atom.min.u32",
-            "atom.min.u64",
-            "atom.shared.min.u32",
-            "atom.shared.min.u64",
-            "atom.global.min.u32",
-            "atom.global.min.u64"
-          )(
-            atomicOpcode(instruction.qualifiedOpcode)
-          ) =>
-        atomicIntegerOperands(destination, address, source, instruction.qualifiedOpcode).map {
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Min, Modifier.U32)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Min, Modifier.U64)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Shared, Modifier.Min, Modifier.U32)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Shared, Modifier.Min, Modifier.U64)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Global, Modifier.Min, Modifier.U32)),
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Global, Modifier.Min, Modifier.U64))
+          )(atomicSignature(signature)) =>
+        atomicIntegerOperands(destination, address, source, signature).map {
           case (destinationName, addressValue, sourceValue, width, space) =>
             VMIR.Instruction.AtomicMin(destinationName, addressValue, sourceValue, width, space)
         }
       case Instruction.Atom(destination, address, source, None, _, _)
-          if atomicOpcode(instruction.qualifiedOpcode) == "atom.global.add.f32" ||
-            atomicOpcode(instruction.qualifiedOpcode) == "atom.global.add.f64" =>
+          if atomicSignature(signature) ==
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Global, Modifier.Add, Modifier.F32)) ||
+            atomicSignature(signature) ==
+            InstructionSignature(Opcode.Atom, Vec(Modifier.Global, Modifier.Add, Modifier.F64)) =>
         for {
           destinationName <- registerName(destination)
           addressValue    <- addressValue(address)
           sourceValue     <- value(source)
-          width = if (atomicOpcode(instruction.qualifiedOpcode).endsWith(".f64")) 64: Int in (16, 32, 64)
-          else 32: Int in (16, 32, 64)
+          width: (Int in (16, 32, 64)) =
+            if (atomicSignature(signature).modifiers.endsWith(Vec(Modifier.F64))) 64 else 32
         } yield VMIR.Instruction.AtomicAddFloat(destinationName, addressValue, sourceValue, width)
       case Instruction.Setp(destination, left, right, None, modifiers, _) =>
         lowerSetPredicate(destination, left, right, modifiers)
       case Instruction.Bar(destination, Some(barrier), Some(predicate), None, _, _)
-          if instruction.qualifiedOpcode == "bar.red.and.pred" || instruction.qualifiedOpcode == "bar.red.or.pred" =>
+          if signature.matches(Opcode.Bar, Modifier.Red, Modifier.And, Modifier.Pred) ||
+            signature.matches(Opcode.Bar, Modifier.Red, Modifier.Or, Modifier.Pred) =>
         for {
           destinationName <- predicateRegisterName(destination)
           barrierId       <- immediate(barrier)
           predicateName   <- predicateRegisterName(predicate)
-          operation = if (instruction.qualifiedOpcode.endsWith(".and.pred")) PredicateOperation.And
+          operation = if (qualifiers.endsWith(Vec(Modifier.And, Modifier.Pred))) PredicateOperation.And
           else PredicateOperation.Or
           checkedBarrierId <-
             if (barrierId >= 0L && barrierId <= Int.MaxValue.toLong)
@@ -1777,28 +1879,27 @@ private object VMCompiler {
             else invalid(s"barrier id is outside Int range: $barrierId")
         } yield VMIR.Instruction.BarrierReduce(destinationName, checkedBarrierId, predicateName, operation)
       case Instruction.Bra(target, _, _)
-          if instruction.qualifiedOpcode == "bra" || instruction.qualifiedOpcode == "bra.uni" =>
+          if signature == InstructionSignature(Opcode.Bra, Vec.empty[Modifier]) ||
+            signature.matches(Opcode.Bra, Modifier.Uni) =>
         target match {
           case Operand.Symbol(label) =>
             labels.get(label)
               .toRight(Error.Invalid(s"unknown label: $label"))
               .map(VMIR.Instruction.Branch(_))
-          case other => invalid(s"expected branch label, found ${Printer.render(other)}")
+          case other => invalid(s"expected branch label, found $other")
         }
-      case Instruction.Bar(_, _, _, _, _, Some(_)) if instruction.qualifiedOpcode == "bar.sync" =>
+      case Instruction.Bar(_, _, _, _, _, Some(_)) if signature.matches(Opcode.Bar, Modifier.Sync) =>
         invalid("bar.sync must not be predicated in the supported execution profile")
-      case Instruction.Bar(barrier, None, None, None, _, _) if instruction.qualifiedOpcode == "bar.sync" =>
+      case Instruction.Bar(barrier, None, None, None, _, _) if signature.matches(Opcode.Bar, Modifier.Sync) =>
         immediate(barrier).flatMap { value =>
           if (value >= 0L && value <= Int.MaxValue.toLong)
             Right(VMIR.Instruction.BarrierSync(value.toInt.unsafe[Int >= 0]))
           else invalid(s"barrier id is outside Int range: $value")
         }
-      case Instruction.Membar(_, _) if instruction.qualifiedOpcode.startsWith("membar.") =>
+      case Instruction.Membar(_, _) if signature.opcode == Opcode.Membar && qualifiers.nonEmpty =>
         Right(VMIR.Instruction.MemoryBarrier)
       case Instruction.Fence(None, None, _, _)
-          if instruction.qualifiedOpcode.matches(
-            "fence(?:\\.(?:sc|acq_rel|acquire|release))?\\.(?:cta|gpu|sys|cluster)"
-          ) =>
+          if fenceForm(signature) =>
         // Execute supported thread fences with stronger full-fence semantics.
         Right(VMIR.Instruction.MemoryBarrier)
       case Instruction.Prefetch(_, _, _) =>
@@ -1819,12 +1920,87 @@ private object VMCompiler {
           parameterNames <- callParameters(params)
         } yield VMIR.Instruction.Call(functionValue, returnNames, parameterNames)
       case _ =>
-        Left(Error.Unsupported(Printer.render(instruction), "no handwritten semantic family"))
+        Left(Error.Unsupported(instruction.opcode, "no handwritten semantic family"))
     }
     for {
+      _         <- validateFloatingInstruction(instruction)
       operation <- lowered
       predicate <- lowerPredicate(instruction.pred)
     } yield PredicatedInstruction(operation, predicate)
+  }
+
+  private val FloatingOpcodes = Set(
+    Opcode.Add,
+    Opcode.Sub,
+    Opcode.Mul,
+    Opcode.Div,
+    Opcode.Fma,
+    Opcode.Abs,
+    Opcode.Neg,
+    Opcode.Min,
+    Opcode.Max,
+    Opcode.CopySign,
+    Opcode.Rcp,
+    Opcode.Rsqrt,
+    Opcode.Sqrt,
+    Opcode.Ex2,
+    Opcode.Lg2,
+    Opcode.Sin,
+    Opcode.Cos,
+    Opcode.Tanh
+  )
+  private val ScalarFloatTypes = Set(Modifier.F16, Modifier.F32, Modifier.F64)
+  private val PackedFloatTypes = Set(Modifier.F16x2, Modifier.Bf16x2)
+
+  private def floatControl(modifiers: Vec[Modifier]): FloatControl = FloatControl(
+    flushSubnormal = modifiers.contains(Modifier.Ftz),
+    saturate = modifiers.contains(Modifier.Sat),
+    propagateNaN = modifiers.contains(Modifier.NaN),
+    absolute = modifiers.contains(Modifier.Abs),
+    xorSign = modifiers.contains(Modifier.Xorsign)
+  )
+
+  private def validateFloatingInstruction(instruction: Instruction): Either[Error, Unit] = {
+    val signature = instruction.signature
+    val modifiers = signature.modifiers
+    val types     = ScalarFloatTypes ++ PackedFloatTypes + Modifier.Bf16 + Modifier.F32x2
+    if (!FloatingOpcodes(signature.opcode) || !modifiers.exists(types)) Right(())
+    else {
+      val packed  = modifiers.exists(PackedFloatTypes)
+      val bf16    = modifiers.contains(Modifier.Bf16)
+      val allowed = if (packed)
+        PackedFloatTypes ++ (if (signature.opcode == Opcode.Fma) Set(Modifier.Rn, Modifier.Sat) else Set(Modifier.Rn))
+      else if (bf16) Set(Modifier.Bf16, Modifier.Rn)
+      else {
+        val behavior = signature.opcode match {
+          case Opcode.Abs | Opcode.Neg => Set(Modifier.Ftz)
+          case Opcode.Min | Opcode.Max => Set(Modifier.Ftz, Modifier.NaN, Modifier.Abs, Modifier.Xorsign)
+          case Opcode.CopySign         => Set.empty[Modifier]
+          case Opcode.Add | Opcode.Sub | Opcode.Mul | Opcode.Fma => Set(Modifier.Rn, Modifier.Ftz, Modifier.Sat)
+          case Opcode.Div => Set(Modifier.Rn, Modifier.Ftz, Modifier.Approx, Modifier.Full)
+          case _          => Set(Modifier.Rn, Modifier.Ftz, Modifier.Approx)
+        }
+        ScalarFloatTypes ++ behavior
+      }
+      val extraOperand = instruction match {
+        case Instruction.Min(_, _, _, Some(_), _, _) | Instruction.Max(_, _, _, Some(_), _, _) => true
+        case _                                                                                 => false
+      }
+      val unsupported = modifiers.filterNot(allowed)
+      if (extraOperand) Left(Error.Unsupported(instruction.opcode, "three-input min/max is not implemented"))
+      else if (bf16 && signature.opcode != Opcode.Fma)
+        Left(Error.Unsupported(instruction.opcode, "scalar bf16 arithmetic is not implemented for this operation"))
+      else if (unsupported.nonEmpty)
+        Left(Error.Unsupported(
+          instruction.opcode,
+          s"unsupported floating modifiers: ${unsupported.map(_.name).mkString(".")}"
+        ))
+      else if (modifiers.distinct.size != modifiers.size || modifiers.count(types) != 1)
+        invalid("expected one floating type and no duplicate modifiers")
+      else if (modifiers.contains(Modifier.Xorsign) && !modifiers.contains(Modifier.Abs))
+        invalid("xorsign requires abs")
+      else Right(())
+    }
   }
 
   private def integerBinary(
@@ -1852,7 +2028,14 @@ private object VMCompiler {
       leftValue       <- value(left)
       rightValue      <- value(right)
       width           <- floatWidth(modifiers)
-    } yield VMIR.Instruction.FloatBinary(operation, destinationName, leftValue, rightValue, width)
+    } yield VMIR.Instruction.FloatBinary(
+      operation,
+      destinationName,
+      leftValue,
+      rightValue,
+      width,
+      floatControl(modifiers)
+    )
 
   private def packedFloatBinary(
       operation: FloatOperation,
@@ -1878,7 +2061,7 @@ private object VMCompiler {
       destinationName <- registerName(destination)
       sourceValue     <- value(source)
       width           <- fixedWidth.fold(floatWidth(modifiers))(Right(_))
-    } yield VMIR.Instruction.FloatUnary(operation, destinationName, sourceValue, width)
+    } yield VMIR.Instruction.FloatUnary(operation, destinationName, sourceValue, width, floatControl(modifiers))
 
   private def lowerSetPredicate(
       destination: Operand,
@@ -1886,43 +2069,43 @@ private object VMCompiler {
       right: Operand,
       instructionModifiers: Vec[Modifier]
   ): Either[Error, VMIR.Instruction] = {
-    val modifiers   = instructionModifiers.map(_.name.raw)
-    val instruction = ("setp" +: modifiers).mkString(".")
+    val modifiers   = instructionModifiers
+    val instruction = ("setp" +: modifiers.map(_.name)).mkString(".")
     val comparison  = modifiers.collectFirst(Function.unlift {
-      case "num" => Some(Comparison.Ordered)
-      case "nan" => Some(Comparison.Unordered)
-      case "eq"  => Some(Comparison.Equal)
-      case "equ" => Some(Comparison.EqualUnordered)
-      case "ne"  => Some(Comparison.NotEqual)
-      case "neu" => Some(Comparison.NotEqualUnordered)
-      case "lt"  => Some(Comparison.LessThan)
-      case "ltu" => Some(Comparison.LessThanUnordered)
-      case "le"  => Some(Comparison.LessThanOrEqual)
-      case "leu" => Some(Comparison.LessThanOrEqualUnordered)
-      case "gt"  => Some(Comparison.GreaterThan)
-      case "gtu" => Some(Comparison.GreaterThanUnordered)
-      case "ge"  => Some(Comparison.GreaterThanOrEqual)
-      case "geu" => Some(Comparison.GreaterThanOrEqualUnordered)
-      case _     => None
+      case Modifier.Num => Some(Comparison.Ordered)
+      case Modifier.Nan => Some(Comparison.Unordered)
+      case Modifier.Eq  => Some(Comparison.Equal)
+      case Modifier.Equ => Some(Comparison.EqualUnordered)
+      case Modifier.Ne  => Some(Comparison.NotEqual)
+      case Modifier.Neu => Some(Comparison.NotEqualUnordered)
+      case Modifier.Lt  => Some(Comparison.LessThan)
+      case Modifier.Ltu => Some(Comparison.LessThanUnordered)
+      case Modifier.Le  => Some(Comparison.LessThanOrEqual)
+      case Modifier.Leu => Some(Comparison.LessThanOrEqualUnordered)
+      case Modifier.Gt  => Some(Comparison.GreaterThan)
+      case Modifier.Gtu => Some(Comparison.GreaterThanUnordered)
+      case Modifier.Ge  => Some(Comparison.GreaterThanOrEqual)
+      case Modifier.Geu => Some(Comparison.GreaterThanOrEqualUnordered)
+      case _            => None
     })
     val kind = modifiers.collectFirst {
-      case "u8"   => 'u' -> 8
-      case "s8"   => 's' -> 8
-      case "u16"  => 'u' -> 16
-      case "s16"  => 's' -> 16
-      case "u32"  => 'u' -> 32
-      case "s32"  => 's' -> 32
-      case "u64"  => 'u' -> 64
-      case "s64"  => 's' -> 64
-      case "b8"   => 'u' -> 8
-      case "b16"  => 'u' -> 16
-      case "b32"  => 'u' -> 32
-      case "b64"  => 'u' -> 64
-      case "f16"  => 'f' -> 16
-      case "f32"  => 'f' -> 32
-      case "f64"  => 'f' -> 64
-      case "bf16" => 'b' -> 16
-      case "pred" => 'p' -> 1
+      case Modifier.U8   => 'u' -> 8
+      case Modifier.S8   => 's' -> 8
+      case Modifier.U16  => 'u' -> 16
+      case Modifier.S16  => 's' -> 16
+      case Modifier.U32  => 'u' -> 32
+      case Modifier.S32  => 's' -> 32
+      case Modifier.U64  => 'u' -> 64
+      case Modifier.S64  => 's' -> 64
+      case Modifier.B8   => 'u' -> 8
+      case Modifier.B16  => 'u' -> 16
+      case Modifier.B32  => 'u' -> 32
+      case Modifier.B64  => 'u' -> 64
+      case Modifier.F16  => 'f' -> 16
+      case Modifier.F32  => 'f' -> 32
+      case Modifier.F64  => 'f' -> 64
+      case Modifier.Bf16 => 'b' -> 16
+      case Modifier.Pred => 'p' -> 1
     }
     for {
       predicate <- comparison.toRight(
@@ -1930,6 +2113,11 @@ private object VMCompiler {
       )
       kindAndWidth <- kind.toRight(
         Error.Invalid(s"unsupported setp type: $instruction")
+      )
+      _ <- Either.cond(
+        !modifiers.contains(Modifier.Ftz) || kindAndWidth == ('f', 32),
+        (),
+        Error.Unsupported("setp", "ftz requires f32 comparison operands")
       )
       destinationName <- predicateRegisterName(destination)
       lowered         <-
@@ -1950,7 +2138,8 @@ private object VMCompiler {
             kindAndWidth._1,
             leftValue,
             rightValue,
-            width
+            width,
+            flushSubnormal = modifiers.contains(Modifier.Ftz)
           )
     } yield lowered
   }
@@ -1969,13 +2158,13 @@ private object VMCompiler {
     operand match {
       case Operand.Register(name, None) => Right(name)
       case Operand.Symbol(name)         => Right(name)
-      case other                        => invalid(s"expected $describe, found ${Printer.render(other)}")
+      case other                        => invalid(s"expected $describe, found $other")
     }
 
   private def valueRegisterName(operand: Operand): Either[Error, NonEmpty[String]] = operand match {
     case Operand.Register(name, None)                         => Right(name)
     case Operand.Symbol(name) if isBareRegisterName(name.raw) => Right(name)
-    case other => invalid(s"expected register, found ${Printer.render(other)}")
+    case other                                                => invalid(s"expected register, found $other")
   }
 
   private def valueDestination(
@@ -2061,7 +2250,7 @@ private object VMCompiler {
           value <- callParameters(item)
         } yield names ++ value
       }
-    case other => invalid(s"expected call parameter names, found ${Printer.render(other)}")
+    case other => invalid(s"expected call parameter names, found $other")
   }
 
   private def functionValue(
@@ -2079,7 +2268,7 @@ private object VMCompiler {
   private def sharedSymbols(body: Vec[Statement]): Map[NonEmpty[String], Long] = {
     val declarations = flatten(body).collect {
       case Statement.Data(DataAddressSpace.Shared, _, _, name, _, _) => Iterator.single(name)
-      case Statement.Directive(path, arguments, _)
+      case Statement.Directive(path, arguments, _, _)
           if path.size == 1 && path.head.raw == "shared" =>
         arguments.view.flatMap(argument =>
           argument.operand match {
@@ -2096,7 +2285,7 @@ private object VMCompiler {
 
   private def addressValue(operand: Operand): Either[Error, Value] = operand match {
     case Operand.Address(Vec(single)) => valueWithOffset(single)
-    case other                        => invalid(s"expected address operand, found ${Printer.render(other)}")
+    case other                        => invalid(s"expected address operand, found $other")
   }
 
   private def parameterAddress(
@@ -2110,7 +2299,7 @@ private object VMCompiler {
           Right(name -> value.toInt.unsafe[Int >= 0])
         else invalid(s"parameter offset is outside Int range: $value")
       )
-    case other => invalid(s"expected parameter address, found ${Printer.render(other)}")
+    case other => invalid(s"expected parameter address, found $other")
   }
 
   private def isDirectParameterAddress(operand: Operand): Boolean = operand match {
@@ -2139,7 +2328,7 @@ private object VMCompiler {
 
   private def floatWidth(modifiers: Vec[Modifier]): Either[Error, Int in (16, 32, 64)] =
     modifiers.reverse.view.collectFirst {
-      case Modifier(name) if Set("f16", "f32", "f64").contains(name.raw) => name.raw.drop(1).toInt
+      case value if Set(Modifier.F16, Modifier.F32, Modifier.F64)(value) => value.bitWidth
     }.toRight(Error.Invalid(
       s"expected an f16, f32, or f64 type in ${modifiers.map(_.name.raw).mkString(".")}"
     ))
@@ -2155,7 +2344,7 @@ private object VMCompiler {
       describe: String
   ): Either[Error, Int where (Between[8, 64] & MultipleOf[8])] =
     modifiers.reverse.view.collectFirst {
-      case Modifier(name) if isScalarType(name.raw) => scalarTypeWidth(name.raw)
+      case value if value.bitWidth > 0 => value.bitWidth
     }.filter(Set(8, 16, 32, 64).contains)
       .toRight(Error.Invalid(
         s"expected an 8, 16, 32, or 64-bit $describe in ${modifiers.map(_.name.raw).mkString(".")}"
@@ -2163,11 +2352,6 @@ private object VMCompiler {
       .flatMap(width =>
         width.refine[Int where (Between[8, 64] & MultipleOf[8])].leftMap(message => Error.Invalid(message))
       )
-
-  private def isScalarType(name: String): Boolean =
-    name == "bf16" || (name.length > 1 && "usbf".contains(name.head) && name.tail.forall(_.isDigit))
-
-  private def scalarTypeWidth(name: String): Int = if (name == "bf16") 16 else name.drop(1).toInt
 
   private def value(operand: Operand): Either[Error, Value] = operand match {
     case Operand.Register(name, None) =>
@@ -2204,7 +2388,7 @@ private object VMCompiler {
     case Operand.Symbol(name)     => Right(Value.Symbol(name))
     case other: Operand.Immediate => immediate(other).map(Value.Immediate(_))
     case Operand.Negate(value)    => immediate(value).map(number => Value.Immediate(-number))
-    case other                    => invalid(s"expected register or immediate, found ${Printer.render(other)}")
+    case other                    => invalid(s"expected register or immediate, found $other")
   }
 
   private def immediate(operand: Operand): Either[Error, Long] = operand match {
@@ -2236,16 +2420,13 @@ private object VMCompiler {
         case Some(_) => invalid(s"integer immediate is outside 64-bit range: $raw")
         case None    => invalid(s"expected integer immediate, found $raw")
       }
-    case other => invalid(s"expected integer immediate, found ${Printer.render(other)}")
+    case other => invalid(s"expected integer immediate, found $other")
   }
 
   private def isBareRegisterName(name: String): Boolean =
     name == "lo" || name == "hi" || Array("r", "rd", "p").exists(prefix =>
       name.startsWith(prefix) && name.drop(prefix.length).forall(_.isDigit)
     )
-
-  private def isSignedScalarOpcode(opcode: String): Boolean =
-    opcode.endsWith(".s8") || opcode.endsWith(".s16") || opcode.endsWith(".s32") || opcode.endsWith(".s64")
 
   private def invalid[A](detail: NonEmpty[String]): Either[Error, A] = Left(Error.Invalid(detail))
 }

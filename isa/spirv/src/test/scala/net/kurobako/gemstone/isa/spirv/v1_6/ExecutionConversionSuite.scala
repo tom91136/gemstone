@@ -11,33 +11,37 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 class ExecutionConversionSuite extends munit.FunSuite {
   test("dispatch converts signed integer bit patterns to floating-point vectors") {
-    val voidType     = operand("IdResult", 1)
-    val u32          = operand("IdResult", 2)
-    val inputType    = operand("IdResult", 3)
-    val f32          = operand("IdResult", 4)
-    val resultType   = operand("IdResult", 5)
-    val outputType   = operand("IdResult", 6)
-    val function     = operand("IdResult", 8)
-    val output       = operand("IdResult", 9)
-    val input        = operand("IdResult", 10)
-    val rhs          = operand("IdResult", 11)
-    val converted    = operand("IdResult", 13)
-    val added        = operand("IdResult", 14)
-    val subtracted   = operand("IdResult", 15)
-    val multiplied   = operand("IdResult", 16)
-    val integerValue = operand("IdResult", 17)
-    val result       = operand("IdResult", 18)
-    val divided      = operand("IdResult", 19)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val u32          = operand(OperandKind.IdResult, 2)
+    val inputType    = operand(OperandKind.IdResult, 3)
+    val f32          = operand(OperandKind.IdResult, 4)
+    val resultType   = operand(OperandKind.IdResult, 5)
+    val outputType   = operand(OperandKind.IdResult, 6)
+    val function     = operand(OperandKind.IdResult, 8)
+    val output       = operand(OperandKind.IdResult, 9)
+    val input        = operand(OperandKind.IdResult, 10)
+    val rhs          = operand(OperandKind.IdResult, 11)
+    val converted    = operand(OperandKind.IdResult, 13)
+    val added        = operand(OperandKind.IdResult, 14)
+    val subtracted   = operand(OperandKind.IdResult, 15)
+    val multiplied   = operand(OperandKind.IdResult, 16)
+    val integerValue = operand(OperandKind.IdResult, 17)
+    val result       = operand(OperandKind.IdResult, 18)
+    val divided      = operand(OperandKind.IdResult, 19)
     val instructions = Vec(
       Instruction.TypeVoid(voidType),
-      Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-      Instruction.TypeVector(inputType, u32, operand("LiteralInteger", 2)),
-      Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
-      Instruction.TypeVector(resultType, f32, operand("LiteralInteger", 2)),
-      Instruction.TypePointer(outputType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), resultType),
-      Instruction.TypeFunction(operand("IdResult", 7), voidType, Vec(outputType, inputType, resultType)),
+      Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+      Instruction.TypeVector(inputType, u32, operand(OperandKind.LiteralInteger, 2)),
+      Instruction.TypeFloat(f32, operand(OperandKind.LiteralInteger, 32), None),
+      Instruction.TypeVector(resultType, f32, operand(OperandKind.LiteralInteger, 2)),
+      Instruction.TypePointer(
+        outputType,
+        operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup),
+        resultType
+      ),
+      Instruction.TypeFunction(operand(OperandKind.IdResult, 7), voidType, Vec(outputType, inputType, resultType)),
       Instruction.EntryPoint(
-        operand("ExecutionModel", spv.ExecutionModel.Kernel),
+        operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
         function,
         stringOperand("signed_to_float"),
         Vec.empty
@@ -45,13 +49,13 @@ class ExecutionConversionSuite extends munit.FunSuite {
       Instruction.Function(
         voidType,
         function,
-        operand("FunctionControl", spv.FunctionControl.None),
-        operand("IdRef", 7)
+        operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+        operand(OperandKind.IdRef, 7)
       ),
       Instruction.FunctionParameter(outputType, output),
       Instruction.FunctionParameter(inputType, input),
       Instruction.FunctionParameter(resultType, rhs),
-      Instruction.Label(operand("IdResult", 12)),
+      Instruction.Label(operand(OperandKind.IdResult, 12)),
       Instruction.ConvertSToF(resultType, converted, input),
       Instruction.FAdd(resultType, added, converted, rhs),
       Instruction.FSub(resultType, subtracted, added, rhs),
@@ -166,8 +170,11 @@ class ExecutionConversionSuite extends munit.FunSuite {
 
     val halfModule = module.copy(instructions =
       instructions
-        .updated(1, Instruction.TypeInt(u32, operand("LiteralInteger", 16), operand("LiteralInteger", 0)))
-        .updated(3, Instruction.TypeFloat(f32, operand("LiteralInteger", 16), None))
+        .updated(
+          1,
+          Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 16), operand(OperandKind.LiteralInteger, 0))
+        )
+        .updated(3, Instruction.TypeFloat(f32, operand(OperandKind.LiteralInteger, 16), None))
     )
     val halfAllocation = AllocationId(5L)
     val halfMemory     = ArrayMemory(halfAllocation, 4)
@@ -194,31 +201,36 @@ class ExecutionConversionSuite extends munit.FunSuite {
   }
 
   test("dispatch converts floating-point values to unsigned integers without signed narrowing") {
-    val voidType     = operand("IdResult", 1)
-    val u64          = operand("IdResult", 2)
-    val f64          = operand("IdResult", 3)
-    val pointerType  = operand("IdResult", 4)
-    val functionType = operand("IdResult", 5)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val input        = operand("IdResult", 8)
-    val result       = operand("IdResult", 10)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val u64          = operand(OperandKind.IdResult, 2)
+    val f64          = operand(OperandKind.IdResult, 3)
+    val pointerType  = operand(OperandKind.IdResult, 4)
+    val functionType = operand(OperandKind.IdResult, 5)
+    val function     = operand(OperandKind.IdResult, 6)
+    val output       = operand(OperandKind.IdResult, 7)
+    val input        = operand(OperandKind.IdResult, 8)
+    val result       = operand(OperandKind.IdResult, 10)
     val instructions = Vec(
       Instruction.TypeVoid(voidType),
-      Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
-      Instruction.TypeFloat(f64, operand("LiteralInteger", 64), None),
-      Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u64),
+      Instruction.TypeInt(u64, operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
+      Instruction.TypeFloat(f64, operand(OperandKind.LiteralInteger, 64), None),
+      Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u64),
       Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f64)),
       Instruction.EntryPoint(
-        operand("ExecutionModel", spv.ExecutionModel.Kernel),
+        operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
         function,
         stringOperand("float_to_unsigned"),
         Vec.empty
       ),
-      Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+      Instruction.Function(
+        voidType,
+        function,
+        operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+        functionType
+      ),
       Instruction.FunctionParameter(pointerType, output),
       Instruction.FunctionParameter(f64, input),
-      Instruction.Label(operand("IdResult", 9)),
+      Instruction.Label(operand(OperandKind.IdResult, 9)),
       Instruction.ConvertFToU(u64, result, input),
       Instruction.Store(output, result, None),
       Instruction.Return(),
@@ -332,38 +344,42 @@ class ExecutionConversionSuite extends munit.FunSuite {
       expected: Seq[Long]
   ): Unit = {
     val lanes       = inputValues.size
-    val voidType    = operand("IdResult", 1)
-    val floatScalar = operand("IdResult", 2)
-    val intScalar   = operand("IdResult", 3)
-    val floatType   = if (lanes == 1) floatScalar else operand("IdResult", 11)
-    val intType     = if (lanes == 1) intScalar else operand("IdResult", 12)
-    val pointer     = operand("IdResult", 4)
-    val signature   = operand("IdResult", 5)
-    val function    = operand("IdResult", 6)
-    val output      = operand("IdResult", 7)
-    val input       = operand("IdResult", 8)
-    val converted   = operand("IdResult", 10)
+    val voidType    = operand(OperandKind.IdResult, 1)
+    val floatScalar = operand(OperandKind.IdResult, 2)
+    val intScalar   = operand(OperandKind.IdResult, 3)
+    val floatType   = if (lanes == 1) floatScalar else operand(OperandKind.IdResult, 11)
+    val intType     = if (lanes == 1) intScalar else operand(OperandKind.IdResult, 12)
+    val pointer     = operand(OperandKind.IdResult, 4)
+    val signature   = operand(OperandKind.IdResult, 5)
+    val function    = operand(OperandKind.IdResult, 6)
+    val output      = operand(OperandKind.IdResult, 7)
+    val input       = operand(OperandKind.IdResult, 8)
+    val converted   = operand(OperandKind.IdResult, 10)
     val types       = Vec[Instruction](
       Instruction.TypeVoid(voidType),
-      Instruction.TypeFloat(floatScalar, operand("LiteralInteger", sourceWidth), None),
-      Instruction.TypeInt(intScalar, operand("LiteralInteger", resultWidth), operand("LiteralInteger", 0))
+      Instruction.TypeFloat(floatScalar, operand(OperandKind.LiteralInteger, sourceWidth), None),
+      Instruction.TypeInt(
+        intScalar,
+        operand(OperandKind.LiteralInteger, resultWidth),
+        operand(OperandKind.LiteralInteger, 0)
+      )
     ) ++
       (if (lanes == 1) Vec.empty[Instruction]
        else Vec[Instruction](
-         Instruction.TypeVector(floatType, floatScalar, operand("LiteralInteger", lanes)),
-         Instruction.TypeVector(intType, intScalar, operand("LiteralInteger", lanes))
+         Instruction.TypeVector(floatType, floatScalar, operand(OperandKind.LiteralInteger, lanes)),
+         Instruction.TypeVector(intType, intScalar, operand(OperandKind.LiteralInteger, lanes))
        ))
-    val decorations = Vec[Instruction](Instruction.Decorate(converted, operand("Decoration", 39, mode))) ++
-      (if (saturate) Vec[Instruction](Instruction.Decorate(converted, operand("Decoration", 28)))
+    val decorations = Vec[Instruction](Instruction.Decorate(converted, operand(OperandKind.Decoration, 39, mode))) ++
+      (if (saturate) Vec[Instruction](Instruction.Decorate(converted, operand(OperandKind.Decoration, 28)))
        else Vec.empty[Instruction])
     val instructions = types ++ decorations ++ Vec[Instruction](
-      Instruction.TypePointer(pointer, operand("StorageClass", 5), intType),
+      Instruction.TypePointer(pointer, operand(OperandKind.StorageClass, 5), intType),
       Instruction.TypeFunction(signature, voidType, Vec(pointer, floatType)),
-      Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("convert"), Vec.empty),
-      Instruction.Function(voidType, function, operand("FunctionControl", 0), signature),
+      Instruction.EntryPoint(operand(OperandKind.ExecutionModel, 6), function, stringOperand("convert"), Vec.empty),
+      Instruction.Function(voidType, function, operand(OperandKind.FunctionControl, 0), signature),
       Instruction.FunctionParameter(pointer, output),
       Instruction.FunctionParameter(floatType, input),
-      Instruction.Label(operand("IdResult", 9)),
+      Instruction.Label(operand(OperandKind.IdResult, 9)),
       Instruction.ConvertFToU(intType, converted, input),
       Instruction.Store(output, converted, None),
       Instruction.Return(),
@@ -396,34 +412,39 @@ class ExecutionConversionSuite extends munit.FunSuite {
   }
 
   test("saturated float-to-signed conversion maps NaN to zero") {
-    val voidType  = operand("IdResult", 1)
-    val floatType = operand("IdResult", 2)
-    val intType   = operand("IdResult", 3)
-    val pointer   = operand("IdResult", 4)
-    val signature = operand("IdResult", 5)
-    val function  = operand("IdResult", 6)
-    val output    = operand("IdResult", 7)
-    val input     = operand("IdResult", 8)
-    val converted = operand("IdResult", 10)
+    val voidType  = operand(OperandKind.IdResult, 1)
+    val floatType = operand(OperandKind.IdResult, 2)
+    val intType   = operand(OperandKind.IdResult, 3)
+    val pointer   = operand(OperandKind.IdResult, 4)
+    val signature = operand(OperandKind.IdResult, 5)
+    val function  = operand(OperandKind.IdResult, 6)
+    val output    = operand(OperandKind.IdResult, 7)
+    val input     = operand(OperandKind.IdResult, 8)
+    val converted = operand(OperandKind.IdResult, 10)
     val module    = Module(
       Header(ISA.version, Word(0), Word(11), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(floatType, operand("LiteralInteger", 32), None),
-        Instruction.TypeInt(intType, operand("LiteralInteger", 32), operand("LiteralInteger", 1)),
-        Instruction.TypePointer(pointer, operand("StorageClass", spv.StorageClass.CrossWorkgroup), intType),
+        Instruction.TypeFloat(floatType, operand(OperandKind.LiteralInteger, 32), None),
+        Instruction.TypeInt(intType, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 1)),
+        Instruction.TypePointer(pointer, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), intType),
         Instruction.TypeFunction(signature, voidType, Vec(pointer, floatType)),
-        Instruction.Decorate(converted, operand("Decoration", spv.Decoration.SaturatedConversion)),
+        Instruction.Decorate(converted, operand(OperandKind.Decoration, spv.Decoration.SaturatedConversion)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("saturated_nan"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), signature),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          signature
+        ),
         Instruction.FunctionParameter(pointer, output),
         Instruction.FunctionParameter(floatType, input),
-        Instruction.Label(operand("IdResult", 9)),
+        Instruction.Label(operand(OperandKind.IdResult, 9)),
         Instruction.ConvertFToS(intType, converted, input),
         Instruction.Store(output, converted, None),
         Instruction.Return(),

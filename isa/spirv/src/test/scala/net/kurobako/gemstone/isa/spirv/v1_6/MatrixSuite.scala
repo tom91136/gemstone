@@ -9,8 +9,8 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class MatrixSuite extends munit.FunSuite {
-  private def ref(id: Int): Operand    = operand("IdRef", id)
-  private def literal(n: Int): Operand = operand("LiteralInteger", n)
+  private def ref(id: Int): Operand    = operand(OperandKind.IdRef, id)
+  private def literal(n: Int): Operand = operand(OperandKind.LiteralInteger, n)
 
   for {
     width     <- Seq(16, 32, 64)
@@ -47,7 +47,8 @@ class MatrixSuite extends munit.FunSuite {
     def flatten(matrix: Vector[Vector[Double]]): Vector[Double] = matrix.transpose.flatten
     val (leftType, rightType, outType, left, right, expected)   = operation match {
       case "determinant_negative_zero" =>
-        (5, 2, 2, flatten(a), Vector(0.0), Vector(-0.0))
+        // Scala Native zero-initializes all-zero literal arrays, losing the sign in Vector(-0.0).
+        (5, 2, 2, flatten(a), Vector(0.0), Vector(java.lang.Double.longBitsToDouble(Long.MinValue)))
       case "determinant" | "determinant_swapped" =>
         (5, 2, 2, flatten(a), Vector(0.0), Vector(Math.pow(2.0, rows) * (if (operation.endsWith("swapped")) -1 else 1)))
       case "inverse" | "inverse_swapped" =>
@@ -79,7 +80,7 @@ class MatrixSuite extends munit.FunSuite {
           ref(outType),
           ref(35),
           ref(39),
-          operand("LiteralExtInstInteger", if (operation.startsWith("determinant")) 33 else 34),
+          operand(OperandKind.LiteralExtInstInteger, if (operation.startsWith("determinant")) 33 else 34),
           Vec(ref(33))
         ))
       case "array_extract" => Vec(Instruction.CompositeExtract(ref(5), ref(35), ref(33), Vec(literal(1))))
@@ -119,22 +120,22 @@ class MatrixSuite extends munit.FunSuite {
         Instruction.Constant(ref(15), ref(18), literal(1)),
         Instruction.Constant(ref(15), ref(19), literal(2)),
         Instruction.TypeArray(ref(8), ref(5), ref(19)),
-        Instruction.TypePointer(ref(9), operand("StorageClass", StorageClass.Input), ref(5)),
-        Instruction.TypePointer(ref(14), operand("StorageClass", StorageClass.Output), ref(2)),
-        Instruction.TypePointer(ref(10), operand("StorageClass", StorageClass.Input), ref(leftType)),
-        Instruction.TypePointer(ref(11), operand("StorageClass", StorageClass.Input), ref(rightType)),
-        Instruction.TypePointer(ref(12), operand("StorageClass", StorageClass.Output), ref(outType)),
+        Instruction.TypePointer(ref(9), operand(OperandKind.StorageClass, StorageClass.Input), ref(5)),
+        Instruction.TypePointer(ref(14), operand(OperandKind.StorageClass, StorageClass.Output), ref(2)),
+        Instruction.TypePointer(ref(10), operand(OperandKind.StorageClass, StorageClass.Input), ref(leftType)),
+        Instruction.TypePointer(ref(11), operand(OperandKind.StorageClass, StorageClass.Input), ref(rightType)),
+        Instruction.TypePointer(ref(12), operand(OperandKind.StorageClass, StorageClass.Output), ref(outType)),
         Instruction.TypeFunction(ref(13), ref(1), Vec.empty),
-        Instruction.Variable(ref(10), ref(20), operand("StorageClass", StorageClass.Input), None),
-        Instruction.Variable(ref(11), ref(21), operand("StorageClass", StorageClass.Input), None),
-        Instruction.Variable(ref(12), ref(22), operand("StorageClass", StorageClass.Output), None),
+        Instruction.Variable(ref(10), ref(20), operand(OperandKind.StorageClass, StorageClass.Input), None),
+        Instruction.Variable(ref(11), ref(21), operand(OperandKind.StorageClass, StorageClass.Input), None),
+        Instruction.Variable(ref(12), ref(22), operand(OperandKind.StorageClass, StorageClass.Output), None),
         Instruction.EntryPoint(
-          operand("ExecutionModel", ExecutionModel.Vertex),
+          operand(OperandKind.ExecutionModel, ExecutionModel.Vertex),
           ref(30),
           stringOperand("main"),
           Vec(ref(20), ref(21), ref(22))
         ),
-        Instruction.Function(ref(1), ref(30), operand("FunctionControl", FunctionControl.None), ref(13)),
+        Instruction.Function(ref(1), ref(30), operand(OperandKind.FunctionControl, FunctionControl.None), ref(13)),
         Instruction.Label(ref(32)),
         Instruction.Load(ref(leftType), ref(33), ref(20), None),
         Instruction.Load(ref(rightType), ref(34), ref(21), None)

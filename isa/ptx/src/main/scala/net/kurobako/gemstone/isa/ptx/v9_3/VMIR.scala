@@ -87,44 +87,44 @@ private object VMIR {
     case Wrap  extends BitMaskMode("wrap")
   }
 
-  enum BytePermuteMode(val suffix: String) {
-    case Default extends BytePermuteMode("")
-    case F4E     extends BytePermuteMode("f4e")
-    case B4E     extends BytePermuteMode("b4e")
-    case RC8     extends BytePermuteMode("rc8")
-    case ECL     extends BytePermuteMode("ecl")
-    case ECR     extends BytePermuteMode("ecr")
-    case RC16    extends BytePermuteMode("rc16")
+  enum BytePermuteMode(val modifier: Option[Modifier]) {
+    case Default extends BytePermuteMode(None)
+    case F4E     extends BytePermuteMode(Some(Modifier.F4e))
+    case B4E     extends BytePermuteMode(Some(Modifier.B4e))
+    case RC8     extends BytePermuteMode(Some(Modifier.Rc8))
+    case ECL     extends BytePermuteMode(Some(Modifier.Ecl))
+    case ECR     extends BytePermuteMode(Some(Modifier.Ecr))
+    case RC16    extends BytePermuteMode(Some(Modifier.Rc16))
   }
 
-  enum ConversionType(val mnemonic: String, val width: Int where (Between[8, 64] & MultipleOf[8]), val kind: Char) {
-    case B8   extends ConversionType("b8", 8: Int where (Between[8, 64] & MultipleOf[8]), 'b')
-    case S8   extends ConversionType("s8", 8: Int where (Between[8, 64] & MultipleOf[8]), 's')
-    case U8   extends ConversionType("u8", 8: Int where (Between[8, 64] & MultipleOf[8]), 'u')
-    case B16  extends ConversionType("b16", 16: Int where (Between[8, 64] & MultipleOf[8]), 'b')
-    case S16  extends ConversionType("s16", 16: Int where (Between[8, 64] & MultipleOf[8]), 's')
-    case U16  extends ConversionType("u16", 16: Int where (Between[8, 64] & MultipleOf[8]), 'u')
-    case F16  extends ConversionType("f16", 16: Int where (Between[8, 64] & MultipleOf[8]), 'f')
-    case BF16 extends ConversionType("bf16", 16: Int where (Between[8, 64] & MultipleOf[8]), 'f')
-    case B32  extends ConversionType("b32", 32: Int where (Between[8, 64] & MultipleOf[8]), 'b')
-    case S32  extends ConversionType("s32", 32: Int where (Between[8, 64] & MultipleOf[8]), 's')
-    case U32  extends ConversionType("u32", 32: Int where (Between[8, 64] & MultipleOf[8]), 'u')
-    case F32  extends ConversionType("f32", 32: Int where (Between[8, 64] & MultipleOf[8]), 'f')
-    case B64  extends ConversionType("b64", 64: Int where (Between[8, 64] & MultipleOf[8]), 'b')
-    case S64  extends ConversionType("s64", 64: Int where (Between[8, 64] & MultipleOf[8]), 's')
-    case U64  extends ConversionType("u64", 64: Int where (Between[8, 64] & MultipleOf[8]), 'u')
-    case F64  extends ConversionType("f64", 64: Int where (Between[8, 64] & MultipleOf[8]), 'f')
+  enum ConversionType(val modifier: Modifier, val width: Int where (Between[8, 64] & MultipleOf[8]), val kind: Char) {
+    case B8   extends ConversionType(Modifier.B8, 8, 'b')
+    case S8   extends ConversionType(Modifier.S8, 8, 's')
+    case U8   extends ConversionType(Modifier.U8, 8, 'u')
+    case B16  extends ConversionType(Modifier.B16, 16, 'b')
+    case S16  extends ConversionType(Modifier.S16, 16, 's')
+    case U16  extends ConversionType(Modifier.U16, 16, 'u')
+    case F16  extends ConversionType(Modifier.F16, 16, 'f')
+    case BF16 extends ConversionType(Modifier.Bf16, 16, 'f')
+    case B32  extends ConversionType(Modifier.B32, 32, 'b')
+    case S32  extends ConversionType(Modifier.S32, 32, 's')
+    case U32  extends ConversionType(Modifier.U32, 32, 'u')
+    case F32  extends ConversionType(Modifier.F32, 32, 'f')
+    case B64  extends ConversionType(Modifier.B64, 64, 'b')
+    case S64  extends ConversionType(Modifier.S64, 64, 's')
+    case U64  extends ConversionType(Modifier.U64, 64, 'u')
+    case F64  extends ConversionType(Modifier.F64, 64, 'f')
   }
 
-  enum ConversionRounding(val mnemonic: String) {
-    case RN  extends ConversionRounding("rn")
-    case RNI extends ConversionRounding("rni")
-    case RZ  extends ConversionRounding("rz")
-    case RZI extends ConversionRounding("rzi")
-    case RM  extends ConversionRounding("rm")
-    case RMI extends ConversionRounding("rmi")
-    case RP  extends ConversionRounding("rp")
-    case RPI extends ConversionRounding("rpi")
+  enum ConversionRounding(val modifier: Modifier) {
+    case RN  extends ConversionRounding(Modifier.Rn)
+    case RNI extends ConversionRounding(Modifier.Rni)
+    case RZ  extends ConversionRounding(Modifier.Rz)
+    case RZI extends ConversionRounding(Modifier.Rzi)
+    case RM  extends ConversionRounding(Modifier.Rm)
+    case RMI extends ConversionRounding(Modifier.Rmi)
+    case RP  extends ConversionRounding(Modifier.Rp)
+    case RPI extends ConversionRounding(Modifier.Rpi)
   }
 
   enum Comparison {
@@ -143,6 +143,14 @@ private object VMIR {
     case GreaterThanOrEqual
     case GreaterThanOrEqualUnordered
   }
+
+  case class FloatControl(
+      flushSubnormal: Boolean = false,
+      saturate: Boolean = false,
+      propagateNaN: Boolean = false,
+      absolute: Boolean = false,
+      xorSign: Boolean = false
+  )
 
   enum FloatOperation {
     case Add
@@ -350,7 +358,8 @@ private object VMIR {
         destination: NonEmpty[String],
         left: Value,
         right: Value,
-        width: Int in (16, 32, 64)
+        width: Int in (16, 32, 64),
+        control: FloatControl = FloatControl()
     ) extends Instruction(s"${operation.toString.toLowerCaseRoot}.f$width")
 
     case FloatBinaryPacked(
@@ -367,7 +376,8 @@ private object VMIR {
         operation: FloatUnaryOperation,
         destination: NonEmpty[String],
         source: Value,
-        width: Int in (16, 32, 64)
+        width: Int in (16, 32, 64),
+        control: FloatControl = FloatControl()
     ) extends Instruction(operation match {
           case FloatUnaryOperation.Negate               => s"neg.f$width"
           case FloatUnaryOperation.Absolute             => s"abs.f$width"
@@ -386,7 +396,8 @@ private object VMIR {
         left: Value,
         right: Value,
         addend: Value,
-        width: Int in (16, 32, 64)
+        width: Int in (16, 32, 64),
+        control: FloatControl = FloatControl()
     ) extends Instruction(s"fma.f$width")
 
     case FusedMultiplyAddBf16(destination: NonEmpty[String], left: Value, right: Value, addend: Value)
@@ -478,7 +489,7 @@ private object VMIR {
         right: Value,
         control: Value,
         mode: BytePermuteMode
-    ) extends Instruction(s"prmt.b32${if (mode == BytePermuteMode.Default) "" else s".${mode.suffix}"}")
+    ) extends Instruction(s"prmt.b32${if (mode == BytePermuteMode.Default) "" else s".${mode.modifier.get.name}"}")
 
     case Select(
         destination: NonEmpty[String],
@@ -495,7 +506,7 @@ private object VMIR {
         destinationType: ConversionType,
         rounding: Option[ConversionRounding]
     ) extends Instruction(
-          s"cvt.${rounding.map(_.mnemonic + ".").getOrElse("")}${destinationType.mnemonic}.${sourceType.mnemonic}"
+          s"cvt.${rounding.map(_.modifier.name + ".").getOrElse("")}${destinationType.modifier.name}.${sourceType.modifier.name}"
         )
 
     case LoadGlobal(
@@ -596,7 +607,8 @@ private object VMIR {
         kind: Char,
         left: Value,
         right: Value,
-        width: Int where (Between[8, 64] & MultipleOf[8])
+        width: Int where (Between[8, 64] & MultipleOf[8]),
+        flushSubnormal: Boolean = false
     ) extends Instruction("setp")
 
     case PredicateCompare(

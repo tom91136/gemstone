@@ -28,32 +28,41 @@ class ExecutionPointerSuite extends munit.FunSuite {
   }
 
   test("pointer stores dirty the destination and report an output relocation") {
-    val voidType       = operand("IdResult", 1)
-    val u32            = operand("IdResult", 2)
-    val pointerType    = operand("IdResult", 3)
-    val pointerPointer = operand("IdResult", 4)
-    val functionType   = operand("IdResult", 5)
-    val function       = operand("IdResult", 6)
-    val target         = operand("IdResult", 7)
-    val source         = operand("IdResult", 8)
+    val voidType       = operand(OperandKind.IdResult, 1)
+    val u32            = operand(OperandKind.IdResult, 2)
+    val pointerType    = operand(OperandKind.IdResult, 3)
+    val pointerPointer = operand(OperandKind.IdResult, 4)
+    val functionType   = operand(OperandKind.IdResult, 5)
+    val function       = operand(OperandKind.IdResult, 6)
+    val target         = operand(OperandKind.IdResult, 7)
+    val source         = operand(OperandKind.IdResult, 8)
     val module         = Module(
       Header(ISA.version, Word(0), Word(12), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
-        Instruction.TypePointer(pointerPointer, operand("StorageClass", spv.StorageClass.CrossWorkgroup), pointerType),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u32),
+        Instruction.TypePointer(
+          pointerPointer,
+          operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup),
+          pointerType
+        ),
         Instruction.TypeFunction(functionType, voidType, Vec(pointerPointer, pointerType)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("store_pointer"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
         Instruction.FunctionParameter(pointerPointer, target),
         Instruction.FunctionParameter(pointerType, source),
-        Instruction.Label(operand("IdResult", 9)),
+        Instruction.Label(operand(OperandKind.IdResult, 9)),
         Instruction.Store(target, source, None),
         Instruction.Return(),
         Instruction.FunctionEnd()
@@ -119,45 +128,54 @@ class ExecutionPointerSuite extends munit.FunSuite {
   }
 
   test("dispatch preserves typed null pointers through generic casts and integer conversion") {
-    val voidType          = operand("IdResult", 1)
-    val u8                = operand("IdResult", 2)
-    val u64               = operand("IdResult", 3)
-    val genericPointer    = operand("IdResult", 4)
-    val globalBytePointer = operand("IdResult", 5)
-    val outputPointer     = operand("IdResult", 6)
-    val functionType      = operand("IdResult", 7)
-    val nullPointer       = operand("IdResult", 8)
-    val function          = operand("IdResult", 9)
-    val output            = operand("IdResult", 10)
-    val castPointer       = operand("IdResult", 12)
-    val addressValue      = operand("IdResult", 13)
-    val genericU64Pointer = operand("IdResult", 14)
-    val zero              = operand("IdResult", 15)
-    val genericOutput     = operand("IdResult", 16)
-    val outputAddress     = operand("IdResult", 17)
-    val restoredGeneric   = operand("IdResult", 18)
-    val restoredOutput    = operand("IdResult", 19)
-    val restoredNull      = operand("IdResult", 20)
+    val voidType          = operand(OperandKind.IdResult, 1)
+    val u8                = operand(OperandKind.IdResult, 2)
+    val u64               = operand(OperandKind.IdResult, 3)
+    val genericPointer    = operand(OperandKind.IdResult, 4)
+    val globalBytePointer = operand(OperandKind.IdResult, 5)
+    val outputPointer     = operand(OperandKind.IdResult, 6)
+    val functionType      = operand(OperandKind.IdResult, 7)
+    val nullPointer       = operand(OperandKind.IdResult, 8)
+    val function          = operand(OperandKind.IdResult, 9)
+    val output            = operand(OperandKind.IdResult, 10)
+    val castPointer       = operand(OperandKind.IdResult, 12)
+    val addressValue      = operand(OperandKind.IdResult, 13)
+    val genericU64Pointer = operand(OperandKind.IdResult, 14)
+    val zero              = operand(OperandKind.IdResult, 15)
+    val genericOutput     = operand(OperandKind.IdResult, 16)
+    val outputAddress     = operand(OperandKind.IdResult, 17)
+    val restoredGeneric   = operand(OperandKind.IdResult, 18)
+    val restoredOutput    = operand(OperandKind.IdResult, 19)
+    val restoredNull      = operand(OperandKind.IdResult, 20)
     val instructions      = Vec(
       Instruction.TypeVoid(voidType),
-      Instruction.TypeInt(u8, operand("LiteralInteger", 8), operand("LiteralInteger", 0)),
-      Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
-      Instruction.TypePointer(genericPointer, operand("StorageClass", spv.StorageClass.Generic), u8),
-      Instruction.TypePointer(globalBytePointer, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u8),
-      Instruction.TypePointer(outputPointer, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u64),
+      Instruction.TypeInt(u8, operand(OperandKind.LiteralInteger, 8), operand(OperandKind.LiteralInteger, 0)),
+      Instruction.TypeInt(u64, operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
+      Instruction.TypePointer(genericPointer, operand(OperandKind.StorageClass, spv.StorageClass.Generic), u8),
+      Instruction.TypePointer(
+        globalBytePointer,
+        operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup),
+        u8
+      ),
+      Instruction.TypePointer(outputPointer, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u64),
       Instruction.TypeFunction(functionType, voidType, Vec(outputPointer)),
       Instruction.ConstantNull(genericPointer, nullPointer),
-      Instruction.TypePointer(genericU64Pointer, operand("StorageClass", spv.StorageClass.Generic), u64),
-      Instruction.Constant(u64, zero, operand("LiteralContextDependentNumber", 0)),
+      Instruction.TypePointer(genericU64Pointer, operand(OperandKind.StorageClass, spv.StorageClass.Generic), u64),
+      Instruction.Constant(u64, zero, operand(OperandKind.LiteralContextDependentNumber, 0)),
       Instruction.EntryPoint(
-        operand("ExecutionModel", spv.ExecutionModel.Kernel),
+        operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
         function,
         stringOperand("null_pointer"),
         Vec.empty
       ),
-      Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+      Instruction.Function(
+        voidType,
+        function,
+        operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+        functionType
+      ),
       Instruction.FunctionParameter(outputPointer, output),
-      Instruction.Label(operand("IdResult", 11)),
+      Instruction.Label(operand(OperandKind.IdResult, 11)),
       Instruction.GenericCastToPtr(globalBytePointer, castPointer, nullPointer),
       Instruction.ConvertPtrToU(u64, addressValue, castPointer),
       Instruction.ConvertUToPtr(genericPointer, restoredNull, addressValue),

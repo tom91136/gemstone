@@ -23,24 +23,6 @@ private object VMIR {
     case Literal(value: Long)
   }
 
-  enum SubDwordSelection(
-      val width: Int where Between[1, 64],
-      val shift: Int where Between[0, 24],
-      val upperBit: Int where Between[1, 64]
-  ) {
-    case Byte0 extends SubDwordSelection(8, 0: Int where Between[0, 24], 8)
-    case Byte1 extends SubDwordSelection(8, 8: Int where Between[0, 24], 16)
-    case Byte2 extends SubDwordSelection(8, 16: Int where Between[0, 24], 24)
-    case Byte3 extends SubDwordSelection(8, 24: Int where Between[0, 24], 32)
-    case Word0 extends SubDwordSelection(16, 0: Int where Between[0, 24], 16)
-    case Word1 extends SubDwordSelection(16, 16: Int where Between[0, 24], 32)
-    case DWord extends SubDwordSelection(32, 0: Int where Between[0, 24], 32)
-  }
-
-  enum SubDwordDestinationUnused {
-    case Pad, SignExtend, Preserve
-  }
-
   enum ScalarUnaryOperation {
     case AbsoluteI32, SignExtendI8, SignExtendI16, CountBits32, CountBits64, ReverseBits32
     case Not32, Not64, FirstBitHighI32, ClearBit32, SetBit32

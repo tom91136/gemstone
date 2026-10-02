@@ -4,13 +4,13 @@
 // SOURCE: smem.s
 
 s_buffer_load_dword s10, s[92:95], m0
-// ENCODING: [0x7c, 0x5c, 0x05, 0xc2]
+// ENCODING: [0x7c, 0x5c, 0x05, 0xc2] WAVE_SIZE: 64
 
 s_buffer_load_dword ttmp0, s[92:95], m0
-// ENCODING: [0x7c, 0x5c, 0x38, 0xc2]
+// ENCODING: [0x7c, 0x5c, 0x38, 0xc2] WAVE_SIZE: 64
 
 s_buffer_load_dwordx2 s[10:11], s[92:95], m0
-// ENCODING: [0x7c, 0x5c, 0x45, 0xc2]
+// ENCODING: [0x7c, 0x5c, 0x45, 0xc2] WAVE_SIZE: 64
 
 s_load_dword s1, s[2:3], -1
 // ERROR: operands are not valid for this GPU or mode

@@ -260,7 +260,7 @@ object GenerateOfficialAPIManifest {
     val functions = collect(root).filter(function => config.acceptedName(function.name.raw))
     val conflicts = functions.groupBy(_.name).collect {
       case (name, entries) if entries.map(_.functionType).distinct.size > 1 =>
-        s"${name}: ${entries.map(_.functionType).distinct.mkString(" versus ")}"
+        s"$name: ${entries.map(_.functionType).distinct.mkString(" versus ")}"
     }.toVector
     if (conflicts.nonEmpty)
       throw IllegalStateException(s"${config.name}: conflicting declarations: ${conflicts.mkString("; ")}")

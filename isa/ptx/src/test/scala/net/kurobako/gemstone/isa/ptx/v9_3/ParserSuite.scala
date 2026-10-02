@@ -2,9 +2,111 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.ptx.v9_3.asm.*
 
 class ParserSuite extends munit.FunSuite {
+  private def roundTrip(source: String): Program = {
+    val parsed = Parser.parse(source).fold(error => fail(error.toString), identity)
+    assertEquals(Parser.parse(Printer.render(parsed)), Right(parsed))
+    parsed
+  }
+
+  test("linkage, prototypes, and launch directives survive the first parse") {
+    val source = ".extern .func external(.param .b64 p);\n" +
+      ".weak .entry declared();\n" +
+      ".visible .entry defined() .maxntid 32, 2, 1 .minnctapersm 2 { ret; }"
+    val program = roundTrip(source)
+    program.statements match {
+      case Vec(
+            Statement.Function(Linkage.Extern, "external", _, _, None, _),
+            Statement.Entry(Linkage.Weak, "declared", _, None, _),
+            Statement.Entry(Linkage.Visible, "defined", _, Some(_), directives)
+          ) =>
+        assertEquals(directives.map(_.path.raw), Vec(Vec("maxntid"), Vec("minnctapersm")))
+        assertEquals(
+          directives.head.arguments.map(_.operand),
+          Vec(
+            Operand.Immediate("32"),
+            Operand.Immediate("2"),
+            Operand.Immediate("1")
+          )
+        )
+      case other => fail(s"lost declaration information: $other")
+    }
+    assert(VMCompiler.compile(program.statements(1) match {
+      case entry: Statement.Entry => entry
+      case _                      => fail("expected entry declaration")
+    }).isLeft)
+  }
+
+  test("scalar, unsized, and sized storage retain distinct syntax and initializer values") {
+    val program = roundTrip(".global .u32 scalar;\n.extern .shared .b8 dynamic[];\n.global .u32 fixed[2] = {1, 2};")
+    val declarations = program.statements.collect { case value: Statement.Data => value }
+    assertEquals(declarations.map(_.extent), Vec(Extent.Scalar, Extent.Unsized, Extent.Sized(2)))
+    assertEquals(declarations.last.initializer, Vec(Operand.Immediate("1"), Operand.Immediate("2")))
+    val directive = roundTrip(".custom symbol = {1, 2};").statements.head
+    directive match {
+      case Statement.Directive(_, _, _, initializer) =>
+        assertEquals(initializer, Vec(Operand.VectorLiteral(Vec(Operand.Immediate("1"), Operand.Immediate("2")))))
+      case other => fail(s"expected directive: $other")
+    }
+  }
+
+  test("debug line directives do not consume the following instructions") {
+    val source = ".file 1 \"kernel.cu\"\n.visible .entry kernel() {\n" +
+      ".loc 1 42 7\nmov.u32 %r0, 1;\n.loc 1 43 0\nret;\n}"
+    val program = roundTrip(source)
+    program.statements match {
+      case Vec(_: Statement.Directive, Statement.Entry(_, _, _, Some(body), _)) =>
+        assertEquals(body.map(_.productPrefix), Vec("Directive", "Instruction", "Directive", "Instruction"))
+        assertEquals(body.collect { case Statement.Instruction(value) => value }.size, 2)
+      case other => fail(s"lost debug directives or instructions: $other")
+    }
+    val pointer = roundTrip(".extern .func f(.param .u64 .ptr .global .align 16 p);")
+    assert(Printer.render(pointer).contains(".param .u64 .ptr .global .align 16 p"))
+  }
+
+  test("indirect-call prototypes retain labels, parameters, and ABI directives") {
+    val program = roundTrip("Fproto: .callprototype (.param .b32 _) _ (.param .b8 _[]) .abi_preserve 4;")
+    program.statements match {
+      case Vec(Statement.CallPrototype("Fproto", returns, parameters, directives)) =>
+        assertEquals(returns.head.elementType, DataType.B32)
+        assertEquals(parameters.head.dimensions, Vec(None))
+        assertEquals(directives.head.path.raw, Vec("abi_preserve"))
+      case other => fail(s"lost call prototype: $other")
+    }
+  }
+
+  test("comments survive normalization without consuming instructions or quoted delimiters") {
+    val source = "// .globl kernel\n.visible .entry kernel() {\n" +
+      "/* block\ncomment */ .reg .u32 %r;\n" +
+      "mov.u32 %r/* inline */, 1; // trailing\n" +
+      ".pragma \"// not a comment /* either */\";\nret;\n// tail\n}\n// module tail"
+    val program                                           = roundTrip(source)
+    def comments(statements: Vec[Statement]): Vec[String] = statements.flatMap {
+      case Statement.Comment(text)           => Vec(text.raw)
+      case Statement.Entry(_, _, _, body, _) => body.toSeq.flatMap(comments(_)).toVec
+      case Statement.Block(body)             => comments(body)
+      case _                                 => Vec.empty
+    }
+    assertEquals(
+      comments(program.statements),
+      Vec(
+        "// .globl kernel",
+        "/* block\ncomment */",
+        "/* inline */",
+        "// trailing",
+        "// tail",
+        "// module tail"
+      )
+    )
+    assert(VMCompiler.compile(Printer.render(program)).isRight)
+    val printed = Printer.render(program)
+    assert(printed.contains("\"// not a comment /* either */\""))
+  }
+
   private val modules = Vec(
     "// comment\n.version 9.3\n.target sm_100, texmode_independent\n.address_size 64",
     ".extern .func __assertfail(.param .b64 message);",
@@ -23,7 +125,7 @@ class ParserSuite extends munit.FunSuite {
   )
 
   private val statementKinds = Vec(
-    Vec("Directive", "Directive", "Directive"),
+    Vec("Comment", "Directive", "Directive", "Directive"),
     Vec("Function"),
     Vec("Entry"),
     Vec("Entry"),
@@ -41,6 +143,7 @@ class ParserSuite extends munit.FunSuite {
     test(s"parses representative module $index") {
       val parsed = Parser.parse(source).fold(error => fail(error.message), identity)
       assertEquals(parsed.statements.map(_.productPrefix), statementKinds(index))
+      assertEquals(Parser.parse(Printer.render(parsed)), Right(parsed))
       assert(Parser.parse(source + "\n/* unterminated").isLeft)
     }
   }
@@ -58,8 +161,8 @@ class ParserSuite extends munit.FunSuite {
     assertEquals(entries.map(_.name.raw), Vec.from((0 until 256).map(index => s"kernel_$index")))
     entries.foreach { entry =>
       assertEquals(entry.parameters, Vec.empty[Parameter])
-      val instructions = entry.body.collect { case Statement.Instruction(value) => value }
-      assertEquals(entry.body.size, 67, entry.name)
+      val instructions = entry.body.toSeq.flatten.collect { case Statement.Instruction(value) => value }
+      assertEquals(entry.body.toSeq.flatten.size, 67, entry.name)
       assertEquals(instructions.size, 66, entry.name)
       assertEquals(
         instructions.head,
@@ -113,7 +216,10 @@ class ParserSuite extends munit.FunSuite {
     assertEquals(endError.offset.raw, source.length)
     assertEquals(endError.line.raw, 5)
     assertEquals(endError.column.raw, 3)
-    assertEquals(Parser.parse("\n // comment\n /* complete */ \n"), Right(Program(Vec.empty)))
+    assertEquals(
+      Parser.parse("\n // comment\n /* complete */ \n"),
+      Right(Program(Vec(Statement.Comment("// comment"), Statement.Comment("/* complete */"))))
+    )
   }
 
   test("NUL bytes are rejected at their original position even at source edges or inside comments") {

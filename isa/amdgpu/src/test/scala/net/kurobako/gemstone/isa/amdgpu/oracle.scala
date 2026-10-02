@@ -5,12 +5,13 @@ import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
 import scala.util.Using
 
 /** Checked-in, readable subset of the pinned LLVM MC AMDGPU oracle. */
 private object oracle {
-  case class OracleCase(target: Target, assembly: String, bytes: Vec[Byte], source: String)
+  case class OracleCase(target: Target, assembly: String, bytes: Vec[Byte], source: String, waveSize: Int in (32, 64))
   case class OracleDiagnostic(target: Target, assembly: String, message: String, source: String)
 
   private case class Loaded(cases: Vec[OracleCase], diagnostics: Vec[OracleDiagnostic])
@@ -58,10 +59,15 @@ private object oracle {
     val (_, _, cases, diagnostics) = content.foldLeft(initial) {
       case ((_, pending, cases, diagnostics), s"// SOURCE: $source") =>
         (Some(source), pending, cases, diagnostics)
-      case ((Some(source), Some(assembly), cases, diagnostics), s"// ENCODING: [$encoded]") =>
+      case ((Some(source), Some(assembly), cases, diagnostics), s"// ENCODING: [$encoded] WAVE_SIZE: $waveSize") =>
         val bytes = encoded.split(',').view.map(_.trim).filter(_.nonEmpty)
           .map(value => Integer.parseInt(value.drop(2), 16).toByte).toVec
-        (Some(source), None, cases :+ OracleCase(target, assembly, bytes, source), diagnostics)
+        (
+          Some(source),
+          None,
+          cases :+ OracleCase(target, assembly, bytes, source, waveSize.toInt.unsafe[Int in (32, 64)]),
+          diagnostics
+        )
       case ((Some(source), Some(assembly), cases, diagnostics), s"// ERROR: $message") =>
         (Some(source), None, cases, diagnostics :+ OracleDiagnostic(target, assembly, message, source))
       case ((source, pending, cases, diagnostics), line) if line.isBlank || line.startsWith("//") =>

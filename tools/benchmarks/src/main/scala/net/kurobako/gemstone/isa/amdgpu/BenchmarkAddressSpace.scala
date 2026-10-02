@@ -71,7 +71,7 @@ private trait BenchmarkAddressSpace extends AddressSpace {
       else {
         val (region, _) = indexed(index)
         (address.raw - base(region)).refine[Long >= 0].left.map(error =>
-          Fault.Memory(s"invalid benchmark offset: ${error}")
+          Fault.Memory(s"invalid benchmark offset: $error")
         ) match {
           case Left(fault)   => Left(fault)
           case Right(offset) => read(region, offset, size)
@@ -89,7 +89,7 @@ private trait BenchmarkAddressSpace extends AddressSpace {
         else {
           val (region, _) = indexed(index)
           (address.raw - base(region)).refine[Long >= 0].left.map(error =>
-            Fault.Memory(s"invalid benchmark offset: ${error}")
+            Fault.Memory(s"invalid benchmark offset: $error")
           ) match {
             case Left(fault)   => Left(fault)
             case Right(offset) => write(region, offset, bytes)
@@ -108,7 +108,7 @@ private trait BenchmarkAddressSpace extends AddressSpace {
       else {
         val (region, _) = indexed(index)
         (address.raw - base(region)).refine[Long >= 0].left.map(error =>
-          Fault.Memory(s"invalid benchmark offset: ${error}")
+          Fault.Memory(s"invalid benchmark offset: $error")
         ) match {
           case Left(fault)   => Left(fault)
           case Right(offset) => readValue(region, offset, size)
@@ -128,7 +128,7 @@ private trait BenchmarkAddressSpace extends AddressSpace {
       else {
         val (region, _) = indexed(index)
         (address.raw - base(region)).refine[Long >= 0].left.map(error =>
-          Fault.Memory(s"invalid benchmark offset: ${error}")
+          Fault.Memory(s"invalid benchmark offset: $error")
         ) match {
           case Left(fault)   => Left(fault)
           case Right(offset) => writeValue(region, offset, value, size)
@@ -147,7 +147,7 @@ private trait BenchmarkAddressSpace extends AddressSpace {
       else {
         val (region, _) = indexed(index)
         (address.raw - base(region)).refine[Long >= 0].left.map(error =>
-          Fault.Memory(s"invalid benchmark offset: ${error}")
+          Fault.Memory(s"invalid benchmark offset: $error")
         ) match {
           case Left(fault)   => Left(fault)
           case Right(offset) => atomicModifyValue(region, offset, size)(update)

@@ -88,7 +88,7 @@ object Specialization {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def index(image: Vec[Byte]): Either[String, ModuleIndex] = {
     val bytes = image.toArray
-    if (bytes.length < 20 || bytes.length % 4 != 0 || LittleEndian.decodeInt32(bytes, 0) != Binary.Magic)
+    if (bytes.length < 20 || bytes.length % 4 != 0 || LittleEndian.decodeInt32(bytes, 0) != SPIRV.Magic)
       Left("invalid SPIR-V module")
     else {
       var specIds      = Map.empty[Binary32, Vector[Int]]

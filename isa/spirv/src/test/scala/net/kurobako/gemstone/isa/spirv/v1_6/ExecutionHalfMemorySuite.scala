@@ -9,53 +9,57 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class ExecutionHalfMemorySuite extends munit.FunSuite {
-  private val voidType      = operand("IdResult", 1)
-  private val sizeType      = operand("IdResult", 2)
-  private val halfType      = operand("IdResult", 3)
-  private val floatType     = operand("IdResult", 4)
-  private val vectorType    = operand("IdResult", 5)
-  private val halfPointer   = operand("IdResult", 6)
-  private val vectorPointer = operand("IdResult", 7)
-  private val signature     = operand("IdResult", 8)
-  private val opencl        = operand("IdResult", 9)
-  private val offset        = operand("IdResult", 10)
-  private val function      = operand("IdResult", 11)
-  private val pointer       = operand("IdResult", 12)
-  private val data          = operand("IdResult", 13)
-  private val result        = operand("IdResult", 15)
+  private val voidType      = operand(OperandKind.IdResult, 1)
+  private val sizeType      = operand(OperandKind.IdResult, 2)
+  private val halfType      = operand(OperandKind.IdResult, 3)
+  private val floatType     = operand(OperandKind.IdResult, 4)
+  private val vectorType    = operand(OperandKind.IdResult, 5)
+  private val halfPointer   = operand(OperandKind.IdResult, 6)
+  private val vectorPointer = operand(OperandKind.IdResult, 7)
+  private val signature     = operand(OperandKind.IdResult, 8)
+  private val opencl        = operand(OperandKind.IdResult, 9)
+  private val offset        = operand(OperandKind.IdResult, 10)
+  private val function      = operand(OperandKind.IdResult, 11)
+  private val pointer       = operand(OperandKind.IdResult, 12)
+  private val data          = operand(OperandKind.IdResult, 13)
+  private val result        = operand(OperandKind.IdResult, 15)
 
   private def module(load: Boolean, opcode: Int, mode: Option[Int]): Module = {
     val secondType = if (load) vectorPointer else vectorType
-    val sources    = if (load) Vec(offset, pointer, operand("LiteralInteger", 3))
-    else Vec(data, offset, pointer) ++ Vec.from(mode.map(value => operand("FPRoundingMode", value)))
+    val sources    = if (load) Vec(offset, pointer, operand(OperandKind.LiteralInteger, 3))
+    else Vec(data, offset, pointer) ++ Vec.from(mode.map(value => operand(OperandKind.FPRoundingMode, value)))
     Module(
       Header(ISA.version, Word(0), Word(16), Word(0)),
       Vec[Instruction](
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(sizeType, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
-        Instruction.TypeFloat(halfType, operand("LiteralInteger", 16), None),
-        Instruction.TypeFloat(floatType, operand("LiteralInteger", 32), None),
-        Instruction.TypeVector(vectorType, floatType, operand("LiteralInteger", 3)),
-        Instruction.TypePointer(halfPointer, operand("StorageClass", StorageClass.CrossWorkgroup), halfType),
-        Instruction.TypePointer(vectorPointer, operand("StorageClass", StorageClass.CrossWorkgroup), vectorType),
+        Instruction.TypeInt(sizeType, operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeFloat(halfType, operand(OperandKind.LiteralInteger, 16), None),
+        Instruction.TypeFloat(floatType, operand(OperandKind.LiteralInteger, 32), None),
+        Instruction.TypeVector(vectorType, floatType, operand(OperandKind.LiteralInteger, 3)),
+        Instruction.TypePointer(halfPointer, operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), halfType),
+        Instruction.TypePointer(
+          vectorPointer,
+          operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup),
+          vectorType
+        ),
         Instruction.TypeFunction(signature, voidType, Vec(halfPointer, secondType)),
         Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
-        Instruction.Constant(sizeType, offset, operand("LiteralContextDependentNumber", 1, 0)),
+        Instruction.Constant(sizeType, offset, operand(OperandKind.LiteralContextDependentNumber, 1, 0)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, ExecutionModel.Kernel),
           function,
           stringOperand("half_memory"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", FunctionControl.None), signature),
+        Instruction.Function(voidType, function, operand(OperandKind.FunctionControl, FunctionControl.None), signature),
         Instruction.FunctionParameter(halfPointer, pointer),
         Instruction.FunctionParameter(secondType, data),
-        Instruction.Label(operand("IdResult", 14)),
+        Instruction.Label(operand(OperandKind.IdResult, 14)),
         Instruction.ExtInst(
           if (load) vectorType else voidType,
           result,
           opencl,
-          operand("LiteralExtInstInteger", opcode),
+          operand(OperandKind.LiteralExtInstInteger, opcode),
           sources
         )
       ) ++ (if (load) Vec[Instruction](Instruction.Store(data, result, None)) else Vec.empty[Instruction]) ++

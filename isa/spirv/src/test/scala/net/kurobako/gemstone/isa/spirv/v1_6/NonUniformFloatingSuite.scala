@@ -9,8 +9,8 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class NonUniformFloatingSuite extends munit.FunSuite {
-  private def ref(n: Int): Operand = operand("IdRef", n)
-  private def lit(n: Int): Operand = operand("LiteralInteger", n)
+  private def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
+  private def lit(n: Int): Operand = operand(OperandKind.LiteralInteger, n)
 
   for {
     width     <- Seq(16, 32, 64)
@@ -22,7 +22,7 @@ class NonUniformFloatingSuite extends munit.FunSuite {
     val count                                     = 69 // Two complete subgroups and one partial subgroup.
     val valueType                                 = if (lanes == 1) 3 else 4
     def collective(destination: Int): Instruction = {
-      val args = operand("GroupOperation", operation)
+      val args = operand(OperandKind.GroupOperation, operation)
       kind match {
         case "add" => Instruction.GroupNonUniformFAdd(ref(valueType), ref(destination), ref(12), args, ref(25), None)
         case "multiply" =>
@@ -36,7 +36,7 @@ class NonUniformFloatingSuite extends munit.FunSuite {
     else Vec(
       Instruction.BitwiseAnd(ref(2), ref(26), ref(22), ref(13)),
       Instruction.IEqual(ref(9), ref(27), ref(26), ref(14)),
-      Instruction.SelectionMerge(ref(33), operand("SelectionControl", SelectionControl.None)),
+      Instruction.SelectionMerge(ref(33), operand(OperandKind.SelectionControl, SelectionControl.None)),
       Instruction.BranchConditional(ref(27), ref(30), ref(31), Vec.empty),
       Instruction.Label(ref(30))
     )
@@ -54,24 +54,24 @@ class NonUniformFloatingSuite extends munit.FunSuite {
         Instruction.TypeInt(ref(2), lit(32), lit(0)),
         Instruction.TypeFloat(ref(3), lit(width), None),
         Instruction.TypeVector(ref(4), ref(3), lit(4)),
-        Instruction.TypePointer(ref(5), operand("StorageClass", StorageClass.CrossWorkgroup), ref(valueType)),
+        Instruction.TypePointer(ref(5), operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), ref(valueType)),
         Instruction.TypeVector(ref(6), ref(2), lit(3)),
-        Instruction.TypePointer(ref(7), operand("StorageClass", StorageClass.Input), ref(6)),
-        Instruction.Variable(ref(7), ref(8), operand("StorageClass", StorageClass.Input), None),
-        Instruction.Decorate(ref(8), operand("Decoration", Decoration.BuiltIn, 27)),
+        Instruction.TypePointer(ref(7), operand(OperandKind.StorageClass, StorageClass.Input), ref(6)),
+        Instruction.Variable(ref(7), ref(8), operand(OperandKind.StorageClass, StorageClass.Input), None),
+        Instruction.Decorate(ref(8), operand(OperandKind.Decoration, Decoration.BuiltIn, 27)),
         Instruction.TypeBool(ref(9)),
         Instruction.TypeFunction(ref(10), ref(1), Vec(ref(5), ref(5))),
-        Instruction.Constant(ref(2), ref(12), operand("LiteralContextDependentNumber", 3)),
-        Instruction.Constant(ref(2), ref(13), operand("LiteralContextDependentNumber", 1)),
-        Instruction.Constant(ref(2), ref(14), operand("LiteralContextDependentNumber", 0)),
-        Instruction.Constant(ref(2), ref(15), operand("LiteralContextDependentNumber", count)),
+        Instruction.Constant(ref(2), ref(12), operand(OperandKind.LiteralContextDependentNumber, 3)),
+        Instruction.Constant(ref(2), ref(13), operand(OperandKind.LiteralContextDependentNumber, 1)),
+        Instruction.Constant(ref(2), ref(14), operand(OperandKind.LiteralContextDependentNumber, 0)),
+        Instruction.Constant(ref(2), ref(15), operand(OperandKind.LiteralContextDependentNumber, count)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, ExecutionModel.Kernel),
           ref(16),
           stringOperand("reduce"),
           Vec(ref(8))
         ),
-        Instruction.Function(ref(1), ref(16), operand("FunctionControl", FunctionControl.None), ref(10)),
+        Instruction.Function(ref(1), ref(16), operand(OperandKind.FunctionControl, FunctionControl.None), ref(10)),
         Instruction.FunctionParameter(ref(5), ref(18)),
         Instruction.FunctionParameter(ref(5), ref(19)),
         Instruction.Label(ref(20)),

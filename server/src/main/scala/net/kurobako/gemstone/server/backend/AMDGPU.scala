@@ -3,7 +3,7 @@ package net.kurobako.gemstone.server.backend
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
-import net.kurobako.gemstone.isa.amdgpu.{Program as _, *}
+import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*

@@ -13,38 +13,47 @@ class ExecutionRemainderSuite extends munit.FunSuite {
     width     <- Seq(16, 32, 64)
     operation <- Seq("FRem", "FMod", "SMod")
   }
-    test(s"${operation} preserves operand signs in $width-bit vector lanes") {
-      val voidType     = operand("IdResult", 1)
-      val scalar       = operand("IdResult", 2)
-      val vector       = operand("IdResult", 3)
-      val pointer      = operand("IdResult", 4)
-      val functionType = operand("IdResult", 5)
-      val function     = operand("IdResult", 6)
-      val output       = operand("IdResult", 7)
-      val left         = operand("IdResult", 8)
-      val right        = operand("IdResult", 9)
-      val result       = operand("IdResult", 11)
+    test(s"$operation preserves operand signs in $width-bit vector lanes") {
+      val voidType     = operand(OperandKind.IdResult, 1)
+      val scalar       = operand(OperandKind.IdResult, 2)
+      val vector       = operand(OperandKind.IdResult, 3)
+      val pointer      = operand(OperandKind.IdResult, 4)
+      val functionType = operand(OperandKind.IdResult, 5)
+      val function     = operand(OperandKind.IdResult, 6)
+      val output       = operand(OperandKind.IdResult, 7)
+      val left         = operand(OperandKind.IdResult, 8)
+      val right        = operand(OperandKind.IdResult, 9)
+      val result       = operand(OperandKind.IdResult, 11)
       val module       = Module(
         Header(ISA.version, Word(0), Word(12), Word(0)),
         Vec(
           Instruction.TypeVoid(voidType),
           if (operation == "SMod")
-            Instruction.TypeInt(scalar, operand("LiteralInteger", width), operand("LiteralInteger", 1))
-          else Instruction.TypeFloat(scalar, operand("LiteralInteger", width), None),
-          Instruction.TypeVector(vector, scalar, operand("LiteralInteger", 4)),
-          Instruction.TypePointer(pointer, operand("StorageClass", StorageClass.CrossWorkgroup), vector),
+            Instruction.TypeInt(
+              scalar,
+              operand(OperandKind.LiteralInteger, width),
+              operand(OperandKind.LiteralInteger, 1)
+            )
+          else Instruction.TypeFloat(scalar, operand(OperandKind.LiteralInteger, width), None),
+          Instruction.TypeVector(vector, scalar, operand(OperandKind.LiteralInteger, 4)),
+          Instruction.TypePointer(pointer, operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), vector),
           Instruction.TypeFunction(functionType, voidType, Vec(pointer, vector, vector)),
           Instruction.EntryPoint(
-            operand("ExecutionModel", ExecutionModel.Kernel),
+            operand(OperandKind.ExecutionModel, ExecutionModel.Kernel),
             function,
             stringOperand("remainder"),
             Vec.empty
           ),
-          Instruction.Function(voidType, function, operand("FunctionControl", FunctionControl.None), functionType),
+          Instruction.Function(
+            voidType,
+            function,
+            operand(OperandKind.FunctionControl, FunctionControl.None),
+            functionType
+          ),
           Instruction.FunctionParameter(pointer, output),
           Instruction.FunctionParameter(vector, left),
           Instruction.FunctionParameter(vector, right),
-          Instruction.Label(operand("IdResult", 10)),
+          Instruction.Label(operand(OperandKind.IdResult, 10)),
           operation match {
             case "SMod" => Instruction.SMod(vector, result, left, right)
             case "FMod" => Instruction.FMod(vector, result, left, right)

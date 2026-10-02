@@ -539,9 +539,26 @@ lazy val ptxReferenceBundle = ReferenceBundle(
   verify = output => require((output / "nvidia/ptx/index.html").isFile, "NVIDIA PTX specification is absent")
 )
 
+lazy val tablegenReferenceBundle = ReferenceBundle(
+  name = "llvm-tablegen",
+  recipeRevision = "3",
+  artifacts = referenceArtifactsNamed("llvm"),
+  populate = (cached, stage) =>
+    Compress.extractTarXz(
+      archive = cached("llvm"),
+      destination = stage,
+      archiveRoot = s"llvm-project-$llvmVersion.src",
+      select = relative =>
+        Vector("llvm", "cmake", "third-party", "libc").exists(relative.startsWith(_)) &&
+          !relative.startsWith("llvm/test") &&
+          !(relative.parent.contains(path"llvm/utils/mlgo-utils") && relative.fileName.endsWith(".py"))
+    ),
+  verify = output => require((output / "llvm/utils/TableGen/CMakeLists.txt").isFile, "LLVM TableGen sources are absent")
+)
+
 lazy val amdgpuReferenceBundle = ReferenceBundle(
   name = "amdgpu",
-  recipeRevision = "1",
+  recipeRevision = "4",
   artifacts = referenceArtifactsNamed(
     "llvm",
     "mesa",
@@ -553,7 +570,12 @@ lazy val amdgpuReferenceBundle = ReferenceBundle(
       destination = stage / "llvm",
       archiveRoot = s"llvm-project-$llvmVersion.src",
       select = relative =>
-        relative == path"llvm/LICENSE.TXT" || relative.startsWith("llvm/test/MC/AMDGPU")
+        relative == path"llvm/LICENSE.TXT" || relative.startsWith(
+          "llvm/test/MC/AMDGPU"
+        ) || relative == path"llvm/lib/Target/AMDGPU/SIDefines.h" ||
+          relative == path"llvm/include/llvm/BinaryFormat/ELFRelocs/AMDGPU.def" ||
+          (relative.startsWith("llvm/include") && relative.fileName.endsWith(".td")) ||
+          (relative.parent.contains(path"llvm/lib/Target/AMDGPU") && relative.fileName.endsWith(".td"))
     )
     Compress.extractTarXz(
       archive = cached("mesa"),
@@ -634,6 +656,7 @@ lazy val checkedInGeneratedResourceDirectory =
 lazy val nativeBindingsDirectory     = settingKey[Path]("Checked-in generated native binding root.")
 lazy val prepareAPIReferences        = taskKey[Path]("Prepare pinned API and native-header references.")
 lazy val preparePTXReferences        = taskKey[Path]("Prepare the pinned PTX reference.")
+lazy val llvmTablegen                = taskKey[Path]("Build the pinned LLVM TableGen used for ISA metadata.")
 lazy val prepareAMDGPUReferences     = taskKey[Path]("Prepare pinned AMDGPU references.")
 lazy val prepareSPIRVReferences      = taskKey[Path]("Prepare pinned SPIR-V references.")
 lazy val generateOfficialAPIManifest =
@@ -730,6 +753,18 @@ lazy val commonSettings = Seq(
   Compile / exportJars  := false,
   scalafmtDetailedError := true,
   scalafmtFailOnErrors  := true
+) ++ Seq(Compile, Test).flatMap(config =>
+  inConfig(config)(Seq(
+    // Refresh resources after sbt 2 restores cached class output containing older copies.
+    copyResources := Def.uncached(Defaults.copyResourcesTask.value),
+    products      := Def.taskDyn {
+      val compiled = products.value
+      Def.task {
+        val _ = copyResources.value
+        compiled
+      }
+    }.value
+  ))
 )
 
 lazy val nativeTestSettings = Seq(
@@ -830,6 +865,18 @@ lazy val api = projectMatrix
   .jvmPlatform(scalaVersions = Seq(scala3Version))
   .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
 
+lazy val isaTools = project.in(file("tools/isa"))
+  .disablePlugins(Stryker4sPlugin)
+  .dependsOn(ptx.jvm(scala3Version), amdgpu.jvm(scala3Version), spirv.jvm(scala3Version))
+  .dependsOn(codestyleRules % ScalafixConfig)
+  .settings(
+    commonSettings,
+    name                                  := "gemstone-isa-tools",
+    publish / skip                        := true,
+    Compile / mainClass                   := Some(s"$rootPackage.tools.isa.CLI"),
+    libraryDependencies += "com.monovore" %% "decline" % declineVersion
+  )
+
 lazy val codegenProject = Project("codegen", file("tools/codegen"))
   .dependsOn(testSupport.jvm(scala3Version) % "test->compile")
   .disablePlugins(Stryker4sPlugin)
@@ -863,6 +910,37 @@ lazy val codegenProject = Project("codegen", file("tools/codegen"))
         offline = (Global / offlineMode).value,
         log = streams.value.log.info
       )
+    },
+    llvmTablegen := Def.uncached {
+      val source = tablegenReferenceBundle.prepare(
+        cacheDirectory = (Global / isaReferenceCacheDirectory).value,
+        outputRoot = target.value / "isa-references",
+        offline = (Global / offlineMode).value,
+        log = streams.value.log.info
+      )
+      val output = target.value / "llvm-tablegen" / source.fileName
+      val build  = CMake.build(
+        source = source / "llvm",
+        build = output,
+        cmake = (Global / cmakeExecutable).value,
+        arguments = Seq(
+          "-G",
+          "Ninja",
+          s"-DCMAKE_MAKE_PROGRAM=${(Global / ninjaExecutable).value}",
+          "-DCMAKE_BUILD_TYPE=Release",
+          "-DLLVM_TARGETS_TO_BUILD=",
+          "-DLLVM_INCLUDE_TESTS=OFF",
+          "-DLLVM_INCLUDE_BENCHMARKS=OFF",
+          "-DLLVM_INCLUDE_EXAMPLES=OFF",
+          "-DLLVM_ENABLE_TERMINFO=OFF",
+          "-DLLVM_ENABLE_ZLIB=OFF",
+          "-DLLVM_ENABLE_ZSTD=OFF"
+        ),
+        parallelism = (Global / buildParallelism).value,
+        log = streams.value.log.info,
+        target = Some("llvm-min-tblgen")
+      )
+      build / "bin/llvm-min-tblgen"
     },
     prepareAMDGPUReferences := Def.uncached {
       amdgpuReferenceBundle.prepare(
@@ -1218,6 +1296,7 @@ lazy val amdgpu = projectMatrix
     generateAMDGPUSources := Def.uncached {
       val converter    = fileConverter.value
       val references   = (codegenProject / prepareAMDGPUReferences).value
+      val tablegen     = (codegenProject / llvmTablegen).value
       val python       = (Global / pythonExecutable).value
       val sourceRoot   = (Compile / checkedInGeneratedSourceDirectory).value
       val metadataRoot = (Compile / checkedInGeneratedResourceDirectory).value
@@ -1231,6 +1310,8 @@ lazy val amdgpu = projectMatrix
         Seq(
           "--python",
           python,
+          "--tablegen",
+          s"$tablegen",
           s"$references",
           s"$sourceRoot",
           s"$metadataRoot"
@@ -1663,7 +1744,7 @@ lazy val gemstone = project.in(file("."))
   .disablePlugins(Stryker4sPlugin)
   .aggregate(testSupport.projectRefs *)
   .aggregate(api.projectRefs *)
-  .aggregate(codegenProject)
+  .aggregate(codegenProject, isaTools)
   .aggregate(core.projectRefs *)
   .aggregate(server.projectRefs *)
   .aggregate(ptx.projectRefs *)
@@ -1702,6 +1783,7 @@ lazy val gemstone = project.in(file("."))
           generated = Seq((api.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
         ),
         Coverage.Entry(codegenProject.id),
+        Coverage.Entry(isaTools.id),
         Coverage.Entry(benchmarks.jvm(scala3Version).id),
         Coverage.Entry(codestyleRules.id, tests = false),
         Coverage.Entry(codestyleTests.id, measure = false)

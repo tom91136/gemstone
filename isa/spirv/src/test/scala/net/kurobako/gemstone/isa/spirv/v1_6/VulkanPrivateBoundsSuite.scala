@@ -14,11 +14,11 @@ class VulkanPrivateBoundsSuite extends munit.FunSuite {
     index   <- Seq(-1, 4)
     shader  <- Seq(false, true)
   } test(s"private bounds storage=$storage index=$index shader=$shader") {
-    def ref(n: Int): Operand                                   = operand("IdRef", n)
-    def literal(n: Int): Operand                               = operand("LiteralInteger", n)
+    def ref(n: Int): Operand                                   = operand(OperandKind.IdRef, n)
+    def literal(n: Int): Operand                               = operand(OperandKind.LiteralInteger, n)
     def constant(id: Int, value: Int, t: Int = 2): Instruction =
-      Instruction.Constant(ref(t), ref(id), operand("LiteralContextDependentNumber", value))
-    val local         = Instruction.Variable(ref(8), ref(31), operand("StorageClass", storage), None)
+      Instruction.Constant(ref(t), ref(id), operand(OperandKind.LiteralContextDependentNumber, value))
+    val local         = Instruction.Variable(ref(8), ref(31), operand(OperandKind.StorageClass, storage), None)
     val outputStorage = if (shader) 2 else 5
     val module        = Module(
       Header(ISA.version, Word(0), Word(48), Word(0)),
@@ -28,10 +28,10 @@ class VulkanPrivateBoundsSuite extends munit.FunSuite {
         Instruction.TypeInt(ref(3), literal(32), literal(1)),
         Instruction.TypeVector(ref(4), ref(2), literal(4)),
         Instruction.TypeStruct(ref(5), Vec(ref(2), ref(2))),
-        Instruction.TypePointer(ref(6), operand("StorageClass", outputStorage), ref(5)),
-        Instruction.TypePointer(ref(7), operand("StorageClass", outputStorage), ref(2)),
-        Instruction.TypePointer(ref(8), operand("StorageClass", storage), ref(4)),
-        Instruction.TypePointer(ref(9), operand("StorageClass", storage), ref(2)),
+        Instruction.TypePointer(ref(6), operand(OperandKind.StorageClass, outputStorage), ref(5)),
+        Instruction.TypePointer(ref(7), operand(OperandKind.StorageClass, outputStorage), ref(2)),
+        Instruction.TypePointer(ref(8), operand(OperandKind.StorageClass, storage), ref(4)),
+        Instruction.TypePointer(ref(9), operand(OperandKind.StorageClass, storage), ref(2)),
         Instruction.TypeFunction(ref(10), ref(1), if (shader) Vec.empty else Vec(ref(6))),
         constant(11, 0, 3),
         constant(12, 1, 3),
@@ -42,24 +42,24 @@ class VulkanPrivateBoundsSuite extends munit.FunSuite {
         constant(18, 33),
         constant(19, 44),
         Instruction.ConstantComposite(ref(4), ref(20), Vec(ref(16), ref(17), ref(18), ref(19))),
-        Instruction.Decorate(ref(5), operand("Decoration", Decoration.BufferBlock)),
-        Instruction.MemberDecorate(ref(5), literal(0), operand("Decoration", Decoration.Offset, 0)),
-        Instruction.MemberDecorate(ref(5), literal(1), operand("Decoration", Decoration.Offset, 4))
+        Instruction.Decorate(ref(5), operand(OperandKind.Decoration, Decoration.BufferBlock)),
+        Instruction.MemberDecorate(ref(5), literal(0), operand(OperandKind.Decoration, Decoration.Offset, 0)),
+        Instruction.MemberDecorate(ref(5), literal(1), operand(OperandKind.Decoration, Decoration.Offset, 4))
       ) ++
         (if (shader) Vec(
-           Instruction.Decorate(ref(30), operand("Decoration", Decoration.Binding, 0)),
-           Instruction.Decorate(ref(30), operand("Decoration", Decoration.DescriptorSet, 0)),
-           Instruction.Variable(ref(6), ref(30), operand("StorageClass", StorageClass.Uniform), None)
+           Instruction.Decorate(ref(30), operand(OperandKind.Decoration, Decoration.Binding, 0)),
+           Instruction.Decorate(ref(30), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+           Instruction.Variable(ref(6), ref(30), operand(OperandKind.StorageClass, StorageClass.Uniform), None)
          )
          else Vec.empty[Instruction]) ++ (if (storage == 6) Vec(local) else Vec.empty[Instruction]) ++ Vec(
           Instruction.EntryPoint(
-            operand("ExecutionModel", if (shader) 5 else 6),
+            operand(OperandKind.ExecutionModel, if (shader) 5 else 6),
             ref(40),
             stringOperand("bounds"),
             if (shader) if (storage == 6) Vec(ref(30), ref(31)) else Vec(ref(30)) else Vec.empty
           ),
-          Instruction.ExecutionMode(ref(40), operand("ExecutionMode", ExecutionMode.LocalSize, 1, 1, 1)),
-          Instruction.Function(ref(1), ref(40), operand("FunctionControl", FunctionControl.None), ref(10))
+          Instruction.ExecutionMode(ref(40), operand(OperandKind.ExecutionMode, ExecutionMode.LocalSize, 1, 1, 1)),
+          Instruction.Function(ref(1), ref(40), operand(OperandKind.FunctionControl, FunctionControl.None), ref(10))
         ) ++ (if (shader) Vec.empty[Instruction] else Vec(Instruction.FunctionParameter(ref(6), ref(30)))) ++ Vec(
           Instruction.Label(ref(41))
         ) ++ (if (storage == 7) Vec(local) else Vec.empty[Instruction]) ++ Vec(

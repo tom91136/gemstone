@@ -15,8 +15,8 @@ class GLSLDecomposeSuite extends munit.FunSuite {
     opcode <- Seq(35, 51)
   }
     test(s"pointer decomposition opcode=$opcode width=$width lanes=$count") {
-      def ref(n: Int): Operand       = operand("IdRef", n)
-      def lit(n: Int): Operand       = operand("LiteralInteger", n)
+      def ref(n: Int): Operand       = operand(OperandKind.IdRef, n)
+      def lit(n: Int): Operand       = operand(OperandKind.LiteralInteger, n)
       def floatBits(v: Double): Long = if (width == 32) java.lang.Float.floatToRawIntBits(v.toFloat).toLong &
         0xffffffffL
       else java.lang.Double.doubleToRawLongBits(v)
@@ -38,17 +38,25 @@ class GLSLDecomposeSuite extends munit.FunSuite {
           Instruction.TypeInt(ref(3), lit(64), lit(1)),
           Instruction.TypeVector(ref(4), ref(2), lit(4)),
           Instruction.TypeVector(ref(5), ref(3), lit(4)),
-          Instruction.TypePointer(ref(6), operand("StorageClass", StorageClass.CrossWorkgroup), ref(valueType)),
-          Instruction.TypePointer(ref(7), operand("StorageClass", StorageClass.CrossWorkgroup), ref(integralType)),
+          Instruction.TypePointer(
+            ref(6),
+            operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup),
+            ref(valueType)
+          ),
+          Instruction.TypePointer(
+            ref(7),
+            operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup),
+            ref(integralType)
+          ),
           Instruction.TypeFunction(ref(8), ref(1), Vec(ref(6), ref(7), ref(valueType))),
           Instruction.ExtInstImport(ref(9), stringOperand("GLSL.std.450")),
           Instruction.EntryPoint(
-            operand("ExecutionModel", ExecutionModel.Kernel),
+            operand(OperandKind.ExecutionModel, ExecutionModel.Kernel),
             ref(10),
             stringOperand("decompose"),
             Vec.empty
           ),
-          Instruction.Function(ref(1), ref(10), operand("FunctionControl", FunctionControl.None), ref(8)),
+          Instruction.Function(ref(1), ref(10), operand(OperandKind.FunctionControl, FunctionControl.None), ref(8)),
           Instruction.FunctionParameter(ref(6), ref(11)),
           Instruction.FunctionParameter(ref(7), ref(12)),
           Instruction.FunctionParameter(ref(valueType), ref(13)),
@@ -57,7 +65,7 @@ class GLSLDecomposeSuite extends munit.FunSuite {
             ref(valueType),
             ref(15),
             ref(9),
-            operand("LiteralExtInstInteger", opcode),
+            operand(OperandKind.LiteralExtInstInteger, opcode),
             Vec(ref(13), ref(12))
           ),
           Instruction.Store(ref(11), ref(15), None),

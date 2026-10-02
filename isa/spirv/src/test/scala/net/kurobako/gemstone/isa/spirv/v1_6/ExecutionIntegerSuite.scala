@@ -179,48 +179,62 @@ class ExecutionIntegerSuite extends munit.FunSuite {
   ): Unit = {
     val outputWidth  = resultWidth.getOrElse(width)
     val lanes        = expected.size
-    val scalar       = operand("IdResult", 2)
-    val valueType    = if (lanes == 1) scalar else operand("IdResult", 3)
-    val resultScalar = if (outputWidth == width) scalar else operand("IdResult", 16)
-    val resultType = if (outputWidth == width) valueType else if (lanes == 1) resultScalar else operand("IdResult", 17)
-    val pointer    = operand("IdResult", 4)
-    val functionType = operand("IdResult", 5)
-    val opencl       = operand("IdResult", 6)
-    val function     = operand("IdResult", 7)
-    val output       = operand("IdResult", 8)
-    val arguments    = Vec.from(inputs.indices.map(index => operand("IdResult", 9 + index)))
+    val scalar       = operand(OperandKind.IdResult, 2)
+    val valueType    = if (lanes == 1) scalar else operand(OperandKind.IdResult, 3)
+    val resultScalar = if (outputWidth == width) scalar else operand(OperandKind.IdResult, 16)
+    val resultType   =
+      if (outputWidth == width) valueType else if (lanes == 1) resultScalar else operand(OperandKind.IdResult, 17)
+    val pointer      = operand(OperandKind.IdResult, 4)
+    val functionType = operand(OperandKind.IdResult, 5)
+    val opencl       = operand(OperandKind.IdResult, 6)
+    val function     = operand(OperandKind.IdResult, 7)
+    val output       = operand(OperandKind.IdResult, 8)
+    val arguments    = Vec.from(inputs.indices.map(index => operand(OperandKind.IdResult, 9 + index)))
     val declarations = Vec[Instruction](
       Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
-      Instruction.TypeVoid(operand("IdResult", 1)),
-      Instruction.TypeInt(scalar, operand("LiteralInteger", width), operand("LiteralInteger", 0))
+      Instruction.TypeVoid(operand(OperandKind.IdResult, 1)),
+      Instruction.TypeInt(scalar, operand(OperandKind.LiteralInteger, width), operand(OperandKind.LiteralInteger, 0))
     ) ++
       (if (lanes == 1) Vec.empty[Instruction]
-       else Vec[Instruction](Instruction.TypeVector(valueType, scalar, operand("LiteralInteger", lanes))))
+       else Vec[Instruction](Instruction.TypeVector(valueType, scalar, operand(OperandKind.LiteralInteger, lanes))))
     val resultDeclarations = if (outputWidth == width) Vec.empty[Instruction]
     else
       Vec[Instruction](Instruction.TypeInt(
         resultScalar,
-        operand("LiteralInteger", outputWidth),
-        operand("LiteralInteger", 0)
+        operand(OperandKind.LiteralInteger, outputWidth),
+        operand(OperandKind.LiteralInteger, 0)
       )) ++
         (if (lanes == 1) Vec.empty[Instruction]
-         else Vec[Instruction](Instruction.TypeVector(resultType, resultScalar, operand("LiteralInteger", lanes))))
+         else Vec[Instruction](Instruction.TypeVector(
+           resultType,
+           resultScalar,
+           operand(OperandKind.LiteralInteger, lanes)
+         )))
     val instructions = declarations ++ resultDeclarations ++ Vec(
-      Instruction.TypePointer(pointer, operand("StorageClass", 5), resultType),
-      Instruction.TypeFunction(functionType, operand("IdRef", 1), Vec(pointer) ++ Vec.fill(inputs.size)(valueType)),
-      Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("integer"), Vec.empty),
-      Instruction.Function(operand("IdRef", 1), function, operand("FunctionControl", 0), functionType),
+      Instruction.TypePointer(pointer, operand(OperandKind.StorageClass, 5), resultType),
+      Instruction.TypeFunction(
+        functionType,
+        operand(OperandKind.IdRef, 1),
+        Vec(pointer) ++ Vec.fill(inputs.size)(valueType)
+      ),
+      Instruction.EntryPoint(operand(OperandKind.ExecutionModel, 6), function, stringOperand("integer"), Vec.empty),
+      Instruction.Function(
+        operand(OperandKind.IdRef, 1),
+        function,
+        operand(OperandKind.FunctionControl, 0),
+        functionType
+      ),
       Instruction.FunctionParameter(pointer, output)
     ) ++ arguments.map(argument => Instruction.FunctionParameter(valueType, argument)) ++ Vec(
-      Instruction.Label(operand("IdResult", 20)),
+      Instruction.Label(operand(OperandKind.IdResult, 20)),
       core.fold[Instruction](Instruction.ExtInst(
         resultType,
-        operand("IdResult", 21),
+        operand(OperandKind.IdResult, 21),
         opencl,
-        operand("LiteralExtInstInteger", opcode),
+        operand(OperandKind.LiteralExtInstInteger, opcode),
         arguments
-      ))(instruction => instruction(resultType, operand("IdResult", 21), arguments(0), arguments(1))),
-      Instruction.Store(output, operand("IdRef", 21), None),
+      ))(instruction => instruction(resultType, operand(OperandKind.IdResult, 21), arguments(0), arguments(1))),
+      Instruction.Store(output, operand(OperandKind.IdRef, 21), None),
       Instruction.Return(),
       Instruction.FunctionEnd()
     )

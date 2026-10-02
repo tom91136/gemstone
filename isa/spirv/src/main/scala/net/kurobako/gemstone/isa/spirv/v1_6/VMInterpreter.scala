@@ -5149,11 +5149,11 @@ private object VMInterpreter {
               val pair    = targets(index)
               val literal = pair.words match {
                 case Vec(low, _) =>
-                  if (pair.kind != "PairLiteralIntegerIdRef")
+                  if (pair.kind != OperandKind.PairLiteralIntegerIdRef)
                     return Left(Fault.InvalidTask("OpSwitch target is not a literal/label pair"))
                   low.toUnsigned.toLong
                 case Vec(low, high, _) =>
-                  if (pair.kind != "PairLiteralIntegerIdRef")
+                  if (pair.kind != OperandKind.PairLiteralIntegerIdRef)
                     return Left(Fault.InvalidTask("OpSwitch target is not a literal/label pair"))
                   low.toUnsigned.toLong | (high.toUnsigned.toLong << 32)
                 case _ =>
@@ -5163,7 +5163,7 @@ private object VMInterpreter {
                 return Left(Fault.InvalidTask("OpSwitch has an incomplete literal/label pair"))
               val label = pair.words.last
               if ((literal & selectorMask) == (value & selectorMask))
-                target = Operand("IdRef", Vec.nonEmpty(label))
+                target = Operand(OperandKind.IdRef, Vec.nonEmpty(label))
               index += 1
             }
             execution.predecessor = execution.currentLabel

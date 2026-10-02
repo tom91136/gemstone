@@ -1,7 +1,8 @@
-package net.kurobako.gemstone.isa.amdgpu
+package net.kurobako.gemstone.isa.amdgpu.asm
 
-import Program.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.amdgpu.*
+import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
 
 /** Canonical AMDGPU assembly printer. */
 object Printer extends Printer[Program] {
@@ -23,6 +24,7 @@ object Printer extends Printer[Program] {
   }
 
   private def renderStatement(statement: Statement): String = statement match {
+    case Statement.Comment(text)                                   => text
     case Statement.Instruction(value)                              => render(value)
     case Statement.InstructionPair(left, right)                    => s"${render(left)} :: ${render(right)}"
     case Statement.Label(name)                                     => s"$name:"
@@ -46,7 +48,12 @@ object Printer extends Printer[Program] {
     case Operand.DecimalLiteral(value)    => value
     case Operand.Identifier(name)         => name
     case Operand.Expression(text)         => text
-    case Operand.Negated(value)           => s"-${renderOperand(value)}"
-    case Operand.Absolute(value)          => s"|${renderOperand(value)}|"
+    case Operand.Negated(value)           =>
+      val rendered = renderOperand(value)
+      if (rendered.startsWith("-")) s"neg($rendered)" else s"-$rendered"
+    case Operand.Absolute(value)      => s"|${renderOperand(value)}|"
+    case Operand.SignExtended(value)  => s"sext(${renderOperand(value)})"
+    case Operand.Half(value, high)    => s"${renderOperand(value)}.${if (high) "h" else "l"}"
+    case Operand.RegisterList(values) => values.map(renderOperand(_)).mkString("[", ", ", "]")
   }
 }

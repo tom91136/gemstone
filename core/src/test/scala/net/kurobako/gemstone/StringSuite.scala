@@ -4,6 +4,38 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
 
 class StringSuite extends munit.FunSuite {
+  test("integer literals share decimal and hex signs without accepting grammar fragments") {
+    assertEquals(parseBigIntLiteral("-0Xff"), Some(BigInt(-255)))
+    assertEquals(parseBigIntLiteral("+0xFf"), Some(BigInt(255)))
+    assertEquals(parseBigIntLiteral("+0010"), Some(BigInt(10)))
+    assertEquals(parseBigIntLiteral("-0010"), Some(BigInt(-10)))
+    assertEquals(parseBigIntLiteral("-0"), Some(BigInt(0)))
+    assertEquals(parseBigIntLiteral("18446744073709551615"), Some((BigInt(1) << 64) - 1))
+    assertEquals(parseBigIntLiteral("0xffffffffffffffffffffffffffffffff"), Some((BigInt(1) << 128) - 1))
+    Seq(
+      "",
+      "+",
+      "-",
+      "0x",
+      "-0X",
+      "+-1",
+      "-+1",
+      "--1",
+      "++1",
+      "0x-1",
+      "0x+1",
+      "0xG",
+      " 1",
+      "1 ",
+      "1u",
+      "1.0",
+      "1_000",
+      "١",
+      "１",
+      "1\n"
+    ).foreach(value => assertEquals(parseBigIntLiteral(value), None))
+  }
+
   test("UTF-8 decoding preserves Unicode and rejects malformed input") {
     val text   = "kernel_λ_😀"
     val bytes  = text.getBytes(java.nio.charset.StandardCharsets.UTF_8)

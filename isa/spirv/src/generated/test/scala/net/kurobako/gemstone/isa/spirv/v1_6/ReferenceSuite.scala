@@ -75,7 +75,7 @@ class ReferenceSuite extends munit.FunSuite {
     }
     Instruction.decode(RawInstruction(SPIRVOpcodeNumber(17), Vec(Word(-1)))) match {
       case Left(InstructionDecodeError.InvalidEnumerant(kind, 0xffffffffL))
-          if kind == "Capability" => ()
+          if kind == OperandKind.Capability => ()
       case other => fail(s"expected invalid-enumerant failure, found $other")
     }
     Instruction.decode(RawInstruction(SPIRVOpcodeNumber(5), Vec(Word(1), Word(-1)))) match {

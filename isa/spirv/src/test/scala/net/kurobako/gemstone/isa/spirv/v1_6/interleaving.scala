@@ -15,18 +15,18 @@ import net.kurobako.gemstone.vm.*
 
 /** Test-only cooperative interleaving: at most P workgroups run, one external memory operation at a time. */
 private object interleaving {
-  val groups: Vec[Int > 0]                             = Vec(1, 2, 3, 5, 9)
-  def o(kind: NonEmpty[String], values: Int*): Operand = Operand(
+  val groups: Vec[Int > 0]                        = Vec(1, 2, 3, 5, 9)
+  def o(kind: OperandKind, values: Int*): Operand = Operand(
     kind,
     Vec.from(values.map(Word(_))).unsafe[NonEmpty[Vec[Word]]]
   )
-  def id(value: Int): Operand              = o("IdRef", value)
+  def id(value: Int): Operand              = o(OperandKind.IdRef, value)
   private def name(value: String): Operand = {
     val checked = Either.cond(!value.contains('\u0000'), value, "SPIR-V literal string contains NUL")
       .fold(message => throw IllegalArgumentException(message), valid => valid)
     val bytes = checked.getBytes(java.nio.charset.StandardCharsets.UTF_8) :+ 0.toByte
     Operand(
-      "LiteralString",
+      OperandKind.LiteralString,
       Vec.from(bytes.grouped(4).map { group =>
         val width = group.length.refine[Int where Between[0, 8]]
           .fold(message => throw IllegalArgumentException(message), value => value)
@@ -38,34 +38,45 @@ private object interleaving {
   def geometry(barrier: Boolean, producer: Int): Module = {
     import Instruction.*
     val head = Vec[Instruction](
-      Capability(o("Capability", spv.Capability.Kernel)),
-      MemoryModel(o("AddressingModel", spv.AddressingModel.Physical64), o("MemoryModel", spv.MemoryModel.OpenCL)),
+      Capability(o(OperandKind.Capability, spv.Capability.Kernel)),
+      MemoryModel(
+        o(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+        o(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
+      ),
       TypeVoid(id(1)),
-      TypeInt(id(2), o("LiteralInteger", 32), o("LiteralInteger", 0)),
-      TypeInt(id(3), o("LiteralInteger", 64), o("LiteralInteger", 0)),
+      TypeInt(id(2), o(OperandKind.LiteralInteger, 32), o(OperandKind.LiteralInteger, 0)),
+      TypeInt(id(3), o(OperandKind.LiteralInteger, 64), o(OperandKind.LiteralInteger, 0)),
       TypeBool(id(4)),
-      TypeVector(id(5), id(3), o("LiteralInteger", 3)),
-      TypePointer(id(6), o("StorageClass", spv.StorageClass.Input), id(5)),
-      TypePointer(id(7), o("StorageClass", spv.StorageClass.CrossWorkgroup), id(2)),
-      TypePointer(id(8), o("StorageClass", spv.StorageClass.Workgroup), id(2)),
+      TypeVector(id(5), id(3), o(OperandKind.LiteralInteger, 3)),
+      TypePointer(id(6), o(OperandKind.StorageClass, spv.StorageClass.Input), id(5)),
+      TypePointer(id(7), o(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
+      TypePointer(id(8), o(OperandKind.StorageClass, spv.StorageClass.Workgroup), id(2)),
       TypeFunction(id(9), id(1), Vec(id(7), id(2), id(8))),
-      Constant(id(2), id(10), o("LiteralContextDependentNumber", producer)),
-      Constant(id(2), id(11), o("LiteralContextDependentNumber", 1000)),
-      Constant(id(2), id(12), o("LiteralContextDependentNumber", 10)),
-      Constant(id(2), id(13), o("LiteralContextDependentNumber", spv.Scope.Workgroup)),
+      Constant(id(2), id(10), o(OperandKind.LiteralContextDependentNumber, producer)),
+      Constant(id(2), id(11), o(OperandKind.LiteralContextDependentNumber, 1000)),
+      Constant(id(2), id(12), o(OperandKind.LiteralContextDependentNumber, 10)),
+      Constant(id(2), id(13), o(OperandKind.LiteralContextDependentNumber, spv.Scope.Workgroup)),
       Constant(
         id(2),
         id(14),
-        o("LiteralContextDependentNumber", spv.MemorySemantics.WorkgroupMemory | spv.MemorySemantics.AcquireRelease)
+        o(
+          OperandKind.LiteralContextDependentNumber,
+          spv.MemorySemantics.WorkgroupMemory | spv.MemorySemantics.AcquireRelease
+        )
       ),
-      Variable(id(6), id(15), o("StorageClass", spv.StorageClass.Input), None),
-      Decorate(id(15), o("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.GlobalInvocationId)),
-      Variable(id(6), id(16), o("StorageClass", spv.StorageClass.Input), None),
-      Decorate(id(16), o("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.LocalInvocationId)),
-      Variable(id(6), id(17), o("StorageClass", spv.StorageClass.Input), None),
-      Decorate(id(17), o("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.WorkgroupId)),
-      EntryPoint(o("ExecutionModel", spv.ExecutionModel.Kernel), id(20), name("groups"), Vec(id(15), id(16), id(17))),
-      Function(id(1), id(20), o("FunctionControl", spv.FunctionControl.None), id(9)),
+      Variable(id(6), id(15), o(OperandKind.StorageClass, spv.StorageClass.Input), None),
+      Decorate(id(15), o(OperandKind.Decoration, spv.Decoration.BuiltIn, spv.BuiltIn.GlobalInvocationId)),
+      Variable(id(6), id(16), o(OperandKind.StorageClass, spv.StorageClass.Input), None),
+      Decorate(id(16), o(OperandKind.Decoration, spv.Decoration.BuiltIn, spv.BuiltIn.LocalInvocationId)),
+      Variable(id(6), id(17), o(OperandKind.StorageClass, spv.StorageClass.Input), None),
+      Decorate(id(17), o(OperandKind.Decoration, spv.Decoration.BuiltIn, spv.BuiltIn.WorkgroupId)),
+      EntryPoint(
+        o(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
+        id(20),
+        name("groups"),
+        Vec(id(15), id(16), id(17))
+      ),
+      Function(id(1), id(20), o(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
       FunctionParameter(id(7), id(21)),
       FunctionParameter(id(2), id(22)),
       FunctionParameter(id(8), id(23)),
@@ -73,9 +84,9 @@ private object interleaving {
       Load(id(5), id(25), id(15), None),
       Load(id(5), id(26), id(16), None),
       Load(id(5), id(27), id(17), None),
-      CompositeExtract(id(3), id(28), id(25), Vec(o("LiteralInteger", 0))),
-      CompositeExtract(id(3), id(29), id(26), Vec(o("LiteralInteger", 0))),
-      CompositeExtract(id(3), id(30), id(27), Vec(o("LiteralInteger", 0))),
+      CompositeExtract(id(3), id(28), id(25), Vec(o(OperandKind.LiteralInteger, 0))),
+      CompositeExtract(id(3), id(29), id(26), Vec(o(OperandKind.LiteralInteger, 0))),
+      CompositeExtract(id(3), id(30), id(27), Vec(o(OperandKind.LiteralInteger, 0))),
       UConvert(id(2), id(31), id(28)),
       UConvert(id(2), id(32), id(29)),
       UConvert(id(2), id(33), id(30)),
@@ -83,7 +94,7 @@ private object interleaving {
     )
     val exchange = if (barrier) Vec[Instruction](
       IEqual(id(4), id(35), id(32), id(10)),
-      SelectionMerge(id(37), o("SelectionControl", spv.SelectionControl.None)),
+      SelectionMerge(id(37), o(OperandKind.SelectionControl, spv.SelectionControl.None)),
       BranchConditional(id(35), id(36), id(37), Vec.empty),
       Label(id(36)),
       Store(id(23), id(34), None),
@@ -114,27 +125,30 @@ private object interleaving {
     Module(
       Header(ISA.version, Word(0), Word(48), Word(0)),
       Vec[Instruction](
-        Capability(o("Capability", spv.Capability.Kernel)),
-        MemoryModel(o("AddressingModel", spv.AddressingModel.Physical64), o("MemoryModel", spv.MemoryModel.OpenCL)),
+        Capability(o(OperandKind.Capability, spv.Capability.Kernel)),
+        MemoryModel(
+          o(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+          o(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
+        ),
         TypeVoid(id(1)),
-        TypeInt(id(2), o("LiteralInteger", 32), o("LiteralInteger", 0)),
-        TypeInt(id(3), o("LiteralInteger", 64), o("LiteralInteger", 0)),
+        TypeInt(id(2), o(OperandKind.LiteralInteger, 32), o(OperandKind.LiteralInteger, 0)),
+        TypeInt(id(3), o(OperandKind.LiteralInteger, 64), o(OperandKind.LiteralInteger, 0)),
         TypeBool(id(4)),
-        TypeVector(id(5), id(3), o("LiteralInteger", 3)),
-        TypePointer(id(6), o("StorageClass", spv.StorageClass.Input), id(5)),
-        TypePointer(id(7), o("StorageClass", spv.StorageClass.CrossWorkgroup), id(2)),
+        TypeVector(id(5), id(3), o(OperandKind.LiteralInteger, 3)),
+        TypePointer(id(6), o(OperandKind.StorageClass, spv.StorageClass.Input), id(5)),
+        TypePointer(id(7), o(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
         TypeFunction(id(9), id(1), Vec(id(7), id(7), id(7), id(7), id(2))),
-        Constant(id(2), id(10), o("LiteralContextDependentNumber", 0)),
-        Constant(id(2), id(11), o("LiteralContextDependentNumber", 1)),
-        Constant(id(2), id(12), o("LiteralContextDependentNumber", 2)),
-        Constant(id(2), id(13), o("LiteralContextDependentNumber", 1)),
-        Constant(id(2), id(14), o("LiteralContextDependentNumber", 516)),
-        Constant(id(2), id(16), o("LiteralContextDependentNumber", 514)),
-        Constant(id(2), id(17), o("LiteralContextDependentNumber", 520)),
-        Variable(id(6), id(15), o("StorageClass", spv.StorageClass.Input), None),
-        Decorate(id(15), o("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.WorkgroupId)),
-        EntryPoint(o("ExecutionModel", spv.ExecutionModel.Kernel), id(20), name("publish"), Vec(id(15))),
-        Function(id(1), id(20), o("FunctionControl", spv.FunctionControl.None), id(9)),
+        Constant(id(2), id(10), o(OperandKind.LiteralContextDependentNumber, 0)),
+        Constant(id(2), id(11), o(OperandKind.LiteralContextDependentNumber, 1)),
+        Constant(id(2), id(12), o(OperandKind.LiteralContextDependentNumber, 2)),
+        Constant(id(2), id(13), o(OperandKind.LiteralContextDependentNumber, 1)),
+        Constant(id(2), id(14), o(OperandKind.LiteralContextDependentNumber, 516)),
+        Constant(id(2), id(16), o(OperandKind.LiteralContextDependentNumber, 514)),
+        Constant(id(2), id(17), o(OperandKind.LiteralContextDependentNumber, 520)),
+        Variable(id(6), id(15), o(OperandKind.StorageClass, spv.StorageClass.Input), None),
+        Decorate(id(15), o(OperandKind.Decoration, spv.Decoration.BuiltIn, spv.BuiltIn.WorkgroupId)),
+        EntryPoint(o(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel), id(20), name("publish"), Vec(id(15))),
+        Function(id(1), id(20), o(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
         FunctionParameter(id(7), id(21)),
         FunctionParameter(id(7), id(22)),
         FunctionParameter(id(7), id(23)),
@@ -142,7 +156,7 @@ private object interleaving {
         FunctionParameter(id(2), id(25)),
         Label(id(26)),
         Load(id(5), id(27), id(15), None),
-        CompositeExtract(id(3), id(28), id(27), Vec(o("LiteralInteger", 0))),
+        CompositeExtract(id(3), id(28), id(27), Vec(o(OperandKind.LiteralInteger, 0))),
         UConvert(id(2), id(29), id(28)),
         IMul(id(2), id(30), id(29), id(12)),
         PtrAccessChain(id(7), id(31), id(21), id(30), Vec.empty),
@@ -151,7 +165,7 @@ private object interleaving {
         AtomicIAdd(id(2), id(34), id(22), id(13), id(17), id(11)),
         Store(id(31), id(34), None),
         IEqual(id(4), id(35), id(34), id(10)),
-        SelectionMerge(id(45), o("SelectionControl", spv.SelectionControl.None)),
+        SelectionMerge(id(45), o(OperandKind.SelectionControl, spv.SelectionControl.None)),
         BranchConditional(id(35), id(36), id(38), Vec.empty),
         Label(id(36)),
         Store(id(23), id(25), None),
@@ -161,7 +175,7 @@ private object interleaving {
         Label(id(38)),
         AtomicLoad(id(2), id(39), id(24), id(13), id(16)),
         INotEqual(id(4), id(40), id(39), id(10)),
-        SelectionMerge(id(44), o("SelectionControl", spv.SelectionControl.None)),
+        SelectionMerge(id(44), o(OperandKind.SelectionControl, spv.SelectionControl.None)),
         BranchConditional(id(40), id(41), id(43), Vec.empty),
         Label(id(41)),
         Load(id(2), id(42), id(23), None),

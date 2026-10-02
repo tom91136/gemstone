@@ -1,5 +1,6 @@
 // Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Regenerate with: sbt codegen
-package net.kurobako.gemstone.isa.amdgpu
+package net.kurobako.gemstone.isa.amdgpu.asm
+import net.kurobako.gemstone.isa.amdgpu.*
 
 import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.constraint.*
@@ -12,7 +13,7 @@ object Instruction {
   enum DecodeError {
     case UnknownOpcode(opcode: String)
     case InvalidOperandCount(opcode: String, expected: Vec[Int], actual: Int)
-    case AmbiguousForms(opcode: String, definitions: Vec[Definition])
+    case AmbiguousForms(opcode: String, definitions: Vec[Opcode])
   }
 
   case class FormDecoder(
@@ -36,676 +37,16 @@ object Instruction {
     FormDecoder(operandCount, construct)
   def decoder(forms: FormDecoder*): Decoder = Decoder(forms.toVec)
 
-  enum ComparisonKind {
-    case Signed16, Signed32, Signed64, Unsigned16, Unsigned32, Unsigned64
-    case Float16, Float32, Float64, ClassFloat32, ClassFloat64
-  }
-
-  enum ComparisonRelation {
-    case Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual
-    case NotLess, NotLessOrEqual, NotGreater, NotGreaterOrEqual
-    case Ordered, Unordered, NotLessOrGreater, Class
-  }
-
-  case class ComparisonOpcode(
-      kind: ComparisonKind,
-      relation: ComparisonRelation,
-      updateExec: Boolean
-  )
-
-  object Definition {
-    private lazy val ByOpcode: Map[String, Vec[Definition]] =
-      AllDefinitions.groupBy(_.opcode)
-
-    def forOpcode(opcode: String): Vec[Definition] =
-      ByOpcode.getOrElse(opcode.toLowerCaseRoot, Vec.empty[Definition])
-  }
-
-  abstract class Definition(
-      val opcode: NonEmpty[String],
-      private val decoder: Decoder,
-      private val metadataId: Int
-  ) {
-    final def operandCounts: Vec[Int] = decoder.operandCounts
-    lazy val meta: Metadata = Metadata.Catalogue.metadata(metadataId)
-
-    final def decode(operands: Vec[Operand], mods: Vec[Modifier]): Vec[Instruction] =
-      decoder(operands, mods)
-
-    override final def toString: String = opcode
-  }
-
-  private val AllDefinitions: Vec[Definition] = Vec(
-    SOP1InstructionDefs.definitions,
-    SOP2InstructionDefs.definitions,
-    SOPCInstructionDefs.definitions,
-    SOPKInstructionDefs.definitions,
-    SOPPInstructionDefs.definitions,
-    ScalarMemoryInstructionDefs.definitions,
-    VOP1InstructionDefs.definitions,
-    VOP2InstructionDefs.definitions,
-    VOP3InstructionDefs.definitions,
-    PackedVectorInstructionDefs.definitions,
-    VectorCompareInstructionDefs.definitions,
-    DualVectorInstructionDefs.definitions,
-    InterpolationInstructionDefs.definitions,
-    MatrixInstructionDefs.definitions,
-    DataShareInstructionDefs.definitions,
-    BufferInstructionDefs.definitions,
-    FlatInstructionDefs.definitions,
-    ImageInstructionDefs.definitions,
-    ExportInstructionDefs.definitions,
-    LDSDirectInstructionDefs.definitions
-  ).flatten
-  val GlobalDefinitions: Set[Definition] = Set(
-    FlatInstructionDefs.GlobalAtomicAdd,
-    FlatInstructionDefs.GlobalAtomicAddF32,
-    FlatInstructionDefs.GlobalAtomicAddF64,
-    FlatInstructionDefs.GlobalAtomicAddU32,
-    FlatInstructionDefs.GlobalAtomicAddU64,
-    FlatInstructionDefs.GlobalAtomicAddX2,
-    FlatInstructionDefs.GlobalAtomicAnd,
-    FlatInstructionDefs.GlobalAtomicAndB32,
-    FlatInstructionDefs.GlobalAtomicAndB64,
-    FlatInstructionDefs.GlobalAtomicAndX2,
-    FlatInstructionDefs.GlobalAtomicCmpswap,
-    FlatInstructionDefs.GlobalAtomicCmpswapB32,
-    FlatInstructionDefs.GlobalAtomicCmpswapB64,
-    FlatInstructionDefs.GlobalAtomicCmpswapF32,
-    FlatInstructionDefs.GlobalAtomicCmpswapX2,
-    FlatInstructionDefs.GlobalAtomicCondSubU32,
-    FlatInstructionDefs.GlobalAtomicCsub,
-    FlatInstructionDefs.GlobalAtomicCsubU32,
-    FlatInstructionDefs.GlobalAtomicDec,
-    FlatInstructionDefs.GlobalAtomicDecU32,
-    FlatInstructionDefs.GlobalAtomicDecU64,
-    FlatInstructionDefs.GlobalAtomicDecX2,
-    FlatInstructionDefs.GlobalAtomicFcmpswap,
-    FlatInstructionDefs.GlobalAtomicFcmpswapX2,
-    FlatInstructionDefs.GlobalAtomicFmax,
-    FlatInstructionDefs.GlobalAtomicFmaxX2,
-    FlatInstructionDefs.GlobalAtomicFmin,
-    FlatInstructionDefs.GlobalAtomicFminX2,
-    FlatInstructionDefs.GlobalAtomicInc,
-    FlatInstructionDefs.GlobalAtomicIncU32,
-    FlatInstructionDefs.GlobalAtomicIncU64,
-    FlatInstructionDefs.GlobalAtomicIncX2,
-    FlatInstructionDefs.GlobalAtomicMaxF32,
-    FlatInstructionDefs.GlobalAtomicMaxF64,
-    FlatInstructionDefs.GlobalAtomicMaxI32,
-    FlatInstructionDefs.GlobalAtomicMaxI64,
-    FlatInstructionDefs.GlobalAtomicMaxNumF32,
-    FlatInstructionDefs.GlobalAtomicMaxNumF64,
-    FlatInstructionDefs.GlobalAtomicMaxU32,
-    FlatInstructionDefs.GlobalAtomicMaxU64,
-    FlatInstructionDefs.GlobalAtomicMinF32,
-    FlatInstructionDefs.GlobalAtomicMinF64,
-    FlatInstructionDefs.GlobalAtomicMinI32,
-    FlatInstructionDefs.GlobalAtomicMinI64,
-    FlatInstructionDefs.GlobalAtomicMinNumF32,
-    FlatInstructionDefs.GlobalAtomicMinNumF64,
-    FlatInstructionDefs.GlobalAtomicMinU32,
-    FlatInstructionDefs.GlobalAtomicMinU64,
-    FlatInstructionDefs.GlobalAtomicOr,
-    FlatInstructionDefs.GlobalAtomicOrB32,
-    FlatInstructionDefs.GlobalAtomicOrB64,
-    FlatInstructionDefs.GlobalAtomicOrX2,
-    FlatInstructionDefs.GlobalAtomicOrderedAddB64,
-    FlatInstructionDefs.GlobalAtomicPkAddBf16,
-    FlatInstructionDefs.GlobalAtomicPkAddF16,
-    FlatInstructionDefs.GlobalAtomicSmax,
-    FlatInstructionDefs.GlobalAtomicSmaxX2,
-    FlatInstructionDefs.GlobalAtomicSmin,
-    FlatInstructionDefs.GlobalAtomicSminX2,
-    FlatInstructionDefs.GlobalAtomicSub,
-    FlatInstructionDefs.GlobalAtomicSubClampU32,
-    FlatInstructionDefs.GlobalAtomicSubU32,
-    FlatInstructionDefs.GlobalAtomicSubU64,
-    FlatInstructionDefs.GlobalAtomicSubX2,
-    FlatInstructionDefs.GlobalAtomicSwap,
-    FlatInstructionDefs.GlobalAtomicSwapB32,
-    FlatInstructionDefs.GlobalAtomicSwapB64,
-    FlatInstructionDefs.GlobalAtomicSwapX2,
-    FlatInstructionDefs.GlobalAtomicUmax,
-    FlatInstructionDefs.GlobalAtomicUmaxX2,
-    FlatInstructionDefs.GlobalAtomicUmin,
-    FlatInstructionDefs.GlobalAtomicUminX2,
-    FlatInstructionDefs.GlobalAtomicXor,
-    FlatInstructionDefs.GlobalAtomicXorB32,
-    FlatInstructionDefs.GlobalAtomicXorB64,
-    FlatInstructionDefs.GlobalAtomicXorX2,
-    FlatInstructionDefs.GlobalInv,
-    FlatInstructionDefs.GlobalLoadAddtidB32,
-    FlatInstructionDefs.GlobalLoadAsyncToLdsB128,
-    FlatInstructionDefs.GlobalLoadAsyncToLdsB32,
-    FlatInstructionDefs.GlobalLoadAsyncToLdsB64,
-    FlatInstructionDefs.GlobalLoadAsyncToLdsB8,
-    FlatInstructionDefs.GlobalLoadB128,
-    FlatInstructionDefs.GlobalLoadB32,
-    FlatInstructionDefs.GlobalLoadB64,
-    FlatInstructionDefs.GlobalLoadB96,
-    FlatInstructionDefs.GlobalLoadBlock,
-    FlatInstructionDefs.GlobalLoadD16B16,
-    FlatInstructionDefs.GlobalLoadD16HiB16,
-    FlatInstructionDefs.GlobalLoadD16HiI8,
-    FlatInstructionDefs.GlobalLoadD16HiU8,
-    FlatInstructionDefs.GlobalLoadD16I8,
-    FlatInstructionDefs.GlobalLoadD16U8,
-    FlatInstructionDefs.GlobalLoadDword,
-    FlatInstructionDefs.GlobalLoadDwordAddtid,
-    FlatInstructionDefs.GlobalLoadDwordx2,
-    FlatInstructionDefs.GlobalLoadDwordx3,
-    FlatInstructionDefs.GlobalLoadDwordx4,
-    FlatInstructionDefs.GlobalLoadI16,
-    FlatInstructionDefs.GlobalLoadI8,
-    FlatInstructionDefs.GlobalLoadLdsDword,
-    FlatInstructionDefs.GlobalLoadLdsDwordx3,
-    FlatInstructionDefs.GlobalLoadLdsDwordx4,
-    FlatInstructionDefs.GlobalLoadLdsSbyte,
-    FlatInstructionDefs.GlobalLoadLdsSshort,
-    FlatInstructionDefs.GlobalLoadLdsUbyte,
-    FlatInstructionDefs.GlobalLoadLdsUshort,
-    FlatInstructionDefs.GlobalLoadMonitorB128,
-    FlatInstructionDefs.GlobalLoadMonitorB32,
-    FlatInstructionDefs.GlobalLoadMonitorB64,
-    FlatInstructionDefs.GlobalLoadSbyte,
-    FlatInstructionDefs.GlobalLoadSbyteD16,
-    FlatInstructionDefs.GlobalLoadSbyteD16Hi,
-    FlatInstructionDefs.GlobalLoadShortD16,
-    FlatInstructionDefs.GlobalLoadShortD16Hi,
-    FlatInstructionDefs.GlobalLoadSshort,
-    FlatInstructionDefs.GlobalLoadTr16B128,
-    FlatInstructionDefs.GlobalLoadTr4B64,
-    FlatInstructionDefs.GlobalLoadTr6B96,
-    FlatInstructionDefs.GlobalLoadTr8B64,
-    FlatInstructionDefs.GlobalLoadTrB128,
-    FlatInstructionDefs.GlobalLoadTrB64,
-    FlatInstructionDefs.GlobalLoadU16,
-    FlatInstructionDefs.GlobalLoadU8,
-    FlatInstructionDefs.GlobalLoadUbyte,
-    FlatInstructionDefs.GlobalLoadUbyteD16,
-    FlatInstructionDefs.GlobalLoadUbyteD16Hi,
-    FlatInstructionDefs.GlobalLoadUshort,
-    FlatInstructionDefs.GlobalPrefetchB8,
-    FlatInstructionDefs.GlobalStoreAddtidB32,
-    FlatInstructionDefs.GlobalStoreAsyncFromLdsB128,
-    FlatInstructionDefs.GlobalStoreAsyncFromLdsB32,
-    FlatInstructionDefs.GlobalStoreAsyncFromLdsB64,
-    FlatInstructionDefs.GlobalStoreAsyncFromLdsB8,
-    FlatInstructionDefs.GlobalStoreB128,
-    FlatInstructionDefs.GlobalStoreB16,
-    FlatInstructionDefs.GlobalStoreB32,
-    FlatInstructionDefs.GlobalStoreB64,
-    FlatInstructionDefs.GlobalStoreB8,
-    FlatInstructionDefs.GlobalStoreB96,
-    FlatInstructionDefs.GlobalStoreBlock,
-    FlatInstructionDefs.GlobalStoreByte,
-    FlatInstructionDefs.GlobalStoreByteD16Hi,
-    FlatInstructionDefs.GlobalStoreD16HiB16,
-    FlatInstructionDefs.GlobalStoreD16HiB8,
-    FlatInstructionDefs.GlobalStoreDword,
-    FlatInstructionDefs.GlobalStoreDwordAddtid,
-    FlatInstructionDefs.GlobalStoreDwordx2,
-    FlatInstructionDefs.GlobalStoreDwordx3,
-    FlatInstructionDefs.GlobalStoreDwordx4,
-    FlatInstructionDefs.GlobalStoreShort,
-    FlatInstructionDefs.GlobalStoreShortD16Hi,
-    FlatInstructionDefs.GlobalWb,
-    FlatInstructionDefs.GlobalWbinv
-  )
-  val FlatDefinitions: Set[Definition] = Set(
-    FlatInstructionDefs.FlatAtomicAdd,
-    FlatInstructionDefs.FlatAtomicAddF32,
-    FlatInstructionDefs.FlatAtomicAddF64,
-    FlatInstructionDefs.FlatAtomicAddU32,
-    FlatInstructionDefs.FlatAtomicAddU64,
-    FlatInstructionDefs.FlatAtomicAddX2,
-    FlatInstructionDefs.FlatAtomicAnd,
-    FlatInstructionDefs.FlatAtomicAndB32,
-    FlatInstructionDefs.FlatAtomicAndB64,
-    FlatInstructionDefs.FlatAtomicAndX2,
-    FlatInstructionDefs.FlatAtomicCmpswap,
-    FlatInstructionDefs.FlatAtomicCmpswapB32,
-    FlatInstructionDefs.FlatAtomicCmpswapB64,
-    FlatInstructionDefs.FlatAtomicCmpswapF32,
-    FlatInstructionDefs.FlatAtomicCmpswapX2,
-    FlatInstructionDefs.FlatAtomicCondSubU32,
-    FlatInstructionDefs.FlatAtomicDec,
-    FlatInstructionDefs.FlatAtomicDecU32,
-    FlatInstructionDefs.FlatAtomicDecU64,
-    FlatInstructionDefs.FlatAtomicDecX2,
-    FlatInstructionDefs.FlatAtomicFcmpswap,
-    FlatInstructionDefs.FlatAtomicFcmpswapX2,
-    FlatInstructionDefs.FlatAtomicFmax,
-    FlatInstructionDefs.FlatAtomicFmaxX2,
-    FlatInstructionDefs.FlatAtomicFmin,
-    FlatInstructionDefs.FlatAtomicFminX2,
-    FlatInstructionDefs.FlatAtomicInc,
-    FlatInstructionDefs.FlatAtomicIncU32,
-    FlatInstructionDefs.FlatAtomicIncU64,
-    FlatInstructionDefs.FlatAtomicIncX2,
-    FlatInstructionDefs.FlatAtomicMaxF32,
-    FlatInstructionDefs.FlatAtomicMaxF64,
-    FlatInstructionDefs.FlatAtomicMaxI32,
-    FlatInstructionDefs.FlatAtomicMaxI64,
-    FlatInstructionDefs.FlatAtomicMaxNumF32,
-    FlatInstructionDefs.FlatAtomicMaxNumF64,
-    FlatInstructionDefs.FlatAtomicMaxU32,
-    FlatInstructionDefs.FlatAtomicMaxU64,
-    FlatInstructionDefs.FlatAtomicMinF32,
-    FlatInstructionDefs.FlatAtomicMinF64,
-    FlatInstructionDefs.FlatAtomicMinI32,
-    FlatInstructionDefs.FlatAtomicMinI64,
-    FlatInstructionDefs.FlatAtomicMinNumF32,
-    FlatInstructionDefs.FlatAtomicMinNumF64,
-    FlatInstructionDefs.FlatAtomicMinU32,
-    FlatInstructionDefs.FlatAtomicMinU64,
-    FlatInstructionDefs.FlatAtomicOr,
-    FlatInstructionDefs.FlatAtomicOrB32,
-    FlatInstructionDefs.FlatAtomicOrB64,
-    FlatInstructionDefs.FlatAtomicOrX2,
-    FlatInstructionDefs.FlatAtomicPkAddBf16,
-    FlatInstructionDefs.FlatAtomicPkAddF16,
-    FlatInstructionDefs.FlatAtomicSmax,
-    FlatInstructionDefs.FlatAtomicSmaxX2,
-    FlatInstructionDefs.FlatAtomicSmin,
-    FlatInstructionDefs.FlatAtomicSminX2,
-    FlatInstructionDefs.FlatAtomicSub,
-    FlatInstructionDefs.FlatAtomicSubClampU32,
-    FlatInstructionDefs.FlatAtomicSubU32,
-    FlatInstructionDefs.FlatAtomicSubU64,
-    FlatInstructionDefs.FlatAtomicSubX2,
-    FlatInstructionDefs.FlatAtomicSwap,
-    FlatInstructionDefs.FlatAtomicSwapB32,
-    FlatInstructionDefs.FlatAtomicSwapB64,
-    FlatInstructionDefs.FlatAtomicSwapX2,
-    FlatInstructionDefs.FlatAtomicUmax,
-    FlatInstructionDefs.FlatAtomicUmaxX2,
-    FlatInstructionDefs.FlatAtomicUmin,
-    FlatInstructionDefs.FlatAtomicUminX2,
-    FlatInstructionDefs.FlatAtomicXor,
-    FlatInstructionDefs.FlatAtomicXorB32,
-    FlatInstructionDefs.FlatAtomicXorB64,
-    FlatInstructionDefs.FlatAtomicXorX2,
-    FlatInstructionDefs.FlatLoadB128,
-    FlatInstructionDefs.FlatLoadB32,
-    FlatInstructionDefs.FlatLoadB64,
-    FlatInstructionDefs.FlatLoadB96,
-    FlatInstructionDefs.FlatLoadD16B16,
-    FlatInstructionDefs.FlatLoadD16HiB16,
-    FlatInstructionDefs.FlatLoadD16HiI8,
-    FlatInstructionDefs.FlatLoadD16HiU8,
-    FlatInstructionDefs.FlatLoadD16I8,
-    FlatInstructionDefs.FlatLoadD16U8,
-    FlatInstructionDefs.FlatLoadDword,
-    FlatInstructionDefs.FlatLoadDwordx2,
-    FlatInstructionDefs.FlatLoadDwordx3,
-    FlatInstructionDefs.FlatLoadDwordx4,
-    FlatInstructionDefs.FlatLoadI16,
-    FlatInstructionDefs.FlatLoadI8,
-    FlatInstructionDefs.FlatLoadMonitorB128,
-    FlatInstructionDefs.FlatLoadMonitorB32,
-    FlatInstructionDefs.FlatLoadMonitorB64,
-    FlatInstructionDefs.FlatLoadSbyte,
-    FlatInstructionDefs.FlatLoadSbyteD16,
-    FlatInstructionDefs.FlatLoadSbyteD16Hi,
-    FlatInstructionDefs.FlatLoadShortD16,
-    FlatInstructionDefs.FlatLoadShortD16Hi,
-    FlatInstructionDefs.FlatLoadSshort,
-    FlatInstructionDefs.FlatLoadU16,
-    FlatInstructionDefs.FlatLoadU8,
-    FlatInstructionDefs.FlatLoadUbyte,
-    FlatInstructionDefs.FlatLoadUbyteD16,
-    FlatInstructionDefs.FlatLoadUbyteD16Hi,
-    FlatInstructionDefs.FlatLoadUshort,
-    FlatInstructionDefs.FlatPrefetchB8,
-    FlatInstructionDefs.FlatStoreB128,
-    FlatInstructionDefs.FlatStoreB16,
-    FlatInstructionDefs.FlatStoreB32,
-    FlatInstructionDefs.FlatStoreB64,
-    FlatInstructionDefs.FlatStoreB8,
-    FlatInstructionDefs.FlatStoreB96,
-    FlatInstructionDefs.FlatStoreByte,
-    FlatInstructionDefs.FlatStoreByteD16Hi,
-    FlatInstructionDefs.FlatStoreD16HiB16,
-    FlatInstructionDefs.FlatStoreD16HiB8,
-    FlatInstructionDefs.FlatStoreDword,
-    FlatInstructionDefs.FlatStoreDwordx2,
-    FlatInstructionDefs.FlatStoreDwordx3,
-    FlatInstructionDefs.FlatStoreDwordx4,
-    FlatInstructionDefs.FlatStoreShort,
-    FlatInstructionDefs.FlatStoreShortD16Hi
-  )
-  val ComparisonOpcodes: Map[Definition, ComparisonOpcode] = Map(
-    VectorCompareInstructionDefs.VCmpClassF32 ->
-      ComparisonOpcode(ComparisonKind.ClassFloat32, ComparisonRelation.Class, false),
-    VectorCompareInstructionDefs.VCmpClassF64 ->
-      ComparisonOpcode(ComparisonKind.ClassFloat64, ComparisonRelation.Class, false),
-    VectorCompareInstructionDefs.VCmpEqF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Equal, false),
-    VectorCompareInstructionDefs.VCmpEqF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Equal, false),
-    VectorCompareInstructionDefs.VCmpEqF64 -> ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.Equal, false),
-    VectorCompareInstructionDefs.VCmpEqI16 ->
-      ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.Equal, false),
-    VectorCompareInstructionDefs.VCmpEqI32 ->
-      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.Equal, false),
-    VectorCompareInstructionDefs.VCmpEqI64 ->
-      ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.Equal, false),
-    VectorCompareInstructionDefs.VCmpEqU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.Equal, false),
-    VectorCompareInstructionDefs.VCmpEqU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.Equal, false),
-    VectorCompareInstructionDefs.VCmpEqU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.Equal, false),
-    VectorCompareInstructionDefs.VCmpGeF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.GreaterOrEqual, false),
-    VectorCompareInstructionDefs.VCmpGeF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.GreaterOrEqual, false),
-    VectorCompareInstructionDefs.VCmpGeF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.GreaterOrEqual, false),
-    VectorCompareInstructionDefs.VCmpGeI16 ->
-      ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.GreaterOrEqual, false),
-    VectorCompareInstructionDefs.VCmpGeI32 ->
-      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.GreaterOrEqual, false),
-    VectorCompareInstructionDefs.VCmpGeI64 ->
-      ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.GreaterOrEqual, false),
-    VectorCompareInstructionDefs.VCmpGeU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.GreaterOrEqual, false),
-    VectorCompareInstructionDefs.VCmpGeU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.GreaterOrEqual, false),
-    VectorCompareInstructionDefs.VCmpGeU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.GreaterOrEqual, false),
-    VectorCompareInstructionDefs.VCmpGtF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Greater, false),
-    VectorCompareInstructionDefs.VCmpGtF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Greater, false),
-    VectorCompareInstructionDefs.VCmpGtF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.Greater, false),
-    VectorCompareInstructionDefs.VCmpGtI16 ->
-      ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.Greater, false),
-    VectorCompareInstructionDefs.VCmpGtI32 ->
-      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.Greater, false),
-    VectorCompareInstructionDefs.VCmpGtI64 ->
-      ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.Greater, false),
-    VectorCompareInstructionDefs.VCmpGtU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.Greater, false),
-    VectorCompareInstructionDefs.VCmpGtU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.Greater, false),
-    VectorCompareInstructionDefs.VCmpGtU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.Greater, false),
-    VectorCompareInstructionDefs.VCmpLeF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.LessOrEqual, false),
-    VectorCompareInstructionDefs.VCmpLeF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.LessOrEqual, false),
-    VectorCompareInstructionDefs.VCmpLeF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.LessOrEqual, false),
-    VectorCompareInstructionDefs.VCmpLeI16 ->
-      ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.LessOrEqual, false),
-    VectorCompareInstructionDefs.VCmpLeI32 ->
-      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.LessOrEqual, false),
-    VectorCompareInstructionDefs.VCmpLeI64 ->
-      ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.LessOrEqual, false),
-    VectorCompareInstructionDefs.VCmpLeU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.LessOrEqual, false),
-    VectorCompareInstructionDefs.VCmpLeU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.LessOrEqual, false),
-    VectorCompareInstructionDefs.VCmpLeU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.LessOrEqual, false),
-    VectorCompareInstructionDefs.VCmpLgF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpLgF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpLgF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpLgI16 ->
-      ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpLgI32 ->
-      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpLgI64 ->
-      ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpLgU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpLgU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpLgU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpLtF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Less, false),
-    VectorCompareInstructionDefs.VCmpLtF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Less, false),
-    VectorCompareInstructionDefs.VCmpLtF64 -> ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.Less, false),
-    VectorCompareInstructionDefs.VCmpLtI16 -> ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.Less, false),
-    VectorCompareInstructionDefs.VCmpLtI32 -> ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.Less, false),
-    VectorCompareInstructionDefs.VCmpLtI64 -> ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.Less, false),
-    VectorCompareInstructionDefs.VCmpLtU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.Less, false),
-    VectorCompareInstructionDefs.VCmpLtU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.Less, false),
-    VectorCompareInstructionDefs.VCmpLtU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.Less, false),
-    VectorCompareInstructionDefs.VCmpNeI16 ->
-      ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpNeI32 ->
-      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpNeI64 ->
-      ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpNeU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpNeU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpNeU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpNeqF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpNeqF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpNeqF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotEqual, false),
-    VectorCompareInstructionDefs.VCmpNgeF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotGreaterOrEqual, false),
-    VectorCompareInstructionDefs.VCmpNgeF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotGreaterOrEqual, false),
-    VectorCompareInstructionDefs.VCmpNgeF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotGreaterOrEqual, false),
-    VectorCompareInstructionDefs.VCmpNgtF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotGreater, false),
-    VectorCompareInstructionDefs.VCmpNgtF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotGreater, false),
-    VectorCompareInstructionDefs.VCmpNgtF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotGreater, false),
-    VectorCompareInstructionDefs.VCmpNleF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotLessOrEqual, false),
-    VectorCompareInstructionDefs.VCmpNleF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotLessOrEqual, false),
-    VectorCompareInstructionDefs.VCmpNleF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotLessOrEqual, false),
-    VectorCompareInstructionDefs.VCmpNlgF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotLessOrGreater, false),
-    VectorCompareInstructionDefs.VCmpNlgF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotLessOrGreater, false),
-    VectorCompareInstructionDefs.VCmpNlgF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotLessOrGreater, false),
-    VectorCompareInstructionDefs.VCmpNltF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotLess, false),
-    VectorCompareInstructionDefs.VCmpNltF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotLess, false),
-    VectorCompareInstructionDefs.VCmpNltF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotLess, false),
-    VectorCompareInstructionDefs.VCmpOF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Ordered, false),
-    VectorCompareInstructionDefs.VCmpOF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Ordered, false),
-    VectorCompareInstructionDefs.VCmpOF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.Ordered, false),
-    VectorCompareInstructionDefs.VCmpUF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Unordered, false),
-    VectorCompareInstructionDefs.VCmpUF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Unordered, false),
-    VectorCompareInstructionDefs.VCmpUF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.Unordered, false),
-    VectorCompareInstructionDefs.VCmpxClassF32 ->
-      ComparisonOpcode(ComparisonKind.ClassFloat32, ComparisonRelation.Class, true),
-    VectorCompareInstructionDefs.VCmpxClassF64 ->
-      ComparisonOpcode(ComparisonKind.ClassFloat64, ComparisonRelation.Class, true),
-    VectorCompareInstructionDefs.VCmpxEqF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Equal, true),
-    VectorCompareInstructionDefs.VCmpxEqF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Equal, true),
-    VectorCompareInstructionDefs.VCmpxEqF64 -> ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.Equal, true),
-    VectorCompareInstructionDefs.VCmpxEqI16 ->
-      ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.Equal, true),
-    VectorCompareInstructionDefs.VCmpxEqI32 ->
-      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.Equal, true),
-    VectorCompareInstructionDefs.VCmpxEqI64 ->
-      ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.Equal, true),
-    VectorCompareInstructionDefs.VCmpxEqU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.Equal, true),
-    VectorCompareInstructionDefs.VCmpxEqU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.Equal, true),
-    VectorCompareInstructionDefs.VCmpxEqU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.Equal, true),
-    VectorCompareInstructionDefs.VCmpxGeF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.GreaterOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxGeF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.GreaterOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxGeF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.GreaterOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxGeI16 ->
-      ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.GreaterOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxGeI32 ->
-      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.GreaterOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxGeI64 ->
-      ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.GreaterOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxGeU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.GreaterOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxGeU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.GreaterOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxGeU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.GreaterOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxGtF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Greater, true),
-    VectorCompareInstructionDefs.VCmpxGtF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Greater, true),
-    VectorCompareInstructionDefs.VCmpxGtF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.Greater, true),
-    VectorCompareInstructionDefs.VCmpxGtI16 ->
-      ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.Greater, true),
-    VectorCompareInstructionDefs.VCmpxGtI32 ->
-      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.Greater, true),
-    VectorCompareInstructionDefs.VCmpxGtI64 ->
-      ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.Greater, true),
-    VectorCompareInstructionDefs.VCmpxGtU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.Greater, true),
-    VectorCompareInstructionDefs.VCmpxGtU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.Greater, true),
-    VectorCompareInstructionDefs.VCmpxGtU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.Greater, true),
-    VectorCompareInstructionDefs.VCmpxLeF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.LessOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxLeF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.LessOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxLeF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.LessOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxLeI16 ->
-      ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.LessOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxLeI32 ->
-      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.LessOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxLeI64 ->
-      ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.LessOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxLeU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.LessOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxLeU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.LessOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxLeU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.LessOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxLgF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxLgF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxLgF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxLgI16 ->
-      ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxLgI32 ->
-      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxLgI64 ->
-      ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxLgU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxLgU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxLgU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxLtF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Less, true),
-    VectorCompareInstructionDefs.VCmpxLtF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Less, true),
-    VectorCompareInstructionDefs.VCmpxLtF64 -> ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.Less, true),
-    VectorCompareInstructionDefs.VCmpxLtI16 -> ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.Less, true),
-    VectorCompareInstructionDefs.VCmpxLtI32 -> ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.Less, true),
-    VectorCompareInstructionDefs.VCmpxLtI64 -> ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.Less, true),
-    VectorCompareInstructionDefs.VCmpxLtU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.Less, true),
-    VectorCompareInstructionDefs.VCmpxLtU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.Less, true),
-    VectorCompareInstructionDefs.VCmpxLtU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.Less, true),
-    VectorCompareInstructionDefs.VCmpxNeI16 ->
-      ComparisonOpcode(ComparisonKind.Signed16, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxNeI32 ->
-      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxNeI64 ->
-      ComparisonOpcode(ComparisonKind.Signed64, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxNeU16 ->
-      ComparisonOpcode(ComparisonKind.Unsigned16, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxNeU32 ->
-      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxNeU64 ->
-      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxNeqF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxNeqF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxNeqF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotEqual, true),
-    VectorCompareInstructionDefs.VCmpxNgeF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotGreaterOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxNgeF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotGreaterOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxNgeF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotGreaterOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxNgtF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotGreater, true),
-    VectorCompareInstructionDefs.VCmpxNgtF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotGreater, true),
-    VectorCompareInstructionDefs.VCmpxNgtF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotGreater, true),
-    VectorCompareInstructionDefs.VCmpxNleF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotLessOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxNleF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotLessOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxNleF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotLessOrEqual, true),
-    VectorCompareInstructionDefs.VCmpxNlgF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotLessOrGreater, true),
-    VectorCompareInstructionDefs.VCmpxNlgF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotLessOrGreater, true),
-    VectorCompareInstructionDefs.VCmpxNlgF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotLessOrGreater, true),
-    VectorCompareInstructionDefs.VCmpxNltF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotLess, true),
-    VectorCompareInstructionDefs.VCmpxNltF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotLess, true),
-    VectorCompareInstructionDefs.VCmpxNltF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotLess, true),
-    VectorCompareInstructionDefs.VCmpxOF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Ordered, true),
-    VectorCompareInstructionDefs.VCmpxOF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Ordered, true),
-    VectorCompareInstructionDefs.VCmpxOF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.Ordered, true),
-    VectorCompareInstructionDefs.VCmpxUF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Unordered, true),
-    VectorCompareInstructionDefs.VCmpxUF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Unordered, true),
-    VectorCompareInstructionDefs.VCmpxUF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.Unordered, true)
-  )
-
-  val definitions: Vec[Definition] = AllDefinitions
+  private lazy val forms: Map[Opcode, Decoder] = SOP1InstructionForms.decoders ++ SOP2InstructionForms.decoders ++
+    SOPCInstructionForms.decoders ++ SOPKInstructionForms.decoders ++ SOPPInstructionForms.decoders ++
+    ScalarMemoryInstructionForms.decoders ++ VOP1InstructionForms.decoders ++ VOP2InstructionForms.decoders ++
+    VOP3InstructionForms.decoders ++ PackedVectorInstructionForms.decoders ++ VectorCompareInstructionForms.decoders ++
+    DualVectorInstructionForms.decoders ++ InterpolationInstructionForms.decoders ++ MatrixInstructionForms.decoders ++
+    DataShareInstructionForms.decoders ++ BufferInstructionForms.decoders ++ FlatInstructionForms.decoders ++
+    ImageInstructionForms.decoders ++ ExportInstructionForms.decoders ++ LDSDirectInstructionForms.decoders
+  def operandCounts(opcode: Opcode): Vec[Int] = forms(opcode).operandCounts
+  def decode(opcode: Opcode, operands: Vec[Operand], mods: Vec[Modifier]): Vec[Instruction] =
+    forms(opcode)(operands, mods)
 
   def decode(
       opcode: String,
@@ -742,16 +83,16 @@ object Instruction {
       operands: Vec[Operand],
       mods: Vec[Modifier]
   ): Either[DecodeError, Instruction] =
-    Definition.forOpcode(name) match {
+    Opcode.forOpcode(name) match {
       case Vec() => Left(DecodeError.UnknownOpcode(name))
       case candidates =>
-        val matches = candidates.flatMap(_.decode(operands, mods))
+        val matches = candidates.flatMap(decode(_, operands, mods))
         matches match {
           case Vec(instruction) => Right(instruction)
           case Vec() => Left(
               DecodeError.InvalidOperandCount(
                 name,
-                candidates.flatMap(_.operandCounts).distinct.sorted,
+                candidates.flatMap(operandCounts(_)).distinct.sorted,
                 operands.size
               )
             )
@@ -761,7 +102,7 @@ object Instruction {
 }
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
-enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
+enum Instruction(val definition: Opcode, operandValues: Operand*) {
   case BufferAtomicAdd(dest: Operand, destAddr: Operand, resource: Operand, offset: Operand, mods: Vec[Modifier])
       extends Instruction(BufferInstructionDefs.BufferAtomicAdd, dest, destAddr, resource, offset)
   case BufferAtomicAddF32(dest: Operand, destAddr: Operand, resource: Operand, offset: Operand, mods: Vec[Modifier])
@@ -1194,6 +535,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
   case BufferStoreShortD16Hi(src: Operand, destAddr: Operand, resource: Operand, offset: Operand, mods: Vec[Modifier])
       extends Instruction(BufferInstructionDefs.BufferStoreShortD16Hi, src, destAddr, resource, offset)
   case BufferWbinvl1(mods: Vec[Modifier]) extends Instruction(BufferInstructionDefs.BufferWbinvl1)
+  case BufferWbinvl1Sc(mods: Vec[Modifier]) extends Instruction(BufferInstructionDefs.BufferWbinvl1Sc)
   case BufferWbinvl1Vol(mods: Vec[Modifier]) extends Instruction(BufferInstructionDefs.BufferWbinvl1Vol)
   case BufferWbl2(mods: Vec[Modifier]) extends Instruction(BufferInstructionDefs.BufferWbl2)
   case ClusterLoadAsyncToLdsB128(dest: Operand, srcAddr: Operand, srcAddr2: Operand, mods: Vec[Modifier])
@@ -1224,12 +566,12 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(DataShareInstructionDefs.DsAddRtnU32, dest, srcAddr, srcA)
   case DsAddRtnU64(dest: Operand, srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsAddRtnU64, dest, srcAddr, srcA)
-  case DsAddSrc2F32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsAddSrc2F32, value)
-  case DsAddSrc2U32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsAddSrc2U32, value)
-  case DsAddSrc2U64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsAddSrc2U64, value)
+  case DsAddSrc2F32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsAddSrc2F32, srcAddr)
+  case DsAddSrc2U32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsAddSrc2U32, srcAddr)
+  case DsAddSrc2U64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsAddSrc2U64, srcAddr)
   case DsAddU32(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsAddU32, srcAddr, srcA)
   case DsAddU64(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
@@ -1242,10 +584,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(DataShareInstructionDefs.DsAndRtnB32, dest, srcAddr, srcA)
   case DsAndRtnB64(dest: Operand, srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsAndRtnB64, dest, srcAddr, srcA)
-  case DsAndSrc2B32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsAndSrc2B32, value)
-  case DsAndSrc2B64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsAndSrc2B64, value)
+  case DsAndSrc2B32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsAndSrc2B32, srcAddr)
+  case DsAndSrc2B64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsAndSrc2B64, srcAddr)
   case DsAppend(dest: Operand, mods: Vec[Modifier]) extends Instruction(DataShareInstructionDefs.DsAppend, dest)
   case DsAtomicAsyncBarrierArriveB64(destAddr: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsAtomicAsyncBarrierArriveB64, destAddr)
@@ -1307,10 +649,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(DataShareInstructionDefs.DsDecRtnU32, dest, srcAddr, srcA)
   case DsDecRtnU64(dest: Operand, srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsDecRtnU64, dest, srcAddr, srcA)
-  case DsDecSrc2U32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsDecSrc2U32, value)
-  case DsDecSrc2U64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsDecSrc2U64, value)
+  case DsDecSrc2U32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsDecSrc2U32, srcAddr)
+  case DsDecSrc2U64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsDecSrc2U64, srcAddr)
   case DsDecU32(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsDecU32, srcAddr, srcA)
   case DsDecU64(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
@@ -1328,10 +670,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(DataShareInstructionDefs.DsIncRtnU32, dest, srcAddr, srcA)
   case DsIncRtnU64(dest: Operand, srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsIncRtnU64, dest, srcAddr, srcA)
-  case DsIncSrc2U32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsIncSrc2U32, value)
-  case DsIncSrc2U64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsIncSrc2U64, value)
+  case DsIncSrc2U32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsIncSrc2U32, srcAddr)
+  case DsIncSrc2U64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsIncSrc2U64, srcAddr)
   case DsIncU32(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsIncU32, srcAddr, srcA)
   case DsIncU64(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
@@ -1410,18 +752,18 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(DataShareInstructionDefs.DsMaxRtnU32, dest, srcAddr, srcA)
   case DsMaxRtnU64(dest: Operand, srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsMaxRtnU64, dest, srcAddr, srcA)
-  case DsMaxSrc2F32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsMaxSrc2F32, value)
-  case DsMaxSrc2F64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsMaxSrc2F64, value)
-  case DsMaxSrc2I32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsMaxSrc2I32, value)
-  case DsMaxSrc2I64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsMaxSrc2I64, value)
-  case DsMaxSrc2U32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsMaxSrc2U32, value)
-  case DsMaxSrc2U64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsMaxSrc2U64, value)
+  case DsMaxSrc2F32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsMaxSrc2F32, srcAddr)
+  case DsMaxSrc2F64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsMaxSrc2F64, srcAddr)
+  case DsMaxSrc2I32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsMaxSrc2I32, srcAddr)
+  case DsMaxSrc2I64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsMaxSrc2I64, srcAddr)
+  case DsMaxSrc2U32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsMaxSrc2U32, srcAddr)
+  case DsMaxSrc2U64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsMaxSrc2U64, srcAddr)
   case DsMaxU32(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsMaxU32, srcAddr, srcA)
   case DsMaxU64(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
@@ -1454,18 +796,18 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(DataShareInstructionDefs.DsMinRtnU32, dest, srcAddr, srcA)
   case DsMinRtnU64(dest: Operand, srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsMinRtnU64, dest, srcAddr, srcA)
-  case DsMinSrc2F32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsMinSrc2F32, value)
-  case DsMinSrc2F64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsMinSrc2F64, value)
-  case DsMinSrc2I32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsMinSrc2I32, value)
-  case DsMinSrc2I64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsMinSrc2I64, value)
-  case DsMinSrc2U32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsMinSrc2U32, value)
-  case DsMinSrc2U64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsMinSrc2U64, value)
+  case DsMinSrc2F32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsMinSrc2F32, srcAddr)
+  case DsMinSrc2F64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsMinSrc2F64, srcAddr)
+  case DsMinSrc2I32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsMinSrc2I32, srcAddr)
+  case DsMinSrc2I64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsMinSrc2I64, srcAddr)
+  case DsMinSrc2U32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsMinSrc2U32, srcAddr)
+  case DsMinSrc2U64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsMinSrc2U64, srcAddr)
   case DsMinU32(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsMinU32, srcAddr, srcA)
   case DsMinU64(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
@@ -1487,8 +829,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(DataShareInstructionDefs.DsOrRtnB32, dest, srcAddr, srcA)
   case DsOrRtnB64(dest: Operand, srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsOrRtnB64, dest, srcAddr, srcA)
-  case DsOrSrc2B32(value: Operand, mods: Vec[Modifier]) extends Instruction(DataShareInstructionDefs.DsOrSrc2B32, value)
-  case DsOrSrc2B64(value: Operand, mods: Vec[Modifier]) extends Instruction(DataShareInstructionDefs.DsOrSrc2B64, value)
+  case DsOrSrc2B32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsOrSrc2B32, srcAddr)
+  case DsOrSrc2B64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsOrSrc2B64, srcAddr)
   case DsOrderedCount(dest: Operand, srcAddr: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsOrderedCount, dest, srcAddr)
   case DsParamLoad(dest: Operand, attr: Operand, mods: Vec[Modifier])
@@ -1553,10 +897,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(DataShareInstructionDefs.DsRsubRtnU32, dest, srcAddr, srcA)
   case DsRsubRtnU64(dest: Operand, srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsRsubRtnU64, dest, srcAddr, srcA)
-  case DsRsubSrc2U32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsRsubSrc2U32, value)
-  case DsRsubSrc2U64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsRsubSrc2U64, value)
+  case DsRsubSrc2U32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsRsubSrc2U32, srcAddr)
+  case DsRsubSrc2U64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsRsubSrc2U64, srcAddr)
   case DsRsubU32(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsRsubU32, srcAddr, srcA)
   case DsRsubU64(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
@@ -1619,10 +963,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(DataShareInstructionDefs.DsSubRtnU32, dest, srcAddr, srcA)
   case DsSubRtnU64(dest: Operand, srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsSubRtnU64, dest, srcAddr, srcA)
-  case DsSubSrc2U32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsSubSrc2U32, value)
-  case DsSubSrc2U64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsSubSrc2U64, value)
+  case DsSubSrc2U32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsSubSrc2U32, srcAddr)
+  case DsSubSrc2U64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsSubSrc2U64, srcAddr)
   case DsSubU32(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsSubU32, srcAddr, srcA)
   case DsSubU64(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
@@ -1657,10 +1001,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(DataShareInstructionDefs.DsWriteB8D16Hi, srcAddr, srcA)
   case DsWriteB96(srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsWriteB96, srcAddr, srcA)
-  case DsWriteSrc2B32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsWriteSrc2B32, value)
-  case DsWriteSrc2B64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsWriteSrc2B64, value)
+  case DsWriteSrc2B32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsWriteSrc2B32, srcAddr)
+  case DsWriteSrc2B64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsWriteSrc2B64, srcAddr)
   case DsWrxchg2RtnB32(dest: Operand, srcAddr: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsWrxchg2RtnB32, dest, srcAddr, srcA, srcB)
   case DsWrxchg2RtnB64(dest: Operand, srcAddr: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -1681,10 +1025,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(DataShareInstructionDefs.DsXorRtnB32, dest, srcAddr, srcA)
   case DsXorRtnB64(dest: Operand, srcAddr: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(DataShareInstructionDefs.DsXorRtnB64, dest, srcAddr, srcA)
-  case DsXorSrc2B32(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsXorSrc2B32, value)
-  case DsXorSrc2B64(value: Operand, mods: Vec[Modifier])
-      extends Instruction(DataShareInstructionDefs.DsXorSrc2B64, value)
+  case DsXorSrc2B32(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsXorSrc2B32, srcAddr)
+  case DsXorSrc2B64(srcAddr: Operand, mods: Vec[Modifier])
+      extends Instruction(DataShareInstructionDefs.DsXorSrc2B64, srcAddr)
   case Exp(target: Operand, srcA: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
       extends Instruction(ExportInstructionDefs.Exp, target, srcA, srcB, srcC, srcD)
   case Export(target: Operand, srcA: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
@@ -2891,8 +2235,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(ImageInstructionDefs.ImageAtomicPkAddBf16, dest, srcB, resource)
   case ImageAtomicPkAddF16(dest: Operand, srcB: Operand, resource: Operand, mods: Vec[Modifier])
       extends Instruction(ImageInstructionDefs.ImageAtomicPkAddF16, dest, srcB, resource)
-  case ImageAtomicRsub(value1: Operand, value2: Operand, value3: Operand, mods: Vec[Modifier])
-      extends Instruction(ImageInstructionDefs.ImageAtomicRsub, value1, value2, value3)
+  case ImageAtomicRsub(dest: Operand, destAddr: Operand, resource: Operand, mods: Vec[Modifier])
+      extends Instruction(ImageInstructionDefs.ImageAtomicRsub, dest, destAddr, resource)
   case ImageAtomicSmax(dest: Operand, destAddr: Operand, resource: Operand, mods: Vec[Modifier])
       extends Instruction(ImageInstructionDefs.ImageAtomicSmax, dest, destAddr, resource)
   case ImageAtomicSmin(dest: Operand, destAddr: Operand, resource: Operand, mods: Vec[Modifier])
@@ -3319,22 +2663,14 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(SOPCInstructionDefs.SBitcmp1B64, srcA, srcB)
   case SBitreplicateB64B32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(SOP1InstructionDefs.SBitreplicateB64B32, dest, srcA)
-  case SBitset0B32_2(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+  case SBitset0B32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(SOP1InstructionDefs.SBitset0B32, dest, srcA)
-  case SBitset0B32_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(SOP1InstructionDefs.SBitset0B32, dest, srcB, srcC)
-  case SBitset0B64_2(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+  case SBitset0B64(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(SOP1InstructionDefs.SBitset0B64, dest, srcA)
-  case SBitset0B64_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(SOP1InstructionDefs.SBitset0B64, dest, srcB, srcC)
-  case SBitset1B32_2(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+  case SBitset1B32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(SOP1InstructionDefs.SBitset1B32, dest, srcA)
-  case SBitset1B32_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(SOP1InstructionDefs.SBitset1B32, dest, srcB, srcC)
-  case SBitset1B64_2(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+  case SBitset1B64(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(SOP1InstructionDefs.SBitset1B64, dest, srcA)
-  case SBitset1B64_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(SOP1InstructionDefs.SBitset1B64, dest, srcB, srcC)
   case SBranch(target: Operand, mods: Vec[Modifier]) extends Instruction(SOPPInstructionDefs.SBranch, target)
   case SBrevB32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(SOP1InstructionDefs.SBrevB32, dest, srcA)
@@ -3430,8 +2766,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(ScalarMemoryInstructionDefs.SBufferStoreDwordx2, src, base, offset)
   case SBufferStoreDwordx4(src: Operand, base: Operand, offset: Operand, mods: Vec[Modifier])
       extends Instruction(ScalarMemoryInstructionDefs.SBufferStoreDwordx4, src, base, offset)
-  case SCallB64_1(dest: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCallB64, dest)
-  case SCallB64_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCallB64(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCallB64, dest, imm)
   case SCallI64(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCallI64, dest, imm)
@@ -3470,14 +2805,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(SOP1InstructionDefs.SClzI32U32, dest, srcA)
   case SClzI32U64(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(SOP1InstructionDefs.SClzI32U64, dest, srcA)
-  case SCmovB32_2(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+  case SCmovB32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(SOP1InstructionDefs.SCmovB32, dest, srcA)
-  case SCmovB32_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(SOP1InstructionDefs.SCmovB32, dest, srcB, srcC)
-  case SCmovB64_2(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+  case SCmovB64(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(SOP1InstructionDefs.SCmovB64, dest, srcA)
-  case SCmovB64_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(SOP1InstructionDefs.SCmovB64, dest, srcB, srcC)
   case SCmovkI32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmovkI32, dest, imm)
   case SCmpEqF16(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -3564,41 +2895,29 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(SOPCInstructionDefs.SCmpUF16, srcA, srcB)
   case SCmpUF32(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(SOPCInstructionDefs.SCmpUF32, srcA, srcB)
-  case SCmpkEqI32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCmpkEqI32, src)
-  case SCmpkEqI32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCmpkEqI32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmpkEqI32, dest, imm)
-  case SCmpkEqU32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCmpkEqU32, src)
-  case SCmpkEqU32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCmpkEqU32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmpkEqU32, dest, imm)
-  case SCmpkGeI32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCmpkGeI32, src)
-  case SCmpkGeI32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCmpkGeI32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmpkGeI32, dest, imm)
-  case SCmpkGeU32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCmpkGeU32, src)
-  case SCmpkGeU32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCmpkGeU32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmpkGeU32, dest, imm)
-  case SCmpkGtI32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCmpkGtI32, src)
-  case SCmpkGtI32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCmpkGtI32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmpkGtI32, dest, imm)
-  case SCmpkGtU32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCmpkGtU32, src)
-  case SCmpkGtU32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCmpkGtU32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmpkGtU32, dest, imm)
-  case SCmpkLeI32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCmpkLeI32, src)
-  case SCmpkLeI32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCmpkLeI32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmpkLeI32, dest, imm)
-  case SCmpkLeU32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCmpkLeU32, src)
-  case SCmpkLeU32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCmpkLeU32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmpkLeU32, dest, imm)
-  case SCmpkLgI32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCmpkLgI32, src)
-  case SCmpkLgI32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCmpkLgI32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmpkLgI32, dest, imm)
-  case SCmpkLgU32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCmpkLgU32, src)
-  case SCmpkLgU32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCmpkLgU32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmpkLgU32, dest, imm)
-  case SCmpkLtI32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCmpkLtI32, src)
-  case SCmpkLtI32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCmpkLtI32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmpkLtI32, dest, imm)
-  case SCmpkLtU32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SCmpkLtU32, src)
-  case SCmpkLtU32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SCmpkLtU32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SCmpkLtU32, dest, imm)
   case SCodeEnd(mods: Vec[Modifier]) extends Instruction(SOPPInstructionDefs.SCodeEnd)
   case SCselectB32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -3676,8 +2995,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
   case SGetWaveidInWorkgroup(dest: Operand, mods: Vec[Modifier])
       extends Instruction(ScalarMemoryInstructionDefs.SGetWaveidInWorkgroup, dest)
   case SGetpcB64(dest: Operand, mods: Vec[Modifier]) extends Instruction(SOP1InstructionDefs.SGetpcB64, dest)
-  case SGetregB32_1(dest: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SGetregB32, dest)
-  case SGetregB32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SGetregB32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SGetregB32, dest, imm)
   case SGl1Inv(mods: Vec[Modifier]) extends Instruction(ScalarMemoryInstructionDefs.SGl1Inv)
   case SIcacheInv(mods: Vec[Modifier]) extends Instruction(SOPPInstructionDefs.SIcacheInv)
@@ -3770,8 +3088,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
   case SMovB64(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(SOP1InstructionDefs.SMovB64, dest, srcA)
   case SMovFedB32(mods: Vec[Modifier]) extends Instruction(SOP1InstructionDefs.SMovFedB32)
-  case SMovkI32_1(dest: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SMovkI32, dest)
-  case SMovkI32_2(dest: Operand, imm: Operand, mods: Vec[Modifier])
+  case SMovkI32(dest: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SMovkI32, dest, imm)
   case SMovreldB32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(SOP1InstructionDefs.SMovreldB32, dest, srcA)
@@ -3913,8 +3230,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
   case SSetpcB64(srcA: Operand, mods: Vec[Modifier]) extends Instruction(SOP1InstructionDefs.SSetpcB64, srcA)
   case SSetprio(imm: Operand, mods: Vec[Modifier]) extends Instruction(SOPPInstructionDefs.SSetprio, imm)
   case SSetprioIncWg(imm: Operand, mods: Vec[Modifier]) extends Instruction(SOPPInstructionDefs.SSetprioIncWg, imm)
-  case SSetregB32_1(src: Operand, mods: Vec[Modifier]) extends Instruction(SOPKInstructionDefs.SSetregB32, src)
-  case SSetregB32_2(imm: Operand, dest: Operand, mods: Vec[Modifier])
+  case SSetregB32(imm: Operand, dest: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SSetregB32, imm, dest)
   case SSetregImm32B32(imm: Operand, imm2: Operand, mods: Vec[Modifier])
       extends Instruction(SOPKInstructionDefs.SSetregImm32B32, imm, imm2)
@@ -3924,6 +3240,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(SOP1InstructionDefs.SSextI32I16, dest, srcA)
   case SSextI32I8(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(SOP1InstructionDefs.SSextI32I8, dest, srcA)
+  case SSingleuseVdst(mods: Vec[Modifier]) extends Instruction(SOPPInstructionDefs.SSingleuseVdst)
   case SSleep(imm: Operand, mods: Vec[Modifier]) extends Instruction(SOPPInstructionDefs.SSleep, imm)
   case SSleepVar(srcA: Operand, mods: Vec[Modifier]) extends Instruction(SOP1InstructionDefs.SSleepVar, srcA)
   case SStoreDword(src: Operand, base: Operand, offset: Operand, mods: Vec[Modifier])
@@ -4265,14 +3582,20 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(BufferInstructionDefs.TbufferStoreFormatXyzw, src, destAddr, resource, offset)
   case TensorLoadToLds(srcA: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
       extends Instruction(MatrixInstructionDefs.TensorLoadToLds, srcA, srcB, srcC, srcD)
+  case TensorSave(srcAddr: Operand, mods: Vec[Modifier]) extends Instruction(MatrixInstructionDefs.TensorSave, srcAddr)
+  case TensorStop(mods: Vec[Modifier]) extends Instruction(MatrixInstructionDefs.TensorStop)
   case TensorStoreFromLds(srcA: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
       extends Instruction(MatrixInstructionDefs.TensorStoreFromLds, srcA, srcB, srcC, srcD)
   case VAccvgprMovB32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VAccvgprMovB32, dest, srcA)
   case VAccvgprRead(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VAccvgprRead, dest, srcA)
+  case VAccvgprReadB32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+      extends Instruction(PackedVectorInstructionDefs.VAccvgprReadB32, dest, srcA)
   case VAccvgprWrite(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VAccvgprWrite, dest, srcA)
+  case VAccvgprWriteB32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+      extends Instruction(PackedVectorInstructionDefs.VAccvgprWriteB32, dest, srcA)
   case VAdd3U32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VAdd3U32, dest, srcA, srcB, srcC)
   case VAddCoCiU32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -4285,14 +3608,12 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VAddF32, dest, srcA, srcB)
   case VAddF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VAddF64, dest, srcA, srcB)
-  case VAddF64E64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VAddF64E64, dest, srcB, srcC)
   case VAddI16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VAddI16, dest, srcA, srcB)
   case VAddI32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VAddI32, dest, srcA, srcB)
-  case VAddI32_4(value1: Operand, value2: Operand, value3: Operand, value4: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VAddI32, value1, value2, value3, value4)
+      extends Instruction(VOP2InstructionDefs.VAddI32, dest, srcA, srcB)
+  case VAddI32_4(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VAddI32, dest, dest2, srcA, srcB)
   case VAddLshlU32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VAddLshlU32, dest, srcA, srcB, srcC)
   case VAddMaxI32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -4317,10 +3638,12 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VAddU16, dest, srcA, srcB)
   case VAddU32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VAddU32, dest, srcA, srcB)
-  case VAddU32_4(value1: Operand, value2: Operand, value3: Operand, value4: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VAddU32, value1, value2, value3, value4)
+  case VAddU32_4(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VAddU32, dest, dest2, srcA, srcB)
   case VAddcCoU32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VAddcCoU32, dest, dest2, srcA, srcB, srcC)
+  case VAddcU32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VAddcU32, dest, dest2, srcA, srcB, srcC)
   case VAlignbitB32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VAlignbitB32, dest, srcA, srcB, srcC)
   case VAlignbyteB32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -4331,10 +3654,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VAndB32, dest, srcA, srcB)
   case VAndOrB32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VAndOrB32, dest, srcA, srcB, srcC)
-  case VAshrI32(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VAshrI32, dest, srcB, srcC)
-  case VAshrI64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VAshrI64, dest, srcB, srcC)
+  case VAshrI32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VAshrI32, dest, srcA, srcB)
+  case VAshrI64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP3InstructionDefs.VAshrI64, dest, srcA, srcB)
   case VAshrPkI8I32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VAshrPkI8I32, dest, srcA, srcB, srcC)
   case VAshrPkU8I32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -4346,7 +3669,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
   case VAshrrevI64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VAshrrevI64, dest, srcA, srcB)
   case VBcntU32B32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VBcntU32B32, dest, srcA, srcB)
+      extends Instruction(VOP2InstructionDefs.VBcntU32B32, dest, srcA, srcB)
   case VBfeI32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VBfeI32, dest, srcA, srcB, srcC)
   case VBfeU32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -4354,7 +3677,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
   case VBfiB32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VBfiB32, dest, srcA, srcB, srcC)
   case VBfmB32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VBfmB32, dest, srcA, srcB)
+      extends Instruction(VOP2InstructionDefs.VBfmB32, dest, srcA, srcB)
   case VBfrevB32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VBfrevB32, dest, srcA)
   case VBitop3B16(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -4474,18 +3797,6 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VectorCompareInstructionDefs.VCmpLgF32, dest, srcA, srcB)
   case VCmpLgF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpLgF64, dest, srcA, srcB)
-  case VCmpLgI16(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpLgI16, dest, srcB, srcC)
-  case VCmpLgI32(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpLgI32, dest, srcB, srcC)
-  case VCmpLgI64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpLgI64, dest, srcB, srcC)
-  case VCmpLgU16(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpLgU16, dest, srcB, srcC)
-  case VCmpLgU32(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpLgU32, dest, srcB, srcC)
-  case VCmpLgU64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpLgU64, dest, srcB, srcC)
   case VCmpLtF16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpLtF16, dest, srcA, srcB)
   case VCmpLtF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -4582,274 +3893,378 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VectorCompareInstructionDefs.VCmpTruF32, dest, srcA, srcB)
   case VCmpTruF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpTruF64, dest, srcA, srcB)
-  case VCmpTruI16(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpTruI16, dest, srcB, srcC)
-  case VCmpTruI32(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpTruI32, dest, srcB, srcC)
-  case VCmpTruI64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpTruI64, dest, srcB, srcC)
-  case VCmpTruU16(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpTruU16, dest, srcB, srcC)
-  case VCmpTruU32(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpTruU32, dest, srcB, srcC)
-  case VCmpTruU64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpTruU64, dest, srcB, srcC)
   case VCmpUF16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpUF16, dest, srcA, srcB)
   case VCmpUF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpUF32, dest, srcA, srcB)
   case VCmpUF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpUF64, dest, srcA, srcB)
-  case VCmpxClassF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxClassF16, srcA, srcB)
+  case VCmpsEqF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsEqF32, dest, srcA, srcB)
+  case VCmpsEqF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsEqF64, dest, srcA, srcB)
+  case VCmpsFF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsFF32, dest, srcA, srcB)
+  case VCmpsFF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsFF64, dest, srcA, srcB)
+  case VCmpsGeF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsGeF32, dest, srcA, srcB)
+  case VCmpsGeF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsGeF64, dest, srcA, srcB)
+  case VCmpsGtF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsGtF32, dest, srcA, srcB)
+  case VCmpsGtF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsGtF64, dest, srcA, srcB)
+  case VCmpsLeF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsLeF32, dest, srcA, srcB)
+  case VCmpsLeF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsLeF64, dest, srcA, srcB)
+  case VCmpsLgF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsLgF32, dest, srcA, srcB)
+  case VCmpsLgF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsLgF64, dest, srcA, srcB)
+  case VCmpsLtF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsLtF32, dest, srcA, srcB)
+  case VCmpsLtF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsLtF64, dest, srcA, srcB)
+  case VCmpsNeqF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsNeqF32, dest, srcA, srcB)
+  case VCmpsNeqF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsNeqF64, dest, srcA, srcB)
+  case VCmpsNgeF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsNgeF32, dest, srcA, srcB)
+  case VCmpsNgeF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsNgeF64, dest, srcA, srcB)
+  case VCmpsNgtF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsNgtF32, dest, srcA, srcB)
+  case VCmpsNgtF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsNgtF64, dest, srcA, srcB)
+  case VCmpsNleF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsNleF32, dest, srcA, srcB)
+  case VCmpsNleF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsNleF64, dest, srcA, srcB)
+  case VCmpsNlgF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsNlgF32, dest, srcA, srcB)
+  case VCmpsNlgF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsNlgF64, dest, srcA, srcB)
+  case VCmpsNltF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsNltF32, dest, srcA, srcB)
+  case VCmpsNltF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsNltF64, dest, srcA, srcB)
+  case VCmpsOF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsOF32, dest, srcA, srcB)
+  case VCmpsOF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsOF64, dest, srcA, srcB)
+  case VCmpsTruF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsTruF32, dest, srcA, srcB)
+  case VCmpsTruF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsTruF64, dest, srcA, srcB)
+  case VCmpsUF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsUF32, dest, srcA, srcB)
+  case VCmpsUF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsUF64, dest, srcA, srcB)
+  case VCmpsxEqF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxEqF32, dest, srcA, srcB)
+  case VCmpsxEqF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxEqF64, dest, srcA, srcB)
+  case VCmpsxFF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxFF32, dest, srcA, srcB)
+  case VCmpsxFF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxFF64, dest, srcA, srcB)
+  case VCmpsxGeF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxGeF32, dest, srcA, srcB)
+  case VCmpsxGeF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxGeF64, dest, srcA, srcB)
+  case VCmpsxGtF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxGtF32, dest, srcA, srcB)
+  case VCmpsxGtF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxGtF64, dest, srcA, srcB)
+  case VCmpsxLeF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxLeF32, dest, srcA, srcB)
+  case VCmpsxLeF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxLeF64, dest, srcA, srcB)
+  case VCmpsxLgF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxLgF32, dest, srcA, srcB)
+  case VCmpsxLgF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxLgF64, dest, srcA, srcB)
+  case VCmpsxLtF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxLtF32, dest, srcA, srcB)
+  case VCmpsxLtF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxLtF64, dest, srcA, srcB)
+  case VCmpsxNeqF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxNeqF32, dest, srcA, srcB)
+  case VCmpsxNeqF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxNeqF64, dest, srcA, srcB)
+  case VCmpsxNgeF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxNgeF32, dest, srcA, srcB)
+  case VCmpsxNgeF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxNgeF64, dest, srcA, srcB)
+  case VCmpsxNgtF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxNgtF32, dest, srcA, srcB)
+  case VCmpsxNgtF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxNgtF64, dest, srcA, srcB)
+  case VCmpsxNleF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxNleF32, dest, srcA, srcB)
+  case VCmpsxNleF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxNleF64, dest, srcA, srcB)
+  case VCmpsxNlgF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxNlgF32, dest, srcA, srcB)
+  case VCmpsxNlgF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxNlgF64, dest, srcA, srcB)
+  case VCmpsxNltF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxNltF32, dest, srcA, srcB)
+  case VCmpsxNltF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxNltF64, dest, srcA, srcB)
+  case VCmpsxOF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxOF32, dest, srcA, srcB)
+  case VCmpsxOF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxOF64, dest, srcA, srcB)
+  case VCmpsxTruF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxTruF32, dest, srcA, srcB)
+  case VCmpsxTruF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxTruF64, dest, srcA, srcB)
+  case VCmpsxUF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxUF32, dest, srcA, srcB)
+  case VCmpsxUF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpsxUF64, dest, srcA, srcB)
+  case VCmpxClassF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxClassF16, value1, value2)
   case VCmpxClassF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxClassF16, dest, srcA, srcB)
-  case VCmpxClassF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxClassF32, srcA, srcB)
+  case VCmpxClassF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxClassF32, value1, value2)
   case VCmpxClassF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxClassF32, dest, srcA, srcB)
-  case VCmpxClassF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxClassF64, srcA, srcB)
+  case VCmpxClassF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxClassF64, value1, value2)
   case VCmpxClassF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxClassF64, dest, srcA, srcB)
-  case VCmpxEqF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxEqF16, srcA, srcB)
+  case VCmpxEqF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxEqF16, value1, value2)
   case VCmpxEqF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxEqF16, dest, srcA, srcB)
-  case VCmpxEqF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxEqF32, srcA, srcB)
+  case VCmpxEqF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxEqF32, value1, value2)
   case VCmpxEqF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxEqF32, dest, srcA, srcB)
-  case VCmpxEqF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxEqF64, srcA, srcB)
+  case VCmpxEqF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxEqF64, value1, value2)
   case VCmpxEqF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxEqF64, dest, srcA, srcB)
-  case VCmpxEqI16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxEqI16, srcA, srcB)
+  case VCmpxEqI16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxEqI16, value1, value2)
   case VCmpxEqI16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxEqI16, dest, srcA, srcB)
-  case VCmpxEqI32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxEqI32, srcA, srcB)
+  case VCmpxEqI32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxEqI32, value1, value2)
   case VCmpxEqI32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxEqI32, dest, srcA, srcB)
-  case VCmpxEqI64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxEqI64, srcA, srcB)
+  case VCmpxEqI64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxEqI64, value1, value2)
   case VCmpxEqI64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxEqI64, dest, srcA, srcB)
-  case VCmpxEqU16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxEqU16, srcA, srcB)
+  case VCmpxEqU16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxEqU16, value1, value2)
   case VCmpxEqU16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxEqU16, dest, srcA, srcB)
-  case VCmpxEqU32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxEqU32, srcA, srcB)
+  case VCmpxEqU32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxEqU32, value1, value2)
   case VCmpxEqU32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxEqU32, dest, srcA, srcB)
-  case VCmpxEqU64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxEqU64, srcA, srcB)
+  case VCmpxEqU64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxEqU64, value1, value2)
   case VCmpxEqU64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxEqU64, dest, srcA, srcB)
-  case VCmpxFF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxFF16, srcA, srcB)
+  case VCmpxFF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxFF16, value1, value2)
   case VCmpxFF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxFF16, dest, srcA, srcB)
-  case VCmpxFF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxFF32, srcA, srcB)
+  case VCmpxFF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxFF32, value1, value2)
   case VCmpxFF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxFF32, dest, srcA, srcB)
-  case VCmpxFF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxFF64, srcA, srcB)
+  case VCmpxFF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxFF64, value1, value2)
   case VCmpxFF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxFF64, dest, srcA, srcB)
-  case VCmpxFI16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxFI16, srcA, srcB)
+  case VCmpxFI16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxFI16, value1, value2)
   case VCmpxFI16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxFI16, dest, srcA, srcB)
-  case VCmpxFI32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxFI32, srcA, srcB)
+  case VCmpxFI32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxFI32, value1, value2)
   case VCmpxFI32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxFI32, dest, srcA, srcB)
-  case VCmpxFI64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxFI64, srcA, srcB)
+  case VCmpxFI64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxFI64, value1, value2)
   case VCmpxFI64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxFI64, dest, srcA, srcB)
-  case VCmpxFU16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxFU16, srcA, srcB)
+  case VCmpxFU16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxFU16, value1, value2)
   case VCmpxFU16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxFU16, dest, srcA, srcB)
-  case VCmpxFU32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxFU32, srcA, srcB)
+  case VCmpxFU32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxFU32, value1, value2)
   case VCmpxFU32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxFU32, dest, srcA, srcB)
-  case VCmpxFU64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxFU64, srcA, srcB)
+  case VCmpxFU64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxFU64, value1, value2)
   case VCmpxFU64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxFU64, dest, srcA, srcB)
-  case VCmpxGeF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGeF16, srcA, srcB)
+  case VCmpxGeF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGeF16, value1, value2)
   case VCmpxGeF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGeF16, dest, srcA, srcB)
-  case VCmpxGeF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGeF32, srcA, srcB)
+  case VCmpxGeF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGeF32, value1, value2)
   case VCmpxGeF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGeF32, dest, srcA, srcB)
-  case VCmpxGeF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGeF64, srcA, srcB)
+  case VCmpxGeF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGeF64, value1, value2)
   case VCmpxGeF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGeF64, dest, srcA, srcB)
-  case VCmpxGeI16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGeI16, srcA, srcB)
+  case VCmpxGeI16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGeI16, value1, value2)
   case VCmpxGeI16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGeI16, dest, srcA, srcB)
-  case VCmpxGeI32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGeI32, srcA, srcB)
+  case VCmpxGeI32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGeI32, value1, value2)
   case VCmpxGeI32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGeI32, dest, srcA, srcB)
-  case VCmpxGeI64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGeI64, srcA, srcB)
+  case VCmpxGeI64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGeI64, value1, value2)
   case VCmpxGeI64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGeI64, dest, srcA, srcB)
-  case VCmpxGeU16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGeU16, srcA, srcB)
+  case VCmpxGeU16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGeU16, value1, value2)
   case VCmpxGeU16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGeU16, dest, srcA, srcB)
-  case VCmpxGeU32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGeU32, srcA, srcB)
+  case VCmpxGeU32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGeU32, value1, value2)
   case VCmpxGeU32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGeU32, dest, srcA, srcB)
-  case VCmpxGeU64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGeU64, srcA, srcB)
+  case VCmpxGeU64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGeU64, value1, value2)
   case VCmpxGeU64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGeU64, dest, srcA, srcB)
-  case VCmpxGtF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGtF16, srcA, srcB)
+  case VCmpxGtF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGtF16, value1, value2)
   case VCmpxGtF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGtF16, dest, srcA, srcB)
-  case VCmpxGtF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGtF32, srcA, srcB)
+  case VCmpxGtF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGtF32, value1, value2)
   case VCmpxGtF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGtF32, dest, srcA, srcB)
-  case VCmpxGtF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGtF64, srcA, srcB)
+  case VCmpxGtF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGtF64, value1, value2)
   case VCmpxGtF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGtF64, dest, srcA, srcB)
-  case VCmpxGtI16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGtI16, srcA, srcB)
+  case VCmpxGtI16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGtI16, value1, value2)
   case VCmpxGtI16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGtI16, dest, srcA, srcB)
-  case VCmpxGtI32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGtI32, srcA, srcB)
+  case VCmpxGtI32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGtI32, value1, value2)
   case VCmpxGtI32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGtI32, dest, srcA, srcB)
-  case VCmpxGtI64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGtI64, srcA, srcB)
+  case VCmpxGtI64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGtI64, value1, value2)
   case VCmpxGtI64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGtI64, dest, srcA, srcB)
-  case VCmpxGtU16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGtU16, srcA, srcB)
+  case VCmpxGtU16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGtU16, value1, value2)
   case VCmpxGtU16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGtU16, dest, srcA, srcB)
-  case VCmpxGtU32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGtU32, srcA, srcB)
+  case VCmpxGtU32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGtU32, value1, value2)
   case VCmpxGtU32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGtU32, dest, srcA, srcB)
-  case VCmpxGtU64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxGtU64, srcA, srcB)
+  case VCmpxGtU64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxGtU64, value1, value2)
   case VCmpxGtU64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxGtU64, dest, srcA, srcB)
-  case VCmpxLeF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLeF16, srcA, srcB)
+  case VCmpxLeF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLeF16, value1, value2)
   case VCmpxLeF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLeF16, dest, srcA, srcB)
-  case VCmpxLeF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLeF32, srcA, srcB)
+  case VCmpxLeF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLeF32, value1, value2)
   case VCmpxLeF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLeF32, dest, srcA, srcB)
-  case VCmpxLeF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLeF64, srcA, srcB)
+  case VCmpxLeF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLeF64, value1, value2)
   case VCmpxLeF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLeF64, dest, srcA, srcB)
-  case VCmpxLeI16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLeI16, srcA, srcB)
+  case VCmpxLeI16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLeI16, value1, value2)
   case VCmpxLeI16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLeI16, dest, srcA, srcB)
-  case VCmpxLeI32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLeI32, srcA, srcB)
+  case VCmpxLeI32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLeI32, value1, value2)
   case VCmpxLeI32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLeI32, dest, srcA, srcB)
-  case VCmpxLeI64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLeI64, srcA, srcB)
+  case VCmpxLeI64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLeI64, value1, value2)
   case VCmpxLeI64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLeI64, dest, srcA, srcB)
-  case VCmpxLeU16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLeU16, srcA, srcB)
+  case VCmpxLeU16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLeU16, value1, value2)
   case VCmpxLeU16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLeU16, dest, srcA, srcB)
-  case VCmpxLeU32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLeU32, srcA, srcB)
+  case VCmpxLeU32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLeU32, value1, value2)
   case VCmpxLeU32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLeU32, dest, srcA, srcB)
-  case VCmpxLeU64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLeU64, srcA, srcB)
+  case VCmpxLeU64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLeU64, value1, value2)
   case VCmpxLeU64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLeU64, dest, srcA, srcB)
-  case VCmpxLgF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLgF16, srcA, srcB)
+  case VCmpxLgF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLgF16, value1, value2)
   case VCmpxLgF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLgF16, dest, srcA, srcB)
-  case VCmpxLgF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLgF32, srcA, srcB)
+  case VCmpxLgF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLgF32, value1, value2)
   case VCmpxLgF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLgF32, dest, srcA, srcB)
-  case VCmpxLgF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLgF64, srcA, srcB)
+  case VCmpxLgF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLgF64, value1, value2)
   case VCmpxLgF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLgF64, dest, srcA, srcB)
-  case VCmpxLgI16(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLgI16, srcA, srcB)
-  case VCmpxLgI32(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLgI32, srcA, srcB)
-  case VCmpxLgI64(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLgI64, srcA, srcB)
-  case VCmpxLgU16(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLgU16, srcA, srcB)
-  case VCmpxLgU32(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLgU32, srcA, srcB)
-  case VCmpxLgU64(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLgU64, srcA, srcB)
-  case VCmpxLtF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLtF16, srcA, srcB)
+  case VCmpxLtF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLtF16, value1, value2)
   case VCmpxLtF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLtF16, dest, srcA, srcB)
-  case VCmpxLtF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLtF32, srcA, srcB)
+  case VCmpxLtF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLtF32, value1, value2)
   case VCmpxLtF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLtF32, dest, srcA, srcB)
-  case VCmpxLtF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLtF64, srcA, srcB)
+  case VCmpxLtF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLtF64, value1, value2)
   case VCmpxLtF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLtF64, dest, srcA, srcB)
-  case VCmpxLtI16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLtI16, srcA, srcB)
+  case VCmpxLtI16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLtI16, value1, value2)
   case VCmpxLtI16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLtI16, dest, srcA, srcB)
-  case VCmpxLtI32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLtI32, srcA, srcB)
+  case VCmpxLtI32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLtI32, value1, value2)
   case VCmpxLtI32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLtI32, dest, srcA, srcB)
-  case VCmpxLtI64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLtI64, srcA, srcB)
+  case VCmpxLtI64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLtI64, value1, value2)
   case VCmpxLtI64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLtI64, dest, srcA, srcB)
-  case VCmpxLtU16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLtU16, srcA, srcB)
+  case VCmpxLtU16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLtU16, value1, value2)
   case VCmpxLtU16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLtU16, dest, srcA, srcB)
-  case VCmpxLtU32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLtU32, srcA, srcB)
+  case VCmpxLtU32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLtU32, value1, value2)
   case VCmpxLtU32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLtU32, dest, srcA, srcB)
-  case VCmpxLtU64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxLtU64, srcA, srcB)
+  case VCmpxLtU64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxLtU64, value1, value2)
   case VCmpxLtU64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxLtU64, dest, srcA, srcB)
   case VCmpxNeI16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
@@ -4876,88 +4291,88 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VectorCompareInstructionDefs.VCmpxNeU64, value1, value2)
   case VCmpxNeU64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNeU64, dest, srcA, srcB)
-  case VCmpxNeqF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNeqF16, srcA, srcB)
+  case VCmpxNeqF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNeqF16, value1, value2)
   case VCmpxNeqF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNeqF16, dest, srcA, srcB)
-  case VCmpxNeqF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNeqF32, srcA, srcB)
+  case VCmpxNeqF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNeqF32, value1, value2)
   case VCmpxNeqF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNeqF32, dest, srcA, srcB)
-  case VCmpxNeqF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNeqF64, srcA, srcB)
+  case VCmpxNeqF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNeqF64, value1, value2)
   case VCmpxNeqF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNeqF64, dest, srcA, srcB)
-  case VCmpxNgeF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNgeF16, srcA, srcB)
+  case VCmpxNgeF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNgeF16, value1, value2)
   case VCmpxNgeF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNgeF16, dest, srcA, srcB)
-  case VCmpxNgeF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNgeF32, srcA, srcB)
+  case VCmpxNgeF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNgeF32, value1, value2)
   case VCmpxNgeF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNgeF32, dest, srcA, srcB)
-  case VCmpxNgeF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNgeF64, srcA, srcB)
+  case VCmpxNgeF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNgeF64, value1, value2)
   case VCmpxNgeF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNgeF64, dest, srcA, srcB)
-  case VCmpxNgtF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNgtF16, srcA, srcB)
+  case VCmpxNgtF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNgtF16, value1, value2)
   case VCmpxNgtF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNgtF16, dest, srcA, srcB)
-  case VCmpxNgtF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNgtF32, srcA, srcB)
+  case VCmpxNgtF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNgtF32, value1, value2)
   case VCmpxNgtF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNgtF32, dest, srcA, srcB)
-  case VCmpxNgtF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNgtF64, srcA, srcB)
+  case VCmpxNgtF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNgtF64, value1, value2)
   case VCmpxNgtF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNgtF64, dest, srcA, srcB)
-  case VCmpxNleF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNleF16, srcA, srcB)
+  case VCmpxNleF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNleF16, value1, value2)
   case VCmpxNleF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNleF16, dest, srcA, srcB)
-  case VCmpxNleF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNleF32, srcA, srcB)
+  case VCmpxNleF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNleF32, value1, value2)
   case VCmpxNleF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNleF32, dest, srcA, srcB)
-  case VCmpxNleF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNleF64, srcA, srcB)
+  case VCmpxNleF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNleF64, value1, value2)
   case VCmpxNleF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNleF64, dest, srcA, srcB)
-  case VCmpxNlgF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNlgF16, srcA, srcB)
+  case VCmpxNlgF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNlgF16, value1, value2)
   case VCmpxNlgF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNlgF16, dest, srcA, srcB)
-  case VCmpxNlgF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNlgF32, srcA, srcB)
+  case VCmpxNlgF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNlgF32, value1, value2)
   case VCmpxNlgF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNlgF32, dest, srcA, srcB)
-  case VCmpxNlgF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNlgF64, srcA, srcB)
+  case VCmpxNlgF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNlgF64, value1, value2)
   case VCmpxNlgF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNlgF64, dest, srcA, srcB)
-  case VCmpxNltF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNltF16, srcA, srcB)
+  case VCmpxNltF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNltF16, value1, value2)
   case VCmpxNltF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNltF16, dest, srcA, srcB)
-  case VCmpxNltF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNltF32, srcA, srcB)
+  case VCmpxNltF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNltF32, value1, value2)
   case VCmpxNltF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNltF32, dest, srcA, srcB)
-  case VCmpxNltF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxNltF64, srcA, srcB)
+  case VCmpxNltF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxNltF64, value1, value2)
   case VCmpxNltF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxNltF64, dest, srcA, srcB)
-  case VCmpxOF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxOF16, srcA, srcB)
+  case VCmpxOF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxOF16, value1, value2)
   case VCmpxOF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxOF16, dest, srcA, srcB)
-  case VCmpxOF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxOF32, srcA, srcB)
+  case VCmpxOF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxOF32, value1, value2)
   case VCmpxOF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxOF32, dest, srcA, srcB)
-  case VCmpxOF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxOF64, srcA, srcB)
+  case VCmpxOF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxOF64, value1, value2)
   case VCmpxOF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxOF64, dest, srcA, srcB)
   case VCmpxTF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
@@ -4996,40 +4411,28 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VectorCompareInstructionDefs.VCmpxTU64, value1, value2)
   case VCmpxTU64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxTU64, dest, srcA, srcB)
-  case VCmpxTruF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxTruF16, srcA, srcB)
+  case VCmpxTruF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxTruF16, value1, value2)
   case VCmpxTruF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxTruF16, dest, srcA, srcB)
-  case VCmpxTruF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxTruF32, srcA, srcB)
+  case VCmpxTruF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxTruF32, value1, value2)
   case VCmpxTruF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxTruF32, dest, srcA, srcB)
-  case VCmpxTruF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxTruF64, srcA, srcB)
+  case VCmpxTruF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxTruF64, value1, value2)
   case VCmpxTruF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxTruF64, dest, srcA, srcB)
-  case VCmpxTruI16(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxTruI16, srcA, srcB)
-  case VCmpxTruI32(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxTruI32, srcA, srcB)
-  case VCmpxTruI64(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxTruI64, srcA, srcB)
-  case VCmpxTruU16(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxTruU16, srcA, srcB)
-  case VCmpxTruU32(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxTruU32, srcA, srcB)
-  case VCmpxTruU64(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxTruU64, srcA, srcB)
-  case VCmpxUF16_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxUF16, srcA, srcB)
+  case VCmpxUF16_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxUF16, value1, value2)
   case VCmpxUF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxUF16, dest, srcA, srcB)
-  case VCmpxUF32_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxUF32, srcA, srcB)
+  case VCmpxUF32_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxUF32, value1, value2)
   case VCmpxUF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxUF32, dest, srcA, srcB)
-  case VCmpxUF64_2(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VectorCompareInstructionDefs.VCmpxUF64, srcA, srcB)
+  case VCmpxUF64_2(value1: Operand, value2: Operand, mods: Vec[Modifier])
+      extends Instruction(VectorCompareInstructionDefs.VCmpxUF64, value1, value2)
   case VCmpxUF64_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VectorCompareInstructionDefs.VCmpxUF64, dest, srcA, srcB)
   case VCndmaskB16(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -5133,7 +4536,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
   case VCvtPkI16F32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VCvtPkI16F32, dest, srcA, srcB)
   case VCvtPkI16I32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VCvtPkI16I32, dest, srcA, srcB)
+      extends Instruction(VOP2InstructionDefs.VCvtPkI16I32, dest, srcA, srcB)
   case VCvtPkNormI16F16_1(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VCvtPkNormI16F16_1, dest, srcA, srcB)
   case VCvtPkNormI16F32_1(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -5147,25 +4550,21 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
   case VCvtPkU16F32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VCvtPkU16F32, dest, srcA, srcB)
   case VCvtPkU16U32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VCvtPkU16U32, dest, srcA, srcB)
+      extends Instruction(VOP2InstructionDefs.VCvtPkU16U32, dest, srcA, srcB)
   case VCvtPkU8F32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VCvtPkU8F32, dest, srcA, srcB, srcC)
-  case VCvtPkaccumU8F32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VCvtPkaccumU8F32, dest, srcA, srcB)
-  case VCvtPkaccumU8F32_4(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VCvtPkaccumU8F32, dest, srcB, srcC, srcD)
+  case VCvtPkaccumU8F32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VCvtPkaccumU8F32, dest, srcA, srcB)
   case VCvtPknormI16F16_2(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VCvtPknormI16F16_2, dest, srcA, srcB)
   case VCvtPknormI16F32_2(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VCvtPknormI16F32_2, dest, srcA, srcB)
+      extends Instruction(VOP2InstructionDefs.VCvtPknormI16F32_2, dest, srcA, srcB)
   case VCvtPknormU16F16_2(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VCvtPknormU16F16_2, dest, srcA, srcB)
   case VCvtPknormU16F32_2(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VCvtPknormU16F32_2, dest, srcA, srcB)
+      extends Instruction(VOP2InstructionDefs.VCvtPknormU16F32_2, dest, srcA, srcB)
   case VCvtPkrtzF16F32_2(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VCvtPkrtzF16F32_2, dest, srcA, srcB)
-  case VCvtPkrtzF16F32E64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VCvtPkrtzF16F32E64, dest, srcB, srcC)
   case VCvtRpiI32F32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VCvtRpiI32F32, dest, srcA)
   case VCvtScalePk16Bf16Bf6(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -5388,14 +4787,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP3InstructionDefs.VDivFixupF64, dest, srcA, srcB, srcC)
   case VDivFixupLegacyF16(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VDivFixupLegacyF16, dest, srcA, srcB, srcC)
-  case VDivFmasF32_4(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
+  case VDivFmasF32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VDivFmasF32, dest, srcA, srcB, srcC)
-  case VDivFmasF32_5(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, srcE: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VDivFmasF32, dest, srcB, srcC, srcD, srcE)
-  case VDivFmasF64_4(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
+  case VDivFmasF64(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VDivFmasF64, dest, srcA, srcB, srcC)
-  case VDivFmasF64_5(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, srcE: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VDivFmasF64, dest, srcB, srcC, srcD, srcE)
   case VDivScaleF32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VDivScaleF32, dest, dest2, srcA, srcB, srcC)
   case VDivScaleF64(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -5416,10 +4811,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VDot2accF32F16, dest, srcA, srcB)
   case VDot2cF32Bf16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VDot2cF32Bf16, dest, srcA, srcB)
-  case VDot2cF32F16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+  case VDot2cF32F16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VDot2cF32F16, dest, srcA, srcB)
-  case VDot2cF32F16_4(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VDot2cF32F16, dest, srcB, srcC, srcD)
   case VDot2cI32I16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VDot2cI32I16, dest, srcA, srcB)
   case VDot4F32Bf8Bf8(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -5436,10 +4829,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(PackedVectorInstructionDefs.VDot4I32Iu8, dest, srcA, srcB, srcC)
   case VDot4U32U8(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VDot4U32U8, dest, srcA, srcB, srcC)
-  case VDot4cI32I8_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+  case VDot4cI32I8(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VDot4cI32I8, dest, srcA, srcB)
-  case VDot4cI32I8_4(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VDot4cI32I8, dest, srcB, srcC, srcD)
   case VDot8I32I4(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VDot8I32I4, dest, srcA, srcB, srcC)
   case VDot8I32Iu4(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -5518,8 +4909,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP1InstructionDefs.VExpF16, dest, srcA)
   case VExpF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VExpF32, dest, srcA)
-  case VExpLegacyF32(dest: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP1InstructionDefs.VExpLegacyF32, dest, srcB)
+  case VExpLegacyF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP1InstructionDefs.VExpLegacyF32, dest, srcA)
   case VFfbhI32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VFfbhI32, dest, srcA)
   case VFfbhU32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
@@ -5562,8 +4953,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VFmaakF32, dest, srcA, srcB, imm)
   case VFmaakF64(dest: Operand, srcA: Operand, srcB: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VFmaakF64, dest, srcA, srcB, imm)
-  case VFmacDx9ZeroF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VFmacDx9ZeroF32, dest, srcA, srcB)
+  case VFmacDx9ZeroF32(dest: Operand, imm: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VFmacDx9ZeroF32, dest, imm, srcB)
   case VFmacF16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VFmacF16, dest, srcA, srcB)
   case VFmacF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -5596,72 +4987,73 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP1InstructionDefs.VFrexpMantF32, dest, srcA)
   case VFrexpMantF64(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VFrexpMantF64, dest, srcA)
-  case VInterpMovF32_2(dest: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VInterpMovF32, dest, srcB)
-  case VInterpMovF32_3(dest: Operand, srcB: Operand, attr: Operand, mods: Vec[Modifier])
+  case VIllegal(mods: Vec[Modifier]) extends Instruction(VOP1InstructionDefs.VIllegal)
+  case VInterpMovF32(dest: Operand, srcB: Operand, attr: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VInterpMovF32, dest, srcB, attr)
   case VInterpP10F16F32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(InterpolationInstructionDefs.VInterpP10F16F32, dest, srcA, srcB, srcC)
+  case VInterpP10F16F32Inreg(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
+      extends Instruction(InterpolationInstructionDefs.VInterpP10F16F32Inreg, dest, srcB, srcC, srcD)
   case VInterpP10F32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(InterpolationInstructionDefs.VInterpP10F32, dest, srcA, srcB, srcC)
+  case VInterpP10F32Inreg(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
+      extends Instruction(InterpolationInstructionDefs.VInterpP10F32Inreg, dest, srcB, srcC, srcD)
   case VInterpP10RtzF16F32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(InterpolationInstructionDefs.VInterpP10RtzF16F32, dest, srcA, srcB, srcC)
-  case VInterpP1F32_2(dest: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VInterpP1F32, dest, srcB)
-  case VInterpP1F32_3(dest: Operand, srcB: Operand, attr: Operand, mods: Vec[Modifier])
+  case VInterpP10RtzF16F32Inreg(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
+      extends Instruction(InterpolationInstructionDefs.VInterpP10RtzF16F32Inreg, dest, srcB, srcC, srcD)
+  case VInterpP1F32(dest: Operand, srcB: Operand, attr: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VInterpP1F32, dest, srcB, attr)
-  case VInterpP1llF16_2(dest: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VInterpP1llF16, dest, srcB)
-  case VInterpP1llF16_3(dest: Operand, srcB: Operand, srcA: Operand, mods: Vec[Modifier])
+  case VInterpP1llF16(dest: Operand, srcB: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VInterpP1llF16, dest, srcB, srcA)
-  case VInterpP1lvF16_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VInterpP1lvF16, dest, srcB, srcC)
-  case VInterpP1lvF16_4(dest: Operand, srcB: Operand, srcA: Operand, srcC: Operand, mods: Vec[Modifier])
+  case VInterpP1lvF16(dest: Operand, srcB: Operand, srcA: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VInterpP1lvF16, dest, srcB, srcA, srcC)
-  case VInterpP2F16_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VInterpP2F16, dest, srcB, srcC)
-  case VInterpP2F16_4(dest: Operand, srcB: Operand, srcA: Operand, srcC: Operand, mods: Vec[Modifier])
+  case VInterpP2F16(dest: Operand, srcB: Operand, srcA: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VInterpP2F16, dest, srcB, srcA, srcC)
   case VInterpP2F16F32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(InterpolationInstructionDefs.VInterpP2F16F32, dest, srcA, srcB, srcC)
+  case VInterpP2F16F32Inreg(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
+      extends Instruction(InterpolationInstructionDefs.VInterpP2F16F32Inreg, dest, srcB, srcC, srcD)
   case VInterpP2F32_3(dest: Operand, srcB: Operand, attr: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VInterpP2F32, dest, srcB, attr)
   case VInterpP2F32_4(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VInterpP2F32, dest, srcA, srcB, srcC)
-  case VInterpP2HiF16(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VInterpP2HiF16, dest, srcB, srcC)
-  case VInterpP2LegacyF16_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VInterpP2LegacyF16, dest, srcB, srcC)
-  case VInterpP2LegacyF16_4(dest: Operand, srcB: Operand, srcA: Operand, srcC: Operand, mods: Vec[Modifier])
+  case VInterpP2F32Inreg(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
+      extends Instruction(InterpolationInstructionDefs.VInterpP2F32Inreg, dest, srcB, srcC, srcD)
+  case VInterpP2HiF16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP3InstructionDefs.VInterpP2HiF16, dest, srcA, srcB)
+  case VInterpP2LegacyF16(dest: Operand, srcB: Operand, srcA: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VInterpP2LegacyF16, dest, srcB, srcA, srcC)
   case VInterpP2RtzF16F32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(InterpolationInstructionDefs.VInterpP2RtzF16F32, dest, srcA, srcB, srcC)
+  case VInterpP2RtzF16F32Inreg(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
+      extends Instruction(InterpolationInstructionDefs.VInterpP2RtzF16F32Inreg, dest, srcB, srcC, srcD)
   case VLdexpF16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VLdexpF16, dest, srcA, srcB)
   case VLdexpF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VLdexpF32, dest, srcA, srcB)
+      extends Instruction(VOP2InstructionDefs.VLdexpF32, dest, srcA, srcB)
   case VLdexpF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VLdexpF64, dest, srcA, srcB)
   case VLerpU8(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VLerpU8, dest, srcA, srcB, srcC)
   case VLogBf16(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VLogBf16, dest, srcA)
-  case VLogClampF32(dest: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP1InstructionDefs.VLogClampF32, dest, srcB)
+  case VLogClampF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP1InstructionDefs.VLogClampF32, dest, srcA)
   case VLogF16(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VLogF16, dest, srcA)
   case VLogF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VLogF32, dest, srcA)
-  case VLogLegacyF32(dest: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP1InstructionDefs.VLogLegacyF32, dest, srcB)
+  case VLogLegacyF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP1InstructionDefs.VLogLegacyF32, dest, srcA)
   case VLshlAddU32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VLshlAddU32, dest, srcA, srcB, srcC)
   case VLshlAddU64(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VLshlAddU64, dest, srcA, srcB, srcC)
-  case VLshlB32(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VLshlB32, dest, srcB, srcC)
-  case VLshlB64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VLshlB64, dest, srcB, srcC)
+  case VLshlB32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VLshlB32, dest, srcA, srcB)
+  case VLshlB64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP3InstructionDefs.VLshlB64, dest, srcA, srcB)
   case VLshlOrB32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VLshlOrB32, dest, srcA, srcB, srcC)
   case VLshlrevB16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -5670,30 +5062,22 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VLshlrevB32, dest, srcA, srcB)
   case VLshlrevB64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VLshlrevB64, dest, srcA, srcB)
-  case VLshlrevB64E64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VLshlrevB64E64, dest, srcB, srcC)
-  case VLshrB32(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VLshrB32, dest, srcB, srcC)
-  case VLshrB64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VLshrB64, dest, srcB, srcC)
+  case VLshrB32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VLshrB32, dest, srcA, srcB)
+  case VLshrB64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP3InstructionDefs.VLshrB64, dest, srcA, srcB)
   case VLshrrevB16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VLshrrevB16, dest, srcA, srcB)
   case VLshrrevB32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VLshrrevB32, dest, srcA, srcB)
   case VLshrrevB64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VLshrrevB64, dest, srcA, srcB)
-  case VMacF16_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+  case VMacF16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMacF16, dest, srcA, srcB)
-  case VMacF16_4(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VMacF16, dest, srcB, srcC, srcD)
-  case VMacF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+  case VMacF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMacF32, dest, srcA, srcB)
-  case VMacF32_4(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VMacF32, dest, srcB, srcC, srcD)
-  case VMacLegacyF32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+  case VMacLegacyF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMacLegacyF32, dest, srcA, srcB)
-  case VMacLegacyF32_4(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VMacLegacyF32, dest, srcB, srcC, srcD)
   case VMadCoI64I32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VMadCoI64I32, dest, dest2, srcA, srcB, srcC)
   case VMadCoU64U32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -5738,21 +5122,13 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP3InstructionDefs.VMadU32U24, dest, srcA, srcB, srcC)
   case VMadU64U32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VMadU64U32, dest, dest2, srcA, srcB, srcC)
-  case VMadakF16_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VMadakF16, dest, srcB, srcC)
-  case VMadakF16_4(dest: Operand, srcA: Operand, srcB: Operand, imm: Operand, mods: Vec[Modifier])
+  case VMadakF16(dest: Operand, srcA: Operand, srcB: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMadakF16, dest, srcA, srcB, imm)
-  case VMadakF32_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VMadakF32, dest, srcB, srcC)
-  case VMadakF32_4(dest: Operand, srcA: Operand, srcB: Operand, imm: Operand, mods: Vec[Modifier])
+  case VMadakF32(dest: Operand, srcA: Operand, srcB: Operand, imm: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMadakF32, dest, srcA, srcB, imm)
-  case VMadmkF16_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VMadmkF16, dest, srcB, srcC)
-  case VMadmkF16_4(dest: Operand, srcA: Operand, imm: Operand, srcB: Operand, mods: Vec[Modifier])
+  case VMadmkF16(dest: Operand, srcA: Operand, imm: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMadmkF16, dest, srcA, imm, srcB)
-  case VMadmkF32_3(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VMadmkF32, dest, srcB, srcC)
-  case VMadmkF32_4(dest: Operand, srcA: Operand, imm: Operand, srcB: Operand, mods: Vec[Modifier])
+  case VMadmkF32(dest: Operand, srcA: Operand, imm: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMadmkF32, dest, srcA, imm, srcB)
   case VMax3F16(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VMax3F16, dest, srcA, srcB, srcC)
@@ -5776,16 +5152,14 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VMaxF32, dest, srcA, srcB)
   case VMaxF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VMaxF64, dest, srcA, srcB)
-  case VMaxF64E64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VMaxF64E64, dest, srcB, srcC)
   case VMaxI16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMaxI16, dest, srcA, srcB)
   case VMaxI32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMaxI32, dest, srcA, srcB)
   case VMaxI64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VMaxI64, dest, srcA, srcB)
-  case VMaxLegacyF32(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VMaxLegacyF32, dest, srcB, srcC)
+  case VMaxLegacyF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VMaxLegacyF32, dest, srcA, srcB)
   case VMaxNumF16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMaxNumF16, dest, srcA, srcB)
   case VMaxNumF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -5826,10 +5200,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP3InstructionDefs.VMaxminU32, dest, srcA, srcB, srcC)
   case VMbcntHiU32B32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMbcntHiU32B32, dest, srcA, srcB)
-  case VMbcntHiU32B32E64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VMbcntHiU32B32E64, dest, srcB, srcC)
   case VMbcntLoU32B32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VMbcntLoU32B32, dest, srcA, srcB)
+      extends Instruction(VOP2InstructionDefs.VMbcntLoU32B32, dest, srcA, srcB)
   case VMed3F16(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VMed3F16, dest, srcA, srcB, srcC)
   case VMed3F32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -5980,6 +5352,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(MatrixInstructionDefs.VMfmaI324x4x416bI8, dest, srcA, srcB, srcC)
   case VMfmaI324x4x4i8(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(MatrixInstructionDefs.VMfmaI324x4x4i8, dest, srcA, srcB, srcC)
+  case VMfmaLdScaleB32(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(MatrixInstructionDefs.VMfmaLdScaleB32, srcA, srcB)
   case VMfmaScaleF3216x16x128F8f6f4(
       dest: Operand,
       srcA: Operand,
@@ -6020,16 +5394,14 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VMinF32, dest, srcA, srcB)
   case VMinF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VMinF64, dest, srcA, srcB)
-  case VMinF64E64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VMinF64E64, dest, srcB, srcC)
   case VMinI16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMinI16, dest, srcA, srcB)
   case VMinI32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMinI32, dest, srcA, srcB)
   case VMinI64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VMinI64, dest, srcA, srcB)
-  case VMinLegacyF32(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VMinLegacyF32, dest, srcB, srcC)
+  case VMinLegacyF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VMinLegacyF32, dest, srcA, srcB)
   case VMinNumF16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMinNumF16, dest, srcA, srcB)
   case VMinNumF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -6096,8 +5468,6 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VMulF32, dest, srcA, srcB)
   case VMulF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMulF64, dest, srcA, srcB)
-  case VMulF64E64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VMulF64E64, dest, srcB, srcC)
   case VMulHiI32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VMulHiI32, dest, srcA, srcB)
   case VMulHiI32I24(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -6110,8 +5480,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VMulI32I24, dest, srcA, srcB)
   case VMulLegacyF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMulLegacyF32, dest, srcA, srcB)
-  case VMulLoI32(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VMulLoI32, dest, srcB, srcC)
+  case VMulLoI32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP3InstructionDefs.VMulLoI32, dest, srcA, srcB)
   case VMulLoU16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VMulLoU16, dest, srcA, srcB)
   case VMulLoU32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -6174,6 +5544,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(PackedVectorInstructionDefs.VPkAddF16, dest, srcA, srcB)
   case VPkAddF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkAddF32, dest, srcA, srcB)
+  case VPkAddF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(PackedVectorInstructionDefs.VPkAddF64, dest, srcA, srcB)
   case VPkAddI16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkAddI16, dest, srcA, srcB)
   case VPkAddMaxI16(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -6184,6 +5556,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(PackedVectorInstructionDefs.VPkAddMinI16, dest, srcA, srcB, srcC)
   case VPkAddMinU16(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkAddMinU16, dest, srcA, srcB, srcC)
+  case VPkAddNcU64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(PackedVectorInstructionDefs.VPkAddNcU64, dest, srcA, srcB)
   case VPkAddU16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkAddU16, dest, srcA, srcB)
   case VPkAshrrevI16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -6194,8 +5568,12 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(PackedVectorInstructionDefs.VPkFmaF16, dest, srcA, srcB, srcC)
   case VPkFmaF32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkFmaF32, dest, srcA, srcB, srcC)
+  case VPkFmaF64(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
+      extends Instruction(PackedVectorInstructionDefs.VPkFmaF64, dest, srcA, srcB, srcC)
   case VPkFmacF16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VPkFmacF16, dest, srcA, srcB)
+  case VPkLshlAddU64(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
+      extends Instruction(PackedVectorInstructionDefs.VPkLshlAddU64, dest, srcA, srcB, srcC)
   case VPkLshlrevB16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkLshlrevB16, dest, srcA, srcB)
   case VPkLshrrevB16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -6218,6 +5596,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(PackedVectorInstructionDefs.VPkMaxNumBf16, dest, srcA, srcB)
   case VPkMaxNumF16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkMaxNumF16, dest, srcA, srcB)
+  case VPkMaxNumF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(PackedVectorInstructionDefs.VPkMaxNumF64, dest, srcA, srcB)
   case VPkMaxU16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkMaxU16, dest, srcA, srcB)
   case VPkMaximum3F16(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -6238,6 +5618,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(PackedVectorInstructionDefs.VPkMinNumBf16, dest, srcA, srcB)
   case VPkMinNumF16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkMinNumF16, dest, srcA, srcB)
+  case VPkMinNumF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(PackedVectorInstructionDefs.VPkMinNumF64, dest, srcA, srcB)
   case VPkMinU16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkMinU16, dest, srcA, srcB)
   case VPkMinimum3F16(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -6252,10 +5634,14 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(PackedVectorInstructionDefs.VPkMulF16, dest, srcA, srcB)
   case VPkMulF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkMulF32, dest, srcA, srcB)
+  case VPkMulF64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(PackedVectorInstructionDefs.VPkMulF64, dest, srcA, srcB)
   case VPkMulLoU16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkMulLoU16, dest, srcA, srcB)
   case VPkSubI16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkSubI16, dest, srcA, srcB)
+  case VPkSubNcU64(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(PackedVectorInstructionDefs.VPkSubNcU64, dest, srcA, srcB)
   case VPkSubU16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(PackedVectorInstructionDefs.VPkSubU16, dest, srcA, srcB)
   case VPrngB32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
@@ -6264,10 +5650,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP3InstructionDefs.VQsadPkU16U8, dest, srcA, srcB, srcC)
   case VRcpBf16(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VRcpBf16, dest, srcA)
-  case VRcpClampF32(dest: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP1InstructionDefs.VRcpClampF32, dest, srcB)
-  case VRcpClampF64(dest: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP1InstructionDefs.VRcpClampF64, dest, srcB)
+  case VRcpClampF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP1InstructionDefs.VRcpClampF32, dest, srcA)
+  case VRcpClampF64(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP1InstructionDefs.VRcpClampF64, dest, srcA)
   case VRcpF16(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VRcpF16, dest, srcA)
   case VRcpF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
@@ -6276,14 +5662,12 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP1InstructionDefs.VRcpF64, dest, srcA)
   case VRcpIflagF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VRcpIflagF32, dest, srcA)
-  case VRcpLegacyF32(dest: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP1InstructionDefs.VRcpLegacyF32, dest, srcB)
+  case VRcpLegacyF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP1InstructionDefs.VRcpLegacyF32, dest, srcA)
   case VReadfirstlaneB32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VReadfirstlaneB32, dest, srcA)
   case VReadlaneB32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VReadlaneB32, dest, srcA, srcB)
-  case VReadlaneB32E64(dest: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VReadlaneB32E64, dest, srcB, srcC)
   case VRndneF16(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VRndneF16, dest, srcA)
   case VRndneF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
@@ -6292,18 +5676,18 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP1InstructionDefs.VRndneF64, dest, srcA)
   case VRsqBf16(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VRsqBf16, dest, srcA)
-  case VRsqClampF32(dest: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP1InstructionDefs.VRsqClampF32, dest, srcB)
-  case VRsqClampF64(dest: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP1InstructionDefs.VRsqClampF64, dest, srcB)
+  case VRsqClampF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP1InstructionDefs.VRsqClampF32, dest, srcA)
+  case VRsqClampF64(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP1InstructionDefs.VRsqClampF64, dest, srcA)
   case VRsqF16(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VRsqF16, dest, srcA)
   case VRsqF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VRsqF32, dest, srcA)
   case VRsqF64(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VRsqF64, dest, srcA)
-  case VRsqLegacyF32(dest: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP1InstructionDefs.VRsqLegacyF32, dest, srcB)
+  case VRsqLegacyF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP1InstructionDefs.VRsqLegacyF32, dest, srcA)
   case VSExpF16(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VSExpF16, dest, srcA)
   case VSExpF32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
@@ -6421,9 +5805,9 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
   case VSubI16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VSubI16, dest, srcA, srcB)
   case VSubI32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VSubI32, dest, srcA, srcB)
-  case VSubI32_4(value1: Operand, value2: Operand, value3: Operand, value4: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VSubI32, value1, value2, value3, value4)
+      extends Instruction(VOP2InstructionDefs.VSubI32, dest, srcA, srcB)
+  case VSubI32_4(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VSubI32, dest, dest2, srcA, srcB)
   case VSubNcI16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VSubNcI16, dest, srcA, srcB)
   case VSubNcI32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -6438,12 +5822,16 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VSubU16, dest, srcA, srcB)
   case VSubU32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VSubU32, dest, srcA, srcB)
-  case VSubU32_4(value1: Operand, value2: Operand, value3: Operand, value4: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VSubU32, value1, value2, value3, value4)
+  case VSubU32_4(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VSubU32, dest, dest2, srcA, srcB)
   case VSubbCoU32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VSubbCoU32, dest, dest2, srcA, srcB, srcC)
+  case VSubbU32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VSubbU32, dest, dest2, srcA, srcB, srcC)
   case VSubbrevCoU32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VSubbrevCoU32, dest, dest2, srcA, srcB, srcC)
+  case VSubbrevU32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VSubbrevU32, dest, dest2, srcA, srcB, srcC)
   case VSubrevCoCiU32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VSubrevCoCiU32, dest, dest2, srcA, srcB, srcC)
   case VSubrevCoU32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
@@ -6452,20 +5840,20 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(VOP2InstructionDefs.VSubrevF16, dest, srcA, srcB)
   case VSubrevF32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VSubrevF32, dest, srcA, srcB)
+  case VSubrevI32(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VSubrevI32, dest, dest2, srcA, srcB)
   case VSubrevNcU32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VSubrevNcU32, dest, srcA, srcB)
   case VSubrevU16(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VSubrevU16, dest, srcA, srcB)
   case VSubrevU32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VSubrevU32, dest, srcA, srcB)
-  case VSubrevU32_4(value1: Operand, value2: Operand, value3: Operand, value4: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VSubrevU32, value1, value2, value3, value4)
+  case VSubrevU32_4(dest: Operand, dest2: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(VOP2InstructionDefs.VSubrevU32, dest, dest2, srcA, srcB)
   case VSwapB16(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VSwapB16, dest, srcA)
-  case VSwapB32_2(dest: Operand, srcA: Operand, mods: Vec[Modifier])
+  case VSwapB32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VSwapB32, dest, srcA)
-  case VSwapB32_4(dest: Operand, dest2: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP1InstructionDefs.VSwapB32, dest, dest2, srcC, srcD)
   case VSwaprelB32(dest: Operand, srcA: Operand, mods: Vec[Modifier])
       extends Instruction(VOP1InstructionDefs.VSwaprelB32, dest, srcA)
   case VSwmmacBf1616x16x32Bf16(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -6596,6 +5984,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(MatrixInstructionDefs.VWmmaF3216x16x64Fp8Fp8, dest, srcA, srcB, srcC)
   case VWmmaF3232x16x128F4(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(MatrixInstructionDefs.VWmmaF3232x16x128F4, dest, srcA, srcB, srcC)
+  case VWmmaF6416x16x4F64(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
+      extends Instruction(MatrixInstructionDefs.VWmmaF6416x16x4F64, dest, srcA, srcB, srcC)
   case VWmmaI3216x16x16Iu4(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(MatrixInstructionDefs.VWmmaI3216x16x16Iu4, dest, srcA, srcB, srcC)
   case VWmmaI3216x16x16Iu8(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
@@ -6604,6 +5994,10 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(MatrixInstructionDefs.VWmmaI3216x16x32Iu4, dest, srcA, srcB, srcC)
   case VWmmaI3216x16x64Iu8(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(MatrixInstructionDefs.VWmmaI3216x16x64Iu8, dest, srcA, srcB, srcC)
+  case VWmmaLdScale16PairedB64(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(MatrixInstructionDefs.VWmmaLdScale16PairedB64, srcA, srcB)
+  case VWmmaLdScalePairedB32(srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+      extends Instruction(MatrixInstructionDefs.VWmmaLdScalePairedB32, srcA, srcB)
   case VWmmaScale16F3216x16x128F8f6f4(
       dest: Operand,
       srcA: Operand,
@@ -6640,12 +6034,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       srcB2: Operand,
       mods: Vec[Modifier]
   ) extends Instruction(MatrixInstructionDefs.VWmmaScaleF3232x16x128F4, dest, srcA, srcB, srcC, srcA2, srcB2)
-  case VWritelaneB32_3(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
+  case VWritelaneB32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])
       extends Instruction(VOP2InstructionDefs.VWritelaneB32, dest, srcA, srcB)
-  case VWritelaneB32_4(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP2InstructionDefs.VWritelaneB32, dest, srcB, srcC, srcD)
-  case VWritelaneB32E64(dest: Operand, srcB: Operand, srcC: Operand, srcD: Operand, mods: Vec[Modifier])
-      extends Instruction(VOP3InstructionDefs.VWritelaneB32E64, dest, srcB, srcC, srcD)
   case VXadU32(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Vec[Modifier])
       extends Instruction(VOP3InstructionDefs.VXadU32, dest, srcA, srcB, srcC)
   case VXnorB32(dest: Operand, srcA: Operand, srcB: Operand, mods: Vec[Modifier])

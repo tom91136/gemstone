@@ -14,6 +14,8 @@ fix.GemstoneNoTypeCasting
 fix.GemstoneCompanionOrder
 fix.GemstoneSimplifyMatch
 fix.GemstoneCollectionIdioms
+fix.GemstoneCollectionNonEmpty
 fix.GemstoneRequireTailRec
 fix.GemstoneRedundantCollectionConversion
 fix.GemstoneRedundantCaseClassVal
+fix.GemstoneInterpolationBraces

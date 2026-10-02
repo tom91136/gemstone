@@ -3,7 +3,8 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 import Program.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.ptx.v9_3.asm.*
+import net.kurobako.gemstone.isa.{Printer as _, *}
 
 class SyntaxSuite extends munit.FunSuite {
   test("empty line comments are valid trivia") {
@@ -111,7 +112,7 @@ class SyntaxSuite extends munit.FunSuite {
     }
     assertEquals(statements.statements.size, 4)
     statements.statements.last match {
-      case Statement.Entry(true, name, parameters, body) if name == "kernel" =>
+      case Statement.Entry(Linkage.Visible, name, parameters, Some(body), _) if name == "kernel" =>
         assertEquals(parameters.map(_.name), Seq("pointer"))
         assert(body.contains(Statement.Label("again")))
         assertEquals(body.collect { case _: Statement.Instruction => 1 }.sum, 2)
@@ -146,7 +147,7 @@ class SyntaxSuite extends munit.FunSuite {
 
   test("data declarations retain structured storage, type, extent, and initializer") {
     statement(".global .align 4 .b8 table[4] = {65, 144, 67, 60};") match {
-      case Statement.Data(DataAddressSpace.Global, qualifiers, DataType.B8, name, Some(count), initializer)
+      case Statement.Data(DataAddressSpace.Global, qualifiers, DataType.B8, name, Extent.Sized(count), initializer)
           if name == "table" && count.raw == 4 =>
         assertEquals(qualifiers, Seq(DeclarationQualifier.Alignment(4)))
         assertEquals(initializer.size, 4)
@@ -156,7 +157,7 @@ class SyntaxSuite extends munit.FunSuite {
 
   test("unsized external shared declarations retain structured storage") {
     statement(".extern .shared .align 16 .b8 shmem[];") match {
-      case Statement.Data(DataAddressSpace.Shared, qualifiers, DataType.B8, name, None, initializer)
+      case Statement.Data(DataAddressSpace.Shared, qualifiers, DataType.B8, name, Extent.Unsized, initializer)
           if name == "shmem" =>
         assertEquals(
           qualifiers,

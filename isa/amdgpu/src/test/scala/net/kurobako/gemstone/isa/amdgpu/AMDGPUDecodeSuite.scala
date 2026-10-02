@@ -132,7 +132,7 @@ class AMDGPUDecodeSuite extends munit.FunSuite {
           1,
           None,
           2,
-          4: Int where Between[4, 8],
+          4,
           0,
           returnValue = false
         )
@@ -149,7 +149,7 @@ class AMDGPUDecodeSuite extends munit.FunSuite {
           2,
           None,
           3,
-          4: Int where Between[4, 8],
+          4,
           0,
           returnValue = true
         )
@@ -190,7 +190,7 @@ class AMDGPUDecodeSuite extends munit.FunSuite {
         Vec[Byte](0x00, 0x80.toByte, 0x78, 0xdc.toByte, 0x17, 0x0d, 0x7d, 0x00),
         Target("gfx1036")
       ),
-      Right(Instruction.GlobalStore(23, None, 13, 16: Int where Between[1, 16], 0))
+      Right(Instruction.GlobalStore(23, None, 13, 16, 0))
     )
   }
 
@@ -200,7 +200,7 @@ class AMDGPUDecodeSuite extends munit.FunSuite {
         Vec[Byte](0x00, 0x80.toByte, 0x70, 0xdc.toByte, 0x40, 0x09, 0x7d, 0x00),
         Target("gfx1036")
       ),
-      Right(Instruction.GlobalStore(64, None, 9, 4: Int where Between[1, 16], 0))
+      Right(Instruction.GlobalStore(64, None, 9, 4, 0))
     )
   }
 

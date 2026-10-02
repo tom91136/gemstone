@@ -49,7 +49,7 @@ private object VMLoader {
       * a concrete GFX revision. The code object itself remains target-specific; only the dispatch helper needs the
       * family spelling (for example, gfx1036 uses the gfx1030 enum).
       */
-    private def archCandidates(targetName: String): Set[String] = {
+    private def archCandidates(targetName: String): Vec[String] = {
       val target = targetName.drop(3).toUpperCaseRoot
       val family =
         if (
@@ -58,7 +58,7 @@ private object VMLoader {
         )
           target.take(3) + "0"
         else target
-      Set(target, family)
+      Vec(target, family).distinct
     }
 
     /** Resolve the dispatch aliases emitted by HIP/ROCm. The per-architecture aliases are normally the preferred
@@ -73,11 +73,12 @@ private object VMLoader {
         allowUnsupported: Boolean = false
     ): Either[NonEmpty[String], Map[String, String]] = {
       val targets  = archCandidates(targetName)
-      val selected = names.groupBy(logicalName(_)).view.map { case (logical, entries) =>
+      val selected = names.groupBy(logicalName(_)).view.map { case (logical, names) =>
+        val entries  = names.toVector.sorted
         val variants = entries.view.filter(name => archSuffix(name).nonEmpty).toVec
         if (variants.isEmpty) Right(logical -> entries.min)
         else {
-          val targetVariant = variants.find(name => archSuffix(name).exists(targets.contains))
+          val targetVariants = targets.flatMap(target => variants.filter(name => archSuffix(name).contains(target)))
           // There can be several generic aliases in one ROCm bundle.  Pick the
           // first usable body rather than depending on Set iteration order: some
           // aliases are four-byte s_endpgm placeholders while the UINT_MAX
@@ -88,10 +89,9 @@ private object VMLoader {
           // be a stub; that must not make the entire module unloadable.  Keep a
           // deterministic fallback for those names and let execution report a
           // fault only if the application actually dispatches one.
-          val fallback = targetVariant.orElse(entries.find(name => archSuffix(name).isEmpty))
-          val result   = targetVariant
-            .filter(usable)
-            .orElse(generic.filter(usable))
+          val fallback = targetVariants.headOption.orElse(entries.find(name => archSuffix(name).isEmpty))
+          val result   = targetVariants.find(usable)
+            .orElse(generic)
             .orElse(Option.when(allowUnsupported)(fallback).flatten)
             .toRight[NonEmpty[String]](s"AMDGPU kernel variant $logical has no $targetName implementation")
             .map(logical -> _)
@@ -115,7 +115,7 @@ private object VMLoader {
     for {
       indexed <- ELF.index(image)
         .leftMap(error => Fault.InvalidTask(error.message))
-      manifests <- CodeObjectMetadata.decodeOptional(image)
+      manifests <- CodeObjectMetadata.decodeNotes(indexed.notes)
         .leftMap(error => Fault.InvalidTask(error.message))
         .map(_.getOrElse(Vec.empty[CodeObjectMetadata.KernelManifest]))
       selected <- AMDGPUKernelVariants.select(

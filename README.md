@@ -11,7 +11,7 @@ It runs on the JVM and Scala Native, with Linux as the supported host platform.
 - `isa/{ptx,amdgpu,spirv}`: parsing, validation, lowering, and CPU execution.
 - `server`: backend composition, TCP/Unix transport, recording/replay, and process launching.
 - `native`: CMake-built API facades and RPC client.
-- `tools/{codegen,benchmarks,test-support}`: generation, benchmarks, and shared Scala test utilities.
+- `tools/{codegen,isa,benchmarks,test-support}`: generation, ISA tools, benchmarks, and shared Scala test utilities.
 - `codestyle`: Scalafix rules and their tests.
 - `conformance`: independent CMake/CTest conformance project.
 
@@ -23,8 +23,8 @@ Reusable build utilities and bootstrap dependencies live in `project/`.
 ## Development
 
 Use JDK 25, sbt 2 (pinned in `project/build.properties`), CMake 3.25+, Ninja, Clang, and a C++23 compiler.
-Generation also needs Python 3; native formatting needs `clang-format`. Native dependencies, including
-LZ4 and Zstandard, are fetched by CMake. Container artifact builds use Podman by default;
+Generation also needs Python 3 and builds a cached TableGen from the pinned LLVM source.
+Native formatting needs `clang-format`. Native dependencies, including LZ4 and Zstandard, are fetched by CMake. Container artifact builds use Podman by default;
 set `CONTAINER_EXECUTABLE=docker` to use Docker.
 
 Run commands from the repository root:
@@ -156,3 +156,26 @@ artifact builder's pinned containers and writes binaries to the ignored
 Use `benchmarksNative` instead of `benchmarks` for Scala Native. JVM benchmarks use a 4 GB heap.
 Results include versioned JSON. The runner's `elapsed_nanos` covers setup, execution, and verification;
 use case-specific timing fields such as `nsPerDispatch` when comparing execution alone.
+
+## ISA tools
+
+```sh
+sbt 'isaTools/run disassemble --isa spirv shader.spv'
+sbt 'isaTools/run assemble --isa spirv --output shader.spv shader.spvasm'
+sbt 'isaTools/run disassemble --isa amdgpu --target gfx1030 instructions.bin'
+sbt 'isaTools/run disassemble --isa amdgpu --target gfx900 --section .text kernel.o'
+```
+
+Assembly tooling lives in each ISA’s `asm` package. Executable-input decoding stays shared, including PTX’s text parser.
+SPIR-V uses typed instructions and preserves binary headers when disassembled and reassembled.
+Text parsing/printing retains comments, normalizing their placement to statement boundaries;
+ordinary source comments have no representation in the binary output.
+AMDGPU supports scalar/vector ALU, DPP/SDWA lane controls, MFMA, dual-issue pairs,
+interpolation, image/export, LDS, buffers and flat/global/scratch memory forms, including RDNA4
+multiword layouts. Input can be a raw instruction stream or an ELF executable
+section; extraction does not require kernel descriptors. Unresolved text relocations are rejected.
+Coverage varies by target and operand form; unsupported forms fail explicitly.
+AMDGPU assembly resolves labels and local branch offsets and supports text, data, and alignment directives.
+ELF text relocations resolve local symbols; the API accepts external symbol and section addresses.
+Use `--wave-size 64` for wave64 matrix assembly/disassembly (default: 32).
+PTX input/output is canonical assembly text, not CUDA cubin/SASS.

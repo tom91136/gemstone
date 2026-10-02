@@ -343,9 +343,9 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     assertEquals(writes, bytes(0x8004, 73, 4))
   }
 
-  private def operand(kind: NonEmpty[String], words: Int*): Operand =
+  private def operand(kind: OperandKind, words: Int*): Operand =
     Operand(kind, Vec.from(words.map(Word(_))).unsafe)
-  private def id(value: Int): Operand = operand("IdRef", value)
+  private def id(value: Int): Operand = operand(OperandKind.IdRef, value)
 
   // This oracle checks the interpreter's publication/cache boundary, independently of
   // atomics (whose stronger implementation could otherwise hide an ignored fence).
@@ -391,32 +391,32 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       val module = Module(
         Header(SPIRVISA.version, Word(0), Word(40), Word(0)),
         Vec[Instruction](
-          Capability(operand("Capability", spv.Capability.Kernel)),
+          Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
           MemoryModel(
-            operand("AddressingModel", spv.AddressingModel.Physical64),
-            operand("MemoryModel", spv.MemoryModel.OpenCL)
+            operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+            operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
           ),
           TypeVoid(id(1)),
-          TypeInt(id(2), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-          TypePointer(id(7), operand("StorageClass", spv.StorageClass.CrossWorkgroup), id(2)),
+          TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+          TypePointer(id(7), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
           TypeFunction(id(9), id(1), Vec(id(7), id(7))),
-          Constant(id(2), id(10), operand("LiteralContextDependentNumber", 0)), // CrossDevice
+          Constant(id(2), id(10), operand(OperandKind.LiteralContextDependentNumber, 0)), // CrossDevice
           Constant(
             id(2),
             id(11),
             operand(
-              "LiteralContextDependentNumber",
+              OperandKind.LiteralContextDependentNumber,
               spv.MemorySemantics.CrossWorkgroupMemory | spv.MemorySemantics.AcquireRelease
             )
           ),
-          Constant(id(2), id(12), operand("LiteralContextDependentNumber", 1)),
+          Constant(id(2), id(12), operand(OperandKind.LiteralContextDependentNumber, 1)),
           EntryPoint(
-            operand("ExecutionModel", spv.ExecutionModel.Kernel),
+            operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
             id(20),
-            operand("LiteralString", 0x626f7270, 0x65),
+            operand(OperandKind.LiteralString, 0x626f7270, 0x65),
             Vec.empty
           ),
-          Function(id(1), id(20), operand("FunctionControl", spv.FunctionControl.None), id(9)),
+          Function(id(1), id(20), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
           FunctionParameter(id(7), id(21)),
           FunctionParameter(id(7), id(22)),
           Label(id(24)),
@@ -452,25 +452,25 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     val module = Module(
       Header(SPIRVISA.version, Word(0), Word(40), Word(0)),
       Vec[Instruction](
-        Capability(operand("Capability", spv.Capability.Kernel)),
+        Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
         MemoryModel(
-          operand("AddressingModel", spv.AddressingModel.Physical64),
-          operand("MemoryModel", spv.MemoryModel.OpenCL)
+          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
         ),
         TypeVoid(id(1)),
-        TypeInt(id(2), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        TypePointer(id(7), operand("StorageClass", spv.StorageClass.CrossWorkgroup), id(2)),
-        TypePointer(id(8), operand("StorageClass", spv.StorageClass.CrossWorkgroup), id(7)),
+        TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        TypePointer(id(7), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
+        TypePointer(id(8), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(7)),
         TypeFunction(id(9), id(1), Vec(id(8), id(7), id(7))),
-        Constant(id(2), id(10), operand("LiteralContextDependentNumber", 0)),
-        Constant(id(2), id(11), operand("LiteralContextDependentNumber", 0x208)),
+        Constant(id(2), id(10), operand(OperandKind.LiteralContextDependentNumber, 0)),
+        Constant(id(2), id(11), operand(OperandKind.LiteralContextDependentNumber, 0x208)),
         EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           id(20),
-          operand("LiteralString", 0x626f7270, 0x65),
+          operand(OperandKind.LiteralString, 0x626f7270, 0x65),
           Vec.empty
         ),
-        Function(id(1), id(20), operand("FunctionControl", spv.FunctionControl.None), id(9)),
+        Function(id(1), id(20), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
         FunctionParameter(id(8), id(21)),
         FunctionParameter(id(7), id(22)),
         FunctionParameter(id(7), id(23)),
@@ -520,29 +520,29 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       val module = Module(
         Header(SPIRVISA.version, Word(0), Word(40), Word(0)),
         Vec[Instruction](
-          Capability(operand("Capability", spv.Capability.Kernel)),
+          Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
           MemoryModel(
-            operand("AddressingModel", spv.AddressingModel.Physical64),
-            operand("MemoryModel", spv.MemoryModel.OpenCL)
+            operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+            operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
           ),
           TypeVoid(id(1)),
-          TypeInt(id(2), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-          TypeInt(id(3), operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
-          TypePointer(id(7), operand("StorageClass", spv.StorageClass.CrossWorkgroup), id(2)),
+          TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+          TypeInt(id(3), operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
+          TypePointer(id(7), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
           TypeStruct(id(4), Vec(id(3), id(7))),
-          TypePointer(id(6), operand("StorageClass", spv.StorageClass.Function), id(4)),
-          TypePointer(id(8), operand("StorageClass", spv.StorageClass.Function), id(7)),
+          TypePointer(id(6), operand(OperandKind.StorageClass, spv.StorageClass.Function), id(4)),
+          TypePointer(id(8), operand(OperandKind.StorageClass, spv.StorageClass.Function), id(7)),
           TypeFunction(id(9), id(1), Vec(id(6))),
-          Constant(id(2), id(10), operand("LiteralContextDependentNumber", 1)),
-          Constant(id(2), id(12), operand("LiteralContextDependentNumber", 97)),
-          Decorate(id(21), operand("Decoration", spv.Decoration.FuncParamAttr, 2)), // FuncParamAttr ByVal
+          Constant(id(2), id(10), operand(OperandKind.LiteralContextDependentNumber, 1)),
+          Constant(id(2), id(12), operand(OperandKind.LiteralContextDependentNumber, 97)),
+          Decorate(id(21), operand(OperandKind.Decoration, spv.Decoration.FuncParamAttr, 2)), // FuncParamAttr ByVal
           EntryPoint(
-            operand("ExecutionModel", spv.ExecutionModel.Kernel),
+            operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
             id(20),
-            operand("LiteralString", 0x626f7270, 0x65),
+            operand(OperandKind.LiteralString, 0x626f7270, 0x65),
             Vec.empty
           ),
-          Function(id(1), id(20), operand("FunctionControl", spv.FunctionControl.None), id(9)),
+          Function(id(1), id(20), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
           FunctionParameter(id(6), id(21)),
           Label(id(24)),
           AccessChain(id(8), id(25), id(21), Vec(id(10))),
@@ -574,27 +574,27 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     val module       = Module(
       Header(SPIRVISA.version, Word(0), Word(40), Word(0)),
       Vec[Instruction](
-        Capability(operand("Capability", spv.Capability.Kernel)),
+        Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
         MemoryModel(
-          operand("AddressingModel", spv.AddressingModel.Physical64),
-          operand("MemoryModel", spv.MemoryModel.OpenCL)
+          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
         ),
         TypeVoid(id(1)),
-        TypeInt(id(2), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        TypePointer(id(7), operand("StorageClass", spv.StorageClass.CrossWorkgroup), id(2)),
-        TypePointer(id(8), operand("StorageClass", spv.StorageClass.CrossWorkgroup), id(7)),
+        TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        TypePointer(id(7), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
+        TypePointer(id(8), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(7)),
         TypeStruct(id(4), Vec(id(7))),
-        TypePointer(id(6), operand("StorageClass", spv.StorageClass.CrossWorkgroup), id(4)),
+        TypePointer(id(6), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(4)),
         TypeFunction(id(9), id(1), Vec(id(argumentType))),
-        Constant(id(2), id(10), operand("LiteralContextDependentNumber", 0)),
-        Constant(id(2), id(12), operand("LiteralContextDependentNumber", 97)),
+        Constant(id(2), id(10), operand(OperandKind.LiteralContextDependentNumber, 0)),
+        Constant(id(2), id(12), operand(OperandKind.LiteralContextDependentNumber, 97)),
         EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           id(20),
-          operand("LiteralString", 0x626f7270, 0x65),
+          operand(OperandKind.LiteralString, 0x626f7270, 0x65),
           Vec.empty
         ),
-        Function(id(1), id(20), operand("FunctionControl", spv.FunctionControl.None), id(9)),
+        Function(id(1), id(20), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
         FunctionParameter(id(argumentType), id(21)),
         Label(id(24)),
         if (structure) AccessChain(id(8), id(25), id(21), Vec(id(10))) else CopyObject(id(8), id(25), id(21)),
@@ -624,33 +624,33 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     val module = Module(
       Header(SPIRVISA.version, Word(0), Word(48), Word(0)),
       Vec[Instruction](
-        Capability(operand("Capability", spv.Capability.Kernel)),
+        Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
         MemoryModel(
-          operand("AddressingModel", spv.AddressingModel.Physical64),
-          operand("MemoryModel", spv.MemoryModel.OpenCL)
+          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
         ),
         TypeVoid(id(1)),
-        TypeInt(id(2), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        TypeInt(id(3), operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
-        TypeVector(id(5), id(3), operand("LiteralInteger", 3)),
-        TypePointer(id(6), operand("StorageClass", spv.StorageClass.Input), id(5)),
-        TypePointer(id(7), operand("StorageClass", spv.StorageClass.CrossWorkgroup), id(2)),
+        TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        TypeInt(id(3), operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
+        TypeVector(id(5), id(3), operand(OperandKind.LiteralInteger, 3)),
+        TypePointer(id(6), operand(OperandKind.StorageClass, spv.StorageClass.Input), id(5)),
+        TypePointer(id(7), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
         TypeFunction(id(9), id(1), Vec(id(7), id(7))),
-        Constant(id(3), id(10), operand("LiteralContextDependentNumber", stride, 0)),
-        Variable(id(6), id(15), operand("StorageClass", spv.StorageClass.Input), None),
-        Decorate(id(15), operand("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.GlobalInvocationId)),
+        Constant(id(3), id(10), operand(OperandKind.LiteralContextDependentNumber, stride, 0)),
+        Variable(id(6), id(15), operand(OperandKind.StorageClass, spv.StorageClass.Input), None),
+        Decorate(id(15), operand(OperandKind.Decoration, spv.Decoration.BuiltIn, spv.BuiltIn.GlobalInvocationId)),
         EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           id(20),
-          operand("LiteralString", 0x626f7270, 0x65),
+          operand(OperandKind.LiteralString, 0x626f7270, 0x65),
           Vec(id(15))
         ),
-        Function(id(1), id(20), operand("FunctionControl", spv.FunctionControl.None), id(9)),
+        Function(id(1), id(20), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
         FunctionParameter(id(7), id(21)),
         FunctionParameter(id(7), id(22)),
         Label(id(24)),
         Load(id(5), id(25), id(15), None),
-        CompositeExtract(id(3), id(28), id(25), Vec(operand("LiteralInteger", 0))),
+        CompositeExtract(id(3), id(28), id(25), Vec(operand(OperandKind.LiteralInteger, 0))),
         IMul(id(3), id(29), id(28), id(10)),
         PtrAccessChain(id(7), id(30), id(21), id(29), Vec.empty),
         PtrAccessChain(id(7), id(31), id(22), id(29), Vec.empty),

@@ -4,8 +4,8 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 
 class SpecializationExpressionSuite extends munit.FunSuite {
-  private def ref(n: Int): Operand = operand("IdRef", n)
-  private def lit(n: Int): Operand = operand("LiteralInteger", n)
+  private def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
+  private def lit(n: Int): Operand = operand(OperandKind.LiteralInteger, n)
   private val types                = Vec(
     Instruction.TypeBool(ref(1)),
     Instruction.TypeInt(ref(2), lit(32), lit(1)),
@@ -20,8 +20,8 @@ class SpecializationExpressionSuite extends munit.FunSuite {
     Instruction.SpecConstant(
       ref(t),
       ref(id),
-      if (t == 3 || t == 5) operand("LiteralContextDependentNumber", bits.toInt, (bits >>> 32).toInt)
-      else operand("LiteralContextDependentNumber", bits.toInt)
+      if (t == 3 || t == 5) operand(OperandKind.LiteralContextDependentNumber, bits.toInt, (bits >>> 32).toInt)
+      else operand(OperandKind.LiteralContextDependentNumber, bits.toInt)
     )
   private def evaluate(declarations: Vec[Instruction], t: Int, opcode: Int, args: Int*): Vec[Long] = {
     val module = Module(
@@ -30,7 +30,7 @@ class SpecializationExpressionSuite extends munit.FunSuite {
         Instruction.SpecConstantOp(
           ref(t),
           ref(99),
-          operand("LiteralSpecConstantOpInteger", opcode),
+          operand(OperandKind.LiteralSpecConstantOpInteger, opcode),
           Vec.from(args.map(ref(_)))
         )
       ),
@@ -119,15 +119,15 @@ class SpecializationExpressionSuite extends munit.FunSuite {
   }
   test("decoration groups apply variable and member metadata before compilation") {
     val declarations = Vec(
-      Instruction.Decorate(ref(20), operand("Decoration", Decoration.DescriptorSet, 3)),
-      Instruction.Decorate(ref(21), operand("Decoration", Decoration.Offset, 16)),
+      Instruction.Decorate(ref(20), operand(OperandKind.Decoration, Decoration.DescriptorSet, 3)),
+      Instruction.Decorate(ref(21), operand(OperandKind.Decoration, Decoration.Offset, 16)),
       Instruction.DecorationGroup(ref(20)),
       Instruction.DecorationGroup(ref(21)),
       Instruction.GroupDecorate(ref(20), Vec(ref(30))),
-      Instruction.GroupMemberDecorate(ref(21), Vec(operand("PairIdRefLiteralInteger", 8, 1))),
-      Instruction.Decorate(ref(30), operand("Decoration", Decoration.Binding, 7)),
-      Instruction.TypePointer(ref(29), operand("StorageClass", StorageClass.Uniform), ref(8)),
-      Instruction.Variable(ref(29), ref(30), operand("StorageClass", StorageClass.Uniform), None)
+      Instruction.GroupMemberDecorate(ref(21), Vec(operand(OperandKind.PairIdRefLiteralInteger, 8, 1))),
+      Instruction.Decorate(ref(30), operand(OperandKind.Decoration, Decoration.Binding, 7)),
+      Instruction.TypePointer(ref(29), operand(OperandKind.StorageClass, StorageClass.Uniform), ref(8)),
+      Instruction.Variable(ref(29), ref(30), operand(OperandKind.StorageClass, StorageClass.Uniform), None)
     )
     val module   = Module(Header(ISA.version, Word(0), Word(40), Word(0)), types ++ declarations, Endianness.Little)
     val compiled = VMCompiler.compileUnchecked(ISA.decode(ISA.encode(module).toOption.get).toOption.get).fold(

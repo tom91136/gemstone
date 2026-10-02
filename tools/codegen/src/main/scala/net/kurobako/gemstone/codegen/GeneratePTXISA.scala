@@ -115,8 +115,66 @@ object GeneratePTXISA {
       val examples = checkedExamples(sections)
       write(output, renderTests(specificationVersion, packageVersion, examples))
     } else write(output, renderInstructions(specificationVersion, packageVersion, sections))
+    val domains = if (request.tests) Vector.empty
+    else renderDomains(packageVersion, sections).map { case (name, source) =>
+      val path = output.resolveSibling(s"$name.scala")
+      write(path, source)
+      path
+    }
     val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
-    GeneratedFiles.removeUnexpected(request.sourceRoot, Set(output), include)
+    GeneratedFiles.removeUnexpected(request.sourceRoot, Set(output) ++ domains, include)
+  }
+
+  private def renderDomains(
+      packageVersion: ScalaPackageVersion,
+      sections: Vector[Section]
+  ): Vector[(String, String)] = {
+    val shapes    = instructionShapes(sections)
+    val opcodes   = shapes.map(_.opcode.takeWhile(_ != '.')).distinct.sorted
+    val modifiers =
+      (shapes.flatMap(_.opcode.split('.').drop(1)) ++ sections.flatMap(_.forms).flatMap(form =>
+        form.requiredModifierGroups.flatten ++ form.optionalModifiers
+      )).distinct.sorted
+    def render(name: String, values: Vector[String], unknown: Boolean): String = {
+      require(values.map(scalaCaseName(_)).distinct.size == values.size, s"ambiguous PTX $name names")
+      val cases = values.map(value => s"  case ${scalaCaseName(value)} extends $name(${literal(value)})").mkString("\n")
+      val entries  = values.map(value => s"${literal(value)} -> ${scalaCaseName(value)}").mkString(", ")
+      val fallback =
+        if (unknown) "Unrecognized(name)" else "throw IllegalArgumentException(s\"unknown PTX opcode $name\")"
+      val extra      = if (unknown) "  case Unrecognized(spelling: NonEmpty[String]) extends Modifier(spelling)" else ""
+      val properties = if (name == "Modifier") {
+        val widths = values.flatMap { value =>
+          val width =
+            if (value == "bf16") Some(16) else if (value.matches("[usbf][0-9]+")) value.drop(1).toIntOption else None
+          width.map(bits => s"case ${scalaCaseName(value)} => $bits")
+        }.mkString("; ")
+        def predicate(method: String, regex: String): String = {
+          val selected = values.filter(_.matches(regex)).map(scalaCaseName(_))
+          if (selected.isEmpty) s"def $method: Boolean = false"
+          else s"def $method: Boolean = this match { case ${selected.mkString(" | ")} => true; case _ => false }"
+        }
+        (if (widths.isEmpty) "def bitWidth: Int = 0\n"
+         else s"def bitWidth: Int = this match { $widths; case _ => 0 }\n") +
+          predicate("isSigned", "s[0-9]+") + "\n" + predicate("isFloating", "f[0-9]+(x[0-9]+)?")
+      } else ""
+      GeneratedHeader.scala("from the pinned PTX syntax domains") +
+        s"""|package net.kurobako.gemstone.isa.ptx.$packageVersion
+            |import net.kurobako.gemstone.constraint.*
+            |
+            |object $name {
+            |  private lazy val byName: Map[String, $name] = Map($entries)
+            |  def apply(name: NonEmpty[String]): $name = byName.getOrElse(name.raw, $fallback)
+            |  def unapply(value: $name): Some[NonEmpty[String]] = Some(value.name)
+            |}
+            |
+            |${GeneratedHeader.annotation()}enum $name(val name: NonEmpty[String]) {
+            |$cases
+            |$extra
+            |$properties
+            |}
+            |""".stripMargin
+    }
+    Vector("Opcode" -> render("Opcode", opcodes, false), "Modifier" -> render("Modifier", modifiers, true))
   }
 
   private def checkedSections(input: Path): Vector[Section] = {
@@ -596,6 +654,8 @@ object GeneratePTXISA {
     val definitions = shapes.map { shape =>
       s"""|    case ${shape.caseName} extends Definition(
           |    ${literal(shape.opcode)},
+          |    Opcode.${scalaCaseName(shape.opcode.takeWhile(_ != '.'))},
+          |    Vec(${shape.opcode.split('.').drop(1).map(value => s"Modifier.${scalaCaseName(value)}").mkString(", ")}),
           |    ${renderDecoder(shape)},
           |    ${renderMetadata(shape)}
           |  )""".stripMargin
@@ -628,12 +688,12 @@ object GeneratePTXISA {
         |      pred: Option[Predication]
         |  ) => Either[DecodeError, Instruction]
         |
-        |  enum Definition(val opcode: NonEmpty[String], val decoder: Decoder, metadata: () => Metadata) {
+        |  enum Definition(val opcode: NonEmpty[String], val mnemonic: Opcode, val fixedModifiers: Vec[Modifier], val decoder: Decoder, metadata: () => Metadata) {
         |${definitions.mkString("\n")}
         |
         |  lazy val meta: Metadata = metadata()
         |
-        |  private[Instruction] val fixedMods: Vec[String] = Vec.from(opcode.split('.')).drop(1)
+        |  private[Instruction] val fixedMods: Vec[String] = fixedModifiers.map(_.name.raw)
         |  }
         |
         |  val version: Version = Version(${version.major}, ${version.minor})
@@ -728,6 +788,7 @@ object GeneratePTXISA {
         |  def pred: Option[Predication]
         |
         |  final def qualifiedOpcode: String = (opcode +: mods.map(_.name)).mkString(".")
+        |  lazy val signature: InstructionSignature = InstructionSignature(definition.mnemonic, definition.fixedModifiers ++ mods)
         |
         |}
         |
@@ -1056,6 +1117,7 @@ object GeneratePTXISA {
     s"""|package net.kurobako.gemstone.isa.ptx.$packageVersion
         |
         |import net.kurobako.gemstone.collection.*
+        |import net.kurobako.gemstone.isa.ptx.$packageVersion.asm.*
         |
         |${GeneratedHeader.scala(
          s"from examples in the pinned NVIDIA PTX ISA ${version.source} specification"

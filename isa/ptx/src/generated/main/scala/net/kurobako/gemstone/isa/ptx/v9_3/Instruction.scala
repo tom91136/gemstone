@@ -25,9 +25,17 @@ object Instruction {
       pred: Option[Predication]
   ) => Either[DecodeError, Instruction]
 
-  enum Definition(val opcode: NonEmpty[String], val decoder: Decoder, metadata: () => Metadata) {
+  enum Definition(
+      val opcode: NonEmpty[String],
+      val mnemonic: Opcode,
+      val fixedModifiers: Vec[Modifier],
+      val decoder: Decoder,
+      metadata: () => Metadata
+  ) {
     case Abs extends Definition(
           "abs",
+          Opcode.Abs,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -124,6 +132,8 @@ object Instruction {
         )
     case Activemask extends Definition(
           "activemask",
+          Opcode.Activemask,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -154,6 +164,8 @@ object Instruction {
         )
     case Add extends Definition(
           "add",
+          Opcode.Add,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -289,6 +301,8 @@ object Instruction {
         )
     case AddCc extends Definition(
           "add.cc",
+          Opcode.Add,
+          Vec(Modifier.Cc),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -322,6 +336,8 @@ object Instruction {
         )
     case Addc extends Definition(
           "addc",
+          Opcode.Addc,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -355,6 +371,8 @@ object Instruction {
         )
     case Alloca extends Definition(
           "alloca",
+          Opcode.Alloca,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -388,6 +406,8 @@ object Instruction {
         )
     case And extends Definition(
           "and",
+          Opcode.And,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -419,6 +439,8 @@ object Instruction {
         )
     case ApplyPriority extends Definition(
           "applypriority",
+          Opcode.ApplyPriority,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -452,6 +474,8 @@ object Instruction {
         )
     case Atom extends Definition(
           "atom",
+          Opcode.Atom,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -723,6 +747,8 @@ object Instruction {
         )
     case Bar extends Definition(
           "bar",
+          Opcode.Bar,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -790,6 +816,8 @@ object Instruction {
         )
     case BarWarpSync extends Definition(
           "bar.warp.sync",
+          Opcode.Bar,
+          Vec(Modifier.Warp, Modifier.Sync),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -820,6 +848,8 @@ object Instruction {
         )
     case Barrier extends Definition(
           "barrier",
+          Opcode.Barrier,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -887,6 +917,8 @@ object Instruction {
         )
     case BarrierCluster extends Definition(
           "barrier.cluster",
+          Opcode.Barrier,
+          Vec(Modifier.Cluster),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -928,6 +960,8 @@ object Instruction {
         )
     case Bfe extends Definition(
           "bfe",
+          Opcode.Bfe,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -966,6 +1000,8 @@ object Instruction {
         )
     case Bfi extends Definition(
           "bfi",
+          Opcode.Bfi,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1003,6 +1039,8 @@ object Instruction {
         )
     case Bfind extends Definition(
           "bfind",
+          Opcode.Bfind,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1045,6 +1083,8 @@ object Instruction {
         )
     case Bmsk extends Definition(
           "bmsk",
+          Opcode.Bmsk,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1076,6 +1116,8 @@ object Instruction {
         )
     case Bra extends Definition(
           "bra",
+          Opcode.Bra,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1108,6 +1150,8 @@ object Instruction {
         )
     case Brev extends Definition(
           "brev",
+          Opcode.Brev,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1139,6 +1183,8 @@ object Instruction {
         )
     case Brkpt extends Definition(
           "brkpt",
+          Opcode.Brkpt,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1163,6 +1209,8 @@ object Instruction {
         )
     case BrxIdx extends Definition(
           "brx.idx",
+          Opcode.Brx,
+          Vec(Modifier.Idx),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1196,6 +1244,8 @@ object Instruction {
         )
     case Call extends Definition(
           "call",
+          Opcode.Call,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1303,6 +1353,8 @@ object Instruction {
         )
     case Clmad extends Definition(
           "clmad",
+          Opcode.Clmad,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1339,6 +1391,8 @@ object Instruction {
         )
     case ClusterLaunchControlQueryCancel extends Definition(
           "clusterlaunchcontrol.query_cancel",
+          Opcode.Clusterlaunchcontrol,
+          Vec(Modifier.QueryCancel),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1412,6 +1466,8 @@ object Instruction {
         )
     case ClusterLaunchControlTryCancel extends Definition(
           "clusterlaunchcontrol.try_cancel",
+          Opcode.Clusterlaunchcontrol,
+          Vec(Modifier.TryCancel),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1449,6 +1505,8 @@ object Instruction {
         )
     case Clz extends Definition(
           "clz",
+          Opcode.Clz,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1479,6 +1537,8 @@ object Instruction {
         )
     case Cnot extends Definition(
           "cnot",
+          Opcode.Cnot,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1510,6 +1570,8 @@ object Instruction {
         )
     case CopySign extends Definition(
           "copysign",
+          Opcode.CopySign,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1541,6 +1603,8 @@ object Instruction {
         )
     case Cos extends Definition(
           "cos",
+          Opcode.Cos,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1571,6 +1635,8 @@ object Instruction {
         )
     case CpAsync extends Definition(
           "cp.async",
+          Opcode.Cp,
+          Vec(Modifier.Async),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1659,6 +1725,8 @@ object Instruction {
         )
     case CpAsyncBulkMBarrier extends Definition(
           "cp.async.bulk",
+          Opcode.Cp,
+          Vec(Modifier.Async, Modifier.Bulk),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -1866,6 +1934,8 @@ object Instruction {
         )
     case CpAsyncBulkGroup extends Definition(
           "cp.async.bulk",
+          Opcode.Cp,
+          Vec(Modifier.Async, Modifier.Bulk),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2046,6 +2116,8 @@ object Instruction {
         )
     case CpAsyncBulkCommitGroup extends Definition(
           "cp.async.bulk.commit_group",
+          Opcode.Cp,
+          Vec(Modifier.Async, Modifier.Bulk, Modifier.CommitGroup),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2076,6 +2148,8 @@ object Instruction {
         )
     case CpAsyncBulkPrefetch extends Definition(
           "cp.async.bulk.prefetch",
+          Opcode.Cp,
+          Vec(Modifier.Async, Modifier.Bulk, Modifier.Prefetch),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2109,6 +2183,8 @@ object Instruction {
         )
     case CpAsyncBulkPrefetchTensor extends Definition(
           "cp.async.bulk.prefetch.tensor",
+          Opcode.Cp,
+          Vec(Modifier.Async, Modifier.Bulk, Modifier.Prefetch, Modifier.Tensor),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2152,6 +2228,8 @@ object Instruction {
         )
     case CpAsyncBulkTensorMBarrier extends Definition(
           "cp.async.bulk.tensor",
+          Opcode.Cp,
+          Vec(Modifier.Async, Modifier.Bulk, Modifier.Tensor),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2271,6 +2349,8 @@ object Instruction {
         )
     case CpAsyncBulkTensorGroup extends Definition(
           "cp.async.bulk.tensor",
+          Opcode.Cp,
+          Vec(Modifier.Async, Modifier.Bulk, Modifier.Tensor),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2342,6 +2422,8 @@ object Instruction {
         )
     case CpAsyncBulkWaitGroup extends Definition(
           "cp.async.bulk.wait_group",
+          Opcode.Cp,
+          Vec(Modifier.Async, Modifier.Bulk, Modifier.WaitGroup),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2373,6 +2455,8 @@ object Instruction {
         )
     case CpAsyncCommitGroup extends Definition(
           "cp.async.commit_group",
+          Opcode.Cp,
+          Vec(Modifier.Async, Modifier.CommitGroup),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2403,6 +2487,8 @@ object Instruction {
         )
     case CpAsyncMbarrierArrive extends Definition(
           "cp.async.mbarrier.arrive",
+          Opcode.Cp,
+          Vec(Modifier.Async, Modifier.Mbarrier, Modifier.Arrive),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2436,6 +2522,8 @@ object Instruction {
         )
     case CpAsyncWaitAll extends Definition(
           "cp.async.wait_all",
+          Opcode.Cp,
+          Vec(Modifier.Async, Modifier.WaitAll),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2460,6 +2548,8 @@ object Instruction {
         )
     case CpAsyncWaitGroup extends Definition(
           "cp.async.wait_group",
+          Opcode.Cp,
+          Vec(Modifier.Async, Modifier.WaitGroup),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2490,6 +2580,8 @@ object Instruction {
         )
     case CpReduceAsyncBulk extends Definition(
           "cp.reduce.async.bulk",
+          Opcode.Cp,
+          Vec(Modifier.Reduce, Modifier.Async, Modifier.Bulk),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2573,6 +2665,8 @@ object Instruction {
         )
     case CpReduceAsyncBulkTensor extends Definition(
           "cp.reduce.async.bulk.tensor",
+          Opcode.Cp,
+          Vec(Modifier.Reduce, Modifier.Async, Modifier.Bulk, Modifier.Tensor),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2612,6 +2706,8 @@ object Instruction {
         )
     case CreatePolicy extends Definition(
           "createpolicy",
+          Opcode.CreatePolicy,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -2681,6 +2777,8 @@ object Instruction {
         )
     case Cvt extends Definition(
           "cvt",
+          Opcode.Cvt,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3018,6 +3116,8 @@ object Instruction {
         )
     case CvtPack extends Definition(
           "cvt.pack",
+          Opcode.Cvt,
+          Vec(Modifier.Pack),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3070,6 +3170,8 @@ object Instruction {
         )
     case Cvta extends Definition(
           "cvta",
+          Opcode.Cvta,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3126,6 +3228,8 @@ object Instruction {
         )
     case Discard extends Definition(
           "discard",
+          Opcode.Discard,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3157,6 +3261,8 @@ object Instruction {
         )
     case Div extends Definition(
           "div",
+          Opcode.Div,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3231,6 +3337,8 @@ object Instruction {
         )
     case Dp2a extends Definition(
           "dp2a",
+          Opcode.Dp2a,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3269,6 +3377,8 @@ object Instruction {
         )
     case Dp4a extends Definition(
           "dp4a",
+          Opcode.Dp4a,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3307,6 +3417,8 @@ object Instruction {
         )
     case ElectSync extends Definition(
           "elect.sync",
+          Opcode.Elect,
+          Vec(Modifier.Sync),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3338,6 +3450,8 @@ object Instruction {
         )
     case Ex2 extends Definition(
           "ex2",
+          Opcode.Ex2,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3395,6 +3509,8 @@ object Instruction {
         )
     case Exit extends Definition(
           "exit",
+          Opcode.Exit,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3419,6 +3535,8 @@ object Instruction {
         )
     case FabricSubmit extends Definition(
           "fabric.submit",
+          Opcode.Fabric,
+          Vec(Modifier.Submit),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3451,6 +3569,8 @@ object Instruction {
         )
     case FabricTryGet extends Definition(
           "fabric.try_get",
+          Opcode.Fabric,
+          Vec(Modifier.TryGet),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3495,6 +3615,8 @@ object Instruction {
         )
     case FabricTryPullred extends Definition(
           "fabric.try_pullred",
+          Opcode.Fabric,
+          Vec(Modifier.TryPullred),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3638,6 +3760,8 @@ object Instruction {
         )
     case FabricTryPut extends Definition(
           "fabric.try_put",
+          Opcode.Fabric,
+          Vec(Modifier.TryPut),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3729,6 +3853,8 @@ object Instruction {
         )
     case FabricTryRed extends Definition(
           "fabric.try_red",
+          Opcode.Fabric,
+          Vec(Modifier.TryRed),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3871,6 +3997,8 @@ object Instruction {
         )
     case FabricWait extends Definition(
           "fabric.wait",
+          Opcode.Fabric,
+          Vec(Modifier.Wait),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -3901,6 +4029,8 @@ object Instruction {
         )
     case Fence extends Definition(
           "fence",
+          Opcode.Fence,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -4035,6 +4165,8 @@ object Instruction {
         )
     case Fma extends Definition(
           "fma",
+          Opcode.Fma,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -4219,6 +4351,8 @@ object Instruction {
         )
     case Fns extends Definition(
           "fns",
+          Opcode.Fns,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -4255,6 +4389,8 @@ object Instruction {
         )
     case GetCtaRank extends Definition(
           "getctarank",
+          Opcode.GetCtaRank,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -4318,6 +4454,8 @@ object Instruction {
         )
     case GridDependencyControl extends Definition(
           "griddepcontrol",
+          Opcode.GridDependencyControl,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -4350,6 +4488,8 @@ object Instruction {
         )
     case IsSpacePredicate extends Definition(
           "isspacep",
+          Opcode.IsSpacePredicate,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -4383,6 +4523,8 @@ object Instruction {
         )
     case IsTypePredicate extends Definition(
           "istypep",
+          Opcode.IsTypePredicate,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -4416,6 +4558,8 @@ object Instruction {
         )
     case Ld extends Definition(
           "ld",
+          Opcode.Ld,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -4671,6 +4815,8 @@ object Instruction {
         )
     case LdGlobalNc extends Definition(
           "ld.global.nc",
+          Opcode.Ld,
+          Vec(Modifier.Global, Modifier.Nc),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -4817,6 +4963,8 @@ object Instruction {
         )
     case Ldu extends Definition(
           "ldu",
+          Opcode.Ldu,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -4893,6 +5041,8 @@ object Instruction {
         )
     case Lg2 extends Definition(
           "lg2",
+          Opcode.Lg2,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -4923,6 +5073,8 @@ object Instruction {
         )
     case Lop3 extends Definition(
           "lop3",
+          Opcode.Lop3,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -4986,6 +5138,8 @@ object Instruction {
         )
     case Mad extends Definition(
           "mad",
+          Opcode.Mad,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5087,6 +5241,8 @@ object Instruction {
         )
     case MadCc extends Definition(
           "mad.cc",
+          Opcode.Mad,
+          Vec(Modifier.Cc),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5125,6 +5281,8 @@ object Instruction {
         )
     case Mad24 extends Definition(
           "mad24",
+          Opcode.Mad24,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5177,6 +5335,8 @@ object Instruction {
         )
     case Madc extends Definition(
           "madc",
+          Opcode.Madc,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5215,6 +5375,8 @@ object Instruction {
         )
     case Mapa extends Definition(
           "mapa",
+          Opcode.Mapa,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5278,6 +5440,8 @@ object Instruction {
         )
     case MatchAllSync extends Definition(
           "match.all.sync",
+          Opcode.Match,
+          Vec(Modifier.All, Modifier.Sync),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5311,6 +5475,8 @@ object Instruction {
         )
     case MatchAnySync extends Definition(
           "match.any.sync",
+          Opcode.Match,
+          Vec(Modifier.Any, Modifier.Sync),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5344,6 +5510,8 @@ object Instruction {
         )
     case Max extends Definition(
           "max",
+          Opcode.Max,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5466,6 +5634,8 @@ object Instruction {
         )
     case MbarrierArrive extends Definition(
           "mbarrier.arrive",
+          Opcode.Mbarrier,
+          Vec(Modifier.Arrive),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5529,6 +5699,8 @@ object Instruction {
         )
     case MbarrierArriveDrop extends Definition(
           "mbarrier.arrive_drop",
+          Opcode.Mbarrier,
+          Vec(Modifier.ArriveDrop),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5592,6 +5764,8 @@ object Instruction {
         )
     case MbarrierCheckLayout extends Definition(
           "mbarrier.check_layout",
+          Opcode.Mbarrier,
+          Vec(Modifier.CheckLayout),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5625,6 +5799,8 @@ object Instruction {
         )
     case MbarrierCompleteTx extends Definition(
           "mbarrier.complete_tx",
+          Opcode.Mbarrier,
+          Vec(Modifier.CompleteTx),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5658,6 +5834,8 @@ object Instruction {
         )
     case MbarrierExpectTx extends Definition(
           "mbarrier.expect_tx",
+          Opcode.Mbarrier,
+          Vec(Modifier.ExpectTx),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5691,6 +5869,8 @@ object Instruction {
         )
     case MbarrierInit extends Definition(
           "mbarrier.init",
+          Opcode.Mbarrier,
+          Vec(Modifier.Init),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5724,6 +5904,8 @@ object Instruction {
         )
     case MbarrierInval extends Definition(
           "mbarrier.inval",
+          Opcode.Mbarrier,
+          Vec(Modifier.Inval),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5754,6 +5936,8 @@ object Instruction {
         )
     case MbarrierPendingCount extends Definition(
           "mbarrier.pending_count",
+          Opcode.Mbarrier,
+          Vec(Modifier.PendingCount),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5787,6 +5971,8 @@ object Instruction {
         )
     case MbarrierTestWait extends Definition(
           "mbarrier.test_wait",
+          Opcode.Mbarrier,
+          Vec(Modifier.TestWait),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5867,6 +6053,8 @@ object Instruction {
         )
     case MbarrierTryWait extends Definition(
           "mbarrier.try_wait",
+          Opcode.Mbarrier,
+          Vec(Modifier.TryWait),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -5969,6 +6157,8 @@ object Instruction {
         )
     case Membar extends Definition(
           "membar",
+          Opcode.Membar,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -6010,6 +6200,8 @@ object Instruction {
         )
     case Min extends Definition(
           "min",
+          Opcode.Min,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -6132,6 +6324,8 @@ object Instruction {
         )
     case Mov extends Definition(
           "mov",
+          Opcode.Mov,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -6283,6 +6477,8 @@ object Instruction {
         )
     case Mul extends Definition(
           "mul",
+          Opcode.Mul,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -6391,6 +6587,8 @@ object Instruction {
         )
     case Mul24 extends Definition(
           "mul24",
+          Opcode.Mul24,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -6424,6 +6622,8 @@ object Instruction {
         )
     case MultimemCpAsyncBulk extends Definition(
           "multimem.cp.async.bulk",
+          Opcode.Multimem,
+          Vec(Modifier.Cp, Modifier.Async, Modifier.Bulk),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -6489,6 +6689,8 @@ object Instruction {
         )
     case MultimemCpReduceAsyncBulk extends Definition(
           "multimem.cp.reduce.async.bulk",
+          Opcode.Multimem,
+          Vec(Modifier.Cp, Modifier.Reduce, Modifier.Async, Modifier.Bulk),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -6545,6 +6747,8 @@ object Instruction {
         )
     case MultimemLdReduce extends Definition(
           "multimem.ld_reduce",
+          Opcode.Multimem,
+          Vec(Modifier.LdReduce),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -6688,6 +6892,8 @@ object Instruction {
         )
     case MultimemRed extends Definition(
           "multimem.red",
+          Opcode.Multimem,
+          Vec(Modifier.Red),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -6765,6 +6971,8 @@ object Instruction {
         )
     case MultimemRedAsync extends Definition(
           "multimem.red.async",
+          Opcode.Multimem,
+          Vec(Modifier.Red, Modifier.Async),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -6803,6 +7011,8 @@ object Instruction {
         )
     case MultimemSt extends Definition(
           "multimem.st",
+          Opcode.Multimem,
+          Vec(Modifier.St),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -6936,6 +7146,8 @@ object Instruction {
         )
     case MultimemStAsync extends Definition(
           "multimem.st.async",
+          Opcode.Multimem,
+          Vec(Modifier.St, Modifier.Async),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -6988,6 +7200,8 @@ object Instruction {
         )
     case NanoSleep extends Definition(
           "nanosleep",
+          Opcode.NanoSleep,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7018,6 +7232,8 @@ object Instruction {
         )
     case Neg extends Definition(
           "neg",
+          Opcode.Neg,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7114,6 +7330,8 @@ object Instruction {
         )
     case Not extends Definition(
           "not",
+          Opcode.Not,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7144,6 +7362,8 @@ object Instruction {
         )
     case Or extends Definition(
           "or",
+          Opcode.Or,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7175,6 +7395,8 @@ object Instruction {
         )
     case PmEvent extends Definition(
           "pmevent",
+          Opcode.PmEvent,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7216,6 +7438,8 @@ object Instruction {
         )
     case Popc extends Definition(
           "popc",
+          Opcode.Popc,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7247,6 +7471,8 @@ object Instruction {
         )
     case Prefetch extends Definition(
           "prefetch",
+          Opcode.Prefetch,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7295,6 +7521,8 @@ object Instruction {
         )
     case Prefetchu extends Definition(
           "prefetchu",
+          Opcode.Prefetchu,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7327,6 +7555,8 @@ object Instruction {
         )
     case Prmt extends Definition(
           "prmt",
+          Opcode.Prmt,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7365,6 +7595,8 @@ object Instruction {
         )
     case Rcp extends Definition(
           "rcp",
+          Opcode.Rcp,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7413,6 +7645,8 @@ object Instruction {
         )
     case RcpApproxFtzF64 extends Definition(
           "rcp.approx.ftz.f64",
+          Opcode.Rcp,
+          Vec(Modifier.Approx, Modifier.Ftz, Modifier.F64),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7444,6 +7678,8 @@ object Instruction {
         )
     case Red extends Definition(
           "red",
+          Opcode.Red,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7609,6 +7845,8 @@ object Instruction {
         )
     case RedAsync extends Definition(
           "red.async",
+          Opcode.Red,
+          Vec(Modifier.Async),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7675,6 +7913,8 @@ object Instruction {
         )
     case ReduxSync extends Definition(
           "redux.sync",
+          Opcode.Redux,
+          Vec(Modifier.Sync),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7724,6 +7964,8 @@ object Instruction {
         )
     case Rem extends Definition(
           "rem",
+          Opcode.Rem,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7757,6 +7999,8 @@ object Instruction {
         )
     case Ret extends Definition(
           "ret",
+          Opcode.Ret,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7781,6 +8025,8 @@ object Instruction {
         )
     case Rsqrt extends Definition(
           "rsqrt",
+          Opcode.Rsqrt,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7823,6 +8069,8 @@ object Instruction {
         )
     case RsqrtApproxFtzF64 extends Definition(
           "rsqrt.approx.ftz.f64",
+          Opcode.Rsqrt,
+          Vec(Modifier.Approx, Modifier.Ftz, Modifier.F64),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7854,6 +8102,8 @@ object Instruction {
         )
     case Sad extends Definition(
           "sad",
+          Opcode.Sad,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7892,6 +8142,8 @@ object Instruction {
         )
     case Selp extends Definition(
           "selp",
+          Opcode.Selp,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -7930,6 +8182,8 @@ object Instruction {
         )
     case Set extends Definition(
           "set",
+          Opcode.Set,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -8385,6 +8639,8 @@ object Instruction {
         )
     case SetMaxRegisters extends Definition(
           "setmaxnreg",
+          Opcode.SetMaxRegisters,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -8422,6 +8678,8 @@ object Instruction {
         )
     case Setp extends Definition(
           "setp",
+          Opcode.Setp,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -8751,6 +9009,8 @@ object Instruction {
         )
     case Shf extends Definition(
           "shf",
+          Opcode.Shf,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -8803,6 +9063,8 @@ object Instruction {
         )
     case Shfl extends Definition(
           "shfl",
+          Opcode.Shfl,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -8841,6 +9103,8 @@ object Instruction {
         )
     case ShflSync extends Definition(
           "shfl.sync",
+          Opcode.Shfl,
+          Vec(Modifier.Sync),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -8880,6 +9144,8 @@ object Instruction {
         )
     case Shl extends Definition(
           "shl",
+          Opcode.Shl,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -8911,6 +9177,8 @@ object Instruction {
         )
     case Shr extends Definition(
           "shr",
+          Opcode.Shr,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -8944,6 +9212,8 @@ object Instruction {
         )
     case Sin extends Definition(
           "sin",
+          Opcode.Sin,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -8974,6 +9244,8 @@ object Instruction {
         )
     case Slct extends Definition(
           "slct",
+          Opcode.Slct,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9032,6 +9304,8 @@ object Instruction {
         )
     case Sqrt extends Definition(
           "sqrt",
+          Opcode.Sqrt,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9081,6 +9355,8 @@ object Instruction {
         )
     case St extends Definition(
           "st",
+          Opcode.St,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9321,6 +9597,8 @@ object Instruction {
         )
     case StAsync extends Definition(
           "st.async",
+          Opcode.St,
+          Vec(Modifier.Async),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9400,6 +9678,8 @@ object Instruction {
         )
     case StBulk extends Definition(
           "st.bulk",
+          Opcode.St,
+          Vec(Modifier.Bulk),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9433,6 +9713,8 @@ object Instruction {
         )
     case StackRestore extends Definition(
           "stackrestore",
+          Opcode.StackRestore,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9463,6 +9745,8 @@ object Instruction {
         )
     case StackSave extends Definition(
           "stacksave",
+          Opcode.StackSave,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9493,6 +9777,8 @@ object Instruction {
         )
     case Sub extends Definition(
           "sub",
+          Opcode.Sub,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9628,6 +9914,8 @@ object Instruction {
         )
     case SubCc extends Definition(
           "sub.cc",
+          Opcode.Sub,
+          Vec(Modifier.Cc),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9661,6 +9949,8 @@ object Instruction {
         )
     case Subc extends Definition(
           "subc",
+          Opcode.Subc,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9694,6 +9984,8 @@ object Instruction {
         )
     case Suld extends Definition(
           "suld",
+          Opcode.Suld,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9733,6 +10025,8 @@ object Instruction {
         )
     case Suq extends Definition(
           "suq",
+          Opcode.Suq,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9776,6 +10070,8 @@ object Instruction {
         )
     case Sured extends Definition(
           "sured",
+          Opcode.Sured,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9828,6 +10124,8 @@ object Instruction {
         )
     case Sust extends Definition(
           "sust",
+          Opcode.Sust,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9880,6 +10178,8 @@ object Instruction {
         )
     case Szext extends Definition(
           "szext",
+          Opcode.Szext,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9913,6 +10213,8 @@ object Instruction {
         )
     case Tanh extends Definition(
           "tanh",
+          Opcode.Tanh,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9962,6 +10264,8 @@ object Instruction {
         )
     case Tcgen05Alloc extends Definition(
           "tcgen05.alloc",
+          Opcode.Tcgen05,
+          Vec(Modifier.Alloc),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -9995,6 +10299,8 @@ object Instruction {
         )
     case Tcgen05Commit extends Definition(
           "tcgen05.commit",
+          Opcode.Tcgen05,
+          Vec(Modifier.Commit),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -10028,6 +10334,8 @@ object Instruction {
         )
     case Tcgen05Cp extends Definition(
           "tcgen05.cp",
+          Opcode.Tcgen05,
+          Vec(Modifier.Cp),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -10061,6 +10369,8 @@ object Instruction {
         )
     case Tcgen05Dealloc extends Definition(
           "tcgen05.dealloc",
+          Opcode.Tcgen05,
+          Vec(Modifier.Dealloc),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -10094,6 +10404,8 @@ object Instruction {
         )
     case Tcgen05FenceAfterThreadSync extends Definition(
           "tcgen05.fence::after_thread_sync",
+          Opcode.Tcgen05,
+          Vec(Modifier.FenceAfterThreadSync),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -10130,6 +10442,8 @@ object Instruction {
         )
     case Tcgen05FenceBeforeThreadSync extends Definition(
           "tcgen05.fence::before_thread_sync",
+          Opcode.Tcgen05,
+          Vec(Modifier.FenceBeforeThreadSync),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -10166,6 +10480,8 @@ object Instruction {
         )
     case Tcgen05Ld extends Definition(
           "tcgen05.ld",
+          Opcode.Tcgen05,
+          Vec(Modifier.Ld),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -10284,6 +10600,8 @@ object Instruction {
         )
     case Tcgen05Mma extends Definition(
           "tcgen05.mma",
+          Opcode.Tcgen05,
+          Vec(Modifier.Mma),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -10569,6 +10887,8 @@ object Instruction {
         )
     case Tcgen05MmaSp extends Definition(
           "tcgen05.mma.sp",
+          Opcode.Tcgen05,
+          Vec(Modifier.Mma, Modifier.Sp),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -10871,6 +11191,8 @@ object Instruction {
         )
     case Tcgen05MmaWs extends Definition(
           "tcgen05.mma.ws",
+          Opcode.Tcgen05,
+          Vec(Modifier.Mma, Modifier.Ws),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -10963,6 +11285,8 @@ object Instruction {
         )
     case Tcgen05MmaWsSp extends Definition(
           "tcgen05.mma.ws.sp",
+          Opcode.Tcgen05,
+          Vec(Modifier.Mma, Modifier.Ws, Modifier.Sp),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11060,6 +11384,8 @@ object Instruction {
         )
     case Tcgen05RelinquishAllocPermit extends Definition(
           "tcgen05.relinquish_alloc_permit",
+          Opcode.Tcgen05,
+          Vec(Modifier.RelinquishAllocPermit),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11096,6 +11422,8 @@ object Instruction {
         )
     case Tcgen05Shift extends Definition(
           "tcgen05.shift",
+          Opcode.Tcgen05,
+          Vec(Modifier.Shift),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11128,6 +11456,8 @@ object Instruction {
         )
     case Tcgen05St extends Definition(
           "tcgen05.st",
+          Opcode.Tcgen05,
+          Vec(Modifier.St),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11180,6 +11510,8 @@ object Instruction {
         )
     case Tcgen05WaitLd extends Definition(
           "tcgen05.wait::ld",
+          Opcode.Tcgen05,
+          Vec(Modifier.WaitLd),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11212,6 +11544,8 @@ object Instruction {
         )
     case Tcgen05WaitSt extends Definition(
           "tcgen05.wait::st",
+          Opcode.Tcgen05,
+          Vec(Modifier.WaitSt),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11244,6 +11578,8 @@ object Instruction {
         )
     case TensorMapCopyFenceProxy extends Definition(
           "tensormap.cp_fenceproxy",
+          Opcode.Tensormap,
+          Vec(Modifier.CpFenceproxy),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11277,6 +11613,8 @@ object Instruction {
         )
     case TensorMapReplace extends Definition(
           "tensormap.replace",
+          Opcode.Tensormap,
+          Vec(Modifier.Replace),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11341,6 +11679,8 @@ object Instruction {
         )
     case TestPredicate extends Definition(
           "testp",
+          Opcode.TestPredicate,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11377,6 +11717,8 @@ object Instruction {
         )
     case Tex extends Definition(
           "tex",
+          Opcode.Tex,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11604,6 +11946,8 @@ object Instruction {
         )
     case Tld4 extends Definition(
           "tld4",
+          Opcode.Tld4,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11667,6 +12011,8 @@ object Instruction {
         )
     case Trap extends Definition(
           "trap",
+          Opcode.Trap,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11691,6 +12037,8 @@ object Instruction {
         )
     case Txq extends Definition(
           "txq",
+          Opcode.Txq,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11762,6 +12110,8 @@ object Instruction {
         )
     case Vabsdiff extends Definition(
           "vabsdiff",
+          Opcode.Vabsdiff,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11846,6 +12196,8 @@ object Instruction {
         )
     case Vabsdiff2 extends Definition(
           "vabsdiff2",
+          Opcode.Vabsdiff2,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11920,6 +12272,8 @@ object Instruction {
         )
     case Vabsdiff4 extends Definition(
           "vabsdiff4",
+          Opcode.Vabsdiff4,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -11994,6 +12348,8 @@ object Instruction {
         )
     case Vadd extends Definition(
           "vadd",
+          Opcode.Vadd,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12078,6 +12434,8 @@ object Instruction {
         )
     case Vadd2 extends Definition(
           "vadd2",
+          Opcode.Vadd2,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12152,6 +12510,8 @@ object Instruction {
         )
     case Vadd4 extends Definition(
           "vadd4",
+          Opcode.Vadd4,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12226,6 +12586,8 @@ object Instruction {
         )
     case Vavrg2 extends Definition(
           "vavrg2",
+          Opcode.Vavrg2,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12300,6 +12662,8 @@ object Instruction {
         )
     case Vavrg4 extends Definition(
           "vavrg4",
+          Opcode.Vavrg4,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12374,6 +12738,8 @@ object Instruction {
         )
     case Vmad extends Definition(
           "vmad",
+          Opcode.Vmad,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12445,6 +12811,8 @@ object Instruction {
         )
     case Vmax extends Definition(
           "vmax",
+          Opcode.Vmax,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12529,6 +12897,8 @@ object Instruction {
         )
     case Vmax2 extends Definition(
           "vmax2",
+          Opcode.Vmax2,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12603,6 +12973,8 @@ object Instruction {
         )
     case Vmax4 extends Definition(
           "vmax4",
+          Opcode.Vmax4,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12677,6 +13049,8 @@ object Instruction {
         )
     case Vmin extends Definition(
           "vmin",
+          Opcode.Vmin,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12761,6 +13135,8 @@ object Instruction {
         )
     case Vmin2 extends Definition(
           "vmin2",
+          Opcode.Vmin2,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12835,6 +13211,8 @@ object Instruction {
         )
     case Vmin4 extends Definition(
           "vmin4",
+          Opcode.Vmin4,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12909,6 +13287,8 @@ object Instruction {
         )
     case Vote extends Definition(
           "vote",
+          Opcode.Vote,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12951,6 +13331,8 @@ object Instruction {
         )
     case VoteSync extends Definition(
           "vote.sync",
+          Opcode.Vote,
+          Vec(Modifier.Sync),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -12993,6 +13375,8 @@ object Instruction {
         )
     case Vset extends Definition(
           "vset",
+          Opcode.Vset,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -13085,6 +13469,8 @@ object Instruction {
         )
     case Vset2 extends Definition(
           "vset2",
+          Opcode.Vset2,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -13163,6 +13549,8 @@ object Instruction {
         )
     case Vset4 extends Definition(
           "vset4",
+          Opcode.Vset4,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -13241,6 +13629,8 @@ object Instruction {
         )
     case Vshl extends Definition(
           "vshl",
+          Opcode.Vshl,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -13336,6 +13726,8 @@ object Instruction {
         )
     case Vshr extends Definition(
           "vshr",
+          Opcode.Vshr,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -13431,6 +13823,8 @@ object Instruction {
         )
     case Vsub extends Definition(
           "vsub",
+          Opcode.Vsub,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -13515,6 +13909,8 @@ object Instruction {
         )
     case Vsub2 extends Definition(
           "vsub2",
+          Opcode.Vsub2,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -13589,6 +13985,8 @@ object Instruction {
         )
     case Vsub4 extends Definition(
           "vsub4",
+          Opcode.Vsub4,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -13663,6 +14061,8 @@ object Instruction {
         )
     case Xor extends Definition(
           "xor",
+          Opcode.Xor,
+          Vec(),
           (
               operands: Vec[Operand],
               mods: Vec[Modifier],
@@ -13695,7 +14095,7 @@ object Instruction {
 
     lazy val meta: Metadata = metadata()
 
-    private[Instruction] val fixedMods: Vec[String] = Vec.from(opcode.split('.')).drop(1)
+    private[Instruction] val fixedMods: Vec[String] = fixedModifiers.map(_.name.raw)
   }
 
   val version: Version = Version(9, 3)
@@ -14880,5 +15280,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
   def pred: Option[Predication]
 
   final def qualifiedOpcode: String = (opcode +: mods.map(_.name)).mkString(".")
+  lazy val signature: InstructionSignature =
+    InstructionSignature(definition.mnemonic, definition.fixedModifiers ++ mods)
 
 }

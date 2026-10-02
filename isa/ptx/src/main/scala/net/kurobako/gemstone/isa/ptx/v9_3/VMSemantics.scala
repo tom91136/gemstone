@@ -305,7 +305,7 @@ private object VMSemantics {
                 VMWrite.Register(
                   lane,
                   destination,
-                  truncate(ballot, 32: Int where (Between[8, 64] & MultipleOf[8]))
+                  truncate(ballot, 32)
                 )
               )
             }
@@ -813,12 +813,22 @@ private object VMSemantics {
         )
         stageResult(effects, write)
       }.map(_ => Step.Advance)
-    case VMIR.Instruction.SetPredicate(destination, comparison, kind, left, right, width) =>
+    case VMIR.Instruction.SetPredicate(destination, comparison, kind, left, right, width, flushSubnormal) =>
       forEveryLane(context) { lane =>
         val write = for {
           leftValue  <- context.read(lane, left)
           rightValue <- context.read(lane, right)
-        } yield VMWrite.Predicate(lane, destination, compare(leftValue, rightValue, comparison, kind, width))
+        } yield VMWrite.Predicate(
+          lane,
+          destination,
+          compare(
+            flushFloat32(leftValue, flushSubnormal),
+            flushFloat32(rightValue, flushSubnormal),
+            comparison,
+            kind,
+            width
+          )
+        )
         stageResult(effects, write)
       }.map(_ => Step.Advance)
     case VMIR.Instruction.PredicateCompare(destination, comparison, left, right) =>
@@ -1275,12 +1285,12 @@ private object VMSemantics {
         )
       }
       true
-    case VMIR.Instruction.FloatBinary(operation, destination, left, right, width) =>
+    case VMIR.Instruction.FloatBinary(operation, destination, left, right, width, control) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
-        val leftBits  = readFast(context, lane, left)
-        val rightBits = readFast(context, lane, right)
-        val result    = floatBinaryBits(operation, leftBits, rightBits, width)
+        val leftBits  = floatInput(readFast(context, lane, left), width, control)
+        val rightBits = floatInput(readFast(context, lane, right), width, control)
+        val result    = floatResult(floatBinaryBits(operation, leftBits, rightBits, width, control), width, control)
         writeRegister(context.state.registers(lane), destination, destinationIndex, result)
       }
       true
@@ -1295,21 +1305,21 @@ private object VMSemantics {
         )
       }
       true
-    case VMIR.Instruction.FloatUnary(operation, destination, source, width) =>
+    case VMIR.Instruction.FloatUnary(operation, destination, source, width, control) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
-        val sourceValue = readFast(context, lane, source)
-        val result      = floatUnaryBits(operation, sourceValue, width)
+        val sourceValue = floatInput(readFast(context, lane, source), width, control)
+        val result      = floatResult(floatUnaryBits(operation, sourceValue, width), width, control)
         writeRegister(context.state.registers(lane), destination, destinationIndex, result)
       }
       true
-    case VMIR.Instruction.FusedMultiplyAdd(destination, left, right, addend, width) =>
+    case VMIR.Instruction.FusedMultiplyAdd(destination, left, right, addend, width, control) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
-        val leftBits   = readFast(context, lane, left)
-        val rightBits  = readFast(context, lane, right)
-        val addendBits = readFast(context, lane, addend)
-        val result     = fusedMultiplyAddBits(leftBits, rightBits, addendBits, width)
+        val leftBits   = floatInput(readFast(context, lane, left), width, control)
+        val rightBits  = floatInput(readFast(context, lane, right), width, control)
+        val addendBits = floatInput(readFast(context, lane, addend), width, control)
+        val result     = floatResult(fusedMultiplyAddBits(leftBits, rightBits, addendBits, width), width, control)
         writeRegister(context.state.registers(lane), destination, destinationIndex, result)
       }
       true
@@ -1345,12 +1355,12 @@ private object VMSemantics {
         )
       }
       true
-    case VMIR.Instruction.SetPredicate(destination, comparison, kind, left, right, width) =>
+    case VMIR.Instruction.SetPredicate(destination, comparison, kind, left, right, width, flushSubnormal) =>
       val destinationIndex = VMPredicateFile.index(destination)
       context.active.foreachLane { lane =>
         val value = compare(
-          readFast(context, lane, left),
-          readFast(context, lane, right),
+          flushFloat32(readFast(context, lane, left), flushSubnormal),
+          flushFloat32(readFast(context, lane, right), flushSubnormal),
           comparison,
           kind,
           width
@@ -1446,7 +1456,7 @@ private object VMSemantics {
 
     def writeLocalPointer(index: Int, value: Long): Unit =
       if (index < parameters.size)
-        context.state.writeLocal(lane, parameter(index), 32: Int where (Between[8, 64] & MultipleOf[8]), value)
+        context.state.writeLocal(lane, parameter(index), 32, value)
 
     name match {
       case "cudaGetDevice" =>
@@ -1724,8 +1734,8 @@ private object VMSemantics {
       case IntegerOperation.MultiplyWideSigned16   =>
         signExtend(
           left,
-          16: Int where (Between[8, 64] & MultipleOf[8])
-        ) * signExtend(right, 16: Int where (Between[8, 64] & MultipleOf[8]))
+          16
+        ) * signExtend(right, 16)
       case IntegerOperation.MultiplyWideUnsigned32 => low32(left).toLong * low32(right).toLong
       case IntegerOperation.MultiplyWideSigned32   => left.toInt.toLong * right.toInt.toLong
       case IntegerOperation.Minimum(signed)        =>
@@ -1749,13 +1759,61 @@ private object VMSemantics {
     truncate(result, width)
   }
 
+  private def flushFloat32(bits: Long, enabled: Boolean): Long =
+    if (enabled && (bits & 0x7f800000L) == 0) bits & 0x80000000L else bits
+
+  private def floatInput(bits: Long, width: Int in (16, 32, 64), control: FloatControl): Long = {
+    val exponent = width.raw match {
+      case 16 => 0x7c00L
+      case 32 => 0x7f800000L
+      case _  => 0x7ff0000000000000L
+    }
+    if (control.flushSubnormal && (bits & exponent) == 0) bits & (1L << (width.raw - 1)) else bits
+  }
+
+  private def floatResult(bits: Long, width: Int in (16, 32, 64), control: FloatControl): Long = {
+    val bounded = if (!control.saturate) bits
+    else {
+      val value = IEEE754.toDouble(bits, width)
+      if (value.isNaN || value <= 0.0) 0L
+      else if (value >= 1.0) IEEE754.fromDouble(1.0, width)
+      else bits
+    }
+    floatInput(bounded, width, control)
+  }
+
+  private def floatExtremum(
+      operation: FloatOperation,
+      leftBits: Long,
+      rightBits: Long,
+      width: Int in (16, 32, 64),
+      control: FloatControl
+  ): Long = {
+    val sign   = 1L << (width.raw - 1)
+    val a      = if (control.absolute) leftBits & ~sign else leftBits
+    val b      = if (control.absolute) rightBits & ~sign else rightBits
+    val left   = IEEE754.toDouble(a, width)
+    val right  = IEEE754.toDouble(b, width)
+    val nan    = (left.isNaN && right.isNaN) || (control.propagateNaN && (left.isNaN || right.isNaN))
+    val result = if (nan) IEEE754.fromDouble(Double.NaN, width)
+    else if (left.isNaN) b
+    else if (right.isNaN) a
+    else if (left == 0.0 && right == 0.0)
+      if (operation == FloatOperation.Minimum) (a | b) & sign else (a & b) & sign
+    else if ((left < right) == (operation == FloatOperation.Minimum)) a else b
+    if (control.xorSign && !nan) (result & ~sign) | ((leftBits ^ rightBits) & sign) else result
+  }
+
   private def floatBinaryBits(
       operation: FloatOperation,
       leftBits: Long,
       rightBits: Long,
-      width: Int in (16, 32, 64)
+      width: Int in (16, 32, 64),
+      control: FloatControl
   ): Long =
-    if (width.raw == 16) {
+    if (operation == FloatOperation.Minimum || operation == FloatOperation.Maximum)
+      floatExtremum(operation, leftBits, rightBits, width, control)
+    else if (width.raw == 16) {
       val left   = IEEE754.binary16ToFloat(Binary16.low(leftBits))
       val right  = IEEE754.binary16ToFloat(Binary16.low(rightBits))
       val result = operation match {
@@ -1831,7 +1889,7 @@ private object VMSemantics {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def floatUnaryBits(operation: FloatUnaryOperation, bits: Long, width: Int in (16, 32, 64)): Long =
     if (width.raw == 16) {
-      val halfBits = truncate(bits, 16: Int where (Between[8, 64] & MultipleOf[8]))
+      val halfBits = truncate(bits, 16)
       operation match {
         case FloatUnaryOperation.Negate   => halfBits ^ 0x8000L
         case FloatUnaryOperation.Absolute => halfBits & 0x7fffL
@@ -1885,7 +1943,7 @@ private object VMSemantics {
 
   private def packedFloatValue(bits: Long, bf16: Boolean): Float =
     if (bf16)
-      IEEE754.binary32ToFloat(Binary32.low(truncate(bits, 16: Int where (Between[8, 64] & MultipleOf[8])) << 16))
+      IEEE754.binary32ToFloat(Binary32.low(truncate(bits, 16) << 16))
     else IEEE754.binary16ToFloat(Binary16.low(bits))
 
   private def packedFloatBits(value: Float, bf16: Boolean): Long =
@@ -1908,8 +1966,10 @@ private object VMSemantics {
       case FloatOperation.Subtract => leftValue - rightValue
       case FloatOperation.Multiply => leftValue * rightValue
       case FloatOperation.Divide   => leftValue / rightValue
-      case FloatOperation.Minimum  => Math.min(leftValue, rightValue)
-      case FloatOperation.Maximum  => Math.max(leftValue, rightValue)
+      case FloatOperation.Minimum  =>
+        if (leftValue.isNaN) rightValue else if (rightValue.isNaN) leftValue else Math.min(leftValue, rightValue)
+      case FloatOperation.Maximum =>
+        if (leftValue.isNaN) rightValue else if (rightValue.isNaN) leftValue else Math.max(leftValue, rightValue)
       case FloatOperation.CopySign => Math.copySign(rightValue, leftValue)
     }
     val low  = packedFloatBits(applyOperation(packedFloatValue(left, bf16), packedFloatValue(right, bf16)), bf16)
@@ -1923,9 +1983,9 @@ private object VMSemantics {
   private def bf16FmaBits(left: Long, right: Long, addend: Long): Long =
     bfloat16FromFloat(
       Math.fma(
-        IEEE754.binary32ToFloat(Binary32.low(truncate(left, 16: Int where (Between[8, 64] & MultipleOf[8])) << 16)),
-        IEEE754.binary32ToFloat(Binary32.low(truncate(right, 16: Int where (Between[8, 64] & MultipleOf[8])) << 16)),
-        IEEE754.binary32ToFloat(Binary32.low(truncate(addend, 16: Int where (Between[8, 64] & MultipleOf[8])) << 16))
+        IEEE754.binary32ToFloat(Binary32.low(truncate(left, 16) << 16)),
+        IEEE754.binary32ToFloat(Binary32.low(truncate(right, 16) << 16)),
+        IEEE754.binary32ToFloat(Binary32.low(truncate(addend, 16) << 16))
       ),
       Some(ConversionRounding.RN)
     )
@@ -1964,8 +2024,8 @@ private object VMSemantics {
       rightSigned: Boolean
   ): Long = {
     var result = signExtend(
-      truncate(addend, 32: Int where (Between[8, 64] & MultipleOf[8])),
-      32: Int where (Between[8, 64] & MultipleOf[8])
+      truncate(addend, 32),
+      32
     )
     var index = 0
     while (index < 4) {
@@ -1976,7 +2036,7 @@ private object VMSemantics {
       result += leftValue * rightValue
       index += 1
     }
-    truncate(result, 32: Int where (Between[8, 64] & MultipleOf[8]))
+    truncate(result, 32)
   }
 
   private def shuffleClamp(value: Long): Int =
@@ -2011,12 +2071,12 @@ private object VMSemantics {
     val widthOverflow    = mode == BitMaskMode.Clamp && rawCount >= 32L
     val sum              = start1 + count1
     val mask0            =
-      if (positionOverflow) 0L else truncate(-1L << start1.toInt, 32: Int where (Between[8, 64] & MultipleOf[8]))
+      if (positionOverflow) 0L else truncate(-1L << start1.toInt, 32)
     val mask1 =
       if (sum >= 32L || positionOverflow || widthOverflow) 0L
       else if (count1 == 0L) 0xffffffffL
-      else truncate(-1L << sum.toInt, 32: Int where (Between[8, 64] & MultipleOf[8]))
-    truncate(mask0 & ~mask1, 32: Int where (Between[8, 64] & MultipleOf[8]))
+      else truncate(-1L << sum.toInt, 32)
+    truncate(mask0 & ~mask1, 32)
   }
 
   private def multiplyHigh(
@@ -2164,7 +2224,7 @@ private object VMSemantics {
       val byte       = if (signExtend && (selected & 0x80) != 0) 0xff else selected
       bits | (byte.toLong << (8 * index))
     }
-    truncate(result, 32: Int where (Between[8, 64] & MultipleOf[8]))
+    truncate(result, 32)
   }
 
   private def divideInteger(
@@ -2275,7 +2335,7 @@ private object VMSemantics {
       if (sourceIsBf16)
         IEEE754.binary32ToFloat(Binary32.low(truncate(
           value,
-          16: Int where (Between[8, 64] & MultipleOf[8])
+          16
         ) << 16)).toDouble
       else IEEE754.toDouble(value, sourceWidth.asFloatingPointWidth)
 
@@ -2341,7 +2401,7 @@ private object VMSemantics {
       case _ if lower > 0x8000L || (lower == 0x8000L && (upper & 1L) != 0L)                          => upper + 1L
       case _                                                                                         => upper
     }
-    truncate(rounded, 16: Int where (Between[8, 64] & MultipleOf[8]))
+    truncate(rounded, 16)
   }
 
 }

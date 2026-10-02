@@ -11,6 +11,83 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 class ArithmeticExecutionSuite extends munit.FunSuite {
   // Exact bit patterns are independent of the VM's arithmetic and conversion helpers.
   private val cases: Vector[(String, String, Int where Between[1, 8], String, Long)] = Vector(
+    ("absolute without ftz preserves a subnormal", "f32", 4, "abs.f32 %value, 0f80000001;", 0x1L),
+    ("absolute ftz flushes a negative subnormal", "f32", 4, "abs.ftz.f32 %value, 0f80000001;", 0x0L),
+    ("negate ftz preserves the zero sign", "f32", 4, "neg.ftz.f32 %value, 0f00000001;", 0x80000000L),
+    ("addition ftz flushes inputs", "f32", 4, "add.ftz.f32 %value, 0f00000001, 0f00800000;", 0x800000L),
+    ("multiply ftz flushes the result", "f32", 4, "mul.ftz.f32 %value, 0f00800000, 0f3f000000;", 0x0L),
+    ("multiply without ftz retains a subnormal result", "f32", 4, "mul.f32 %value, 0f00800000, 0f3f000000;", 0x400000L),
+    ("saturating addition clamps above one", "f32", 4, "add.sat.f32 %value, 0f40000000, 0f3f800000;", 0x3f800000L),
+    ("saturating subtraction clamps below zero", "f32", 4, "sub.sat.f32 %value, 0f3f800000, 0f40000000;", 0x0L),
+    ("saturating arithmetic maps NaN to positive zero", "f32", 4, "add.sat.f32 %value, 0f7fc00000, 0f3f800000;", 0x0L),
+    (
+      "saturating fused multiply add clamps its result",
+      "f32",
+      4,
+      "fma.rn.sat.f32 %value, 0f40000000, 0f40000000, 0fbf800000;",
+      0x3f800000L
+    ),
+    (
+      "fused multiply add ftz flushes the addend",
+      "f32",
+      4,
+      "fma.rn.ftz.f32 %value, 0f00000000, 0f3f800000, 0f80000001;",
+      0x0L
+    ),
+    ("minimum chooses its numeric right operand", "f32", 4, "min.f32 %value, 0f7fc00001, 0f3fc00000;", 0x3fc00000L),
+    ("maximum chooses its numeric left operand", "f32", 4, "max.f32 %value, 0f3fc00000, 0f7fc00001;", 0x3fc00000L),
+    (
+      "minimum NaN modifier propagates a canonical NaN",
+      "f32",
+      4,
+      "min.NaN.f32 %value, 0f3fc00000, 0f7fc00001;",
+      0x7fc00000L
+    ),
+    (
+      "maximum NaN modifier propagates a canonical NaN",
+      "f32",
+      4,
+      "max.NaN.f32 %value, 0f7fc00001, 0f3fc00000;",
+      0x7fc00000L
+    ),
+    ("minimum of two NaNs is a canonical NaN", "f32", 4, "min.f32 %value, 0f7fc00001, 0fffc00001;", 0x7fc00000L),
+    ("minimum selects negative zero", "f32", 4, "min.f32 %value, 0f00000000, 0f80000000;", 0x80000000L),
+    ("maximum selects positive zero", "f32", 4, "max.f32 %value, 0f80000000, 0f00000000;", 0x0L),
+    (
+      "minimum xorsign abs combines magnitude and original signs",
+      "f32",
+      4,
+      "min.xorsign.abs.f32 %value, 0fc0000000, 0f3fc00000;",
+      0xbfc00000L
+    ),
+    (
+      "maximum xorsign abs combines magnitude and original signs",
+      "f32",
+      4,
+      "max.xorsign.abs.f32 %value, 0fc0000000, 0f3fc00000;",
+      0xc0000000L
+    ),
+    (
+      "xorsign leaves a NaN result unchanged",
+      "f32",
+      4,
+      "min.NaN.xorsign.abs.f32 %value, 0ffffc0000, 0f3fc00000;",
+      0x7fc00000L
+    ),
+    (
+      "comparison ftz flushes inputs before comparison",
+      "f32",
+      4,
+      ".reg .pred %p; setp.eq.ftz.f32 %p, 0f00000001, 0f00000000; selp.b32 %value, 1, 0, %p;",
+      0x1L
+    ),
+    (
+      "comparison without ftz distinguishes a subnormal from zero",
+      "f32",
+      4,
+      ".reg .pred %p; setp.eq.f32 %p, 0f00000001, 0f00000000; selp.b32 %value, 1, 0, %p;",
+      0x0L
+    ),
     (
       "addition propagates carry through an intermediate word",
       "b32",
@@ -86,6 +163,27 @@ class ArithmeticExecutionSuite extends munit.FunSuite {
       "f32",
       4,
       "abs.f32 %value, 0fbfc00000;",
+      0x3fc00000L
+    ),
+    (
+      "floating absolute with ftz clears the sign",
+      "f32",
+      4,
+      "abs.ftz.f32 %value, 0fbfc00000;",
+      0x3fc00000L
+    ),
+    (
+      "floating minimum with ftz compares values across zero",
+      "f32",
+      4,
+      "min.ftz.f32 %value, 0fc0000000, 0f3fc00000;",
+      0xc0000000L
+    ),
+    (
+      "floating maximum with ftz compares values across zero",
+      "f32",
+      4,
+      "max.ftz.f32 %value, 0fc0000000, 0f3fc00000;",
       0x3fc00000L
     ),
     (
@@ -193,6 +291,24 @@ class ArithmeticExecutionSuite extends munit.FunSuite {
         Right(())
       )
       assertEquals(memory.readLittleEndian(memory.allocation.start, bytes), Right(expected))
+    }
+  }
+
+  for (
+    instruction <- Seq(
+      "add.rz.f32 %value, 0f3f800000, 0f33800000;",
+      "mul.rm.f32 %value, 0f3f800001, 0f3f800001;",
+      "fma.rp.f32 %value, 0f3f800001, 0f3f800001, 0f00000000;",
+      "fma.rn.relu.f32 %value, 0f3f800000, 0fbf800000, 0f00000000;",
+      "min.f32 %value, 0f3f800000, 0f40000000, 0f40400000;",
+      "add.sat.f16x2 %value, 0x3c003c00, 0x3c003c00;"
+    )
+  ) test(s"unsupported floating form is rejected: $instruction") {
+    val source =
+      s".version 9.0\n.target sm_100\n.address_size 64\n.visible .entry k() { .reg .b32 %value; $instruction ret; }"
+    VMCompiler.compile(source) match {
+      case Left(VMCompiler.SourceError.Compilation(VMCompiler.Error.Unsupported(_, _))) => ()
+      case other => fail(s"expected an unsupported-instruction error, got $other")
     }
   }
 

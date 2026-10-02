@@ -28,23 +28,23 @@ class InstructionSuite extends munit.FunSuite {
       Left(
         InstructionDecodeError.InvalidOperandCount(
           "OpPhi",
-          "short PairIdRefIdRef at word 2"
+          "missing IdRef at word 3"
         )
       )
     )
   }
 
   test("constructor fields and common operands are the same values") {
-    val resultType  = operand("IdResultType", 1)
-    val dest        = operand("IdResult", 2)
-    val srcA        = operand("IdRef", 3)
-    val srcB        = operand("IdRef", 4)
+    val resultType  = operand(OperandKind.IdResultType, 1)
+    val dest        = operand(OperandKind.IdResult, 2)
+    val srcA        = operand(OperandKind.IdRef, 3)
+    val srcB        = operand(OperandKind.IdRef, 4)
     val instruction = Instruction.IAdd(resultType, dest, srcA, srcB)
     assertEquals(instruction.opcode, "OpIAdd")
     assertEquals(instruction.operands, Seq(resultType, dest, srcA, srcB))
   }
 
-  private def operand(kind: NonEmpty[String], value: Int): Operand = Operand(
+  private def operand(kind: OperandKind, value: Int): Operand = Operand(
     kind,
     Vec.nonEmpty(Word(value))
   )

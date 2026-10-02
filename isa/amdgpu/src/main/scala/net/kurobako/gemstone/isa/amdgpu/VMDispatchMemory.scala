@@ -63,7 +63,7 @@ private class VMDispatchMemory(
       case None        =>
         memory.read(GuestAddress(address), size).leftMap {
           case Fault.Memory(message) =>
-            Fault.Memory(s"AMDGPU memory read address=0x${address.toHexString} size=$size: ${message}")
+            Fault.Memory(s"AMDGPU memory read address=0x${address.toHexString} size=$size: $message")
           case other => other
         }
     }
@@ -103,7 +103,7 @@ private class VMDispatchMemory(
             } else {
               memory.readValue(GuestAddress(address), size).leftMap {
                 case Fault.Memory(message) =>
-                  Fault.Memory(s"AMDGPU memory read address=0x${address.toHexString} size=$size: ${message}")
+                  Fault.Memory(s"AMDGPU memory read address=0x${address.toHexString} size=$size: $message")
                 case other => other
               }
             }
@@ -130,7 +130,7 @@ private class VMDispatchMemory(
       case None    =>
         memory.write(GuestAddress(address), Vec.unsafeWrapArray(bytes)).leftMap {
           case Fault.Memory(message) => Fault.Memory(
-              s"AMDGPU memory write address=0x${address.toHexString} size=${bytes.length}: ${message}"
+              s"AMDGPU memory write address=0x${address.toHexString} size=${bytes.length}: $message"
             )
           case other => other
         }
@@ -162,7 +162,7 @@ private class VMDispatchMemory(
       } else {
         memory.writeValue(GuestAddress(address), value, size).leftMap {
           case Fault.Memory(message) =>
-            Fault.Memory(s"AMDGPU memory write address=0x${address.toHexString} size=$size: ${message}")
+            Fault.Memory(s"AMDGPU memory write address=0x${address.toHexString} size=$size: $message")
           case other => other
         }
       }
@@ -195,7 +195,7 @@ private class VMDispatchMemory(
       } else {
         memory.atomicModifyValue(GuestAddress(address), size)(update).left.map {
           case Fault.Memory(message) =>
-            Fault.Memory(s"AMDGPU atomic address=0x${address.toHexString} size=$size: ${message}")
+            Fault.Memory(s"AMDGPU atomic address=0x${address.toHexString} size=$size: $message")
           case other => other
         }
       }

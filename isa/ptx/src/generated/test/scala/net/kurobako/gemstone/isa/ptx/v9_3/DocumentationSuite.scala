@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.ptx.v9_3.asm.*
 
 // Generated from examples in the pinned NVIDIA PTX ISA 9.3 specification. Regenerate with: sbt codegen
 @javax.annotation.processing.Generated(Array("sbt codegen"))

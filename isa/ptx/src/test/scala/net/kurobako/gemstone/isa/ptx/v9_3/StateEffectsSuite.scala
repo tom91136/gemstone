@@ -11,7 +11,7 @@ class StateEffectsSuite extends munit.FunSuite {
     val destination: NonEmpty[String] = "%r0"
 
     state.effects.stageRegister(0, destination, 42L)
-    state.effects.stageMemory(0, memory.allocation.start.offset(4L), 32: Int where (Between[8, 64] & MultipleOf[8]), 7L)
+    state.effects.stageMemory(0, memory.allocation.start.offset(4L), 32, 7L)
 
     assert(state.effects.commit(state, memory, Pc.Entry).isLeft)
     assertEquals(state.registers(0)(destination), 0L)

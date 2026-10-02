@@ -27,38 +27,43 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
     val module = Module(
       Header(SPIRVISA.version, Word(0), Word(18), Word(0)),
       Vec(
-        Instruction.Capability(operand("Capability", spv.Capability.Kernel)),
+        Instruction.Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
         Instruction.ExtInstImport(id(1), stringOperand("OpenCL.std")),
         Instruction.MemoryModel(
-          operand("AddressingModel", spv.AddressingModel.Physical64),
-          operand("MemoryModel", spv.MemoryModel.OpenCL)
+          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
         ),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           id(14),
           stringOperand("print_value"),
           Vec.empty
         ),
         Instruction.TypeVoid(id(2)),
-        Instruction.TypeInt(id(3), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypeInt(id(4), operand("LiteralInteger", 8), operand("LiteralInteger", 0)),
-        Instruction.Constant(id(3), id(5), operand("LiteralContextDependentNumber", 3)),
-        Instruction.Constant(id(4), id(6), operand("LiteralContextDependentNumber", 37)),
-        Instruction.Constant(id(4), id(7), operand("LiteralContextDependentNumber", 117)),
-        Instruction.Constant(id(4), id(8), operand("LiteralContextDependentNumber", 0)),
+        Instruction.TypeInt(id(3), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeInt(id(4), operand(OperandKind.LiteralInteger, 8), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.Constant(id(3), id(5), operand(OperandKind.LiteralContextDependentNumber, 3)),
+        Instruction.Constant(id(4), id(6), operand(OperandKind.LiteralContextDependentNumber, 37)),
+        Instruction.Constant(id(4), id(7), operand(OperandKind.LiteralContextDependentNumber, 117)),
+        Instruction.Constant(id(4), id(8), operand(OperandKind.LiteralContextDependentNumber, 0)),
         Instruction.TypeArray(id(9), id(4), id(5)),
         Instruction.ConstantComposite(id(9), id(10), Vec(id(6), id(7), id(8))),
-        Instruction.TypePointer(id(11), operand("StorageClass", spv.StorageClass.CrossWorkgroup), id(9)),
-        Instruction.Variable(id(11), id(12), operand("StorageClass", spv.StorageClass.CrossWorkgroup), Some(id(10))),
+        Instruction.TypePointer(id(11), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(9)),
+        Instruction.Variable(
+          id(11),
+          id(12),
+          operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup),
+          Some(id(10))
+        ),
         Instruction.TypeFunction(id(13), id(2), Vec.empty),
-        Instruction.Constant(id(3), id(17), operand("LiteralContextDependentNumber", 7)),
-        Instruction.Function(id(2), id(14), operand("FunctionControl", spv.FunctionControl.None), id(13)),
+        Instruction.Constant(id(3), id(17), operand(OperandKind.LiteralContextDependentNumber, 7)),
+        Instruction.Function(id(2), id(14), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(13)),
         Instruction.Label(id(15)),
         Instruction.ExtInst(
           id(3),
           id(16),
           id(1),
-          operand("LiteralExtInstInteger", ExtendedInstruction.OpenClStd.Printf),
+          operand(OperandKind.LiteralExtInstInteger, ExtendedInstruction.OpenClStd.Printf),
           Vec(id(12), id(17))
         ),
         Instruction.Return(),
@@ -101,27 +106,32 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
   private val encoding = SPIRV(Validation.Environment.OpenCLCompute).encoding
 
   test("the external SPIR-V load boundary does not treat non-kernel entry points as libraries") {
-    val voidType     = operand("IdResult", 1)
-    val functionType = operand("IdResult", 2)
-    val function     = operand("IdResult", 3)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val functionType = operand(OperandKind.IdResult, 2)
+    val function     = operand(OperandKind.IdResult, 3)
     val module       = Module(
       Header(SPIRVISA.version, Word(0), Word(5), Word(0)),
       Vec(
-        Instruction.Capability(operand("Capability", spv.Capability.Kernel)),
+        Instruction.Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
         Instruction.MemoryModel(
-          operand("AddressingModel", spv.AddressingModel.Physical64),
-          operand("MemoryModel", spv.MemoryModel.OpenCL)
+          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
         ),
         Instruction.TypeVoid(voidType),
         Instruction.TypeFunction(functionType, voidType, Vec.empty),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Vertex),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Vertex),
           function,
           stringOperand("vertex"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
-        Instruction.Label(operand("IdResult", 4)),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
+        Instruction.Label(operand(OperandKind.IdResult, 4)),
         Instruction.Return(),
         Instruction.FunctionEnd()
       ),
@@ -137,22 +147,27 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
   }
 
   test("the external SPIR-V load boundary rejects modules outside the OpenCL compute environment") {
-    val voidType     = operand("IdResult", 1)
-    val functionType = operand("IdResult", 2)
-    val function     = operand("IdResult", 3)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val functionType = operand(OperandKind.IdResult, 2)
+    val function     = operand(OperandKind.IdResult, 3)
     val module       = Module(
       Header(SPIRVISA.version, Word(0), Word(5), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
         Instruction.TypeFunction(functionType, voidType, Vec.empty),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("invalid_environment"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
-        Instruction.Label(operand("IdResult", 4)),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
+        Instruction.Label(operand(OperandKind.IdResult, 4)),
         Instruction.Return(),
         Instruction.FunctionEnd()
       ),
@@ -167,26 +182,26 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
   }
 
   test("typed SPIR-V executes through the binary program service boundary") {
-    val voidType    = operand("IdResult", 1)
-    val u32         = operand("IdResult", 2)
-    val pointerType = operand("IdResult", 3)
-    val function    = operand("IdResult", 5)
-    val output      = operand("IdResult", 6)
-    val value       = operand("IdResult", 7)
+    val voidType    = operand(OperandKind.IdResult, 1)
+    val u32         = operand(OperandKind.IdResult, 2)
+    val pointerType = operand(OperandKind.IdResult, 3)
+    val function    = operand(OperandKind.IdResult, 5)
+    val output      = operand(OperandKind.IdResult, 6)
+    val value       = operand(OperandKind.IdResult, 7)
     val module      = Module(
       Header(SPIRVISA.version, Word(0), Word(16), Word(0)),
       Vec(
-        Instruction.Capability(operand("Capability", spv.Capability.Kernel)),
+        Instruction.Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
         Instruction.MemoryModel(
-          operand("AddressingModel", spv.AddressingModel.Physical64),
-          operand("MemoryModel", spv.MemoryModel.OpenCL)
+          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
         ),
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
-        Instruction.TypeFunction(operand("IdResult", 4), voidType, Vec(pointerType, u32)),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u32),
+        Instruction.TypeFunction(operand(OperandKind.IdResult, 4), voidType, Vec(pointerType, u32)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("store"),
           Vec.empty
@@ -194,12 +209,12 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
         Instruction.Function(
           voidType,
           function,
-          operand("FunctionControl", spv.FunctionControl.None),
-          operand("IdRef", 4)
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          operand(OperandKind.IdRef, 4)
         ),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(u32, value),
-        Instruction.Label(operand("IdResult", 8)),
+        Instruction.Label(operand(OperandKind.IdResult, 8)),
         Instruction.Store(output, value, None),
         Instruction.Return(),
         Instruction.FunctionEnd()
@@ -338,28 +353,33 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
     Module(
       Header(SPIRVISA.version, Word(0), Word(48), Word(0)),
       Vec[Instruction](
-        Capability(operand("Capability", spv.Capability.Kernel)),
+        Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
         MemoryModel(
-          operand("AddressingModel", spv.AddressingModel.Physical64),
-          operand("MemoryModel", spv.MemoryModel.OpenCL)
+          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
         ),
         TypeVoid(id(1)),
-        TypeInt(id(2), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        TypeInt(id(3), operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
-        TypeVector(id(5), id(3), operand("LiteralInteger", 3)),
-        TypePointer(id(6), operand("StorageClass", spv.StorageClass.Input), id(5)),
-        TypePointer(id(7), operand("StorageClass", spv.StorageClass.CrossWorkgroup), id(2)),
+        TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        TypeInt(id(3), operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
+        TypeVector(id(5), id(3), operand(OperandKind.LiteralInteger, 3)),
+        TypePointer(id(6), operand(OperandKind.StorageClass, spv.StorageClass.Input), id(5)),
+        TypePointer(id(7), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
         TypeFunction(id(9), id(1), Vec(id(7), id(2))),
-        Constant(id(3), id(10), operand("LiteralContextDependentNumber", 16384, 0)),
-        Variable(id(6), id(15), operand("StorageClass", spv.StorageClass.Input), None),
-        Decorate(id(15), operand("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.GlobalInvocationId)),
-        EntryPoint(operand("ExecutionModel", spv.ExecutionModel.Kernel), id(20), stringOperand("groups"), Vec(id(15))),
-        Function(id(1), id(20), operand("FunctionControl", spv.FunctionControl.None), id(9)),
+        Constant(id(3), id(10), operand(OperandKind.LiteralContextDependentNumber, 16384, 0)),
+        Variable(id(6), id(15), operand(OperandKind.StorageClass, spv.StorageClass.Input), None),
+        Decorate(id(15), operand(OperandKind.Decoration, spv.Decoration.BuiltIn, spv.BuiltIn.GlobalInvocationId)),
+        EntryPoint(
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
+          id(20),
+          stringOperand("groups"),
+          Vec(id(15))
+        ),
+        Function(id(1), id(20), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
         FunctionParameter(id(7), id(21)),
         FunctionParameter(id(2), id(22)),
         Label(id(24)),
         Load(id(5), id(25), id(15), None),
-        CompositeExtract(id(3), id(28), id(25), Vec(operand("LiteralInteger", 0))),
+        CompositeExtract(id(3), id(28), id(25), Vec(operand(OperandKind.LiteralInteger, 0))),
         IMul(id(3), id(44), id(28), id(10)),
         PtrAccessChain(id(7), id(43), id(21), id(44), Vec.empty),
         Store(id(43), id(22), None),
@@ -370,7 +390,7 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
     )
   }
 
-  private def id(value: Int): Operand = operand("IdRef", value)
+  private def id(value: Int): Operand = operand(OperandKind.IdRef, value)
 
   private def awaitCompletion(
       service: ExecutionSession,
@@ -386,7 +406,7 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
     loop()
   }
 
-  private def operand(kind: NonEmpty[String], value: Int, remaining: Int*): Operand =
+  private def operand(kind: OperandKind, value: Int, remaining: Int*): Operand =
     Operand(
       kind,
       Vec.nonEmpty(Word(value), remaining.map(Word(_))*)
@@ -397,6 +417,6 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
     val words = bytes.grouped(4).map { group =>
       Word(LittleEndian.decode(group, 0, group.length.unsafe[Int where Between[0, 8]]).toInt)
     }
-    Operand("LiteralString", Vec.from(words).unsafe)
+    Operand(OperandKind.LiteralString, Vec.from(words).unsafe)
   }
 }

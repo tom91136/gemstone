@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import net.kurobako.gemstone.constraint.*
 
 case class OperandShape(
-    kind: NonEmpty[String],
+    kind: OperandKind,
     name: NonEmpty[String],
     quantifier: OperandQuantifier
 )

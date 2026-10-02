@@ -171,6 +171,7 @@ if(NOT CONFORMANCE_BACKEND OR BUILD_TESTING)
   target_include_directories(conformance_driver PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" PRIVATE src)
   target_link_libraries(conformance_driver PUBLIC glaze::glaze magic_enum::magic_enum Aspartame::Aspartame fmt::fmt-header-only)
   target_compile_definitions(conformance_driver PUBLIC
+    CONFORMANCE_CTS_TIMEOUT_SECONDS=${CONFORMANCE_TIMEOUT_CTS}
     CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS="${CONFORMANCE_TIMEOUT_OPENCL_ISOLATED}"
     CONFORMANCE_SYCL_HANDLER_TIMEOUT_SECONDS=${CONFORMANCE_TIMEOUT_SYCL_HANDLER_ISOLATED})
   add_executable(conformance src/main.cpp)

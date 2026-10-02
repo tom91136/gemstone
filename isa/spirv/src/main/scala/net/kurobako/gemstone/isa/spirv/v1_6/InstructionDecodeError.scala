@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 enum InstructionDecodeError {
   case UnknownOpcode(opcodeNumber: SPIRVOpcodeNumber)
   case InvalidOperandCount(opcode: NonEmpty[String], detail: NonEmpty[String])
-  case InvalidEnumerant(kind: NonEmpty[String], value: Long)
+  case InvalidEnumerant(kind: OperandKind, value: Long)
   case UnterminatedString(opcode: NonEmpty[String])
   case DecoderOpcodeMismatch(expected: SPIRVOpcodeNumber, actual: SPIRVOpcodeNumber)
   case NoMatchingDefinition(opcodeNumber: SPIRVOpcodeNumber, candidates: NonEmpty[Vec[NonEmpty[String]]])

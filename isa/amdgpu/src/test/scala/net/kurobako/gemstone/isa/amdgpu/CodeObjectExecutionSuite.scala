@@ -275,7 +275,7 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
     val code = Vec[Byte](0x00, 0x10, 0x68, 0xe0.toByte, 0x01, 0x00, 0x01, 0x80.toByte)
     assertEquals(
       VMCompiler.decodeInstruction(code, Target("gfx1030")),
-      Right(Instruction.BufferStore(Some(1), 4, None, 0, 2: Int where Between[1, 16], 0))
+      Right(Instruction.BufferStore(Some(1), 4, None, 0, 2, 0))
     )
     // Point the buffer descriptor at allocation 1 and store v0's low half at byte offset 1.
     val words = Vec[Long](0xbe840380L, 0xbe8503ffL, 0x00004000L, 0xbe860388L, 0xbe870380L,

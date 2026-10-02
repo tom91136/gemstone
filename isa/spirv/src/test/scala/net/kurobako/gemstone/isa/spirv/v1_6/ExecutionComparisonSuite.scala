@@ -11,8 +11,8 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class ExecutionComparisonSuite extends munit.FunSuite {
-  private def id(value: Int): Operand      = operand("IdResult", value)
-  private def literal(value: Int): Operand = operand("LiteralContextDependentNumber", value)
+  private def id(value: Int): Operand      = operand(OperandKind.IdResult, value)
+  private def literal(value: Int): Operand = operand(OperandKind.LiteralContextDependentNumber, value)
   private val comparisons: Seq[(String, (Operand, Operand, Operand, Operand) => Instruction, Seq[Int])] = Seq(
     ("ordered equal", Instruction.FOrdEqual(_, _, _, _), Seq(0, 0, 1, 0, 0)),
     ("unordered equal", Instruction.FUnordEqual(_, _, _, _), Seq(1, 1, 1, 0, 0)),
@@ -57,22 +57,22 @@ class ExecutionComparisonSuite extends munit.FunSuite {
         Header(ISA.version, Word(0), Word(50), Word(0)),
         Vec(
           Instruction.TypeVoid(id(1)),
-          Instruction.TypeInt(id(2), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+          Instruction.TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
           Instruction.TypeBool(id(3)),
-          Instruction.TypeFloat(id(4), operand("LiteralInteger", 32), None),
-          Instruction.TypePointer(id(5), operand("StorageClass", StorageClass.CrossWorkgroup), id(2)),
+          Instruction.TypeFloat(id(4), operand(OperandKind.LiteralInteger, 32), None),
+          Instruction.TypePointer(id(5), operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), id(2)),
           Instruction.TypeFunction(id(6), id(1), Vec(id(5))),
           Instruction.Constant(id(2), id(7), literal(0)),
           Instruction.Constant(id(2), id(8), literal(1))
         ) ++
           declarations ++ Vec(
             Instruction.EntryPoint(
-              operand("ExecutionModel", ExecutionModel.Kernel),
+              operand(OperandKind.ExecutionModel, ExecutionModel.Kernel),
               id(10),
               stringOperand("compare"),
               Vec.empty
             ),
-            Instruction.Function(id(1), id(10), operand("FunctionControl", FunctionControl.None), id(6)),
+            Instruction.Function(id(1), id(10), operand(OperandKind.FunctionControl, FunctionControl.None), id(6)),
             Instruction.FunctionParameter(id(5), id(11)),
             Instruction.Label(id(12))
           ) ++ operations ++
@@ -92,25 +92,25 @@ class ExecutionComparisonSuite extends munit.FunSuite {
     }
 
   test("dispatch compares integer values with a typed boolean result") {
-    val voidType     = operand("IdResult", 1)
-    val u32          = operand("IdResult", 2)
-    val bool         = operand("IdResult", 3)
-    val pointerType  = operand("IdResult", 4)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val left         = operand("IdResult", 8)
-    val right        = operand("IdResult", 9)
-    val remainder    = operand("IdResult", 11)
-    val equal        = operand("IdResult", 12)
-    val selected     = operand("IdResult", 13)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val u32          = operand(OperandKind.IdResult, 2)
+    val bool         = operand(OperandKind.IdResult, 3)
+    val pointerType  = operand(OperandKind.IdResult, 4)
+    val function     = operand(OperandKind.IdResult, 6)
+    val output       = operand(OperandKind.IdResult, 7)
+    val left         = operand(OperandKind.IdResult, 8)
+    val right        = operand(OperandKind.IdResult, 9)
+    val remainder    = operand(OperandKind.IdResult, 11)
+    val equal        = operand(OperandKind.IdResult, 12)
+    val selected     = operand(OperandKind.IdResult, 13)
     val instructions = Vec(
       Instruction.TypeVoid(voidType),
-      Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+      Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
       Instruction.TypeBool(bool),
-      Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
-      Instruction.TypeFunction(operand("IdResult", 5), voidType, Vec(pointerType, u32, u32)),
+      Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u32),
+      Instruction.TypeFunction(operand(OperandKind.IdResult, 5), voidType, Vec(pointerType, u32, u32)),
       Instruction.EntryPoint(
-        operand("ExecutionModel", spv.ExecutionModel.Kernel),
+        operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
         function,
         stringOperand("integer_equal"),
         Vec.empty
@@ -118,13 +118,13 @@ class ExecutionComparisonSuite extends munit.FunSuite {
       Instruction.Function(
         voidType,
         function,
-        operand("FunctionControl", spv.FunctionControl.None),
-        operand("IdRef", 5)
+        operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+        operand(OperandKind.IdRef, 5)
       ),
       Instruction.FunctionParameter(pointerType, output),
       Instruction.FunctionParameter(u32, left),
       Instruction.FunctionParameter(u32, right),
-      Instruction.Label(operand("IdResult", 10)),
+      Instruction.Label(operand(OperandKind.IdResult, 10)),
       Instruction.SRem(u32, remainder, left, right),
       Instruction.IEqual(bool, equal, remainder, right),
       Instruction.Select(u32, selected, equal, left, remainder),
@@ -229,26 +229,26 @@ class ExecutionComparisonSuite extends munit.FunSuite {
   }
 
   test("dispatch performs ordered floating equality") {
-    val voidType     = operand("IdResult", 1)
-    val f32          = operand("IdResult", 2)
-    val bool         = operand("IdResult", 3)
-    val pointerType  = operand("IdResult", 4)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val left         = operand("IdResult", 8)
-    val right        = operand("IdResult", 9)
-    val equal        = operand("IdResult", 11)
-    val lessEqual    = operand("IdResult", 12)
-    val selected     = operand("IdResult", 13)
-    val result       = operand("IdResult", 14)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val f32          = operand(OperandKind.IdResult, 2)
+    val bool         = operand(OperandKind.IdResult, 3)
+    val pointerType  = operand(OperandKind.IdResult, 4)
+    val function     = operand(OperandKind.IdResult, 6)
+    val output       = operand(OperandKind.IdResult, 7)
+    val left         = operand(OperandKind.IdResult, 8)
+    val right        = operand(OperandKind.IdResult, 9)
+    val equal        = operand(OperandKind.IdResult, 11)
+    val lessEqual    = operand(OperandKind.IdResult, 12)
+    val selected     = operand(OperandKind.IdResult, 13)
+    val result       = operand(OperandKind.IdResult, 14)
     val instructions = Vec(
       Instruction.TypeVoid(voidType),
-      Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
+      Instruction.TypeFloat(f32, operand(OperandKind.LiteralInteger, 32), None),
       Instruction.TypeBool(bool),
-      Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), f32),
-      Instruction.TypeFunction(operand("IdResult", 5), voidType, Vec(pointerType, f32, f32)),
+      Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), f32),
+      Instruction.TypeFunction(operand(OperandKind.IdResult, 5), voidType, Vec(pointerType, f32, f32)),
       Instruction.EntryPoint(
-        operand("ExecutionModel", spv.ExecutionModel.Kernel),
+        operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
         function,
         stringOperand("floating_equal"),
         Vec.empty
@@ -256,13 +256,13 @@ class ExecutionComparisonSuite extends munit.FunSuite {
       Instruction.Function(
         voidType,
         function,
-        operand("FunctionControl", spv.FunctionControl.None),
-        operand("IdRef", 5)
+        operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+        operand(OperandKind.IdRef, 5)
       ),
       Instruction.FunctionParameter(pointerType, output),
       Instruction.FunctionParameter(f32, left),
       Instruction.FunctionParameter(f32, right),
-      Instruction.Label(operand("IdResult", 10)),
+      Instruction.Label(operand(OperandKind.IdResult, 10)),
       Instruction.FOrdEqual(bool, equal, left, right),
       Instruction.FOrdLessThanEqual(bool, lessEqual, left, right),
       Instruction.Select(f32, selected, equal, left, right),

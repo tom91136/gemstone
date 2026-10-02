@@ -1,6 +1,7 @@
 package external
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.amdgpu.asm.*
 import scala.compiletime.testing.typeCheckErrors
 
 class AMDGPUVisibilitySuite extends munit.FunSuite {

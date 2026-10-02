@@ -96,18 +96,18 @@ object SPIRVExecutionBenchmark {
     }
   }
 
-  private def operand(kind: NonEmpty[String], values: Int*): Operand =
+  private def operand(kind: OperandKind, values: Int*): Operand =
     Operand(
       kind,
       Vec.from(values.map(Word(_))).unsafe
     )
 
-  private def id(value: Int): Operand = operand("IdRef", value)
+  private def id(value: Int): Operand = operand(OperandKind.IdRef, value)
 
   private def literalString(value: String): Operand = {
     val bytes = value.getBytes(StandardCharsets.UTF_8) :+ 0.toByte
     Operand(
-      "LiteralString",
+      OperandKind.LiteralString,
       Vec.from(bytes.grouped(4).map { group =>
         val width = group.length.refine[Int where Between[0, 8]]
           .fold(message => throw IllegalArgumentException(message), value => value)
@@ -124,14 +124,14 @@ object SPIRVExecutionBenchmark {
       IAdd(id(2), id(destination), id(source), id(4))
     }
     val instructions = Vec[Instruction](
-      Capability(operand("Capability", 6)),
-      MemoryModel(operand("AddressingModel", 2), operand("MemoryModel", 2)),
+      Capability(operand(OperandKind.Capability, 6)),
+      MemoryModel(operand(OperandKind.AddressingModel, 2), operand(OperandKind.MemoryModel, 2)),
       TypeVoid(id(1)),
-      TypeInt(id(2), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+      TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
       TypeFunction(id(3), id(1), Vec.empty),
-      Constant(id(2), id(4), operand("LiteralContextDependentNumber", 1)),
-      EntryPoint(operand("ExecutionModel", 6), id(5), literalString("arithmetic"), Vec.empty),
-      Function(id(1), id(5), operand("FunctionControl", 0), id(3)),
+      Constant(id(2), id(4), operand(OperandKind.LiteralContextDependentNumber, 1)),
+      EntryPoint(operand(OperandKind.ExecutionModel, 6), id(5), literalString("arithmetic"), Vec.empty),
+      Function(id(1), id(5), operand(OperandKind.FunctionControl, 0), id(3)),
       Label(id(6))
     ) ++ Vec.from(arithmetic) ++ Vec[Instruction](Return(), FunctionEnd())
     Module(

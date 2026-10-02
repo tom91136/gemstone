@@ -10,19 +10,23 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 
 class SharedDecoderSuite extends munit.FunSuite {
-  private def operand(kind: String, value: Int): Operand = Operand(
-    kind.refine[NonEmpty[String]].fold(message => fail(message), valid => valid),
+  private def operand(kind: OperandKind, value: Int): Operand = Operand(
+    kind,
     Vec.nonEmpty(Word(value))
   )
 
   private def module(value: Int, endianness: Endianness = Endianness.Little): Module = Module(
     Header(ISA.version, Word(0), Word(8), Word(0)),
     Vec(
-      Instruction.TypeInt(operand("IdResult", 1), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+      Instruction.TypeInt(
+        operand(OperandKind.IdResult, 1),
+        operand(OperandKind.LiteralInteger, 32),
+        operand(OperandKind.LiteralInteger, 0)
+      ),
       Instruction.SpecConstant(
-        operand("IdResultType", 1),
-        operand("IdResult", 2),
-        operand("LiteralContextDependentNumber", value)
+        operand(OperandKind.IdResultType, 1),
+        operand(OperandKind.IdResult, 2),
+        operand(OperandKind.LiteralContextDependentNumber, value)
       )
     ),
     endianness
@@ -108,16 +112,20 @@ class SharedDecoderSuite extends munit.FunSuite {
   test("hash collisions preserve distinct constants and live entries during reclamation") {
     def encoded(low: Int, high: Int): Vec[Byte] = {
       val constant = Instruction.SpecConstant(
-        operand("IdResultType", 1),
-        operand("IdResult", 2),
+        operand(OperandKind.IdResultType, 1),
+        operand(OperandKind.IdResult, 2),
         Operand(
-          "LiteralContextDependentNumber",
+          OperandKind.LiteralContextDependentNumber,
           Vec.nonEmpty(Word(low), Word(high))
         )
       )
       ISA.encode(module(0).copy(instructions =
         Vec(
-          Instruction.TypeInt(operand("IdResult", 1), operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
+          Instruction.TypeInt(
+            operand(OperandKind.IdResult, 1),
+            operand(OperandKind.LiteralInteger, 64),
+            operand(OperandKind.LiteralInteger, 0)
+          ),
           constant
         )
       )).toOption.get

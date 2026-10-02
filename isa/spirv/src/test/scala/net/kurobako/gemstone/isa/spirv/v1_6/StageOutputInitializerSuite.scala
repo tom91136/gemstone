@@ -13,8 +13,8 @@ class StageOutputInitializerSuite extends munit.FunSuite {
     model <- Seq(0, 4)
     shape <- Seq("scalar", "vector", "matrix", "array")
   } test(s"stage $model initializes every $shape output record on every launch") {
-    def ref(n: Int): Operand           = operand("IdRef", n)
-    def literal(n: Int): Operand       = operand("LiteralInteger", n)
+    def ref(n: Int): Operand           = operand(OperandKind.IdRef, n)
+    def literal(n: Int): Operand       = operand(OperandKind.LiteralInteger, n)
     val (dataType, initializer, count) = shape match {
       case "scalar" => (2, 10, 1)
       case "vector" => (3, 11, 4)
@@ -35,11 +35,21 @@ class StageOutputInitializerSuite extends munit.FunSuite {
         Instruction.ConstantComposite(ref(3), ref(11), Vec(ref(10), ref(10), ref(10), ref(10))),
         Instruction.ConstantComposite(ref(4), ref(12), Vec(ref(11), ref(11))),
         Instruction.ConstantComposite(ref(7), ref(13), Vec(ref(12), ref(12))),
-        Instruction.TypePointer(ref(14), operand("StorageClass", StorageClass.Output), ref(dataType)),
-        Instruction.Variable(ref(14), ref(15), operand("StorageClass", StorageClass.Output), Some(ref(initializer))),
+        Instruction.TypePointer(ref(14), operand(OperandKind.StorageClass, StorageClass.Output), ref(dataType)),
+        Instruction.Variable(
+          ref(14),
+          ref(15),
+          operand(OperandKind.StorageClass, StorageClass.Output),
+          Some(ref(initializer))
+        ),
         Instruction.TypeFunction(ref(16), ref(1), Vec.empty),
-        Instruction.EntryPoint(operand("ExecutionModel", model), ref(20), stringOperand("main"), Vec(ref(15))),
-        Instruction.Function(ref(1), ref(20), operand("FunctionControl", FunctionControl.None), ref(16)),
+        Instruction.EntryPoint(
+          operand(OperandKind.ExecutionModel, model),
+          ref(20),
+          stringOperand("main"),
+          Vec(ref(15))
+        ),
+        Instruction.Function(ref(1), ref(20), operand(OperandKind.FunctionControl, FunctionControl.None), ref(16)),
         Instruction.Label(ref(21)),
         Instruction.Return(),
         Instruction.FunctionEnd()

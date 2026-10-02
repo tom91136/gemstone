@@ -90,9 +90,9 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
       val module = khrGroupModule("And", logical, false, 32, 2, 0)
       val wrong  = module.copy(instructions = module.instructions.map {
         case Instruction.GroupLogicalAndKHR(t, d, s, o, _) =>
-          Instruction.GroupLogicalAndKHR(t, d, s, o, operand("IdResult", 17))
+          Instruction.GroupLogicalAndKHR(t, d, s, o, operand(OperandKind.IdResult, 17))
         case Instruction.GroupBitwiseAndKHR(t, d, s, o, _) =>
-          Instruction.GroupBitwiseAndKHR(t, d, s, o, operand("IdResult", 30))
+          Instruction.GroupBitwiseAndKHR(t, d, s, o, operand(OperandKind.IdResult, 30))
         case x => x
       })
       assert(executeUnchecked(
@@ -114,12 +114,12 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
       scope: Int,
       operation: Int
   ): Module = {
-    def ref(id: Int)   = operand("IdResult", id)
+    def ref(id: Int)   = operand(OperandKind.IdResult, id)
     val scalarType     = ref(24)
     val vectorType     = ref(25)
     val dataType       = if (vector) vectorType else scalarType
     val payload        = if (vector) ref(30) else ref(28)
-    val groupOperation = operand("GroupOperation", operation)
+    val groupOperation = operand(OperandKind.GroupOperation, operation)
     val collective     = (logical, operator) match {
       case (false, "And") => Instruction.GroupBitwiseAndKHR(dataType, ref(31), ref(18), groupOperation, payload)
       case (false, "Or")  => Instruction.GroupBitwiseOrKHR(dataType, ref(31), ref(18), groupOperation, payload)
@@ -137,14 +137,18 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
           Vec(Instruction.Constant(
             ref(3),
             dest,
-            operand("LiteralContextDependentNumber", high.toInt, (high >>> 32).toInt)
+            operand(OperandKind.LiteralContextDependentNumber, high.toInt, (high >>> 32).toInt)
           ))
         case entry: Instruction.EntryPoint => Vec(
             if (logical) Instruction.TypeBool(scalarType)
-            else Instruction.TypeInt(scalarType, operand("LiteralInteger", width), operand("LiteralInteger", 0)),
-            Instruction.TypeVector(vectorType, scalarType, operand("LiteralInteger", 2)),
-            Instruction.Constant(ref(3), ref(26), operand("LiteralContextDependentNumber", 0, 0)),
-            Instruction.Constant(ref(3), ref(27), operand("LiteralContextDependentNumber", 1, 0)),
+            else Instruction.TypeInt(
+              scalarType,
+              operand(OperandKind.LiteralInteger, width),
+              operand(OperandKind.LiteralInteger, 0)
+            ),
+            Instruction.TypeVector(vectorType, scalarType, operand(OperandKind.LiteralInteger, 2)),
+            Instruction.Constant(ref(3), ref(26), operand(OperandKind.LiteralContextDependentNumber, 0, 0)),
+            Instruction.Constant(ref(3), ref(27), operand(OperandKind.LiteralContextDependentNumber, 1, 0)),
             Instruction.ConstantComposite(ref(5), ref(32), Vec(ref(26), ref(26))),
             Instruction.ConstantComposite(ref(5), ref(33), Vec(ref(27), ref(27))),
             entry
@@ -217,21 +221,21 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
       rejectFence    <- Seq(false, true)
     } {
       val original  = shuffleModule(false, false, scope, false)
-      val u32       = operand("IdResult", 2)
-      val execution = operand("IdResult", 24)
-      val semantics = operand("IdResult", 25)
+      val u32       = operand(OperandKind.IdResult, 2)
+      val execution = operand(OperandKind.IdResult, 24)
+      val semantics = operand(OperandKind.IdResult, 25)
       val module    = original.copy(
         header = original.header.copy(bound = Word(26)),
         instructions = original.instructions.flatMap {
-          case value @ Instruction.Constant(_, dest, _) if dest == operand("IdResult", 19) =>
+          case value @ Instruction.Constant(_, dest, _) if dest == operand(OperandKind.IdResult, 19) =>
             Vec(
               value,
-              Instruction.Constant(u32, execution, operand("LiteralContextDependentNumber", executionScope)),
-              Instruction.Constant(u32, semantics, operand("LiteralContextDependentNumber", 0x308))
+              Instruction.Constant(u32, execution, operand(OperandKind.LiteralContextDependentNumber, executionScope)),
+              Instruction.Constant(u32, semantics, operand(OperandKind.LiteralContextDependentNumber, 0x308))
             )
           case Instruction.SubgroupShuffleINTEL(resultType, dest, data, _) =>
             Vec(
-              Instruction.ControlBarrier(execution, operand("IdResult", 18), semantics),
+              Instruction.ControlBarrier(execution, operand(OperandKind.IdResult, 18), semantics),
               Instruction.CopyObject(resultType, dest, data)
             )
           case instruction => Vec(instruction)
@@ -273,36 +277,45 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
 
   test("workgroup broadcast selects both coordinates of a two-dimensional local id") {
     val original = shuffleModule(false, false, 1, false)
-    val u64      = operand("IdResult", 3)
-    val vector2  = operand("IdResult", 5)
-    val globalY  = operand("IdResult", 24)
-    val row      = operand("IdResult", 25)
-    val four     = operand("IdResult", 26)
-    val linear   = operand("IdResult", 27)
-    val selector = operand("IdResult", 28)
-    val two      = operand("IdResult", 29)
-    val one      = operand("IdResult", 30)
-    val scope    = operand("IdResult", 31)
+    val u64      = operand(OperandKind.IdResult, 3)
+    val vector2  = operand(OperandKind.IdResult, 5)
+    val globalY  = operand(OperandKind.IdResult, 24)
+    val row      = operand(OperandKind.IdResult, 25)
+    val four     = operand(OperandKind.IdResult, 26)
+    val linear   = operand(OperandKind.IdResult, 27)
+    val selector = operand(OperandKind.IdResult, 28)
+    val two      = operand(OperandKind.IdResult, 29)
+    val one      = operand(OperandKind.IdResult, 30)
+    val scope    = operand(OperandKind.IdResult, 31)
     val module   = original.copy(
       header = original.header.copy(bound = Word(32)),
       instructions = original.instructions.flatMap {
-        case value @ Instruction.Constant(_, dest, _) if dest == operand("IdResult", 19) =>
+        case value @ Instruction.Constant(_, dest, _) if dest == operand(OperandKind.IdResult, 19) =>
           Vec(
             value,
-            Instruction.Constant(u64, four, operand("LiteralContextDependentNumber", 4)),
-            Instruction.Constant(u64, two, operand("LiteralContextDependentNumber", 2)),
-            Instruction.Constant(u64, one, operand("LiteralContextDependentNumber", 1)),
+            Instruction.Constant(u64, four, operand(OperandKind.LiteralContextDependentNumber, 4)),
+            Instruction.Constant(u64, two, operand(OperandKind.LiteralContextDependentNumber, 2)),
+            Instruction.Constant(u64, one, operand(OperandKind.LiteralContextDependentNumber, 1)),
             Instruction.ConstantComposite(vector2, selector, Vec(two, one)),
-            Instruction.Constant(operand("IdResult", 2), scope, operand("LiteralContextDependentNumber", 2))
+            Instruction.Constant(
+              operand(OperandKind.IdResult, 2),
+              scope,
+              operand(OperandKind.LiteralContextDependentNumber, 2)
+            )
           )
-        case value @ Instruction.CompositeExtract(_, dest, _, _) if dest == operand("IdResult", 14) =>
+        case value @ Instruction.CompositeExtract(_, dest, _, _) if dest == operand(OperandKind.IdResult, 14) =>
           Vec(
             value,
-            Instruction.CompositeExtract(u64, globalY, operand("IdResult", 13), Vec(operand("LiteralInteger", 1))),
+            Instruction.CompositeExtract(
+              u64,
+              globalY,
+              operand(OperandKind.IdResult, 13),
+              Vec(operand(OperandKind.LiteralInteger, 1))
+            ),
             Instruction.IMul(u64, row, globalY, four),
             Instruction.IAdd(u64, linear, row, dest)
           )
-        case Instruction.IAdd(resultType, dest, a, _) if dest == operand("IdResult", 17) =>
+        case Instruction.IAdd(resultType, dest, a, _) if dest == operand(OperandKind.IdResult, 17) =>
           Vec(Instruction.IAdd(resultType, dest, a, linear))
         case Instruction.SubgroupShuffleINTEL(resultType, dest, data, _) =>
           Vec(Instruction.GroupBroadcast(resultType, dest, scope, data, selector))
@@ -324,28 +337,28 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
   }
 
   private def shuffleModule(xor: Boolean, vector: Boolean, mask: Int, varying: Boolean): Module = {
-    val voidType      = operand("IdResult", 1)
-    val u32           = operand("IdResult", 2)
-    val u64           = operand("IdResult", 3)
-    val vector3       = operand("IdResult", 4)
-    val vector2       = operand("IdResult", 5)
-    val builtinType   = operand("IdResult", 6)
-    val outputType    = operand("IdResult", 7)
-    val functionType  = operand("IdResult", 8)
-    val globalBuiltin = operand("IdResult", 9)
-    val function      = operand("IdResult", 10)
-    val output        = operand("IdResult", 11)
-    val globalVector  = operand("IdResult", 13)
-    val globalX       = operand("IdResult", 14)
-    val high          = operand("IdResult", 15)
-    val payload       = operand("IdResult", 16)
-    val highData      = operand("IdResult", 17)
-    val constantMask  = operand("IdResult", 18)
-    val three         = operand("IdResult", 19)
-    val index32       = operand("IdResult", 20)
-    val variableMask  = operand("IdResult", 21)
-    val result        = operand("IdResult", 22)
-    val destination   = operand("IdResult", 23)
+    val voidType      = operand(OperandKind.IdResult, 1)
+    val u32           = operand(OperandKind.IdResult, 2)
+    val u64           = operand(OperandKind.IdResult, 3)
+    val vector3       = operand(OperandKind.IdResult, 4)
+    val vector2       = operand(OperandKind.IdResult, 5)
+    val builtinType   = operand(OperandKind.IdResult, 6)
+    val outputType    = operand(OperandKind.IdResult, 7)
+    val functionType  = operand(OperandKind.IdResult, 8)
+    val globalBuiltin = operand(OperandKind.IdResult, 9)
+    val function      = operand(OperandKind.IdResult, 10)
+    val output        = operand(OperandKind.IdResult, 11)
+    val globalVector  = operand(OperandKind.IdResult, 13)
+    val globalX       = operand(OperandKind.IdResult, 14)
+    val high          = operand(OperandKind.IdResult, 15)
+    val payload       = operand(OperandKind.IdResult, 16)
+    val highData      = operand(OperandKind.IdResult, 17)
+    val constantMask  = operand(OperandKind.IdResult, 18)
+    val three         = operand(OperandKind.IdResult, 19)
+    val index32       = operand(OperandKind.IdResult, 20)
+    val variableMask  = operand(OperandKind.IdResult, 21)
+    val result        = operand(OperandKind.IdResult, 22)
+    val destination   = operand(OperandKind.IdResult, 23)
     val dataType      = if (vector) vector2 else u64
     val data          = if (vector) payload else highData
     val selector      = if (varying) variableMask else constantMask
@@ -353,24 +366,29 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
       Header(ISA.version, Word(0), Word(24), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
-        Instruction.TypeVector(vector3, u64, operand("LiteralInteger", 3)),
-        Instruction.TypeVector(vector2, u64, operand("LiteralInteger", 2)),
-        Instruction.TypePointer(builtinType, operand("StorageClass", 1), vector3),
-        Instruction.TypePointer(outputType, operand("StorageClass", 5), dataType),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeInt(u64, operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeVector(vector3, u64, operand(OperandKind.LiteralInteger, 3)),
+        Instruction.TypeVector(vector2, u64, operand(OperandKind.LiteralInteger, 2)),
+        Instruction.TypePointer(builtinType, operand(OperandKind.StorageClass, 1), vector3),
+        Instruction.TypePointer(outputType, operand(OperandKind.StorageClass, 5), dataType),
         Instruction.TypeFunction(functionType, voidType, Vec(outputType)),
-        Instruction.Constant(u64, high, operand("LiteralContextDependentNumber", 0, 0x12345678)),
-        Instruction.Constant(u32, constantMask, operand("LiteralContextDependentNumber", mask)),
-        Instruction.Constant(u32, three, operand("LiteralContextDependentNumber", 3)),
-        Instruction.Variable(builtinType, globalBuiltin, operand("StorageClass", 1), None),
-        Instruction.Decorate(globalBuiltin, operand("Decoration", 11, 28)),
-        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("shuffle"), Vec(globalBuiltin)),
-        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.Constant(u64, high, operand(OperandKind.LiteralContextDependentNumber, 0, 0x12345678)),
+        Instruction.Constant(u32, constantMask, operand(OperandKind.LiteralContextDependentNumber, mask)),
+        Instruction.Constant(u32, three, operand(OperandKind.LiteralContextDependentNumber, 3)),
+        Instruction.Variable(builtinType, globalBuiltin, operand(OperandKind.StorageClass, 1), None),
+        Instruction.Decorate(globalBuiltin, operand(OperandKind.Decoration, 11, 28)),
+        Instruction.EntryPoint(
+          operand(OperandKind.ExecutionModel, 6),
+          function,
+          stringOperand("shuffle"),
+          Vec(globalBuiltin)
+        ),
+        Instruction.Function(voidType, function, operand(OperandKind.FunctionControl, 0), functionType),
         Instruction.FunctionParameter(outputType, output),
-        Instruction.Label(operand("IdResult", 12)),
+        Instruction.Label(operand(OperandKind.IdResult, 12)),
         Instruction.Load(vector3, globalVector, globalBuiltin, None),
-        Instruction.CompositeExtract(u64, globalX, globalVector, Vec(operand("LiteralInteger", 0))),
+        Instruction.CompositeExtract(u64, globalX, globalVector, Vec(operand(OperandKind.LiteralInteger, 0))),
         Instruction.IAdd(u64, highData, high, globalX),
         Instruction.CompositeConstruct(vector2, payload, Vec(globalX, highData)),
         Instruction.UConvert(u32, index32, globalX),
@@ -387,57 +405,75 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
   }
 
   test("dispatch rendezvouses subgroup and workgroup collectives") {
-    val voidType       = operand("IdResult", 1)
-    val u32            = operand("IdResult", 2)
-    val u64            = operand("IdResult", 3)
-    val bool           = operand("IdResult", 4)
-    val vector3        = operand("IdResult", 5)
-    val builtinType    = operand("IdResult", 6)
-    val outputType     = operand("IdResult", 7)
-    val functionType   = operand("IdResult", 8)
-    val subgroupScope  = operand("IdResult", 9)
-    val workgroupScope = operand("IdResult", 10)
-    val three          = operand("IdResult", 11)
-    val localBuiltin   = operand("IdResult", 12)
-    val function       = operand("IdResult", 13)
-    val output         = operand("IdResult", 14)
-    val localVector    = operand("IdResult", 16)
-    val localX         = operand("IdResult", 17)
-    val pred           = operand("IdResult", 18)
-    val any            = operand("IdResult", 19)
-    val minimum        = operand("IdResult", 20)
-    val trueValue      = operand("IdResult", 21)
-    val notAll         = operand("IdResult", 22)
+    val voidType       = operand(OperandKind.IdResult, 1)
+    val u32            = operand(OperandKind.IdResult, 2)
+    val u64            = operand(OperandKind.IdResult, 3)
+    val bool           = operand(OperandKind.IdResult, 4)
+    val vector3        = operand(OperandKind.IdResult, 5)
+    val builtinType    = operand(OperandKind.IdResult, 6)
+    val outputType     = operand(OperandKind.IdResult, 7)
+    val functionType   = operand(OperandKind.IdResult, 8)
+    val subgroupScope  = operand(OperandKind.IdResult, 9)
+    val workgroupScope = operand(OperandKind.IdResult, 10)
+    val three          = operand(OperandKind.IdResult, 11)
+    val localBuiltin   = operand(OperandKind.IdResult, 12)
+    val function       = operand(OperandKind.IdResult, 13)
+    val output         = operand(OperandKind.IdResult, 14)
+    val localVector    = operand(OperandKind.IdResult, 16)
+    val localX         = operand(OperandKind.IdResult, 17)
+    val pred           = operand(OperandKind.IdResult, 18)
+    val any            = operand(OperandKind.IdResult, 19)
+    val minimum        = operand(OperandKind.IdResult, 20)
+    val trueValue      = operand(OperandKind.IdResult, 21)
+    val notAll         = operand(OperandKind.IdResult, 22)
     val instructions   = Vec(
       Instruction.TypeVoid(voidType),
-      Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-      Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
+      Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+      Instruction.TypeInt(u64, operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
       Instruction.TypeBool(bool),
-      Instruction.TypeVector(vector3, u64, operand("LiteralInteger", 3)),
-      Instruction.TypePointer(builtinType, operand("StorageClass", spv.StorageClass.Input), vector3),
-      Instruction.TypePointer(outputType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u64),
+      Instruction.TypeVector(vector3, u64, operand(OperandKind.LiteralInteger, 3)),
+      Instruction.TypePointer(builtinType, operand(OperandKind.StorageClass, spv.StorageClass.Input), vector3),
+      Instruction.TypePointer(outputType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u64),
       Instruction.TypeFunction(functionType, voidType, Vec(outputType)),
-      Instruction.Constant(u32, subgroupScope, operand("LiteralContextDependentNumber", spv.Scope.Subgroup)),
-      Instruction.Constant(u32, workgroupScope, operand("LiteralContextDependentNumber", spv.Scope.Workgroup)),
-      Instruction.Constant(u64, three, operand("LiteralContextDependentNumber", 3)),
+      Instruction.Constant(u32, subgroupScope, operand(OperandKind.LiteralContextDependentNumber, spv.Scope.Subgroup)),
+      Instruction.Constant(
+        u32,
+        workgroupScope,
+        operand(OperandKind.LiteralContextDependentNumber, spv.Scope.Workgroup)
+      ),
+      Instruction.Constant(u64, three, operand(OperandKind.LiteralContextDependentNumber, 3)),
       Instruction.ConstantTrue(bool, trueValue),
-      Instruction.Variable(builtinType, localBuiltin, operand("StorageClass", spv.StorageClass.Input), None),
-      Instruction.Decorate(localBuiltin, operand("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.LocalInvocationId)),
+      Instruction.Variable(builtinType, localBuiltin, operand(OperandKind.StorageClass, spv.StorageClass.Input), None),
+      Instruction.Decorate(
+        localBuiltin,
+        operand(OperandKind.Decoration, spv.Decoration.BuiltIn, spv.BuiltIn.LocalInvocationId)
+      ),
       Instruction.EntryPoint(
-        operand("ExecutionModel", spv.ExecutionModel.Kernel),
+        operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
         function,
         stringOperand("collective"),
         Vec(localBuiltin)
       ),
-      Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+      Instruction.Function(
+        voidType,
+        function,
+        operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+        functionType
+      ),
       Instruction.FunctionParameter(outputType, output),
-      Instruction.Label(operand("IdResult", 15)),
+      Instruction.Label(operand(OperandKind.IdResult, 15)),
       Instruction.Load(vector3, localVector, localBuiltin, None),
-      Instruction.CompositeExtract(u64, localX, localVector, Vec(operand("LiteralInteger", 0))),
+      Instruction.CompositeExtract(u64, localX, localVector, Vec(operand(OperandKind.LiteralInteger, 0))),
       Instruction.ULessThan(bool, pred, localX, three),
       Instruction.GroupAny(bool, any, subgroupScope, pred),
       Instruction.LogicalNotEqual(bool, notAll, any, trueValue),
-      Instruction.GroupUMin(u64, minimum, workgroupScope, operand("GroupOperation", spv.GroupOperation.Reduce), localX),
+      Instruction.GroupUMin(
+        u64,
+        minimum,
+        workgroupScope,
+        operand(OperandKind.GroupOperation, spv.GroupOperation.Reduce),
+        localX
+      ),
       Instruction.Store(output, minimum, None),
       Instruction.Return(),
       Instruction.FunctionEnd()
@@ -487,8 +523,8 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
     assertEquals(executeUnchecked(barrierModule, barrierDispatch, barrierMemory), Right(()))
     assertEquals(barrierMemory.bytes, Vec.fill(8)(0.toByte))
 
-    val scanDestination  = operand("IdResult", 23)
-    val broadcast        = operand("IdResult", 24)
+    val scanDestination  = operand(OperandKind.IdResult, 23)
+    val broadcast        = operand(OperandKind.IdResult, 24)
     val scanInstructions = instructions
       .updated(
         23,
@@ -496,7 +532,7 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
           u64,
           minimum,
           workgroupScope,
-          operand("GroupOperation", spv.GroupOperation.InclusiveScan),
+          operand(OperandKind.GroupOperation, spv.GroupOperation.InclusiveScan),
           localX
         )
       )
@@ -529,7 +565,7 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
           u64,
           minimum,
           workgroupScope,
-          operand("GroupOperation", spv.GroupOperation.Reduce),
+          operand(OperandKind.GroupOperation, spv.GroupOperation.Reduce),
           localX
         )
       )
@@ -545,7 +581,7 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
           u64,
           minimum,
           workgroupScope,
-          operand("GroupOperation", spv.GroupOperation.Reduce),
+          operand(OperandKind.GroupOperation, spv.GroupOperation.Reduce),
           three
         )
       )
@@ -554,18 +590,18 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
     assertEquals(executeUnchecked(multiplicationModule, scanDispatch, multiplicationMemory), Right(()))
     assertEquals(multiplicationMemory.bytes, Vec.fill(8)(LittleEndian.toVec(6561L, 8)).flatten)
 
-    val f32                      = operand("IdResult", 25)
-    val floatThree               = operand("IdResult", 26)
-    val floatResult              = operand("IdResult", 27)
+    val f32                      = operand(OperandKind.IdResult, 25)
+    val floatThree               = operand(OperandKind.IdResult, 26)
+    val floatResult              = operand(OperandKind.IdResult, 27)
     val floatingScanInstructions = scanInstructions
       .patch(
         12,
         Vec(
-          Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
+          Instruction.TypeFloat(f32, operand(OperandKind.LiteralInteger, 32), None),
           Instruction.Constant(
             f32,
             floatThree,
-            operand("LiteralContextDependentNumber", java.lang.Float.floatToRawIntBits(3.0f))
+            operand(OperandKind.LiteralContextDependentNumber, java.lang.Float.floatToRawIntBits(3.0f))
           )
         ),
         0
@@ -576,7 +612,7 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
           f32,
           floatResult,
           workgroupScope,
-          operand("GroupOperation", spv.GroupOperation.InclusiveScan),
+          operand(OperandKind.GroupOperation, spv.GroupOperation.InclusiveScan),
           floatThree
         )
       )
@@ -601,7 +637,7 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
           f32,
           floatResult,
           workgroupScope,
-          operand("GroupOperation", spv.GroupOperation.InclusiveScan),
+          operand(OperandKind.GroupOperation, spv.GroupOperation.InclusiveScan),
           floatThree
         )
       )
@@ -645,7 +681,7 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
           u64,
           minimum,
           workgroupScope,
-          operand("GroupOperation", spv.GroupOperation.ExclusiveScan),
+          operand(OperandKind.GroupOperation, spv.GroupOperation.ExclusiveScan),
           localX
         )
       )
@@ -675,7 +711,7 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
     val subgroupBroadcastModule = broadcastModule.copy(instructions =
       broadcastInstructions.updated(
         8,
-        Instruction.Constant(u32, subgroupScope, operand("LiteralContextDependentNumber", spv.Scope.Subgroup))
+        Instruction.Constant(u32, subgroupScope, operand(OperandKind.LiteralContextDependentNumber, spv.Scope.Subgroup))
       )
     )
     val subgroupBroadcastDispatch = KernelTask
@@ -701,7 +737,7 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
       instructions
         .updated(
           8,
-          Instruction.Constant(u32, subgroupScope, operand("LiteralContextDependentNumber", spv.Scope.Device))
+          Instruction.Constant(u32, subgroupScope, operand(OperandKind.LiteralContextDependentNumber, spv.Scope.Device))
         )
         .updated(21, Instruction.GroupAny(bool, any, subgroupScope, pred))
     )
@@ -722,59 +758,73 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
   }
 
   test("dispatch resolves subgroup ballots") {
-    val voidType      = operand("IdResult", 1)
-    val u32           = operand("IdResult", 2)
-    val u64           = operand("IdResult", 3)
-    val bool          = operand("IdResult", 4)
-    val vector3       = operand("IdResult", 5)
-    val ballotType    = operand("IdResult", 6)
-    val builtinType   = operand("IdResult", 7)
-    val outputType    = operand("IdResult", 8)
-    val functionType  = operand("IdResult", 9)
-    val subgroupScope = operand("IdResult", 10)
-    val three         = operand("IdResult", 11)
-    val localBuiltin  = operand("IdResult", 12)
-    val function      = operand("IdResult", 13)
-    val output        = operand("IdResult", 14)
-    val label         = operand("IdResult", 15)
-    val localVector   = operand("IdResult", 16)
-    val localX        = operand("IdResult", 17)
-    val predicate     = operand("IdResult", 18)
-    val ballot        = operand("IdResult", 19)
-    val firstWord     = operand("IdResult", 20)
+    val voidType      = operand(OperandKind.IdResult, 1)
+    val u32           = operand(OperandKind.IdResult, 2)
+    val u64           = operand(OperandKind.IdResult, 3)
+    val bool          = operand(OperandKind.IdResult, 4)
+    val vector3       = operand(OperandKind.IdResult, 5)
+    val ballotType    = operand(OperandKind.IdResult, 6)
+    val builtinType   = operand(OperandKind.IdResult, 7)
+    val outputType    = operand(OperandKind.IdResult, 8)
+    val functionType  = operand(OperandKind.IdResult, 9)
+    val subgroupScope = operand(OperandKind.IdResult, 10)
+    val three         = operand(OperandKind.IdResult, 11)
+    val localBuiltin  = operand(OperandKind.IdResult, 12)
+    val function      = operand(OperandKind.IdResult, 13)
+    val output        = operand(OperandKind.IdResult, 14)
+    val label         = operand(OperandKind.IdResult, 15)
+    val localVector   = operand(OperandKind.IdResult, 16)
+    val localX        = operand(OperandKind.IdResult, 17)
+    val predicate     = operand(OperandKind.IdResult, 18)
+    val ballot        = operand(OperandKind.IdResult, 19)
+    val firstWord     = operand(OperandKind.IdResult, 20)
     val module        = Module(
       Header(ISA.version, Word(0), Word(21), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeInt(u64, operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
         Instruction.TypeBool(bool),
-        Instruction.TypeVector(vector3, u64, operand("LiteralInteger", 3)),
-        Instruction.TypeVector(ballotType, u32, operand("LiteralInteger", 4)),
-        Instruction.TypePointer(builtinType, operand("StorageClass", spv.StorageClass.Input), vector3),
-        Instruction.TypePointer(outputType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
+        Instruction.TypeVector(vector3, u64, operand(OperandKind.LiteralInteger, 3)),
+        Instruction.TypeVector(ballotType, u32, operand(OperandKind.LiteralInteger, 4)),
+        Instruction.TypePointer(builtinType, operand(OperandKind.StorageClass, spv.StorageClass.Input), vector3),
+        Instruction.TypePointer(outputType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u32),
         Instruction.TypeFunction(functionType, voidType, Vec(outputType)),
-        Instruction.Constant(u32, subgroupScope, operand("LiteralContextDependentNumber", spv.Scope.Subgroup)),
-        Instruction.Constant(u64, three, operand("LiteralContextDependentNumber", 3)),
-        Instruction.Variable(builtinType, localBuiltin, operand("StorageClass", spv.StorageClass.Input), None),
+        Instruction.Constant(
+          u32,
+          subgroupScope,
+          operand(OperandKind.LiteralContextDependentNumber, spv.Scope.Subgroup)
+        ),
+        Instruction.Constant(u64, three, operand(OperandKind.LiteralContextDependentNumber, 3)),
+        Instruction.Variable(
+          builtinType,
+          localBuiltin,
+          operand(OperandKind.StorageClass, spv.StorageClass.Input),
+          None
+        ),
         Instruction.Decorate(
           localBuiltin,
-          operand("Decoration", spv.Decoration.BuiltIn, spv.BuiltIn.LocalInvocationId)
+          operand(OperandKind.Decoration, spv.Decoration.BuiltIn, spv.BuiltIn.LocalInvocationId)
         ),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("ballot"),
           Vec(localBuiltin)
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
         Instruction.FunctionParameter(outputType, output),
         Instruction.Label(label),
         Instruction.Load(vector3, localVector, localBuiltin, None),
-        Instruction.CompositeExtract(u64, localX, localVector, Vec(operand("LiteralInteger", 0))),
+        Instruction.CompositeExtract(u64, localX, localVector, Vec(operand(OperandKind.LiteralInteger, 0))),
         Instruction.ULessThan(bool, predicate, localX, three),
         Instruction.GroupNonUniformBallot(ballotType, ballot, subgroupScope, predicate),
-        Instruction.CompositeExtract(u32, firstWord, ballot, Vec(operand("LiteralInteger", 0))),
+        Instruction.CompositeExtract(u32, firstWord, ballot, Vec(operand(OperandKind.LiteralInteger, 0))),
         Instruction.Store(output, firstWord, None),
         Instruction.Return(),
         Instruction.FunctionEnd()
@@ -798,32 +848,36 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
   }
 
   test("dispatch retains per-lane state only for entry points that reach collectives") {
-    val voidType           = operand("IdResult", 1)
-    val u32                = operand("IdResult", 2)
-    val functionType       = operand("IdResult", 3)
-    val workgroupScope     = operand("IdResult", 4)
-    val plainFunction      = operand("IdResult", 5)
-    val plainLabel         = operand("IdResult", 6)
-    val collectiveFunction = operand("IdResult", 7)
-    val collectiveLabel    = operand("IdResult", 8)
-    val callResult         = operand("IdResult", 9)
-    val collectiveHelper   = operand("IdResult", 10)
-    val helperLabel        = operand("IdResult", 11)
+    val voidType           = operand(OperandKind.IdResult, 1)
+    val u32                = operand(OperandKind.IdResult, 2)
+    val functionType       = operand(OperandKind.IdResult, 3)
+    val workgroupScope     = operand(OperandKind.IdResult, 4)
+    val plainFunction      = operand(OperandKind.IdResult, 5)
+    val plainLabel         = operand(OperandKind.IdResult, 6)
+    val collectiveFunction = operand(OperandKind.IdResult, 7)
+    val collectiveLabel    = operand(OperandKind.IdResult, 8)
+    val callResult         = operand(OperandKind.IdResult, 9)
+    val collectiveHelper   = operand(OperandKind.IdResult, 10)
+    val helperLabel        = operand(OperandKind.IdResult, 11)
     val module             = Module(
       Header(ISA.version, Word(0), Word(12), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
         Instruction.TypeFunction(functionType, voidType, Vec.empty),
-        Instruction.Constant(u32, workgroupScope, operand("LiteralContextDependentNumber", spv.Scope.Workgroup)),
+        Instruction.Constant(
+          u32,
+          workgroupScope,
+          operand(OperandKind.LiteralContextDependentNumber, spv.Scope.Workgroup)
+        ),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           plainFunction,
           stringOperand("plain"),
           Vec.empty
         ),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           collectiveFunction,
           stringOperand("collective"),
           Vec.empty
@@ -831,7 +885,7 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
         Instruction.Function(
           voidType,
           plainFunction,
-          operand("FunctionControl", spv.FunctionControl.None),
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
           functionType
         ),
         Instruction.Label(plainLabel),
@@ -840,7 +894,7 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
         Instruction.Function(
           voidType,
           collectiveFunction,
-          operand("FunctionControl", spv.FunctionControl.None),
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
           functionType
         ),
         Instruction.Label(collectiveLabel),
@@ -850,7 +904,7 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
         Instruction.Function(
           voidType,
           collectiveHelper,
-          operand("FunctionControl", spv.FunctionControl.None),
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
           functionType
         ),
         Instruction.Label(helperLabel),

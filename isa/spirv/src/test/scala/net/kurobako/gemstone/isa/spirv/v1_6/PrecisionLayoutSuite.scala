@@ -13,15 +13,15 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class PrecisionLayoutSuite extends munit.FunSuite {
-  private def o(kind: NonEmpty[String], values: Int*): Operand = Operand(
+  private def o(kind: OperandKind, values: Int*): Operand = Operand(
     kind,
     Vec.from(values.map(Word(_))).unsafe[NonEmpty[Vec[Word]]]
   )
-  private def r(value: Int)                                    = o("IdResult", value)
+  private def r(value: Int)                                    = o(OperandKind.IdResult, value)
   private def literal(value: Long, width: OneOf[(16, 32, 64)]) = {
     val byteWidth = width.scalarByteWidth
     Operand(
-      "LiteralContextDependentNumber",
+      OperandKind.LiteralContextDependentNumber,
       Vec.from(LittleEndian.toArray(value, byteWidth).grouped(4).map { bytes =>
         val chunkWidth = bytes.length.refine[Int where Between[0, 8]]
           .fold(message => throw IllegalArgumentException(message), value => value)
@@ -29,7 +29,7 @@ class PrecisionLayoutSuite extends munit.FunSuite {
       }).unsafe
     )
   }
-  private val entry      = Operand("LiteralString", Vec.nonEmpty(Word(0x6b)))
+  private val entry      = Operand(OperandKind.LiteralString, Vec.nonEmpty(Word(0x6b)))
   private val allocation = AllocationId(1)
   private class Memory(size: Int) extends vm.Memory {
     val bytes: Array[Byte]                                                                    = Array.ofDim[Byte](size)
@@ -43,11 +43,12 @@ class PrecisionLayoutSuite extends munit.FunSuite {
     }
   }
   private def run(instructions: Vec[Instruction], args: Vec[KernelTask.Argument], memory: Memory): Unit = {
-    val profile = Vec.from(Seq(4, 6, 7, 9, 10, 11).map(value => Instruction.Capability(o("Capability", value)))) :+
-      Instruction.MemoryModel(
-        o("AddressingModel", spv.AddressingModel.Physical64),
-        o("MemoryModel", spv.MemoryModel.OpenCL)
-      )
+    val profile =
+      Vec.from(Seq(4, 6, 7, 9, 10, 11).map(value => Instruction.Capability(o(OperandKind.Capability, value)))) :+
+        Instruction.MemoryModel(
+          o(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+          o(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
+        )
     val module = Module(
       Header(ISA.version, Word(0), Word(64), Word(0)),
       profile ++ instructions,
@@ -96,27 +97,33 @@ class PrecisionLayoutSuite extends munit.FunSuite {
       }
       val definitions = Vec[Instruction](
         Instruction.TypeVoid(r(1)),
-        Instruction.TypeFloat(r(2), o("LiteralInteger", width.raw), None),
-        Instruction.TypeVector(r(3), r(2), o("LiteralInteger", count)),
+        Instruction.TypeFloat(r(2), o(OperandKind.LiteralInteger, width.raw), None),
+        Instruction.TypeVector(r(3), r(2), o(OperandKind.LiteralInteger, count)),
         Instruction.TypeStruct(r(4), Vec(r(2), r(3))),
-        Instruction.TypePointer(r(5), o("StorageClass", spv.StorageClass.CrossWorkgroup), r(4)),
-        Instruction.TypePointer(r(6), o("StorageClass", spv.StorageClass.Function), r(4)),
-        Instruction.TypeInt(r(7), o("LiteralInteger", 32), o("LiteralInteger", 0)),
+        Instruction.TypePointer(r(5), o(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), r(4)),
+        Instruction.TypePointer(r(6), o(OperandKind.StorageClass, spv.StorageClass.Function), r(4)),
+        Instruction.TypeInt(r(7), o(OperandKind.LiteralInteger, 32), o(OperandKind.LiteralInteger, 0)),
         Instruction.Constant(r(7), r(8), literal(1, 32)),
         Instruction.Constant(r(2), r(9), literal(IEEE754.fromDouble(1.5, width), width)),
         Instruction.Constant(r(2), r(10), literal(IEEE754.fromDouble(2.25, width), width)),
         Instruction.ConstantComposite(r(3), r(11), Vec.fill(count)(r(9))),
         Instruction.ConstantComposite(r(4), r(12), Vec(r(10), r(11))),
         Instruction.TypeFunction(r(13), r(1), if (byValue) Vec(r(6), r(5)) else Vec(r(5))),
-        Instruction.EntryPoint(o("ExecutionModel", spv.ExecutionModel.Kernel), r(20), entry, Vec.empty)
+        Instruction.EntryPoint(o(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel), r(20), entry, Vec.empty)
       ) ++
-        (if (byValue) Vec[Instruction](Instruction.Decorate(r(21), o("Decoration", spv.Decoration.FuncParamAttr, 2)))
+        (if (byValue)
+           Vec[Instruction](Instruction.Decorate(r(21), o(OperandKind.Decoration, spv.Decoration.FuncParamAttr, 2)))
          else Vec.empty[Instruction])
       val parameters = if (byValue)
         Vec[Instruction](Instruction.FunctionParameter(r(6), r(21)), Instruction.FunctionParameter(r(5), r(22)))
       else Vec[Instruction](Instruction.FunctionParameter(r(5), r(22)))
       val instructions = definitions ++
-        Vec[Instruction](Instruction.Function(r(1), r(20), o("FunctionControl", spv.FunctionControl.None), r(13))) ++
+        Vec[Instruction](Instruction.Function(
+          r(1),
+          r(20),
+          o(OperandKind.FunctionControl, spv.FunctionControl.None),
+          r(13)
+        )) ++
         parameters ++
         Vec[Instruction](Instruction.Label(r(23))) ++
         (if (byValue) Vec[Instruction](Instruction.Load(r(4), r(24), r(21), None)) else Vec.empty[Instruction]) ++
@@ -144,13 +151,13 @@ class PrecisionLayoutSuite extends munit.FunSuite {
     test(s"OpFConvert double to half rounds once for $input") {
       val instructions = Vec[Instruction](
         Instruction.TypeVoid(r(1)),
-        Instruction.TypeFloat(r(2), o("LiteralInteger", 64), None),
-        Instruction.TypeFloat(r(3), o("LiteralInteger", 16), None),
-        Instruction.TypePointer(r(4), o("StorageClass", spv.StorageClass.CrossWorkgroup), r(3)),
+        Instruction.TypeFloat(r(2), o(OperandKind.LiteralInteger, 64), None),
+        Instruction.TypeFloat(r(3), o(OperandKind.LiteralInteger, 16), None),
+        Instruction.TypePointer(r(4), o(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), r(3)),
         Instruction.TypeFunction(r(5), r(1), Vec(r(4))),
         Instruction.Constant(r(2), r(6), literal(IEEE754.doubleToBinary64(input), 64)),
-        Instruction.EntryPoint(o("ExecutionModel", spv.ExecutionModel.Kernel), r(20), entry, Vec.empty),
-        Instruction.Function(r(1), r(20), o("FunctionControl", spv.FunctionControl.None), r(5)),
+        Instruction.EntryPoint(o(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel), r(20), entry, Vec.empty),
+        Instruction.Function(r(1), r(20), o(OperandKind.FunctionControl, spv.FunctionControl.None), r(5)),
         Instruction.FunctionParameter(r(4), r(21)),
         Instruction.Label(r(22)),
         Instruction.FConvert(r(3), r(23), r(6)),

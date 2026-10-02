@@ -1,19 +1,20 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import Program.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.amdgpu.asm.*
+import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
 import net.kurobako.gemstone.string.*
 
 class InstructionSuite extends munit.FunSuite {
   test("every generated form descriptor decodes directly to its parameterized enum case") {
-    val opcodes = Instruction.definitions.map(_.opcode).distinct.sorted
-    assertEquals(opcodes.size, 2407)
-    Instruction.definitions.foreach { definition =>
-      definition.operandCounts.foreach { operandCount =>
+    val opcodes = Opcode.definitions.map(_.opcode).distinct.sorted
+    assertEquals(opcodes.size, 2467)
+    Opcode.definitions.foreach { definition =>
+      Instruction.operandCounts(definition).foreach { operandCount =>
         val operands = operandsFor(operandCount)
         val modifier = Modifier("test", Some("value"))
-        val decoded  = definition.decode(operands, Vec(modifier))
+        val decoded  = Instruction.decode(definition, operands, Vec(modifier))
         assertEquals(decoded.size, 1, s"${definition.toString}: ambiguous or missing form")
         val instruction = decoded.head
         assertEquals(instruction.definition, definition)
@@ -26,11 +27,12 @@ class InstructionSuite extends munit.FunSuite {
   }
 
   test("generated runtime class names are portable to case-insensitive filesystems") {
-    val classNames = Instruction.definitions.flatMap { definition =>
-      definition.operandCounts.flatMap { operandCount =>
-        definition.decode(
+    val classNames = Opcode.definitions.flatMap { definition =>
+      Instruction.operandCounts(definition).flatMap { operandCount =>
+        Instruction.decode(
+          definition,
           operandsFor(operandCount),
-          Vec.empty
+          Vec.empty[Modifier]
         ).map(_.getClass.getName.toLowerCaseRoot)
       }
     }

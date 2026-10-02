@@ -3,46 +3,42 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.collection.*
-import Instruction.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 private object InterpolationInstructionDefs {
-  case object VInterpP10F16F32 extends Definition(
-        "v_interp_p10_f16_f32",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VInterpP10F16F32(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1917
-      )
-  case object VInterpP10F32 extends Definition(
-        "v_interp_p10_f32",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VInterpP10F32(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1918
-      )
-  case object VInterpP10RtzF16F32 extends Definition(
-        "v_interp_p10_rtz_f16_f32",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VInterpP10RtzF16F32(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1919
-      )
-  case object VInterpP2F16F32 extends Definition(
-        "v_interp_p2_f16_f32",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VInterpP2F16F32(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1924
-      )
-  case object VInterpP2RtzF16F32 extends Definition(
-        "v_interp_p2_rtz_f16_f32",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VInterpP2RtzF16F32(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1928
-      )
+  case object VInterpP10F16F32 extends Opcode("v_interp_p10_f16_f32", 1963)
 
-  val definitions: Vec[Definition] =
-    Vec(VInterpP10F16F32, VInterpP10F32, VInterpP10RtzF16F32, VInterpP2F16F32, VInterpP2RtzF16F32)
+  case object VInterpP10F16F32Inreg extends Opcode("v_interp_p10_f16_f32_inreg", 1964)
+
+  case object VInterpP10F32 extends Opcode("v_interp_p10_f32", 1965)
+
+  case object VInterpP10F32Inreg extends Opcode("v_interp_p10_f32_inreg", 1966)
+
+  case object VInterpP10RtzF16F32 extends Opcode("v_interp_p10_rtz_f16_f32", 1967)
+
+  case object VInterpP10RtzF16F32Inreg extends Opcode("v_interp_p10_rtz_f16_f32_inreg", 1968)
+
+  case object VInterpP2F16F32 extends Opcode("v_interp_p2_f16_f32", 1973)
+
+  case object VInterpP2F16F32Inreg extends Opcode("v_interp_p2_f16_f32_inreg", 1974)
+
+  case object VInterpP2F32Inreg extends Opcode("v_interp_p2_f32_inreg", 1976)
+
+  case object VInterpP2RtzF16F32 extends Opcode("v_interp_p2_rtz_f16_f32", 1979)
+
+  case object VInterpP2RtzF16F32Inreg extends Opcode("v_interp_p2_rtz_f16_f32_inreg", 1980)
+
+  val definitions: Vec[Opcode] = Vec(
+    VInterpP10F16F32,
+    VInterpP10F16F32Inreg,
+    VInterpP10F32,
+    VInterpP10F32Inreg,
+    VInterpP10RtzF16F32,
+    VInterpP10RtzF16F32Inreg,
+    VInterpP2F16F32,
+    VInterpP2F16F32Inreg,
+    VInterpP2F32Inreg,
+    VInterpP2RtzF16F32,
+    VInterpP2RtzF16F32Inreg
+  )
 }

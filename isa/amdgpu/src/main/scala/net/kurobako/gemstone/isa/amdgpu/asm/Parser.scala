@@ -1,6 +1,5 @@
-package net.kurobako.gemstone.isa.amdgpu
+package net.kurobako.gemstone.isa.amdgpu.asm
 
-import Program.*
 import cats.data.Chain
 import cats.parse.Parser as P
 import cats.syntax.all.*
@@ -8,39 +7,59 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.amdgpu.*
+import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
 import net.kurobako.gemstone.string.*
 import scala.annotation.tailrec
 import scala.util.Try
 
-object Parser extends Decoder[String, Program, ParseError] {
+object Parser extends Decoder[String, Program, Parser.Error] {
+  case class Error(
+      line: Int > 0,
+      column: Int > 0,
+      message: NonEmpty[String]
+  ) {
+    override def toString: String = s"$line:$column: $message"
+  }
 
-  override def decode(source: String): Either[ParseError, Program] = parse(source)
+  override def decode(source: String): Either[Error, Program] = parse(source)
 
-  def parse(source: String): Either[ParseError, Program] =
+  def parse(source: String): Either[Error, Program] =
     source.linesIterator.zipWithIndex.toVec
-      .traverse { case (line, index) => parseLine(line, (index + 1).unsafe[Int > 0]) }
+      .traverse { case (line, index) =>
+        val end     = commentOffset(line)
+        val comment = line.drop(end).refine[NonEmpty[String]].toOption.map(Statement.Comment(_))
+        parseLine(line.take(end), (index + 1).unsafe[Int > 0]).map(statement =>
+          Vec.from(statement.toSeq ++ comment.toSeq)
+        )
+      }
       .map(statements => Program(statements.flatten))
 
-  def parseInstruction(source: String): Either[ParseError, Instruction] =
-    parse(source).flatMap {
+  def parseInstruction(source: String): Either[Error, Instruction] =
+    parse(source).map(program =>
+      Program(program.statements.filter {
+        case Statement.Comment(_) => false
+        case _                    => true
+      })
+    ).flatMap {
       case Program(Vec(Statement.Instruction(instruction))) => Right(instruction)
-      case Program(Vec())                                   => Left(ParseError(1, 1, "expected an instruction"))
-      case _ => Left(ParseError(1, 1, "expected exactly one instruction"))
+      case Program(Vec())                                   => Left(Error(1, 1, "expected an instruction"))
+      case _                                                => Left(Error(1, 1, "expected exactly one instruction"))
     }
 
-  private def parseLine(source: String, line: Int > 0): Either[ParseError, Option[Statement]] = {
-    val text = stripComment(source).trim
+  private def parseLine(source: String, line: Int > 0): Either[Error, Option[Statement]] = {
+    val text = source.trim
     if (text.isEmpty) Right(None)
     else if (text.endsWith(":")) {
       val name = text.dropRight(1).trim
       if (isIdentifier(name)) Right(Some(Statement.Label(name)))
-      else Left(ParseError(line, 1, s"invalid label '$name'"))
+      else Left(Error(line, 1, s"invalid label '$name'"))
     } else if (text.startsWith(".")) {
       val end  = text.indexWhere(_.isWhitespace)
       val name = if (end < 0) text else text.take(end)
       val args = if (end < 0) "" else text.drop(end).trim
       if (directiveName.parseAll(name).isRight) Right(Some(Statement.Directive(name, args)))
-      else Left(ParseError(line, 1, s"invalid directive '$name'"))
+      else Left(Error(line, 1, s"invalid directive '$name'"))
     } else {
       text match {
         case s"$left :: $right" =>
@@ -53,10 +72,10 @@ object Parser extends Decoder[String, Program, ParseError] {
     }
   }
 
-  private def parseInstructionLine(text: String, line: Int > 0): Either[ParseError, Instruction] = {
+  private def parseInstructionLine(text: String, line: Int > 0): Either[Error, Instruction] = {
     val opcodeEnd  = text.indexWhere(_.isWhitespace)
     val opcodeText = if (opcodeEnd < 0) text else text.take(opcodeEnd)
-    if (opcodeName.parseAll(opcodeText).isLeft) Left(ParseError(line, 1, s"invalid AMDGPU opcode '$opcodeText'"))
+    if (opcodeName.parseAll(opcodeText).isLeft) Left(Error(line, 1, s"invalid AMDGPU opcode '$opcodeText'"))
     else {
       val opcode = opcodeText.toLowerCaseRoot
       val tail   = if (opcodeEnd < 0) "" else text.drop(opcodeEnd).trim
@@ -73,11 +92,11 @@ object Parser extends Decoder[String, Program, ParseError] {
           .flatMap { case (operands, modifiers) =>
             Instruction.decode(opcode, Vec.from(operands.toVector.view), Vec.from(modifiers.toVector.view)).leftMap {
               case Instruction.DecodeError.UnknownOpcode(value) =>
-                ParseError(line, 1, s"unknown AMDGPU opcode '$value'")
+                Error(line, 1, s"unknown AMDGPU opcode '$value'")
               case Instruction.DecodeError.InvalidOperandCount(value, expected, actual) =>
-                ParseError(line, 1, s"$value expects ${expected.mkString(" or ")} operands, found $actual")
+                Error(line, 1, s"$value expects ${expected.mkString(" or ")} operands, found $actual")
               case Instruction.DecodeError.AmbiguousForms(value, definitions) =>
-                ParseError(line, 1, s"$value ambiguously matched ${definitions.mkString(", ")}")
+                Error(line, 1, s"$value ambiguously matched ${definitions.mkString(", ")}")
             }
           }
       }
@@ -88,7 +107,7 @@ object Parser extends Decoder[String, Program, ParseError] {
       words: Vec[String],
       line: Int > 0,
       instruction: String
-  ): Either[ParseError, Vec[Either[Operand, Modifier]]] =
+  ): Either[Error, Vec[Either[Operand, Modifier]]] =
     words.zipWithIndex.traverse { case (word, wordIndex) =>
       val column = (instruction.indexOf(word) + 1).unsafe[Int > 0]
       parseModifier(word) match {
@@ -96,20 +115,39 @@ object Parser extends Decoder[String, Program, ParseError] {
         case None if wordIndex > 0 =>
           val name = if (isIdentifier(word)) word.toLowerCaseRoot else word
           name.refine[NonEmpty[String]]
-            .leftMap(_ => ParseError(line, column, s"invalid modifier '$word'"))
+            .leftMap(_ => Error(line, column, s"invalid modifier '$word'"))
             .map(value => Right(Modifier(value)))
         case None => parseOperand(word, line, column).map(Left(_))
       }
     }
 
-  private def parseOperand(text: String, line: Int > 0, column: Int > 0): Either[ParseError, Operand] =
+  private def parseOperand(text: String, line: Int > 0, column: Int > 0): Either[Error, Operand] =
     if (text.startsWith("-") && text.length > 1 && !looksNumeric(text))
       parseOperand(text.drop(1), line, column + 1).map(Operand.Negated(_))
     else if (text.startsWith("|") && text.endsWith("|") && text.length > 2)
       parseOperand(text.slice(1, text.length - 1), line, column + 1).map(Operand.Absolute(_))
-    else parseRegister(text).orElse(parseNumber(text)).orElse(parseAtom(text)) match {
+    else if (text.startsWith("neg(") && text.endsWith(")"))
+      parseOperand(text.slice(4, text.length - 1), line, column + 4).map(Operand.Negated(_))
+    else if (text.startsWith("sext(") && text.endsWith(")"))
+      parseOperand(text.slice(5, text.length - 1), line, column + 5).map(Operand.SignExtended(_))
+    else if (text.startsWith("[") && text.endsWith("]"))
+      splitTopLevel(text.slice(1, text.length - 1), ',', line)
+        .flatMap(_.traverse(parseOperand(_, line, column + 1))).map { values =>
+          if (
+            values.nonEmpty && values.forall {
+              case Operand.Register(_, _, _) => true
+              case _                         => false
+            }
+          ) Operand.RegisterList(values)
+          else Operand.Expression(text)
+        }
+    else parseRegister(text.dropRight(2)).filter(_ => text.endsWith(".l") || text.endsWith(".h"))
+      .map(Operand.Half(
+        _,
+        text.endsWith(".h")
+      )).orElse(parseRegister(text)).orElse(parseNumber(text)).orElse(parseAtom(text)) match {
       case Some(value) => Right(value)
-      case None        => Left(ParseError(line, column, s"invalid operand '$text'"))
+      case None        => Left(Error(line, column, s"invalid operand '$text'"))
     }
 
   private def parseRegister(text: String): Option[Operand] =
@@ -133,19 +171,13 @@ object Parser extends Decoder[String, Program, ParseError] {
         }
     }
 
-  private def parseNumber(text: String): Option[Operand] = {
-    val signed = if (text.startsWith("-") || text.startsWith("+")) text.drop(1) else text
-    val sign   = if (text.startsWith("-")) -1 else 1
-    if (
-      signed.length > 2 && signed.take(2).equalsIgnoreCase("0x") &&
-      signed.drop(2).forall(character => Character.digit(character, 16) >= 0)
+  private def parseNumber(text: String): Option[Operand] =
+    parseBigIntLiteral(text).map(value =>
+      Operand.IntegerLiteral(value, if (text.toLowerCaseRoot.contains("0x")) 16 else 10)
     )
-      Some(Operand.IntegerLiteral(BigInt(signed.drop(2), 16) * sign, 16))
-    else if (digits(signed)) Some(Operand.IntegerLiteral(BigInt(signed) * sign, 10))
-    else if (text.contains('.') && Try(BigDecimal(text)).isSuccess)
-      Some(Operand.DecimalLiteral(text.toLowerCaseRoot))
-    else None
-  }
+      .orElse(Option.when(
+        text.contains('.') && Try(BigDecimal(text)).isSuccess
+      )(Operand.DecimalLiteral(text.toLowerCaseRoot)))
 
   private def parseAtom(text: String): Option[Operand] =
     if (isIdentifier(text)) Some(Operand.Identifier(text))
@@ -163,7 +195,7 @@ object Parser extends Decoder[String, Program, ParseError] {
     else None
   }
 
-  private def splitTopLevel(text: String, separator: Char, line: Int > 0): Either[ParseError, Vec[String]] =
+  private def splitTopLevel(text: String, separator: Char, line: Int > 0): Either[Error, Vec[String]] =
     if (text.isEmpty) Right(Vec.empty)
     else {
       val lastColumn = text.length.unsafe[Int > 0]
@@ -173,23 +205,24 @@ object Parser extends Decoder[String, Program, ParseError] {
           start: Int,
           closing: List[Char],
           result: Chain[String]
-      ): Either[ParseError, Vec[String]] = {
+      ): Either[Error, Vec[String]] = {
         val index = column.raw - 1
         if (index == text.length) {
           val last = text.drop(start).trim
-          if (closing.nonEmpty) Left(ParseError(line, lastColumn, "unclosed delimiter"))
-          else if (last.isEmpty) Left(ParseError(line, lastColumn, "empty operand"))
+          if (closing.nonEmpty) Left(Error(line, lastColumn, "unclosed delimiter"))
+          else if (last.isEmpty) Left(Error(line, lastColumn, "empty operand"))
           else Right(Vec.from(result.append(last).toVector.view))
         } else text(index) match {
-          case '('       => loop(column + 1, start, ')' :: closing, result)
-          case '['       => loop(column + 1, start, ']' :: closing, result)
-          case ')' | ']' => closing match {
+          case '('             => loop(column + 1, start, ')' :: closing, result)
+          case '{'             => loop(column + 1, start, '}' :: closing, result)
+          case '['             => loop(column + 1, start, ']' :: closing, result)
+          case ')' | ']' | '}' => closing match {
               case expected :: rest if expected == text(index) => loop(column + 1, start, rest, result)
-              case _ => Left(ParseError(line, column, "unmatched closing delimiter"))
+              case _ => Left(Error(line, column, "unmatched closing delimiter"))
             }
           case character if character == separator && closing.isEmpty =>
             val part = text.slice(start, index).trim
-            if (part.isEmpty) Left(ParseError(line, column, "empty operand"))
+            if (part.isEmpty) Left(Error(line, column, "empty operand"))
             else loop(column + 1, index + 1, closing, result.append(part))
           case _ => loop(column + 1, start, closing, result)
         }
@@ -209,11 +242,11 @@ object Parser extends Decoder[String, Program, ParseError] {
       val character               = if (index == text.length) ' ' else text(index)
       val nextStart               = start.orElse(Option.when(!character.isWhitespace)(index))
       val (nextRound, nextSquare) = character match {
-        case '(' => round + 1 -> square
-        case ')' => round - 1 -> square
-        case '[' => round     -> (square + 1)
-        case ']' => round     -> (square - 1)
-        case _   => round     -> square
+        case '(' | '{' => round + 1 -> square
+        case ')' | '}' => round - 1 -> square
+        case '['       => round     -> (square + 1)
+        case ']'       => round     -> (square - 1)
+        case _         => round     -> square
       }
       val completedAt = nextStart.filter(_ => character.isWhitespace && nextRound == 0 && nextSquare == 0)
       val nextResult  = completedAt.fold(result)(start => result.append(text.slice(start, index)))
@@ -224,11 +257,16 @@ object Parser extends Decoder[String, Program, ParseError] {
     Vec.from(loop(0, None, 0, 0, Chain.empty).toVector.view)
   }
 
-  private def stripComment(source: String): String = {
-    val slash = source.indexOf("//")
-    val hash  = source.indexOf('#')
-    val end   = Vec(slash, hash).filter(_ >= 0).minOption.getOrElse(source.length)
-    source.take(end)
+  private def commentOffset(source: String): Int = {
+    @tailrec
+    def loop(index: Int, quoted: Boolean, escaped: Boolean): Int =
+      if (index >= source.length) source.length
+      else if (escaped) loop(index + 1, quoted, false)
+      else if (quoted && source(index) == '\\') loop(index + 1, quoted, true)
+      else if (source(index) == '"') loop(index + 1, !quoted, false)
+      else if (!quoted && (source(index) == '#' || source.startsWith("//", index))) index
+      else loop(index + 1, quoted, false)
+    loop(0, false, false)
   }
 
   private def topLevelColon(text: String): Int = {
@@ -287,6 +325,9 @@ object Parser extends Decoder[String, Program, ParseError] {
 
   private val KnownFlagModifiers = Set(
     "a16",
+    "compr",
+    "row_en",
+    "nv",
     "addr64",
     "clamp",
     "d16",
@@ -324,6 +365,7 @@ object Parser extends Decoder[String, Program, ParseError] {
     "null",
     "scc",
     "src_execz",
+    "src_lds_direct",
     "src_scc",
     "src_vccz",
     "vcc",

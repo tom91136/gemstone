@@ -117,6 +117,22 @@ private object VMArithmetic {
     }
     calculate(lowSelection, negateLow) | (calculate(highSelection, negateHigh) << 16)
   }
+  private def mixedOperand(
+      source: Long,
+      index: Int,
+      selection: Int,
+      selectionHi: Int,
+      negate: Int,
+      absolute: Int
+  ): Float = {
+    val convertFromHalf = (selectionHi & (1 << index)) != 0
+    val selectHigh      = (selection & (1 << index)) != 0
+    val value           = if (convertFromHalf)
+      IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(if (selectHigh) source >>> 16 else source)))
+    else IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source)))
+    val magnitude = if ((absolute & (1 << index)) != 0) math.abs(value) else value
+    if ((negate & (1 << index)) != 0) -magnitude else magnitude
+  }
   def fmaMixF16(
       existing: Long,
       srcA: Long,
@@ -129,18 +145,12 @@ private object VMArithmetic {
       clamp: Boolean,
       high: Boolean
   ): Long = {
-    def operand(source: Long, index: Int): Float = {
-      val convertFromHalf = (opSelectionHi & (1 << index)) != 0
-      val selectHigh      = (opSelection & (1 << index)) != 0
-      val value           =
-        if (convertFromHalf)
-          IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(if (selectHigh) source >>> 16 else source)))
-        else IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source)))
-      val absoluteValue = if ((absolute & (1 << index)) != 0) math.abs(value) else value
-      if ((negate & (1 << index)) != 0) -absoluteValue else absoluteValue
-    }
-    val rounded = IEEE754.floatToBinary16(Math.fma(operand(srcA, 0), operand(srcB, 1), operand(srcC, 2)))
-    val value   =
+    val rounded = IEEE754.floatToBinary16(Math.fma(
+      mixedOperand(srcA, 0, opSelection, opSelectionHi, negate, absolute),
+      mixedOperand(srcB, 1, opSelection, opSelectionHi, negate, absolute),
+      mixedOperand(srcC, 2, opSelection, opSelectionHi, negate, absolute)
+    ))
+    val value =
       if (clamp) {
         val converted = IEEE754.binary16ToFloat(rounded)
         IEEE754.floatToBinary16(math.max(0.0f, math.min(1.0f, converted)))
@@ -157,17 +167,11 @@ private object VMArithmetic {
       absolute: Int,
       clamp: Boolean
   ): Long = {
-    def operand(source: Long, index: Int): Float = {
-      val convertFromHalf = (opSelectionHi & (1 << index)) != 0
-      val selectHigh      = (opSelection & (1 << index)) != 0
-      val value           =
-        if (convertFromHalf)
-          IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(if (selectHigh) source >>> 16 else source)))
-        else IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source)))
-      val absoluteValue = if ((absolute & (1 << index)) != 0) math.abs(value) else value
-      if ((negate & (1 << index)) != 0) -absoluteValue else absoluteValue
-    }
-    val result = Math.fma(operand(srcA, 0), operand(srcB, 1), operand(srcC, 2))
+    val result = Math.fma(
+      mixedOperand(srcA, 0, opSelection, opSelectionHi, negate, absolute),
+      mixedOperand(srcB, 1, opSelection, opSelectionHi, negate, absolute),
+      mixedOperand(srcC, 2, opSelection, opSelectionHi, negate, absolute)
+    )
     IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).toLong
   }
   def dot2F32F16(left: Long, right: Long, accumulator: Long, accumulate: Boolean): Binary32 = {
@@ -216,20 +220,10 @@ private object VMArithmetic {
       else if (negative) 3 else 8
     1L << classBit
   }
-  def signedMultiply24(left: Long, right: Long): Long = {
-    def signed(value: Long): Long = {
-      val bits = value & 0xffffffL
-      if ((bits & 0x800000L) == 0L) bits else bits | ~0xffffffL
-    }
-    Bits.low32(signed(left) * signed(right)).toLong
-  }
-  def signedMultiplyHigh24(left: Long, right: Long): Long = {
-    def signed(value: Long): Long = {
-      val bits = value & 0xffffffL
-      if ((bits & 0x800000L) == 0L) bits else bits | ~0xffffffL
-    }
-    Bits.low32((signed(left) * signed(right)) >> 32).toLong
-  }
+  def signedMultiply24(left: Long, right: Long): Long =
+    Bits.low32(Bits.signExtend(left, 24) * Bits.signExtend(right, 24)).toLong
+  def signedMultiplyHigh24(left: Long, right: Long): Long =
+    Bits.low32((Bits.signExtend(left, 24) * Bits.signExtend(right, 24)) >> 32).toLong
   def divisionFixupF32(quotient: Float, denominator: Float, numerator: Float): Float = {
     val negative =
       ((java.lang.Float.floatToRawIntBits(numerator) ^
@@ -260,8 +254,6 @@ private object VMArithmetic {
     }
     IEEE754.floatToBinary32(result)
   }
-  def bitReverse32(value: Long): Long =
-    Bits.reverseBits(value, 32)
   def minimumF16(left: Long, right: Long): Binary16 =
     IEEE754.floatToBinary16(
       math.min(

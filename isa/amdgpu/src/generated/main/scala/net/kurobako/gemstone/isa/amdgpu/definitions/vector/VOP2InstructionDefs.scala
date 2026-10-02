@@ -3,633 +3,273 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.collection.*
-import Instruction.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 private object VOP2InstructionDefs {
-  case object VAddCoCiU32 extends Definition(
-        "v_add_co_ci_u32",
-        decoder(form(5)((operands, mods) =>
-          Instruction.VAddCoCiU32(operands(0), operands(1), operands(2), operands(3), operands(4), mods)
-        )),
-        1365
-      )
-  case object VAddCoU32 extends Definition(
-        "v_add_co_u32",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VAddCoU32(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1366
-      )
-  case object VAddF16 extends Definition(
-        "v_add_f16",
-        decoder(form(3)((operands, mods) => Instruction.VAddF16(operands(0), operands(1), operands(2), mods))),
-        1367
-      )
-  case object VAddF32 extends Definition(
-        "v_add_f32",
-        decoder(form(3)((operands, mods) => Instruction.VAddF32(operands(0), operands(1), operands(2), mods))),
-        1368
-      )
-  case object VAddF64 extends Definition(
-        "v_add_f64",
-        decoder(form(3)((operands, mods) => Instruction.VAddF64(operands(0), operands(1), operands(2), mods))),
-        1369
-      )
-  case object VAddNcU32 extends Definition(
-        "v_add_nc_u32",
-        decoder(form(3)((operands, mods) => Instruction.VAddNcU32(operands(0), operands(1), operands(2), mods))),
-        1381
-      )
-  case object VAddNcU64 extends Definition(
-        "v_add_nc_u64",
-        decoder(form(3)((operands, mods) => Instruction.VAddNcU64(operands(0), operands(1), operands(2), mods))),
-        1382
-      )
-  case object VAddU16 extends Definition(
-        "v_add_u16",
-        decoder(form(3)((operands, mods) => Instruction.VAddU16(operands(0), operands(1), operands(2), mods))),
-        1383
-      )
-  case object VAddU32 extends Definition(
-        "v_add_u32",
-        decoder(
-          form(3)((operands, mods) => Instruction.VAddU32_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) => Instruction.VAddU32_4(operands(0), operands(1), operands(2), operands(3), mods))
-        ),
-        1384
-      )
-  case object VAddcCoU32 extends Definition(
-        "v_addc_co_u32",
-        decoder(form(5)((operands, mods) =>
-          Instruction.VAddcCoU32(operands(0), operands(1), operands(2), operands(3), operands(4), mods)
-        )),
-        1385
-      )
-  case object VAndB32 extends Definition(
-        "v_and_b32",
-        decoder(form(3)((operands, mods) => Instruction.VAndB32(operands(0), operands(1), operands(2), mods))),
-        1389
-      )
-  case object VAshrI32 extends Definition(
-        "v_ashr_i32",
-        decoder(form(3)((operands, mods) => Instruction.VAshrI32(operands(0), operands(1), operands(2), mods))),
-        1391
-      )
-  case object VAshrrevI16 extends Definition(
-        "v_ashrrev_i16",
-        decoder(form(3)((operands, mods) => Instruction.VAshrrevI16(operands(0), operands(1), operands(2), mods))),
-        1395
-      )
-  case object VAshrrevI32 extends Definition(
-        "v_ashrrev_i32",
-        decoder(form(3)((operands, mods) => Instruction.VAshrrevI32(operands(0), operands(1), operands(2), mods))),
-        1396
-      )
-  case object VCndmaskB32 extends Definition(
-        "v_cndmask_b32",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VCndmaskB32(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1641
-      )
-  case object VCvtPkRtzF16F32_1 extends Definition(
-        "v_cvt_pk_rtz_f16_f32",
-        decoder(form(3)((operands, mods) =>
-          Instruction.VCvtPkRtzF16F32_1(operands(0), operands(1), operands(2), mods)
-        )),
-        1695
-      )
-  case object VCvtPkrtzF16F32_2 extends Definition(
-        "v_cvt_pkrtz_f16_f32",
-        decoder(form(3)((operands, mods) =>
-          Instruction.VCvtPkrtzF16F32_2(operands(0), operands(1), operands(2), mods)
-        )),
-        1704
-      )
-  case object VDot2accF32F16 extends Definition(
-        "v_dot2acc_f32_f16",
-        decoder(form(3)((operands, mods) => Instruction.VDot2accF32F16(operands(0), operands(1), operands(2), mods))),
-        1827
-      )
-  case object VDot2cF32Bf16 extends Definition(
-        "v_dot2c_f32_bf16",
-        decoder(form(3)((operands, mods) => Instruction.VDot2cF32Bf16(operands(0), operands(1), operands(2), mods))),
-        1828
-      )
-  case object VDot2cF32F16 extends Definition(
-        "v_dot2c_f32_f16",
-        decoder(
-          form(3)((operands, mods) => Instruction.VDot2cF32F16_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) =>
-            Instruction.VDot2cF32F16_4(operands(0), operands(1), operands(2), operands(3), mods)
-          )
-        ),
-        1829
-      )
-  case object VDot2cI32I16 extends Definition(
-        "v_dot2c_i32_i16",
-        decoder(form(3)((operands, mods) => Instruction.VDot2cI32I16(operands(0), operands(1), operands(2), mods))),
-        1830
-      )
-  case object VDot4cI32I8 extends Definition(
-        "v_dot4c_i32_i8",
-        decoder(
-          form(3)((operands, mods) => Instruction.VDot4cI32I8_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) =>
-            Instruction.VDot4cI32I8_4(operands(0), operands(1), operands(2), operands(3), mods)
-          )
-        ),
-        1838
-      )
-  case object VDot8cI32I4 extends Definition(
-        "v_dot8c_i32_i4",
-        decoder(form(3)((operands, mods) => Instruction.VDot8cI32I4(operands(0), operands(1), operands(2), mods))),
-        1842
-      )
-  case object VFmaakF16 extends Definition(
-        "v_fmaak_f16",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VFmaakF16(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1896
-      )
-  case object VFmaakF32 extends Definition(
-        "v_fmaak_f32",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VFmaakF32(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1897
-      )
-  case object VFmaakF64 extends Definition(
-        "v_fmaak_f64",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VFmaakF64(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1898
-      )
-  case object VFmacDx9ZeroF32 extends Definition(
-        "v_fmac_dx9_zero_f32",
-        decoder(form(3)((operands, mods) => Instruction.VFmacDx9ZeroF32(operands(0), operands(1), operands(2), mods))),
-        1899
-      )
-  case object VFmacF16 extends Definition(
-        "v_fmac_f16",
-        decoder(form(3)((operands, mods) => Instruction.VFmacF16(operands(0), operands(1), operands(2), mods))),
-        1900
-      )
-  case object VFmacF32 extends Definition(
-        "v_fmac_f32",
-        decoder(form(3)((operands, mods) => Instruction.VFmacF32(operands(0), operands(1), operands(2), mods))),
-        1901
-      )
-  case object VFmacF64 extends Definition(
-        "v_fmac_f64",
-        decoder(form(3)((operands, mods) => Instruction.VFmacF64(operands(0), operands(1), operands(2), mods))),
-        1902
-      )
-  case object VFmacLegacyF32 extends Definition(
-        "v_fmac_legacy_f32",
-        decoder(form(3)((operands, mods) => Instruction.VFmacLegacyF32(operands(0), operands(1), operands(2), mods))),
-        1903
-      )
-  case object VFmamkF16 extends Definition(
-        "v_fmamk_f16",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VFmamkF16(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1904
-      )
-  case object VFmamkF32 extends Definition(
-        "v_fmamk_f32",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VFmamkF32(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1905
-      )
-  case object VFmamkF64 extends Definition(
-        "v_fmamk_f64",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VFmamkF64(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1906
-      )
-  case object VLdexpF16 extends Definition(
-        "v_ldexp_f16",
-        decoder(form(3)((operands, mods) => Instruction.VLdexpF16(operands(0), operands(1), operands(2), mods))),
-        1929
-      )
-  case object VLshlB32 extends Definition(
-        "v_lshl_b32",
-        decoder(form(3)((operands, mods) => Instruction.VLshlB32(operands(0), operands(1), operands(2), mods))),
-        1940
-      )
-  case object VLshlrevB16 extends Definition(
-        "v_lshlrev_b16",
-        decoder(form(3)((operands, mods) => Instruction.VLshlrevB16(operands(0), operands(1), operands(2), mods))),
-        1943
-      )
-  case object VLshlrevB32 extends Definition(
-        "v_lshlrev_b32",
-        decoder(form(3)((operands, mods) => Instruction.VLshlrevB32(operands(0), operands(1), operands(2), mods))),
-        1944
-      )
-  case object VLshlrevB64 extends Definition(
-        "v_lshlrev_b64",
-        decoder(form(3)((operands, mods) => Instruction.VLshlrevB64(operands(0), operands(1), operands(2), mods))),
-        1945
-      )
-  case object VLshrB32 extends Definition(
-        "v_lshr_b32",
-        decoder(form(3)((operands, mods) => Instruction.VLshrB32(operands(0), operands(1), operands(2), mods))),
-        1947
-      )
-  case object VLshrrevB16 extends Definition(
-        "v_lshrrev_b16",
-        decoder(form(3)((operands, mods) => Instruction.VLshrrevB16(operands(0), operands(1), operands(2), mods))),
-        1949
-      )
-  case object VLshrrevB32 extends Definition(
-        "v_lshrrev_b32",
-        decoder(form(3)((operands, mods) => Instruction.VLshrrevB32(operands(0), operands(1), operands(2), mods))),
-        1950
-      )
-  case object VMacF16 extends Definition(
-        "v_mac_f16",
-        decoder(
-          form(3)((operands, mods) => Instruction.VMacF16_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) => Instruction.VMacF16_4(operands(0), operands(1), operands(2), operands(3), mods))
-        ),
-        1952
-      )
-  case object VMacF32 extends Definition(
-        "v_mac_f32",
-        decoder(
-          form(3)((operands, mods) => Instruction.VMacF32_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) => Instruction.VMacF32_4(operands(0), operands(1), operands(2), operands(3), mods))
-        ),
-        1953
-      )
-  case object VMacLegacyF32 extends Definition(
-        "v_mac_legacy_f32",
-        decoder(
-          form(3)((operands, mods) => Instruction.VMacLegacyF32_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) =>
-            Instruction.VMacLegacyF32_4(operands(0), operands(1), operands(2), operands(3), mods)
-          )
-        ),
-        1954
-      )
-  case object VMadakF16 extends Definition(
-        "v_madak_f16",
-        decoder(
-          form(3)((operands, mods) => Instruction.VMadakF16_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) => Instruction.VMadakF16_4(operands(0), operands(1), operands(2), operands(3), mods))
-        ),
-        1977
-      )
-  case object VMadakF32 extends Definition(
-        "v_madak_f32",
-        decoder(
-          form(3)((operands, mods) => Instruction.VMadakF32_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) => Instruction.VMadakF32_4(operands(0), operands(1), operands(2), operands(3), mods))
-        ),
-        1978
-      )
-  case object VMadmkF16 extends Definition(
-        "v_madmk_f16",
-        decoder(
-          form(3)((operands, mods) => Instruction.VMadmkF16_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) => Instruction.VMadmkF16_4(operands(0), operands(1), operands(2), operands(3), mods))
-        ),
-        1979
-      )
-  case object VMadmkF32 extends Definition(
-        "v_madmk_f32",
-        decoder(
-          form(3)((operands, mods) => Instruction.VMadmkF32_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) => Instruction.VMadmkF32_4(operands(0), operands(1), operands(2), operands(3), mods))
-        ),
-        1980
-      )
-  case object VMaxF16 extends Definition(
-        "v_max_f16",
-        decoder(form(3)((operands, mods) => Instruction.VMaxF16(operands(0), operands(1), operands(2), mods))),
-        1989
-      )
-  case object VMaxF32 extends Definition(
-        "v_max_f32",
-        decoder(form(3)((operands, mods) => Instruction.VMaxF32(operands(0), operands(1), operands(2), mods))),
-        1990
-      )
-  case object VMaxI16 extends Definition(
-        "v_max_i16",
-        decoder(form(3)((operands, mods) => Instruction.VMaxI16(operands(0), operands(1), operands(2), mods))),
-        1993
-      )
-  case object VMaxI32 extends Definition(
-        "v_max_i32",
-        decoder(form(3)((operands, mods) => Instruction.VMaxI32(operands(0), operands(1), operands(2), mods))),
-        1994
-      )
-  case object VMaxLegacyF32 extends Definition(
-        "v_max_legacy_f32",
-        decoder(form(3)((operands, mods) => Instruction.VMaxLegacyF32(operands(0), operands(1), operands(2), mods))),
-        1996
-      )
-  case object VMaxNumF16 extends Definition(
-        "v_max_num_f16",
-        decoder(form(3)((operands, mods) => Instruction.VMaxNumF16(operands(0), operands(1), operands(2), mods))),
-        1997
-      )
-  case object VMaxNumF32 extends Definition(
-        "v_max_num_f32",
-        decoder(form(3)((operands, mods) => Instruction.VMaxNumF32(operands(0), operands(1), operands(2), mods))),
-        1998
-      )
-  case object VMaxNumF64 extends Definition(
-        "v_max_num_f64",
-        decoder(form(3)((operands, mods) => Instruction.VMaxNumF64(operands(0), operands(1), operands(2), mods))),
-        1999
-      )
-  case object VMaxU16 extends Definition(
-        "v_max_u16",
-        decoder(form(3)((operands, mods) => Instruction.VMaxU16(operands(0), operands(1), operands(2), mods))),
-        2000
-      )
-  case object VMaxU32 extends Definition(
-        "v_max_u32",
-        decoder(form(3)((operands, mods) => Instruction.VMaxU32(operands(0), operands(1), operands(2), mods))),
-        2001
-      )
-  case object VMbcntHiU32B32 extends Definition(
-        "v_mbcnt_hi_u32_b32",
-        decoder(form(3)((operands, mods) => Instruction.VMbcntHiU32B32(operands(0), operands(1), operands(2), mods))),
-        2016
-      )
-  case object VMinF16 extends Definition(
-        "v_min_f16",
-        decoder(form(3)((operands, mods) => Instruction.VMinF16(operands(0), operands(1), operands(2), mods))),
-        2104
-      )
-  case object VMinF32 extends Definition(
-        "v_min_f32",
-        decoder(form(3)((operands, mods) => Instruction.VMinF32(operands(0), operands(1), operands(2), mods))),
-        2105
-      )
-  case object VMinI16 extends Definition(
-        "v_min_i16",
-        decoder(form(3)((operands, mods) => Instruction.VMinI16(operands(0), operands(1), operands(2), mods))),
-        2108
-      )
-  case object VMinI32 extends Definition(
-        "v_min_i32",
-        decoder(form(3)((operands, mods) => Instruction.VMinI32(operands(0), operands(1), operands(2), mods))),
-        2109
-      )
-  case object VMinLegacyF32 extends Definition(
-        "v_min_legacy_f32",
-        decoder(form(3)((operands, mods) => Instruction.VMinLegacyF32(operands(0), operands(1), operands(2), mods))),
-        2111
-      )
-  case object VMinNumF16 extends Definition(
-        "v_min_num_f16",
-        decoder(form(3)((operands, mods) => Instruction.VMinNumF16(operands(0), operands(1), operands(2), mods))),
-        2112
-      )
-  case object VMinNumF32 extends Definition(
-        "v_min_num_f32",
-        decoder(form(3)((operands, mods) => Instruction.VMinNumF32(operands(0), operands(1), operands(2), mods))),
-        2113
-      )
-  case object VMinNumF64 extends Definition(
-        "v_min_num_f64",
-        decoder(form(3)((operands, mods) => Instruction.VMinNumF64(operands(0), operands(1), operands(2), mods))),
-        2114
-      )
-  case object VMinU16 extends Definition(
-        "v_min_u16",
-        decoder(form(3)((operands, mods) => Instruction.VMinU16(operands(0), operands(1), operands(2), mods))),
-        2115
-      )
-  case object VMinU32 extends Definition(
-        "v_min_u32",
-        decoder(form(3)((operands, mods) => Instruction.VMinU32(operands(0), operands(1), operands(2), mods))),
-        2116
-      )
-  case object VMulDx9ZeroF32 extends Definition(
-        "v_mul_dx9_zero_f32",
-        decoder(form(3)((operands, mods) => Instruction.VMulDx9ZeroF32(operands(0), operands(1), operands(2), mods))),
-        2141
-      )
-  case object VMulF16 extends Definition(
-        "v_mul_f16",
-        decoder(form(3)((operands, mods) => Instruction.VMulF16(operands(0), operands(1), operands(2), mods))),
-        2142
-      )
-  case object VMulF32 extends Definition(
-        "v_mul_f32",
-        decoder(form(3)((operands, mods) => Instruction.VMulF32(operands(0), operands(1), operands(2), mods))),
-        2143
-      )
-  case object VMulF64 extends Definition(
-        "v_mul_f64",
-        decoder(form(3)((operands, mods) => Instruction.VMulF64(operands(0), operands(1), operands(2), mods))),
-        2144
-      )
-  case object VMulHiI32I24 extends Definition(
-        "v_mul_hi_i32_i24",
-        decoder(form(3)((operands, mods) => Instruction.VMulHiI32I24(operands(0), operands(1), operands(2), mods))),
-        2147
-      )
-  case object VMulHiU32U24 extends Definition(
-        "v_mul_hi_u32_u24",
-        decoder(form(3)((operands, mods) => Instruction.VMulHiU32U24(operands(0), operands(1), operands(2), mods))),
-        2149
-      )
-  case object VMulI32I24 extends Definition(
-        "v_mul_i32_i24",
-        decoder(form(3)((operands, mods) => Instruction.VMulI32I24(operands(0), operands(1), operands(2), mods))),
-        2150
-      )
-  case object VMulLegacyF32 extends Definition(
-        "v_mul_legacy_f32",
-        decoder(form(3)((operands, mods) => Instruction.VMulLegacyF32(operands(0), operands(1), operands(2), mods))),
-        2151
-      )
-  case object VMulLoU16 extends Definition(
-        "v_mul_lo_u16",
-        decoder(form(3)((operands, mods) => Instruction.VMulLoU16(operands(0), operands(1), operands(2), mods))),
-        2153
-      )
-  case object VMulU32U24 extends Definition(
-        "v_mul_u32_u24",
-        decoder(form(3)((operands, mods) => Instruction.VMulU32U24(operands(0), operands(1), operands(2), mods))),
-        2155
-      )
-  case object VMulU64 extends Definition(
-        "v_mul_u64",
-        decoder(form(3)((operands, mods) => Instruction.VMulU64(operands(0), operands(1), operands(2), mods))),
-        2156
-      )
-  case object VOrB32 extends Definition(
-        "v_or_b32",
-        decoder(form(3)((operands, mods) => Instruction.VOrB32(operands(0), operands(1), operands(2), mods))),
-        2163
-      )
-  case object VPkFmacF16 extends Definition(
-        "v_pk_fmac_f16",
-        decoder(form(3)((operands, mods) => Instruction.VPkFmacF16(operands(0), operands(1), operands(2), mods))),
-        2195
-      )
-  case object VReadlaneB32 extends Definition(
-        "v_readlane_b32",
-        decoder(form(3)((operands, mods) => Instruction.VReadlaneB32(operands(0), operands(1), operands(2), mods))),
-        2238
-      )
-  case object VSubCoCiU32 extends Definition(
-        "v_sub_co_ci_u32",
-        decoder(form(5)((operands, mods) =>
-          Instruction.VSubCoCiU32(operands(0), operands(1), operands(2), operands(3), operands(4), mods)
-        )),
-        2303
-      )
-  case object VSubCoU32 extends Definition(
-        "v_sub_co_u32",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VSubCoU32(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        2304
-      )
-  case object VSubF16 extends Definition(
-        "v_sub_f16",
-        decoder(form(3)((operands, mods) => Instruction.VSubF16(operands(0), operands(1), operands(2), mods))),
-        2305
-      )
-  case object VSubF32 extends Definition(
-        "v_sub_f32",
-        decoder(form(3)((operands, mods) => Instruction.VSubF32(operands(0), operands(1), operands(2), mods))),
-        2306
-      )
-  case object VSubNcU32 extends Definition(
-        "v_sub_nc_u32",
-        decoder(form(3)((operands, mods) => Instruction.VSubNcU32(operands(0), operands(1), operands(2), mods))),
-        2312
-      )
-  case object VSubNcU64 extends Definition(
-        "v_sub_nc_u64",
-        decoder(form(3)((operands, mods) => Instruction.VSubNcU64(operands(0), operands(1), operands(2), mods))),
-        2313
-      )
-  case object VSubU16 extends Definition(
-        "v_sub_u16",
-        decoder(form(3)((operands, mods) => Instruction.VSubU16(operands(0), operands(1), operands(2), mods))),
-        2314
-      )
-  case object VSubU32 extends Definition(
-        "v_sub_u32",
-        decoder(
-          form(3)((operands, mods) => Instruction.VSubU32_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) => Instruction.VSubU32_4(operands(0), operands(1), operands(2), operands(3), mods))
-        ),
-        2315
-      )
-  case object VSubbCoU32 extends Definition(
-        "v_subb_co_u32",
-        decoder(form(5)((operands, mods) =>
-          Instruction.VSubbCoU32(operands(0), operands(1), operands(2), operands(3), operands(4), mods)
-        )),
-        2316
-      )
-  case object VSubbrevCoU32 extends Definition(
-        "v_subbrev_co_u32",
-        decoder(form(5)((operands, mods) =>
-          Instruction.VSubbrevCoU32(operands(0), operands(1), operands(2), operands(3), operands(4), mods)
-        )),
-        2317
-      )
-  case object VSubrevCoCiU32 extends Definition(
-        "v_subrev_co_ci_u32",
-        decoder(form(5)((operands, mods) =>
-          Instruction.VSubrevCoCiU32(operands(0), operands(1), operands(2), operands(3), operands(4), mods)
-        )),
-        2318
-      )
-  case object VSubrevCoU32 extends Definition(
-        "v_subrev_co_u32",
-        decoder(form(4)((operands, mods) =>
-          Instruction.VSubrevCoU32(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        2319
-      )
-  case object VSubrevF16 extends Definition(
-        "v_subrev_f16",
-        decoder(form(3)((operands, mods) => Instruction.VSubrevF16(operands(0), operands(1), operands(2), mods))),
-        2320
-      )
-  case object VSubrevF32 extends Definition(
-        "v_subrev_f32",
-        decoder(form(3)((operands, mods) => Instruction.VSubrevF32(operands(0), operands(1), operands(2), mods))),
-        2321
-      )
-  case object VSubrevNcU32 extends Definition(
-        "v_subrev_nc_u32",
-        decoder(form(3)((operands, mods) => Instruction.VSubrevNcU32(operands(0), operands(1), operands(2), mods))),
-        2322
-      )
-  case object VSubrevU16 extends Definition(
-        "v_subrev_u16",
-        decoder(form(3)((operands, mods) => Instruction.VSubrevU16(operands(0), operands(1), operands(2), mods))),
-        2323
-      )
-  case object VSubrevU32 extends Definition(
-        "v_subrev_u32",
-        decoder(
-          form(3)((operands, mods) => Instruction.VSubrevU32_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) =>
-            Instruction.VSubrevU32_4(operands(0), operands(1), operands(2), operands(3), mods)
-          )
-        ),
-        2324
-      )
-  case object VWritelaneB32 extends Definition(
-        "v_writelane_b32",
-        decoder(
-          form(3)((operands, mods) => Instruction.VWritelaneB32_3(operands(0), operands(1), operands(2), mods)),
-          form(4)((operands, mods) =>
-            Instruction.VWritelaneB32_4(operands(0), operands(1), operands(2), operands(3), mods)
-          )
-        ),
-        2400
-      )
-  case object VXnorB32 extends Definition(
-        "v_xnor_b32",
-        decoder(form(3)((operands, mods) => Instruction.VXnorB32(operands(0), operands(1), operands(2), mods))),
-        2403
-      )
-  case object VXorB32 extends Definition(
-        "v_xor_b32",
-        decoder(form(3)((operands, mods) => Instruction.VXorB32(operands(0), operands(1), operands(2), mods))),
-        2406
-      )
+  case object VAddCoCiU32 extends Opcode("v_add_co_ci_u32", 1371)
 
-  val definitions: Vec[Definition] = Vec(
+  case object VAddCoU32 extends Opcode("v_add_co_u32", 1372)
+
+  case object VAddF16 extends Opcode("v_add_f16", 1373)
+
+  case object VAddF32 extends Opcode("v_add_f32", 1374)
+
+  case object VAddF64 extends Opcode("v_add_f64", 1375)
+
+  case object VAddI32 extends Opcode("v_add_i32", 1377)
+
+  case object VAddNcU32 extends Opcode("v_add_nc_u32", 1386)
+
+  case object VAddNcU64 extends Opcode("v_add_nc_u64", 1387)
+
+  case object VAddU16 extends Opcode("v_add_u16", 1388)
+
+  case object VAddU32 extends Opcode("v_add_u32", 1389)
+
+  case object VAddcCoU32 extends Opcode("v_addc_co_u32", 1390)
+
+  case object VAddcU32 extends Opcode("v_addc_u32", 1391)
+
+  case object VAndB32 extends Opcode("v_and_b32", 1395)
+
+  case object VAshrI32 extends Opcode("v_ashr_i32", 1397)
+
+  case object VAshrrevI16 extends Opcode("v_ashrrev_i16", 1401)
+
+  case object VAshrrevI32 extends Opcode("v_ashrrev_i32", 1402)
+
+  case object VBcntU32B32 extends Opcode("v_bcnt_u32_b32", 1404)
+
+  case object VBfmB32 extends Opcode("v_bfm_b32", 1408)
+
+  case object VCndmaskB32 extends Opcode("v_cndmask_b32", 1687)
+
+  case object VCvtPkI16I32 extends Opcode("v_cvt_pk_i16_i32", 1736)
+
+  case object VCvtPkRtzF16F32_1 extends Opcode("v_cvt_pk_rtz_f16_f32", 1741)
+
+  case object VCvtPkU16U32 extends Opcode("v_cvt_pk_u16_u32", 1743)
+
+  case object VCvtPkaccumU8F32 extends Opcode("v_cvt_pkaccum_u8_f32", 1745)
+
+  case object VCvtPknormI16F32_2 extends Opcode("v_cvt_pknorm_i16_f32", 1747)
+
+  case object VCvtPknormU16F32_2 extends Opcode("v_cvt_pknorm_u16_f32", 1749)
+
+  case object VCvtPkrtzF16F32_2 extends Opcode("v_cvt_pkrtz_f16_f32", 1750)
+
+  case object VDot2accF32F16 extends Opcode("v_dot2acc_f32_f16", 1872)
+
+  case object VDot2cF32Bf16 extends Opcode("v_dot2c_f32_bf16", 1873)
+
+  case object VDot2cF32F16 extends Opcode("v_dot2c_f32_f16", 1874)
+
+  case object VDot2cI32I16 extends Opcode("v_dot2c_i32_i16", 1875)
+
+  case object VDot4cI32I8 extends Opcode("v_dot4c_i32_i8", 1883)
+
+  case object VDot8cI32I4 extends Opcode("v_dot8c_i32_i4", 1887)
+
+  case object VFmaakF16 extends Opcode("v_fmaak_f16", 1941)
+
+  case object VFmaakF32 extends Opcode("v_fmaak_f32", 1942)
+
+  case object VFmaakF64 extends Opcode("v_fmaak_f64", 1943)
+
+  case object VFmacDx9ZeroF32 extends Opcode("v_fmac_dx9_zero_f32", 1944)
+
+  case object VFmacF16 extends Opcode("v_fmac_f16", 1945)
+
+  case object VFmacF32 extends Opcode("v_fmac_f32", 1946)
+
+  case object VFmacF64 extends Opcode("v_fmac_f64", 1947)
+
+  case object VFmacLegacyF32 extends Opcode("v_fmac_legacy_f32", 1948)
+
+  case object VFmamkF16 extends Opcode("v_fmamk_f16", 1949)
+
+  case object VFmamkF32 extends Opcode("v_fmamk_f32", 1950)
+
+  case object VFmamkF64 extends Opcode("v_fmamk_f64", 1951)
+
+  case object VLdexpF16 extends Opcode("v_ldexp_f16", 1981)
+
+  case object VLdexpF32 extends Opcode("v_ldexp_f32", 1982)
+
+  case object VLshlB32 extends Opcode("v_lshl_b32", 1992)
+
+  case object VLshlrevB16 extends Opcode("v_lshlrev_b16", 1995)
+
+  case object VLshlrevB32 extends Opcode("v_lshlrev_b32", 1996)
+
+  case object VLshlrevB64 extends Opcode("v_lshlrev_b64", 1997)
+
+  case object VLshrB32 extends Opcode("v_lshr_b32", 1998)
+
+  case object VLshrrevB16 extends Opcode("v_lshrrev_b16", 2000)
+
+  case object VLshrrevB32 extends Opcode("v_lshrrev_b32", 2001)
+
+  case object VMacF16 extends Opcode("v_mac_f16", 2003)
+
+  case object VMacF32 extends Opcode("v_mac_f32", 2004)
+
+  case object VMacLegacyF32 extends Opcode("v_mac_legacy_f32", 2005)
+
+  case object VMadakF16 extends Opcode("v_madak_f16", 2028)
+
+  case object VMadakF32 extends Opcode("v_madak_f32", 2029)
+
+  case object VMadmkF16 extends Opcode("v_madmk_f16", 2030)
+
+  case object VMadmkF32 extends Opcode("v_madmk_f32", 2031)
+
+  case object VMaxF16 extends Opcode("v_max_f16", 2040)
+
+  case object VMaxF32 extends Opcode("v_max_f32", 2041)
+
+  case object VMaxI16 extends Opcode("v_max_i16", 2043)
+
+  case object VMaxI32 extends Opcode("v_max_i32", 2044)
+
+  case object VMaxLegacyF32 extends Opcode("v_max_legacy_f32", 2046)
+
+  case object VMaxNumF16 extends Opcode("v_max_num_f16", 2047)
+
+  case object VMaxNumF32 extends Opcode("v_max_num_f32", 2048)
+
+  case object VMaxNumF64 extends Opcode("v_max_num_f64", 2049)
+
+  case object VMaxU16 extends Opcode("v_max_u16", 2050)
+
+  case object VMaxU32 extends Opcode("v_max_u32", 2051)
+
+  case object VMbcntHiU32B32 extends Opcode("v_mbcnt_hi_u32_b32", 2066)
+
+  case object VMbcntLoU32B32 extends Opcode("v_mbcnt_lo_u32_b32", 2067)
+
+  case object VMinF16 extends Opcode("v_min_f16", 2154)
+
+  case object VMinF32 extends Opcode("v_min_f32", 2155)
+
+  case object VMinI16 extends Opcode("v_min_i16", 2157)
+
+  case object VMinI32 extends Opcode("v_min_i32", 2158)
+
+  case object VMinLegacyF32 extends Opcode("v_min_legacy_f32", 2160)
+
+  case object VMinNumF16 extends Opcode("v_min_num_f16", 2161)
+
+  case object VMinNumF32 extends Opcode("v_min_num_f32", 2162)
+
+  case object VMinNumF64 extends Opcode("v_min_num_f64", 2163)
+
+  case object VMinU16 extends Opcode("v_min_u16", 2164)
+
+  case object VMinU32 extends Opcode("v_min_u32", 2165)
+
+  case object VMulDx9ZeroF32 extends Opcode("v_mul_dx9_zero_f32", 2190)
+
+  case object VMulF16 extends Opcode("v_mul_f16", 2191)
+
+  case object VMulF32 extends Opcode("v_mul_f32", 2192)
+
+  case object VMulF64 extends Opcode("v_mul_f64", 2193)
+
+  case object VMulHiI32I24 extends Opcode("v_mul_hi_i32_i24", 2195)
+
+  case object VMulHiU32U24 extends Opcode("v_mul_hi_u32_u24", 2197)
+
+  case object VMulI32I24 extends Opcode("v_mul_i32_i24", 2198)
+
+  case object VMulLegacyF32 extends Opcode("v_mul_legacy_f32", 2199)
+
+  case object VMulLoU16 extends Opcode("v_mul_lo_u16", 2201)
+
+  case object VMulU32U24 extends Opcode("v_mul_u32_u24", 2203)
+
+  case object VMulU64 extends Opcode("v_mul_u64", 2204)
+
+  case object VOrB32 extends Opcode("v_or_b32", 2211)
+
+  case object VPkFmacF16 extends Opcode("v_pk_fmac_f16", 2246)
+
+  case object VReadlaneB32 extends Opcode("v_readlane_b32", 2294)
+
+  case object VSubCoCiU32 extends Opcode("v_sub_co_ci_u32", 2358)
+
+  case object VSubCoU32 extends Opcode("v_sub_co_u32", 2359)
+
+  case object VSubF16 extends Opcode("v_sub_f16", 2360)
+
+  case object VSubF32 extends Opcode("v_sub_f32", 2361)
+
+  case object VSubI32 extends Opcode("v_sub_i32", 2363)
+
+  case object VSubNcU32 extends Opcode("v_sub_nc_u32", 2367)
+
+  case object VSubNcU64 extends Opcode("v_sub_nc_u64", 2368)
+
+  case object VSubU16 extends Opcode("v_sub_u16", 2369)
+
+  case object VSubU32 extends Opcode("v_sub_u32", 2370)
+
+  case object VSubbCoU32 extends Opcode("v_subb_co_u32", 2371)
+
+  case object VSubbU32 extends Opcode("v_subb_u32", 2372)
+
+  case object VSubbrevCoU32 extends Opcode("v_subbrev_co_u32", 2373)
+
+  case object VSubbrevU32 extends Opcode("v_subbrev_u32", 2374)
+
+  case object VSubrevCoCiU32 extends Opcode("v_subrev_co_ci_u32", 2375)
+
+  case object VSubrevCoU32 extends Opcode("v_subrev_co_u32", 2376)
+
+  case object VSubrevF16 extends Opcode("v_subrev_f16", 2377)
+
+  case object VSubrevF32 extends Opcode("v_subrev_f32", 2378)
+
+  case object VSubrevI32 extends Opcode("v_subrev_i32", 2379)
+
+  case object VSubrevNcU32 extends Opcode("v_subrev_nc_u32", 2380)
+
+  case object VSubrevU16 extends Opcode("v_subrev_u16", 2381)
+
+  case object VSubrevU32 extends Opcode("v_subrev_u32", 2382)
+
+  case object VWritelaneB32 extends Opcode("v_writelane_b32", 2461)
+
+  case object VXnorB32 extends Opcode("v_xnor_b32", 2463)
+
+  case object VXorB32 extends Opcode("v_xor_b32", 2466)
+
+  val definitions: Vec[Opcode] = Vec(
     VAddCoCiU32,
     VAddCoU32,
     VAddF16,
     VAddF32,
     VAddF64,
+    VAddI32,
     VAddNcU32,
     VAddNcU64,
     VAddU16,
     VAddU32,
     VAddcCoU32,
+    VAddcU32,
     VAndB32,
     VAshrI32,
     VAshrrevI16,
     VAshrrevI32,
+    VBcntU32B32,
+    VBfmB32,
     VCndmaskB32,
+    VCvtPkI16I32,
     VCvtPkRtzF16F32_1,
+    VCvtPkU16U32,
+    VCvtPkaccumU8F32,
+    VCvtPknormI16F32_2,
+    VCvtPknormU16F32_2,
     VCvtPkrtzF16F32_2,
     VDot2accF32F16,
     VDot2cF32Bf16,
@@ -649,6 +289,7 @@ private object VOP2InstructionDefs {
     VFmamkF32,
     VFmamkF64,
     VLdexpF16,
+    VLdexpF32,
     VLshlB32,
     VLshlrevB16,
     VLshlrevB32,
@@ -674,6 +315,7 @@ private object VOP2InstructionDefs {
     VMaxU16,
     VMaxU32,
     VMbcntHiU32B32,
+    VMbcntLoU32B32,
     VMinF16,
     VMinF32,
     VMinI16,
@@ -702,16 +344,20 @@ private object VOP2InstructionDefs {
     VSubCoU32,
     VSubF16,
     VSubF32,
+    VSubI32,
     VSubNcU32,
     VSubNcU64,
     VSubU16,
     VSubU32,
     VSubbCoU32,
+    VSubbU32,
     VSubbrevCoU32,
+    VSubbrevU32,
     VSubrevCoCiU32,
     VSubrevCoU32,
     VSubrevF16,
     VSubrevF32,
+    VSubrevI32,
     VSubrevNcU32,
     VSubrevU16,
     VSubrevU32,

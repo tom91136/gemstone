@@ -61,7 +61,7 @@ class PTX(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBackend
       memory match {
         case addresses: AddressSpace =>
           loaded.global(name).left.map(_ =>
-            ExecutionFailure.NotFound(s"PTX global '${name}' is not present")
+            ExecutionFailure.NotFound(s"PTX global '$name' is not present")
           )
             .flatMap(_ =>
               loaded.bindGlobal(name, region, offset, regionSize, addresses)

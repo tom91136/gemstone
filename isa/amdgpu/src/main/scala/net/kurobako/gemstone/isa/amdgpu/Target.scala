@@ -32,11 +32,13 @@ object Target extends Newtype[NonEmpty[String]] {
       (ISA.CDNA2.type, Tuple1["gfx90a"]),
       (ISA.CDNA3.type, ("gfx940", "gfx941", "gfx942")),
       (ISA.CDNA4.type, Tuple1["gfx950"]),
+      (ISA.CDNA5.type, ("gfx1250", "gfx1251")),
       (ISA.RDNA1.type, ("gfx1001", "gfx1010", "gfx1011", "gfx1012", "gfx1013")),
       (ISA.RDNA2.type, ("gfx1030", "gfx1031", "gfx1032", "gfx1033", "gfx1034", "gfx1035", "gfx1036")),
       (ISA.RDNA3.type, ("gfx1100", "gfx1101", "gfx1102", "gfx1103")),
-      (ISA.RDNA3_5.type, ("gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1170")),
-      (ISA.RDNA4.type, ("gfx12", "gfx1200", "gfx1250", "gfx1251"))
+      (ISA.RDNA3_5.type, ("gfx1150", "gfx1151", "gfx1152", "gfx1153")),
+      (ISA.GFX11_7.type, Tuple1["gfx1170"]),
+      (ISA.RDNA4.type, ("gfx12", "gfx1200"))
   )
 
   private type Names[T <: Tuple] <: Tuple = T match {

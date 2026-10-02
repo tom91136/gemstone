@@ -105,7 +105,7 @@ private object execution extends munit.Assertions {
       )
   }
 
-  def operand(kind: NonEmpty[String], values: Int*): Operand = Operand(
+  def operand(kind: OperandKind, values: Int*): Operand = Operand(
     kind,
     Vec.from(values.map(Word(_))).unsafe[NonEmpty[Vec[Word]]]
   )
@@ -113,7 +113,7 @@ private object execution extends munit.Assertions {
   def phiPair(value: Operand, parent: Operand): Operand = {
     val valueWord  = value.singleWord.fold(message => fail(message), word => word)
     val parentWord = parent.singleWord.fold(message => fail(message), word => word)
-    Operand("PairIdRefIdRef", Vec.nonEmpty(valueWord, parentWord))
+    Operand(OperandKind.PairIdRefIdRef, Vec.nonEmpty(valueWord, parentWord))
   }
 
   def stringOperand(value: String): Operand = {
@@ -127,6 +127,6 @@ private object execution extends munit.Assertions {
       )
       Word(LittleEndian.decode(group, 0, width).toInt)
     }
-    Operand("LiteralString", Vec.from(words).unsafe)
+    Operand(OperandKind.LiteralString, Vec.from(words).unsafe)
   }
 }

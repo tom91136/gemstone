@@ -18,8 +18,8 @@ object Parser extends Decoder[String, Program, ParseError] {
 
   def parse(source: String): Either[ParseError, Program] =
     try {
-      val (tokens, end) = tokenize(source)
-      Right(Cursor(tokens, end).program())
+      val (tokens, comments, end) = tokenize(source)
+      Right(Cursor(tokens, comments, end).program())
     } catch {
       case Failure(token, expectation) =>
         Left(ParseError(
@@ -32,8 +32,14 @@ object Parser extends Decoder[String, Program, ParseError] {
 
   override def decode(source: String): Either[ParseError, Program] = parse(source)
 
+  /** Extract one semantic statement; parse retains surrounding comments in the program. */
   def parseStatement(source: String): Either[ParseError, Statement] =
-    parse(source).flatMap {
+    parse(source).map(program =>
+      Program(program.statements.filter {
+        case Statement.Comment(_) => false
+        case _                    => true
+      })
+    ).flatMap {
       case Program(Vec(value)) => Right(value)
       case Program(values)     => Left(ParseError(
           0,
@@ -44,8 +50,9 @@ object Parser extends Decoder[String, Program, ParseError] {
     }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def tokenize(source: String): (Array[Token], Token) = {
+  private def tokenize(source: String): (Array[Token], Array[Token], Token) = {
     val tokens           = mutable.ArrayBuffer.empty[Token]
+    val comments         = mutable.ArrayBuffer.empty[Token]
     var offset: Int >= 0 = 0
     var line: Int > 0    = 1
     var column: Int > 0  = 1
@@ -62,11 +69,15 @@ object Parser extends Decoder[String, Program, ParseError] {
     def add(text: String, start: Int >= 0, startLine: Int > 0, startColumn: Int > 0, quoted: Boolean = false): Unit =
       tokens += Token(text, start, startLine, startColumn, quoted)
 
+    def atComment: Boolean = source.startsWith("//", offset.raw) || source.startsWith("/*", offset.raw)
+
     while (offset.raw < source.length) {
       val character = source.charAt(offset.raw)
       if (character.isWhitespace) advance()
       else if (character == '/' && offset.raw + 1 < source.length && source.charAt(offset.raw + 1) == '/') {
+        val start = Token("", offset, line, column)
         while (offset.raw < source.length && source.charAt(offset.raw) != '\n') advance()
+        comments += start.copy(text = source.substring(start.offset.raw, offset.raw))
       } else if (character == '/' && offset.raw + 1 < source.length && source.charAt(offset.raw + 1) == '*') {
         val start       = offset
         val startLine   = line
@@ -80,6 +91,7 @@ object Parser extends Decoder[String, Program, ParseError] {
         if (offset.raw + 1 >= source.length) throw Failure(Token("", start, startLine, startColumn), "closing */")
         advance()
         advance()
+        comments += Token(source.substring(start.raw, offset.raw), start, startLine, startColumn)
       } else {
         val start       = offset
         val startLine   = line
@@ -115,7 +127,7 @@ object Parser extends Decoder[String, Program, ParseError] {
             advance()
             while (
               offset.raw < source.length &&
-              !source.charAt(offset.raw).isWhitespace &&
+              !source.charAt(offset.raw).isWhitespace && !atComment &&
               !".,;:{}()[]+-|@!=\"".contains(source.charAt(offset.raw))
             ) advance()
             add(source.substring(previous.offset.raw, offset.raw), previous.offset, previous.line, previous.column)
@@ -124,7 +136,7 @@ object Parser extends Decoder[String, Program, ParseError] {
             advance(); add(value.toString, start, startLine, startColumn)
           case _ =>
             while (
-              offset.raw < source.length && !source.charAt(offset.raw).isWhitespace &&
+              offset.raw < source.length && !source.charAt(offset.raw).isWhitespace && !atComment &&
               !".,;:{}()[]+-|@!=\"".contains(source.charAt(offset.raw))
             ) advance()
             if (offset == start) throw Failure(Token(character.toString, start, startLine, startColumn), "PTX token")
@@ -132,12 +144,13 @@ object Parser extends Decoder[String, Program, ParseError] {
         }
       }
     }
-    (tokens.toArray, Token("", offset, line, column))
+    (tokens.toArray, comments.toArray, Token("", offset, line, column))
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
-  private class Cursor(tokens: Array[Token], end: Token) {
-    private var index = 0
+  private class Cursor(tokens: Array[Token], comments: Array[Token], end: Token) {
+    private var index        = 0
+    private var commentIndex = 0
 
     private def eof: Boolean = index >= tokens.length
 
@@ -169,8 +182,21 @@ object Parser extends Decoder[String, Program, ParseError] {
 
     def program(): Program = {
       val statements = mutable.ArrayBuffer.empty[Statement]
-      while (!eof) statements += statement()
+      while (!eof) appendStatement(statements)
+      appendComments(statements)
       Program(Vec.from(statements))
+    }
+
+    private def appendComments(statements: mutable.ArrayBuffer[Statement]): Unit =
+      while (commentIndex < comments.length && comments(commentIndex).offset.raw < current.offset.raw) {
+        statements += Statement.Comment(name(comments(commentIndex).text))
+        commentIndex += 1
+      }
+
+    private def appendStatement(statements: mutable.ArrayBuffer[Statement]): Unit = {
+      appendComments(statements)
+      statements += statement()
+      appendComments(statements)
     }
 
     private def statement(): Statement =
@@ -186,8 +212,9 @@ object Parser extends Decoder[String, Program, ParseError] {
       val body = mutable.ArrayBuffer.empty[Statement]
       while (!at("}")) {
         if (eof) fail("closing }")
-        body += statement()
+        appendStatement(body)
       }
+      appendComments(body)
       expect("}")
       Statement.Block(Vec.from(body))
     }
@@ -198,7 +225,7 @@ object Parser extends Decoder[String, Program, ParseError] {
       val first = word()
       index = mark
       if (looksLikeFunctionDeclaration()) function()
-      else if (first == "version" || first == "target" || first == "address_size") lineDirective()
+      else if (Set("version", "target", "address_size", "file", "loc").contains(first)) lineDirective()
       else if (looksLikeDataDeclaration()) {
         val dataMark = index
         try dataDeclaration()
@@ -244,7 +271,7 @@ object Parser extends Decoder[String, Program, ParseError] {
       val path      = dottedPath()
       val arguments = mutable.ArrayBuffer.empty[DirectiveArgument]
       var separator = DirectiveSeparator.Space
-      while (!eof && !at(";") && !at("}") && !(current.line > startLine && at(".")))
+      while (!eof && !at(";") && !at("}") && current.line <= startLine)
         if (accept(",")) separator = DirectiveSeparator.Comma
         else {
           arguments += DirectiveArgument(separator, operand())
@@ -264,9 +291,13 @@ object Parser extends Decoder[String, Program, ParseError] {
           arguments += DirectiveArgument(separator, operand())
           separator = DirectiveSeparator.Space
         }
-      if (accept("=")) while (!eof && !at(";")) index += 1
+      val initializer = if (accept("=")) {
+        val values = operandsUntil(";")
+        if (values.isEmpty) fail("initializer")
+        values
+      } else Vec.empty[Operand]
       expect(";")
-      Statement.Directive(path, Vec.from(arguments), DirectiveTerminator.Semicolon)
+      Statement.Directive(path, Vec.from(arguments), DirectiveTerminator.Semicolon, initializer)
     }
 
     private def dottedPath(): NonEmpty[Vec[NonEmpty[String]]] = {
@@ -293,17 +324,17 @@ object Parser extends Decoder[String, Program, ParseError] {
       val symbol = name(word())
       val count  =
         if (accept("[")) {
-          val value = if (accept("]")) None
+          val value = if (accept("]")) Extent.Unsized
           else {
             val parsed =
               word().toIntOption.flatMap(refinementValue => refinementValue.refine[Int > 0].toOption).getOrElse(
                 fail("positive element count")
               )
             expect("]")
-            Some(parsed)
+            Extent.Sized(parsed)
           }
           value
-        } else None
+        } else Extent.Scalar
       val initializer =
         if (accept("=")) {
           if (accept("{")) {
@@ -347,44 +378,63 @@ object Parser extends Decoder[String, Program, ParseError] {
     }
 
     private def function(): Statement = {
-      var visible  = false
+      var linkage  = Linkage.Default
       var scanning = true
       while (scanning) {
         expect(".")
         word() match {
-          case "visible"                 => visible = true
-          case "weak"                    => ()
-          case "extern"                  => ()
+          case value @ ("visible" | "weak" | "extern") =>
+            if (linkage != Linkage.Default) fail("one linkage qualifier")
+            linkage = Linkage.values.find(_.mnemonic == value).getOrElse(fail("linkage qualifier"))
           case kind @ ("entry" | "func") =>
             scanning = false
             val isEntry            = kind == "entry"
             val returns            = if (!isEntry && at("(")) this.parameters() else Vec.empty[Parameter]
             val functionName       = word()
             val functionParameters = if (at("(")) this.parameters() else Vec.empty[Parameter]
-            while (!eof && !at("{") && !at(";")) index += 1
-            val body =
+            val directives         = functionDirectives()
+            val body               =
               if (accept("{")) {
                 val statements = mutable.ArrayBuffer.empty[Statement]
                 while (!at("}")) {
                   if (eof) fail("closing }")
-                  statements += statement()
+                  appendStatement(statements)
                 }
+                appendComments(statements)
                 expect("}")
                 Some(Vec.from(statements))
-              } else { val _ = accept(";"); None }
+              } else { expect(";"); None }
             return if (isEntry)
               Statement.Entry(
-                visible,
+                linkage,
                 name(functionName),
                 functionParameters,
-                body.getOrElse(Vec.empty[Statement])
+                body,
+                directives
               )
             else
-              Statement.Function(visible, name(functionName), returns, functionParameters, body)
+              Statement.Function(linkage, name(functionName), returns, functionParameters, body, directives)
           case _ => fail(".entry or .func")
         }
       }
       fail("function")
+    }
+
+    private def functionDirectives(): Vec[Statement.Directive] = {
+      val directives = mutable.ArrayBuffer.empty[Statement.Directive]
+      while (!eof && !at("{") && !at(";")) {
+        val path      = dottedPath()
+        val arguments = mutable.ArrayBuffer.empty[DirectiveArgument]
+        var separator = DirectiveSeparator.Space
+        while (!eof && !at(".") && !at("{") && !at(";"))
+          if (accept(",")) separator = DirectiveSeparator.Comma
+          else {
+            arguments += DirectiveArgument(separator, operand())
+            separator = DirectiveSeparator.Space
+          }
+        directives += Statement.Directive(path, Vec.from(arguments), DirectiveTerminator.Line)
+      }
+      Vec.from(directives)
     }
 
     private def parameters(): Vec[Parameter] = {
@@ -407,9 +457,9 @@ object Parser extends Decoder[String, Program, ParseError] {
       }
       val kind = DataType.values.find(value => parts.contains(value.mnemonic)).getOrElse(fail("parameter data type"))
       val parameterName = name(word())
-      val dimensions    = mutable.ArrayBuffer.empty[Operand]
+      val dimensions    = mutable.ArrayBuffer.empty[Option[Operand]]
       while (accept("[")) {
-        if (!at("]")) dimensions ++= operandsUntil("]")
+        dimensions += (if (at("]")) None else Some(operand()))
         expect("]")
       }
       Parameter(declarationQualifiers(Vec.from(parts), Set(kind.mnemonic)), kind, parameterName, Vec.from(dimensions))
@@ -419,12 +469,14 @@ object Parser extends Decoder[String, Program, ParseError] {
       val label = word()
       expect(":")
       if (at(".") && index + 1 < tokens.length && tokens(index + 1).text == "callprototype") {
-        while (!eof && !accept(";")) index += 1
-        Statement.Directive(
-          Vec.nonEmpty(name("callprototype")),
-          Vec.empty,
-          DirectiveTerminator.Semicolon
-        )
+        expect(".")
+        expect("callprototype")
+        val returns = if (at("(")) parameters() else Vec.empty[Parameter]
+        expect("_")
+        val inputs     = if (at("(")) parameters() else Vec.empty[Parameter]
+        val directives = functionDirectives()
+        expect(";")
+        Statement.CallPrototype(name(label), returns, inputs, directives)
       } else Statement.Label(name(label))
     }
 

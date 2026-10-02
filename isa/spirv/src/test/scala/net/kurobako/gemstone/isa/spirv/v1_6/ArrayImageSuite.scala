@@ -19,8 +19,8 @@ class ArrayImageSuite extends munit.FunSuite {
   } test(
     s"stage $model image dimension $dimension texel format $format, width $width, $position layer $layer: writes/atomics alias fetches, reads and size queries"
   ) {
-    def ref(n: Int): Operand = operand("IdRef", n)
-    def lit(n: Int): Operand = operand("LiteralInteger", n)
+    def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
+    def lit(n: Int): Operand = operand(OperandKind.LiteralInteger, n)
     val integer              = format >= 21 && format <= 39
     val signed               = format >= 21 && format <= 29
     val componentType        = if (integer) 2 else 3
@@ -54,28 +54,28 @@ class ArrayImageSuite extends munit.FunSuite {
       Instruction.Constant(
         ref(componentType),
         ref(20 + i),
-        operand("LiteralContextDependentNumber", v.toInt)
+        operand(OperandKind.LiteralContextDependentNumber, v.toInt)
       ): Instruction
     })
     val module = Module(
       Header(ISA.version, Word(0), Word(56), Word(0)),
       Vec(
         Instruction.EntryPoint(
-          operand("ExecutionModel", model),
+          operand(OperandKind.ExecutionModel, model),
           ref(30),
           stringOperand("main"),
           Vec(ref(16), ref(17), ref(18))
         ),
-        Instruction.Decorate(ref(16), operand("Decoration", Decoration.Binding, 0)),
-        Instruction.Decorate(ref(16), operand("Decoration", Decoration.DescriptorSet, 0)),
-        Instruction.Decorate(ref(17), operand("Decoration", Decoration.Binding, 1)),
-        Instruction.Decorate(ref(17), operand("Decoration", Decoration.DescriptorSet, 0)),
-        Instruction.Decorate(ref(18), operand("Decoration", Decoration.Binding, 2)),
-        Instruction.Decorate(ref(18), operand("Decoration", Decoration.DescriptorSet, 0)),
-        Instruction.MemberDecorate(ref(9), lit(0), operand("Decoration", Decoration.Offset, 0)),
-        Instruction.MemberDecorate(ref(9), lit(1), operand("Decoration", Decoration.Offset, 16)),
-        Instruction.MemberDecorate(ref(9), lit(2), operand("Decoration", Decoration.Offset, 32)),
-        Instruction.MemberDecorate(ref(9), lit(3), operand("Decoration", Decoration.Offset, 48)),
+        Instruction.Decorate(ref(16), operand(OperandKind.Decoration, Decoration.Binding, 0)),
+        Instruction.Decorate(ref(16), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+        Instruction.Decorate(ref(17), operand(OperandKind.Decoration, Decoration.Binding, 1)),
+        Instruction.Decorate(ref(17), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+        Instruction.Decorate(ref(18), operand(OperandKind.Decoration, Decoration.Binding, 2)),
+        Instruction.Decorate(ref(18), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+        Instruction.MemberDecorate(ref(9), lit(0), operand(OperandKind.Decoration, Decoration.Offset, 0)),
+        Instruction.MemberDecorate(ref(9), lit(1), operand(OperandKind.Decoration, Decoration.Offset, 16)),
+        Instruction.MemberDecorate(ref(9), lit(2), operand(OperandKind.Decoration, Decoration.Offset, 32)),
+        Instruction.MemberDecorate(ref(9), lit(3), operand(OperandKind.Decoration, Decoration.Offset, 48)),
         Instruction.TypeVoid(ref(1)),
         Instruction.TypeInt(ref(2), lit(32), lit(if (signed) 1 else 0)),
         Instruction.TypeFloat(ref(3), lit(32), None),
@@ -83,37 +83,37 @@ class ArrayImageSuite extends munit.FunSuite {
         Instruction.TypeImage(
           ref(5),
           ref(componentType),
-          operand("Dim", dimension),
+          operand(OperandKind.Dim, dimension),
           lit(0),
           lit(if (dimension == 2) 0 else 1),
           lit(0),
           lit(2),
-          operand("ImageFormat", format),
+          operand(OperandKind.ImageFormat, format),
           None
         ),
         Instruction.TypeImage(
           ref(6),
           ref(componentType),
-          operand("Dim", if (dimension == 3) 1 else dimension),
+          operand(OperandKind.Dim, if (dimension == 3) 1 else dimension),
           lit(0),
           lit(if (dimension == 2) 0 else 1),
           lit(0),
           lit(1),
-          operand("ImageFormat", ImageFormat.Unknown),
+          operand(OperandKind.ImageFormat, ImageFormat.Unknown),
           None
         ),
-        Instruction.TypePointer(ref(7), operand("StorageClass", StorageClass.UniformConstant), ref(5)),
-        Instruction.TypePointer(ref(8), operand("StorageClass", StorageClass.UniformConstant), ref(6)),
+        Instruction.TypePointer(ref(7), operand(OperandKind.StorageClass, StorageClass.UniformConstant), ref(5)),
+        Instruction.TypePointer(ref(8), operand(OperandKind.StorageClass, StorageClass.UniformConstant), ref(6)),
         Instruction.TypeVector(ref(51), ref(2), lit(if (dimension == 0) 2 else 3)),
         Instruction.TypeStruct(ref(9), Vec(ref(4), ref(4), ref(51), ref(51))),
-        Instruction.TypePointer(ref(10), operand("StorageClass", StorageClass.StorageBuffer), ref(9)),
-        Instruction.TypePointer(ref(11), operand("StorageClass", StorageClass.StorageBuffer), ref(4)),
-        Instruction.TypePointer(ref(12), operand("StorageClass", StorageClass.StorageBuffer), ref(51)),
-        Instruction.TypePointer(ref(45), operand("StorageClass", StorageClass.Image), ref(2)),
+        Instruction.TypePointer(ref(10), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(9)),
+        Instruction.TypePointer(ref(11), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(4)),
+        Instruction.TypePointer(ref(12), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(51)),
+        Instruction.TypePointer(ref(45), operand(OperandKind.StorageClass, StorageClass.Image), ref(2)),
         Instruction.TypeFunction(ref(13), ref(1), Vec.empty),
-        Instruction.Variable(ref(7), ref(16), operand("StorageClass", StorageClass.UniformConstant), None),
-        Instruction.Variable(ref(8), ref(17), operand("StorageClass", StorageClass.UniformConstant), None),
-        Instruction.Variable(ref(10), ref(18), operand("StorageClass", StorageClass.StorageBuffer), None),
+        Instruction.Variable(ref(7), ref(16), operand(OperandKind.StorageClass, StorageClass.UniformConstant), None),
+        Instruction.Variable(ref(8), ref(17), operand(OperandKind.StorageClass, StorageClass.UniformConstant), None),
+        Instruction.Variable(ref(10), ref(18), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), None),
         Instruction.Constant(ref(2), ref(50), lit(coordinate)),
         Instruction.Constant(ref(2), ref(52), lit(layer)),
         Instruction.Constant(ref(2), ref(53), lit(y)),
@@ -128,7 +128,7 @@ class ArrayImageSuite extends munit.FunSuite {
           if (dimension == 0) Vec(ref(50), ref(52)) else Vec(ref(50), ref(53), ref(52))
         ),
         Instruction.ConstantComposite(ref(4), ref(24), Vec(ref(20), ref(21), ref(22), ref(23))),
-        Instruction.Function(ref(1), ref(30), operand("FunctionControl", FunctionControl.None), ref(13)),
+        Instruction.Function(ref(1), ref(30), operand(OperandKind.FunctionControl, FunctionControl.None), ref(13)),
         Instruction.Label(ref(31)),
         Instruction.Load(ref(5), ref(32), ref(16), None),
         Instruction.Load(ref(6), ref(33), ref(17), None),
@@ -143,7 +143,7 @@ class ArrayImageSuite extends munit.FunSuite {
           ref(35),
           ref(33),
           ref(19),
-          if (dimension == 5) None else Some(operand("ImageOperands", ImageOperands.Lod, 26))
+          if (dimension == 5) None else Some(operand(OperandKind.ImageOperands, ImageOperands.Lod, 26))
         ),
         Instruction.ImageQuerySize(ref(51), ref(36), ref(32)),
         if (dimension == 5) Instruction.ImageQuerySize(ref(51), ref(37), ref(33))

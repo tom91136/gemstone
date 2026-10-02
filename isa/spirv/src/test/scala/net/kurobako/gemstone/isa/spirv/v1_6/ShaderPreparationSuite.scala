@@ -9,12 +9,12 @@ import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.rpc.*
 
 class ShaderPreparationSuite extends munit.FunSuite {
-  private def o(kind: NonEmpty[String], values: Int*): Operand             = operand(kind, values*)
-  private def ref(value: Int): Operand                                     = o("IdRef", value)
-  private def dest(value: Int): Operand                                    = o("IdResult", value)
-  private def literal(value: Int): Operand                                 = o("LiteralInteger", value)
+  private def o(kind: OperandKind, values: Int*): Operand                  = operand(kind, values*)
+  private def ref(value: Int): Operand                                     = o(OperandKind.IdRef, value)
+  private def dest(value: Int): Operand                                    = o(OperandKind.IdResult, value)
+  private def literal(value: Int): Operand                                 = o(OperandKind.LiteralInteger, value)
   private def decoration(target: Int, kind: Long, value: Int): Instruction =
-    Instruction.Decorate(ref(target), o("Decoration", kind.toInt, value))
+    Instruction.Decorate(ref(target), o(OperandKind.Decoration, kind.toInt, value))
   private def base(
       model: Long,
       declarations: Vec[Instruction] = Vec.empty,
@@ -23,16 +23,29 @@ class ShaderPreparationSuite extends munit.FunSuite {
   ): Module = Module(
     Header(Version(1, 4), Word(0), Word(100), Word(0)),
     Vec(
-      Instruction.Capability(o("Capability", Capability.Shader)),
-      Instruction.MemoryModel(o("AddressingModel", AddressingModel.Logical), o("MemoryModel", MemoryModel.GLSL450)),
-      Instruction.EntryPoint(o("ExecutionModel", model.toInt), ref(10), stringOperand("main"), interfaces.map(ref(_)))
+      Instruction.Capability(o(OperandKind.Capability, Capability.Shader)),
+      Instruction.MemoryModel(
+        o(OperandKind.AddressingModel, AddressingModel.Logical),
+        o(OperandKind.MemoryModel, MemoryModel.GLSL450)
+      ),
+      Instruction.EntryPoint(
+        o(OperandKind.ExecutionModel, model.toInt),
+        ref(10),
+        stringOperand("main"),
+        interfaces.map(ref(_))
+      )
     ) ++
       (if (model == ExecutionModel.GLCompute)
-         Vec(Instruction.ExecutionMode(ref(10), o("ExecutionMode", ExecutionMode.LocalSize, 2, 3, 4)))
+         Vec(Instruction.ExecutionMode(ref(10), o(OperandKind.ExecutionMode, ExecutionMode.LocalSize, 2, 3, 4)))
        else Vec.empty[Instruction]) ++
       Vec(Instruction.TypeVoid(dest(1)), Instruction.TypeFunction(dest(2), ref(1), Vec.empty)) ++ declarations ++
       Vec(
-        Instruction.Function(o("IdResultType", 1), dest(10), o("FunctionControl", FunctionControl.None), ref(2)),
+        Instruction.Function(
+          o(OperandKind.IdResultType, 1),
+          dest(10),
+          o(OperandKind.FunctionControl, FunctionControl.None),
+          ref(2)
+        ),
         Instruction.Label(dest(11))
       ) ++ body ++ Vec(Instruction.FunctionEnd()),
     Endianness.Little
@@ -52,12 +65,12 @@ class ShaderPreparationSuite extends munit.FunSuite {
     val module  = compute.copy(instructions =
       compute.instructions ++ Vec(
         Instruction.EntryPoint(
-          o("ExecutionModel", ExecutionModel.Vertex),
+          o(OperandKind.ExecutionModel, ExecutionModel.Vertex),
           ref(20),
           stringOperand("main"),
           Vec.empty
         ),
-        Instruction.ExecutionMode(ref(20), o("ExecutionMode", ExecutionMode.EarlyFragmentTests))
+        Instruction.ExecutionMode(ref(20), o(OperandKind.ExecutionMode, ExecutionMode.EarlyFragmentTests))
       )
     )
     val selected = ISA.decode(prepare(module, ShaderStageKind.Compute).image).toOption.get
@@ -71,7 +84,7 @@ class ShaderPreparationSuite extends munit.FunSuite {
     assert(ShaderPreparation.prepare(
       ISA.encode(module.copy(instructions = module.instructions ++ module.instructions.collect {
         case value: Instruction.EntryPoint
-            if value.executionModel == o("ExecutionModel", ExecutionModel.Vertex) => value
+            if value.executionModel == o(OperandKind.ExecutionModel, ExecutionModel.Vertex) => value
       })).toOption.get,
       "main",
       ShaderStageKind.Vertex,
@@ -84,7 +97,7 @@ class ShaderPreparationSuite extends munit.FunSuite {
     val early    = fragment.copy(instructions =
       fragment.instructions.patch(
         3,
-        Vec(Instruction.ExecutionMode(ref(10), o("ExecutionMode", ExecutionMode.EarlyFragmentTests))),
+        Vec(Instruction.ExecutionMode(ref(10), o(OperandKind.ExecutionMode, ExecutionMode.EarlyFragmentTests))),
         0
       )
     )
@@ -119,8 +132,13 @@ class ShaderPreparationSuite extends munit.FunSuite {
         decoration(6, Decoration.BuiltIn, BuiltIn.GlobalInvocationId),
         Instruction.TypeInt(dest(3), literal(32), literal(0)),
         Instruction.TypeVector(dest(4), ref(3), literal(3)),
-        Instruction.TypePointer(dest(5), o("StorageClass", StorageClass.Input), ref(4)),
-        Instruction.Variable(o("IdResultType", 5), dest(6), o("StorageClass", StorageClass.Input), None)
+        Instruction.TypePointer(dest(5), o(OperandKind.StorageClass, StorageClass.Input), ref(4)),
+        Instruction.Variable(
+          o(OperandKind.IdResultType, 5),
+          dest(6),
+          o(OperandKind.StorageClass, StorageClass.Input),
+          None
+        )
       ),
       Vec(6)
     )
@@ -134,17 +152,17 @@ class ShaderPreparationSuite extends munit.FunSuite {
       decoration(7, Decoration.DescriptorSet, 0),
       decoration(7, Decoration.Binding, 3),
       Instruction.TypeInt(dest(3), literal(32), literal(0)),
-      Instruction.TypePointer(dest(4), o("StorageClass", StorageClass.StorageBuffer), ref(3)),
+      Instruction.TypePointer(dest(4), o(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(3)),
       Instruction.Variable(
-        o("IdResultType", 4),
+        o(OperandKind.IdResultType, 4),
         dest(6),
-        o("StorageClass", StorageClass.StorageBuffer),
+        o(OperandKind.StorageClass, StorageClass.StorageBuffer),
         None
       ),
       Instruction.Variable(
-        o("IdResultType", 4),
+        o(OperandKind.IdResultType, 4),
         dest(7),
-        o("StorageClass", StorageClass.StorageBuffer),
+        o(OperandKind.StorageClass, StorageClass.StorageBuffer),
         None
       )
     )
@@ -164,11 +182,20 @@ class ShaderPreparationSuite extends munit.FunSuite {
       decoration(4, Decoration.SpecId, 9),
       decoration(8, Decoration.Location, 2),
       Instruction.TypeInt(dest(3), literal(32), literal(0)),
-      Instruction.SpecConstant(o("IdResultType", 3), dest(4), o("LiteralContextDependentNumber", 2)),
+      Instruction.SpecConstant(
+        o(OperandKind.IdResultType, 3),
+        dest(4),
+        o(OperandKind.LiteralContextDependentNumber, 2)
+      ),
       Instruction.TypeFloat(dest(5), literal(32), None),
       Instruction.TypeArray(dest(6), ref(5), ref(4)),
-      Instruction.TypePointer(dest(7), o("StorageClass", StorageClass.Output), ref(6)),
-      Instruction.Variable(o("IdResultType", 7), dest(8), o("StorageClass", StorageClass.Output), None)
+      Instruction.TypePointer(dest(7), o(OperandKind.StorageClass, StorageClass.Output), ref(6)),
+      Instruction.Variable(
+        o(OperandKind.IdResultType, 7),
+        dest(8),
+        o(OperandKind.StorageClass, StorageClass.Output),
+        None
+      )
     )
     val module = base(ExecutionModel.Vertex, declarations, Vec(8))
     val bytes  = ISA.encode(module).toOption.get
@@ -214,7 +241,7 @@ class ShaderPreparationSuite extends munit.FunSuite {
         Instruction.DecorationGroup(dest(30)),
         decoration(30, Decoration.Location, 3),
         Instruction.GroupDecorate(ref(30), Vec(ref(6), ref(7))),
-        Instruction.GroupMemberDecorate(ref(30), Vec(o("PairIdRefLiteralInteger", 8, 0)))
+        Instruction.GroupMemberDecorate(ref(30), Vec(o(OperandKind.PairIdRefLiteralInteger, 8, 0)))
       )
     )
     val normalized =
@@ -224,7 +251,7 @@ class ShaderPreparationSuite extends munit.FunSuite {
     assert(normalized.instructions.contains(Instruction.MemberDecorate(
       ref(8),
       literal(0),
-      o("Decoration", Decoration.Location, 3)
+      o(OperandKind.Decoration, Decoration.Location, 3)
     )))
     val bad = module.copy(instructions = module.instructions ++ Vec(Instruction.GroupDecorate(ref(31), Vec(ref(6)))))
     assert(ShaderPreparation.prepare(
@@ -240,10 +267,19 @@ class ShaderPreparationSuite extends munit.FunSuite {
       ExecutionModel.Vertex,
       Vec(
         Instruction.TypeInt(dest(3), literal(32), literal(0)),
-        Instruction.Constant(o("IdResultType", 3), dest(4), o("LiteralContextDependentNumber", count)),
+        Instruction.Constant(
+          o(OperandKind.IdResultType, 3),
+          dest(4),
+          o(OperandKind.LiteralContextDependentNumber, count)
+        ),
         if (recursive) Instruction.TypeStruct(dest(5), Vec(ref(5))) else Instruction.TypeArray(dest(5), ref(3), ref(4)),
-        Instruction.TypePointer(dest(6), o("StorageClass", StorageClass.Output), ref(5)),
-        Instruction.Variable(o("IdResultType", 6), dest(7), o("StorageClass", StorageClass.Output), None)
+        Instruction.TypePointer(dest(6), o(OperandKind.StorageClass, StorageClass.Output), ref(5)),
+        Instruction.Variable(
+          o(OperandKind.IdResultType, 6),
+          dest(7),
+          o(OperandKind.StorageClass, StorageClass.Output),
+          None
+        )
       ),
       Vec(7)
     )
@@ -259,21 +295,21 @@ class ShaderPreparationSuite extends munit.FunSuite {
       Vec(
         Instruction.TypeFloat(dest(3), literal(32), None),
         Instruction.TypeVector(dest(4), ref(3), literal(4)),
-        Instruction.TypePointer(dest(5), o("StorageClass", StorageClass.Input), ref(4)),
+        Instruction.TypePointer(dest(5), o(OperandKind.StorageClass, StorageClass.Input), ref(4)),
         Instruction.TypeImage(
           dest(6),
           ref(3),
-          o("Dim", Dim.SubpassData),
+          o(OperandKind.Dim, Dim.SubpassData),
           literal(0),
           literal(0),
           literal(0),
           literal(2),
-          o("ImageFormat", ImageFormat.Unknown),
+          o(OperandKind.ImageFormat, ImageFormat.Unknown),
           None
         ),
-        Instruction.Constant(o("IdResultType", 3), dest(7), o("LiteralContextDependentNumber", 0))
+        Instruction.Constant(o(OperandKind.IdResultType, 3), dest(7), o(OperandKind.LiteralContextDependentNumber, 0))
       ),
-      body = Vec(Instruction.DPdx(o("IdResultType", 3), dest(8), ref(7)), Instruction.Kill())
+      body = Vec(Instruction.DPdx(o(OperandKind.IdResultType, 3), dest(8), ref(7)), Instruction.Kill())
     )
     val prepared = prepare(module, ShaderStageKind.Fragment)
     assert(prepared.fragmentQuads)

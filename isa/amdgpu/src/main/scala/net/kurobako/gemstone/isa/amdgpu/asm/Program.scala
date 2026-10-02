@@ -1,12 +1,14 @@
-package net.kurobako.gemstone.isa.amdgpu
+package net.kurobako.gemstone.isa.amdgpu.asm
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.isa.amdgpu.Instruction as AMDGPUInstruction
+import net.kurobako.gemstone.isa.amdgpu.*
+import net.kurobako.gemstone.isa.amdgpu.asm.Instruction as AMDGPUInstruction
 
 object Program {
 
   enum Statement {
+    case Comment(text: NonEmpty[String])
     case Instruction(value: AMDGPUInstruction)
     case InstructionPair(
         left: AMDGPUInstruction,
@@ -29,17 +31,13 @@ object Program {
     case Expression(text: String)
     case Negated(value: Operand)
     case Absolute(value: Operand)
+    case SignExtended(value: Operand)
+    case RegisterList(values: Vec[Operand])
+    case Half(value: Operand, high: Boolean)
   }
 
   case class Modifier(name: NonEmpty[String], value: Option[NonEmpty[String]] = None)
 
-  case class ParseError(
-      line: Int > 0,
-      column: Int > 0,
-      message: NonEmpty[String]
-  ) {
-    override def toString: String = s"$line:$column: $message"
-  }
 }
 
 /** A parsed AMDGPU assembly program. Source locations are deliberately kept out of the semantic tree. */

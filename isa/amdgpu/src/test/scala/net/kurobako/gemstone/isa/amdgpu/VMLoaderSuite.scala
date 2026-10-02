@@ -28,6 +28,16 @@ class VMLoaderSuite extends munit.FunSuite {
     assertEquals(aliases(gfx906), gfx900)
   }
 
+  test("kernel aliases prefer usable exact revisions before family and generic bodies") {
+    val generic = "wrapped_target_archE"
+    val family  = "wrapped_target_archE1030E"
+    val exact   = "wrapped_target_archE1036E"
+    val names   = Set(generic, family, exact)
+    assertEquals(AMDGPUKernelVariants.select(names, "gfx1036").toOption.get(generic), exact)
+    assertEquals(AMDGPUKernelVariants.select(names, "gfx1036", _ != exact).toOption.get(generic), family)
+    assertEquals(AMDGPUKernelVariants.select(names, "gfx1036", _ == generic).toOption.get(exact), generic)
+  }
+
   test("AMDGPU kernel aliases preserve unrelated symbols") {
     val aliases = AMDGPUKernelVariants.select(Set("first", "second"), "gfx900").toOption.get
 

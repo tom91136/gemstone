@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import ELF.*
+import EncodingConstants.*
 import LoadedProgram.*
 import VMArithmetic.*
 import VMIR.*
@@ -34,28 +35,6 @@ private object VMInterpreter {
     case Left(error) => Left(error)
     case Right(_)    => AdvanceStep
   }
-  private val EmulatedCallNameFragments = Set(
-    "logIf",
-    "logId",
-    "casinhf",
-    "casinhE",
-    "cacosf",
-    "cacosE",
-    "catanf",
-    "catanE",
-    "cacoshf",
-    "cacoshE",
-    "catanhf",
-    "catanhE",
-    "csinhf",
-    "ccoshf",
-    "ctanhf",
-    "csinhE",
-    "ccoshE",
-    "ctanhE",
-    "expIf",
-    "expId"
-  )
   // The 1200-bit fixed-point representation used by the GFX9
   // v_trig_preop_f64 instruction for extracting a 53-bit chunk of 2/pi.
   private val TwoOverPi1200 = BigInteger(
@@ -86,14 +65,14 @@ private object VMInterpreter {
         }
       case other =>
         val value = other match {
-          case InstructionSource.Scalar(Decoding.VccLo)  => Bits.low32(carry.register).toLong
-          case InstructionSource.Scalar(Decoding.VccHi)  => Bits.high32(carry.register).toLong
-          case InstructionSource.Scalar(Decoding.ExecLo) => Bits.low32(active.register).toLong
-          case InstructionSource.Scalar(Decoding.ExecHi) => Bits.high32(active.register).toLong
-          case InstructionSource.Scalar(index)           => scalar(index)
-          case InstructionSource.Constant(raw)           => raw
-          case InstructionSource.Literal(raw)            => raw
-          case InstructionSource.VectorRegister(_)       => 0L
+          case InstructionSource.Scalar(Fixed.VccLo)  => Bits.low32(carry.register).toLong
+          case InstructionSource.Scalar(Fixed.VccHi)  => Bits.high32(carry.register).toLong
+          case InstructionSource.Scalar(Fixed.ExecLo) => Bits.low32(active.register).toLong
+          case InstructionSource.Scalar(Fixed.ExecHi) => Bits.high32(active.register).toLong
+          case InstructionSource.Scalar(index)        => scalar(index)
+          case InstructionSource.Constant(raw)        => raw
+          case InstructionSource.Literal(raw)         => raw
+          case InstructionSource.VectorRegister(_)    => 0L
         }
         var lane = 0
         while (lane < lanes.raw) {
@@ -314,8 +293,8 @@ private object VMInterpreter {
     // EXEC/VCC mask width.
     val waveSize: Int in (32, 64) = kernel.target.isa match {
       case ISA.GFX6 | ISA.GFX7 | ISA.GFX8 | ISA.GFX9 | ISA.CDNA1 | ISA.CDNA2 | ISA.CDNA3 | ISA.CDNA4 |
-          ISA.CDNA5 => 64: Int in (32, 64)
-      case ISA.RDNA1 | ISA.RDNA2 | ISA.RDNA3 | ISA.RDNA3_5 | ISA.RDNA4 => 32: Int in (32, 64)
+          ISA.CDNA5 => 64
+      case ISA.RDNA1 | ISA.RDNA2 | ISA.RDNA3 | ISA.RDNA3_5 | ISA.RDNA4 | ISA.GFX11_7 => 32
     }
     val waveCount = (localCount + waveSize.raw - 1) / waveSize.raw
     val states    = Array.ofDim[WaveState | Null](waveCount)
@@ -507,7 +486,7 @@ private object VMInterpreter {
       // VOP carry-producing instructions encode a discarded mask result as
       // the null SGPR (s[125:126]).  Do not read/write that pseudo-register:
       // s126 is the live EXEC mask in the emulator.
-      if (destination != Decoding.NullSgpr) {
+      if (destination != Fixed.NullSgpr) {
         if (waveSize.raw <= 32) {
           writeScalar32(destination, Bits.low32(result).toLong)
         } else {
@@ -522,40 +501,40 @@ private object VMInterpreter {
       if (width == 32) writeScalar32(destination, value) else writeScalar64(destination, value)
 
     def source(value: InstructionSource, lane: Int): Long = value match {
-      case InstructionSource.Scalar(Decoding.VccLo)  => Bits.low32(carry.register).toLong
-      case InstructionSource.Scalar(Decoding.VccHi)  => Bits.high32(carry.register).toLong
-      case InstructionSource.Scalar(Decoding.ExecLo) => Bits.low32(active.register).toLong
-      case InstructionSource.Scalar(Decoding.ExecHi) => Bits.high32(active.register).toLong
-      case InstructionSource.Scalar(index)           => scalar(index)
-      case InstructionSource.VectorRegister(index)   => vector(index)(lane)
-      case InstructionSource.Constant(raw)           => raw
-      case InstructionSource.Literal(raw)            => raw
+      case InstructionSource.Scalar(Fixed.VccLo)   => Bits.low32(carry.register).toLong
+      case InstructionSource.Scalar(Fixed.VccHi)   => Bits.high32(carry.register).toLong
+      case InstructionSource.Scalar(Fixed.ExecLo)  => Bits.low32(active.register).toLong
+      case InstructionSource.Scalar(Fixed.ExecHi)  => Bits.high32(active.register).toLong
+      case InstructionSource.Scalar(index)         => scalar(index)
+      case InstructionSource.VectorRegister(index) => vector(index)(lane)
+      case InstructionSource.Constant(raw)         => raw
+      case InstructionSource.Literal(raw)          => raw
     }
 
     def sourceScalar64(value: InstructionSource): Long = value match {
-      case InstructionSource.Scalar(Decoding.VccLo)  => carry.register
-      case InstructionSource.Scalar(Decoding.VccHi)  => Bits.high32(carry.register).toLong
-      case InstructionSource.Scalar(Decoding.ExecLo) => active.register
-      case InstructionSource.Scalar(Decoding.ExecHi) => Bits.high32(active.register).toLong
-      case InstructionSource.Scalar(index)           => pair(scalar, index)
-      case InstructionSource.Constant(raw)           => raw
-      case InstructionSource.Literal(raw)            => raw
-      case InstructionSource.VectorRegister(_)       => 0L
+      case InstructionSource.Scalar(Fixed.VccLo)  => carry.register
+      case InstructionSource.Scalar(Fixed.VccHi)  => Bits.high32(carry.register).toLong
+      case InstructionSource.Scalar(Fixed.ExecLo) => active.register
+      case InstructionSource.Scalar(Fixed.ExecHi) => Bits.high32(active.register).toLong
+      case InstructionSource.Scalar(index)        => pair(scalar, index)
+      case InstructionSource.Constant(raw)        => raw
+      case InstructionSource.Literal(raw)         => raw
+      case InstructionSource.VectorRegister(_)    => 0L
     }
 
     def writeScalar64(dest: Int, value: Long): Unit = dest match {
-      case Decoding.VccLo  => carry.register = value
-      case Decoding.ExecLo => active.register = value
-      case _               => setPair(scalar, dest, value)
+      case Fixed.VccLo  => carry.register = value
+      case Fixed.ExecLo => active.register = value
+      case _            => setPair(scalar, dest, value)
     }
 
     def writeScalar32(dest: Int, value: Long): Unit = dest match {
-      case Decoding.VccLo => carry.register = (carry.register & 0xffffffff00000000L) | Bits.low32(value).toLong
-      case Decoding.VccHi =>
+      case Fixed.VccLo => carry.register = (carry.register & 0xffffffff00000000L) | Bits.low32(value).toLong
+      case Fixed.VccHi =>
         carry.register = (carry.register & 0xffffffffL) | (Bits.low32(value).toLong << 32)
-      case Decoding.ExecLo => active.register = (active.register & 0xffffffff00000000L) | Bits.low32(value).toLong
-      case Decoding.ExecHi => active.register = (active.register & 0xffffffffL) | (Bits.low32(value).toLong << 32)
-      case _               => scalar(dest) = Bits.low32(value).toLong
+      case Fixed.ExecLo => active.register = (active.register & 0xffffffff00000000L) | Bits.low32(value).toLong
+      case Fixed.ExecHi => active.register = (active.register & 0xffffffffL) | (Bits.low32(value).toLong << 32)
+      case _            => scalar(dest) = Bits.low32(value).toLong
     }
 
     def foreachLane(operation: Int => Unit): Unit = {
@@ -604,10 +583,6 @@ private object VMInterpreter {
         Array.copy(bytes, 0, scratch(lane), address.toInt, bytes.length)
         Right(())
       } else dispatchMemory.writeBytes(address, bytes)
-
-    def isEmulatedCall(name: String): Boolean =
-      name == "__ockl_get_group_id" || name == "__ockl_get_local_size" || name == "__ockl_get_local_id" ||
-        EmulatedCallNameFragments.exists(name.contains(_))
 
     def bufferOffset(
         lane: Int,
@@ -732,7 +707,8 @@ private object VMInterpreter {
         val target      = sourceScalar64(src)
         val targetIndex = programIndex(target)
         val targetName  = kernel.functionTargets.get(target)
-        if (!targetName.exists(isEmulatedCall(_)) && targetIndex.nonEmpty) {
+        val function    = kernel.emulatedCalls.get(target)
+        if (function.isEmpty && targetIndex.nonEmpty) {
           // Device calls and returns use the same hardware primitive:
           // save the next instruction address in the destination pair,
           // then jump to the source pair. A callee returns by swapping
@@ -783,8 +759,8 @@ private object VMInterpreter {
             val right = complexLog(1.0 - real, -imaginary)
             ((left._1 - right._1) * 0.5, (left._2 - right._2) * 0.5)
           }
-          kernel.functionTargets.get(target) match {
-            case Some(name) if name.contains("logIf") =>
+          function match {
+            case Some(VMFunction.ComplexLogF32) =>
               foreachActive { lane =>
                 val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
@@ -792,7 +768,7 @@ private object VMInterpreter {
                 vector(1)(lane) = IEEE754.floatToBinary32(math.atan2(imaginary, real).toFloat).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("logId") =>
+            case Some(VMFunction.ComplexLogF64) =>
               foreachActive { lane =>
                 val real          = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
@@ -804,7 +780,7 @@ private object VMInterpreter {
                 vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("casinhf") =>
+            case Some(VMFunction.ComplexAsinhF32) =>
               foreachActive { lane =>
                 val real             = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary        = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
@@ -820,7 +796,7 @@ private object VMInterpreter {
                 vector(1)(lane) = IEEE754.floatToBinary32(math.atan2(shiftedImaginary, shiftedReal).toFloat).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("casinhE") =>
+            case Some(VMFunction.ComplexAsinhF64) =>
               foreachActive { lane =>
                 val real             = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary        = IEEE754.binary64ToDouble(pair(vector, 2, lane))
@@ -841,7 +817,7 @@ private object VMInterpreter {
                 vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("cacosf") =>
+            case Some(VMFunction.ComplexAcosF32) =>
               foreachActive { lane =>
                 val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
@@ -850,7 +826,7 @@ private object VMInterpreter {
                 vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("cacosE") =>
+            case Some(VMFunction.ComplexAcosF64) =>
               foreachActive { lane =>
                 val real          = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
@@ -863,7 +839,7 @@ private object VMInterpreter {
                 vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("catanf") =>
+            case Some(VMFunction.ComplexAtanF32) =>
               foreachActive { lane =>
                 val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
@@ -872,7 +848,7 @@ private object VMInterpreter {
                 vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("catanE") =>
+            case Some(VMFunction.ComplexAtanF64) =>
               foreachActive { lane =>
                 val real          = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
@@ -885,7 +861,7 @@ private object VMInterpreter {
                 vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("cacoshf") =>
+            case Some(VMFunction.ComplexAcoshF32) =>
               foreachActive { lane =>
                 val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
@@ -894,7 +870,7 @@ private object VMInterpreter {
                 vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("cacoshE") =>
+            case Some(VMFunction.ComplexAcoshF64) =>
               foreachActive { lane =>
                 val real          = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
@@ -907,7 +883,7 @@ private object VMInterpreter {
                 vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("catanhf") =>
+            case Some(VMFunction.ComplexAtanhF32) =>
               foreachActive { lane =>
                 val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
@@ -916,7 +892,7 @@ private object VMInterpreter {
                 vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("catanhE") =>
+            case Some(VMFunction.ComplexAtanhF64) =>
               foreachActive { lane =>
                 val real          = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
@@ -929,7 +905,7 @@ private object VMInterpreter {
                 vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("csinhf") =>
+            case Some(VMFunction.ComplexSinhF32) =>
               foreachActive { lane =>
                 val real            = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary       = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
@@ -939,7 +915,7 @@ private object VMInterpreter {
                 vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("ccoshf") =>
+            case Some(VMFunction.ComplexCoshF32) =>
               foreachActive { lane =>
                 val real            = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary       = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
@@ -949,7 +925,7 @@ private object VMInterpreter {
                 vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("ctanhf") =>
+            case Some(VMFunction.ComplexTanhF32) =>
               foreachActive { lane =>
                 val real            = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary       = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
@@ -960,7 +936,7 @@ private object VMInterpreter {
                 vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("csinhE") =>
+            case Some(VMFunction.ComplexSinhF64) =>
               foreachActive { lane =>
                 val real            = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary       = IEEE754.binary64ToDouble(pair(vector, 2, lane))
@@ -974,7 +950,7 @@ private object VMInterpreter {
                 vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("ccoshE") =>
+            case Some(VMFunction.ComplexCoshF64) =>
               foreachActive { lane =>
                 val real            = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary       = IEEE754.binary64ToDouble(pair(vector, 2, lane))
@@ -988,7 +964,7 @@ private object VMInterpreter {
                 vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("ctanhE") =>
+            case Some(VMFunction.ComplexTanhF64) =>
               foreachActive { lane =>
                 val real            = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary       = IEEE754.binary64ToDouble(pair(vector, 2, lane))
@@ -1003,7 +979,7 @@ private object VMInterpreter {
                 vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("expIf") =>
+            case Some(VMFunction.ComplexExpF32) =>
               foreachActive { lane =>
                 val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
                 val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
@@ -1012,7 +988,7 @@ private object VMInterpreter {
                 vector(1)(lane) = IEEE754.floatToBinary32((scale * math.sin(imaginary)).toFloat).toLong
               }
               AdvanceStep
-            case Some(name) if name.contains("expId") =>
+            case Some(VMFunction.ComplexExpF64) =>
               foreachActive { lane =>
                 val real          = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
@@ -1025,24 +1001,23 @@ private object VMInterpreter {
                 vector(3)(lane) = Bits.high32(imaginaryBits).toLong
               }
               AdvanceStep
-            case Some(name)
-                if name == "__ockl_get_group_id" || name == "__ockl_get_local_size" || name == "__ockl_get_local_id" =>
+            case Some(function @ (VMFunction.GroupId | VMFunction.LocalSize | VMFunction.LocalId)) =>
               foreachActive { lane =>
                 val dimension = Bits.signed32(vector(0)(lane))
-                val value     = name match {
-                  case "__ockl_get_group_id" => dimension match {
+                val value     = function match {
+                  case VMFunction.GroupId => dimension match {
                       case 0 => groupX.raw
                       case 1 => groupY.raw
                       case 2 => groupZ.raw
                       case _ => 0
                     }
-                  case "__ockl_get_local_size" => dimension match {
+                  case VMFunction.LocalSize => dimension match {
                       case 0 => groupWidth.raw
                       case 1 => groupHeight.raw
                       case 2 => groupDepth.raw
                       case _ => 0
                     }
-                  case "__ockl_get_local_id" =>
+                  case VMFunction.LocalId =>
                     val local = laneCoordinates(lane)
                     dimension match {
                       case 0 => local.x.raw
@@ -1050,17 +1025,14 @@ private object VMInterpreter {
                       case 2 => local.z.raw
                       case _ => 0
                     }
-                  case _ => 0
                 }
                 vector(0)(lane) = Bits.unsigned32(value).toLong
               }
               AdvanceStep
-            case Some(name) =>
-              Left(Fault.Unsupported(s"AMDGPU call to $name is not implemented"))
-            case None =>
-              Left(Fault.Backend(
-                f"AMDGPU call target 0x$target%X is not present in the code object"
-              ))
+            case None => targetName match {
+                case Some(name) => Left(Fault.Unsupported(s"AMDGPU call to $name is not implemented"))
+                case None => Left(Fault.Backend(f"AMDGPU call target 0x$target%X is not present in the code object"))
+              }
           }
         }
       case Instruction.SAndSaveExec(dest, src, width) =>
@@ -1068,7 +1040,7 @@ private object VMInterpreter {
         val sourceValue = saveExecSource(src, width)
         val result      = if (width == 32) Bits.low32(previous).toLong & sourceValue else previous & sourceValue
         saveExecWrite(dest, previous, width)
-        saveExecWrite(Decoding.ExecLo, result, width)
+        saveExecWrite(Fixed.ExecLo, result, width)
         scalarCarry = result != 0L
         AdvanceStep
       case Instruction.SAndn2SaveExec(dest, src, width) =>
@@ -1080,7 +1052,7 @@ private object VMInterpreter {
         val result = if (width == 32) Bits.low32(andn2SaveExecMask(Bits.low32(previous).toLong, sourceValue)).toLong
         else andn2SaveExecMask(previous, sourceValue)
         saveExecWrite(dest, previous, width)
-        saveExecWrite(Decoding.ExecLo, result, width)
+        saveExecWrite(Fixed.ExecLo, result, width)
         scalarCarry = result != 0L
         AdvanceStep
       case Instruction.SOrSaveExec(dest, src, width) =>
@@ -1088,7 +1060,7 @@ private object VMInterpreter {
         val result   = if (width == 32) Bits.low32(previous).toLong | saveExecSource(src, width)
         else previous | saveExecSource(src, width)
         saveExecWrite(dest, previous, width)
-        saveExecWrite(Decoding.ExecLo, result, width)
+        saveExecWrite(Fixed.ExecLo, result, width)
         scalarCarry = result != 0L
         AdvanceStep
       case Instruction.SXorSaveExec(dest, src, width) =>
@@ -1096,7 +1068,7 @@ private object VMInterpreter {
         val result   = if (width == 32) Bits.low32(previous).toLong ^ saveExecSource(src, width)
         else previous ^ saveExecSource(src, width)
         saveExecWrite(dest, previous, width)
-        saveExecWrite(Decoding.ExecLo, result, width)
+        saveExecWrite(Fixed.ExecLo, result, width)
         scalarCarry = result != 0L
         AdvanceStep
       case Instruction.SUnary(operation, dest, src) =>
@@ -1110,7 +1082,7 @@ private object VMInterpreter {
           case ScalarUnaryOperation.CountBits32 => Bits.bitCount(source(src, 0), 32).toLong
           case ScalarUnaryOperation.CountBits64 =>
             Bits.bitCount(sourceScalar64(src), 64).toLong
-          case ScalarUnaryOperation.ReverseBits32   => bitReverse32(source(src, 0))
+          case ScalarUnaryOperation.ReverseBits32   => Bits.reverseBits(source(src, 0), 32)
           case ScalarUnaryOperation.Not32           => Bits.low32(~source(src, 0)).toLong
           case ScalarUnaryOperation.Not64           => ~sourceScalar64(src)
           case ScalarUnaryOperation.FirstBitHighI32 => signedFirstBitHigh32(source(src, 0))
@@ -1289,7 +1261,7 @@ private object VMInterpreter {
         executeVMove(dest, src, scalar, vector, carry, active, lanes)
         AdvanceStep
       case Instruction.VMoveRelative(dest, InstructionSource.VectorRegister(src)) =>
-        val indexed = src + (Bits.low32(scalar(Decoding.M0)).toLong & 0xffL).toInt
+        val indexed = src + (Bits.low32(scalar(Fixed.M0)).toLong & 0xffL).toInt
         if (indexed < 0 || indexed >= 256)
           Left(Fault.Backend(s"v_movrels_b32 indexed VGPR $indexed is out of range"))
         else {
@@ -1302,7 +1274,7 @@ private object VMInterpreter {
           s"v_movrels_b32 requires a vector-register source, found $source"
         ))
       case Instruction.VMoveRelativeDestination(dest, src) =>
-        val indexed = dest + (Bits.low32(scalar(Decoding.M0)).toLong & 0xffL).toInt
+        val indexed = dest + (Bits.low32(scalar(Fixed.M0)).toLong & 0xffL).toInt
         if (indexed < 0 || indexed >= 256)
           Left(Fault.Backend(s"v_movreld_b32 indexed VGPR $indexed is out of range"))
         else {
@@ -1322,7 +1294,7 @@ private object VMInterpreter {
       case Instruction.VSwap(_, _) =>
         Left(Fault.Backend("v_swap_b32 requires a vector-register source"))
       case Instruction.VBitReverse(dest, src) =>
-        foreachActive(lane => vector(dest)(lane) = bitReverse32(source(src, lane)))
+        foreachActive(lane => vector(dest)(lane) = Bits.reverseBits(source(src, lane), 32))
         AdvanceStep
       case Instruction.VBitFind(operation, dest, src) =>
         foreachActive { lane =>
@@ -2002,7 +1974,7 @@ private object VMInterpreter {
           val right  = selectSubDword(source(srcB, lane), srcBSelection, srcBSignExtend)
           val result = operation match {
             case VectorSubDwordOperation.ConditionalMask32 =>
-              val conditionMask = Bits.low32(source(InstructionSource.Scalar(Decoding.VccLo), 0)).toLong
+              val conditionMask = Bits.low32(source(InstructionSource.Scalar(Fixed.VccLo), 0)).toLong
               if ((conditionMask & (1L << lane)) != 0L) right else left
             case VectorSubDwordOperation.AddU32 => Bits.low32(left + right).toLong
             case VectorSubDwordOperation.AddU16 => Bits.low16(left + right).toLong
@@ -3541,8 +3513,8 @@ private object VMInterpreter {
     case InstructionSource.Literal(raw) =>
       IEEE754.doubleToBinary64(floatingLiteralToDouble(raw))
     case InstructionSource.Constant(raw) =>
-      val index = Decoding.InlineFloatingConstants.indexOf(raw)
-      IEEE754.doubleToBinary64(if (index >= 0) Decoding.InlineFloatingValues(index) else raw.toDouble)
+      val index = Fixed.InlineFloatingConstants.indexOf(raw)
+      IEEE754.doubleToBinary64(if (index >= 0) Fixed.InlineFloatingValues(index) else raw.toDouble)
     case _ => source64(source, lane, scalar, vector)
   }
 

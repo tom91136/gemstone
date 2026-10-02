@@ -9,26 +9,26 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class ExecutionShuffleSuite extends munit.FunSuite {
-  private val voidType    = operand("IdResult", 1)
-  private val u32         = operand("IdResult", 2)
-  private val inputType   = operand("IdResult", 3)
-  private val outputType  = operand("IdResult", 4)
-  private val signature   = operand("IdResult", 5)
-  private val builtin     = operand("IdResult", 6)
-  private val one         = operand("IdResult", 7)
-  private val size        = operand("IdResult", 8)
-  private val firstBase   = operand("IdResult", 9)
-  private val secondBase  = operand("IdResult", 10)
-  private val function    = operand("IdResult", 11)
-  private val output      = operand("IdResult", 12)
-  private val local       = operand("IdResult", 14)
-  private val lane        = operand("IdResult", 15)
-  private val current     = operand("IdResult", 16)
-  private val other       = operand("IdResult", 17)
-  private val last        = operand("IdResult", 18)
-  private val reversed    = operand("IdResult", 19)
-  private val result      = operand("IdResult", 20)
-  private val destination = operand("IdResult", 21)
+  private val voidType    = operand(OperandKind.IdResult, 1)
+  private val u32         = operand(OperandKind.IdResult, 2)
+  private val inputType   = operand(OperandKind.IdResult, 3)
+  private val outputType  = operand(OperandKind.IdResult, 4)
+  private val signature   = operand(OperandKind.IdResult, 5)
+  private val builtin     = operand(OperandKind.IdResult, 6)
+  private val one         = operand(OperandKind.IdResult, 7)
+  private val size        = operand(OperandKind.IdResult, 8)
+  private val firstBase   = operand(OperandKind.IdResult, 9)
+  private val secondBase  = operand(OperandKind.IdResult, 10)
+  private val function    = operand(OperandKind.IdResult, 11)
+  private val output      = operand(OperandKind.IdResult, 12)
+  private val local       = operand(OperandKind.IdResult, 14)
+  private val lane        = operand(OperandKind.IdResult, 15)
+  private val current     = operand(OperandKind.IdResult, 16)
+  private val other       = operand(OperandKind.IdResult, 17)
+  private val last        = operand(OperandKind.IdResult, 18)
+  private val reversed    = operand(OperandKind.IdResult, 19)
+  private val result      = operand(OperandKind.IdResult, 20)
+  private val destination = operand(OperandKind.IdResult, 21)
 
   private def module(operation: String, varying: Boolean, subgroupSize: Int): Module = {
     val delta   = if (varying) lane else one
@@ -41,25 +41,28 @@ class ExecutionShuffleSuite extends munit.FunSuite {
       Header(ISA.version, Word(0), Word(22), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypePointer(inputType, operand("StorageClass", StorageClass.Input), u32),
-        Instruction.TypePointer(outputType, operand("StorageClass", StorageClass.CrossWorkgroup), u32),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypePointer(inputType, operand(OperandKind.StorageClass, StorageClass.Input), u32),
+        Instruction.TypePointer(outputType, operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), u32),
         Instruction.TypeFunction(signature, voidType, Vec(outputType)),
-        Instruction.Variable(inputType, builtin, operand("StorageClass", StorageClass.Input), None),
-        Instruction.Decorate(builtin, operand("Decoration", Decoration.BuiltIn, BuiltIn.LocalInvocationIndex)),
-        Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
-        Instruction.Constant(u32, size, operand("LiteralContextDependentNumber", subgroupSize)),
-        Instruction.Constant(u32, firstBase, operand("LiteralContextDependentNumber", 1000)),
-        Instruction.Constant(u32, secondBase, operand("LiteralContextDependentNumber", 2000)),
+        Instruction.Variable(inputType, builtin, operand(OperandKind.StorageClass, StorageClass.Input), None),
+        Instruction.Decorate(
+          builtin,
+          operand(OperandKind.Decoration, Decoration.BuiltIn, BuiltIn.LocalInvocationIndex)
+        ),
+        Instruction.Constant(u32, one, operand(OperandKind.LiteralContextDependentNumber, 1)),
+        Instruction.Constant(u32, size, operand(OperandKind.LiteralContextDependentNumber, subgroupSize)),
+        Instruction.Constant(u32, firstBase, operand(OperandKind.LiteralContextDependentNumber, 1000)),
+        Instruction.Constant(u32, secondBase, operand(OperandKind.LiteralContextDependentNumber, 2000)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, ExecutionModel.Kernel),
           function,
           stringOperand("shuffle"),
           Vec(builtin)
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", FunctionControl.None), signature),
+        Instruction.Function(voidType, function, operand(OperandKind.FunctionControl, FunctionControl.None), signature),
         Instruction.FunctionParameter(outputType, output),
-        Instruction.Label(operand("IdResult", 13)),
+        Instruction.Label(operand(OperandKind.IdResult, 13)),
         Instruction.Load(u32, local, builtin, None),
         Instruction.UMod(u32, lane, local, size),
         Instruction.IAdd(u32, current, local, firstBase),

@@ -44,32 +44,32 @@ class IntegerMultiplyAddSuite extends munit.FunSuite {
   test("primitive multiply-add matches unsigned wide arithmetic") {
     val operations = Vector(
       IntegerMultiplyAddOperation.Low(
-        32: Int where (Between[8, 64] & MultipleOf[8]),
-        32: Int where (Between[8, 64] & MultipleOf[8]),
+        operandWidth = 32,
+        resultWidth = 32,
         carryIn = false,
         carryOut = false
       ),
       IntegerMultiplyAddOperation.Low(
-        32: Int where (Between[8, 64] & MultipleOf[8]),
-        64: Int where (Between[8, 64] & MultipleOf[8]),
+        operandWidth = 32,
+        resultWidth = 64,
         carryIn = false,
         carryOut = false
       ),
       IntegerMultiplyAddOperation.Low(
-        64: Int where (Between[8, 64] & MultipleOf[8]),
-        64: Int where (Between[8, 64] & MultipleOf[8]),
+        operandWidth = 64,
+        resultWidth = 64,
         carryIn = true,
         carryOut = true
       ),
       IntegerMultiplyAddOperation.High(
-        32: Int where (Between[8, 64] & MultipleOf[8]),
-        32: Int where (Between[8, 64] & MultipleOf[8]),
+        operandWidth = 32,
+        resultWidth = 32,
         carryIn = true,
         carryOut = true
       ),
       IntegerMultiplyAddOperation.High(
-        64: Int where (Between[8, 64] & MultipleOf[8]),
-        64: Int where (Between[8, 64] & MultipleOf[8]),
+        operandWidth = 64,
+        resultWidth = 64,
         carryIn = true,
         carryOut = true
       )

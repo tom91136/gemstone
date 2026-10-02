@@ -13,7 +13,7 @@ class AMDGPUMemorySuite extends munit.FunSuite {
         Vec[Byte](0x07, 0x00, 0x60, 0xe0.toByte, 0x00, 0x02, 0x00, 0x80.toByte),
         Target("gfx1030")
       ),
-      Right(Instruction.BufferStore(None, 0, None, 2, 1: Int where Between[1, 16], 7))
+      Right(Instruction.BufferStore(None, 0, None, 2, 1, 7))
     )
   }
 
@@ -23,7 +23,7 @@ class AMDGPUMemorySuite extends munit.FunSuite {
         Vec[Byte](0x07, 0x00, 0x20, 0xe0.toByte, 0x00, 0x02, 0x00, 0x80.toByte),
         Target("gfx1030")
       ),
-      Right(Instruction.BufferLoad(2, None, 0, None, 1: Int where Between[1, 16], 7))
+      Right(Instruction.BufferLoad(2, None, 0, None, 1, 7))
     )
   }
 
@@ -33,14 +33,14 @@ class AMDGPUMemorySuite extends munit.FunSuite {
         Vec[Byte](0x00, 0x90.toByte, 0x6c, 0xd8.toByte, 0x00, 0x00, 0x00, 0x00),
         Target("gfx900")
       ),
-      Right(Instruction.DSRead(0, 0, 4: Int where Between[1, 16], 36864, None))
+      Right(Instruction.DSRead(0, 0, 4, 36864, None))
     )
     assertEquals(
       VMCompiler.decodeInstruction(
         Vec[Byte](0xff.toByte, 0xff.toByte, 0xbe.toByte, 0xd9.toByte, 0x00, 0x01, 0x00, 0x00),
         Target("gfx900")
       ),
-      Right(Instruction.DSWrite(0, 1, None, 16: Int where Between[1, 16], 65535, None))
+      Right(Instruction.DSWrite(0, 1, None, 16, 65535, None))
     )
   }
 
@@ -82,7 +82,7 @@ class AMDGPUMemorySuite extends munit.FunSuite {
         ),
         Target("gfx900")
       ),
-      Right(Instruction.BufferLoad(7, Some(1), 0, None, 4: Int where Between[1, 16], 0))
+      Right(Instruction.BufferLoad(7, Some(1), 0, None, 4, 0))
     )
   }
 
@@ -92,7 +92,7 @@ class AMDGPUMemorySuite extends munit.FunSuite {
         Vec[Byte](0x00, 0x10, 0x50, 0xe0.toByte, 0x12, 0x13, 0x05, 0x80.toByte),
         Target("gfx900")
       ),
-      Right(Instruction.BufferLoad(19, Some(18), 20, None, 4: Int where Between[1, 16], 0))
+      Right(Instruction.BufferLoad(19, Some(18), 20, None, 4, 0))
     )
   }
 
@@ -102,14 +102,14 @@ class AMDGPUMemorySuite extends munit.FunSuite {
         Vec[Byte](0x10, 0x10, 0x90.toByte, 0xe0.toByte, 0x03, 0x07, 0x05, 0x80.toByte),
         Target("gfx900")
       ),
-      Right(Instruction.BufferLoadD16(7, Some(3), 20, None, 2: Int where Between[1, 2], 16, high = false))
+      Right(Instruction.BufferLoadD16(7, Some(3), 20, None, 2, 16, high = false))
     )
     assertEquals(
       VMCompiler.decodeInstruction(
         Vec[Byte](0x10, 0x10, 0x94.toByte, 0xe0.toByte, 0x03, 0x07, 0x05, 0x80.toByte),
         Target("gfx900")
       ),
-      Right(Instruction.BufferLoadD16(7, Some(3), 20, None, 2: Int where Between[1, 2], 16, high = true))
+      Right(Instruction.BufferLoadD16(7, Some(3), 20, None, 2, 16, high = true))
     )
   }
 

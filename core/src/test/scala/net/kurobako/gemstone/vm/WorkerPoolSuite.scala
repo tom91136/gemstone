@@ -7,6 +7,7 @@ import net.kurobako.gemstone.constraint.*
 import scala.util.Using
 
 class WorkerPoolSuite extends munit.FunSuite {
+  // Blocking waits must run outside the suite monitor held by MUnit's by-name assert.
   test("large dispatches yield to queued work within a bounded number of groups") {
     val entered = java.util.concurrent.CountDownLatch(1)
     val release = java.util.concurrent.CountDownLatch(1)
@@ -16,7 +17,7 @@ class WorkerPoolSuite extends munit.FunSuite {
         pool.parallelFor(65536L) { index =>
           if (index.raw == 0L) {
             entered.countDown()
-            assert(release.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+            assertEquals(release.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
           }
           val _ = visited.incrementAndGet()
           Right(())
@@ -26,7 +27,7 @@ class WorkerPoolSuite extends munit.FunSuite {
       caller.start()
       val short = java.util.concurrent.FutureTask[Int](() => visited.get())
       try {
-        assert(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
         pool.execute(short)
       } finally release.countDown()
       val precedingGroups = short.get(5L, java.util.concurrent.TimeUnit.SECONDS)
@@ -45,7 +46,7 @@ class WorkerPoolSuite extends munit.FunSuite {
         pool.parallelFor(3L) { index =>
           if (index.raw == 0L) {
             entered.countDown()
-            assert(releaseGroup.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+            assertEquals(releaseGroup.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
           }
           Right(())
         }
@@ -55,7 +56,7 @@ class WorkerPoolSuite extends munit.FunSuite {
       )
       pool.execute(outer)
       val completed = try {
-        assert(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
         pool.execute(unrelated)
         releaseGroup.countDown()
         try { outer.get(1L, java.util.concurrent.TimeUnit.SECONDS); true }
@@ -65,7 +66,7 @@ class WorkerPoolSuite extends munit.FunSuite {
         releaseLaunch.countDown()
       }
       assertEquals(outer.get(5L, java.util.concurrent.TimeUnit.SECONDS), Right(()))
-      assert(unrelated.get(5L, java.util.concurrent.TimeUnit.SECONDS))
+      assertEquals(unrelated.get(5L, java.util.concurrent.TimeUnit.SECONDS), true)
       assert(completed, "a workgroup join entered an unrelated launch before returning to its own caller")
     }
   }
@@ -79,21 +80,21 @@ class WorkerPoolSuite extends munit.FunSuite {
         pool.parallelFor(3L) { index =>
           if (index.raw == 0L) {
             entered.countDown()
-            assert(releaseGroup.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+            assertEquals(releaseGroup.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
           }
           Right(())
         }
       )
       val other = java.util.concurrent.FutureTask[Either[Fault, Unit]](() =>
         pool.parallelFor(1L) { _ =>
-          assert(releaseOther.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+          assertEquals(releaseOther.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
           Right(())
         }
       )
       val caller = Thread(other, "independent-workgroup-caller")
       pool.execute(outer)
       val completed = try {
-        assert(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
         caller.start()
         // WAITING here means parallelFor has enqueued its job and is awaiting completion.
         val deadline = platform.monotonicNanos + java.util.concurrent.TimeUnit.SECONDS.toNanos(5L)
@@ -131,7 +132,7 @@ class WorkerPoolSuite extends munit.FunSuite {
       val visited = AtomicInteger()
       val tasks   = Vector.fill(2)(java.util.concurrent.FutureTask[Either[Fault, Unit]] { () =>
         entered.countDown()
-        assert(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
         pool.parallelFor(8L) { _ =>
           pool.parallelFor(3L) { _ =>
             val _ = visited.incrementAndGet()
@@ -158,7 +159,7 @@ class WorkerPoolSuite extends munit.FunSuite {
       }
     )) { pool =>
       pool.execute(() => throw error)
-      assert(reported.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+      assertEquals(reported.await(5L, java.util.concurrent.TimeUnit.SECONDS), true)
       assertEquals(observed.get(), Some(error))
       val next = java.util.concurrent.FutureTask[Int](() => 42)
       pool.execute(next)

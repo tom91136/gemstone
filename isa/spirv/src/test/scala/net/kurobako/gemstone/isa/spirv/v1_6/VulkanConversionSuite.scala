@@ -14,41 +14,53 @@ class VulkanConversionSuite extends munit.FunSuite {
     signed <- Seq(0, 1)
   }
     test(s"Vulkan $width-bit floating conversion chooses saturated $signed integer endpoints") {
-      def ref(n: Int): Operand = operand("IdRef", n)
+      def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
       val module               = Module(
         Header(ISA.version, Word(0), Word(32), Word(0)),
         Vec(
           Instruction.TypeVoid(ref(1)),
-          Instruction.TypeFloat(ref(2), operand("LiteralInteger", width), None),
-          Instruction.TypeInt(ref(3), operand("LiteralInteger", 32), operand("LiteralInteger", signed)),
-          Instruction.TypeVector(ref(4), ref(2), operand("LiteralInteger", 4)),
-          Instruction.TypeVector(ref(5), ref(3), operand("LiteralInteger", 4)),
+          Instruction.TypeFloat(ref(2), operand(OperandKind.LiteralInteger, width), None),
+          Instruction.TypeInt(
+            ref(3),
+            operand(OperandKind.LiteralInteger, 32),
+            operand(OperandKind.LiteralInteger, signed)
+          ),
+          Instruction.TypeVector(ref(4), ref(2), operand(OperandKind.LiteralInteger, 4)),
+          Instruction.TypeVector(ref(5), ref(3), operand(OperandKind.LiteralInteger, 4)),
           Instruction.TypeStruct(ref(6), Vec(ref(4))),
           Instruction.TypeStruct(ref(7), Vec(ref(5))),
-          Instruction.TypePointer(ref(8), operand("StorageClass", StorageClass.Uniform), ref(6)),
-          Instruction.TypePointer(ref(9), operand("StorageClass", StorageClass.Uniform), ref(7)),
-          Instruction.TypePointer(ref(10), operand("StorageClass", StorageClass.Uniform), ref(4)),
-          Instruction.TypePointer(ref(11), operand("StorageClass", StorageClass.Uniform), ref(5)),
+          Instruction.TypePointer(ref(8), operand(OperandKind.StorageClass, StorageClass.Uniform), ref(6)),
+          Instruction.TypePointer(ref(9), operand(OperandKind.StorageClass, StorageClass.Uniform), ref(7)),
+          Instruction.TypePointer(ref(10), operand(OperandKind.StorageClass, StorageClass.Uniform), ref(4)),
+          Instruction.TypePointer(ref(11), operand(OperandKind.StorageClass, StorageClass.Uniform), ref(5)),
           Instruction.TypeFunction(ref(12), ref(1), Vec.empty),
-          Instruction.Constant(ref(3), ref(13), operand("LiteralContextDependentNumber", 0)),
-          Instruction.Decorate(ref(6), operand("Decoration", Decoration.BufferBlock)),
-          Instruction.Decorate(ref(7), operand("Decoration", Decoration.BufferBlock)),
-          Instruction.MemberDecorate(ref(6), operand("LiteralInteger", 0), operand("Decoration", Decoration.Offset, 0)),
-          Instruction.MemberDecorate(ref(7), operand("LiteralInteger", 0), operand("Decoration", Decoration.Offset, 0)),
-          Instruction.Decorate(ref(14), operand("Decoration", Decoration.Binding, 0)),
-          Instruction.Decorate(ref(14), operand("Decoration", Decoration.DescriptorSet, 0)),
-          Instruction.Decorate(ref(15), operand("Decoration", Decoration.Binding, 1)),
-          Instruction.Decorate(ref(15), operand("Decoration", Decoration.DescriptorSet, 0)),
-          Instruction.Variable(ref(8), ref(14), operand("StorageClass", StorageClass.Uniform), None),
-          Instruction.Variable(ref(9), ref(15), operand("StorageClass", StorageClass.Uniform), None),
+          Instruction.Constant(ref(3), ref(13), operand(OperandKind.LiteralContextDependentNumber, 0)),
+          Instruction.Decorate(ref(6), operand(OperandKind.Decoration, Decoration.BufferBlock)),
+          Instruction.Decorate(ref(7), operand(OperandKind.Decoration, Decoration.BufferBlock)),
+          Instruction.MemberDecorate(
+            ref(6),
+            operand(OperandKind.LiteralInteger, 0),
+            operand(OperandKind.Decoration, Decoration.Offset, 0)
+          ),
+          Instruction.MemberDecorate(
+            ref(7),
+            operand(OperandKind.LiteralInteger, 0),
+            operand(OperandKind.Decoration, Decoration.Offset, 0)
+          ),
+          Instruction.Decorate(ref(14), operand(OperandKind.Decoration, Decoration.Binding, 0)),
+          Instruction.Decorate(ref(14), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+          Instruction.Decorate(ref(15), operand(OperandKind.Decoration, Decoration.Binding, 1)),
+          Instruction.Decorate(ref(15), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+          Instruction.Variable(ref(8), ref(14), operand(OperandKind.StorageClass, StorageClass.Uniform), None),
+          Instruction.Variable(ref(9), ref(15), operand(OperandKind.StorageClass, StorageClass.Uniform), None),
           Instruction.EntryPoint(
-            operand("ExecutionModel", ExecutionModel.GLCompute),
+            operand(OperandKind.ExecutionModel, ExecutionModel.GLCompute),
             ref(16),
             stringOperand("convert"),
             Vec(ref(14), ref(15))
           ),
-          Instruction.ExecutionMode(ref(16), operand("ExecutionMode", ExecutionMode.LocalSize, 1, 1, 1)),
-          Instruction.Function(ref(1), ref(16), operand("FunctionControl", FunctionControl.None), ref(12)),
+          Instruction.ExecutionMode(ref(16), operand(OperandKind.ExecutionMode, ExecutionMode.LocalSize, 1, 1, 1)),
+          Instruction.Function(ref(1), ref(16), operand(OperandKind.FunctionControl, FunctionControl.None), ref(12)),
           Instruction.Label(ref(17)),
           Instruction.AccessChain(ref(10), ref(18), ref(14), Vec(ref(13))),
           Instruction.AccessChain(ref(11), ref(19), ref(15), Vec(ref(13))),

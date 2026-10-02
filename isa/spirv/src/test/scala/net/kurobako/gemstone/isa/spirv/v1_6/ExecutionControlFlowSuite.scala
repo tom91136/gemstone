@@ -15,26 +15,30 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
     signed <- Seq(false, true)
   }
     test(s"OpSwitch compares $width-bit literals at selector width, signed=$signed") {
-      def ref(n: Int): Operand    = operand("IdRef", n)
-      def result(n: Int): Operand = operand("IdResult", n)
-      val literal                 = if (width == 64) operand("PairLiteralIntegerIdRef", -7, -1, 22)
-      else operand("PairLiteralIntegerIdRef", -7, 22)
+      def ref(n: Int): Operand    = operand(OperandKind.IdRef, n)
+      def result(n: Int): Operand = operand(OperandKind.IdResult, n)
+      val literal                 = if (width == 64) operand(OperandKind.PairLiteralIntegerIdRef, -7, -1, 22)
+      else operand(OperandKind.PairLiteralIntegerIdRef, -7, 22)
       val module = Module(
         Header(ISA.version, Word(0), Word(32), Word(0)),
         Vec(
           Instruction.TypeVoid(result(1)),
           Instruction.TypeInt(
             result(2),
-            operand("LiteralInteger", width),
-            operand("LiteralInteger", if (signed) 1 else 0)
+            operand(OperandKind.LiteralInteger, width),
+            operand(OperandKind.LiteralInteger, if (signed) 1 else 0)
           ),
-          Instruction.TypeInt(result(3), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-          Instruction.TypePointer(result(4), operand("StorageClass", 5), ref(3)),
+          Instruction.TypeInt(
+            result(3),
+            operand(OperandKind.LiteralInteger, 32),
+            operand(OperandKind.LiteralInteger, 0)
+          ),
+          Instruction.TypePointer(result(4), operand(OperandKind.StorageClass, 5), ref(3)),
           Instruction.TypeFunction(result(5), ref(1), Vec(ref(4), ref(2))),
-          Instruction.Constant(ref(3), result(6), operand("LiteralContextDependentNumber", 99)),
-          Instruction.Constant(ref(3), result(7), operand("LiteralContextDependentNumber", 0)),
-          Instruction.EntryPoint(operand("ExecutionModel", 6), ref(10), stringOperand("switch"), Vec.empty),
-          Instruction.Function(ref(1), result(10), operand("FunctionControl", 0), ref(5)),
+          Instruction.Constant(ref(3), result(6), operand(OperandKind.LiteralContextDependentNumber, 99)),
+          Instruction.Constant(ref(3), result(7), operand(OperandKind.LiteralContextDependentNumber, 0)),
+          Instruction.EntryPoint(operand(OperandKind.ExecutionModel, 6), ref(10), stringOperand("switch"), Vec.empty),
+          Instruction.Function(ref(1), result(10), operand(OperandKind.FunctionControl, 0), ref(5)),
           Instruction.FunctionParameter(ref(4), result(11)),
           Instruction.FunctionParameter(ref(2), result(12)),
           Instruction.Label(result(20)),
@@ -67,46 +71,56 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
     }
 
   test("indirect function call rejects a pointer from another program") {
-    val voidType       = operand("IdResult", 1)
-    val u32            = operand("IdResult", 2)
-    val u64            = operand("IdResult", 3)
-    val pointerType    = operand("IdResult", 4)
-    val entryType      = operand("IdResult", 5)
-    val helperType     = operand("IdResult", 6)
-    val helperValue    = operand("IdResult", 7)
-    val entryFunction  = operand("IdResult", 8)
-    val helperFunction = operand("IdResult", 9)
-    val output         = operand("IdResult", 10)
-    val token          = operand("IdResult", 11)
-    val result         = operand("IdResult", 13)
+    val voidType       = operand(OperandKind.IdResult, 1)
+    val u32            = operand(OperandKind.IdResult, 2)
+    val u64            = operand(OperandKind.IdResult, 3)
+    val pointerType    = operand(OperandKind.IdResult, 4)
+    val entryType      = operand(OperandKind.IdResult, 5)
+    val helperType     = operand(OperandKind.IdResult, 6)
+    val helperValue    = operand(OperandKind.IdResult, 7)
+    val entryFunction  = operand(OperandKind.IdResult, 8)
+    val helperFunction = operand(OperandKind.IdResult, 9)
+    val output         = operand(OperandKind.IdResult, 10)
+    val token          = operand(OperandKind.IdResult, 11)
+    val result         = operand(OperandKind.IdResult, 13)
     val module         = Module(
       Header(ISA.version, Word(0), Word(17), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeInt(u64, operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u32),
         Instruction.TypeFunction(entryType, voidType, Vec(pointerType, u64)),
         Instruction.TypeFunction(helperType, u32, Vec.empty),
-        Instruction.Constant(u32, helperValue, operand("LiteralContextDependentNumber", 37)),
+        Instruction.Constant(u32, helperValue, operand(OperandKind.LiteralContextDependentNumber, 37)),
         Instruction.Name(helperFunction, stringOperand("helper")),
         Instruction.Name(helperValue, stringOperand("not_a_function")),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           entryFunction,
           stringOperand("indirect"),
           Vec.empty
         ),
-        Instruction.Function(voidType, entryFunction, operand("FunctionControl", spv.FunctionControl.None), entryType),
+        Instruction.Function(
+          voidType,
+          entryFunction,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          entryType
+        ),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(u64, token),
-        Instruction.Label(operand("IdResult", 12)),
+        Instruction.Label(operand(OperandKind.IdResult, 12)),
         Instruction.FunctionPointerCallINTEL(u32, result, Vec(token)),
         Instruction.Store(output, result, None),
         Instruction.Return(),
         Instruction.FunctionEnd(),
-        Instruction.Function(u32, helperFunction, operand("FunctionControl", spv.FunctionControl.None), helperType),
-        Instruction.Label(operand("IdResult", 14)),
+        Instruction.Function(
+          u32,
+          helperFunction,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          helperType
+        ),
+        Instruction.Label(operand(OperandKind.IdResult, 14)),
         Instruction.ReturnValue(helperValue),
         Instruction.FunctionEnd()
       ),
@@ -148,48 +162,62 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
   }
 
   test("dispatch executes typed function calls and return values") {
-    val voidType        = operand("IdResult", 1)
-    val u32             = operand("IdResult", 2)
-    val pointerType     = operand("IdResult", 3)
-    val entryType       = operand("IdResult", 4)
-    val helperType      = operand("IdResult", 5)
-    val one             = operand("IdResult", 6)
-    val entryFunction   = operand("IdResult", 7)
-    val helperFunction  = operand("IdResult", 8)
-    val output          = operand("IdResult", 9)
-    val input           = operand("IdResult", 10)
-    val callResult      = operand("IdResult", 12)
-    val helperParameter = operand("IdResult", 14)
-    val helperResult    = operand("IdResult", 16)
+    val voidType        = operand(OperandKind.IdResult, 1)
+    val u32             = operand(OperandKind.IdResult, 2)
+    val pointerType     = operand(OperandKind.IdResult, 3)
+    val entryType       = operand(OperandKind.IdResult, 4)
+    val helperType      = operand(OperandKind.IdResult, 5)
+    val one             = operand(OperandKind.IdResult, 6)
+    val entryFunction   = operand(OperandKind.IdResult, 7)
+    val helperFunction  = operand(OperandKind.IdResult, 8)
+    val output          = operand(OperandKind.IdResult, 9)
+    val input           = operand(OperandKind.IdResult, 10)
+    val callResult      = operand(OperandKind.IdResult, 12)
+    val helperParameter = operand(OperandKind.IdResult, 14)
+    val helperResult    = operand(OperandKind.IdResult, 16)
     val module          = Module(
       Header(ISA.version, Word(0), Word(24), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u32),
         Instruction.TypeFunction(entryType, voidType, Vec(pointerType, u32)),
         Instruction.TypeFunction(helperType, u32, Vec(u32)),
-        Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
-        Instruction.String(operand("IdResult", 17), stringOperand("call.cl")),
+        Instruction.Constant(u32, one, operand(OperandKind.LiteralContextDependentNumber, 1)),
+        Instruction.String(operand(OperandKind.IdResult, 17), stringOperand("call.cl")),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           entryFunction,
           stringOperand("call"),
           Vec.empty
         ),
-        Instruction.Function(voidType, entryFunction, operand("FunctionControl", spv.FunctionControl.None), entryType),
+        Instruction.Function(
+          voidType,
+          entryFunction,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          entryType
+        ),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(u32, input),
-        Instruction.Label(operand("IdResult", 11)),
-        Instruction.Line(operand("IdRef", 17), operand("LiteralInteger", 1), operand("LiteralInteger", 1)),
+        Instruction.Label(operand(OperandKind.IdResult, 11)),
+        Instruction.Line(
+          operand(OperandKind.IdRef, 17),
+          operand(OperandKind.LiteralInteger, 1),
+          operand(OperandKind.LiteralInteger, 1)
+        ),
         Instruction.FunctionCall(u32, callResult, helperFunction, Vec(input)),
         Instruction.Store(output, callResult, None),
         Instruction.NoLine(),
         Instruction.Return(),
         Instruction.FunctionEnd(),
-        Instruction.Function(u32, helperFunction, operand("FunctionControl", spv.FunctionControl.None), helperType),
+        Instruction.Function(
+          u32,
+          helperFunction,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          helperType
+        ),
         Instruction.FunctionParameter(u32, helperParameter),
-        Instruction.Label(operand("IdResult", 15)),
+        Instruction.Label(operand(OperandKind.IdResult, 15)),
         Instruction.IAdd(u32, helperResult, helperParameter, one),
         Instruction.ReturnValue(helperResult),
         Instruction.FunctionEnd()
@@ -216,34 +244,34 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
   }
 
   test("dispatch executes structured loops and Phi values") {
-    val voidType    = operand("IdResult", 1)
-    val u32         = operand("IdResult", 2)
-    val pointerType = operand("IdResult", 3)
-    val function    = operand("IdResult", 5)
-    val output      = operand("IdResult", 6)
-    val bound       = operand("IdResult", 7)
-    val entry       = operand("IdResult", 8)
-    val header      = operand("IdResult", 9)
-    val body        = operand("IdResult", 10)
-    val merge       = operand("IdResult", 11)
-    val index       = operand("IdResult", 12)
-    val condition   = operand("IdResult", 13)
-    val destination = operand("IdResult", 14)
-    val next        = operand("IdResult", 15)
-    val zero        = operand("IdResult", 16)
-    val one         = operand("IdResult", 17)
+    val voidType    = operand(OperandKind.IdResult, 1)
+    val u32         = operand(OperandKind.IdResult, 2)
+    val pointerType = operand(OperandKind.IdResult, 3)
+    val function    = operand(OperandKind.IdResult, 5)
+    val output      = operand(OperandKind.IdResult, 6)
+    val bound       = operand(OperandKind.IdResult, 7)
+    val entry       = operand(OperandKind.IdResult, 8)
+    val header      = operand(OperandKind.IdResult, 9)
+    val body        = operand(OperandKind.IdResult, 10)
+    val merge       = operand(OperandKind.IdResult, 11)
+    val index       = operand(OperandKind.IdResult, 12)
+    val condition   = operand(OperandKind.IdResult, 13)
+    val destination = operand(OperandKind.IdResult, 14)
+    val next        = operand(OperandKind.IdResult, 15)
+    val zero        = operand(OperandKind.IdResult, 16)
+    val one         = operand(OperandKind.IdResult, 17)
     val module      = Module(
       Header(ISA.version, Word(0), Word(32), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypeBool(operand("IdResult", 18)),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
-        Instruction.TypeFunction(operand("IdResult", 4), voidType, Vec(pointerType, u32)),
-        Instruction.Constant(u32, zero, operand("LiteralContextDependentNumber", 0)),
-        Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeBool(operand(OperandKind.IdResult, 18)),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u32),
+        Instruction.TypeFunction(operand(OperandKind.IdResult, 4), voidType, Vec(pointerType, u32)),
+        Instruction.Constant(u32, zero, operand(OperandKind.LiteralContextDependentNumber, 0)),
+        Instruction.Constant(u32, one, operand(OperandKind.LiteralContextDependentNumber, 1)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("sequence"),
           Vec.empty
@@ -251,8 +279,8 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
         Instruction.Function(
           voidType,
           function,
-          operand("FunctionControl", spv.FunctionControl.None),
-          operand("IdRef", 4)
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          operand(OperandKind.IdRef, 4)
         ),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(u32, bound),
@@ -260,8 +288,8 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
         Instruction.Branch(header),
         Instruction.Label(header),
         Instruction.Phi(u32, index, Vec(phiPair(zero, entry), phiPair(next, body))),
-        Instruction.LoopMerge(merge, body, operand("LoopControl", spv.LoopControl.None)),
-        Instruction.ULessThan(operand("IdResultType", 18), condition, index, bound),
+        Instruction.LoopMerge(merge, body, operand(OperandKind.LoopControl, spv.LoopControl.None)),
+        Instruction.ULessThan(operand(OperandKind.IdResultType, 18), condition, index, bound),
         Instruction.BranchConditional(condition, body, merge, Vec.empty),
         Instruction.Label(body),
         Instruction.PtrAccessChain(pointerType, destination, output, index, Vec.empty),
@@ -299,29 +327,29 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
   }
 
   test("dispatch validates lifetime markers around function objects") {
-    val voidType     = operand("IdResult", 1)
-    val u8           = operand("IdResult", 2)
-    val u32          = operand("IdResult", 3)
-    val outputType   = operand("IdResult", 4)
-    val localType    = operand("IdResult", 5)
-    val localBytePtr = operand("IdResult", 6)
-    val function     = operand("IdResult", 8)
-    val output       = operand("IdResult", 9)
-    val local        = operand("IdResult", 11)
-    val bytePointer  = operand("IdResult", 12)
-    val loaded       = operand("IdResult", 13)
-    val value        = operand("IdResult", 14)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val u8           = operand(OperandKind.IdResult, 2)
+    val u32          = operand(OperandKind.IdResult, 3)
+    val outputType   = operand(OperandKind.IdResult, 4)
+    val localType    = operand(OperandKind.IdResult, 5)
+    val localBytePtr = operand(OperandKind.IdResult, 6)
+    val function     = operand(OperandKind.IdResult, 8)
+    val output       = operand(OperandKind.IdResult, 9)
+    val local        = operand(OperandKind.IdResult, 11)
+    val bytePointer  = operand(OperandKind.IdResult, 12)
+    val loaded       = operand(OperandKind.IdResult, 13)
+    val value        = operand(OperandKind.IdResult, 14)
     val instructions = Vec(
       Instruction.TypeVoid(voidType),
-      Instruction.TypeInt(u8, operand("LiteralInteger", 8), operand("LiteralInteger", 0)),
-      Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-      Instruction.TypePointer(outputType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
-      Instruction.TypePointer(localType, operand("StorageClass", spv.StorageClass.Function), u32),
-      Instruction.TypePointer(localBytePtr, operand("StorageClass", spv.StorageClass.Function), u8),
-      Instruction.TypeFunction(operand("IdResult", 7), voidType, Vec(outputType)),
-      Instruction.Constant(u32, value, operand("LiteralContextDependentNumber", 0x12345678)),
+      Instruction.TypeInt(u8, operand(OperandKind.LiteralInteger, 8), operand(OperandKind.LiteralInteger, 0)),
+      Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+      Instruction.TypePointer(outputType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u32),
+      Instruction.TypePointer(localType, operand(OperandKind.StorageClass, spv.StorageClass.Function), u32),
+      Instruction.TypePointer(localBytePtr, operand(OperandKind.StorageClass, spv.StorageClass.Function), u8),
+      Instruction.TypeFunction(operand(OperandKind.IdResult, 7), voidType, Vec(outputType)),
+      Instruction.Constant(u32, value, operand(OperandKind.LiteralContextDependentNumber, 0x12345678)),
       Instruction.EntryPoint(
-        operand("ExecutionModel", spv.ExecutionModel.Kernel),
+        operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
         function,
         stringOperand("lifetime"),
         Vec.empty
@@ -329,18 +357,18 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
       Instruction.Function(
         voidType,
         function,
-        operand("FunctionControl", spv.FunctionControl.None),
-        operand("IdRef", 7)
+        operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+        operand(OperandKind.IdRef, 7)
       ),
       Instruction.FunctionParameter(outputType, output),
-      Instruction.Label(operand("IdResult", 10)),
-      Instruction.Variable(localType, local, operand("StorageClass", spv.StorageClass.Function), None),
+      Instruction.Label(operand(OperandKind.IdResult, 10)),
+      Instruction.Variable(localType, local, operand(OperandKind.StorageClass, spv.StorageClass.Function), None),
       Instruction.Bitcast(localBytePtr, bytePointer, local),
-      Instruction.LifetimeStart(bytePointer, operand("LiteralInteger", 4)),
+      Instruction.LifetimeStart(bytePointer, operand(OperandKind.LiteralInteger, 4)),
       Instruction.Store(local, value, None),
       Instruction.Load(u32, loaded, local, None),
       Instruction.Store(output, loaded, None),
-      Instruction.LifetimeStop(bytePointer, operand("LiteralInteger", 4)),
+      Instruction.LifetimeStop(bytePointer, operand(OperandKind.LiteralInteger, 4)),
       Instruction.Return(),
       Instruction.FunctionEnd()
     )
@@ -364,7 +392,7 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
     val malformed = module.copy(instructions =
       instructions.updated(
         14,
-        Instruction.LifetimeStart(bytePointer, operand("LiteralInteger", 4, 0))
+        Instruction.LifetimeStart(bytePointer, operand(OperandKind.LiteralInteger, 4, 0))
       )
     )
     executeUnchecked(malformed, dispatch, memory) match {

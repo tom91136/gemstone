@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import ELF.*
 import VMIR.*
 import fixtures.*
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
@@ -14,8 +15,8 @@ class AMDGPUControlFlowSuite extends munit.FunSuite {
 
   test("vector condition masks follow the wave width") {
     val mask = 0x8000000100000001L
-    assertEquals(VMArithmetic.waveConditionMask(mask, 32: Int where Between[1, 64]), 1L)
-    assertEquals(VMArithmetic.waveConditionMask(mask, 64: Int where Between[1, 64]), mask)
+    assertEquals(VMArithmetic.waveConditionMask(mask, 32), 1L)
+    assertEquals(VMArithmetic.waveConditionMask(mask, 64), mask)
   }
 
   test("gfx900 VOP3 mask bit counts compose across both halves of a wave") {
@@ -56,7 +57,7 @@ class AMDGPUControlFlowSuite extends munit.FunSuite {
   }
 
   test("gfx900 bit reverse accepts canonical inline floating constants as raw bits") {
-    assertEquals(VMArithmetic.bitReverse32(0x3f000000L), 0x000000fcL)
+    assertEquals(Bits.reverseBits(0x3f000000L, 32), 0x000000fcL)
     assertEquals(
       VMCompiler.validate(
         Vec[Byte](
@@ -156,10 +157,10 @@ class AMDGPUControlFlowSuite extends munit.FunSuite {
   }
 
   test("gfx1036 DS permute selects a destination lane from a byte address") {
-    assertEquals(VMArithmetic.permuteDestinationLane(0L, 0L, 32: Int in (32, 64)), 0)
-    assertEquals(VMArithmetic.permuteDestinationLane(4L * 29L, 0L, 32: Int in (32, 64)), 29)
-    assertEquals(VMArithmetic.permuteDestinationLane(0L, 124L, 32: Int in (32, 64)), 31)
-    assertEquals(VMArithmetic.permuteDestinationLane(4L * 37L, 124L, 32: Int in (32, 64)), 4)
+    assertEquals(VMArithmetic.permuteDestinationLane(0L, 0L, 32), 0)
+    assertEquals(VMArithmetic.permuteDestinationLane(4L * 29L, 0L, 32), 29)
+    assertEquals(VMArithmetic.permuteDestinationLane(0L, 124L, 32), 31)
+    assertEquals(VMArithmetic.permuteDestinationLane(4L * 37L, 124L, 32), 4)
     assertEquals(
       VMCompiler.decodeInstruction(
         Vec[Byte](0x00, 0x00, 0xc8.toByte, 0xda.toByte, 0x01, 0x02, 0x00, 0x05),

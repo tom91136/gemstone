@@ -42,45 +42,54 @@ class GLSLIntegerMinMaxSuite extends munit.FunSuite {
         case 41 => Seq(BigInt(1), maximum, high, BigInt(3))
         case _  => Seq(BigInt(1), maximum - 1, high, BigInt(3))
       }
-      val voidType     = operand("IdResult", 1)
-      val scalar       = operand("IdResult", 2)
-      val vector       = operand("IdResult", 3)
-      val pointer      = operand("IdResult", 4)
-      val functionType = operand("IdResult", 5)
-      val function     = operand("IdResult", 6)
-      val output       = operand("IdResult", 7)
-      val left         = operand("IdResult", 8)
-      val right        = operand("IdResult", 9)
-      val bound        = operand("IdResult", 10)
-      val result       = operand("IdResult", 11)
-      val importId     = operand("IdResult", 12)
+      val voidType     = operand(OperandKind.IdResult, 1)
+      val scalar       = operand(OperandKind.IdResult, 2)
+      val vector       = operand(OperandKind.IdResult, 3)
+      val pointer      = operand(OperandKind.IdResult, 4)
+      val functionType = operand(OperandKind.IdResult, 5)
+      val function     = operand(OperandKind.IdResult, 6)
+      val output       = operand(OperandKind.IdResult, 7)
+      val left         = operand(OperandKind.IdResult, 8)
+      val right        = operand(OperandKind.IdResult, 9)
+      val bound        = operand(OperandKind.IdResult, 10)
+      val result       = operand(OperandKind.IdResult, 11)
+      val importId     = operand(OperandKind.IdResult, 12)
       val valueType    = if (count == 1) scalar else vector
       val module       = Module(
         Header(ISA.version, Word(0), Word(14), Word(0)),
         Vec(
           Instruction.TypeVoid(voidType),
           Instruction.ExtInstImport(importId, stringOperand("GLSL.std.450")),
-          Instruction.TypeInt(scalar, operand("LiteralInteger", width), operand("LiteralInteger", declaredSigned)),
-          Instruction.TypeVector(vector, scalar, operand("LiteralInteger", 4)),
-          Instruction.TypePointer(pointer, operand("StorageClass", StorageClass.CrossWorkgroup), valueType),
+          Instruction.TypeInt(
+            scalar,
+            operand(OperandKind.LiteralInteger, width),
+            operand(OperandKind.LiteralInteger, declaredSigned)
+          ),
+          Instruction.TypeVector(vector, scalar, operand(OperandKind.LiteralInteger, 4)),
+          Instruction.TypePointer(pointer, operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), valueType),
           Instruction.TypeFunction(functionType, voidType, Vec(pointer, valueType, valueType, valueType)),
           Instruction.EntryPoint(
-            operand("ExecutionModel", ExecutionModel.Kernel),
+            operand(OperandKind.ExecutionModel, ExecutionModel.Kernel),
             function,
             stringOperand("minmax"),
             Vec.empty
           ),
-          Instruction.Function(voidType, function, operand("FunctionControl", FunctionControl.None), functionType),
+          Instruction.Function(
+            voidType,
+            function,
+            operand(OperandKind.FunctionControl, FunctionControl.None),
+            functionType
+          ),
           Instruction.FunctionParameter(pointer, output),
           Instruction.FunctionParameter(valueType, left),
           Instruction.FunctionParameter(valueType, right),
           Instruction.FunctionParameter(valueType, bound),
-          Instruction.Label(operand("IdResult", 13)),
+          Instruction.Label(operand(OperandKind.IdResult, 13)),
           Instruction.ExtInst(
             valueType,
             result,
             importId,
-            operand("LiteralExtInstInteger", opcode),
+            operand(OperandKind.LiteralExtInstInteger, opcode),
             if (unary) Vec(left) else if (opcode >= 44) Vec(left, right, bound) else Vec(left, right)
           ),
           Instruction.Store(output, result, None),

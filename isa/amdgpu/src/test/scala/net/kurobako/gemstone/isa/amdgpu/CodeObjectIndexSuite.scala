@@ -13,6 +13,91 @@ import scala.util.Using
 class CodeObjectIndexSuite extends munit.FunSuite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
+  test("executable sections can be extracted without kernel descriptors or target metadata") {
+    val image = minimalCodeObject()
+    val table = LittleEndian.decodeInt64(image, 40).toInt
+    // ELF64 section-header fields; the fixture's .text is section 4.
+    LittleEndian.write(6L, image, table + 4 * 64 + 8, 8) // SHF_ALLOC | SHF_EXECINSTR
+    val descriptors     = LittleEndian.decodeInt64(image, table + 5 * 64 + 24).toInt
+    val descriptorBytes = LittleEndian.decodeInt64(image, table + 5 * 64 + 32).toInt
+    java.util.Arrays.fill(image, descriptors, descriptors + descriptorBytes, 0.toByte)
+    val code = CodeObject.decode(Vec.from(image)).flatMap(_.executableSections).toOption.get
+    assertEquals(code.map(_.name), Vec(".text"))
+    assertEquals(code.head.address, 0x1000L)
+    assertEquals(code.head.bytes, Vec(0x00, 0x00, 0x81, 0xbf).map(_.toByte))
+    assertEquals(code.head.symbols, Vec(CodeObject.Symbol("kernel", 0, 4)))
+    // Remove the symbol table: inspection of executable bytes must still work.
+    LittleEndian.write(0L, image, table + 3 * 64 + 4, 4)
+    val stripped = CodeObject.decode(Vec.from(image)).flatMap(_.executableSections).toOption.get
+    assertEquals(stripped.head.bytes, code.head.bytes)
+    assertEquals(stripped.head.symbols, Vec.empty[CodeObject.Symbol])
+  }
+
+  test("executable extraction rejects out-of-section symbols, unresolved relocations, and invalid string tables") {
+    val image = minimalCodeObject(globalPointer = true)
+    val table = LittleEndian.decodeInt64(image, 40).toInt
+    LittleEndian.write(6L, image, table + 4 * 64 + 8, 8)
+    def extract(bytes: Array[Byte]) = CodeObject.decode(Vec.from(bytes)).flatMap(_.executableSections)
+    val oversized                   = image.clone()
+    val symbols                     = LittleEndian.decodeInt64(image, table + 3 * 64 + 24).toInt
+    LittleEndian.write(8L, oversized, symbols + 24 + 16, 8)
+    assert(extract(oversized).isLeft)
+    val relocated = image.clone()
+    LittleEndian.write(4L, relocated, table + 8 * 64 + 44, 4)
+    assert(extract(relocated).left.exists {
+      case CodeObject.Error.Invalid(_) => true
+      case _                           => false
+    })
+    val dynamic     = image.clone()
+    val relocations = LittleEndian.decodeInt64(image, table + 8 * 64 + 24).toInt
+    LittleEndian.write(0L, dynamic, table + 8 * 64 + 44, 4)
+    LittleEndian.write(0x1000L, dynamic, relocations, 8)
+    assert(extract(dynamic).left.exists {
+      case CodeObject.Error.Invalid(_) => true
+      case _                           => false
+    })
+    val invalidStrings = image.clone()
+    LittleEndian.write(8L, invalidStrings, table + 1 * 64 + 4, 4) // SHT_NOBITS is not a string table.
+    assert(extract(invalidStrings).isLeft)
+  }
+
+  test("text relocations resolve local and supplied external symbols without mutating the ELF") {
+    val image   = minimalCodeObject(globalPointer = true)
+    val table   = LittleEndian.decodeInt64(image, 40).toInt
+    val records = LittleEndian.decodeInt64(image, table + 8 * 64 + 24).toInt
+    val symbols = LittleEndian.decodeInt64(image, table + 3 * 64 + 24).toInt
+    // ELF64 .text is section 4, .rela is section 8, and symbol 1 is kernel at 0x1000.
+    LittleEndian.write(6L, image, table + 4 * 64 + 8, 8)
+    LittleEndian.write(4L, image, table + 8 * 64 + 44, 4)
+    LittleEndian.write(0x1000L, image, records, 8)
+    LittleEndian.write((1L << 32) | EncodingConstants.R_AMDGPU_REL32, image, records + 8, 8)
+    LittleEndian.write(12L, image, records + 16, 8)
+    val original   = Vec.from(image)
+    val objectFile = CodeObject.decode(original).toOption.get
+    assertEquals(objectFile.executableSections.map(_.head.bytes), Right(Vec[Byte](12, 0, 0, 0)))
+    assertEquals(Vec.from(image), original)
+    LittleEndian.write(0L, image, symbols + 24 + 6, 2) // SHN_UNDEF
+    LittleEndian.write((1L << 32) | EncodingConstants.R_AMDGPU_ABS32, image, records + 8, 8)
+    LittleEndian.write(0L, image, records + 16, 8)
+    val external = CodeObject.decode(Vec.from(image)).toOption.get
+    assert(external.executableSections.left.exists {
+      case CodeObject.Error.Unsupported(message) => message.contains("kernel")
+      case _                                     => false
+    })
+    assertEquals(
+      external.relocatedSections(Map("kernel" -> 0xbf810000L), Map.empty).map(_.head.bytes),
+      Right(Vec(0x00, 0x00, 0x81, 0xbf).map(_.toByte))
+    )
+    assert(external.relocatedSections(Map("kernel" -> 0x100000000L), Map.empty).isLeft)
+    // ELF symbol zero supplies S=0, so this ABS32 relocation is just its addend.
+    LittleEndian.write(EncodingConstants.R_AMDGPU_ABS32.toLong, image, records + 8, 8)
+    LittleEndian.write(12L, image, records + 16, 8)
+    assertEquals(
+      CodeObject.decode(Vec.from(image)).flatMap(_.executableSections).map(_.head.bytes),
+      Right(Vec[Byte](12, 0, 0, 0))
+    )
+  }
+
   test("ELF symbol names preserve UTF-8 while target IDs remain ASCII") {
     val image       = minimalCodeObject()
     val original    = "kernel".getBytes(StandardCharsets.US_ASCII)

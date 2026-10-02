@@ -139,10 +139,16 @@ object LoadedProgram {
     statements.collect {
       case Statement.Data(addressSpace, _, elementType, name, declaredCount, initializer)
           if addressSpace == DataAddressSpace.Global || addressSpace == DataAddressSpace.Const =>
-        val count: Int > 0 = declaredCount.getOrElse(1)
-        (name, elementType, count, initializer)
-    }.traverse { case (name, elementType, count, initializer) =>
-      globalDefinition(name, elementType, count, initializer).map(name -> _)
+        (name, elementType, declaredCount, initializer)
+    }.traverse { case (name, elementType, extent, initializer) =>
+      val count = extent match {
+        case Extent.Scalar          => Right[Fault, Int > 0](1)
+        case Extent.Sized(elements) => Right(elements)
+        case Extent.Unsized         => initializer.size.refine[Int > 0].left.map(_ =>
+            Fault.Unsupported(s"PTX global '$name' has no defined extent")
+          )
+      }
+      count.flatMap(globalDefinition(name, elementType, _, initializer)).map(name -> _)
     }.map(_.toMap)
 
   // Initializer decoding is a parser boundary and fails on the first malformed or unrepresentable scalar.
@@ -240,7 +246,7 @@ class LoadedProgram private (
   def kernel(
       name: NonEmpty[String]
   ): Either[Fault, KernelMetadata] =
-    entry(name).toRight(Fault.Backend(s"PTX kernel '${name}' is not present"))
+    entry(name).toRight(Fault.Backend(s"PTX kernel '$name' is not present"))
       .flatMap(value => VMCompiler.parameterLayout(value).leftMap(error => Fault.Unsupported(error.message)))
       .flatMap { layout =>
         val parameters = layout.map { case (parameter, offset) =>
@@ -272,7 +278,7 @@ class LoadedProgram private (
       name: NonEmpty[String]
   ): Either[Fault, GlobalImage] =
     globals.get(name).toRight(Fault.Backend(
-      s"PTX global '${name}' is not present"
+      s"PTX global '$name' is not present"
     )).flatMap { definition =>
       GlobalImage.validated(
         definition.size.toLong,
@@ -288,13 +294,13 @@ class LoadedProgram private (
       addresses: AddressSpace
   ): Either[Fault, Unit] = for {
     definition <- globals.get(name).toRight(Fault.Backend(
-      s"PTX global '${name}' is not present"
+      s"PTX global '$name' is not present"
     ))
     _ <- Either.cond(
       definition.size.raw.toLong <= regionSize.raw - offset.raw,
       (),
       Fault.InvalidTask(
-        s"PTX global '${name}' does not fit its bound memory region"
+        s"PTX global '$name' does not fit its bound memory region"
       )
     )
     address <- addresses.address(region, offset)
@@ -324,7 +330,7 @@ class LoadedProgram private (
       case None         =>
         val kernel = entry(name).toRight(
           Fault.InvalidTask(
-            s"PTX kernel '${name}' is not present"
+            s"PTX kernel '$name' is not present"
           )
         ).flatMap(value =>
           VMCompiler.compile(value, functions, state.globalAddresses, moduleSharedSymbols, entries)

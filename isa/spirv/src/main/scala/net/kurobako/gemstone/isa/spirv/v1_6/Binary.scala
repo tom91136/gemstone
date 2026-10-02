@@ -7,7 +7,8 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import scala.annotation.tailrec
 
-object Binary {
+object Binary extends Decoder[Vec[Byte], RawModule, Binary.BinaryError]
+    with Encoder[RawModule, Vec[Byte], Binary.BinaryError] {
   enum BinaryError {
     case MisalignedByteLength(length: Int)
     case TruncatedHeader(wordCount: Int)
@@ -31,8 +32,6 @@ object Binary {
     }
   }
 
-  val Magic: Int = SPIRV.Magic
-
   def decode(bytes: Vec[Byte]): Either[BinaryError, RawModule] =
     for {
       _ <- Either.cond(
@@ -44,8 +43,8 @@ object Binary {
       _ <- Either.cond(wordCount >= 5, (), BinaryError.TruncatedHeader(wordCount))
       rawMagic = readInt(bytes, 0, Endianness.Little)
       endianness <-
-        if (rawMagic == Magic) Right(Endianness.Little)
-        else if (java.lang.Integer.reverseBytes(rawMagic) == Magic) Right(Endianness.Big)
+        if (rawMagic == SPIRV.Magic) Right(Endianness.Little)
+        else if (java.lang.Integer.reverseBytes(rawMagic) == SPIRV.Magic) Right(Endianness.Big)
         else Left(BinaryError.InvalidMagic(Bits.unsigned32(rawMagic).toLong))
       words = Vec.tabulate(wordCount)(index => Word(readInt(bytes, index * 4, endianness)))
       version <- decodeVersion(words(1)).toRight(BinaryError.InvalidVersion(words(1).toUnsigned.toLong))
@@ -85,7 +84,7 @@ object Binary {
         Left(BinaryError.InstructionTooLong(instruction.opcodeNumber, instruction.wordCount))
       case None =>
         val header = Vec(
-          Word(Magic),
+          Word(SPIRV.Magic),
           version,
           module.header.generator,
           module.header.bound,

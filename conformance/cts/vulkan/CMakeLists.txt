@@ -40,7 +40,7 @@ ExternalProject_Add(vulkan_cts_build
 add_executable(vulkan_cts IMPORTED GLOBAL)
 set_target_properties(vulkan_cts PROPERTIES IMPORTED_LOCATION "${cts_program}" OUTPUT_NAME vulkan_cts)
 add_dependencies(vulkan_cts vulkan_cts_build)
-conformance_register_test_program(vulkan_cts 120 deqp)
+conformance_register_test_program(vulkan_cts ${CONFORMANCE_TIMEOUT_CTS} deqp)
 install(PROGRAMS "${cts_program}" DESTINATION . RENAME vulkan_cts COMPONENT architecture)
 install(DIRECTORY "${vulkan_cts_source}/external/vulkancts/data/"
   DESTINATION data/vulkan COMPONENT support)

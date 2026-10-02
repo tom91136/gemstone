@@ -42,31 +42,31 @@ class CubeSamplingSuite extends munit.FunSuite {
     arrayed <- Seq(false, true)
     layer   <- if (arrayed && !sample.compare) Seq(-1f, 0f, 1f, 2f) else Seq(0f)
   } test(s"cube ${sample.name} array=$arrayed layer=$layer") {
-    def ref(n: Int): Operand              = operand("IdRef", n)
-    def lit(n: Int): Operand              = operand("LiteralInteger", n)
+    def ref(n: Int): Operand              = operand(OperandKind.IdRef, n)
+    def lit(n: Int): Operand              = operand(OperandKind.LiteralInteger, n)
     def fc(n: Int, v: Float): Instruction = Instruction.Constant(
       ref(3),
       ref(n),
-      operand("LiteralContextDependentNumber", java.lang.Float.floatToRawIntBits(v))
+      operand(OperandKind.LiteralContextDependentNumber, java.lang.Float.floatToRawIntBits(v))
     )
     val module = Module(
       Header(ISA.version, Word(0), Word(60), Word(0)),
       Vec(
         Instruction.EntryPoint(
-          operand("ExecutionModel", ExecutionModel.GLCompute),
+          operand(OperandKind.ExecutionModel, ExecutionModel.GLCompute),
           ref(40),
           stringOperand("main"),
           Vec(ref(16), ref(17), ref(18))
         ),
-        Instruction.Decorate(ref(16), operand("Decoration", Decoration.Binding, 0)),
-        Instruction.Decorate(ref(16), operand("Decoration", Decoration.DescriptorSet, 0)),
-        Instruction.Decorate(ref(17), operand("Decoration", Decoration.Binding, 1)),
-        Instruction.Decorate(ref(17), operand("Decoration", Decoration.DescriptorSet, 0)),
-        Instruction.Decorate(ref(18), operand("Decoration", Decoration.Binding, 2)),
-        Instruction.Decorate(ref(18), operand("Decoration", Decoration.DescriptorSet, 0)),
-        Instruction.MemberDecorate(ref(11), lit(0), operand("Decoration", Decoration.Offset, 0)),
-        Instruction.MemberDecorate(ref(11), lit(1), operand("Decoration", Decoration.Offset, 16)),
-        Instruction.MemberDecorate(ref(11), lit(2), operand("Decoration", Decoration.Offset, 32)),
+        Instruction.Decorate(ref(16), operand(OperandKind.Decoration, Decoration.Binding, 0)),
+        Instruction.Decorate(ref(16), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+        Instruction.Decorate(ref(17), operand(OperandKind.Decoration, Decoration.Binding, 1)),
+        Instruction.Decorate(ref(17), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+        Instruction.Decorate(ref(18), operand(OperandKind.Decoration, Decoration.Binding, 2)),
+        Instruction.Decorate(ref(18), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+        Instruction.MemberDecorate(ref(11), lit(0), operand(OperandKind.Decoration, Decoration.Offset, 0)),
+        Instruction.MemberDecorate(ref(11), lit(1), operand(OperandKind.Decoration, Decoration.Offset, 16)),
+        Instruction.MemberDecorate(ref(11), lit(2), operand(OperandKind.Decoration, Decoration.Offset, 32)),
         Instruction.TypeVoid(ref(1)),
         Instruction.TypeInt(ref(2), lit(32), lit(0)),
         Instruction.TypeFloat(ref(3), lit(32), None),
@@ -75,28 +75,28 @@ class CubeSamplingSuite extends munit.FunSuite {
         Instruction.TypeImage(
           ref(6),
           ref(3),
-          operand("Dim", Dim.Cube),
+          operand(OperandKind.Dim, Dim.Cube),
           lit(if (sample.compare) 1 else 0),
           lit(if (arrayed) 1 else 0),
           lit(0),
           lit(1),
-          operand("ImageFormat", ImageFormat.Unknown),
+          operand(OperandKind.ImageFormat, ImageFormat.Unknown),
           None
         ),
-        Instruction.TypePointer(ref(7), operand("StorageClass", StorageClass.UniformConstant), ref(6)),
+        Instruction.TypePointer(ref(7), operand(OperandKind.StorageClass, StorageClass.UniformConstant), ref(6)),
         Instruction.TypeSampler(ref(8)),
-        Instruction.TypePointer(ref(9), operand("StorageClass", StorageClass.UniformConstant), ref(8)),
+        Instruction.TypePointer(ref(9), operand(OperandKind.StorageClass, StorageClass.UniformConstant), ref(8)),
         Instruction.TypeSampledImage(ref(10), ref(6)),
         Instruction.TypeVector(ref(27), ref(2), lit(if (arrayed) 3 else 2)),
         Instruction.TypeStruct(ref(11), Vec(ref(5), ref(27), ref(2))),
-        Instruction.TypePointer(ref(12), operand("StorageClass", StorageClass.StorageBuffer), ref(11)),
-        Instruction.TypePointer(ref(13), operand("StorageClass", StorageClass.StorageBuffer), ref(5)),
-        Instruction.TypePointer(ref(14), operand("StorageClass", StorageClass.StorageBuffer), ref(27)),
-        Instruction.TypePointer(ref(48), operand("StorageClass", StorageClass.StorageBuffer), ref(2)),
+        Instruction.TypePointer(ref(12), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(11)),
+        Instruction.TypePointer(ref(13), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(5)),
+        Instruction.TypePointer(ref(14), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(27)),
+        Instruction.TypePointer(ref(48), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(2)),
         Instruction.TypeFunction(ref(15), ref(1), Vec.empty),
-        Instruction.Variable(ref(7), ref(16), operand("StorageClass", StorageClass.UniformConstant), None),
-        Instruction.Variable(ref(9), ref(17), operand("StorageClass", StorageClass.UniformConstant), None),
-        Instruction.Variable(ref(12), ref(18), operand("StorageClass", StorageClass.StorageBuffer), None),
+        Instruction.Variable(ref(7), ref(16), operand(OperandKind.StorageClass, StorageClass.UniformConstant), None),
+        Instruction.Variable(ref(9), ref(17), operand(OperandKind.StorageClass, StorageClass.UniformConstant), None),
+        Instruction.Variable(ref(12), ref(18), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), None),
         Instruction.Constant(ref(2), ref(19), lit(0)),
         Instruction.Constant(ref(2), ref(49), lit(1)),
         Instruction.Constant(ref(2), ref(50), lit(2)),
@@ -119,7 +119,7 @@ class CubeSamplingSuite extends munit.FunSuite {
           if (sample.grad == 2) Vec(ref(34), ref(33), ref(33)) else Vec(ref(33), ref(33), ref(34))
         ),
         Instruction.ConstantComposite(ref(4), ref(55), Vec(ref(33), ref(33), ref(33))),
-        Instruction.Function(ref(1), ref(40), operand("FunctionControl", FunctionControl.None), ref(15)),
+        Instruction.Function(ref(1), ref(40), operand(OperandKind.FunctionControl, FunctionControl.None), ref(15)),
         Instruction.Label(ref(41)),
         Instruction.Load(ref(6), ref(28), ref(16), None),
         Instruction.Load(ref(8), ref(29), ref(17), None),
@@ -136,7 +136,7 @@ class CubeSamplingSuite extends munit.FunSuite {
              ref(30),
              ref(25),
              ref(24),
-             operand("ImageOperands", ImageOperands.Lod, 23)
+             operand(OperandKind.ImageOperands, ImageOperands.Lod, 23)
            ),
            Instruction.CompositeConstruct(ref(5), ref(31), Vec(ref(32), ref(33), ref(33), ref(34)))
          )
@@ -145,8 +145,8 @@ class CubeSamplingSuite extends munit.FunSuite {
            ref(31),
            ref(30),
            ref(25),
-           if (sample.grad == 0) operand("ImageOperands", ImageOperands.Lod, 23)
-           else operand("ImageOperands", ImageOperands.Grad, 54, 55)
+           if (sample.grad == 0) operand(OperandKind.ImageOperands, ImageOperands.Lod, 23)
+           else operand(OperandKind.ImageOperands, ImageOperands.Grad, 54, 55)
          ))) ++ Vec(
           Instruction.AccessChain(ref(13), ref(42), ref(18), Vec(ref(19))),
           Instruction.Store(ref(42), ref(31), None),

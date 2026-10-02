@@ -66,13 +66,13 @@ private object ShaderLowering {
       bound += 1
       result
     }
-    def operand(kind: NonEmpty[String], words: Int*): Operand =
+    def operand(kind: OperandKind, words: Int*): Operand =
       Operand(kind, Vec.from(words.map(Word(_))).unsafe)
-    def result(value: Int): Operand   = operand("IdResult", value)
-    def ref(value: Int): Operand      = operand("IdRef", value)
-    def typ(value: Int): Operand      = operand("IdResultType", value)
-    def literal(value: Int): Operand  = operand("LiteralInteger", value)
-    def storage(value: Long): Operand = operand("StorageClass", value.toInt)
+    def result(value: Int): Operand   = operand(OperandKind.IdResult, value)
+    def ref(value: Int): Operand      = operand(OperandKind.IdRef, value)
+    def typ(value: Int): Operand      = operand(OperandKind.IdResultType, value)
+    def literal(value: Int): Operand  = operand(OperandKind.LiteralInteger, value)
+    def storage(value: Long): Operand = operand(OperandKind.StorageClass, value.toInt)
     def declaration(existing: PartialFunction[Instruction, Int], create: Int => Instruction): Int =
       (module.instructions ++ Vec.from(declarations)).collect(existing).headOption.getOrElse {
         val value = fresh()
@@ -91,7 +91,7 @@ private object ShaderLowering {
       declarations += Instruction.Variable(typ(pointer), result(value), storage(storageClass), initializer.map(ref(_)))
       decorations += Instruction.Decorate(
         ref(value),
-        operand("Decoration", Decoration.BuiltIn, builtin.toInt)
+        operand(OperandKind.Decoration, Decoration.BuiltIn, builtin.toInt)
       )
       added += ref(value)
     }
@@ -113,9 +113,9 @@ private object ShaderLowering {
       )
       val one = fresh(); val all = fresh(); val array = fresh(); val initial = fresh()
       declarations +=
-        Instruction.Constant(typ(uint), result(one), operand("LiteralContextDependentNumber", 1))
+        Instruction.Constant(typ(uint), result(one), operand(OperandKind.LiteralContextDependentNumber, 1))
       declarations +=
-        Instruction.Constant(typ(uint), result(all), operand("LiteralContextDependentNumber", -1))
+        Instruction.Constant(typ(uint), result(all), operand(OperandKind.LiteralContextDependentNumber, -1))
       declarations += Instruction.TypeArray(result(array), ref(uint), ref(one))
       declarations += Instruction.ConstantComposite(typ(array), result(initial), Vec(ref(all)))
       variable(array, StorageClass.Output, BuiltIn.SampleMask, Some(initial))

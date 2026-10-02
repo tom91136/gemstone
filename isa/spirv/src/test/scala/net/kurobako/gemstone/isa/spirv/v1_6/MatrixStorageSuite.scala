@@ -9,8 +9,8 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class MatrixStorageSuite extends munit.FunSuite {
-  private def ref(n: Int): Operand = operand("IdRef", n)
-  private def lit(n: Int): Operand = operand("LiteralInteger", n)
+  private def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
+  private def lit(n: Int): Operand = operand(OperandKind.LiteralInteger, n)
 
   for {
     rows            <- 2 to 4
@@ -69,26 +69,26 @@ class MatrixStorageSuite extends munit.FunSuite {
       Header(ISA.version, Word(0), Word(64), Word(0)),
       Vec(
         Instruction.EntryPoint(
-          operand("ExecutionModel", ExecutionModel.GLCompute),
+          operand(OperandKind.ExecutionModel, ExecutionModel.GLCompute),
           ref(30),
           stringOperand("main"),
           Vec(ref(20), ref(21))
         ),
-        Instruction.Decorate(ref(20), operand("Decoration", Decoration.Binding, 0)),
-        Instruction.Decorate(ref(20), operand("Decoration", Decoration.DescriptorSet, 0)),
-        Instruction.Decorate(ref(21), operand("Decoration", Decoration.Binding, 1)),
-        Instruction.Decorate(ref(21), operand("Decoration", Decoration.DescriptorSet, 0)),
-        Instruction.Decorate(ref(10), operand("Decoration", Decoration.Block)),
-        Instruction.Decorate(ref(11), operand("Decoration", Decoration.Block)),
-        Instruction.Decorate(ref(8), operand("Decoration", Decoration.ArrayStride, 128)),
-        Instruction.MemberDecorate(ref(10), lit(0), operand("Decoration", Decoration.Offset, 0)),
-        Instruction.MemberDecorate(ref(11), lit(0), operand("Decoration", Decoration.Offset, 0)),
-        Instruction.MemberDecorate(ref(10), lit(1), operand("Decoration", Decoration.Offset, 16)),
-        Instruction.MemberDecorate(ref(11), lit(1), operand("Decoration", Decoration.Offset, 16)),
-        Instruction.MemberDecorate(ref(10), lit(1), operand("Decoration", Decoration.MatrixStride, 16)),
-        Instruction.MemberDecorate(ref(11), lit(1), operand("Decoration", Decoration.MatrixStride, 32)),
-        Instruction.MemberDecorate(ref(10), lit(1), operand("Decoration", if (sourceRows) 4 else 5)),
-        Instruction.MemberDecorate(ref(11), lit(1), operand("Decoration", if (destinationRows) 4 else 5)),
+        Instruction.Decorate(ref(20), operand(OperandKind.Decoration, Decoration.Binding, 0)),
+        Instruction.Decorate(ref(20), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+        Instruction.Decorate(ref(21), operand(OperandKind.Decoration, Decoration.Binding, 1)),
+        Instruction.Decorate(ref(21), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+        Instruction.Decorate(ref(10), operand(OperandKind.Decoration, Decoration.Block)),
+        Instruction.Decorate(ref(11), operand(OperandKind.Decoration, Decoration.Block)),
+        Instruction.Decorate(ref(8), operand(OperandKind.Decoration, Decoration.ArrayStride, 128)),
+        Instruction.MemberDecorate(ref(10), lit(0), operand(OperandKind.Decoration, Decoration.Offset, 0)),
+        Instruction.MemberDecorate(ref(11), lit(0), operand(OperandKind.Decoration, Decoration.Offset, 0)),
+        Instruction.MemberDecorate(ref(10), lit(1), operand(OperandKind.Decoration, Decoration.Offset, 16)),
+        Instruction.MemberDecorate(ref(11), lit(1), operand(OperandKind.Decoration, Decoration.Offset, 16)),
+        Instruction.MemberDecorate(ref(10), lit(1), operand(OperandKind.Decoration, Decoration.MatrixStride, 16)),
+        Instruction.MemberDecorate(ref(11), lit(1), operand(OperandKind.Decoration, Decoration.MatrixStride, 32)),
+        Instruction.MemberDecorate(ref(10), lit(1), operand(OperandKind.Decoration, if (sourceRows) 4 else 5)),
+        Instruction.MemberDecorate(ref(11), lit(1), operand(OperandKind.Decoration, if (destinationRows) 4 else 5)),
         Instruction.TypeVoid(ref(1)),
         Instruction.TypeFloat(ref(2), lit(32), None),
         Instruction.TypeInt(ref(15), lit(32), lit(0)),
@@ -101,26 +101,31 @@ class MatrixStorageSuite extends munit.FunSuite {
         Instruction.TypeArray(ref(8), ref(5), ref(18)),
         Instruction.TypeStruct(ref(10), Vec(ref(2), ref(8))),
         Instruction.TypeStruct(ref(11), Vec(ref(2), ref(8))),
-        Instruction.TypePointer(ref(12), operand("StorageClass", StorageClass.StorageBuffer), ref(10)),
-        Instruction.TypePointer(ref(13), operand("StorageClass", StorageClass.StorageBuffer), ref(11)),
-        Instruction.TypePointer(ref(14), operand("StorageClass", StorageClass.StorageBuffer), ref(8)),
-        Instruction.TypePointer(ref(23), operand("StorageClass", StorageClass.StorageBuffer), ref(5)),
-        Instruction.TypePointer(ref(24), operand("StorageClass", StorageClass.StorageBuffer), ref(4)),
-        Instruction.TypePointer(ref(25), operand("StorageClass", StorageClass.StorageBuffer), ref(2)),
-        Instruction.TypePointer(ref(46), operand("StorageClass", StorageClass.Function), ref(10)),
-        Instruction.Constant(ref(2), ref(41), operand("LiteralContextDependentNumber", 0x3f800000)),
+        Instruction.TypePointer(ref(12), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(10)),
+        Instruction.TypePointer(ref(13), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(11)),
+        Instruction.TypePointer(ref(14), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(8)),
+        Instruction.TypePointer(ref(23), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(5)),
+        Instruction.TypePointer(ref(24), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(4)),
+        Instruction.TypePointer(ref(25), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(2)),
+        Instruction.TypePointer(ref(46), operand(OperandKind.StorageClass, StorageClass.Function), ref(10)),
+        Instruction.Constant(ref(2), ref(41), operand(OperandKind.LiteralContextDependentNumber, 0x3f800000)),
         Instruction.ConstantComposite(ref(4), ref(42), Vec.fill(rows)(ref(41))),
         Instruction.ConstantComposite(ref(5), ref(43), Vec.fill(columns)(ref(42))),
         Instruction.ConstantComposite(ref(8), ref(44), Vec(ref(43), ref(43))),
         Instruction.ConstantComposite(ref(10), ref(45), Vec(ref(41), ref(44))),
         Instruction.TypeFunction(ref(22), ref(1), Vec.empty),
-        Instruction.Variable(ref(12), ref(20), operand("StorageClass", StorageClass.StorageBuffer), None),
-        Instruction.Variable(ref(13), ref(21), operand("StorageClass", StorageClass.StorageBuffer), None),
-        Instruction.Function(ref(1), ref(30), operand("FunctionControl", FunctionControl.None), ref(22)),
+        Instruction.Variable(ref(12), ref(20), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), None),
+        Instruction.Variable(ref(13), ref(21), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), None),
+        Instruction.Function(ref(1), ref(30), operand(OperandKind.FunctionControl, FunctionControl.None), ref(22)),
         Instruction.Label(ref(31))
       ) ++
         (if (mode == "initializer")
-           Vec(Instruction.Variable(ref(46), ref(47), operand("StorageClass", StorageClass.Function), Some(ref(45))))
+           Vec(Instruction.Variable(
+             ref(46),
+             ref(47),
+             operand(OperandKind.StorageClass, StorageClass.Function),
+             Some(ref(45))
+           ))
          else Vec.empty[Instruction]) ++ body ++ Vec(Instruction.Return(), Instruction.FunctionEnd()),
       Endianness.Little
     )

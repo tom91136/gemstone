@@ -23,28 +23,28 @@ class InputAttachmentSuite extends munit.FunSuite {
   } test(
     s"sampled=$sampled attachment format=$format extension=$extension samples=$samples sample=$sample pixel=($x,$y) arrayed=$arrayed layer=$layer"
   ) {
-    def ref(n: Int): Operand = operand("IdRef", n)
-    def lit(n: Int): Operand = operand("LiteralInteger", n)
+    def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
+    def lit(n: Int): Operand = operand(OperandKind.LiteralInteger, n)
     val integer              = Set(21, 23, 30, 32, 33, 35, 1003, 1004).contains(format)
     val component            = if (integer) 2 else 3
     val module               = Module(
       Header(ISA.version, Word(0), Word(46), Word(0)),
       Vec(
         Instruction.EntryPoint(
-          operand("ExecutionModel", ExecutionModel.Fragment),
+          operand(OperandKind.ExecutionModel, ExecutionModel.Fragment),
           ref(30),
           stringOperand("main"),
           Vec(ref(16), ref(17), ref(18))
         ),
-        Instruction.Decorate(ref(16), operand("Decoration", Decoration.Binding, 0)),
-        Instruction.Decorate(ref(16), operand("Decoration", Decoration.DescriptorSet, 0)),
-        Instruction.Decorate(ref(16), operand("Decoration", Decoration.InputAttachmentIndex, 0)),
-        Instruction.Decorate(ref(17), operand("Decoration", Decoration.Binding, 1)),
-        Instruction.Decorate(ref(17), operand("Decoration", Decoration.DescriptorSet, 0)),
-        Instruction.Decorate(ref(18), operand("Decoration", Decoration.BuiltIn, 15)),
-        Instruction.MemberDecorate(ref(9), lit(0), operand("Decoration", Decoration.Offset, 0)),
-        Instruction.MemberDecorate(ref(9), lit(1), operand("Decoration", Decoration.Offset, 16)),
-        Instruction.MemberDecorate(ref(9), lit(2), operand("Decoration", Decoration.Offset, 24)),
+        Instruction.Decorate(ref(16), operand(OperandKind.Decoration, Decoration.Binding, 0)),
+        Instruction.Decorate(ref(16), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+        Instruction.Decorate(ref(16), operand(OperandKind.Decoration, Decoration.InputAttachmentIndex, 0)),
+        Instruction.Decorate(ref(17), operand(OperandKind.Decoration, Decoration.Binding, 1)),
+        Instruction.Decorate(ref(17), operand(OperandKind.Decoration, Decoration.DescriptorSet, 0)),
+        Instruction.Decorate(ref(18), operand(OperandKind.Decoration, Decoration.BuiltIn, 15)),
+        Instruction.MemberDecorate(ref(9), lit(0), operand(OperandKind.Decoration, Decoration.Offset, 0)),
+        Instruction.MemberDecorate(ref(9), lit(1), operand(OperandKind.Decoration, Decoration.Offset, 16)),
+        Instruction.MemberDecorate(ref(9), lit(2), operand(OperandKind.Decoration, Decoration.Offset, 24)),
         Instruction.TypeVoid(ref(1)),
         Instruction.TypeInt(ref(2), lit(32), lit(if ((format == 21 || format == 23) && extension == 0) 1 else 0)),
         Instruction.TypeFloat(ref(3), lit(32), None),
@@ -52,27 +52,27 @@ class InputAttachmentSuite extends munit.FunSuite {
         Instruction.TypeImage(
           ref(5),
           ref(component),
-          operand("Dim", if (sampled) 1 else 6),
+          operand(OperandKind.Dim, if (sampled) 1 else 6),
           lit(0),
           lit(if (arrayed) 1 else 0),
           lit(if (samples == 1) 0 else 1),
           lit(if (sampled) 1 else 2),
-          operand("ImageFormat", ImageFormat.Unknown),
+          operand(OperandKind.ImageFormat, ImageFormat.Unknown),
           None
         ),
         Instruction.TypeVector(ref(6), ref(2), lit(if (arrayed) 3 else 2)),
-        Instruction.TypePointer(ref(7), operand("StorageClass", StorageClass.UniformConstant), ref(5)),
+        Instruction.TypePointer(ref(7), operand(OperandKind.StorageClass, StorageClass.UniformConstant), ref(5)),
         Instruction.TypeVector(ref(8), ref(3), lit(4)),
         Instruction.TypeStruct(ref(9), Vec(ref(4), ref(2), ref(6))),
-        Instruction.TypePointer(ref(10), operand("StorageClass", StorageClass.StorageBuffer), ref(9)),
-        Instruction.TypePointer(ref(11), operand("StorageClass", StorageClass.StorageBuffer), ref(4)),
-        Instruction.TypePointer(ref(12), operand("StorageClass", StorageClass.Input), ref(8)),
-        Instruction.TypePointer(ref(14), operand("StorageClass", StorageClass.StorageBuffer), ref(2)),
-        Instruction.TypePointer(ref(15), operand("StorageClass", StorageClass.StorageBuffer), ref(6)),
+        Instruction.TypePointer(ref(10), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(9)),
+        Instruction.TypePointer(ref(11), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(4)),
+        Instruction.TypePointer(ref(12), operand(OperandKind.StorageClass, StorageClass.Input), ref(8)),
+        Instruction.TypePointer(ref(14), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(2)),
+        Instruction.TypePointer(ref(15), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), ref(6)),
         Instruction.TypeFunction(ref(13), ref(1), Vec.empty),
-        Instruction.Variable(ref(7), ref(16), operand("StorageClass", StorageClass.UniformConstant), None),
-        Instruction.Variable(ref(10), ref(17), operand("StorageClass", StorageClass.StorageBuffer), None),
-        Instruction.Variable(ref(12), ref(18), operand("StorageClass", StorageClass.Input), None),
+        Instruction.Variable(ref(7), ref(16), operand(OperandKind.StorageClass, StorageClass.UniformConstant), None),
+        Instruction.Variable(ref(10), ref(17), operand(OperandKind.StorageClass, StorageClass.StorageBuffer), None),
+        Instruction.Variable(ref(12), ref(18), operand(OperandKind.StorageClass, StorageClass.Input), None),
         Instruction.Constant(ref(2), ref(25), lit(1)),
         Instruction.Constant(ref(2), ref(26), lit(2)),
         Instruction.ConstantComposite(
@@ -90,7 +90,7 @@ class InputAttachmentSuite extends munit.FunSuite {
           if (arrayed) Vec(ref(23), ref(24), ref(28)) else Vec(ref(23), ref(24))
         ),
         Instruction.Constant(ref(2), ref(22), lit(sample)),
-        Instruction.Function(ref(1), ref(30), operand("FunctionControl", FunctionControl.None), ref(13)),
+        Instruction.Function(ref(1), ref(30), operand(OperandKind.FunctionControl, FunctionControl.None), ref(13)),
         Instruction.Label(ref(31)),
         Instruction.Load(ref(5), ref(32), ref(16), None),
         if (sampled)
@@ -99,15 +99,15 @@ class InputAttachmentSuite extends munit.FunSuite {
             ref(33),
             ref(32),
             ref(21),
-            Some(operand("ImageOperands", ImageOperands.Sample | extension, 22))
+            Some(operand(OperandKind.ImageOperands, ImageOperands.Sample | extension, 22))
           )
         else Instruction.ImageRead(
           ref(4),
           ref(33),
           ref(32),
           ref(21),
-          if (samples == 1) { if (extension == 0) None else Some(operand("ImageOperands", extension)) }
-          else Some(operand("ImageOperands", ImageOperands.Sample | extension, 22))
+          if (samples == 1) { if (extension == 0) None else Some(operand(OperandKind.ImageOperands, extension)) }
+          else Some(operand(OperandKind.ImageOperands, ImageOperands.Sample | extension, 22))
         ),
         Instruction.AccessChain(ref(11), ref(34), ref(17), Vec(ref(20))),
         Instruction.Store(ref(34), ref(33), None),

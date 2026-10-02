@@ -9,7 +9,7 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class FloatingRoundingSuite extends munit.FunSuite {
-  private def ref(n: Int): Operand = operand("IdRef", n)
+  private def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
 
   for {
     (sourceWidth, width) <- Seq((32, 16), (64, 16), (64, 32))
@@ -50,29 +50,33 @@ class FloatingRoundingSuite extends munit.FunSuite {
       test(s"FConvert $sourceWidth to $width mode $mode $label lanes $lanes grouped $grouped") {
         val decorations = if (grouped) Vec(
           Instruction.DecorationGroup(ref(30)),
-          Instruction.Decorate(ref(30), operand("Decoration", Decoration.FPRoundingMode, mode)),
+          Instruction.Decorate(ref(30), operand(OperandKind.Decoration, Decoration.FPRoundingMode, mode)),
           Instruction.GroupDecorate(ref(30), Vec(ref(21)))
         )
-        else Vec(Instruction.Decorate(ref(21), operand("Decoration", Decoration.FPRoundingMode, mode)))
+        else Vec(Instruction.Decorate(ref(21), operand(OperandKind.Decoration, Decoration.FPRoundingMode, mode)))
         val sourceType = if (lanes == 1) 2 else 4
         val targetType = if (lanes == 1) 3 else 5
         val module     = Module(
           Header(ISA.version, Word(0), Word(32), Word(0)),
           decorations ++ Vec(
             Instruction.TypeVoid(ref(1)),
-            Instruction.TypeFloat(ref(2), operand("LiteralInteger", sourceWidth), None),
-            Instruction.TypeFloat(ref(3), operand("LiteralInteger", width), None),
-            Instruction.TypeVector(ref(4), ref(2), operand("LiteralInteger", 4)),
-            Instruction.TypeVector(ref(5), ref(3), operand("LiteralInteger", 4)),
-            Instruction.TypePointer(ref(6), operand("StorageClass", StorageClass.CrossWorkgroup), ref(targetType)),
+            Instruction.TypeFloat(ref(2), operand(OperandKind.LiteralInteger, sourceWidth), None),
+            Instruction.TypeFloat(ref(3), operand(OperandKind.LiteralInteger, width), None),
+            Instruction.TypeVector(ref(4), ref(2), operand(OperandKind.LiteralInteger, 4)),
+            Instruction.TypeVector(ref(5), ref(3), operand(OperandKind.LiteralInteger, 4)),
+            Instruction.TypePointer(
+              ref(6),
+              operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup),
+              ref(targetType)
+            ),
             Instruction.TypeFunction(ref(7), ref(1), Vec(ref(6), ref(sourceType))),
             Instruction.EntryPoint(
-              operand("ExecutionModel", ExecutionModel.Kernel),
+              operand(OperandKind.ExecutionModel, ExecutionModel.Kernel),
               ref(16),
               stringOperand("convert"),
               Vec.empty
             ),
-            Instruction.Function(ref(1), ref(16), operand("FunctionControl", FunctionControl.None), ref(7)),
+            Instruction.Function(ref(1), ref(16), operand(OperandKind.FunctionControl, FunctionControl.None), ref(7)),
             Instruction.FunctionParameter(ref(6), ref(18)),
             Instruction.FunctionParameter(ref(sourceType), ref(20)),
             Instruction.Label(ref(17)),

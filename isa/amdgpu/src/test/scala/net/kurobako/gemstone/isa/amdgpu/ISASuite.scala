@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.isa.amdgpu.asm.*
 import scala.compiletime.testing.typeChecks
 
 class ISASuite extends munit.FunSuite {
@@ -16,7 +17,9 @@ class ISASuite extends munit.FunSuite {
     ISA.CDNA1   -> Target("gfx908"),
     ISA.CDNA2   -> Target("gfx90a"),
     ISA.CDNA3   -> Target("gfx942"),
-    ISA.CDNA4   -> Target("gfx950")
+    ISA.CDNA4   -> Target("gfx950"),
+    ISA.CDNA5   -> Target("gfx1250"),
+    ISA.GFX11_7 -> Target("gfx1170")
   )
 
   processors.foreach { (isa, target) =>
@@ -34,16 +37,16 @@ class ISASuite extends munit.FunSuite {
     }
   }
 
-  test("each ISA has catalog metadata, including CDNA5 without a supported processor") {
+  test("each ISA has catalog metadata, with a supported processor") {
     ISA.values.foreach { isa =>
       assert(isa.instructions.nonEmpty, isa.toString)
       assert(isa.instructions.forall(_.meta.supports(isa)))
     }
-    assertEquals(processors.map(_._1).toSet, ISA.values.toSet - ISA.CDNA5)
+    assertEquals(processors.map(_._1).toSet, ISA.values.toSet)
   }
 
   test("RDNA1 and RDNA2 retain distinct instruction availability and opcode lookup") {
-    val definition = Instruction.Definition.forOpcode("v_dot2_f32_f16").head
+    val definition = Opcode.forOpcode("v_fma_legacy_f32").head
     assert(!ISA.RDNA1.instructions.contains(definition))
     assert(ISA.RDNA2.instructions.contains(definition))
     val encoding = Metadata.encodingsFor(definition, ISA.RDNA2).head
@@ -59,6 +62,6 @@ class ISASuite extends munit.FunSuite {
     assertEquals(Target("tahiti").isa, ISA.GFX6)
     assertEquals(Target("gfx1036").isa, ISA.RDNA2)
     assertEquals(Target("gfx1103").isa, ISA.RDNA3)
-    assertEquals(Target("gfx1170").isa, ISA.RDNA3_5)
+    assertEquals(Target("gfx1170").isa, ISA.GFX11_7)
   }
 }

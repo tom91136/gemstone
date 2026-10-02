@@ -22,7 +22,7 @@ import scala.util.Using
 class ServerLifecycleSuite extends munit.FunSuite {
   test("server sessions supply SPIR-V specialization independently of program loading") {
     val words = Vec[Long](
-      spv.Binary.Magic.toLong,
+      spv.SPIRV.Magic.toLong,
       0x00010600L,
       0L,
       3L,

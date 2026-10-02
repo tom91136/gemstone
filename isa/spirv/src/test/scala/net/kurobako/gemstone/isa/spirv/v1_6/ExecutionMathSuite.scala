@@ -13,36 +13,41 @@ class ExecutionMathSuite extends munit.FunSuite {
   import execution.*
 
   test("dispatch executes typed OpenCL.std scalar f64 hypot") {
-    val voidType     = operand("IdResult", 1)
-    val f64          = operand("IdResult", 2)
-    val pointerType  = operand("IdResult", 3)
-    val functionType = operand("IdResult", 4)
-    val opencl       = operand("IdResult", 5)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val left         = operand("IdResult", 8)
-    val right        = operand("IdResult", 9)
-    val result       = operand("IdResult", 11)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val f64          = operand(OperandKind.IdResult, 2)
+    val pointerType  = operand(OperandKind.IdResult, 3)
+    val functionType = operand(OperandKind.IdResult, 4)
+    val opencl       = operand(OperandKind.IdResult, 5)
+    val function     = operand(OperandKind.IdResult, 6)
+    val output       = operand(OperandKind.IdResult, 7)
+    val left         = operand(OperandKind.IdResult, 8)
+    val right        = operand(OperandKind.IdResult, 9)
+    val result       = operand(OperandKind.IdResult, 11)
     val module       = Module(
       Header(ISA.version, Word(0), Word(20), Word(0)),
       Vec(
         Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
         Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(f64, operand("LiteralInteger", 64), None),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), f64),
+        Instruction.TypeFloat(f64, operand(OperandKind.LiteralInteger, 64), None),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), f64),
         Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f64, f64)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("hypot"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(f64, left),
         Instruction.FunctionParameter(f64, right),
-        Instruction.Label(operand("IdResult", 10)),
-        Instruction.ExtInst(f64, result, opencl, operand("LiteralExtInstInteger", 32), Vec(left, right)),
+        Instruction.Label(operand(OperandKind.IdResult, 10)),
+        Instruction.ExtInst(f64, result, opencl, operand(OperandKind.LiteralExtInstInteger, 32), Vec(left, right)),
         Instruction.Store(output, result, None),
         Instruction.Return(),
         Instruction.FunctionEnd()
@@ -79,38 +84,49 @@ class ExecutionMathSuite extends munit.FunSuite {
   }
 
   test("dispatch executes OpenCL.std fma with one rounding") {
-    val voidType     = operand("IdResult", 1)
-    val f32          = operand("IdResult", 2)
-    val pointerType  = operand("IdResult", 3)
-    val functionType = operand("IdResult", 4)
-    val opencl       = operand("IdResult", 5)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val left         = operand("IdResult", 8)
-    val right        = operand("IdResult", 9)
-    val addend       = operand("IdResult", 10)
-    val result       = operand("IdResult", 12)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val f32          = operand(OperandKind.IdResult, 2)
+    val pointerType  = operand(OperandKind.IdResult, 3)
+    val functionType = operand(OperandKind.IdResult, 4)
+    val opencl       = operand(OperandKind.IdResult, 5)
+    val function     = operand(OperandKind.IdResult, 6)
+    val output       = operand(OperandKind.IdResult, 7)
+    val left         = operand(OperandKind.IdResult, 8)
+    val right        = operand(OperandKind.IdResult, 9)
+    val addend       = operand(OperandKind.IdResult, 10)
+    val result       = operand(OperandKind.IdResult, 12)
     val module       = Module(
       Header(ISA.version, Word(0), Word(16), Word(0)),
       Vec(
         Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
         Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), f32),
+        Instruction.TypeFloat(f32, operand(OperandKind.LiteralInteger, 32), None),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), f32),
         Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f32, f32, f32)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("fma"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(f32, left),
         Instruction.FunctionParameter(f32, right),
         Instruction.FunctionParameter(f32, addend),
-        Instruction.Label(operand("IdResult", 11)),
-        Instruction.ExtInst(f32, result, opencl, operand("LiteralExtInstInteger", 26), Vec(left, right, addend)),
+        Instruction.Label(operand(OperandKind.IdResult, 11)),
+        Instruction.ExtInst(
+          f32,
+          result,
+          opencl,
+          operand(OperandKind.LiteralExtInstInteger, 26),
+          Vec(left, right, addend)
+        ),
         Instruction.Store(output, result, None),
         Instruction.Return(),
         Instruction.FunctionEnd()
@@ -154,34 +170,39 @@ class ExecutionMathSuite extends munit.FunSuite {
   }
 
   test("dispatch executes OpenCL.std native reciprocal") {
-    val voidType     = operand("IdResult", 1)
-    val f32          = operand("IdResult", 2)
-    val pointerType  = operand("IdResult", 3)
-    val functionType = operand("IdResult", 4)
-    val opencl       = operand("IdResult", 5)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val input        = operand("IdResult", 8)
-    val result       = operand("IdResult", 10)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val f32          = operand(OperandKind.IdResult, 2)
+    val pointerType  = operand(OperandKind.IdResult, 3)
+    val functionType = operand(OperandKind.IdResult, 4)
+    val opencl       = operand(OperandKind.IdResult, 5)
+    val function     = operand(OperandKind.IdResult, 6)
+    val output       = operand(OperandKind.IdResult, 7)
+    val input        = operand(OperandKind.IdResult, 8)
+    val result       = operand(OperandKind.IdResult, 10)
     val module       = Module(
       Header(ISA.version, Word(0), Word(11), Word(0)),
       Vec(
         Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
         Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), f32),
+        Instruction.TypeFloat(f32, operand(OperandKind.LiteralInteger, 32), None),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), f32),
         Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f32)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("native_recip"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(f32, input),
-        Instruction.Label(operand("IdResult", 9)),
-        Instruction.ExtInst(f32, result, opencl, operand("LiteralExtInstInteger", 90), Vec(input)),
+        Instruction.Label(operand(OperandKind.IdResult, 9)),
+        Instruction.ExtInst(f32, result, opencl, operand(OperandKind.LiteralExtInstInteger, 90), Vec(input)),
         Instruction.Store(output, result, None),
         Instruction.Return(),
         Instruction.FunctionEnd()
@@ -214,34 +235,39 @@ class ExecutionMathSuite extends munit.FunSuite {
   }
 
   test("dispatch executes OpenCL.std native sine") {
-    val voidType     = operand("IdResult", 1)
-    val f32          = operand("IdResult", 2)
-    val pointerType  = operand("IdResult", 3)
-    val functionType = operand("IdResult", 4)
-    val opencl       = operand("IdResult", 5)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val input        = operand("IdResult", 8)
-    val result       = operand("IdResult", 10)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val f32          = operand(OperandKind.IdResult, 2)
+    val pointerType  = operand(OperandKind.IdResult, 3)
+    val functionType = operand(OperandKind.IdResult, 4)
+    val opencl       = operand(OperandKind.IdResult, 5)
+    val function     = operand(OperandKind.IdResult, 6)
+    val output       = operand(OperandKind.IdResult, 7)
+    val input        = operand(OperandKind.IdResult, 8)
+    val result       = operand(OperandKind.IdResult, 10)
     val module       = Module(
       Header(ISA.version, Word(0), Word(11), Word(0)),
       Vec(
         Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
         Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), f32),
+        Instruction.TypeFloat(f32, operand(OperandKind.LiteralInteger, 32), None),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), f32),
         Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f32)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("native_sin"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(f32, input),
-        Instruction.Label(operand("IdResult", 9)),
-        Instruction.ExtInst(f32, result, opencl, operand("LiteralExtInstInteger", 92), Vec(input)),
+        Instruction.Label(operand(OperandKind.IdResult, 9)),
+        Instruction.ExtInst(f32, result, opencl, operand(OperandKind.LiteralExtInstInteger, 92), Vec(input)),
         Instruction.Store(output, result, None),
         Instruction.Return(),
         Instruction.FunctionEnd()
@@ -272,34 +298,39 @@ class ExecutionMathSuite extends munit.FunSuite {
   }
 
   test("dispatch executes OpenCL.std native cosine") {
-    val voidType     = operand("IdResult", 1)
-    val f32          = operand("IdResult", 2)
-    val pointerType  = operand("IdResult", 3)
-    val functionType = operand("IdResult", 4)
-    val opencl       = operand("IdResult", 5)
-    val function     = operand("IdResult", 6)
-    val output       = operand("IdResult", 7)
-    val input        = operand("IdResult", 8)
-    val result       = operand("IdResult", 10)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val f32          = operand(OperandKind.IdResult, 2)
+    val pointerType  = operand(OperandKind.IdResult, 3)
+    val functionType = operand(OperandKind.IdResult, 4)
+    val opencl       = operand(OperandKind.IdResult, 5)
+    val function     = operand(OperandKind.IdResult, 6)
+    val output       = operand(OperandKind.IdResult, 7)
+    val input        = operand(OperandKind.IdResult, 8)
+    val result       = operand(OperandKind.IdResult, 10)
     val module       = Module(
       Header(ISA.version, Word(0), Word(11), Word(0)),
       Vec(
         Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
         Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), f32),
+        Instruction.TypeFloat(f32, operand(OperandKind.LiteralInteger, 32), None),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), f32),
         Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f32)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("native_cos"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(f32, input),
-        Instruction.Label(operand("IdResult", 9)),
-        Instruction.ExtInst(f32, result, opencl, operand("LiteralExtInstInteger", 81), Vec(input)),
+        Instruction.Label(operand(OperandKind.IdResult, 9)),
+        Instruction.ExtInst(f32, result, opencl, operand(OperandKind.LiteralExtInstInteger, 81), Vec(input)),
         Instruction.Store(output, result, None),
         Instruction.Return(),
         Instruction.FunctionEnd()
@@ -342,35 +373,44 @@ class ExecutionMathSuite extends munit.FunSuite {
   }
 
   test("vector-times-scalar multiplies each floating lane") {
-    val voidType   = operand("IdResult", 1)
-    val floatType  = operand("IdResult", 2)
-    val vectorType = operand("IdResult", 3)
-    val pointer    = operand("IdResult", 4)
-    val signature  = operand("IdResult", 5)
-    val function   = operand("IdResult", 6)
-    val output     = operand("IdResult", 7)
-    val vector     = operand("IdResult", 8)
-    val scalar     = operand("IdResult", 9)
-    val product    = operand("IdResult", 11)
+    val voidType   = operand(OperandKind.IdResult, 1)
+    val floatType  = operand(OperandKind.IdResult, 2)
+    val vectorType = operand(OperandKind.IdResult, 3)
+    val pointer    = operand(OperandKind.IdResult, 4)
+    val signature  = operand(OperandKind.IdResult, 5)
+    val function   = operand(OperandKind.IdResult, 6)
+    val output     = operand(OperandKind.IdResult, 7)
+    val vector     = operand(OperandKind.IdResult, 8)
+    val scalar     = operand(OperandKind.IdResult, 9)
+    val product    = operand(OperandKind.IdResult, 11)
     val module     = Module(
       Header(ISA.version, Word(0), Word(12), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeFloat(floatType, operand("LiteralInteger", 32), None),
-        Instruction.TypeVector(vectorType, floatType, operand("LiteralInteger", 2)),
-        Instruction.TypePointer(pointer, operand("StorageClass", spv.StorageClass.CrossWorkgroup), vectorType),
+        Instruction.TypeFloat(floatType, operand(OperandKind.LiteralInteger, 32), None),
+        Instruction.TypeVector(vectorType, floatType, operand(OperandKind.LiteralInteger, 2)),
+        Instruction.TypePointer(
+          pointer,
+          operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup),
+          vectorType
+        ),
         Instruction.TypeFunction(signature, voidType, Vec(pointer, vectorType, floatType)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("vector_scale"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), signature),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          signature
+        ),
         Instruction.FunctionParameter(pointer, output),
         Instruction.FunctionParameter(vectorType, vector),
         Instruction.FunctionParameter(floatType, scalar),
-        Instruction.Label(operand("IdResult", 10)),
+        Instruction.Label(operand(OperandKind.IdResult, 10)),
         Instruction.VectorTimesScalar(vectorType, product, vector, scalar),
         Instruction.Store(output, product, None),
         Instruction.Return(),
@@ -703,55 +743,70 @@ class ExecutionMathSuite extends munit.FunSuite {
       toleranceUlps: Int = 0
   ): Unit = {
     val lanes        = expected.size
-    val scalar       = operand("IdResult", 2)
-    val valueType    = if (lanes == 1) scalar else operand("IdResult", 3)
-    val storedScalar = if (integerPointer) operand("IdResult", 16) else scalar
+    val scalar       = operand(OperandKind.IdResult, 2)
+    val valueType    = if (lanes == 1) scalar else operand(OperandKind.IdResult, 3)
+    val storedScalar = if (integerPointer) operand(OperandKind.IdResult, 16) else scalar
     val storedType   =
-      if (integerPointer && lanes != 1) operand("IdResult", 17) else if (integerPointer) storedScalar else valueType
-    val resultType = if (integerResult) { if (lanes == 1) operand("IdResult", 16) else operand("IdResult", 17) }
-    else valueType
+      if (integerPointer && lanes != 1) operand(OperandKind.IdResult, 17)
+      else if (integerPointer) storedScalar else valueType
+    val resultType = if (integerResult) {
+      if (lanes == 1) operand(OperandKind.IdResult, 16) else operand(OperandKind.IdResult, 17)
+    } else valueType
     val resultWidth   = if (integerResult) 32 else width
-    val pointer       = operand("IdResult", 4)
-    val storedPointer = operand("IdResult", 18)
-    val functionType  = operand("IdResult", 5)
-    val opencl        = operand("IdResult", 6)
-    val function      = operand("IdResult", 7)
-    val output        = operand("IdResult", 8)
-    val auxiliary     = operand("IdResult", 19)
-    val arguments     = Vec.from(inputs.indices.map(index => operand("IdResult", 9 + index)))
+    val pointer       = operand(OperandKind.IdResult, 4)
+    val storedPointer = operand(OperandKind.IdResult, 18)
+    val functionType  = operand(OperandKind.IdResult, 5)
+    val opencl        = operand(OperandKind.IdResult, 6)
+    val function      = operand(OperandKind.IdResult, 7)
+    val output        = operand(OperandKind.IdResult, 8)
+    val auxiliary     = operand(OperandKind.IdResult, 19)
+    val arguments     = Vec.from(inputs.indices.map(index => operand(OperandKind.IdResult, 9 + index)))
     val declarations  = Vec[Instruction](
       Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
-      Instruction.TypeVoid(operand("IdResult", 1)),
-      Instruction.TypeFloat(scalar, operand("LiteralInteger", width), None),
-      Instruction.TypeInt(operand("IdResult", 16), operand("LiteralInteger", 32), operand("LiteralInteger", 1))
+      Instruction.TypeVoid(operand(OperandKind.IdResult, 1)),
+      Instruction.TypeFloat(scalar, operand(OperandKind.LiteralInteger, width), None),
+      Instruction.TypeInt(
+        operand(OperandKind.IdResult, 16),
+        operand(OperandKind.LiteralInteger, 32),
+        operand(OperandKind.LiteralInteger, 1)
+      )
     ) ++
       (if (lanes == 1) Vec.empty[Instruction]
        else Vec[Instruction](
-         Instruction.TypeVector(valueType, scalar, operand("LiteralInteger", lanes)),
-         Instruction.TypeVector(operand("IdResult", 17), operand("IdRef", 16), operand("LiteralInteger", lanes))
+         Instruction.TypeVector(valueType, scalar, operand(OperandKind.LiteralInteger, lanes)),
+         Instruction.TypeVector(
+           operand(OperandKind.IdResult, 17),
+           operand(OperandKind.IdRef, 16),
+           operand(OperandKind.LiteralInteger, lanes)
+         )
        ))
     val instructions = declarations ++ Vec(
-      Instruction.TypePointer(pointer, operand("StorageClass", 5), resultType),
-      Instruction.TypePointer(storedPointer, operand("StorageClass", 5), storedType),
+      Instruction.TypePointer(pointer, operand(OperandKind.StorageClass, 5), resultType),
+      Instruction.TypePointer(storedPointer, operand(OperandKind.StorageClass, 5), storedType),
       Instruction.TypeFunction(
         functionType,
-        operand("IdRef", 1),
+        operand(OperandKind.IdRef, 1),
         Vec(pointer, storedPointer) ++ Vec.fill(inputs.size)(valueType)
       ),
-      Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("math"), Vec.empty),
-      Instruction.Function(operand("IdRef", 1), function, operand("FunctionControl", 0), functionType),
+      Instruction.EntryPoint(operand(OperandKind.ExecutionModel, 6), function, stringOperand("math"), Vec.empty),
+      Instruction.Function(
+        operand(OperandKind.IdRef, 1),
+        function,
+        operand(OperandKind.FunctionControl, 0),
+        functionType
+      ),
       Instruction.FunctionParameter(pointer, output),
       Instruction.FunctionParameter(storedPointer, auxiliary)
     ) ++ arguments.map(argument => Instruction.FunctionParameter(valueType, argument)) ++ Vec(
-      Instruction.Label(operand("IdResult", 20)),
+      Instruction.Label(operand(OperandKind.IdResult, 20)),
       Instruction.ExtInst(
         resultType,
-        operand("IdResult", 21),
+        operand(OperandKind.IdResult, 21),
         opencl,
-        operand("LiteralExtInstInteger", opcode),
+        operand(OperandKind.LiteralExtInstInteger, opcode),
         arguments ++ (if (stored.isDefined) Vec(auxiliary) else Vec.empty)
       ),
-      Instruction.Store(output, operand("IdRef", 21), None),
+      Instruction.Store(output, operand(OperandKind.IdRef, 21), None),
       Instruction.Return(),
       Instruction.FunctionEnd()
     )

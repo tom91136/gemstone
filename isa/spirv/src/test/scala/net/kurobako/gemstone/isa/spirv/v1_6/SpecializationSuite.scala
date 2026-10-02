@@ -11,7 +11,7 @@ class SpecializationSuite extends munit.FunSuite {
   // Word offsets below address this fixture: integer type width at 15, numeric instruction at 19
   // (value at 22), and boolean instruction at 23. Patching must preserve every other word.
   private val words = Array[Long](
-    spv.Binary.Magic.toLong,
+    spv.SPIRV.Magic.toLong,
     0x00010600L,
     0L,
     6L,

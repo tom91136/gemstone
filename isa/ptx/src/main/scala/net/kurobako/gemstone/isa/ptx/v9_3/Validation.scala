@@ -123,10 +123,10 @@ object Validation {
 
   private def collectInstructions(statements: Vec[Statement]): Vec[Instruction] =
     statements.flatMap {
-      case Statement.Instruction(value)         => Vec(value)
-      case Statement.Block(body)                => collectInstructions(body)
-      case Statement.Entry(_, _, _, body)       => collectInstructions(body)
-      case Statement.Function(_, _, _, _, body) => body.view.flatMap(collectInstructions(_)).toVec
-      case _                                    => Vec.empty[Instruction]
+      case Statement.Instruction(value)            => Vec(value)
+      case Statement.Block(body)                   => collectInstructions(body)
+      case Statement.Entry(_, _, _, body, _)       => body.view.flatMap(collectInstructions(_)).toVec
+      case Statement.Function(_, _, _, _, body, _) => body.view.flatMap(collectInstructions(_)).toVec
+      case _                                       => Vec.empty[Instruction]
     }
 }

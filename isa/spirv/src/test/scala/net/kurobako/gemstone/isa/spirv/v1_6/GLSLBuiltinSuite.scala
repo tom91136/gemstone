@@ -12,31 +12,35 @@ class GLSLBuiltinSuite extends munit.FunSuite {
   private def f(value: Float): Long           = java.lang.Float.floatToRawIntBits(value).toLong & 0xffffffffL
   private def words(values: Long*): Vec[Byte] = Vec.from(values.flatMap(LittleEndian.toVec(_, 4)))
   private def run(opcode: Int, resultType: Int, inputs: Seq[(Int, Vec[Byte])], expected: Vec[Byte]): Unit = {
-    def ref(n: Int): Operand = operand("IdRef", n)
+    def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
     val module               = Module(
       Header(ISA.version, Word(0), Word(64), Word(0)),
       Vec(
         Instruction.TypeVoid(ref(1)),
-        Instruction.TypeFloat(ref(2), operand("LiteralInteger", 32), None),
-        Instruction.TypeFloat(ref(3), operand("LiteralInteger", 64), None),
-        Instruction.TypeInt(ref(4), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypeInt(ref(11), operand("LiteralInteger", 64), operand("LiteralInteger", 1)),
-        Instruction.TypeInt(ref(10), operand("LiteralInteger", 32), operand("LiteralInteger", 1)),
-        Instruction.TypeVector(ref(5), ref(2), operand("LiteralInteger", 2)),
-        Instruction.TypeVector(ref(6), ref(2), operand("LiteralInteger", 4)),
-        Instruction.TypeVector(ref(7), ref(4), operand("LiteralInteger", 2)),
+        Instruction.TypeFloat(ref(2), operand(OperandKind.LiteralInteger, 32), None),
+        Instruction.TypeFloat(ref(3), operand(OperandKind.LiteralInteger, 64), None),
+        Instruction.TypeInt(ref(4), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeInt(ref(11), operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 1)),
+        Instruction.TypeInt(ref(10), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 1)),
+        Instruction.TypeVector(ref(5), ref(2), operand(OperandKind.LiteralInteger, 2)),
+        Instruction.TypeVector(ref(6), ref(2), operand(OperandKind.LiteralInteger, 4)),
+        Instruction.TypeVector(ref(7), ref(4), operand(OperandKind.LiteralInteger, 2)),
         Instruction.TypeStruct(ref(8), Vec(ref(2), ref(2))),
         Instruction.TypeStruct(ref(9), Vec(ref(2), ref(10))),
-        Instruction.TypePointer(ref(30), operand("StorageClass", StorageClass.CrossWorkgroup), ref(resultType)),
+        Instruction.TypePointer(
+          ref(30),
+          operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup),
+          ref(resultType)
+        ),
         Instruction.TypeFunction(ref(31), ref(1), Vec(ref(30)) ++ Vec.from(inputs.map(x => ref(x._1)))),
         Instruction.ExtInstImport(ref(32), stringOperand("GLSL.std.450")),
         Instruction.EntryPoint(
-          operand("ExecutionModel", ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, ExecutionModel.Kernel),
           ref(33),
           stringOperand("builtin"),
           Vec.empty
         ),
-        Instruction.Function(ref(1), ref(33), operand("FunctionControl", FunctionControl.None), ref(31)),
+        Instruction.Function(ref(1), ref(33), operand(OperandKind.FunctionControl, FunctionControl.None), ref(31)),
         Instruction.FunctionParameter(ref(30), ref(35))
       ) ++ Vec.from(inputs.zipWithIndex.map((x, i) => Instruction.FunctionParameter(ref(x._1), ref(40 + i)))) ++ Vec(
         Instruction.Label(ref(34)),
@@ -44,7 +48,7 @@ class GLSLBuiltinSuite extends munit.FunSuite {
           ref(resultType),
           ref(50),
           ref(32),
-          operand("LiteralExtInstInteger", opcode),
+          operand(OperandKind.LiteralExtInstInteger, opcode),
           Vec.from(inputs.indices.map(i => ref(40 + i)))
         ),
         Instruction.Store(ref(35), ref(50), None),

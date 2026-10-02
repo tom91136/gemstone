@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import Program.*
 import cats.syntax.either.*
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
@@ -29,10 +28,6 @@ object ISA {
 
   val version: Version                          = Instruction.version
   val instructions: Vec[Instruction.Definition] = Instruction.definitions
-
-  def parse(source: String): Either[ParseError, Program] = Parser.parse(source)
-
-  def render(program: Program): String = Printer.render(program)
 
   def validate(program: Program, target: Target): ValidationOutcome[Validation.Issue] =
     Validation.validate(program, version, target)

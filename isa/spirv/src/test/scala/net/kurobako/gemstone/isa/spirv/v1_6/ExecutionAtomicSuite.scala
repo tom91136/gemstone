@@ -68,50 +68,58 @@ class ExecutionAtomicSuite extends munit.FunSuite {
     width        <- Vec(32, 64)
   }
     test(s"$width-bit descriptor atomics preserve prior values in storage class $storageClass") {
-      def ref(value: Int): Operand             = operand("IdRef", value)
+      def ref(value: Int): Operand             = operand(OperandKind.IdRef, value)
       val scalarWidth: Int where Between[0, 8] = if (width == 32) 4 else 8
       val module                               = Module(
         Header(ISA.version, Word(0), Word(64), Word(0)),
         Vec(
           Instruction.TypeVoid(ref(1)),
-          Instruction.TypeInt(ref(2), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-          Instruction.TypeInt(ref(3), operand("LiteralInteger", width), operand("LiteralInteger", 0)),
+          Instruction.TypeInt(ref(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+          Instruction.TypeInt(
+            ref(3),
+            operand(OperandKind.LiteralInteger, width),
+            operand(OperandKind.LiteralInteger, 0)
+          ),
           Instruction.TypeRuntimeArray(ref(4), ref(3)),
           Instruction.TypeStruct(ref(5), Vec(ref(4))),
-          Instruction.TypePointer(ref(6), operand("StorageClass", storageClass), ref(5)),
-          Instruction.TypePointer(ref(7), operand("StorageClass", storageClass), ref(3)),
+          Instruction.TypePointer(ref(6), operand(OperandKind.StorageClass, storageClass), ref(5)),
+          Instruction.TypePointer(ref(7), operand(OperandKind.StorageClass, storageClass), ref(3)),
           Instruction.TypeFunction(ref(8), ref(1), Vec.empty),
-          Instruction.Constant(ref(2), ref(9), operand("LiteralContextDependentNumber", 0)),
-          Instruction.Constant(ref(2), ref(10), operand("LiteralContextDependentNumber", 1)),
-          Instruction.Constant(ref(2), ref(11), operand("LiteralContextDependentNumber", 2)),
-          Instruction.Constant(ref(2), ref(12), operand("LiteralContextDependentNumber", 3)),
-          Instruction.Constant(ref(2), ref(13), operand("LiteralContextDependentNumber", 4)),
+          Instruction.Constant(ref(2), ref(9), operand(OperandKind.LiteralContextDependentNumber, 0)),
+          Instruction.Constant(ref(2), ref(10), operand(OperandKind.LiteralContextDependentNumber, 1)),
+          Instruction.Constant(ref(2), ref(11), operand(OperandKind.LiteralContextDependentNumber, 2)),
+          Instruction.Constant(ref(2), ref(12), operand(OperandKind.LiteralContextDependentNumber, 3)),
+          Instruction.Constant(ref(2), ref(13), operand(OperandKind.LiteralContextDependentNumber, 4)),
           Instruction.Constant(
             ref(3),
             ref(14),
-            if (width == 32) operand("LiteralContextDependentNumber", 5)
-            else operand("LiteralContextDependentNumber", 5, 0)
+            if (width == 32) operand(OperandKind.LiteralContextDependentNumber, 5)
+            else operand(OperandKind.LiteralContextDependentNumber, 5, 0)
           ),
           Instruction.Constant(
             ref(3),
             ref(15),
-            if (width == 32) operand("LiteralContextDependentNumber", 7)
-            else operand("LiteralContextDependentNumber", 7, 0)
+            if (width == 32) operand(OperandKind.LiteralContextDependentNumber, 7)
+            else operand(OperandKind.LiteralContextDependentNumber, 7, 0)
           ),
-          Instruction.Decorate(ref(4), operand("Decoration", 6, width / 8)),
-          Instruction.Decorate(ref(5), operand("Decoration", if (storageClass == 2) 3 else 2)),
-          Instruction.MemberDecorate(ref(5), operand("LiteralInteger", 0), operand("Decoration", 35, 0)),
-          Instruction.Decorate(ref(16), operand("Decoration", 33, 0)),
-          Instruction.Decorate(ref(16), operand("Decoration", 34, 0)),
-          Instruction.Variable(ref(6), ref(16), operand("StorageClass", storageClass), None),
+          Instruction.Decorate(ref(4), operand(OperandKind.Decoration, 6, width / 8)),
+          Instruction.Decorate(ref(5), operand(OperandKind.Decoration, if (storageClass == 2) 3 else 2)),
+          Instruction.MemberDecorate(
+            ref(5),
+            operand(OperandKind.LiteralInteger, 0),
+            operand(OperandKind.Decoration, 35, 0)
+          ),
+          Instruction.Decorate(ref(16), operand(OperandKind.Decoration, 33, 0)),
+          Instruction.Decorate(ref(16), operand(OperandKind.Decoration, 34, 0)),
+          Instruction.Variable(ref(6), ref(16), operand(OperandKind.StorageClass, storageClass), None),
           Instruction.EntryPoint(
-            operand("ExecutionModel", 5),
+            operand(OperandKind.ExecutionModel, 5),
             ref(17),
             stringOperand("descriptor_atomics"),
             Vec(ref(16))
           ),
-          Instruction.ExecutionMode(ref(17), operand("ExecutionMode", 17, 1, 1, 1)),
-          Instruction.Function(ref(1), ref(17), operand("FunctionControl", 0), ref(8)),
+          Instruction.ExecutionMode(ref(17), operand(OperandKind.ExecutionMode, 17, 1, 1, 1)),
+          Instruction.Function(ref(1), ref(17), operand(OperandKind.FunctionControl, 0), ref(8)),
           Instruction.Label(ref(18)),
           Instruction.AccessChain(ref(7), ref(19), ref(16), Vec(ref(9), ref(9))),
           Instruction.AccessChain(ref(7), ref(20), ref(16), Vec(ref(9), ref(10))),
@@ -145,59 +153,64 @@ class ExecutionAtomicSuite extends munit.FunSuite {
     }
 
   test("atomic flag test-and-set returns the prior state and clear resets the flag") {
-    val voidType     = operand("IdResult", 1)
-    val u32          = operand("IdResult", 2)
-    val boolType     = operand("IdResult", 3)
-    val pointerType  = operand("IdResult", 4)
-    val functionType = operand("IdResult", 5)
-    val scope        = operand("IdResult", 6)
-    val semantics    = operand("IdResult", 7)
-    val zero         = operand("IdResult", 8)
-    val one          = operand("IdResult", 9)
-    val function     = operand("IdResult", 10)
-    val target       = operand("IdResult", 11)
-    val first        = operand("IdResult", 13)
-    val second       = operand("IdResult", 14)
-    val third        = operand("IdResult", 15)
-    val firstValue   = operand("IdResult", 16)
-    val secondValue  = operand("IdResult", 17)
-    val thirdValue   = operand("IdResult", 18)
-    val firstOutput  = operand("IdResult", 19)
-    val secondOutput = operand("IdResult", 20)
-    val thirdOutput  = operand("IdResult", 21)
-    val two          = operand("IdResult", 22)
-    val three        = operand("IdResult", 23)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val u32          = operand(OperandKind.IdResult, 2)
+    val boolType     = operand(OperandKind.IdResult, 3)
+    val pointerType  = operand(OperandKind.IdResult, 4)
+    val functionType = operand(OperandKind.IdResult, 5)
+    val scope        = operand(OperandKind.IdResult, 6)
+    val semantics    = operand(OperandKind.IdResult, 7)
+    val zero         = operand(OperandKind.IdResult, 8)
+    val one          = operand(OperandKind.IdResult, 9)
+    val function     = operand(OperandKind.IdResult, 10)
+    val target       = operand(OperandKind.IdResult, 11)
+    val first        = operand(OperandKind.IdResult, 13)
+    val second       = operand(OperandKind.IdResult, 14)
+    val third        = operand(OperandKind.IdResult, 15)
+    val firstValue   = operand(OperandKind.IdResult, 16)
+    val secondValue  = operand(OperandKind.IdResult, 17)
+    val thirdValue   = operand(OperandKind.IdResult, 18)
+    val firstOutput  = operand(OperandKind.IdResult, 19)
+    val secondOutput = operand(OperandKind.IdResult, 20)
+    val thirdOutput  = operand(OperandKind.IdResult, 21)
+    val two          = operand(OperandKind.IdResult, 22)
+    val three        = operand(OperandKind.IdResult, 23)
     val module       = Module(
       Header(ISA.version, Word(0), Word(24), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
         Instruction.TypeBool(boolType),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u32),
         Instruction.TypeFunction(functionType, voidType, Vec(pointerType)),
-        Instruction.Constant(u32, scope, operand("LiteralContextDependentNumber", spv.Scope.Workgroup)),
+        Instruction.Constant(u32, scope, operand(OperandKind.LiteralContextDependentNumber, spv.Scope.Workgroup)),
         Instruction.Constant(
           u32,
           semantics,
           operand(
-            "LiteralContextDependentNumber",
+            OperandKind.LiteralContextDependentNumber,
             spv.MemorySemantics.SubgroupMemory | spv.MemorySemantics.WorkgroupMemory |
               spv.MemorySemantics.CrossWorkgroupMemory
           )
         ),
-        Instruction.Constant(u32, zero, operand("LiteralContextDependentNumber", 0)),
-        Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
-        Instruction.Constant(u32, two, operand("LiteralContextDependentNumber", 2)),
-        Instruction.Constant(u32, three, operand("LiteralContextDependentNumber", 3)),
+        Instruction.Constant(u32, zero, operand(OperandKind.LiteralContextDependentNumber, 0)),
+        Instruction.Constant(u32, one, operand(OperandKind.LiteralContextDependentNumber, 1)),
+        Instruction.Constant(u32, two, operand(OperandKind.LiteralContextDependentNumber, 2)),
+        Instruction.Constant(u32, three, operand(OperandKind.LiteralContextDependentNumber, 3)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("atomic_flag"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
         Instruction.FunctionParameter(pointerType, target),
-        Instruction.Label(operand("IdResult", 12)),
+        Instruction.Label(operand(OperandKind.IdResult, 12)),
         Instruction.AtomicFlagTestAndSet(boolType, first, target, scope, semantics),
         Instruction.AtomicFlagTestAndSet(boolType, second, target, scope, semantics),
         Instruction.AtomicFlagClear(target, scope, semantics),
@@ -237,54 +250,59 @@ class ExecutionAtomicSuite extends munit.FunSuite {
   }
 
   test("dispatch executes typed 64-bit atomic add and unsigned minimum") {
-    val voidType      = operand("IdResult", 1)
-    val u32           = operand("IdResult", 2)
-    val u64           = operand("IdResult", 3)
-    val pointerType   = operand("IdResult", 4)
-    val functionType  = operand("IdResult", 5)
-    val scope         = operand("IdResult", 6)
-    val semantics     = operand("IdResult", 7)
-    val addend        = operand("IdResult", 8)
-    val minimum       = operand("IdResult", 9)
-    val one           = operand("IdResult", 10)
-    val two           = operand("IdResult", 11)
-    val function      = operand("IdResult", 12)
-    val target        = operand("IdResult", 13)
-    val addResult     = operand("IdResult", 15)
-    val minimumResult = operand("IdResult", 16)
-    val addOutput     = operand("IdResult", 17)
-    val minimumOutput = operand("IdResult", 18)
+    val voidType      = operand(OperandKind.IdResult, 1)
+    val u32           = operand(OperandKind.IdResult, 2)
+    val u64           = operand(OperandKind.IdResult, 3)
+    val pointerType   = operand(OperandKind.IdResult, 4)
+    val functionType  = operand(OperandKind.IdResult, 5)
+    val scope         = operand(OperandKind.IdResult, 6)
+    val semantics     = operand(OperandKind.IdResult, 7)
+    val addend        = operand(OperandKind.IdResult, 8)
+    val minimum       = operand(OperandKind.IdResult, 9)
+    val one           = operand(OperandKind.IdResult, 10)
+    val two           = operand(OperandKind.IdResult, 11)
+    val function      = operand(OperandKind.IdResult, 12)
+    val target        = operand(OperandKind.IdResult, 13)
+    val addResult     = operand(OperandKind.IdResult, 15)
+    val minimumResult = operand(OperandKind.IdResult, 16)
+    val addOutput     = operand(OperandKind.IdResult, 17)
+    val minimumOutput = operand(OperandKind.IdResult, 18)
     val module        = Module(
       Header(ISA.version, Word(0), Word(20), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u64),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeInt(u64, operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u64),
         Instruction.TypeFunction(functionType, voidType, Vec(pointerType)),
-        Instruction.Constant(u32, scope, operand("LiteralContextDependentNumber", spv.Scope.Workgroup)),
+        Instruction.Constant(u32, scope, operand(OperandKind.LiteralContextDependentNumber, spv.Scope.Workgroup)),
         Instruction.Constant(
           u32,
           semantics,
           operand(
-            "LiteralContextDependentNumber",
+            OperandKind.LiteralContextDependentNumber,
             spv.MemorySemantics.SubgroupMemory | spv.MemorySemantics.WorkgroupMemory |
               spv.MemorySemantics.CrossWorkgroupMemory
           )
         ),
-        Instruction.Constant(u64, addend, operand("LiteralContextDependentNumber", 3)),
-        Instruction.Constant(u64, minimum, operand("LiteralContextDependentNumber", 7)),
-        Instruction.Constant(u64, one, operand("LiteralContextDependentNumber", 1)),
-        Instruction.Constant(u64, two, operand("LiteralContextDependentNumber", 2)),
+        Instruction.Constant(u64, addend, operand(OperandKind.LiteralContextDependentNumber, 3)),
+        Instruction.Constant(u64, minimum, operand(OperandKind.LiteralContextDependentNumber, 7)),
+        Instruction.Constant(u64, one, operand(OperandKind.LiteralContextDependentNumber, 1)),
+        Instruction.Constant(u64, two, operand(OperandKind.LiteralContextDependentNumber, 2)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("atomics"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
         Instruction.FunctionParameter(pointerType, target),
-        Instruction.Label(operand("IdResult", 14)),
+        Instruction.Label(operand(OperandKind.IdResult, 14)),
         Instruction.AtomicStore(target, scope, semantics, minimum),
         Instruction.AtomicIAdd(u64, addResult, target, scope, semantics, addend),
         Instruction.AtomicUMin(u64, minimumResult, target, scope, semantics, minimum),
@@ -322,48 +340,53 @@ class ExecutionAtomicSuite extends munit.FunSuite {
   }
 
   test("dispatch executes the integer atomic operation family") {
-    val voidType     = operand("IdResult", 1)
-    val u32          = operand("IdResult", 2)
-    val pointerType  = operand("IdResult", 3)
-    val functionType = operand("IdResult", 4)
-    val scope        = operand("IdResult", 5)
-    val semantics    = operand("IdResult", 6)
-    val source       = operand("IdResult", 7)
-    val one          = operand("IdResult", 8)
-    val function     = operand("IdResult", 9)
-    val target       = operand("IdResult", 10)
-    val result       = operand("IdResult", 12)
-    val output       = operand("IdResult", 13)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val u32          = operand(OperandKind.IdResult, 2)
+    val pointerType  = operand(OperandKind.IdResult, 3)
+    val functionType = operand(OperandKind.IdResult, 4)
+    val scope        = operand(OperandKind.IdResult, 5)
+    val semantics    = operand(OperandKind.IdResult, 6)
+    val source       = operand(OperandKind.IdResult, 7)
+    val one          = operand(OperandKind.IdResult, 8)
+    val function     = operand(OperandKind.IdResult, 9)
+    val target       = operand(OperandKind.IdResult, 10)
+    val result       = operand(OperandKind.IdResult, 12)
+    val output       = operand(OperandKind.IdResult, 13)
 
     def execute(operation: Instruction, initial: Long, sourceValue: Long, updated: Long): Unit = {
       val module = Module(
         Header(ISA.version, Word(0), Word(14), Word(0)),
         Vec(
           Instruction.TypeVoid(voidType),
-          Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-          Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), u32),
+          Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+          Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), u32),
           Instruction.TypeFunction(functionType, voidType, Vec(pointerType)),
-          Instruction.Constant(u32, scope, operand("LiteralContextDependentNumber", spv.Scope.Workgroup)),
+          Instruction.Constant(u32, scope, operand(OperandKind.LiteralContextDependentNumber, spv.Scope.Workgroup)),
           Instruction.Constant(
             u32,
             semantics,
             operand(
-              "LiteralContextDependentNumber",
+              OperandKind.LiteralContextDependentNumber,
               spv.MemorySemantics.SubgroupMemory | spv.MemorySemantics.WorkgroupMemory |
                 spv.MemorySemantics.CrossWorkgroupMemory
             )
           ),
-          Instruction.Constant(u32, source, operand("LiteralContextDependentNumber", sourceValue.toInt)),
-          Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
+          Instruction.Constant(u32, source, operand(OperandKind.LiteralContextDependentNumber, sourceValue.toInt)),
+          Instruction.Constant(u32, one, operand(OperandKind.LiteralContextDependentNumber, 1)),
           Instruction.EntryPoint(
-            operand("ExecutionModel", spv.ExecutionModel.Kernel),
+            operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
             function,
             stringOperand("atomic"),
             Vec.empty
           ),
-          Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+          Instruction.Function(
+            voidType,
+            function,
+            operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+            functionType
+          ),
           Instruction.FunctionParameter(pointerType, target),
-          Instruction.Label(operand("IdResult", 11)),
+          Instruction.Label(operand(OperandKind.IdResult, 11)),
           operation,
           Instruction.PtrAccessChain(pointerType, output, target, one, Vec.empty),
           Instruction.Store(output, result, None),
@@ -452,56 +475,61 @@ class ExecutionAtomicSuite extends munit.FunSuite {
   }
 
   test("dispatch treats floating atomic load, store, and exchange as typed raw bits") {
-    val voidType     = operand("IdResult", 1)
-    val u32          = operand("IdResult", 2)
-    val f32          = operand("IdResult", 3)
-    val pointerType  = operand("IdResult", 4)
-    val functionType = operand("IdResult", 5)
-    val scope        = operand("IdResult", 6)
-    val semantics    = operand("IdResult", 7)
-    val first        = operand("IdResult", 8)
-    val second       = operand("IdResult", 9)
-    val one          = operand("IdResult", 10)
-    val two          = operand("IdResult", 11)
-    val function     = operand("IdResult", 12)
-    val target       = operand("IdResult", 13)
-    val loaded       = operand("IdResult", 15)
-    val exchanged    = operand("IdResult", 16)
-    val firstOutput  = operand("IdResult", 17)
-    val secondOutput = operand("IdResult", 18)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val u32          = operand(OperandKind.IdResult, 2)
+    val f32          = operand(OperandKind.IdResult, 3)
+    val pointerType  = operand(OperandKind.IdResult, 4)
+    val functionType = operand(OperandKind.IdResult, 5)
+    val scope        = operand(OperandKind.IdResult, 6)
+    val semantics    = operand(OperandKind.IdResult, 7)
+    val first        = operand(OperandKind.IdResult, 8)
+    val second       = operand(OperandKind.IdResult, 9)
+    val one          = operand(OperandKind.IdResult, 10)
+    val two          = operand(OperandKind.IdResult, 11)
+    val function     = operand(OperandKind.IdResult, 12)
+    val target       = operand(OperandKind.IdResult, 13)
+    val loaded       = operand(OperandKind.IdResult, 15)
+    val exchanged    = operand(OperandKind.IdResult, 16)
+    val firstOutput  = operand(OperandKind.IdResult, 17)
+    val secondOutput = operand(OperandKind.IdResult, 18)
     val firstBits    = java.lang.Float.floatToRawIntBits(1.5f)
     val secondBits   = java.lang.Float.floatToRawIntBits(2.5f)
     val module       = Module(
       Header(ISA.version, Word(0), Word(19), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
-        Instruction.TypePointer(pointerType, operand("StorageClass", spv.StorageClass.CrossWorkgroup), f32),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeFloat(f32, operand(OperandKind.LiteralInteger, 32), None),
+        Instruction.TypePointer(pointerType, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), f32),
         Instruction.TypeFunction(functionType, voidType, Vec(pointerType)),
-        Instruction.Constant(u32, scope, operand("LiteralContextDependentNumber", spv.Scope.Workgroup)),
+        Instruction.Constant(u32, scope, operand(OperandKind.LiteralContextDependentNumber, spv.Scope.Workgroup)),
         Instruction.Constant(
           u32,
           semantics,
           operand(
-            "LiteralContextDependentNumber",
+            OperandKind.LiteralContextDependentNumber,
             spv.MemorySemantics.SubgroupMemory | spv.MemorySemantics.WorkgroupMemory |
               spv.MemorySemantics.CrossWorkgroupMemory
           )
         ),
-        Instruction.Constant(f32, first, operand("LiteralContextDependentNumber", firstBits)),
-        Instruction.Constant(f32, second, operand("LiteralContextDependentNumber", secondBits)),
-        Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
-        Instruction.Constant(u32, two, operand("LiteralContextDependentNumber", 2)),
+        Instruction.Constant(f32, first, operand(OperandKind.LiteralContextDependentNumber, firstBits)),
+        Instruction.Constant(f32, second, operand(OperandKind.LiteralContextDependentNumber, secondBits)),
+        Instruction.Constant(u32, one, operand(OperandKind.LiteralContextDependentNumber, 1)),
+        Instruction.Constant(u32, two, operand(OperandKind.LiteralContextDependentNumber, 2)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("atomic_float"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
         Instruction.FunctionParameter(pointerType, target),
-        Instruction.Label(operand("IdResult", 14)),
+        Instruction.Label(operand(OperandKind.IdResult, 14)),
         Instruction.AtomicStore(target, scope, semantics, first),
         Instruction.AtomicLoad(f32, loaded, target, scope, semantics),
         Instruction.AtomicExchange(f32, exchanged, target, scope, semantics, second),
@@ -615,24 +643,24 @@ class ExecutionAtomicSuite extends munit.FunSuite {
   }
 
   test("dispatch executes floating atomic minimum and maximum and returns old values") {
-    val voidType    = operand("IdResult", 1)
-    val u32         = operand("IdResult", 2)
-    val f32         = operand("IdResult", 3)
-    val pointer     = operand("IdResult", 4)
-    val functionTy  = operand("IdResult", 5)
-    val scope       = operand("IdResult", 6)
-    val semantics   = operand("IdResult", 7)
-    val initial     = operand("IdResult", 8)
-    val minimum     = operand("IdResult", 9)
-    val maximum     = operand("IdResult", 10)
-    val one         = operand("IdResult", 11)
-    val two         = operand("IdResult", 12)
-    val function    = operand("IdResult", 13)
-    val target      = operand("IdResult", 14)
-    val oldMinimum  = operand("IdResult", 15)
-    val oldMaximum  = operand("IdResult", 16)
-    val minOutput   = operand("IdResult", 17)
-    val maxOutput   = operand("IdResult", 18)
+    val voidType    = operand(OperandKind.IdResult, 1)
+    val u32         = operand(OperandKind.IdResult, 2)
+    val f32         = operand(OperandKind.IdResult, 3)
+    val pointer     = operand(OperandKind.IdResult, 4)
+    val functionTy  = operand(OperandKind.IdResult, 5)
+    val scope       = operand(OperandKind.IdResult, 6)
+    val semantics   = operand(OperandKind.IdResult, 7)
+    val initial     = operand(OperandKind.IdResult, 8)
+    val minimum     = operand(OperandKind.IdResult, 9)
+    val maximum     = operand(OperandKind.IdResult, 10)
+    val one         = operand(OperandKind.IdResult, 11)
+    val two         = operand(OperandKind.IdResult, 12)
+    val function    = operand(OperandKind.IdResult, 13)
+    val target      = operand(OperandKind.IdResult, 14)
+    val oldMinimum  = operand(OperandKind.IdResult, 15)
+    val oldMaximum  = operand(OperandKind.IdResult, 16)
+    val minOutput   = operand(OperandKind.IdResult, 17)
+    val maxOutput   = operand(OperandKind.IdResult, 18)
     val initialBits = java.lang.Float.floatToRawIntBits(3.0f)
     val minimumBits = java.lang.Float.floatToRawIntBits(1.0f)
     val maximumBits = java.lang.Float.floatToRawIntBits(5.0f)
@@ -640,34 +668,39 @@ class ExecutionAtomicSuite extends munit.FunSuite {
       Header(ISA.version, Word(0), Word(19), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
-        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
-        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
-        Instruction.TypePointer(pointer, operand("StorageClass", spv.StorageClass.CrossWorkgroup), f32),
+        Instruction.TypeInt(u32, operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeFloat(f32, operand(OperandKind.LiteralInteger, 32), None),
+        Instruction.TypePointer(pointer, operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), f32),
         Instruction.TypeFunction(functionTy, voidType, Vec(pointer)),
-        Instruction.Constant(u32, scope, operand("LiteralContextDependentNumber", spv.Scope.Workgroup)),
+        Instruction.Constant(u32, scope, operand(OperandKind.LiteralContextDependentNumber, spv.Scope.Workgroup)),
         Instruction.Constant(
           u32,
           semantics,
           operand(
-            "LiteralContextDependentNumber",
+            OperandKind.LiteralContextDependentNumber,
             spv.MemorySemantics.SubgroupMemory | spv.MemorySemantics.WorkgroupMemory |
               spv.MemorySemantics.CrossWorkgroupMemory
           )
         ),
-        Instruction.Constant(f32, initial, operand("LiteralContextDependentNumber", initialBits)),
-        Instruction.Constant(f32, minimum, operand("LiteralContextDependentNumber", minimumBits)),
-        Instruction.Constant(f32, maximum, operand("LiteralContextDependentNumber", maximumBits)),
-        Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
-        Instruction.Constant(u32, two, operand("LiteralContextDependentNumber", 2)),
+        Instruction.Constant(f32, initial, operand(OperandKind.LiteralContextDependentNumber, initialBits)),
+        Instruction.Constant(f32, minimum, operand(OperandKind.LiteralContextDependentNumber, minimumBits)),
+        Instruction.Constant(f32, maximum, operand(OperandKind.LiteralContextDependentNumber, maximumBits)),
+        Instruction.Constant(u32, one, operand(OperandKind.LiteralContextDependentNumber, 1)),
+        Instruction.Constant(u32, two, operand(OperandKind.LiteralContextDependentNumber, 2)),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("atomic_float_min_max"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionTy),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionTy
+        ),
         Instruction.FunctionParameter(pointer, target),
-        Instruction.Label(operand("IdResult", 19)),
+        Instruction.Label(operand(OperandKind.IdResult, 19)),
         Instruction.AtomicStore(target, scope, semantics, initial),
         Instruction.AtomicFMinEXT(f32, oldMinimum, target, scope, semantics, minimum),
         Instruction.AtomicFMaxEXT(f32, oldMaximum, target, scope, semantics, maximum),

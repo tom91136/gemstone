@@ -34,11 +34,13 @@ object GenerateSPIRVISA {
   private case class Enumerant(
       value: Long,
       name: NonEmpty[String],
-      parameters: Vector[NonEmpty[String]]
+      parameters: Vector[NonEmpty[String]],
+      aliases: Vector[NonEmpty[String]]
   )
   private case class OperandKind(
       kind: NonEmpty[String],
       category: NonEmpty[String],
+      bases: Vector[NonEmpty[String]],
       enumerants: Vector[Enumerant]
   )
   private case class Entry(
@@ -47,7 +49,8 @@ object GenerateSPIRVISA {
       instructionClass: NonEmpty[String],
       version: Option[NonEmpty[String]],
       capabilities: Vector[NonEmpty[String]],
-      operands: Vector[Operand]
+      operands: Vector[Operand],
+      aliases: Vector[NonEmpty[String]]
   )
   private case class Grammar(
       magic: Long,
@@ -96,6 +99,7 @@ object GenerateSPIRVISA {
         sourceRoot,
         (Map(
           base.resolve("SPIRV.scala")               -> renderConstants(grammar, version),
+          base.resolve("OperandKind.scala")         -> renderOperandKinds(grammar, version),
           base.resolve("ImageFormats.scala")        -> ImageFormats.scalaSource(version),
           base.resolve("ImageDescriptor.scala")     -> ImageDescriptorABI.scalaSource(version),
           base.resolve("ExtendedInstruction.scala") -> renderExtendedInstructions(extended, version)
@@ -154,7 +158,8 @@ object GenerateSPIRVISA {
               optionalString(operand, "name"),
               optionalString(operand, "quantifier")
             )
-          } ++ grammarOverride(stringField(obj, "opname"))
+          } ++ grammarOverride(stringField(obj, "opname")),
+          aliases = optionalStringArray(obj, "aliases")
         )
       case _ => throw IllegalArgumentException("instruction entry is not an object")
     }.sortBy(_.opcode)
@@ -164,13 +169,18 @@ object GenerateSPIRVISA {
         OperandKind(
           kind = stringField(obj, "kind"),
           category = stringField(obj, "category"),
+          bases = optionalStringArray(obj, "bases"),
           enumerants = optionalObjectArray(obj, "enumerants").map { enumerant =>
             Enumerant(
               parseUnsigned(valueField(enumerant, "value")),
               stringField(enumerant, "enumerant"),
-              optionalObjectArray(enumerant, "parameters").map(parameter => stringField(parameter, "kind"))
+              optionalObjectArray(enumerant, "parameters").map(parameter => stringField(parameter, "kind")),
+              optionalStringArray(enumerant, "aliases")
             )
-          }.groupBy(_.value).values.map(_.head).toVector.sortBy(_.value)
+          }.groupBy(_.value).values.map { values =>
+            val first = values.head
+            first.copy(aliases = (first.aliases ++ values.tail.flatMap(value => value.name +: value.aliases)).distinct)
+          }.toVector.sortBy(_.value)
         )
       case _ => throw IllegalArgumentException("operand kind is not an object")
     }
@@ -214,6 +224,11 @@ object GenerateSPIRVISA {
               |}
               |""".stripMargin)
     }
+    val aliases = grammar.entries.toVector.flatMap(entry =>
+      entry.aliases.map(name =>
+        s"${trustedText(name)} -> Definition.${normalizeCase(entry.name.stripPrefix("Op"))}"
+      )
+    ).mkString("Map(", ", ", ")")
     val kindValues =
       grammar.kinds.toVector.filter(kind => kind.category == "ValueEnum" || kind.category == "BitEnum")
         .map(renderKind(_))
@@ -253,9 +268,10 @@ object GenerateSPIRVISA {
         |
         |${kindChunks.mkString("\n\n")}
         |
-        |  private val operandKinds: Map[NonEmpty[java.lang.String], OperandKindInfo] =
+        |  val operandKinds: Map[OperandKind, OperandKindInfo] =
         |    $kindExpression.view.map(value => value.kind -> value).toMap
         |
+        |  private val aliases: Map[java.lang.String, Definition] = $aliases
         |  private val byNumber: Map[SPIRVOpcodeNumber, Vec[Definition]] =
         |    definitions.groupMap(_.opcodeNumber)(value => value)
         |  private val byOpcode: Map[NonEmpty[java.lang.String], Vec[Definition]] =
@@ -264,7 +280,7 @@ object GenerateSPIRVISA {
         |  def definitionsFor(opcodeNumber: SPIRVOpcodeNumber): Vec[Definition] =
         |    byNumber.getOrElse(opcodeNumber, Vec.empty[Definition])
         |  def definitionsFor(opcode: NonEmpty[java.lang.String]): Vec[Definition] =
-        |    byOpcode.getOrElse(opcode, Vec.empty[Definition])
+        |    byOpcode.getOrElse(opcode, aliases.get(opcode).toVec)
         |
         |  def decode(raw: RawInstruction): Either[InstructionDecodeError, Instruction] = {
         |    val candidates = definitionsFor(raw.opcodeNumber)
@@ -375,18 +391,38 @@ object GenerateSPIRVISA {
         case Some("*") => "OperandQuantifier.Repeated"
         case _         => "OperandQuantifier.One"
       }
-      s"OperandShape(\"${escape(field.operand.kind)}\", ${trustedText(field.name)}, $quantifier)"
+      s"OperandShape(OperandKind.${field.operand.kind}, ${trustedText(field.name)}, $quantifier)"
     }.mkString("Vec(", ", ", ")")
     s"Metadata(${trustedText(entry.instructionClass)}, $since, $capabilities, $operands)"
   }
 
+  private def renderOperandKinds(grammar: Grammar, packageVersion: ScalaPackageVersion): String = {
+    val categories = grammar.kinds.map(_.category).distinct.sorted.mkString(", ")
+    val cases      = grammar.kinds.map { kind =>
+      val bases = kind.bases.map(value => s"OperandKind.$value").mkString("Vector(", ", ", ")")
+      s"  case ${kind.kind} extends OperandKind(OperandKind.Category.${kind.category}, $bases)"
+    }.mkString("\n")
+    GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
+      s"""|package net.kurobako.gemstone.isa.spirv.$packageVersion
+          |
+          |object OperandKind {
+          |  enum Category { case $categories }
+          |}
+          |
+          |${GeneratedHeader.annotation()}enum OperandKind(val category: OperandKind.Category, val components: Vector[OperandKind]) {
+          |$cases
+          |}
+          |""".stripMargin
+  }
+
   private def renderKind(kind: OperandKind): String = {
     val enumerants = kind.enumerants.map { enumerant =>
-      val parameters = enumerant.parameters.map(value => s"\"${escape(value)}\"")
+      val parameters = enumerant.parameters.map(value => s"OperandKind.$value")
         .mkString("Vec(", ", ", ")")
-      s"OperandEnumerant(${enumerant.value}L, $parameters)"
+      val aliases = enumerant.aliases.map(trustedText(_)).mkString("Vec(", ", ", ")")
+      s"OperandEnumerant(${trustedText(enumerant.name)}, ${enumerant.value}L, $parameters, $aliases)"
     }.mkString("Vec(", ", ", ")")
-    s"    OperandKindInfo(\"${escape(kind.kind)}\", ${trustedText(kind.category)}, $enumerants)"
+    s"    OperandKindInfo(OperandKind.${kind.kind}, $enumerants)"
   }
 
   private def construct(entry: Entry, fields: Vector[Field]): String = {
@@ -553,7 +589,7 @@ object GenerateSPIRVISA {
         |    }
         |    Instruction.decode(RawInstruction(SPIRVOpcodeNumber(17), Vec(Word(-1)))) match {
         |      case Left(InstructionDecodeError.InvalidEnumerant(kind, 0xffffffffL))
-        |          if kind == "Capability" => ()
+        |          if kind == OperandKind.Capability => ()
         |      case other => fail(s"expected invalid-enumerant failure, found $$other")
         |    }
         |    Instruction.decode(RawInstruction(SPIRVOpcodeNumber(5), Vec(Word(1), Word(-1)))) match {
@@ -685,10 +721,17 @@ object GenerateSPIRVISA {
           |$values
           |  }""".stripMargin
     }.mkString("\n\n")
+    val names = sets.map { set =>
+      val entries = set.instructions.map { case (name, opcode) => s"${trustedText(name)} -> $opcode" }.mkString(", ")
+      s"    ${trustedText(set.name)} -> Map($entries)"
+    }.mkString(",\n")
     GeneratedHeader.scala("from the pinned Khronos SPIR-V extended instruction grammars") +
       s"""|package net.kurobako.gemstone.isa.spirv.$packageVersion
           |
           |${GeneratedHeader.annotation()}object ExtendedInstruction {
+          |  val names: Map[String, Map[String, Int]] = Map(
+          |$names
+          |  )
           |$objects
           |}
           |""".stripMargin

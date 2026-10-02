@@ -10,15 +10,15 @@ class ValidationSuite extends munit.FunSuite {
     val module = Module(
       Header(ISA.version, Word(0), Word(10), Word(0)),
       Vec(
-        Instruction.Capability(operand("Capability", spv.Capability.Kernel)),
+        Instruction.Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
         Instruction.MemoryModel(
-          operand("AddressingModel", spv.AddressingModel.Physical64),
-          operand("MemoryModel", spv.MemoryModel.OpenCL)
+          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
         ),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
-          operand("IdRef", 1),
-          operand("LiteralString", 0),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
+          operand(OperandKind.IdRef, 1),
+          operand(OperandKind.LiteralString, 0),
           Vec.empty
         )
       ),
@@ -31,15 +31,15 @@ class ValidationSuite extends munit.FunSuite {
     val module = Module(
       Header(ISA.version, Word(0), Word(10), Word(0)),
       Vec(
-        Instruction.Capability(operand("Capability", spv.Capability.Shader)),
+        Instruction.Capability(operand(OperandKind.Capability, spv.Capability.Shader)),
         Instruction.MemoryModel(
-          operand("AddressingModel", spv.AddressingModel.Logical),
-          operand("MemoryModel", spv.MemoryModel.GLSL450)
+          operand(OperandKind.AddressingModel, spv.AddressingModel.Logical),
+          operand(OperandKind.MemoryModel, spv.MemoryModel.GLSL450)
         ),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.GLCompute),
-          operand("IdRef", 1),
-          operand("LiteralString", 0),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.GLCompute),
+          operand(OperandKind.IdRef, 1),
+          operand(OperandKind.LiteralString, 0),
           Vec.empty
         )
       ),
@@ -62,10 +62,10 @@ class ValidationSuite extends munit.FunSuite {
     val module = Module(
       Header(ISA.version, Word(0), Word(1), Word(0)),
       Vec(
-        Instruction.Capability(operand("Capability", spv.Capability.Kernel)),
+        Instruction.Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
         Instruction.MemoryModel(
-          operand("AddressingModel", spv.AddressingModel.Physical64),
-          operand("MemoryModel", spv.MemoryModel.OpenCL)
+          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
         )
       ),
       Endianness.Little
@@ -86,7 +86,7 @@ class ValidationSuite extends munit.FunSuite {
     )
   }
 
-  private def operand(kind: NonEmpty[String], value: Int): Operand = Operand(
+  private def operand(kind: OperandKind, value: Int): Operand = Operand(
     kind,
     Vec.nonEmpty(Word(value))
   )

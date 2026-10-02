@@ -15,45 +15,50 @@ class GLSLDistanceSuite extends munit.FunSuite {
     count     <- Seq(1, 4)
   }
     test(s"$operation computes $width-bit results from $count components") {
-      val voidType     = operand("IdResult", 1)
-      val scalar       = operand("IdResult", 2)
-      val vector       = operand("IdResult", 3)
-      val pointer      = operand("IdResult", 4)
-      val functionType = operand("IdResult", 5)
-      val function     = operand("IdResult", 6)
-      val output       = operand("IdResult", 7)
-      val left         = operand("IdResult", 8)
-      val right        = operand("IdResult", 9)
-      val result       = operand("IdResult", 11)
+      val voidType     = operand(OperandKind.IdResult, 1)
+      val scalar       = operand(OperandKind.IdResult, 2)
+      val vector       = operand(OperandKind.IdResult, 3)
+      val pointer      = operand(OperandKind.IdResult, 4)
+      val functionType = operand(OperandKind.IdResult, 5)
+      val function     = operand(OperandKind.IdResult, 6)
+      val output       = operand(OperandKind.IdResult, 7)
+      val left         = operand(OperandKind.IdResult, 8)
+      val right        = operand(OperandKind.IdResult, 9)
+      val result       = operand(OperandKind.IdResult, 11)
       val module       = Module(
         Header(ISA.version, Word(0), Word(14), Word(0)),
         Vec(
           Instruction.TypeVoid(voidType),
-          Instruction.ExtInstImport(operand("IdResult", 12), stringOperand("GLSL.std.450")),
-          Instruction.TypeFloat(scalar, operand("LiteralInteger", width), None),
-          Instruction.TypeVector(vector, scalar, operand("LiteralInteger", 4)),
-          Instruction.TypePointer(pointer, operand("StorageClass", StorageClass.CrossWorkgroup), scalar),
+          Instruction.ExtInstImport(operand(OperandKind.IdResult, 12), stringOperand("GLSL.std.450")),
+          Instruction.TypeFloat(scalar, operand(OperandKind.LiteralInteger, width), None),
+          Instruction.TypeVector(vector, scalar, operand(OperandKind.LiteralInteger, 4)),
+          Instruction.TypePointer(pointer, operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), scalar),
           Instruction.TypeFunction(
             functionType,
             voidType,
             Vec(pointer, if (count == 1) scalar else vector, if (count == 1) scalar else vector)
           ),
           Instruction.EntryPoint(
-            operand("ExecutionModel", ExecutionModel.Kernel),
+            operand(OperandKind.ExecutionModel, ExecutionModel.Kernel),
             function,
             stringOperand("remainder"),
             Vec.empty
           ),
-          Instruction.Function(voidType, function, operand("FunctionControl", FunctionControl.None), functionType),
+          Instruction.Function(
+            voidType,
+            function,
+            operand(OperandKind.FunctionControl, FunctionControl.None),
+            functionType
+          ),
           Instruction.FunctionParameter(pointer, output),
           Instruction.FunctionParameter(if (count == 1) scalar else vector, left),
           Instruction.FunctionParameter(if (count == 1) scalar else vector, right),
-          Instruction.Label(operand("IdResult", 10)),
+          Instruction.Label(operand(OperandKind.IdResult, 10)),
           Instruction.ExtInst(
             scalar,
             result,
-            operand("IdRef", 12),
-            operand("LiteralExtInstInteger", if (operation == "Length") 66 else 67),
+            operand(OperandKind.IdRef, 12),
+            operand(OperandKind.LiteralExtInstInteger, if (operation == "Length") 66 else 67),
             if (operation == "Length") Vec(left) else Vec(left, right)
           ),
           Instruction.Store(output, result, None),

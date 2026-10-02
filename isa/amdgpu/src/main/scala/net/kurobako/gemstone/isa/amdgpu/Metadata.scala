@@ -11,13 +11,14 @@ import upickle.default.read
 object Metadata {
   case class Encoding(
       isa: ISA,
-      format: NonEmpty[String],
+      format: EncodingFormat,
       opcode: Int,
-      operands: Vec[OperandInfo]
+      operands: Vec[OperandInfo],
+      groups: Vec[InstructionGroup] = Vec.empty
   )
 
   object Catalogue {
-    case class Row(isa: Int, format: Int, opcode: Int, schema: Int) derives ReadWriter
+    case class Row(isa: Int, format: Int, opcode: Int, schema: Int, groups: Vector[Int]) derives ReadWriter
 
     private lazy val values: Vec[Metadata] = {
       val stream = Option(getClass.getResourceAsStream("metadata.json"))
@@ -35,24 +36,28 @@ object Metadata {
   /** The interned encoding catalogue emitted by the AMDGPU generator. */
   case class Catalogue(
       strings: Vector[NonEmpty[String]],
-      schemas: Vector[Vector[(Int, Int, Boolean)]],
+      schemas: Vector[Vector[(Int, Int, Boolean, Int, Int, Boolean)]],
       encodings: Vector[Catalogue.Row],
       metadata: Vector[(Int, Int)]
   ) derives ReadWriter {
     private def decode: Vec[Metadata] = {
-      val operands = schemas.map(_.map { case (field, kind, implicitOperand) =>
+      val operands = schemas.map(_.map { case (field, kind, implicitOperand, bits, dataFormat, output) =>
         OperandInfo(
-          field = Option.when(field >= 0)(strings(field)),
-          kind = strings(kind),
-          implicitOperand = implicitOperand
+          field = Option.when(field >= 0)(EncodingField.valueOf(strings(field))),
+          kind = OperandKind.valueOf(strings(kind)),
+          implicitOperand = implicitOperand,
+          bits = bits.unsafe[Int >= 0],
+          dataFormat = Option.when(dataFormat >= 0)(DataFormat.valueOf(strings(dataFormat))),
+          output = output
         )
       }.toVec)
       val decoded = encodings.map { row =>
         Encoding(
           isa = ISA.valueOf(strings(row.isa)),
-          format = strings(row.format),
+          format = EncodingFormat.valueOf(strings(row.format)),
           opcode = row.opcode,
-          operands = operands(row.schema)
+          operands = operands(row.schema),
+          groups = row.groups.map(id => InstructionGroup.valueOf(strings(id))).toVec
         )
       }
       metadata.map { case (start, count) =>
@@ -61,11 +66,8 @@ object Metadata {
     }
   }
 
-  def encodingsFor(definition: Instruction.Definition, isa: ISA): Vec[Encoding] =
+  def encodingsFor(definition: Opcode, isa: ISA): Vec[Encoding] =
     definition.meta.encodings.filter(_.isa == isa)
-
-  def encodingsFor(instruction: Instruction, target: Target): Vec[Encoding] =
-    encodingsFor(instruction.definition, target.isa)
 
 }
 

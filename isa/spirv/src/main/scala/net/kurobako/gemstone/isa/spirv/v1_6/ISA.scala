@@ -6,7 +6,8 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.spirv.v1_6.Binary as SPIRVBinary
 
-object ISA extends Decoder[Vec[Byte], Module, ISA.DecodeError] {
+object ISA extends Decoder[Vec[Byte], Module, ISA.DecodeError]
+    with Encoder[Module, Vec[Byte], Binary.BinaryError] {
   enum DecodeError {
     case Binary(error: SPIRVBinary.BinaryError)
     case Instruction(error: ModuleDecodeError)

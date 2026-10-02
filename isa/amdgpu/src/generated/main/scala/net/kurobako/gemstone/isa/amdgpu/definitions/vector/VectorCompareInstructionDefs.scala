@@ -3,1458 +3,546 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.collection.*
-import Instruction.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 private object VectorCompareInstructionDefs {
-  case object VCmpClassF16 extends Definition(
-        "v_cmp_class_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpClassF16(operands(0), operands(1), operands(2), mods))),
-        1412
-      )
-  case object VCmpClassF32 extends Definition(
-        "v_cmp_class_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpClassF32(operands(0), operands(1), operands(2), mods))),
-        1413
-      )
-  case object VCmpClassF64 extends Definition(
-        "v_cmp_class_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpClassF64(operands(0), operands(1), operands(2), mods))),
-        1414
-      )
-  case object VCmpEqF16 extends Definition(
-        "v_cmp_eq_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpEqF16(operands(0), operands(1), operands(2), mods))),
-        1415
-      )
-  case object VCmpEqF32 extends Definition(
-        "v_cmp_eq_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpEqF32(operands(0), operands(1), operands(2), mods))),
-        1416
-      )
-  case object VCmpEqF64 extends Definition(
-        "v_cmp_eq_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpEqF64(operands(0), operands(1), operands(2), mods))),
-        1417
-      )
-  case object VCmpEqI16 extends Definition(
-        "v_cmp_eq_i16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpEqI16(operands(0), operands(1), operands(2), mods))),
-        1418
-      )
-  case object VCmpEqI32 extends Definition(
-        "v_cmp_eq_i32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpEqI32(operands(0), operands(1), operands(2), mods))),
-        1419
-      )
-  case object VCmpEqI64 extends Definition(
-        "v_cmp_eq_i64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpEqI64(operands(0), operands(1), operands(2), mods))),
-        1420
-      )
-  case object VCmpEqU16 extends Definition(
-        "v_cmp_eq_u16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpEqU16(operands(0), operands(1), operands(2), mods))),
-        1421
-      )
-  case object VCmpEqU32 extends Definition(
-        "v_cmp_eq_u32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpEqU32(operands(0), operands(1), operands(2), mods))),
-        1422
-      )
-  case object VCmpEqU64 extends Definition(
-        "v_cmp_eq_u64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpEqU64(operands(0), operands(1), operands(2), mods))),
-        1423
-      )
-  case object VCmpFF16 extends Definition(
-        "v_cmp_f_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpFF16(operands(0), operands(1), operands(2), mods))),
-        1424
-      )
-  case object VCmpFF32 extends Definition(
-        "v_cmp_f_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpFF32(operands(0), operands(1), operands(2), mods))),
-        1425
-      )
-  case object VCmpFF64 extends Definition(
-        "v_cmp_f_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpFF64(operands(0), operands(1), operands(2), mods))),
-        1426
-      )
-  case object VCmpFI16 extends Definition(
-        "v_cmp_f_i16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpFI16(operands(0), operands(1), operands(2), mods))),
-        1427
-      )
-  case object VCmpFI32 extends Definition(
-        "v_cmp_f_i32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpFI32(operands(0), operands(1), operands(2), mods))),
-        1428
-      )
-  case object VCmpFI64 extends Definition(
-        "v_cmp_f_i64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpFI64(operands(0), operands(1), operands(2), mods))),
-        1429
-      )
-  case object VCmpFU16 extends Definition(
-        "v_cmp_f_u16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpFU16(operands(0), operands(1), operands(2), mods))),
-        1430
-      )
-  case object VCmpFU32 extends Definition(
-        "v_cmp_f_u32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpFU32(operands(0), operands(1), operands(2), mods))),
-        1431
-      )
-  case object VCmpFU64 extends Definition(
-        "v_cmp_f_u64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpFU64(operands(0), operands(1), operands(2), mods))),
-        1432
-      )
-  case object VCmpGeF16 extends Definition(
-        "v_cmp_ge_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGeF16(operands(0), operands(1), operands(2), mods))),
-        1433
-      )
-  case object VCmpGeF32 extends Definition(
-        "v_cmp_ge_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGeF32(operands(0), operands(1), operands(2), mods))),
-        1434
-      )
-  case object VCmpGeF64 extends Definition(
-        "v_cmp_ge_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGeF64(operands(0), operands(1), operands(2), mods))),
-        1435
-      )
-  case object VCmpGeI16 extends Definition(
-        "v_cmp_ge_i16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGeI16(operands(0), operands(1), operands(2), mods))),
-        1436
-      )
-  case object VCmpGeI32 extends Definition(
-        "v_cmp_ge_i32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGeI32(operands(0), operands(1), operands(2), mods))),
-        1437
-      )
-  case object VCmpGeI64 extends Definition(
-        "v_cmp_ge_i64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGeI64(operands(0), operands(1), operands(2), mods))),
-        1438
-      )
-  case object VCmpGeU16 extends Definition(
-        "v_cmp_ge_u16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGeU16(operands(0), operands(1), operands(2), mods))),
-        1439
-      )
-  case object VCmpGeU32 extends Definition(
-        "v_cmp_ge_u32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGeU32(operands(0), operands(1), operands(2), mods))),
-        1440
-      )
-  case object VCmpGeU64 extends Definition(
-        "v_cmp_ge_u64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGeU64(operands(0), operands(1), operands(2), mods))),
-        1441
-      )
-  case object VCmpGtF16 extends Definition(
-        "v_cmp_gt_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGtF16(operands(0), operands(1), operands(2), mods))),
-        1442
-      )
-  case object VCmpGtF32 extends Definition(
-        "v_cmp_gt_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGtF32(operands(0), operands(1), operands(2), mods))),
-        1443
-      )
-  case object VCmpGtF64 extends Definition(
-        "v_cmp_gt_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGtF64(operands(0), operands(1), operands(2), mods))),
-        1444
-      )
-  case object VCmpGtI16 extends Definition(
-        "v_cmp_gt_i16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGtI16(operands(0), operands(1), operands(2), mods))),
-        1445
-      )
-  case object VCmpGtI32 extends Definition(
-        "v_cmp_gt_i32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGtI32(operands(0), operands(1), operands(2), mods))),
-        1446
-      )
-  case object VCmpGtI64 extends Definition(
-        "v_cmp_gt_i64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGtI64(operands(0), operands(1), operands(2), mods))),
-        1447
-      )
-  case object VCmpGtU16 extends Definition(
-        "v_cmp_gt_u16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGtU16(operands(0), operands(1), operands(2), mods))),
-        1448
-      )
-  case object VCmpGtU32 extends Definition(
-        "v_cmp_gt_u32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGtU32(operands(0), operands(1), operands(2), mods))),
-        1449
-      )
-  case object VCmpGtU64 extends Definition(
-        "v_cmp_gt_u64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpGtU64(operands(0), operands(1), operands(2), mods))),
-        1450
-      )
-  case object VCmpLeF16 extends Definition(
-        "v_cmp_le_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLeF16(operands(0), operands(1), operands(2), mods))),
-        1451
-      )
-  case object VCmpLeF32 extends Definition(
-        "v_cmp_le_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLeF32(operands(0), operands(1), operands(2), mods))),
-        1452
-      )
-  case object VCmpLeF64 extends Definition(
-        "v_cmp_le_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLeF64(operands(0), operands(1), operands(2), mods))),
-        1453
-      )
-  case object VCmpLeI16 extends Definition(
-        "v_cmp_le_i16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLeI16(operands(0), operands(1), operands(2), mods))),
-        1454
-      )
-  case object VCmpLeI32 extends Definition(
-        "v_cmp_le_i32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLeI32(operands(0), operands(1), operands(2), mods))),
-        1455
-      )
-  case object VCmpLeI64 extends Definition(
-        "v_cmp_le_i64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLeI64(operands(0), operands(1), operands(2), mods))),
-        1456
-      )
-  case object VCmpLeU16 extends Definition(
-        "v_cmp_le_u16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLeU16(operands(0), operands(1), operands(2), mods))),
-        1457
-      )
-  case object VCmpLeU32 extends Definition(
-        "v_cmp_le_u32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLeU32(operands(0), operands(1), operands(2), mods))),
-        1458
-      )
-  case object VCmpLeU64 extends Definition(
-        "v_cmp_le_u64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLeU64(operands(0), operands(1), operands(2), mods))),
-        1459
-      )
-  case object VCmpLgF16 extends Definition(
-        "v_cmp_lg_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLgF16(operands(0), operands(1), operands(2), mods))),
-        1460
-      )
-  case object VCmpLgF32 extends Definition(
-        "v_cmp_lg_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLgF32(operands(0), operands(1), operands(2), mods))),
-        1461
-      )
-  case object VCmpLgF64 extends Definition(
-        "v_cmp_lg_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLgF64(operands(0), operands(1), operands(2), mods))),
-        1462
-      )
-  case object VCmpLgI16 extends Definition(
-        "v_cmp_lg_i16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLgI16(operands(0), operands(1), operands(2), mods))),
-        1463
-      )
-  case object VCmpLgI32 extends Definition(
-        "v_cmp_lg_i32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLgI32(operands(0), operands(1), operands(2), mods))),
-        1464
-      )
-  case object VCmpLgI64 extends Definition(
-        "v_cmp_lg_i64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLgI64(operands(0), operands(1), operands(2), mods))),
-        1465
-      )
-  case object VCmpLgU16 extends Definition(
-        "v_cmp_lg_u16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLgU16(operands(0), operands(1), operands(2), mods))),
-        1466
-      )
-  case object VCmpLgU32 extends Definition(
-        "v_cmp_lg_u32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLgU32(operands(0), operands(1), operands(2), mods))),
-        1467
-      )
-  case object VCmpLgU64 extends Definition(
-        "v_cmp_lg_u64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLgU64(operands(0), operands(1), operands(2), mods))),
-        1468
-      )
-  case object VCmpLtF16 extends Definition(
-        "v_cmp_lt_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLtF16(operands(0), operands(1), operands(2), mods))),
-        1469
-      )
-  case object VCmpLtF32 extends Definition(
-        "v_cmp_lt_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLtF32(operands(0), operands(1), operands(2), mods))),
-        1470
-      )
-  case object VCmpLtF64 extends Definition(
-        "v_cmp_lt_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLtF64(operands(0), operands(1), operands(2), mods))),
-        1471
-      )
-  case object VCmpLtI16 extends Definition(
-        "v_cmp_lt_i16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLtI16(operands(0), operands(1), operands(2), mods))),
-        1472
-      )
-  case object VCmpLtI32 extends Definition(
-        "v_cmp_lt_i32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLtI32(operands(0), operands(1), operands(2), mods))),
-        1473
-      )
-  case object VCmpLtI64 extends Definition(
-        "v_cmp_lt_i64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLtI64(operands(0), operands(1), operands(2), mods))),
-        1474
-      )
-  case object VCmpLtU16 extends Definition(
-        "v_cmp_lt_u16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLtU16(operands(0), operands(1), operands(2), mods))),
-        1475
-      )
-  case object VCmpLtU32 extends Definition(
-        "v_cmp_lt_u32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLtU32(operands(0), operands(1), operands(2), mods))),
-        1476
-      )
-  case object VCmpLtU64 extends Definition(
-        "v_cmp_lt_u64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpLtU64(operands(0), operands(1), operands(2), mods))),
-        1477
-      )
-  case object VCmpNeI16 extends Definition(
-        "v_cmp_ne_i16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNeI16(operands(0), operands(1), operands(2), mods))),
-        1478
-      )
-  case object VCmpNeI32 extends Definition(
-        "v_cmp_ne_i32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNeI32(operands(0), operands(1), operands(2), mods))),
-        1479
-      )
-  case object VCmpNeI64 extends Definition(
-        "v_cmp_ne_i64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNeI64(operands(0), operands(1), operands(2), mods))),
-        1480
-      )
-  case object VCmpNeU16 extends Definition(
-        "v_cmp_ne_u16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNeU16(operands(0), operands(1), operands(2), mods))),
-        1481
-      )
-  case object VCmpNeU32 extends Definition(
-        "v_cmp_ne_u32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNeU32(operands(0), operands(1), operands(2), mods))),
-        1482
-      )
-  case object VCmpNeU64 extends Definition(
-        "v_cmp_ne_u64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNeU64(operands(0), operands(1), operands(2), mods))),
-        1483
-      )
-  case object VCmpNeqF16 extends Definition(
-        "v_cmp_neq_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNeqF16(operands(0), operands(1), operands(2), mods))),
-        1484
-      )
-  case object VCmpNeqF32 extends Definition(
-        "v_cmp_neq_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNeqF32(operands(0), operands(1), operands(2), mods))),
-        1485
-      )
-  case object VCmpNeqF64 extends Definition(
-        "v_cmp_neq_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNeqF64(operands(0), operands(1), operands(2), mods))),
-        1486
-      )
-  case object VCmpNgeF16 extends Definition(
-        "v_cmp_nge_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNgeF16(operands(0), operands(1), operands(2), mods))),
-        1487
-      )
-  case object VCmpNgeF32 extends Definition(
-        "v_cmp_nge_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNgeF32(operands(0), operands(1), operands(2), mods))),
-        1488
-      )
-  case object VCmpNgeF64 extends Definition(
-        "v_cmp_nge_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNgeF64(operands(0), operands(1), operands(2), mods))),
-        1489
-      )
-  case object VCmpNgtF16 extends Definition(
-        "v_cmp_ngt_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNgtF16(operands(0), operands(1), operands(2), mods))),
-        1490
-      )
-  case object VCmpNgtF32 extends Definition(
-        "v_cmp_ngt_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNgtF32(operands(0), operands(1), operands(2), mods))),
-        1491
-      )
-  case object VCmpNgtF64 extends Definition(
-        "v_cmp_ngt_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNgtF64(operands(0), operands(1), operands(2), mods))),
-        1492
-      )
-  case object VCmpNleF16 extends Definition(
-        "v_cmp_nle_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNleF16(operands(0), operands(1), operands(2), mods))),
-        1493
-      )
-  case object VCmpNleF32 extends Definition(
-        "v_cmp_nle_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNleF32(operands(0), operands(1), operands(2), mods))),
-        1494
-      )
-  case object VCmpNleF64 extends Definition(
-        "v_cmp_nle_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNleF64(operands(0), operands(1), operands(2), mods))),
-        1495
-      )
-  case object VCmpNlgF16 extends Definition(
-        "v_cmp_nlg_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNlgF16(operands(0), operands(1), operands(2), mods))),
-        1496
-      )
-  case object VCmpNlgF32 extends Definition(
-        "v_cmp_nlg_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNlgF32(operands(0), operands(1), operands(2), mods))),
-        1497
-      )
-  case object VCmpNlgF64 extends Definition(
-        "v_cmp_nlg_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNlgF64(operands(0), operands(1), operands(2), mods))),
-        1498
-      )
-  case object VCmpNltF16 extends Definition(
-        "v_cmp_nlt_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNltF16(operands(0), operands(1), operands(2), mods))),
-        1499
-      )
-  case object VCmpNltF32 extends Definition(
-        "v_cmp_nlt_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNltF32(operands(0), operands(1), operands(2), mods))),
-        1500
-      )
-  case object VCmpNltF64 extends Definition(
-        "v_cmp_nlt_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpNltF64(operands(0), operands(1), operands(2), mods))),
-        1501
-      )
-  case object VCmpOF16 extends Definition(
-        "v_cmp_o_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpOF16(operands(0), operands(1), operands(2), mods))),
-        1502
-      )
-  case object VCmpOF32 extends Definition(
-        "v_cmp_o_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpOF32(operands(0), operands(1), operands(2), mods))),
-        1503
-      )
-  case object VCmpOF64 extends Definition(
-        "v_cmp_o_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpOF64(operands(0), operands(1), operands(2), mods))),
-        1504
-      )
-  case object VCmpTF16 extends Definition(
-        "v_cmp_t_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTF16(operands(0), operands(1), operands(2), mods))),
-        1505
-      )
-  case object VCmpTF32 extends Definition(
-        "v_cmp_t_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTF32(operands(0), operands(1), operands(2), mods))),
-        1506
-      )
-  case object VCmpTF64 extends Definition(
-        "v_cmp_t_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTF64(operands(0), operands(1), operands(2), mods))),
-        1507
-      )
-  case object VCmpTI16 extends Definition(
-        "v_cmp_t_i16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTI16(operands(0), operands(1), operands(2), mods))),
-        1508
-      )
-  case object VCmpTI32 extends Definition(
-        "v_cmp_t_i32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTI32(operands(0), operands(1), operands(2), mods))),
-        1509
-      )
-  case object VCmpTI64 extends Definition(
-        "v_cmp_t_i64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTI64(operands(0), operands(1), operands(2), mods))),
-        1510
-      )
-  case object VCmpTU16 extends Definition(
-        "v_cmp_t_u16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTU16(operands(0), operands(1), operands(2), mods))),
-        1511
-      )
-  case object VCmpTU32 extends Definition(
-        "v_cmp_t_u32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTU32(operands(0), operands(1), operands(2), mods))),
-        1512
-      )
-  case object VCmpTU64 extends Definition(
-        "v_cmp_t_u64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTU64(operands(0), operands(1), operands(2), mods))),
-        1513
-      )
-  case object VCmpTruF16 extends Definition(
-        "v_cmp_tru_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTruF16(operands(0), operands(1), operands(2), mods))),
-        1514
-      )
-  case object VCmpTruF32 extends Definition(
-        "v_cmp_tru_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTruF32(operands(0), operands(1), operands(2), mods))),
-        1515
-      )
-  case object VCmpTruF64 extends Definition(
-        "v_cmp_tru_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTruF64(operands(0), operands(1), operands(2), mods))),
-        1516
-      )
-  case object VCmpTruI16 extends Definition(
-        "v_cmp_tru_i16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTruI16(operands(0), operands(1), operands(2), mods))),
-        1517
-      )
-  case object VCmpTruI32 extends Definition(
-        "v_cmp_tru_i32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTruI32(operands(0), operands(1), operands(2), mods))),
-        1518
-      )
-  case object VCmpTruI64 extends Definition(
-        "v_cmp_tru_i64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTruI64(operands(0), operands(1), operands(2), mods))),
-        1519
-      )
-  case object VCmpTruU16 extends Definition(
-        "v_cmp_tru_u16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTruU16(operands(0), operands(1), operands(2), mods))),
-        1520
-      )
-  case object VCmpTruU32 extends Definition(
-        "v_cmp_tru_u32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTruU32(operands(0), operands(1), operands(2), mods))),
-        1521
-      )
-  case object VCmpTruU64 extends Definition(
-        "v_cmp_tru_u64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpTruU64(operands(0), operands(1), operands(2), mods))),
-        1522
-      )
-  case object VCmpUF16 extends Definition(
-        "v_cmp_u_f16",
-        decoder(form(3)((operands, mods) => Instruction.VCmpUF16(operands(0), operands(1), operands(2), mods))),
-        1523
-      )
-  case object VCmpUF32 extends Definition(
-        "v_cmp_u_f32",
-        decoder(form(3)((operands, mods) => Instruction.VCmpUF32(operands(0), operands(1), operands(2), mods))),
-        1524
-      )
-  case object VCmpUF64 extends Definition(
-        "v_cmp_u_f64",
-        decoder(form(3)((operands, mods) => Instruction.VCmpUF64(operands(0), operands(1), operands(2), mods))),
-        1525
-      )
-  case object VCmpxClassF16 extends Definition(
-        "v_cmpx_class_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxClassF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxClassF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1526
-      )
-  case object VCmpxClassF32 extends Definition(
-        "v_cmpx_class_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxClassF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxClassF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1527
-      )
-  case object VCmpxClassF64 extends Definition(
-        "v_cmpx_class_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxClassF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxClassF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1528
-      )
-  case object VCmpxEqF16 extends Definition(
-        "v_cmpx_eq_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxEqF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxEqF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1529
-      )
-  case object VCmpxEqF32 extends Definition(
-        "v_cmpx_eq_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxEqF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxEqF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1530
-      )
-  case object VCmpxEqF64 extends Definition(
-        "v_cmpx_eq_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxEqF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxEqF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1531
-      )
-  case object VCmpxEqI16 extends Definition(
-        "v_cmpx_eq_i16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxEqI16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxEqI16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1532
-      )
-  case object VCmpxEqI32 extends Definition(
-        "v_cmpx_eq_i32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxEqI32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxEqI32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1533
-      )
-  case object VCmpxEqI64 extends Definition(
-        "v_cmpx_eq_i64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxEqI64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxEqI64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1534
-      )
-  case object VCmpxEqU16 extends Definition(
-        "v_cmpx_eq_u16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxEqU16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxEqU16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1535
-      )
-  case object VCmpxEqU32 extends Definition(
-        "v_cmpx_eq_u32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxEqU32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxEqU32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1536
-      )
-  case object VCmpxEqU64 extends Definition(
-        "v_cmpx_eq_u64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxEqU64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxEqU64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1537
-      )
-  case object VCmpxFF16 extends Definition(
-        "v_cmpx_f_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxFF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxFF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1538
-      )
-  case object VCmpxFF32 extends Definition(
-        "v_cmpx_f_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxFF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxFF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1539
-      )
-  case object VCmpxFF64 extends Definition(
-        "v_cmpx_f_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxFF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxFF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1540
-      )
-  case object VCmpxFI16 extends Definition(
-        "v_cmpx_f_i16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxFI16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxFI16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1541
-      )
-  case object VCmpxFI32 extends Definition(
-        "v_cmpx_f_i32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxFI32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxFI32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1542
-      )
-  case object VCmpxFI64 extends Definition(
-        "v_cmpx_f_i64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxFI64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxFI64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1543
-      )
-  case object VCmpxFU16 extends Definition(
-        "v_cmpx_f_u16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxFU16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxFU16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1544
-      )
-  case object VCmpxFU32 extends Definition(
-        "v_cmpx_f_u32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxFU32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxFU32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1545
-      )
-  case object VCmpxFU64 extends Definition(
-        "v_cmpx_f_u64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxFU64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxFU64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1546
-      )
-  case object VCmpxGeF16 extends Definition(
-        "v_cmpx_ge_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGeF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGeF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1547
-      )
-  case object VCmpxGeF32 extends Definition(
-        "v_cmpx_ge_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGeF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGeF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1548
-      )
-  case object VCmpxGeF64 extends Definition(
-        "v_cmpx_ge_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGeF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGeF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1549
-      )
-  case object VCmpxGeI16 extends Definition(
-        "v_cmpx_ge_i16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGeI16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGeI16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1550
-      )
-  case object VCmpxGeI32 extends Definition(
-        "v_cmpx_ge_i32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGeI32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGeI32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1551
-      )
-  case object VCmpxGeI64 extends Definition(
-        "v_cmpx_ge_i64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGeI64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGeI64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1552
-      )
-  case object VCmpxGeU16 extends Definition(
-        "v_cmpx_ge_u16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGeU16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGeU16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1553
-      )
-  case object VCmpxGeU32 extends Definition(
-        "v_cmpx_ge_u32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGeU32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGeU32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1554
-      )
-  case object VCmpxGeU64 extends Definition(
-        "v_cmpx_ge_u64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGeU64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGeU64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1555
-      )
-  case object VCmpxGtF16 extends Definition(
-        "v_cmpx_gt_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGtF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGtF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1556
-      )
-  case object VCmpxGtF32 extends Definition(
-        "v_cmpx_gt_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGtF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGtF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1557
-      )
-  case object VCmpxGtF64 extends Definition(
-        "v_cmpx_gt_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGtF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGtF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1558
-      )
-  case object VCmpxGtI16 extends Definition(
-        "v_cmpx_gt_i16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGtI16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGtI16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1559
-      )
-  case object VCmpxGtI32 extends Definition(
-        "v_cmpx_gt_i32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGtI32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGtI32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1560
-      )
-  case object VCmpxGtI64 extends Definition(
-        "v_cmpx_gt_i64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGtI64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGtI64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1561
-      )
-  case object VCmpxGtU16 extends Definition(
-        "v_cmpx_gt_u16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGtU16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGtU16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1562
-      )
-  case object VCmpxGtU32 extends Definition(
-        "v_cmpx_gt_u32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGtU32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGtU32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1563
-      )
-  case object VCmpxGtU64 extends Definition(
-        "v_cmpx_gt_u64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxGtU64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxGtU64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1564
-      )
-  case object VCmpxLeF16 extends Definition(
-        "v_cmpx_le_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLeF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLeF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1565
-      )
-  case object VCmpxLeF32 extends Definition(
-        "v_cmpx_le_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLeF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLeF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1566
-      )
-  case object VCmpxLeF64 extends Definition(
-        "v_cmpx_le_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLeF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLeF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1567
-      )
-  case object VCmpxLeI16 extends Definition(
-        "v_cmpx_le_i16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLeI16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLeI16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1568
-      )
-  case object VCmpxLeI32 extends Definition(
-        "v_cmpx_le_i32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLeI32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLeI32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1569
-      )
-  case object VCmpxLeI64 extends Definition(
-        "v_cmpx_le_i64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLeI64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLeI64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1570
-      )
-  case object VCmpxLeU16 extends Definition(
-        "v_cmpx_le_u16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLeU16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLeU16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1571
-      )
-  case object VCmpxLeU32 extends Definition(
-        "v_cmpx_le_u32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLeU32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLeU32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1572
-      )
-  case object VCmpxLeU64 extends Definition(
-        "v_cmpx_le_u64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLeU64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLeU64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1573
-      )
-  case object VCmpxLgF16 extends Definition(
-        "v_cmpx_lg_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLgF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLgF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1574
-      )
-  case object VCmpxLgF32 extends Definition(
-        "v_cmpx_lg_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLgF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLgF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1575
-      )
-  case object VCmpxLgF64 extends Definition(
-        "v_cmpx_lg_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLgF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLgF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1576
-      )
-  case object VCmpxLgI16 extends Definition(
-        "v_cmpx_lg_i16",
-        decoder(form(2)((operands, mods) => Instruction.VCmpxLgI16(operands(0), operands(1), mods))),
-        1577
-      )
-  case object VCmpxLgI32 extends Definition(
-        "v_cmpx_lg_i32",
-        decoder(form(2)((operands, mods) => Instruction.VCmpxLgI32(operands(0), operands(1), mods))),
-        1578
-      )
-  case object VCmpxLgI64 extends Definition(
-        "v_cmpx_lg_i64",
-        decoder(form(2)((operands, mods) => Instruction.VCmpxLgI64(operands(0), operands(1), mods))),
-        1579
-      )
-  case object VCmpxLgU16 extends Definition(
-        "v_cmpx_lg_u16",
-        decoder(form(2)((operands, mods) => Instruction.VCmpxLgU16(operands(0), operands(1), mods))),
-        1580
-      )
-  case object VCmpxLgU32 extends Definition(
-        "v_cmpx_lg_u32",
-        decoder(form(2)((operands, mods) => Instruction.VCmpxLgU32(operands(0), operands(1), mods))),
-        1581
-      )
-  case object VCmpxLgU64 extends Definition(
-        "v_cmpx_lg_u64",
-        decoder(form(2)((operands, mods) => Instruction.VCmpxLgU64(operands(0), operands(1), mods))),
-        1582
-      )
-  case object VCmpxLtF16 extends Definition(
-        "v_cmpx_lt_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLtF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLtF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1583
-      )
-  case object VCmpxLtF32 extends Definition(
-        "v_cmpx_lt_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLtF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLtF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1584
-      )
-  case object VCmpxLtF64 extends Definition(
-        "v_cmpx_lt_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLtF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLtF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1585
-      )
-  case object VCmpxLtI16 extends Definition(
-        "v_cmpx_lt_i16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLtI16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLtI16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1586
-      )
-  case object VCmpxLtI32 extends Definition(
-        "v_cmpx_lt_i32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLtI32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLtI32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1587
-      )
-  case object VCmpxLtI64 extends Definition(
-        "v_cmpx_lt_i64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLtI64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLtI64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1588
-      )
-  case object VCmpxLtU16 extends Definition(
-        "v_cmpx_lt_u16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLtU16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLtU16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1589
-      )
-  case object VCmpxLtU32 extends Definition(
-        "v_cmpx_lt_u32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLtU32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLtU32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1590
-      )
-  case object VCmpxLtU64 extends Definition(
-        "v_cmpx_lt_u64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxLtU64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxLtU64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1591
-      )
-  case object VCmpxNeI16 extends Definition(
-        "v_cmpx_ne_i16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNeI16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNeI16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1592
-      )
-  case object VCmpxNeI32 extends Definition(
-        "v_cmpx_ne_i32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNeI32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNeI32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1593
-      )
-  case object VCmpxNeI64 extends Definition(
-        "v_cmpx_ne_i64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNeI64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNeI64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1594
-      )
-  case object VCmpxNeU16 extends Definition(
-        "v_cmpx_ne_u16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNeU16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNeU16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1595
-      )
-  case object VCmpxNeU32 extends Definition(
-        "v_cmpx_ne_u32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNeU32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNeU32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1596
-      )
-  case object VCmpxNeU64 extends Definition(
-        "v_cmpx_ne_u64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNeU64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNeU64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1597
-      )
-  case object VCmpxNeqF16 extends Definition(
-        "v_cmpx_neq_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNeqF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNeqF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1598
-      )
-  case object VCmpxNeqF32 extends Definition(
-        "v_cmpx_neq_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNeqF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNeqF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1599
-      )
-  case object VCmpxNeqF64 extends Definition(
-        "v_cmpx_neq_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNeqF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNeqF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1600
-      )
-  case object VCmpxNgeF16 extends Definition(
-        "v_cmpx_nge_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNgeF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNgeF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1601
-      )
-  case object VCmpxNgeF32 extends Definition(
-        "v_cmpx_nge_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNgeF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNgeF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1602
-      )
-  case object VCmpxNgeF64 extends Definition(
-        "v_cmpx_nge_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNgeF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNgeF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1603
-      )
-  case object VCmpxNgtF16 extends Definition(
-        "v_cmpx_ngt_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNgtF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNgtF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1604
-      )
-  case object VCmpxNgtF32 extends Definition(
-        "v_cmpx_ngt_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNgtF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNgtF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1605
-      )
-  case object VCmpxNgtF64 extends Definition(
-        "v_cmpx_ngt_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNgtF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNgtF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1606
-      )
-  case object VCmpxNleF16 extends Definition(
-        "v_cmpx_nle_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNleF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNleF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1607
-      )
-  case object VCmpxNleF32 extends Definition(
-        "v_cmpx_nle_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNleF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNleF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1608
-      )
-  case object VCmpxNleF64 extends Definition(
-        "v_cmpx_nle_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNleF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNleF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1609
-      )
-  case object VCmpxNlgF16 extends Definition(
-        "v_cmpx_nlg_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNlgF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNlgF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1610
-      )
-  case object VCmpxNlgF32 extends Definition(
-        "v_cmpx_nlg_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNlgF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNlgF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1611
-      )
-  case object VCmpxNlgF64 extends Definition(
-        "v_cmpx_nlg_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNlgF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNlgF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1612
-      )
-  case object VCmpxNltF16 extends Definition(
-        "v_cmpx_nlt_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNltF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNltF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1613
-      )
-  case object VCmpxNltF32 extends Definition(
-        "v_cmpx_nlt_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNltF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNltF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1614
-      )
-  case object VCmpxNltF64 extends Definition(
-        "v_cmpx_nlt_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxNltF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxNltF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1615
-      )
-  case object VCmpxOF16 extends Definition(
-        "v_cmpx_o_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxOF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxOF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1616
-      )
-  case object VCmpxOF32 extends Definition(
-        "v_cmpx_o_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxOF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxOF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1617
-      )
-  case object VCmpxOF64 extends Definition(
-        "v_cmpx_o_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxOF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxOF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1618
-      )
-  case object VCmpxTF16 extends Definition(
-        "v_cmpx_t_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxTF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxTF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1619
-      )
-  case object VCmpxTF32 extends Definition(
-        "v_cmpx_t_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxTF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxTF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1620
-      )
-  case object VCmpxTF64 extends Definition(
-        "v_cmpx_t_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxTF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxTF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1621
-      )
-  case object VCmpxTI16 extends Definition(
-        "v_cmpx_t_i16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxTI16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxTI16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1622
-      )
-  case object VCmpxTI32 extends Definition(
-        "v_cmpx_t_i32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxTI32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxTI32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1623
-      )
-  case object VCmpxTI64 extends Definition(
-        "v_cmpx_t_i64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxTI64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxTI64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1624
-      )
-  case object VCmpxTU16 extends Definition(
-        "v_cmpx_t_u16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxTU16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxTU16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1625
-      )
-  case object VCmpxTU32 extends Definition(
-        "v_cmpx_t_u32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxTU32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxTU32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1626
-      )
-  case object VCmpxTU64 extends Definition(
-        "v_cmpx_t_u64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxTU64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxTU64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1627
-      )
-  case object VCmpxTruF16 extends Definition(
-        "v_cmpx_tru_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxTruF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxTruF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1628
-      )
-  case object VCmpxTruF32 extends Definition(
-        "v_cmpx_tru_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxTruF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxTruF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1629
-      )
-  case object VCmpxTruF64 extends Definition(
-        "v_cmpx_tru_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxTruF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxTruF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1630
-      )
-  case object VCmpxTruI16 extends Definition(
-        "v_cmpx_tru_i16",
-        decoder(form(2)((operands, mods) => Instruction.VCmpxTruI16(operands(0), operands(1), mods))),
-        1631
-      )
-  case object VCmpxTruI32 extends Definition(
-        "v_cmpx_tru_i32",
-        decoder(form(2)((operands, mods) => Instruction.VCmpxTruI32(operands(0), operands(1), mods))),
-        1632
-      )
-  case object VCmpxTruI64 extends Definition(
-        "v_cmpx_tru_i64",
-        decoder(form(2)((operands, mods) => Instruction.VCmpxTruI64(operands(0), operands(1), mods))),
-        1633
-      )
-  case object VCmpxTruU16 extends Definition(
-        "v_cmpx_tru_u16",
-        decoder(form(2)((operands, mods) => Instruction.VCmpxTruU16(operands(0), operands(1), mods))),
-        1634
-      )
-  case object VCmpxTruU32 extends Definition(
-        "v_cmpx_tru_u32",
-        decoder(form(2)((operands, mods) => Instruction.VCmpxTruU32(operands(0), operands(1), mods))),
-        1635
-      )
-  case object VCmpxTruU64 extends Definition(
-        "v_cmpx_tru_u64",
-        decoder(form(2)((operands, mods) => Instruction.VCmpxTruU64(operands(0), operands(1), mods))),
-        1636
-      )
-  case object VCmpxUF16 extends Definition(
-        "v_cmpx_u_f16",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxUF16_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxUF16_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1637
-      )
-  case object VCmpxUF32 extends Definition(
-        "v_cmpx_u_f32",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxUF32_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxUF32_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1638
-      )
-  case object VCmpxUF64 extends Definition(
-        "v_cmpx_u_f64",
-        decoder(
-          form(2)((operands, mods) => Instruction.VCmpxUF64_2(operands(0), operands(1), mods)),
-          form(3)((operands, mods) => Instruction.VCmpxUF64_3(operands(0), operands(1), operands(2), mods))
-        ),
-        1639
-      )
+  case object VCmpClassF16 extends Opcode("v_cmp_class_f16", 1418)
 
-  val definitions: Vec[Definition] = Vec(
+  case object VCmpClassF32 extends Opcode("v_cmp_class_f32", 1419)
+
+  case object VCmpClassF64 extends Opcode("v_cmp_class_f64", 1420)
+
+  case object VCmpEqF16 extends Opcode("v_cmp_eq_f16", 1421)
+
+  case object VCmpEqF32 extends Opcode("v_cmp_eq_f32", 1422)
+
+  case object VCmpEqF64 extends Opcode("v_cmp_eq_f64", 1423)
+
+  case object VCmpEqI16 extends Opcode("v_cmp_eq_i16", 1424)
+
+  case object VCmpEqI32 extends Opcode("v_cmp_eq_i32", 1425)
+
+  case object VCmpEqI64 extends Opcode("v_cmp_eq_i64", 1426)
+
+  case object VCmpEqU16 extends Opcode("v_cmp_eq_u16", 1427)
+
+  case object VCmpEqU32 extends Opcode("v_cmp_eq_u32", 1428)
+
+  case object VCmpEqU64 extends Opcode("v_cmp_eq_u64", 1429)
+
+  case object VCmpFF16 extends Opcode("v_cmp_f_f16", 1430)
+
+  case object VCmpFF32 extends Opcode("v_cmp_f_f32", 1431)
+
+  case object VCmpFF64 extends Opcode("v_cmp_f_f64", 1432)
+
+  case object VCmpFI16 extends Opcode("v_cmp_f_i16", 1433)
+
+  case object VCmpFI32 extends Opcode("v_cmp_f_i32", 1434)
+
+  case object VCmpFI64 extends Opcode("v_cmp_f_i64", 1435)
+
+  case object VCmpFU16 extends Opcode("v_cmp_f_u16", 1436)
+
+  case object VCmpFU32 extends Opcode("v_cmp_f_u32", 1437)
+
+  case object VCmpFU64 extends Opcode("v_cmp_f_u64", 1438)
+
+  case object VCmpGeF16 extends Opcode("v_cmp_ge_f16", 1439)
+
+  case object VCmpGeF32 extends Opcode("v_cmp_ge_f32", 1440)
+
+  case object VCmpGeF64 extends Opcode("v_cmp_ge_f64", 1441)
+
+  case object VCmpGeI16 extends Opcode("v_cmp_ge_i16", 1442)
+
+  case object VCmpGeI32 extends Opcode("v_cmp_ge_i32", 1443)
+
+  case object VCmpGeI64 extends Opcode("v_cmp_ge_i64", 1444)
+
+  case object VCmpGeU16 extends Opcode("v_cmp_ge_u16", 1445)
+
+  case object VCmpGeU32 extends Opcode("v_cmp_ge_u32", 1446)
+
+  case object VCmpGeU64 extends Opcode("v_cmp_ge_u64", 1447)
+
+  case object VCmpGtF16 extends Opcode("v_cmp_gt_f16", 1448)
+
+  case object VCmpGtF32 extends Opcode("v_cmp_gt_f32", 1449)
+
+  case object VCmpGtF64 extends Opcode("v_cmp_gt_f64", 1450)
+
+  case object VCmpGtI16 extends Opcode("v_cmp_gt_i16", 1451)
+
+  case object VCmpGtI32 extends Opcode("v_cmp_gt_i32", 1452)
+
+  case object VCmpGtI64 extends Opcode("v_cmp_gt_i64", 1453)
+
+  case object VCmpGtU16 extends Opcode("v_cmp_gt_u16", 1454)
+
+  case object VCmpGtU32 extends Opcode("v_cmp_gt_u32", 1455)
+
+  case object VCmpGtU64 extends Opcode("v_cmp_gt_u64", 1456)
+
+  case object VCmpLeF16 extends Opcode("v_cmp_le_f16", 1457)
+
+  case object VCmpLeF32 extends Opcode("v_cmp_le_f32", 1458)
+
+  case object VCmpLeF64 extends Opcode("v_cmp_le_f64", 1459)
+
+  case object VCmpLeI16 extends Opcode("v_cmp_le_i16", 1460)
+
+  case object VCmpLeI32 extends Opcode("v_cmp_le_i32", 1461)
+
+  case object VCmpLeI64 extends Opcode("v_cmp_le_i64", 1462)
+
+  case object VCmpLeU16 extends Opcode("v_cmp_le_u16", 1463)
+
+  case object VCmpLeU32 extends Opcode("v_cmp_le_u32", 1464)
+
+  case object VCmpLeU64 extends Opcode("v_cmp_le_u64", 1465)
+
+  case object VCmpLgF16 extends Opcode("v_cmp_lg_f16", 1466)
+
+  case object VCmpLgF32 extends Opcode("v_cmp_lg_f32", 1467)
+
+  case object VCmpLgF64 extends Opcode("v_cmp_lg_f64", 1468)
+
+  case object VCmpLtF16 extends Opcode("v_cmp_lt_f16", 1469)
+
+  case object VCmpLtF32 extends Opcode("v_cmp_lt_f32", 1470)
+
+  case object VCmpLtF64 extends Opcode("v_cmp_lt_f64", 1471)
+
+  case object VCmpLtI16 extends Opcode("v_cmp_lt_i16", 1472)
+
+  case object VCmpLtI32 extends Opcode("v_cmp_lt_i32", 1473)
+
+  case object VCmpLtI64 extends Opcode("v_cmp_lt_i64", 1474)
+
+  case object VCmpLtU16 extends Opcode("v_cmp_lt_u16", 1475)
+
+  case object VCmpLtU32 extends Opcode("v_cmp_lt_u32", 1476)
+
+  case object VCmpLtU64 extends Opcode("v_cmp_lt_u64", 1477)
+
+  case object VCmpNeI16 extends Opcode("v_cmp_ne_i16", 1478)
+
+  case object VCmpNeI32 extends Opcode("v_cmp_ne_i32", 1479)
+
+  case object VCmpNeI64 extends Opcode("v_cmp_ne_i64", 1480)
+
+  case object VCmpNeU16 extends Opcode("v_cmp_ne_u16", 1481)
+
+  case object VCmpNeU32 extends Opcode("v_cmp_ne_u32", 1482)
+
+  case object VCmpNeU64 extends Opcode("v_cmp_ne_u64", 1483)
+
+  case object VCmpNeqF16 extends Opcode("v_cmp_neq_f16", 1484)
+
+  case object VCmpNeqF32 extends Opcode("v_cmp_neq_f32", 1485)
+
+  case object VCmpNeqF64 extends Opcode("v_cmp_neq_f64", 1486)
+
+  case object VCmpNgeF16 extends Opcode("v_cmp_nge_f16", 1487)
+
+  case object VCmpNgeF32 extends Opcode("v_cmp_nge_f32", 1488)
+
+  case object VCmpNgeF64 extends Opcode("v_cmp_nge_f64", 1489)
+
+  case object VCmpNgtF16 extends Opcode("v_cmp_ngt_f16", 1490)
+
+  case object VCmpNgtF32 extends Opcode("v_cmp_ngt_f32", 1491)
+
+  case object VCmpNgtF64 extends Opcode("v_cmp_ngt_f64", 1492)
+
+  case object VCmpNleF16 extends Opcode("v_cmp_nle_f16", 1493)
+
+  case object VCmpNleF32 extends Opcode("v_cmp_nle_f32", 1494)
+
+  case object VCmpNleF64 extends Opcode("v_cmp_nle_f64", 1495)
+
+  case object VCmpNlgF16 extends Opcode("v_cmp_nlg_f16", 1496)
+
+  case object VCmpNlgF32 extends Opcode("v_cmp_nlg_f32", 1497)
+
+  case object VCmpNlgF64 extends Opcode("v_cmp_nlg_f64", 1498)
+
+  case object VCmpNltF16 extends Opcode("v_cmp_nlt_f16", 1499)
+
+  case object VCmpNltF32 extends Opcode("v_cmp_nlt_f32", 1500)
+
+  case object VCmpNltF64 extends Opcode("v_cmp_nlt_f64", 1501)
+
+  case object VCmpOF16 extends Opcode("v_cmp_o_f16", 1502)
+
+  case object VCmpOF32 extends Opcode("v_cmp_o_f32", 1503)
+
+  case object VCmpOF64 extends Opcode("v_cmp_o_f64", 1504)
+
+  case object VCmpTF16 extends Opcode("v_cmp_t_f16", 1505)
+
+  case object VCmpTF32 extends Opcode("v_cmp_t_f32", 1506)
+
+  case object VCmpTF64 extends Opcode("v_cmp_t_f64", 1507)
+
+  case object VCmpTI16 extends Opcode("v_cmp_t_i16", 1508)
+
+  case object VCmpTI32 extends Opcode("v_cmp_t_i32", 1509)
+
+  case object VCmpTI64 extends Opcode("v_cmp_t_i64", 1510)
+
+  case object VCmpTU16 extends Opcode("v_cmp_t_u16", 1511)
+
+  case object VCmpTU32 extends Opcode("v_cmp_t_u32", 1512)
+
+  case object VCmpTU64 extends Opcode("v_cmp_t_u64", 1513)
+
+  case object VCmpTruF16 extends Opcode("v_cmp_tru_f16", 1514)
+
+  case object VCmpTruF32 extends Opcode("v_cmp_tru_f32", 1515)
+
+  case object VCmpTruF64 extends Opcode("v_cmp_tru_f64", 1516)
+
+  case object VCmpUF16 extends Opcode("v_cmp_u_f16", 1517)
+
+  case object VCmpUF32 extends Opcode("v_cmp_u_f32", 1518)
+
+  case object VCmpUF64 extends Opcode("v_cmp_u_f64", 1519)
+
+  case object VCmpsEqF32 extends Opcode("v_cmps_eq_f32", 1520)
+
+  case object VCmpsEqF64 extends Opcode("v_cmps_eq_f64", 1521)
+
+  case object VCmpsFF32 extends Opcode("v_cmps_f_f32", 1522)
+
+  case object VCmpsFF64 extends Opcode("v_cmps_f_f64", 1523)
+
+  case object VCmpsGeF32 extends Opcode("v_cmps_ge_f32", 1524)
+
+  case object VCmpsGeF64 extends Opcode("v_cmps_ge_f64", 1525)
+
+  case object VCmpsGtF32 extends Opcode("v_cmps_gt_f32", 1526)
+
+  case object VCmpsGtF64 extends Opcode("v_cmps_gt_f64", 1527)
+
+  case object VCmpsLeF32 extends Opcode("v_cmps_le_f32", 1528)
+
+  case object VCmpsLeF64 extends Opcode("v_cmps_le_f64", 1529)
+
+  case object VCmpsLgF32 extends Opcode("v_cmps_lg_f32", 1530)
+
+  case object VCmpsLgF64 extends Opcode("v_cmps_lg_f64", 1531)
+
+  case object VCmpsLtF32 extends Opcode("v_cmps_lt_f32", 1532)
+
+  case object VCmpsLtF64 extends Opcode("v_cmps_lt_f64", 1533)
+
+  case object VCmpsNeqF32 extends Opcode("v_cmps_neq_f32", 1534)
+
+  case object VCmpsNeqF64 extends Opcode("v_cmps_neq_f64", 1535)
+
+  case object VCmpsNgeF32 extends Opcode("v_cmps_nge_f32", 1536)
+
+  case object VCmpsNgeF64 extends Opcode("v_cmps_nge_f64", 1537)
+
+  case object VCmpsNgtF32 extends Opcode("v_cmps_ngt_f32", 1538)
+
+  case object VCmpsNgtF64 extends Opcode("v_cmps_ngt_f64", 1539)
+
+  case object VCmpsNleF32 extends Opcode("v_cmps_nle_f32", 1540)
+
+  case object VCmpsNleF64 extends Opcode("v_cmps_nle_f64", 1541)
+
+  case object VCmpsNlgF32 extends Opcode("v_cmps_nlg_f32", 1542)
+
+  case object VCmpsNlgF64 extends Opcode("v_cmps_nlg_f64", 1543)
+
+  case object VCmpsNltF32 extends Opcode("v_cmps_nlt_f32", 1544)
+
+  case object VCmpsNltF64 extends Opcode("v_cmps_nlt_f64", 1545)
+
+  case object VCmpsOF32 extends Opcode("v_cmps_o_f32", 1546)
+
+  case object VCmpsOF64 extends Opcode("v_cmps_o_f64", 1547)
+
+  case object VCmpsTruF32 extends Opcode("v_cmps_tru_f32", 1548)
+
+  case object VCmpsTruF64 extends Opcode("v_cmps_tru_f64", 1549)
+
+  case object VCmpsUF32 extends Opcode("v_cmps_u_f32", 1550)
+
+  case object VCmpsUF64 extends Opcode("v_cmps_u_f64", 1551)
+
+  case object VCmpsxEqF32 extends Opcode("v_cmpsx_eq_f32", 1552)
+
+  case object VCmpsxEqF64 extends Opcode("v_cmpsx_eq_f64", 1553)
+
+  case object VCmpsxFF32 extends Opcode("v_cmpsx_f_f32", 1554)
+
+  case object VCmpsxFF64 extends Opcode("v_cmpsx_f_f64", 1555)
+
+  case object VCmpsxGeF32 extends Opcode("v_cmpsx_ge_f32", 1556)
+
+  case object VCmpsxGeF64 extends Opcode("v_cmpsx_ge_f64", 1557)
+
+  case object VCmpsxGtF32 extends Opcode("v_cmpsx_gt_f32", 1558)
+
+  case object VCmpsxGtF64 extends Opcode("v_cmpsx_gt_f64", 1559)
+
+  case object VCmpsxLeF32 extends Opcode("v_cmpsx_le_f32", 1560)
+
+  case object VCmpsxLeF64 extends Opcode("v_cmpsx_le_f64", 1561)
+
+  case object VCmpsxLgF32 extends Opcode("v_cmpsx_lg_f32", 1562)
+
+  case object VCmpsxLgF64 extends Opcode("v_cmpsx_lg_f64", 1563)
+
+  case object VCmpsxLtF32 extends Opcode("v_cmpsx_lt_f32", 1564)
+
+  case object VCmpsxLtF64 extends Opcode("v_cmpsx_lt_f64", 1565)
+
+  case object VCmpsxNeqF32 extends Opcode("v_cmpsx_neq_f32", 1566)
+
+  case object VCmpsxNeqF64 extends Opcode("v_cmpsx_neq_f64", 1567)
+
+  case object VCmpsxNgeF32 extends Opcode("v_cmpsx_nge_f32", 1568)
+
+  case object VCmpsxNgeF64 extends Opcode("v_cmpsx_nge_f64", 1569)
+
+  case object VCmpsxNgtF32 extends Opcode("v_cmpsx_ngt_f32", 1570)
+
+  case object VCmpsxNgtF64 extends Opcode("v_cmpsx_ngt_f64", 1571)
+
+  case object VCmpsxNleF32 extends Opcode("v_cmpsx_nle_f32", 1572)
+
+  case object VCmpsxNleF64 extends Opcode("v_cmpsx_nle_f64", 1573)
+
+  case object VCmpsxNlgF32 extends Opcode("v_cmpsx_nlg_f32", 1574)
+
+  case object VCmpsxNlgF64 extends Opcode("v_cmpsx_nlg_f64", 1575)
+
+  case object VCmpsxNltF32 extends Opcode("v_cmpsx_nlt_f32", 1576)
+
+  case object VCmpsxNltF64 extends Opcode("v_cmpsx_nlt_f64", 1577)
+
+  case object VCmpsxOF32 extends Opcode("v_cmpsx_o_f32", 1578)
+
+  case object VCmpsxOF64 extends Opcode("v_cmpsx_o_f64", 1579)
+
+  case object VCmpsxTruF32 extends Opcode("v_cmpsx_tru_f32", 1580)
+
+  case object VCmpsxTruF64 extends Opcode("v_cmpsx_tru_f64", 1581)
+
+  case object VCmpsxUF32 extends Opcode("v_cmpsx_u_f32", 1582)
+
+  case object VCmpsxUF64 extends Opcode("v_cmpsx_u_f64", 1583)
+
+  case object VCmpxClassF16 extends Opcode("v_cmpx_class_f16", 1584)
+
+  case object VCmpxClassF32 extends Opcode("v_cmpx_class_f32", 1585)
+
+  case object VCmpxClassF64 extends Opcode("v_cmpx_class_f64", 1586)
+
+  case object VCmpxEqF16 extends Opcode("v_cmpx_eq_f16", 1587)
+
+  case object VCmpxEqF32 extends Opcode("v_cmpx_eq_f32", 1588)
+
+  case object VCmpxEqF64 extends Opcode("v_cmpx_eq_f64", 1589)
+
+  case object VCmpxEqI16 extends Opcode("v_cmpx_eq_i16", 1590)
+
+  case object VCmpxEqI32 extends Opcode("v_cmpx_eq_i32", 1591)
+
+  case object VCmpxEqI64 extends Opcode("v_cmpx_eq_i64", 1592)
+
+  case object VCmpxEqU16 extends Opcode("v_cmpx_eq_u16", 1593)
+
+  case object VCmpxEqU32 extends Opcode("v_cmpx_eq_u32", 1594)
+
+  case object VCmpxEqU64 extends Opcode("v_cmpx_eq_u64", 1595)
+
+  case object VCmpxFF16 extends Opcode("v_cmpx_f_f16", 1596)
+
+  case object VCmpxFF32 extends Opcode("v_cmpx_f_f32", 1597)
+
+  case object VCmpxFF64 extends Opcode("v_cmpx_f_f64", 1598)
+
+  case object VCmpxFI16 extends Opcode("v_cmpx_f_i16", 1599)
+
+  case object VCmpxFI32 extends Opcode("v_cmpx_f_i32", 1600)
+
+  case object VCmpxFI64 extends Opcode("v_cmpx_f_i64", 1601)
+
+  case object VCmpxFU16 extends Opcode("v_cmpx_f_u16", 1602)
+
+  case object VCmpxFU32 extends Opcode("v_cmpx_f_u32", 1603)
+
+  case object VCmpxFU64 extends Opcode("v_cmpx_f_u64", 1604)
+
+  case object VCmpxGeF16 extends Opcode("v_cmpx_ge_f16", 1605)
+
+  case object VCmpxGeF32 extends Opcode("v_cmpx_ge_f32", 1606)
+
+  case object VCmpxGeF64 extends Opcode("v_cmpx_ge_f64", 1607)
+
+  case object VCmpxGeI16 extends Opcode("v_cmpx_ge_i16", 1608)
+
+  case object VCmpxGeI32 extends Opcode("v_cmpx_ge_i32", 1609)
+
+  case object VCmpxGeI64 extends Opcode("v_cmpx_ge_i64", 1610)
+
+  case object VCmpxGeU16 extends Opcode("v_cmpx_ge_u16", 1611)
+
+  case object VCmpxGeU32 extends Opcode("v_cmpx_ge_u32", 1612)
+
+  case object VCmpxGeU64 extends Opcode("v_cmpx_ge_u64", 1613)
+
+  case object VCmpxGtF16 extends Opcode("v_cmpx_gt_f16", 1614)
+
+  case object VCmpxGtF32 extends Opcode("v_cmpx_gt_f32", 1615)
+
+  case object VCmpxGtF64 extends Opcode("v_cmpx_gt_f64", 1616)
+
+  case object VCmpxGtI16 extends Opcode("v_cmpx_gt_i16", 1617)
+
+  case object VCmpxGtI32 extends Opcode("v_cmpx_gt_i32", 1618)
+
+  case object VCmpxGtI64 extends Opcode("v_cmpx_gt_i64", 1619)
+
+  case object VCmpxGtU16 extends Opcode("v_cmpx_gt_u16", 1620)
+
+  case object VCmpxGtU32 extends Opcode("v_cmpx_gt_u32", 1621)
+
+  case object VCmpxGtU64 extends Opcode("v_cmpx_gt_u64", 1622)
+
+  case object VCmpxLeF16 extends Opcode("v_cmpx_le_f16", 1623)
+
+  case object VCmpxLeF32 extends Opcode("v_cmpx_le_f32", 1624)
+
+  case object VCmpxLeF64 extends Opcode("v_cmpx_le_f64", 1625)
+
+  case object VCmpxLeI16 extends Opcode("v_cmpx_le_i16", 1626)
+
+  case object VCmpxLeI32 extends Opcode("v_cmpx_le_i32", 1627)
+
+  case object VCmpxLeI64 extends Opcode("v_cmpx_le_i64", 1628)
+
+  case object VCmpxLeU16 extends Opcode("v_cmpx_le_u16", 1629)
+
+  case object VCmpxLeU32 extends Opcode("v_cmpx_le_u32", 1630)
+
+  case object VCmpxLeU64 extends Opcode("v_cmpx_le_u64", 1631)
+
+  case object VCmpxLgF16 extends Opcode("v_cmpx_lg_f16", 1632)
+
+  case object VCmpxLgF32 extends Opcode("v_cmpx_lg_f32", 1633)
+
+  case object VCmpxLgF64 extends Opcode("v_cmpx_lg_f64", 1634)
+
+  case object VCmpxLtF16 extends Opcode("v_cmpx_lt_f16", 1635)
+
+  case object VCmpxLtF32 extends Opcode("v_cmpx_lt_f32", 1636)
+
+  case object VCmpxLtF64 extends Opcode("v_cmpx_lt_f64", 1637)
+
+  case object VCmpxLtI16 extends Opcode("v_cmpx_lt_i16", 1638)
+
+  case object VCmpxLtI32 extends Opcode("v_cmpx_lt_i32", 1639)
+
+  case object VCmpxLtI64 extends Opcode("v_cmpx_lt_i64", 1640)
+
+  case object VCmpxLtU16 extends Opcode("v_cmpx_lt_u16", 1641)
+
+  case object VCmpxLtU32 extends Opcode("v_cmpx_lt_u32", 1642)
+
+  case object VCmpxLtU64 extends Opcode("v_cmpx_lt_u64", 1643)
+
+  case object VCmpxNeI16 extends Opcode("v_cmpx_ne_i16", 1644)
+
+  case object VCmpxNeI32 extends Opcode("v_cmpx_ne_i32", 1645)
+
+  case object VCmpxNeI64 extends Opcode("v_cmpx_ne_i64", 1646)
+
+  case object VCmpxNeU16 extends Opcode("v_cmpx_ne_u16", 1647)
+
+  case object VCmpxNeU32 extends Opcode("v_cmpx_ne_u32", 1648)
+
+  case object VCmpxNeU64 extends Opcode("v_cmpx_ne_u64", 1649)
+
+  case object VCmpxNeqF16 extends Opcode("v_cmpx_neq_f16", 1650)
+
+  case object VCmpxNeqF32 extends Opcode("v_cmpx_neq_f32", 1651)
+
+  case object VCmpxNeqF64 extends Opcode("v_cmpx_neq_f64", 1652)
+
+  case object VCmpxNgeF16 extends Opcode("v_cmpx_nge_f16", 1653)
+
+  case object VCmpxNgeF32 extends Opcode("v_cmpx_nge_f32", 1654)
+
+  case object VCmpxNgeF64 extends Opcode("v_cmpx_nge_f64", 1655)
+
+  case object VCmpxNgtF16 extends Opcode("v_cmpx_ngt_f16", 1656)
+
+  case object VCmpxNgtF32 extends Opcode("v_cmpx_ngt_f32", 1657)
+
+  case object VCmpxNgtF64 extends Opcode("v_cmpx_ngt_f64", 1658)
+
+  case object VCmpxNleF16 extends Opcode("v_cmpx_nle_f16", 1659)
+
+  case object VCmpxNleF32 extends Opcode("v_cmpx_nle_f32", 1660)
+
+  case object VCmpxNleF64 extends Opcode("v_cmpx_nle_f64", 1661)
+
+  case object VCmpxNlgF16 extends Opcode("v_cmpx_nlg_f16", 1662)
+
+  case object VCmpxNlgF32 extends Opcode("v_cmpx_nlg_f32", 1663)
+
+  case object VCmpxNlgF64 extends Opcode("v_cmpx_nlg_f64", 1664)
+
+  case object VCmpxNltF16 extends Opcode("v_cmpx_nlt_f16", 1665)
+
+  case object VCmpxNltF32 extends Opcode("v_cmpx_nlt_f32", 1666)
+
+  case object VCmpxNltF64 extends Opcode("v_cmpx_nlt_f64", 1667)
+
+  case object VCmpxOF16 extends Opcode("v_cmpx_o_f16", 1668)
+
+  case object VCmpxOF32 extends Opcode("v_cmpx_o_f32", 1669)
+
+  case object VCmpxOF64 extends Opcode("v_cmpx_o_f64", 1670)
+
+  case object VCmpxTF16 extends Opcode("v_cmpx_t_f16", 1671)
+
+  case object VCmpxTF32 extends Opcode("v_cmpx_t_f32", 1672)
+
+  case object VCmpxTF64 extends Opcode("v_cmpx_t_f64", 1673)
+
+  case object VCmpxTI16 extends Opcode("v_cmpx_t_i16", 1674)
+
+  case object VCmpxTI32 extends Opcode("v_cmpx_t_i32", 1675)
+
+  case object VCmpxTI64 extends Opcode("v_cmpx_t_i64", 1676)
+
+  case object VCmpxTU16 extends Opcode("v_cmpx_t_u16", 1677)
+
+  case object VCmpxTU32 extends Opcode("v_cmpx_t_u32", 1678)
+
+  case object VCmpxTU64 extends Opcode("v_cmpx_t_u64", 1679)
+
+  case object VCmpxTruF16 extends Opcode("v_cmpx_tru_f16", 1680)
+
+  case object VCmpxTruF32 extends Opcode("v_cmpx_tru_f32", 1681)
+
+  case object VCmpxTruF64 extends Opcode("v_cmpx_tru_f64", 1682)
+
+  case object VCmpxUF16 extends Opcode("v_cmpx_u_f16", 1683)
+
+  case object VCmpxUF32 extends Opcode("v_cmpx_u_f32", 1684)
+
+  case object VCmpxUF64 extends Opcode("v_cmpx_u_f64", 1685)
+
+  val definitions: Vec[Opcode] = Vec(
     VCmpClassF16,
     VCmpClassF32,
     VCmpClassF64,
@@ -1506,12 +594,6 @@ private object VectorCompareInstructionDefs {
     VCmpLgF16,
     VCmpLgF32,
     VCmpLgF64,
-    VCmpLgI16,
-    VCmpLgI32,
-    VCmpLgI64,
-    VCmpLgU16,
-    VCmpLgU32,
-    VCmpLgU64,
     VCmpLtF16,
     VCmpLtF32,
     VCmpLtF64,
@@ -1560,15 +642,73 @@ private object VectorCompareInstructionDefs {
     VCmpTruF16,
     VCmpTruF32,
     VCmpTruF64,
-    VCmpTruI16,
-    VCmpTruI32,
-    VCmpTruI64,
-    VCmpTruU16,
-    VCmpTruU32,
-    VCmpTruU64,
     VCmpUF16,
     VCmpUF32,
     VCmpUF64,
+    VCmpsEqF32,
+    VCmpsEqF64,
+    VCmpsFF32,
+    VCmpsFF64,
+    VCmpsGeF32,
+    VCmpsGeF64,
+    VCmpsGtF32,
+    VCmpsGtF64,
+    VCmpsLeF32,
+    VCmpsLeF64,
+    VCmpsLgF32,
+    VCmpsLgF64,
+    VCmpsLtF32,
+    VCmpsLtF64,
+    VCmpsNeqF32,
+    VCmpsNeqF64,
+    VCmpsNgeF32,
+    VCmpsNgeF64,
+    VCmpsNgtF32,
+    VCmpsNgtF64,
+    VCmpsNleF32,
+    VCmpsNleF64,
+    VCmpsNlgF32,
+    VCmpsNlgF64,
+    VCmpsNltF32,
+    VCmpsNltF64,
+    VCmpsOF32,
+    VCmpsOF64,
+    VCmpsTruF32,
+    VCmpsTruF64,
+    VCmpsUF32,
+    VCmpsUF64,
+    VCmpsxEqF32,
+    VCmpsxEqF64,
+    VCmpsxFF32,
+    VCmpsxFF64,
+    VCmpsxGeF32,
+    VCmpsxGeF64,
+    VCmpsxGtF32,
+    VCmpsxGtF64,
+    VCmpsxLeF32,
+    VCmpsxLeF64,
+    VCmpsxLgF32,
+    VCmpsxLgF64,
+    VCmpsxLtF32,
+    VCmpsxLtF64,
+    VCmpsxNeqF32,
+    VCmpsxNeqF64,
+    VCmpsxNgeF32,
+    VCmpsxNgeF64,
+    VCmpsxNgtF32,
+    VCmpsxNgtF64,
+    VCmpsxNleF32,
+    VCmpsxNleF64,
+    VCmpsxNlgF32,
+    VCmpsxNlgF64,
+    VCmpsxNltF32,
+    VCmpsxNltF64,
+    VCmpsxOF32,
+    VCmpsxOF64,
+    VCmpsxTruF32,
+    VCmpsxTruF64,
+    VCmpsxUF32,
+    VCmpsxUF64,
     VCmpxClassF16,
     VCmpxClassF32,
     VCmpxClassF64,
@@ -1620,12 +760,6 @@ private object VectorCompareInstructionDefs {
     VCmpxLgF16,
     VCmpxLgF32,
     VCmpxLgF64,
-    VCmpxLgI16,
-    VCmpxLgI32,
-    VCmpxLgI64,
-    VCmpxLgU16,
-    VCmpxLgU32,
-    VCmpxLgU64,
     VCmpxLtF16,
     VCmpxLtF32,
     VCmpxLtF64,
@@ -1674,12 +808,6 @@ private object VectorCompareInstructionDefs {
     VCmpxTruF16,
     VCmpxTruF32,
     VCmpxTruF64,
-    VCmpxTruI16,
-    VCmpxTruI32,
-    VCmpxTruI64,
-    VCmpxTruU16,
-    VCmpxTruU32,
-    VCmpxTruU64,
     VCmpxUF16,
     VCmpxUF32,
     VCmpxUF64

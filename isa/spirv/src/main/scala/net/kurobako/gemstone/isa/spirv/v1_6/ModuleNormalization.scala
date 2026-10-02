@@ -20,11 +20,11 @@ private object ModuleNormalization {
         require(groups.contains(id(group)), "undefined decoration group")
         targets.flatMap { pair =>
           require(
-            pair.kind == "PairIdRefLiteralInteger" && pair.words.length == 2,
+            pair.kind == OperandKind.PairIdRefLiteralInteger && pair.words.length == 2,
             "OpGroupMemberDecorate requires target/member pairs"
           )
-          val target = Operand("IdRef", Vec.nonEmpty(pair.words.head))
-          val member = Operand("LiteralInteger", Vec.nonEmpty(pair.words.apply(1)))
+          val target = Operand(OperandKind.IdRef, Vec.nonEmpty(pair.words.head))
+          val member = Operand(OperandKind.LiteralInteger, Vec.nonEmpty(pair.words.apply(1)))
           decorations.getOrElse(id(group), Vec.empty[Operand]).map(Instruction.MemberDecorate(target, member, _))
         }
       case _: Instruction.DecorationGroup                                 => Vec.empty

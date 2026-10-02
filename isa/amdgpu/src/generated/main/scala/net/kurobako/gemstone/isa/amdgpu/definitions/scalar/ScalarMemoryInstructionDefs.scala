@@ -3,641 +3,232 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.collection.*
-import Instruction.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 private object ScalarMemoryInstructionDefs {
-  case object SAtcProbe extends Definition(
-        "s_atc_probe",
-        decoder(form(3)((operands, mods) => Instruction.SAtcProbe(operands(0), operands(1), operands(2), mods))),
-        868
-      )
-  case object SAtcProbeBuffer extends Definition(
-        "s_atc_probe_buffer",
-        decoder(form(3)((operands, mods) => Instruction.SAtcProbeBuffer(operands(0), operands(1), operands(2), mods))),
-        869
-      )
-  case object SAtomicAdd extends Definition(
-        "s_atomic_add",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicAdd(operands(0), operands(1), operands(2), mods))),
-        870
-      )
-  case object SAtomicAddX2 extends Definition(
-        "s_atomic_add_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicAddX2(operands(0), operands(1), operands(2), mods))),
-        871
-      )
-  case object SAtomicAnd extends Definition(
-        "s_atomic_and",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicAnd(operands(0), operands(1), operands(2), mods))),
-        872
-      )
-  case object SAtomicAndX2 extends Definition(
-        "s_atomic_and_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicAndX2(operands(0), operands(1), operands(2), mods))),
-        873
-      )
-  case object SAtomicCmpswap extends Definition(
-        "s_atomic_cmpswap",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicCmpswap(operands(0), operands(1), operands(2), mods))),
-        874
-      )
-  case object SAtomicCmpswapX2 extends Definition(
-        "s_atomic_cmpswap_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicCmpswapX2(operands(0), operands(1), operands(2), mods))),
-        875
-      )
-  case object SAtomicDec extends Definition(
-        "s_atomic_dec",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicDec(operands(0), operands(1), operands(2), mods))),
-        876
-      )
-  case object SAtomicDecX2 extends Definition(
-        "s_atomic_dec_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicDecX2(operands(0), operands(1), operands(2), mods))),
-        877
-      )
-  case object SAtomicInc extends Definition(
-        "s_atomic_inc",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicInc(operands(0), operands(1), operands(2), mods))),
-        878
-      )
-  case object SAtomicIncX2 extends Definition(
-        "s_atomic_inc_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicIncX2(operands(0), operands(1), operands(2), mods))),
-        879
-      )
-  case object SAtomicOr extends Definition(
-        "s_atomic_or",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicOr(operands(0), operands(1), operands(2), mods))),
-        880
-      )
-  case object SAtomicOrX2 extends Definition(
-        "s_atomic_or_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicOrX2(operands(0), operands(1), operands(2), mods))),
-        881
-      )
-  case object SAtomicSmax extends Definition(
-        "s_atomic_smax",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicSmax(operands(0), operands(1), operands(2), mods))),
-        882
-      )
-  case object SAtomicSmaxX2 extends Definition(
-        "s_atomic_smax_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicSmaxX2(operands(0), operands(1), operands(2), mods))),
-        883
-      )
-  case object SAtomicSmin extends Definition(
-        "s_atomic_smin",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicSmin(operands(0), operands(1), operands(2), mods))),
-        884
-      )
-  case object SAtomicSminX2 extends Definition(
-        "s_atomic_smin_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicSminX2(operands(0), operands(1), operands(2), mods))),
-        885
-      )
-  case object SAtomicSub extends Definition(
-        "s_atomic_sub",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicSub(operands(0), operands(1), operands(2), mods))),
-        886
-      )
-  case object SAtomicSubX2 extends Definition(
-        "s_atomic_sub_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicSubX2(operands(0), operands(1), operands(2), mods))),
-        887
-      )
-  case object SAtomicSwap extends Definition(
-        "s_atomic_swap",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicSwap(operands(0), operands(1), operands(2), mods))),
-        888
-      )
-  case object SAtomicSwapX2 extends Definition(
-        "s_atomic_swap_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicSwapX2(operands(0), operands(1), operands(2), mods))),
-        889
-      )
-  case object SAtomicUmax extends Definition(
-        "s_atomic_umax",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicUmax(operands(0), operands(1), operands(2), mods))),
-        890
-      )
-  case object SAtomicUmaxX2 extends Definition(
-        "s_atomic_umax_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicUmaxX2(operands(0), operands(1), operands(2), mods))),
-        891
-      )
-  case object SAtomicUmin extends Definition(
-        "s_atomic_umin",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicUmin(operands(0), operands(1), operands(2), mods))),
-        892
-      )
-  case object SAtomicUminX2 extends Definition(
-        "s_atomic_umin_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicUminX2(operands(0), operands(1), operands(2), mods))),
-        893
-      )
-  case object SAtomicXor extends Definition(
-        "s_atomic_xor",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicXor(operands(0), operands(1), operands(2), mods))),
-        894
-      )
-  case object SAtomicXorX2 extends Definition(
-        "s_atomic_xor_x2",
-        decoder(form(3)((operands, mods) => Instruction.SAtomicXorX2(operands(0), operands(1), operands(2), mods))),
-        895
-      )
-  case object SBufferAtomicAdd extends Definition(
-        "s_buffer_atomic_add",
-        decoder(form(3)((operands, mods) => Instruction.SBufferAtomicAdd(operands(0), operands(1), operands(2), mods))),
-        925
-      )
-  case object SBufferAtomicAddX2 extends Definition(
-        "s_buffer_atomic_add_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicAddX2(operands(0), operands(1), operands(2), mods)
-        )),
-        926
-      )
-  case object SBufferAtomicAnd extends Definition(
-        "s_buffer_atomic_and",
-        decoder(form(3)((operands, mods) => Instruction.SBufferAtomicAnd(operands(0), operands(1), operands(2), mods))),
-        927
-      )
-  case object SBufferAtomicAndX2 extends Definition(
-        "s_buffer_atomic_and_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicAndX2(operands(0), operands(1), operands(2), mods)
-        )),
-        928
-      )
-  case object SBufferAtomicCmpswap extends Definition(
-        "s_buffer_atomic_cmpswap",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicCmpswap(operands(0), operands(1), operands(2), mods)
-        )),
-        929
-      )
-  case object SBufferAtomicCmpswapX2 extends Definition(
-        "s_buffer_atomic_cmpswap_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicCmpswapX2(operands(0), operands(1), operands(2), mods)
-        )),
-        930
-      )
-  case object SBufferAtomicDec extends Definition(
-        "s_buffer_atomic_dec",
-        decoder(form(3)((operands, mods) => Instruction.SBufferAtomicDec(operands(0), operands(1), operands(2), mods))),
-        931
-      )
-  case object SBufferAtomicDecX2 extends Definition(
-        "s_buffer_atomic_dec_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicDecX2(operands(0), operands(1), operands(2), mods)
-        )),
-        932
-      )
-  case object SBufferAtomicInc extends Definition(
-        "s_buffer_atomic_inc",
-        decoder(form(3)((operands, mods) => Instruction.SBufferAtomicInc(operands(0), operands(1), operands(2), mods))),
-        933
-      )
-  case object SBufferAtomicIncX2 extends Definition(
-        "s_buffer_atomic_inc_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicIncX2(operands(0), operands(1), operands(2), mods)
-        )),
-        934
-      )
-  case object SBufferAtomicOr extends Definition(
-        "s_buffer_atomic_or",
-        decoder(form(3)((operands, mods) => Instruction.SBufferAtomicOr(operands(0), operands(1), operands(2), mods))),
-        935
-      )
-  case object SBufferAtomicOrX2 extends Definition(
-        "s_buffer_atomic_or_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicOrX2(operands(0), operands(1), operands(2), mods)
-        )),
-        936
-      )
-  case object SBufferAtomicSmax extends Definition(
-        "s_buffer_atomic_smax",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicSmax(operands(0), operands(1), operands(2), mods)
-        )),
-        937
-      )
-  case object SBufferAtomicSmaxX2 extends Definition(
-        "s_buffer_atomic_smax_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicSmaxX2(operands(0), operands(1), operands(2), mods)
-        )),
-        938
-      )
-  case object SBufferAtomicSmin extends Definition(
-        "s_buffer_atomic_smin",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicSmin(operands(0), operands(1), operands(2), mods)
-        )),
-        939
-      )
-  case object SBufferAtomicSminX2 extends Definition(
-        "s_buffer_atomic_smin_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicSminX2(operands(0), operands(1), operands(2), mods)
-        )),
-        940
-      )
-  case object SBufferAtomicSub extends Definition(
-        "s_buffer_atomic_sub",
-        decoder(form(3)((operands, mods) => Instruction.SBufferAtomicSub(operands(0), operands(1), operands(2), mods))),
-        941
-      )
-  case object SBufferAtomicSubX2 extends Definition(
-        "s_buffer_atomic_sub_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicSubX2(operands(0), operands(1), operands(2), mods)
-        )),
-        942
-      )
-  case object SBufferAtomicSwap extends Definition(
-        "s_buffer_atomic_swap",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicSwap(operands(0), operands(1), operands(2), mods)
-        )),
-        943
-      )
-  case object SBufferAtomicSwapX2 extends Definition(
-        "s_buffer_atomic_swap_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicSwapX2(operands(0), operands(1), operands(2), mods)
-        )),
-        944
-      )
-  case object SBufferAtomicUmax extends Definition(
-        "s_buffer_atomic_umax",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicUmax(operands(0), operands(1), operands(2), mods)
-        )),
-        945
-      )
-  case object SBufferAtomicUmaxX2 extends Definition(
-        "s_buffer_atomic_umax_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicUmaxX2(operands(0), operands(1), operands(2), mods)
-        )),
-        946
-      )
-  case object SBufferAtomicUmin extends Definition(
-        "s_buffer_atomic_umin",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicUmin(operands(0), operands(1), operands(2), mods)
-        )),
-        947
-      )
-  case object SBufferAtomicUminX2 extends Definition(
-        "s_buffer_atomic_umin_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicUminX2(operands(0), operands(1), operands(2), mods)
-        )),
-        948
-      )
-  case object SBufferAtomicXor extends Definition(
-        "s_buffer_atomic_xor",
-        decoder(form(3)((operands, mods) => Instruction.SBufferAtomicXor(operands(0), operands(1), operands(2), mods))),
-        949
-      )
-  case object SBufferAtomicXorX2 extends Definition(
-        "s_buffer_atomic_xor_x2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferAtomicXorX2(operands(0), operands(1), operands(2), mods)
-        )),
-        950
-      )
-  case object SBufferLoadB128 extends Definition(
-        "s_buffer_load_b128",
-        decoder(form(3)((operands, mods) => Instruction.SBufferLoadB128(operands(0), operands(1), operands(2), mods))),
-        951
-      )
-  case object SBufferLoadB256 extends Definition(
-        "s_buffer_load_b256",
-        decoder(form(3)((operands, mods) => Instruction.SBufferLoadB256(operands(0), operands(1), operands(2), mods))),
-        952
-      )
-  case object SBufferLoadB32 extends Definition(
-        "s_buffer_load_b32",
-        decoder(form(3)((operands, mods) => Instruction.SBufferLoadB32(operands(0), operands(1), operands(2), mods))),
-        953
-      )
-  case object SBufferLoadB512 extends Definition(
-        "s_buffer_load_b512",
-        decoder(form(3)((operands, mods) => Instruction.SBufferLoadB512(operands(0), operands(1), operands(2), mods))),
-        954
-      )
-  case object SBufferLoadB64 extends Definition(
-        "s_buffer_load_b64",
-        decoder(form(3)((operands, mods) => Instruction.SBufferLoadB64(operands(0), operands(1), operands(2), mods))),
-        955
-      )
-  case object SBufferLoadB96 extends Definition(
-        "s_buffer_load_b96",
-        decoder(form(3)((operands, mods) => Instruction.SBufferLoadB96(operands(0), operands(1), operands(2), mods))),
-        956
-      )
-  case object SBufferLoadDword extends Definition(
-        "s_buffer_load_dword",
-        decoder(form(3)((operands, mods) => Instruction.SBufferLoadDword(operands(0), operands(1), operands(2), mods))),
-        957
-      )
-  case object SBufferLoadDwordx16 extends Definition(
-        "s_buffer_load_dwordx16",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferLoadDwordx16(operands(0), operands(1), operands(2), mods)
-        )),
-        958
-      )
-  case object SBufferLoadDwordx2 extends Definition(
-        "s_buffer_load_dwordx2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferLoadDwordx2(operands(0), operands(1), operands(2), mods)
-        )),
-        959
-      )
-  case object SBufferLoadDwordx4 extends Definition(
-        "s_buffer_load_dwordx4",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferLoadDwordx4(operands(0), operands(1), operands(2), mods)
-        )),
-        960
-      )
-  case object SBufferLoadDwordx8 extends Definition(
-        "s_buffer_load_dwordx8",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferLoadDwordx8(operands(0), operands(1), operands(2), mods)
-        )),
-        961
-      )
-  case object SBufferLoadI16 extends Definition(
-        "s_buffer_load_i16",
-        decoder(form(3)((operands, mods) => Instruction.SBufferLoadI16(operands(0), operands(1), operands(2), mods))),
-        962
-      )
-  case object SBufferLoadI8 extends Definition(
-        "s_buffer_load_i8",
-        decoder(form(3)((operands, mods) => Instruction.SBufferLoadI8(operands(0), operands(1), operands(2), mods))),
-        963
-      )
-  case object SBufferLoadU16 extends Definition(
-        "s_buffer_load_u16",
-        decoder(form(3)((operands, mods) => Instruction.SBufferLoadU16(operands(0), operands(1), operands(2), mods))),
-        964
-      )
-  case object SBufferLoadU8 extends Definition(
-        "s_buffer_load_u8",
-        decoder(form(3)((operands, mods) => Instruction.SBufferLoadU8(operands(0), operands(1), operands(2), mods))),
-        965
-      )
-  case object SBufferPrefetchData extends Definition(
-        "s_buffer_prefetch_data",
-        decoder(form(4)((operands, mods) =>
-          Instruction.SBufferPrefetchData(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        966
-      )
-  case object SBufferStoreDword extends Definition(
-        "s_buffer_store_dword",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferStoreDword(operands(0), operands(1), operands(2), mods)
-        )),
-        967
-      )
-  case object SBufferStoreDwordx2 extends Definition(
-        "s_buffer_store_dwordx2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferStoreDwordx2(operands(0), operands(1), operands(2), mods)
-        )),
-        968
-      )
-  case object SBufferStoreDwordx4 extends Definition(
-        "s_buffer_store_dwordx4",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SBufferStoreDwordx4(operands(0), operands(1), operands(2), mods)
-        )),
-        969
-      )
-  case object SDcacheDiscard extends Definition(
-        "s_dcache_discard",
-        decoder(form(2)((operands, mods) => Instruction.SDcacheDiscard(operands(0), operands(1), mods))),
-        1062
-      )
-  case object SDcacheDiscardX2 extends Definition(
-        "s_dcache_discard_x2",
-        decoder(form(2)((operands, mods) => Instruction.SDcacheDiscardX2(operands(0), operands(1), mods))),
-        1063
-      )
-  case object SDcacheInv extends Definition(
-        "s_dcache_inv",
-        decoder(form(0)((_, mods) => Instruction.SDcacheInv(mods))),
-        1064
-      )
-  case object SDcacheInvVol extends Definition(
-        "s_dcache_inv_vol",
-        decoder(form(0)((_, mods) => Instruction.SDcacheInvVol(mods))),
-        1065
-      )
-  case object SDcacheWb extends Definition(
-        "s_dcache_wb",
-        decoder(form(0)((_, mods) => Instruction.SDcacheWb(mods))),
-        1066
-      )
-  case object SDcacheWbVol extends Definition(
-        "s_dcache_wb_vol",
-        decoder(form(0)((_, mods) => Instruction.SDcacheWbVol(mods))),
-        1067
-      )
-  case object SGetWaveidInWorkgroup extends Definition(
-        "s_get_waveid_in_workgroup",
-        decoder(form(1)((operands, mods) => Instruction.SGetWaveidInWorkgroup(operands(0), mods))),
-        1091
-      )
-  case object SGl1Inv extends Definition(
-        "s_gl1_inv",
-        decoder(form(0)((_, mods) => Instruction.SGl1Inv(mods))),
-        1094
-      )
-  case object SLoadB128 extends Definition(
-        "s_load_b128",
-        decoder(form(3)((operands, mods) => Instruction.SLoadB128(operands(0), operands(1), operands(2), mods))),
-        1098
-      )
-  case object SLoadB256 extends Definition(
-        "s_load_b256",
-        decoder(form(3)((operands, mods) => Instruction.SLoadB256(operands(0), operands(1), operands(2), mods))),
-        1099
-      )
-  case object SLoadB32 extends Definition(
-        "s_load_b32",
-        decoder(form(3)((operands, mods) => Instruction.SLoadB32(operands(0), operands(1), operands(2), mods))),
-        1100
-      )
-  case object SLoadB512 extends Definition(
-        "s_load_b512",
-        decoder(form(3)((operands, mods) => Instruction.SLoadB512(operands(0), operands(1), operands(2), mods))),
-        1101
-      )
-  case object SLoadB64 extends Definition(
-        "s_load_b64",
-        decoder(form(3)((operands, mods) => Instruction.SLoadB64(operands(0), operands(1), operands(2), mods))),
-        1102
-      )
-  case object SLoadB96 extends Definition(
-        "s_load_b96",
-        decoder(form(3)((operands, mods) => Instruction.SLoadB96(operands(0), operands(1), operands(2), mods))),
-        1103
-      )
-  case object SLoadDword extends Definition(
-        "s_load_dword",
-        decoder(form(3)((operands, mods) => Instruction.SLoadDword(operands(0), operands(1), operands(2), mods))),
-        1104
-      )
-  case object SLoadDwordx16 extends Definition(
-        "s_load_dwordx16",
-        decoder(form(3)((operands, mods) => Instruction.SLoadDwordx16(operands(0), operands(1), operands(2), mods))),
-        1105
-      )
-  case object SLoadDwordx2 extends Definition(
-        "s_load_dwordx2",
-        decoder(form(3)((operands, mods) => Instruction.SLoadDwordx2(operands(0), operands(1), operands(2), mods))),
-        1106
-      )
-  case object SLoadDwordx4 extends Definition(
-        "s_load_dwordx4",
-        decoder(form(3)((operands, mods) => Instruction.SLoadDwordx4(operands(0), operands(1), operands(2), mods))),
-        1107
-      )
-  case object SLoadDwordx8 extends Definition(
-        "s_load_dwordx8",
-        decoder(form(3)((operands, mods) => Instruction.SLoadDwordx8(operands(0), operands(1), operands(2), mods))),
-        1108
-      )
-  case object SLoadI16 extends Definition(
-        "s_load_i16",
-        decoder(form(3)((operands, mods) => Instruction.SLoadI16(operands(0), operands(1), operands(2), mods))),
-        1109
-      )
-  case object SLoadI8 extends Definition(
-        "s_load_i8",
-        decoder(form(3)((operands, mods) => Instruction.SLoadI8(operands(0), operands(1), operands(2), mods))),
-        1110
-      )
-  case object SLoadU16 extends Definition(
-        "s_load_u16",
-        decoder(form(3)((operands, mods) => Instruction.SLoadU16(operands(0), operands(1), operands(2), mods))),
-        1111
-      )
-  case object SLoadU8 extends Definition(
-        "s_load_u8",
-        decoder(form(3)((operands, mods) => Instruction.SLoadU8(operands(0), operands(1), operands(2), mods))),
-        1112
-      )
-  case object SMemrealtime extends Definition(
-        "s_memrealtime",
-        decoder(form(1)((operands, mods) => Instruction.SMemrealtime(operands(0), mods))),
-        1129
-      )
-  case object SMemtime extends Definition(
-        "s_memtime",
-        decoder(form(1)((operands, mods) => Instruction.SMemtime(operands(0), mods))),
-        1130
-      )
-  case object SPrefetchData extends Definition(
-        "s_prefetch_data",
-        decoder(form(4)((operands, mods) =>
-          Instruction.SPrefetchData(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1187
-      )
-  case object SPrefetchDataPcRel extends Definition(
-        "s_prefetch_data_pc_rel",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SPrefetchDataPcRel(operands(0), operands(1), operands(2), mods)
-        )),
-        1188
-      )
-  case object SPrefetchInst extends Definition(
-        "s_prefetch_inst",
-        decoder(form(4)((operands, mods) =>
-          Instruction.SPrefetchInst(operands(0), operands(1), operands(2), operands(3), mods)
-        )),
-        1189
-      )
-  case object SPrefetchInstPcRel extends Definition(
-        "s_prefetch_inst_pc_rel",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SPrefetchInstPcRel(operands(0), operands(1), operands(2), mods)
-        )),
-        1190
-      )
-  case object SScratchLoadDword extends Definition(
-        "s_scratch_load_dword",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SScratchLoadDword(operands(0), operands(1), operands(2), mods)
-        )),
-        1199
-      )
-  case object SScratchLoadDwordx2 extends Definition(
-        "s_scratch_load_dwordx2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SScratchLoadDwordx2(operands(0), operands(1), operands(2), mods)
-        )),
-        1200
-      )
-  case object SScratchLoadDwordx4 extends Definition(
-        "s_scratch_load_dwordx4",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SScratchLoadDwordx4(operands(0), operands(1), operands(2), mods)
-        )),
-        1201
-      )
-  case object SScratchStoreDword extends Definition(
-        "s_scratch_store_dword",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SScratchStoreDword(operands(0), operands(1), operands(2), mods)
-        )),
-        1202
-      )
-  case object SScratchStoreDwordx2 extends Definition(
-        "s_scratch_store_dwordx2",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SScratchStoreDwordx2(operands(0), operands(1), operands(2), mods)
-        )),
-        1203
-      )
-  case object SScratchStoreDwordx4 extends Definition(
-        "s_scratch_store_dwordx4",
-        decoder(form(3)((operands, mods) =>
-          Instruction.SScratchStoreDwordx4(operands(0), operands(1), operands(2), mods)
-        )),
-        1204
-      )
-  case object SStoreDword extends Definition(
-        "s_store_dword",
-        decoder(form(3)((operands, mods) => Instruction.SStoreDword(operands(0), operands(1), operands(2), mods))),
-        1229
-      )
-  case object SStoreDwordx2 extends Definition(
-        "s_store_dwordx2",
-        decoder(form(3)((operands, mods) => Instruction.SStoreDwordx2(operands(0), operands(1), operands(2), mods))),
-        1230
-      )
-  case object SStoreDwordx4 extends Definition(
-        "s_store_dwordx4",
-        decoder(form(3)((operands, mods) => Instruction.SStoreDwordx4(operands(0), operands(1), operands(2), mods))),
-        1231
-      )
+  case object SAtcProbe extends Opcode("s_atc_probe", 869)
 
-  val definitions: Vec[Definition] = Vec(
+  case object SAtcProbeBuffer extends Opcode("s_atc_probe_buffer", 870)
+
+  case object SAtomicAdd extends Opcode("s_atomic_add", 871)
+
+  case object SAtomicAddX2 extends Opcode("s_atomic_add_x2", 872)
+
+  case object SAtomicAnd extends Opcode("s_atomic_and", 873)
+
+  case object SAtomicAndX2 extends Opcode("s_atomic_and_x2", 874)
+
+  case object SAtomicCmpswap extends Opcode("s_atomic_cmpswap", 875)
+
+  case object SAtomicCmpswapX2 extends Opcode("s_atomic_cmpswap_x2", 876)
+
+  case object SAtomicDec extends Opcode("s_atomic_dec", 877)
+
+  case object SAtomicDecX2 extends Opcode("s_atomic_dec_x2", 878)
+
+  case object SAtomicInc extends Opcode("s_atomic_inc", 879)
+
+  case object SAtomicIncX2 extends Opcode("s_atomic_inc_x2", 880)
+
+  case object SAtomicOr extends Opcode("s_atomic_or", 881)
+
+  case object SAtomicOrX2 extends Opcode("s_atomic_or_x2", 882)
+
+  case object SAtomicSmax extends Opcode("s_atomic_smax", 883)
+
+  case object SAtomicSmaxX2 extends Opcode("s_atomic_smax_x2", 884)
+
+  case object SAtomicSmin extends Opcode("s_atomic_smin", 885)
+
+  case object SAtomicSminX2 extends Opcode("s_atomic_smin_x2", 886)
+
+  case object SAtomicSub extends Opcode("s_atomic_sub", 887)
+
+  case object SAtomicSubX2 extends Opcode("s_atomic_sub_x2", 888)
+
+  case object SAtomicSwap extends Opcode("s_atomic_swap", 889)
+
+  case object SAtomicSwapX2 extends Opcode("s_atomic_swap_x2", 890)
+
+  case object SAtomicUmax extends Opcode("s_atomic_umax", 891)
+
+  case object SAtomicUmaxX2 extends Opcode("s_atomic_umax_x2", 892)
+
+  case object SAtomicUmin extends Opcode("s_atomic_umin", 893)
+
+  case object SAtomicUminX2 extends Opcode("s_atomic_umin_x2", 894)
+
+  case object SAtomicXor extends Opcode("s_atomic_xor", 895)
+
+  case object SAtomicXorX2 extends Opcode("s_atomic_xor_x2", 896)
+
+  case object SBufferAtomicAdd extends Opcode("s_buffer_atomic_add", 926)
+
+  case object SBufferAtomicAddX2 extends Opcode("s_buffer_atomic_add_x2", 927)
+
+  case object SBufferAtomicAnd extends Opcode("s_buffer_atomic_and", 928)
+
+  case object SBufferAtomicAndX2 extends Opcode("s_buffer_atomic_and_x2", 929)
+
+  case object SBufferAtomicCmpswap extends Opcode("s_buffer_atomic_cmpswap", 930)
+
+  case object SBufferAtomicCmpswapX2 extends Opcode("s_buffer_atomic_cmpswap_x2", 931)
+
+  case object SBufferAtomicDec extends Opcode("s_buffer_atomic_dec", 932)
+
+  case object SBufferAtomicDecX2 extends Opcode("s_buffer_atomic_dec_x2", 933)
+
+  case object SBufferAtomicInc extends Opcode("s_buffer_atomic_inc", 934)
+
+  case object SBufferAtomicIncX2 extends Opcode("s_buffer_atomic_inc_x2", 935)
+
+  case object SBufferAtomicOr extends Opcode("s_buffer_atomic_or", 936)
+
+  case object SBufferAtomicOrX2 extends Opcode("s_buffer_atomic_or_x2", 937)
+
+  case object SBufferAtomicSmax extends Opcode("s_buffer_atomic_smax", 938)
+
+  case object SBufferAtomicSmaxX2 extends Opcode("s_buffer_atomic_smax_x2", 939)
+
+  case object SBufferAtomicSmin extends Opcode("s_buffer_atomic_smin", 940)
+
+  case object SBufferAtomicSminX2 extends Opcode("s_buffer_atomic_smin_x2", 941)
+
+  case object SBufferAtomicSub extends Opcode("s_buffer_atomic_sub", 942)
+
+  case object SBufferAtomicSubX2 extends Opcode("s_buffer_atomic_sub_x2", 943)
+
+  case object SBufferAtomicSwap extends Opcode("s_buffer_atomic_swap", 944)
+
+  case object SBufferAtomicSwapX2 extends Opcode("s_buffer_atomic_swap_x2", 945)
+
+  case object SBufferAtomicUmax extends Opcode("s_buffer_atomic_umax", 946)
+
+  case object SBufferAtomicUmaxX2 extends Opcode("s_buffer_atomic_umax_x2", 947)
+
+  case object SBufferAtomicUmin extends Opcode("s_buffer_atomic_umin", 948)
+
+  case object SBufferAtomicUminX2 extends Opcode("s_buffer_atomic_umin_x2", 949)
+
+  case object SBufferAtomicXor extends Opcode("s_buffer_atomic_xor", 950)
+
+  case object SBufferAtomicXorX2 extends Opcode("s_buffer_atomic_xor_x2", 951)
+
+  case object SBufferLoadB128 extends Opcode("s_buffer_load_b128", 952)
+
+  case object SBufferLoadB256 extends Opcode("s_buffer_load_b256", 953)
+
+  case object SBufferLoadB32 extends Opcode("s_buffer_load_b32", 954)
+
+  case object SBufferLoadB512 extends Opcode("s_buffer_load_b512", 955)
+
+  case object SBufferLoadB64 extends Opcode("s_buffer_load_b64", 956)
+
+  case object SBufferLoadB96 extends Opcode("s_buffer_load_b96", 957)
+
+  case object SBufferLoadDword extends Opcode("s_buffer_load_dword", 958)
+
+  case object SBufferLoadDwordx16 extends Opcode("s_buffer_load_dwordx16", 959)
+
+  case object SBufferLoadDwordx2 extends Opcode("s_buffer_load_dwordx2", 960)
+
+  case object SBufferLoadDwordx4 extends Opcode("s_buffer_load_dwordx4", 961)
+
+  case object SBufferLoadDwordx8 extends Opcode("s_buffer_load_dwordx8", 962)
+
+  case object SBufferLoadI16 extends Opcode("s_buffer_load_i16", 963)
+
+  case object SBufferLoadI8 extends Opcode("s_buffer_load_i8", 964)
+
+  case object SBufferLoadU16 extends Opcode("s_buffer_load_u16", 965)
+
+  case object SBufferLoadU8 extends Opcode("s_buffer_load_u8", 966)
+
+  case object SBufferPrefetchData extends Opcode("s_buffer_prefetch_data", 967)
+
+  case object SBufferStoreDword extends Opcode("s_buffer_store_dword", 968)
+
+  case object SBufferStoreDwordx2 extends Opcode("s_buffer_store_dwordx2", 969)
+
+  case object SBufferStoreDwordx4 extends Opcode("s_buffer_store_dwordx4", 970)
+
+  case object SDcacheDiscard extends Opcode("s_dcache_discard", 1063)
+
+  case object SDcacheDiscardX2 extends Opcode("s_dcache_discard_x2", 1064)
+
+  case object SDcacheInv extends Opcode("s_dcache_inv", 1065)
+
+  case object SDcacheInvVol extends Opcode("s_dcache_inv_vol", 1066)
+
+  case object SDcacheWb extends Opcode("s_dcache_wb", 1067)
+
+  case object SDcacheWbVol extends Opcode("s_dcache_wb_vol", 1068)
+
+  case object SGetWaveidInWorkgroup extends Opcode("s_get_waveid_in_workgroup", 1092)
+
+  case object SGl1Inv extends Opcode("s_gl1_inv", 1095)
+
+  case object SLoadB128 extends Opcode("s_load_b128", 1099)
+
+  case object SLoadB256 extends Opcode("s_load_b256", 1100)
+
+  case object SLoadB32 extends Opcode("s_load_b32", 1101)
+
+  case object SLoadB512 extends Opcode("s_load_b512", 1102)
+
+  case object SLoadB64 extends Opcode("s_load_b64", 1103)
+
+  case object SLoadB96 extends Opcode("s_load_b96", 1104)
+
+  case object SLoadDword extends Opcode("s_load_dword", 1105)
+
+  case object SLoadDwordx16 extends Opcode("s_load_dwordx16", 1106)
+
+  case object SLoadDwordx2 extends Opcode("s_load_dwordx2", 1107)
+
+  case object SLoadDwordx4 extends Opcode("s_load_dwordx4", 1108)
+
+  case object SLoadDwordx8 extends Opcode("s_load_dwordx8", 1109)
+
+  case object SLoadI16 extends Opcode("s_load_i16", 1110)
+
+  case object SLoadI8 extends Opcode("s_load_i8", 1111)
+
+  case object SLoadU16 extends Opcode("s_load_u16", 1112)
+
+  case object SLoadU8 extends Opcode("s_load_u8", 1113)
+
+  case object SMemrealtime extends Opcode("s_memrealtime", 1130)
+
+  case object SMemtime extends Opcode("s_memtime", 1131)
+
+  case object SPrefetchData extends Opcode("s_prefetch_data", 1188)
+
+  case object SPrefetchDataPcRel extends Opcode("s_prefetch_data_pc_rel", 1189)
+
+  case object SPrefetchInst extends Opcode("s_prefetch_inst", 1190)
+
+  case object SPrefetchInstPcRel extends Opcode("s_prefetch_inst_pc_rel", 1191)
+
+  case object SScratchLoadDword extends Opcode("s_scratch_load_dword", 1200)
+
+  case object SScratchLoadDwordx2 extends Opcode("s_scratch_load_dwordx2", 1201)
+
+  case object SScratchLoadDwordx4 extends Opcode("s_scratch_load_dwordx4", 1202)
+
+  case object SScratchStoreDword extends Opcode("s_scratch_store_dword", 1203)
+
+  case object SScratchStoreDwordx2 extends Opcode("s_scratch_store_dwordx2", 1204)
+
+  case object SScratchStoreDwordx4 extends Opcode("s_scratch_store_dwordx4", 1205)
+
+  case object SStoreDword extends Opcode("s_store_dword", 1231)
+
+  case object SStoreDwordx2 extends Opcode("s_store_dwordx2", 1232)
+
+  case object SStoreDwordx4 extends Opcode("s_store_dwordx4", 1233)
+
+  val definitions: Vec[Opcode] = Vec(
     SAtcProbe,
     SAtcProbeBuffer,
     SAtomicAdd,

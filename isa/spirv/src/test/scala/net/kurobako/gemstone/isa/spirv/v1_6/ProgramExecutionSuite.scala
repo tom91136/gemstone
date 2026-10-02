@@ -22,27 +22,32 @@ class ProgramExecutionSuite extends munit.FunSuite {
   }
 
   test("loads an explicit environment and executes a kernel task") {
-    val voidType     = operand("IdResult", 1)
-    val functionType = operand("IdResult", 2)
-    val function     = operand("IdResult", 3)
+    val voidType     = operand(OperandKind.IdResult, 1)
+    val functionType = operand(OperandKind.IdResult, 2)
+    val function     = operand(OperandKind.IdResult, 3)
     val module       = Module(
       Header(ISA.version, Word(0), Word(5), Word(0)),
       Vec(
-        Instruction.Capability(operand("Capability", spv.Capability.Kernel)),
+        Instruction.Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
         Instruction.MemoryModel(
-          operand("AddressingModel", spv.AddressingModel.Physical64),
-          operand("MemoryModel", spv.MemoryModel.OpenCL)
+          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
         ),
         Instruction.TypeVoid(voidType),
         Instruction.TypeFunction(functionType, voidType, Vec.empty),
         Instruction.EntryPoint(
-          operand("ExecutionModel", spv.ExecutionModel.Kernel),
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
           function,
           stringOperand("empty"),
           Vec.empty
         ),
-        Instruction.Function(voidType, function, operand("FunctionControl", spv.FunctionControl.None), functionType),
-        Instruction.Label(operand("IdResult", 4)),
+        Instruction.Function(
+          voidType,
+          function,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          functionType
+        ),
+        Instruction.Label(operand(OperandKind.IdResult, 4)),
         Instruction.Return(),
         Instruction.FunctionEnd()
       ),
@@ -64,7 +69,7 @@ class ProgramExecutionSuite extends munit.FunSuite {
     assertEquals(result, ())
   }
 
-  private def operand(kind: NonEmpty[String], value: Int): Operand =
+  private def operand(kind: OperandKind, value: Int): Operand =
     Operand(kind, Vec.nonEmpty(Word(value)))
 
   private def stringOperand(value: String): Operand = {
@@ -74,6 +79,6 @@ class ProgramExecutionSuite extends munit.FunSuite {
         word | ((byte & 0xff) << (index * 8))
       })
     }.toSeq
-    Operand("LiteralString", Vec.from(words).unsafe)
+    Operand(OperandKind.LiteralString, Vec.from(words).unsafe)
   }
 }
