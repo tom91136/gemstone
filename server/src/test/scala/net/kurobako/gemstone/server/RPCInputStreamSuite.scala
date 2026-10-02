@@ -106,4 +106,32 @@ class RPCInputStreamSuite extends munit.FunSuite {
     intercept[java.nio.charset.CharacterCodingException](readHeader(DataInputStream(ByteArrayInputStream(frame))))
   }
 
+  test("response framing rejects the wrong magic without waiting for a header") {
+    val input = DataInputStream(ByteArrayInputStream(ByteBuffer.allocate(Integer.BYTES).putInt(0).array()))
+    val error = intercept[java.io.IOException](Frame.readResponse(input, 64))
+    assertEquals(error.getMessage, "unexpected RPC response magic")
+  }
+
+  test("response framing rejects invalid headers before reading or allocating payloads") {
+    for ((status, size, maximum) <- Seq((2, 0, 64), (0, -1, 64), (0, Int.MaxValue, 64), (0, 65, 64))) {
+      val prefix = ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes.raw)
+        .putInt(ExecutionRPC.ResponseMagic).putInt(status).putInt(size).array()
+      val input = DataInputStream(ByteArrayInputStream(prefix))
+      val error = intercept[java.io.IOException](Frame.readResponse(input, maximum))
+      assertEquals(error.getClass, classOf[java.io.IOException])
+    }
+  }
+
+  test("response framing retains the complete frame and rejects truncated payloads") {
+    val frame = ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes.raw + 3)
+      .putInt(ExecutionRPC.ResponseMagic).putInt(0).putInt(3).put(Array[Byte](4, 5, 6)).array()
+    assertEquals(
+      Frame.readResponse(DataInputStream(ByteArrayInputStream(frame)), frame.length).toSeq,
+      frame.toSeq
+    )
+    intercept[java.io.EOFException] {
+      Frame.readResponse(DataInputStream(ByteArrayInputStream(frame.dropRight(1))), frame.length)
+    }
+  }
+
 }

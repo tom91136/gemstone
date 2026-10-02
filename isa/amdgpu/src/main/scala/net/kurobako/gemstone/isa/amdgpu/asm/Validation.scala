@@ -42,15 +42,15 @@ object Validation {
   private def result(
       instruction: Instruction,
       target: Target,
-      encoded: Either[Binary.CodecError, Vec[Byte]]
+      encoded: Either[CodecError, Vec[Byte]]
   ): ValidationOutcome[Issue] = encoded match {
     case Right(_) =>
       incomplete(s"exact processor availability is not normalized for ${instruction.opcode} on ${target.name}")
-    case Left(Binary.CodecError.UnsupportedInstruction(opcode, target)) =>
+    case Left(CodecError.UnsupportedInstruction(opcode, target)) =>
       ValidationOutcome.Rejected(Vec.nonEmpty(Issue.UnsupportedInstruction(opcode, target)))
-    case Left(Binary.CodecError.InvalidOperand(message)) =>
+    case Left(CodecError.InvalidOperand(message)) =>
       ValidationOutcome.Rejected(Vec.nonEmpty(Issue.InvalidInstruction(instruction.opcode, message)))
-    case Left(Binary.CodecError.InvalidEncoding(message)) =>
+    case Left(CodecError.InvalidEncoding(message)) =>
       ValidationOutcome.Rejected(Vec.nonEmpty(Issue.InvalidInstruction(instruction.opcode, message)))
     case Left(error) => incomplete(s"operand validation for ${instruction.opcode}: $error")
   }

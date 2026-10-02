@@ -70,20 +70,14 @@ object CUDACloverleafFluxBenchmark {
       Dimensions(32, 1, 1),
       Dimensions(groups, 1, 1)
     ).fold(error => throw IllegalArgumentException(error), identity)
-    val before    = PlatformMetrics.allocatedBytes
-    val started   = platform.monotonicNanos
-    var iteration = 0
-    while (iteration < parsed.iterations.raw) {
-      VMInterpreter.execute(kernel, geometry, parameters, memory)
-        .fold(error => throw IllegalStateException(error.message), _ => ())
-      iteration += 1
+    val measurement = Measurement {
+      var iteration = 0
+      while (iteration < parsed.iterations.raw) {
+        VMInterpreter.execute(kernel, geometry, parameters, memory)
+          .fold(error => throw IllegalStateException(error.message), _ => ())
+        iteration += 1
+      }
     }
-    val elapsed   = math.max(0L, platform.monotonicNanos - started)
-    val allocated = for {
-      start <- before
-      end   <- PlatformMetrics.allocatedBytes
-      if end >= start
-    } yield end - start
     var checksum = 0L
     var index    = 0
     while (index < parsed.cells.raw) {
@@ -95,8 +89,9 @@ object CUDACloverleafFluxBenchmark {
       index += 1
     }
     Console.out.println(
-      s"cells=${parsed.cells} iterations=${parsed.iterations} nsPerDispatch=${elapsed.toDouble / parsed.iterations.raw} " +
-        s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
+      s"cells=${parsed.cells} iterations=${parsed.iterations} nsPerDispatch=${measurement.elapsedNanos.raw.toDouble /
+          parsed.iterations.raw} " +
+        s"bytesPerDispatch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
     )
   }
 }

@@ -39,7 +39,7 @@ object Metadata {
       category: NonEmpty[String],
       syntax: NonEmpty[Vec[NonEmpty[String]]],
       introduced: Version,
-      minimumTarget: ISA.Target,
+      minimumTarget: Target,
       forms: Vec[InstructionForm]
   )
 }

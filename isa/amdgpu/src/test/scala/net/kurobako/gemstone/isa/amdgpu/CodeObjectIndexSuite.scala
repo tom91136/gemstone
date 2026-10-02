@@ -25,12 +25,12 @@ class CodeObjectIndexSuite extends munit.FunSuite {
     assertEquals(code.map(_.name), Vec(".text"))
     assertEquals(code.head.address, 0x1000L)
     assertEquals(code.head.bytes, Vec(0x00, 0x00, 0x81, 0xbf).map(_.toByte))
-    assertEquals(code.head.symbols, Vec(CodeObject.Symbol("kernel", 0, 4)))
+    assertEquals(code.head.symbols, Vec(ExecutableSection.Symbol("kernel", 0, 4)))
     // Remove the symbol table: inspection of executable bytes must still work.
     LittleEndian.write(0L, image, table + 3 * 64 + 4, 4)
     val stripped = CodeObject.decode(Vec.from(image)).flatMap(_.executableSections).toOption.get
     assertEquals(stripped.head.bytes, code.head.bytes)
-    assertEquals(stripped.head.symbols, Vec.empty[CodeObject.Symbol])
+    assertEquals(stripped.head.symbols, Vec.empty[ExecutableSection.Symbol])
   }
 
   test("executable extraction rejects out-of-section symbols, unresolved relocations, and invalid string tables") {
@@ -45,16 +45,16 @@ class CodeObjectIndexSuite extends munit.FunSuite {
     val relocated = image.clone()
     LittleEndian.write(4L, relocated, table + 8 * 64 + 44, 4)
     assert(extract(relocated).left.exists {
-      case CodeObject.Error.Invalid(_) => true
-      case _                           => false
+      case CodeObjectError.Invalid(_) => true
+      case _                          => false
     })
     val dynamic     = image.clone()
     val relocations = LittleEndian.decodeInt64(image, table + 8 * 64 + 24).toInt
     LittleEndian.write(0L, dynamic, table + 8 * 64 + 44, 4)
     LittleEndian.write(0x1000L, dynamic, relocations, 8)
     assert(extract(dynamic).left.exists {
-      case CodeObject.Error.Invalid(_) => true
-      case _                           => false
+      case CodeObjectError.Invalid(_) => true
+      case _                          => false
     })
     val invalidStrings = image.clone()
     LittleEndian.write(8L, invalidStrings, table + 1 * 64 + 4, 4) // SHT_NOBITS is not a string table.
@@ -81,8 +81,8 @@ class CodeObjectIndexSuite extends munit.FunSuite {
     LittleEndian.write(0L, image, records + 16, 8)
     val external = CodeObject.decode(Vec.from(image)).toOption.get
     assert(external.executableSections.left.exists {
-      case CodeObject.Error.Unsupported(message) => message.contains("kernel")
-      case _                                     => false
+      case CodeObjectError.Unsupported(message) => message.contains("kernel")
+      case _                                    => false
     })
     assertEquals(
       external.relocatedSections(Map("kernel" -> 0xbf810000L), Map.empty).map(_.head.bytes),

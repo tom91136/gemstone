@@ -29,7 +29,7 @@ object Validation {
       case MissingGLComputeEntryPoint       => "an OpEntryPoint GLCompute is required"
       case MissingGLSL450MemoryModel        => "a Logical GLSL450 OpMemoryModel is required"
       case UnsupportedVersion(version)      =>
-        s"SPIR-V ${version.major}.${version.minor} is newer than ${ISA.version.major}.${ISA.version.minor}"
+        s"SPIR-V ${version.major}.${version.minor} is newer than ${Instruction.version.major}.${Instruction.version.minor}"
     }
   }
 
@@ -98,9 +98,9 @@ object Validation {
           module.header.schema.toUnsigned.toLong != 0L
         )(Issue.InvalidHeader("reserved schema word must be zero"))
     val unsupported = Option.when(
-      module.header.version.major > ISA.version.major ||
-        (module.header.version.major == ISA.version.major &&
-          module.header.version.minor > ISA.version.minor)
+      module.header.version.major > Instruction.version.major ||
+        (module.header.version.major == Instruction.version.major &&
+          module.header.version.minor > Instruction.version.minor)
     )(Issue.UnsupportedVersion(module.header.version))
     val facts = module.instructions.foldLeft(Facts(false, false, false, Chain.empty)) {
       case (state, Instruction.Capability(capability)) => capability.singleWord match {

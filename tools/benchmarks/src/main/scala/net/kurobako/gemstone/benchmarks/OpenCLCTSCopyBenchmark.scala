@@ -137,27 +137,21 @@ object OpenCLCTSCopyBenchmark {
     Using.resource(WorkerPool(parsed.parallelism, minGroups = 1L, minWorkItems = 1L)) { workgroups =>
       val program = LoadedProgram.load(module, Validation.Environment.OpenCLCompute)
         .fold(error => throw IllegalArgumentException(error.message), identity)
-      val allocatedBefore = PlatformMetrics.allocatedBytes
-      val started         = platform.monotonicNanos
-      var iteration       = 0
-      while (iteration < parsed.iterations.raw) {
-        program.execute(task, memory, TaskControl(), workgroups)
-          .fold(error => throw IllegalStateException(error.message), _ => ())
-        iteration += 1
+      val measurement = Measurement {
+        var iteration = 0
+        while (iteration < parsed.iterations.raw) {
+          program.execute(task, memory, TaskControl(), workgroups)
+            .fold(error => throw IllegalStateException(error.message), _ => ())
+          iteration += 1
+        }
       }
-      val elapsed   = math.max(0L, platform.monotonicNanos - started)
-      val allocated = for {
-        before <- allocatedBefore
-        after  <- PlatformMetrics.allocatedBytes
-        if after >= before
-      } yield after - before
       val checksum = memory.verify(parsed.groups.raw, parsed.localSize.raw, parsed.stride.raw)
       Console.out.println(
         s"direction=${parsed.direction} groups=${parsed.groups} localSize=${parsed.localSize} " +
           s"stride=${parsed.stride} iterations=${parsed.iterations} parallelism=${parsed.parallelism} " +
-          s"elements=${(parsed.groups * parsed.localSize) * 3} nsPerDispatch=${elapsed.toDouble /
+          s"elements=${(parsed.groups * parsed.localSize) * 3} nsPerDispatch=${measurement.elapsedNanos.raw.toDouble /
               parsed.iterations.raw} " +
-          s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
+          s"bytesPerDispatch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
       )
     }
   }

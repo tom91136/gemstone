@@ -20,5 +20,4 @@ private object NormalizedImageFormat {
       Math.copySign(Math.floor(Math.abs(scaled) + 0.5), scaled).toLong & 255L
     }
   }
-  def apply(format: Int): Option[Layout] = ImageFormats.normalized(format)
 }

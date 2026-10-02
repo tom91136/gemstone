@@ -2,7 +2,8 @@ package net.kurobako.gemstone.rpc
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 class ExecutionSpecializationSuite extends munit.FunSuite {

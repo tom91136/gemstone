@@ -790,7 +790,43 @@ def checkedInGeneratedSources = Seq(
 lazy val generateNativeBindings =
   taskKey[Seq[Path]]("Generate native ABI declarations and implementation checks for every platform.")
 
+lazy val acyclicPlugin = project.in(file("codestyle/acyclic"))
+  .disablePlugins(Stryker4sPlugin)
+  .disablePlugins(_root_.scalafix.sbt.ScalafixPlugin)
+  .settings(
+    name := "gemstone-acyclic",
+    // Compiler options contain the plugin path; change it when the plugin changes to invalidate sbt's cache.
+    Compile / packageBin := {
+      val packaged      = (Compile / packageBin).value
+      val converter     = fileConverter.value
+      val original      = converter.toPath(packaged)
+      val fingerprinted = original.resolveSibling(s"acyclic-${Fetch.sha256(original)}.jar")
+      Files.copy(original, fingerprinted, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+      val output = converter.toVirtualFile(fingerprinted)
+      Def.declareOutput(output)
+      output
+    },
+    scalaVersion         := scala3Version,
+    publish / skip       := true,
+    Compile / exportJars := true,
+    scalacOptions ++= Seq("-deprecation", "-Wunused:all"),
+    libraryDependencies ++= Seq(
+      "org.scala-lang" %% "scala3-compiler" % scala3Version % Provided,
+      "org.scalameta"  %% "munit"           % munitVersion  % Test
+    ),
+    Test / fork := true,
+    Test / javaOptions ++= {
+      val converter = fileConverter.value
+      Seq(
+        s"-Dgemstone.acyclic.jar=${converter.toPath((Compile / packageBin).value)}",
+        "-Dgemstone.acyclic.classpath=" + (Test / fullClasspath).value
+          .map(entry => converter.toPath(entry.data).toString).mkString(java.io.File.pathSeparator)
+      )
+    }
+  )
+
 lazy val codestyleRules = project.in(file("codestyle/rules"))
+  .dependsOn(acyclicPlugin % "plugin->compile")
   .disablePlugins(Stryker4sPlugin)
   .disablePlugins(_root_.scalafix.sbt.ScalafixPlugin)
   .settings(
@@ -802,6 +838,7 @@ lazy val codestyleRules = project.in(file("codestyle/rules"))
   )
 
 lazy val codestyleInput = project.in(file("codestyle/input"))
+  .dependsOn(acyclicPlugin % "plugin->compile")
   .disablePlugins(Stryker4sPlugin)
   .disablePlugins(_root_.scalafix.sbt.ScalafixPlugin)
   .settings(
@@ -811,6 +848,7 @@ lazy val codestyleInput = project.in(file("codestyle/input"))
   )
 
 lazy val codestyleOutput = project.in(file("codestyle/output"))
+  .dependsOn(acyclicPlugin % "plugin->compile")
   .disablePlugins(Stryker4sPlugin)
   .disablePlugins(_root_.scalafix.sbt.ScalafixPlugin)
   .settings(
@@ -821,7 +859,7 @@ lazy val codestyleOutput = project.in(file("codestyle/output"))
 lazy val codestyleTests = project.in(file("codestyle/tests"))
   .disablePlugins(Stryker4sPlugin)
   .dependsOn(codestyleInput, codestyleRules)
-  .dependsOn(codestyleRules % ScalafixConfig)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .enablePlugins(_root_.scalafix.sbt.ScalafixTestkitPlugin)
   .settings(
     publish / skip := true,
@@ -835,7 +873,7 @@ lazy val codestyleTests = project.in(file("codestyle/tests"))
 
 lazy val codestyle = project.in(file("codestyle"))
   .disablePlugins(Stryker4sPlugin)
-  .aggregate(codestyleRules, codestyleInput, codestyleOutput, codestyleTests)
+  .aggregate(acyclicPlugin, codestyleRules, codestyleInput, codestyleOutput, codestyleTests)
   .disablePlugins(_root_.scalafix.sbt.ScalafixPlugin)
   .settings(
     name           := "gemstone-codestyle",
@@ -845,7 +883,7 @@ lazy val codestyle = project.in(file("codestyle"))
 // No dependency on core: its own tests can use these utilities without a cycle.
 lazy val testSupport = projectMatrix.in(file("tools/test-support"))
   .disablePlugins(Stryker4sPlugin)
-  .dependsOn(codestyleRules % ScalafixConfig)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(commonSettings, name := "gemstone-test-support", publish / skip := true)
   .jvmPlatform(scalaVersions = Seq(scala3Version))
   .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
@@ -854,7 +892,7 @@ lazy val api = projectMatrix
   .dependsOn(testSupport % "test->compile")
   .disablePlugins(Stryker4sPlugin)
   .dependsOn(core)
-  .dependsOn(codestyleRules % ScalafixConfig)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
     checkedInGeneratedSources,
@@ -868,7 +906,7 @@ lazy val api = projectMatrix
 lazy val isaTools = project.in(file("tools/isa"))
   .disablePlugins(Stryker4sPlugin)
   .dependsOn(ptx.jvm(scala3Version), amdgpu.jvm(scala3Version), spirv.jvm(scala3Version))
-  .dependsOn(codestyleRules % ScalafixConfig)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
     name                                  := "gemstone-isa-tools",
@@ -881,7 +919,7 @@ lazy val codegenProject = Project("codegen", file("tools/codegen"))
   .dependsOn(testSupport.jvm(scala3Version) % "test->compile")
   .disablePlugins(Stryker4sPlugin)
   .dependsOn(core.jvm(scala3Version))
-  .dependsOn(codestyleRules % ScalafixConfig)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
     name                    := "gemstone-codegen",
@@ -1071,7 +1109,7 @@ lazy val mutationSettings = Mutation.settings ++ Seq(
 lazy val core = projectMatrix
   .dependsOn(testSupport % "test->compile")
   .disablePlugins(Stryker4sPlugin)
-  .dependsOn(codestyleRules % ScalafixConfig)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
     checkedInGeneratedSources,
@@ -1228,7 +1266,7 @@ lazy val ptx = projectMatrix
   .disablePlugins(Stryker4sPlugin)
   .in(file("isa/ptx"))
   .dependsOn(core)
-  .dependsOn(codestyleRules % ScalafixConfig)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
     checkedInGeneratedSources,
@@ -1283,7 +1321,7 @@ lazy val amdgpu = projectMatrix
   .disablePlugins(Stryker4sPlugin)
   .in(file("isa/amdgpu"))
   .dependsOn(core)
-  .dependsOn(codestyleRules % ScalafixConfig)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
     checkedInGeneratedSources,
@@ -1344,7 +1382,7 @@ lazy val amdgpu = projectMatrix
     configure = project =>
       project.enablePlugins(Stryker4sPlugin).settings(
         mutationSettings,
-        strykerMutate     := Seq("src/main/scala/net/kurobako/gemstone/isa/amdgpu/Parser.scala"),
+        strykerMutate     := Seq("src/main/scala/net/kurobako/gemstone/isa/amdgpu/asm/Parser.scala"),
         strykerTestFilter := Seq("net.kurobako.gemstone.isa.amdgpu.ParserSuite")
       )
   )
@@ -1361,7 +1399,7 @@ lazy val spirv = projectMatrix
   .disablePlugins(Stryker4sPlugin)
   .in(file("isa/spirv"))
   .dependsOn(core)
-  .dependsOn(codestyleRules % ScalafixConfig)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
     checkedInGeneratedSources,
@@ -1434,7 +1472,7 @@ lazy val server = projectMatrix
   .disablePlugins(Stryker4sPlugin)
   .in(file("server"))
   .dependsOn(core, ptx, amdgpu, spirv)
-  .dependsOn(codestyleRules % ScalafixConfig)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
     name := "gemstone-server",
@@ -1474,7 +1512,7 @@ lazy val benchmarks = projectMatrix.in(file("tools/benchmarks"))
   .dependsOn(testSupport % "test->compile")
   .disablePlugins(Stryker4sPlugin)
   .dependsOn(core, ptx, amdgpu, spirv, server)
-  .dependsOn(codestyleRules % ScalafixConfig)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
     name           := "gemstone-benchmarks",
@@ -1753,7 +1791,7 @@ lazy val gemstone = project.in(file("."))
   .aggregate(benchmarks.projectRefs *)
   .aggregate(codestyle)
   .aggregate(native, conformance)
-  .dependsOn(codestyleRules % ScalafixConfig)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
     name           := "gemstone",

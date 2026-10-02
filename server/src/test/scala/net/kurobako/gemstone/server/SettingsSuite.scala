@@ -33,6 +33,24 @@ class SettingsSuite extends munit.FunSuite {
       assert(Server.Settings.fromEnvironment(Map(key -> value)).isLeft, value)
   }
 
+  test("settings retain timeout boundary values and useful invalid-input diagnostics") {
+    val maximumSeconds = Int.MaxValue / 1000
+    assertEquals(
+      Server.Settings.fromEnvironment(Map(environment.RpcTimeoutSeconds -> maximumSeconds.toString))
+        .map(_.requestTimeoutMillis.raw),
+      Right(maximumSeconds * 1000)
+    )
+    assertEquals(
+      Server.Settings.fromEnvironment(Map(environment.ExecutionMaxInstructions -> "+1")),
+      Left(s"${environment.ExecutionMaxInstructions} must be a positive integer: +1")
+    )
+    assertEquals(
+      Server.Settings.fromEnvironment(Map(environment.ExecutionParallelism -> Long.MaxValue.toString)),
+      Left(s"${environment.ExecutionParallelism} must be a positive integer: ${Long.MaxValue}")
+    )
+    assert(Server.Settings.fromEnvironment(Map(environment.Record -> "bad\u0000path")).isLeft)
+  }
+
   test("performance tracing follows scope tokens and ignores unrelated categories") {
     for (
       (value, expected) <- List(

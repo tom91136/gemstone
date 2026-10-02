@@ -275,8 +275,16 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
           assertEquals(service.awaitCompletion(completion).isLeft, reject)
           val (memory, descriptor) = captured.last
           assert(memory.read(descriptor, 0L, 1).isLeft)
-          if (reject) assert(service.completionDirtyRanges(completion, 0).isLeft)
-          else assert(right(service.completionDirtyRanges(completion, 0)).isEmpty)
+          if (reject) assert(service.completionDirtyRanges(
+            id = completion,
+            offset = 0,
+            limit = ExecutionRPC.MaximumElements
+          ).isLeft)
+          else assert(right(service.completionDirtyRanges(
+            id = completion,
+            offset = 0,
+            limit = ExecutionRPC.MaximumElements
+          )).isEmpty)
           right(service.releaseCompletion(completion))
           if (!standalone) {
             right(service.releaseAllocation(source))

@@ -8,7 +8,8 @@ import java.util.concurrent.atomic.AtomicReference
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.server.transport.*
+import net.kurobako.gemstone.server.Transport.*
+import net.kurobako.gemstone.server.protocol.*
 import scala.util.Using
 
 class JournalSuite extends munit.FunSuite {
@@ -40,7 +41,7 @@ class JournalSuite extends munit.FunSuite {
           ).toSeq
         )
         first(0) = 0
-        assertEquals(Journal.Frames.magic(reader.frame(reader.events.head)), ExecutionRPC.RequestMagic)
+        assertEquals(Frame.magic(reader.frame(reader.events.head)), ExecutionRPC.RequestMagic)
       }
       val _ = intercept[IOException](Journal.Writer(file, Journal.Header(schema)))
     }

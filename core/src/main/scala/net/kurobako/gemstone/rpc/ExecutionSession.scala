@@ -28,7 +28,8 @@ class ExecutionSession(
     executionContext: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.parasitic,
     parallelism: Int > 0 = 1,
     specialization: Option[RuntimeBackend.Specialization] = None,
-    graphics: Option[GraphicsBackend] = None
+    graphics: Option[GraphicsBackend] = None,
+    maxPrintEvents: Int > 0 = 16384
 ) extends AutoCloseable {
   private val SyntheticAddressBase   = 0x400000000000L
   private val SyntheticAddressStride = 0x100000000L
@@ -111,13 +112,13 @@ class ExecutionSession(
     private lazy val allPointerRelocations = Vec.from(relocations.values)
     private var output: Vec[Event.Print]   = Vec.empty
 
-    def graphicsStatistics: Option[GraphicsStatistics]                          = currentGraphicsStatistics
-    def status: CompletionStatus                                                = currentStatus
-    def pointerRelocations(offset: Int >= 0): Vec[KernelTask.PointerRelocation] =
+    def graphicsStatistics: Option[GraphicsStatistics] = currentGraphicsStatistics
+    def status: CompletionStatus                       = currentStatus
+    def pointerRelocations(offset: Int >= 0, limit: Int > 0): Vec[KernelTask.PointerRelocation] =
       if (offset.raw >= allPointerRelocations.length) Vec.empty
       else allPointerRelocations.slice(
         offset.raw,
-        offset.raw + math.min(ExecutionRPC.MaximumElements.raw, allPointerRelocations.length - offset.raw)
+        offset.raw + math.min(limit.raw, allPointerRelocations.length - offset.raw)
       )
     def prints: Vec[Event.Print]                                                              = output
     def finish(result: CompletionStatus, statistics: Option[GraphicsStatistics] = None): Unit = {
@@ -134,7 +135,7 @@ class ExecutionSession(
       relocations.update(key, relocation)
     }
     def record(event: Event.Print): Either[ExecutionFailure, Unit] =
-      if (output.size >= ExecutionRPC.MaximumElements.raw)
+      if (output.size >= maxPrintEvents.raw)
         Left(ExecutionFailure.Failed("device printf event limit exceeded"))
       else { output = output.appended(event); Right(()) }
     val hostMemory: HostMemoryMirror = HostMemoryMirror()
@@ -172,11 +173,11 @@ class ExecutionSession(
         }
       })
     }
-    def dirtyRanges(offset: Int >= 0): Vec[DirtyRange] =
+    def dirtyRanges(offset: Int >= 0, limit: Int > 0): Vec[DirtyRange] =
       if (offset.raw >= allDirtyRanges.length) Vec.empty
       else allDirtyRanges.slice(
         offset.raw,
-        offset.raw + math.min(ExecutionRPC.MaximumElements.raw, allDirtyRanges.length - offset.raw)
+        offset.raw + math.min(limit.raw, allDirtyRanges.length - offset.raw)
       )
   }
   private case class State(
@@ -674,7 +675,7 @@ class ExecutionSession(
             try
               programLifecycleLock.readLock().withLock {
                 execution.execute(
-                  completionMemory(id),
+                  CompletionMemory(id),
                   execution.control,
                   event => handleEvent(id, event)
                 )
@@ -922,16 +923,21 @@ class ExecutionSession(
     }
   }
 
-  def completionDirtyRanges(id: CompletionId, offset: Int >= 0): Either[ExecutionFailure, Vec[DirtyRange]] =
+  def completionDirtyRanges(
+      id: CompletionId,
+      offset: Int >= 0,
+      limit: Int > 0
+  ): Either[ExecutionFailure, Vec[DirtyRange]] =
     stateLock.withLock {
-      succeededCompletion(id)(execution => Right(execution.dirtyRanges(offset)))
+      succeededCompletion(id)(execution => Right(execution.dirtyRanges(offset, limit)))
     }
 
   def completionPointerRelocations(
       id: CompletionId,
-      offset: Int >= 0
+      offset: Int >= 0,
+      limit: Int > 0
   ): Either[ExecutionFailure, Vec[KernelTask.PointerRelocation]] =
-    stateLock.withLock(succeededCompletion(id)(record => Right(record.pointerRelocations(offset))))
+    stateLock.withLock(succeededCompletion(id)(record => Right(record.pointerRelocations(offset, limit))))
 
   def completionPrints(id: CompletionId): Either[ExecutionFailure, String] =
     stateLock.withLock(succeededCompletion(id)(record => renderPrints(record.prints)))
@@ -1252,8 +1258,6 @@ class ExecutionSession(
         )(update).left.map(memoryFault(_)))
       )
   }
-
-  private def completionMemory(completion: CompletionId): Memory = CompletionMemory(completion)
 
   private def recordPointerRelocation(completion: CompletionId, relocation: KernelTask.PointerRelocation): Unit =
     stateLock.withLock {

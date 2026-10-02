@@ -116,20 +116,15 @@ object AMDGPUExecutionBenchmark {
       iteration += 1
     }
 
-    val (allocatedBefore, elapsed, allocatedAfter) =
+    val measurement =
       Using.resource(PlatformMetrics.startRecording(sys.env.get(env.BenchmarkJfr).map(Path.of(_)))) { _ =>
-        val before  = PlatformMetrics.allocatedBytes
-        val started = platform.monotonicNanos
-        iteration = 0
-        while (iteration < measured.raw) {
-          execute()
-          iteration += 1
+        Measurement {
+          iteration = 0
+          while (iteration < measured.raw) {
+            execute()
+            iteration += 1
+          }
         }
-        (
-          before,
-          math.max(0L, platform.monotonicNanos - started).unsafe[Long >= 0],
-          PlatformMetrics.allocatedBytes
-        )
       }
     val checksum = Array.tabulate(elements.raw) { index =>
       val observed = memory.getInt(OutputId, (index * 4).unsafe[Int >= 0])
@@ -138,15 +133,11 @@ object AMDGPUExecutionBenchmark {
       observed.toLong
     }.sum
 
-    val nanosPerDispatch = elapsed.raw.toDouble / measured.raw.toDouble
-    val bytesPerDispatch = (allocatedBefore, allocatedAfter) match {
-      case (Some(before), Some(after)) if after >= before =>
-        (after - before).raw.toDouble / measured.raw.toDouble
-      case _ => Double.NaN
-    }
+    val nanosPerDispatch = measurement.elapsedNanos.raw.toDouble / measured.raw.toDouble
+    val bytesPerDispatch = measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / measured.raw.toDouble)
     Console.out.println(
       f"amdgpu-execution benchmark dispatches=$measured warmup=$warmup groups=$groups " +
-        f"elapsed_ms=${elapsed.raw / 1000000.0}%.3f ns_per_dispatch=$nanosPerDispatch%.1f " +
+        f"elapsed_ms=${measurement.elapsedNanos.raw / 1000000.0}%.3f ns_per_dispatch=$nanosPerDispatch%.1f " +
         f"allocated_bytes_per_dispatch=$bytesPerDispatch%.1f checksum=$checksum"
     )
   }

@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu.asm
 
-import Binary.*
 import OperandCodec.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.binary.*
@@ -62,7 +61,7 @@ private object ScalarCodec {
       word: Long,
       target: Target,
       layout: InstructionLayout
-  ): Either[CodecError, Binary.Decoded] = {
+  ): Either[CodecError, DecodedInstruction] = {
     val opcode      = layout.get(BigInt(word), EncodingField.OP).toInt
     val format      = layout.format
     val definitions = OpcodeIndex.canonical(OpcodeIndex.definitions(format, opcode, target), target)(identity)
@@ -95,7 +94,7 @@ private object ScalarCodec {
                   .toRight(CodecError.InvalidEncoding(s"unsupported $format operand encoding in $field"))
               }.flatMap { args =>
                 Instruction.decode(definition, args, Vec.empty[Program.Modifier]) match {
-                  case Vec(instruction) => Right(Binary.Decoded(instruction, size))
+                  case Vec(instruction) => Right(DecodedInstruction(instruction, size))
                   case _ => Left(CodecError.InvalidEncoding(s"ambiguous operand form for ${definition.opcode}"))
                 }
               }

@@ -5,10 +5,11 @@ import java.io.DataOutputStream
 import java.io.IOException
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.rpc.ExecutionProtocol.given
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
-import net.kurobako.gemstone.server.transport.*
+import net.kurobako.gemstone.vm.*
 
 private object connections {
   class Client(
@@ -17,7 +18,7 @@ private object connections {
       process: Long = 42L,
       incarnation: Long = 17L
   ) extends AutoCloseable {
-    private val socket = transport.connect(endpoint, 10000)
+    private val socket = SocketTransport.connect(endpoint, 10000)
     private val input  = DataInputStream(socket.input)
     private val output = DataOutputStream(socket.output)
 

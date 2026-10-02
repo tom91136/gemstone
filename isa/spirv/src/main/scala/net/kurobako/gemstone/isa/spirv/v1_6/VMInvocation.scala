@@ -3,7 +3,6 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import VMCollectives.Request as CollectiveRequest
 import VMIR.*
 import VMMemory.*
-import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
@@ -11,19 +10,9 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 private object VMInvocation {
-  enum RuntimeValue {
-    case Bits(typeId: Int, lanes: Array[Long])
-    case Address(typeId: Int, pointer: Pointer)
-  }
-
-  def runtimeValue(constant: Constant): RuntimeValue = constant match {
-    case Constant.Bits(typeId, lanes)                        => RuntimeValue.Bits(typeId, Vec.toArray(lanes))
-    case Constant.NullPointer(typeId, pointee, storageClass) =>
-      RuntimeValue.Address(typeId, Pointer(Region.Null, 0L, pointee, storageClass))
-  }
   class BaseScalarValues(
-      constants: Map[Int, RuntimeValue],
-      globals: Map[Int, RuntimeValue],
+      constants: Map[Int, VMValue],
+      globals: Map[Int, VMValue],
       idBound: Long
   ) {
     private val denseLimit = 1000000L
@@ -33,7 +22,7 @@ private object VMInvocation {
     private val bits = Array.ofDim[Long](types.length)
 
     (constants.view ++ globals.view).foreach {
-      case (key, RuntimeValue.Bits(typeId, Array(value))) if key >= 0 && key < types.length =>
+      case (key, VMValue.Bits(typeId, Array(value))) if key >= 0 && key < types.length =>
         types(key) = typeId
         bits(key) = value
       case _ => ()
@@ -51,8 +40,8 @@ private object VMInvocation {
   // Dense nullable slots avoid allocating an Option for every interpreted SSA read and write.
   @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
   class InvocationValues(
-      constants: Map[Int, RuntimeValue],
-      globals: Map[Int, RuntimeValue],
+      constants: Map[Int, VMValue],
+      globals: Map[Int, VMValue],
       idBound: Long,
       baseScalars: BaseScalarValues,
       metrics: VMMetrics,
@@ -60,22 +49,22 @@ private object VMInvocation {
   ) {
     private val denseLimit = 1000000L
     private val dense      =
-      if (idBound > 0L && idBound <= denseLimit) Array.ofDim[RuntimeValue | Null](idBound.toInt)
-      else Array.empty[RuntimeValue | Null]
+      if (idBound > 0L && idBound <= denseLimit) Array.ofDim[VMValue | Null](idBound.toInt)
+      else Array.empty[VMValue | Null]
     private val denseScalarTypes = Array.fill(dense.length)(-1)
     private val denseScalarBits  = Array.ofDim[Long](dense.length)
     private val touched          = if (trackTouched) Array.ofDim[Int](dense.length) else Array.empty[Int]
     private var touchedSize      = 0
-    private val overflow         = mutable.LongMap.empty[RuntimeValue]
+    private val overflow         = mutable.LongMap.empty[VMValue]
 
     metrics.recordInvocationValues(dense.length, 16)
 
-    def get(key: Long): Option[RuntimeValue] = {
+    def get(key: Long): Option[VMValue] = {
       val local =
         if (key >= 0L && key < dense.length.toLong) {
           val index = key.toInt
           if (denseScalarTypes(index) >= 0)
-            Some(RuntimeValue.Bits(denseScalarTypes(index), Array(denseScalarBits(index))))
+            Some(VMValue.Bits(denseScalarTypes(index), Array(denseScalarBits(index))))
           else
             dense(index) match {
               case null  => None
@@ -85,7 +74,7 @@ private object VMInvocation {
       local.orElse(globals.get(key.toInt)).orElse(constants.get(key.toInt))
     }
 
-    def update(key: Long, value: RuntimeValue): Unit =
+    def update(key: Long, value: VMValue): Unit =
       if (key >= 0L && key < dense.length.toLong) {
         val index = key.toInt
         if (trackTouched && dense(index) == null && denseScalarTypes(index) < 0) {
@@ -93,7 +82,7 @@ private object VMInvocation {
           touchedSize += 1
         }
         value match {
-          case RuntimeValue.Bits(typeId, Array(bits)) =>
+          case VMValue.Bits(typeId, Array(bits)) =>
             dense(index) = null
             denseScalarTypes(index) = typeId
             denseScalarBits(index) = bits
@@ -114,9 +103,9 @@ private object VMInvocation {
         }
       } else
         overflow.get(key.toLong) match {
-          case Some(RuntimeValue.Bits(typeId, Array(_))) => typeId
-          case Some(_)                                   => -1
-          case None                                      => fallbackScalarType(key)
+          case Some(VMValue.Bits(typeId, Array(_))) => typeId
+          case Some(_)                              => -1
+          case None                                 => fallbackScalarType(key)
         }
 
     def scalarBits(key: Int): Long =
@@ -126,9 +115,9 @@ private object VMInvocation {
         else fallbackScalarBits(key)
       } else
         overflow.get(key.toLong) match {
-          case Some(RuntimeValue.Bits(_, Array(value))) => value
-          case Some(_) => throw IllegalStateException(s"SPIR-V value %$key is not scalar")
-          case None    => fallbackScalarBits(key)
+          case Some(VMValue.Bits(_, Array(value))) => value
+          case Some(_)                             => throw IllegalStateException(s"SPIR-V value %$key is not scalar")
+          case None                                => fallbackScalarBits(key)
         }
 
     def readScalar(key: Int): Option[Long] =
@@ -139,27 +128,27 @@ private object VMInvocation {
         else readFallbackScalar(key)
       } else
         overflow.get(key.toLong) match {
-          case Some(RuntimeValue.Bits(_, Array(value))) => Some(value)
-          case Some(_)                                  => None
-          case None                                     => readFallbackScalar(key)
+          case Some(VMValue.Bits(_, Array(value))) => Some(value)
+          case Some(_)                             => None
+          case None                                => readFallbackScalar(key)
         }
 
     private def readFallbackScalar(key: Int): Option[Long] =
       globals.get(key).orElse(constants.get(key)) match {
-        case Some(RuntimeValue.Bits(_, Array(value))) => Some(value)
-        case _                                        => None
+        case Some(VMValue.Bits(_, Array(value))) => Some(value)
+        case _                                   => None
       }
 
     private def fallbackScalarType(key: Int): Int =
       globals.get(key).orElse(constants.get(key)) match {
-        case Some(RuntimeValue.Bits(typeId, Array(_))) => typeId
-        case _                                         => -1
+        case Some(VMValue.Bits(typeId, Array(_))) => typeId
+        case _                                    => -1
       }
 
     private def fallbackScalarBits(key: Int): Long =
       globals.get(key).orElse(constants.get(key)) match {
-        case Some(RuntimeValue.Bits(_, Array(value))) => value
-        case _ => throw IllegalStateException(s"SPIR-V value %$key is not scalar")
+        case Some(VMValue.Bits(_, Array(value))) => value
+        case _                                   => throw IllegalStateException(s"SPIR-V value %$key is not scalar")
       }
 
     def updateScalar(key: Int, typeId: Int, bits: Long): Unit =
@@ -171,7 +160,7 @@ private object VMInvocation {
         dense(key) = null
         denseScalarTypes(key) = typeId
         denseScalarBits(key) = bits
-      } else overflow.update(key.toLong, RuntimeValue.Bits(typeId, Array(bits)))
+      } else overflow.update(key.toLong, VMValue.Bits(typeId, Array(bits)))
 
     def clear(): Unit = {
       var index = 0

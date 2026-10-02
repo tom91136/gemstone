@@ -367,11 +367,11 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
     )
     assertEquals(
       ELF.selectFunctionTarget(Vec("_Z5logIfv", "_Z5expIfv")),
-      Left(CodeObject.Error.Invalid("AMDGPU function aliases have conflicting call semantics: _Z5expIfv, _Z5logIfv"))
+      Left(CodeObjectError.Invalid("AMDGPU function aliases have conflicting call semantics: _Z5expIfv, _Z5logIfv"))
     )
     assertEquals(
       ELF.selectFunctionTarget(Vec("first", "second")),
-      Left(CodeObject.Error.Invalid("AMDGPU function aliases are ambiguous: first, second"))
+      Left(CodeObjectError.Invalid("AMDGPU function aliases are ambiguous: first, second"))
     )
   }
 

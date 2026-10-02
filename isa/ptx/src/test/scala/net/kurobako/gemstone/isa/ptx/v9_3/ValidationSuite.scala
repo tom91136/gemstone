@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import ISA.*
 import Program.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*

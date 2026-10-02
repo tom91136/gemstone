@@ -1,16 +1,14 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMExecution.*
-
 private object VMLaneMask {
   val MaximumLanes: Int = 1024
   val WordCount: Int    = MaximumLanes / java.lang.Long.SIZE
   val Empty: VMLaneMask = VMLaneMask(Array.fill(WordCount)(0L), 0, 0)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def all(laneCount: Int): Either[ExecutionFault, VMLaneMask] =
+  def all(laneCount: Int): Either[VMFault, VMLaneMask] =
     if (laneCount < 1 || laneCount > MaximumLanes)
-      Left(ExecutionFault.InvalidProgram(
+      Left(VMFault.InvalidProgram(
         s"lane count must be between 1 and $MaximumLanes, found $laneCount"
       ))
     else {
@@ -23,9 +21,9 @@ private object VMLaneMask {
       Right(VMLaneMask(words, laneCount, (laneCount + 63) >>> 6))
     }
 
-  def one(lane: Int): Either[ExecutionFault, VMLaneMask] =
+  def one(lane: Int): Either[VMFault, VMLaneMask] =
     if (lane < 0 || lane >= MaximumLanes)
-      Left(ExecutionFault.InvalidProgram(
+      Left(VMFault.InvalidProgram(
         s"lane index must be between 0 and ${MaximumLanes - 1}, found $lane"
       ))
     else {

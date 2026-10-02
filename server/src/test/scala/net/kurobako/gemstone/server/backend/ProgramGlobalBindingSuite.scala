@@ -83,7 +83,11 @@ class ProgramGlobalBindingSuite extends munit.FunSuite {
       val third = launch(s, program, KernelTask.Argument.Scalar(LittleEndian.toVec(0x3000, 8)))
       assertEquals(read(s, global, 8), 72L)
       assertEquals(read(s, output, 4), 1L)
-      assert(s.completionDirtyRanges(third, 0).toOption.get.exists(_.allocation == global))
+      assert(s.completionDirtyRanges(
+        id = third,
+        offset = 0,
+        limit = ExecutionRPC.MaximumElements
+      ).toOption.get.exists(_.allocation == global))
       assert(s.releaseAllocation(global).isLeft)
       assertEquals(s.unload(program), Right(()))
       assert(s.releaseAllocation(global).isLeft, "completion must retain implicit bound globals after unload")

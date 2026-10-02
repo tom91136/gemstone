@@ -15975,10 +15975,14 @@ object Instruction {
   ): Either[InstructionDecodeError, Instruction] =
     if (raw.opcodeNumber != definition.opcodeNumber)
       Left(InstructionDecodeError.DecoderOpcodeMismatch(definition.opcodeNumber, raw.opcodeNumber))
-    else
-      OperandDecoder
-        .decode(definition, raw.operandWords, definition.meta.operands, operandKinds)
-        .map(construct)
+    else {
+      val decoded = OperandDecoder.decode(definition.opcode, raw.operandWords, definition.meta.operands, operandKinds)
+      // The grammar uses 32-bit switch literals; retain 64-bit cases until the selector type is resolved.
+      val operands = if (definition == Definition.Switch)
+        decoded.orElse(OperandDecoder.decodeSwitch64(definition.opcode, raw.operandWords).orElse(decoded))
+      else decoded
+      operands.map(construct)
+    }
 }
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))

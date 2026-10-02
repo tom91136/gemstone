@@ -3,6 +3,7 @@ package net.kurobako.gemstone.tools.isa
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
+import java.nio.file.Path
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
@@ -120,6 +121,37 @@ class AssemblySuite extends munit.FunSuite {
       "input"
     ).isLeft)
     assert(parse("disassemble", "--isa", "amdgpu", "--target", "gfx1030", "--section", ".text", "input").isRight)
+  }
+
+  test("CLI requests preserve mandatory assembly destinations and optional disassembly destinations") {
+    assertEquals(
+      CLI.command.parse(List("assemble", "--isa", "spirv", "input", "-o", "output")),
+      Right(CLI.Request.Assemble(Assembly.Format.SPIRV, Path.of("input"), Path.of("output")))
+    )
+    assertEquals(
+      CLI.command.parse(List("disassemble", "--isa", "ptx", "input")),
+      Right(CLI.Request.Disassemble(Assembly.Format.PTX, Path.of("input"), None, None))
+    )
+    assertEquals(
+      CLI.command.parse(List(
+        "disassemble",
+        "--isa",
+        "amdgpu",
+        "--target",
+        "gfx1030",
+        "input",
+        "-o",
+        "output",
+        "--section",
+        ".text"
+      )),
+      Right(CLI.Request.Disassemble(
+        format = Assembly.Format.AMDGPU(amdgpu.Target("gfx1030")),
+        input = Path.of("input"),
+        output = Some(Path.of("output")),
+        section = Some(".text")
+      ))
+    )
   }
 
   /** Minimal ELF64 fixture: null section, string table, then executable sections. */

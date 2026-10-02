@@ -318,12 +318,23 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
             ).toOption.get
             val completion = service.launch(program, task).toOption.get
             assertEquals(service.completion(completion), Right(CompletionStatus.Pending))
-            assert(service.completionDirtyRanges(completion, 0).isLeft)
+            assert(service.completionDirtyRanges(
+              id = completion,
+              offset = 0,
+              limit = ExecutionRPC.MaximumElements
+            ).isLeft)
             assertEquals(service.read(allocation, 0L, size), Right(before))
             queued.getAndSet(None).get.run()
             assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
-            val ranges = service.completionDirtyRanges(completion, 0).toOption.get
-            assertEquals(service.completionDirtyRanges(completion, 0), Right(ranges))
+            val ranges = service.completionDirtyRanges(
+              id = completion,
+              offset = 0,
+              limit = ExecutionRPC.MaximumElements
+            ).toOption.get
+            assertEquals(
+              service.completionDirtyRanges(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements),
+              Right(ranges)
+            )
             ranges.foreach { range =>
               assertEquals(range.allocation, allocation)
               assert(range.offset.raw >= 0 && range.offset.raw + range.size.raw <= size.raw)

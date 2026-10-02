@@ -8,10 +8,10 @@ import java.io.EOFException
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
 import net.kurobako.gemstone.server.recording.*
-import net.kurobako.gemstone.server.transport.*
+import net.kurobako.gemstone.vm.*
 import scala.util.Using
 import scala.util.control.NonFatal
 

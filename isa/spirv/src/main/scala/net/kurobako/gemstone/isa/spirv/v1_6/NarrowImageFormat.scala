@@ -5,7 +5,6 @@ import net.kurobako.gemstone.constraint.*
 
 /** Packed color and 16-bit float texels. Format numbers match the native image descriptor ABI. */
 private object NarrowImageFormat {
-  import ImageFormats.*
   import NarrowEncoding.*
 
   case class Layout(
@@ -50,5 +49,4 @@ private object NarrowImageFormat {
       (0 until components).foldLeft(0L)((bits, lane) => bits | (encodeLane(values(lane), lane) << shifts(lane)))
     }
   }
-  def apply(format: Int): Option[Layout] = ImageFormats.narrow(format)
 }

@@ -5,7 +5,6 @@ import net.kurobako.gemstone.graphics.GraphicsFormats.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 private object ImageFormats {
-  enum NarrowEncoding { case Unorm, Half, Ufloat, SharedExponent }
   private val integer0 = Some(IntegerImageFormat.Layout(4, 4, false, true))
   private val integer1 = Some(IntegerImageFormat.Layout(1, 1, false, false))
   private val integer2 = Some(IntegerImageFormat.Layout(1, 1, true, false))

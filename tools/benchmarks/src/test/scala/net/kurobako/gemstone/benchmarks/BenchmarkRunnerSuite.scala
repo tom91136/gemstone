@@ -8,6 +8,15 @@ class BenchmarkRunnerSuite extends munit.FunSuite {
     assertEquals(PlatformBenchmarks.names.toVector.distinct, PlatformBenchmarks.names.toVector)
   }
 
+  test("every listed benchmark dispatches to its own argument parser") {
+    PlatformBenchmarks.names.foreach { name =>
+      val help = intercept[IllegalArgumentException] {
+        PlatformBenchmarks.run(BenchmarkInvocation(name, Vector("--help")))
+      }
+      assert(help.getMessage.contains(s"Usage: $name"), help.getMessage)
+    }
+  }
+
   test("unknown cases fail before measurement") {
     val error = intercept[IllegalArgumentException] {
       BenchmarkRunner.parse(BenchmarkName("missing"), Vector.empty)

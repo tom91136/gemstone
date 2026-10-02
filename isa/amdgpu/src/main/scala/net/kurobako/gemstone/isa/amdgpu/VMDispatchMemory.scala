@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import ELF.*
-import LoadedProgram.*
+import VMDispatchMemory.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
@@ -12,6 +12,14 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
 private object VMDispatchMemory {
+  case class GlobalBinding(
+      address: Long,
+      size: Int >= 0,
+      allocation: AllocationId,
+      offset: Long >= 0,
+      allocationSize: Long > 0
+  )
+
   val KernargAddress  = 0x100000000000L
   val DispatchAddress = 0x200000000000L
 }

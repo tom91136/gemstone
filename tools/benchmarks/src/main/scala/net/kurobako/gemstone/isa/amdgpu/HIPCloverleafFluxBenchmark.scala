@@ -150,7 +150,7 @@ object HIPCloverleafFluxBenchmark {
     val prepared = (for {
       codeObject <- ELF.index(image)
       kernel     <- codeObject.kernel("clover_flux")
-      compiled   <- VMCompiler.compile(kernel).left.map(error => CodeObject.Error.Invalid(error.message))
+      compiled   <- VMCompiler.compile(kernel).left.map(error => CodeObjectError.Invalid(error.message))
     } yield compiled).fold(error => throw IllegalArgumentException(error.message), identity)
     val groups = ((parsed.cells.raw.toLong + 63L) / 64L).toInt.unsafe[Int > 0]
     val hidden = hiddenArguments(image, prepared.source.kernargSize, parsed.cells.raw, groups.raw)
@@ -171,20 +171,14 @@ object HIPCloverleafFluxBenchmark {
         KernelTask.Argument.Scalar(hidden)
       )
     ).fold(error => throw IllegalArgumentException(error), identity)
-    val before    = PlatformMetrics.allocatedBytes
-    val started   = platform.monotonicNanos
-    var iteration = 0
-    while (iteration < parsed.iterations.raw) {
-      VMInterpreter.execute(prepared, task, memory, TaskControl(), Workgroups.Sequential, Vec.empty)
-        .fold(error => throw IllegalStateException(error.message), _ => ())
-      iteration += 1
+    val measurement = Measurement {
+      var iteration = 0
+      while (iteration < parsed.iterations.raw) {
+        VMInterpreter.execute(prepared, task, memory, TaskControl(), Workgroups.Sequential, Vec.empty)
+          .fold(error => throw IllegalStateException(error.message), _ => ())
+        iteration += 1
+      }
     }
-    val elapsed   = math.max(0L, platform.monotonicNanos - started)
-    val allocated = for {
-      start <- before
-      end   <- PlatformMetrics.allocatedBytes
-      if end >= start
-    } yield end - start
     var checksum = 0L
     var index    = 0
     while (index < parsed.cells.raw) {
@@ -192,8 +186,9 @@ object HIPCloverleafFluxBenchmark {
       index += 1
     }
     Console.out.println(
-      s"cells=${parsed.cells} iterations=${parsed.iterations} nsPerDispatch=${elapsed.toDouble / parsed.iterations.raw} " +
-        s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
+      s"cells=${parsed.cells} iterations=${parsed.iterations} nsPerDispatch=${measurement.elapsedNanos.raw.toDouble /
+          parsed.iterations.raw} " +
+        s"bytesPerDispatch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
     )
   }
 }

@@ -3,7 +3,6 @@ package net.kurobako.gemstone.server
 import cats.syntax.all.*
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
 import scala.util.control.NonFatal
@@ -99,9 +98,15 @@ object ExecutionHandler {
     case request @ Operation.AwaitCompletion(completion) =>
       encode(request, service.awaitCompletion(completion))
     case request @ Operation.CompletionDirtyRanges(completion, offset) =>
-      encode(request, service.completionDirtyRanges(completion, offset))
+      encode(
+        request,
+        service.completionDirtyRanges(id = completion, offset = offset, limit = ExecutionRPC.MaximumElements)
+      )
     case request @ Operation.CompletionPointerRelocations(completion, offset) =>
-      encode(request, service.completionPointerRelocations(completion, offset))
+      encode(
+        request,
+        service.completionPointerRelocations(id = completion, offset = offset, limit = ExecutionRPC.MaximumElements)
+      )
     case request @ Operation.CompletionPrints(completion) =>
       encode(request, service.completionPrints(completion))
     case request @ Operation.ReleaseCompletion(completion) =>

@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMExecution.*
 import VMIR.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
@@ -20,7 +19,7 @@ private class VMInstructionContext(
     val control: TaskControl,
     val workgroups: Workgroups
 ) {
-  def read(lane: Int, value: Value): Either[ExecutionFault, Long] = value match {
+  def read(lane: Int, value: Value): Either[VMFault, Long] = value match {
     // A PTX register read after a divergent path is unspecified.  Hardware
     // nevertheless carries a value for it, and CUDA reductions commonly use
     // such lanes only as inactive shuffle participants.  Use a deterministic
@@ -30,12 +29,12 @@ private class VMInstructionContext(
     case Value.Predicate(name)      => Right(if (state.predicates(lane).get(name).getOrElse(false)) 1L else 0L)
     case Value.PredicateSlot(index) => Right(if (state.predicates(lane).getSlot(index).getOrElse(false)) 1L else 0L)
     case Value.Function(name)       =>
-      Left(ExecutionFault.InvalidState(s"function symbol $name is not numeric"))
+      Left(VMFault.InvalidState(s"function symbol $name is not numeric"))
     case Value.Symbol(name) =>
       state.parameterAddresses.get(
         name
       ).orElse(kernel.sharedSymbols.get(name)).orElse(kernel.globalSymbols.get(name).map(_.raw)).toRight(
-        ExecutionFault.InvalidState(s"unknown shared symbol $name")
+        VMFault.InvalidState(s"unknown shared symbol $name")
       )
     case Value.Immediate(immediate)  => Right(immediate)
     case Value.Address(base, offset) => read(lane, base).map(_ + offset)
@@ -47,24 +46,24 @@ private class VMInstructionContext(
     case Value.LaneMaskLess          => Right((1L << (lane & 31)) - 1L)
     case Value.LaneMaskEqual         => Right(1L << (lane & 31))
     case Value.ThreadId(axis)        => geometry.localCoordinates(lane)
-        .left.map(error => ExecutionFault.InvalidState(error))
+        .left.map(error => VMFault.InvalidState(error))
         .map(coordinates => axis.select(coordinates).raw.toLong)
     case Value.BlockId(axis)  => Right(axis.select(group).raw.toLong)
     case Value.BlockDim(axis) => Right(axis.select(geometry.groupSize).raw.toLong)
     case Value.GridDim(axis)  => Right(axis.select(geometry.groupCount).raw.toLong)
   }
 
-  def functionName(lane: Int, value: Value): Either[ExecutionFault, NonEmpty[String]] = value match {
+  def functionName(lane: Int, value: Value): Either[VMFault, NonEmpty[String]] = value match {
     case Value.Function(name) => Right(name)
     case Value.Register(name) => state.functionRegisters(lane).get(name).toRight(
-        ExecutionFault.UndefinedRegister(name, pc, lane)
+        VMFault.UndefinedRegister(name, pc, lane)
       )
     case Value.RegisterSlot(index) =>
       val name = VMRegisterFile.name(index)
       state.functionRegisters(lane).get(name).toRight(
-        ExecutionFault.UndefinedRegister(name, pc, lane)
+        VMFault.UndefinedRegister(name, pc, lane)
       )
     case other =>
-      Left(ExecutionFault.InvalidState(s"expected a function value, found $other"))
+      Left(VMFault.InvalidState(s"expected a function value, found $other"))
   }
 }

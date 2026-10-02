@@ -117,7 +117,11 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }
       assert(done)
       assertEquals(service.awaitCompletion(completion), Right(()))
-      afterCompletion(service.completionPointerRelocations(completion, 0).toOption.get)
+      afterCompletion(service.completionPointerRelocations(
+        id = completion,
+        offset = 0,
+        limit = ExecutionRPC.MaximumElements
+      ).toOption.get)
       assertEquals(service.releaseCompletion(completion), Right(()))
       (reads.toVector, writes.toMap, batches)
     }

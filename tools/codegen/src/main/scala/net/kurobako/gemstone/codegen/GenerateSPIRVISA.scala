@@ -100,6 +100,7 @@ object GenerateSPIRVISA {
         (Map(
           base.resolve("SPIRV.scala")               -> renderConstants(grammar, version),
           base.resolve("OperandKind.scala")         -> renderOperandKinds(grammar, version),
+          base.resolve("NarrowEncoding.scala")      -> ImageFormats.narrowEncodingSource(version),
           base.resolve("ImageFormats.scala")        -> ImageFormats.scalaSource(version),
           base.resolve("ImageDescriptor.scala")     -> ImageDescriptorABI.scalaSource(version),
           base.resolve("ExtendedInstruction.scala") -> renderExtendedInstructions(extended, version)
@@ -226,7 +227,7 @@ object GenerateSPIRVISA {
     }
     val aliases = grammar.entries.toVector.flatMap(entry =>
       entry.aliases.map(name =>
-        s"${trustedText(name)} -> Definition.${normalizeCase(entry.name.stripPrefix("Op"))}"
+        s"${Emission.literal(name)} -> Definition.${normalizeCase(entry.name.stripPrefix("Op"))}"
       )
     ).mkString("Map(", ", ", ")")
     val kindValues =
@@ -320,10 +321,14 @@ object GenerateSPIRVISA {
         |  ): Either[InstructionDecodeError, Instruction] =
         |    if (raw.opcodeNumber != definition.opcodeNumber)
         |      Left(InstructionDecodeError.DecoderOpcodeMismatch(definition.opcodeNumber, raw.opcodeNumber))
-        |    else
-        |      OperandDecoder
-        |        .decode(definition, raw.operandWords, definition.meta.operands, operandKinds)
-        |        .map(construct)
+        |    else {
+        |      val decoded = OperandDecoder.decode(definition.opcode, raw.operandWords, definition.meta.operands, operandKinds)
+        |      // The grammar uses 32-bit switch literals; retain 64-bit cases until the selector type is resolved.
+        |      val operands = if (definition == Definition.Switch)
+        |        decoded.orElse(OperandDecoder.decodeSwitch64(definition.opcode, raw.operandWords).orElse(decoded))
+        |      else decoded
+        |      operands.map(construct)
+        |    }
         |}
         |
         |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
@@ -345,7 +350,7 @@ object GenerateSPIRVISA {
     val parameter = if (fields.isEmpty) "_" else "values"
     val decoder   =
       s"definition => raw => Instruction.decodeDefinition(definition, raw, $parameter => ${construct(entry, fields)})"
-    s"    case $caseName extends Definition(\"${escape(entry.name)}\", " +
+    s"    case $caseName extends Definition(\"${Emission.escape(entry.name)}\", " +
       s"SPIRVOpcodeNumber(${entry.opcode}), $decoder, $metadataRef)"
   }
 
@@ -383,17 +388,17 @@ object GenerateSPIRVISA {
   }
 
   private def renderMetadata(entry: Entry, fields: Vector[Field]): String = {
-    val since        = entry.version.map(value => s"Some(${trustedText(value)})").getOrElse("None")
-    val capabilities = entry.capabilities.map(value => trustedText(value)).mkString("Vec(", ", ", ")")
+    val since        = entry.version.map(value => s"Some(${Emission.literal(value)})").getOrElse("None")
+    val capabilities = entry.capabilities.map(value => Emission.literal(value)).mkString("Vec(", ", ", ")")
     val operands     = fields.map { field =>
       val quantifier = field.operand.quantifier match {
         case Some("?") => "OperandQuantifier.Optional"
         case Some("*") => "OperandQuantifier.Repeated"
         case _         => "OperandQuantifier.One"
       }
-      s"OperandShape(OperandKind.${field.operand.kind}, ${trustedText(field.name)}, $quantifier)"
+      s"OperandShape(OperandKind.${field.operand.kind}, ${Emission.literal(field.name)}, $quantifier)"
     }.mkString("Vec(", ", ", ")")
-    s"Metadata(${trustedText(entry.instructionClass)}, $since, $capabilities, $operands)"
+    s"Metadata(${Emission.literal(entry.instructionClass)}, $since, $capabilities, $operands)"
   }
 
   private def renderOperandKinds(grammar: Grammar, packageVersion: ScalaPackageVersion): String = {
@@ -419,8 +424,8 @@ object GenerateSPIRVISA {
     val enumerants = kind.enumerants.map { enumerant =>
       val parameters = enumerant.parameters.map(value => s"OperandKind.$value")
         .mkString("Vec(", ", ", ")")
-      val aliases = enumerant.aliases.map(trustedText(_)).mkString("Vec(", ", ", ")")
-      s"OperandEnumerant(${trustedText(enumerant.name)}, ${enumerant.value}L, $parameters, $aliases)"
+      val aliases = enumerant.aliases.map(Emission.literal(_)).mkString("Vec(", ", ", ")")
+      s"OperandEnumerant(${Emission.literal(enumerant.name)}, ${enumerant.value}L, $parameters, $aliases)"
     }.mkString("Vec(", ", ", ")")
     s"    OperandKindInfo(OperandKind.${kind.kind}, $enumerants)"
   }
@@ -669,9 +674,6 @@ object GenerateSPIRVISA {
     case ujson.Num(number) if number.isWhole && number >= Long.MinValue && number <= Long.MaxValue => number.toLong
     case _ => throw IllegalArgumentException("enumerant value is not an integer")
   }
-  private def escape(value: String): String = Emission.escape(value)
-
-  private def trustedText(value: String): String = Emission.nonEmptyString(value)
 
   private def checkedPackageVersion(value: String): ScalaPackageVersion =
     ScalaPackageVersion.either(value).fold(
@@ -716,14 +718,15 @@ object GenerateSPIRVISA {
         val safe = Identifiers.upperCamel(name, "Value", "Value")
         s"    final val $safe = $opcode"
       }.mkString("\n")
-      s"""|  /** ${escape(set.name)} */
+      s"""|  /** ${Emission.escape(set.name)} */
           |  object ${set.objectName} {
           |$values
           |  }""".stripMargin
     }.mkString("\n\n")
     val names = sets.map { set =>
-      val entries = set.instructions.map { case (name, opcode) => s"${trustedText(name)} -> $opcode" }.mkString(", ")
-      s"    ${trustedText(set.name)} -> Map($entries)"
+      val entries =
+        set.instructions.map { case (name, opcode) => s"${Emission.literal(name)} -> $opcode" }.mkString(", ")
+      s"    ${Emission.literal(set.name)} -> Map($entries)"
     }.mkString(",\n")
     GeneratedHeader.scala("from the pinned Khronos SPIR-V extended instruction grammars") +
       s"""|package net.kurobako.gemstone.isa.spirv.$packageVersion

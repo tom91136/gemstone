@@ -70,7 +70,7 @@ class GlobalBindingSuite extends munit.FunSuite {
           memory,
           TaskControl(),
           Workgroups.Sequential,
-          Vec(LoadedProgram.GlobalBinding(
+          Vec(VMDispatchMemory.GlobalBinding(
             0x3000,
             16,
             global,
@@ -102,7 +102,7 @@ class GlobalBindingSuite extends munit.FunSuite {
       globalMemory = Array(0x3000L -> Array.ofDim[Byte](16))
     )
     val prepared = VMCompiler.compile(kernel).toOption.get
-    val bindings = Vec(LoadedProgram.GlobalBinding(
+    val bindings = Vec(VMDispatchMemory.GlobalBinding(
       0x3000L,
       16,
       global,

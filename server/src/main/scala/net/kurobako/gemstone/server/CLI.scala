@@ -14,8 +14,8 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.*
+import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.recording.*
-import net.kurobako.gemstone.server.transport.*
 import scala.util.Using
 import scala.util.control.NonFatal
 

@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import CodeObject.*
 import EncodingConstants.*
 import cats.syntax.either.*
 import cats.syntax.traverse.*
@@ -206,9 +205,9 @@ private object ELF {
       }
 
     /** Snapshot from this session's relocated section image, before external storage is bound. */
-    def globalData(name: NonEmpty[String]): Either[CodeObject.Error, (GuestAddress, Vec[Byte])] =
+    def globalData(name: NonEmpty[String]): Either[CodeObjectError, (GuestAddress, Vec[Byte])] =
       globalImageLock.withLock {
-        global(name).toRight(CodeObject.Error.Invalid(
+        global(name).toRight(CodeObjectError.Invalid(
           s"AMDGPU global symbol $name is not present"
         )).map {
           case (address, size) =>
@@ -221,21 +220,21 @@ private object ELF {
       }
 
     /** Applies a host-to-device symbol copy to the shared code-object section image. */
-    def writeGlobal(name: NonEmpty[String], offset: Long, value: Vec[Byte]): Either[CodeObject.Error, Unit] =
+    def writeGlobal(name: NonEmpty[String], offset: Long, value: Vec[Byte]): Either[CodeObjectError, Unit] =
       globalImageLock.withLock {
-        globalSymbols.get(name).toRight(CodeObject.Error.Invalid(
+        globalSymbols.get(name).toRight(CodeObjectError.Invalid(
           s"AMDGPU global symbol $name is not present"
         )).flatMap {
           symbol =>
             globalSections.get(
               symbol.section
-            ).toRight(CodeObject.Error.Invalid(
+            ).toRight(CodeObjectError.Invalid(
               s"AMDGPU global symbol $name has no storage"
             )).flatMap {
               section =>
                 globalImages.get(
                   symbol.section
-                ).toRight(CodeObject.Error.Invalid(
+                ).toRight(CodeObjectError.Invalid(
                   s"AMDGPU global symbol $name has no image"
                 )).flatMap { image =>
                   val relative = symbol.value - section.address
@@ -243,14 +242,14 @@ private object ELF {
                     relative < 0L || relative > section.size.toLong ||
                     symbol.size.raw.toLong > section.size.toLong - relative
                   )
-                    Left(CodeObject.Error.Invalid(
+                    Left(CodeObjectError.Invalid(
                       s"AMDGPU global symbol $name exceeds its section"
                     ))
                   else if (
                     offset < 0L || offset > symbol.size.raw.toLong ||
                     value.size.toLong > symbol.size.raw.toLong - offset
                   )
-                    Left(CodeObject.Error.Invalid(
+                    Left(CodeObjectError.Invalid(
                       s"AMDGPU global write $name offset=$offset size=${value.size} exceeds symbol size ${symbol.size}"
                     ))
                   else {
@@ -262,9 +261,9 @@ private object ELF {
         }
       }
 
-    def kernel(name: String): Either[CodeObject.Error, CodeObjectKernel] = {
+    def kernel(name: String): Either[CodeObjectError, CodeObjectKernel] = {
       val missing: NonEmpty[String] = s"AMDGPU code object has no kernel symbol $name"
-      records.get(name).toRight(CodeObject.Error.Invalid(missing)).map { record =>
+      records.get(name).toRight(CodeObjectError.Invalid(missing)).map { record =>
         materialized.computeIfAbsent(name, _ => materialize(record))
       }
     }
@@ -272,15 +271,15 @@ private object ELF {
 
   // Target IDs use ASCII; ELF symbol names below may contain non-ASCII UTF-8.
   private val TargetPrefix = "amdgcn-amd-amdhsa--".getBytes(StandardCharsets.US_ASCII)
-  private val indexCache   = LRUCache[Vec[Byte], Either[CodeObject.Error, Index]](capacity = 4)
+  private val indexCache   = LRUCache[Vec[Byte], Either[CodeObjectError, Index]](capacity = 4)
 
-  def selectFunctionTarget(names: Vec[String]): Either[CodeObject.Error, String] = {
+  def selectFunctionTarget(names: Vec[String]): Either[CodeObjectError, String] = {
     val aliases    = names.distinct.sorted
     val recognized = aliases.flatMap(name => VMFunction.matching(name).map(_ -> name))
     val kinds      = recognized.map(_._1).distinct
     if (kinds.size > 1)
       Left(
-        CodeObject.Error.Invalid(
+        CodeObjectError.Invalid(
           s"AMDGPU function aliases have conflicting call semantics: ${aliases.mkString(", ")}"
         )
       )
@@ -288,7 +287,7 @@ private object ELF {
       kinds.headOption match {
         case Some(kind)                => Right(recognized.collectFirst { case (`kind`, name) => name }.get)
         case None if aliases.size == 1 => Right(aliases.head)
-        case None                      => Left(CodeObject.Error.Invalid(
+        case None                      => Left(CodeObjectError.Invalid(
             s"AMDGPU function aliases are ambiguous: ${aliases.mkString(", ")}"
           ))
       }
@@ -297,32 +296,32 @@ private object ELF {
   /** Constant-space validation suitable for a lazy loader. Full section, symbol, and kernel validation remains in
     * [[index]].
     */
-  def validateHeader(image: Vec[Byte]): Either[CodeObject.Error, Unit] =
+  def validateHeader(image: Vec[Byte]): Either[CodeObjectError, Unit] =
     Either.cond(
       image.size >= 64 &&
         image(0) == 0x7f.toByte && image(1) == 'E' && image(2) == 'L' && image(3) == 'F' &&
         image(4) == 2 && image(5) == 1,
       (),
-      CodeObject.Error.Invalid("expected a little-endian ELF64 code object")
+      CodeObjectError.Invalid("expected a little-endian ELF64 code object")
     ).flatMap(_ =>
       Either.cond(
         (image(18) & 0xff) == 224 && image(19) == 0,
         (),
-        CodeObject.Error.Invalid("ELF machine is not AMDGPU")
+        CodeObjectError.Invalid("ELF machine is not AMDGPU")
       )
     )
 
-  private def indexBytes(bytes: Array[Byte]): Either[CodeObject.Error, Index] =
+  private def indexBytes(bytes: Array[Byte]): Either[CodeObjectError, Index] =
     for {
       buffer     <- elfBuffer(bytes)
       target     <- findTarget(bytes)
-      sections   <- sections64(bytes).left.map(CodeObject.Error.Invalid(_))
+      sections   <- sections64(bytes).left.map(CodeObjectError.Invalid(_))
       names      <- sectionNames(bytes, sections, buffer.getShort(62) & 0xffff)
       rawSymbols <- readSymbols(bytes, sections)
       symbols = inferFunctionSizes(rawSymbols, sections)
       descriptors <- descriptorIndex(symbols)
       textSection <- sections.zip(names).collectFirst { case (section, ".text") => section }
-        .toRight(CodeObject.Error.Invalid("AMDGPU code object has no .text section"))
+        .toRight(CodeObjectError.Invalid("AMDGPU code object has no .text section"))
       functionTargets <- symbols.view
         .filter(candidate => candidate.kind == 2 && candidate.section > 0 && candidate.size.raw > 0)
         .toVec
@@ -341,7 +340,7 @@ private object ELF {
         .toMap
       readOnlySection <- sections.zip(names).find { case (_, name) => name == ".rodata" }.map(_._1) match {
         case Some(section) if section.sectionType == 8 =>
-          Left(CodeObject.Error.Invalid("AMDGPU .rodata section is not file-backed"))
+          Left(CodeObjectError.Invalid("AMDGPU .rodata section is not file-backed"))
         case section => Right(section)
       }
       records <- symbols.view
@@ -357,7 +356,7 @@ private object ELF {
         .toVec
         .sequence
         .map(_.toMap)
-      _ <- Either.cond(records.nonEmpty, (), CodeObject.Error.Invalid("AMDGPU code object has no kernel symbols"))
+      _ <- Either.cond(records.nonEmpty, (), CodeObjectError.Invalid("AMDGPU code object has no kernel symbols"))
       globalSections = sections.zip(names).zipWithIndex.collect {
         case ((section, name), index)
             if name == ".rodata" || name == ".data" || name == ".bss" || name == ".got" ||
@@ -368,7 +367,7 @@ private object ELF {
       }.toVec.traverse { symbol =>
         symbol.name.refine[NonEmpty[String]]
           .leftMap(_ =>
-            CodeObject.Error.Invalid(
+            CodeObjectError.Invalid(
               s"invalid AMDGPU global name '${symbol.name}'"
             )
           )
@@ -389,7 +388,7 @@ private object ELF {
       sections.filter(_.sectionType == NoteSection)
     )
 
-  def index(image: Vec[Byte]): Either[CodeObject.Error, Index] =
+  def index(image: Vec[Byte]): Either[CodeObjectError, Index] =
     indexCache.get(image)(indexBytes(Vec.toArray(image))).map(_.fork())
 
   private val NoteSection = 7
@@ -397,11 +396,11 @@ private object ELF {
   private def sectionBytes(bytes: Array[Byte], section: SectionHeader): Vec[Byte] =
     Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, section.offset, section.offset + section.size))
 
-  def notes(image: Vec[Byte]): Either[CodeObject.Error, Vec[Vec[Byte]]] = {
+  def notes(image: Vec[Byte]): Either[CodeObjectError, Vec[Vec[Byte]]] = {
     val bytes = Vec.toArray(image)
     for {
       _        <- elfBuffer(bytes)
-      sections <- sections64(bytes).left.map(CodeObject.Error.Invalid(_))
+      sections <- sections64(bytes).left.map(CodeObjectError.Invalid(_))
     } yield sections.filter(_.sectionType == NoteSection).map(sectionBytes(bytes, _))
   }
 
@@ -416,11 +415,11 @@ private object ELF {
       image: Vec[Byte],
       external: Map[String, Long] = Map.empty,
       addresses: Map[String, Long] = Map.empty
-  ): Either[CodeObject.Error, Vec[CodeObject.Section]] = {
+  ): Either[CodeObjectError, Vec[ExecutableSection]] = {
     val bytes = Vec.toArray(image)
     for {
       buffer   <- elfBuffer(bytes)
-      sections <- sections64(bytes).left.map(CodeObject.Error.Invalid(_))
+      sections <- sections64(bytes).left.map(CodeObjectError.Invalid(_))
       names    <- sectionNames(bytes, sections, buffer.getShort(62) & 0xffff)
       symbols  <-
         if (sections.exists(section => section.sectionType == SymbolTable || section.sectionType == DynamicSymbolTable))
@@ -432,7 +431,7 @@ private object ELF {
             _ <- Either.cond(
               section.sectionType == ProgramBits,
               (),
-              CodeObject.Error.Invalid(s"executable section ${names(index)} has no file data")
+              CodeObjectError.Invalid(s"executable section ${names(index)} has no file data")
             )
             relocated <-
               relocateText(bytes, sections, names, section, index, buffer.getShort(16) == 1, external, addresses)
@@ -443,22 +442,22 @@ private object ELF {
                   relative >= 0 && relative <= section.size &&
                     symbol.size.raw <= section.size - relative,
                   (),
-                  CodeObject.Error.Invalid(s"symbol ${symbol.name} exceeds section ${names(index)}")
+                  CodeObjectError.Invalid(s"symbol ${symbol.name} exceeds section ${names(index)}")
                 )
-              } yield CodeObject.Symbol(
+              } yield ExecutableSection.Symbol(
                 symbol.name.unsafe[NonEmpty[String]],
                 relative.toInt.unsafe[Int >= 0],
                 symbol.size
               )
             }
-          } yield CodeObject.Section(
+          } yield ExecutableSection(
             names(index),
             addresses.getOrElse(names(index), section.address),
             relocated,
             entries.distinct.sortBy(_.offset)
           )
       }
-      _ <- Either.cond(code.nonEmpty, (), CodeObject.Error.Invalid("AMDGPU code object has no executable sections"))
+      _ <- Either.cond(code.nonEmpty, (), CodeObjectError.Invalid("AMDGPU code object has no executable sections"))
     } yield code
   }
 
@@ -471,35 +470,35 @@ private object ELF {
       relocatable: Boolean,
       external: Map[String, Long],
       addresses: Map[String, Long]
-  ): Either[CodeObject.Error, Vec[Byte]] = {
+  ): Either[CodeObjectError, Vec[Byte]] = {
     val output = java.util.Arrays.copyOfRange(bytes, code.offset, code.offset + code.size)
     val base   = addresses.getOrElse(names(index), code.address)
-    def symbol(tableIndex: Int, symbolIndex: Long): Either[CodeObject.Error, BigInt] = for {
+    def symbol(tableIndex: Int, symbolIndex: Long): Either[CodeObjectError, BigInt] = for {
       table <- sections.lift(tableIndex).filter(value =>
         value.sectionType == SymbolTable || value.sectionType == DynamicSymbolTable
       )
-        .toRight(CodeObject.Error.Invalid("relocation has no valid symbol table"))
+        .toRight(CodeObjectError.Invalid("relocation has no valid symbol table"))
       _ <- Either.cond(
         table.entrySize >= SymbolEntrySize && symbolIndex >= 0 && symbolIndex < table.size / table.entrySize,
         (),
-        CodeObject.Error.Invalid("relocation symbol index exceeds table")
+        CodeObjectError.Invalid("relocation symbol index exceeds table")
       )
-      strings <- sections.lift(table.link).toRight(CodeObject.Error.Invalid("relocation has no symbol string table"))
+      strings <- sections.lift(table.link).toRight(CodeObjectError.Invalid("relocation has no symbol string table"))
       start = table.offset + symbolIndex.toInt * table.entrySize
       name <- cString(bytes, strings, decodeInt32(bytes, start))
       sectionIndex = decodeUInt16(bytes, start + 6)
       value        = decodeInt64(bytes, start + 8)
       resolved <- if (symbolIndex == 0) Right(BigInt(0)) // ELF STN_UNDEF contributes zero.
       else if (sectionIndex == 0)
-        external.get(name).map(BigInt(_)).toRight(CodeObject.Error.Unsupported(s"undefined relocation symbol '$name'"))
+        external.get(name).map(BigInt(_)).toRight(CodeObjectError.Unsupported(s"undefined relocation symbol '$name'"))
       else if (sectionIndex == 0xfff1) Right(BigInt(value)) // SHN_ABS
       else sections.lift(
         sectionIndex
-      ).toRight(CodeObject.Error.Invalid(s"invalid section for relocation symbol '$name'")).flatMap { section =>
+      ).toRight(CodeObjectError.Invalid(s"invalid section for relocation symbol '$name'")).flatMap { section =>
         val address =
           addresses.get(names(sectionIndex)).orElse(Option.when(!relocatable || sectionIndex == index)(section.address))
         address.toRight(
-          CodeObject.Error.Unsupported(s"relocation requires an address for section ${names(sectionIndex)}")
+          CodeObjectError.Unsupported(s"relocation requires an address for section ${names(sectionIndex)}")
         )
           .map(address => BigInt(address) + value - (if (relocatable) 0 else section.address))
       }
@@ -512,7 +511,7 @@ private object ELF {
         val explicit = table.sectionType == RelocationSection
         val minimum  = if (explicit) 24 else 16
         if (table.entrySize < minimum || table.size % table.entrySize != 0)
-          Left(CodeObject.Error.Invalid("invalid relocation table"))
+          Left(CodeObjectError.Invalid("invalid relocation table"))
         else (0 until table.size by table.entrySize).toVec.traverse { record =>
           val start   = table.offset + record
           val address = decodeInt64(bytes, start)
@@ -535,12 +534,12 @@ private object ELF {
                   R_AMDGPU_REL32_HI
                 )(kind),
                 (),
-                CodeObject.Error.Unsupported(s"unsupported AMDGPU relocation type $kind")
+                CodeObjectError.Unsupported(s"unsupported AMDGPU relocation type $kind")
               )
               _ <- Either.cond(
                 offset >= 0 && offset <= code.size - width.raw,
                 (),
-                CodeObject.Error.Invalid("text relocation exceeds section")
+                CodeObjectError.Invalid("text relocation exceeds section")
               )
               resolved <- symbol(table.link, info >>> 32)
               addend = if (explicit) BigInt(decodeInt64(bytes, start + 16))
@@ -552,7 +551,7 @@ private object ELF {
                 (kind != R_AMDGPU_REL32 || value.isValidInt) &&
                   (kind != R_AMDGPU_ABS32 || (value >= 0 && value < (BigInt(1) << 32))),
                 (),
-                CodeObject.Error.Invalid("text relocation overflows its field")
+                CodeObjectError.Invalid("text relocation overflows its field")
               )
             } yield LittleEndian.write(
               (if (kind == R_AMDGPU_ABS32_HI || kind == R_AMDGPU_REL32_HI) value >> 32 else value).toLong,
@@ -565,7 +564,7 @@ private object ELF {
       }.map(_ => Vec.unsafeWrapArray(output))
   }
 
-  def decode(image: Vec[Byte]): Either[CodeObject.Error, Map[String, CodeObjectKernel]] =
+  def decode(image: Vec[Byte]): Either[CodeObjectError, Map[String, CodeObjectKernel]] =
     index(image).flatMap { indexed =>
       indexed.kernelNames.view.map(name => indexed.kernel(name).map(name -> _)).toVec.sequence.map(_.toMap)
     }
@@ -608,7 +607,7 @@ private object ELF {
     else java.util.Arrays.copyOf(code, lastEnd)
   }
 
-  private def elfBuffer(bytes: Array[Byte]): Either[CodeObject.Error, ByteBuffer] =
+  private def elfBuffer(bytes: Array[Byte]): Either[CodeObjectError, ByteBuffer] =
     validateHeader(Vec.unsafeWrapArray(bytes)).map(_ => ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN))
 
   private val RelocationSection   = 4
@@ -625,10 +624,10 @@ private object ELF {
   private def readGlobalRelocations(
       bytes: Array[Byte],
       sections: Vec[SectionHeader]
-  ): Either[CodeObject.Error, Vec[(Long, Long)]] = {
+  ): Either[CodeObjectError, Vec[(Long, Long)]] = {
     val buffer  = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
     val builder = Vec.newBuilder[(Long, Long)]
-    var failure = Option.empty[CodeObject.Error]
+    var failure = Option.empty[CodeObjectError]
     sections.view.filter(section => section.sectionType == RelocationSection).foreach { section =>
       val stride = math.max(RelocationEntrySize, section.entrySize)
       var index  = 0
@@ -641,7 +640,7 @@ private object ELF {
         if ((info & 0xffffffffL) == RelocationAbs64)
           symbolValue(bytes, sections, section.link, symbol) match {
             case Some(resolved) => builder += (target -> (resolved + addend))
-            case None => failure = Some(CodeObject.Error.Invalid(s"unresolved AMDGPU relocation symbol $symbol"))
+            case None => failure = Some(CodeObjectError.Invalid(s"unresolved AMDGPU relocation symbol $symbol"))
           }
         index += stride
       }
@@ -664,24 +663,24 @@ private object ELF {
       bytes: Array[Byte],
       sections: Vec[SectionHeader],
       index: Int
-  ): Either[CodeObject.Error, Vec[String]] =
-    sections.lift(index).toRight(CodeObject.Error.Invalid("invalid ELF section-name table index")).flatMap { table =>
+  ): Either[CodeObjectError, Vec[String]] =
+    sections.lift(index).toRight(CodeObjectError.Invalid("invalid ELF section-name table index")).flatMap { table =>
       sections.map(section => cString(bytes, table, section.nameOffset)).sequence
     }
 
   private def readSymbols(
       bytes: Array[Byte],
       sections: Vec[SectionHeader]
-  ): Either[CodeObject.Error, Vec[Symbol]] =
+  ): Either[CodeObjectError, Vec[Symbol]] =
     sections.find(_.sectionType == SymbolTable).orElse(sections.find(_.sectionType == DynamicSymbolTable))
-      .toRight(CodeObject.Error.Invalid("AMDGPU code object has no symbol table"))
+      .toRight(CodeObjectError.Invalid("AMDGPU code object has no symbol table"))
       .flatMap { table =>
         for {
-          strings <- sections.lift(table.link).toRight(CodeObject.Error.Invalid("invalid ELF symbol string table"))
+          strings <- sections.lift(table.link).toRight(CodeObjectError.Invalid("invalid ELF symbol string table"))
           _       <- Either.cond(
             table.entrySize >= SymbolEntrySize && table.size % table.entrySize == 0,
             (),
-            CodeObject.Error.Invalid("invalid ELF symbol-table entry size")
+            CodeObjectError.Invalid("invalid ELF symbol-table entry size")
           )
           symbols <- Vec.tabulate(table.size / table.entrySize) { index =>
             val start = table.offset + index * table.entrySize
@@ -699,16 +698,16 @@ private object ELF {
         } yield symbols
       }
 
-  private def descriptorIndex(symbols: Vec[Symbol]): Either[CodeObject.Error, Map[String, Symbol]] =
+  private def descriptorIndex(symbols: Vec[Symbol]): Either[CodeObjectError, Map[String, Symbol]] =
     symbols.view
       .filter(symbol => symbol.kind == 1 && symbol.name.endsWith(".kd"))
-      .foldLeft[Either[CodeObject.Error, Map[String, Symbol]]](Right(Map.empty)) {
+      .foldLeft[Either[CodeObjectError, Map[String, Symbol]]](Right(Map.empty)) {
         case (error @ Left(_), _)         => error
         case (Right(descriptors), symbol) =>
           Either.cond(
             !descriptors.contains(symbol.name),
             descriptors.updated(symbol.name, symbol),
-            CodeObject.Error.Invalid(s"duplicate AMDGPU kernel descriptor symbol ${symbol.name}")
+            CodeObjectError.Invalid(s"duplicate AMDGPU kernel descriptor symbol ${symbol.name}")
           )
       }
 
@@ -718,19 +717,19 @@ private object ELF {
       names: Vec[String],
       descriptors: Map[String, Symbol],
       symbol: Symbol
-  ): Either[CodeObject.Error, KernelRecord] =
+  ): Either[CodeObjectError, KernelRecord] =
     for {
-      section <- sections.lift(symbol.section).toRight(CodeObject.Error.Invalid(
+      section <- sections.lift(symbol.section).toRight(CodeObjectError.Invalid(
         s"invalid section for ${symbol.name}"
       ))
       sectionName <-
-        names.lift(symbol.section).toRight(CodeObject.Error.Invalid(
+        names.lift(symbol.section).toRight(CodeObjectError.Invalid(
           s"missing section name for ${symbol.name}"
         ))
       _ <- Either.cond(
         sectionName == ".text" && symbol.value >= section.address,
         (),
-        CodeObject.Error.Invalid(
+        CodeObjectError.Invalid(
           s"kernel ${symbol.name} does not point into .text"
         )
       )
@@ -738,11 +737,11 @@ private object ELF {
       _        <- Either.cond(
         relative <= section.size && symbol.size.raw <= section.size - relative,
         (),
-        CodeObject.Error.Invalid(s"kernel ${symbol.name} exceeds .text")
+        CodeObjectError.Invalid(s"kernel ${symbol.name} exceeds .text")
       )
       start = section.offset + relative
       descriptorSymbol <- descriptors.get(s"${symbol.name}.kd")
-        .toRight(CodeObject.Error.Invalid(
+        .toRight(CodeObjectError.Invalid(
           s"kernel ${symbol.name} has no descriptor symbol"
         ))
       descriptor       <- symbolBytes(bytes, sections, descriptorSymbol, 64, s"kernel ${symbol.name} descriptor")
@@ -773,28 +772,28 @@ private object ELF {
       symbol: Symbol,
       minimumSize: Int,
       label: String
-  ): Either[CodeObject.Error, Array[Byte]] =
+  ): Either[CodeObjectError, Array[Byte]] =
     for {
-      section <- sections.lift(symbol.section).toRight(CodeObject.Error.Invalid(
+      section <- sections.lift(symbol.section).toRight(CodeObjectError.Invalid(
         s"invalid section for $label"
       ))
       _ <- Either.cond(
         symbol.value >= section.address,
         (),
-        CodeObject.Error.Invalid(s"$label precedes its section")
+        CodeObjectError.Invalid(s"$label precedes its section")
       )
       relative <- intValue(symbol.value - section.address, s"$label section offset")
       _        <- Either.cond(
         symbol.size.raw >= minimumSize && relative <= section.size && symbol.size.raw <= section.size - relative,
         (),
-        CodeObject.Error.Invalid(s"$label is truncated")
+        CodeObjectError.Invalid(s"$label is truncated")
       )
       start = section.offset + relative
     } yield java.util.Arrays.copyOfRange(bytes, start, start + symbol.size.raw)
 
   // Scan the untrusted ELF bytes without materializing every candidate substring.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def findTarget(bytes: Array[Byte]): Either[CodeObject.Error, Target] = {
+  private def findTarget(bytes: Array[Byte]): Either[CodeObjectError, Target] = {
     var candidate   = 0
     var prefixStart = -1
     val lastStart   = bytes.length - TargetPrefix.length
@@ -804,7 +803,7 @@ private object ELF {
       if (matched == TargetPrefix.length) prefixStart = candidate
       candidate += 1
     }
-    if (prefixStart < 0) Left(CodeObject.Error.Invalid("AMDGPU target metadata is absent"))
+    if (prefixStart < 0) Left(CodeObjectError.Invalid("AMDGPU target metadata is absent"))
     else {
       val valueStart = prefixStart + TargetPrefix.length
       var valueEnd   = valueStart
@@ -820,32 +819,32 @@ private object ELF {
       }
       val name = String(bytes, valueStart, valueEnd - valueStart, StandardCharsets.US_ASCII)
       Target.either(name.toLowerCaseRoot).leftMap(message =>
-        CodeObject.Error.Unsupported(message)
+        CodeObjectError.Unsupported(message)
       )
     }
   }
 
   // Find the terminator in place before constructing the one validated string.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def cString(bytes: Array[Byte], table: SectionHeader, offset: Int): Either[CodeObject.Error, String] =
-    if (table.sectionType != StringTable) Left(CodeObject.Error.Invalid("ELF string table has an invalid section type"))
+  private def cString(bytes: Array[Byte], table: SectionHeader, offset: Int): Either[CodeObjectError, String] =
+    if (table.sectionType != StringTable) Left(CodeObjectError.Invalid("ELF string table has an invalid section type"))
     else if (offset < 0 || offset >= table.size)
-      Left(CodeObject.Error.Invalid("ELF string offset is outside its table"))
+      Left(CodeObjectError.Invalid("ELF string offset is outside its table"))
     else {
       val start = table.offset + offset
       val limit = table.offset + table.size
       var end   = start
       while (end < limit && bytes(end) != 0) end += 1
-      if (end == limit) Left(CodeObject.Error.Invalid("unterminated ELF string"))
+      if (end == limit) Left(CodeObjectError.Invalid("unterminated ELF string"))
       else decodeUtf8(bytes, start, end - start)
-        .left.map(_ => CodeObject.Error.Unsupported("ELF string is not valid UTF-8"))
+        .left.map(_ => CodeObjectError.Unsupported("ELF string is not valid UTF-8"))
     }
 
-  private def intValue(value: Long, label: String): Either[CodeObject.Error, Int] =
+  private def intValue(value: Long, label: String): Either[CodeObjectError, Int] =
     Either.cond(
       value >= 0L && value <= Int.MaxValue.toLong,
       value.toInt,
-      CodeObject.Error.Unsupported(s"$label is too large")
+      CodeObjectError.Unsupported(s"$label is too large")
     )
 
 }

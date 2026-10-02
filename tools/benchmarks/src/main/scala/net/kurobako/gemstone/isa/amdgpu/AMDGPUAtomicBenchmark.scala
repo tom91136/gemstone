@@ -79,34 +79,28 @@ object AMDGPUAtomicBenchmark {
         KernelTask.Argument.Scalar(LittleEndian.toVec(7L, 8))
       )
     ).fold(error => throw IllegalArgumentException(error), identity)
-    val memory = AtomicMemory()
-    val before = PlatformMetrics.allocatedBytes
-    val start  = platform.monotonicNanos
-    var index  = 0
-    while (index < iterations.raw) {
-      VMInterpreter.execute(
-        kernel,
-        dispatch,
-        memory,
-        TaskControl(),
-        Workgroups.Sequential,
-        Vec.empty
-      ).fold(error => throw IllegalStateException(error.message), identity)
-      index += 1
+    val memory      = AtomicMemory()
+    val measurement = Measurement {
+      var index = 0
+      while (index < iterations.raw) {
+        VMInterpreter.execute(
+          kernel,
+          dispatch,
+          memory,
+          TaskControl(),
+          Workgroups.Sequential,
+          Vec.empty
+        ).fold(error => throw IllegalStateException(error.message), identity)
+        index += 1
+      }
     }
-    val elapsed   = platform.monotonicNanos - start
-    val allocated = for {
-      initial <- before
-      current <- PlatformMetrics.allocatedBytes
-      if current >= initial
-    } yield current - initial
     val observed = LittleEndian.decode(memory.bytes, 0, 4)
     val expected = (7L + iterations.raw.toLong * 9L) & 0xffffffffL
     if (observed != expected)
       throw IllegalStateException(s"atomic benchmark result $observed != $expected")
     Console.out.println(
-      s"iterations=$iterations nsPerDispatch=${elapsed.toDouble / iterations.raw} " +
-        s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.raw.toDouble / iterations.raw)} checksum=$observed"
+      s"iterations=$iterations nsPerDispatch=${measurement.elapsedNanos.raw.toDouble / iterations.raw} " +
+        s"bytesPerDispatch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / iterations.raw)} checksum=$observed"
     )
   }
 }

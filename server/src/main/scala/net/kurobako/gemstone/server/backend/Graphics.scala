@@ -4,6 +4,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.graphics.*
 import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.graphics.ShaderMetadata.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.spirv.v1_6.*
 import net.kurobako.gemstone.isa.spirv.v1_6.graphics.*
 import net.kurobako.gemstone.memory.*

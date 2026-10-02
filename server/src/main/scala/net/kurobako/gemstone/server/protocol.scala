@@ -4,11 +4,13 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
 import java.io.IOException
+import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
-import net.kurobako.gemstone.server.transport.*
+import net.kurobako.gemstone.rpc.ExecutionProtocol.given
+import net.kurobako.gemstone.server.Transport.*
+import net.kurobako.gemstone.vm.*
 import scala.compiletime.error
 import scala.util.Using
 
@@ -43,6 +45,59 @@ object protocol {
 
   }
 
+  object Frame {
+    def magic(bytes: Array[Byte]): Int                = integer(bytes, 0)
+    def integer(bytes: Array[Byte], offset: Int): Int = ByteBuffer.wrap(bytes, offset, 4).getInt()
+
+    def operation(bytes: Array[Byte]): String = {
+      val size = integer(bytes, ExecutionRPC.RequestTagSizeOffset.raw)
+      StandardCharsets.UTF_8.newDecoder()
+        .decode(ByteBuffer.wrap(bytes, ExecutionRPC.RequestHeaderBytes.raw, size)).toString
+    }
+
+    def payload(bytes: Array[Byte]): Array[Byte] =
+      java.util.Arrays.copyOfRange(
+        bytes,
+        ExecutionRPC.RequestHeaderBytes.raw + integer(bytes, ExecutionRPC.RequestTagSizeOffset.raw),
+        bytes.length
+      )
+
+    /** Checks framing without requiring the payload to be retained. Callers impose their own size budget. */
+    def validatePrefix(bytes: Array[Byte], frameSize: Long): Unit = {
+      def check(value: Boolean): Unit = if (!value) throw IOException("invalid RPC frame")
+      check(bytes.length >= ExecutionRPC.ResponseHeaderBytes.raw && bytes.length <= frameSize)
+      val (header, payload) = magic(bytes) match {
+        case ExecutionRPC.RequestMagic =>
+          check(bytes.length >= ExecutionRPC.RequestHeaderBytes.raw)
+          val tagSize = integer(bytes, ExecutionRPC.RequestTagSizeOffset.raw)
+          check(validTagSize(tagSize))
+          (ExecutionRPC.RequestHeaderBytes.raw + tagSize, integer(bytes, ExecutionRPC.RequestPayloadSizeOffset.raw))
+        case ExecutionRPC.ResponseMagic =>
+          val status = integer(bytes, ExecutionRPC.ResponseStatusOffset.raw)
+          check(status == 0 || status == 1)
+          (ExecutionRPC.ResponseHeaderBytes.raw, integer(bytes, ExecutionRPC.ResponsePayloadSizeOffset.raw))
+        case _ => throw IOException("invalid RPC frame magic")
+      }
+      check(payload >= 0 && header.toLong + payload == frameSize)
+    }
+
+    def readResponse(input: DataInputStream, maximum: Int): Array[Byte] = {
+      val receivedMagic = input.readInt()
+      if (receivedMagic != ExecutionRPC.ResponseMagic) throw IOException("unexpected RPC response magic")
+      val prefix = ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes.raw).putInt(receivedMagic).array()
+      input.readFully(prefix, Integer.BYTES, prefix.length - Integer.BYTES)
+      val payloadSize = integer(prefix, ExecutionRPC.ResponsePayloadSizeOffset.raw)
+      val frameSize   = ExecutionRPC.ResponseHeaderBytes.raw.toLong + payloadSize
+      validatePrefix(prefix, frameSize)
+      if (frameSize > maximum) throw IOException("RPC response exceeds frame bounds")
+      val frame = java.util.Arrays.copyOf(prefix, frameSize.toInt)
+      input.readFully(frame, prefix.length, payloadSize)
+      frame
+    }
+  }
+
+  private def validTagSize(size: Int): Boolean = size > 0 && size <= ExecutionRPC.MaximumTagBytes.raw
+
   case class Header(client: ClientId, session: SessionId, operation: String, payloadSize: Int >= 0)
 
   /** Reads the execution header after its magic. The stream is never marked or rewound. */
@@ -52,7 +107,7 @@ object protocol {
     val low     = input.readLong()
     val session = SessionId.either((high, low)).fold(message => throw IllegalArgumentException(message), identity)
     val tagSize = input.readInt()
-    require(tagSize > 0 && tagSize <= ExecutionRPC.MaximumTagBytes.raw, s"invalid operation tag size: $tagSize")
+    require(validTagSize(tagSize), s"invalid operation tag size: $tagSize")
     val size = input.readInt()
     require(size >= 0 && size <= ExecutionRPC.MaximumPayload.raw, s"invalid execution payload size: $size")
     val tag       = readExactly(input, tagSize, EOFException(_))
@@ -166,7 +221,7 @@ object protocol {
     private def exchange[A](endpoint: Endpoint, timeoutMillis: Int > 0, operation: Int, client: Option[ClientId])(
         read: DataInputStream => A
     ): A =
-      Using.resource(transport.connect(endpoint, timeoutMillis)) { channel =>
+      Using.resource(SocketTransport.connect(endpoint, timeoutMillis)) { channel =>
         val output = DataOutputStream(channel.output)
         writeRequest(output, operation, client)
         val input   = DataInputStream(channel.input)

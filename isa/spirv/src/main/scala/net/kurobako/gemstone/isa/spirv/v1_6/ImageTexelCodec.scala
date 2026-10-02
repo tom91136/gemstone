@@ -7,10 +7,10 @@ import net.kurobako.gemstone.constraint.auto.*
   * scalar bits; floating colors carry IEEE binary32 bits.
   */
 object ImageTexelCodec {
-  def texelBytes(format: Int): Int = IntegerImageFormat(format) match {
-    case Some(layout)                                => layout.texelBytes
-    case None if NarrowImageFormat(format).isDefined => NarrowImageFormat(format).get.texelBytes.raw
-    case None                                        => format match {
+  def texelBytes(format: Int): Int = ImageFormats.integer(format) match {
+    case Some(layout)                                  => layout.texelBytes
+    case None if ImageFormats.narrow(format).isDefined => ImageFormats.narrow(format).get.texelBytes.raw
+    case None                                          => format match {
         case ImageDescriptor.Format.DecodedRgb32f => 12
         case ImageFormat.Rgba32f                  => 16
         case ImageFormat.Rg32f | ImageDescriptor.Format.D32SfloatS8Depth | ImageDescriptor.Format.D32SfloatS8Stencil =>
@@ -23,11 +23,11 @@ object ImageTexelCodec {
       }
   }
 
-  def integer(format: Int): Boolean = IntegerImageFormat(format).nonEmpty
-  def signed(format: Int): Boolean  = IntegerImageFormat(format).exists(_.signed) ||
-    NormalizedImageFormat(format).exists(_.signed)
+  def integer(format: Int): Boolean = ImageFormats.integer(format).nonEmpty
+  def signed(format: Int): Boolean  = ImageFormats.integer(format).exists(_.signed) ||
+    ImageFormats.normalized(format).exists(_.signed)
   def floating(format: Int): Boolean = floatComponents(format) != 0 ||
-    NarrowImageFormat(format).exists(_.encoding != ImageFormats.NarrowEncoding.Unorm)
+    ImageFormats.narrow(format).exists(_.encoding != NarrowEncoding.Unorm)
   def floatComponents(format: Int): Int = ImageFormats.floatComponents(format)
   private def bits(bytes: Array[Byte], offset: Int, count: Int where Between[1, 8]): Long =
     (0 until count.raw).foldLeft(0L)((value, byte) =>
@@ -43,18 +43,18 @@ object ImageTexelCodec {
     if (floats != 0) {
       if (lane >= floats) { if (lane == 3) 1.0 else 0.0 }
       else java.lang.Float.intBitsToFloat(bits(bytes, offset + lane * 4, 4).toInt).toDouble
-    } else NarrowImageFormat(format) match {
+    } else ImageFormats.narrow(format) match {
       case Some(layout) =>
         if (lane >= layout.components) { if (lane == 3) 1.0 else 0.0 }
         else layout.decode(
           bits(
             bytes,
-            offset + (if (layout.encoding == ImageFormats.NarrowEncoding.Half) lane * 2 else 0),
+            offset + (if (layout.encoding == NarrowEncoding.Half) lane * 2 else 0),
             layout.elementBytes
           ),
           lane
         )
-      case None => NormalizedImageFormat(format) match {
+      case None => ImageFormats.normalized(format) match {
           case Some(layout) =>
             if (lane >= layout.components) { if (lane == 3) 1.0 else 0.0 }
             else layout.decode(bytes(offset + layout.channel(lane)).toLong & 255L, lane)
@@ -63,7 +63,7 @@ object ImageTexelCodec {
     }
   }
   def readInteger(bytes: Array[Byte], offset: Int, format: Int, lane: Int): Int = {
-    val layout = IntegerImageFormat(format).getOrElse(throw IllegalArgumentException("not an integer image"))
+    val layout = ImageFormats.integer(format).getOrElse(throw IllegalArgumentException("not an integer image"))
     if (lane >= layout.components) { if (lane == 3) 1 else 0 }
     else layout.decode(
       bits(bytes, offset + layout.offset(lane), if (layout.packed) 4 else layout.componentBytes),
@@ -77,7 +77,7 @@ object ImageTexelCodec {
     if (floats != 0) (0 until floats).foreach(lane =>
       if ((mask & (1 << lane)) != 0) put(bytes, offset + lane * 4, 4, values(lane).toLong)
     )
-    else IntegerImageFormat(format) match {
+    else ImageFormats.integer(format) match {
       case Some(layout) =>
         if (layout.packed) {
           val lanes = Array.tabulate[Long](4)(lane =>
@@ -88,9 +88,9 @@ object ImageTexelCodec {
           if ((mask & (1 << lane)) != 0)
             put(bytes, offset + layout.offset(lane), layout.componentBytes, layout.encode(values(lane).toLong))
         )
-      case None => NarrowImageFormat(format) match {
+      case None => ImageFormats.narrow(format) match {
           case Some(layout) =>
-            if (layout.encoding == ImageFormats.NarrowEncoding.SharedExponent) {
+            if (layout.encoding == NarrowEncoding.SharedExponent) {
               val channels =
                 Array.tabulate(3)(lane => if (value(lane).isNaN) 0.0 else Math.max(0.0, Math.min(65408.0, value(lane))))
               val maximum  = channels.max
@@ -100,7 +100,7 @@ object ImageTexelCodec {
                 word | (Math.floor(Math.scalb(channels(lane), 24 - exponent) + 0.5).toLong << (lane * 9))
               )
               put(bytes, offset, 4, packed)
-            } else if (layout.encoding == ImageFormats.NarrowEncoding.Half) {
+            } else if (layout.encoding == NarrowEncoding.Half) {
               (0 until layout.components).foreach(lane =>
                 if ((mask & (1 << lane)) != 0) put(bytes, offset + lane * 2, 2, layout.encodeLane(value(lane), lane))
               )
@@ -116,7 +116,7 @@ object ImageTexelCodec {
               put(bytes, offset, layout.texelBytes, packed)
             }
           case None =>
-            val layout = NormalizedImageFormat(
+            val layout = ImageFormats.normalized(
               format
             ).getOrElse(throw IllegalArgumentException(s"unsupported image format $format"))
             (0 until layout.components).foreach(lane =>

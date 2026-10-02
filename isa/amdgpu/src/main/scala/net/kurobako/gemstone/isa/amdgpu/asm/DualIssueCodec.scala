@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu.asm
 
-import Binary.*
 import Program.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.binary.*
@@ -115,7 +114,7 @@ private object DualIssueCodec {
       }
     }.headOption
 
-  def decode(bytes: Vec[Byte], offset: Int, target: Target): Either[CodecError, StatementDecoded] = {
+  def decode(bytes: Vec[Byte], offset: Int, target: Target): Either[CodecError, DecodedStatement] = {
     val result = for {
       layout <- Vec(
         EncodingFormat.VOPDXY,
@@ -172,7 +171,7 @@ private object DualIssueCodec {
       }
       encoded <- encode(halves(0), halves(1), target).toOption
       if encoded == bytes.slice(offset, offset + size)
-    } yield StatementDecoded(Statement.InstructionPair(halves(0), halves(1)), size.unsafe[Int > 0])
+    } yield DecodedStatement(Statement.InstructionPair(halves(0), halves(1)), size.unsafe[Int > 0])
     result.toRight(CodecError.InvalidEncoding(s"invalid or truncated dual-issue instruction at byte $offset"))
   }
 }

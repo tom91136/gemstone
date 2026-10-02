@@ -73,25 +73,20 @@ object SPIRVExecutionBenchmark {
         source,
         Validation.Environment.OpenCLCompute
       ).fold(error => throw IllegalArgumentException(error.message), identity)
-      val allocatedBefore = PlatformMetrics.allocatedBytes
-      val started         = platform.monotonicNanos
-      var iteration       = 0
-      while (iteration < parsed.iterations.raw) {
-        val control = TaskControl()
-        program.execute(task, EmptyMemory, control, workgroups)
-          .fold(error => throw IllegalStateException(error.message), _ => ())
-        iteration += 1
+      val measurement = Measurement {
+        var iteration = 0
+        while (iteration < parsed.iterations.raw) {
+          val control = TaskControl()
+          program.execute(task, EmptyMemory, control, workgroups)
+            .fold(error => throw IllegalStateException(error.message), _ => ())
+          iteration += 1
+        }
       }
-      val elapsed   = math.max(0L, platform.monotonicNanos - started)
-      val allocated = for {
-        before <- allocatedBefore
-        after  <- PlatformMetrics.allocatedBytes
-        if after >= before
-      } yield after - before
       Console.out.println(
         s"iterations=${parsed.iterations} groups=${parsed.groups} instructions=${parsed.instructions} " +
-          s"parallelism=${parsed.parallelism} nsPerDispatch=${elapsed.toDouble / parsed.iterations.raw} " +
-          s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)}"
+          s"parallelism=${parsed.parallelism} nsPerDispatch=${measurement.elapsedNanos.raw.toDouble /
+              parsed.iterations.raw} " +
+          s"bytesPerDispatch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)}"
       )
     }
   }

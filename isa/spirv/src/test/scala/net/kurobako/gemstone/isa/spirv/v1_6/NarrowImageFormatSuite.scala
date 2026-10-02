@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 
 class NarrowImageFormatSuite extends munit.FunSuite {
   test("half image lanes preserve every finite encoding including signed zero and subnormals") {
-    val layout = NarrowImageFormat(9).get
+    val layout = ImageFormats.narrow(9).get
     for (code <- 0 until 65536) {
       val value   = layout.decode(code.toLong, 0)
       val encoded = layout.encodeLane(value, 0)
@@ -15,7 +15,7 @@ class NarrowImageFormatSuite extends munit.FunSuite {
     assertEquals(layout.encodeLane(3 * Math.scalb(1.0, -25), 0), 2L)
   }
   test("unsigned float image lanes preserve all finite codes and clamp negatives") {
-    val layout = NarrowImageFormat(8).get
+    val layout = ImageFormats.narrow(8).get
     for {
       lane <- 0 until 3
       code <- 0 until (1 << (if (lane == 2) 10 else 11))
@@ -28,7 +28,7 @@ class NarrowImageFormatSuite extends munit.FunSuite {
   }
   test("packed normalized formats use the specified channel order") {
     for ((format, red) <- Seq(1007 -> 0x00f0L, 1008 -> 0xf800L, 1009 -> 0x7c00L, 11 -> 0x3ffL)) {
-      val layout = NarrowImageFormat(format).get
+      val layout = ImageFormats.narrow(format).get
       assertEquals(layout.decode(red, 0), 1.0)
       assertEquals(layout.decode(red, 1), 0.0)
       assertEquals(layout.decode(red, 2), 0.0)
@@ -36,14 +36,14 @@ class NarrowImageFormatSuite extends munit.FunSuite {
     }
   }
   test("RGB9E5 decodes shared exponents without a hidden bit or special exponent") {
-    val layout = NarrowImageFormat(1010).get
+    val layout = ImageFormats.narrow(1010).get
     val bits   = (16L << 27) | (64L << 18) | (128L << 9) | 256L
     assertEquals((0 until 3).map(layout.decode(bits, _)), Seq(1.0, 0.5, 0.25))
     assertEquals(layout.decode(1L, 0), Math.scalb(1.0, -24))
     assertEquals(layout.decode(0xffffffffL, 0), 65408.0)
   }
   test("10-bit integer storage saturates each channel independently") {
-    val layout = IntegerImageFormat(34).get
+    val layout = ImageFormats.integer(34).get
     val packed = layout.encodePacked(Array(1024L, 42L, 0xffffffffL, 4L))
     assertEquals(packed, 0xfff00000L | (42L << 10) | 1023L)
     assertEquals((0 until 4).map(layout.decode(packed, _)), Seq(1023L, 42L, 1023L, 3L))

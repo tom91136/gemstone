@@ -3,8 +3,9 @@ package net.kurobako.gemstone.graphics
 import GraphicsProtocol.*
 import ShaderMetadata.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.vm.*
 
 /** Shader preparation and rendering supplied by the application to an execution session. */

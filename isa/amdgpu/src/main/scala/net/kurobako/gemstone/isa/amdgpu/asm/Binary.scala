@@ -10,18 +10,6 @@ import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.Metadata.*
 
 object Binary {
-  enum CodecError {
-    case UnsupportedInstruction(opcode: NonEmpty[String], target: Target)
-    case UnsupportedFormat(opcode: NonEmpty[String], target: Target, formats: Vec[EncodingFormat])
-    case UnsupportedOperandSyntax(opcode: NonEmpty[String], target: Target, operands: Vec[Operand])
-    case AmbiguousInstruction(opcode: NonEmpty[String], target: Target)
-    case InvalidOperand(message: NonEmpty[String])
-    case InvalidEncoding(message: NonEmpty[String])
-  }
-
-  case class Decoded(instruction: Instruction, size: Int > 0)
-  case class StatementDecoded(statement: Statement, size: Int > 0)
-
   def encodeStatement(
       statement: Statement,
       target: Target,
@@ -37,10 +25,10 @@ object Binary {
       offset: Int >= 0,
       target: Target,
       waveSize: Int in (32, 64) = 32
-  ): Either[CodecError, StatementDecoded] =
+  ): Either[CodecError, DecodedStatement] =
     if (DualIssueCodec.matches(bytes, offset.raw, target)) DualIssueCodec.decode(bytes, offset.raw, target)
     else decodeAt(bytes, offset, target, waveSize).map(value =>
-      StatementDecoded(Statement.Instruction(value.instruction), value.size)
+      DecodedStatement(Statement.Instruction(value.instruction), value.size)
     )
 
   private def soppLayout(target: Target): InstructionLayout =
@@ -92,14 +80,14 @@ object Binary {
       offset: Int >= 0,
       target: Target,
       waveSize: Int in (32, 64) = 32
-  ): Either[CodecError, Decoded] =
+  ): Either[CodecError, DecodedInstruction] =
     if (offset.raw > bytes.size || bytes.size - offset.raw < 4)
       Left(CodecError.InvalidEncoding(s"truncated instruction at byte $offset"))
     else {
       val word   = LittleEndian.decode(bytes, offset.raw, 4)
       val layout = soppLayout(target)
       val result = if (layout.matches(word))
-        decodeSOPP(Bits.low32(word), target).map(Decoded(_, 4))
+        decodeSOPP(Bits.low32(word), target).map(DecodedInstruction(_, 4))
       else ScalarCodec.format(word, target) match {
         case Some(format) =>
           ScalarCodec.decode(
@@ -222,9 +210,9 @@ object Binary {
 }
 
 class Binary(target: Target, waveSize: Int in (32, 64) = 32)
-    extends Decoder[Vec[Byte], Instruction, Binary.CodecError]
-    with Encoder[Instruction, Vec[Byte], Binary.CodecError] {
-  override def decode(bytes: Vec[Byte]): Either[Binary.CodecError, Instruction] = Binary.decode(bytes, target, waveSize)
-  override def encode(instruction: Instruction): Either[Binary.CodecError, Vec[Byte]] =
+    extends Decoder[Vec[Byte], Instruction, CodecError]
+    with Encoder[Instruction, Vec[Byte], CodecError] {
+  override def decode(bytes: Vec[Byte]): Either[CodecError, Instruction]       = Binary.decode(bytes, target, waveSize)
+  override def encode(instruction: Instruction): Either[CodecError, Vec[Byte]] =
     Binary.encode(instruction, target, waveSize)
 }

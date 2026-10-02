@@ -228,7 +228,7 @@ private object VMInterpreter {
       argumentVariables(
         program,
         dispatch.kernelName
-      ).zip(dispatch.arguments).foldLeft[Either[Fault, Map[Int, RuntimeValue]]](Right(initialGlobals)) {
+      ).zip(dispatch.arguments).foldLeft[Either[Fault, Map[Int, VMValue]]](Right(initialGlobals)) {
         case (result, (variable, KernelTask.Argument.Memory(allocation, offset, range))) => result.flatMap { values =>
             program.globals.get(variable).toRight(Fault.InvalidTask(s"SPIR-V descriptor %$variable has no variable"))
               .map { global =>
@@ -243,12 +243,12 @@ private object VMInterpreter {
                 val pointer = program.layout.runtimeType(pointee) match {
                   case Some(RuntimeType.Array(member, _)) if program.descriptorBindings.contains(variable) =>
                     val previous = values.get(variable).collect {
-                      case RuntimeValue.Address(_, pointer) => pointer.descriptors.getOrElse(Vector.empty)
+                      case VMValue.Address(_, pointer) => pointer.descriptors.getOrElse(Vector.empty)
                     }.getOrElse(Vector.empty)
                     leaf.copy(descriptors = Some(previous :+ leaf.copy(pointee = member)))
                   case _ => leaf
                 }
-                values.updated(variable, RuntimeValue.Address(global.pointerType, pointer))
+                values.updated(variable, VMValue.Address(global.pointerType, pointer))
               }
           }
         case (_, (variable, _)) => Left(Fault.InvalidTask(s"SPIR-V descriptor %$variable requires a memory argument"))
@@ -426,8 +426,8 @@ private object VMInterpreter {
           // interpolated fragment inputs use the same typed memory operations as
           // descriptors; each invocation receives its own input/output slice.
           val stageValues = stageInterfaces.view.flatMap { variable =>
-            globalValues.get(variable).collect { case RuntimeValue.Address(pointerType, pointer) =>
-              variable -> RuntimeValue.Address(
+            globalValues.get(variable).collect { case VMValue.Address(pointerType, pointer) =>
+              variable -> VMValue.Address(
                 pointerType,
                 pointer.copy(
                   offset = Math.addExact(
@@ -444,7 +444,7 @@ private object VMInterpreter {
           while (initializerIndex < stageInitializers.size) {
             val (variable, bytes) = stageInitializers(initializerIndex)
             stageValues.get(variable) match {
-              case Some(RuntimeValue.Address(_, pointer)) => bytes.flatMap(groupState.write(pointer, _)) match {
+              case Some(VMValue.Address(_, pointer)) => bytes.flatMap(groupState.write(pointer, _)) match {
                   case Left(error) => return Left(error)
                   case Right(())   => ()
                 }
@@ -470,11 +470,11 @@ private object VMInterpreter {
             case Right(value) =>
               value.fragmentInvocation = fragment
               value.sampleMask =
-                maskVariable.flatMap(stageValues.get).collect { case RuntimeValue.Address(_, pointer) => pointer }
+                maskVariable.flatMap(stageValues.get).collect { case VMValue.Address(_, pointer) => pointer }
               value.fragmentQuad = fragment && groupSize.x.raw == 4 && groupSize.y.raw == 1 && groupSize.z.raw == 1
               value.subgroupReconvergence = program.usesNonUniformCollectives && !fragment
               value.helperInvocation = helperVariable.flatMap(stageValues.get) match {
-                case Some(RuntimeValue.Address(_, pointer)) =>
+                case Some(VMValue.Address(_, pointer)) =>
                   val flag = memory.awaitRead(groupState.readScalar(pointer, 1))
                   flag match {
                     case Left(error)  => return Left(error)
@@ -565,7 +565,7 @@ private object VMInterpreter {
       arguments: Vec[KernelTask.Argument],
       shared: Map[Int, Region],
       invocation: InvocationBuiltins,
-      globalValues: Map[Int, RuntimeValue],
+      globalValues: Map[Int, VMValue],
       reusableValues: Option[InvocationValues],
       reusableExecution: InvocationState | Null,
       memory: MemoryState,
@@ -601,7 +601,7 @@ private object VMInterpreter {
       val (variable, global) = globals(globalIndex)
       program.builtins.get(variable) match {
         case Some(_) if globalValues.get(variable).exists {
-              case RuntimeValue.Address(_, pointer) => pointer.region match {
+              case VMValue.Address(_, pointer) => pointer.region match {
                   case Region.External(_) => true
                   case _                  => false
                 }
@@ -619,7 +619,7 @@ private object VMInterpreter {
           }
           values.update(
             variable,
-            RuntimeValue.Address(
+            VMValue.Address(
               global.pointerType,
               Pointer(Region.Internal(InternalMemory(bytes)), 0L, pointee, global.storageClass)
             )
@@ -851,7 +851,7 @@ private object VMInterpreter {
           }
         }
       case Instruction.Phi(_, _, _) =>
-        val updates = mutable.ArrayBuffer.empty[(Int, RuntimeValue)]
+        val updates = mutable.ArrayBuffer.empty[(Int, VMValue)]
         var phiPc   = execution.pc
         while (phiPc < execution.currentFunction.end && isPhi(program.module.instructions(phiPc))) {
           program.module.instructions(phiPc) match {
@@ -918,7 +918,7 @@ private object VMInterpreter {
         }
         values.update(
           id(dest),
-          RuntimeValue.Address(
+          VMValue.Address(
             id(resultType),
             Pointer(
               Region.Internal(InternalMemory(buffer)),
@@ -949,7 +949,7 @@ private object VMInterpreter {
                     _,
                     _
                   )) | Some(RuntimeType.CubeTexture(_, _)) | Some(RuntimeType.Sampler) =>
-                values.update(id(dest), RuntimeValue.Address(id(resultType), source))
+                values.update(id(dest), VMValue.Address(id(resultType), source))
                 execution.pc += 1
               case Some(RuntimeType.SampledImage(imageType))
                   if program.layout.runtimeType(imageType).exists {
@@ -958,7 +958,7 @@ private object VMInterpreter {
                   } =>
                 // GLSL samplerBuffer types use OpTypeSampledImage, but Vulkan
                 // uniform texel buffers carry an image view without a sampler.
-                values.update(id(dest), RuntimeValue.Address(id(resultType), source.copy(pointee = imageType)))
+                values.update(id(dest), VMValue.Address(id(resultType), source.copy(pointee = imageType)))
                 execution.pc += 1
               case Some(RuntimeType.SampledImage(imageType)) =>
                 val loaded = for {
@@ -980,7 +980,7 @@ private object VMInterpreter {
                 loaded match {
                   case Left(error)  => return Left(error)
                   case Right(image) =>
-                    values.update(id(dest), RuntimeValue.Address(id(resultType), image)); execution.pc += 1
+                    values.update(id(dest), VMValue.Address(id(resultType), image)); execution.pc += 1
                 }
               case Some(RuntimeType.Pointer(_, _)) =>
                 loadPointer(program, memory, source, id(resultType)) match {
@@ -1046,12 +1046,12 @@ private object VMInterpreter {
                 }
             }
           case Right(target) => values.get(id(source)) match {
-              case Some(RuntimeValue.Address(sourceType, value)) =>
+              case Some(VMValue.Address(sourceType, value)) =>
                 storePointer(program, memory, target, sourceType, value) match {
                   case Left(error) => return Left(error)
                   case Right(())   => execution.pc += 1
                 }
-              case Some(value: RuntimeValue.Bits) if mappedMatrixStorage(program, target) =>
+              case Some(value: VMValue.Bits) if mappedMatrixStorage(program, target) =>
                 storeMatrixStorage(program, memory, target, value) match {
                   case Left(error) => return Left(error)
                   case Right(())   => execution.pc += 1
@@ -1181,7 +1181,7 @@ private object VMInterpreter {
     case _                                                          => 0
   }
   private def imageIsInteger(format: Int): Boolean =
-    format == ImageDescriptor.Format.S8Uint || format == ImageDescriptor.Format.D32SfloatS8Stencil || IntegerImageFormat(
+    format == ImageDescriptor.Format.S8Uint || format == ImageDescriptor.Format.D32SfloatS8Stencil || ImageFormats.integer(
       format
     ).isDefined
   private def imageWordComponents(format: Int): Int = imageFloatComponents(format)
@@ -1502,13 +1502,13 @@ private object VMInterpreter {
         ) + (if (format == ImageDescriptor.Format.D32SfloatS8Stencil) 4 else 0)
       )
     val components = imageWordComponents(format)
-    if (IntegerImageFormat(format).isDefined) {
-      val layout = IntegerImageFormat(format).get
+    if (ImageFormats.integer(format).isDefined) {
+      val layout = ImageFormats.integer(format).get
       readIntegerTexel(memory, pointer, layout).map(_.map(v => if (layout.signed) v.toInt.toDouble else v.toDouble))
-    } else if (NarrowImageFormat(format).isDefined) {
-      readNarrowTexel(memory, pointer, NarrowImageFormat(format).get)
-    } else if (NormalizedImageFormat(format).isDefined) {
-      readNormalizedTexel(memory, pointer, NormalizedImageFormat(format).get)
+    } else if (ImageFormats.narrow(format).isDefined) {
+      readNarrowTexel(memory, pointer, ImageFormats.narrow(format).get)
+    } else if (ImageFormats.normalized(format).isDefined) {
+      readNormalizedTexel(memory, pointer, ImageFormats.normalized(format).get)
     } else if (components != 0) {
       (0 until components).foldLeft[Memory.ReadResult[Array[Double]]](Right(Array(0.0, 0.0, 0.0, 1.0))) {
         (result, lane) =>
@@ -1575,7 +1575,7 @@ private object VMInterpreter {
       dimensions: Int
   ): Memory.ReadResult[Array[Long]] =
     values.get(operand) match {
-      case Some(RuntimeValue.Bits(_, lanes)) if lanes.length == dimensions =>
+      case Some(VMValue.Bits(_, lanes)) if lanes.length == dimensions =>
         val offset = lanes.map(_.toInt.toLong)
         Either.cond(
           offset.forall(v => v >= -8 && v <= 7),
@@ -1685,7 +1685,7 @@ private object VMInterpreter {
       gatherOffsets <- if ((mask & ImageOperands.ConstOffsets) == 0) Right(imageGatherOffsets)
       else if (cube) Left(Fault.InvalidTask("cube gather does not allow ConstOffsets"))
       else values.get(operands(offsetIndex)) match {
-        case Some(RuntimeValue.Bits(_, lanes)) if lanes.length == 8 =>
+        case Some(VMValue.Bits(_, lanes)) if lanes.length == 8 =>
           val offsets = lanes.map(_.toInt.toLong)
           Either.cond(
             offsets.forall(v => v >= -8 && v <= 7),
@@ -1696,13 +1696,13 @@ private object VMInterpreter {
       }
       lod <- if (lodMask == ImageOperands.Bias || lodMask == ImageOperands.Lod) {
         values.get(operands(1)) match {
-          case Some(RuntimeValue.Bits(_, lanes)) if lanes.length == 1 => Right(float(lanes(0)))
-          case _ => Left(Fault.InvalidTask("sample LOD is not scalar"))
+          case Some(VMValue.Bits(_, lanes)) if lanes.length == 1 => Right(float(lanes(0)))
+          case _                                                 => Left(Fault.InvalidTask("sample LOD is not scalar"))
         }
       } else Right(0.0)
       resolvedGradients <- if (lodMask == ImageOperands.Grad) {
         (values.get(operands(1)), values.get(operands(2))) match {
-          case (Some(RuntimeValue.Bits(_, dx)), Some(RuntimeValue.Bits(_, dy))) =>
+          case (Some(VMValue.Bits(_, dx)), Some(VMValue.Bits(_, dy))) =>
             Right(Some((dx.take(dimensions).map(float(_)), dy.take(dimensions).map(float(_)))))
           case _ => Left(Fault.InvalidTask("sample gradients are not floating values"))
         }
@@ -1806,10 +1806,10 @@ private object VMInterpreter {
             if (
               format == ImageDescriptor.Format.D16Unorm || format == ImageDescriptor.Format.S8Uint || format == ImageDescriptor.Format.D32SfloatS8Stencil
             ) 1
-            else IntegerImageFormat(
+            else ImageFormats.integer(
               format
-            ).fold(NormalizedImageFormat(format).fold(
-              NarrowImageFormat(format).fold(imageWordComponents(format))(_.components)
+            ).fold(ImageFormats.normalized(format).fold(
+              ImageFormats.narrow(format).fold(imageWordComponents(format))(_.components)
             )(_.components))(_.components) match {
               case 0     => 4
               case count => count
@@ -2034,7 +2034,7 @@ private object VMInterpreter {
         program.vulkanEntries.nonEmpty
       ).map { result =>
         execution.gradients = None
-        values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
+        values.update(id(dest), VMValue.Bits(id(resultType), result))
       }
     } yield ()
     val result = instruction match {
@@ -2042,9 +2042,9 @@ private object VMInterpreter {
         for {
           image <- address(values, source)
           state <- address(values, sampler)
-        } yield values.update(id(dest), RuntimeValue.Address(id(resultType), image.copy(sampler = Some(state))))
+        } yield values.update(id(dest), VMValue.Address(id(resultType), image.copy(sampler = Some(state))))
       case Instruction.Image(resultType, dest, source) => address(values, source).map(image =>
-          values.update(id(dest), RuntimeValue.Address(id(resultType), image.copy(sampler = None)))
+          values.update(id(dest), VMValue.Address(id(resultType), image.copy(sampler = None)))
         )
       case Instruction.ImageSampleImplicitLod(t, d, i, c, m)        => sample(t, d, i, c, None, false, m)
       case Instruction.ImageSampleExplicitLod(t, d, i, c, m)        => sample(t, d, i, c, None, true, Some(m))
@@ -2104,7 +2104,7 @@ private object VMInterpreter {
             else clamped
             values.update(
               id(d),
-              RuntimeValue.Bits(id(t), Array(selected, lod).map(v => doubleToFloating(resultShape._1, v)))
+              VMValue.Bits(id(t), Array(selected, lod).map(v => doubleToFloating(resultShape._1, v)))
             )
             execution.gradients = None
           }
@@ -2113,7 +2113,7 @@ private object VMInterpreter {
         for {
           image  <- address(values, i)
           levels <- imageLevels(memory, image)
-        } yield values.update(id(d), RuntimeValue.Bits(id(t), Array(levels.toLong)))
+        } yield values.update(id(d), VMValue.Bits(id(t), Array(levels.toLong)))
       case Instruction.ImageQuerySizeLod(t, d, i, lod) =>
         for {
           level      <- scalar(values, lod)
@@ -2128,7 +2128,7 @@ private object VMInterpreter {
           data <- imageLevel(memory, image, bounded)
         } yield values.update(
           id(d),
-          RuntimeValue.Bits(
+          VMValue.Bits(
             id(t),
             (if (dimensions._1 == 1) Array(data.width)
              else if (dimensions._1 == 3) Array(data.width, data.height, data.depth)
@@ -2141,7 +2141,7 @@ private object VMInterpreter {
         for {
           image <- address(values, i)
           data  <- imageLevel(memory, image, 0)
-        } yield values.update(id(d), RuntimeValue.Bits(id(t), Array(data.samples.toLong)))
+        } yield values.update(id(d), VMValue.Bits(id(t), Array(data.samples.toLong)))
       case Instruction.ImageFetch(t, d, i, c, mods) =>
         for {
           image     <- address(values, i)
@@ -2174,7 +2174,7 @@ private object VMInterpreter {
           )
           operand <- if (!hasSelection) Right(0)
           else values.get(operands(1)) match {
-            case Some(RuntimeValue.Bits(_, lanes)) if lanes.length == 1 => Right(lanes(0).toInt)
+            case Some(VMValue.Bits(_, lanes)) if lanes.length == 1 => Right(lanes(0).toInt)
             case _ => Left(Fault.InvalidTask("texel fetch LOD or sample is not scalar"))
           }
           offset <- if (!hasOffset) Right(imageZeroOffset)
@@ -2212,7 +2212,7 @@ private object VMInterpreter {
           swizzled <- swizzleImage(memory, image, texel)
         } yield values.update(
           id(d),
-          RuntimeValue.Bits(
+          VMValue.Bits(
             id(t),
             swizzled.map(v =>
               if (imageIsInteger(data.format)) v.toLong & 0xffffffffL
@@ -2244,10 +2244,10 @@ private object VMInterpreter {
     coord <- bits(values, coordinate)
     _ <- Either.cond(coord.length == 2, (), Fault.InvalidTask("input attachment coordinates require two components"))
     position <- program.builtins.view.collectFirst {
-      case (variable, 15) if values.get(variable).exists { case RuntimeValue.Address(_, _) => true; case _ => false } =>
+      case (variable, 15) if values.get(variable).exists { case VMValue.Address(_, _) => true; case _ => false } =>
         variable
     }.flatMap(v => values.get(v)) match {
-      case Some(RuntimeValue.Address(_, pointer)) => Right(pointer)
+      case Some(VMValue.Address(_, pointer)) => Right(pointer)
       case _ => Left(Fault.InvalidTask("input attachment requires a fragment position record"))
     }
     px     <- memory.readScalar(position, 4)
@@ -2257,7 +2257,7 @@ private object VMInterpreter {
           if imageType._2 && m.words.length == 2 && (m.words.head.raw & ~(ImageOperands.SignExtend | ImageOperands.ZeroExtend)) == ImageOperands.Sample &&
             (m.words.head.raw & (ImageOperands.SignExtend | ImageOperands.ZeroExtend)) != (ImageOperands.SignExtend | ImageOperands.ZeroExtend) =>
         values.get(m.words.apply(1).raw) match {
-          case Some(RuntimeValue.Bits(_, lanes)) if lanes.length == 1 => Right(lanes(0).toInt)
+          case Some(VMValue.Bits(_, lanes)) if lanes.length == 1 => Right(lanes(0).toInt)
           case _ => Left(Fault.InvalidTask("input attachment sample index is not scalar"))
         }
       case None if !imageType._2 => Right(0)
@@ -2291,7 +2291,7 @@ private object VMInterpreter {
             }
           ) =>
         readInputAttachment(program, memory, values, image, coordinate, mods)
-          .map(lanes => values.update(id(dest), RuntimeValue.Bits(id(resultType), lanes)))
+          .map(lanes => values.update(id(dest), VMValue.Bits(id(resultType), lanes)))
 
       case Instruction.ImageRead(resultType, dest, image, coordinate, mods) =>
         for {
@@ -2309,14 +2309,14 @@ private object VMInterpreter {
             val (pointer, format) = texel
             val valid             = pointer.bounds.exists { case (_, end) => pointer.offset < end }
             val components        = imageWordComponents(format)
-            if (IntegerImageFormat(format).isDefined)
-              readIntegerTexel(memory, pointer, IntegerImageFormat(format).get, valid)
-            else if (NarrowImageFormat(format).isDefined)
-              readNarrowTexel(memory, pointer, NarrowImageFormat(format).get, valid).map(_.map(value =>
+            if (ImageFormats.integer(format).isDefined)
+              readIntegerTexel(memory, pointer, ImageFormats.integer(format).get, valid)
+            else if (ImageFormats.narrow(format).isDefined)
+              readNarrowTexel(memory, pointer, ImageFormats.narrow(format).get, valid).map(_.map(value =>
                 IEEE754.floatToBinary32(value.toFloat).raw.toLong & 0xffffffffL
               ))
-            else if (NormalizedImageFormat(format).isDefined)
-              readNormalizedTexel(memory, pointer, NormalizedImageFormat(format).get, valid).map(_.map(value =>
+            else if (ImageFormats.normalized(format).isDefined)
+              readNormalizedTexel(memory, pointer, ImageFormats.normalized(format).get, valid).map(_.map(value =>
                 IEEE754.floatToBinary32(value.toFloat).raw.toLong & 0xffffffffL
               ))
             else if (components != 0) {
@@ -2335,7 +2335,7 @@ private object VMInterpreter {
               else Array(value, 0L, 0L, if (valid) 1L else 0L)
             }
           }
-        } yield values.update(id(dest), RuntimeValue.Bits(id(resultType), lanes))
+        } yield values.update(id(dest), VMValue.Bits(id(resultType), lanes))
       case Instruction.ImageWrite(image, coordinate, texel, mods) =>
         for {
           _ <- Either.cond(
@@ -2350,8 +2350,8 @@ private object VMInterpreter {
           target <- imageTexel(program, memory, values, image, coordinate)
           lanes  <- bits(values, texel)
           _      <- Either.cond(lanes.length == 4, (), Fault.InvalidTask("image texel requires four components"))
-          _      <- if (IntegerImageFormat(target._2).isDefined) {
-            val layout = IntegerImageFormat(target._2).get
+          _      <- if (ImageFormats.integer(target._2).isDefined) {
+            val layout = ImageFormats.integer(target._2).get
             if (layout.packed) memory.writeScalar(target._1, layout.encodePacked(lanes), 4)
             else (0 until layout.components).foldLeft[Memory.ReadResult[Unit]](Right(())) { (result, lane) =>
               result.flatMap(_ =>
@@ -2362,10 +2362,10 @@ private object VMInterpreter {
                 )
               )
             }
-          } else if (NarrowImageFormat(target._2).isDefined) {
-            val layout = NarrowImageFormat(target._2).get
+          } else if (ImageFormats.narrow(target._2).isDefined) {
+            val layout = ImageFormats.narrow(target._2).get
             val floats = lanes.map(v => IEEE754.binary32ToFloat(Binary32.low(v)).toDouble)
-            if (layout.encoding != ImageFormats.NarrowEncoding.Half)
+            if (layout.encoding != NarrowEncoding.Half)
               memory.writeScalar(
                 target._1,
                 layout.encodePacked(floats),
@@ -2380,8 +2380,8 @@ private object VMInterpreter {
                 )
               )
             }
-          } else if (NormalizedImageFormat(target._2).isDefined) {
-            val layout = NormalizedImageFormat(target._2).get
+          } else if (ImageFormats.normalized(target._2).isDefined) {
+            val layout = ImageFormats.normalized(target._2).get
             (0 until layout.components).foldLeft[Memory.ReadResult[Unit]](Right(())) { (result, lane) =>
               result.flatMap(_ =>
                 memory.writeScalar(
@@ -2413,7 +2413,7 @@ private object VMInterpreter {
             (),
             Fault.Unsupported("image atomics require R32ui or R32i")
           )
-        } yield values.update(id(dest), RuntimeValue.Address(id(resultType), target._1))
+        } yield values.update(id(dest), VMValue.Address(id(resultType), target._1))
       case Instruction.ImageQuerySize(resultType, dest, image) =>
         for {
           pointer   <- address(values, image)
@@ -2428,7 +2428,7 @@ private object VMInterpreter {
             imageLevel(memory, pointer, 0, if (program.vulkanEntries.nonEmpty) -1 else imageType._1, imageType._3)
         } yield values.update(
           id(dest),
-          RuntimeValue.Bits(
+          VMValue.Bits(
             id(resultType),
             (if (imageType._2 == 1) Array(shape.width)
              else if (imageType._2 == 3) Array(shape.width, shape.height, shape.depth)
@@ -2454,24 +2454,24 @@ private object VMInterpreter {
     instruction match {
       case Instruction.Bitcast(resultType, dest, source) =>
         values.get(id(source)) match {
-          case Some(RuntimeValue.Address(_, pointer)) =>
+          case Some(VMValue.Address(_, pointer)) =>
             val pointee = program.layout.pointerPointee(id(resultType))
             val result  = if (pointer.pointee == pointee) pointer else pointer.copy(pointee = pointee)
-            values.update(id(dest), RuntimeValue.Address(id(resultType), result))
+            values.update(id(dest), VMValue.Address(id(resultType), result))
             execution.pc += 1
           case Some(value) =>
             value match {
-              case RuntimeValue.Bits(sourceType, lanes) =>
+              case VMValue.Bits(sourceType, lanes) =>
                 bitcast(program, sourceType, id(resultType), lanes) match {
                   case Left(error)   => return Left(error)
                   case Right(result) =>
-                    values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
+                    values.update(id(dest), VMValue.Bits(id(resultType), result))
                     execution.pc += 1
                 }
-              case RuntimeValue.Address(_, pointer) =>
+              case VMValue.Address(_, pointer) =>
                 val pointee = program.layout.pointerPointee(id(resultType))
                 val result  = if (pointer.pointee == pointee) pointer else pointer.copy(pointee = pointee)
-                values.update(id(dest), RuntimeValue.Address(id(resultType), result))
+                values.update(id(dest), VMValue.Address(id(resultType), result))
                 execution.pc += 1
             }
           case None => return Left(undefined(source))
@@ -2483,12 +2483,12 @@ private object VMInterpreter {
         }
       case Instruction.PtrCastToGeneric(resultType, dest, source) =>
         (program.layout.runtimeType(id(resultType)), values.get(id(source))) match {
-          case (Some(RuntimeType.Pointer(8, pointee)), Some(RuntimeValue.Address(sourceType, pointer))) =>
+          case (Some(RuntimeType.Pointer(8, pointee)), Some(VMValue.Address(sourceType, pointer))) =>
             program.layout.runtimeType(sourceType) match {
               case Some(RuntimeType.Pointer(storageClass, sourcePointee))
                   if Vec(4, 5, 7).contains(storageClass) && sourcePointee == pointee &&
                     pointer.pointee == pointee && (pointer.region == Region.Null || pointer.storageClass == storageClass) =>
-                values.update(id(dest), RuntimeValue.Address(id(resultType), pointer))
+                values.update(id(dest), VMValue.Address(id(resultType), pointer))
                 execution.pc += 1
               case Some(RuntimeType.Pointer(storageClass, sourcePointee)) =>
                 return Left(
@@ -2536,7 +2536,7 @@ private object VMInterpreter {
         }
       case Instruction.ArrayLength(resultType, dest, structure, arrayMember) =>
         val result = values.get(id(structure)) match {
-          case Some(RuntimeValue.Address(_, pointer)) => program.layout.runtimeType(pointer.pointee) match {
+          case Some(VMValue.Address(_, pointer)) => program.layout.runtimeType(pointer.pointee) match {
               case Some(RuntimeType.Structure(members)) =>
                 val member = unsigned(arrayMember).toInt
                 if (member < 0 || member >= members.size)
@@ -2584,8 +2584,8 @@ private object VMInterpreter {
         var index = 0
         while (index < constituents.size) {
           values.get(id(constituents(index))) match {
-            case Some(RuntimeValue.Bits(_, value)) => lanes ++= value
-            case Some(_)                           =>
+            case Some(VMValue.Bits(_, value)) => lanes ++= value
+            case Some(_)                      =>
               return Left(
                 Fault.InvalidTask(
                   s"OpCompositeConstruct constituent %${id(constituents(index))} is a pointer"
@@ -2598,7 +2598,7 @@ private object VMInterpreter {
         val result = lanes.result()
         program.layout.scalarLeafCount(id(resultType)) match {
           case Right(expected) if result.length == expected =>
-            values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
+            values.update(id(dest), VMValue.Bits(id(resultType), result))
             execution.pc += 1
           case Right(expected) =>
             return Left(
@@ -2615,13 +2615,13 @@ private object VMInterpreter {
         }
       case Instruction.VectorExtractDynamic(resultType, dest, vector, index) =>
         (values.get(id(vector)), values.get(id(index))) match {
-          case (Some(RuntimeValue.Bits(_, lanes)), Some(RuntimeValue.Bits(_, Array(component)))) =>
+          case (Some(VMValue.Bits(_, lanes)), Some(VMValue.Bits(_, Array(component)))) =>
             val selected = component.toInt
             if (selected < 0 || selected >= lanes.length)
               return Left(Fault.InvalidTask(
                 s"OpVectorExtractDynamic index $selected is out of range"
               ))
-            values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(lanes(selected))))
+            values.update(id(dest), VMValue.Bits(id(resultType), Array(lanes(selected))))
             execution.pc += 1
           case (None, _) => return Left(undefined(vector))
           case (_, None) => return Left(undefined(index))
@@ -2629,7 +2629,7 @@ private object VMInterpreter {
         }
       case Instruction.VectorInsertDynamic(resultType, dest, vector, component, index) =>
         (values.get(id(vector)), values.get(id(component)), scalar(values, index)) match {
-          case (Some(RuntimeValue.Bits(_, lanes)), Some(RuntimeValue.Bits(_, Array(value))), Right(selected)) =>
+          case (Some(VMValue.Bits(_, lanes)), Some(VMValue.Bits(_, Array(value))), Right(selected)) =>
             val position = selected.toInt
             if (position < 0 || position >= lanes.length)
               return Left(Fault.InvalidTask(
@@ -2637,7 +2637,7 @@ private object VMInterpreter {
               ))
             val result = lanes.clone()
             result(position) = value
-            values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
+            values.update(id(dest), VMValue.Bits(id(resultType), result))
             execution.pc += 1
           case (None, _, _)        => return Left(undefined(vector))
           case (_, None, _)        => return Left(undefined(component))
@@ -2662,7 +2662,7 @@ private object VMInterpreter {
     instruction match {
       case Instruction.VectorShuffle(resultType, dest, vector1, vector2, components) =>
         (values.get(id(vector1)), values.get(id(vector2))) match {
-          case (Some(RuntimeValue.Bits(_, left)), Some(RuntimeValue.Bits(_, right))) =>
+          case (Some(VMValue.Bits(_, left)), Some(VMValue.Bits(_, right))) =>
             program.layout.scalarLeafCount(id(resultType)) match {
               case Right(expected) if expected == components.size =>
                 val combined = left ++ right
@@ -2681,7 +2681,7 @@ private object VMInterpreter {
                       )
                   index += 1
                 }
-                values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
+                values.update(id(dest), VMValue.Bits(id(resultType), result))
                 execution.pc += 1
               case Right(expected) =>
                 return Left(
@@ -2726,9 +2726,9 @@ private object VMInterpreter {
           execution.pc += 1
         } else
           values.get(sourceId) match {
-            case Some(RuntimeValue.Bits(_, lanes)) =>
+            case Some(VMValue.Bits(_, lanes)) =>
               val width = program.layout.scalarWidth(id(resultType))
-              values.update(id(dest), RuntimeValue.Bits(id(resultType), lanes.map(_ & mask(width))))
+              values.update(id(dest), VMValue.Bits(id(resultType), lanes.map(_ & mask(width))))
               execution.pc += 1
             case Some(_) => return Left(Fault.InvalidTask("OpUConvert cannot convert a pointer"))
             case None    => return Left(undefined(source))
@@ -2747,25 +2747,25 @@ private object VMInterpreter {
         address(values, pointer).flatMap(memory.pointerInteger(_)) match {
           case Left(error)  => return Left(error)
           case Right(value) =>
-            values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(value & mask(resultWidth))))
+            values.update(id(dest), VMValue.Bits(id(resultType), Array(value & mask(resultWidth))))
             execution.pc += 1
         }
       case Instruction.ConvertUToPtr(resultType, dest, integerValue) =>
         (program.layout.runtimeType(id(resultType)), values.get(id(integerValue))) match {
           case (
                 Some(RuntimeType.Pointer(_, pointee)),
-                Some(RuntimeValue.Bits(integerType, Array(rawAddress)))
+                Some(VMValue.Bits(integerType, Array(rawAddress)))
               )
               if program.types.get(pointee).exists {
                 case RuntimeType.Function(_, _) => true
                 case _                          => false
               } &&
                 integerShape(program, integerType).exists(_._2 == 1) =>
-            values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(rawAddress)))
+            values.update(id(dest), VMValue.Bits(id(resultType), Array(rawAddress)))
             execution.pc += 1
           case (
                 Some(RuntimeType.Pointer(storageClass, pointee)),
-                Some(RuntimeValue.Bits(integerType, Array(rawAddress)))
+                Some(VMValue.Bits(integerType, Array(rawAddress)))
               ) if integerShape(program, integerType).exists(_._2 == 1) =>
             memory.integerPointer(
               rawAddress & mask(program.layout.scalarWidth(integerType)),
@@ -2780,7 +2780,7 @@ private object VMInterpreter {
                   )
                 )
               case Right(pointer) =>
-                values.update(id(dest), RuntimeValue.Address(id(resultType), pointer))
+                values.update(id(dest), VMValue.Address(id(resultType), pointer))
                 execution.pc += 1
             }
           case (Some(RuntimeType.Pointer(_, _)), Some(_)) =>
@@ -2817,12 +2817,12 @@ private object VMInterpreter {
         }
       case Instruction.QuantizeToF16(resultType, dest, source) =>
         values.get(id(source)) match {
-          case Some(RuntimeValue.Bits(t, lanes))
+          case Some(VMValue.Bits(t, lanes))
               if t == id(resultType) &&
                 floatingShape(program, t).exists { case (width, count) =>
                   width.raw == 32 && count == lanes.length
                 } =>
-            values.update(id(dest), RuntimeValue.Bits(t, lanes.map(quantizeToF16)))
+            values.update(id(dest), VMValue.Bits(t, lanes.map(quantizeToF16)))
             execution.pc += 1
           case Some(_) =>
             return Left(Fault.InvalidTask("OpQuantizeToF16 requires matching float32 scalar or vector types"))
@@ -2837,7 +2837,7 @@ private object VMInterpreter {
         zeroValue(program.types, resultType, dest, "OpUndef") match {
           case Left(error)  => return Left(error)
           case Right(value) =>
-            values.update(id(dest), VMInvocation.runtimeValue(value))
+            values.update(id(dest), VMValue.fromConstant(value))
             execution.pc += 1
         }
       case Instruction.CopyObject(resultType, dest, source) =>
@@ -2888,13 +2888,13 @@ private object VMInterpreter {
     for {
       shape  <- integerShape(program, id(t)).toRight(Fault.InvalidTask("bit-field result requires integer components"))
       source <- values.get(id(base)) match {
-        case Some(RuntimeValue.Bits(bt, lanes))
+        case Some(VMValue.Bits(bt, lanes))
             if integerShape(program, bt).contains(shape) && lanes.length == shape._2 => Right(lanes)
         case _ => Left(Fault.InvalidTask("bit-field base shape does not match result"))
       }
       added <- insert match {
         case Some(i) => values.get(id(i)) match {
-            case Some(RuntimeValue.Bits(it, lanes))
+            case Some(VMValue.Bits(it, lanes))
                 if integerShape(program, it).contains(shape) && lanes.length == shape._2 => Right(lanes)
             case _ => Left(Fault.InvalidTask("bit-field inserted value shape does not match result"))
           }
@@ -2924,7 +2924,7 @@ private object VMInterpreter {
         }
         value & mask(shape._1)
       }.toArray
-      values.update(id(d), RuntimeValue.Bits(id(t), result))
+      values.update(id(d), VMValue.Bits(id(t), result))
       execution.pc += 1
     }
   }
@@ -3693,9 +3693,9 @@ private object VMInterpreter {
         val falseId = id(whenFalse)
         (values.get(id(condition)), values.get(trueId), values.get(falseId)) match {
           case (
-                Some(RuntimeValue.Bits(conditionType, conditionLanes)),
-                Some(RuntimeValue.Bits(_, trueLanes)),
-                Some(RuntimeValue.Bits(_, falseLanes))
+                Some(VMValue.Bits(conditionType, conditionLanes)),
+                Some(VMValue.Bits(_, trueLanes)),
+                Some(VMValue.Bits(_, falseLanes))
               ) =>
             (booleanLanes(program, conditionType), program.layout.scalarLeafCount(id(resultType))) match {
               case (Some(conditionCount), Right(resultCount))
@@ -3706,7 +3706,7 @@ private object VMInterpreter {
                   else falseLanes
                   selected(index)
                 }
-                values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
+                values.update(id(dest), VMValue.Bits(id(resultType), result))
                 execution.pc += 1
               case (None, _) =>
                 return Left(Fault.InvalidTask(
@@ -3721,7 +3721,7 @@ private object VMInterpreter {
                   )
                 )
             }
-          case (Some(RuntimeValue.Bits(conditionType, conditionLanes)), Some(yes), Some(no))
+          case (Some(VMValue.Bits(conditionType, conditionLanes)), Some(yes), Some(no))
               if booleanLanes(program, conditionType).contains(1) && conditionLanes.length == 1 =>
             values.update(id(dest), retag(if (conditionLanes(0) != 0L) yes else no, id(resultType)))
             execution.pc += 1
@@ -3760,7 +3760,7 @@ private object VMInterpreter {
         predicateResult: Boolean = false
     ): Either[Fault, CollectiveRequest] =
       (scalar(values, scope), values.get(id(source))) match {
-        case (Right(3L), Some(value @ RuntimeValue.Bits(sourceType, _)))
+        case (Right(3L), Some(value @ VMValue.Bits(sourceType, _)))
             if (predicateResult && booleanLanes(program, id(t)).contains(1)) || sourceType == id(t) =>
           Right(CollectiveRequest(
             kind,
@@ -3807,7 +3807,7 @@ private object VMInterpreter {
         _       <- Either.cond(
           integerShape(
             program,
-            values.get(id(lane)).collect { case RuntimeValue.Bits(t, _) => t }.getOrElse(-1)
+            values.get(id(lane)).collect { case VMValue.Bits(t, _) => t }.getOrElse(-1)
           ).contains(32 -> 1),
           (),
           Fault.InvalidTask("subgroup shuffle lane must be a 32-bit scalar integer")
@@ -3826,8 +3826,8 @@ private object VMInterpreter {
             id(t),
             id(d),
             data,
-            RuntimeValue.Bits(
-              values.get(id(lane)).collect { case RuntimeValue.Bits(t, _) => t }.getOrElse(-1),
+            VMValue.Bits(
+              values.get(id(lane)).collect { case VMValue.Bits(t, _) => t }.getOrElse(-1),
               Array(selected)
             )
           )
@@ -3851,7 +3851,7 @@ private object VMInterpreter {
                 function,
                 pc,
                 3,
-                CollectivePayload.Value(id(t), id(d), RuntimeValue.Bits(id(t), Array(1L))),
+                CollectivePayload.Value(id(t), id(d), VMValue.Bits(id(t), Array(1L))),
                 nonUniform = true
               ))
             }
@@ -3953,7 +3953,7 @@ private object VMInterpreter {
     val bit =
       index.fold[Either[Fault, Long]](Right(execution.invocation.subgroupLocal.toLong))(scalar(execution.values, _))
     (scalar(execution.values, scope), execution.values.get(id(source)), bit) match {
-      case (Right(3L), Some(RuntimeValue.Bits(sourceType, words)), Right(local))
+      case (Right(3L), Some(VMValue.Bits(sourceType, words)), Right(local))
           if integerShape(program, sourceType).contains(32 -> 4) && words.length == 4 &&
             (if (mode == -1) booleanLanes(program, id(t)).contains(1)
              else integerShape(program, id(t)).contains(32 -> 1)) =>
@@ -3969,7 +3969,7 @@ private object VMInterpreter {
         }
         if (result < 0) Left(Fault.InvalidTask("invalid subgroup ballot operation"))
         else {
-          execution.values.update(id(d), RuntimeValue.Bits(id(t), Array(result)))
+          execution.values.update(id(d), VMValue.Bits(id(t), Array(result)))
           execution.pc += 1
           Right(())
         }
@@ -4620,7 +4620,7 @@ private object VMInterpreter {
     instruction match {
       case Instruction.FunctionPointerCallINTEL(resultType, dest, sources) if sources.nonEmpty =>
         return values.get(id(sources.head)) match {
-          case Some(RuntimeValue.Bits(_, Array(token)))
+          case Some(VMValue.Bits(_, Array(token)))
               if program.ownsFunctionPointer(token) &&
                 (token & 0xffffffffL) > 0 && (token & 0xffffffffL) <= Int.MaxValue &&
                 program.functions.contains((token & 0xffffffffL).toInt) =>
@@ -4654,7 +4654,7 @@ private object VMInterpreter {
                   case Some((width, 1)) =>
                     values.update(
                       id(dest),
-                      RuntimeValue.Bits(
+                      VMValue.Bits(
                         id(resultType),
                         Array(execution.invocation.local(dimension.toInt) & mask(width))
                       )
@@ -4685,7 +4685,7 @@ private object VMInterpreter {
                         execution.invocation.enqueuedWorkgroupSize(dimension.toInt)
                       case _ => 0L
                     }
-                    values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(source & mask(width))))
+                    values.update(id(dest), VMValue.Bits(id(resultType), Array(source & mask(width))))
                     execution.pc += 1
                   case _ =>
                     return Left(
@@ -4710,7 +4710,7 @@ private object VMInterpreter {
                   case Some((width, 1)) =>
                     values.update(
                       id(dest),
-                      RuntimeValue.Bits(
+                      VMValue.Bits(
                         id(resultType),
                         Array(execution.invocation.global(dimension.toInt) & mask(width))
                       )
@@ -4740,7 +4740,7 @@ private object VMInterpreter {
                       case Some("_Z14get_num_groupsj")    => execution.invocation.numWorkgroups(dimension.toInt)
                       case _                              => 0L
                     }
-                    values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(source & mask(width))))
+                    values.update(id(dest), VMValue.Bits(id(resultType), Array(source & mask(width))))
                     execution.pc += 1
                   case _ =>
                     return Left(
@@ -4767,7 +4767,7 @@ private object VMInterpreter {
                   case Some("_Z18get_num_sub_groupsv")     => execution.invocation.numSubgroups
                   case _                                   => 0L
                 }
-                values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(source & mask(width))))
+                values.update(id(dest), VMValue.Bits(id(resultType), Array(source & mask(width))))
                 execution.pc += 1
               case _ =>
                 return Left(
@@ -4785,7 +4785,7 @@ private object VMInterpreter {
             ) match {
               case (Right(left), Right(right), Some((width, 1))) =>
                 val result = if (java.lang.Long.compareUnsigned(left, right) <= 0) left else right
-                values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(result & mask(width))))
+                values.update(id(dest), VMValue.Bits(id(resultType), Array(result & mask(width))))
                 execution.pc += 1
               case (Left(error), _, _) => return Left(error)
               case (_, Left(error), _) => return Left(error)
@@ -4806,7 +4806,7 @@ private object VMInterpreter {
                 val count =
                   if (bits == 0L) sourceWidth.raw.toLong
                   else java.lang.Long.numberOfTrailingZeros(bits).toLong
-                values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(count & mask(resultWidth))))
+                values.update(id(dest), VMValue.Bits(id(resultType), Array(count & mask(resultWidth))))
                 execution.pc += 1
               case (Left(error), _, _) => return Left(error)
               case _                   =>
@@ -4823,8 +4823,8 @@ private object VMInterpreter {
               )
             (values.get(id(arguments(0))), values.get(id(arguments(1))), scalar(values, arguments(2))) match {
               case (
-                    previousValue @ Some(RuntimeValue.Bits(previousType, previousLanes)),
-                    currentValue @ Some(RuntimeValue.Bits(currentType, currentLanes)),
+                    previousValue @ Some(VMValue.Bits(previousType, previousLanes)),
+                    currentValue @ Some(VMValue.Bits(currentType, currentLanes)),
                     Right(delta)
                   )
                   if previousType == id(resultType) && currentType == id(resultType) &&
@@ -4869,13 +4869,13 @@ private object VMInterpreter {
                 )
               )
             values.get(id(arguments.head)) match {
-              case Some(RuntimeValue.Address(_, pointer)) =>
+              case Some(VMValue.Address(_, pointer)) =>
                 memory.readScalar(pointer, 4) match {
                   case Left(error) => return Left(error)
                   case Right(raw)  =>
                     values.update(
                       id(dest),
-                      RuntimeValue.Bits(id(resultType), Array(float32ToBfloat16Bits(raw)))
+                      VMValue.Bits(id(resultType), Array(float32ToBfloat16Bits(raw)))
                     )
                     execution.pc += 1
                 }
@@ -4893,13 +4893,13 @@ private object VMInterpreter {
                 )
               )
             values.get(id(arguments.head)) match {
-              case Some(RuntimeValue.Address(_, pointer)) =>
+              case Some(VMValue.Address(_, pointer)) =>
                 memory.readScalar(pointer, 2) match {
                   case Left(error) => return Left(error)
                   case Right(raw)  =>
                     values.update(
                       id(dest),
-                      RuntimeValue.Bits(id(resultType), Array(bfloat16ToFloat32Bits(raw)))
+                      VMValue.Bits(id(resultType), Array(bfloat16ToFloat32Bits(raw)))
                     )
                     execution.pc += 1
                 }
@@ -4911,16 +4911,16 @@ private object VMInterpreter {
             }
           case Some("__to_global") =>
             (values.get(id(arguments.head)), program.layout.runtimeType(id(resultType))) match {
-              case (Some(RuntimeValue.Address(_, pointer)), Some(RuntimeType.Pointer(storageClass, pointee))) =>
+              case (Some(VMValue.Address(_, pointer)), Some(RuntimeType.Pointer(storageClass, pointee))) =>
                 values.update(
                   id(dest),
-                  RuntimeValue.Address(
+                  VMValue.Address(
                     id(resultType),
                     pointer.copy(pointee = pointee, storageClass = storageClass)
                   )
                 )
                 execution.pc += 1
-              case (Some(RuntimeValue.Address(_, _)), _) =>
+              case (Some(VMValue.Address(_, _)), _) =>
                 return Left(Fault.InvalidTask("OpenCL __to_global result is not a pointer"))
               case (Some(_), _) =>
                 return Left(Fault.InvalidTask("OpenCL __to_global source is not a pointer"))
@@ -4928,7 +4928,7 @@ private object VMInterpreter {
             }
           case Some("_Z5isnanf") =>
             values.get(id(arguments.head)) match {
-              case Some(RuntimeValue.Bits(sourceType, Array(raw))) =>
+              case Some(VMValue.Bits(sourceType, Array(raw))) =>
                 (floatingShape(program, sourceType), integerShape(program, id(resultType))) match {
                   case (Some((width, 1)), Some((resultWidth, 1))) =>
                     val (exponentMask, fractionMask) = width.raw match {
@@ -4940,7 +4940,7 @@ private object VMInterpreter {
                     val isNan = (bits & exponentMask) == exponentMask && (bits & fractionMask) != 0L
                     values.update(
                       id(dest),
-                      RuntimeValue.Bits(id(resultType), Array((if (isNan) 1L else 0L) & mask(resultWidth)))
+                      VMValue.Bits(id(resultType), Array((if (isNan) 1L else 0L) & mask(resultWidth)))
                     )
                     execution.pc += 1
                   case (None, _) =>
@@ -4981,7 +4981,7 @@ private object VMInterpreter {
             }
           case Some("_Z29work_group_scan_exclusive_addi") =>
             values.get(id(arguments.head)) match {
-              case Some(value @ RuntimeValue.Bits(sourceType, lanes))
+              case Some(value @ VMValue.Bits(sourceType, lanes))
                   if lanes.length == 1 && integerShape(program, sourceType).isDefined &&
                     integerShape(program, sourceType) == integerShape(program, id(resultType)) =>
                 suspend(
@@ -5011,7 +5011,7 @@ private object VMInterpreter {
             }
           case Some("_Z29work_group_scan_exclusive_addl") | Some("_Z28sub_group_scan_exclusive_addi") =>
             values.get(id(arguments.head)) match {
-              case Some(value @ RuntimeValue.Bits(sourceType, lanes))
+              case Some(value @ VMValue.Bits(sourceType, lanes))
                   if lanes.length == 1 && integerShape(program, sourceType).isDefined &&
                     integerShape(program, sourceType) == integerShape(program, id(resultType)) =>
                 val scope = program.functionNames.get(id(called)) match {
@@ -5050,7 +5050,7 @@ private object VMInterpreter {
               scalar(values, arguments(1)),
               integerShape(program, id(resultType))
             ) match {
-              case (Some(value @ RuntimeValue.Bits(sourceType, lanes)), Right(localId), Some((width, count)))
+              case (Some(value @ VMValue.Bits(sourceType, lanes)), Right(localId), Some((width, count)))
                   if lanes.length == count && integerShape(program, sourceType) == Some((width, count)) =>
                 val scope = openCLBroadcastScope(name).get
                 suspend(
@@ -5439,7 +5439,7 @@ private object VMInterpreter {
               }
               IEEE754.floatToBinary32(result.toFloat).raw.toLong & 0xffffffffL
             }
-            execution.values.update(request.destination, RuntimeValue.Bits(request.resultType, data))
+            execution.values.update(request.destination, VMValue.Bits(request.resultType, data))
             execution.pc += 1
           }
           execution.quadRequest = None
@@ -5492,9 +5492,9 @@ private object VMInterpreter {
         inputs: Vec[Array[Long]],
         initial: Long,
         resultType: Int
-    )(combine: (Long, Long) => Long): Vec[RuntimeValue] = {
+    )(combine: (Long, Long) => Long): Vec[VMValue] = {
       val accumulated = Array.fill(inputs.head.length)(initial)
-      val outputs     = Vec.newBuilder[RuntimeValue]
+      val outputs     = Vec.newBuilder[VMValue]
       inputs.foreach { input =>
         val before = accumulated.clone()
         var lane   = 0
@@ -5502,7 +5502,7 @@ private object VMInterpreter {
           accumulated(lane) = combine(accumulated(lane), input(lane))
           lane += 1
         }
-        outputs += RuntimeValue.Bits(resultType, if (expected.operation == 1) accumulated.clone() else before)
+        outputs += VMValue.Bits(resultType, if (expected.operation == 1) accumulated.clone() else before)
       }
       outputs.result()
     }
@@ -5531,11 +5531,11 @@ private object VMInterpreter {
           ))
         else {
           val results =
-            participants.zip(shuffleRequests).foldLeft[Either[Fault, Vec[RuntimeValue]]](Right(Vec.empty)) {
+            participants.zip(shuffleRequests).foldLeft[Either[Fault, Vec[VMValue]]](Right(Vec.empty)) {
               case (Right(existing), request) =>
                 val invocationId = request._2._3
                 invocationId match {
-                  case RuntimeValue.Bits(_, Array(sourceLocal)) =>
+                  case VMValue.Bits(_, Array(sourceLocal)) =>
                     participants.find(_.invocation.subgroupLocal.toLong == sourceLocal) match {
                       case Some(sourceExecution) =>
                         sourceExecution.suspended match {
@@ -5586,7 +5586,7 @@ private object VMInterpreter {
           ))
         else {
           val results =
-            participants.zip(shuffleRequests).foldLeft[Either[Fault, Vec[RuntimeValue]]](Right(Vec.empty)) {
+            participants.zip(shuffleRequests).foldLeft[Either[Fault, Vec[VMValue]]](Right(Vec.empty)) {
               case (Right(existing), (execution, (_, _, _, delta))) =>
                 val unwrappedSource = execution.invocation.subgroupLocal.toLong - delta
                 val usePrevious     = unwrappedSource < 0L
@@ -5654,7 +5654,7 @@ private object VMInterpreter {
           ))
         else {
           val results =
-            participants.zip(shuffleRequests).foldLeft[Either[Fault, Vec[RuntimeValue]]](Right(Vec.empty)) {
+            participants.zip(shuffleRequests).foldLeft[Either[Fault, Vec[VMValue]]](Right(Vec.empty)) {
               case (Right(existing), (execution, (_, _, _, delta))) =>
                 val unwrappedSource = execution.invocation.subgroupLocal.toLong + delta
                 val useNext         = unwrappedSource >= execution.invocation.subgroupSize.toLong
@@ -5710,11 +5710,11 @@ private object VMInterpreter {
           val results = expected.kind match {
             case CollectiveKind.Elect =>
               Right(Vec.from(participants.indices.map(i =>
-                RuntimeValue.Bits(resultType, Array(if (i == 0) 1L else 0L))
+                VMValue.Bits(resultType, Array(if (i == 0) 1L else 0L))
               )))
             case CollectiveKind.BroadcastFirst => Right(Vec.fill(participants.size)(requestValues.head))
             case CollectiveKind.AllEqual       =>
-              val inputs = requestValues.collect { case RuntimeValue.Bits(t, lanes) => (t, lanes) }
+              val inputs = requestValues.collect { case VMValue.Bits(t, lanes) => (t, lanes) }
               val equal  = inputs.size == requestValues.size && inputs.tail.forall { case (t, lanes) =>
                 val first = inputs.head._2
                 lanes.length == first.length && lanes.indices.forall { lane =>
@@ -5725,22 +5725,22 @@ private object VMInterpreter {
                   }
                 }
               }
-              Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, Array(if (equal) 1L else 0L))))
+              Right(Vec.fill(participants.size)(VMValue.Bits(resultType, Array(if (equal) 1L else 0L))))
             case CollectiveKind.Any =>
               val any = requestValues.exists {
-                case RuntimeValue.Bits(_, Array(value)) => value != 0L
-                case _                                  => false
+                case VMValue.Bits(_, Array(value)) => value != 0L
+                case _                             => false
               }
-              Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, Array(if (any) 1L else 0L))))
+              Right(Vec.fill(participants.size)(VMValue.Bits(resultType, Array(if (any) 1L else 0L))))
             case CollectiveKind.All =>
               val all = requestValues.forall {
-                case RuntimeValue.Bits(_, Array(value)) => value != 0L
-                case _                                  => false
+                case VMValue.Bits(_, Array(value)) => value != 0L
+                case _                             => false
               }
-              Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, Array(if (all) 1L else 0L))))
+              Right(Vec.fill(participants.size)(VMValue.Bits(resultType, Array(if (all) 1L else 0L))))
             case CollectiveKind.UnsignedMin | CollectiveKind.UnsignedMax | CollectiveKind.SignedMin |
                 CollectiveKind.SignedMax =>
-              val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
+              val inputs = requestValues.collect { case VMValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
                 Left(
                   Fault.InvalidTask(
@@ -5761,7 +5761,7 @@ private object VMInterpreter {
                   val lanes = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.map(_(lane) & mask(width)).reduce(extremum(_, _))
                   }
-                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, lanes)))
+                  Right(Vec.fill(participants.size)(VMValue.Bits(resultType, lanes)))
                 } else {
                   val identity =
                     if (signed) {
@@ -5774,7 +5774,7 @@ private object VMInterpreter {
                 }
               }
             case CollectiveKind.IntegerAdd =>
-              val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
+              val inputs = requestValues.collect { case VMValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
                 Left(Fault.InvalidTask(
                   "OpGroupIAdd participants do not all provide integer values"
@@ -5785,14 +5785,14 @@ private object VMInterpreter {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.foldLeft(0L)((sum, input) => (sum + input(lane)) & mask(width))
                   }
-                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
+                  Right(Vec.fill(participants.size)(VMValue.Bits(resultType, reduced)))
                 } else {
                   Right(scan(inputs, 0L, resultType)((left, right) => (left + right) & mask(width)))
                 }
               }
             case CollectiveKind.BitwiseAnd | CollectiveKind.BitwiseOr | CollectiveKind.BitwiseXor |
                 CollectiveKind.LogicalAnd | CollectiveKind.LogicalOr | CollectiveKind.LogicalXor =>
-              val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
+              val inputs = requestValues.collect { case VMValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
                 Left(Fault.InvalidTask(s"${expected.kind} participants do not all provide matching values"))
               else {
@@ -5815,11 +5815,11 @@ private object VMInterpreter {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.foldLeft(identity)((acc, input) => combine(acc, input(lane)))
                   }
-                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
+                  Right(Vec.fill(participants.size)(VMValue.Bits(resultType, reduced)))
                 } else Right(scan(inputs, identity, resultType)(combine(_, _)))
               }
             case CollectiveKind.IntegerMultiply =>
-              val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
+              val inputs = requestValues.collect { case VMValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
                 Left(Fault.InvalidTask(
                   "OpGroupIMulKHR participants do not all provide integer values"
@@ -5830,13 +5830,13 @@ private object VMInterpreter {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.foldLeft(1L)((product, input) => (product * input(lane)) & mask(width))
                   }
-                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
+                  Right(Vec.fill(participants.size)(VMValue.Bits(resultType, reduced)))
                 } else {
                   Right(scan(inputs, 1L, resultType)((left, right) => (left * right) & mask(width)))
                 }
               }
             case CollectiveKind.FloatingAdd =>
-              val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
+              val inputs = requestValues.collect { case VMValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
                 Left(Fault.InvalidTask(
                   "OpGroupFAdd participants do not all provide floating values"
@@ -5847,13 +5847,13 @@ private object VMInterpreter {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.foldLeft(0L)((sum, input) => floatingAddBits(width, sum, input(lane)))
                   }
-                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
+                  Right(Vec.fill(participants.size)(VMValue.Bits(resultType, reduced)))
                 } else {
                   Right(scan(inputs, 0L, resultType)((left, right) => floatingAddBits(width, left, right)))
                 }
               }
             case CollectiveKind.FloatingMin | CollectiveKind.FloatingMax =>
-              val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
+              val inputs = requestValues.collect { case VMValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
                 Left(Fault.InvalidTask(
                   s"${expected.kind} participants do not all provide values"
@@ -5868,14 +5868,14 @@ private object VMInterpreter {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.map(_(lane)).reduce(extremum(_, _))
                   }
-                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
+                  Right(Vec.fill(participants.size)(VMValue.Bits(resultType, reduced)))
                 } else {
                   val identity = floatingInfinityBits(width, negative = maximum)
                   Right(scan(inputs, identity, resultType)(extremum(_, _)))
                 }
               }
             case CollectiveKind.FloatingMultiply =>
-              val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
+              val inputs = requestValues.collect { case VMValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
                 Left(Fault.InvalidTask(
                   "OpGroupFMulKHR participants do not all provide floating values"
@@ -5889,7 +5889,7 @@ private object VMInterpreter {
                       floatingMultiplyBits(width, product, input(lane))
                     }
                   }
-                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
+                  Right(Vec.fill(participants.size)(VMValue.Bits(resultType, reduced)))
                 } else {
                   Right(scan(inputs, identity, resultType)((left, right) => floatingMultiplyBits(width, left, right)))
                 }
@@ -5928,7 +5928,7 @@ private object VMInterpreter {
             case CollectiveKind.Ballot =>
               val ballot = Array.fill(4)(0L)
               val valid  = participants.zip(requestValues).forall {
-                case (execution, RuntimeValue.Bits(_, Array(predicate))) =>
+                case (execution, VMValue.Bits(_, Array(predicate))) =>
                   val local = execution.invocation.subgroupLocal
                   if (predicate != 0L) ballot(local / 32) |= 1L << (local % 32)
                   true
@@ -5938,7 +5938,7 @@ private object VMInterpreter {
                 Left(Fault.InvalidTask(
                   "OpGroupNonUniformBallot participants do not all provide scalar boolean predicates"
                 ))
-              else Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, ballot)))
+              else Right(Vec.fill(participants.size)(VMValue.Bits(resultType, ballot)))
             case CollectiveKind.Barrier =>
               Left(Fault.InvalidTask("barrier rendezvous unexpectedly carried a value"))
           }
@@ -5975,7 +5975,7 @@ private object VMInterpreter {
       pred: Operand
   ): Either[Fault, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(pred))) match {
-      case (Right(3L), Some(value @ RuntimeValue.Bits(predType, Array(_))))
+      case (Right(3L), Some(value @ VMValue.Bits(predType, Array(_))))
           if integerShape(program, id(resultType)).contains(32 -> 4) &&
             booleanLanes(program, predType).contains(1) =>
         Right(
@@ -6086,7 +6086,7 @@ private object VMInterpreter {
         if (elementSize <= 0)
           Left(Fault.InvalidTask("OpGroupAsyncCopy element type has no data size"))
         else if (invocation.localX != 0L || invocation.localY != 0L || invocation.localZ != 0L) {
-          values.update(id(resultDestination), RuntimeValue.Bits(id(resultType), Array(0L)))
+          values.update(id(resultDestination), VMValue.Bits(id(resultType), Array(0L)))
           Right(())
         } else {
           try {
@@ -6140,7 +6140,7 @@ private object VMInterpreter {
                 writeElement(0L)
               } else memory.write(destination, packed)
             }.map { _ =>
-              values.update(id(resultDestination), RuntimeValue.Bits(id(resultType), Array(0L)))
+              values.update(id(resultDestination), VMValue.Bits(id(resultType), Array(0L)))
             }
           } catch {
             case _: ArithmeticException | _: IllegalArgumentException =>
@@ -6185,7 +6185,7 @@ private object VMInterpreter {
       opcode: String
   ): Either[Fault, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(pred))) match {
-      case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(predType, Array(_))))
+      case (Right(scope @ (2L | 3L)), Some(value @ VMValue.Bits(predType, Array(_))))
           if booleanLanes(program, id(resultType)).contains(1) && booleanLanes(program, predType).contains(1) =>
         Right(
           CollectiveRequest(
@@ -6223,7 +6223,7 @@ private object VMInterpreter {
       logical: Boolean = false
   ): Either[Fault, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
-      case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
+      case (Right(scope @ (2L | 3L)), Some(value @ VMValue.Bits(sourceType, lanes)))
           if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
             (if (logical) booleanLanes(program, id(resultType)) == booleanLanes(program, sourceType) &&
              booleanLanes(program, sourceType).contains(lanes.length)
@@ -6269,7 +6269,7 @@ private object VMInterpreter {
       source: Operand
   ): Either[Fault, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
-      case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
+      case (Right(scope @ (2L | 3L)), Some(value @ VMValue.Bits(sourceType, lanes)))
           if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
             integerShape(program, id(resultType)) == integerShape(program, sourceType) &&
             integerShape(program, sourceType).exists(_._2 == lanes.length) =>
@@ -6313,7 +6313,7 @@ private object VMInterpreter {
       source: Operand
   ): Either[Fault, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
-      case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
+      case (Right(scope @ (2L | 3L)), Some(value @ VMValue.Bits(sourceType, lanes)))
           if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
             integerShape(program, id(resultType)) == integerShape(program, sourceType) &&
             integerShape(program, sourceType).exists(_._2 == lanes.length) =>
@@ -6357,7 +6357,7 @@ private object VMInterpreter {
       source: Operand
   ): Either[Fault, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
-      case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
+      case (Right(scope @ (2L | 3L)), Some(value @ VMValue.Bits(sourceType, lanes)))
           if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
             floatingShape(program, id(resultType)) == floatingShape(program, sourceType) &&
             floatingShape(program, sourceType).exists(_._2 == lanes.length) =>
@@ -6401,7 +6401,7 @@ private object VMInterpreter {
       source: Operand
   ): Either[Fault, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
-      case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
+      case (Right(scope @ (2L | 3L)), Some(value @ VMValue.Bits(sourceType, lanes)))
           if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
             floatingShape(program, id(resultType)) == floatingShape(program, sourceType) &&
             floatingShape(program, sourceType).exists(_._2 == lanes.length) =>
@@ -6447,7 +6447,7 @@ private object VMInterpreter {
       opcode: String
   ): Either[Fault, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
-      case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
+      case (Right(scope @ (2L | 3L)), Some(value @ VMValue.Bits(sourceType, lanes)))
           if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
             floatingShape(program, id(resultType)) == floatingShape(program, sourceType) &&
             floatingShape(program, sourceType).exists(_._2 == lanes.length) =>
@@ -6491,8 +6491,8 @@ private object VMInterpreter {
   ): Either[Fault, CollectiveRequest] =
     (values.get(id(previous)), values.get(id(current)), scalar(values, delta)) match {
       case (
-            Some(previousValue @ RuntimeValue.Bits(previousType, previousLanes)),
-            Some(currentValue @ RuntimeValue.Bits(currentType, currentLanes)),
+            Some(previousValue @ VMValue.Bits(previousType, previousLanes)),
+            Some(currentValue @ VMValue.Bits(currentType, currentLanes)),
             Right(deltaValue)
           )
           if previousType == id(resultType) && currentType == id(resultType) &&
@@ -6535,8 +6535,8 @@ private object VMInterpreter {
   ): Either[Fault, CollectiveRequest] =
     (values.get(id(data)), values.get(id(invocationId))) match {
       case (
-            Some(dataValue @ RuntimeValue.Bits(dataType, dataLanes)),
-            Some(RuntimeValue.Bits(selectorType, Array(selector)))
+            Some(dataValue @ VMValue.Bits(dataType, dataLanes)),
+            Some(VMValue.Bits(selectorType, Array(selector)))
           )
           if dataType == id(resultType) && dataLanes.nonEmpty =>
         Right(
@@ -6549,11 +6549,11 @@ private object VMInterpreter {
               id(resultType),
               id(destination),
               dataValue,
-              RuntimeValue.Bits(selectorType, Array(selector ^ sourceXor.toLong))
+              VMValue.Bits(selectorType, Array(selector ^ sourceXor.toLong))
             )
           )
         )
-      case (Some(_), Some(RuntimeValue.Bits(_, lanes))) if lanes.length != 1 =>
+      case (Some(_), Some(VMValue.Bits(_, lanes))) if lanes.length != 1 =>
         Left(Fault.InvalidTask("OpSubgroupShuffleINTEL invocation id must be scalar"))
       case (Some(_), Some(_)) =>
         Left(Fault.InvalidTask(
@@ -6575,8 +6575,8 @@ private object VMInterpreter {
   ): Either[Fault, CollectiveRequest] =
     (values.get(id(current)), values.get(id(next)), scalar(values, delta)) match {
       case (
-            Some(currentValue @ RuntimeValue.Bits(currentType, currentLanes)),
-            Some(nextValue @ RuntimeValue.Bits(nextType, nextLanes)),
+            Some(currentValue @ VMValue.Bits(currentType, currentLanes)),
+            Some(nextValue @ VMValue.Bits(nextType, nextLanes)),
             Right(deltaValue)
           )
           if currentType == id(resultType) && nextType == id(resultType) &&
@@ -6621,8 +6621,8 @@ private object VMInterpreter {
     (scalar(values, executionScope), values.get(id(source)), values.get(id(localId))) match {
       case (
             Right(scope @ (2L | 3L)),
-            Some(value @ RuntimeValue.Bits(sourceType, _)),
-            Some(RuntimeValue.Bits(localIdType, lanes))
+            Some(value @ VMValue.Bits(sourceType, _)),
+            Some(VMValue.Bits(localIdType, lanes))
           )
           if sourceType == id(resultType) && integerShape(program, localIdType).exists { case (_, count) =>
             count == lanes.length && Vec(1, 2, 3).contains(count)
@@ -6662,13 +6662,13 @@ private object VMInterpreter {
       shared: Option[Region],
       argumentIndex: Int,
       memory: MemoryState
-  ): Either[Fault, RuntimeValue] =
+  ): Either[Fault, VMValue] =
     program.layout.runtimeType(parameterType) match {
       case Some(RuntimeType.Pointer(storageClass, pointee)) => argument match {
           case KernelTask.Argument.Memory(allocation, offset, _) =>
             program.layout.pointerLeafOffsets(pointee, 0L) match {
               case Right(leaves) if leaves.isEmpty =>
-                Right(RuntimeValue.Address(
+                Right(VMValue.Address(
                   parameterType,
                   Pointer(Region.External(allocation), offset.raw, pointee, storageClass)
                 ))
@@ -6689,7 +6689,7 @@ private object VMInterpreter {
                   case RuntimeType.Structure(_) | RuntimeType.Array(_, _) | RuntimeType.MatrixType(_, _) => true
                   case _                                                                                 => false
                 } =>
-            Right(RuntimeValue.Address(parameterType, Pointer(Region.Null, 0L, pointee, storageClass)))
+            Right(VMValue.Address(parameterType, Pointer(Region.Null, 0L, pointee, storageClass)))
           case KernelTask.Argument.Scalar(bytes)
               // A ByVal aggregate can contain a pointer in opaque byte-array storage at offset zero.
               // That relocation belongs inside the private copy, not to the parameter pointer itself.
@@ -6699,7 +6699,7 @@ private object VMInterpreter {
             memory.argumentRelocation(argumentIndex, 0L) match {
               case Some((target, targetOffset)) =>
                 Right(
-                  RuntimeValue.Address(
+                  VMValue.Address(
                     parameterType,
                     Pointer(Region.External(target), targetOffset, pointee, storageClass)
                   )
@@ -6713,7 +6713,7 @@ private object VMInterpreter {
               pointee,
               storageClass
             )
-              .map(pointer => RuntimeValue.Address(parameterType, pointer))
+              .map(pointer => VMValue.Address(parameterType, pointer))
           case KernelTask.Argument.Scalar(bytes) =>
             memory.relocateArgument(argumentIndex, bytes) match {
               case Left(error)      => Left(error)
@@ -6735,7 +6735,7 @@ private object VMInterpreter {
                     }
                   case Left(_) => ()
                 }
-                Right(RuntimeValue.Address(
+                Right(VMValue.Address(
                   parameterType,
                   Pointer(
                     Region.Internal(InternalMemory(buffer)),
@@ -6748,7 +6748,7 @@ private object VMInterpreter {
             }
           case KernelTask.Argument.Local(size) =>
             val region = shared.getOrElse(Region.Internal(InternalMemory(Array.ofDim[Byte](checkedSize(size.raw)))))
-            Right(RuntimeValue.Address(parameterType, Pointer(region, 0L, pointee, storageClass)))
+            Right(VMValue.Address(parameterType, Pointer(region, 0L, pointee, storageClass)))
         }
       case Some(_) => argument match {
           case KernelTask.Argument.Scalar(bytes) =>
@@ -6762,7 +6762,7 @@ private object VMInterpreter {
                 val region =
                   shared.getOrElse(Region.Internal(InternalMemory(Array.ofDim[Byte](checkedSize(size.raw)))))
                 memory.pointerInteger(Pointer(region, 0L, 0, 4)).map(address =>
-                  RuntimeValue.Bits(parameterType, Array(address))
+                  VMValue.Bits(parameterType, Array(address))
                 )
               case other => Left(
                   Fault.InvalidTask(s"scalar SPIR-V parameter cannot bind $other")
@@ -6783,7 +6783,7 @@ private object VMInterpreter {
       allocation: AllocationId,
       allocationOffset: Long,
       memory: MemoryState
-  ): Either[Fault, RuntimeValue] =
+  ): Either[Fault, VMValue] =
     program.layout.pointerLeafOffsets(pointee, 0L) match {
       case Left(error)   => Left(error)
       case Right(leaves) =>
@@ -6801,7 +6801,7 @@ private object VMInterpreter {
           }
         }
         Right(
-          RuntimeValue.Address(
+          VMValue.Address(
             parameterType,
             Pointer(
               Region.External(allocation),
@@ -6827,7 +6827,7 @@ private object VMInterpreter {
       memory: MemoryState,
       source: Pointer,
       resultType: Int
-  ): Memory.ReadResult[RuntimeValue] = program.layout.runtimeType(resultType) match {
+  ): Memory.ReadResult[VMValue] = program.layout.runtimeType(resultType) match {
     case Some(RuntimeType.Pointer(resultStorage, resultPointee)) =>
       val stored = if (memory.nativePointerStorage(source)) None
       else source.slots.flatMap(_.get(source.offset)).orElse(
@@ -6852,7 +6852,7 @@ private object VMInterpreter {
             // pointer for the destination; Generic is compatible with any
             // concrete storage class.
             val result = pointer.copy(pointee = resultPointee, storageClass = resultStorage)
-            Right(RuntimeValue.Address(resultType, result))
+            Right(VMValue.Address(resultType, result))
           case value =>
             Left(
               Fault.InvalidTask(
@@ -6997,7 +6997,7 @@ private object VMInterpreter {
     val pointee    = program.layout.pointerPointee(outputType)
     values.update(
       id(destination),
-      RuntimeValue.Address(
+      VMValue.Address(
         outputType,
         source.copy(offset = offset, pointee = pointee, matrixLayout = matrixLayout)
       )
@@ -7016,7 +7016,7 @@ private object VMInterpreter {
     (program.layout.runtimeType(outputType), values.get(id(source))) match {
       case (
             Some(RuntimeType.Pointer(targetStorage, targetPointee)),
-            Some(RuntimeValue.Address(sourceType, pointer))
+            Some(VMValue.Address(sourceType, pointer))
           ) if Vec(4, 5, 7).contains(targetStorage) =>
         program.layout.runtimeType(sourceType) match {
           case Some(RuntimeType.Pointer(8, sourcePointee))
@@ -7026,7 +7026,7 @@ private object VMInterpreter {
               case _ if pointer.storageClass == targetStorage => pointer
               case _                                          => Pointer(Region.Null, 0L, targetPointee, targetStorage)
             }
-            values.update(id(destination), RuntimeValue.Address(outputType, converted))
+            values.update(id(destination), VMValue.Address(outputType, converted))
             Right(())
           case Some(RuntimeType.Pointer(sourceStorage, sourcePointee)) =>
             Left(
@@ -7065,7 +7065,7 @@ private object VMInterpreter {
     (program.layout.runtimeType(outputType), values.get(id(source))) match {
       case (
             Some(RuntimeType.Pointer(resultStorage, targetPointee)),
-            Some(RuntimeValue.Address(sourceType, pointer))
+            Some(VMValue.Address(sourceType, pointer))
           ) if resultStorage == targetStorage && Vec(4, 5, 7).contains(targetStorage) =>
         program.layout.runtimeType(sourceType) match {
           case Some(RuntimeType.Pointer(8, sourcePointee))
@@ -7074,7 +7074,7 @@ private object VMInterpreter {
               if (pointer.region == Region.Null || pointer.storageClass == targetStorage)
                 pointer.copy(pointee = targetPointee, storageClass = targetStorage)
               else Pointer(Region.Null, 0L, targetPointee, targetStorage)
-            values.update(id(destination), RuntimeValue.Address(outputType, converted))
+            values.update(id(destination), VMValue.Address(outputType, converted))
             Right(())
           case Some(RuntimeType.Pointer(sourceStorage, sourcePointee)) =>
             Left(
@@ -7164,10 +7164,10 @@ private object VMInterpreter {
       composite: Operand,
       indexes: Vec[Operand]
   ): Either[Fault, Unit] = values.get(id(composite)) match {
-    case Some(RuntimeValue.Bits(compositeType, lanes)) =>
+    case Some(VMValue.Bits(compositeType, lanes)) =>
       compositeLeafRange(program, compositeType, indexes) match {
         case Right((offset, count)) if offset >= 0 && offset + count <= lanes.length =>
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), lanes.slice(offset, offset + count)))
+          values.update(id(destination), VMValue.Bits(id(resultType), lanes.slice(offset, offset + count)))
           Right(())
         case Right((offset, count)) =>
           Left(
@@ -7191,12 +7191,12 @@ private object VMInterpreter {
       indexes: Vec[Operand]
   ): Either[Fault, Unit] =
     (values.get(id(source)), values.get(id(composite))) match {
-      case (Some(RuntimeValue.Bits(_, sourceLanes)), Some(RuntimeValue.Bits(compositeType, compositeLanes))) =>
+      case (Some(VMValue.Bits(_, sourceLanes)), Some(VMValue.Bits(compositeType, compositeLanes))) =>
         compositeLeafRange(program, compositeType, indexes) match {
           case Right((offset, count)) if sourceLanes.length == count && offset + count <= compositeLanes.length =>
             val result = compositeLanes.clone()
             Array.copy(sourceLanes, 0, result, offset, count)
-            values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+            values.update(id(destination), VMValue.Bits(id(resultType), result))
             Right(())
           case Right((offset, count)) =>
             Left(
@@ -7277,7 +7277,7 @@ private object VMInterpreter {
           }
           lane += 1
         }
-        values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+        values.update(id(destination), VMValue.Bits(id(resultType), result))
         Right(())
       case (Some(_), Left(error), _) => Left(error)
       case (Some(_), _, Left(error)) => Left(error)
@@ -7301,7 +7301,7 @@ private object VMInterpreter {
         Fault.InvalidTask(s"OpenCL.std half store expects $expected operands")
       )
     (values.get(id(sources(0))), scalar(values, sources(1)), address(values, sources(2))) match {
-      case (Some(RuntimeValue.Bits(sourceType, lanes)), Right(offset), Right(pointer)) =>
+      case (Some(VMValue.Bits(sourceType, lanes)), Right(offset), Right(pointer)) =>
         floatingShape(program, sourceType) match {
           case Some((width, count)) if width.raw == 32 || width.raw == 64 =>
             val stride = if (aligned && count == 3) 4 else count
@@ -7374,7 +7374,7 @@ private object VMInterpreter {
             }
             index += 1
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), lanes))
+          values.update(id(destination), VMValue.Bits(id(resultType), lanes))
           Right(())
         case (Some(RuntimeType.VectorType(_, count)), Right(_), Right(_)) =>
           Left(
@@ -7405,7 +7405,7 @@ private object VMInterpreter {
       ))
     else
       (values.get(id(source)), scalar(values, sources(0)), address(values, sources(1))) match {
-        case (Some(RuntimeValue.Bits(sourceType, lanes)), Right(offset), Right(pointer)) =>
+        case (Some(VMValue.Bits(sourceType, lanes)), Right(offset), Right(pointer)) =>
           program.layout.runtimeType(sourceType) match {
             case Some(RuntimeType.VectorType(component, count)) if lanes.length == count =>
               val elementSize = program.layout.scalarMemoryWidth(component) match {
@@ -7453,7 +7453,7 @@ private object VMInterpreter {
       right: Operand
   ): Either[Fault, Unit] =
     (values.get(id(left)), values.get(id(right))) match {
-      case (Some(RuntimeValue.Bits(leftType, leftLanes)), Some(RuntimeValue.Bits(rightType, rightLanes))) =>
+      case (Some(VMValue.Bits(leftType, leftLanes)), Some(VMValue.Bits(rightType, rightLanes))) =>
         (
           floatingShape(program, leftType),
           floatingShape(program, rightType),
@@ -7486,7 +7486,7 @@ private object VMInterpreter {
                   )
               }
             }
-            values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+            values.update(id(destination), VMValue.Bits(id(resultType), result))
             Right(())
           case _ =>
             Left(
@@ -7509,7 +7509,7 @@ private object VMInterpreter {
       right: Operand
   ): Either[Fault, Unit] =
     (values.get(id(left)), values.get(id(right))) match {
-      case (Some(RuntimeValue.Bits(leftType, leftLanes)), Some(RuntimeValue.Bits(rightType, rightLanes))) =>
+      case (Some(VMValue.Bits(leftType, leftLanes)), Some(VMValue.Bits(rightType, rightLanes))) =>
         (
           integerShape(program, leftType),
           integerShape(program, rightType),
@@ -7522,7 +7522,7 @@ private object VMInterpreter {
               val rightValue = signExtend(rightLanes(index), width)
               ((leftValue & rightValue) + ((leftValue ^ rightValue) >> 1)) & mask(width)
             }
-            values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+            values.update(id(destination), VMValue.Bits(id(resultType), result))
             Right(())
           case _ =>
             Left(
@@ -7566,7 +7566,7 @@ private object VMInterpreter {
         var index      = 0
         while (index < arity) {
           values.get(id(sources(index))) match {
-            case Some(RuntimeValue.Bits(sourceType, lanes))
+            case Some(VMValue.Bits(sourceType, lanes))
                 if integerShape(program, sourceType).contains(inputWidth -> count) && lanes.length == count =>
               inputs(index) = lanes
             case None => return Left(undefined(sources(index)))
@@ -7614,7 +7614,7 @@ private object VMInterpreter {
           }
           calculated.toLong & mask(width)
         }
-        values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+        values.update(id(destination), VMValue.Bits(id(resultType), result))
         Right(())
       case _ =>
         Left(Fault.InvalidTask(s"OpenCL.std integer opcode $opcode requires an 8, 16, 32 or 64-bit integer result"))
@@ -7629,7 +7629,7 @@ private object VMInterpreter {
       source: Operand,
       signed: Boolean
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (integerShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
             if sourceWidth == resultWidth && sourceLanes == resultLanes && lanes.length == sourceLanes =>
@@ -7637,7 +7637,7 @@ private object VMInterpreter {
             val value = if (signed) signExtend(raw, sourceWidth) else raw
             (if (signed && value < 0L) -value else value) & mask(resultWidth)
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case _ =>
           Left(Fault.InvalidTask(
@@ -7655,7 +7655,7 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (integerShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
             if sourceWidth == resultWidth && sourceLanes == resultLanes && lanes.length == sourceLanes =>
@@ -7666,7 +7666,7 @@ private object VMInterpreter {
             else
               (java.lang.Long.numberOfLeadingZeros(value) - (64 - sourceWidth.raw)).toLong
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result.map(_ & mask(resultWidth))))
+          values.update(id(destination), VMValue.Bits(id(resultType), result.map(_ & mask(resultWidth))))
           Right(())
         case _ =>
           Left(Fault.InvalidTask(
@@ -7684,7 +7684,7 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (integerShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
             if sourceWidth == resultWidth && sourceLanes == resultLanes && lanes.length == sourceLanes =>
@@ -7692,7 +7692,7 @@ private object VMInterpreter {
             val value = raw & mask(sourceWidth)
             if (value == 0L) sourceWidth.raw.toLong else java.lang.Long.numberOfTrailingZeros(value).toLong
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result.map(_ & mask(resultWidth))))
+          values.update(id(destination), VMValue.Bits(id(resultType), result.map(_ & mask(resultWidth))))
           Right(())
         case _ =>
           Left(Fault.InvalidTask(
@@ -7710,12 +7710,12 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (integerShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
             if sourceWidth == resultWidth && sourceLanes == resultLanes && lanes.length == sourceLanes =>
           val result = lanes.map(raw => bitCount(raw, sourceWidth).toLong & mask(resultWidth))
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case _ =>
           Left(Fault.InvalidTask(
@@ -7738,7 +7738,7 @@ private object VMInterpreter {
     if (sources.isEmpty)
       return Left(Fault.InvalidTask("OpenCL.std printf requires a format string"))
     val format = values.get(id(sources.head)) match {
-      case Some(RuntimeValue.Address(_, pointer)) => readCString(memory, pointer) match {
+      case Some(VMValue.Address(_, pointer)) => readCString(memory, pointer) match {
           case Left(error) => return Left(error)
           case Right(text) => text
         }
@@ -7760,7 +7760,7 @@ private object VMInterpreter {
     while (index < conversions.size) {
       val source = sources(index + 1)
       values.get(id(source)) match {
-        case Some(RuntimeValue.Bits(typeId, lanes)) =>
+        case Some(VMValue.Bits(typeId, lanes)) =>
           signedIntegerShape(program, typeId) match {
             case Some((width, _, _)) =>
               arguments += Event.PrintArgument.Integer(Vec.from(lanes), width.raw)
@@ -7775,12 +7775,12 @@ private object VMInterpreter {
                   )
               }
           }
-        case Some(RuntimeValue.Address(_, pointer)) if conversions(index) == 's' =>
+        case Some(VMValue.Address(_, pointer)) if conversions(index) == 's' =>
           readCString(memory, pointer) match {
             case Left(error) => return Left(error)
             case Right(text) => arguments += Event.PrintArgument.Text(text)
           }
-        case Some(RuntimeValue.Address(_, pointer)) =>
+        case Some(VMValue.Address(_, pointer)) =>
           memory.pointerInteger(pointer) match {
             case Left(error)  => return Left(error)
             case Right(value) => arguments += Event.PrintArgument.Pointer(value)
@@ -7792,7 +7792,7 @@ private object VMInterpreter {
     memory.handler(Event.Print(format, Vec.from(arguments))).flatMap { _ =>
       integerShape(program, id(resultType)) match {
         case Some((width, 1)) =>
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), Array(0L & mask(width))))
+          values.update(id(destination), VMValue.Bits(id(resultType), Array(0L & mask(width))))
           Right(())
         case _ => Left(Fault.InvalidTask("OpenCL.std printf result is not an integer scalar"))
       }
@@ -7958,7 +7958,7 @@ private object VMInterpreter {
           ))
         else
           (values.get(id(sources(0))), values.get(id(sources(1)))) match {
-            case (Some(RuntimeValue.Bits(leftType, left)), Some(RuntimeValue.Bits(rightType, right))) =>
+            case (Some(VMValue.Bits(leftType, left)), Some(VMValue.Bits(rightType, right))) =>
               (
                 floatingShape(program, leftType),
                 floatingShape(program, rightType),
@@ -7973,7 +7973,7 @@ private object VMInterpreter {
                   }
                   values.update(
                     id(destination),
-                    RuntimeValue.Bits(
+                    VMValue.Bits(
                       id(resultType),
                       Array.tabulate(lanes)(index => (left(index) & ~signMask) | (right(index) & signMask))
                     )
@@ -8156,7 +8156,7 @@ private object VMInterpreter {
           ))
         else
           values.get(id(sources.head)) match {
-            case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+            case Some(VMValue.Bits(sourceType, lanes)) =>
               (floatingShape(program, sourceType), floatingShape(program, id(resultType))) match {
                 case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
                     if sourceWidth == resultWidth && sourceLanes == resultLanes =>
@@ -8236,7 +8236,7 @@ private object VMInterpreter {
                       case 64 => IEEE754.doubleToBinary64(evaluate(IEEE754.binary64ToDouble(raw)))
                     }
                   }
-                  values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+                  values.update(id(destination), VMValue.Bits(id(resultType), result))
                   Right(())
                 case _ =>
                   Left(
@@ -8440,7 +8440,7 @@ private object VMInterpreter {
       ).toRight(Fault.InvalidTask("GLSL Length/Distance result must be floating point"))
       operands <- sources.traverse { source =>
         values.get(id(source)) match {
-          case Some(RuntimeValue.Bits(typeId, lanes)) => floatingShape(
+          case Some(VMValue.Bits(typeId, lanes)) => floatingShape(
               program,
               typeId
             ).toRight(Fault.InvalidTask("GLSL Length/Distance operand must be floating point")).map(shape =>
@@ -8464,7 +8464,7 @@ private object VMInterpreter {
         else floatingToDouble(width, doubleToFloating(width, a - floatingToDouble(width, operands(1)._2(lane))))
         Math.hypot(length, value)
       }
-      values.update(id(destination), RuntimeValue.Bits(id(resultType), Array(doubleToFloating(width, length))))
+      values.update(id(destination), VMValue.Bits(id(resultType), Array(doubleToFloating(width, length))))
     }
 
   private def glslMatrix(
@@ -8477,7 +8477,7 @@ private object VMInterpreter {
   ): Either[Fault, Unit] =
     if (sources.size != 1) Left(Fault.InvalidTask("GLSL matrix operation requires one operand"))
     else values.get(id(sources.head)) match {
-      case Some(RuntimeValue.Bits(typeId, lanes)) => matrixShape(program, typeId) match {
+      case Some(VMValue.Bits(typeId, lanes)) => matrixShape(program, typeId) match {
           case Some(shape @ (width, rows, columns))
               if rows == columns && lanes.length == rows * columns &&
                 (if (opcode == ExtendedInstruction.GlslStd450.Determinant)
@@ -8503,7 +8503,7 @@ private object VMInterpreter {
               val cofactor = determinant(minor(matrix, c, r))
               doubleToFloating(width, (if ((r + c) % 2 == 0) cofactor else -cofactor) / det)
             }
-            values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+            values.update(id(destination), VMValue.Bits(id(resultType), result))
             Right(())
           case _ => Left(Fault.InvalidTask("GLSL determinant/inverse requires matching square matrix types"))
         }
@@ -8532,7 +8532,7 @@ private object VMInterpreter {
         Left(Fault.InvalidTask("GLSL integer bit searches require 32-bit components"))
       else sources.traverse { source =>
         values.get(id(source)) match {
-          case Some(RuntimeValue.Bits(typeId, lanes))
+          case Some(VMValue.Bits(typeId, lanes))
               if integerShape(program, typeId).contains(shape) && lanes.length == count => Right(lanes)
           case None => Left(undefined(source))
           case _    => Left(Fault.InvalidTask(s"GLSL integer opcode $opcode operand types do not match"))
@@ -8564,7 +8564,7 @@ private object VMInterpreter {
           }
           value & mask(width)
         }
-        values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+        values.update(id(destination), VMValue.Bits(id(resultType), result))
       }
     }
   }
@@ -8587,7 +8587,7 @@ private object VMInterpreter {
       case shape @ (width, count) =>
         sources.traverse { source =>
           values.get(id(source)) match {
-            case Some(RuntimeValue.Bits(typeId, lanes))
+            case Some(VMValue.Bits(typeId, lanes))
                 if floatingShape(program, typeId).contains(shape) && lanes.length == count => Right(lanes)
             case None => Left(undefined(source))
             case _    => Left(Fault.InvalidTask("GLSL numeric min/max operand types do not match"))
@@ -8606,7 +8606,7 @@ private object VMInterpreter {
             }
             doubleToFloating(width, value)
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
         }
     }
   }
@@ -8621,7 +8621,7 @@ private object VMInterpreter {
   ): Either[Fault, Unit] =
     if (sources.size != 1) Left(Fault.InvalidTask("GLSL packing expects one operand"))
     else values.get(id(sources.head)) match {
-      case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+      case Some(VMValue.Bits(sourceType, lanes)) =>
         val sourceFloat = floatingShape(program, sourceType).map((w, n) => w.raw -> n)
         val resultFloat = floatingShape(program, id(resultType)).map((w, n) => w.raw -> n)
         val sourceInt   = signedIntegerShape(program, sourceType).map((w, n, signed) => (w.raw, n, signed))
@@ -8692,7 +8692,7 @@ private object VMInterpreter {
             })
           } else None
         result match {
-          case Some(bits) => values.update(id(destination), RuntimeValue.Bits(id(resultType), bits)); Right(())
+          case Some(bits) => values.update(id(destination), VMValue.Bits(id(resultType), bits)); Right(())
           case None       => Left(Fault.InvalidTask(s"GLSL packing opcode $opcode has invalid operand or result types"))
         }
       case Some(_) => Left(Fault.InvalidTask("GLSL packing operand is a pointer"))
@@ -8713,9 +8713,9 @@ private object VMInterpreter {
     if (sources.size != (if (pointerForm) 2 else 1))
       Left(Fault.InvalidTask("GLSL decomposition has an incorrect operand count"))
     else values.get(id(sources.head)) match {
-      case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+      case Some(VMValue.Bits(sourceType, lanes)) =>
         val output = if (pointerForm) values.get(id(sources(1))) match {
-          case Some(RuntimeValue.Address(_, pointer)) if id(resultType) == sourceType =>
+          case Some(VMValue.Address(_, pointer)) if id(resultType) == sourceType =>
             Some((pointer.pointee, Some(pointer)))
           case _ => None
         }
@@ -8751,13 +8751,13 @@ private object VMInterpreter {
             }
             val written = pointer match {
               case Some(address) =>
-                program.encode(RuntimeValue.Bits(outputType, integral)).flatMap(memory.write(address, _))
+                program.encode(VMValue.Bits(outputType, integral)).flatMap(memory.write(address, _))
               case None => Right(())
             }
             written.map { _ =>
               values.update(
                 id(destination),
-                RuntimeValue.Bits(id(resultType), if (pointerForm) fractional else fractional ++ integral)
+                VMValue.Bits(id(resultType), if (pointerForm) fractional else fractional ++ integral)
               )
             }
           case _ => Left(Fault.InvalidTask("GLSL decomposition has incompatible operand or result types"))
@@ -8781,7 +8781,7 @@ private object VMInterpreter {
         sources.zipWithIndex.traverse { (source, index) =>
           val expected = if (opcode == ExtendedInstruction.GlslStd450.Refract && index == 2) 1 else count
           values.get(id(source)) match {
-            case Some(RuntimeValue.Bits(t, lanes))
+            case Some(VMValue.Bits(t, lanes))
                 if floatingShape(program, t).contains(width -> expected) && lanes.length == expected =>
               Right(lanes.map(floatingToDouble(width, _)))
             case None => Left(undefined(source))
@@ -8803,7 +8803,7 @@ private object VMInterpreter {
             }
             doubleToFloating(width, value)
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
         }
       case _ => Left(Fault.InvalidTask("GLSL geometric result or operand count is invalid"))
     }
@@ -8819,7 +8819,7 @@ private object VMInterpreter {
   ): Either[Fault, Unit] =
     if (sources.size != 1) Left(Fault.InvalidTask(s"GLSL.std.450 opcode $opcode expects one operand"))
     else values.get(id(sources.head)) match {
-      case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+      case Some(VMValue.Bits(sourceType, lanes)) =>
         (floatingShape(program, sourceType), floatingShape(program, id(resultType))) match {
           case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
               if sourceWidth == resultWidth && sourceLanes == resultLanes =>
@@ -8880,7 +8880,7 @@ private object VMInterpreter {
                 }
               }
             }
-            values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+            values.update(id(destination), VMValue.Bits(id(resultType), result))
             Right(())
           case _ => Left(Fault.InvalidTask("GLSL.std.450 unary floating types do not match"))
         }
@@ -8954,7 +8954,7 @@ private object VMInterpreter {
         var sourceIndex  = 0
         while (sourceIndex < sources.size) {
           values.get(id(sources(sourceIndex))) match {
-            case Some(RuntimeValue.Bits(sourceType, lanes)) => floatingShape(program, sourceType) match {
+            case Some(VMValue.Bits(sourceType, lanes)) => floatingShape(program, sourceType) match {
                 case Some((sourceWidth, sourceCount))
                     if sourceWidth == width && (sourceCount == count || sourceCount == 1) =>
                   sourceLanes(sourceIndex) = lanes
@@ -8983,7 +8983,7 @@ private object VMInterpreter {
           }
           doubleToFloating(width, operation(arguments))
         }
-        values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+        values.update(id(destination), VMValue.Bits(id(resultType), result))
         Right(())
     }
 
@@ -9071,7 +9071,7 @@ private object VMInterpreter {
     var index    = 0
     while (index < arity) {
       values.get(id(sources(index))) match {
-        case Some(RuntimeValue.Bits(sourceType, lanes)) => floatingShape(program, sourceType) match {
+        case Some(VMValue.Bits(sourceType, lanes)) => floatingShape(program, sourceType) match {
             case Some((sourceWidth, sourceCount))
                 if width.forall(_ == sourceWidth) && (index == 0 || sourceCount == count) =>
               width = Some(sourceWidth)
@@ -9120,7 +9120,7 @@ private object VMInterpreter {
             doubleToFloating(commonWidth, component(0, 2) * component(1, 0) - component(0, 0) * component(1, 2)),
             doubleToFloating(commonWidth, component(0, 0) * component(1, 1) - component(0, 1) * component(1, 0))
           ) ++ Option.when(count == 4)(doubleToFloating(commonWidth, 0.0))
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         }
       case ExtendedInstruction.OpenClStd.Distance | ExtendedInstruction.OpenClStd.FastDistance =>
@@ -9137,7 +9137,7 @@ private object VMInterpreter {
           }
           values.update(
             id(destination),
-            RuntimeValue.Bits(id(resultType), Array(doubleToFloating(commonWidth, distance)))
+            VMValue.Bits(id(resultType), Array(doubleToFloating(commonWidth, distance)))
           )
           Right(())
         }
@@ -9149,7 +9149,7 @@ private object VMInterpreter {
         else {
           values.update(
             id(destination),
-            RuntimeValue.Bits(id(resultType), Array(doubleToFloating(commonWidth, magnitude(0))))
+            VMValue.Bits(id(resultType), Array(doubleToFloating(commonWidth, magnitude(0))))
           )
           Right(())
         }
@@ -9182,7 +9182,7 @@ private object VMInterpreter {
               else (component(0, lane) / scale) / scaledLength
             doubleToFloating(commonWidth, normalized)
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         }
     }
@@ -9209,16 +9209,16 @@ private object VMInterpreter {
     val selection = values.get(id(sources(maskIndex)))
     (first, second, selection) match {
       case (
-            Some(RuntimeValue.Bits(firstType, firstLanes)),
+            Some(VMValue.Bits(firstType, firstLanes)),
             secondValue,
-            Some(RuntimeValue.Bits(maskType, maskLanes))
+            Some(VMValue.Bits(maskType, maskLanes))
           ) =>
         val secondLanes =
-          secondValue.collect { case RuntimeValue.Bits(_, lanes) => lanes }.getOrElse(Array.emptyLongArray)
+          secondValue.collect { case VMValue.Bits(_, lanes) => lanes }.getOrElse(Array.emptyLongArray)
         val sourceShape = numericShape(program, firstType)
         val secondShape = secondValue.flatMap {
-          case RuntimeValue.Bits(secondType, _) => numericShape(program, secondType)
-          case _                                => None
+          case VMValue.Bits(secondType, _) => numericShape(program, secondType)
+          case _                           => None
         }
         (sourceShape, integerShape(program, maskType), numericShape(program, id(resultType))) match {
           case (Some((width, sourceCount)), Some((_, maskCount)), Some((resultWidth, resultCount)))
@@ -9228,7 +9228,7 @@ private object VMInterpreter {
             val result   = Array.tabulate(resultCount) { lane =>
               combined(java.lang.Long.remainderUnsigned(maskLanes(lane), combined.length.toLong).toInt)
             }
-            values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+            values.update(id(destination), VMValue.Bits(id(resultType), result))
             Right(())
           case _ => Left(Fault.InvalidTask("OpenCL.std shuffle operand types are incompatible"))
         }
@@ -9254,9 +9254,9 @@ private object VMInterpreter {
       ))
     (values.get(id(sources(0))), values.get(id(sources(1))), values.get(id(sources(2)))) match {
       case (
-            Some(RuntimeValue.Bits(aType, a)),
-            Some(RuntimeValue.Bits(bType, b)),
-            Some(RuntimeValue.Bits(cType, c))
+            Some(VMValue.Bits(aType, a)),
+            Some(VMValue.Bits(bType, b)),
+            Some(VMValue.Bits(cType, c))
           ) =>
         val resultShape = numericShape(program, id(resultType))
         if (
@@ -9269,7 +9269,7 @@ private object VMInterpreter {
         else {
           values.update(
             id(destination),
-            RuntimeValue.Bits(
+            VMValue.Bits(
               id(resultType),
               Array.tabulate(a.length)(index => (a(index) & ~c(index)) | (b(index) & c(index)))
             )
@@ -9297,9 +9297,9 @@ private object VMInterpreter {
       ))
     (values.get(id(sources(0))), values.get(id(sources(1))), values.get(id(sources(2)))) match {
       case (
-            Some(RuntimeValue.Bits(aType, a)),
-            Some(RuntimeValue.Bits(bType, b)),
-            Some(RuntimeValue.Bits(cType, c))
+            Some(VMValue.Bits(aType, a)),
+            Some(VMValue.Bits(bType, b)),
+            Some(VMValue.Bits(cType, c))
           ) =>
         (
           numericShape(program, id(resultType)),
@@ -9317,7 +9317,7 @@ private object VMInterpreter {
                 else (condition & sign) != 0L
               if (selected) b(lane) else a(lane)
             }
-            values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+            values.update(id(destination), VMValue.Bits(id(resultType), result))
             Right(())
           case _ => Left(Fault.InvalidTask("OpenCL.std select operand types are incompatible"))
         }
@@ -9334,7 +9334,7 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, sourceLanes)) =>
+    case Some(VMValue.Bits(sourceType, sourceLanes)) =>
       (floatingShape(program, id(resultType)), integerShape(program, sourceType)) match {
         case (Some((width, count)), Some((_, sourceCount))) if sourceCount == count || sourceCount == 1 =>
           val result = Array.tabulate(count) { lane =>
@@ -9345,7 +9345,7 @@ private object VMInterpreter {
               case 64 => 0x7ff8000000000000L | (payload & 0x7ffffffffffffL)
             }
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case _ => Left(Fault.InvalidTask("OpenCL.std nan requires a floating result and integer payload"))
       }
@@ -9362,7 +9362,7 @@ private object VMInterpreter {
       exponent: Operand,
       root: Boolean
   ): Either[Fault, Unit] = (values.get(id(source)), values.get(id(exponent))) match {
-    case (Some(RuntimeValue.Bits(sourceType, sourceLanes)), Some(RuntimeValue.Bits(exponentType, exponentLanes))) =>
+    case (Some(VMValue.Bits(sourceType, sourceLanes)), Some(VMValue.Bits(exponentType, exponentLanes))) =>
       (
         floatingShape(program, id(resultType)),
         floatingShape(program, sourceType),
@@ -9388,7 +9388,7 @@ private object VMInterpreter {
               else Math.pow(value, 1.0 / power.toDouble)
             doubleToFloating(width, evaluated)
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case _ =>
           Left(
@@ -9416,9 +9416,9 @@ private object VMInterpreter {
   ): Either[Fault, Unit] =
     (values.get(id(left)), values.get(id(right)), values.get(id(addend))) match {
       case (
-            Some(RuntimeValue.Bits(leftType, leftLanes)),
-            Some(RuntimeValue.Bits(rightType, rightLanes)),
-            Some(RuntimeValue.Bits(addendType, addendLanes))
+            Some(VMValue.Bits(leftType, leftLanes)),
+            Some(VMValue.Bits(rightType, rightLanes)),
+            Some(VMValue.Bits(addendType, addendLanes))
           ) =>
         (
           floatingShape(program, leftType),
@@ -9444,7 +9444,7 @@ private object VMInterpreter {
                   addendLanes(index)
                 )
             }
-            values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+            values.update(id(destination), VMValue.Bits(id(resultType), result))
             Right(())
           case _ =>
             Left(Fault.InvalidTask(
@@ -9469,7 +9469,7 @@ private object VMInterpreter {
       opcode: Int
   ): Either[Fault, Unit] =
     (values.get(id(source)), address(values, output)) match {
-      case (Some(RuntimeValue.Bits(sourceType, sourceLanes)), Right(pointer)) =>
+      case (Some(VMValue.Bits(sourceType, sourceLanes)), Right(pointer)) =>
         (floatingShape(program, sourceType), floatingShape(program, id(resultType))) match {
           case (Some((width, count)), Some(resultShape))
               if resultShape == (width, count) && sourceLanes.length == count =>
@@ -9510,7 +9510,7 @@ private object VMInterpreter {
               val bytes = Array.ofDim[Byte](program.layout.typeSize(pointer.pointee))
               val _     = program.encodeBits(pointer.pointee, paired.map(_._2), 0, bytes, 0)
               memory.write(pointer, bytes).map { _ =>
-                values.update(id(destination), RuntimeValue.Bits(id(resultType), paired.map(_._1)))
+                values.update(id(destination), VMValue.Bits(id(resultType), paired.map(_._1)))
               }
             }
           case _ =>
@@ -9528,7 +9528,7 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (floatingShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((width, count)), Some((resultWidth, resultCount)))
             if resultWidth.raw == 32 && count == resultCount =>
@@ -9537,7 +9537,7 @@ private object VMInterpreter {
             val exponent = if (x == 0.0) Int.MinValue else if (!x.isFinite) Int.MaxValue else openCLExponent(x)
             exponent.toLong & 0xffffffffL
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case _ => Left(Fault.InvalidTask("OpenCL.std ilogb requires floating input and matching i32 result lanes"))
       }
@@ -9554,7 +9554,7 @@ private object VMInterpreter {
       sources: Vec[Operand]
   ): Either[Fault, Unit] =
     (values.get(id(sources(0))), values.get(id(sources(1))), address(values, sources(2))) match {
-      case (Some(RuntimeValue.Bits(leftType, left)), Some(RuntimeValue.Bits(rightType, right)), Right(pointer)) =>
+      case (Some(VMValue.Bits(leftType, left)), Some(VMValue.Bits(rightType, right)), Right(pointer)) =>
         floatingShape(program, id(resultType)) match {
           case Some(shape @ (width, count))
               if floatingShape(program, leftType).contains(shape) &&
@@ -9583,7 +9583,7 @@ private object VMInterpreter {
             val bytes = Array.ofDim[Byte](program.layout.typeSize(pointer.pointee))
             val _     = program.encodeBits(pointer.pointee, quotients, 0, bytes, 0)
             memory.write(pointer, bytes).map { _ =>
-              values.update(id(destination), RuntimeValue.Bits(id(resultType), remainders))
+              values.update(id(destination), VMValue.Bits(id(resultType), remainders))
             }
           case _ =>
             Left(Fault.InvalidTask("OpenCL.std remquo requires matching floating operands and i32 pointer lanes"))
@@ -9609,7 +9609,7 @@ private object VMInterpreter {
       right: Operand,
       maximum: Boolean
   ): Either[Fault, Unit] = (values.get(id(left)), values.get(id(right))) match {
-    case (Some(RuntimeValue.Bits(leftType, leftLanes)), Some(RuntimeValue.Bits(rightType, rightLanes))) =>
+    case (Some(VMValue.Bits(leftType, leftLanes)), Some(VMValue.Bits(rightType, rightLanes))) =>
       (
         floatingShape(program, leftType),
         floatingShape(program, rightType),
@@ -9628,7 +9628,7 @@ private object VMInterpreter {
               else floatingMinimum(leftValue, rightValue)
             doubleToFloating(width, selected)
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case _ =>
           Left(Fault.InvalidTask(
@@ -9648,7 +9648,7 @@ private object VMInterpreter {
       left: Operand,
       right: Operand
   ): Either[Fault, Unit] = (values.get(id(left)), values.get(id(right))) match {
-    case (Some(RuntimeValue.Bits(leftType, leftLanes)), Some(RuntimeValue.Bits(rightType, rightLanes))) =>
+    case (Some(VMValue.Bits(leftType, leftLanes)), Some(VMValue.Bits(rightType, rightLanes))) =>
       (
         floatingShape(program, leftType),
         floatingShape(program, rightType),
@@ -9663,7 +9663,7 @@ private object VMInterpreter {
               Math.pow(floatingToDouble(width, leftLanes(index)), floatingToDouble(width, rightLanes(index)))
             )
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case _ =>
           Left(Fault.InvalidTask(
@@ -9684,7 +9684,7 @@ private object VMInterpreter {
       right: Operand,
       hypot: Boolean
   ): Either[Fault, Unit] = (values.get(id(left)), values.get(id(right))) match {
-    case (Some(RuntimeValue.Bits(leftType, leftLanes)), Some(RuntimeValue.Bits(rightType, rightLanes))) =>
+    case (Some(VMValue.Bits(leftType, leftLanes)), Some(VMValue.Bits(rightType, rightLanes))) =>
       (
         floatingShape(program, leftType),
         floatingShape(program, rightType),
@@ -9703,7 +9703,7 @@ private object VMInterpreter {
             val value      = if (hypot) Math.hypot(leftValue, rightValue) else Math.atan2(leftValue, rightValue)
             doubleToFloating(width, value)
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case _ =>
           Left(
@@ -9726,7 +9726,7 @@ private object VMInterpreter {
       exponent: Operand,
       glsl: Boolean = false
   ): Either[Fault, Unit] = (values.get(id(source)), values.get(id(exponent))) match {
-    case (Some(RuntimeValue.Bits(sourceType, sourceLanes)), Some(RuntimeValue.Bits(exponentType, exponentLanes))) =>
+    case (Some(VMValue.Bits(sourceType, sourceLanes)), Some(VMValue.Bits(exponentType, exponentLanes))) =>
       (
         floatingShape(program, sourceType),
         floatingShape(program, id(resultType)),
@@ -9744,7 +9744,7 @@ private object VMInterpreter {
             val scale         = Math.max(Int.MinValue.toLong, Math.min(Int.MaxValue.toLong, exponentValue)).toInt
             doubleToFloating(width, Math.scalb(floatingToDouble(width, sourceLanes(index)), scale))
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case _ =>
           Left(Fault.InvalidTask(
@@ -9785,7 +9785,7 @@ private object VMInterpreter {
           val width = program.layout.scalarWidth(id(resultType))
           val size  = math.max(a.length, b.length)
           val lanes = Array.tabulate(size)(index => operation(a(index % a.length), b(index % b.length)) & mask(width))
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), lanes))
+          values.update(id(destination), VMValue.Bits(id(resultType), lanes))
           InstructionCompleted
         case (Left(error), _) => Left(error)
         case (_, Left(error)) => Left(error)
@@ -9803,8 +9803,8 @@ private object VMInterpreter {
   )(operation: (Long, Long, Int where Between[1, 64]) => Long): Either[Fault, Unit] =
     (values.get(id(base)), values.get(id(shift))) match {
       case (
-            Some(RuntimeValue.Bits(baseType, baseLanes)),
-            Some(RuntimeValue.Bits(shiftType, shiftLanes))
+            Some(VMValue.Bits(baseType, baseLanes)),
+            Some(VMValue.Bits(shiftType, shiftLanes))
           ) =>
         val resultShape = integerShape(program, id(resultType))
         val baseShape   = integerShape(program, baseType)
@@ -9817,7 +9817,7 @@ private object VMInterpreter {
               val amount = shiftLanes(lane) & mask(shiftWidth)
               operation(baseLanes(lane), amount, width) & mask(width)
             }
-            values.update(id(destination), RuntimeValue.Bits(id(resultType), lanes))
+            values.update(id(destination), VMValue.Bits(id(resultType), lanes))
             Right(())
           case _ =>
             Left(
@@ -9859,7 +9859,7 @@ private object VMInterpreter {
           val size  = math.max(a.length, b.length)
           val lanes =
             Array.tabulate(size)(index => if (predicate(a(index % a.length), b(index % b.length))) 1L else 0L)
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), lanes))
+          values.update(id(destination), VMValue.Bits(id(resultType), lanes))
           Right(())
         case (Left(error), _) => Left(error)
         case (_, Left(error)) => Left(error)
@@ -9892,8 +9892,8 @@ private object VMInterpreter {
       case _ =>
         (values.get(leftId), values.get(rightId)) match {
           case (
-                Some(RuntimeValue.Bits(leftRuntimeType, leftLanes)),
-                Some(RuntimeValue.Bits(rightRuntimeType, rightLanes))
+                Some(VMValue.Bits(leftRuntimeType, leftLanes)),
+                Some(VMValue.Bits(rightRuntimeType, rightLanes))
               ) =>
             (
               integerShape(program, leftRuntimeType),
@@ -9906,7 +9906,7 @@ private object VMInterpreter {
                 val result = Array.tabulate(count)(index =>
                   if (predicate(signExtend(leftLanes(index), width), signExtend(rightLanes(index), width))) 1L else 0L
                 )
-                values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+                values.update(id(destination), VMValue.Bits(id(resultType), result))
                 Right(())
               case (None, _, _) =>
                 Left(
@@ -9933,9 +9933,9 @@ private object VMInterpreter {
                   )
                 )
             }
-          case (Some(RuntimeValue.Address(_, _)), _) =>
+          case (Some(VMValue.Address(_, _)), _) =>
             Left(Fault.InvalidTask(s"$opcode left operand %$leftId is a pointer"))
-          case (_, Some(RuntimeValue.Address(_, _))) =>
+          case (_, Some(VMValue.Address(_, _))) =>
             Left(Fault.InvalidTask(s"$opcode right operand %$rightId is a pointer"))
           case (None, _) => Left(undefined(left))
           case (_, None) => Left(undefined(right))
@@ -9948,7 +9948,7 @@ private object VMInterpreter {
       typeId: Int,
       builtin: Int,
       invocation: InvocationBuiltins
-  ): Either[Fault, RuntimeValue] = {
+  ): Either[Fault, VMValue] = {
     val lanes: Either[Fault, Array[Long]] = builtin match {
       case BuiltIn.NumWorkgroups                                 => Right(invocation.numWorkgroupsVector)
       case BuiltIn.WorkgroupSize                                 => Right(invocation.workgroupSizeVector)
@@ -10008,7 +10008,7 @@ private object VMInterpreter {
     lanes.flatMap(values =>
       integerShape(program, typeId) match {
         case Some((width, count)) if count == values.length =>
-          Right(RuntimeValue.Bits(typeId, values.map(_ & mask(width))))
+          Right(VMValue.Bits(typeId, values.map(_ & mask(width))))
         case Some((_, count)) =>
           Left(
             Fault.InvalidTask(
@@ -10039,7 +10039,7 @@ private object VMInterpreter {
       program: Program,
       memory: MemoryState,
       pointer: Pointer
-  ): Memory.ReadResult[RuntimeValue.Bits] = {
+  ): Memory.ReadResult[VMValue.Bits] = {
     val leaves = program.layout.matrixStorageLeaves(pointer.pointee, pointer.matrixLayout)
     val lanes  = Array.ofDim[Long](leaves.size)
     var index  = 0
@@ -10058,7 +10058,7 @@ private object VMInterpreter {
       }
       index += 1
     }
-    Right(RuntimeValue.Bits(pointer.pointee, lanes))
+    Right(VMValue.Bits(pointer.pointee, lanes))
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
@@ -10066,7 +10066,7 @@ private object VMInterpreter {
       program: Program,
       memory: MemoryState,
       pointer: Pointer,
-      value: RuntimeValue.Bits
+      value: VMValue.Bits
   ): Either[Fault, Unit] = {
     val leaves = program.layout.matrixStorageLeaves(pointer.pointee, pointer.matrixLayout)
     if (leaves.size != value.lanes.length) return Left(Fault.InvalidTask("matrix storage scalar count does not match"))
@@ -10092,8 +10092,8 @@ private object VMInterpreter {
 
   private def address(values: InvocationValues, operand: Operand): Either[Fault, Pointer] =
     values.get(id(operand)) match {
-      case Some(RuntimeValue.Address(_, value)) => Right(value)
-      case Some(_)                              =>
+      case Some(VMValue.Address(_, value)) => Right(value)
+      case Some(_)                         =>
         Left(Fault.InvalidTask(s"SPIR-V value %${id(operand)} is not a pointer"))
       case None => Left(undefined(operand))
     }
@@ -10110,7 +10110,7 @@ private object VMInterpreter {
   ): Either[Fault, Unit] =
     (pointerOperand.words, sizeOperand.words) match {
       case (Vec(pointerId), Vec(sizeWord)) => values.get(pointerId.raw) match {
-          case Some(RuntimeValue.Address(pointerType, pointer)) => program.layout.runtimeType(pointerType) match {
+          case Some(VMValue.Address(pointerType, pointer)) => program.layout.runtimeType(pointerType) match {
               case Some(RuntimeType.Pointer(_, pointee)) if pointee == pointer.pointee =>
                 val size = sizeWord.toUnsigned.toLong
                 pointer.region match {
@@ -10153,8 +10153,8 @@ private object VMInterpreter {
 
   private def bits(values: InvocationValues, operand: Operand): Either[Fault, Array[Long]] =
     values.get(id(operand)) match {
-      case Some(RuntimeValue.Bits(_, value)) => Right(value)
-      case Some(_)                           =>
+      case Some(VMValue.Bits(_, value)) => Right(value)
+      case Some(_)                      =>
         Left(Fault.InvalidTask(s"SPIR-V value %${id(operand)} is not numeric"))
       case None => Left(undefined(operand))
     }
@@ -10169,9 +10169,9 @@ private object VMInterpreter {
           ))
       }
 
-  private def retag(value: RuntimeValue, typeId: Int): RuntimeValue = value match {
-    case RuntimeValue.Bits(_, lanes)      => RuntimeValue.Bits(typeId, lanes.clone())
-    case RuntimeValue.Address(_, pointer) => RuntimeValue.Address(typeId, pointer)
+  private def retag(value: VMValue, typeId: Int): VMValue = value match {
+    case VMValue.Bits(_, lanes)      => VMValue.Bits(typeId, lanes.clone())
+    case VMValue.Address(_, pointer) => VMValue.Address(typeId, pointer)
   }
 
   // Bitcast packs and unpacks lane bits without allocating intermediate collections.
@@ -10265,14 +10265,14 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (integerShape(program, sourceType), floatingShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes))) if sourceLanes == resultLanes =>
           val converted = lanes.map { raw =>
             val signed = signExtend(raw, sourceWidth)
             doubleToFloating(resultWidth, signed.toDouble)
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), converted))
+          values.update(id(destination), VMValue.Bits(id(resultType), converted))
           Right(())
         case (None, _) =>
           Left(
@@ -10305,7 +10305,7 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (integerShape(program, sourceType), floatingShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes))) if sourceLanes == resultLanes =>
           val converted = lanes.map { raw =>
@@ -10315,7 +10315,7 @@ private object VMInterpreter {
             }
             doubleToFloating(resultWidth, unsigned)
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), converted))
+          values.update(id(destination), VMValue.Bits(id(resultType), converted))
           Right(())
         case (None, _) =>
           Left(
@@ -10348,12 +10348,12 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (integerShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes))) if sourceLanes == resultLanes =>
           values.update(
             id(destination),
-            RuntimeValue.Bits(id(resultType), lanes.map(value => signExtend(value, sourceWidth) & mask(resultWidth)))
+            VMValue.Bits(id(resultType), lanes.map(value => signExtend(value, sourceWidth) & mask(resultWidth)))
           )
           Right(())
         case (None, _) =>
@@ -10385,11 +10385,11 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (integerShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some(sourceShape @ (width, count)), Some(resultShape))
             if sourceShape == resultShape && lanes.length == count =>
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), lanes.map(raw => -raw & mask(width))))
+          values.update(id(destination), VMValue.Bits(id(resultType), lanes.map(raw => -raw & mask(width))))
           Right(())
         case _ => Left(Fault.InvalidTask("OpSNegate requires matching integer scalar/vector operand and result types"))
       }
@@ -10405,7 +10405,7 @@ private object VMInterpreter {
       source: Operand,
       classification: FloatingClassification
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (floatingShape(program, sourceType), booleanLanes(program, id(resultType))) match {
         case (Some((width, sourceLanes)), Some(resultLanes)) if sourceLanes == resultLanes =>
           val result = lanes.map { raw =>
@@ -10426,7 +10426,7 @@ private object VMInterpreter {
             }
             if (matches) 1L else 0L
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case (None, _) =>
           Left(
@@ -10459,7 +10459,7 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (floatingShape(program, sourceType), floatingShape(program, id(resultType))) match {
         case (Some(sourceShape @ (width, _)), Some(resultShape)) if sourceShape == resultShape =>
           val signMask = width.raw match {
@@ -10467,7 +10467,7 @@ private object VMInterpreter {
             case 32 => 0x80000000L
             case 64 => 0x8000000000000000L
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), lanes.map(_ ^ signMask)))
+          values.update(id(destination), VMValue.Bits(id(resultType), lanes.map(_ ^ signMask)))
           Right(())
         case _ =>
           Left(
@@ -10488,7 +10488,7 @@ private object VMInterpreter {
       vector: Operand,
       scalar: Operand
   ): Either[Fault, Unit] = (values.get(id(vector)), values.get(id(scalar))) match {
-    case (Some(RuntimeValue.Bits(vectorType, vectorLanes)), Some(RuntimeValue.Bits(scalarType, Array(scalarRaw)))) =>
+    case (Some(VMValue.Bits(vectorType, vectorLanes)), Some(VMValue.Bits(scalarType, Array(scalarRaw)))) =>
       (
         floatingShape(program, vectorType),
         floatingShape(program, scalarType),
@@ -10499,7 +10499,7 @@ private object VMInterpreter {
               && vectorLanes.length == count =>
           val multiplier = floatingToDouble(width, scalarRaw)
           val result     = vectorLanes.map(raw => doubleToFloating(width, floatingToDouble(width, raw) * multiplier))
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case _ => Left(Fault.InvalidTask("OpVectorTimesScalar requires a floating vector and matching scalar"))
       }
@@ -10517,7 +10517,7 @@ private object VMInterpreter {
       right: Operand,
       operation: FloatingOperation
   ): Either[Fault, Unit] = (values.get(id(left)), values.get(id(right))) match {
-    case (Some(RuntimeValue.Bits(leftType, leftLanes)), Some(RuntimeValue.Bits(rightType, rightLanes))) =>
+    case (Some(VMValue.Bits(leftType, leftLanes)), Some(VMValue.Bits(rightType, rightLanes))) =>
       (
         floatingShape(program, id(resultType)),
         floatingShape(program, leftType),
@@ -10580,7 +10580,7 @@ private object VMInterpreter {
                 )
             }
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case (None, _, _) =>
           Left(
@@ -10605,11 +10605,11 @@ private object VMInterpreter {
             )
           )
       }
-    case (Some(RuntimeValue.Address(_, _)), _) =>
+    case (Some(VMValue.Address(_, _)), _) =>
       Left(Fault.InvalidTask(
         s"${operation.opcode} left operand %${id(left)} is a pointer"
       ))
-    case (_, Some(RuntimeValue.Address(_, _))) =>
+    case (_, Some(VMValue.Address(_, _))) =>
       Left(Fault.InvalidTask(
         s"${operation.opcode} right operand %${id(right)} is a pointer"
       ))
@@ -10624,7 +10624,7 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (floatingShape(program, sourceType), floatingShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
             if sourceLanes == resultLanes && lanes.length == sourceLanes =>
@@ -10646,7 +10646,7 @@ private object VMInterpreter {
               }
             }
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), converted))
+          values.update(id(destination), VMValue.Bits(id(resultType), converted))
           Right(())
         case (None, _) =>
           Left(Fault.InvalidTask(
@@ -10687,7 +10687,7 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (floatingShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes))) if sourceLanes == resultLanes =>
           val mode      = program.ir.roundingModes.get(id(destination))
@@ -10704,7 +10704,7 @@ private object VMInterpreter {
               } else roundedToLong(floating, mode)
             signed & mask(resultWidth)
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), converted))
+          values.update(id(destination), VMValue.Bits(id(resultType), converted))
           Right(())
         case (None, _) =>
           Left(
@@ -10739,7 +10739,7 @@ private object VMInterpreter {
       destination: Operand,
       source: Operand
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (floatingShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes))) if sourceLanes == resultLanes =>
           val saturate  = program.saturatedConversions.contains(id(destination))
@@ -10762,7 +10762,7 @@ private object VMInterpreter {
             }
             index += 1
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), converted))
+          values.update(id(destination), VMValue.Bits(id(resultType), converted))
           Right(())
         case (None, _) =>
           Left(
@@ -10848,8 +10848,8 @@ private object VMInterpreter {
         Right(())
       case _ => (values.get(leftId), values.get(rightId)) match {
           case (
-                Some(RuntimeValue.Bits(leftRuntimeType, leftLanes)),
-                Some(RuntimeValue.Bits(rightRuntimeType, rightLanes))
+                Some(VMValue.Bits(leftRuntimeType, leftLanes)),
+                Some(VMValue.Bits(rightRuntimeType, rightLanes))
               ) =>
             (
               integerShape(program, leftRuntimeType),
@@ -10861,7 +10861,7 @@ private object VMInterpreter {
                     leftLanes.length == resultLanes && rightLanes.length == resultLanes =>
                 values.update(
                   id(destination),
-                  RuntimeValue.Bits(
+                  VMValue.Bits(
                     id(resultType),
                     Array.tabulate(resultLanes)(index => if (predicate(leftLanes(index), rightLanes(index))) 1L else 0L)
                   )
@@ -10892,9 +10892,9 @@ private object VMInterpreter {
                   )
                 )
             }
-          case (Some(RuntimeValue.Address(_, _)), _) =>
+          case (Some(VMValue.Address(_, _)), _) =>
             Left(Fault.InvalidTask(s"$opcode left operand %$leftId is a pointer"))
-          case (_, Some(RuntimeValue.Address(_, _))) =>
+          case (_, Some(VMValue.Address(_, _))) =>
             Left(Fault.InvalidTask(s"$opcode right operand %$rightId is a pointer"))
           case (None, _) => Left(undefined(left))
           case (_, None) => Left(undefined(right))
@@ -10934,14 +10934,14 @@ private object VMInterpreter {
         } else
           (values.get(leftId), values.get(rightId)) match {
             case (
-                  Some(RuntimeValue.Bits(leftRuntimeType, leftLanes)),
-                  Some(RuntimeValue.Bits(rightRuntimeType, rightLanes))
+                  Some(VMValue.Bits(leftRuntimeType, leftLanes)),
+                  Some(VMValue.Bits(rightRuntimeType, rightLanes))
                 )
                 if matches(leftRuntimeType) && matches(rightRuntimeType) &&
                   leftLanes.length == count && rightLanes.length == count =>
               values.update(
                 id(destination),
-                RuntimeValue.Bits(
+                VMValue.Bits(
                   resultId,
                   Array.tabulate(count)(index => operation(leftLanes(index), rightLanes(index)) & mask(width))
                 )
@@ -10983,12 +10983,12 @@ private object VMInterpreter {
         Right(())
       case Some((width, count)) =>
         values.get(sourceId) match {
-          case Some(RuntimeValue.Bits(runtimeType, lanes))
+          case Some(VMValue.Bits(runtimeType, lanes))
               if (runtimeType == resultId || integerShape(
                 program,
                 runtimeType
               ).contains(width -> count)) && lanes.length == count =>
-            values.update(id(destination), RuntimeValue.Bits(resultId, lanes.map(value => ~value & mask(width))))
+            values.update(id(destination), VMValue.Bits(resultId, lanes.map(value => ~value & mask(width))))
             Right(())
           case Some(_) =>
             Left(
@@ -11015,7 +11015,7 @@ private object VMInterpreter {
       case _                                                                                     => None
     }
     (member.flatMap(signedIntegerShape(program, _)), values.get(id(left)), values.get(id(right))) match {
-      case (Some((width, count, signed)), Some(RuntimeValue.Bits(aType, a)), Some(RuntimeValue.Bits(bType, b)))
+      case (Some((width, count, signed)), Some(VMValue.Bits(aType, a)), Some(VMValue.Bits(bType, b)))
           if member.contains(
             aType
           ) && aType == bType && a.length == count && b.length == count && (operation == 3 || !signed) =>
@@ -11046,7 +11046,7 @@ private object VMInterpreter {
           result(lane) = low
           result(count + lane) = high & wordMask
         }
-        values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+        values.update(id(destination), VMValue.Bits(id(resultType), result))
         Right(())
       case (_, None, _) => Left(undefined(left))
       case (_, _, None) => Left(undefined(right))
@@ -11063,13 +11063,13 @@ private object VMInterpreter {
       destination: Operand,
       base: Operand
   ): Either[Fault, Unit] = values.get(id(base)) match {
-    case Some(RuntimeValue.Bits(baseType, lanes)) =>
+    case Some(VMValue.Bits(baseType, lanes)) =>
       (integerShape(program, id(resultType)), integerShape(program, baseType)) match {
         case (Some((resultWidth, count)), Some((baseWidth, baseCount)))
             if count == baseCount && lanes.length == count =>
           values.update(
             id(destination),
-            RuntimeValue.Bits(id(resultType), lanes.map(value => bitCount(value, baseWidth).toLong & mask(resultWidth)))
+            VMValue.Bits(id(resultType), lanes.map(value => bitCount(value, baseWidth).toLong & mask(resultWidth)))
           )
           Right(())
         case _ =>
@@ -11102,8 +11102,8 @@ private object VMInterpreter {
     } else
       (values.get(leftId), values.get(rightId)) match {
         case (
-              Some(RuntimeValue.Bits(leftRuntimeType, leftLanes)),
-              Some(RuntimeValue.Bits(rightRuntimeType, rightLanes))
+              Some(VMValue.Bits(leftRuntimeType, leftLanes)),
+              Some(VMValue.Bits(rightRuntimeType, rightLanes))
             ) =>
           (
             booleanLanes(program, leftRuntimeType),
@@ -11115,7 +11115,7 @@ private object VMInterpreter {
                   leftLanes.length == leftCount && rightLanes.length == rightCount =>
               values.update(
                 id(destination),
-                RuntimeValue.Bits(
+                VMValue.Bits(
                   id(resultType),
                   Array.tabulate(resultCount)(index =>
                     if (predicate(leftLanes(index) != 0L, rightLanes(index) != 0L)) 1L else 0L
@@ -11164,9 +11164,9 @@ private object VMInterpreter {
     if (sources.size != required) Left(Fault.InvalidTask(s"matrix $operation has the wrong operand count"))
     else sources.traverse { source =>
       values.get(id(source)) match {
-        case Some(RuntimeValue.Bits(typeId, lanes)) => Right((typeId, lanes))
-        case None                                   => Left(undefined(source))
-        case _ => Left(Fault.InvalidTask(s"matrix $operation requires data operands"))
+        case Some(VMValue.Bits(typeId, lanes)) => Right((typeId, lanes))
+        case None                              => Left(undefined(source))
+        case _                                 => Left(Fault.InvalidTask(s"matrix $operation requires data operands"))
       }
     }.flatMap { operands =>
       val resultId     = id(resultType)
@@ -11247,7 +11247,7 @@ private object VMInterpreter {
           }
       }
       result.toRight(Fault.InvalidTask(s"matrix $operation operand/result shapes do not match")).map { lanes =>
-        values.update(id(destination), RuntimeValue.Bits(resultId, lanes))
+        values.update(id(destination), VMValue.Bits(resultId, lanes))
       }
     }
   }
@@ -11262,7 +11262,7 @@ private object VMInterpreter {
       left: Operand,
       right: Operand
   ): Either[Fault, Unit] = (values.get(id(left)), values.get(id(right))) match {
-    case (Some(RuntimeValue.Bits(leftType, leftLanes)), Some(RuntimeValue.Bits(rightType, rightLanes))) =>
+    case (Some(VMValue.Bits(leftType, leftLanes)), Some(VMValue.Bits(rightType, rightLanes))) =>
       (
         floatingShape(program, leftType),
         floatingShape(program, rightType),
@@ -11281,7 +11281,7 @@ private object VMInterpreter {
             )
             lane += 1
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), Array(accumulated)))
+          values.update(id(destination), VMValue.Bits(id(resultType), Array(accumulated)))
           Right(())
         case _ => Left(Fault.InvalidTask("OpDot requires matching floating vectors and a scalar result"))
       }
@@ -11299,7 +11299,7 @@ private object VMInterpreter {
       source: Operand,
       all: Boolean
   ): Either[Fault, Unit] = values.get(id(source)) match {
-    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+    case Some(VMValue.Bits(sourceType, lanes)) =>
       (booleanLanes(program, sourceType), booleanLanes(program, id(resultType))) match {
         case (Some(count), Some(1)) if lanes.length == count =>
           val result = if (all) !lanes.contains(0L) else lanes.exists(_ != 0L)
@@ -11332,12 +11332,12 @@ private object VMInterpreter {
       Right(())
     } else
       values.get(sourceId) match {
-        case Some(RuntimeValue.Bits(runtimeType, lanes))
+        case Some(VMValue.Bits(runtimeType, lanes))
             if booleanLanes(program, runtimeType).contains(lanes.length) &&
               booleanLanes(program, id(resultType)).contains(lanes.length) =>
           values.update(
             id(destination),
-            RuntimeValue.Bits(id(resultType), lanes.map(value => if (value == 0L) 1L else 0L))
+            VMValue.Bits(id(resultType), lanes.map(value => if (value == 0L) 1L else 0L))
           )
           Right(())
         case Some(_) =>
@@ -11374,7 +11374,7 @@ private object VMInterpreter {
     val leftValue  = values.get(id(left))
     val rightValue = values.get(id(right))
     (leftValue, rightValue) match {
-      case (Some(RuntimeValue.Bits(leftType, leftLanes)), Some(RuntimeValue.Bits(rightType, rightLanes))) =>
+      case (Some(VMValue.Bits(leftType, leftLanes)), Some(VMValue.Bits(rightType, rightLanes))) =>
         (
           integerShape(program, id(resultType)),
           integerShape(program, leftType),
@@ -11401,7 +11401,7 @@ private object VMInterpreter {
                   }) & mask(width)
               index += 1
             }
-            values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+            values.update(id(destination), VMValue.Bits(id(resultType), result))
             Right(())
           case (None, _, _) =>
             Left(
@@ -11428,11 +11428,11 @@ private object VMInterpreter {
               )
             )
         }
-      case (Some(RuntimeValue.Address(_, _)), _) =>
+      case (Some(VMValue.Address(_, _)), _) =>
         Left(Fault.InvalidTask(
           s"${operation.opcode} left operand %${id(left)} is a pointer"
         ))
-      case (_, Some(RuntimeValue.Address(_, _))) =>
+      case (_, Some(VMValue.Address(_, _))) =>
         Left(Fault.InvalidTask(
           s"${operation.opcode} right operand %${id(right)} is a pointer"
         ))
@@ -11916,8 +11916,8 @@ private object VMInterpreter {
     else
       (values.get(leftId), values.get(rightId)) match {
         case (
-              Some(RuntimeValue.Bits(leftType, Array(leftValue))),
-              Some(RuntimeValue.Bits(rightType, Array(rightValue)))
+              Some(VMValue.Bits(leftType, Array(leftValue))),
+              Some(VMValue.Bits(rightType, Array(rightValue)))
             ) =>
           (
             integerShape(program, id(resultType)),
@@ -11936,7 +11936,7 @@ private object VMInterpreter {
                   val remainder = dividend % divisor
                   if (remainder != 0 && (remainder < 0) != (divisor < 0)) remainder + divisor else remainder
               }
-              values.update(id(destination), RuntimeValue.Bits(id(resultType), Array(result & mask(width))))
+              values.update(id(destination), VMValue.Bits(id(resultType), Array(result & mask(width))))
               Right(())
             case (None, _, _) =>
               Left(
@@ -11963,7 +11963,7 @@ private object VMInterpreter {
                 )
               )
           }
-        case (Some(RuntimeValue.Bits(leftType, leftLanes)), Some(RuntimeValue.Bits(rightType, rightLanes))) =>
+        case (Some(VMValue.Bits(leftType, leftLanes)), Some(VMValue.Bits(rightType, rightLanes))) =>
           (
             integerShape(program, id(resultType)),
             integerShape(program, leftType),
@@ -11988,7 +11988,7 @@ private object VMInterpreter {
                    }) & mask(width)
                 index += 1
               }
-              values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+              values.update(id(destination), VMValue.Bits(id(resultType), result))
               Right(())
             case (None, _, _) =>
               Left(
@@ -12015,11 +12015,11 @@ private object VMInterpreter {
                 )
               )
           }
-        case (Some(RuntimeValue.Address(_, _)), _) =>
+        case (Some(VMValue.Address(_, _)), _) =>
           Left(Fault.InvalidTask(
             s"${operation.opcode} left operand %${id(left)} is a pointer"
           ))
-        case (_, Some(RuntimeValue.Address(_, _))) =>
+        case (_, Some(VMValue.Address(_, _))) =>
           Left(Fault.InvalidTask(
             s"${operation.opcode} right operand %${id(right)} is a pointer"
           ))
@@ -12037,7 +12037,7 @@ private object VMInterpreter {
       right: Operand,
       operation: FloatingComparison
   ): Either[Fault, Unit] = (values.get(id(left)), values.get(id(right))) match {
-    case (Some(RuntimeValue.Bits(leftType, leftLanes)), Some(RuntimeValue.Bits(rightType, rightLanes))) =>
+    case (Some(VMValue.Bits(leftType, leftLanes)), Some(VMValue.Bits(rightType, rightLanes))) =>
       (
         floatingShape(program, leftType),
         floatingShape(program, rightType),
@@ -12068,7 +12068,7 @@ private object VMInterpreter {
             }
             if (comparison) 1L else 0L
           }
-          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case (None, _, _) =>
           Left(Fault.InvalidTask(
@@ -12095,11 +12095,11 @@ private object VMInterpreter {
             )
           )
       }
-    case (Some(RuntimeValue.Address(_, _)), _) =>
+    case (Some(VMValue.Address(_, _)), _) =>
       Left(Fault.InvalidTask(
         s"${operation.opcode} left operand %${id(left)} is a pointer"
       ))
-    case (_, Some(RuntimeValue.Address(_, _))) =>
+    case (_, Some(VMValue.Address(_, _))) =>
       Left(Fault.InvalidTask(
         s"${operation.opcode} right operand %${id(right)} is a pointer"
       ))

@@ -68,6 +68,44 @@ class ExecutionSessionSuite extends munit.FunSuite {
     override def close(): Unit = closed.set(true)
   }
 
+  test("printf retention accepts its limit and fails on the next event") {
+    for (events <- List(2, 3)) {
+      class PrintingBackend extends Backend {
+        override def load(image: Vec[Byte]): Either[ExecutionFailure, RuntimeBackend.Program] =
+          Right(PrintingProgram())
+        private class PrintingProgram extends Program(AtomicBoolean()) {
+          override def execute(
+              task: KernelTask,
+              memory: Memory,
+              control: TaskControl,
+              handler: Event => Either[Fault, Unit]
+          ): Either[ExecutionFailure, Unit] = (0 until events).foldLeft[Either[Fault, Unit]](Right(())) { (result, _) =>
+            result.flatMap(_ => handler(Event.Print("hello", Vec.empty)))
+          }.left.map(ExecutionFailure.fromFault(_))
+        }
+      }
+      Using.resource(ExecutionSession(backends = List(PrintingBackend()), maxPrintEvents = 2)) { service =>
+        val allocation = service.registerAllocation(8L, AllocationKind.Device).toOption.get
+        val program    = service.load(encoding, Vec[Byte](1)).toOption.get
+        val task       = KernelTask.validated(
+          "print",
+          LaunchGeometry.Dimensions.One,
+          LaunchGeometry.Dimensions.One,
+          Vec(KernelTask.Argument.Memory(allocation, 0L))
+        ).toOption.get
+        val completion = service.launch(program, task).toOption.get
+        if (events == 2) {
+          assertEquals(service.awaitCompletion(completion), Right(()))
+          assertEquals(service.completionPrints(completion), Right("hellohello"))
+        } else {
+          val failure = service.awaitCompletion(completion).swap.toOption.get
+          assert(failure.message.contains("device printf event limit exceeded"))
+          assertEquals(service.completion(completion), Right(CompletionStatus.Failed(failure)))
+        }
+      }
+    }
+  }
+
   test("an atomic update does not block writes to an unrelated allocation") {
     Using.resource(ExecutionSession(List(Backend()))) { service =>
       val first   = service.registerAllocation(8L, AllocationKind.Device).toOption.get
@@ -157,7 +195,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
       assertEquals(service.read(allocation, 2L, 1), Right(Vec[Byte](42)))
       assertEquals(service.completionPrints(completion), Right("done 42"))
       assertEquals(
-        service.completionDirtyRanges(completion, 0),
+        service.completionDirtyRanges(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements),
         Right(Vec(DirtyRange(allocation, 2L, 1)))
       )
     }
@@ -199,14 +237,41 @@ class ExecutionSessionSuite extends munit.FunSuite {
       ).toOption.get
       val completion = service.launch(program, task).toOption.get
       assertEquals(service.awaitCompletion(completion), Right(()))
-      val first  = service.completionDirtyRanges(completion, 0).toOption.get
-      val second = service.completionDirtyRanges(completion, ExecutionRPC.MaximumElements).toOption.get
+      val first =
+        service.completionDirtyRanges(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements).toOption.get
+      val second = service.completionDirtyRanges(
+        id = completion,
+        offset = ExecutionRPC.MaximumElements,
+        limit = ExecutionRPC.MaximumElements
+      ).toOption.get
       assertEquals(first.length, ExecutionRPC.MaximumElements.raw)
       assertEquals(second.length, 3)
-      assertEquals(service.completionDirtyRanges(completion, 0), Right(first))
-      assertEquals(service.completionDirtyRanges(completion, count.unsafe[Int >= 0]), Right(Vec.empty[DirtyRange]))
-      assertEquals(service.completionDirtyRanges(completion, Int.MaxValue), Right(Vec.empty[DirtyRange]))
+      assertEquals(
+        service.completionDirtyRanges(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements),
+        Right(first)
+      )
+      assertEquals(
+        service.completionDirtyRanges(
+          id = completion,
+          offset = count.unsafe[Int >= 0],
+          limit = ExecutionRPC.MaximumElements
+        ),
+        Right(Vec.empty[DirtyRange])
+      )
+      assertEquals(
+        service.completionDirtyRanges(id = completion, offset = Int.MaxValue, limit = ExecutionRPC.MaximumElements),
+        Right(Vec.empty[DirtyRange])
+      )
       val ranges = first ++ second
+      assertEquals(service.completionDirtyRanges(id = completion, offset = 1, limit = 2), Right(ranges.slice(1, 3)))
+      assertEquals(
+        service.completionDirtyRanges(id = completion, offset = (count - 1).unsafe[Int >= 0], limit = 2),
+        Right(ranges.takeRight(1))
+      )
+      assertEquals(
+        service.completionDirtyRanges(id = completion, offset = 1, limit = Int.MaxValue),
+        Right(ranges.drop(1))
+      )
       assertEquals(ranges.map(_.offset.raw), Vec.from(0 until count).map(_.toLong * 2))
       assert(ranges.forall(range => range.allocation == allocation && range.size.raw == 1))
       for (page <- Vec(first, second)) {
@@ -216,7 +281,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
       val bytes = service.read(allocation, 0L, (count * 2).unsafe[Int >= 0]).toOption.get
       assertEquals(bytes, Vec.from(0 until count * 2).map(index => if (index % 2 == 0) 42.toByte else 0.toByte))
       assertEquals(service.releaseCompletion(completion), Right(()))
-      assert(service.completionDirtyRanges(completion, 0).isLeft)
+      assert(service.completionDirtyRanges(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements).isLeft)
     }
   }
 
@@ -257,7 +322,10 @@ class ExecutionSessionSuite extends munit.FunSuite {
         val expected =
           Vec.from(0 until 128).map(index => DirtyRange(allocation, (index.toLong * 16L).unsafe[Long >= 0], 8))
             .appended(DirtyRange(allocation, 4095L, 8))
-        assertEquals(service.completionDirtyRanges(completion, 0), Right(expected))
+        assertEquals(
+          service.completionDirtyRanges(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements),
+          Right(expected)
+        )
         (0 until 128).foreach { index =>
           val offset = ((index.toLong * 31L % 128L) * 16L).unsafe[Long >= 0]
           assertEquals(service.readValue(allocation, offset, 8), Right(index.toLong + 1L))
@@ -300,12 +368,35 @@ class ExecutionSessionSuite extends munit.FunSuite {
       ).toOption.get
       val completion = session.launch(program, task).toOption.get
       assertEquals(session.awaitCompletion(completion), Right(()))
-      val first  = session.completionPointerRelocations(completion, 0).toOption.get
-      val second = session.completionPointerRelocations(completion, ExecutionRPC.MaximumElements).toOption.get
+      val first = session.completionPointerRelocations(
+        id = completion,
+        offset = 0,
+        limit = ExecutionRPC.MaximumElements
+      ).toOption.get
+      val second = session.completionPointerRelocations(
+        id = completion,
+        offset = ExecutionRPC.MaximumElements,
+        limit = ExecutionRPC.MaximumElements
+      ).toOption.get
       assertEquals(first.size, ExecutionRPC.MaximumElements.raw)
       assertEquals(second.size, 1)
-      assertEquals(session.completionPointerRelocations(completion, 0), Right(first))
+      assertEquals(
+        session.completionPointerRelocations(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements),
+        Right(first)
+      )
       assertEquals((first ++ second).map(_.sourceOffset.raw), Vec.tabulate(count)(_.toLong * 16))
+      assertEquals(
+        session.completionPointerRelocations(id = completion, offset = 1, limit = 2),
+        Right(first.slice(1, 3))
+      )
+      assertEquals(
+        session.completionPointerRelocations(id = completion, offset = (count - 1).unsafe[Int >= 0], limit = 2),
+        Right(second)
+      )
+      assertEquals(
+        session.completionPointerRelocations(id = completion, offset = 1, limit = Int.MaxValue),
+        Right((first ++ second).drop(1))
+      )
       assert((first ++ second).forall(value =>
         value.source == KernelTask.RelocationSource.Memory(allocation) &&
           value.target == allocation && value.targetOffset.raw == 0L
@@ -316,15 +407,27 @@ class ExecutionSessionSuite extends munit.FunSuite {
           0
         ).replyCodec.encode(page, ExecutionRPC.Limits).isRight)
       assertEquals(
-        session.completionPointerRelocations(completion, count.unsafe[Int >= 0]),
+        session.completionPointerRelocations(
+          id = completion,
+          offset = count.unsafe[Int >= 0],
+          limit = ExecutionRPC.MaximumElements
+        ),
         Right(Vec.empty[KernelTask.PointerRelocation])
       )
       assertEquals(
-        session.completionPointerRelocations(completion, Int.MaxValue),
+        session.completionPointerRelocations(
+          id = completion,
+          offset = Int.MaxValue,
+          limit = ExecutionRPC.MaximumElements
+        ),
         Right(Vec.empty[KernelTask.PointerRelocation])
       )
       assertEquals(session.releaseCompletion(completion), Right(()))
-      assert(session.completionPointerRelocations(completion, 0).isLeft)
+      assert(session.completionPointerRelocations(
+        id = completion,
+        offset = 0,
+        limit = ExecutionRPC.MaximumElements
+      ).isLeft)
     }
   }
 
@@ -821,7 +924,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
       val completion = session.launch(program, task).toOption.get
       assertEquals(session.awaitCompletion(completion), Right(()))
       assertEquals(
-        session.completionPointerRelocations(completion, 0),
+        session.completionPointerRelocations(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements),
         Right(Vec(
           KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(first), 8L, second, 2L),
           KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(second), 0L, first, 3L),
@@ -831,7 +934,10 @@ class ExecutionSessionSuite extends munit.FunSuite {
       events.set(Vec.empty)
       val next = session.launch(program, task).toOption.get
       assertEquals(session.awaitCompletion(next), Right(()))
-      assertEquals(session.completionPointerRelocations(next, 0), Right(Vec.empty[KernelTask.PointerRelocation]))
+      assertEquals(
+        session.completionPointerRelocations(id = next, offset = 0, limit = ExecutionRPC.MaximumElements),
+        Right(Vec.empty[KernelTask.PointerRelocation])
+      )
     }
   }
 

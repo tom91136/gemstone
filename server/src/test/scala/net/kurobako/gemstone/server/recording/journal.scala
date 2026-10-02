@@ -8,6 +8,7 @@ import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.recording.Journal.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 private object journal {
@@ -46,7 +47,7 @@ private object journal {
     val status = value match {
       case 1 => CompletionStatus.Pending
       case 2 => CompletionStatus.Succeeded
-      case _ => CompletionStatus.Failed(ExecutionProtocol.ExecutionFailure.Failed("failed"))
+      case _ => CompletionStatus.Failed(ExecutionFailure.Failed("failed"))
     }
     val payload = summon[Wire.Codec[CompletionStatus]].encode(status, ExecutionRPC.Limits)
       .fold(message => throw IllegalArgumentException(message), value => value)

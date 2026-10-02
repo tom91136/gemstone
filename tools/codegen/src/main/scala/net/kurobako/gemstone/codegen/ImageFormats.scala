@@ -251,6 +251,10 @@ object ImageFormats {
     }
   }
 
+  def narrowEncodingSource(version: ScalaPackageVersion): String =
+    GeneratedHeader.scala("from ImageFormats") +
+      s"package net.kurobako.gemstone.isa.spirv.${version.raw}\n\n${GeneratedHeader.annotation()}private enum NarrowEncoding { case ${Encoding.values.mkString(", ")} }\n"
+
   def scalaSource(version: ScalaPackageVersion): String = {
     def layout(row: Row): (String, String) = row.layout match {
       case Floating(components)                       => ("Floating", components.toString)
@@ -283,7 +287,7 @@ object ImageFormats {
     val shaderCodes =
       s"  extension (format: GraphicsShaderFormat) { def code: Int = format match {\n$shaderCases\n  } }"
     GeneratedHeader.scala("from ImageFormats") +
-      s"package net.kurobako.gemstone.isa.spirv.${version.raw}\n\nimport net.kurobako.gemstone.graphics.GraphicsFormats.*\n\n${GeneratedHeader.annotation()}private object ImageFormats {\n  enum NarrowEncoding { case ${Encoding.values.mkString(", ")} }\n$groups\n$floats\n$shaderCodes\n}\n"
+      s"package net.kurobako.gemstone.isa.spirv.${version.raw}\n\nimport net.kurobako.gemstone.graphics.GraphicsFormats.*\n\n${GeneratedHeader.annotation()}private object ImageFormats {\n$groups\n$floats\n$shaderCodes\n}\n"
   }
 
   private case class Vertex(

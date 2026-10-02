@@ -14,49 +14,31 @@
 #include <stdint.h>
 #include <unistd.h>
 
+#include <gemstone/file_descriptor.hpp>
+
 #include <sys/types.h>
 #include <sys/wait.h>
 
 namespace gemstone::rpc {
 
-/** Owns a file descriptor and closes it on destruction. */
-class FileDescriptor {
-public:
-  explicit FileDescriptor(int value = -1) noexcept : value_(value) {}
-  ~FileDescriptor() {
-    if (value_ != -1) close(value_);
-  }
-
-  FileDescriptor(const FileDescriptor &) = delete;
-  FileDescriptor &operator=(const FileDescriptor &) = delete;
-
-  FileDescriptor(FileDescriptor &&other) noexcept : value_(std::exchange(other.value_, -1)) {}
-  FileDescriptor &operator=(FileDescriptor &&other) noexcept {
-    if (this != &other) {
-      if (value_ != -1) close(value_);
-      value_ = std::exchange(other.value_, -1);
-    }
-    return *this;
-  }
-
-  [[nodiscard]] int get() const noexcept { return value_; }
-  [[nodiscard]] int release() noexcept { return std::exchange(value_, -1); }
-
-private:
-  int value_;
-};
+namespace detail {
+inline std::vector<char> temporaryPattern(std::string_view name) {
+  const char *configured = std::getenv("TMPDIR");
+  std::string base = configured && *configured ? configured : "/tmp";
+  while (base.size() > 1 && base.back() == '/')
+    base.pop_back();
+  const std::string pattern = base + "/" + std::string(name);
+  std::vector<char> buffer(pattern.begin(), pattern.end());
+  buffer.push_back('\0');
+  return buffer;
+}
+} // namespace detail
 
 /** Owns a unique temporary directory and removes it on destruction. */
 class TemporaryDirectory {
 public:
   explicit TemporaryDirectory(std::string_view name) {
-    const char *configured = std::getenv("TMPDIR");
-    std::string base = configured && *configured ? configured : "/tmp";
-    while (base.size() > 1 && base.back() == '/')
-      base.pop_back();
-    const std::string pattern = base + "/" + std::string(name);
-    std::vector<char> buffer(pattern.begin(), pattern.end());
-    buffer.push_back('\0');
+    auto buffer = detail::temporaryPattern(name);
     if (const auto created = mkdtemp(buffer.data())) path_ = created;
   }
 
@@ -79,13 +61,7 @@ private:
 class TemporaryFile {
 public:
   explicit TemporaryFile(std::string_view name = "gemstone-XXXXXX") {
-    const char *configured = std::getenv("TMPDIR");
-    std::string base = configured && *configured ? configured : "/tmp";
-    while (base.size() > 1 && base.back() == '/')
-      base.pop_back();
-    const std::string pattern = base + "/" + std::string(name);
-    std::vector<char> buffer(pattern.begin(), pattern.end());
-    buffer.push_back('\0');
+    auto buffer = detail::temporaryPattern(name);
     const int descriptor = mkstemp(buffer.data());
     if (descriptor < 0) return;
     close(descriptor);

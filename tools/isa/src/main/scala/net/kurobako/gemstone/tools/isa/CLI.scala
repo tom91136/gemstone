@@ -12,17 +12,10 @@ import net.kurobako.gemstone.isa.amdgpu.*
 import scala.util.control.NonFatal
 
 object CLI {
-  enum Action {
-    case Assemble, Disassemble
+  enum Request {
+    case Assemble(format: Assembly.Format, input: Path, output: Path)
+    case Disassemble(format: Assembly.Format, input: Path, output: Option[Path], section: Option[String])
   }
-
-  case class Request(
-      action: Action,
-      format: Assembly.Format,
-      input: Path,
-      output: Option[Path],
-      section: Option[String]
-  )
 
   private val format = (
     Opts.option[String]("isa", help = "spirv, amdgpu, or ptx (textual; no cubin/SASS)"),
@@ -44,28 +37,32 @@ object CLI {
     }
   }
 
-  private def options(action: Action): Opts[Request] = (
+  private val input  = Opts.argument[String]("input").map(Path.of(_))
+  private val output = Opts.option[String]("output", short = "o", help = "Output file (required for assembly)")
+    .map(Path.of(_))
+
+  private val assemble: Opts[Request] = (
     format,
-    Opts.argument[String]("input").map(Path.of(_)),
-    Opts.option[String]("output", short = "o", help = "Output file (required for assembly)").map(Path.of(_)).orNone,
+    input,
+    output.orNone.mapValidated(_.toValidNel("assembly requires --output"))
+  ).mapN(Request.Assemble(_, _, _))
+
+  private val disassemble: Opts[Request] = (
+    format,
+    input,
+    output.orNone,
     Opts.option[String]("section", help = "Executable ELF section to disassemble").orNone
-  ).mapN(Request(action, _, _, _, _)).mapValidated { request =>
-    if (action == Action.Assemble && request.output.isEmpty) "assembly requires --output".invalidNel
-    else if (
-      request.section.nonEmpty &&
-      (action != Action.Disassemble ||
-        (request.format match {
-          case Assembly.Format.AMDGPU(_, _) => false
-          case _                            => true
-        }))
-    )
-      "--section requires disassemble --isa amdgpu".invalidNel
-    else request.validNel
+  ).tupled.mapValidated { (format, input, output, section) =>
+    (format, section) match {
+      case (Assembly.Format.AMDGPU(_, _), _) | (_, None) =>
+        Request.Disassemble(format, input, output, section).validNel
+      case _ => "--section requires disassemble --isa amdgpu".invalidNel
+    }
   }
 
   val command: Command[Request] = Command("gemstone-isa", "Assemble and disassemble GPU instructions")(
-    Opts.subcommand("assemble", "Assemble text into an ISA image")(options(Action.Assemble)).orElse(
-      Opts.subcommand("disassemble", "Print an ISA image as canonical assembly")(options(Action.Disassemble))
+    Opts.subcommand("assemble", "Assemble text into an ISA image")(assemble).orElse(
+      Opts.subcommand("disassemble", "Print an ISA image as canonical assembly")(disassemble)
     )
   )
 
@@ -75,22 +72,24 @@ object CLI {
       if (help.errors.nonEmpty) sys.exit(2)
     case Right(request) =>
       try {
-        val bytes  = Vec.unsafeWrapArray(Files.readAllBytes(request.input))
-        val result = request.action match {
-          case Action.Assemble    => Assembly.text(bytes).flatMap(Assembly.assemble(_, request.format))
-          case Action.Disassemble =>
-            val text = (request.format, request.section) match {
+        val (result, destination) = request match {
+          case Request.Assemble(format, input, output) =>
+            val bytes = Vec.unsafeWrapArray(Files.readAllBytes(input))
+            (Assembly.text(bytes).flatMap(Assembly.assemble(_, format)), Some(output))
+          case Request.Disassemble(format, input, output, section) =>
+            val bytes = Vec.unsafeWrapArray(Files.readAllBytes(input))
+            val text  = (format, section) match {
               case (Assembly.Format.AMDGPU(target, waveSize), Some(section)) =>
                 Assembly.disassembleCodeObject(bytes, target, Some(section), waveSize)
-              case _ => Assembly.disassemble(bytes, request.format)
+              case _ => Assembly.disassemble(bytes, format)
             }
-            text.map(value => Vec.unsafeWrapArray((value + "\n").getBytes(StandardCharsets.UTF_8)))
+            (text.map(value => Vec.unsafeWrapArray((value + "\n").getBytes(StandardCharsets.UTF_8))), output)
         }
         result match {
           case Left(error) =>
             Console.err.println(error)
             sys.exit(1)
-          case Right(output) => request.output match {
+          case Right(output) => destination match {
               case Some(path) => val _ = Files.write(path, Vec.toArray(output))
               case None       => Console.out.write(Vec.toArray(output))
             }

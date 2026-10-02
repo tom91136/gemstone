@@ -33,13 +33,13 @@ private object VMInterpreter {
       workgroups: Workgroups = Workgroups.Sequential,
       initialParameterBuffers: Map[Long, Array[Byte]] = Map.empty,
       blockIndices: Option[Vec[Int]] = None
-  ): Either[ExecutionFault, Unit] = {
+  ): Either[VMFault, Unit] = {
     val laneCount = geometry.groupSize.volumeInt match {
-      case Left(message) => return Left(ExecutionFault.InvalidState(message))
+      case Left(message) => return Left(VMFault.InvalidState(message))
       case Right(value)  => value
     }
     val groupCount = geometry.groupCount.volumeInt match {
-      case Left(message) => return Left(ExecutionFault.InvalidState(message))
+      case Left(message) => return Left(VMFault.InvalidState(message))
       case Right(value)  => value
     }
     val allLanes = VMLaneMask.all(laneCount.raw) match {
@@ -53,10 +53,10 @@ private object VMInterpreter {
         (geometry.groupSize.y.toLong * geometry.groupCount.y.toLong) &&
         geometry.globalExtent.z ==
         (geometry.groupSize.z.toLong * geometry.groupCount.z.toLong)
-    def liveLanes(group: Coordinates): Either[ExecutionFault, VMLaneMask] =
+    def liveLanes(group: Coordinates): Either[VMFault, VMLaneMask] =
       if (everyGroupFull) Right(allLanes)
       else geometry.activeGroupSize(group) match {
-        case Left(message) => Left(ExecutionFault.InvalidState(s"PTX geometry failure: $message"))
+        case Left(message) => Left(VMFault.InvalidState(s"PTX geometry failure: $message"))
         case Right(activeSize) if activeSize == geometry.groupSize => Right(allLanes)
         case Right(_)                                              =>
           var live                    = VMLaneMask.Empty
@@ -76,17 +76,17 @@ private object VMInterpreter {
           }
           failure match {
             case Some(message) =>
-              Left(ExecutionFault.InvalidState(s"PTX geometry failure: $message"))
+              Left(VMFault.InvalidState(s"PTX geometry failure: $message"))
             case None => Right(live)
           }
       }
-    def runBlock(block: Int): Either[ExecutionFault, Unit] =
+    def runBlock(block: Int): Either[VMFault, Unit] =
       if (block < 0 || block >= groupCount.raw)
-        Left(ExecutionFault.InvalidState(s"selected PTX block is outside the launch: $block"))
+        Left(VMFault.InvalidState(s"selected PTX block is outside the launch: $block"))
       else
         geometry.groupCoordinates(block.toLong) match {
           case Left(message) =>
-            Left(ExecutionFault.InvalidState(s"PTX geometry failure: $message"))
+            Left(VMFault.InvalidState(s"PTX geometry failure: $message"))
           case Right(group) =>
             liveLanes(group) match {
               case Left(error) => Left(error)
@@ -110,14 +110,14 @@ private object VMInterpreter {
     val selectedTasks                  = selectedCount.toLong.unsafe[Long >= 0]
     val workItems: Long >= 0           = laneCount.toLong
     val parallelBlocks                 = workgroups.shouldParallel(selectedTasks, workItems)
-    val executionFailure               = AtomicReference(Option.empty[ExecutionFault])
+    val executionFailure               = AtomicReference(Option.empty[VMFault])
     workgroups.forEach(selectedTasks, parallel = parallelBlocks) { index =>
       runBlock(selectedBlock(index.raw.toInt)).left.map { error =>
         val _ = executionFailure.compareAndSet(None, Some(error))
         error.toFault
       }
     } match {
-      case Left(error) => return Left(executionFailure.get().getOrElse(ExecutionFault.fromControl(error)))
+      case Left(error) => return Left(executionFailure.get().getOrElse(VMFault.fromControl(error)))
       case Right(())   => ()
     }
     Right(())
@@ -156,7 +156,7 @@ private object VMInterpreter {
       workgroups: Workgroups,
       initialParameterBuffers: Map[Long, Array[Byte]],
       initialState: Option[VMBlockState] = None
-  ): Either[ExecutionFault, VMBlockState] = {
+  ): Either[VMFault, VMBlockState] = {
     val laneCount =
       geometry.groupSize.volumeInt.fold(message => throw IllegalArgumentException(message), value => value)
     val state    = initialState.getOrElse(borrowState(laneCount.raw, initialLive, kernel.registerChunkCount))
@@ -190,7 +190,7 @@ private object VMInterpreter {
       workgroups: Workgroups,
       initialParameterBuffers: Map[Long, Array[Byte]],
       state: VMBlockState
-  ): Either[ExecutionFault, VMBlockState] = {
+  ): Either[VMFault, VMBlockState] = {
     import VMSemantics.*
 
     state.importParameterBuffers(initialParameterBuffers)
@@ -227,7 +227,7 @@ private object VMInterpreter {
     def synchronizeWarpInstruction(
         executable: PredicatedInstruction,
         cohort: Cohort
-    ): Either[ExecutionFault, (VMLaneMask, VMLaneMask)] = warpMemberMask(executable.instruction) match {
+    ): Either[VMFault, (VMLaneMask, VMLaneMask)] = warpMemberMask(executable.instruction) match {
       case None             => Right(cohort.lanes -> VMLaneMask.Empty)
       case Some(memberMask) =>
         val context = VMInstructionContext(
@@ -243,8 +243,8 @@ private object VMInterpreter {
           control,
           workgroups
         )
-        val masks                           = mutable.Map.empty[Int, Long]
-        var failure: Option[ExecutionFault] = None
+        val masks                    = mutable.Map.empty[Int, Long]
+        var failure: Option[VMFault] = None
         cohort.lanes.foreachLane { lane =>
           if (failure.isEmpty) {
             context.read(lane, memberMask) match {
@@ -272,10 +272,10 @@ private object VMInterpreter {
             Right(runnable -> delayed)
         }
     }
-    def advance(pc: Pc, lanes: VMLaneMask): Either[ExecutionFault, Unit] =
-      pc.next.toRight(ExecutionFault.InvalidProgram("program counter overflow")).map(next => enqueue(next, lanes))
+    def advance(pc: Pc, lanes: VMLaneMask): Either[VMFault, Unit] =
+      pc.next.toRight(VMFault.InvalidProgram("program counter overflow")).map(next => enqueue(next, lanes))
 
-    def releaseBarrier(key: WaitKey): Either[ExecutionFault, Unit] = {
+    def releaseBarrier(key: WaitKey): Either[VMFault, Unit] = {
       val arrived  = barrierMasks.getOrElse(key, VMLaneMask.Empty)
       val expected = key.scope match {
         case WaitScope.Workgroup => state.live
@@ -294,7 +294,7 @@ private object VMInterpreter {
         val _ = barrierMasks.remove(key)
         val _ = warpBarrierMasks.remove(key)
         released.view.flatMap(_.reduction).take(1).foreach { reduction =>
-          var reduced: Either[ExecutionFault, Boolean] = Right(reduction.operation match {
+          var reduced: Either[VMFault, Boolean] = Right(reduction.operation match {
             case PredicateOperation.And => true
             case PredicateOperation.Or  => false
             case PredicateOperation.Xor => false
@@ -302,7 +302,7 @@ private object VMInterpreter {
           arrived.foreachLane { lane =>
             reduced = reduced.flatMap { current =>
               state.predicates(lane).get(reduction.predicate).toRight(
-                ExecutionFault.UndefinedRegister(reduction.predicate, reduction.pc, lane)
+                VMFault.UndefinedRegister(reduction.predicate, reduction.pc, lane)
               ).map { value =>
                 reduction.operation match {
                   case PredicateOperation.And => current && value
@@ -334,12 +334,12 @@ private object VMInterpreter {
         val waits = waiting.map(value => s"${value.key.scope}:${value.key.id}@${value.key.phase}").distinct.sorted
         val detail: NonEmpty[String] =
           if (waits.nonEmpty) s"waiting for ${waits.mkString(", ")}" else "no runnable cohort"
-        return Left(ExecutionFault.Deadlock(detail))
+        return Left(VMFault.Deadlock(detail))
       }
       var cohort     = ready.remove(0)
       val executable = kernel.program.at(cohort.pc) match {
         case None =>
-          return Left(ExecutionFault.InvalidProgram(
+          return Left(VMFault.InvalidProgram(
             s"program counter ${cohort.pc} is outside a ${kernel.program.size}-instruction program"
           ))
         case Some(value) => value
@@ -359,12 +359,12 @@ private object VMInterpreter {
       }
       if (cohort.lanes.nonEmpty) {
         control.checkpoint(cohort.lanes.size.unsafe[Int > 0]) match {
-          case Left(fault) => return Left(ExecutionFault.fromControl(fault))
+          case Left(fault) => return Left(VMFault.fromControl(fault))
           case Right(())   => ()
         }
-        var active                                   = cohort.lanes
-        var predicateFailure: Option[ExecutionFault] = None
-        val predicateIndex                           =
+        var active                            = cohort.lanes
+        var predicateFailure: Option[VMFault] = None
+        val predicateIndex                    =
           executable.predication.map(predicate => VMPredicateFile.index(predicate.name)).getOrElse(-1)
         executable.predication.foreach { predicate =>
           active = cohort.lanes.filterLanes { lane =>
@@ -375,7 +375,7 @@ private object VMInterpreter {
               case Some(predicateValue) => predicateValue != predicate.negated
               case None                 =>
                 predicateFailure = Some(
-                  ExecutionFault.UndefinedRegister(predicate.name, cohort.pc, lane)
+                  VMFault.UndefinedRegister(predicate.name, cohort.pc, lane)
                 )
                 false
             }
@@ -502,13 +502,13 @@ private object VMInterpreter {
       function: DeviceFunction,
       parameters: Vec[NonEmpty[String]],
       returnParameters: Vec[NonEmpty[String]]
-  ): Either[ExecutionFault, Unit] = {
+  ): Either[VMFault, Unit] = {
     if (parameters.size != function.parameters.size)
-      return Left(ExecutionFault.InvalidState(
+      return Left(VMFault.InvalidState(
         s"device function ${function.name} expects ${function.parameters.size} parameters, found ${parameters.size}"
       ))
     if (returnParameters.size != function.returnParameters.size)
-      return Left(ExecutionFault.InvalidState(
+      return Left(VMFault.InvalidState(
         s"device function ${function.name} returns ${function.returnParameters.size} parameters, found ${returnParameters.size}"
       ))
     val laneCount = caller.state.laneCount

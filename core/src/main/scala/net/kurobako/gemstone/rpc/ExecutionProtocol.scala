@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.rpc
 
-import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
@@ -44,34 +43,7 @@ object ExecutionProtocol {
       sync: Option[HostMemorySync] = None
   ) derives Codec
 
-  object ExecutionFailure {
-    def fromFault(fault: Fault): ExecutionFailure = fault match {
-      case Fault.InvalidTask(detail) => InvalidRequest(detail)
-      case Fault.Unsupported(detail) => Unsupported(detail)
-      case _                         => Failed(fault.message)
-    }
-  }
-
-  enum ExecutionFailure derives Codec {
-    case InvalidRequest(detail: String)
-    case NotFound(detail: String)
-    case Unsupported(detail: String)
-    case Failed(detail: String)
-
-    def message: String = this match {
-      case InvalidRequest(value) => value
-      case NotFound(value)       => value
-      case Unsupported(value)    => value
-      case Failed(value)         => value
-    }
-
-    def withDetail(value: String): ExecutionFailure = this match {
-      case _: InvalidRequest => InvalidRequest(value)
-      case _: NotFound       => NotFound(value)
-      case _: Unsupported    => Unsupported(value)
-      case _: Failed         => Failed(value)
-    }
-  }
+  given Codec[ExecutionFailure] = Codec.derived
 
   enum CompletionStatus derives Codec {
     case Pending
@@ -153,15 +125,9 @@ object ExecutionProtocol {
 
   case class BlasResult(scalar: Vec[Byte]) derives Codec
 
-  case class SpecializationConstant(
-      specId: Binary32,
-      value: Vec[Byte]
-  ) derives Codec
+  given Codec[SpecializationConstant] = Codec.derived
 
-  case class SpecializationInfo(
-      specId: Binary32,
-      byteSize: Int > 0
-  ) derives Codec
+  given Codec[SpecializationInfo] = Codec.derived
 
   given Codec[GlobalImage] = Codec.validated(Codec.product[GlobalImage]("ProgramGlobal"))(value =>
     GlobalImage.validated(value.size, value.initial)

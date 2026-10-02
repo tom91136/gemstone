@@ -81,54 +81,48 @@ object PTXProgramLifecycleBenchmark {
     val images = Vector.tabulate(parsed.images.raw)(index => s"$source\n// lifecycle benchmark image $index\n")
 
     Using.resource(PlatformMetrics.startRecording(parsed.recording)) { _ =>
-      val allocatedBefore = PlatformMetrics.allocatedBytes
-      val started         = platform.monotonicNanos
-      val checksum        = parsed.operation match {
-        case Operation.Decode =>
-          var iteration = 0
-          var total     = 0L
-          while (iteration < parsed.iterations.raw) {
-            val program = decode(images(iteration % images.size))
-            total +=
-              program.symbols
-                .fold(error => throw IllegalStateException(error.message), _.kernels.size.toLong)
-            iteration += 1
-          }
-          total
-        case Operation.Launch =>
-          val program  = decode(images.head)
-          val metadata = program.kernel(parsed.kernel)
-            .fold(error => throw IllegalArgumentException(error.message), value => value)
-          if (metadata.explicitParameterCount.raw != 0)
-            throw IllegalArgumentException(
-              s"benchmark launch kernel '${parsed.kernel}' has ${metadata.explicitParameterCount} parameters"
-            )
-          val task = KernelTask.validated(
-            kernelName = parsed.kernel,
-            groupSize = LaunchGeometry.Dimensions.One,
-            groupCount = LaunchGeometry.Dimensions.One,
-            arguments = Vec.empty
-          ).fold(error => throw IllegalArgumentException(error), value => value)
-          var iteration = 0
-          while (iteration < parsed.iterations.raw) {
-            program.execute(task, EmptyMemory, TaskControl())
-              .fold(error => throw IllegalStateException(error.message), _ => ())
-            iteration += 1
-          }
-          parsed.iterations.raw.toLong
+      val measurement = Measurement {
+        parsed.operation match {
+          case Operation.Decode =>
+            var iteration = 0
+            var total     = 0L
+            while (iteration < parsed.iterations.raw) {
+              val program = decode(images(iteration % images.size))
+              total +=
+                program.symbols
+                  .fold(error => throw IllegalStateException(error.message), _.kernels.size.toLong)
+              iteration += 1
+            }
+            total
+          case Operation.Launch =>
+            val program  = decode(images.head)
+            val metadata = program.kernel(parsed.kernel)
+              .fold(error => throw IllegalArgumentException(error.message), value => value)
+            if (metadata.explicitParameterCount.raw != 0)
+              throw IllegalArgumentException(
+                s"benchmark launch kernel '${parsed.kernel}' has ${metadata.explicitParameterCount} parameters"
+              )
+            val task = KernelTask.validated(
+              kernelName = parsed.kernel,
+              groupSize = LaunchGeometry.Dimensions.One,
+              groupCount = LaunchGeometry.Dimensions.One,
+              arguments = Vec.empty
+            ).fold(error => throw IllegalArgumentException(error), value => value)
+            var iteration = 0
+            while (iteration < parsed.iterations.raw) {
+              program.execute(task, EmptyMemory, TaskControl())
+                .fold(error => throw IllegalStateException(error.message), _ => ())
+              iteration += 1
+            }
+            parsed.iterations.raw.toLong
+        }
       }
-      val elapsed   = math.max(0L, platform.monotonicNanos - started)
-      val allocated = for {
-        before <- allocatedBefore
-        after  <- PlatformMetrics.allocatedBytes
-        if after >= before
-      } yield after - before
       Console.out.println(
         s"operation=${parsed.operation.toString.toLowerCaseRoot} iterations=${parsed.iterations} " +
           s"images=${parsed.images} entries=${parsed.entries} instructions=${parsed.instructions} " +
           s"sourceBytes=${source.getBytes(StandardCharsets.UTF_8).length} " +
-          s"nsPerOperation=${elapsed.toDouble / parsed.iterations.raw} " +
-          s"bytesPerOperation=${allocated.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
+          s"nsPerOperation=${measurement.elapsedNanos.raw.toDouble / parsed.iterations.raw} " +
+          s"bytesPerOperation=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=${measurement.value}"
       )
     }
   }

@@ -39,24 +39,19 @@ object PTXRegisterIndexBenchmark {
         case RegisterKind.Named    => s"%benchmark_named_$index"
       }
     }
-    val allocatedBefore = PlatformMetrics.allocatedBytes
-    val started         = platform.monotonicNanos
-    var iteration       = 0
-    var checksum        = 0L
-    while (iteration < parsed.iterations.raw) {
-      checksum += VMRegisterFile.indexRaw(names(iteration % names.length))
-      iteration += 1
+    val measurement = Measurement {
+      var iteration = 0
+      var checksum  = 0L
+      while (iteration < parsed.iterations.raw) {
+        checksum += VMRegisterFile.indexRaw(names(iteration % names.length))
+        iteration += 1
+      }
+      checksum
     }
-    val elapsed   = math.max(0L, platform.monotonicNanos - started)
-    val allocated = for {
-      before <- allocatedBefore
-      after  <- PlatformMetrics.allocatedBytes
-      if after >= before
-    } yield after - before
     Console.out.println(
       s"kind=${parsed.kind.toString.toLowerCaseRoot} names=${parsed.names} iterations=${parsed.iterations} " +
-        s"nsPerIndex=${elapsed.toDouble / parsed.iterations.raw} " +
-        s"bytesPerIndex=${allocated.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
+        s"nsPerIndex=${measurement.elapsedNanos.raw.toDouble / parsed.iterations.raw} " +
+        s"bytesPerIndex=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=${measurement.value}"
     )
   }
 }

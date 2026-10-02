@@ -44,19 +44,14 @@ object JournalInspectionBenchmark {
     }
     for (_ <- 0 until 2) Journal.inspect(file)
     for (sample <- 0 until 5) {
-      val allocated = PlatformMetrics.allocatedBytes
-      val started   = platform.monotonicNanos
-      val summary   = Journal.inspect(file)
-      val nanos     = platform.monotonicNanos - started
-      val bytes     = for {
-        start <- allocated
-        end   <- PlatformMetrics.allocatedBytes
-        if end >= start
-      } yield end - start
+      val measurement = Measurement {
+        Journal.inspect(file)
+      }
+      val summary = measurement.value
       if (summary.events.raw != 401 || summary.frames.raw != 400 || !summary.replayable)
         throw IllegalStateException(s"unexpected journal summary: $summary")
       Console.out.println(
-        s"INSPECT sample=$sample nanos=$nanos allocated=${bytes.fold(-1L)(identity)} " +
+        s"INSPECT sample=$sample nanos=${measurement.elapsedNanos} allocated=${measurement.allocatedBytes.fold(-1L)(identity)} " +
           s"events=${summary.events} frames=${summary.frames} archive=${Files.size(file)}"
       )
     }

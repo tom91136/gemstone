@@ -5,8 +5,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.graphics.ShaderMetadata.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.rpc.ExecutionProtocol.{*, given}
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
 

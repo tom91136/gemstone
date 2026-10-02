@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu.asm
 
-import Binary.*
 import Program.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.binary.*
@@ -875,17 +874,17 @@ private object InstructionCodec {
       offset: Int,
       target: Target,
       waveSize: Int in (32, 64)
-  ): Either[CodecError, Binary.Decoded] = {
+  ): Either[CodecError, DecodedInstruction] = {
     val candidates = layouts.filter(value =>
       value.isa == target.isa && value.format != EncodingFormat.VOPDXY && value.format != EncodingFormat.VOPD3XY
     ).flatMap {
       layout =>
-        if (bytes.size - offset < layout.bits / 8) Vec.empty[Binary.Decoded]
+        if (bytes.size - offset < layout.bits / 8) Vec.empty[DecodedInstruction]
         else {
           val word = (0 until layout.bits / 8).foldLeft(BigInt(0))((word, index) =>
             word | (BigInt(bytes(offset + index) & 255) << (index * 8))
           )
-          if ((word & layout.fixedMask) != layout.prefixes.head) Vec.empty[Binary.Decoded]
+          if ((word & layout.fixedMask) != layout.prefixes.head) Vec.empty[DecodedInstruction]
           else OpcodeIndex.encodings(layout.format, layout.get(word, EncodingField.OP).toInt, target).flatMap {
             case (definition, value) =>
               decodeOperands(bytes, offset, word, target, definition, value, layout, waveSize).toVec
@@ -915,7 +914,7 @@ private object InstructionCodec {
       value: Metadata.Encoding,
       layout: InstructionLayout,
       waveSize: Int in (32, 64)
-  ): Option[Binary.Decoded] = {
+  ): Option[DecodedInstruction] = {
     val operands = schema(
       value,
       definition.opcode.raw,
@@ -1172,7 +1171,7 @@ private object InstructionCodec {
           else mods
         Instruction.decode(definition, args, filtered) match {
           case Vec(instruction) => encode(instruction, target, value, layout, waveSize).filter(_ ==
-              bytes.slice(offset, offset + size)).map(_ => Binary.Decoded(instruction, size.unsafe[Int > 0]))
+              bytes.slice(offset, offset + size)).map(_ => DecodedInstruction(instruction, size.unsafe[Int > 0]))
           case _ => None
         }
       }

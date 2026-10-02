@@ -36,28 +36,25 @@ bool ready(int fd, short events, int timeout) {
 int socketTimeoutMillis() { return environment::rpcTimeoutSeconds() * 1000; }
 
 int openSocket(int family, const sockaddr *address, socklen_t size, int timeout) {
-  int fd = ::socket(family, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-  if (fd < 0) return -1;
-  if (::connect(fd, address, size) < 0) {
-    if (errno != EINPROGRESS || !ready(fd, POLLOUT, timeout)) {
-      ::close(fd);
+  FileDescriptor fd(::socket(family, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0));
+  if (fd.get() < 0) return -1;
+  if (::connect(fd.get(), address, size) < 0) {
+    if (errno != EINPROGRESS || !ready(fd.get(), POLLOUT, timeout)) {
       return -1;
     }
     int error = 0;
     socklen_t length = sizeof(error);
-    if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) < 0 || error != 0) {
-      ::close(fd);
+    if (::getsockopt(fd.get(), SOL_SOCKET, SO_ERROR, &error, &length) < 0 || error != 0) {
       return -1;
     }
   }
   if (family != AF_UNIX) {
     const int enabled = 1;
-    if (::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled)) < 0) {
-      ::close(fd);
+    if (::setsockopt(fd.get(), IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled)) < 0) {
       return -1;
     }
   }
-  return fd;
+  return fd.release();
 }
 int openEndpoint(std::string_view endpoint, int timeout, std::string &error) {
   if (endpoint.starts_with("unix:///")) {
@@ -142,16 +139,12 @@ void appendU64(std::vector<uint8_t> &out, uint64_t value) {
 uint32_t readU32(const uint8_t *data) { return (uint32_t{data[0]} << 24) | (uint32_t{data[1]} << 16) | (uint32_t{data[2]} << 8) | data[3]; }
 } // namespace
 
-Connection::~Connection() {
-  if (fd_ >= 0) ::close(fd_);
-}
 void Connection::poison() {
-  if (fd_ >= 0) ::close(fd_);
-  fd_ = -1;
+  fd_ = FileDescriptor();
   if (established_) poisoned_ = true;
 }
 bool Connection::connect() {
-  if (fd_ >= 0) return true;
+  if (fd_.get() >= 0) return true;
   if (poisoned_) {
     error_ = "execution session was lost; create a fresh client and rebuild its state";
     return false;
@@ -162,8 +155,8 @@ bool Connection::connect() {
     return false;
   }
   timeoutMillis_ = socketTimeoutMillis();
-  fd_ = openEndpoint(endpoint, timeoutMillis_, error_);
-  if (fd_ < 0) {
+  fd_ = FileDescriptor(openEndpoint(endpoint, timeoutMillis_, error_));
+  if (fd_.get() < 0) {
     if (error_.empty()) error_ = "cannot connect to the Gemstone RPC endpoint";
     return false;
   }
@@ -183,10 +176,10 @@ bool Connection::connect() {
 }
 bool Connection::send(std::span<const uint8_t> bytes) {
   while (!bytes.empty()) {
-    const auto count = ::send(fd_, bytes.data(), bytes.size(), MSG_NOSIGNAL);
+    const auto count = ::send(fd_.get(), bytes.data(), bytes.size(), MSG_NOSIGNAL);
     if (count < 0 && errno == EINTR) continue;
     if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-      if (ready(fd_, POLLOUT, timeoutMillis_)) continue;
+      if (ready(fd_.get(), POLLOUT, timeoutMillis_)) continue;
       return false;
     }
     if (count <= 0) return false;
@@ -196,10 +189,10 @@ bool Connection::send(std::span<const uint8_t> bytes) {
 }
 bool Connection::receive(std::span<uint8_t> bytes) {
   while (!bytes.empty()) {
-    const auto count = ::recv(fd_, bytes.data(), bytes.size(), 0);
+    const auto count = ::recv(fd_.get(), bytes.data(), bytes.size(), 0);
     if (count < 0 && errno == EINTR) continue;
     if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-      if (ready(fd_, POLLIN, timeoutMillis_)) continue;
+      if (ready(fd_.get(), POLLIN, timeoutMillis_)) continue;
       return false;
     }
     if (count <= 0) return false;

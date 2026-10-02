@@ -28,5 +28,4 @@ private object IntegerImageFormat {
       Math.max(minimum, Math.min(maximum, value))
     }
   }
-  def apply(format: Int): Option[Layout] = ImageFormats.integer(format)
 }

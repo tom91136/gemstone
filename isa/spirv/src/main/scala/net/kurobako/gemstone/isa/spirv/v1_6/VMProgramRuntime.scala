@@ -1,7 +1,6 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import VMIR.*
-import VMInvocation.*
 import VMMemory.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.*
@@ -27,7 +26,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
 
   def ownsFunctionPointer(token: Long): Boolean = (token >>> 32) == functionPointerNamespace.get()
 
-  val constants: Map[Int, RuntimeValue] = ir.constantData.view.mapValues(runtimeValue).toMap
+  val constants: Map[Int, VMValue] = ir.constantData.view.mapValues(VMValue.fromConstant).toMap
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
   private val scalarIntegerInstructions = {
@@ -152,7 +151,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
     }.map(_._1).toRight(Fault.Memory(s"SPIR-V global '$name' is not present")).flatMap { id =>
       materializeGlobals(storageClass => storageClass != 4 && storageClass != 6, useBindings = false)
         .flatMap(_.get(id) match {
-          case Some(RuntimeValue.Address(_, Pointer(Region.Internal(storage), _, _, _, _, _, _, _, _))) =>
+          case Some(VMValue.Address(_, Pointer(Region.Internal(storage), _, _, _, _, _, _, _, _))) =>
             Right(id -> storage.bytes)
           case _ => Left(Fault.Memory(s"SPIR-V global '$name' has no storage"))
         })
@@ -269,8 +268,8 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
   def materializeGlobals(
       includeStorageClass: Int => Boolean,
       useBindings: Boolean = true
-  ): Either[Fault, Map[Int, RuntimeValue]] = {
-    val values      = Map.newBuilder[Int, RuntimeValue]
+  ): Either[Fault, Map[Int, VMValue]] = {
+    val values      = Map.newBuilder[Int, VMValue]
     val globals     = this.globals.view.toVector
     var globalIndex = 0
     while (globalIndex < globals.size) {
@@ -313,14 +312,14 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
                 bytes.length.toLong)
             )
         }
-        values += variable -> RuntimeValue.Address(global.pointerType, pointer)
+        values += variable -> VMValue.Address(global.pointerType, pointer)
       }
       globalIndex += 1
     }
     Right(values.result())
   }
 
-  def decode(typeId: Int, bytes: Array[Byte]): Either[Fault, RuntimeValue] =
+  def decode(typeId: Int, bytes: Array[Byte]): Either[Fault, VMValue] =
     this.layout.scalarLeafCount(typeId).flatMap { count =>
       try {
         val lanes = Array.ofDim[Long](count)
@@ -340,7 +339,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
           Left(Fault.InvalidTask(
             s"SPIR-V value of type %$typeId decoded $used scalar leaves, expected ${lanes.length}"
           ))
-        else Right(RuntimeValue.Bits(typeId, lanes))
+        else Right(VMValue.Bits(typeId, lanes))
       } catch {
         case error: IllegalArgumentException => Left(Fault.InvalidTask(throwables.detail(error)))
       }
@@ -414,8 +413,8 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
     case value => throw IllegalArgumentException(s"SPIR-V type %$typeId cannot be decoded as data: $value")
   }
 
-  def encode(value: RuntimeValue): Either[Fault, Array[Byte]] = value match {
-    case RuntimeValue.Bits(typeId, lanes) =>
+  def encode(value: VMValue): Either[Fault, Array[Byte]] = value match {
+    case VMValue.Bits(typeId, lanes) =>
       try {
         val bytes = Array.ofDim[Byte](this.layout.typeSize(typeId))
         val used  = if (layout.hasMatrixStorage(typeId)) {
@@ -440,7 +439,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
       } catch {
         case error: IllegalArgumentException => Left(Fault.InvalidTask(throwables.detail(error)))
       }
-    case RuntimeValue.Address(_, pointer) =>
+    case VMValue.Address(_, pointer) =>
       Left(Fault.InvalidTask(s"cannot encode runtime pointer $pointer as process-neutral bytes"))
   }
 

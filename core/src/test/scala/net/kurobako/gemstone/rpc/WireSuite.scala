@@ -3,6 +3,7 @@ package net.kurobako.gemstone.rpc
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.Wire.*
+import net.kurobako.gemstone.vm.*
 
 class WireSuite extends munit.FunSuite {
   // Fixed bytes and boundary values below are independent expectations for the wire/bit representation.
@@ -195,7 +196,7 @@ class WireSuite extends munit.FunSuite {
   }
 
   test("derived products and sums reject wrong arity, unknown tags, and invalid ordinals") {
-    import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+    import net.kurobako.gemstone.rpc.ExecutionProtocol.{*, given}
     assertEquals(decode[Pair](0x92, 7, 0xc3), Right(Pair(7, true)))
     assert(decode[Pair](0x91, 7, 0xc3).isLeft)
     assert(decode[Pair](0x93, 7, 0xc3).isLeft)

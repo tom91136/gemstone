@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMExecution.*
 import VMIR.*
 import execution.*
 import net.kurobako.gemstone.collection.*
@@ -300,6 +299,6 @@ class InterpreterSuite extends munit.FunSuite {
       ArrayCheckedMemory.allocate(4),
       control = cancellation
     )
-    assertEquals(result, Left(ExecutionFault.Cancelled))
+    assertEquals(result, Left(VMFault.Cancelled))
   }
 }

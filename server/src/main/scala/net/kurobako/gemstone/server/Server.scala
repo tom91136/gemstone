@@ -7,10 +7,10 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.backend.*
 import net.kurobako.gemstone.server.protocol.*
 import net.kurobako.gemstone.server.recording.*
-import net.kurobako.gemstone.server.transport.*
 import net.kurobako.gemstone.vm.*
 import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
@@ -21,47 +21,38 @@ object Server {
     def defaultParallelism: Int > 0 = math.max(1, hostBound - 2).unsafe[Int > 0]
 
     /** Parse and validate before acquiring any server resources. */
-    def fromEnvironment(values: Map[String, String]): Either[String, Settings] =
-      try {
-        val instructions =
-          values.get(env.ExecutionMaxInstructions).fold(TaskControl.Limits.Default.maxInstructions) {
-            value =>
-              configuration.positiveLong(value).getOrElse(throw IllegalArgumentException(
-                s"${env.ExecutionMaxInstructions} must be a positive integer: $value"
-              )).refine[Long > 0].fold(
-                message => throw IllegalArgumentException(s"${env.ExecutionMaxInstructions}: $message"),
-                identity
-              )
-          }
-        val parallelism = values.get(env.ExecutionParallelism).fold(defaultParallelism) { value =>
-          configuration.positiveLong(value).filter(_ <= Int.MaxValue).map(_.toInt).getOrElse(
-            throw IllegalArgumentException(
-              s"${env.ExecutionParallelism} must be a positive integer: $value"
-            )
-          ).refine[Int > 0].fold(
-            message => throw IllegalArgumentException(s"${env.ExecutionParallelism}: $message"),
-            identity
-          )
-        }
-        require(
+    def fromEnvironment(values: Map[String, String]): Either[String, Settings] = {
+      def positive(
+          name: String,
+          default: Long > 0,
+          maximum: Long = Long.MaxValue,
+          expected: String = "a positive integer"
+      ): Either[String, Long > 0] = values.get(name).fold[Either[String, Long > 0]](Right(default)) { value =>
+        configuration.positiveLong(value).filter(_.raw <= maximum).toRight(s"$name must be $expected: $value")
+      }
+      for {
+        instructions <- positive(env.ExecutionMaxInstructions, TaskControl.Limits.Default.maxInstructions)
+        parallelism  <- positive(env.ExecutionParallelism, defaultParallelism.toLong, Int.MaxValue.toLong)
+        _            <- Either.cond(
           parallelism.raw <= hostBound,
-          s"${env.ExecutionParallelism}=$parallelism exceeds host bound $hostBound"
+          (),
+          s"requirement failed: ${env.ExecutionParallelism}=$parallelism exceeds host bound $hostBound"
         )
-        Right(Settings(
-          limits = TaskControl.Limits(instructions),
-          parallelism = parallelism,
-          requestTimeoutMillis = values.get(env.RpcTimeoutSeconds).fold(
-            Math.toIntExact(env.RpcTimeoutSecondsDefault * 1000).unsafe[Int > 0]
-          ) { value =>
-            (configuration.positiveLong(value).filter(_ <= Int.MaxValue / 1000)
-              .getOrElse(throw IllegalArgumentException(
-                s"${env.RpcTimeoutSeconds} must be positive seconds fitting an Int millisecond timeout: $value"
-              )) * 1000).toInt.unsafe[Int > 0]
-          },
-          record = values.get(env.Record).map(Path.of(_)),
-          tracePerformance = values.get(env.Trace).exists(configuration.traceEnabled(_, "perf"))
-        ))
-      } catch { case NonFatal(error) => Left(throwables.detail(error)) }
+        timeout <- positive(
+          name = env.RpcTimeoutSeconds,
+          default = env.RpcTimeoutSecondsDefault.unsafe[Long > 0],
+          maximum = Int.MaxValue / 1000,
+          expected = "positive seconds fitting an Int millisecond timeout"
+        )
+        record <- scala.util.Try(values.get(env.Record).map(Path.of(_))).toEither.left.map(throwables.detail(_))
+      } yield Settings(
+        limits = TaskControl.Limits(instructions),
+        parallelism = parallelism.raw.toInt.unsafe[Int > 0],
+        requestTimeoutMillis = (timeout * 1000L).raw.toInt.unsafe[Int > 0],
+        record = record,
+        tracePerformance = values.get(env.Trace).exists(configuration.traceEnabled(_, "perf"))
+      )
+    }
   }
 
   case class Settings(
@@ -77,7 +68,7 @@ object Server {
   def start(
       settings: Settings = Settings(),
       backends: Workgroups => Backends = Backends.default(_),
-      listen: Bind => Listener = transport.listen(_)
+      listen: Bind => Listener = SocketTransport.listen(_)
   ): Server = {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var rollback                                = List.empty[() => Unit]

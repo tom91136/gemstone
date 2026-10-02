@@ -4,7 +4,6 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.vm.*
 
 object RuntimeBackend {
@@ -46,10 +45,10 @@ object RuntimeBackend {
 
   /** Optional image transformation configured by the application, independent of program execution. */
   trait Specialization {
-    def describe(image: Vec[Byte]): Either[ExecutionFailure, Vec[ExecutionProtocol.SpecializationInfo]]
+    def describe(image: Vec[Byte]): Either[ExecutionFailure, Vec[SpecializationInfo]]
     def specialize(
         image: Vec[Byte],
-        constants: Vec[ExecutionProtocol.SpecializationConstant]
+        constants: Vec[SpecializationConstant]
     ): Either[ExecutionFailure, Vec[Byte]]
   }
 

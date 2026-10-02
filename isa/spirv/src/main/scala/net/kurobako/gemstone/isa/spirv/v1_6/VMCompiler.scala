@@ -220,7 +220,7 @@ private object VMCompiler {
             ((unsigned(dim) == Dim.Buffer || unsigned(dim) == Dim.Value3D) && unsigned(arrayed) != 0L) ||
             unsigned(multisampled) != 0L || unsigned(sampled) != 2L ||
             !(floatingStorageFormats.contains(unsigned(format)) ||
-              IntegerImageFormat(unsigned(format).toInt).isDefined) ||
+              ImageFormats.integer(unsigned(format).toInt).isDefined) ||
             !(if (floatingStorageFormats.contains(unsigned(format)))
                 types.get(id(sampledType)).contains(RuntimeType.Floating(32))
               else types.get(id(sampledType)).exists {

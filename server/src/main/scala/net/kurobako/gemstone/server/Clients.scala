@@ -5,8 +5,8 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.server.protocol.*
+import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
 object Clients {

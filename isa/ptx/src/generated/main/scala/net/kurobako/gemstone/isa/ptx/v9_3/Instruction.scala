@@ -1,8 +1,6 @@
 // Generated PTX instruction model from the pinned NVIDIA ISA 9.3 specification. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import Program.*
-import ISA.*
 import Metadata.*
 
 import net.kurobako.gemstone.string.*

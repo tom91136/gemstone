@@ -115,20 +115,14 @@ object PTXExecutionBenchmark {
     Using.resource(PlatformMetrics.startRecording(parsed.recording)) { _ =>
       var round = 0
       while (round < rounds.raw) {
-        val before = PlatformMetrics.allocatedBytes
-        val start  = platform.monotonicNanos
-        i = 0
-        while (i < measured.raw) { execute(); i += 1 }
-        val elapsed   = platform.monotonicNanos - start
-        val allocated = for {
-          start <- before
-          end   <- PlatformMetrics.allocatedBytes
-          if end >= start
-        } yield end - start
+        val measurement = Measurement {
+          i = 0
+          while (i < measured.raw) { execute(); i += 1 }
+        }
         verify()
         Console.out.println(
-          s"mode=${mode.toString.toLowerCaseRoot} round=$round launches=$measured nsPerLaunch=${elapsed.toDouble /
-              measured.raw} bytesPerLaunch=${allocated.fold(Double.NaN)(_.raw.toDouble / measured.raw)} verified=$size"
+          s"mode=${mode.toString.toLowerCaseRoot} round=$round launches=$measured nsPerLaunch=${measurement.elapsedNanos.raw.toDouble /
+              measured.raw} bytesPerLaunch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / measured.raw)} verified=$size"
         )
         round += 1
       }

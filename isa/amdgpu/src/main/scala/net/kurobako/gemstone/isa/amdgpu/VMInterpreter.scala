@@ -2,7 +2,6 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import ELF.*
 import EncodingConstants.*
-import LoadedProgram.*
 import VMArithmetic.*
 import VMIR.*
 import VMState.*

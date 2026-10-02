@@ -28,7 +28,7 @@ class MemoryPublicationSuite extends munit.FunSuite {
           Server.Settings(
             limits = TaskControl.Limits(1000000000L),
             parallelism = 2,
-            bind = if (unix) transport.Bind.Unix(vendors.resolve("rpc.sock")) else transport.Bind.Tcp()
+            bind = if (unix) Transport.Bind.Unix(vendors.resolve("rpc.sock")) else Transport.Bind.Tcp()
           )
         )) { server =>
           val result = native.run(

@@ -1406,7 +1406,7 @@ for name in sorted(module.instructions):
     val cases      = dimensions.zipWithIndex.map { case (value, encoding) =>
       val spelling = value("name").str
       val name     = "Image" + spelling.split('_').map(_.toLowerCaseRoot.capitalize).mkString
-      s"  case $name extends ImageDimension($encoding, ${literal("SQ_RSRC_IMG_" + spelling)}, ${value("coordinates").num.toInt}, ${value("gradients").num.toInt})"
+      s"  case $name extends ImageDimension($encoding, ${Emission.literal("SQ_RSRC_IMG_" + spelling)}, ${value("coordinates").num.toInt}, ${value("gradients").num.toInt})"
     }.mkString("\n")
     GeneratedHeader.scala("from LLVM AMDGPUDimProps") +
       s"""|package net.kurobako.gemstone.isa.amdgpu
@@ -1945,7 +1945,7 @@ for name in sorted(module.instructions):
 
   private def renderDefinitionCase(forms: Vector[InstructionForm], metadataId: Int): String = {
     val first = forms.head
-    s"""|  case object ${first.definitionName} extends Opcode(${literal(first.opcode)}, $metadataId)
+    s"""|  case object ${first.definitionName} extends Opcode(${Emission.literal(first.opcode)}, $metadataId)
         |""".stripMargin
   }
 
@@ -2064,8 +2064,6 @@ for name in sorted(module.instructions):
   }
 
   private def scalaCaseName(opcode: String): String = Identifiers.upperCamel(opcode, "Opcode", "Opcode")
-
-  private def literal(value: String): String = Emission.literal(value)
 
   private def parseRadix(element: Element): Int = {
     val radix = Option(element.getAttribute("Radix")).filter(_.nonEmpty).map(_.toInt).getOrElse(10)

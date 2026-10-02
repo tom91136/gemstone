@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import ELF.*
+import VMDispatchMemory.*
 import cats.syntax.all.*
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.collection.*
@@ -9,7 +10,6 @@ import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
-import net.kurobako.gemstone.isa.amdgpu.LoadedProgram.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
@@ -19,13 +19,6 @@ object LoadedProgram {
     ELF.validateHeader(program.image).leftMap(error => Fault.InvalidTask(error.message))
       .map(_ => LoadedProgram(() => VMLoader.index(program)))
 
-  case class GlobalBinding(
-      address: Long,
-      size: Int >= 0,
-      allocation: AllocationId,
-      offset: Long >= 0,
-      allocationSize: Long > 0
-  )
 }
 
 class LoadedProgram private (initialize: () => Either[Fault, VMLoader.IndexedProgram]) {

@@ -23,10 +23,10 @@ object Assembly {
     case PTX(error: ptx.Program.ParseError)
     case SPIRVAssembly(error: spirv.asm.Assembler.Error)
     case SPIRVBinary(error: spirv.ISA.DecodeError)
-    case CodeObject(error: amdgpu.CodeObject.Error)
+    case CodeObject(error: amdgpu.CodeObjectError)
     case AMDGPUParse(error: amdgpu.asm.Parser.Error)
-    case AMDGPUEncoding(error: amdgpu.asm.Binary.CodecError)
-    case AMDGPUDecoding(offset: Int >= 0, error: amdgpu.asm.Binary.CodecError)
+    case AMDGPUEncoding(error: amdgpu.asm.CodecError)
+    case AMDGPUDecoding(offset: Int >= 0, error: amdgpu.asm.CodecError)
   }
 
   /** PTX is textual: assembly and disassembly both return its canonical source, not a CUDA cubin. */
@@ -60,11 +60,11 @@ object Assembly {
       section match {
         case Some(name) => sections.filter(_.name == name) match {
             case Vec(value) => Right(value)
-            case _          => Left(amdgpu.CodeObject.Error.Invalid(s"expected one executable section named '$name'"))
+            case _          => Left(amdgpu.CodeObjectError.Invalid(s"expected one executable section named '$name'"))
           }
         case None => sections match {
             case Vec(value) => Right(value)
-            case _          => Left(amdgpu.CodeObject.Error.Invalid(
+            case _          => Left(amdgpu.CodeObjectError.Invalid(
                 s"select an executable section with --section: ${sections.map(_.name).mkString(", ")}"
               ))
           }

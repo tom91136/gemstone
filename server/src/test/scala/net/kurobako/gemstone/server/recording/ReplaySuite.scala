@@ -19,8 +19,8 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.*
+import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
-import net.kurobako.gemstone.server.transport.*
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
@@ -86,8 +86,8 @@ class ReplaySuite extends munit.FunSuite {
           val header = ExecutionRPC.RequestHeaderBytes.raw
           val prefix = Array.ofDim[Byte](header); ByteBuffer.wrap(prefix).putInt(magic)
           input.readFully(prefix, 4, header - 4)
-          val extra = Journal.Frames.integer(prefix, ExecutionRPC.RequestPayloadSizeOffset.raw) +
-            Journal.Frames.integer(prefix, ExecutionRPC.RequestTagSizeOffset.raw)
+          val extra = Frame.integer(prefix, ExecutionRPC.RequestPayloadSizeOffset.raw) +
+            Frame.integer(prefix, ExecutionRPC.RequestTagSizeOffset.raw)
           assert(extra >= 0 && extra <= 4096)
           val frame  = java.util.Arrays.copyOf(prefix, header + extra); input.readFully(frame, header, extra)
           val client = ByteBuffer.wrap(frame).getLong(ExecutionRPC.RequestClientOffset.raw)
@@ -188,7 +188,7 @@ class ReplaySuite extends munit.FunSuite {
     }
   }
 
-  test("real response mismatches fail and close the fresh endpoint") {
+  test("response mismatches close the endpoint and preserve cleanup failures as suppressed") {
     temporary { file =>
       capture(file) { w =>
         val c = w.connection(Object()); c.request(execution()); c.response(response()); c.close()
@@ -199,9 +199,14 @@ class ReplaySuite extends munit.FunSuite {
         val e = intercept[IOException](Replay.run(
           Replay.Options(file, schema, 3000),
           _ =>
-            Replay.Target(peer.endpoint.endpoint, () => { closed.set(true); peer.close() })
+            Replay.Target(
+              peer.endpoint.endpoint,
+              () => { closed.set(true); peer.close(); throw IOException("cleanup failed") }
+            )
         ))
-        assert(e.getMessage.contains("frame differs"), e.getMessage); assert(closed.get()); peer.verify()
+        assert(e.getMessage.contains("frame differs"), e.getMessage)
+        assertEquals(e.getSuppressed.toSeq.map(_.getMessage), Seq("cleanup failed"))
+        assert(closed.get()); peer.verify()
       }
     }
   }

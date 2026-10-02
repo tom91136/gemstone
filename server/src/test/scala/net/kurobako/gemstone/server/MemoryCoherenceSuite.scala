@@ -9,6 +9,7 @@ import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.backend.*
+import net.kurobako.gemstone.server.protocol.*
 import net.kurobako.gemstone.server.recording.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
@@ -153,8 +154,8 @@ class MemoryCoherenceSuite extends munit.FunSuite {
         assert(requests.nonEmpty, "recording contains no RPC requests")
         requests.foreach { event =>
           val frame        = journal.frame(event)
-          val operationTag = Journal.Frames.operation(frame)
-          val payload      = Journal.Frames.payload(frame)
+          val operationTag = Frame.operation(frame)
+          val payload      = Frame.payload(frame)
           val request      = Wire.Protocol[Operation].decodePayload(operationTag, payload, ExecutionRPC.Limits)
             .fold(message => fail(message), identity).value
           request match {

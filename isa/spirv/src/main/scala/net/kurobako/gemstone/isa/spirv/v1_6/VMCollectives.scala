@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import VMInvocation.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.*
 
@@ -77,20 +76,20 @@ private object VMCollectives {
   }
 
   enum Payload {
-    case Value(resultType: Int, destination: Int, value: RuntimeValue)
-    case Shuffle(resultType: Int, destination: Int, data: RuntimeValue, invocationId: RuntimeValue)
+    case Value(resultType: Int, destination: Int, value: VMValue)
+    case Shuffle(resultType: Int, destination: Int, data: VMValue, invocationId: VMValue)
     case ShuffleUp(
         resultType: Int,
         destination: Int,
-        previous: RuntimeValue,
-        current: RuntimeValue,
+        previous: VMValue,
+        current: VMValue,
         delta: Long
     )
     case ShuffleDown(
         resultType: Int,
         destination: Int,
-        current: RuntimeValue,
-        next: RuntimeValue,
+        current: VMValue,
+        next: VMValue,
         delta: Long
     )
     case Barrier(memoryScope: Int, semantics: Long)

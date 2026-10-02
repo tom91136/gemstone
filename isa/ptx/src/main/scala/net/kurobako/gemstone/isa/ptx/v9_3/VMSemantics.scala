@@ -17,9 +17,9 @@ import scala.collection.mutable
 private object VMSemantics {
 
   private def stageResult(
-      effects: VMWriteBuffer,
-      result: Either[ExecutionFault, VMWrite]
-  ): Either[ExecutionFault, Unit] =
+      effects: VMBlockState.WriteBuffer,
+      result: Either[VMFault, VMWrite]
+  ): Either[VMFault, Unit] =
     result match {
       case Left(fault)  => Left(fault)
       case Right(write) =>
@@ -28,11 +28,11 @@ private object VMSemantics {
     }
 
   private def stageRegisterResult(
-      effects: VMWriteBuffer,
+      effects: VMBlockState.WriteBuffer,
       lane: Int,
       destination: NonEmpty[String],
-      result: Either[ExecutionFault, Long]
-  ): Either[ExecutionFault, Unit] =
+      result: Either[VMFault, Long]
+  ): Either[VMFault, Unit] =
     result match {
       case Left(fault)  => Left(fault)
       case Right(value) =>
@@ -41,9 +41,9 @@ private object VMSemantics {
     }
 
   private def stageResults(
-      effects: VMWriteBuffer,
-      result: Either[ExecutionFault, Vec[VMWrite]]
-  ): Either[ExecutionFault, Unit] =
+      effects: VMBlockState.WriteBuffer,
+      result: Either[VMFault, Vec[VMWrite]]
+  ): Either[VMFault, Unit] =
     result match {
       case Left(fault)   => Left(fault)
       case Right(writes) =>
@@ -54,14 +54,14 @@ private object VMSemantics {
   extension (instruction: VMIR.Instruction) {
     // A PTX instruction updates per-lane machine state; staged mutable maps avoid allocating immutable copies.
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    def execute(context: VMInstructionContext, effects: VMWriteBuffer): Either[ExecutionFault, Step] =
+    def execute(context: VMInstructionContext, effects: VMBlockState.WriteBuffer): Either[VMFault, Step] =
       if (executeFast(instruction, context)) Right(Step.Advance)
       else instruction match {
         case VMIR.Instruction.LoadParameter(destinations, parameter, offset, elementWidth, signed) =>
           val elementBytes   = elementWidth.byteCount
           val argumentValues = context.arguments.get(parameter).map { argument =>
             if (offset.raw > argument.bytes.length - elementBytes.raw * destinations.size)
-              Left(ExecutionFault.InvalidState(
+              Left(VMFault.InvalidState(
                 s"parameter $parameter load at $offset exceeds ${argument.bytes.length} bytes"
               ))
             else
@@ -74,20 +74,20 @@ private object VMSemantics {
                 )
               })
           }
-          var failure: Option[ExecutionFault] = None
+          var failure: Option[VMFault] = None
           context.active.foreachLane { lane =>
             if (failure.isEmpty)
               context.state.parameters(lane).get(parameter) match {
                 case Some(value) if offset.raw == 0 && destinations.size == 1 =>
                   effects.stageRegister(lane, destinations.head, loadBits(value, elementWidth, signed))
                 case Some(_) =>
-                  failure = Some(ExecutionFault.InvalidState(
+                  failure = Some(VMFault.InvalidState(
                     s"unsupported local parameter load: $parameter+$offset"
                   ))
                 case None =>
                   argumentValues match {
                     case None =>
-                      failure = Some(ExecutionFault.InvalidState(
+                      failure = Some(VMFault.InvalidState(
                         s"missing kernel argument $parameter"
                       ))
                     case Some(Left(error))   => failure = Some(error)
@@ -117,7 +117,7 @@ private object VMSemantics {
                   context.memory
                     .readLittleEndian(GuestAddress(rawAddress), width.byteCount)
                     .leftMap(error =>
-                      ExecutionFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
+                      VMFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
                     )
                     .map(value => loadBits(value, width, signed))
               }
@@ -148,7 +148,7 @@ private object VMSemantics {
                     context.memory
                       .readLittleEndian(GuestAddress(elementAddress), width.byteCount)
                       .leftMap(error =>
-                        ExecutionFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
+                        VMFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
                       )
                       .map(loaded =>
                         VMWrite.Register(
@@ -286,7 +286,7 @@ private object VMSemantics {
           forEveryLane(context) { lane =>
             val write = context.read(lane, memberMask).flatMap { maskValue =>
               val warpBase = lane & ~31
-              (0 until 32).foldLeft[Either[ExecutionFault, Long]](Right(0L)) {
+              (0 until 32).foldLeft[Either[VMFault, Long]](Right(0L)) {
                 case (result, laneInWarp) =>
                   val candidate = warpBase + laneInWarp
                   if (
@@ -296,7 +296,7 @@ private object VMSemantics {
                   else
                     result.flatMap { ballot =>
                       context.state.predicates(candidate).get(predicate).toRight(
-                        ExecutionFault.UndefinedRegister(predicate, context.pc, candidate)
+                        VMFault.UndefinedRegister(predicate, context.pc, candidate)
                       ).map { selected =>
                         if (selected) ballot | (1L << laneInWarp) else ballot
                       }
@@ -315,7 +315,7 @@ private object VMSemantics {
           forEveryLane(context) { lane =>
             val write = context.read(lane, memberMask).flatMap { maskValue =>
               val warpBase = lane & ~31
-              (0 until 32).foldLeft[Either[ExecutionFault, Vec[Boolean]]](Right(Vec.empty)) {
+              (0 until 32).foldLeft[Either[VMFault, Vec[Boolean]]](Right(Vec.empty)) {
                 case (result, laneInWarp) =>
                   val candidate = warpBase + laneInWarp
                   if (
@@ -325,7 +325,7 @@ private object VMSemantics {
                   else
                     result.flatMap { values =>
                       context.state.predicates(candidate).get(predicate).toRight(
-                        ExecutionFault.UndefinedRegister(predicate, context.pc, candidate)
+                        VMFault.UndefinedRegister(predicate, context.pc, candidate)
                       ).map(values :+ _)
                     }
               }.map { values =>
@@ -359,11 +359,11 @@ private object VMSemantics {
   private def executeMemoryAndControl(
       instruction: VMIR.Instruction,
       context: VMInstructionContext,
-      effects: VMWriteBuffer
-  ): Either[ExecutionFault, Step] = instruction match {
+      effects: VMBlockState.WriteBuffer
+  ): Either[VMFault, Step] = instruction match {
     case VMIR.Instruction.LoadGlobal(destination, address, width, signed) =>
       prepareGlobalReads(context, address, width.byteCount.raw, false).flatMap { _ =>
-        var failure: Option[ExecutionFault] = None
+        var failure: Option[VMFault] = None
         context.active.foreachLane { lane =>
           if (failure.isEmpty) {
             val rawAddress = readFast(context, lane, address)
@@ -373,7 +373,7 @@ private object VMSemantics {
               case None =>
                 context.memory.readLittleEndian(GuestAddress(rawAddress), width.byteCount) match {
                   case Left(error) =>
-                    failure = Some(ExecutionFault.fromMemory(error, s"pc ${context.pc}, lane $lane: "))
+                    failure = Some(VMFault.fromMemory(error, s"pc ${context.pc}, lane $lane: "))
                   case Right(value) =>
                     effects.stageRegister(lane, destination, loadBits(value, width, signed))
                 }
@@ -387,7 +387,7 @@ private object VMSemantics {
       }
     case VMIR.Instruction.LoadGeneric(destination, address, width, signed) =>
       prepareGlobalReads(context, address, width.byteCount.raw, true).flatMap { _ =>
-        var failure: Option[ExecutionFault] = None
+        var failure: Option[VMFault] = None
         context.active.foreachLane { lane =>
           if (failure.isEmpty) {
             val rawAddress = readFast(context, lane, address)
@@ -409,7 +409,7 @@ private object VMSemantics {
               case None =>
                 context.memory.readLittleEndian(GuestAddress(rawAddress), width.byteCount) match {
                   case Left(error) =>
-                    failure = Some(ExecutionFault.fromMemory(error, s"pc ${context.pc}, lane $lane: "))
+                    failure = Some(VMFault.fromMemory(error, s"pc ${context.pc}, lane $lane: "))
                   case Right(value) =>
                     effects.stageRegister(lane, destination, loadBits(value, width, signed))
                 }
@@ -434,7 +434,7 @@ private object VMSemantics {
                   width.byteCount
                 )
                 .leftMap(error =>
-                  ExecutionFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
+                  VMFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
                 )
                 .map(value =>
                   VMWrite.Register(
@@ -478,7 +478,7 @@ private object VMSemantics {
                   context.memory
                     .readLittleEndian(GuestAddress(elementAddress), width.byteCount)
                     .leftMap(error =>
-                      ExecutionFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
+                      VMFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
                     )
                     .map(value =>
                       VMWrite.Register(
@@ -646,7 +646,7 @@ private object VMSemantics {
             context.memory
               .readLittleEndian(GuestAddress(sourceAddress + offset.toLong), width.byteCount)
               .leftMap(error =>
-                ExecutionFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
+                VMFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
               )
               .map(value =>
                 VMWrite.Shared(
@@ -662,9 +662,9 @@ private object VMSemantics {
       }.map(_ => Step.Advance)
     case VMIR.Instruction.AsyncCommit | VMIR.Instruction.AsyncWait                      => Right(Step.Advance)
     case VMIR.Instruction.WarpReduce(destination, source, memberMask, operation, width) =>
-      val values                          = mutable.Map.empty[Int, Long]
-      val masks                           = mutable.Map.empty[Int, Long]
-      var failure: Option[ExecutionFault] = None
+      val values                   = mutable.Map.empty[Int, Long]
+      val masks                    = mutable.Map.empty[Int, Long]
+      var failure: Option[VMFault] = None
       context.active.foreachLane { lane =>
         if (failure.isEmpty)
           context.read(lane, source) match {
@@ -688,7 +688,7 @@ private object VMSemantics {
                   if (candidate & ~31) == warpBase && (mask & (1L << (candidate & 31))) != 0L => value
             })
             if ((mask & (1L << (lane & 31))) == 0L || members.isEmpty)
-              failure = Some(ExecutionFault.InvalidState(
+              failure = Some(VMFault.InvalidState(
                 s"redux.sync lane $lane is absent from its member mask"
               ))
             else {
@@ -835,10 +835,10 @@ private object VMSemantics {
       forEveryLane(context) { lane =>
         val write = for {
           leftValue <- context.state.predicates(lane).get(left).toRight(
-            ExecutionFault.UndefinedRegister(left, context.pc, lane)
+            VMFault.UndefinedRegister(left, context.pc, lane)
           )
           rightValue <- context.state.predicates(lane).get(right).toRight(
-            ExecutionFault.UndefinedRegister(right, context.pc, lane)
+            VMFault.UndefinedRegister(right, context.pc, lane)
           )
         } yield VMWrite.Predicate(
           lane,
@@ -852,7 +852,7 @@ private object VMSemantics {
         stageResult(
           effects,
           context.state.predicates(lane).get(source).toRight(
-            ExecutionFault.UndefinedRegister(source, context.pc, lane)
+            VMFault.UndefinedRegister(source, context.pc, lane)
           ).map(value => VMWrite.Predicate(lane, destination, !value))
         )
       }.map(_ => Step.Advance)
@@ -860,10 +860,10 @@ private object VMSemantics {
       forEveryLane(context) { lane =>
         val write = for {
           leftValue <- context.state.predicates(lane).get(left).toRight(
-            ExecutionFault.UndefinedRegister(left, context.pc, lane)
+            VMFault.UndefinedRegister(left, context.pc, lane)
           )
           rightValue <- context.state.predicates(lane).get(right).toRight(
-            ExecutionFault.UndefinedRegister(right, context.pc, lane)
+            VMFault.UndefinedRegister(right, context.pc, lane)
           )
         } yield VMWrite.Predicate(
           lane,
@@ -899,12 +899,12 @@ private object VMSemantics {
             }
           }
           if (mismatch)
-            Left(ExecutionFault.InvalidState("bar.warp.sync member mask differs across active lanes"))
+            Left(VMFault.InvalidState("bar.warp.sync member mask differs across active lanes"))
           else
             Right(Step.Suspend(WaitKey(WaitScope.Warp, memberMaskValue, context.pc.toInt.toLong)))
       }
     case VMIR.Instruction.MemoryBarrier =>
-      context.memory.fence().leftMap(error => ExecutionFault.fromMemory(error)).map(_ => Step.Advance)
+      context.memory.fence().leftMap(error => VMFault.fromMemory(error)).map(_ => Step.Advance)
     case VMIR.Instruction.Prefetch                                   => Right(Step.Advance)
     case VMIR.Instruction.Call(function, returnParameter, parameter) =>
       val groups = mutable.LinkedHashMap.empty[NonEmpty[String], VMLaneMask]
@@ -915,7 +915,7 @@ private object VMSemantics {
           }
         }
       }.flatMap { _ =>
-        groups.foldLeft[Either[ExecutionFault, Unit]](Right(())) { case (current, (name, lanes)) =>
+        groups.foldLeft[Either[VMFault, Unit]](Right(())) { case (current, (name, lanes)) =>
           current.flatMap { _ =>
             val groupContext = VMInstructionContext(
               context.kernel,
@@ -936,7 +936,7 @@ private object VMSemantics {
               case None =>
                 forEveryLane(groupContext) { lane =>
                   executeBuiltin(groupContext, lane, name, returnParameter, parameter).getOrElse(
-                    Left(ExecutionFault.InvalidState(s"missing device function $name"))
+                    Left(VMFault.InvalidState(s"missing device function $name"))
                   )
                 }
             }
@@ -944,9 +944,9 @@ private object VMSemantics {
         }
       }.map(_ => Step.Advance)
     case VMIR.Instruction.Trap =>
-      Left(ExecutionFault.ArchitecturalTrap("ptx", 0L, context.pc))
+      Left(VMFault.ArchitecturalTrap("ptx", 0L, context.pc))
     case VMIR.Instruction.Return => Right(Step.Exit(context.active))
-    case other                   => Left(ExecutionFault.InvalidState(s"unhandled compiled PTX instruction $other"))
+    case other                   => Left(VMFault.InvalidState(s"unhandled compiled PTX instruction $other"))
   }
 
   /** CUB's scan descriptors rely on coherent aligned status/value transfers, including 16-byte double descriptors. This
@@ -970,7 +970,7 @@ private object VMSemantics {
       address: Value,
       size: Int,
       generic: Boolean
-  ): Either[ExecutionFault, Unit] = {
+  ): Either[VMFault, Unit] = {
     val ranges = Vec.newBuilder[(GuestAddress, Int >= 0)]
     context.active.foreachLane { lane =>
       val raw = readFast(context, lane, address)
@@ -983,7 +983,7 @@ private object VMSemantics {
         val _ = ranges += ((GuestAddress(raw), size.unsafe[Int >= 0]))
       }
     }
-    context.memory.prepareReads(ranges.result()).leftMap(error => ExecutionFault.fromMemory(error))
+    context.memory.prepareReads(ranges.result()).leftMap(error => VMFault.fromMemory(error))
   }
 
   private def loadCoherentVector(
@@ -993,12 +993,12 @@ private object VMSemantics {
       destinations: Vec[NonEmpty[String]],
       width: Int where (Between[8, 64] & MultipleOf[8]),
       signed: Boolean
-  ): Either[ExecutionFault, Vec[VMWrite]] =
+  ): Either[VMFault, Vec[VMWrite]] =
     if (destinations.nonEmpty && destinations.size * width.byteCount.raw <= 8) {
       val packedBytes = (destinations.size * width.byteCount.raw).unsafe[Int where Between[1, 8]]
       context.memory.readLittleEndian(GuestAddress(address), packedBytes)
         .leftMap(error =>
-          ExecutionFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
+          VMFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
         )
         .map { packed =>
           destinations.zipWithIndex.map { case (destination, index) =>
@@ -1014,7 +1014,7 @@ private object VMSemantics {
       val totalBytes = destinations.nonNegativeSize * width.byteCount
       context.memory.readBytes(GuestAddress(address), totalBytes)
         .leftMap(error =>
-          ExecutionFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
+          VMFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
         )
         .map { bytes =>
           destinations.zipWithIndex.map { case (destination, index) =>
@@ -1035,9 +1035,9 @@ private object VMSemantics {
       address: Long,
       sources: Vec[Value],
       width: Int where (Between[8, 64] & MultipleOf[8])
-  ): Either[ExecutionFault, Vec[VMWrite]] =
+  ): Either[VMFault, Vec[VMWrite]] =
     if (sources.nonEmpty && sources.size * width.byteCount.raw <= 8) {
-      sources.zipWithIndex.foldLeft[Either[ExecutionFault, Long]](Right(0L)) { case (result, (source, index)) =>
+      sources.zipWithIndex.foldLeft[Either[VMFault, Long]](Right(0L)) { case (result, (source, index)) =>
         for {
           packed <- result
           value  <- context.read(lane, source)
@@ -1442,7 +1442,7 @@ private object VMSemantics {
       name: NonEmpty[String],
       returnParameters: Vec[NonEmpty[String]],
       parameters: Vec[NonEmpty[String]]
-  ): Option[Either[ExecutionFault, Unit]] = {
+  ): Option[Either[VMFault, Unit]] = {
     def parameter(index: Int, width: Int where Between[0, 8] = 8): Long =
       if (index < parameters.size)
         context.state.parameters(lane).getOrElse(
@@ -1492,10 +1492,10 @@ private object VMSemantics {
           case memory: DeviceAllocationMemory =>
             val allocation = parameter(0) match {
               case size if size < 1L || size > Int.MaxValue.toLong =>
-                Left(ExecutionFault.InvalidState(s"invalid malloc size: $size"))
+                Left(VMFault.InvalidState(s"invalid malloc size: $size"))
               case size =>
                 memory.allocate(size.toInt.unsafe[Int > 0]).leftMap(error =>
-                  ExecutionFault.fromMemory(error)
+                  VMFault.fromMemory(error)
                 )
             }
             allocation match {
@@ -1504,14 +1504,14 @@ private object VMSemantics {
                 returnValue(address.raw)
                 Some(Right(()))
             }
-          case _ => Some(Left(ExecutionFault.InvalidState("device malloc requires dynamic address memory")))
+          case _ => Some(Left(VMFault.InvalidState("device malloc requires dynamic address memory")))
         }
       case "free" =>
         context.memory match {
           case memory: DeviceAllocationMemory =>
             val _ = memory.free(GuestAddress(parameter(0)))
             Some(Right(()))
-          case _ => Some(Left(ExecutionFault.InvalidState("device free requires dynamic address memory")))
+          case _ => Some(Left(VMFault.InvalidState("device free requires dynamic address memory")))
         }
       case "cudaLaunchDevice" =>
         Some(executeDeviceLaunch(context, lane, returnParameters, parameters, parameter(_, _)))
@@ -1540,15 +1540,15 @@ private object VMSemantics {
       returnParameters: Vec[NonEmpty[String]],
       parameters: Vec[NonEmpty[String]],
       parameter: (Int, Int where Between[0, 8]) => Long
-  ): Either[ExecutionFault, Unit] =
+  ): Either[VMFault, Unit] =
     if (parameters.size < 6)
-      Left(ExecutionFault.InvalidState(
+      Left(VMFault.InvalidState(
         s"cudaLaunchDevice expects six parameters, found ${parameters.size}"
       ))
     else {
       val target = context.state.functionParameters(lane).get(parameters(0))
       val child  = target.flatMap(context.kernel.functions.get).toRight(
-        ExecutionFault.InvalidState(
+        VMFault.InvalidState(
           s"cudaLaunchDevice target is not a lowered entry: ${target.getOrElse("<unknown>")}"
         )
       )
@@ -1566,9 +1566,9 @@ private object VMSemantics {
               context.state.readParameterBytes(lane, parameters(3), index * 4, 4) &
                 0xffffffffL
             )
-          val childArguments                          = mutable.Map.empty[NonEmpty[String], Argument]
-          var argumentFailure: Option[ExecutionFault] = None
-          var index                                   = 0
+          val childArguments                   = mutable.Map.empty[NonEmpty[String], Argument]
+          var argumentFailure: Option[VMFault] = None
+          var index                            = 0
           while (index < function.parameters.size && argumentFailure.isEmpty) {
             val width  = function.parameterWidths(index)
             val offset = function.parameterOffsets(index)
@@ -1576,7 +1576,7 @@ private object VMSemantics {
               case Some(bytes) =>
                 childArguments(function.parameters(index)) =
                   Argument(Vec.unsafeWrapArray(bytes).unsafe)
-              case None => argumentFailure = Some(ExecutionFault.InvalidState(
+              case None => argumentFailure = Some(VMFault.InvalidState(
                   s"cudaLaunchDevice parameter buffer 0x${java.lang.Long.toUnsignedString(buffer, 16)} is out of range"
                 ))
             }
@@ -1590,7 +1590,7 @@ private object VMSemantics {
                 groupSize  <- dimensions(block(0).toInt, block(1).toInt, block(2).toInt)
                 value      <- LaunchGeometry.forLaunch(groupSize, groupCount)
               } yield value
-              geometry.leftMap(error => ExecutionFault.InvalidState(error)) match {
+              geometry.leftMap(error => VMFault.InvalidState(error)) match {
                 case Left(fault)  => Left(fault)
                 case Right(value) =>
                   VMInterpreter.execute(
@@ -1665,9 +1665,9 @@ private object VMSemantics {
   // Preserve the first lane fault without evaluating later lanes after failure.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def forEveryLane(context: VMInstructionContext)(
-      function: Int => Either[ExecutionFault, Unit]
-  ): Either[ExecutionFault, Unit] = {
-    var failure: Option[ExecutionFault] = None
+      function: Int => Either[VMFault, Unit]
+  ): Either[VMFault, Unit] = {
+    var failure: Option[VMFault] = None
     context.active.foreachLane { lane =>
       if (failure.isEmpty) function(lane).left.foreach(fault => failure = Some(fault))
     }

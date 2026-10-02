@@ -10,11 +10,12 @@ import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.rpc.ExecutionProtocol.given
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.recording.*
-import net.kurobako.gemstone.server.transport.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 class ConnectionSuite extends munit.FunSuite {
@@ -98,7 +99,7 @@ class ConnectionSuite extends munit.FunSuite {
     files.temporary { directory =>
       val bind = if (unix) Bind.Unix(directory.resolve("socket")) else Bind.Tcp()
       Using.resource(Server.start(Server.Settings(parallelism = 1, requestTimeoutMillis = 100, bind = bind))) { server =>
-        Using.resource(transport.connect(server.endpoint, 5000)) { socket =>
+        Using.resource(SocketTransport.connect(server.endpoint, 5000)) { socket =>
           Thread.sleep(200)
           socket.output.write(frame)
           socket.output.flush()

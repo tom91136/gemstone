@@ -4,8 +4,8 @@ import net.kurobako.gemstone.constraint.*
 
 object Bits {
   inline val Mask8  = 0xffL
-  inline val Mask16 = 0xffffL
-  inline val Mask32 = 0xffffffffL
+  inline val Mask16 = Binary16.Mask
+  inline val Mask32 = Binary32.Mask
 
   inline def mask(width: Int where Between[1, 64]): Long =
     if (width.raw == 64) -1L else (1L << width.raw) - 1L

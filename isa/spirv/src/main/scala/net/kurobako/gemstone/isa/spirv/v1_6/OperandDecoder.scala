@@ -13,33 +13,20 @@ private object OperandDecoder {
   }
 
   def decode(
-      definition: Instruction.Definition,
+      opcode: NonEmpty[String],
       words: Vec[Word],
       shapes: Vec[OperandShape],
       kinds: Map[OperandKind, OperandKindInfo]
   ): Either[InstructionDecodeError, DecodedOperands] =
-    decodeShapes(definition.opcode, words, shapes, kinds, 0, 0, Chain.empty)
-      .map(fields => DecodedOperands(Vec.from(fields.toVector.view))) match {
-      case right @ Right(_)                                           => right
-      case Left(error) if definition == Instruction.Definition.Switch =>
-        // OpSwitch literals have the width of their selector.  The core
-        // grammar represents the common 32-bit form as a pair, but a 64-bit
-        // selector uses two literal words followed by the target label.  The
-        // selector type is resolved after binary decoding, so accept the
-        // lossless three-word form here when the fixed-width parse rejects it.
-        decodeSwitch64(words) match {
-          case right @ Right(_) => right
-          case Left(_)          => Left(error)
-        }
-      case Left(error) => Left(error)
-    }
-
-  private def decodeSwitch64(
+    decodeShapes(opcode, words, shapes, kinds, 0, 0, Chain.empty)
+      .map(fields => DecodedOperands(Vec.from(fields.toVector.view)))
+  def decodeSwitch64(
+      opcode: NonEmpty[String],
       words: Vec[Word]
   ): Either[InstructionDecodeError, DecodedOperands] =
     if (words.size < 2 || (words.size - 2) % 3 != 0)
       Left(InstructionDecodeError.InvalidOperandCount(
-        Instruction.Definition.Switch.opcode,
+        opcode,
         "literal/label pairs are not 64-bit aligned"
       ))
     else {

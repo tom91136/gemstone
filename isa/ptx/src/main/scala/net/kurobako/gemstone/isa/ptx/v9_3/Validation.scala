@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import ISA.*
 import Metadata.*
 import Program.*
 import net.kurobako.gemstone.collection.*

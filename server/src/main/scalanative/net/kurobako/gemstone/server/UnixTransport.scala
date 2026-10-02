@@ -7,7 +7,7 @@ import java.net.SocketTimeoutException
 import java.nio.file.Path
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.concurrent.*
-import net.kurobako.gemstone.server.transport.*
+import net.kurobako.gemstone.server.Transport.*
 import scala.scalanative.unsafe.*
 
 private object UnixTransport {

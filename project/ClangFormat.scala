@@ -1,11 +1,13 @@
 import java.nio.file.Path
+import sbt.internal.util.MessageOnlyException
 import scala.sys.process.Process
 import scala.sys.process.ProcessLogger
 
 /** clang-format invocation shared by the native formatting tasks. */
 object ClangFormat {
   def format(files: Seq[Path], executable: String, workingDirectory: Path, log: String => Unit): Unit = {
-    val _ = run(files, executable, Vector("-i"), workingDirectory, log)
+    val status = run(files, executable, Vector("-i"), workingDirectory, log)
+    if (status != 0) throw MessageOnlyException(s"$executable exited with $status")
   }
 
   def check(files: Seq[Path], executable: String, workingDirectory: Path, log: String => Unit): Boolean =

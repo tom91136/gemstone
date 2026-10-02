@@ -9,12 +9,12 @@ import java.util.concurrent.TimeUnit
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.*
+import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
-import net.kurobako.gemstone.server.transport.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 /** Socket-level isolation coverage shared by both server implementations. */
@@ -25,7 +25,7 @@ class SharedServerSuite extends munit.FunSuite {
       operation: Int,
       client: Option[ClientId] = None
   )(read: DataInputStream => A): A =
-    Using.resource(transport.connect(endpoint, 10000)) { socket =>
+    Using.resource(SocketTransport.connect(endpoint, 10000)) { socket =>
       val output = DataOutputStream(socket.output)
       Control.writeRequest(output, operation, client)
       val bytes = Control.readResponse(DataInputStream(socket.input), operation)

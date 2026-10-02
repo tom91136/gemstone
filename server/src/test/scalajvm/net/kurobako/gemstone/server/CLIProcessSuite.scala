@@ -11,9 +11,9 @@ import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.platform.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.*
+import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
 import net.kurobako.gemstone.server.recording.*
-import net.kurobako.gemstone.server.transport.*
 import net.kurobako.gemstone.testing.*
 import scala.concurrent.duration.*
 import scala.util.Using

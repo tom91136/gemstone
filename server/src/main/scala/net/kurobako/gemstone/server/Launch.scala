@@ -9,8 +9,8 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.server.*
+import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
-import net.kurobako.gemstone.server.transport.*
 import scala.util.Using
 
 object Launch {

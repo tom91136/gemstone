@@ -101,30 +101,23 @@ object AMDGPUALUExecutionBenchmark {
       execute()
       iteration += 1
     }
-    val (allocatedBefore, elapsed, allocatedAfter) =
+    val measurement =
       Using.resource(PlatformMetrics.startRecording(sys.env.get(env.BenchmarkJfr).map(Path.of(_)))) { _ =>
-        val before  = PlatformMetrics.allocatedBytes
-        val started = platform.monotonicNanos
-        iteration = 0
-        while (iteration < measured.raw) {
-          execute()
-          iteration += 1
+        Measurement {
+          iteration = 0
+          while (iteration < measured.raw) {
+            execute()
+            iteration += 1
+          }
         }
-        (
-          before,
-          math.max(0L, platform.monotonicNanos - started).unsafe[Long >= 0],
-          PlatformMetrics.allocatedBytes
-        )
       }
     Console.out.println(
       f"amdgpu-alu benchmark mode=${mode.toString.toLowerCaseRoot} dispatches=$measured warmup=$warmup instructions_per_dispatch=${instructionCount.raw +
           1} " +
-        f"elapsed_ms=${elapsed.raw / 1000000.0}%.3f ns_per_dispatch=${elapsed.raw.toDouble / measured.raw.toDouble}%.1f " +
-        f"allocated_bytes_per_dispatch=${(allocatedBefore, allocatedAfter) match {
-            case (Some(before), Some(after)) if after >= before =>
-              (after - before).raw.toDouble / measured.raw.toDouble
-            case _ => Double.NaN
-          }}%.1f"
+        f"elapsed_ms=${measurement.elapsedNanos.raw /
+            1000000.0}%.3f ns_per_dispatch=${measurement.elapsedNanos.raw.toDouble / measured.raw.toDouble}%.1f " +
+        f"allocated_bytes_per_dispatch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble /
+            measured.raw.toDouble)}%.1f"
     )
   }
 }

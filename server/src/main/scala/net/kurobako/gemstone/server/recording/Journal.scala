@@ -15,6 +15,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.server.protocol.*
 import scala.collection.mutable
 import scala.util.Using
 import scala.util.control.NonFatal
@@ -119,22 +120,6 @@ object Journal {
   )
 
   object Frames {
-    def magic(bytes: Array[Byte]): Int                = ByteBuffer.wrap(bytes).getInt()
-    def integer(bytes: Array[Byte], offset: Int): Int = ByteBuffer.wrap(bytes, offset, 4).getInt()
-    def long(bytes: Array[Byte], offset: Int): Long   = ByteBuffer.wrap(bytes, offset, 8).getLong()
-
-    def operation(bytes: Array[Byte]): String = {
-      val size = integer(bytes, ExecutionRPC.RequestTagSizeOffset.raw)
-      java.nio.charset.StandardCharsets.UTF_8.newDecoder()
-        .decode(ByteBuffer.wrap(bytes, ExecutionRPC.RequestHeaderBytes.raw, size)).toString
-    }
-    def payload(bytes: Array[Byte]): Array[Byte] =
-      java.util.Arrays.copyOfRange(
-        bytes,
-        ExecutionRPC.RequestHeaderBytes.raw + integer(bytes, ExecutionRPC.RequestTagSizeOffset.raw),
-        bytes.length
-      )
-
     def normalized(
         kind: Kind,
         bytes: Array[Byte],
@@ -164,24 +149,17 @@ object Journal {
         maximum: FrameByteSize,
         normalized: Boolean
     ): Unit = {
-      def check(value: Boolean): Unit = if (!value) throw IOException("RPC journal: invalid RPC frame")
-      check(bytes.length >= 12 && bytes.length <= frameSize && frameSize <= maximum.toInt)
-      val (header, payload) = kind match {
-        case Kind.Request if magic(bytes) == ExecutionRPC.RequestMagic =>
-          check(bytes.length >= ExecutionRPC.RequestHeaderBytes.raw)
-          val tagSize = integer(bytes, ExecutionRPC.RequestTagSizeOffset.raw)
-          check(tagSize > 0 && tagSize <= ExecutionRPC.MaximumTagBytes.raw)
-          (ExecutionRPC.RequestHeaderBytes.raw + tagSize, integer(bytes, ExecutionRPC.RequestPayloadSizeOffset.raw))
-        case Kind.Response if magic(bytes) == ExecutionRPC.ResponseMagic =>
-          check(bytes.length >= ExecutionRPC.ResponseHeaderBytes.raw)
-          check(integer(bytes, ExecutionRPC.ResponseStatusOffset.raw) == 0 ||
-            integer(bytes, ExecutionRPC.ResponseStatusOffset.raw) == 1)
-          (ExecutionRPC.ResponseHeaderBytes.raw, integer(bytes, ExecutionRPC.ResponsePayloadSizeOffset.raw))
-        case _ => throw IOException("RPC journal: frame kind/magic differ")
+      if (frameSize > maximum.toInt) throw IOException("RPC journal: frame exceeds archive bounds")
+      Frame.validatePrefix(bytes, frameSize.toLong)
+      val expectedMagic = kind match {
+        case Kind.Request  => ExecutionRPC.RequestMagic
+        case Kind.Response => ExecutionRPC.ResponseMagic
+        case _             => throw IOException("RPC journal: event has no frame")
       }
-      check(payload >= 0 && header.toLong + payload == frameSize.toLong)
+      if (Frame.magic(bytes) != expectedMagic) throw IOException("RPC journal: frame kind/magic differ")
       if (normalized && kind == Kind.Request) {
-        check(ByteBuffer.wrap(bytes).getLong(ExecutionRPC.RequestClientOffset.raw) == 0L)
+        if (ByteBuffer.wrap(bytes).getLong(ExecutionRPC.RequestClientOffset.raw) != 0L)
+          throw IOException("RPC journal: request client is not normalized")
       }
     }
   }
@@ -319,7 +297,7 @@ object Journal {
           case Kind.Response =>
             ensure(previous.requestPending, "response has no request")
             ensure(
-              Journal.Frames.magic(frame) == ExecutionRPC.ResponseMagic,
+              Frame.magic(frame) == ExecutionRPC.ResponseMagic,
               "response protocol differs from its request"
             )
             previous.copy(requestPending = false)

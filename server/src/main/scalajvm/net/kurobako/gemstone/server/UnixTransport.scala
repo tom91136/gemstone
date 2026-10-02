@@ -12,7 +12,7 @@ import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
 import java.nio.file.Path
 import net.kurobako.gemstone.*
-import net.kurobako.gemstone.server.transport.*
+import net.kurobako.gemstone.server.Transport.*
 import scala.util.control.NonFatal
 
 private object UnixTransport {

@@ -15,9 +15,10 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
     signed <- Seq(false, true)
   }
     test(s"OpSwitch compares $width-bit literals at selector width, signed=$signed") {
-      def ref(n: Int): Operand    = operand(OperandKind.IdRef, n)
-      def result(n: Int): Operand = operand(OperandKind.IdResult, n)
-      val literal                 = if (width == 64) operand(OperandKind.PairLiteralIntegerIdRef, -7, -1, 22)
+      def resultType(n: Int): Operand = operand(OperandKind.IdResultType, n)
+      def ref(n: Int): Operand        = operand(OperandKind.IdRef, n)
+      def result(n: Int): Operand     = operand(OperandKind.IdResult, n)
+      val literal                     = if (width == 64) operand(OperandKind.PairLiteralIntegerIdRef, -7, -1, 22)
       else operand(OperandKind.PairLiteralIntegerIdRef, -7, 22)
       val module = Module(
         Header(ISA.version, Word(0), Word(32), Word(0)),
@@ -35,12 +36,12 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
           ),
           Instruction.TypePointer(result(4), operand(OperandKind.StorageClass, 5), ref(3)),
           Instruction.TypeFunction(result(5), ref(1), Vec(ref(4), ref(2))),
-          Instruction.Constant(ref(3), result(6), operand(OperandKind.LiteralContextDependentNumber, 99)),
-          Instruction.Constant(ref(3), result(7), operand(OperandKind.LiteralContextDependentNumber, 0)),
+          Instruction.Constant(resultType(3), result(6), operand(OperandKind.LiteralContextDependentNumber, 99)),
+          Instruction.Constant(resultType(3), result(7), operand(OperandKind.LiteralContextDependentNumber, 0)),
           Instruction.EntryPoint(operand(OperandKind.ExecutionModel, 6), ref(10), stringOperand("switch"), Vec.empty),
-          Instruction.Function(ref(1), result(10), operand(OperandKind.FunctionControl, 0), ref(5)),
-          Instruction.FunctionParameter(ref(4), result(11)),
-          Instruction.FunctionParameter(ref(2), result(12)),
+          Instruction.Function(resultType(1), result(10), operand(OperandKind.FunctionControl, 0), ref(5)),
+          Instruction.FunctionParameter(resultType(4), result(11)),
+          Instruction.FunctionParameter(resultType(2), result(12)),
           Instruction.Label(result(20)),
           Instruction.Switch(ref(12), ref(21), Vec(literal)),
           Instruction.Label(result(21)),
@@ -53,6 +54,8 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
         ),
         Endianness.Little
       )
+      val decoded = ISA.encode(module).flatMap(ISA.decode(_)).fold(error => fail(error.toString), identity)
+      assertEquals(decoded, module)
       for ((selector, expected) <- Seq(-7L -> 99L, 7L -> 0L)) {
         val region = AllocationId(30L)
         val memory = ArrayMemory(region, 4)
@@ -65,7 +68,7 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
             KernelTask.Argument.Scalar(LittleEndian.toVec(selector, (width / 8).unsafe[Int where Between[0, 8]]))
           )
         ).fold(fail(_), identity)
-        assertEquals(executeUnchecked(module, task, memory), Right(()))
+        assertEquals(executeUnchecked(decoded, task, memory), Right(()))
         assertEquals(LittleEndian.decode(memory.bytes, 0, 4), expected)
       }
     }

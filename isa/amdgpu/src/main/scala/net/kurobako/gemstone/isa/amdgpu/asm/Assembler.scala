@@ -6,7 +6,6 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.amdgpu.*
-import net.kurobako.gemstone.isa.amdgpu.asm.Binary.*
 import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
 
 object Assembler {

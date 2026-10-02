@@ -24,22 +24,15 @@ object GenerateAPISurfaces {
       openCL: String,
       vulkan: String
   )
-  private object Aliases {
-    val empty: Aliases = Aliases(Vector.empty)
-  }
+  private type Render[A] = State[Map[String, String], A]
 
-  private case class Aliases(entries: Vector[(String, String)]) {
-    def get(name: String): Option[String] = entries.collectFirst { case (`name`, definition) => definition }
-    def put(name: String, definition: String): Aliases =
-      get(name) match {
-        case Some(existing) if existing != definition =>
-          throw IllegalArgumentException(s"conflicting Scala alias $name: $existing versus $definition")
-        case Some(_) => this
-        case None    => copy(entries = entries :+ (name -> definition))
-      }
+  private def alias(name: String, definition: String): Render[Unit] = State.modify { aliases =>
+    aliases.get(name).foreach { existing =>
+      if (existing != definition)
+        throw IllegalArgumentException(s"conflicting Scala alias $name: $existing versus $definition")
+    }
+    aliases.updated(name, definition)
   }
-
-  private type Render[A] = State[Aliases, A]
 
   private case class Target(
       manifestNames: Vector[String],
@@ -184,13 +177,13 @@ object GenerateAPISurfaces {
         returnType <- mapType(function.returnType.raw.trim, callbackTypedefs)
       } yield s"  def ${identifier(function.name.raw)}(${parameters.mkString(", ")}): $returnType = unsupported"
     }
-    val (aliases, declarations) = rendered.run(Aliases.empty).value
-    val aliasLines              = aliases.entries.sortBy(_._1).map {
+    val (aliases, declarations) = rendered.run(Map.empty).value
+    val aliasLines              = aliases.toVector.sortBy(_._1).map {
       case (name, definition) =>
         s"  type ${identifier(name)} = $definition"
     }
     val versionLines = target.versions.map { case (name, value) =>
-      s"  val $name: NonEmpty[String] = ${literal(value)}"
+      s"  val $name: NonEmpty[String] = ${Emission.literal(value)}"
     }
     GeneratedHeader.scala("from pinned official headers by GenerateAPISurfaces") +
       s"""|package ${target.packageName}
@@ -239,7 +232,8 @@ object GenerateAPISurfaces {
         else {
           val access  = if (readOnly) "Read" else "ReadWrite"
           val element =
-            if (pointee == "void") State.pure[Aliases, String]("CVoid") else mapType(pointee, callbackTypedefs)
+            if (pointee == "void") State.pure[Map[String, String], String]("CVoid")
+            else mapType(pointee, callbackTypedefs)
           element.map(value => s"Pointer[$value, $access, Opaque]")
         }
       case None =>
@@ -250,8 +244,9 @@ object GenerateAPISurfaces {
             for {
               parameterTypes <- parameters.traverse(mapType(_, callbackTypedefs))
               resultType     <- mapType(result, callbackTypedefs)
-              definition = s"CallbackTypedef[${literal(value)}, ${callbackArguments(parameterTypes)}, $resultType]"
-              _ <- State.modify[Aliases](_.put(value, definition))
+              definition =
+                s"CallbackTypedef[${Emission.literal(value)}, ${callbackArguments(parameterTypes)}, $resultType]"
+              _ <- alias(value, definition)
             } yield typeIdentifier(value)
           case None =>
             fixedArray(value) match {
@@ -281,7 +276,7 @@ object GenerateAPISurfaces {
       case "double"                                                    => State.pure("Double")
       case other                                                       =>
         val name = identifierName(other)
-        State.modify[Aliases](_.put(name, s"CValue[${literal(other)}]")).as(identifier(name))
+        alias(name, s"CValue[${Emission.literal(other)}]").as(identifier(name))
     }
 
   private def functionPointer(value: String): Option[(String, Vector[String])] = {
@@ -324,5 +319,4 @@ object GenerateAPISurfaces {
 
   private def identifier(value: String): String = if (ScalaKeywords(value)) s"`$value`" else value
 
-  private def literal(value: String): String = Emission.literal(value)
 }
