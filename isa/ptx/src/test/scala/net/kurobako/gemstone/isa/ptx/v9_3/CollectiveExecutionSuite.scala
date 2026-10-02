@@ -1,15 +1,13 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMIR.*
 import execution.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class CollectiveExecutionSuite extends munit.FunSuite {
-  private def execute(body: String): Seq[(Int, Int)] = {
+  private def execute(body: String): Vec[(Int, Int)] = {
     val source = s""".version 8.0
       |.target sm_80
       |.address_size 64
@@ -30,27 +28,28 @@ class CollectiveExecutionSuite extends munit.FunSuite {
       | ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(512, GuestAddress(0x10000L))
     assertEquals(
-      VMInterpreter.execute(
+      execution.execute(
         kernel,
-        LaunchGeometry.forLaunch(Dimensions(64, 1, 1), Dimensions.One).toOption.get,
+        1,
+        64,
         Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
         memory
       ),
       Right(())
     )
-    (0 until 64).map { lane =>
+    Vec.tabulate(64) { lane =>
       val address = memory.allocation.start.offset(lane.toLong * 8)
       (memory.readInt32(address).toOption.get, memory.readInt32(address.offset(4)).toOption.get)
     }
   }
 
-  for ((operation, clamp) <- Seq("up" -> 0, "down" -> 31, "bfly" -> 31))
+  for ((operation, clamp) <- Vec("up" -> 0, "down" -> 31, "bfly" -> 31))
     test(s"$operation shuffle reports boundary validity and stays within each warp") {
       val result   = execute(s"shfl.sync.$operation.b32 %result|%p, %value, 3, $clamp, -1; selp.u32 %valid, 1, 0, %p;")
-      val expected = (0 until 64).map { lane =>
+      val expected = Vec.tabulate(64) { lane =>
         val local  = lane % 32
         val source = operation match {
           case "up"   => local - 3
@@ -64,7 +63,7 @@ class CollectiveExecutionSuite extends munit.FunSuite {
     }
 
   for (
-    (operation, threshold, expected) <- Seq(
+    (operation, threshold, expected) <- Vec(
       ("all", 8, 0),
       ("any", 8, 1),
       ("uni", 8, 0),
@@ -118,19 +117,20 @@ class CollectiveExecutionSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val memory =
       ArrayCheckedMemory.allocate(16, provenance = "divergent-barrier")
-    val result = VMInterpreter.execute(
+    val result = execution.execute(
       kernel,
-      geometry(blocks = 1, threads = 4),
+      1,
+      4,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
       Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get),
-      Seq(7, 7, 9, 9)
+      Vec(7, 7, 9, 9)
     )
   }
 
@@ -165,14 +165,15 @@ class CollectiveExecutionSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(
       8,
       provenance = "divergent-workgroup-barrier-id"
     )
-    val result = VMInterpreter.execute(
+    val result = execution.execute(
       kernel,
-      geometry(blocks = 1, threads = 256),
+      1,
+      256,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
@@ -212,21 +213,22 @@ class CollectiveExecutionSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(
       16,
       provenance = "divergent-warp-barrier"
     )
-    val result = VMInterpreter.execute(
+    val result = execution.execute(
       kernel,
-      geometry(blocks = 1, threads = 4),
+      1,
+      4,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
       Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get),
-      Seq(7, 7, 7, 7)
+      Vec(7, 7, 7, 7)
     )
   }
 
@@ -250,19 +252,20 @@ class CollectiveExecutionSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val memory =
       ArrayCheckedMemory.allocate(16, provenance = "sync-warp-shuffle")
-    val result = VMInterpreter.execute(
+    val result = execution.execute(
       kernel,
-      geometry(blocks = 1, threads = 4),
+      1,
+      4,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
       Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get),
-      Seq(7, 7, 7, 7)
+      Vec(7, 7, 7, 7)
     )
   }
 
@@ -283,14 +286,15 @@ class CollectiveExecutionSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(
       32 * 4,
       provenance = "segmented-warp-shuffle"
     )
-    val result = VMInterpreter.execute(
+    val result = execution.execute(
       kernel,
-      geometry(blocks = 1, threads = 32),
+      1,
+      32,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
@@ -315,12 +319,13 @@ class CollectiveExecutionSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val memory =
       ArrayCheckedMemory.allocate(8, provenance = "64-bit-warp-shuffle")
-    val result = VMInterpreter.execute(
+    val result = execution.execute(
       kernel,
-      geometry(blocks = 1, threads = 4),
+      1,
+      4,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
@@ -351,21 +356,22 @@ class CollectiveExecutionSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(
       8,
       provenance = "inline-warp-shuffle-registers"
     )
-    val result = VMInterpreter.execute(
+    val result = execution.execute(
       kernel,
-      geometry(blocks = 1, threads = 2),
+      1,
+      2,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
       Vec.tabulate(2)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get),
-      Seq(7, 7)
+      Vec(7, 7)
     )
   }
 }

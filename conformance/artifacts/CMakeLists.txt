@@ -6,6 +6,7 @@ if(NOT CMAKE_GENERATOR MATCHES "^Ninja")
   message(FATAL_ERROR "The conformance artifact matrix requires Ninja job pools")
 endif()
 
+option(CONFORMANCE_CUDA_CUBIN_ONLY "Compile CUDA kernels without embedded PTX" OFF)
 set(CONFORMANCE_TARGET_SET default CACHE STRING "Named conformance artifact target set")
 set(CONTAINER_EXECUTABLE podman CACHE STRING "OCI container build executable")
 if(NOT ROCM_VERSION)
@@ -283,9 +284,11 @@ function(artifact_arguments backend architecture output_mode result)
     conformance_cuda_toolchain("${architecture}" unused_image unused_package support)
     list(APPEND arguments
       "-DCUDA_ARCHITECTURES=${architecture}"
+      "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}"
       "-DCONFORMANCE_SUPPORT_KEY=${support}")
   elseif(backend STREQUAL "openacc")
-    list(APPEND arguments "-DCUDA_ARCHITECTURES=${architecture}")
+    list(APPEND arguments "-DCUDA_ARCHITECTURES=${architecture}"
+      "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}")
   elseif(backend STREQUAL "sycl")
     list(APPEND arguments "-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=${SYCL_CTS_ENABLE_FULL_CONFORMANCE}")
   elseif(backend STREQUAL "hip" OR backend STREQUAL "hsa")

@@ -4,6 +4,7 @@ import Program.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.nvidia.*
 import scala.collection.mutable
 import scala.util.control.NoStackTrace
 
@@ -51,100 +52,87 @@ object Parser extends Decoder[String, Program, ParseError] {
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def tokenize(source: String): (Array[Token], Array[Token], Token) = {
-    val tokens           = mutable.ArrayBuffer.empty[Token]
-    val comments         = mutable.ArrayBuffer.empty[Token]
-    var offset: Int >= 0 = 0
-    var line: Int > 0    = 1
-    var column: Int > 0  = 1
+    val tokens       = mutable.ArrayBuffer.empty[Token]
+    val comments     = mutable.ArrayBuffer.empty[Token]
+    val sourceCursor = SourceCursor(source)
+
+    def token(text: String, start: SourceCursor.Position, quoted: Boolean = false): Token =
+      Token(text, start.offset, start.line, start.column, quoted)
 
     def advance(): Unit = {
-      val character = source.charAt(offset.raw)
-      if (character == '\u0000')
-        throw Failure(Token("", offset, line, column), "PTX source without NUL characters")
-      offset += 1
-      if (character == '\n') { line += 1; column = 1 }
-      else column += 1
+      if (sourceCursor.at('\u0000'))
+        throw Failure(token("", sourceCursor.position), "PTX source without NUL characters")
+      sourceCursor.advance()
     }
 
-    def add(text: String, start: Int >= 0, startLine: Int > 0, startColumn: Int > 0, quoted: Boolean = false): Unit =
-      tokens += Token(text, start, startLine, startColumn, quoted)
+    def wordCharacter: Boolean = !sourceCursor.atEnd && !sourceCursor.char().isWhitespace &&
+      !sourceCursor.startsWith("//") && !sourceCursor.startsWith("/*") &&
+      !".,;:{}()[]+-|@!=\"".contains(sourceCursor.char())
 
-    def atComment: Boolean = source.startsWith("//", offset.raw) || source.startsWith("/*", offset.raw)
-
-    while (offset.raw < source.length) {
-      val character = source.charAt(offset.raw)
+    while (!sourceCursor.atEnd) {
+      val character = sourceCursor.char()
       if (character.isWhitespace) advance()
-      else if (character == '/' && offset.raw + 1 < source.length && source.charAt(offset.raw + 1) == '/') {
-        val start = Token("", offset, line, column)
-        while (offset.raw < source.length && source.charAt(offset.raw) != '\n') advance()
-        comments += start.copy(text = source.substring(start.offset.raw, offset.raw))
-      } else if (character == '/' && offset.raw + 1 < source.length && source.charAt(offset.raw + 1) == '*') {
-        val start       = offset
-        val startLine   = line
-        val startColumn = column
+      else if (sourceCursor.startsWith("//")) {
+        val start = sourceCursor.position
+        while (!sourceCursor.atEnd && !sourceCursor.at('\n')) advance()
+        comments += token(sourceCursor.slice(start.offset), start)
+      } else if (sourceCursor.startsWith("/*")) {
+        val start = sourceCursor.position
         advance()
         advance()
-        while (
-          offset.raw + 1 < source.length && !(source.charAt(offset.raw) == '*' && source.charAt(offset.raw + 1) == '/')
-        )
-          advance()
-        if (offset.raw + 1 >= source.length) throw Failure(Token("", start, startLine, startColumn), "closing */")
+        while (sourceCursor.has(1) && !sourceCursor.startsWith("*/")) advance()
+        if (!sourceCursor.has(1)) throw Failure(token("", start), "closing */")
         advance()
         advance()
-        comments += Token(source.substring(start.raw, offset.raw), start, startLine, startColumn)
+        comments += token(sourceCursor.slice(start.offset), start)
       } else {
-        val start       = offset
-        val startLine   = line
-        val startColumn = column
+        val startOffset                                                = sourceCursor.offset
+        val startLine                                                  = sourceCursor.line
+        val startColumn                                                = sourceCursor.column
+        def currentToken(text: String, quoted: Boolean = false): Token =
+          Token(text, startOffset, startLine, startColumn, quoted)
         character match {
           case '"' =>
             advance()
             val value  = StringBuilder()
             var closed = false
-            while (offset.raw < source.length && !closed)
-              source.charAt(offset.raw) match {
-                case '"'         => advance(); closed = true
-                case '\n' | '\r' => throw Failure(Token("", start, startLine, startColumn), "closing quote")
-                case '\\' if offset.raw + 1 < source.length =>
+            while (!sourceCursor.atEnd && !closed)
+              sourceCursor.char() match {
+                case '"'                         => advance(); closed = true
+                case '\n' | '\r'                 => throw Failure(currentToken(""), "closing quote")
+                case '\\' if sourceCursor.has(1) =>
                   value.append('\\')
                   advance()
-                  value.append(source.charAt(offset.raw))
+                  value.append(sourceCursor.char())
                   advance()
                 case _ =>
-                  value.append(source.charAt(offset.raw))
+                  value.append(sourceCursor.char())
                   advance()
               }
-            if (!closed) throw Failure(Token("", start, startLine, startColumn), "closing quote")
-            add(value.result(), start, startLine, startColumn, quoted = true)
-          case ':' if offset.raw + 1 < source.length && source.charAt(offset.raw + 1) == ':' =>
-            advance(); advance(); add("::", start, startLine, startColumn)
+            if (!closed) throw Failure(currentToken(""), "closing quote")
+            tokens += currentToken(value.result(), quoted = true)
+          case ':' if sourceCursor.startsWith("::") =>
+            advance(); advance(); tokens += currentToken("::")
           case '.'
-              if offset.raw + 1 < source.length && source.charAt(offset.raw + 1).isDigit &&
-                tokens.lastOption.exists(token =>
-                  token.offset.raw + token.text.length == offset.raw && token.text.forall(_.isDigit)
+              if sourceCursor.has(1) && sourceCursor.char(1).isDigit &&
+                tokens.lastOption.exists(previous =>
+                  previous.offset.raw + previous.text.length == sourceCursor.offset.raw &&
+                    previous.text.forall(_.isDigit)
                 ) =>
             val previous = tokens.remove(tokens.size - 1)
             advance()
-            while (
-              offset.raw < source.length &&
-              !source.charAt(offset.raw).isWhitespace && !atComment &&
-              !".,;:{}()[]+-|@!=\"".contains(source.charAt(offset.raw))
-            ) advance()
-            add(source.substring(previous.offset.raw, offset.raw), previous.offset, previous.line, previous.column)
-          case value @ ('.' | ',' | ';' | ':' | '{' | '}' | '(' | ')' | '[' | ']' | '+' | '-' | '|' | '@' | '!' |
-              '=') =>
-            advance(); add(value.toString, start, startLine, startColumn)
+            while (wordCharacter) advance()
+            tokens += previous.copy(text = sourceCursor.slice(previous.offset))
+          case value @ ('.' | ',' | ';' | ':' | '{' | '}' | '(' | ')' | '[' | ']' | '+' | '-' | '|' | '@' | '!' | '=') =>
+            advance(); tokens += currentToken(value.toString)
           case _ =>
-            while (
-              offset.raw < source.length && !source.charAt(offset.raw).isWhitespace && !atComment &&
-              !".,;:{}()[]+-|@!=\"".contains(source.charAt(offset.raw))
-            ) advance()
-            if (offset == start) throw Failure(Token(character.toString, start, startLine, startColumn), "PTX token")
-            add(source.substring(start.raw, offset.raw), start, startLine, startColumn)
+            while (wordCharacter) advance()
+            if (sourceCursor.offset == startOffset) throw Failure(currentToken(character.toString), "PTX token")
+            tokens += currentToken(sourceCursor.slice(startOffset))
         }
       }
     }
-    (tokens.toArray, comments.toArray, Token("", offset, line, column))
+    (tokens.toArray, comments.toArray, token("", sourceCursor.position))
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
@@ -312,12 +300,7 @@ object Parser extends Decoder[String, Program, ParseError] {
     }
 
     private def dataDeclaration(): Statement = {
-      val parts = mutable.ArrayBuffer.empty[String]
-      while (at(".")) {
-        expect(".")
-        parts += segment(allowSingleColon = false)
-        if (parts.last == "align" && !eof && current.text.toIntOption.nonEmpty) parts += word()
-      }
+      val parts   = declarationParts()
       val address =
         DataAddressSpace.values.find(value => parts.contains(value.mnemonic)).getOrElse(fail("data address space"))
       val kind   = DataType.values.find(value => parts.contains(value.mnemonic)).getOrElse(fail("data type"))
@@ -346,7 +329,7 @@ object Parser extends Decoder[String, Program, ParseError] {
       expect(";")
       Statement.Data(
         address,
-        declarationQualifiers(Vec.from(parts), Set(address.mnemonic, kind.mnemonic)),
+        declarationQualifiers(parts, Set(address.mnemonic, kind.mnemonic)),
         kind,
         symbol,
         count,
@@ -375,6 +358,16 @@ object Parser extends Decoder[String, Program, ParseError] {
         }
       }
       Vec.from(qualifiers)
+    }
+
+    private def declarationParts(): Vec[String] = {
+      val parts = mutable.ArrayBuffer.empty[String]
+      while (at(".")) {
+        expect(".")
+        parts += segment(allowSingleColon = false)
+        if (parts.last == "align" && !eof && current.text.toIntOption.nonEmpty) parts += word()
+      }
+      Vec.from(parts)
     }
 
     private def function(): Statement = {
@@ -449,20 +442,15 @@ object Parser extends Decoder[String, Program, ParseError] {
     }
 
     private def parameter(): Parameter = {
-      val parts = mutable.ArrayBuffer.empty[String]
-      while (at(".")) {
-        expect(".")
-        parts += segment(allowSingleColon = false)
-        if (parts.last == "align" && !eof && current.text.toIntOption.nonEmpty) parts += word()
-      }
-      val kind = DataType.values.find(value => parts.contains(value.mnemonic)).getOrElse(fail("parameter data type"))
+      val parts = declarationParts()
+      val kind  = DataType.values.find(value => parts.contains(value.mnemonic)).getOrElse(fail("parameter data type"))
       val parameterName = name(word())
       val dimensions    = mutable.ArrayBuffer.empty[Option[Operand]]
       while (accept("[")) {
         dimensions += (if (at("]")) None else Some(operand()))
         expect("]")
       }
-      Parameter(declarationQualifiers(Vec.from(parts), Set(kind.mnemonic)), kind, parameterName, Vec.from(dimensions))
+      Parameter(declarationQualifiers(parts, Set(kind.mnemonic)), kind, parameterName, Vec.from(dimensions))
     }
 
     private def labelOrPrototype(): Statement = {
@@ -496,8 +484,8 @@ object Parser extends Decoder[String, Program, ParseError] {
       val _          = accept(";")
       val normalized = {
         val values = Vec.from(modifiers)
-        if (operation == "vote" && values.exists(_.name == "sync") && values.exists(_.name == "ballot"))
-          Vec(Modifier(name("sync"))) ++ values.filterNot(_.name == "sync")
+        if (operation == "vote" && values.contains(Modifier.Sync) && values.contains(Modifier.Ballot))
+          Vec(Modifier.Sync) ++ values.filterNot(_ == Modifier.Sync)
         else values
       }
       Instruction.decodeParsed(name(operation), operands, normalized, predicate) match {
@@ -544,13 +532,13 @@ object Parser extends Decoder[String, Program, ParseError] {
         if (looksLikeRegisterPart(part))
           value = value match {
             case Operand.Symbol(symbol) =>
-              Operand.Register(symbol, Some(name(part)))
+              Operand.Register(symbol, Some(OperandDomains.RegisterPart.fromSpelling(name(part))))
             case _ => index = mark; suffix = false; value
           }
         else
           value match {
             case Operand.Address(_) | Operand.Qualified(_, _) =>
-              value = Operand.Qualified(value, name(part))
+              value = Operand.Qualified(value, OperandDomains.QualifiedOperand.fromSpelling(name(part)))
             case _ => index = mark; suffix = false
           }
       }
@@ -598,7 +586,7 @@ object Parser extends Decoder[String, Program, ParseError] {
           if (part > 0 && part == segments.size - 1)
             Operand.Register(
               name(segments.take(part).mkString(".")),
-              Some(name(segments.last))
+              Some(OperandDomains.RegisterPart.fromSpelling(name(segments.last)))
             )
           else Operand.Register(name(segments.mkString(".")), None)
         } else if (number(value)) Operand.Immediate(name(value))

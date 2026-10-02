@@ -12,6 +12,22 @@ class ValidationSuite extends munit.FunSuite {
       case other                        => fail(s"expected instruction, found $other")
     }
 
+  test("modifier validation preserves ordered required groups and repeated types") {
+    def validate(source: String) = Validation.validate(instruction(source), Version(9, 3), Target(100))
+    validate("cvt.rn.f32.f32 %d, %a;") match {
+      case ValidationOutcome.Rejected(issues) => fail(s"repeated source/destination type rejected: $issues")
+      case _                                  => ()
+    }
+    for (source <- Vec("mul.u32.wide %d, %a, %b;", "mul.wide.u32.u32 %d, %a, %b;"))
+      validate(source) match {
+        case ValidationOutcome.Rejected(issues) => assert(issues.exists {
+            case _: Validation.Issue.InvalidModifiers => true
+            case _                                    => false
+          })
+        case other => fail(s"invalid modifier sequence accepted: $source: $other")
+      }
+  }
+
   test("typed forms enforce modifier groups after decoding enforces operand counts") {
     assertEquals(
       Validation.validate(
@@ -72,7 +88,7 @@ class ValidationSuite extends munit.FunSuite {
       case Right(Statement.UnsupportedInstruction(opcode, operands, mods, None))
           if opcode == "not_a_ptx_instruction" =>
         assertEquals(operands.size, 1)
-        assertEquals(mods.map(_.name), Seq("u32"))
+        assertEquals(mods.map(_.name), Vec("u32"))
       case other => fail(s"unexpected parse result: $other")
     }
   }

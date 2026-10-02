@@ -105,6 +105,47 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
     assertEquals(mirror.read(0x1001, 1), Some(Vec[Byte](9)))
   }
 
+  test("system reads refresh only selected clean bytes and preserve selected dirty bytes") {
+    val mirror = HostMemoryMirror()
+    assertEquals(mirror.read(0x1000, 4), None)
+    assertEquals(mirror.read(0x2000, 4), None)
+    assert(mirror.supply(Vec(
+      HostMemoryBytes(GuestAddress(0x1000L), Vec.fill(4)(1.toByte)),
+      HostMemoryBytes(GuestAddress(0x2000L), Vec.fill(4)(2.toByte))
+    )).isRight)
+    mirror.write(0x1001, Vec[Byte](9))
+    mirror.invalidateClean(Vec(HostMemoryRange(GuestAddress(0x1000L), 4)))
+    assertEquals(mirror.read(0x1000, 1), None)
+    assertEquals(mirror.read(0x1001, 1), Some(Vec[Byte](9)))
+    assertEquals(mirror.read(0x2000, 4), Some(Vec.fill(4)(2.toByte)))
+  }
+
+  test("system publication drains only its target and leaves unrelated dirty bytes queued") {
+    val mirror = HostMemoryMirror()
+    mirror.write(0x1000, Vec[Byte](1, 2, 3, 4))
+    mirror.write(0x2000, Vec[Byte](5, 6, 7, 8))
+    val published = mirror.takeDirty(Vec(HostMemoryRange(GuestAddress(0x2001L), 2)))
+    assertEquals(published, Vec(HostMemoryBytes(GuestAddress(0x2001L), Vec[Byte](6, 7))))
+    assertEquals(
+      mirror.dirty,
+      Vec(
+        HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2, 3, 4)),
+        HostMemoryBytes(GuestAddress(0x2000L), Vec[Byte](5)),
+        HostMemoryBytes(GuestAddress(0x2003L), Vec[Byte](8))
+      )
+    )
+  }
+
+  test("bounded system publication keeps its acknowledgement pending until the target drains") {
+    val mirror = HostMemoryMirror(maxBatchBytes = 8)
+    mirror.write(0x1000, Vec.fill(12)(1.toByte))
+    val target = Vec(HostMemoryRange(GuestAddress(0x1000L), 12))
+    assertEquals(mirror.takeDirty(target).map(_.bytes.size).sum, 8)
+    assert(mirror.hasDirty(target))
+    assertEquals(mirror.takeDirty(target).map(_.bytes.size).sum, 4)
+    assert(!mirror.hasDirty(target))
+  }
+
   test("publication batches retain atomic widths and do not split words at a byte budget") {
     val mirror = HostMemoryMirror(maxBatchBytes = 10)
     mirror.write(0x1000, Vec.fill(4)(1.toByte), 4)
@@ -188,6 +229,40 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
         HostMemoryBytes(GuestAddress(0x2000), Vec[Byte](3, 9, 3, 3))
       )
     )
+  }
+
+  test("selected publication expands a clipped atomic store to its aligned word") {
+    val mirror = HostMemoryMirror(maxBatchBytes = 8)
+    mirror.write(0x3000, Vec[Byte](1, 2, 3, 4), 4)
+    val selection = Vec(HostMemoryRange(GuestAddress(0x3001L), 2))
+    assert(mirror.hasDirty(selection))
+    assertEquals(
+      mirror.takeDirty(selection),
+      Vec(HostMemoryBytes(GuestAddress(0x3000L), Vec[Byte](1, 2, 3, 4), 4))
+    )
+    assert(!mirror.hasDirty(selection))
+    assert(!mirror.hasDirty)
+  }
+
+  test("selected publication preserves atomic widths one through eight") {
+    val mirror = HostMemoryMirror()
+    mirror.write(0x5000, Vec[Byte](1), 1)
+    mirror.write(0x5002, Vec[Byte](2, 3), 2)
+    mirror.write(0x5004, Vec[Byte](4, 5, 6, 7), 4)
+    mirror.write(0x5008, Vec[Byte](8, 9, 10, 11, 12, 13, 14, 15), 8)
+    val published = mirror.takeDirty(Vec(HostMemoryRange(GuestAddress(0x5000L), 16)))
+    assertEquals(published.map(_.atomicWidth), Vec(1, 2, 4, 8))
+    assertEquals(published.map(_.address.raw), Vec(0x5000L, 0x5002L, 0x5004L, 0x5008L))
+  }
+
+  test("an atomic observation preserves bytes dirtied while its host request was pending") {
+    val mirror = HostMemoryMirror()
+    assertEquals(mirror.read(0x4000, 4), None)
+    assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x4000L), Vec[Byte](1, 2, 3, 4)))).isRight)
+    mirror.write(0x4001, Vec[Byte](9))
+    mirror.observeAtomic(0x4000, Vec[Byte](5, 6, 7, 8))
+    assertEquals(mirror.read(0x4000, 4), Some(Vec[Byte](5, 9, 7, 8)))
+    assertEquals(mirror.dirty, Vec(HostMemoryBytes(GuestAddress(0x4001L), Vec[Byte](9))))
   }
 
 }

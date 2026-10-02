@@ -94,9 +94,10 @@ std::optional<size_t> gemstoneVulkanDescriptorLength(VkDeviceSize bufferSize, Vk
   return static_cast<size_t>(length);
 }
 
-GemstoneVulkanDescriptorAllocationPlan gemstoneVulkanDescriptorAllocationPlan(const std::vector<GemstoneVulkanDescriptorRange> &ranges) {
-  GemstoneVulkanDescriptorAllocationPlan plan;
-  plan.arguments.resize(ranges.size());
+GemstoneVulkanDescriptorAllocationLayout
+gemstoneVulkanDescriptorAllocationLayout(const std::vector<GemstoneVulkanDescriptorRange> &ranges) {
+  GemstoneVulkanDescriptorAllocationLayout layout;
+  layout.arguments.resize(ranges.size());
   std::vector<size_t> order(ranges.size());
   std::iota(order.begin(), order.end(), 0);
   std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
@@ -107,14 +108,14 @@ GemstoneVulkanDescriptorAllocationPlan gemstoneVulkanDescriptorAllocationPlan(co
   // overlapping views share one allocation but keep their individual bounds.
   for (const auto index : order) {
     const auto &range = ranges[index];
-    if (plan.allocations.empty() || plan.allocations.back().memory != range.memory
-        || range.offset >= plan.allocations.back().offset + plan.allocations.back().size)
-      plan.allocations.push_back(range);
+    if (layout.allocations.empty() || layout.allocations.back().memory != range.memory
+        || range.offset >= layout.allocations.back().offset + layout.allocations.back().size)
+      layout.allocations.push_back(range);
     else {
-      auto &allocation = plan.allocations.back();
+      auto &allocation = layout.allocations.back();
       allocation.size = static_cast<size_t>(std::max(allocation.offset + allocation.size, range.offset + range.size) - allocation.offset);
     }
-    plan.arguments[index] = {plan.allocations.size() - 1, range.offset - plan.allocations.back().offset};
+    layout.arguments[index] = {layout.allocations.size() - 1, range.offset - layout.allocations.back().offset};
   }
-  return plan;
+  return layout;
 }

@@ -44,8 +44,8 @@ object Modifier {
     "ashift" -> Ashift,
     "async" -> Async,
     "async::generic" -> AsyncGeneric,
-    "atype" -> Atype,
     "b" -> B,
+    "b1" -> B1,
     "b1024" -> B1024,
     "b128" -> B128,
     "b16" -> B16,
@@ -67,6 +67,7 @@ object Modifier {
     "box_dim" -> BoxDim,
     "bulk" -> Bulk,
     "bulk_group" -> BulkGroup,
+    "c" -> C,
     "ca" -> Ca,
     "cas" -> Cas,
     "cc" -> Cc,
@@ -76,6 +77,7 @@ object Modifier {
     "check_layout" -> CheckLayout,
     "clamp" -> Clamp,
     "cluster" -> Cluster,
+    "col" -> Col,
     "collector::buffer::op" -> CollectorBufferOp,
     "commit" -> Commit,
     "commit_group" -> CommitGroup,
@@ -90,15 +92,18 @@ object Modifier {
     "cube" -> Cube,
     "cv" -> Cv,
     "cvt" -> Cvt,
+    "d" -> D,
     "dealloc" -> Dealloc,
     "dec" -> Dec,
     "depth" -> Depth,
     "down" -> Down,
-    "dtype" -> Dtype,
+    "e2m1" -> E2m1,
     "e2m1x2" -> E2m1x2,
     "e2m1x4" -> E2m1x4,
+    "e2m3" -> E2m3,
     "e2m3x2" -> E2m3x2,
     "e2m3x4" -> E2m3x4,
+    "e3m2" -> E3m2,
     "e3m2x2" -> E3m2x2,
     "e3m2x4" -> E3m2x4,
     "e4m3" -> E4m3,
@@ -123,6 +128,7 @@ object Modifier {
     "f64" -> F64,
     "fabric::fabric" -> FabricFabric,
     "fabric::generic" -> FabricGeneric,
+    "fence" -> Fence,
     "fence::after_thread_sync" -> FenceAfterThreadSync,
     "fence::before_thread_sync" -> FenceBeforeThreadSync,
     "fill_mode" -> FillMode,
@@ -179,11 +185,145 @@ object Modifier {
     "level" -> Level,
     "level::cache_hint" -> LevelCacheHint,
     "lo" -> Lo,
+    "load" -> Load,
     "local" -> Local,
     "ls" -> Ls,
     "lt" -> Lt,
     "ltu" -> Ltu,
     "lu" -> Lu,
+    "m16n16" -> M16n16,
+    "m16n16k16" -> M16n16k16,
+    "m16n16k8" -> M16n16k8,
+    "m16n8" -> M16n8,
+    "m16n8k128" -> M16n8k128,
+    "m16n8k16" -> M16n8k16,
+    "m16n8k256" -> M16n8k256,
+    "m16n8k32" -> M16n8k32,
+    "m16n8k4" -> M16n8k4,
+    "m16n8k64" -> M16n8k64,
+    "m16n8k8" -> M16n8k8,
+    "m32n8k16" -> M32n8k16,
+    "m64n104k16" -> M64n104k16,
+    "m64n104k32" -> M64n104k32,
+    "m64n104k64" -> M64n104k64,
+    "m64n112k16" -> M64n112k16,
+    "m64n112k256" -> M64n112k256,
+    "m64n112k32" -> M64n112k32,
+    "m64n112k64" -> M64n112k64,
+    "m64n120k16" -> M64n120k16,
+    "m64n120k32" -> M64n120k32,
+    "m64n120k64" -> M64n120k64,
+    "m64n128k16" -> M64n128k16,
+    "m64n128k256" -> M64n128k256,
+    "m64n128k32" -> M64n128k32,
+    "m64n128k64" -> M64n128k64,
+    "m64n136k16" -> M64n136k16,
+    "m64n136k32" -> M64n136k32,
+    "m64n136k64" -> M64n136k64,
+    "m64n144k16" -> M64n144k16,
+    "m64n144k256" -> M64n144k256,
+    "m64n144k32" -> M64n144k32,
+    "m64n144k64" -> M64n144k64,
+    "m64n152k16" -> M64n152k16,
+    "m64n152k32" -> M64n152k32,
+    "m64n152k64" -> M64n152k64,
+    "m64n160k16" -> M64n160k16,
+    "m64n160k256" -> M64n160k256,
+    "m64n160k32" -> M64n160k32,
+    "m64n160k64" -> M64n160k64,
+    "m64n168k16" -> M64n168k16,
+    "m64n168k32" -> M64n168k32,
+    "m64n168k64" -> M64n168k64,
+    "m64n16k16" -> M64n16k16,
+    "m64n16k256" -> M64n16k256,
+    "m64n16k32" -> M64n16k32,
+    "m64n16k64" -> M64n16k64,
+    "m64n176k16" -> M64n176k16,
+    "m64n176k256" -> M64n176k256,
+    "m64n176k32" -> M64n176k32,
+    "m64n176k64" -> M64n176k64,
+    "m64n184k16" -> M64n184k16,
+    "m64n184k32" -> M64n184k32,
+    "m64n184k64" -> M64n184k64,
+    "m64n192k16" -> M64n192k16,
+    "m64n192k256" -> M64n192k256,
+    "m64n192k32" -> M64n192k32,
+    "m64n192k64" -> M64n192k64,
+    "m64n200k16" -> M64n200k16,
+    "m64n200k32" -> M64n200k32,
+    "m64n200k64" -> M64n200k64,
+    "m64n208k16" -> M64n208k16,
+    "m64n208k256" -> M64n208k256,
+    "m64n208k32" -> M64n208k32,
+    "m64n208k64" -> M64n208k64,
+    "m64n216k16" -> M64n216k16,
+    "m64n216k32" -> M64n216k32,
+    "m64n216k64" -> M64n216k64,
+    "m64n224k16" -> M64n224k16,
+    "m64n224k256" -> M64n224k256,
+    "m64n224k32" -> M64n224k32,
+    "m64n224k64" -> M64n224k64,
+    "m64n232k16" -> M64n232k16,
+    "m64n232k32" -> M64n232k32,
+    "m64n232k64" -> M64n232k64,
+    "m64n240k16" -> M64n240k16,
+    "m64n240k256" -> M64n240k256,
+    "m64n240k32" -> M64n240k32,
+    "m64n240k64" -> M64n240k64,
+    "m64n248k16" -> M64n248k16,
+    "m64n248k32" -> M64n248k32,
+    "m64n248k64" -> M64n248k64,
+    "m64n24k16" -> M64n24k16,
+    "m64n24k256" -> M64n24k256,
+    "m64n24k32" -> M64n24k32,
+    "m64n24k64" -> M64n24k64,
+    "m64n256k16" -> M64n256k16,
+    "m64n256k256" -> M64n256k256,
+    "m64n256k32" -> M64n256k32,
+    "m64n256k64" -> M64n256k64,
+    "m64n32k16" -> M64n32k16,
+    "m64n32k256" -> M64n32k256,
+    "m64n32k32" -> M64n32k32,
+    "m64n32k64" -> M64n32k64,
+    "m64n40k16" -> M64n40k16,
+    "m64n40k32" -> M64n40k32,
+    "m64n40k64" -> M64n40k64,
+    "m64n48k16" -> M64n48k16,
+    "m64n48k256" -> M64n48k256,
+    "m64n48k32" -> M64n48k32,
+    "m64n48k64" -> M64n48k64,
+    "m64n56k16" -> M64n56k16,
+    "m64n56k32" -> M64n56k32,
+    "m64n56k64" -> M64n56k64,
+    "m64n64k16" -> M64n64k16,
+    "m64n64k256" -> M64n64k256,
+    "m64n64k32" -> M64n64k32,
+    "m64n64k64" -> M64n64k64,
+    "m64n72k16" -> M64n72k16,
+    "m64n72k32" -> M64n72k32,
+    "m64n72k64" -> M64n72k64,
+    "m64n80k16" -> M64n80k16,
+    "m64n80k256" -> M64n80k256,
+    "m64n80k32" -> M64n80k32,
+    "m64n80k64" -> M64n80k64,
+    "m64n88k16" -> M64n88k16,
+    "m64n88k32" -> M64n88k32,
+    "m64n88k64" -> M64n88k64,
+    "m64n8k16" -> M64n8k16,
+    "m64n8k256" -> M64n8k256,
+    "m64n8k32" -> M64n8k32,
+    "m64n8k64" -> M64n8k64,
+    "m64n96k16" -> M64n96k16,
+    "m64n96k256" -> M64n96k256,
+    "m64n96k32" -> M64n96k32,
+    "m64n96k64" -> M64n96k64,
+    "m8n16" -> M8n16,
+    "m8n32k16" -> M8n32k16,
+    "m8n8" -> M8n8,
+    "m8n84" -> M8n84,
+    "m8n8k128" -> M8n8k128,
+    "m8n8k32" -> M8n8k32,
+    "m8n8k4" -> M8n8k4,
     "mask" -> Mask,
     "max" -> Max,
     "mbarrier" -> Mbarrier,
@@ -193,6 +333,7 @@ object Modifier {
     "memory_layout" -> MemoryLayout,
     "min" -> Min,
     "mma" -> Mma,
+    "mma_async" -> MmaAsync,
     "mmio" -> Mmio,
     "multicast::cluster" -> MulticastCluster,
     "multicast::cluster::all" -> MulticastClusterAll,
@@ -246,6 +387,7 @@ object Modifier {
     "rn" -> Rn,
     "rna" -> Rna,
     "rni" -> Rni,
+    "row" -> Row,
     "rp" -> Rp,
     "rpi" -> Rpi,
     "rs" -> Rs,
@@ -273,7 +415,9 @@ object Modifier {
     "shr15" -> Shr15,
     "shr7" -> Shr7,
     "sp" -> Sp,
+    "sp::ordered_metadata" -> SpOrderedMetadata,
     "st" -> St,
+    "store" -> Store,
     "submit" -> Submit,
     "subnormal" -> Subnormal,
     "surfref" -> Surfref,
@@ -294,6 +438,7 @@ object Modifier {
     "tile::gather4" -> TileGather4,
     "tile::scatter4" -> TileScatter4,
     "to" -> To,
+    "trans" -> Trans,
     "trap" -> Trap,
     "try_cancel" -> TryCancel,
     "try_get" -> TryGet,
@@ -310,6 +455,7 @@ object Modifier {
     "u64" -> U64,
     "u8" -> U8,
     "u8x4" -> U8x4,
+    "ue8m0" -> Ue8m0,
     "ue8m0x2" -> Ue8m0x2,
     "uni" -> Uni,
     "up" -> Up,
@@ -388,8 +534,8 @@ enum Modifier(val name: NonEmpty[String]) {
   case Ashift extends Modifier("ashift")
   case Async extends Modifier("async")
   case AsyncGeneric extends Modifier("async::generic")
-  case Atype extends Modifier("atype")
   case B extends Modifier("b")
+  case B1 extends Modifier("b1")
   case B1024 extends Modifier("b1024")
   case B128 extends Modifier("b128")
   case B16 extends Modifier("b16")
@@ -411,6 +557,7 @@ enum Modifier(val name: NonEmpty[String]) {
   case BoxDim extends Modifier("box_dim")
   case Bulk extends Modifier("bulk")
   case BulkGroup extends Modifier("bulk_group")
+  case C extends Modifier("c")
   case Ca extends Modifier("ca")
   case Cas extends Modifier("cas")
   case Cc extends Modifier("cc")
@@ -420,6 +567,7 @@ enum Modifier(val name: NonEmpty[String]) {
   case CheckLayout extends Modifier("check_layout")
   case Clamp extends Modifier("clamp")
   case Cluster extends Modifier("cluster")
+  case Col extends Modifier("col")
   case CollectorBufferOp extends Modifier("collector::buffer::op")
   case Commit extends Modifier("commit")
   case CommitGroup extends Modifier("commit_group")
@@ -434,15 +582,18 @@ enum Modifier(val name: NonEmpty[String]) {
   case Cube extends Modifier("cube")
   case Cv extends Modifier("cv")
   case Cvt extends Modifier("cvt")
+  case D extends Modifier("d")
   case Dealloc extends Modifier("dealloc")
   case Dec extends Modifier("dec")
   case Depth extends Modifier("depth")
   case Down extends Modifier("down")
-  case Dtype extends Modifier("dtype")
+  case E2m1 extends Modifier("e2m1")
   case E2m1x2 extends Modifier("e2m1x2")
   case E2m1x4 extends Modifier("e2m1x4")
+  case E2m3 extends Modifier("e2m3")
   case E2m3x2 extends Modifier("e2m3x2")
   case E2m3x4 extends Modifier("e2m3x4")
+  case E3m2 extends Modifier("e3m2")
   case E3m2x2 extends Modifier("e3m2x2")
   case E3m2x4 extends Modifier("e3m2x4")
   case E4m3 extends Modifier("e4m3")
@@ -467,6 +618,7 @@ enum Modifier(val name: NonEmpty[String]) {
   case F64 extends Modifier("f64")
   case FabricFabric extends Modifier("fabric::fabric")
   case FabricGeneric extends Modifier("fabric::generic")
+  case Fence extends Modifier("fence")
   case FenceAfterThreadSync extends Modifier("fence::after_thread_sync")
   case FenceBeforeThreadSync extends Modifier("fence::before_thread_sync")
   case FillMode extends Modifier("fill_mode")
@@ -523,11 +675,145 @@ enum Modifier(val name: NonEmpty[String]) {
   case Level extends Modifier("level")
   case LevelCacheHint extends Modifier("level::cache_hint")
   case Lo extends Modifier("lo")
+  case Load extends Modifier("load")
   case Local extends Modifier("local")
   case Ls extends Modifier("ls")
   case Lt extends Modifier("lt")
   case Ltu extends Modifier("ltu")
   case Lu extends Modifier("lu")
+  case M16n16 extends Modifier("m16n16")
+  case M16n16k16 extends Modifier("m16n16k16")
+  case M16n16k8 extends Modifier("m16n16k8")
+  case M16n8 extends Modifier("m16n8")
+  case M16n8k128 extends Modifier("m16n8k128")
+  case M16n8k16 extends Modifier("m16n8k16")
+  case M16n8k256 extends Modifier("m16n8k256")
+  case M16n8k32 extends Modifier("m16n8k32")
+  case M16n8k4 extends Modifier("m16n8k4")
+  case M16n8k64 extends Modifier("m16n8k64")
+  case M16n8k8 extends Modifier("m16n8k8")
+  case M32n8k16 extends Modifier("m32n8k16")
+  case M64n104k16 extends Modifier("m64n104k16")
+  case M64n104k32 extends Modifier("m64n104k32")
+  case M64n104k64 extends Modifier("m64n104k64")
+  case M64n112k16 extends Modifier("m64n112k16")
+  case M64n112k256 extends Modifier("m64n112k256")
+  case M64n112k32 extends Modifier("m64n112k32")
+  case M64n112k64 extends Modifier("m64n112k64")
+  case M64n120k16 extends Modifier("m64n120k16")
+  case M64n120k32 extends Modifier("m64n120k32")
+  case M64n120k64 extends Modifier("m64n120k64")
+  case M64n128k16 extends Modifier("m64n128k16")
+  case M64n128k256 extends Modifier("m64n128k256")
+  case M64n128k32 extends Modifier("m64n128k32")
+  case M64n128k64 extends Modifier("m64n128k64")
+  case M64n136k16 extends Modifier("m64n136k16")
+  case M64n136k32 extends Modifier("m64n136k32")
+  case M64n136k64 extends Modifier("m64n136k64")
+  case M64n144k16 extends Modifier("m64n144k16")
+  case M64n144k256 extends Modifier("m64n144k256")
+  case M64n144k32 extends Modifier("m64n144k32")
+  case M64n144k64 extends Modifier("m64n144k64")
+  case M64n152k16 extends Modifier("m64n152k16")
+  case M64n152k32 extends Modifier("m64n152k32")
+  case M64n152k64 extends Modifier("m64n152k64")
+  case M64n160k16 extends Modifier("m64n160k16")
+  case M64n160k256 extends Modifier("m64n160k256")
+  case M64n160k32 extends Modifier("m64n160k32")
+  case M64n160k64 extends Modifier("m64n160k64")
+  case M64n168k16 extends Modifier("m64n168k16")
+  case M64n168k32 extends Modifier("m64n168k32")
+  case M64n168k64 extends Modifier("m64n168k64")
+  case M64n16k16 extends Modifier("m64n16k16")
+  case M64n16k256 extends Modifier("m64n16k256")
+  case M64n16k32 extends Modifier("m64n16k32")
+  case M64n16k64 extends Modifier("m64n16k64")
+  case M64n176k16 extends Modifier("m64n176k16")
+  case M64n176k256 extends Modifier("m64n176k256")
+  case M64n176k32 extends Modifier("m64n176k32")
+  case M64n176k64 extends Modifier("m64n176k64")
+  case M64n184k16 extends Modifier("m64n184k16")
+  case M64n184k32 extends Modifier("m64n184k32")
+  case M64n184k64 extends Modifier("m64n184k64")
+  case M64n192k16 extends Modifier("m64n192k16")
+  case M64n192k256 extends Modifier("m64n192k256")
+  case M64n192k32 extends Modifier("m64n192k32")
+  case M64n192k64 extends Modifier("m64n192k64")
+  case M64n200k16 extends Modifier("m64n200k16")
+  case M64n200k32 extends Modifier("m64n200k32")
+  case M64n200k64 extends Modifier("m64n200k64")
+  case M64n208k16 extends Modifier("m64n208k16")
+  case M64n208k256 extends Modifier("m64n208k256")
+  case M64n208k32 extends Modifier("m64n208k32")
+  case M64n208k64 extends Modifier("m64n208k64")
+  case M64n216k16 extends Modifier("m64n216k16")
+  case M64n216k32 extends Modifier("m64n216k32")
+  case M64n216k64 extends Modifier("m64n216k64")
+  case M64n224k16 extends Modifier("m64n224k16")
+  case M64n224k256 extends Modifier("m64n224k256")
+  case M64n224k32 extends Modifier("m64n224k32")
+  case M64n224k64 extends Modifier("m64n224k64")
+  case M64n232k16 extends Modifier("m64n232k16")
+  case M64n232k32 extends Modifier("m64n232k32")
+  case M64n232k64 extends Modifier("m64n232k64")
+  case M64n240k16 extends Modifier("m64n240k16")
+  case M64n240k256 extends Modifier("m64n240k256")
+  case M64n240k32 extends Modifier("m64n240k32")
+  case M64n240k64 extends Modifier("m64n240k64")
+  case M64n248k16 extends Modifier("m64n248k16")
+  case M64n248k32 extends Modifier("m64n248k32")
+  case M64n248k64 extends Modifier("m64n248k64")
+  case M64n24k16 extends Modifier("m64n24k16")
+  case M64n24k256 extends Modifier("m64n24k256")
+  case M64n24k32 extends Modifier("m64n24k32")
+  case M64n24k64 extends Modifier("m64n24k64")
+  case M64n256k16 extends Modifier("m64n256k16")
+  case M64n256k256 extends Modifier("m64n256k256")
+  case M64n256k32 extends Modifier("m64n256k32")
+  case M64n256k64 extends Modifier("m64n256k64")
+  case M64n32k16 extends Modifier("m64n32k16")
+  case M64n32k256 extends Modifier("m64n32k256")
+  case M64n32k32 extends Modifier("m64n32k32")
+  case M64n32k64 extends Modifier("m64n32k64")
+  case M64n40k16 extends Modifier("m64n40k16")
+  case M64n40k32 extends Modifier("m64n40k32")
+  case M64n40k64 extends Modifier("m64n40k64")
+  case M64n48k16 extends Modifier("m64n48k16")
+  case M64n48k256 extends Modifier("m64n48k256")
+  case M64n48k32 extends Modifier("m64n48k32")
+  case M64n48k64 extends Modifier("m64n48k64")
+  case M64n56k16 extends Modifier("m64n56k16")
+  case M64n56k32 extends Modifier("m64n56k32")
+  case M64n56k64 extends Modifier("m64n56k64")
+  case M64n64k16 extends Modifier("m64n64k16")
+  case M64n64k256 extends Modifier("m64n64k256")
+  case M64n64k32 extends Modifier("m64n64k32")
+  case M64n64k64 extends Modifier("m64n64k64")
+  case M64n72k16 extends Modifier("m64n72k16")
+  case M64n72k32 extends Modifier("m64n72k32")
+  case M64n72k64 extends Modifier("m64n72k64")
+  case M64n80k16 extends Modifier("m64n80k16")
+  case M64n80k256 extends Modifier("m64n80k256")
+  case M64n80k32 extends Modifier("m64n80k32")
+  case M64n80k64 extends Modifier("m64n80k64")
+  case M64n88k16 extends Modifier("m64n88k16")
+  case M64n88k32 extends Modifier("m64n88k32")
+  case M64n88k64 extends Modifier("m64n88k64")
+  case M64n8k16 extends Modifier("m64n8k16")
+  case M64n8k256 extends Modifier("m64n8k256")
+  case M64n8k32 extends Modifier("m64n8k32")
+  case M64n8k64 extends Modifier("m64n8k64")
+  case M64n96k16 extends Modifier("m64n96k16")
+  case M64n96k256 extends Modifier("m64n96k256")
+  case M64n96k32 extends Modifier("m64n96k32")
+  case M64n96k64 extends Modifier("m64n96k64")
+  case M8n16 extends Modifier("m8n16")
+  case M8n32k16 extends Modifier("m8n32k16")
+  case M8n8 extends Modifier("m8n8")
+  case M8n84 extends Modifier("m8n84")
+  case M8n8k128 extends Modifier("m8n8k128")
+  case M8n8k32 extends Modifier("m8n8k32")
+  case M8n8k4 extends Modifier("m8n8k4")
   case Mask extends Modifier("mask")
   case Max extends Modifier("max")
   case Mbarrier extends Modifier("mbarrier")
@@ -537,6 +823,7 @@ enum Modifier(val name: NonEmpty[String]) {
   case MemoryLayout extends Modifier("memory_layout")
   case Min extends Modifier("min")
   case Mma extends Modifier("mma")
+  case MmaAsync extends Modifier("mma_async")
   case Mmio extends Modifier("mmio")
   case MulticastCluster extends Modifier("multicast::cluster")
   case MulticastClusterAll extends Modifier("multicast::cluster::all")
@@ -590,6 +877,7 @@ enum Modifier(val name: NonEmpty[String]) {
   case Rn extends Modifier("rn")
   case Rna extends Modifier("rna")
   case Rni extends Modifier("rni")
+  case Row extends Modifier("row")
   case Rp extends Modifier("rp")
   case Rpi extends Modifier("rpi")
   case Rs extends Modifier("rs")
@@ -617,7 +905,9 @@ enum Modifier(val name: NonEmpty[String]) {
   case Shr15 extends Modifier("shr15")
   case Shr7 extends Modifier("shr7")
   case Sp extends Modifier("sp")
+  case SpOrderedMetadata extends Modifier("sp::ordered_metadata")
   case St extends Modifier("st")
+  case Store extends Modifier("store")
   case Submit extends Modifier("submit")
   case Subnormal extends Modifier("subnormal")
   case Surfref extends Modifier("surfref")
@@ -638,6 +928,7 @@ enum Modifier(val name: NonEmpty[String]) {
   case TileGather4 extends Modifier("tile::gather4")
   case TileScatter4 extends Modifier("tile::scatter4")
   case To extends Modifier("to")
+  case Trans extends Modifier("trans")
   case Trap extends Modifier("trap")
   case TryCancel extends Modifier("try_cancel")
   case TryGet extends Modifier("try_get")
@@ -654,6 +945,7 @@ enum Modifier(val name: NonEmpty[String]) {
   case U64 extends Modifier("u64")
   case U8 extends Modifier("u8")
   case U8x4 extends Modifier("u8x4")
+  case Ue8m0 extends Modifier("ue8m0")
   case Ue8m0x2 extends Modifier("ue8m0x2")
   case Uni extends Modifier("uni")
   case Up extends Modifier("up")
@@ -687,10 +979,10 @@ enum Modifier(val name: NonEmpty[String]) {
   case Zero extends Modifier("zero")
   case Unrecognized(spelling: NonEmpty[String]) extends Modifier(spelling)
   def bitWidth: Int = this match {
-    case B1024 => 1024; case B128 => 128; case B16 => 16; case B32 => 32; case B64 => 64; case B8 => 8; case Bf16 => 16;
-    case F16 => 16; case F32 => 32; case F64 => 64; case S16 => 16; case S2 => 2; case S32 => 32; case S4 => 4;
-    case S64 => 64; case S8 => 8; case U16 => 16; case U2 => 2; case U32 => 32; case U4 => 4; case U64 => 64;
-    case U8 => 8; case _ => 0
+    case B1 => 1; case B1024 => 1024; case B128 => 128; case B16 => 16; case B32 => 32; case B64 => 64; case B8 => 8;
+    case Bf16 => 16; case F16 => 16; case F32 => 32; case F64 => 64; case S16 => 16; case S2 => 2; case S32 => 32;
+    case S4 => 4; case S64 => 64; case S8 => 8; case U16 => 16; case U2 => 2; case U32 => 32; case U4 => 4;
+    case U64 => 64; case U8 => 8; case _ => 0
   }
   def isSigned: Boolean = this match { case S16 | S2 | S32 | S4 | S64 | S8 => true; case _ => false }
   def isFloating: Boolean = this match { case F16 | F16x2 | F32 | F32x2 | F64 => true; case _ => false }

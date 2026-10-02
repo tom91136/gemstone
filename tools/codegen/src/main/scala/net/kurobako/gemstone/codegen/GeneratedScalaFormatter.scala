@@ -15,7 +15,7 @@ object GeneratedScalaFormatter {
 
   def apply(path: Path, source: String): String =
     Scalafmt.format(source, parsed, Set.empty, path.toAbsolutePath.normalize.toString).toEither.fold(
-      error => throw IllegalStateException(s"cannot format generated Scala source $path", error),
+      error => throw IllegalStateException(s"cannot format generated Scala source $path: ${error.getMessage}", error),
       value => value
     )
 }

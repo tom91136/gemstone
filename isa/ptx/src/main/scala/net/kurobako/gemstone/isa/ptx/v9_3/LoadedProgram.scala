@@ -1,7 +1,6 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
-import VMIR.*
 import cats.syntax.all.*
 import java.util.concurrent.atomic.AtomicReference
 import net.kurobako.gemstone.binary.*
@@ -10,6 +9,8 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.nvidia.*
+import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import scala.annotation.tailrec
@@ -26,110 +27,13 @@ object LoadedProgram {
     )
   }
 
-  private def executeVM(
-      kernel: Kernel,
-      task: KernelTask,
-      addresses: AddressSpace,
-      control: TaskControl,
-      workgroups: Workgroups
-  ): Either[Fault, Unit] =
-    for {
-      _ <- Either.cond(
-        task.arguments.size == kernel.parameters.size,
-        (),
-        Fault.InvalidTask(
-          s"PTX kernel ${kernel.name} expects ${kernel.parameters.size} arguments, found ${task.arguments.size}"
-        )
-      )
-      arguments <- prepareVMArguments(kernel, task.arguments, task.pointerRelocations, addresses)
-      _         <- VMInterpreter.execute(
-        kernel,
-        task.geometry,
-        arguments,
-        DynamicAddressMemory(VMMemory(addresses)),
-        control,
-        workgroups,
-        Map.empty,
-        None
-      ).left.map(_.toFault)
-    } yield ()
-
-  private def prepareVMArguments(
-      kernel: Kernel,
-      arguments: Vec[KernelTask.Argument],
-      relocations: Vec[KernelTask.PointerRelocation],
-      addresses: AddressSpace
-  ): Either[Fault, Map[NonEmpty[String], Argument]] =
-    kernel.parameters.zip(arguments).zipWithIndex.foldLeft[
-      Either[Fault, Map[NonEmpty[String], Argument]]
-    ](Right(Map.empty)) { case (result, ((parameter, argument), index)) =>
-      result.flatMap { values =>
-        argument match {
-          case KernelTask.Argument.Scalar(bytes) =>
-            for {
-              _ <- Either.cond(
-                bytes.size == parameter.widthBytes.raw,
-                (),
-                Fault.InvalidTask(
-                  s"PTX argument ${parameter.name} expects ${parameter.widthBytes} bytes, found ${bytes.size}"
-                )
-              )
-              relocated <- relocateVMArgument(index, bytes, relocations, addresses)
-            } yield values.updated(parameter.name, Argument(relocated.unsafe))
-          case KernelTask.Argument.Memory(region, offset, _) =>
-            for {
-              _ <- Either.cond(
-                parameter.widthBytes.raw == 8,
-                (),
-                Fault.InvalidTask(
-                  s"memory argument ${parameter.name} requires an eight-byte PTX parameter"
-                )
-              )
-              address <- addresses.address(region, offset)
-            } yield values.updated(
-              parameter.name,
-              Argument.fromLong(address.raw)
-            )
-          case KernelTask.Argument.Local(size) =>
-            Left(Fault.Unsupported(
-              s"PTX local argument ${parameter.name} ($size bytes) is unsupported"
-            ))
-        }
-      }
-    }
-
-  private def relocateVMArgument(
-      index: Int,
-      bytes: Vec[Byte],
-      relocations: Vec[KernelTask.PointerRelocation],
-      addresses: AddressSpace
-  ): Either[Fault, Vec[Byte]] = {
-    val relocated = Vec.toArray(bytes)
-    relocations.foldLeft[Either[Fault, Unit]](Right(())) {
-      case (result, relocation) => result.flatMap { _ =>
-          relocation match {
-            case KernelTask.PointerRelocation(
-                  KernelTask.RelocationSource.Argument(source),
-                  sourceOffset,
-                  target,
-                  targetOffset
-                ) if source.raw == index =>
-              addresses.address(target, targetOffset).map { address =>
-                LittleEndian.write(address.raw, relocated, sourceOffset.raw.toInt, 8)
-              }
-            case _ => Right(())
-          }
-        }
-    }.map(_ => Vec.from(relocated))
-  }
-
   private def moduleSharedSymbols(statements: Vec[Statement]): Map[NonEmpty[String], Long] =
     statements.collect {
       case Statement.Data(DataAddressSpace.Shared, _, _, name, _, _) => name
     }.distinct.zipWithIndex.map { case (name, index) =>
       name -> Math.addExact(
-        PTXAddressSpace.ModuleSharedBase,
-        Math.multiplyExact(index.toLong, PTXAddressSpace.ModuleSharedStride)
+        VMAddressSpace.ModuleSharedBase,
+        Math.multiplyExact(index.toLong, VMAddressSpace.ModuleSharedStride)
       )
     }.toMap
 
@@ -171,7 +75,7 @@ object LoadedProgram {
 
     val size       = elementBytes * count
     val bytes      = Array.ofDim[Byte](size.raw)
-    val immediates = initializer.view.collect { case Operand.Immediate(raw) => raw.raw }.take(count.raw).toVector
+    val immediates = initializer.view.collect { case Operand.Immediate(raw) => raw.raw }.take(count.raw).toVec
     var index      = 0
     while (index < immediates.size) {
       val raw = immediates(index)
@@ -195,19 +99,16 @@ object LoadedProgram {
   private def initializerBits(raw: String, kind: Char, width: Int): Option[Long] =
     try
       if (kind == 'f' && width == 32) {
-        if (raw.startsWith("0f") || raw.startsWith("0F")) Some(BigInt(raw.drop(2), 16).longValue)
-        else Some(IEEE754.floatToBinary32(raw.toFloat).toLong)
+        NumericLiteral.hexadecimalPayload(raw, 'f')
+          .fold(Some(IEEE754.floatToBinary32(raw.toFloat).toLong))(digits => Some(BigInt(digits, 16).longValue))
       } else if (kind == 'f' && width == 64) {
-        if (raw.startsWith("0d") || raw.startsWith("0D")) Some(BigInt(raw.drop(2), 16).longValue)
-        else Some(IEEE754.doubleToBinary64(raw.toDouble))
+        NumericLiteral.hexadecimalPayload(raw, 'd')
+          .fold(Some(IEEE754.doubleToBinary64(raw.toDouble)))(digits => Some(BigInt(digits, 16).longValue))
       } else {
-        val unsigned = raw.reverse.dropWhile(character => "uUlL".contains(character)).reverse
+        val unsigned = NumericLiteral.stripIntegerSuffix(raw)
         val negative = unsigned.startsWith("-")
         val value    = if (negative) unsigned.drop(1) else unsigned
-        val parsed   =
-          if (value.startsWith("0x") || value.startsWith("0X")) BigInt(value.drop(2), 16)
-          else if (value.startsWith("0b") || value.startsWith("0B")) BigInt(value.drop(2), 2)
-          else BigInt(value)
+        val parsed   = NumericLiteral.integer(value)
         Some((if (negative) -parsed else parsed).longValue)
       }
     catch {
@@ -229,7 +130,7 @@ class LoadedProgram private (
   private val compilationState = AtomicReference(CompilationState(Map.empty, Map.empty))
 
   val symbols: Either[Fault, ProgramSymbols] =
-    globals.toSeq.sortBy(_._1).traverse { case (name, definition) =>
+    globals.toVec.sortBy(_._1).traverse { case (name, definition) =>
       for {
         globalName = name
         size       = definition.size.toLong
@@ -282,7 +183,7 @@ class LoadedProgram private (
     )).flatMap { definition =>
       GlobalImage.validated(
         definition.size.toLong,
-        Vec.from(definition.initial.toVector)
+        definition.initial.toVec
       ).left.map(Fault.InvalidTask(_))
     }
 
@@ -320,7 +221,7 @@ class LoadedProgram private (
       control: TaskControl,
       workgroups: Workgroups = Workgroups.Sequential
   ): Either[Fault, Unit] =
-    compiled(task.kernelName).flatMap(LoadedProgram.executeVM(_, task, memory, control, workgroups))
+    compiled(task.kernelName).flatMap(VMKernelLaunch.execute(_, task, memory, control, workgroups))
 
   @tailrec
   private def compiled(name: NonEmpty[String]): Either[Fault, Kernel] = {

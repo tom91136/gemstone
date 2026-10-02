@@ -6,6 +6,7 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.string.*
 
 object PTXRegisterIndexBenchmark {

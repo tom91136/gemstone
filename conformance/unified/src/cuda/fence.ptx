@@ -1,4 +1,4 @@
-.version 8.0
+.version 7.8
 .target sm_80
 .address_size 64
 .visible .entry probe(.param .u64 input, .param .u64 output, .param .u64 indices, .param .u32 mode) {
@@ -8,22 +8,22 @@
  loop32:
  ld.relaxed.sys.global.u32 %old, [%p];
  setp.ne.u32 %pred, %old, 1; @%pred bra loop32;
- fence.acquire.sys;
+ membar.sys;
  atom.acq_rel.sys.global.add.u32 %old, [%p+8], 1;
  ld.global.u32 %v, [%p+4]; st.global.u32 [%q], %v;
  mul.lo.u32 %v, %v, 2; st.global.u32 [%p+4], %v;
- fence.release.sys;
+ membar.sys;
  st.relaxed.sys.global.u32 [%p], 2;
  add.u64 %q, %q, 4; add.u32 %round, %round, 1;
  setp.lt.u32 %pred, %round, 32; @%pred bra loop32; ret;
  loop64:
  ld.relaxed.sys.global.u64 %old64, [%p];
  setp.ne.u64 %pred, %old64, 1; @%pred bra loop64;
- fence.acquire.sys;
+ membar.sys;
  atom.acq_rel.sys.global.add.u64 %old64, [%p+16], 1;
  ld.global.u64 %v64, [%p+8]; st.global.u64 [%q], %v64;
  mul.lo.u64 %v64, %v64, 2; st.global.u64 [%p+8], %v64;
- fence.release.sys;
+ membar.sys;
  st.relaxed.sys.global.u64 [%p], 2;
  add.u64 %q, %q, 8; add.u32 %round, %round, 1;
  setp.lt.u32 %pred, %round, 32; @%pred bra loop64; ret;

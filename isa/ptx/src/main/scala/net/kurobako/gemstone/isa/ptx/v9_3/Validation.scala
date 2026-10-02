@@ -67,13 +67,13 @@ object Validation {
           )
         )
       else {
-        val modifiers    = instruction.mods.map(_.name).toSet
+        val modifiers    = instruction.mods
         val matchingMods = sameCount.filter(form => modifiersMatch(modifiers, form))
         if (matchingMods.isEmpty)
           ValidationOutcome.Rejected(
             Vec.nonEmpty(Issue.InvalidModifiers(
               instruction.opcode,
-              s"unsupported modifier set: ${modifiers.view.toArray.sorted.mkString(".")}"
+              s"unsupported modifier sequence: ${modifiers.map(_.name.raw).mkString(".")}"
             ))
           )
         else {
@@ -96,10 +96,17 @@ object Validation {
       }
     }
 
-  private def modifiersMatch(actual: Set[NonEmpty[String]], form: InstructionForm): Boolean = {
-    val allowed  = form.requiredModifierGroups.flatMap(_.raw).toSet ++ form.optionalModifiers
-    val required = form.requiredModifierGroups.forall(group => actual.count(group.raw.contains) == 1)
-    required && actual.subsetOf(allowed)
+  private def modifiersMatch(actual: Vec[Modifier], form: InstructionForm): Boolean = {
+    // Keep both interpretations when a token is optional and can fill the next required group.
+    // Each occurrence consumes at most one group, including repeated source/destination types.
+    val matched = actual.foldLeft(Set(0)) { (positions, modifier) =>
+      positions.flatMap { position =>
+        val required = form.requiredModifierGroups.lift(position).exists(_.raw.contains(modifier))
+        Option.when(required)(position + 1).toSet ++
+          Option.when(form.optionalModifiers.contains(modifier))(position).toSet
+      }
+    }
+    matched.contains(form.requiredModifierGroups.size)
   }
 
   private def unsupported(

@@ -1,25 +1,27 @@
 package net.kurobako.gemstone.tools.isa
 
 import cats.syntax.all.*
-import java.nio.ByteBuffer
-import java.nio.charset.CharacterCodingException
-import java.nio.charset.StandardCharsets
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.ptx.v9_3 as ptx
 import net.kurobako.gemstone.isa.spirv.v1_6 as spirv
-import scala.annotation.tailrec
+import net.kurobako.gemstone.string.*
 
 object Assembly {
   enum Format {
     case PTX, SPIRV
+    case SASS(target: sass.Target)
     case AMDGPU(target: amdgpu.Target, waveSize: Int in (32, 64) = 32)
   }
 
   enum Error {
     case InvalidUTF8
+    case TextEncoding(error: UTF8.Error)
+    case PTXDecode(error: ptx.ISA.DecodeError)
+    case SASS(error: sass.asm.Error)
+    case Cubin(detail: NonEmpty[String])
     case PTX(error: ptx.Program.ParseError)
     case SPIRVAssembly(error: spirv.asm.Assembler.Error)
     case SPIRVBinary(error: spirv.ISA.DecodeError)
@@ -33,7 +35,10 @@ object Assembly {
   def assemble(source: String, format: Format): Either[Error, Vec[Byte]] = format match {
     case Format.SPIRV => spirv.asm.Assembler.encode(source).leftMap(Error.SPIRVAssembly(_))
     case Format.PTX   =>
-      ptx.Parser.parse(source).leftMap(Error.PTX(_)).map(program => utf8(ptx.asm.Printer.render(program)))
+      ptx.ISA.decode(source).leftMap(Error.PTX(_)).flatMap(ptx.asm.Assembler.encode(_).leftMap(Error.TextEncoding(_)))
+    case Format.SASS(target) =>
+      sass.asm.Parser.parseProgram(source).leftMap(Error.SASS(_))
+        .flatMap(sass.asm.Assembler(target).encode(_).leftMap(Error.SASS(_)))
     case Format.AMDGPU(target, waveSize) => amdgpu.asm.Parser.parse(source).leftMap(Error.AMDGPUParse(_)).flatMap {
         program =>
           amdgpu.asm.Assembler.encode(program, target, waveSize).leftMap(Error.AMDGPUEncoding(_))
@@ -41,11 +46,15 @@ object Assembly {
   }
 
   def disassemble(bytes: Vec[Byte], format: Format): Either[Error, String] = format match {
-    case Format.SPIRV => spirv.ISA.decode(bytes).map(spirv.asm.Printer.render(_)).leftMap(Error.SPIRVBinary(_))
-    case Format.PTX   =>
-      text(bytes).flatMap(source => ptx.Parser.parse(source).leftMap(Error.PTX(_))).map(ptx.asm.Printer.render(_))
+    case Format.SPIRV =>
+      spirv.asm.Disassembler.decode(bytes).map(spirv.asm.Printer.render(_)).leftMap(Error.SPIRVBinary(_))
+    case Format.PTX =>
+      ptx.asm.Disassembler.decode(bytes).leftMap(Error.PTXDecode(_)).map(ptx.asm.Printer.render(_))
+    case Format.SASS(target) =>
+      if (elf.hasMagic(bytes)) disassembleCubin(bytes, target, None)
+      else disassembleSASS(bytes, target)
     case Format.AMDGPU(target, waveSize) =>
-      if (bytes.take(4) == Vec[Byte](0x7f, 'E'.toByte, 'L'.toByte, 'F'.toByte))
+      if (elf.hasMagic(bytes))
         disassembleCodeObject(bytes, target, None, waveSize)
       else disassembleInstructions(bytes, target, waveSize)
   }
@@ -75,23 +84,26 @@ object Assembly {
       bytes: Vec[Byte],
       target: amdgpu.Target,
       waveSize: Int in (32, 64)
-  ): Either[Error, String] = {
-    val instructions = Vec.newBuilder[amdgpu.asm.Program.Statement]
-    @tailrec
-    def loop(offset: Int >= 0): Either[Error, String] =
-      if (offset.raw == bytes.size) Right(amdgpu.asm.Printer.render(amdgpu.asm.Program(instructions.result())))
-      else amdgpu.asm.Binary.decodeStatementAt(bytes, offset, target, waveSize) match {
-        case Left(error)    => Left(Error.AMDGPUDecoding(offset, error))
-        case Right(decoded) =>
-          instructions += decoded.statement
-          loop(offset + decoded.size)
+  ): Either[Error, String] =
+    amdgpu.asm.Disassembler(target, waveSize).decode(bytes).leftMap {
+      case amdgpu.asm.Disassembler.Error.Instruction(offset, error) => Error.AMDGPUDecoding(offset, error)
+    }.map(amdgpu.asm.Printer.render(_))
+
+  private def disassembleSASS(bytes: Vec[Byte], target: sass.Target): Either[Error, String] =
+    sass.asm.Disassembler(target).decode(bytes).flatMap(sass.asm.Printer.print(_)).leftMap(Error.SASS(_))
+
+  def disassembleCubin(image: Vec[Byte], target: sass.Target, section: Option[String]): Either[Error, String] =
+    sass.Cubin.decode(Vec.toArray(image)).leftMap(detail => Error.Cubin(s"invalid cubin: $detail"))
+      .flatMap { module =>
+        val executable = module.sections.filter(value => (value.flags & 4L) != 0L)
+        val selected   = section.fold(executable)(name => executable.filter(_.name == name))
+        if (module.sm != target.sm.raw)
+          Left(Error.Cubin(s"cubin sm_${module.sm} differs from requested ${target.name}"))
+        else selected match {
+          case Vec(value) => disassembleSASS(value.bytes, target)
+          case _          => Left(Error.Cubin("select one executable cubin section with --section"))
+        }
       }
-    loop(0)
-  }
 
-  def text(bytes: Vec[Byte]): Either[Error, String] =
-    try Right(StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(Vec.toArray(bytes))).toString)
-    catch { case _: CharacterCodingException => Left(Error.InvalidUTF8) }
-
-  private def utf8(value: String): Vec[Byte] = Vec.unsafeWrapArray(value.getBytes(StandardCharsets.UTF_8))
+  def text(bytes: Vec[Byte]): Either[Error, String] = UTF8.decode(bytes).leftMap(_ => Error.InvalidUTF8)
 }

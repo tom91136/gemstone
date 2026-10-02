@@ -15,19 +15,18 @@ object Metadata {
   }
 
   type ModifierGroup = ModifierGroup.Type
-  object ModifierGroup extends Newtype[NonEmpty[Set[NonEmpty[String]]]] {
+  object ModifierGroup extends Newtype[NonEmpty[Set[Modifier]]] {
     def apply(
-        first: NonEmpty[String],
-        rest: NonEmpty[String]*
+        first: Modifier,
+        rest: Modifier*
     ): ModifierGroup = (first +: rest).toSet.unsafe[ModifierGroup]
   }
 
   /** One normalized alternative from an instruction's syntax rubric. */
   case class InstructionForm(
-      opcode: NonEmpty[String],
       operands: Vec[OperandConstraint],
       requiredModifierGroups: Vec[ModifierGroup],
-      optionalModifiers: Set[NonEmpty[String]],
+      optionalModifiers: Set[Modifier],
       complete: Boolean
   )
 

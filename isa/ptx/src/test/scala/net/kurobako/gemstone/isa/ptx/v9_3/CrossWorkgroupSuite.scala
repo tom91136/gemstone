@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMIR.*
+import execution.*
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -10,13 +10,16 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.nvidia.*
+import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Using
 
 class CrossWorkgroupSuite extends munit.FunSuite {
-  private val groupCounts = Seq[Int > 0](1, 2, 3, 5, 9) // P=4: includes P+1 and 2P+1.
-  private val widths      = Seq[Int > 0](31, 32, 33)
+  private val groupCounts = Vec[Int > 0](1, 2, 3, 5, 9) // P=4: includes P+1 and 2P+1.
+  private val widths      = Vec[Int > 0](31, 32, 33)
   private val header      = ".version 8.0\n.target sm_80\n.address_size 64\n"
 
   private class Workers extends Workgroups with AutoCloseable {
@@ -101,12 +104,12 @@ class CrossWorkgroupSuite extends munit.FunSuite {
   }
 
   private def kernel(body: String): Kernel =
-    VMCompiler.compile(header + body).fold(error => fail(error.message), value => value)
+    compileKernel(header + body)
   private def geometry(groups: Int > 0, lanes: Int > 0, count: Int > 0): LaunchGeometry =
     LaunchGeometry.forLaunch(
-      dimensions(lanes),
-      dimensions(groups),
-      Some(dimensions(count).toGlobalDimensions)
+      Dimensions(lanes, 1, 1),
+      Dimensions(groups, 1, 1),
+      Some(Dimensions(count, 1, 1).toGlobalDimensions)
     ).toOption.get
   private def run(
       kernel: Kernel,
@@ -242,7 +245,7 @@ class CrossWorkgroupSuite extends munit.FunSuite {
   private val parallelIsolation = kernel(isolationSource.replace("atom.global.add.u32 %r10, [%rd0], 1;", ""))
 
   for {
-    parallel <- Seq(false, true)
+    parallel <- Vec(false, true)
     groups   <- groupCounts
   } {
     test(s"128-bit payload plus release flag: groups=$groups parallel=$parallel") {
@@ -275,7 +278,7 @@ class CrossWorkgroupSuite extends munit.FunSuite {
       withWorkers(parallel) { workers =>
         for {
           lanes <- widths
-          tail  <- Seq(0, lanes.raw / 2)
+          tail  <- Vec(0, lanes.raw / 2)
         } {
           val count  = (groups.raw * lanes.raw - tail).unsafe[Int > 0]
           val memory = Memory(groups.raw * 8 + count.raw * 4)
@@ -320,7 +323,7 @@ class CrossWorkgroupSuite extends munit.FunSuite {
         val count: Int > 0 = 4096
         val tile           = (count.raw + groups.raw - 1) / groups.raw
         val values         = (0 until count.raw).map(index => (index * 17 + 11) % 23 - 11)
-        for (retainEven <- Seq(false, true)) {
+        for (retainEven <- Vec(false, true)) {
           // Same deterministic input and predicates as the previously failing CUB cases.
           // Independent output expectations use the host collection filter, not a tile scan.
           val expected = values.filter(value => (value % 2 == 0) == retainEven)

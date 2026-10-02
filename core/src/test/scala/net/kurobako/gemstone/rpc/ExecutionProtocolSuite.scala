@@ -16,7 +16,8 @@ class ExecutionProtocolSuite extends munit.FunSuite {
       requiredWorkGroupSize: Option[LaunchGeometry.Dimensions] = None,
       workGroupSizeHint: Option[LaunchGeometry.Dimensions] = None,
       bindingIndices: Vec[Int >= 0] = Vec.empty,
-      entryPointId: Option[Int >= 0] = None
+      entryPointId: Option[Int >= 0] = None,
+      registerCount: Option[Int >= 0] = None
   ) derives Codec
 
   private case class UncheckedGlobalSymbol(
@@ -26,7 +27,11 @@ class ExecutionProtocolSuite extends munit.FunSuite {
       pointerOffsets: Vec[Int >= 0]
   ) derives Codec
 
-  private case class UncheckedProgramGlobal(size: Long >= 0, initial: Vec[Byte]) derives Codec
+  private case class UncheckedProgramGlobal(
+      size: Long >= 0,
+      initial: Vec[Byte],
+      alias: Option[GlobalImage.Alias] = None
+  ) derives Codec
 
   test("identities and symbol names reject wire sentinels") {
     assert(AllocationId.either(0L).isLeft)
@@ -127,6 +132,20 @@ class ExecutionProtocolSuite extends munit.FunSuite {
     val decoded = Codec[UncheckedGlobalSymbol].encode(invalid, ExecutionRPC.Limits)
       .flatMap(bytes => Codec[GlobalSymbol].decode(bytes, ExecutionRPC.Limits))
     assert(decoded.isLeft)
+  }
+
+  test("program global aliases round-trip without independent initial contents") {
+    val alias  = Some(GlobalImage.Alias("bank", 8L))
+    val global = GlobalImage.validated(4L, Vec.empty, alias).toOption.get
+    assertEquals(
+      Codec[GlobalImage].encode(global, ExecutionRPC.Limits)
+        .flatMap(bytes => Codec[GlobalImage].decode(bytes, ExecutionRPC.Limits)),
+      Right(global)
+    )
+    assert(GlobalImage.validated(4L, Vec[Byte](1), alias).isLeft)
+    val invalid = UncheckedProgramGlobal(4L, Vec[Byte](1), alias)
+    assert(Codec[UncheckedProgramGlobal].encode(invalid, ExecutionRPC.Limits)
+      .flatMap(bytes => Codec[GlobalImage].decode(bytes, ExecutionRPC.Limits)).isLeft)
   }
 
   test("program globals reject initial images larger than their extent") {

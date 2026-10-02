@@ -211,14 +211,15 @@ std::optional<gemstone::vulkan::StageResources> descriptorResources(const std::v
     ranges.push_back({buffer->second.memory, begin, *length});
     bufferArguments.push_back(index);
   }
-  const auto plan = gemstoneVulkanDescriptorAllocationPlan(ranges);
+  const auto allocationLayout = gemstoneVulkanDescriptorAllocationLayout(ranges);
   const auto imageCount = result.allocations.size();
-  for (const auto &allocation : plan.allocations)
+  for (const auto &allocation : allocationLayout.allocations)
     result.allocations.push_back(
         {memories.at(allocation.memory)->bytes.data() + allocation.offset, allocation.size, {}, allocation.memory, allocation.offset});
-  for (size_t i = 0; i < plan.arguments.size(); ++i) {
+  for (size_t i = 0; i < allocationLayout.arguments.size(); ++i) {
     const auto index = bufferArguments[i];
-    result.arguments[index] = StageResources::Argument{imageCount + plan.arguments[i].allocation, plan.arguments[i].offset, ranges[i].size};
+    result.arguments[index] = StageResources::Argument{imageCount + allocationLayout.arguments[i].allocation,
+                                                       allocationLayout.arguments[i].offset, ranges[i].size};
     if (const auto format = texelFormats.find(index); format != texelFormats.end()) {
       const auto size = static_cast<int64_t>(ranges[i].size);
       const auto layout = graphicsFormat(format->second);

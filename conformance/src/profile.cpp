@@ -96,6 +96,9 @@ void validate(std::string_view name, const Profile &profile) {
       if (reserved(key)) throw std::invalid_argument(fmt::format("machine profile environment must not define reserved variable: {}", key));
     }
     validate_skips(name, "target " + id, target.skips);
+    validate_skips(name, "route " + id, target.routeSkips);
+    if (target.skipReason && (target.skipReason->empty() || target.skipReason->find_first_of("\r\n") != std::string::npos))
+      throw std::invalid_argument(fmt::format("machine profile {} has an invalid skip reason for {}", name, id));
   }
 
   for (const auto &[backend, targets] : by_backend) {
@@ -190,7 +193,8 @@ std::vector<ResolvedTarget> resolve_targets(const Profile &profile, const std::v
          })
          | map([&](const ProfileTarget &target) {
              const auto id = target_id(target);
-             ResolvedTarget planned{id, target.backend, target.architecture, profile.environment, target.deviceLock};
+             ResolvedTarget planned{
+                 id, target.backend, target.architecture, profile.environment, target.deviceLock, target.routeSkips, target.skipReason};
              for (const auto &[key, value] : target.environment)
                planned.environment[key] = value;
              planned.environment["CONFORMANCE_DEVICE"] = target.device.value_or("");

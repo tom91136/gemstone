@@ -7,8 +7,7 @@ include(ValidateCUDAHeader.cmake)
 
 add_library(gemstone_cuda SHARED
   src/runtime.cpp
-  src/unsupported.cpp
-  src/cublas.cpp)
+  src/unsupported.cpp)
 set_target_properties(gemstone_cuda PROPERTIES OUTPUT_NAME cuda SOVERSION 1 CXX_STANDARD 17)
 target_include_directories(gemstone_cuda PRIVATE include "${CUDA_INCLUDE_DIR}")
 target_compile_options(gemstone_cuda PRIVATE -Wall -Wextra -Werror)
@@ -50,4 +49,11 @@ if(BUILD_TESTING)
   gemstone_test_target(cuda_execution_unavailable_smoke)
   add_test(NAME cuda/execution-boundary COMMAND ${CMAKE_COMMAND} -E env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:gemstone_cuda>" $<TARGET_FILE:cuda_execution_unavailable_smoke>)
+  add_executable(cuda_code_mode_test test/code-mode.cpp)
+  target_compile_features(cuda_code_mode_test PRIVATE cxx_std_17)
+  target_include_directories(cuda_code_mode_test PRIVATE "${CUDA_INCLUDE_DIR}")
+  target_link_libraries(cuda_code_mode_test PRIVATE gemstone_cuda)
+  gemstone_test_target(cuda_code_mode_test)
+  add_test(NAME cuda/code-mode COMMAND ${CMAKE_COMMAND} -E env
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:gemstone_cuda>" $<TARGET_FILE:cuda_code_mode_test>)
 endif()

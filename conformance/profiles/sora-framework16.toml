@@ -1,9 +1,17 @@
 # Ryzen AI 9 HX 370, Radeon 890M (gfx1150), and the CUDA target from Polyregion.
 [[targets]]
-name = "cuda-sm120"
+name = "cuda-ptx"
 backend = "cuda"
 architecture = "sm_120"
 device = "*sm_120*"
+environment = { CONFORMANCE_CUDA_CODE = "ptx", GEMSTONE_CUDA_CODE = "ptx", CUDA_FORCE_PTX_JIT = "1", CUDA_DISABLE_PTX_JIT = "0" }
+
+[[targets]]
+name = "cuda-sass"
+backend = "cuda"
+architecture = "sm_120"
+device = "*sm_120*"
+environment = { CONFORMANCE_CUDA_CODE = "sass", GEMSTONE_CUDA_CODE = "sass", CUDA_FORCE_PTX_JIT = "0", CUDA_DISABLE_PTX_JIT = "1" }
 
 [[targets]]
 name = "amd-hsa"

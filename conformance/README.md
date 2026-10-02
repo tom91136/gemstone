@@ -147,6 +147,68 @@ Do not add inner `--parallel`/`-j` flags: they bypass the shared budget. Cancell
 Without the wrapper, each container uses `CMAKE_BUILD_PARALLEL_LEVEL` or four jobs; budgets are not shared.
 The container images provide Ninja 1.13.2. Compiler-internal threads and memory are not bounded by job tokens.
 
+CUDA conformance exposes two explicit routes, `cuda-ptx` and `cuda-sass`, in each
+NVIDIA machine profile. They use the same CUDA `sm_*` artifact but set
+`CONFORMANCE_CUDA_CODE=ptx` or `sass` to select the matching explicit memory
+fixture, set `GEMSTONE_CUDA_CODE=ptx` or `sass` for Gemstone, and set NVIDIA's documented
+`CUDA_FORCE_PTX_JIT` / `CUDA_DISABLE_PTX_JIT` variables for physical CUDA runs.
+These selections are strict: PTX mode rejects cubin-only executable images, and
+SASS mode rejects PTX text and never falls back to embedded PTX. Metadata-only
+library modules remain loadable because they have no instructions to execute.
+The legacy `GEMSTONE_CUDA_CODE=cubin` value remains an alias for SASS mode.
+See NVIDIA's [CUDA environment variable reference](https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/environment-variables.html)
+for the driver behavior.
+
+Use the normal artifact build, which embeds both image kinds for compiler-built
+kernels and compiles explicit PTX memory fixtures to cubins with the pinned CUDA
+toolkit, then choose one execution route while retaining the usual workload.
+The routes are intended to run through the configured launcher so Gemstone sees
+the per-target `GEMSTONE_CUDA_CODE` value:
+
+```console
+build/executable/bin/conformance run cuda-ptx \
+  --profiles profiles --artifacts build/artifacts/output \
+  --machine soraws-uk --workload compact --output build/reports/cuda-ptx \
+  --isolated-launcher --launcher -- /path/to/launcher
+build/executable/bin/conformance run cuda-sass \
+  --profiles profiles --artifacts build/artifacts/output \
+  --machine soraws-uk --workload compact --output build/reports/cuda-sass \
+  --isolated-launcher --launcher -- /path/to/launcher
+```
+
+For `sm_89`, strict PTX skips `blas/*` and `edge/blas/*`. The pinned CUDA 13.3
+cuBLAS support bundle contains PTX entries targeting `sm_120`, which cannot run
+on `sm_89`; the matching `sm_120` profile keeps these cases enabled. SASS mode
+tests the same `memory/*` cases as PTX mode: the pinned `ptxas` assembles each
+checked-in memory PTX fixture to an architecture-matched cubin, and the fixture
+loader selects it for the SASS route. Both routes remain distinct under
+`--isolated-launcher`.
+
+`CONFORMANCE_CUDA_CUBIN_ONLY=ON` remains available for a separate build that
+checks compiler-built fatbinaries contain no PTX fallback. It cannot serve the
+PTX route; use separate artifact output directories for that build.
+
+The instruction budget counts active lanes for each NVIDIA VMIR instruction, so
+one SASS instruction can consume several units per lane. Large full-workload GEMM
+cases can exceed the default 100-million-instruction budget. For example, the
+sm_89 FP64 full edge cases pass with
+`GEMSTONE_EXECUTION_MAX_INSTRUCTIONS=2000000000` in Gemstone's environment.
+This override retains a finite per-task limit; it does not change the default.
+
+```console
+cmake -S artifacts -B build/sass -G Ninja \
+  -DCONFORMANCE_BACKENDS=cuda -DCUDA_ARCHITECTURES=sm_35,sm_89 \
+  -DCONFORMANCE_CUDA_CUBIN_ONLY=ON
+cmake --build build/sass
+```
+
+The CUDA containers include `nvdisasm` for fixture generation. The 11.8 container uses a current C++23
+host compiler for the harness and GCC 11 for nvcc's host compilation. The Gemstone execution host
+requires no NVIDIA toolkit: the generated decoder handles binary instructions directly, and execution
+uses Gemstone's CPU interpreter.
+Architecture smoke coverage does not imply every SASS instruction is supported;
+unsupported forms report the kernel and instruction offset.
+
 ## Driver
 
 Build the dual-use driver without building suites:

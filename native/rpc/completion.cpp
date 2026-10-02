@@ -11,6 +11,35 @@
 #include <vector>
 
 namespace gemstone::execution {
+namespace {
+
+template <typename Function> decltype(auto) visit_atomic_width(size_t width, Function &&function) {
+  if (width == 1) return function.template operator()<uint8_t>();
+  if (width == 2) return function.template operator()<uint16_t>();
+  if (width == 4) return function.template operator()<uint32_t>();
+  return function.template operator()<uint64_t>();
+}
+
+template <typename T>
+uint64_t apply_atomic_request(uintptr_t address, HostMemoryAtomicOperation operation, uint64_t expected, uint64_t desired) {
+  auto &cell = *reinterpret_cast<T *>(address);
+  auto reference = std::atomic_ref<T>(cell);
+  if (operation == HostMemoryAtomicOperation::Load) return reference.load(std::memory_order_relaxed);
+  if (operation == HostMemoryAtomicOperation::Store) {
+    reference.store(static_cast<T>(desired), std::memory_order_relaxed);
+    return expected;
+  }
+  auto observed = static_cast<T>(expected);
+  reference.compare_exchange_strong(observed, static_cast<T>(desired), std::memory_order_seq_cst);
+  return observed;
+}
+
+template <typename T> void atomic_store(uintptr_t address, uint64_t value, std::memory_order order) {
+  auto &cell = *reinterpret_cast<T *>(address);
+  std::atomic_ref<T>(cell).store(static_cast<T>(value), order);
+}
+
+} // namespace
 
 namespace {
 // Completion records are immutable until ReleaseCompletion, so offsets can be retried safely.
@@ -66,20 +95,16 @@ bool await_completion(Client &client, CompletionId completion, std::string &erro
       }
       if (range.atomicWidth != 0) {
         const auto width = range.atomicWidth;
-        if ((width != 4 && width != 8) || address % width || range.bytes.size() % width) {
+        if ((width != 1 && width != 2 && width != 4 && width != 8) || address % width || range.bytes.size() % width) {
           error = "invalid host atomic store range";
           return false;
         }
         for (size_t offset = 0; offset < range.bytes.size(); offset += width) {
-          if (width == 4) {
-            uint32_t value;
+          visit_atomic_width(width, [&]<typename T>() {
+            T value;
             std::memcpy(&value, range.bytes.data() + offset, sizeof(value));
-            std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(address + offset)).store(value, std::memory_order_seq_cst);
-          } else {
-            uint64_t value;
-            std::memcpy(&value, range.bytes.data() + offset, sizeof(value));
-            std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(address + offset)).store(value, std::memory_order_seq_cst);
-          }
+            atomic_store<T>(address + offset, value, std::memory_order_seq_cst);
+          });
         }
       } else std::memcpy(reinterpret_cast<void *>(address), range.bytes.data(), range.bytes.size());
     }
@@ -90,20 +115,22 @@ bool await_completion(Client &client, CompletionId completion, std::string &erro
         const auto &request = *sync.atomic;
         const auto address = static_cast<uintptr_t>(request.address.value);
         observed = static_cast<uint64_t>(request.expected);
-        if (!address || (request.size != 4 && request.size != 8) || address % request.size != 0) {
+        if (!address || (request.size != 1 && request.size != 2 && request.size != 4 && request.size != 8) || address % request.size != 0) {
           error = "invalid host atomic range";
           return false;
         }
-        if (request.size == 4) {
-          auto expected = static_cast<uint32_t>(observed);
-          std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(address))
-              .compare_exchange_strong(expected, static_cast<uint32_t>(request.desired), std::memory_order_seq_cst);
-          observed = expected;
-        } else {
-          std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(address))
-              .compare_exchange_strong(observed, static_cast<uint64_t>(request.desired), std::memory_order_seq_cst);
+        observed = visit_atomic_width(
+            request.size, [&]<typename T>() { return apply_atomic_request<T>(address, request.operation, observed, request.desired); });
+      }
+      for (const auto &request : sync.atomicStores) {
+        const auto address = static_cast<uintptr_t>(request.address.value);
+        if (!address || (request.size != 1 && request.size != 2 && request.size != 4 && request.size != 8) || address % request.size != 0) {
+          error = "invalid host atomic store range";
+          return false;
         }
-      } else std::atomic_thread_fence(std::memory_order_seq_cst);
+        visit_atomic_width(request.size, [&]<typename T>() { atomic_store<T>(address, request.desired, std::memory_order_relaxed); });
+      }
+      if (!sync.relaxed && !sync.atomic && sync.publish.empty()) std::atomic_thread_fence(std::memory_order_seq_cst);
       auto supplied = client.call(SupplyHostSync{completion, sync.ticket, static_cast<int64_t>(observed)});
       if (!supplied) {
         error = supplied.error().detail;

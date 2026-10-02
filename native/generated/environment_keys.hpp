@@ -5,6 +5,13 @@
 
 namespace gemstone::environment {
 inline constexpr char BenchmarkJfr[] = "GEMSTONE_BENCHMARK_JFR";
+inline constexpr char Cuda11889[] = "GEMSTONE_CUDA_11_8_89";
+inline constexpr char Cuda11889Image[] = "GEMSTONE_CUDA_11_8_89_IMAGE";
+inline constexpr char Cuda13333[] = "GEMSTONE_CUDA_13_3_33";
+inline constexpr char Cuda13333Image[] = "GEMSTONE_CUDA_13_3_33_IMAGE";
+inline constexpr char Cuda13373[] = "GEMSTONE_CUDA_13_3_73";
+inline constexpr char Cuda13373Image[] = "GEMSTONE_CUDA_13_3_73_IMAGE";
+inline constexpr char CudaCode[] = "GEMSTONE_CUDA_CODE";
 inline constexpr char ExecutionMaxInstructions[] = "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS";
 inline constexpr char ExecutionParallelism[] = "GEMSTONE_EXECUTION_PARALLELISM";
 inline constexpr char HsaPagingTimeoutSeconds[] = "GEMSTONE_HSA_PAGING_TIMEOUT_SECONDS";
@@ -14,6 +21,9 @@ inline constexpr char MemoryAtomicBits[] = "GEMSTONE_MEMORY_ATOMIC_BITS";
 inline constexpr char MemoryConcurrencyDirectory[] = "GEMSTONE_MEMORY_CONCURRENCY_DIRECTORY";
 inline constexpr char MemoryProbe[] = "GEMSTONE_MEMORY_PROBE";
 inline constexpr char NativeDirectory[] = "GEMSTONE_NATIVE_DIRECTORY";
+inline constexpr char Nvdisasm11886[] = "GEMSTONE_NVDISASM_11_8_86";
+inline constexpr char Nvdisasm13278[] = "GEMSTONE_NVDISASM_13_2_78";
+inline constexpr char Nvdisasm13373[] = "GEMSTONE_NVDISASM_13_3_73";
 inline constexpr char Offline[] = "GEMSTONE_OFFLINE";
 inline constexpr char OpenclCompiler[] = "GEMSTONE_OPENCL_COMPILER";
 inline constexpr char OpenclLlvmLink[] = "GEMSTONE_OPENCL_LLVM_LINK";
@@ -35,6 +45,7 @@ inline constexpr char SystemPaging[] = "GEMSTONE_SYSTEM_PAGING";
 inline constexpr char TargetArch[] = "GEMSTONE_TARGET_ARCH";
 inline constexpr char TestLibrary[] = "GEMSTONE_TEST_LIBRARY";
 inline constexpr char Trace[] = "GEMSTONE_TRACE";
+inline constexpr char VerifyFixtures[] = "GEMSTONE_VERIFY_FIXTURES";
 inline constexpr char VulkanApiVersion[] = "GEMSTONE_VULKAN_API_VERSION";
 inline constexpr char VulkanDump[] = "GEMSTONE_VULKAN_DUMP";
 inline constexpr char VulkanValidateAllocators[] = "GEMSTONE_VULKAN_VALIDATE_ALLOCATORS";

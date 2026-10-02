@@ -137,7 +137,7 @@ RUN printf '%s\n' /opt/rocm/lib /opt/rocm/llvm/lib \
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
-FROM ${CUDA_IMAGE} AS toolchain-cuda
+FROM ${CUDA_IMAGE} AS cuda-sdk
 USER root
 ARG DEBIAN_FRONTEND=noninteractive
 ARG CUDA_PACKAGE_VERSION
@@ -146,10 +146,24 @@ ARG CMAKE_LINUX_X86_64_SHA256
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
        binutils build-essential ca-certificates curl ninja-build patchelf xz-utils \
-       cuda-nvcc-${CUDA_PACKAGE_VERSION} cuda-cudart-dev-${CUDA_PACKAGE_VERSION} \
+       cuda-nvcc-${CUDA_PACKAGE_VERSION} cuda-nvdisasm-${CUDA_PACKAGE_VERSION} cuda-cudart-dev-${CUDA_PACKAGE_VERSION} \
        cuda-cccl-${CUDA_PACKAGE_VERSION} \
        libcublas-dev-${CUDA_PACKAGE_VERSION} \
     && rm -rf /var/lib/apt/lists/*
+# The conformance host harness needs C++23, while nvcc 11.8 needs GCC <= 11.
+# Keep the pinned SDK and use separate compilers for host and device sources.
+FROM ubuntu-build-base AS toolchain-cuda
+ARG DEBIAN_FRONTEND=noninteractive
+ARG CUDA_PACKAGE_VERSION
+ARG CMAKE_VERSION
+ARG CMAKE_LINUX_X86_64_SHA256
+COPY --from=cuda-sdk /usr/local/ /usr/local/
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes curl xz-utils g++-11 \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /usr/local/cuda \
+    && ln -s "cuda-$(echo "${CUDA_PACKAGE_VERSION}" | tr - .)" /usr/local/cuda
+ENV CUDAHOSTCXX=/usr/bin/g++-11
 RUN archive="cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
     && curl -fsSLO "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/${archive}" \
     && echo "${CMAKE_LINUX_X86_64_SHA256}  ${archive}" | sha256sum --check --strict \

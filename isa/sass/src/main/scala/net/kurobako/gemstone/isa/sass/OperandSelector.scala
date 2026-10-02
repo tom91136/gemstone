@@ -1,0 +1,62 @@
+package net.kurobako.gemstone.isa.sass
+
+import OperandDomains.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+
+object OperandSelector {
+  private val known = Vec(
+    CC,
+    reuse,
+    H0,
+    H1,
+    H0_H0,
+    H0_H1,
+    H1_H0,
+    H1_H1,
+    EQU,
+    NEU,
+    LTU,
+    LEU,
+    GTU,
+    GEU,
+    F32,
+    B0,
+    B1,
+    B2,
+    B3,
+    ROW,
+    COL,
+    X4,
+    X8
+  )
+  def fromSpelling(value: String): OperandSelector = known.find(_.spelling == value).getOrElse(Unknown(nonEmpty(value)))
+}
+
+enum OperandSelector(val spellingValue: NonEmpty[String]) {
+  inline def spelling: String = spellingValue
+  case CC                                        extends OperandSelector("CC")
+  case reuse                                     extends OperandSelector("reuse")
+  case H0                                        extends OperandSelector("H0")
+  case H1                                        extends OperandSelector("H1")
+  case H0_H0                                     extends OperandSelector("H0_H0")
+  case H0_H1                                     extends OperandSelector("H0_H1")
+  case H1_H0                                     extends OperandSelector("H1_H0")
+  case H1_H1                                     extends OperandSelector("H1_H1")
+  case EQU                                       extends OperandSelector("EQU")
+  case NEU                                       extends OperandSelector("NEU")
+  case LTU                                       extends OperandSelector("LTU")
+  case LEU                                       extends OperandSelector("LEU")
+  case GTU                                       extends OperandSelector("GTU")
+  case GEU                                       extends OperandSelector("GEU")
+  case F32                                       extends OperandSelector("F32")
+  case B0                                        extends OperandSelector("B0")
+  case B1                                        extends OperandSelector("B1")
+  case B2                                        extends OperandSelector("B2")
+  case B3                                        extends OperandSelector("B3")
+  case ROW                                       extends OperandSelector("ROW")
+  case COL                                       extends OperandSelector("COL")
+  case X4                                        extends OperandSelector("X4")
+  case X8                                        extends OperandSelector("X8")
+  case Unknown(vendorSpelling: NonEmpty[String]) extends OperandSelector(vendorSpelling)
+}

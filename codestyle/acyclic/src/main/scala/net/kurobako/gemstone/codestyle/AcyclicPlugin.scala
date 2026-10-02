@@ -18,13 +18,13 @@ import scala.collection.mutable
 
 class AcyclicPlugin extends StandardPlugin {
   val name        = "acyclic"
-  val description = "Reject source cycles and report structural coupling"
+  val description = "Check source cycles and report structural coupling"
 
   private val analysis = new Analysis
 
   override def initialize(options: List[String])(using Context): List[PluginPhase] = {
-    options.foreach(option => report.error(s"acyclic has no options: $option"))
-    List(new AcyclicPhase(analysis))
+    options.filterNot(_ == "warn").foreach(option => report.error(s"unknown acyclic option: $option"))
+    List(new AcyclicPhase(analysis, warningsOnly = options.contains("warn")))
   }
 }
 
@@ -44,7 +44,7 @@ private class Analysis {
   }
 }
 
-private class AcyclicPhase(analysis: Analysis) extends PluginPhase {
+private class AcyclicPhase(analysis: Analysis, warningsOnly: Boolean) extends PluginPhase {
   import Architecture.*
 
   val phaseName                         = "acyclic"
@@ -273,7 +273,10 @@ private class AcyclicPhase(analysis: Analysis) extends PluginPhase {
       val remainder = if (details.size > 12)
         s"\n  ${details.size - 12} more dependencies; complete group: ${destination.resolve("cycles.tsv")}"
       else ""
-      report.error(s"Cyclic source dependency (${group.size} files):\n$summary$remainder", internal.head._2.head._2)
+      val message  = s"Cyclic source dependency (${group.size} files):\n$summary$remainder"
+      val position = internal.head._2.head._2
+      if (warningsOnly) report.warning(message, position)
+      else report.error(message, position)
     }
     Files.writeString(destination.resolve("cycles.tsv"), cycleRows.result().mkString("", "\n", "\n"))
     units

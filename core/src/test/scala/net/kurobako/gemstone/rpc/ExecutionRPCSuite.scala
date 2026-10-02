@@ -7,7 +7,7 @@ import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.graphics.ShaderMetadata.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.{*, given}
+import net.kurobako.gemstone.rpc.ExecutionProtocol.{given, *}
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
 
@@ -132,27 +132,6 @@ class ExecutionRPCSuite extends munit.FunSuite {
     Operation.DescribeProgram(program),
     Operation.DescribeKernel(program, "kernel"),
     Operation.DescribeImage("spirv-binary", Vec[Byte](3, 2, 35, 7), "kernel"),
-    Operation.Blas(BlasRequest(
-      operation = BlasOperation.Axpy,
-      element = BlasElement.F32,
-      count = 2,
-      rows = 0,
-      columns = 0,
-      inner = 0,
-      transposeA = false,
-      transposeB = false,
-      alpha = Vec[Byte](0, 0, 128.toByte, 63),
-      beta = Vec.empty,
-      x = None,
-      y = None,
-      a = None,
-      b = None,
-      c = None,
-      strideA = 0L,
-      strideB = 0L,
-      strideC = 0L,
-      batch = 0
-    )),
     Operation.DescribeGlobal(program, "global"),
     Operation.BindProgramGlobal(program, "global", allocation, 8L),
     Operation.WriteProgramGlobal(program, "global", 8L, Vec[Byte](4, 5)),
@@ -194,6 +173,15 @@ class ExecutionRPCSuite extends munit.FunSuite {
         .fold(message => fail(message), value => value)
       assertEquals(decoded.value, operation)
     }
+  }
+
+  test("physical kernel register counts survive metadata transport") {
+    val metadata = KernelMetadata.validated(0, 0, Vec.empty, registerCount = Some(26)).toOption.get
+    assertEquals(
+      Wire.Codec[KernelMetadata].encode(metadata, ExecutionRPC.Limits)
+        .flatMap(Wire.Codec[KernelMetadata].decode(_, ExecutionRPC.Limits)),
+      Right(metadata)
+    )
   }
 
   test("operations use their exact names as tags") {

@@ -92,6 +92,36 @@ class AssemblySuite extends munit.FunSuite {
     assertEquals(Assembly.assemble(text, Assembly.Format.PTX), Right(bytes))
   }
 
+  test("SASS frontend preserves machine encodings and legacy bundle controls") {
+    Vec(35, 50, 89).foreach { sm =>
+      val target = sass.Target.parse(s"sm_$sm").fold(fail(_), identity)
+      val format = Assembly.Format.SASS(target)
+      val bytes  = Assembly.assemble("entry: MOV R3, R7; BRA entry;", format)
+        .fold(error => fail(error.toString), identity)
+      val text = Assembly.disassemble(bytes, format).fold(error => fail(error.toString), identity)
+      assertEquals(Assembly.assemble(text, format), Right(bytes))
+      assert(Assembly.disassemble(bytes.dropRight(1), format).isLeft)
+    }
+  }
+
+  test("cubin disassembly selects executable sections and checks the target") {
+    val target = sass.Target.parse("sm_89").fold(fail(_), identity)
+    val format = Assembly.Format.SASS(target)
+    // Fixed SM89 EXIT bytes, independent of the assembler under test.
+    val exit   = Vec(0x4d, 0x79, 0, 0, 0, 0, 0, 0, 0, 0, 0x80, 3, 0, 0xea, 0x0f, 0).map(_.toByte)
+    val single = elfImage(Vec(".text.kernel" -> exit), Some(89))
+    val text   = Assembly.disassemble(single, format).fold(error => fail(error.toString), identity)
+    assertEquals(Assembly.assemble(text, format), Right(exit))
+    val multiple = elfImage(Vec(".text.first" -> exit, ".text.second" -> exit), Some(89))
+    assert(Assembly.disassemble(multiple, format).isLeft)
+    val selected = Assembly.disassembleCubin(multiple, target, Some(".text.second"))
+      .fold(error => fail(error.toString), identity)
+    assertEquals(Assembly.assemble(selected, format), Right(exit))
+    assert(Assembly.disassembleCubin(multiple, target, Some(".missing")).isLeft)
+    assert(Assembly.disassemble(elfImage(Vec(".text.kernel" -> exit), Some(80)), format).isLeft)
+    assert(Assembly.disassemble(elfImage(Vec.empty, Some(89)), format).isLeft)
+  }
+
   test("text decoding rejects malformed UTF-8 instead of replacing bytes") {
     assertEquals(Assembly.text(Vec(0xc3.toByte, 0x28.toByte)), Left(Assembly.Error.InvalidUTF8))
   }
@@ -100,6 +130,11 @@ class AssemblySuite extends munit.FunSuite {
     def parse(args: String*) = CLI.command.parse(args.toList)
     assert(parse("assemble", "--isa", "spirv", "input").isLeft)
     assert(parse("disassemble", "--isa", "amdgpu", "input").isLeft)
+    assert(parse("disassemble", "--isa", "sass", "input").isLeft)
+    assert(parse("disassemble", "--isa", "sass", "--target", "sm_89", "input").isRight)
+    assert(parse("disassemble", "--isa", "sass", "--target", "sm_89", "--section", ".text.kernel", "input").isRight)
+    assert(parse("disassemble", "--isa", "sass", "--target", "gfx1030", "input").isLeft)
+    assert(parse("assemble", "--isa", "sass", "--target", "sm_89", "--output", "output", "input").isRight)
     assert(parse("disassemble", "--isa", "spirv", "--target", "gfx1030", "input").isLeft)
     assert(parse("disassemble", "--isa", "amdgpu", "--target", "typo", "input").isLeft)
     assert(parse("disassemble", "--isa", "amdgpu", "--target", "gfx1030", "input").isRight)
@@ -155,7 +190,7 @@ class AssemblySuite extends munit.FunSuite {
   }
 
   /** Minimal ELF64 fixture: null section, string table, then executable sections. */
-  private def elfImage(sections: Vec[(String, Vec[Byte])]): Vec[Byte] = {
+  private def elfImage(sections: Vec[(String, Vec[Byte])], cudaSM: Option[Int] = None): Vec[Byte] = {
     val names        = "\u0000.shstrtab\u0000" + sections.map(_._1).mkString("\u0000") + "\u0000"
     val strings      = names.getBytes(StandardCharsets.UTF_8)
     val headerBytes  = 64
@@ -163,9 +198,10 @@ class AssemblySuite extends munit.FunSuite {
     val tableEnd     = headerBytes + (sections.size + 2) * sectionBytes
     val bytes        = Array.ofDim[Byte](tableEnd + strings.length + sections.map(_._2.size).sum)
     val buffer       = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-    // ELF64 header offsets and EM_AMDGPU; independent of the production ELF reader.
+    // ELF64 header offsets; independent of the production ELF reader.
     buffer.putInt(0, 0x464c457f).put(4, 2.toByte).put(5, 1.toByte).put(6, 1.toByte)
-      .putShort(16, 1.toShort).putShort(18, 224.toShort).putInt(20, 1)
+      .putShort(16, 1.toShort).putShort(18, (if (cudaSM.isDefined) 190 else 224).toShort).putInt(20, 1)
+      .put(8, (if (cudaSM.isDefined) 7 else 0).toByte).putInt(48, cudaSM.getOrElse(0))
       .putLong(40, headerBytes.toLong).putShort(52, headerBytes.toShort)
       .putShort(58, sectionBytes.toShort).putShort(60, (sections.size + 2).toShort).putShort(62, 1.toShort)
     buffer.putInt(headerBytes + sectionBytes, 1).putInt(headerBytes + sectionBytes + 4, 3)

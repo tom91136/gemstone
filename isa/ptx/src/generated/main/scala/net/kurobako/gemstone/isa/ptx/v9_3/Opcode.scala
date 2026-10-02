@@ -44,11 +44,13 @@ object Opcode {
     "fence" -> Fence,
     "fma" -> Fma,
     "fns" -> Fns,
+    "fp8" -> Fp8,
     "getctarank" -> GetCtaRank,
     "griddepcontrol" -> GridDependencyControl,
     "isspacep" -> IsSpacePredicate,
     "istypep" -> IsTypePredicate,
     "ld" -> Ld,
+    "ldmatrix" -> Ldmatrix,
     "ldu" -> Ldu,
     "lg2" -> Lg2,
     "lop3" -> Lop3,
@@ -61,7 +63,9 @@ object Opcode {
     "mbarrier" -> Mbarrier,
     "membar" -> Membar,
     "min" -> Min,
+    "mma" -> Mma,
     "mov" -> Mov,
+    "movmatrix" -> Movmatrix,
     "mul" -> Mul,
     "mul24" -> Mul24,
     "multimem" -> Multimem,
@@ -95,6 +99,7 @@ object Opcode {
     "st" -> St,
     "stackrestore" -> StackRestore,
     "stacksave" -> StackSave,
+    "stmatrix" -> Stmatrix,
     "sub" -> Sub,
     "subc" -> Subc,
     "suld" -> Suld,
@@ -134,6 +139,8 @@ object Opcode {
     "vsub" -> Vsub,
     "vsub2" -> Vsub2,
     "vsub4" -> Vsub4,
+    "wgmma" -> Wgmma,
+    "wmma" -> Wmma,
     "xor" -> Xor
   )
   def apply(name: NonEmpty[String]): Opcode =
@@ -183,11 +190,13 @@ enum Opcode(val name: NonEmpty[String]) {
   case Fence extends Opcode("fence")
   case Fma extends Opcode("fma")
   case Fns extends Opcode("fns")
+  case Fp8 extends Opcode("fp8")
   case GetCtaRank extends Opcode("getctarank")
   case GridDependencyControl extends Opcode("griddepcontrol")
   case IsSpacePredicate extends Opcode("isspacep")
   case IsTypePredicate extends Opcode("istypep")
   case Ld extends Opcode("ld")
+  case Ldmatrix extends Opcode("ldmatrix")
   case Ldu extends Opcode("ldu")
   case Lg2 extends Opcode("lg2")
   case Lop3 extends Opcode("lop3")
@@ -200,7 +209,9 @@ enum Opcode(val name: NonEmpty[String]) {
   case Mbarrier extends Opcode("mbarrier")
   case Membar extends Opcode("membar")
   case Min extends Opcode("min")
+  case Mma extends Opcode("mma")
   case Mov extends Opcode("mov")
+  case Movmatrix extends Opcode("movmatrix")
   case Mul extends Opcode("mul")
   case Mul24 extends Opcode("mul24")
   case Multimem extends Opcode("multimem")
@@ -234,6 +245,7 @@ enum Opcode(val name: NonEmpty[String]) {
   case St extends Opcode("st")
   case StackRestore extends Opcode("stackrestore")
   case StackSave extends Opcode("stacksave")
+  case Stmatrix extends Opcode("stmatrix")
   case Sub extends Opcode("sub")
   case Subc extends Opcode("subc")
   case Suld extends Opcode("suld")
@@ -273,6 +285,8 @@ enum Opcode(val name: NonEmpty[String]) {
   case Vsub extends Opcode("vsub")
   case Vsub2 extends Opcode("vsub2")
   case Vsub4 extends Opcode("vsub4")
+  case Wgmma extends Opcode("wgmma")
+  case Wmma extends Opcode("wmma")
   case Xor extends Opcode("xor")
 
 }

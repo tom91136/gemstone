@@ -1,13 +1,26 @@
 package fix
 
 object ExplicitEtaExpansion {
+  sealed abstract class Parent(value: Int)
+  final case class Child(value: Int) extends Parent(value)
   case class Box(value: Int)
 
   private def increment(value: Int): Int    = value + 1
   private val incrementFunction: Int => Int = value => value + 1
+  private def acceptByName(value: => Int): Int = value
+  private def passFunction(function: Int => Int): List[Int] = List(1).map(function)
+  private def passValue(value: Int): List[Int] = List(1).map(_ => acceptByName(value))
+  private def passByName(value: => Int): List[Int] = List(1).map(_ => acceptByName(value))
   extension (value: Int) {
     def parity: Int            = value & 1
     def plus(amount: Int): Int = value + amount
+  }
+
+  def localMethod: List[Int] = {
+    def localIncrement(value: Int): Int = value + 1
+    // format: off
+    List(1).map(localIncrement(_))
+    // format: on
   }
 
   // format: off

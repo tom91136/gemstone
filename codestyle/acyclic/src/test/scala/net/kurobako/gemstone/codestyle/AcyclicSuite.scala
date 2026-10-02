@@ -10,7 +10,12 @@ import scala.jdk.CollectionConverters.*
 class AcyclicSuite extends FunSuite {
   private def compile(sources: (String, String)*): List[String] = inspect(sources*)((errors, _) => errors)
 
-  private def inspect[A](sources: (String, String)*)(check: (List[String], Path) => A): A = {
+  private def inspect[A](sources: (String, String)*)(check: (List[String], Path) => A): A =
+    inspectWithOptions(Nil, sources)((errors, _, output) => check(errors, output))
+
+  private def inspectWithOptions[A](options: List[String], sources: Seq[(String, String)])(
+      check: (List[String], List[String], Path) => A
+  ): A = {
     val directory = Files.createTempDirectory("gemstone-acyclic-")
     try {
       val output = Files.createDirectory(directory.resolve("classes"))
@@ -28,9 +33,13 @@ class AcyclicSuite extends FunSuite {
         s"-Xplugin:${System.getProperty("gemstone.acyclic.jar")}",
         "-Xplugin-require:acyclic",
         "-color:never"
-      ) ++ files
+      ) ++ options.map(option => s"-P:acyclic:$option") ++ files
       val result = new Driver().process(arguments, reporter)
-      check(result.allErrors.map(_.message).toList, directory.resolve("classes-architecture"))
+      check(
+        result.allErrors.map(_.message).toList,
+        result.allWarnings.map(_.message).toList,
+        directory.resolve("classes-architecture")
+      )
     } finally {
       val paths = Files.walk(directory)
       try paths.iterator().asScala.toList.reverse.foreach(Files.delete)
@@ -47,6 +56,24 @@ class AcyclicSuite extends FunSuite {
 
   test("mutual references report both files and source lines") {
     assertCycle("A.scala" -> "class A(val b: B)", "B.scala" -> "class B(val a: A)")
+  }
+
+  test("warning mode reports cycles and preserves the graph without failing compilation") {
+    inspectWithOptions(List("warn"), Seq("A.scala" -> "class A(val b: B)", "B.scala" -> "class B(val a: A)")) {
+      (errors, warnings, output) =>
+        assertEquals(errors, Nil)
+        assertEquals(warnings.size, 1)
+        assert(warnings.head.startsWith("Cyclic source dependency ("), warnings.head)
+        val cycles = Files.readString(output.resolve("cycles.tsv"))
+        assert(cycles.contains("A.scala"), cycles)
+        assert(cycles.contains("B.scala"), cycles)
+    }
+  }
+
+  test("unknown checker options still fail") {
+    inspectWithOptions(List("ignored"), Seq("A.scala" -> "class A")) { (errors, _, _) =>
+      assert(errors.exists(_.contains("unknown acyclic option")), errors.mkString("\n"))
+    }
   }
 
   test("nested type arguments contribute dependencies") {

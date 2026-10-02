@@ -14,6 +14,9 @@ trait AddressMemory {
   @nowarn("msg=unused explicit parameter")
   def prepareReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[MemoryError, Unit] = Right(())
 
+  /** Prepare fresh system-scope reads while preserving dirty local writes. */
+  def prepareSystemReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[MemoryError, Unit] = prepareReads(ranges)
+
   def readInt8(address: GuestAddress): Either[MemoryError, Byte]
   def readInt32(address: GuestAddress): Either[MemoryError, Int]
   def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit]
@@ -73,6 +76,11 @@ trait AddressMemory {
     read(0, 0L)
   }
 
+  def readSystemLittleEndian(
+      address: GuestAddress,
+      size: Int where Between[1, 8]
+  ): Either[MemoryError, Long] = readLittleEndian(address, size)
+
   def writeLittleEndian(address: GuestAddress, value: Long, size: Int where Between[1, 8]): Either[MemoryError, Unit] =
     validateRange(address, size.nonNegative) match {
       case Left(error) => Left(error)
@@ -86,6 +94,18 @@ trait AddressMemory {
           }
         write(0)
     }
+
+  def writeSystemLittleEndian(
+      address: GuestAddress,
+      value: Long,
+      size: Int where Between[1, 8]
+  ): Either[MemoryError, Unit] = writeLittleEndian(address, value, size)
+
+  def writeSystemBatch(
+      writes: Vec[(GuestAddress, Long, Int where Between[1, 8])]
+  ): Either[MemoryError, Unit] = writes.foldLeft[Either[MemoryError, Unit]](Right(())) {
+    case (result, (address, value, size)) => result.flatMap(_ => writeSystemLittleEndian(address, value, size))
+  }
 
   /** Atomically replace a value and return its previous contents. Views over shared storage must delegate the whole
     * operation to their backing owner.

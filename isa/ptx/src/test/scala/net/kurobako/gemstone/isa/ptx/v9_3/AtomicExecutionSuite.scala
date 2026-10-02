@@ -1,17 +1,16 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMIR.*
 import execution.*
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class AtomicExecutionSuite extends munit.FunSuite {
   for {
-    width  <- List(32, 64)
-    target <- List("generic", "global", "acquire.sys.global", "shared", "generic-shared")
+    width  <- Vec(32, 64)
+    target <- Vec("generic", "global", "acquire.sys.global", "shared", "generic-shared")
   } test(s"$target $width-bit CAS returns old bits on success and failure") {
     val size      = width / 8
     val shared    = target == "shared" || target == "generic-shared"
@@ -36,13 +35,14 @@ class AtomicExecutionSuite extends munit.FunSuite {
         st.global.b$width [%q], %value;
         ret;
       }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate((3 * size).unsafe[Int >= 0])
     val start  = memory.allocation.start
     assertEquals(
-      VMInterpreter.execute(
+      execute(
         kernel,
-        geometry(blocks = 1, threads = 1),
+        1,
+        1,
         Map(("output": NonEmpty[String]) -> Argument.fromLong(start.raw)),
         memory
       ),
@@ -57,7 +57,7 @@ class AtomicExecutionSuite extends munit.FunSuite {
     assertEquals(memory.readLittleEndian(start.offset(2L * size), byteWidth).toOption.get, 7L)
   }
 
-  for (width <- List(32, 64)) test(s"$width-bit CAS has exactly one winner across lanes") {
+  for (width <- Vec(32, 64)) test(s"$width-bit CAS has exactly one winner across lanes") {
     val size   = width / 8
     val source = s""".version 8.0
       .target sm_80
@@ -75,13 +75,14 @@ class AtomicExecutionSuite extends munit.FunSuite {
         st.global.b$width [%q], %old;
         ret;
       }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate((33 * size).unsafe[Int >= 0])
     val start  = memory.allocation.start
     assertEquals(
-      VMInterpreter.execute(
+      execute(
         kernel,
-        geometry(blocks = 1, threads = 32),
+        1,
+        32,
         Map(("output": NonEmpty[String]) -> Argument.fromLong(start.raw)),
         memory
       ),
@@ -107,14 +108,15 @@ class AtomicExecutionSuite extends munit.FunSuite {
         st.global.u32 [%old_address], %old;
         ret;
       }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(8)
     val start  = memory.allocation.start
     assertEquals(memory.writeInt32(start, 3), Right(()))
     assertEquals(
-      VMInterpreter.execute(
+      execute(
         kernel,
-        geometry(blocks = 1, threads = 1),
+        1,
+        1,
         Map(("output": NonEmpty[String]) -> Argument.fromLong(start.raw)),
         memory
       ),
@@ -137,14 +139,15 @@ class AtomicExecutionSuite extends munit.FunSuite {
         st.global.u32 [%old_address], %old;
         ret;
       }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(8)
     val start  = memory.allocation.start
     assertEquals(memory.writeInt32(start, 3), Right(()))
     assertEquals(
-      VMInterpreter.execute(
+      execute(
         kernel,
-        geometry(blocks = 1, threads = 1),
+        1,
+        1,
         Map(("output": NonEmpty[String]) -> Argument.fromLong(start.raw)),
         memory
       ),
@@ -167,14 +170,15 @@ class AtomicExecutionSuite extends munit.FunSuite {
         st.global.u32 [%old_address], %old;
         ret;
       }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(8)
     val start  = memory.allocation.start
     assertEquals(memory.writeInt32(start, 7), Right(()))
     assertEquals(
-      VMInterpreter.execute(
+      execute(
         kernel,
-        geometry(blocks = 1, threads = 1),
+        1,
+        1,
         Map(("output": NonEmpty[String]) -> Argument.fromLong(start.raw)),
         memory
       ),
@@ -206,14 +210,15 @@ class AtomicExecutionSuite extends munit.FunSuite {
         st.global.u32 [%old_address], %old;
         ret;
       }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(20)
     val start  = memory.allocation.start
     assertEquals(memory.writeInt32(start, 7), Right(()))
     assertEquals(
-      VMInterpreter.execute(
+      execute(
         kernel,
-        geometry(blocks = 1, threads = 1),
+        1,
+        1,
         Map(("output": NonEmpty[String]) -> Argument.fromLong(start.raw)),
         memory
       ),
@@ -221,18 +226,18 @@ class AtomicExecutionSuite extends munit.FunSuite {
     )
     assertEquals(
       (0 to 4).map(index => memory.readInt32(start.offset(index.toLong * 4L)).toOption.get),
-      Seq(48, 7, 19, 19, 51)
+      Vec(48, 7, 19, 19, 51)
     )
   }
 
   for {
-    space  <- Seq("global", "shared")
-    width  <- Seq(32, 64)
-    groups <- Seq[Int > 0](1, 5)
+    space  <- Vec("global", "shared")
+    width  <- Vec(32, 64)
+    groups <- Vec[Int > 0](1, 5)
   }
     test(s"unsigned atomic min $space/$width over $groups groups preserves high-bit ordering") {
-      val memory                             = ArrayCheckedMemory.allocate((groups + 1) * 8, GuestAddress(0x100000L))
-      val max                                = if (width == 64) -1L else 0xffffffffL
+      val memory = ArrayCheckedMemory.allocate((groups * 2 + 1) * 8, GuestAddress(0x100000L))
+      val max    = if (width == 64) -1L else 0xffffffffL
       val byteWidth: Int where Between[1, 8] = if (width == 64) 8 else 4
       memory.writeLittleEndian(memory.allocation.start, max, byteWidth).toOption.get
       val init   = if (space == "shared") s"st.shared.u$width [scratch], $max;" else ""
@@ -250,24 +255,32 @@ $init
 atom.$space.min.u$width %old, [$target], 1;
 ld.$space.u$width %result, [$target];
 mov.u32 %group, %ctaid.x;
-mul.wide.u32 %offset, %group, 8;
+mul.wide.u32 %offset, %group, 16;
 add.u64 %address, %out, %offset;
 add.u64 %address, %address, 8;
 st.global.u$width [%address], %result;
+add.u64 %address, %address, 8;
+st.global.u$width [%address], %old;
 ret;
 }
 """
-      val kernel   = VMCompiler.compile(body).fold(error => fail(error.message), value => value)
-      val geometry = LaunchGeometry.forLaunch(Dimensions.One, dimensions(groups)).toOption.get
-      val result   = VMInterpreter.execute(
+      val kernel = compileKernel(body)
+      val result = execute(
         kernel,
-        geometry,
+        groups,
+        1,
         Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
         memory
       )
       assert(result.isRight, result.toString)
       for (group <- 0 until groups.raw)
-        assertEquals(memory.readLittleEndian(memory.allocation.start.offset(8 + group * 8), byteWidth), Right(1L))
+        assertEquals(memory.readLittleEndian(memory.allocation.start.offset(8 + group * 16), byteWidth), Right(1L))
+      val previous = Vec.tabulate(groups.raw) { group =>
+        memory.readLittleEndian(memory.allocation.start.offset(16 + group * 16), byteWidth).toOption.get
+      }
+      val expected = if (space == "shared") Vec.fill(groups.raw)(max)
+      else max +: Vec.fill(groups.raw - 1)(1L)
+      assertEquals(previous.sorted, expected.sorted)
     }
 
 }

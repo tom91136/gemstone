@@ -63,7 +63,7 @@ class SyntaxSuite extends munit.FunSuite {
           ) =>
         assertEquals(predicate.negated, false)
         assertEquals(instruction.opcode, "ld.global.nc")
-        assertEquals(modifiers.map(_.name), Seq("L1::evict_last", "v2", "f64"))
+        assertEquals(modifiers.map(_.name), Vec("L1::evict_last", "v2", "f64"))
         assert(Operand.isVectorLiteral(destination))
         assert(Operand.isAddress(address))
       case other => fail(s"unexpected statement: $other")
@@ -113,7 +113,7 @@ class SyntaxSuite extends munit.FunSuite {
     assertEquals(statements.statements.size, 4)
     statements.statements.last match {
       case Statement.Entry(Linkage.Visible, name, parameters, Some(body), _) if name == "kernel" =>
-        assertEquals(parameters.map(_.name), Seq("pointer"))
+        assertEquals(parameters.map(_.name), Vec("pointer"))
         assert(body.contains(Statement.Label("again")))
         assertEquals(body.collect { case _: Statement.Instruction => 1 }.sum, 2)
       case other => fail(s"unexpected statement: $other")
@@ -149,7 +149,7 @@ class SyntaxSuite extends munit.FunSuite {
     statement(".global .align 4 .b8 table[4] = {65, 144, 67, 60};") match {
       case Statement.Data(DataAddressSpace.Global, qualifiers, DataType.B8, name, Extent.Sized(count), initializer)
           if name == "table" && count.raw == 4 =>
-        assertEquals(qualifiers, Seq(DeclarationQualifier.Alignment(4)))
+        assertEquals(qualifiers, Vec(DeclarationQualifier.Alignment(4)))
         assertEquals(initializer.size, 4)
       case other => fail(s"unexpected declaration: $other")
     }
@@ -161,7 +161,7 @@ class SyntaxSuite extends munit.FunSuite {
           if name == "shmem" =>
         assertEquals(
           qualifiers,
-          Seq(
+          Vec(
             DeclarationQualifier.Attribute("extern"),
             DeclarationQualifier.Alignment(16)
           )

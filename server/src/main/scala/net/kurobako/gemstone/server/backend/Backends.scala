@@ -9,6 +9,7 @@ object Backends {
   def default(workgroups: Workgroups = Workgroups.Sequential): Backends = Backends(
     List(
       PTX(workgroups),
+      Cubin(workgroups),
       AMDGPU(workgroups),
       SPIRV(environment = Validation.Environment.OpenCLCompute, workgroups = workgroups),
       SPIRV(Validation.Environment.VulkanCompute, "spirv-vulkan-binary", workgroups),

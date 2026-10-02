@@ -19,7 +19,7 @@ class CUDACrossWorkgroupSuite extends munit.FunSuite {
     path
   }
 
-  for (workers <- Seq(1, 4))
+  for (workers <- Vec(1, 4))
     test(s"native CUDA 128-bit payload publication, compaction and atomic counts with $workers workers") {
       val directory = runtimeDirectory
       val runtime   = directory.resolve("libcuda.so.1")
@@ -40,6 +40,7 @@ class CUDACrossWorkgroupSuite extends munit.FunSuite {
               env.RpcEndpoint  -> server.endpoint.toString,
               env.RpcClient    -> server.client.raw.toString,
               env.TestLibrary  -> runtime.toString,
+              env.TargetArch   -> "sm_80",
               env.SystemPaging -> "1"
             ),
             Set.empty
@@ -55,7 +56,7 @@ class CUDACrossWorkgroupSuite extends munit.FunSuite {
   // One process per case keeps unsupported registration from hiding later cases.
   // These explicit allocations/registrations must not depend on system paging.
   for (
-    name <- Seq(
+    name <- Vec(
       "CUDA managed interior aliases preserve host edits between launches",
       "CUDA pinned interior aliases preserve host edits between launches",
       "CUDA registered stack subrange supports kernels and unregister",

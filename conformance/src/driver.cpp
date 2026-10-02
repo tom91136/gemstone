@@ -199,12 +199,14 @@ std::vector<std::string> launcher_arguments(bool enabled, std::span<char *const>
 }
 std::vector<profile::ResolvedTarget> unique_routes(const std::vector<profile::ResolvedTarget> &targets, bool isolated) {
   std::vector<profile::ResolvedTarget> result;
-  std::set<std::pair<std::string, std::optional<std::string>>> seen;
+  std::set<std::tuple<std::string, std::optional<std::string>, std::string>> seen;
   for (const auto &target : targets) {
-    // An isolated launcher replaces the native provider and device. Its route
-    // is the artifact ABI, not the machine-specific selector, environment, or
-    // lock policy used to reach the physical device.
-    if (!isolated || seen.emplace(target.backend, target.architecture).second) {
+    // An isolated launcher replaces the native provider and physical device.
+    // Distinct CUDA code-mode routes still select different runtime paths.
+    const auto mode = target.backend == "cuda" && target.environment.contains("CONFORMANCE_CUDA_CODE")
+                          ? target.environment.at("CONFORMANCE_CUDA_CODE")
+                          : std::string{};
+    if (!isolated || seen.emplace(target.backend, target.architecture, mode).second) {
       result.push_back(target);
       if (isolated) result.back().deviceLock = false;
     } else std::cout << "conformance: identical isolated route " << target.id << " omitted before discovery\n";
@@ -576,7 +578,9 @@ std::optional<TargetExecution> prepare_target(const RunOptions &configuration, c
                        configuration.launcher,
                        configuration.isolated_launcher ? std::vector<std::string>{} : configured_skips(environment),
                        workload.specs,
-                       target.deviceLock};
+                       target.deviceLock,
+                       target.skipReason.value_or(""),
+                       target.routeSkips};
   apply_device_probe(exec, probe_device(configuration, artifact, environment, target.id));
   // Re-probe with the exact child environment: selection must survive visibility remapping.
   const auto verified = probe_device(configuration, artifact, exec.environment, target.id);
@@ -622,9 +626,14 @@ void materialize_ctest(const fs::path &directory, const fs::path &driver, const 
 int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
   const auto config = read_execution_config(path);
   if (!valid_identifier(test.program) || test.program == "." || test.program == "..") throw std::invalid_argument("invalid test program");
-  if (std::ranges::find(config.skips, test.program) != config.skips.end()
-      || std::ranges::find(config.skips, test.identity) != config.skips.end()) {
-    std::cout << "SKIP " << test.identity << ": machine profile\n";
+  const auto matches = [&](const std::vector<std::string> &patterns) {
+    return std::ranges::any_of(patterns, [&](const std::string &pattern) {
+      return glob_matches(pattern.c_str(), test.program.c_str()) || glob_matches(pattern.c_str(), test.identity.c_str());
+    });
+  };
+  if (matches(config.skips) || matches(config.routeSkips)) {
+    const auto reason = matches(config.routeSkips) && !config.skipReason.empty() ? config.skipReason : "machine profile";
+    std::cout << "SKIP " << test.identity << ": " << reason << '\n';
     return SkipReturnCode;
   }
   const auto programs = test_programs(config.directory, Workload{});

@@ -60,7 +60,7 @@ struct GemstoneVulkanDescriptorArgument {
   VkDeviceSize offset;
 };
 
-struct GemstoneVulkanDescriptorAllocationPlan {
+struct GemstoneVulkanDescriptorAllocationLayout {
   std::vector<GemstoneVulkanDescriptorRange> allocations;
   std::vector<GemstoneVulkanDescriptorArgument> arguments;
 };
@@ -68,5 +68,5 @@ struct GemstoneVulkanDescriptorAllocationPlan {
 __attribute__((visibility("default"))) std::optional<size_t> gemstoneVulkanDescriptorLength(VkDeviceSize bufferSize, VkDeviceSize offset,
                                                                                             VkDeviceSize range);
 
-__attribute__((visibility("default"))) GemstoneVulkanDescriptorAllocationPlan
-gemstoneVulkanDescriptorAllocationPlan(const std::vector<GemstoneVulkanDescriptorRange> &ranges);
+__attribute__((visibility("default"))) GemstoneVulkanDescriptorAllocationLayout
+gemstoneVulkanDescriptorAllocationLayout(const std::vector<GemstoneVulkanDescriptorRange> &ranges);

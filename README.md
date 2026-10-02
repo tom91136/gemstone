@@ -1,14 +1,62 @@
 # Gemstone
 
 Gemstone executes GPU programs on a checked CPU emulator for GPUless testing and debugging. It implements
-subsets of PTX, AMDGPU, and SPIR-V behind native CUDA Driver, HIP, HSA, OpenCL, Vulkan, and Level Zero facades.
+subsets of PTX, SASS, AMDGPU, and SPIR-V behind native CUDA Driver, HIP, HSA, OpenCL, Vulkan, and Level Zero facades.
 It runs on the JVM and Scala Native, with Linux as the supported host platform.
+
+CUDA tensor kernels use the ordinary PTX execution path. Supported families include WMMA loads, stores and
+matrix multiply-accumulate, dense `mma.sync` for FP16/BF16/TF32/FP64 and 8-bit integer inputs, `ldmatrix`/`stmatrix`
+`m8n8.b16` with `x1`/`x2`/`x4` and transpose, and `cvt.rna.tf32.f32`. Unsupported shapes and qualifiers fail
+explicitly; sparse MMA, WGMMA and `tcgen05` execution are not implemented. Tensor collectives require complete,
+converged warps. WMMA uses a stable emulator fragment layout; MMA and matrix transfers follow the PTX lane layouts.
+
+Gemstone does not intercept cuBLAS calls or provide BLAS-specific RPC operations. Vendor libraries use ordinary
+CUDA module loading, allocation and kernel launches. The pinned CUDA 13.3 cuBLAS bundle contains PTX for `sm_120`
+but also registers cubin-only modules. The generic `cuda-cubin` backend reads CUDA ELF metadata, binds
+constant banks and globals (including named aliases into bank storage), and lazily compiles supported SASS
+instructions directly into the shared NVIDIA execution IR. SASS and PTX are separate ISA modules; neither
+frontend invokes the other. Both use the same checked NVIDIA execution engine.
+Their handwritten text parsers share character scanning and source positions through the NVIDIA module.
+It includes physical register pairs, predication, local memory, structured convergence, local device calls,
+warp operations, atomics, dense HMMA and FP64 `DMMA.884`. Generated binary tables perform decoding,
+and execution stays on Gemstone's CPU. Loading PTX or cubin images requires no NVIDIA toolkit;
+unsupported binary forms report the kernel and instruction offset.
+The CUDA 11.8 and 13.3 SDK pins are shared with the conformance artifact builder.
+The synthetic CUDA device advertises four virtual SMs consistently through runtime and
+driver queries. Libraries use this capacity to select grid dimensions; it is independent of CPU worker count.
+
+Compiler-produced SAXPY fixtures cover sm_35, sm_50, sm_60, sm_70, sm_75, sm_80, sm_86, sm_87,
+sm_89, sm_90, sm_100, sm_103 and sm_120. This is smoke coverage; broader legacy and Hopper/Blackwell
+program coverage remains incomplete. The reconciliation onto `931d4fa` is validated by the current
+[test record](GEMSTONE_NEW.md#local-sass-branch-reconciliation-record), including normal CUDA and
+cubin-only WMMA runs. Earlier architecture-specific results remain in the preserved branch checkpoint.
+
+Scala suites cover selected floating-point, packed-half, tensor, address, and carry behavior using
+explicit launch metadata, text assembly and independent machine words. A small embedded ELF fixture
+covers cubin loading; tests require neither NVIDIA tools nor checked-in binary files.
+Maxwell/Pascal generic-memory lowering recognizes bounded compiler sequences with checked control flow;
+those fixtures use CUDA 11.8 and independent VM results, without native Maxwell/Pascal measurements.
+
+Unimplemented instructions, non-structured control-stack forms, external calls and unapplied
+executable/global/constant relocations fail explicitly. CUDA 11.8 cuBLAS initializes through the generic
+module path, but its legacy FP32 norm still requires the unverified `FCHK.DIVIDE` form. Full BLAS workloads
+can exceed the default instruction limit; the validation record uses a two-billion-instruction budget.
+No all-architecture BLAS or complete SASS conformance claim is made.
+
+Conformance exposes `cuda-ptx` and `cuda-sass` routes with strict code selection.
+`GEMSTONE_CUDA_CODE=ptx` requires PTX; `GEMSTONE_CUDA_CODE=sass` requires machine code
+(`cubin` remains an alias). `CONFORMANCE_CUDA_CUBIN_ONLY=ON` builds conformance kernels
+without embedded PTX. Set `GEMSTONE_TRACE=cuda` for load and execution diagnostics. PTX grid dependencies retain completion
+ordering rather than launching dependent grids early. The CUDA case `runtime/cuda/tensor-wmma-gemm` checks an
+nvcc-compiled WMMA kernel through normal allocation, launch and copy operations, with padded matrices, multiple
+warps and fragment arithmetic. See [conformance](conformance/README.md) for mode-specific coverage.
 
 ## Layout
 
 - `core`: portable ABI, memory, RPC execution, and VM scheduling.
 - `api`: generated Scala API definitions.
-- `isa/{ptx,amdgpu,spirv}`: parsing, validation, lowering, and CPU execution.
+- `isa/{ptx,sass,amdgpu,spirv}`: instruction decoding, validation and semantic compilation.
+- `isa/nvidia`: shared NVIDIA execution IR, lane/warp state, memory and numerical semantics.
 - `server`: backend composition, TCP/Unix transport, recording/replay, and process launching.
 - `native`: CMake-built API facades and RPC client.
 - `tools/{codegen,isa,benchmarks,test-support}`: generation, ISA tools, benchmarks, and shared Scala test utilities.
@@ -164,9 +212,16 @@ sbt 'isaTools/run disassemble --isa spirv shader.spv'
 sbt 'isaTools/run assemble --isa spirv --output shader.spv shader.spvasm'
 sbt 'isaTools/run disassemble --isa amdgpu --target gfx1030 instructions.bin'
 sbt 'isaTools/run disassemble --isa amdgpu --target gfx900 --section .text kernel.o'
+sbt 'isaTools/run disassemble --isa sass --target sm_89 --section .text.kernel kernel.cubin'
+sbt 'isaTools/run assemble --isa sass --target sm_89 --output kernel.bin kernel.sass'
+sbt 'isaTools/run assemble --isa ptx --output canonical.ptx kernel.ptx'
 ```
 
 Assembly tooling lives in each ISA’s `asm` package. Executable-input decoding stays shared, including PTX’s text parser.
+SASS accepts raw code sections or cubin executable sections for disassembly and emits raw code sections for assembly.
+Printed encoding annotations and legacy bundle directives preserve exact bytes; labels resolve to physical instruction addresses.
+PTX assembly emits canonical UTF-8 PTX text. `sbt 'isaTools/nvidiaRuntimeCheck'` freshly compiles PTX and SASS
+with their `asm` sources excluded and executes a kernel through each runtime.
 SPIR-V uses typed instructions and preserves binary headers when disassembled and reassembled.
 Text parsing/printing retains comments, normalizing their placement to statement boundaries;
 ordinary source comments have no representation in the binary output.
@@ -178,4 +233,3 @@ Coverage varies by target and operand form; unsupported forms fail explicitly.
 AMDGPU assembly resolves labels and local branch offsets and supports text, data, and alignment directives.
 ELF text relocations resolve local symbols; the API accepts external symbol and section addresses.
 Use `--wave-size 64` for wave64 matrix assembly/disassembly (default: 32).
-PTX input/output is canonical assembly text, not CUDA cubin/SASS.

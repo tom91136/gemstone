@@ -52,8 +52,6 @@ object ExecutionHandler {
       encode(request, service.kernel(program, name))
     case request @ Operation.DescribeImage(encoding, image, name) =>
       encode(request, service.describeImage(encoding, image, name))
-    case request @ Operation.Blas(blas) =>
-      encode(request, service.blas(blas))
     case request @ Operation.DescribeGlobal(program, name) =>
       encode(request, service.global(program, name))
     case request @ Operation.BindProgramGlobal(program, name, allocation, offset) =>

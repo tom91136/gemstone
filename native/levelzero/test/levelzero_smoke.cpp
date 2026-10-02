@@ -255,6 +255,46 @@ TEST_CASE("Level Zero completed memory hints release allocations before their ev
   }
 }
 
+TEST_CASE("Level Zero completed device memory hints release allocations before their fence", "[level-zero]") {
+  REQUIRE(zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS);
+  uint32_t count = 1;
+  ze_driver_handle_t driver = nullptr;
+  REQUIRE(zeDriverGet(&count, &driver) == ZE_RESULT_SUCCESS);
+  ze_device_handle_t device = nullptr;
+  REQUIRE(zeDeviceGet(driver, &count, &device) == ZE_RESULT_SUCCESS);
+  ze_context_desc_t contextDesc{};
+  contextDesc.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
+  ze_context_handle_t context = nullptr;
+  REQUIRE(zeContextCreate(driver, &contextDesc, &context) == ZE_RESULT_SUCCESS);
+  ze_command_queue_desc_t queueDesc{};
+  queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  queueDesc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+  ze_command_queue_handle_t queue = nullptr;
+  REQUIRE(zeCommandQueueCreate(context, device, &queueDesc, &queue) == ZE_RESULT_SUCCESS);
+  ze_command_list_desc_t listDesc{};
+  listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+  ze_command_list_handle_t list = nullptr;
+  REQUIRE(zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS);
+  ze_device_mem_alloc_desc_t allocationDesc{};
+  allocationDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+  void *memory = nullptr;
+  REQUIRE(zeMemAllocDevice(context, &allocationDesc, 64, 64, device, &memory) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendMemoryPrefetch(list, memory, 64) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendMemAdvise(list, device, memory, 64, ZE_MEMORY_ADVICE_SET_READ_MOSTLY) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListClose(list) == ZE_RESULT_SUCCESS);
+  ze_fence_desc_t fenceDesc{};
+  fenceDesc.stype = ZE_STRUCTURE_TYPE_FENCE_DESC;
+  ze_fence_handle_t fence = nullptr;
+  REQUIRE(zeFenceCreate(queue, &fenceDesc, &fence) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueExecuteCommandLists(queue, 1, &list, fence) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeFenceHostSynchronize(fence, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemFree(context, memory) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeFenceDestroy(fence) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
 TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
 

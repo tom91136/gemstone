@@ -79,12 +79,14 @@ elseif(CONFORMANCE_BACKEND STREQUAL "cuda")
     src/cuda/algorithms_f32.cu
     src/cuda/algorithms_f64.cu
     src/cuda/blas.cu
+    src/cuda/tensor.cu
+    src/cuda/mma884.cu
     src/cuda/edge.cu
     src/cuda/async.cu
     src/cuda/stress.cu
     src/cuda/regressions.cu)
   target_link_libraries(unified PRIVATE CUDA::cudart_static CUDA::cublas)
-  string(REPLACE ";" "," cuda_device_targets "${CMAKE_CUDA_ARCHITECTURES}")
+  string(REPLACE ";" "," cuda_device_targets "${conformance_cuda_architecture}")
   target_compile_definitions(unified PRIVATE CONFORMANCE_DEVICE_TARGETS="${cuda_device_targets}")
   set_target_properties(unified PROPERTIES
     CUDA_STANDARD 17
@@ -207,6 +209,45 @@ if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
   file(MAKE_DIRECTORY "${memory_output}")
   if(CONFORMANCE_BACKEND STREQUAL "cuda")
     set(memory_image "${memory_source}/cuda/kernel.ptx")
+    find_program(conformance_cuda_ptxas ptxas HINTS "${CUDAToolkit_BIN_DIR}" REQUIRED)
+    set(memory_cubin_architecture "${conformance_cuda_architecture}")
+    if(memory_cubin_architecture LESS 80)
+      set(memory_cubin_architecture 80)
+    endif()
+    foreach(fixture IN ITEMS kernel atomic fence contended)
+      set(cubin "${memory_output}/${fixture}.cubin")
+      set(header "${memory_output}/${fixture}_sass_image.hpp")
+      add_custom_command(OUTPUT "${cubin}"
+        COMMAND "${conformance_cuda_ptxas}" "-arch=sm_${memory_cubin_architecture}"
+          "${memory_source}/cuda/${fixture}.ptx" -o "${cubin}"
+        DEPENDS "${memory_source}/cuda/${fixture}.ptx" VERBATIM)
+      add_custom_command(OUTPUT "${header}"
+        COMMAND "${CMAKE_COMMAND}" "-DINPUT=${cubin}" "-DOUTPUT=${header}"
+          "-DSYMBOL=${fixture}_sass_image"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBinary.cmake"
+        DEPENDS "${cubin}" cmake/EmbedBinary.cmake VERBATIM)
+      target_sources(unified PRIVATE "${header}")
+    endforeach()
+    set(mma884_ptx "${memory_source}/cuda/mma884.ptx")
+    set(mma884_ptx_header "${memory_output}/mma884_ptx_image.hpp")
+    set(mma884_cubin "${memory_output}/mma884.cubin")
+    set(mma884_sass_header "${memory_output}/mma884_sass_image.hpp")
+    set(mma884_cubin_architecture "${conformance_cuda_architecture}")
+    if(mma884_cubin_architecture LESS 70)
+      set(mma884_cubin_architecture 70)
+    endif()
+    add_custom_command(OUTPUT "${mma884_ptx_header}"
+      COMMAND "${CMAKE_COMMAND}" "-DINPUT=${mma884_ptx}" "-DOUTPUT=${mma884_ptx_header}"
+        "-DSYMBOL=mma884_ptx_image" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBinary.cmake"
+      DEPENDS "${mma884_ptx}" cmake/EmbedBinary.cmake VERBATIM)
+    add_custom_command(OUTPUT "${mma884_cubin}"
+      COMMAND "${conformance_cuda_ptxas}" "-arch=sm_${mma884_cubin_architecture}" "${mma884_ptx}" -o "${mma884_cubin}"
+      DEPENDS "${mma884_ptx}" VERBATIM)
+    add_custom_command(OUTPUT "${mma884_sass_header}"
+      COMMAND "${CMAKE_COMMAND}" "-DINPUT=${mma884_cubin}" "-DOUTPUT=${mma884_sass_header}"
+        "-DSYMBOL=mma884_sass_image" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBinary.cmake"
+      DEPENDS "${mma884_cubin}" cmake/EmbedBinary.cmake VERBATIM)
+    target_sources(unified PRIVATE "${mma884_ptx_header}" "${mma884_sass_header}")
   else()
     set(memory_options -O1)
     if(CONFORMANCE_BACKEND MATCHES "^(hip|hsa)$")

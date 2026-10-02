@@ -1,13 +1,49 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMIR.*
 import execution.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
 class CallExecutionSuite extends munit.FunSuite {
+  test("address-taken device functions are retained without a direct call") {
+    val kernel = compileKernel(""".version 8.0
+      .target sm_80
+      .address_size 64
+      .func address_taken() { ret; }
+      .visible .entry main() {
+        .reg .b64 %function;
+        mov.b64 %function, address_taken;
+        ret;
+      }""")
+
+    assert(kernel.functions.keys.exists(_.raw == "address_taken"))
+  }
+
+  test("reachable direct calls are lowered before address-taken functions") {
+    val source = """.version 8.0
+      .target sm_80
+      .address_size 64
+      .func called() {
+        not_a_call_instruction.u32 %r0;
+        ret;
+      }
+      .func address_taken() {
+        not_an_address_instruction.u32 %r1;
+        ret;
+      }
+      .visible .entry main() {
+        .reg .b64 %function;
+        mov.b64 %function, address_taken;
+        call called, ();
+        ret;
+      }"""
+
+    assert(VMCompiler.compile(source).left.exists(_.message.contains("not_a_call_instruction")))
+  }
+
   test("device calls preserve thread coordinates") {
     val source = """.version 8.0
       .target sm_80
@@ -31,18 +67,19 @@ class CallExecutionSuite extends munit.FunSuite {
         }
         ret;
       }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(16)
-    val result = VMInterpreter.execute(
+    val result = execute(
       kernel,
-      geometry(blocks = 1, threads = 4),
+      1,
+      4,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assertEquals(result, Right(()))
     assertEquals(
       Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get),
-      Seq(0, 1, 2, 3)
+      Vec(0, 1, 2, 3)
     )
   }
 
@@ -80,11 +117,12 @@ class CallExecutionSuite extends munit.FunSuite {
         }
         ret;
       }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(8)
-    val result = VMInterpreter.execute(
+    val result = execute(
       kernel,
-      geometry(blocks = 1, threads = 2),
+      1,
+      2,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
@@ -115,11 +153,12 @@ class CallExecutionSuite extends munit.FunSuite {
         }
         ret;
       }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(4)
-    val result = VMInterpreter.execute(
+    val result = execute(
       kernel,
-      geometry(blocks = 1, threads = 1),
+      1,
+      1,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
@@ -158,13 +197,14 @@ class CallExecutionSuite extends munit.FunSuite {
         }
         ret;
       }"""
-    val kernel     = VMCompiler.compile(source).fold(error => fail(error.toString), value => value)
+    val kernel     = compileKernel(source)
     val memory     = ArrayCheckedMemory.allocate(4)
     val workgroups = RecordingWorkgroups()
     val control    = TaskControl()
-    val result     = VMInterpreter.execute(
+    val result     = execute(
       kernel,
-      geometry(blocks = 4, threads = 1),
+      4,
+      1,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory,
       control,

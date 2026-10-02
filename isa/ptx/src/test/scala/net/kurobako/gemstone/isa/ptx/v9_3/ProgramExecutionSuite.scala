@@ -44,9 +44,8 @@ class ProgramExecutionSuite extends munit.FunSuite {
       LaunchGeometry.Dimensions.One,
       Vec.empty
     ).fold(message => fail(message), value => value)
-    val result = first.execute(task, EmptyMemory(), TaskControl())
+    first.execute(task, EmptyMemory(), TaskControl())
       .fold(error => fail(error.message), value => value)
-    assertEquals(result, ())
   }
   test("cancellation during a backing read stays cancellation through PTX memory conversion") {
     class CancelledMemory extends EmptyMemory {

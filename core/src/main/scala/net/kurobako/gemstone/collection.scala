@@ -29,6 +29,29 @@ object collection {
 
     def tabulate[A: ClassTag](count: Int)(value: Int => A): Vec[A] = ArraySeq.tabulate(count)(value)
 
+    /** Construct a half-open integer range whose elements retain the compile-time bounds. Empty ranges are allowed;
+      * reversed ranges and ranges too large for an indexed Vec are rejected before allocation.
+      */
+    inline def range[From <: Int, Until <: Int](using
+        fromValue: ValueOf[From],
+        untilValue: ValueOf[Until],
+        tag: ClassTag[Int where (AtLeast[From] & LessThan[Until])]
+    ): Vec[Int where (AtLeast[From] & LessThan[Until])] = {
+      val from  = fromValue.value
+      val until = untilValue.value
+      if (from > until) throw IllegalArgumentException(s"invalid integer range [$from, $until)")
+      val count = until.toLong - from.toLong
+      if (count > Int.MaxValue.toLong)
+        throw IllegalArgumentException(s"integer range [$from, $until) exceeds Vec capacity")
+      ArraySeq.tabulate[Int where (AtLeast[From] & LessThan[Until])](count.toInt) { index =>
+        (from.toLong + index.toLong).toInt.unsafe[Int where (AtLeast[From] & LessThan[Until])]
+      }(using tag)
+    }
+
+    /** Generate the zero-based indexes for a runtime-sized sequence, retaining nonnegative evidence. */
+    def indices(count: Int >= 0): Vec[Int >= 0] =
+      ArraySeq.tabulate[Int >= 0](count.raw)(index => index.unsafe[Int >= 0])
+
     def newBuilder[A: ClassTag]: mutable.Builder[A, Vec[A]] = ArraySeq.newBuilder[A]
 
     extension [A: ClassTag](values: IterableOnce[A]) def toVec: Vec[A] = from(values)

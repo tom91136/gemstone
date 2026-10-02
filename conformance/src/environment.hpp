@@ -19,6 +19,10 @@ inline bool selection_environment_key(std::string_view key) {
 }
 inline bool reserved_environment_key(std::string_view key) {
   if (driver::suite_environment_key(key)) return false;
+  // CUDA code selection is an explicit machine-route setting, like suite-level
+  // knobs, and is consumed by the independent unified fixtures as well as the
+  // launched backend.
+  if (key == "CONFORMANCE_CUDA_CODE") return false;
   if (key.starts_with("CONFORMANCE_") || selection_environment_key(key)) return true;
   constexpr std::string_view keys[]{"PATH",
                                     "LD_LIBRARY_PATH",

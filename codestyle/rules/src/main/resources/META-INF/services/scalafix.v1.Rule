@@ -11,10 +11,12 @@ fix.GemstoneNoFinalClass
 fix.GemstoneFinalValPascalCase
 fix.GemstoneNoThen
 fix.GemstoneNoTypeCasting
+fix.GemstoneNoProductTraversal
 fix.GemstoneCompanionOrder
 fix.GemstoneSimplifyMatch
 fix.GemstoneCollectionIdioms
 fix.GemstoneCollectionNonEmpty
+fix.GemstoneFilterBeforeSorted
 fix.GemstoneRequireTailRec
 fix.GemstoneRedundantCollectionConversion
 fix.GemstoneRedundantCaseClassVal

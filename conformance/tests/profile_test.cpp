@@ -44,6 +44,8 @@ backend = "opencl"
 device = "*first*"
 environment = { SHARED = "target", LOCAL = "yes" }
 skips = ["local/case"]
+routeSkips = ["blas/*"]
+skipReason = "strict PTX excludes SASS-only vendor images"
 
 [[targets]]
 name = "second-opencl"
@@ -59,6 +61,8 @@ device = "*second*"
   CHECK(tests[0].environment.at("SHARED") == "target");
   CHECK(tests[0].environment.at("CONFORMANCE_DEVICE") == "*first*");
   CHECK(tests[0].environment.at("CONFORMANCE_SKIPS") == "global/case\nlocal/case");
+  CHECK(tests[0].routeSkips == std::vector<std::string>{"blas/*"});
+  CHECK(tests[0].skipReason == "strict PTX excludes SASS-only vendor images");
 
   const auto selected = conformance::profile::resolve_targets(resolved, {"second-opencl"});
   REQUIRE(selected.size() == 1);

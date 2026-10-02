@@ -144,10 +144,6 @@ Result<KernelMetadata> Client::call(const DescribeImage &request) {
   return implementation_->call<KernelMetadata>(operation::DescribeImage, request);
 }
 
-Result<BlasResult> Client::call(const Blas &request) {
-  return implementation_->call<BlasResult>(operation::Blas, request);
-}
-
 Result<ProgramGlobal> Client::call(const DescribeGlobal &request) {
   return implementation_->call<ProgramGlobal>(operation::DescribeGlobal, request);
 }

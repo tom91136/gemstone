@@ -17,6 +17,28 @@ class LoadedProgramSuite extends munit.FunSuite {
     assertEquals(actual.initial, Vec.from(Array.ofDim[Byte](16)))
   }
 
+  test("keeps global integer initializer suffix, radix, and truncation behavior") {
+    val source =
+      ".version 8.0\n.target sm_80\n.address_size 64\n" +
+        ".global .u8 values[4] = {255, 0xffu, 0b100000010, 18446744073709551617};\n"
+    val program = Parser.decode(source).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
+    val global  = loaded.global("values").fold(error => fail(error.message), identity)
+
+    assertEquals(global.initial.map(_.toInt), Vec(-1, -1, 2, 1))
+  }
+
+  test("keeps floating initializer bit-pattern and decimal conversion behavior") {
+    val source =
+      ".version 8.0\n.target sm_80\n.address_size 64\n" +
+        ".global .f32 values[2] = {0f3f800000, 1.5};\n"
+    val program = Parser.decode(source).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program).fold(error => fail(error.message), value => value)
+    val global  = loaded.global("values").fold(error => fail(error.message), identity)
+
+    assertEquals(global.initial.map(byte => byte & 0xff), Vec(0, 0, 128, 63, 0, 0, 192, 63))
+  }
+
   test("exposes aligned PTX kernel parameter offsets") {
     val source =
       ".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry layout(" +

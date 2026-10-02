@@ -16,6 +16,8 @@ struct ProfileTarget {
   std::map<std::string, std::string> environment;
   std::vector<std::string> skips;
   bool deviceLock = true;
+  std::vector<std::string> routeSkips;
+  std::optional<std::string> skipReason;
 };
 
 struct Profile {
@@ -33,6 +35,8 @@ struct ResolvedTarget {
   std::optional<std::string> architecture;
   std::map<std::string, std::string> environment;
   bool deviceLock = true;
+  std::vector<std::string> routeSkips;
+  std::optional<std::string> skipReason;
 };
 
 std::string local_hostname();

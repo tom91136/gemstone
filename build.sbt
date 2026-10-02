@@ -58,6 +58,20 @@ lazy val spirvPackage               = "v" + spirvVersion.replace('.', '_')
 
 lazy val referenceArtifacts = Vector(
   Fetch.Request(
+    id = "nvidia-nvdisasm-legacy",
+    fileName = "cuda-nvdisasm-11-8_11.8.86-1_amd64.deb",
+    url =
+      "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-nvdisasm-11-8_11.8.86-1_amd64.deb",
+    expectedSha256 = "81989cf87650ae3126693309f831fbe4332d415a5dc63c25ebb149eed562af70"
+  ),
+  Fetch.Request(
+    id = "nvidia-nvdisasm-modern",
+    fileName = "cuda-nvdisasm-13-3_13.3.73-1_amd64.deb",
+    url =
+      "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-nvdisasm-13-3_13.3.73-1_amd64.deb",
+    expectedSha256 = "6d103457281439a4a241baecc087a0e30eb33eb6a35b3f7b00c15a0b41aaec91"
+  ),
+  Fetch.Request(
     id = "llvm",
     fileName = s"llvm-project-$llvmVersion.src.tar.xz",
     url =
@@ -195,12 +209,22 @@ def referenceArtifact(id: String): Fetch.Request = {
 // Owned names and shared numeric defaults. Parsing belongs to each consumer.
 lazy val environmentVariables: Vector[(String, Option[Long])] = Vector(
   "BENCHMARK_JFR"                -> None,
+  "CUDA_CODE"                    -> None,
+  "CUDA_11_8_89"                 -> None,
+  "CUDA_11_8_89_IMAGE"           -> None,
+  "CUDA_13_3_33"                 -> None,
+  "CUDA_13_3_33_IMAGE"           -> None,
+  "CUDA_13_3_73"                 -> None,
+  "CUDA_13_3_73_IMAGE"           -> None,
   "OFFLINE"                      -> None,
   "EXECUTION_MAX_INSTRUCTIONS"   -> None,
   "EXECUTION_PARALLELISM"        -> None,
   "HSA_PAGING_TIMEOUT_SECONDS"   -> None,
   "HSA_REJECTED_CODE_OBJECT"     -> None,
   "NATIVE_DIRECTORY"             -> None,
+  "NVDISASM_11_8_86"             -> None,
+  "NVDISASM_13_2_78"             -> None,
+  "NVDISASM_13_3_73"             -> None,
   "OPENCL_COMPILER"              -> None,
   "OPENCL_LLVM_LINK"             -> None,
   "OPENCL_LLVM_SPIRV"            -> None,
@@ -216,6 +240,7 @@ lazy val environmentVariables: Vector[(String, Option[Long])] = Vector(
   "SYSTEM_PAGING"                -> None,
   "TARGET_ARCH"                  -> None,
   "TRACE"                        -> None,
+  "VERIFY_FIXTURES"              -> None,
   "VULKAN_API_VERSION"           -> None,
   "VULKAN_VALIDATE_ALLOCATORS"   -> None,
   "VULKAN_DUMP"                  -> None,
@@ -556,6 +581,31 @@ lazy val tablegenReferenceBundle = ReferenceBundle(
   verify = output => require((output / "llvm/utils/TableGen/CMakeLists.txt").isFile, "LLVM TableGen sources are absent")
 )
 
+lazy val sassTools = Vector(
+  ("legacy", "11.8", "89a8a64006f0b0667305e42a5f684be10493a33db4bf31df696b9ce85965f835"),
+  ("modern", "13.3", "5842e6adf9e232c9503a804915f158a576473e542577c070da3be49390474140")
+)
+
+lazy val sassToolsReferenceBundle = ReferenceBundle(
+  name = "sass-tools",
+  recipeRevision = "1",
+  artifacts = referenceArtifactsNamed("nvidia-nvdisasm-legacy", "nvidia-nvdisasm-modern"),
+  populate = (cached, stage) =>
+    sassTools.foreach { case (generation, version, _) =>
+      val relative = path"usr/local" / s"cuda-$version" / "bin/nvdisasm"
+      Compress.extractDebXz(cached(s"nvidia-nvdisasm-$generation"), stage / generation, _ == relative)
+      val executable = stage / generation / relative
+      require(executable.toFile.setExecutable(true), s"cannot mark $executable executable")
+    },
+  verify = output =>
+    sassTools.foreach { case (generation, version, digest) =>
+      require(
+        Fetch.sha256(output / generation / s"usr/local/cuda-$version/bin/nvdisasm") == digest,
+        s"$generation nvdisasm hash mismatch"
+      )
+    }
+)
+
 lazy val amdgpuReferenceBundle = ReferenceBundle(
   name = "amdgpu",
   recipeRevision = "4",
@@ -657,6 +707,7 @@ lazy val nativeBindingsDirectory     = settingKey[Path]("Checked-in generated na
 lazy val prepareAPIReferences        = taskKey[Path]("Prepare pinned API and native-header references.")
 lazy val preparePTXReferences        = taskKey[Path]("Prepare the pinned PTX reference.")
 lazy val llvmTablegen                = taskKey[Path]("Build the pinned LLVM TableGen used for ISA metadata.")
+lazy val prepareSASSReferences       = taskKey[Path]("Recover and verify pinned SASS descriptions.")
 lazy val prepareAMDGPUReferences     = taskKey[Path]("Prepare pinned AMDGPU references.")
 lazy val prepareSPIRVReferences      = taskKey[Path]("Prepare pinned SPIR-V references.")
 lazy val generateOfficialAPIManifest =
@@ -667,6 +718,8 @@ lazy val generateExecutionRPC =
   taskKey[Seq[Path]]("Generate the typed native execution RPC client.")
 lazy val generatePTXSources =
   taskKey[Seq[Path]]("Update checked-in PTX sources and reference tests.")
+lazy val generateSASSSources =
+  taskKey[Seq[Path]]("Update shared SASS instruction forms and target-specific descriptions.")
 lazy val generateAMDGPUSources =
   taskKey[Seq[Path]]("Update checked-in AMDGPU sources and oracle fixtures.")
 lazy val generateAPISources =
@@ -745,6 +798,8 @@ lazy val commonSettings = Seq(
     "3.9"
   ),
   scalacOptions += "-Wunused:all",
+  // Architecture reports guide ownership decisions; source cycles are not compilation failures.
+  scalacOptions += "-P:acyclic:warn",
   Compile / scalafixConfig               := Some(file(".scalafix.conf")),
   Test / scalafixConfig                  := Some(file(".scalafix.conf")),
   libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
@@ -784,7 +839,57 @@ def checkedInGeneratedSources = Seq(
   Compile / unmanagedSourceDirectories += (Compile / checkedInGeneratedSourceDirectory).value,
   Test / unmanagedSourceDirectories += (Test / checkedInGeneratedSourceDirectory).value,
   Compile / unmanagedResourceDirectories += (Compile / checkedInGeneratedResourceDirectory).value,
-  Test / unmanagedResourceDirectories += (Test / checkedInGeneratedResourceDirectory).value
+  Test / unmanagedResourceDirectories += (Test / checkedInGeneratedResourceDirectory).value,
+  // `copyResourcesTask` keys its sync cache from resource paths. Add content
+  // digests so replacing a checked-in generated resource refreshes the classpath copy.
+  Compile / copyResources := Def.task {
+    val _        = (Compile / resourcesVF).value
+    val mappings = (Compile / copyResources).value
+    mappings.foreach { case (source, target) =>
+      val sourcePath = source.toPath
+      val targetPath = target.toPath
+      if (
+        sourcePath != targetPath &&
+        (!Files.isRegularFile(targetPath) || Files.mismatch(sourcePath, targetPath) != -1L)
+      ) {
+        Option(targetPath.getParent).foreach { parent =>
+          val _ = Files.createDirectories(parent)
+        }
+        val _ = Files.copy(sourcePath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+      }
+    }
+    mappings
+  }.value,
+  Test / copyResources := Def.task {
+    val _        = (Test / resourcesVF).value
+    val mappings = (Test / copyResources).value
+    mappings.foreach { case (source, target) =>
+      val sourcePath = source.toPath
+      val targetPath = target.toPath
+      if (
+        sourcePath != targetPath &&
+        (!Files.isRegularFile(targetPath) || Files.mismatch(sourcePath, targetPath) != -1L)
+      ) {
+        Option(targetPath.getParent).foreach { parent =>
+          val _ = Files.createDirectories(parent)
+        }
+        val _ = Files.copy(sourcePath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+      }
+    }
+    mappings
+  }.value,
+  // sbt 2's products task includes resource directories but does not copy them
+  // into classDirectory. Ensure the Sync copy runs when either classpath is built.
+  Compile / products := Def.task {
+    val outputs = (Compile / products).value
+    val _       = (Compile / copyResources).value
+    outputs
+  }.value,
+  Test / products := Def.task {
+    val outputs = (Test / products).value
+    val _       = (Test / copyResources).value
+    outputs
+  }.value
 )
 
 lazy val generateNativeBindings =
@@ -903,13 +1008,45 @@ lazy val api = projectMatrix
   .jvmPlatform(scalaVersions = Seq(scala3Version))
   .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
 
+lazy val nvidiaRuntimeCheck = taskKey[Unit]("Freshly compile and execute NVIDIA runtimes without assembly packages")
+
 lazy val isaTools = project.in(file("tools/isa"))
   .disablePlugins(Stryker4sPlugin)
-  .dependsOn(ptx.jvm(scala3Version), amdgpu.jvm(scala3Version), spirv.jvm(scala3Version))
+  .dependsOn(ptx.jvm(scala3Version), sass.jvm(scala3Version), amdgpu.jvm(scala3Version), spirv.jvm(scala3Version))
   .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
-    name                                  := "gemstone-isa-tools",
+    name               := "gemstone-isa-tools",
+    nvidiaRuntimeCheck := Def.uncached {
+      val root         = (LocalRootProject / baseDirectory).value.toPath
+      val converter    = fileConverter.value
+      val log          = streams.value.log
+      val dependencies = (ptx.jvm(scala3Version) / Compile / dependencyClasspath).value ++
+        (sass.jvm(scala3Version) / Compile / dependencyClasspath).value
+      val runtimeSources = (ptx.jvm(scala3Version) / Compile / sources).value ++
+        (sass.jvm(scala3Version) / Compile / sources).value
+      val resources = (core.jvm(scala3Version) / Compile / resourceDirectories).value ++
+        (nvidia.jvm(scala3Version) / Compile / resourceDirectories).value ++
+        (ptx.jvm(scala3Version) / Compile / resourceDirectories).value ++
+        (sass.jvm(scala3Version) / Compile / resourceDirectories).value
+      NvidiaRuntimeBoundary.check(
+        root = root,
+        java = javaHome.value.map(_.toPath).getOrElse(path"${sys.props("java.home")}") / "bin/java",
+        compilerClasspath = scalaInstance.value.allJars.toSeq.map(_.toPath),
+        dependencyClasspath = dependencies.map(entry => converter.toPath(entry.data)),
+        productionSources = runtimeSources.map(_.toPath),
+        harnessSources = (root / "tools/isa/src/test/scala").descendants("*RuntimeCheck.scala"),
+        resourceDirectories = resources.map(_.toPath),
+        scalacOptions = (sass.jvm(scala3Version) / Compile / scalacOptions).value.map {
+          case s"-Xplugin:$paths" =>
+            "-Xplugin:" + paths.split(java.io.File.pathSeparatorChar)
+              .map(path => converter.toPath(xsbti.VirtualFileRef.of(path))).mkString(java.io.File.pathSeparator)
+          case option => option
+        },
+        log = log.info,
+        error = log.error
+      )
+    },
     publish / skip                        := true,
     Compile / mainClass                   := Some(s"$rootPackage.tools.isa.CLI"),
     libraryDependencies += "com.monovore" %% "decline" % declineVersion
@@ -931,7 +1068,8 @@ lazy val codegenProject = Project("codegen", file("tools/codegen"))
 
       "com.monovore"  %% "decline"       % declineVersion,
       "org.scalameta" %% "scalafmt-core" % scalafmtVersion,
-      "org.typelevel" %% "cats-core"     % catsCoreVersion
+      "org.typelevel" %% "cats-core"     % catsCoreVersion,
+      "org.typelevel" %% "cats-parse"    % catsParseVersion
     ),
     prepareAPIReferences := Def.uncached {
       apiReferenceBundle.prepare(
@@ -979,6 +1117,32 @@ lazy val codegenProject = Project("codegen", file("tools/codegen"))
         target = Some("llvm-min-tblgen")
       )
       build / "bin/llvm-min-tblgen"
+    },
+    prepareSASSReferences := Def.uncached {
+      val converter = fileConverter.value
+      val log       = streams.value.log
+      val tools     = sassToolsReferenceBundle.prepare(
+        cacheDirectory = (Global / isaReferenceCacheDirectory).value,
+        outputRoot = target.value / "isa-references",
+        offline = (Global / offlineMode).value,
+        log = log.info
+      )
+      val output = target.value / "isa-references/sass"
+      (Compile / runner).value.run(
+        "net.kurobako.gemstone.codegen.ExtractSASS",
+        (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data)),
+        Vector("--bundle", s"${tools / "MANIFEST.tsv"}", "--output", s"$output") ++
+          sassTools.flatMap { case (generation, version, digest) =>
+            Vector(
+              s"--$generation",
+              s"${tools / generation / s"usr/local/cuda-$version/bin/nvdisasm"}",
+              s"--$generation-sha",
+              digest
+            )
+          },
+        log
+      ).get
+      output
     },
     prepareAMDGPUReferences := Def.uncached {
       amdgpuReferenceBundle.prepare(
@@ -1261,19 +1425,60 @@ lazy val native = project.in(file("native"))
     cleanFiles := Seq((LocalRootProject / baseDirectory).value / "target/native")
   )
 
+lazy val nvidia = projectMatrix
+  .dependsOn(testSupport % "test->compile")
+  .disablePlugins(Stryker4sPlugin)
+  .in(file("isa/nvidia"))
+  .dependsOn(core)
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
+  .settings(commonSettings, name := "gemstone-isa-nvidia")
+  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
+
+lazy val sass = projectMatrix
+  .dependsOn(testSupport % "test->compile")
+  .disablePlugins(Stryker4sPlugin)
+  .in(file("isa/sass"))
+  .dependsOn(core, nvidia % "compile->compile;test->test")
+  .dependsOn(ptx % "test->compile")
+  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
+  .settings(
+    commonSettings,
+    checkedInGeneratedSources,
+    name := "gemstone-isa-sass",
+    libraryDependencies ++= Seq(
+      "org.typelevel" %% "cats-core" % catsCoreVersion
+    ),
+    generateSASSSources := Def.uncached {
+      val converter  = fileConverter.value
+      val references = (codegenProject / prepareSASSReferences).value
+      val sourceRoot = (Compile / checkedInGeneratedSourceDirectory).value
+      val resources  = (Compile / checkedInGeneratedResourceDirectory).value
+      (codegenProject / Compile / runner).value.run(
+        s"$rootPackage.codegen.GenerateSASSISA",
+        (codegenProject / Compile / fullClasspath).value.map(entry => converter.toPath(entry.data)),
+        Seq(s"$references", s"$sourceRoot", s"$resources"),
+        streams.value.log
+      ).get
+      (sourceRoot / "net/kurobako/gemstone/isa/sass").descendants("*.scala") ++
+        (resources / "net/kurobako/gemstone/isa/sass").walk()
+    }
+  )
+  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
+
 lazy val ptx = projectMatrix
   .dependsOn(testSupport % "test->compile")
   .disablePlugins(Stryker4sPlugin)
   .in(file("isa/ptx"))
-  .dependsOn(core)
+  .dependsOn(core, nvidia % "compile->compile;test->test")
   .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
     checkedInGeneratedSources,
     name := "gemstone-isa-ptx",
     libraryDependencies ++= Seq(
-      "org.typelevel" %% "cats-core"  % catsCoreVersion,
-      "org.typelevel" %% "cats-parse" % catsParseVersion
+      "org.typelevel" %% "cats-core" % catsCoreVersion
     ),
     generatePTXSources := Def.uncached {
       val converter  = fileConverter.value
@@ -1308,7 +1513,17 @@ lazy val ptx = projectMatrix
         ),
         log
       ).get
-      val outputs = (sourceRoot.descendants("*.scala") ++ testRoot.descendants("*.scala")).filter(_.isFile)
+      val testResources      = (Test / checkedInGeneratedResourceDirectory).value
+      val conformanceSources = (LocalRootProject / baseDirectory).value / "conformance/unified/src/cuda"
+      run.run(
+        s"$rootPackage.codegen.GenerateMMA884Oracle",
+        classpath,
+        Seq(s"$testRoot", s"$testResources", s"$conformanceSources"),
+        log
+      ).get
+      val outputs =
+        (sourceRoot.descendants("*.scala") ++ testRoot.descendants("*.scala") ++ (testResources / "mma884").walk() ++
+          Seq(conformanceSources / "mma884.ptx")).filter(_.isFile)
       require(outputs.nonEmpty, "PTX generator outputs are incomplete")
       outputs
     }
@@ -1471,7 +1686,8 @@ lazy val server = projectMatrix
   .dependsOn(testSupport % "test->compile")
   .disablePlugins(Stryker4sPlugin)
   .in(file("server"))
-  .dependsOn(core, ptx, amdgpu, spirv)
+  .dependsOn(core, ptx, sass % "compile->compile;test->test", amdgpu, spirv)
+  .dependsOn(nvidia % "test->test")
   .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
@@ -1511,7 +1727,7 @@ lazy val server = projectMatrix
 lazy val benchmarks = projectMatrix.in(file("tools/benchmarks"))
   .dependsOn(testSupport % "test->compile")
   .disablePlugins(Stryker4sPlugin)
-  .dependsOn(core, ptx, amdgpu, spirv, server)
+  .dependsOn(core, ptx, sass, amdgpu, spirv, server)
   .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
@@ -1730,7 +1946,10 @@ lazy val conformance = project.in(file("conformance"))
           environmentName("EXECUTION_MAX_INSTRUCTIONS"),
           conformanceMaxInstructions
         )
-      )
+      ) ++ Seq("CUDA_CODE", "TRACE").flatMap { key =>
+        val name = environmentName(key)
+        sys.env.get(name).map(name -> _)
+      }
       val mainClass = s"$rootPackage.server.CLI"
       val classpath = (server.jvm(scala3Version) / Runtime / fullClasspath).value
         .map(entry => converter.toPath(entry.data))
@@ -1786,6 +2005,8 @@ lazy val gemstone = project.in(file("."))
   .aggregate(core.projectRefs *)
   .aggregate(server.projectRefs *)
   .aggregate(ptx.projectRefs *)
+  .aggregate(sass.projectRefs *)
+  .aggregate(nvidia.projectRefs *)
   .aggregate(amdgpu.projectRefs *)
   .aggregate(spirv.projectRefs *)
   .aggregate(benchmarks.projectRefs *)
@@ -1802,6 +2023,11 @@ lazy val gemstone = project.in(file("."))
       title = "Gemstone JVM",
       entries = Seq(
         Coverage.Entry(core.jvm(scala3Version).id),
+        Coverage.Entry(nvidia.jvm(scala3Version).id),
+        Coverage.Entry(
+          sass.jvm(scala3Version).id,
+          generated = Seq((sass.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
+        ),
         Coverage.Entry(
           amdgpu.jvm(scala3Version).id,
           generated = Seq((amdgpu.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
@@ -1830,9 +2056,10 @@ lazy val gemstone = project.in(file("."))
       output = baseDirectory.value / "target" / "coverage"
     ),
     terminologyCheck := Def.uncached {
-      val root       = baseDirectory.value.absolute
-      val prohibited = Codestyle.wordVariants("contract")
-      val rules      = Seq(Codestyle.prohibitedTerm(prohibited, "prohibited vague terminology"))
+      val root  = baseDirectory.value.absolute
+      val rules = Seq("contract", "plan").map(term =>
+        Codestyle.prohibitedTerm(Codestyle.wordVariants(term), "prohibited vague terminology")
+      )
       val sources    = Sources.authored(root, exclude = _.getFileName.toString == "build.sbt")
       val violations = Codestyle.scan(sources, rules, root)
       violations.foreach(violation => streams.value.log.error(violation.render))
@@ -1843,10 +2070,13 @@ lazy val gemstone = project.in(file("."))
       val root      = baseDirectory.value
       val apiDir    = (api.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
       val ptxDir    = (ptx.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
+      val sassDir   = (sass.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
       val amdgpuDir = (amdgpu.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
       val spirvDir  = (spirv.jvm(scala3Version) / projectMatrixBaseDirectory).value.absolute / "src" / "generated"
       val nativeDir = (codegenProject / nativeBindingsDirectory).value
-      val generated = Seq(apiDir, ptxDir, amdgpuDir, spirvDir, nativeDir, root / "core/src/generated")
+      val mma884Conformance = root / "conformance/unified/src/cuda/mma884.ptx"
+      val generated = Seq(apiDir, ptxDir, sassDir, amdgpuDir, spirvDir, nativeDir, root / "core/src/generated") :+
+        mma884Conformance
       def snapshot(): Map[Path, String] =
         generated.flatMap(_.walk()).map(path => path -> Fetch.sha256(path)).toMap
       val before = snapshot()
@@ -1867,6 +2097,7 @@ lazy val gemstone = project.in(file("."))
         codegenProject / generateNativeBindings,
         codegenProject / generateExecutionRPC,
         ptx.jvm(scala3Version) / generatePTXSources,
+        sass.jvm(scala3Version) / generateSASSSources,
         amdgpu.jvm(scala3Version) / generateAMDGPUSources,
         spirv.jvm(scala3Version) / generateSPIRVSources
       ).value

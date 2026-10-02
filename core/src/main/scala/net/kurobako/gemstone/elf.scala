@@ -8,6 +8,59 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 
 object elf {
+  def hasMagic(bytes: Vec[Byte]): Boolean =
+    bytes.size >= 4 && bytes(0) == 0x7f && bytes(1) == 'E' && bytes(2) == 'L' && bytes(3) == 'F'
+
+  case class Header64(byteOrder: ByteOrder, imageType: Int, machine: Int, abiVersion: Int, flags: Int, names: Int)
+  case class Symbol64(nameOffset: Int, kind: Int, section: Int, value: Long, size: Long)
+
+  def header64(bytes: Array[Byte]): Either[NonEmpty[String], Header64] =
+    if (bytes.length < 64 || !hasMagic(Vec.unsafeWrapArray(bytes)) || bytes(4) != 2)
+      Left("expected an ELF64 image")
+    else if (bytes(5) != 1 && bytes(5) != 2) Left("invalid ELF byte order")
+    else {
+      val order  = if (bytes(5) == 1) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
+      val buffer = ByteBuffer.wrap(bytes).order(order)
+      Right(Header64(
+        order,
+        buffer.getShort(16) & 0xffff,
+        buffer.getShort(18) & 0xffff,
+        bytes(8) & 0xff,
+        buffer.getInt(48),
+        buffer.getShort(62) & 0xffff
+      ))
+    }
+
+  def sectionBytes(image: Array[Byte], section: SectionHeader): Either[NonEmpty[String], Vec[Byte]] =
+    if (section.sectionType == 8) Right(Vec.empty)
+    else if (!ByteRange.contains(image.length, section.offset.toLong, section.size.toLong))
+      Left("ELF section exceeds image")
+    else Right(Vec.unsafeWrapArray(image.slice(section.offset, section.offset + section.size)))
+
+  def stringAt(bytes: Vec[Byte], offset: Int): Either[NonEmpty[String], String] =
+    if (offset < 0 || offset >= bytes.size) Left("invalid ELF string offset")
+    else {
+      val end = bytes.indexOf(0.toByte, offset)
+      if (end < offset) Left("unterminated ELF string")
+      else string.UTF8.decode(bytes.slice(offset, end)).left.map(_.message)
+    }
+
+  def symbols64(bytes: Vec[Byte], byteOrder: ByteOrder, stride: Int = 24): Either[NonEmpty[String], Vec[Symbol64]] =
+    if (stride < 24 || bytes.size % stride != 0) Left("invalid ELF64 symbol table stride")
+    else {
+      val buffer = ByteBuffer.wrap(Vec.toArray(bytes)).order(byteOrder)
+      Right(Vec.tabulate(bytes.size / stride) { index =>
+        val start = index * stride
+        Symbol64(
+          buffer.getInt(start),
+          buffer.get(start + 4) & 15,
+          buffer.getShort(start + 6) & 0xffff,
+          buffer.getLong(start + 8),
+          buffer.getLong(start + 16)
+        )
+      })
+    }
+
   case class SectionHeader(
       nameOffset: Int,
       sectionType: Int,
@@ -20,13 +73,7 @@ object elf {
       entrySize: Int
   )
   def sections64(bytes: Array[Byte]): Either[NonEmpty[String], Vec[SectionHeader]] =
-    if (bytes.length < 64 || bytes(0) != 0x7f || bytes(1) != 'E' || bytes(2) != 'L' || bytes(3) != 'F' || bytes(4) != 2)
-      Left("expected an ELF64 image")
-    else if (bytes(5) != 1 && bytes(5) != 2) Left("invalid ELF byte order")
-    else readSections(
-      ByteBuffer.wrap(bytes).order(if (bytes(5) == 1) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN),
-      bytes.length
-    )
+    header64(bytes).flatMap(header => readSections(ByteBuffer.wrap(bytes).order(header.byteOrder), bytes.length))
 
   private def intValue(value: Long, name: String): Either[NonEmpty[String], Int] =
     Either.cond(value >= 0 && value <= Int.MaxValue, value.toInt, s"$name exceeds supported range")

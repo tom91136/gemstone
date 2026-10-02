@@ -47,6 +47,26 @@ class StringSuite extends munit.FunSuite {
     }
   }
 
+  test("shared UTF-8 conversion is strict, keeps NUL, and reports byte offsets") {
+    val text  = "nul\u0000 and astral 😀"
+    val bytes = UTF8.encode(text).fold(error => fail(error.message), identity)
+    assertEquals(UTF8.decode(bytes), Right(text))
+
+    val invalid = Array[Byte](65, 0xe2.toByte, 0x82.toByte)
+    UTF8.decode(invalid, 0, invalid.length) match {
+      case Left(error)  => assertEquals(error.offset.raw, 1)
+      case Right(value) => fail(s"accepted malformed UTF-8: $value")
+    }
+
+    assertEquals(UTF8.decode(Array[Byte](0, 0xc3.toByte, 0x28.toByte), 1, 2).left.map(_.offset.raw), Left(1))
+    assertEquals(UTF8.encode("é\ud800").left.map(_.offset.raw), Left(2))
+
+    UTF8.encode("bad\ud800") match {
+      case Left(error)  => assertEquals(error.offset.raw, 3)
+      case Right(value) => fail(s"accepted malformed UTF-16: $value")
+    }
+  }
+
   test("case conversion handles Unicode and empty strings") {
     assertEquals("Straße".toUpperCaseRoot, "STRASSE")
     assertEquals("ÉCOLE".toLowerCaseRoot, "école")

@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import OperandDomains.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 
@@ -28,14 +29,14 @@ object Operand {
 /** Lossless syntax used by generated, opcode-specific [[Instruction]] cases. */
 enum Operand {
   case Immediate(raw: NonEmpty[String])
-  case Register(name: NonEmpty[String], part: Option[NonEmpty[String]])
+  case Register(name: NonEmpty[String], part: Option[RegisterPart])
   case Symbol(name: NonEmpty[String])
   case StringLiteral(rawContents: String)
   case Qualifier(path: NonEmpty[Vec[NonEmpty[String]]])
   case VectorLiteral(items: Vec[Operand])
   case Parenthesized(items: Vec[Operand])
   case Address(items: Vec[Operand])
-  case Qualified(base: Operand, qualifier: NonEmpty[String])
+  case Qualified(base: Operand, qualifier: QualifiedOperand)
   case Index(base: Operand, index: Operand)
   case Add(left: Operand, right: Operand)
   case Subtract(left: Operand, right: Operand)

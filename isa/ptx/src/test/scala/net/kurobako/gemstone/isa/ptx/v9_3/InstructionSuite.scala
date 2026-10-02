@@ -1,20 +1,63 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import Program.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.ptx.v9_3.asm.*
 
 /** Verifies the generated PTX instruction sum type and its colocated decoders. */
 class InstructionSuite extends munit.FunSuite {
+  test("typed modifiers preserve duplicate types, fixed suffix order and vendor syntax") {
+    def instruction(source: String): Instruction = Parser.parseStatement(source) match {
+      case Right(Statement.Instruction(value)) => value
+      case other                               => fail(s"unexpected parse result: $other")
+    }
+    val conversion = instruction("cvt.rn.f32.f32 %d, %a;")
+    assertEquals(conversion.mods, Vec(Modifier.Rn, Modifier.F32, Modifier.F32))
+    val load = instruction("wmma.load.a.sync.aligned.row.m16n16k16.global.f16 {%r0}, [%p], 16;")
+    assertEquals(
+      load.fixedModifiers ++ load.mods,
+      Vec(
+        Modifier.Load,
+        Modifier.A,
+        Modifier.Sync,
+        Modifier.Aligned,
+        Modifier.Row,
+        Modifier.M16n16k16,
+        Modifier.Global,
+        Modifier.F16
+      )
+    )
+    val vendor = instruction("mov.vendor_extension.u32 %d, %a;")
+    assertEquals(
+      vendor.mods,
+      Vec(
+        Modifier.Unrecognized("vendor_extension".refine[NonEmpty[String]].fold(error => fail(error.raw), identity)),
+        Modifier.U32
+      )
+    )
+    assertEquals(instruction(Printer.render(vendor)), vendor)
+    assert(Parser.parseStatement("mov..u32 %d, %a;").isLeft)
+  }
+
   test("case fields and enum constructor expose one instruction model") {
     val dest        = Operand.Register("%d", None)
     val srcA        = Operand.Register("%a", None)
     val instruction =
-      Instruction.Abs(dest = dest, srcA = srcA, mods = Vec(Modifier("s32")), pred = None)
+      Instruction.Abs(
+        dest = dest,
+        srcA = srcA,
+        mods = Vec(Modifier("s32".refine[NonEmpty[String]].fold(error => fail(error.raw), identity))),
+        pred = None
+      )
 
     assertEquals(instruction.opcode, "abs")
     assertEquals(instruction.definition, Instruction.Definition.Abs)
-    assertEquals(instruction.operands, Seq(dest, srcA))
-    assertEquals(instruction.mods, Seq(Modifier("s32")))
+    assertEquals(instruction.operands, Vec(dest, srcA))
+    assertEquals(
+      instruction.mods,
+      Vec(Modifier("s32".refine[NonEmpty[String]].fold(error => fail(error.raw), identity)))
+    )
     assertEquals(instruction.pred, None)
     assertEquals(instruction.qualifiedOpcode, "abs.s32")
     assert(instruction.meta.entries.nonEmpty)
@@ -28,8 +71,7 @@ class InstructionSuite extends munit.FunSuite {
     val opcodes = Instruction.definitions.map(_.opcode).distinct.sorted
 
     assert(Instruction.definitions.nonEmpty)
-    // Independent count for the pinned PTX 9.3 input; catches accidentally omitted generated definitions.
-    assertEquals(opcodes.size, 195)
+    assertEquals(opcodes.size, 209)
     opcodes.foreach { opcode =>
       val forms =
         Instruction.definitions.filter(_.opcode == opcode).flatMap(_.meta.entries).flatMap(_.forms)
@@ -52,7 +94,7 @@ class InstructionSuite extends munit.FunSuite {
     )
     Instruction.decode("add", Vec(Operand.Symbol("destination"))) match {
       case Left(Instruction.DecodeError.InvalidOperandCount("add", expected, 1)) =>
-        assertEquals(expected, Seq(3))
+        assertEquals(expected, Vec(3))
       case value => fail(s"unexpected result: $value")
     }
   }

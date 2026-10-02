@@ -916,27 +916,27 @@ TEST_CASE("Vulkan descriptor views enforce their declared range") {
   REQUIRE_FALSE(gemstoneVulkanDescriptorLength(64, 60, 8));
 }
 
-TEST_CASE("Vulkan descriptor allocation planning preserves overlapping aliases") {
+TEST_CASE("Vulkan descriptor allocation layout preserves overlapping aliases") {
   const auto first = reinterpret_cast<VkDeviceMemory>(0x1000);
   const auto second = reinterpret_cast<VkDeviceMemory>(0x2000);
-  const auto plan = gemstoneVulkanDescriptorAllocationPlan({
+  const auto layout = gemstoneVulkanDescriptorAllocationLayout({
       {first, 16, 16},
       {first, 24, 16},
       {first, 64, 8},
       {second, 0, 4},
   });
-  REQUIRE(plan.allocations.size() == 3);
-  REQUIRE(plan.allocations[0].memory == first);
-  REQUIRE(plan.allocations[0].offset == 16);
-  REQUIRE(plan.allocations[0].size == 24);
-  REQUIRE(plan.arguments[0].allocation == plan.arguments[1].allocation);
-  REQUIRE(plan.arguments[0].offset == 0);
-  REQUIRE(plan.arguments[1].offset == 8);
-  REQUIRE(plan.arguments[2].allocation != plan.arguments[0].allocation);
-  REQUIRE(plan.arguments[3].allocation != plan.arguments[0].allocation);
+  REQUIRE(layout.allocations.size() == 3);
+  REQUIRE(layout.allocations[0].memory == first);
+  REQUIRE(layout.allocations[0].offset == 16);
+  REQUIRE(layout.allocations[0].size == 24);
+  REQUIRE(layout.arguments[0].allocation == layout.arguments[1].allocation);
+  REQUIRE(layout.arguments[0].offset == 0);
+  REQUIRE(layout.arguments[1].offset == 8);
+  REQUIRE(layout.arguments[2].allocation != layout.arguments[0].allocation);
+  REQUIRE(layout.arguments[3].allocation != layout.arguments[0].allocation);
 }
 
-TEST_CASE("Vulkan descriptor allocation planning merges chains independent of input order") {
+TEST_CASE("Vulkan descriptor allocation layout merges chains independent of input order") {
   const auto first = reinterpret_cast<VkDeviceMemory>(0x1000);
   const auto second = reinterpret_cast<VkDeviceMemory>(0x2000);
   // The bridge appears last, after nested, disjoint, touching and other-memory views.
@@ -947,12 +947,12 @@ TEST_CASE("Vulkan descriptor allocation planning merges chains independent of in
     std::vector<GemstoneVulkanDescriptorRange> shuffled;
     for (const auto i : order)
       shuffled.push_back(ranges[i]);
-    const auto plan = gemstoneVulkanDescriptorAllocationPlan(shuffled);
-    REQUIRE(plan.allocations.size() == 4);
+    const auto layout = gemstoneVulkanDescriptorAllocationLayout(shuffled);
+    REQUIRE(layout.allocations.size() == 4);
     for (size_t i = 0; i < order.size(); ++i) {
       const auto &input = shuffled[i];
-      const auto &argument = plan.arguments[i];
-      const auto &allocation = plan.allocations.at(argument.allocation);
+      const auto &argument = layout.arguments[i];
+      const auto &allocation = layout.allocations.at(argument.allocation);
       const bool merged = order[i] == 0 || order[i] == 1 || order[i] == 2 || order[i] == 6;
       REQUIRE(allocation.memory == input.memory);
       REQUIRE(allocation.offset == (merged ? 0 : input.offset));
@@ -960,7 +960,7 @@ TEST_CASE("Vulkan descriptor allocation planning merges chains independent of in
       REQUIRE(allocation.offset + argument.offset == input.offset);
     }
   } while (std::next_permutation(order.begin(), order.end()));
-  const auto empty = gemstoneVulkanDescriptorAllocationPlan({});
+  const auto empty = gemstoneVulkanDescriptorAllocationLayout({});
   REQUIRE(empty.allocations.empty());
   REQUIRE(empty.arguments.empty());
 }

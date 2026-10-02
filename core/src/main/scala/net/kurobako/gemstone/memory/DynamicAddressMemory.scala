@@ -65,6 +65,20 @@ class DynamicAddressMemory(
     delegate.prepareReads(external)
   }
 
+  override def prepareSystemReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[MemoryError, Unit] = {
+    val external = lock.withLock {
+      ranges.flatMap { case (address, size) =>
+        if (dynamicRange(address, size.raw).nonEmpty) Vec.empty[(GuestAddress, Int >= 0)]
+        else if (!overlapsDynamic(address, size.raw)) Vec((address, size))
+        else Vec.from((0 until size.raw).collect {
+          case offset if dynamicRange(address.offset(offset.toLong), 1).isEmpty =>
+            (address.offset(offset.toLong), 1: Int >= 0)
+        })
+      }
+    }
+    delegate.prepareSystemReads(external)
+  }
+
   override def validateRange(address: GuestAddress, size: Int >= 0): Either[MemoryError, Unit] = {
     val local = lock.withLock {
       if (dynamicRange(address, size.raw).nonEmpty) Some(Right(()))
@@ -115,6 +129,16 @@ class DynamicAddressMemory(
       delegate.readLittleEndian(address, size)
     )
 
+  override def readSystemLittleEndian(
+      address: GuestAddress,
+      size: Int where Between[1, 8]
+  ): Either[MemoryError, Long] =
+    route(address, size.raw)(
+      (bytes, offset) => LittleEndian.decode(bytes, offset, size.scalarByteWidth),
+      Some(readSystemStraddled(address, size)),
+      delegate.readSystemLittleEndian(address, size)
+    )
+
   override def writeLittleEndian(
       address: GuestAddress,
       value: Long,
@@ -125,6 +149,46 @@ class DynamicAddressMemory(
       Some(super.writeLittleEndian(address, value, size)),
       delegate.writeLittleEndian(address, value, size)
     )
+
+  override def writeSystemLittleEndian(
+      address: GuestAddress,
+      value: Long,
+      size: Int where Between[1, 8]
+  ): Either[MemoryError, Unit] = writeSystemBatch(Vec((address, value, size)))
+
+  override def writeSystemBatch(
+      writes: Vec[(GuestAddress, Long, Int where Between[1, 8])]
+  ): Either[MemoryError, Unit] = {
+    val (overlay, external, mixed) = lock.withLock {
+      writes.foldLeft((
+        Vec.empty[(GuestAddress, Long, Int where Between[1, 8])],
+        Vec.empty[(GuestAddress, Long, Int where Between[1, 8])],
+        Vec.empty[(GuestAddress, Long, Int where Between[1, 8])]
+      )) {
+        case ((local, delegated, straddled), write @ (address, _, size)) =>
+          if (dynamicRange(address, size.raw).nonEmpty) (local :+ write, delegated, straddled)
+          else if (overlapsDynamic(address, size.raw)) (local, delegated, straddled :+ write)
+          else (local, delegated :+ write, straddled)
+      }
+    }
+    val stored = lock.withLock {
+      overlay.foldLeft[Either[MemoryError, Unit]](Right(())) { case (result, (address, value, size)) =>
+        result.flatMap(_ =>
+          dynamicRange(address, size.raw) match {
+            case Some((bytes, offset)) =>
+              LittleEndian.write(value, bytes, offset, size.scalarByteWidth)
+              Right(())
+            case None => Left(MemoryError.InvalidAddress(address, size.raw.self, "dynamic allocation disappeared"))
+          }
+        )
+      }
+    }
+    stored.flatMap(_ => delegate.writeSystemBatch(external)).flatMap { _ =>
+      mixed.foldLeft[Either[MemoryError, Unit]](Right(())) { case (result, (address, value, size)) =>
+        result.flatMap(_ => writeSystemStraddled(address, value, size))
+      }
+    }
+  }
 
   override def atomicModifyLittleEndian(
       address: GuestAddress,
@@ -153,6 +217,37 @@ class DynamicAddressMemory(
         case None                  => if (overlapsDynamic(address, size)) straddle else None
       }
     }.getOrElse(delegated)
+
+  private def readSystemStraddled(
+      address: GuestAddress,
+      size: Int where Between[1, 8]
+  ): Either[MemoryError, Long] = (0 until size.raw).foldLeft[Either[MemoryError, Long]](Right(0L)) { (result, index) =>
+    result.flatMap { value =>
+      val byteAddress = address.offset(index.toLong)
+      val local       = lock.withLock(dynamicRange(byteAddress, 1).map((bytes, offset) => bytes(offset)))
+      val source: Either[MemoryError, Byte] = local match {
+        case Some(byte) => Right(byte)
+        case None       => delegate.readSystemLittleEndian(byteAddress, 1).map(_.toByte)
+      }
+      source
+        .map(byte => value | ((byte.toLong & 0xffL) << (index * 8)))
+    }
+  }
+
+  private def writeSystemStraddled(
+      address: GuestAddress,
+      value: Long,
+      size: Int where Between[1, 8]
+  ): Either[MemoryError, Unit] = (0 until size.raw).foldLeft[Either[MemoryError, Unit]](Right(())) { (result, index) =>
+    result.flatMap { _ =>
+      val byteAddress = address.offset(index.toLong)
+      val byte        = (value >>> (index * 8)).toByte
+      lock.withLock(dynamicRange(byteAddress, 1).map { (bytes, offset) => bytes(offset) = byte }) match {
+        case Some(()) => Right(())
+        case None     => delegate.writeSystemLittleEndian(byteAddress, byte.toLong, 1)
+      }
+    }
+  }
 
   /** Called while holding the allocation lock. Mixed ranges retain byte-wise overlay routing; wholly delegated words
     * reach the delegate as one transaction even while unrelated device allocations exist.

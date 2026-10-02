@@ -1,15 +1,59 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMIR.*
 import execution.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.nvidia.*
+import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class InterpreterSuite extends munit.FunSuite {
+  for (width <- Vec(32, 64)) test(s"signed $width-bit extraction beyond the source replicates its sign") {
+    val size  = width / 8
+    val cases = Vec(
+      ("-1", width, 1, -1L),
+      ("-1", 255, 255, -1L),
+      ("-1", width, 0, 0L),
+      ("1", width, 1, 0L)
+    )
+    val instructions = cases.zipWithIndex.map { case ((input, position, count, _), index) =>
+      s"bfe.s$width %value, $input, $position, $count; st.global.b$width [%p+${index * size}], %value;"
+    }.mkString("\n")
+    val source = s""".version 8.0
+      .target sm_80
+      .address_size 64
+      .visible .entry extract(.param .u64 output) {
+        .reg .u64 %p;
+        .reg .b$width %value;
+        ld.param.u64 %p, [output];
+        $instructions
+        ret;
+      }"""
+    val kernel = compileKernel(source)
+    val memory = ArrayCheckedMemory.allocate((cases.size * size).unsafe[Int >= 0])
+    val start  = memory.allocation.start
+    val result = execute(
+      kernel,
+      1,
+      1,
+      Map(("output": NonEmpty[String]) -> Argument.fromLong(start.raw)),
+      memory
+    )
+    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    cases.zipWithIndex.foreach { case ((_, _, _, expected), index) =>
+      assertEquals(
+        memory.readLittleEndian(
+          start.offset(index.toLong * size),
+          size.unsafe[Int where Between[1, 8]]
+        ).toOption.get,
+        if (width == 32) expected & 0xffffffffL else expected
+      )
+    }
+  }
+
   private val vectorAdd = """
     |.version 8.0
     |.target sm_80
@@ -39,11 +83,11 @@ class InterpreterSuite extends munit.FunSuite {
     |""".stripMargin
 
   test("parse and deterministically execute integer vector addition") {
-    val kernel = VMCompiler.compile(vectorAdd).toOption.get
+    val kernel = compileKernel(vectorAdd)
     assertEquals(kernel.name, "vector_add")
     assertEquals(
       kernel.parameters,
-      Seq(
+      Vec(
         KernelParameter("input_a", 8),
         KernelParameter("input_b", 8),
         KernelParameter("output", 8)
@@ -63,23 +107,23 @@ class InterpreterSuite extends munit.FunSuite {
       memory.writeInt32(b.offset(index.toLong * 4L), values(index) * 10).toOption.get
     }
 
-    VMInterpreter
-      .execute(
-        kernel,
-        geometry(blocks = 1, threads = values.positiveSize),
-        Map(
-          ("input_a": NonEmpty[String]) -> Argument.fromLong(a.raw),
-          ("input_b": NonEmpty[String]) -> Argument.fromLong(b.raw),
-          ("output": NonEmpty[String])  -> Argument.fromLong(output.raw)
-        ),
-        memory
-      )
+    execute(
+      kernel,
+      1,
+      values.positiveSize,
+      Map(
+        ("input_a": NonEmpty[String]) -> Argument.fromLong(a.raw),
+        ("input_b": NonEmpty[String]) -> Argument.fromLong(b.raw),
+        ("output": NonEmpty[String])  -> Argument.fromLong(output.raw)
+      ),
+      memory
+    )
       .toOption
       .get
 
     assertEquals(
       values.indices.map(index => memory.readInt32(output.offset(index.toLong * 4L)).toOption.get),
-      Seq(11, 22, 33, 44)
+      Vec(11, 22, 33, 44)
     )
   }
 
@@ -102,12 +146,13 @@ class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(16)
     val base   = memory.allocation.start
-    val result = VMInterpreter.execute(
+    val result = execute(
       kernel,
-      geometry(blocks = 1, threads = 1),
+      1,
+      1,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(base.raw)),
       memory
     )
@@ -123,26 +168,29 @@ class InterpreterSuite extends munit.FunSuite {
       |.visible .entry shared_symbols() {
       |  .shared .align 4 .b8 first[4];
       |  .shared .align 4 .b8 second[4];
+      |  { .shared .align 4 .b8 nested[4]; }
       |  .reg .b32 %r<2>;
       |  mov.u32 %r0, first;
       |  mov.u32 %r1, second;
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    assertEquals(kernel.sharedSymbols.keySet, Set[NonEmpty[String]]("first", "second"))
+    val kernel       = compileKernel(source)
+    val instructions = kernel.program.instructions.map(_.instruction)
+    assertEquals(kernel.sharedSymbols.keySet, Set[NonEmpty[String]]("first", "second", "nested"))
     assertNotEquals(
       kernel.sharedSymbols("first"),
       kernel.sharedSymbols("second")
     )
+    assertEquals(kernel.sharedSymbols.values.toSet.size, 3)
     assert(
-      kernel.instructions.exists {
+      instructions.exists {
         case VMIR.Instruction.Move(_, Value.Symbol(name), _) if name == "first" => true
         case _                                                                  => false
       }
     )
     assert(
-      kernel.instructions.exists {
+      instructions.exists {
         case VMIR.Instruction.Move(_, Value.Symbol(name), _) if name == "second" => true
         case _                                                                   => false
       }
@@ -169,12 +217,13 @@ class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val memory =
       ArrayCheckedMemory.allocate(4, provenance = "generic-shared")
-    val result = VMInterpreter.execute(
+    val result = execute(
       kernel,
-      geometry(blocks = 1, threads = 1),
+      1,
+      1,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
@@ -199,21 +248,22 @@ class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), identity)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(
       8,
       provenance = "immediate-local-vector-store"
     )
-    val result = VMInterpreter.execute(
+    val result = execute(
       kernel,
-      geometry(blocks = 1, threads = 1),
+      1,
+      1,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
       Vec.tabulate(2)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get),
-      Seq(0, 0x3f800000)
+      Vec(0, 0x3f800000)
     )
   }
 
@@ -246,7 +296,7 @@ class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel     = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel     = compileKernel(source)
     val groupSize  = Dimensions(2, 2, 1)
     val groupCount = Dimensions(2, 2, 1)
     val launch     = LaunchGeometry.forLaunch(groupSize, groupCount).toOption.get
@@ -277,10 +327,11 @@ class InterpreterSuite extends munit.FunSuite {
       |  bra again;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val result = VMInterpreter.execute(
+    val kernel = compileKernel(source)
+    val result = execute(
       kernel,
-      geometry(blocks = 1, threads = 1),
+      1,
+      1,
       Map.empty,
       ArrayCheckedMemory.allocate(4),
       TaskControl(TaskControl.Limits(maxInstructions = 8L))
@@ -289,12 +340,13 @@ class InterpreterSuite extends munit.FunSuite {
   }
 
   test("execution observes cancellation before fetching an instruction") {
-    val kernel       = VMCompiler.compile(vectorAdd).fold(error => fail(error.message), value => value)
+    val kernel       = compileKernel(vectorAdd)
     val cancellation = TaskControl()
     cancellation.cancel()
-    val result = VMInterpreter.execute(
+    val result = execute(
       kernel,
-      geometry(blocks = 1, threads = 1),
+      1,
+      1,
       Map.empty,
       ArrayCheckedMemory.allocate(4),
       control = cancellation

@@ -382,6 +382,8 @@ object Wire {
       productCodecRuntime(name, labels, codecs, mirror)
     }
 
+    // Generic derivation pairs each product field with its statically derived codec.
+    @SuppressWarnings(Array("scalafix:GemstoneNoProductTraversal"))
     @publicInBinary
     private[Codec] def productCodecRuntime[A](
         name: String,

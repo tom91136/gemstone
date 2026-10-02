@@ -1,9 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMIR.*
+import execution.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.nvidia.*
+import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
@@ -109,7 +111,7 @@ class WideDescriptorSuite extends munit.FunSuite {
         st.global.f64 [%rd4+32], %fd;
         ret;
       }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val result = VMInterpreter.execute(
       kernel,
       geometry,
@@ -140,7 +142,7 @@ class WideDescriptorSuite extends munit.FunSuite {
         st.relaxed.gpu.v2.u64 [%rd0], {%rd1, %rd2};
         ret;
       }"""
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val result = VMInterpreter.execute(
       kernel,
       geometry,

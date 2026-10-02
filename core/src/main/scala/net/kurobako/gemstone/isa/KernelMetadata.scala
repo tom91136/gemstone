@@ -25,7 +25,8 @@ object KernelMetadata {
       requiredWorkGroupSize: Option[LaunchGeometry.Dimensions] = None,
       workGroupSizeHint: Option[LaunchGeometry.Dimensions] = None,
       bindingIndices: Vec[Int >= 0] = Vec.empty,
-      entryPointId: Option[Int >= 0] = None
+      entryPointId: Option[Int >= 0] = None,
+      registerCount: Option[Int >= 0] = None
   ): Either[NonEmpty[String], KernelMetadata] =
     for {
       _ <- Either.cond[NonEmpty[String], Unit](
@@ -54,7 +55,8 @@ object KernelMetadata {
       requiredWorkGroupSize,
       workGroupSizeHint,
       bindingIndices,
-      entryPointId
+      entryPointId,
+      registerCount
     )
 }
 
@@ -66,5 +68,6 @@ case class KernelMetadata private (
     requiredWorkGroupSize: Option[LaunchGeometry.Dimensions],
     workGroupSizeHint: Option[LaunchGeometry.Dimensions],
     bindingIndices: Vec[Int >= 0],
-    entryPointId: Option[Int >= 0]
+    entryPointId: Option[Int >= 0],
+    registerCount: Option[Int >= 0]
 )

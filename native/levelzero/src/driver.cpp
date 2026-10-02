@@ -688,6 +688,7 @@ ze_result_t ZE_APICALL queueExecute(ze_command_queue_handle_t queueHandle, uint3
     lists.emplace_back(list);
   }
   HandleUse<Fence> fence;
+  Fence *submittedFence = nullptr;
   if (fenceHandle) {
     auto *value = cast<Fence>(fenceHandle, Kind::Fence);
     if (!value) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
@@ -695,6 +696,7 @@ ze_result_t ZE_APICALL queueExecute(ze_command_queue_handle_t queueHandle, uint3
     fence = HandleUse<Fence>(value);
     std::lock_guard lock(fence->event.mutex);
     fence->pending = true;
+    submittedFence = value;
   }
   std::function<ze_result_t()> submission = [lists = std::move(lists), fence = std::move(fence)]() mutable {
     ze_result_t result = ZE_RESULT_SUCCESS;
@@ -724,11 +726,25 @@ ze_result_t ZE_APICALL queueExecute(ze_command_queue_handle_t queueHandle, uint3
       std::lock_guard lock(queue->mutex);
       queue->pending.push_back(std::move(submission));
       ++queue->submitted;
+      if (submittedFence) submittedFence->completionSequence.store(queue->submitted, std::memory_order_release);
     }
     queue->changed.notify_one();
     return ZE_RESULT_SUCCESS;
   }
-  return submission();
+  const std::lock_guard synchronousLock(queue->synchronousMutex);
+  {
+    std::lock_guard lock(queue->mutex);
+    ++queue->submitted;
+    if (submittedFence) submittedFence->completionSequence.store(queue->submitted, std::memory_order_release);
+  }
+  const auto result = submission();
+  submission = {};
+  {
+    std::lock_guard lock(queue->mutex);
+    ++queue->completed;
+  }
+  queue->changed.notify_all();
+  return result;
 }
 ze_result_t ZE_APICALL queueSync(ze_command_queue_handle_t handle, uint64_t timeout) {
   auto *queue = cast<Queue>(handle, Kind::Queue);
@@ -1763,8 +1779,18 @@ ze_result_t ZE_APICALL fenceDestroy(ze_fence_handle_t handle) {
 ze_result_t ZE_APICALL fenceSync(ze_fence_handle_t handle, uint64_t timeout) {
   auto *fence = cast<Fence>(handle, Kind::Fence);
   if (!fence) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  const auto started = std::chrono::steady_clock::now();
   const auto result = waitEvent(&fence->event, timeout);
   if (result != ZE_RESULT_SUCCESS) return result;
+  auto remaining = timeout;
+  if (timeout != std::numeric_limits<uint64_t>::max()) {
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    const auto elapsedNanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
+    if (elapsedNanoseconds < 0 || static_cast<uint64_t>(elapsedNanoseconds) >= timeout) remaining = 0;
+    else remaining -= static_cast<uint64_t>(elapsedNanoseconds);
+  }
+  const auto retired = fence->queue->waitThrough(fence->completionSequence.load(std::memory_order_acquire), remaining);
+  if (retired != ZE_RESULT_SUCCESS) return retired;
   std::lock_guard lock(fence->event.mutex);
   return fence->completionResult;
 }
@@ -1773,6 +1799,8 @@ ze_result_t ZE_APICALL fenceStatus(ze_fence_handle_t handle) {
   if (!fence) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   std::lock_guard lock(fence->event.mutex);
   if (!fence->event.signalled) return ZE_RESULT_NOT_READY;
+  if (fence->queue->waitThrough(fence->completionSequence.load(std::memory_order_acquire), 0) != ZE_RESULT_SUCCESS)
+    return ZE_RESULT_NOT_READY;
   return fence->completionResult;
 }
 ze_result_t ZE_APICALL fenceReset(ze_fence_handle_t handle) {

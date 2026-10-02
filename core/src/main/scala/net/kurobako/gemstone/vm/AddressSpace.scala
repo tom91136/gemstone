@@ -17,6 +17,8 @@ trait AddressSpace extends Memory {
 
   def prepareReads(@scala.annotation.unused ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] = Right(())
 
+  def prepareSystemReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] = prepareReads(ranges)
+
   def address(
       region: AllocationId,
       offset: Long >= 0
@@ -65,6 +67,9 @@ trait AddressSpace extends Memory {
         Left(Fault.Unsupported(s"absolute address ${address.show} requires an address-backed memory"))
     }
 
+  def readSystemValue(address: GuestAddress, size: Int where Between[1, 8]): Either[Fault, Long] =
+    readValue(address, size)
+
   /** Scalar form of [[write]], preserving a backing memory's allocation-free scalar implementation. */
   def writeValue(
       address: GuestAddress,
@@ -77,6 +82,18 @@ trait AddressSpace extends Memory {
       case Right(Location.Absolute(address))          =>
         Left(Fault.Unsupported(s"absolute address ${address.show} requires an address-backed memory"))
     }
+
+  def writeSystemValue(
+      address: GuestAddress,
+      value: Long,
+      size: Int where Between[1, 8]
+  ): Either[Fault, Unit] = writeValue(address, value, size)
+
+  def writeSystemBatch(
+      writes: Vec[(GuestAddress, Long, Int where Between[1, 8])]
+  ): Either[Fault, Unit] = writes.foldLeft[Either[Fault, Unit]](Right(())) {
+    case (result, (address, value, size)) => result.flatMap(_ => writeSystemValue(address, value, size))
+  }
 
   /** Resolve and perform one indivisible scalar update. */
   def atomicModifyValue(

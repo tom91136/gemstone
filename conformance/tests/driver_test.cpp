@@ -298,6 +298,18 @@ TEST_CASE("isolated routes deduplicate physical variants by artifact ABI", "[dri
   CHECK_FALSE(physical[5].deviceLock);
 }
 
+TEST_CASE("isolated CUDA PTX and SASS routes remain distinct", "[driver]") {
+  using conformance::profile::ResolvedTarget;
+  ResolvedTarget ptx{"cuda-ptx", "cuda", "sm_89", {{"CONFORMANCE_CUDA_CODE", "ptx"}}, true};
+  ResolvedTarget sass{"cuda-sass", "cuda", "sm_89", {{"CONFORMANCE_CUDA_CODE", "sass"}}, true};
+  const auto isolated = unique_routes({ptx, sass}, true);
+  REQUIRE(isolated.size() == 2);
+  CHECK(isolated[0].id == "cuda-ptx");
+  CHECK(isolated[1].id == "cuda-sass");
+  CHECK_FALSE(isolated[0].deviceLock);
+  CHECK_FALSE(isolated[1].deviceLock);
+}
+
 TEST_CASE("failed tests retain both streams in full and print a bounded diagnostic excerpt", "[driver]") {
   TemporaryDirectory directory;
   const auto artifact = fixture_artifact(directory.path / "artifact");
@@ -355,6 +367,15 @@ TEST_CASE("execution preserves skips environment and distinct report paths", "[d
   config.skips = {names[0]};
   REQUIRE(!glz::write_file_json(config, file.string(), buffer));
   CHECK(execute_case(file, {names[0], fixture.stem().string(), 10, 0, 2}) == SkipReturnCode);
+  config.skips = {"*"};
+  config.skipReason = "strict route excludes this fixture";
+  REQUIRE(!glz::write_file_json(config, file.string(), buffer));
+  CHECK(execute_case(file, {names[0], fixture.stem().string(), 10, 0, 2}) == SkipReturnCode);
+  config.skips.clear();
+  config.routeSkips = {"blas/*", "edge/blas/*"};
+  REQUIRE(!glz::write_file_json(config, file.string(), buffer));
+  CHECK(execute_case(file, {"blas/f32/compact/asum", "unified", 10, 0, 2}) == SkipReturnCode);
+  CHECK(execute_case(file, {"edge/blas/f32/compact/gemm", "unified", 10, 0, 2}) == SkipReturnCode);
   CHECK_FALSE(fs::exists(directory.path / "skips.log"));
 }
 
@@ -379,6 +400,7 @@ TEST_CASE("runtime environment reserves owned keys and excludes inherited SDK pa
        {"CONFORMANCE_TARGET_ARCHITECTURE", "CONFORMANCE_REPORT_DIRECTORY", "CONFORMANCE_TEST_IDENTITY", "CONFORMANCE_PHYSICAL_DEVICE",
         "CUDA_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "CL_DEVICE_INDEX", "ONEAPI_DEVICE_SELECTOR"})
     CHECK(conformance::reserved_environment_key(key));
+  CHECK_FALSE(conformance::reserved_environment_key("CONFORMANCE_CUDA_CODE"));
   CHECK_FALSE(conformance::valid_environment_entry("BAD=KEY", "value"));
   CHECK_FALSE(conformance::valid_environment_entry("KEY", std::string("bad\0value", 9)));
   ExecutionConfig config;

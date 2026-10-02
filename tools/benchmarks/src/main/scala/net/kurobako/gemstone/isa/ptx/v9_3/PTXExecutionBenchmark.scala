@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMIR.*
 import cats.syntax.all.*
 import com.monovore.decline.Opts
 import java.nio.file.Path
@@ -9,6 +8,8 @@ import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.isa.nvidia.*
+import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.*

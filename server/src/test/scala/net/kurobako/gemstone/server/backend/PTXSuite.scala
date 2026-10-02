@@ -53,9 +53,8 @@ class PTXSuite extends munit.FunSuite {
       LaunchGeometry.Dimensions.One,
       Vec.empty
     ).fold(message => fail(message), value => value)
-    val result = program.execute(task, EmptyMemory, TaskControl())
+    program.execute(task, EmptyMemory, TaskControl())
       .fold(error => fail(error.message), value => value)
-    assertEquals(result, ())
 
     val cancelled = TaskControl()
     cancelled.cancel()

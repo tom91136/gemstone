@@ -169,7 +169,7 @@ class ParserSuite extends munit.FunSuite {
         Instruction.Mov(
           Operand.Register("%r0", None),
           Operand.Register("%tid.x", None),
-          Vec(Modifier("u32")),
+          Vec(Modifier("u32".refine[NonEmpty[String]].fold(error => fail(error.raw), identity))),
           None
         )
       )
@@ -179,8 +179,10 @@ class ParserSuite extends munit.FunSuite {
           Instruction.Add(
             Operand.Register("%r1", None),
             Operand.Register("%r0", None),
-            Operand.Immediate((index + 1).toString.unsafe[NonEmpty[String]]),
-            Vec(Modifier("u32")),
+            Operand.Immediate(
+              (index + 1).toString.refine[NonEmpty[String]].fold(error => fail(error.raw), identity)
+            ),
+            Vec(Modifier("u32".refine[NonEmpty[String]].fold(error => fail(error.raw), identity))),
             None
           ),
           s"${entry.name}, add $index"
@@ -223,7 +225,7 @@ class ParserSuite extends munit.FunSuite {
   }
 
   test("NUL bytes are rejected at their original position even at source edges or inside comments") {
-    val sources = Seq("\u0000ret;", "ret;\u0000", "\n// comment\u0000", ".file 1 \"a\u0000b\";")
+    val sources = Vec("\u0000ret;", "ret;\u0000", "\n// comment\u0000", ".file 1 \"a\u0000b\";")
     sources.foreach { source =>
       val error = Parser.parse(source).swap.toOption.getOrElse(fail("NUL source was accepted"))
       assertEquals(error.offset.raw, source.indexOf('\u0000'), clues(source))
@@ -243,7 +245,7 @@ class ParserSuite extends munit.FunSuite {
         )
       case other => fail(s"expected an instruction, found $other")
     }
-    Seq("table[]", "table[1,2]", "table[1,]", "table[1").foreach { operand =>
+    Vec("table[]", "table[1,2]", "table[1,]", "table[1").foreach { operand =>
       assert(Parser.parseStatement(s"mov.u32 %r0, $operand;").isLeft, clues(operand))
     }
   }

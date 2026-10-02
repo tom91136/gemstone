@@ -53,6 +53,8 @@ private object checkpoints {
       override def flushHostReads(): Either[Fault, Unit]            = delegate.flushHostReads()
       override def prepareReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] =
         addresses.prepareReads(ranges)
+      override def prepareSystemReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] =
+        addresses.prepareSystemReads(ranges)
       override def address(region: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] =
         addresses.address(region, offset)
       override def locate(address: GuestAddress, size: Int >= 0): Either[Fault, Location] =
@@ -80,8 +82,18 @@ private object checkpoints {
         addresses.write(address, bytes)
       override def readValue(address: GuestAddress, size: Int where Between[1, 8]): Either[Fault, Long] =
         addresses.readValue(address, size)
+      override def readSystemValue(address: GuestAddress, size: Int where Between[1, 8]): Either[Fault, Long] =
+        addresses.readSystemValue(address, size)
       override def writeValue(address: GuestAddress, value: Long, size: Int where Between[1, 8]): Either[Fault, Unit] =
         addresses.writeValue(address, value, size)
+      override def writeSystemValue(
+          address: GuestAddress,
+          value: Long,
+          size: Int where Between[1, 8]
+      ): Either[Fault, Unit] = addresses.writeSystemValue(address, value, size)
+      override def writeSystemBatch(
+          writes: Vec[(GuestAddress, Long, Int where Between[1, 8])]
+      ): Either[Fault, Unit] = addresses.writeSystemBatch(writes)
       override def atomicModifyValue(
           region: AllocationId,
           offset: Long >= 0,

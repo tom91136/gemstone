@@ -54,6 +54,8 @@ struct ExecutionConfig {
   std::map<std::string, std::string> environment;
   std::vector<std::string> launcher, skips, specs;
   bool deviceLock = true;
+  std::string skipReason;
+  std::vector<std::string> routeSkips;
 };
 struct ScheduledCase {
   std::string identity, program;

@@ -73,8 +73,6 @@ object ExecutionRPC {
         extends Operation[KernelMetadata]
     case DescribeImage(encoding: String, image: Vec[Byte], name: NonEmpty[String])
         extends Operation[KernelMetadata]
-    case Blas(request: BlasRequest)
-        extends Operation[BlasResult]
     case DescribeGlobal(program: ProgramId, name: NonEmpty[String])
         extends Operation[GlobalImage]
     case BindProgramGlobal(

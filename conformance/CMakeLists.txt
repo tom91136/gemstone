@@ -62,6 +62,14 @@ if((CONFORMANCE_BUILD_UNIFIED OR CONFORMANCE_BUILD_CTS OR CONFORMANCE_BUILD_MINI
     "CONFORMANCE_BACKEND is required when building conformance suites")
 endif()
 set(CMAKE_CUDA_ARCHITECTURES "75" CACHE STRING "CUDA architectures for unified and miniapps")
+option(CONFORMANCE_CUDA_CUBIN_ONLY "Compile CUDA kernels without an embedded PTX fallback" OFF)
+set(conformance_cuda_architecture "${CMAKE_CUDA_ARCHITECTURES}")
+if(CONFORMANCE_CUDA_CUBIN_ONLY AND CONFORMANCE_BACKEND STREQUAL "cuda")
+  if(NOT CMAKE_CUDA_ARCHITECTURES MATCHES "^[0-9]+$")
+    message(FATAL_ERROR "Cubin-only builds require one numeric CUDA architecture")
+  endif()
+  set(CMAKE_CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}-real")
+endif()
 set(CMAKE_HIP_ARCHITECTURES "gfx908" CACHE STRING "AMDGPU architectures for unified, HSA, and miniapps")
 set(CONFORMANCE_MINIAPP_MODELS "" CACHE STRING
     "Optional semicolon-separated app:model miniapp selection")
@@ -203,12 +211,22 @@ if(BUILD_TESTING)
   target_compile_features(conformance_fixture PRIVATE cxx_std_23)
   target_link_libraries(conformance_fixture PRIVATE Catch2::Catch2)
   add_executable(conformance_unit_tests
+    tests/cuda_image_test.cpp
     tests/device_lock_test.cpp
     tests/driver_test.cpp
     tests/profile_test.cpp)
   target_compile_features(conformance_unit_tests PRIVATE cxx_std_23)
   target_include_directories(conformance_unit_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  # Exercise the production image selector without a CUDA SDK or compiled kernels.
+  set(cuda_test_images "${CMAKE_CURRENT_BINARY_DIR}/cuda-test-images")
+  set(cuda_test_image_id 1)
+  foreach(image IN ITEMS memory atomic atomic_sass contended contended_sass fence fence_sass kernel_sass mma884_ptx mma884_sass)
+    file(GENERATE OUTPUT "${cuda_test_images}/${image}_image.hpp"
+      CONTENT "#pragma once\n#include <array>\ninline constexpr std::array<unsigned char, 2> ${image}_image{${cuda_test_image_id}, 255};\n")
+    math(EXPR cuda_test_image_id "${cuda_test_image_id} + 1")
+  endforeach()
+  target_include_directories(conformance_unit_tests PRIVATE "${cuda_test_images}")
   target_link_libraries(conformance_unit_tests PRIVATE
     Catch2::Catch2WithMain conformance_driver)
   target_compile_definitions(conformance_unit_tests PRIVATE
@@ -229,7 +247,7 @@ if(CONFORMANCE_BACKEND)
   target_link_libraries(conformance_device PUBLIC magic_enum::magic_enum PRIVATE fmt::fmt-header-only)
 endif()
 if(CONFORMANCE_BACKEND MATCHES "^(cuda|openacc)$")
-  string(REPLACE ";" "," conformance_device_targets "${CMAKE_CUDA_ARCHITECTURES}")
+  string(REPLACE ";" "," conformance_device_targets "${conformance_cuda_architecture}")
   target_compile_definitions(conformance_device PRIVATE
     CONFORMANCE_DEVICE_CUDA=1 CONFORMANCE_DEVICE_TARGETS="${conformance_device_targets}")
   if(CONFORMANCE_BACKEND STREQUAL "cuda")

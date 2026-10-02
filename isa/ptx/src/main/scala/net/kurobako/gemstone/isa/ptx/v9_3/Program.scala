@@ -5,7 +5,6 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.ptx.v9_3.Instruction as PTXInstruction
 
 object Program {
-
   enum DirectiveSeparator {
     case Space
     case Comma
@@ -18,13 +17,13 @@ object Program {
 
   case class DirectiveArgument(separator: DirectiveSeparator, operand: Operand)
 
-  enum DataAddressSpace(val mnemonic: String) {
+  enum DataAddressSpace(val mnemonic: NonEmpty[String]) {
     case Global extends DataAddressSpace("global")
     case Const  extends DataAddressSpace("const")
     case Shared extends DataAddressSpace("shared")
   }
 
-  enum DataType(val mnemonic: String, val widthBits: Int > 0, val kind: Char) {
+  enum DataType(val mnemonic: NonEmpty[String], val widthBits: Int in (8, 16, 32, 64, 128), val kind: Char) {
     case B8   extends DataType("b8", 8, 'b')
     case B16  extends DataType("b16", 16, 'b')
     case B32  extends DataType("b32", 32, 'b')

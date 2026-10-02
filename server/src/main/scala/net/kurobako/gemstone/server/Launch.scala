@@ -103,18 +103,18 @@ object Launch {
       if (apis.isEmpty) Left("at least one API must be enabled")
       else serverEndpoint match {
         case Some(endpoint) => Using.resource(Registration(endpoint)) { registration =>
-            plan(apis, directory, endpoint, registration.client, inherited).map(child)
+            prepareEnvironment(apis, directory, endpoint, registration.client, inherited).map(child)
           }
         case None => Server.Settings.fromEnvironment(inherited)
             .left.map(message => s"invalid execution profile: $message").flatMap { settings =>
               Using.resource(Server.start(settings)) { running =>
-                plan(apis, directory, running.endpoint, running.client, inherited).map(child)
+                prepareEnvironment(apis, directory, running.endpoint, running.client, inherited).map(child)
               }
             }
       }
     catch { case scala.util.control.NonFatal(error) => Left(throwables.detail(error)) }
 
-  def plan(
+  def prepareEnvironment(
       apis: Set[API],
       directory: Path,
       endpoint: Endpoint,

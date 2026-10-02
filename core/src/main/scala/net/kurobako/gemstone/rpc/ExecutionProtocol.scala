@@ -34,8 +34,25 @@ object ExecutionProtocol {
 
   case class HostMemoryRange(address: GuestAddress, size: Int > 0) derives Codec
   case class HostMemoryBytes(address: GuestAddress, bytes: Vec[Byte], atomicWidth: Int = 0) derives Codec
-  case class HostMemoryAtomic(address: GuestAddress, size: Int, expected: Long, desired: Long) derives Codec
-  case class HostMemorySync(ticket: Long, atomic: Option[HostMemoryAtomic]) derives Codec
+  enum HostMemoryAtomicOperation derives Codec {
+    case CompareExchange
+    case Load
+    case Store
+  }
+  case class HostMemoryAtomic(
+      address: GuestAddress,
+      size: Int,
+      expected: Long,
+      desired: Long,
+      operation: HostMemoryAtomicOperation = HostMemoryAtomicOperation.CompareExchange
+  ) derives Codec
+  case class HostMemorySync(
+      ticket: Long,
+      atomic: Option[HostMemoryAtomic],
+      publish: Vec[HostMemoryRange] = Vec.empty,
+      atomicStores: Vec[HostMemoryAtomic] = Vec.empty,
+      relaxed: Boolean = false
+  ) derives Codec
   case class HostMemoryBatch(
       reads: Vec[HostMemoryRange],
       writes: Vec[HostMemoryBytes],
@@ -68,7 +85,8 @@ object ExecutionProtocol {
       value.requiredWorkGroupSize,
       value.workGroupSizeHint,
       value.bindingIndices,
-      value.entryPointId
+      value.entryPointId,
+      value.registerCount
     )
   )
 
@@ -80,56 +98,13 @@ object ExecutionProtocol {
 
   given Codec[ProgramSymbols] = Codec.derived
 
-  enum BlasOperation derives Codec {
-    case Axpy
-    case Scal
-    case Copy
-    case Dot
-    case Nrm2
-    case Asum
-    case Gemv
-    case Gemm
-    case GemmStridedBatched
-  }
-
-  enum BlasElement derives Codec {
-    case F16
-    case F32
-    case F64
-  }
-
-  case class BlasVector(allocation: AllocationId, offset: Long >= 0, increment: Int) derives Codec
-  case class BlasMatrix(allocation: AllocationId, offset: Long >= 0, leading: Int) derives Codec
-
-  case class BlasRequest(
-      operation: BlasOperation,
-      element: BlasElement,
-      count: Int,
-      rows: Int,
-      columns: Int,
-      inner: Int,
-      transposeA: Boolean,
-      transposeB: Boolean,
-      alpha: Vec[Byte],
-      beta: Vec[Byte],
-      x: Option[BlasVector],
-      y: Option[BlasVector],
-      a: Option[BlasMatrix],
-      b: Option[BlasMatrix],
-      c: Option[BlasMatrix],
-      strideA: Long,
-      strideB: Long,
-      strideC: Long,
-      batch: Int
-  ) derives Codec
-
-  case class BlasResult(scalar: Vec[Byte]) derives Codec
-
   given Codec[SpecializationConstant] = Codec.derived
 
   given Codec[SpecializationInfo] = Codec.derived
 
+  given Codec[GlobalImage.Alias] = Codec.product[GlobalImage.Alias]("ProgramGlobalAlias")
+
   given Codec[GlobalImage] = Codec.validated(Codec.product[GlobalImage]("ProgramGlobal"))(value =>
-    GlobalImage.validated(value.size, value.initial)
+    GlobalImage.validated(value.size, value.initial, value.alias)
   )
 }

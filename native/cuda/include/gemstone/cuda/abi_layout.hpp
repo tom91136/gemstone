@@ -147,6 +147,21 @@ struct CudaLaunchConfig {
   uint32_t attribute_count;
 };
 
+struct CudaPointerAttributesPrefix {
+  int32_t type;
+  int32_t device;
+  void *device_pointer;
+  void *host_pointer;
+};
+
+struct CudaPointerAttributes {
+  int32_t type;
+  int32_t device;
+  void *device_pointer;
+  void *host_pointer;
+  long reserved[8];
+};
+
 struct Dim3 {
   uint32_t x;
   uint32_t y;

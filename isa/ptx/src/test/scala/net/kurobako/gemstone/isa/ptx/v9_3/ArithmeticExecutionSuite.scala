@@ -1,16 +1,21 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMIR.*
 import execution.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class ArithmeticExecutionSuite extends munit.FunSuite {
   // Exact bit patterns are independent of the VM's arithmetic and conversion helpers.
-  private val cases: Vector[(String, String, Int where Between[1, 8], String, Long)] = Vector(
+  private val cases: Vec[(String, String, Int where Between[1, 8], String, Long)] = Vec(
+    (
+      "fma rounds toward positive infinity",
+      "f32",
+      4,
+      "fma.rp.f32 %value, 0f3f800001, 0f3f800001, 0f00000000;",
+      0x3f800003L
+    ),
     ("absolute without ftz preserves a subnormal", "f32", 4, "abs.f32 %value, 0f80000001;", 0x1L),
     ("absolute ftz flushes a negative subnormal", "f32", 4, "abs.ftz.f32 %value, 0f80000001;", 0x0L),
     ("negate ftz preserves the zero sign", "f32", 4, "neg.ftz.f32 %value, 0f00000001;", 0x80000000L),
@@ -279,12 +284,13 @@ class ArithmeticExecutionSuite extends munit.FunSuite {
          |  ret;
          |}
          |""".stripMargin
-      val kernel = VMCompiler.compile(source).fold(error => fail(error.message), identity)
+      val kernel = compileKernel(source)
       val memory = ArrayCheckedMemory.allocate(8, GuestAddress(0x10000L))
       assertEquals(
-        VMInterpreter.execute(
+        execute(
           kernel,
-          LaunchGeometry.forLaunch(Dimensions.One, Dimensions.One).toOption.get,
+          1,
+          1,
           Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
           memory
         ),
@@ -298,7 +304,6 @@ class ArithmeticExecutionSuite extends munit.FunSuite {
     instruction <- Seq(
       "add.rz.f32 %value, 0f3f800000, 0f33800000;",
       "mul.rm.f32 %value, 0f3f800001, 0f3f800001;",
-      "fma.rp.f32 %value, 0f3f800001, 0f3f800001, 0f00000000;",
       "fma.rn.relu.f32 %value, 0f3f800000, 0fbf800000, 0f00000000;",
       "min.f32 %value, 0f3f800000, 0f40000000, 0f40400000;",
       "add.sat.f16x2 %value, 0x3c003c00, 0x3c003c00;"
@@ -328,11 +333,12 @@ st.global.b16 [%out], %h;
 ret;
 }
 """
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val memory = ArrayCheckedMemory.allocate(2, GuestAddress(0x10000L))
-    assert(VMInterpreter.execute(
+    assert(execute(
       kernel,
-      LaunchGeometry.forLaunch(Dimensions.One, Dimensions.One).toOption.get,
+      1,
+      1,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     ).isRight)
@@ -368,12 +374,13 @@ ret;
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = compileKernel(source)
     val memory =
       ArrayCheckedMemory.allocate(32, provenance = "integer-division")
-    val result = VMInterpreter.execute(
+    val result = execute(
       kernel,
-      geometry(blocks = 1, threads = 1),
+      1,
+      1,
       Map(
         ("dividend": NonEmpty[String])          -> Argument.fromLong(-21L),
         ("unsigned_dividend": NonEmpty[String]) -> Argument.fromLong(-1L),
@@ -424,19 +431,20 @@ ret;
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), identity)
+    val kernel = compileKernel(source)
     val memory =
       ArrayCheckedMemory.allocate(16, provenance = "funnel-shift")
-    val result = VMInterpreter.execute(
+    val result = execute(
       kernel,
-      geometry(blocks = 1, threads = 1),
+      1,
+      1,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
       Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get),
-      Seq(0xabcdef31, 0x31234567, 0x12345679, 0x9abcdef3)
+      Vec(0xabcdef31, 0x31234567, 0x12345679, 0x9abcdef3)
     )
   }
 
@@ -456,12 +464,13 @@ ret;
       |  ret;
       |}
       |""".stripMargin
-    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), identity)
+    val kernel = compileKernel(source)
     val memory =
       ArrayCheckedMemory.allocate(4, provenance = "signed-wide-multiply")
-    val result = VMInterpreter.execute(
+    val result = execute(
       kernel,
-      geometry(blocks = 1, threads = 1),
+      1,
+      1,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )

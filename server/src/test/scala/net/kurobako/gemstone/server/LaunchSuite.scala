@@ -62,7 +62,7 @@ class LaunchSuite extends munit.FunSuite {
   }
 
   test("all selected APIs coexist in one environment") {
-    val environment = Launch.plan(
+    val environment = Launch.prepareEnvironment(
       API.values.toSet,
       root,
       endpoint,
@@ -82,7 +82,7 @@ class LaunchSuite extends munit.FunSuite {
   }
 
   test("Vulkan loader directory is absent when Vulkan is not selected") {
-    val environment = Launch.plan(
+    val environment = Launch.prepareEnvironment(
       Set(API.CUDA),
       root,
       endpoint,
@@ -101,12 +101,12 @@ class LaunchSuite extends munit.FunSuite {
       Set(API.HIP, API.HSA)
     )
     combinations.foreach { apis =>
-      assert(Launch.plan(apis, root, endpoint, client, Map.empty).isRight)
+      assert(Launch.prepareEnvironment(apis, root, endpoint, client, Map.empty).isRight)
     }
   }
 
   test("an empty API set is rejected") {
-    assert(Launch.plan(Set.empty, root, endpoint, client, Map.empty).isLeft)
+    assert(Launch.prepareEnvironment(Set.empty, root, endpoint, client, Map.empty).isLeft)
   }
 
   test("process-scoped execution profiles reject malformed values before launch") {

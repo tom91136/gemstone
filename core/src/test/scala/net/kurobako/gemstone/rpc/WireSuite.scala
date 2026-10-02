@@ -196,15 +196,16 @@ class WireSuite extends munit.FunSuite {
   }
 
   test("derived products and sums reject wrong arity, unknown tags, and invalid ordinals") {
-    import net.kurobako.gemstone.rpc.ExecutionProtocol.{*, given}
+    import net.kurobako.gemstone.rpc.ExecutionProtocol.given
     assertEquals(decode[Pair](0x92, 7, 0xc3), Right(Pair(7, true)))
     assert(decode[Pair](0x91, 7, 0xc3).isLeft)
     assert(decode[Pair](0x93, 7, 0xc3).isLeft)
-    assertEquals(decode[BlasElement](0), Right(BlasElement.F16))
-    assertEquals(decode[BlasElement](2), Right(BlasElement.F64))
-    assert(decode[BlasElement](3).isLeft)
-    assert(decode[BlasElement](4).isLeft)
-    assert(decode[BlasElement](0xff).isLeft)
+    import net.kurobako.gemstone.isa.*
+    assertEquals(decode[KernelMetadata.ParameterKind](0), Right(KernelMetadata.ParameterKind.Scalar))
+    assertEquals(decode[KernelMetadata.ParameterKind](2), Right(KernelMetadata.ParameterKind.Local))
+    assert(decode[KernelMetadata.ParameterKind](3).isLeft)
+    assert(decode[KernelMetadata.ParameterKind](4).isLeft)
+    assert(decode[KernelMetadata.ParameterKind](0xff).isLeft)
     val failed = bytes(0x92, 0xa6, 0x46, 0x61, 0x69, 0x6c, 0x65, 0x64, 0x91, 0xa1, 0x78)
     assertEquals(Codec[ExecutionFailure].decode(failed, limits), Right(ExecutionFailure.Failed("x")))
     assert(Codec[ExecutionFailure].decode(bytes(0x91) ++ failed.drop(1), limits).isLeft)

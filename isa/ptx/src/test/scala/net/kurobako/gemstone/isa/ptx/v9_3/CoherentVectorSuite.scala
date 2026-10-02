@@ -1,16 +1,14 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import VMIR.*
+import execution.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 class CoherentVectorSuite extends munit.FunSuite {
-  private val geometry = LaunchGeometry.forLaunch(Dimensions.One, Dimensions.One).toOption.get
-  private val packed   = (668L << 32) | 101L
+  private val packed = (668L << 32) | 101L
 
   // Interleaving controls and observations are confined to this final test fixture.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -45,7 +43,7 @@ class CoherentVectorSuite extends munit.FunSuite {
 
   test("packed release store publishes the complete scan status and prefix") {
     val memory = InterleavingMemory()
-    val kernel = VMCompiler.compile(""".version 8.0
+    val kernel = compileKernel(""".version 8.0
       .target sm_80
       .address_size 64
       .visible .entry publish(.param .u64 output) {
@@ -56,10 +54,11 @@ class CoherentVectorSuite extends munit.FunSuite {
         mov.u32 %r1, 668;
         st.release.gpu.v2.u32 [%rd], {%r0, %r1};
         ret;
-      }""").toOption.get
-    assert(VMInterpreter.execute(
+}""")
+    assert(execute(
       kernel,
-      geometry,
+      1,
+      1,
       Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.base.raw)),
       memory
     ).isRight)
@@ -71,7 +70,7 @@ class CoherentVectorSuite extends munit.FunSuite {
     val memory = InterleavingMemory()
     memory.backing.writeLittleEndian(memory.base, packed, 8).toOption.get
     memory.changeAfterRead = true
-    val kernel = VMCompiler.compile(""".version 8.0
+    val kernel = compileKernel(""".version 8.0
       .target sm_80
       .address_size 64
       .visible .entry observe(.param .u64 input) {
@@ -82,10 +81,11 @@ class CoherentVectorSuite extends munit.FunSuite {
         add.u64 %rd, %rd, 8;
         st.global.v2.u32 [%rd], {%r0, %r1};
         ret;
-      }""").toOption.get
-    assert(VMInterpreter.execute(
+}""")
+    assert(execute(
       kernel,
-      geometry,
+      1,
+      1,
       Map(("input": NonEmpty[String]) -> Argument.fromLong(memory.base.raw)),
       memory
     ).isRight)

@@ -2,6 +2,7 @@ package net.kurobako.gemstone
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import net.kurobako.gemstone.collection.*
 
 class ElfSuite extends munit.FunSuite {
   // ELF64 header/section offsets are fixtures from the ELF file format, independent of the reader.
@@ -54,4 +55,36 @@ class ElfSuite extends munit.FunSuite {
     buffer.putLong(40, Long.MaxValue)
     assert(elf.sections64(bytes).isLeft)
   }
+  test("ELF headers and symbol entries preserve endianness and extended strides") {
+    Vec(ByteOrder.LITTLE_ENDIAN, ByteOrder.BIG_ENDIAN).foreach { order =>
+      val bytes  = image(order)
+      val header = ByteBuffer.wrap(bytes).order(order)
+      header.putShort(16, 2.toShort).putShort(18, 190.toShort).put(8, 8.toByte).putInt(48, 89 << 8)
+      val decoded = elf.header64(bytes).toOption.get
+      assertEquals(decoded.machine, 190)
+      assertEquals(decoded.abiVersion, 8)
+      assertEquals(decoded.flags, 89 << 8)
+      val symbols = ByteBuffer.allocate(32).order(order)
+      symbols.putInt(0, 3).put(4, 0x11.toByte).putShort(6, 2.toShort).putLong(8, 42).putLong(16, 8)
+      assertEquals(elf.symbols64(Vec.from(symbols.array()), order, 32), Right(Vec(elf.Symbol64(3, 1, 2, 42, 8))))
+      assert(elf.symbols64(Vec.from(symbols.array()), order).isLeft)
+      assert(elf.symbols64(Vec.empty, order, 0).isLeft)
+    }
+  }
+
+  test("ELF string tables validate offsets, terminators and UTF-8") {
+    val names = Vec[Byte](0, 'k'.toByte, 0)
+    assertEquals(elf.stringAt(names, 1), Right("k"))
+    assert(elf.stringAt(names, -1).isLeft)
+    assert(elf.stringAt(names, 3).isLeft)
+    assert(elf.stringAt(Vec[Byte]('k'.toByte), 0).isLeft)
+    assert(elf.stringAt(Vec[Byte](0xc3.toByte, 0x28.toByte, 0), 0).isLeft)
+    val section = elf.sections64(image(ByteOrder.LITTLE_ENDIAN)).toOption.get.head
+    assertEquals(
+      elf.sectionBytes(image(ByteOrder.LITTLE_ENDIAN), section.copy(sectionType = 8, size = 4096)),
+      Right(Vec.empty[Byte])
+    )
+    assert(elf.sectionBytes(image(ByteOrder.LITTLE_ENDIAN), section.copy(size = 1)).isLeft)
+  }
+
 }

@@ -1,23 +1,34 @@
 package fix
 
 import scala.meta.*
+import scala.meta.internal.semanticdb.Scala.*
 import scala.util.control.NonFatal
 import scalafix.v1.*
 
 /** Requires method values to show their arity instead of relying on invisible eta expansion. */
 class GemstoneExplicitEtaExpansion extends SemanticRule("GemstoneExplicitEtaExpansion") {
-  override def fix(using document: SemanticDocument): Patch = document.tree.collect {
-    case reference: Term.Ref if isArgument(reference) =>
-      explicitApplication(reference).map { application =>
-        Patch.replaceTree(reference, application) + Patch.lint(
-          Diagnostic(
-            id = "method-value",
-            message = "write an explicit lambda or placeholder application so the method value's arity is visible",
-            position = reference.pos
+  override def fix(using document: SemanticDocument): Patch = {
+    // Parameter refs are values, never methods needing eta expansion. Building this set once
+    // avoids resolving SemanticDB signatures for the many generated constructor arguments.
+    val parameterSymbols = document.tree.collect { case parameter: Term.Param => parameter.name.symbol }
+      .filterNot(_ == Symbol.None)
+      .toSet
+    document.tree.collect {
+      case reference: Term.Ref
+          if isArgument(reference) &&
+            !parameterSymbols(reference.symbol) &&
+            mayBeMethod(reference.symbol) =>
+        explicitApplication(reference).map { application =>
+          Patch.replaceTree(reference, application) + Patch.lint(
+            Diagnostic(
+              id = "method-value",
+              message = "write an explicit lambda or placeholder application so the method value's arity is visible",
+              position = reference.pos
+            )
           )
-        )
-      }
-  }.flatten.asPatch
+        }
+    }.flatten.asPatch
+  }
 
   private def isArgument(reference: Term.Ref): Boolean = reference.parent match {
     case Some(arguments: Term.ArgClause)                                 => arguments.values.exists(_.eq(reference))
@@ -28,6 +39,13 @@ class GemstoneExplicitEtaExpansion extends SemanticRule("GemstoneExplicitEtaExpa
       }
     case _ => false
   }
+
+  // Resolving .info for a global term (for example, a generated enum case field
+  // forwarded to its superclass) cannot identify a method needing eta expansion. In large
+  // generated files, each such lookup scans SemanticDB documents, so restrict
+  // lookups to method descriptors and local symbols (which may be local defs).
+  private def mayBeMethod(symbol: Symbol): Boolean =
+    symbol.isLocal || (symbol.isGlobal && symbol.value.desc.isMethod)
 
   private def explicitApplication(reference: Term.Ref)(using SemanticDocument): Option[String] =
     try

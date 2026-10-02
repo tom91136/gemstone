@@ -3,12 +3,13 @@ package net.kurobako.gemstone.tools.isa
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.amdgpu.*
+import net.kurobako.gemstone.string.*
 import scala.util.control.NonFatal
 
 object CLI {
@@ -18,8 +19,8 @@ object CLI {
   }
 
   private val format = (
-    Opts.option[String]("isa", help = "spirv, amdgpu, or ptx (textual; no cubin/SASS)"),
-    Opts.option[String]("target", help = "AMDGPU processor, e.g. gfx1030").orNone,
+    Opts.option[String]("isa", help = "spirv, amdgpu, sass, or ptx (textual)"),
+    Opts.option[String]("target", help = "AMDGPU or SASS processor, e.g. gfx1030 or sm_89").orNone,
     Opts.option[Int]("wave-size", help = "AMDGPU wave size: 32 (default) or 64").orNone
   ).tupled.mapValidated { (isa, target, waveSize) =>
     if (waveSize.exists(value => value != 32 && value != 64)) "--wave-size must be 32 or 64".invalidNel
@@ -31,8 +32,10 @@ object CLI {
         Target.either(value).leftMap(_.toString).map(target =>
           Assembly.Format.AMDGPU(target, waveSize.getOrElse(32).unsafe[Int in (32, 64)])
         ).toValidatedNel
+      case ("sass", Some(value))      => sass.Target.parse(value).map(Assembly.Format.SASS(_)).toValidatedNel
+      case ("sass", None)             => "SASS requires --target".invalidNel
       case ("amdgpu", None)           => "AMDGPU requires --target".invalidNel
-      case ("spirv" | "ptx", Some(_)) => "--target is only used with --isa amdgpu".invalidNel
+      case ("spirv" | "ptx", Some(_)) => "--target is only used with --isa amdgpu or sass".invalidNel
       case _                          => s"unknown ISA '$isa'".invalidNel
     }
   }
@@ -54,9 +57,9 @@ object CLI {
     Opts.option[String]("section", help = "Executable ELF section to disassemble").orNone
   ).tupled.mapValidated { (format, input, output, section) =>
     (format, section) match {
-      case (Assembly.Format.AMDGPU(_, _), _) | (_, None) =>
+      case (Assembly.Format.AMDGPU(_, _) | Assembly.Format.SASS(_), _) | (_, None) =>
         Request.Disassemble(format, input, output, section).validNel
-      case _ => "--section requires disassemble --isa amdgpu".invalidNel
+      case _ => "--section requires disassemble --isa amdgpu or sass".invalidNel
     }
   }
 
@@ -81,9 +84,11 @@ object CLI {
             val text  = (format, section) match {
               case (Assembly.Format.AMDGPU(target, waveSize), Some(section)) =>
                 Assembly.disassembleCodeObject(bytes, target, Some(section), waveSize)
+              case (Assembly.Format.SASS(target), Some(section)) =>
+                Assembly.disassembleCubin(bytes, target, Some(section))
               case _ => Assembly.disassemble(bytes, format)
             }
-            (text.map(value => Vec.unsafeWrapArray((value + "\n").getBytes(StandardCharsets.UTF_8))), output)
+            (text.flatMap(value => UTF8.encode(value + "\n").leftMap(Assembly.Error.TextEncoding(_))), output)
         }
         result match {
           case Left(error) =>

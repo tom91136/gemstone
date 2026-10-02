@@ -30,15 +30,23 @@ class GeneratePTXISASuite extends munit.FunSuite {
 
   test("HTML syntax produces typed operands, modifier choices and target/version metadata") {
     inDirectory { root =>
-      val input  = write(root, "ptx.html", special + padding)
-      val output = root.resolve("output")
+      val input   = write(root, "ptx.html", special + padding)
+      val output  = root.resolve("output")
+      val sibling = write(output, "net/kurobako/gemstone/isa/sass/Instruction.scala", "// SASS sibling\n")
       generate("instructions", input, output)
-      val actual = source(output, "Instruction")
+      assertEquals(Files.readString(sibling), "// SASS sibling\n")
+      val actual    = source(output, "Instruction")
+      val modifiers = source(output, "Modifier")
+      val opcodes   = source(output, "Opcode")
       assert(actual.contains("case Add("), actual.take(500))
       assert(actual.contains("dest: Operand, srcA: Operand, srcB: Operand"), actual.takeRight(1500))
       assert(actual.contains("Version(7, 2), Target(80)"))
-      assert(actual.contains("ModifierGroup(\"s32\", \"u32\")"))
-      assert(actual.contains("Set(\"sat\")"))
+      assert(actual.contains("Opcode.Add"))
+      assert(actual.contains("ModifierGroup(Modifier.S32, Modifier.U32)"))
+      assert(actual.contains("Set(Modifier.Sat)"))
+      assert(modifiers.contains("case U32 extends Modifier(\"u32\")"))
+      assert(modifiers.contains("case Unrecognized(spelling: NonEmpty[String])"))
+      assert(opcodes.contains("case Add extends Opcode(\"add\")"))
       assert(actual.contains("val version: Version = Version(9, 3)"))
       val before = snapshot(output)
       generate("instructions", input, output)
@@ -56,6 +64,29 @@ class GeneratePTXISASuite extends munit.FunSuite {
       assert(!actual.contains("Example 1:"))
       assert(!actual.contains("ignored comment"))
       assertEquals(" -> ".r.findAllIn(actual).size, 846)
+    }
+  }
+
+  test("chained modifier definitions retain separate source and destination groups") {
+    inDirectory { root =>
+      val input = write(
+        root,
+        "ptx.html",
+        section(
+          "conversion",
+          "cvt.dtype.atype d, a;\n.dtype = .atype = { .f32, .u32 };",
+          "cvt.f32.f32 %r0, %r1;"
+        ) + padding
+      )
+      val output = root.resolve("output")
+      generate("instructions", input, output)
+      val actual = source(output, "Instruction")
+      val group  = "ModifierGroup(Modifier.F32, Modifier.U32)"
+      assert(
+        actual.filterNot(_.isWhitespace).contains(s"Vec($group,$group)".filterNot(_.isWhitespace)),
+        actual.takeRight(2500)
+      )
+      assert(!actual.contains("Modifier.Dtype"))
     }
   }
 

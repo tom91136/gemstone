@@ -46,10 +46,12 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       beforeSync: (HostMemorySync, Map[Long, Byte]) => Map[Long, Byte] = (_, _) => Map.empty,
       beforeRead: (HostMemoryRange, scala.collection.Map[Long, Byte]) => Map[Long, Byte] = (_, _) => Map.empty,
       relocations: Vec[KernelTask.PointerRelocation] = Vec.empty,
-      afterCompletion: Vec[KernelTask.PointerRelocation] => Unit = _ => ()
+      afterCompletion: Vec[KernelTask.PointerRelocation] => Unit = _ => (),
+      afterExecution: (ExecutionSession, Map[Long, AllocationId]) => Unit = (_, _) => ()
   ) =
     Using.resource(ExecutionSession(Backends.default().programs, executionContext = Async)) { service =>
       assertEquals(service.enableHostMemory(), Right(()))
+      val allocations = mutable.Map.empty[Long, AllocationId]
       fragments.foreach { (address, contents) =>
         val allocation =
           service.registerAllocation(
@@ -58,6 +60,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
           ).toOption.get
         assertEquals(service.registerAllocationAddress(allocation, GuestAddress(address), hostBacked), Right(()))
         assertEquals(service.write(allocation, 0L, contents), Right(()))
+        allocations.update(address, allocation)
       }
       val program = service.load(encoding, image).toOption.get
       val task    = KernelTask.validated(
@@ -89,12 +92,21 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
             val observed = (0 until size.raw).foldLeft(0L)((value, index) =>
               value | ((native(request.address.raw + index).toLong & 255L) << (index * 8))
             )
-            if (observed == request.expected) {
+            if (request.operation == HostMemoryAtomicOperation.Load) observed
+            else if (request.operation == HostMemoryAtomicOperation.Store || observed == request.expected) {
               val updated = bytes(request.address.raw, request.desired, size)
               native ++= updated
               writes ++= updated
+              observed
+            } else {
+              observed
             }
-            observed
+          }
+          sync.atomicStores.foreach { request =>
+            val size    = request.size.unsafe[Int where Between[1, 8]]
+            val updated = bytes(request.address.raw, request.desired, size)
+            native ++= updated
+            writes ++= updated
           }
           assertEquals(service.supplyHostSync(completion, sync.ticket, observed), Right(()))
           assert(service.supplyHostSync(completion, sync.ticket, observed).isLeft)
@@ -122,6 +134,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         offset = 0,
         limit = ExecutionRPC.MaximumElements
       ).toOption.get)
+      afterExecution(service, allocations.toMap)
       assertEquals(service.releaseCompletion(completion), Right(()))
       (reads.toVector, writes.toMap, batches)
     }
@@ -203,6 +216,33 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     assertEquals(batches, 0)
     assertEquals(reads.size, 0)
     assertEquals(writes, bytes(0x8000, 7, 4) ++ bytes(0x8004, 9, 4))
+  }
+
+  test("relaxed system-scope access to device-backed allocations stays on device memory") {
+    val source                   = header + """
+      .visible .entry probe() {
+        .reg .u64 %input, %output; .reg .u32 %value;
+        mov.u64 %input, 4096; mov.u64 %output, 8192;
+        ld.relaxed.sys.global.u32 %value, [%input];
+        st.relaxed.sys.global.u32 [%output], %value;
+        ret;
+      }"""
+    val syncs                    = mutable.ArrayBuffer.empty[HostMemorySync]
+    val (reads, writes, batches) = runImage(
+      PTX.encoding,
+      Vec.from(source.getBytes(StandardCharsets.UTF_8)),
+      1,
+      Vec.empty,
+      bytes(0x1000, 999, 4) ++ bytes(0x2000, 0, 4),
+      List(0x1000L -> encoded(73, 4), 0x2000L -> encoded(0, 4)),
+      beforeSync = (sync, _) => { syncs += sync; Map.empty },
+      afterExecution = (service, allocations) =>
+        assertEquals(service.read(allocations(0x2000L), 0L, 4).map(_.toList), Right(encoded(73, 4).toList))
+    )
+    assertEquals(reads, Vector.empty)
+    assertEquals(writes, Map.empty)
+    assertEquals(syncs.toVector, Vector.empty)
+    assertEquals(batches, 0)
   }
 
   test("PTX device atomics linearize at native storage across lanes") {
@@ -345,6 +385,172 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     )
     assertEquals(reads, Vector(HostMemoryRange(GuestAddress(0x100cL), 4)))
     assertEquals(writes, bytes(0x8004, 73, 4))
+  }
+
+  test("relaxed.sys store publishes its target without flushing unrelated host writes") {
+    val source         = header + """
+      .visible .entry probe() {
+        .reg .u64 %ordinary, %system; .reg .u32 %value;
+        mov.u64 %ordinary, 4096; mov.u64 %system, 8192; mov.u32 %value, 17;
+        st.global.u32 [%ordinary], %value;
+        mov.u32 %value, 29; st.relaxed.sys.global.u32 [%system], %value; ret;
+      }"""
+    val syncs          = mutable.ArrayBuffer.empty[HostMemorySync]
+    val (_, writes, _) = runImage(
+      PTX.encoding,
+      Vec.from(source.getBytes(StandardCharsets.UTF_8)),
+      1,
+      Vec.empty,
+      bytes(0x1000, 0, 4) ++ bytes(0x2000, 0, 4),
+      beforeSync = (sync, native) => {
+        syncs += sync
+        assertEquals(sync.atomic, None)
+        assertEquals(sync.relaxed, true)
+        assertEquals(sync.publish, Vec(HostMemoryRange(GuestAddress(0x2000L), 4)))
+        assertEquals((0 until 4).map(index => native(0x1000L + index)), encoded(0, 4))
+        assertEquals(sync.atomicStores.map(_.operation), Vec.fill(1)(HostMemoryAtomicOperation.Store))
+        assertEquals(sync.atomicStores.map(_.desired), Vec(29L))
+        Map.empty
+      }
+    )
+    assertEquals(syncs.size, 1)
+    assertEquals(writes, bytes(0x1000, 17, 4) ++ bytes(0x2000, 29, 4))
+  }
+
+  test("relaxed.sys load refreshes only its requested range after a cached weak load") {
+    val source         = header + """
+      .visible .entry probe() {
+        .reg .u64 %input, %output; .reg .u32 %weak, %system;
+        mov.u64 %input, 4096; mov.u64 %output, 32768;
+        ld.global.u32 %weak, [%input];
+        ld.relaxed.sys.global.u32 %system, [%input];
+        st.global.u32 [%output], %weak; st.global.u32 [%output+4], %system; ret;
+      }"""
+    val reads          = mutable.ArrayBuffer.empty[HostMemoryRange]
+    val syncs          = mutable.ArrayBuffer.empty[HostMemorySync]
+    val (_, writes, _) = runImage(
+      PTX.encoding,
+      Vec.from(source.getBytes(StandardCharsets.UTF_8)),
+      1,
+      Vec.empty,
+      bytes(0x1000, 1, 4) ++ bytes(0x8000, 0, 8),
+      beforeRead = (range, _) =>
+        if (range.address.raw == 0x1000L) {
+          reads += range
+          bytes(0x1000, 11, 4)
+        } else Map.empty,
+      beforeSync = (sync, _) => {
+        syncs += sync
+        assertEquals(sync.atomic.map(_.operation), Some(HostMemoryAtomicOperation.Load))
+        assertEquals(sync.relaxed, true)
+        bytes(0x1000, 23, 4)
+      }
+    )
+    assertEquals(reads.toVector, Vector(HostMemoryRange(GuestAddress(0x1000L), 4)))
+    assertEquals(syncs.size, 1)
+    assertEquals(writes, bytes(0x8000, 11, 4) ++ bytes(0x8004, 23, 4))
+  }
+
+  test("generic relaxed.sys accesses classify host-backed addresses and publish the exact store") {
+    val source         = header + """
+      .visible .entry probe(.param .u64 input, .param .u64 output) {
+        .reg .u64 %p, %q; .reg .u32 %v;
+        ld.param.u64 %p, [input]; ld.param.u64 %q, [output];
+        ld.relaxed.sys.u32 %v, [%p]; st.relaxed.sys.u32 [%q], %v; ret;
+      }"""
+    val reads          = mutable.ArrayBuffer.empty[HostMemoryRange]
+    val (_, writes, _) = runImage(
+      PTX.encoding,
+      Vec.from(source.getBytes(StandardCharsets.UTF_8)),
+      1,
+      Vec(scalar(0x100001000L), scalar(0x100002000L)),
+      bytes(0x100001000L, 41, 4) ++ bytes(0x100002000L, 0, 4),
+      beforeRead = (range, _) => { reads += range; Map.empty },
+      beforeSync = (sync, _) => {
+        assertEquals(sync.relaxed, true)
+        sync.atomic match {
+          case Some(request) if request.operation == HostMemoryAtomicOperation.Load =>
+            assertEquals(sync.publish, Vec(HostMemoryRange(GuestAddress(0x100001000L), 4)))
+          case None =>
+            assertEquals(sync.publish, Vec(HostMemoryRange(GuestAddress(0x100002000L), 4)))
+            assertEquals(sync.atomicStores.map(_.desired), Vec(41L))
+          case other => fail(s"unexpected relaxed.sys sync: $other")
+        }
+        Map.empty
+      }
+    )
+    assertEquals(reads.toVector, Vector.empty)
+    assertEquals(writes, bytes(0x100002000L, 41, 4))
+  }
+
+  test("relaxed.sys host scalars use native atomic operations at 8- and 16-bit widths") {
+    val source             = header + """
+      .visible .entry probe(.param .u64 input, .param .u64 output) {
+        .reg .u64 %p, %q; .reg .u32 %a, %b;
+        ld.param.u64 %p, [input]; ld.param.u64 %q, [output];
+        ld.relaxed.sys.u8 %a, [%p]; ld.relaxed.sys.u16 %b, [%p+2];
+        st.relaxed.sys.u8 [%q], %a; st.relaxed.sys.u16 [%q+2], %b; ret;
+      }"""
+    val syncs              = mutable.ArrayBuffer.empty[HostMemorySync]
+    val (reads, writes, _) = runImage(
+      PTX.encoding,
+      Vec.from(source.getBytes(StandardCharsets.UTF_8)),
+      1,
+      Vec(scalar(0x100001000L), scalar(0x100002000L)),
+      bytes(0x100001000L, 0x66554433L, 4) ++ bytes(0x100002000L, 0, 4),
+      beforeSync = (sync, _) => { syncs += sync; Map.empty }
+    )
+    assertEquals(reads, Vector.empty)
+    assertEquals(syncs.flatMap(_.atomic.map(_.size)).toVector, Vector(1, 2))
+    assertEquals(syncs.flatMap(_.atomicStores.map(_.size)).toVector, Vector(1, 2))
+    assert(syncs.forall(_.relaxed))
+    assertEquals(writes, bytes(0x100002000L, 0x33L, 1) ++ bytes(0x100002002L, 0x6655L, 2))
+  }
+
+  test("relaxed.sys host load rejects misaligned atomic-width addresses") {
+    val source = header + """
+      .visible .entry probe(.param .u64 input) {
+        .reg .u64 %p; .reg .u32 %value;
+        ld.param.u64 %p, [input];
+        ld.relaxed.sys.global.u32 %value, [%p];
+        ret;
+      }"""
+    Using.resource(ExecutionSession(Backends.default().programs, executionContext = Async)) { service =>
+      assertEquals(service.enableHostMemory(), Right(()))
+      val program = service.load(PTX.encoding, Vec.from(source.getBytes(StandardCharsets.UTF_8))).toOption.get
+      val task    = KernelTask.validated(
+        "probe",
+        LaunchGeometry.Dimensions.One,
+        LaunchGeometry.Dimensions.One,
+        Vec(scalar(0x1001L))
+      ).toOption.get
+      val completion = service.launch(program, task).toOption.get
+      service.pollHostMemory(completion) match {
+        case Left(error)  => assert(error.message.contains("naturally aligned"), error.message)
+        case Right(batch) => fail(s"misaligned relaxed.sys load completed or requested a host copy: $batch")
+      }
+    }
+  }
+
+  test("generic relaxed.gpu accesses retain shared-memory routing") {
+    val source         = header + """
+      .shared .align 4 .b8 scratch[4];
+      .visible .entry probe(.param .u64 output) {
+        .reg .u64 %q, %shared; .reg .u32 %value, %result;
+        ld.param.u64 %q, [output]; cvta.shared.u64 %shared, scratch;
+        mov.u32 %value, 73;
+        st.relaxed.gpu.u32 [%shared], %value;
+        ld.relaxed.gpu.u32 %result, [%shared];
+        st.global.u32 [%q], %result; ret;
+      }"""
+    val (_, writes, _) = runImage(
+      PTX.encoding,
+      Vec.from(source.getBytes(StandardCharsets.UTF_8)),
+      1,
+      Vec(scalar(0x8000)),
+      bytes(0x8000, 0, 4)
+    )
+    assertEquals(writes, bytes(0x8000, 73, 4))
   }
 
   private def operand(kind: OperandKind, words: Int*): Operand =

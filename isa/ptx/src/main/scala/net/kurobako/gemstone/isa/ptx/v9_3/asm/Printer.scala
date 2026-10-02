@@ -11,14 +11,14 @@ object Printer extends ISAPrinter[Program] {
   def render(operand: Operand): String = operand match {
     case Operand.Immediate(raw)             => raw.raw
     case Operand.Register(name, None)       => name.raw
-    case Operand.Register(name, Some(part)) => s"$name.$part"
+    case Operand.Register(name, Some(part)) => s"$name.${part.spelling}"
     case Operand.Symbol(name)               => name.raw
     case Operand.StringLiteral(contents)    => s"\"$contents\""
     case Operand.Qualifier(path)            => path.raw.map(part => "." + part.raw).mkString
     case Operand.VectorLiteral(items)       => items.map(render(_)).mkString("{", ", ", "}")
     case Operand.Parenthesized(items)       => items.map(render(_)).mkString("(", ", ", ")")
     case Operand.Address(items)             => items.map(render(_)).mkString("[", ", ", "]")
-    case Operand.Qualified(base, qualifier) => s"${render(base)}.$qualifier"
+    case Operand.Qualified(base, qualifier) => s"${render(base)}.${qualifier.spelling}"
     case Operand.Index(base, index)         => s"${render(base)}[${render(index)}]"
     case Operand.Add(left, right)           => s"${render(left)}+${render(right)}"
     case Operand.Subtract(left, right)      => s"${render(left)}-${render(right)}"

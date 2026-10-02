@@ -183,6 +183,22 @@ template <class Derived, class Job> struct WorkerLoop {
     return failure;
   }
 
+  /** Waits until a specific submission has released its job captures. */
+  ze_result_t waitThrough(uint64_t target, uint64_t timeout) {
+    std::unique_lock lock(mutex);
+    const auto finished = [&] { return completed >= target; };
+    if (timeout == 0) {
+      if (!finished()) return ZE_RESULT_NOT_READY;
+    } else if (timeout == std::numeric_limits<uint64_t>::max()) {
+      changed.wait(lock, finished);
+    } else if (!changed.wait_for(
+                   lock, std::chrono::nanoseconds(static_cast<int64_t>(std::min(timeout, uint64_t{std::numeric_limits<int64_t>::max()}))),
+                   finished)) {
+      return ZE_RESULT_NOT_READY;
+    }
+    return ZE_RESULT_SUCCESS;
+  }
+
   std::mutex mutex;
   std::condition_variable changed;
   std::deque<Job> pending;
@@ -247,11 +263,13 @@ struct Queue final : Handle, WorkerLoop<Queue, std::function<ze_result_t()>> {
   HandleUse<Context> context;
   Device *device;
   ze_command_queue_desc_t desc;
+  std::mutex synchronousMutex;
 };
 
 struct Fence final : Handle {
   explicit Fence(Queue *queueValue) : Handle(Kind::Fence), queue(queueValue) {}
   HandleUse<Queue> queue;
+  std::atomic<uint64_t> completionSequence{0};
   Event event;
   // Reset clears the signal, but a completed submission may still retain the
   // fence while its worker releases internal references.

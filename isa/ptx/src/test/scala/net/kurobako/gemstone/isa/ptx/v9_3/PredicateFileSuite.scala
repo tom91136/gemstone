@@ -1,44 +1,12 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import execution.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.vm.*
 
 class PredicateFileSuite extends munit.FunSuite {
-  test("numbered predicate boundaries retain independent defined and value bits") {
-    val predicates = VMPredicateFile()
-    val indices    = Seq(0, 1, 62, 63, 64, 65, 127, 128, 959, 960, 1022, 1023)
-    indices.foreach(index => assertEquals(predicates.getSlot(index), None))
-    indices.foreach { index =>
-      predicates.updateSlot(index, false)
-      assertEquals(predicates.getSlot(index), Some(false))
-      predicates.updateSlot(index, true)
-      assertEquals(predicates.get(s"%p$index"), Some(true))
-    }
-    assertEquals(predicates.getSlot(66), None)
-    indices.foreach { index =>
-      predicates.update(s"%p$index", false)
-      assertEquals(predicates.getSlot(index), Some(false))
-    }
-    assertEquals(predicates.getSlot(66), None)
-  }
-
-  test("named predicates and dense predicates do not alias") {
-    val predicates = VMPredicateFile()
-    Seq[NonEmpty[String]]("%ready", "%p", "%p1024", "%p-1").foreach { name =>
-      assertEquals(predicates.get(name), None)
-      predicates.update(name, true)
-    }
-    assertEquals(predicates.getSlot(0), None)
-    predicates.updateSlot(0, false)
-    Seq[NonEmpty[String]]("%ready", "%p", "%p1024", "%p-1").foreach(name =>
-      assertEquals(predicates.get(name), Some(true))
-    )
-    assertEquals(predicates.getSlot(0), Some(false))
-  }
-
   test("undefined predicate used by a vote still reports an execution fault") {
-    val source   = """.version 8.0
+    val source = """.version 8.0
       .target sm_80
       .address_size 64
       .visible .entry undefined_predicate() {
@@ -47,14 +15,11 @@ class PredicateFileSuite extends munit.FunSuite {
         vote.sync.ballot.b32 %r, %p63, 1;
         ret;
       }"""
-    val kernel   = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
-    val geometry = LaunchGeometry.forLaunch(
-      LaunchGeometry.Dimensions.One,
-      LaunchGeometry.Dimensions.One
-    ).toOption.get
-    val result = VMInterpreter.execute(
+    val kernel = compileKernel(source)
+    val result = execute(
       kernel,
-      geometry,
+      1,
+      1,
       Map.empty,
       ArrayCheckedMemory.allocate(0)
     )

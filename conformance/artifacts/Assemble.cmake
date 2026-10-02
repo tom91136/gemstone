@@ -31,7 +31,7 @@ if(NOT CONFORMANCE_SUPPORT_KEY MATCHES "^[A-Za-z0-9][A-Za-z0-9._-]*$")
   message(FATAL_ERROR "Invalid conformance support key: ${CONFORMANCE_SUPPORT_KEY}")
 endif()
 
-set(backend_cmake_arguments)
+set(backend_cmake_arguments "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}")
 if(BACKEND STREQUAL "hip")
   list(APPEND backend_cmake_arguments -DCMAKE_HIP_PLATFORM=amd)
 elseif(BACKEND STREQUAL "sycl")
