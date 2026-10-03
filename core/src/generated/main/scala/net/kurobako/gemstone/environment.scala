@@ -1,6 +1,8 @@
 // Generated from build.sbt: environmentVariables. Regenerate with: sbt codegen
 package net.kurobako.gemstone
 
+import net.kurobako.gemstone.constraint.*
+
 object environment {
   val BenchmarkJfr: String = "GEMSTONE_BENCHMARK_JFR"
   val Cuda11889: String = "GEMSTONE_CUDA_11_8_89"
@@ -27,18 +29,18 @@ object environment {
   val OpenclLlvmLink: String = "GEMSTONE_OPENCL_LLVM_LINK"
   val OpenclLlvmSpirv: String = "GEMSTONE_OPENCL_LLVM_SPIRV"
   val OpenclLocalMemSize: String = "GEMSTONE_OPENCL_LOCAL_MEM_SIZE"
-  val OpenclLocalMemSizeDefault: Long = 65536L
+  val OpenclLocalMemSizeDefault: Long > 0 = 65536L
   val OpenclMaxMemAllocSize: String = "GEMSTONE_OPENCL_MAX_MEM_ALLOC_SIZE"
-  val OpenclMaxMemAllocSizeDefault: Long = 268435456L
+  val OpenclMaxMemAllocSizeDefault: Long > 0 = 268435456L
   val OpenclMaxWorkGroupSize: String = "GEMSTONE_OPENCL_MAX_WORK_GROUP_SIZE"
-  val OpenclMaxWorkGroupSizeDefault: Long = 64L
+  val OpenclMaxWorkGroupSizeDefault: Long > 0 = 64L
   val OpenclScanBufferPointers: String = "GEMSTONE_OPENCL_SCAN_BUFFER_POINTERS"
   val Profile: String = "GEMSTONE_PROFILE"
   val Record: String = "GEMSTONE_RECORD"
   val RpcClient: String = "GEMSTONE_RPC_CLIENT"
   val RpcEndpoint: String = "GEMSTONE_RPC_ENDPOINT"
   val RpcTimeoutSeconds: String = "GEMSTONE_RPC_TIMEOUT_SECONDS"
-  val RpcTimeoutSecondsDefault: Long = 300L
+  val RpcTimeoutSecondsDefault: Long > 0 = 300L
   val SystemPaging: String = "GEMSTONE_SYSTEM_PAGING"
   val TargetArch: String = "GEMSTONE_TARGET_ARCH"
   val TestLibrary: String = "GEMSTONE_TEST_LIBRARY"

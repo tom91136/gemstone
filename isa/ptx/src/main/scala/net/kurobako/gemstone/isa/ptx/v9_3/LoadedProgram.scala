@@ -63,7 +63,7 @@ object LoadedProgram {
       count: Int > 0,
       initializer: Vec[Operand]
   ): Either[Fault, GlobalDefinition] = {
-    val elementBytes = (elementType.widthBits.raw / 8).unsafe[Int > 0]
+    val elementBytes = elementType.byteCount
     if (count.raw > Int.MaxValue / elementBytes.raw)
       return Left(Fault.InvalidTask(
         s"PTX global '$name' exceeds the supported size"
@@ -75,11 +75,11 @@ object LoadedProgram {
 
     val size       = elementBytes * count
     val bytes      = Array.ofDim[Byte](size.raw)
-    val immediates = initializer.view.collect { case Operand.Immediate(raw) => raw.raw }.take(count.raw).toVec
+    val immediates = initializer.view.collect { case Operand.Immediate(raw) => raw }.take(count.raw).toVec
     var index      = 0
     while (index < immediates.size) {
       val raw = immediates(index)
-      initializerBits(raw, elementType.kind, elementType.widthBits.raw) match {
+      initializerBits(raw, elementType) match {
         case None =>
           return Left(Fault.InvalidTask(
             s"invalid initializer '$raw' for PTX global '$name'"
@@ -96,24 +96,27 @@ object LoadedProgram {
     Right(GlobalDefinition(size, Vec.from(bytes).unsafe))
   }
 
-  private def initializerBits(raw: String, kind: Char, width: Int): Option[Long] =
+  private def initializerBits(raw: NonEmpty[String], elementType: DataType): Option[Long] = {
+    val kind  = elementType.kind
+    val width = elementType.widthBits.raw
     try
       if (kind == 'f' && width == 32) {
         NumericLiteral.hexadecimalPayload(raw, 'f')
-          .fold(Some(IEEE754.floatToBinary32(raw.toFloat).toLong))(digits => Some(BigInt(digits, 16).longValue))
+          .fold(Some(IEEE754.floatToBinary32(raw.toFloat).toLong))(digits => Some(BigInt(digits, 16).toLong))
       } else if (kind == 'f' && width == 64) {
         NumericLiteral.hexadecimalPayload(raw, 'd')
-          .fold(Some(IEEE754.doubleToBinary64(raw.toDouble)))(digits => Some(BigInt(digits, 16).longValue))
+          .fold(Some(IEEE754.doubleToBinary64(raw.toDouble)))(digits => Some(BigInt(digits, 16).toLong))
       } else {
         val unsigned = NumericLiteral.stripIntegerSuffix(raw)
         val negative = unsigned.startsWith("-")
         val value    = if (negative) unsigned.drop(1) else unsigned
         val parsed   = NumericLiteral.integer(value)
-        Some((if (negative) -parsed else parsed).longValue)
+        Some((if (negative) -parsed else parsed).toLong)
       }
     catch {
       case _: NumberFormatException => None
     }
+  }
 }
 
 class LoadedProgram private (

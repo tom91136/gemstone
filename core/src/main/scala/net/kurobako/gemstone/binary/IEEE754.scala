@@ -4,6 +4,87 @@ import net.kurobako.gemstone.constraint.*
 
 /** Raw IEEE-754 interchange encodings used by ISA registers and memory. */
 object IEEE754 {
+  enum Rounding {
+    case NearestEven, TowardZero, Up, Down
+  }
+
+  /** Convert a signed or unsigned 64-bit register without rounding through Double first. */
+  def integerToBinary(
+      value: Long,
+      unsigned: Boolean,
+      width: Int in (32, 64),
+      rounding: Rounding = Rounding.NearestEven
+  ): Long = {
+    val negative  = !unsigned && value < 0L
+    val magnitude = if (negative) -value else value
+    if (magnitude == 0L) 0L
+    else {
+      val fractionBits = if (width.raw == 32) 23 else 52
+      val bias         = if (width.raw == 32) 127 else 1023
+      val exponent     = 63 - java.lang.Long.numberOfLeadingZeros(magnitude)
+      val shift        = exponent - fractionBits
+      val significand  = if (shift <= 0) magnitude << -shift else magnitude >>> shift
+      val remainder    = if (shift <= 0) 0L else magnitude & ((1L << shift) - 1L)
+      val increment    = if (remainder == 0L) false
+      else rounding match {
+        case Rounding.TowardZero  => false
+        case Rounding.Up          => !negative
+        case Rounding.Down        => negative
+        case Rounding.NearestEven =>
+          val half = 1L << (shift - 1)
+          remainder > half || (remainder == half && (significand & 1L) != 0L)
+      }
+      val rounded  = significand + (if (increment) 1L else 0L)
+      val carry    = rounded >>> (fractionBits + 1)
+      val fraction = (if (carry != 0L) rounded >>> 1 else rounded) & ((1L << fractionBits) - 1L)
+      (if (negative) 1L << (width.raw - 1) else 0L) |
+        ((exponent.toLong + bias + carry) << fractionBits) | fraction
+    }
+  }
+
+  /** Signed low seven bits of the nearest-even integral quotient used by remquo. Binary long division keeps the
+    * remainder below a 53-bit significand even when x/y overflows Double.
+    */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def remainderQuotient(x: Double, y: Double): Int =
+    if (!x.isFinite || !y.isFinite || x == 0.0 || y == 0.0) 0
+    else {
+      def significand(bits: Long): Long = {
+        val fraction = bits & 0xfffffffffffffL
+        if ((bits & 0x7ff0000000000000L) == 0L) fraction else fraction | 0x10000000000000L
+      }
+      def exponent(bits: Long): Int = {
+        val encoded = ((bits >>> 52) & 0x7ffL).toInt
+        if (encoded == 0) -1074 else encoded - 1075
+      }
+      val xBits        = doubleToBinary64(x)
+      val yBits        = doubleToBinary64(y)
+      val xSignificand = significand(xBits)
+      val ySignificand = significand(yBits)
+      val xShift       = java.lang.Long.numberOfLeadingZeros(xSignificand) - 11
+      val yShift       = java.lang.Long.numberOfLeadingZeros(ySignificand) - 11
+      val numerator    = xSignificand << xShift
+      val denominator  = ySignificand << yShift
+      val distance     = exponent(xBits) - xShift - exponent(yBits) + yShift
+      val magnitude    = if (distance < -1) 0
+      else if (distance == -1) { if (numerator > denominator) 1 else 0 }
+      else {
+        var remainder = numerator
+        var quotient  = 0
+        var bit       = distance
+        while (bit >= 0) {
+          val next = if (remainder >= denominator) { remainder -= denominator; 1 }
+          else 0
+          quotient = ((quotient << 1) | next) & 0x7f
+          if (bit > 0) remainder <<= 1
+          bit -= 1
+        }
+        val twice = remainder << 1
+        (quotient + (if (twice > denominator || (twice == denominator && (quotient & 1) != 0)) 1 else 0)) & 0x7f
+      }
+      if ((xBits ^ yBits) < 0L) -magnitude else magnitude
+    }
+
   private inline val Binary16Bias        = 15
   private inline val Binary16ExponentMax = 0x1f
   private inline val Binary32Bias        = 127
@@ -97,13 +178,13 @@ object IEEE754 {
     Binary16.low(encoded)
   }
 
-  def toDouble(bits: Long, width: OneOf[(16, 32, 64)]): Double = width.raw match {
+  def toDouble(bits: Long, width: Int in (16, 32, 64)): Double = width.raw match {
     case 16 => binary16ToFloat(Binary16.low(bits)).toDouble
     case 32 => binary32ToFloat(Binary32.fromLow(Bits.low32(bits))).toDouble
     case 64 => binary64ToDouble(bits)
   }
 
-  def fromDouble(value: Double, width: OneOf[(16, 32, 64)]): Long = width.raw match {
+  def fromDouble(value: Double, width: Int in (16, 32, 64)): Long = width.raw match {
     case 16 => doubleToBinary16(value).toLong
     case 32 => floatToBinary32(value.toFloat).toLong
     case 64 => doubleToBinary64(value)

@@ -10,7 +10,7 @@ import net.kurobako.gemstone.vm.*
 
 class ModernIntegerLoweringSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
-    SASSFixture.module(89, Vec(SASSFixture.Kernel("divide_probe", 352, Vec(0 -> 8, 8 -> 4, 12 -> 4), registers = 10)))
+    SASSFixture.module(89, Vec(SASSFixture.Kernel("divide_probe", 352, Vec((0, 8), (8, 4), (12, 4)), registers = 10)))
 
   test("compiler-produced sm_89 signed division and remainder cover boundary values") {
     val module   = fixtureModule
@@ -24,7 +24,7 @@ class ModernIntegerLoweringSuite extends munit.FunSuite {
 
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(8L.unsafe[Long > 0])
+      val output  = service.allocate(8L)
       val program = service.compile(lowered)
         .fold(e => fail(e.message), identity)
       Vec(

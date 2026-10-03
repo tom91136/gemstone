@@ -117,7 +117,7 @@ object SASSOperandParser {
       val index   = if (cursor.consume('Z')) -1 else digits().toInt
       val refined = (if (index < 0) { if (bank == "UR") 63 else 255 }
                      else index)
-        .unsafe[Int where Between[0, 255]]
+        .unsafe[Int in 0 ~ 255]
       Operand.Register(RegisterBank.fromSpelling(bank), refined) -> dottedSuffixes()
     }
 
@@ -272,7 +272,7 @@ object SASSOperandParser {
       val uniform = name.startsWith("U")
       val number  = name.stripPrefix("U").stripPrefix("P")
       val index   = Option.when(number != "T")(number.toInt)
-      Operand.Predicate(index.map(_.unsafe[Int where Between[0, 6]]), uniform, negated)
+      Operand.Predicate(index.map(_.unsafe[Int in 0 ~ 6]), uniform, negated)
     }
 
     private def constantBank(): Operand = {
@@ -389,10 +389,10 @@ object SASSOperandParser {
       val displacement = terms.collect {
         case AddressTerm.Integer(value) => value
       }.sum
-      val mode   = addressModes.headOption
-      val scale  = mode.flatMap(AddressMode.scale).getOrElse(1)
-      val result =
-        Operand.Address(base, index, displacement, scale.unsafe[Int in (1, 2, 4, 8, 16)], mode, descriptor)
+      val mode                           = addressModes.headOption
+      val scale: Int in (1, 2, 4, 8, 16) = mode.flatMap(AddressMode.scale).getOrElse(1)
+      val result                         =
+        Operand.Address(base, index, displacement, scale, mode, descriptor)
       if (qualifiers.isEmpty) result else Operand.Qualified(result, qualifiers)
     }
   }

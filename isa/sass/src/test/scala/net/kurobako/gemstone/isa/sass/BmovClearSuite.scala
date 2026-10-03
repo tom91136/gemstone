@@ -17,7 +17,7 @@ class BmovClearSuite extends munit.FunSuite {
   private val clearModifiers = Vec(Instruction.Modifier("32"), Instruction.Modifier("CLEAR"))
 
   private def input(sm: Int = 75): Cubin.Module =
-    SASSFixture.module(sm, Vec(SASSFixture.Kernel("divergent_loop", 352, Vec(0 -> 8, 8 -> 4), registers = 8)))
+    SASSFixture.module(sm, Vec(SASSFixture.Kernel("divergent_loop", 352, Vec((0, 8), (8, 4)), registers = 8)))
   private val listing = Map(
     70 -> BmovFixtures.bmovClearSm70ProbeSm70,
     75 -> BmovFixtures.bmovClearSm75ProbeSm75,

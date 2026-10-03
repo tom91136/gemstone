@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -10,11 +11,13 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class ExtendedIntegerSuite extends munit.FunSuite {
   for {
-    width     <- Seq(8, 16, 32, 64)
+    width <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
+    rawWidth = width.raw
+    widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     count     <- Seq(1, 4)
     operation <- Seq("carry", "borrow", "umul", "smul")
     signed    <- if (operation == "smul") Seq(0, 1) else Seq(0)
-  } test(s"extended $operation: $width bits, $count lanes, signedness $signed") {
+  } test(s"extended $operation: $rawWidth bits, $count lanes, signedness $signed") {
     def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
     val valueType            = ref(if (count == 1) 2 else 3)
     val instruction          = operation match {
@@ -29,7 +32,7 @@ class ExtendedIntegerSuite extends munit.FunSuite {
         Instruction.TypeVoid(ref(1)),
         Instruction.TypeInt(
           ref(2),
-          operand(OperandKind.LiteralInteger, width),
+          operand(OperandKind.LiteralInteger, rawWidth),
           operand(OperandKind.LiteralInteger, signed)
         ),
         Instruction.TypeVector(ref(3), ref(2), operand(OperandKind.LiteralInteger, 4)),
@@ -55,7 +58,7 @@ class ExtendedIntegerSuite extends munit.FunSuite {
       Endianness.Little
     )
     val program  = loadUnchecked(module).toOption.get
-    val wordMask = (BigInt(1) << width) - 1
+    val wordMask = (BigInt(1) << rawWidth) - 1
     val pairs    = Seq(
       (-1L, -1L),
       (Long.MaxValue, Long.MaxValue),
@@ -65,25 +68,25 @@ class ExtendedIntegerSuite extends munit.FunSuite {
       (Long.MinValue, Long.MinValue),
       (1L, -1L),
       (0x123456789abcdefL, 0xfedcba9876543210L),
-      (1L << (width - 1), 1L << (width - 1)),
-      ((1L << (width - 1)) - 1, 2L)
+      (1L << (rawWidth - 1), 1L << (rawWidth - 1)),
+      ((1L << (rawWidth - 1)) - 1, 2L)
     )
     def encoded(values: Seq[Long]): Vec[Byte] =
-      Vec.from(values.flatMap(LittleEndian.toVec(_, (width / 8).unsafe[Int where Between[0, 8]])))
+      Vec.from(values.flatMap(LittleEndian.toVec(_, widthBytes.widen[Int in 0 ~ 8])))
     for (index <- pairs.indices) {
       val inputs  = (0 until count).map(lane => pairs((index + lane) % pairs.size))
       val results = inputs.map { (a, b) =>
         def value(n: Long): BigInt = {
           val bits = BigInt(n) & wordMask
-          if (operation == "smul" && bits.testBit(width - 1)) bits - (BigInt(1) << width) else bits
+          if (operation == "smul" && bits.testBit(rawWidth - 1)) bits - (BigInt(1) << rawWidth) else bits
         }
         val x    = value(a); val y = value(b)
         val full = if (operation == "carry") x + y else if (operation == "borrow") x - y else x * y
         val high = if (operation == "borrow") { if (x < y) BigInt(1) else BigInt(0) }
-        else full >> width
+        else full >> rawWidth
         ((full & wordMask).toLong, (high & wordMask).toLong)
       }
-      val region = AllocationId(1L); val memory = ArrayMemory(region, width / 8 * count * 2)
+      val region = AllocationId(1L); val memory = ArrayMemory(region, rawWidth / 8 * count * 2)
       val task   = KernelTask.validated(
         "extended",
         Dimensions.One,
@@ -100,12 +103,16 @@ class ExtendedIntegerSuite extends munit.FunSuite {
   }
 
   for {
-    baseWidth   <- Seq(8, 16, 32, 64)
-    resultWidth <- Seq(8, 32, 64)
+    baseWidth <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
+    rawBaseWidth = baseWidth.raw
+    baseWidthBytes = baseWidth.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
+    resultWidth <- Seq[Int in (8, 32, 64)](8, 32, 64)
+    rawResultWidth = resultWidth.raw
+    resultWidthBytes = resultWidth.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     count       <- Seq(1, 4)
     signed      <- Seq(0, 1)
   }
-    test(s"bitcount accepts $baseWidth-bit input and $resultWidth-bit result, $count lanes, input signedness $signed") {
+    test(s"bitcount accepts $rawBaseWidth-bit input and $rawResultWidth-bit result, $count lanes, input signedness $signed") {
       def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
       val inputType            = ref(if (count == 1) 2 else 4); val resultType = ref(if (count == 1) 3 else 5)
       val module               = Module(
@@ -114,12 +121,12 @@ class ExtendedIntegerSuite extends munit.FunSuite {
           Instruction.TypeVoid(ref(1)),
           Instruction.TypeInt(
             ref(2),
-            operand(OperandKind.LiteralInteger, baseWidth),
+            operand(OperandKind.LiteralInteger, rawBaseWidth),
             operand(OperandKind.LiteralInteger, signed)
           ),
           Instruction.TypeInt(
             ref(3),
-            operand(OperandKind.LiteralInteger, resultWidth),
+            operand(OperandKind.LiteralInteger, rawResultWidth),
             operand(OperandKind.LiteralInteger, 1 - signed)
           ),
           Instruction.TypeVector(ref(4), ref(2), operand(OperandKind.LiteralInteger, 4)),
@@ -143,9 +150,9 @@ class ExtendedIntegerSuite extends munit.FunSuite {
         ),
         Endianness.Little
       )
-      val inputs   = Seq(-1L, 0L, 0x5555555555555555L, 1L << (baseWidth - 1)).take(count)
-      val expected = Seq(baseWidth, 0, baseWidth / 2, 1).take(count)
-      val region   = AllocationId(1L); val memory = ArrayMemory(region, resultWidth / 8 * count)
+      val inputs   = Seq(-1L, 0L, 0x5555555555555555L, 1L << (rawBaseWidth - 1)).take(count)
+      val expected = Seq(rawBaseWidth, 0, rawBaseWidth / 2, 1).take(count)
+      val region   = AllocationId(1L); val memory = ArrayMemory(region, rawResultWidth / 8 * count)
       val task     = KernelTask.validated(
         "count",
         Dimensions.One,
@@ -154,14 +161,14 @@ class ExtendedIntegerSuite extends munit.FunSuite {
           KernelTask.Argument.Memory(region, 0L),
           KernelTask.Argument.Scalar(Vec.from(inputs.flatMap(LittleEndian.toVec(
             _,
-            (baseWidth / 8).unsafe[Int where Between[0, 8]]
+            baseWidthBytes.widen[Int in 0 ~ 8]
           ))))
         )
       ).toOption.get
       assertEquals(executeUnchecked(module, task, memory), Right(()))
       assertEquals(
         memory.bytes,
-        Vec.from(expected.flatMap(n => LittleEndian.toVec(n.toLong, (resultWidth / 8).unsafe[Int where Between[0, 8]])))
+        Vec.from(expected.flatMap(n => LittleEndian.toVec(n.toLong, resultWidthBytes.widen[Int in 0 ~ 8])))
       )
     }
 }

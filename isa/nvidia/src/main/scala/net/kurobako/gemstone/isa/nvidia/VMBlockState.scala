@@ -4,6 +4,7 @@ import cats.syntax.all.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Bits.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
@@ -18,7 +19,7 @@ object VMBlockState {
     private def validateMemoryRange(
         memory: AddressMemory,
         pc: Pc,
-        lane: Int,
+        lane: WorkgroupLane,
         address: GuestAddress,
         size: Int >= 0
     ): Either[VMFault, Unit] =
@@ -29,7 +30,7 @@ object VMBlockState {
     def validateWrite(memory: AddressMemory, pc: Pc)(write: VMWrite): Either[VMFault, Unit] =
       write match {
         case VMWrite.MemoryVector(lane, address, width, values) =>
-          val size = Math.multiplyExact(width.byteCount.raw, values.size).unsafe[Int >= 0]
+          val size = values.nonNegativeSize * width.byteCount
           validateMemoryRange(memory, pc, lane, address, size)
         case VMWrite.Memory(lane, address, width, _) =>
           validateMemoryRange(memory, pc, lane, address, width.byteCount)
@@ -49,19 +50,19 @@ object VMBlockState {
       }
 
     def applyWrite(state: VMBlockState, memory: AddressMemory)(write: VMWrite): Unit = write match {
-      case VMWrite.Register(lane, name, value)         => state.registers(lane)(name) = value
-      case VMWrite.Carry(lane, value)                  => state.carry(lane) = value
-      case VMWrite.ConditionFlag(lane, flag, value)    => state.conditionCodes(lane).write(flag, value)
-      case VMWrite.AddThreeCarry(lane, value)          => state.conditionCodes(lane).writeThreeInputCarry(value)
-      case VMWrite.FunctionRegister(lane, name, value) => state.functionRegisters(lane)(name) = value
-      case VMWrite.Predicate(lane, name, value)        => state.predicates(lane)(name) = value
-      case VMWrite.Parameter(lane, name, value)        => state.parameters(lane)(name) = value
+      case VMWrite.Register(lane, name, value)         => state.registers(lane.raw)(name) = value
+      case VMWrite.Carry(lane, value)                  => state.carry(lane.raw) = value
+      case VMWrite.ConditionFlag(lane, flag, value)    => state.conditionCodes(lane.raw).write(flag, value)
+      case VMWrite.AddThreeCarry(lane, value)          => state.conditionCodes(lane.raw).writeThreeInputCarry(value)
+      case VMWrite.FunctionRegister(lane, name, value) => state.functionRegisters(lane.raw)(name) = value
+      case VMWrite.Predicate(lane, name, value)        => state.predicates(lane.raw)(name) = value
+      case VMWrite.Parameter(lane, name, value)        => state.parameters(lane.raw)(name) = value
       case VMWrite.ParameterBytes(lane, name, offset, width, value) =>
         state.writeParameterBytes(lane, name, offset, width, value)
-      case VMWrite.FunctionParameter(lane, name, value)   => state.functionParameters(lane)(name) = value
+      case VMWrite.FunctionParameter(lane, name, value)   => state.functionParameters(lane.raw)(name) = value
       case VMWrite.ParameterBuffer(address, width, value) =>
-        state.parameterBufferRange(address, width.byteCount.raw).foreach { case (bytes, offset) =>
-          LittleEndian.write(value, bytes, offset, width.byteCount)
+        state.parameterBufferRange(address, width.byteCount.widen[Int >= 0]).foreach { case (bytes, offset) =>
+          LittleEndian.write(value, bytes, offset.raw, width.byteCount)
         }
       case VMWrite.Shared(_, address, width, value)        => state.writeShared(address, width, value)
       case VMWrite.Local(lane, address, width, value)      => state.writeLocal(lane, address, width, value)
@@ -78,42 +79,42 @@ object VMBlockState {
         )
       case VMWrite.AtomicSharedAdd(lane, destination, address, width, value) =>
         val previous = state.readShared(address, width)
-        state.registers(lane)(destination) = Bits.truncate(previous, width)
+        state.registers(lane.raw)(destination) = Bits.truncate(previous, width)
         state.writeShared(address, width, previous + value)
       case VMWrite.AtomicSharedCompareExchange(lane, destination, address, width, comparator, value) =>
         val previous = Bits.truncate(state.readShared(address, width), width)
-        state.registers(lane)(destination) = previous
+        state.registers(lane.raw)(destination) = previous
         if (previous == Bits.truncate(comparator, width)) state.writeShared(address, width, value)
       case VMWrite.AtomicSharedExchange(lane, destination, address, width, value) =>
         val previous = state.readShared(address, width)
-        state.registers(lane)(destination) = Bits.truncate(previous, width)
+        state.registers(lane.raw)(destination) = Bits.truncate(previous, width)
         state.writeShared(address, width, value)
       case VMWrite.AtomicSharedBinary(lane, destination, address, width, value, operation) =>
         val previous = state.readShared(address, width)
-        state.registers(lane)(destination) = Bits.truncate(previous, width)
+        state.registers(lane.raw)(destination) = Bits.truncate(previous, width)
         state.writeShared(address, width, atomicBinaryResult(operation, previous, value, width))
       case VMWrite.AtomicMemoryAdd(lane, destination, address, width, value) =>
         val previous = memory.atomicModifyLittleEndian(address, width.byteCount)(_ + value).fold(
           error => throw IllegalStateException(error.message),
           value => value
         )
-        state.registers(lane)(destination) = Bits.truncate(previous, width)
+        state.registers(lane.raw)(destination) = Bits.truncate(previous, width)
       case VMWrite.AtomicMemoryCompareExchange(lane, destination, address, width, comparator, value) =>
         val previous = memory.atomicModifyLittleEndian(address, width.byteCount) { current =>
           if (Bits.truncate(current, width) == Bits.truncate(comparator, width)) value else current
         }.fold(error => throw IllegalStateException(error.message), value => value)
-        state.registers(lane)(destination) = Bits.truncate(previous, width)
+        state.registers(lane.raw)(destination) = Bits.truncate(previous, width)
       case VMWrite.AtomicMemoryExchange(lane, destination, address, width, value) =>
         val previous = memory.atomicModifyLittleEndian(address, width.byteCount)(_ => value).fold(
           error => throw IllegalStateException(error.message),
           value => value
         )
-        state.registers(lane)(destination) = Bits.truncate(previous, width)
+        state.registers(lane.raw)(destination) = Bits.truncate(previous, width)
       case VMWrite.AtomicMemoryBinary(lane, destination, address, width, value, operation) =>
         val previous = memory.atomicModifyLittleEndian(address, width.byteCount) { current =>
           atomicBinaryResult(operation, current, value, width)
         }.fold(error => throw IllegalStateException(error.message), value => value)
-        state.registers(lane)(destination) = Bits.truncate(previous, width)
+        state.registers(lane.raw)(destination) = Bits.truncate(previous, width)
       case VMWrite.AtomicMemoryAddFloat(lane, destination, address, width, value) =>
         val previous = memory.atomicModifyLittleEndian(address, width.byteCount) { current =>
           if (width.raw == 32)
@@ -123,7 +124,7 @@ object VMBlockState {
             ).toLong
           else IEEE754.doubleToBinary64(IEEE754.binary64ToDouble(current) + IEEE754.binary64ToDouble(value))
         }.fold(error => throw IllegalStateException(error.message), value => value)
-        state.registers(lane)(destination) = Bits.truncate(previous, width)
+        state.registers(lane.raw)(destination) = Bits.truncate(previous, width)
     }
 
     private def atomicBinaryResult(
@@ -162,7 +163,7 @@ object VMBlockState {
     private val MemoryWrite   = 2.toByte
     private var kinds         = Array.ofDim[Byte](64)
     private var writes        = Array.ofDim[VMWrite | Null](64)
-    private var lanes         = Array.ofDim[Int](64)
+    private var lanes         = Array.ofDim[WorkgroupLane](64)
     private var registerNames = Array.ofDim[NonEmpty[String]](64)
     private var values        = Array.ofDim[Long](64)
     private var addresses     = Array.ofDim[Long](64)
@@ -176,7 +177,7 @@ object VMBlockState {
       pendingSize += 1
     }
 
-    def stageRegister(lane: Int, name: NonEmpty[String], value: Long): Unit = {
+    def stageRegister(lane: WorkgroupLane, name: NonEmpty[String], value: Long): Unit = {
       ensureCapacity()
       kinds(pendingSize) = RegisterWrite
       writes(pendingSize) = null
@@ -187,7 +188,7 @@ object VMBlockState {
     }
 
     def stageMemory(
-        lane: Int,
+        lane: WorkgroupLane,
         address: GuestAddress,
         width: Int where (Between[8, 64] & MultipleOf[8]),
         value: Long
@@ -219,7 +220,9 @@ object VMBlockState {
         val capacity = Math.multiplyExact(kinds.length, 2)
         kinds = java.util.Arrays.copyOf(kinds, capacity)
         writes = java.util.Arrays.copyOf(writes, capacity)
-        lanes = java.util.Arrays.copyOf(lanes, capacity)
+        val nextLanes = Array.ofDim[WorkgroupLane](capacity)
+        Array.copy(lanes, 0, nextLanes, 0, lanes.length)
+        lanes = nextLanes
         val nextRegisterNames = Array.ofDim[NonEmpty[String]](capacity)
         Array.copy(registerNames, 0, nextRegisterNames, 0, registerNames.length)
         registerNames = nextRegisterNames
@@ -267,7 +270,7 @@ object VMBlockState {
       index = 0
       while (index < pendingSize) {
         if (kinds(index) == RegisterWrite)
-          state.registers(lanes(index))(registerNames(index)) = values(index)
+          state.registers(lanes(index).raw)(registerNames(index)) = values(index)
         else if (kinds(index) == MemoryWrite)
           memory.writeLittleEndian(
             GuestAddress(addresses(index)),
@@ -291,38 +294,38 @@ object VMBlockState {
 
 /** Mutable storage for one executing NVIDIA workgroup. */
 class VMBlockState(
-    val laneCount: Int,
+    val laneCount: Int > 0,
     initialLive: VMLaneMask,
     val shared: mutable.Map[Long, Byte] = mutable.Map.empty,
-    val registerChunkCount: Int = 96
+    val registerChunkCount: VMRegisterFile.ChunkCount = 96
 ) {
-  val registers: Array[VMRegisterFile] = Array.fill(laneCount)(VMRegisterFile(registerChunkCount))
+  val registers: Array[VMRegisterFile] = Array.fill(laneCount.raw)(VMRegisterFile(registerChunkCount))
   val functionRegisters: Array[mutable.Map[NonEmpty[String], NonEmpty[String]]] =
-    Array.fill(laneCount)(mutable.Map.empty[NonEmpty[String], NonEmpty[String]])
-  val predicates: Array[VMPredicateFile]                     = Array.fill(laneCount)(VMPredicateFile())
-  val conditionCodes: Array[VMConditionCodes]                = Array.fill(laneCount)(VMConditionCodes())
+    Array.fill(laneCount.raw)(mutable.Map.empty[NonEmpty[String], NonEmpty[String]])
+  val predicates: Array[VMPredicateFile]                     = Array.fill(laneCount.raw)(VMPredicateFile())
+  val conditionCodes: Array[VMConditionCodes]                = Array.fill(laneCount.raw)(VMConditionCodes())
   val parameters: Array[mutable.Map[NonEmpty[String], Long]] =
-    Array.fill(laneCount)(mutable.Map.empty[NonEmpty[String], Long])
+    Array.fill(laneCount.raw)(mutable.Map.empty[NonEmpty[String], Long])
   val functionParameters: Array[mutable.Map[NonEmpty[String], NonEmpty[String]]] =
-    Array.fill(laneCount)(mutable.Map.empty[NonEmpty[String], NonEmpty[String]])
+    Array.fill(laneCount.raw)(mutable.Map.empty[NonEmpty[String], NonEmpty[String]])
   val parameterBytes: Array[mutable.Map[NonEmpty[String], mutable.Map[Int, Byte]]] =
-    Array.fill(laneCount)(mutable.Map.empty[NonEmpty[String], mutable.Map[Int, Byte]])
+    Array.fill(laneCount.raw)(mutable.Map.empty[NonEmpty[String], mutable.Map[Int, Byte]])
   val convergence: scala.collection.mutable.Map[(Int, Int), Long] = mutable.Map.empty[(Int, Int), Long]
-  val sassReturns: Array[mutable.ArrayBuffer[Int]]            = Array.fill(laneCount)(mutable.ArrayBuffer.empty[Int])
-  val carry: Array[Boolean]                                   = Array.fill(laneCount)(false)
-  val effects: VMBlockState.WriteBuffer                       = VMBlockState.WriteBuffer()
-  val parameterBuffers: mutable.Map[Long, Array[Byte]]        = mutable.Map.empty
+  val sassReturns: Array[mutable.ArrayBuffer[Int]]     = Array.fill(laneCount.raw)(mutable.ArrayBuffer.empty[Int])
+  val carry: Array[Boolean]                            = Array.fill(laneCount.raw)(false)
+  val effects: VMBlockState.WriteBuffer                = VMBlockState.WriteBuffer()
+  val parameterBuffers: mutable.Map[Long, Array[Byte]] = mutable.Map.empty
   val parameterAddresses: mutable.Map[NonEmpty[String], Long] = mutable.Map.empty
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var nextParameterBuffer                   = 0x700000000L
-  private val local: Array[mutable.Map[Long, Byte]] = Array.fill(laneCount)(mutable.Map.empty[Long, Byte])
+  private val local: Array[mutable.Map[Long, Byte]] = Array.fill(laneCount.raw)(mutable.Map.empty[Long, Byte])
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   var live: VMLaneMask = initialLive
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def reset(nextLive: VMLaneMask): Unit = {
     var lane = 0
-    while (lane < laneCount) {
+    while (lane < laneCount.raw) {
       registers(lane).clear()
       functionRegisters(lane).clear()
       predicates(lane).clear()
@@ -354,43 +357,53 @@ class VMBlockState(
       shared(address + index.toLong) = byte
     }
 
-  def readLocal(lane: Int, address: Long, width: Int where (Between[8, 64] & MultipleOf[8])): Long =
+  def readLocal(lane: WorkgroupLane, address: Long, width: Int where (Between[8, 64] & MultipleOf[8])): Long =
     LittleEndian.decode(byteCount(width))(index =>
-      local(lane).getOrElse(address + index.toLong, 0.toByte)
+      local(lane.raw).getOrElse(address + index.toLong, 0.toByte)
     )
 
-  def writeLocal(lane: Int, address: Long, width: Int where (Between[8, 64] & MultipleOf[8]), value: Long): Unit =
+  def writeLocal(
+      lane: WorkgroupLane,
+      address: Long,
+      width: Int where (Between[8, 64] & MultipleOf[8]),
+      value: Long
+  ): Unit =
     LittleEndian.write(value, byteCount(width)) { (index, byte) =>
-      local(lane)(address + index.toLong) = byte
+      local(lane.raw)(address + index.toLong) = byte
     }
 
   def writeParameterBytes(
-      lane: Int,
+      lane: WorkgroupLane,
       name: NonEmpty[String],
       offset: Int,
       width: Int where (Between[8, 64] & MultipleOf[8]),
       value: Long
   ): Unit = {
-    val bytes = parameterBytes(lane).getOrElseUpdate(name, mutable.Map.empty)
+    val bytes = parameterBytes(lane.raw).getOrElseUpdate(name, mutable.Map.empty)
     LittleEndian.write(value, byteCount(width)) { (index, byte) =>
       bytes(offset + index) = byte
     }
   }
 
-  def readParameterBytes(lane: Int, name: NonEmpty[String], offset: Int, size: Int where Between[0, 8]): Long =
+  def readParameterBytes(
+      lane: WorkgroupLane,
+      name: NonEmpty[String],
+      offset: Int,
+      size: Int in 0 ~ 8
+  ): Long =
     LittleEndian.decode(size) { index =>
-      parameterBytes(lane).get(name).flatMap(_.get(offset + index)).getOrElse(0.toByte)
+      parameterBytes(lane.raw).get(name).flatMap(_.get(offset + index)).getOrElse(0.toByte)
     }
 
-  def allocateParameterBuffer(size: Int): Long = {
+  def allocateParameterBuffer(size: Int >= 0): Long = {
     val base = nextParameterBuffer
-    parameterBuffers(base) = Array.ofDim[Byte](Math.max(size, 1))
-    nextParameterBuffer = Math.addExact(base, Math.max(size, 1).toLong + 0x100L)
+    parameterBuffers(base) = Array.ofDim[Byte](Math.max(size.raw, 1))
+    nextParameterBuffer = Math.addExact(base, Math.max(size.raw, 1).toLong + 0x100L)
     base
   }
 
   def bindParameterBuffer(name: NonEmpty[String], bytes: Array[Byte]): Unit = {
-    val base = allocateParameterBuffer(bytes.length)
+    val base = allocateParameterBuffer(bytes.length.unsafe[Int >= 0])
     Array.copy(bytes, 0, parameterBuffers(base), 0, bytes.length)
     parameterAddresses(name) = base
   }
@@ -406,25 +419,25 @@ class VMBlockState(
 
   // This hot lookup avoids the intermediate view and collectFirst closure for each virtual-memory access.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:GemstoneNoIterator.no-iterator"))
-  def parameterBufferRange(address: Long, size: Int): Option[(Array[Byte], Int)] = {
+  def parameterBufferRange(address: Long, size: Int >= 0): Option[(Array[Byte], Int >= 0)] = {
     val buffers                            = parameterBuffers.iterator
-    var result: Option[(Array[Byte], Int)] = None
+    var result: Option[(Array[Byte], Int >= 0)] = None
     while (buffers.hasNext && result.isEmpty) {
       val (base, bytes) = buffers.next()
       val offset        = address - base
-      if (address >= base && offset >= 0L && offset <= bytes.length.toLong - size.toLong)
-        result = Some(bytes -> offset.toInt)
+      if (address >= base && offset >= 0L && offset <= bytes.length.toLong - size.raw.toLong)
+        result = Some(bytes -> offset.toInt.unsafe[Int >= 0])
     }
     result
   }
 
-  def readParameterBuffer(address: Long, size: Int where Between[0, 8]): Option[Long] =
-    parameterBufferRange(address, size.raw).map { case (bytes, offset) =>
-      LittleEndian.decode(bytes, offset, size)
+  def readParameterBuffer(address: Long, size: Int in 0 ~ 8): Option[Long] =
+    parameterBufferRange(address, size.widen[Int >= 0]).map { case (bytes, offset) =>
+      LittleEndian.decode(bytes, offset.raw, size)
     }
 
-  def readParameterBufferBytes(address: Long, size: Int): Option[Array[Byte]] =
+  def readParameterBufferBytes(address: Long, size: Int >= 0): Option[Array[Byte]] =
     parameterBufferRange(address, size).map { case (bytes, offset) =>
-      java.util.Arrays.copyOfRange(bytes, offset, offset + size)
+      java.util.Arrays.copyOfRange(bytes, offset.raw, (offset + size).raw)
     }
 }

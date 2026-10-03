@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -10,19 +11,21 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class VulkanUndefinedIntegerSuite extends munit.FunSuite {
   for {
-    width     <- Seq(32, 64)
+    width <- Seq[Int in (32, 64)](32, 64)
+    rawWidth = width.raw
+    widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     count     <- Seq(1, 4)
     operation <- Seq("sdiv", "srem", "smod", "udiv", "umod")
   }
-    test(s"Vulkan $operation $width-bit $count-lane undefined results do not abort valid lanes") {
+    test(s"Vulkan $operation $rawWidth-bit $count-lane undefined results do not abort valid lanes") {
       def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
       val valueType            = ref(if (count == 1) 2 else 3)
       val left                 = ref(if (count == 1) 20 else 12); val right = ref(if (count == 1) 8 else 13)
-      val minimum              = 1L << (width - 1)
+      val minimum              = 1L << (rawWidth - 1)
       def constant(id: Int, value: Long): Instruction = Instruction.Constant(
         ref(2),
         ref(id),
-        if (width == 32) operand(OperandKind.LiteralContextDependentNumber, value.toInt)
+        if (rawWidth == 32) operand(OperandKind.LiteralContextDependentNumber, value.toInt)
         else operand(OperandKind.LiteralContextDependentNumber, value.toInt, (value >>> 32).toInt)
       )
       val calculation = operation match {
@@ -38,7 +41,7 @@ class VulkanUndefinedIntegerSuite extends munit.FunSuite {
           Instruction.TypeVoid(ref(1)),
           Instruction.TypeInt(
             ref(2),
-            operand(OperandKind.LiteralInteger, width),
+            operand(OperandKind.LiteralInteger, rawWidth),
             operand(OperandKind.LiteralInteger, if (operation.startsWith("s")) 1 else 0)
           ),
           Instruction.TypeVector(ref(3), ref(2), operand(OperandKind.LiteralInteger, 4)),
@@ -81,7 +84,7 @@ class VulkanUndefinedIntegerSuite extends munit.FunSuite {
         ),
         Endianness.Little
       )
-      val region = AllocationId(1L); val memory = ArrayMemory(region, width / 8 * count)
+      val region = AllocationId(1L); val memory = ArrayMemory(region, rawWidth / 8 * count)
       val task   = KernelTask.validated(
         "undefined_integer",
         Dimensions.One,
@@ -98,24 +101,26 @@ class VulkanUndefinedIntegerSuite extends munit.FunSuite {
           1L,
           if (operation.endsWith("div")) 3L else 1L
         ).take(count)
-      assertEquals(memory.bytes, expected.flatMap(LittleEndian.toVec(_, (width / 8).unsafe[Int where Between[0, 8]])))
+      assertEquals(memory.bytes, expected.flatMap(LittleEndian.toVec(_, widthBytes.widen[Int in 0 ~ 8])))
     }
 
   for {
-    width            <- Seq(32, 64)
+    width <- Seq[Int in (32, 64)](32, 64)
+    rawWidth = width.raw
+    widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     count            <- Seq(1, 4)
     operation        <- Seq("uextract", "sextract", "insert")
-    (offset, length) <- Seq((-1, 1), (0, -1), (width, 1), (width - 1, 2))
+    (offset, length) <- Seq((-1, 1), (0, -1), (rawWidth, 1), (rawWidth - 1, 2))
   }
-    test(s"Vulkan $operation $width-bit $count-lane undefined range $offset/$length does not abort") {
+    test(s"Vulkan $operation $rawWidth-bit $count-lane undefined range $offset/$length does not abort") {
       def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
       val valueType            = ref(if (count == 1) 2 else 3)
       val left                 = ref(if (count == 1) 20 else 12); val right = ref(if (count == 1) 8 else 13)
-      val minimum              = 1L << (width - 1)
+      val minimum              = 1L << (rawWidth - 1)
       def constant(id: Int, value: Long): Instruction = Instruction.Constant(
         ref(2),
         ref(id),
-        if (width == 32) operand(OperandKind.LiteralContextDependentNumber, value.toInt)
+        if (rawWidth == 32) operand(OperandKind.LiteralContextDependentNumber, value.toInt)
         else operand(OperandKind.LiteralContextDependentNumber, value.toInt, (value >>> 32).toInt)
       )
       val calculation = operation match {
@@ -129,7 +134,7 @@ class VulkanUndefinedIntegerSuite extends munit.FunSuite {
           Instruction.TypeVoid(ref(1)),
           Instruction.TypeInt(
             ref(2),
-            operand(OperandKind.LiteralInteger, width),
+            operand(OperandKind.LiteralInteger, rawWidth),
             operand(OperandKind.LiteralInteger, if (operation.startsWith("s")) 1 else 0)
           ),
           Instruction.TypeVector(ref(3), ref(2), operand(OperandKind.LiteralInteger, 4)),
@@ -174,7 +179,7 @@ class VulkanUndefinedIntegerSuite extends munit.FunSuite {
         ),
         Endianness.Little
       )
-      val region = AllocationId(1L); val memory = ArrayMemory(region, width / 8 * count)
+      val region = AllocationId(1L); val memory = ArrayMemory(region, rawWidth / 8 * count)
       val task   = KernelTask.validated(
         "undefined_integer",
         Dimensions.One,
@@ -184,6 +189,6 @@ class VulkanUndefinedIntegerSuite extends munit.FunSuite {
       assertEquals(executeUnchecked(module, task, memory), Right(()))
       val expected =
         (if (operation == "insert") Vec(8L, minimum, 3L, 10L) else Vec.fill(4)(0L)).take(count)
-      assertEquals(memory.bytes, expected.flatMap(LittleEndian.toVec(_, (width / 8).unsafe[Int where Between[0, 8]])))
+      assertEquals(memory.bytes, expected.flatMap(LittleEndian.toVec(_, widthBytes.widen[Int in 0 ~ 8])))
     }
 }

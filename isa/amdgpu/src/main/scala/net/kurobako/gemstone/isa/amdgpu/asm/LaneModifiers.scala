@@ -10,20 +10,21 @@ import net.kurobako.gemstone.isa.amdgpu.EncodingConstants.*
 import net.kurobako.gemstone.string.*
 
 private object LaneModifiers {
-  private val Rows = Map(
-    "row_shl"   -> DPP.ROW_SHL0,
-    "row_shr"   -> DPP.ROW_SHR0,
-    "row_ror"   -> DPP.ROW_ROR0,
-    "row_share" -> DPP.ROW_SHARE0,
-    "row_xmask" -> DPP.ROW_XMASK0
+  private val Rows: Map[NonEmpty[String], Int] = Map(
+    ("row_shl", DPP.ROW_SHL0),
+    ("row_shr", DPP.ROW_SHR0),
+    ("row_ror", DPP.ROW_ROR0),
+    ("row_share", DPP.ROW_SHARE0),
+    ("row_xmask", DPP.ROW_XMASK0)
   )
-  private val Waves = Map(
-    "wave_shl" -> DPP.WAVE_SHL1,
-    "wave_rol" -> DPP.WAVE_ROL1,
-    "wave_shr" -> DPP.WAVE_SHR1,
-    "wave_ror" -> DPP.WAVE_ROR1
+  private val Waves: Map[NonEmpty[String], Int] = Map(
+    ("wave_shl", DPP.WAVE_SHL1),
+    ("wave_rol", DPP.WAVE_ROL1),
+    ("wave_shr", DPP.WAVE_SHR1),
+    ("wave_ror", DPP.WAVE_ROR1)
   )
-  private val Mirrors   = Map("row_mirror" -> DPP.ROW_MIRROR, "row_half_mirror" -> DPP.ROW_HALF_MIRROR)
+  private val Mirrors: Map[NonEmpty[String], Int] =
+    Map(("row_mirror", DPP.ROW_MIRROR), ("row_half_mirror", DPP.ROW_HALF_MIRROR))
   private val Broadcast = Map(15 -> DPP.BCAST15, 31 -> DPP.BCAST31)
   private val Numeric   = Set("row_mask", "bank_mask", "bound_ctrl", "fi")
 
@@ -57,7 +58,7 @@ private object LaneModifiers {
       EncodingField.BANK_MASK -> BigInt(15)
     )
 
-  private def number(value: String): Option[Int] = scala.util.Try(Integer.decode(value).intValue).toOption
+  private def number(value: String): Option[Int]                               = parseIntLiteral(value)
   private def list(value: String, count: Int, limit: Int): Option[Vector[Int]] =
     Option.when(value.startsWith("[") && value.endsWith("]"))(value.drop(1).dropRight(1).split(',').toVector)
       .flatMap(_.traverse(text => number(text.trim))).filter(values =>
@@ -65,7 +66,7 @@ private object LaneModifiers {
       )
 
   def modifier(modifier: Modifier, layout: InstructionLayout): Option[Map[EncodingField, BigInt]] = {
-    val name               = modifier.name.raw
+    val name               = modifier.name
     val value              = modifier.value.map(_.raw)
     def control(code: Int) =
       Option.when(layout.byName.contains(EncodingField.DPP_CTRL))(Map(EncodingField.DPP_CTRL -> BigInt(code)))
@@ -106,14 +107,14 @@ private object LaneModifiers {
   }
 
   def modifiers(word: BigInt, layout: InstructionLayout): Vec[Modifier] = {
-    def numeric(name: String, value: BigInt): Modifier =
-      Modifier(name.unsafe[NonEmpty[String]], Some(value.toString.unsafe[NonEmpty[String]]))
-    def select(name: EncodingField, spelling: Int => Option[String]): Vec[Modifier] =
+    def numeric(name: NonEmpty[String], value: BigInt): Modifier =
+      Modifier(name, Some(value.toString.unsafe[NonEmpty[String]]))
+    def select(name: EncodingField, spelling: Int => Option[NonEmpty[String]]): Vec[Modifier] =
       layout.byName.get(name).flatMap(field =>
         spelling(field.get(word).toInt)
       )
         .map(value =>
-          Modifier(name.toString.toLowerCaseRoot.unsafe[NonEmpty[String]], Some(value.unsafe[NonEmpty[String]]))
+          Modifier(name.assemblyName, Some(value))
         ).toVec
     if (!supports(layout.format)) Vec.empty
     else if (sdwa(layout)) Vec(Modifier("sdwa")) ++
@@ -142,7 +143,7 @@ private object LaneModifiers {
       ))
       else Rows.find { case (_, base) => (code & ~15) == base }.map { case (name, _) => numeric(name, code & 15) }
         .orElse(Waves.find(_._2 == code).map { case (name, _) => numeric(name, 1) })
-        .orElse(Mirrors.find(_._2 == code).map { case (name, _) => Modifier(name.unsafe[NonEmpty[String]]) })
+        .orElse(Mirrors.find(_._2 == code).map { case (name, _) => Modifier(name) })
         .orElse(Broadcast.find(_._2 == code).map { case (value, _) => numeric("row_bcast", value) })
       Vec(Modifier("dpp")) ++ control.toVec ++
         Vec(
@@ -150,7 +151,7 @@ private object LaneModifiers {
           numeric("bank_mask", layout.get(word, EncodingField.BANK_MASK))
         ) ++
         Vec(EncodingField.BOUND_CTRL, EncodingField.FI).filter(name => layout.get(word, name) != 0).map(name =>
-          numeric(name.toString.toLowerCaseRoot, layout.get(word, name))
+          numeric(name.assemblyName, layout.get(word, name))
         )
     }
   }

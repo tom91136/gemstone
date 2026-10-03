@@ -27,7 +27,7 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
     val words4: BitSet     = java.util.BitSet(pageSize / 4)
     val words8: BitSet     = java.util.BitSet(pageSize / 8)
 
-    def atomicWidth(offset: Int): Int =
+    def atomicWidth(offset: Int): Int in (0, 1, 2, 4, 8) =
       if (words8.get(offset / 8)) 8
       else if (words4.get(offset / 4)) 4
       else if (words2.get(offset / 2)) 2
@@ -68,12 +68,12 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
     }
   }
 
-  private val pages                           = mutable.LongMap.empty[Page]
-  private val missing                         = Addresses()
-  private val issued                          = Addresses()
-  private val changed                         = Addresses()
-  private def atomicWidth(address: Long): Int =
-    pages.get(address >>> 12).fold(0)(_.atomicWidth((address & 4095L).toInt))
+  private val pages                                              = mutable.LongMap.empty[Page]
+  private val missing                                            = Addresses()
+  private val issued                                             = Addresses()
+  private val changed                                            = Addresses()
+  private def atomicWidth(address: Long): Int in (0, 1, 2, 4, 8) =
+    pages.get(address >>> 12).fold[Int in (0, 1, 2, 4, 8)](0)(_.atomicWidth((address & 4095L).toInt))
   private def contains(address: Long): Boolean =
     pages.get(address >>> 12).exists(_.valid.get((address & 4095L).toInt))
   private def byte(address: Long): Byte = pages(address >>> 12).bytes((address & 4095L).toInt)
@@ -128,7 +128,7 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
     if (absent) None else Some(Vec.from((0 until size).map(index => byte(address + index.toLong))))
   }
 
-  def write(address: Long, values: Vec[Byte], atomicWidth: Int = 0): Unit = {
+  def write(address: Long, values: Vec[Byte], atomicWidth: Int in (0, 1, 2, 4, 8) = 0): Unit = {
     // Preserve the width of naturally aligned stores when publishing a batch.
     // Mixed-width overlapping accesses do not have a cross-agent atomicity guarantee.
     spans(address, values.size) { (number, offset, length, consumed) =>
@@ -140,12 +140,12 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
       for (index <- 0 until length) page.bytes(offset + index) = values(consumed + index)
       page.valid.set(offset, offset + length)
     }
-    if (Set(1, 2, 4, 8)(atomicWidth) && values.nonEmpty && address % atomicWidth == 0) {
+    if (atomicWidth.raw != 0 && values.nonEmpty && address % atomicWidth.raw == 0) {
       val page   = pages(address >>> 12)
       val offset = (address & 4095L).toInt
-      if (atomicWidth == 8) page.words8.set(offset / 8)
-      else if (atomicWidth == 4) page.words4.set(offset / 4)
-      else if (atomicWidth == 2) page.words2.set(offset / 2)
+      if (atomicWidth.raw == 8) page.words8.set(offset / 8)
+      else if (atomicWidth.raw == 4) page.words4.set(offset / 4)
+      else if (atomicWidth.raw == 2) page.words2.set(offset / 2)
       else page.words1.set(offset)
     }
     changed.add(address, values.size)
@@ -181,11 +181,11 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
     val source    = addresses.iterator.buffered
     var remaining = maxBatchBytes
     while (
-      source.hasNext && remaining >= (if (stores) math.max(1, atomicWidth(source.head)) else 1) &&
+      source.hasNext && remaining >= (if (stores) math.max(1, atomicWidth(source.head).raw) else 1) &&
       chunks.size < maxBatchRanges
     ) {
       val base     = source.next()
-      val width    = if (stores) math.max(1, atomicWidth(base)) else 1
+      val width    = if (stores) math.max(1, atomicWidth(base).raw) else 1
       val capacity = math.min(65536, remaining / width * width)
       var size     = 1
       remaining -= 1

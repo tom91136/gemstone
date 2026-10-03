@@ -16,18 +16,18 @@ import net.kurobako.gemstone.vm.*
 class HmmaF16AccumulatorSuite extends munit.FunSuite {
   private def fixtureModule(sm: Int, shuffle: Boolean = false): Cubin.Module = {
     val kernels = if (sm == 89) Vec(
-      SASSFixture.Kernel("mma_f16_acc_nonalias_1688", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 18),
-      SASSFixture.Kernel("mma_f16_acc_alias_1688", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 16),
-      SASSFixture.Kernel("mma_f16_acc_nonalias", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 20),
-      SASSFixture.Kernel("mma_f16_acc_alias", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 20)
+      SASSFixture.Kernel("mma_f16_acc_nonalias_1688", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 18),
+      SASSFixture.Kernel("mma_f16_acc_alias_1688", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 16),
+      SASSFixture.Kernel("mma_f16_acc_nonalias", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 20),
+      SASSFixture.Kernel("mma_f16_acc_alias", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 20)
     )
     else if (shuffle) Vec(
-      SASSFixture.Kernel("mma_f16_acc_nonalias_1688", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 18),
-      SASSFixture.Kernel("mma_f16_acc_alias_1688", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 16)
+      SASSFixture.Kernel("mma_f16_acc_nonalias_1688", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 18),
+      SASSFixture.Kernel("mma_f16_acc_alias_1688", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 16)
     )
     else Vec(
-      SASSFixture.Kernel("mma_f16_acc_nonalias_1688", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 16),
-      SASSFixture.Kernel("mma_f16_acc_alias_1688", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 14)
+      SASSFixture.Kernel("mma_f16_acc_nonalias_1688", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 16),
+      SASSFixture.Kernel("mma_f16_acc_alias_1688", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 14)
     )
     SASSFixture.module(sm, kernels)
   }
@@ -109,7 +109,7 @@ class HmmaF16AccumulatorSuite extends munit.FunSuite {
     def nextRegister(operand: Operand): Operand = operand match {
       case Operand.Register(bank, index) => Operand.Register(
           bank,
-          (index.raw + 1).refine[Int where Between[0, 255]].fold(error => fail(error.raw), identity)
+          (index.raw + 1).refine[Int in 0 ~ 255].fold(error => fail(error.raw), identity)
         )
       case other => fail(s"expected register operand, got $other")
     }
@@ -135,7 +135,7 @@ class HmmaF16AccumulatorSuite extends munit.FunSuite {
       shuffle: Boolean = false
   ): Unit = {
     val module      = fixtureModule(sm, shuffle)
-    val parsed      = ListingDecoder.parse(sassText, kernel, module.sm).fold(fail(_), _.head)
+    val parsed      = ListingDecoder.parse(sassText, kernel, module.sm.raw).fold(fail(_), _.head)
     val function    = if (forceAlias) aliasDestinationToAccumulator(parsed) else parsed
     val instruction = function.instructions.find(_.mnemonic.raw == "HMMA").getOrElse(fail("fixture has no HMMA"))
     assert(instruction.operands.size == 4)
@@ -146,7 +146,7 @@ class HmmaF16AccumulatorSuite extends munit.FunSuite {
     val (aWords, bWords, cWords, expected) = fragments(shape, dense)
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(512L.unsafe[Long > 0])
+      val output  = service.allocate(512L)
       val inputs  = Vec(aWords, bWords, cWords).map(values =>
         service.allocate((values.size.toLong * 4).unsafe[Long > 0])
       )

@@ -9,6 +9,39 @@ import net.kurobako.gemstone.rpc.Wire.*
 import net.kurobako.gemstone.vm.*
 
 class ExecutionProtocolSuite extends munit.FunSuite {
+  private case class UncheckedHostAtomic(
+      address: GuestAddress,
+      size: Int,
+      expected: Long,
+      desired: Long,
+      operation: HostMemoryAtomicOperation
+  ) derives Codec
+
+  private case class UncheckedHostBytes(address: GuestAddress, bytes: Vec[Byte], atomicWidth: Int) derives Codec
+
+  test("host atomic widths are validated at the wire boundary while zero denotes ordinary bytes") {
+    def atomic(width: Int): Either[String, HostMemoryAtomic] =
+      Codec[UncheckedHostAtomic].encode(
+        UncheckedHostAtomic(GuestAddress(4096L), width, 0L, 1L, HostMemoryAtomicOperation.Store),
+        ExecutionRPC.Limits
+      ).flatMap(Codec[HostMemoryAtomic].decode(_, ExecutionRPC.Limits))
+    def bytes(width: Int): Either[String, HostMemoryBytes] =
+      Codec[UncheckedHostBytes].encode(
+        UncheckedHostBytes(GuestAddress(4096L), Vec[Byte](1), width),
+        ExecutionRPC.Limits
+      ).flatMap(Codec[HostMemoryBytes].decode(_, ExecutionRPC.Limits))
+    Vec(1, 2, 4, 8).foreach { width =>
+      assertEquals(atomic(width).map(_.size.raw), Right(width))
+      assertEquals(bytes(width).map(_.atomicWidth.raw), Right(width))
+    }
+    assert(atomic(0).isLeft)
+    assertEquals(bytes(0).map(_.atomicWidth.raw), Right(0))
+    Vec(-1, 3, 16).foreach { width =>
+      assert(atomic(width).isLeft)
+      assert(bytes(width).isLeft)
+    }
+  }
+
   private case class UncheckedKernelMetadata(
       argumentBlockSize: Int >= 0,
       explicitParameterCount: Int >= 0,

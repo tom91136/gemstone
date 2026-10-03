@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import VMCollectives.*
 import VMIR.*
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
@@ -74,8 +75,10 @@ private object VMCompiler {
     val descriptorSets          = mutable.HashMap.empty[Int, Int >= 0]
     val descriptorSlots         = mutable.HashMap.empty[Int, Int >= 0]
     val builtins                = mutable.HashMap.empty[Int, Int]
-    val arrayStrides            = mutable.HashMap.empty[Int, Int]
-    val memberOffsets           = mutable.HashMap.empty[(Int, Int), Int]
+    val arrayStrides            = mutable.HashMap.empty[Int, Int > 0]
+    val memberOffsets           = mutable.HashMap.empty[(Int, Int), Int >= 0]
+    val matrixStrides           = mutable.HashMap.empty[(Int, Int), Int > 0]
+    val rowMajorMatrices        = mutable.HashSet.empty[(Int, Int)]
     val packedStructures        = mutable.HashSet.empty[Int]
     val byValueParameters       = mutable.HashSet.empty[Int]
     val saturatedConversions    = mutable.HashSet.empty[Int]
@@ -119,7 +122,7 @@ private object VMCompiler {
           // The preceding guard proves the SPIR-V scalar bit-width range at the decode boundary.
           types.update(
             id(dest),
-            RuntimeType.Integer(bits.unsafe[Int where Between[1, 64]], unsigned(signedness) != 0L)
+            RuntimeType.Integer(bits.unsafe[ScalarBitWidth], unsigned(signedness) != 0L)
           )
         case Instruction.TypeFloat(dest, width, _) =>
           val bits = id(width)
@@ -128,17 +131,17 @@ private object VMCompiler {
               Fault.Unsupported(s"SPIR-V floating-point width $bits is unsupported")
             )
           // The preceding closed-domain check proves the supported interchange width.
-          types.update(id(dest), RuntimeType.Floating(bits.unsafe[OneOf[(16, 32, 64)]]))
+          types.update(id(dest), RuntimeType.Floating(bits.unsafe[Int in (16, 32, 64)]))
         case Instruction.TypeVector(dest, component, count) =>
           val componentCount = id(count)
           if (componentCount <= 0)
             return Left(Fault.InvalidTask(s"SPIR-V vector component count ${unsigned(count)} is invalid"))
-          types.update(id(dest), RuntimeType.VectorType(id(component), componentCount))
+          types.update(id(dest), RuntimeType.VectorType(id(component), componentCount.unsafe[Int > 0]))
         case Instruction.TypeMatrix(dest, column, count) =>
           val columns     = id(count)
           val validColumn = types.get(id(column)).exists {
             case RuntimeType.VectorType(component, rows) =>
-              rows >= 2 && rows <= 4 && types.get(component).exists {
+              rows.raw >= 2 && rows.raw <= 4 && types.get(component).exists {
                 case RuntimeType.Floating(_) => true
                 case _                       => false
               }
@@ -146,7 +149,7 @@ private object VMCompiler {
           }
           if (!validColumn || columns < 2 || columns > 4)
             return Left(Fault.InvalidTask("SPIR-V matrix requires two to four floating columns and rows"))
-          types.update(id(dest), RuntimeType.MatrixType(id(column), columns))
+          types.update(id(dest), RuntimeType.MatrixType(id(column), columns.unsafe[Int in 2 ~ 4]))
         case Instruction.TypeArray(dest, element, length) =>
           val count = constants.get(id(length)).flatMap(scalarBits(_)) match {
             case Some(value) => value
@@ -157,7 +160,10 @@ private object VMCompiler {
                 )
               )
           }
-          types.update(id(dest), RuntimeType.Array(id(element), count))
+          count.refine[Long >= 0] match {
+            case Right(size) => types.update(id(dest), RuntimeType.Array(id(element), size))
+            case Left(_)     => return Left(Fault.InvalidTask(s"SPIR-V array length $count is invalid"))
+          }
         case Instruction.TypeRuntimeArray(dest, element) =>
           // A zero count marks an unsized descriptor array; accesses use the external allocation's bounds.
           types.update(id(dest), RuntimeType.Array(id(element), 0L))
@@ -311,7 +317,10 @@ private object VMCompiler {
             case Right(value) => descriptorSets.update(id(target), value)
           }
         case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 && unsigned(decoration) == 6L =>
-          arrayStrides.update(id(target), Math.toIntExact(decoration.words(1).toUnsigned.toLong))
+          decoration.words(1).raw.refine[Int > 0] match {
+            case Right(stride) => arrayStrides.update(id(target), stride)
+            case Left(_) => return Left(Fault.InvalidTask("SPIR-V array stride must be a positive supported byte size"))
+          }
         case Instruction.Decorate(target, decoration) if unsigned(decoration) == 10L =>
           val _ = packedStructures.add(id(target))
         case Instruction.Decorate(target, decoration)
@@ -325,10 +334,20 @@ private object VMCompiler {
             return Left(Fault.InvalidTask("FPRoundingMode requires RTE, RTZ, RTP or RTN"))
           roundingModes.update(id(target), decoration.words.apply(1).raw)
         case Instruction.MemberDecorate(structureType, member, decoration)
+            if decoration.words.length >= 2 && unsigned(decoration) == Decoration.MatrixStride =>
+          decoration.words(1).raw.refine[Int > 0] match {
+            case Right(stride) => matrixStrides.update(id(structureType) -> id(member), stride)
+            case Left(_)       =>
+              return Left(Fault.InvalidTask("SPIR-V matrix stride must be a positive supported byte size"))
+          }
+        case Instruction.MemberDecorate(structureType, member, decoration)
+            if unsigned(decoration) == Decoration.RowMajor =>
+          val _ = rowMajorMatrices.add(id(structureType) -> id(member))
+        case Instruction.MemberDecorate(structureType, member, decoration)
             if decoration.words.length >= 2 && unsigned(decoration) == Decoration.Offset =>
           memberOffsets.update(
             id(structureType) -> Math.toIntExact(unsigned(member)),
-            Math.toIntExact(decoration.words(1).toUnsigned.toLong)
+            Math.toIntExact(decoration.words(1).toUnsigned.toLong).unsafe[Int >= 0]
           )
         case Instruction.ExtInstImport(dest, name) =>
           val decodedName = literalString(name)
@@ -448,7 +467,8 @@ private object VMCompiler {
       globals.get(variable).exists { global =>
         types.get(global.pointerType) match {
           case Some(RuntimeType.Pointer(_, pointee)) => types.get(pointee) match {
-              case Some(RuntimeType.Array(element, count)) => count <= 0 || count > 4096 || types.get(element).exists {
+              case Some(RuntimeType.Array(element, count)) => count.raw <= 0 || count.raw > 4096 ||
+                types.get(element).exists {
                   case RuntimeType.Array(_, _) => true
                   case _                       => false
                 }
@@ -474,6 +494,9 @@ private object VMCompiler {
         builtins = builtins.toMap,
         arrayStrides = arrayStrides.toMap,
         memberOffsets = memberOffsets.toMap,
+        memberMatrixLayouts = matrixStrides.map { case (key, stride) =>
+          key -> MatrixLayout(stride, rowMajorMatrices.contains(key))
+        }.toMap,
         packedStructures = packedStructures.toSet,
         byValueParameters = byValueParameters.toSet,
         saturatedConversions = saturatedConversions.toSet,
@@ -598,7 +621,7 @@ private object VMCompiler {
     val result = lanes.result()
     scalarLeafCount(types, id(resultType)).flatMap(expected =>
       Either.cond(
-        result.length == expected,
+        result.length == expected.raw,
         Constant.Bits(id(resultType), Vec.from(result)),
         Fault.InvalidTask(
           s"SPIR-V composite constant %${id(destination)} has ${result.length} scalar leaves, expected $expected"
@@ -638,7 +661,7 @@ private object VMCompiler {
       constants.get(Math.toIntExact(value)).collect { case Constant.Bits(t, lanes) => (t, lanes) }
     }
     def shape(t: Int): Option[(RuntimeType, Int)] = types.get(t).flatMap {
-      case RuntimeType.VectorType(component, count) => types.get(component).map((_, count))
+      case RuntimeType.VectorType(component, count) => types.get(component).map((_, count.raw))
       case scalar @ (RuntimeType.Bool | RuntimeType.Integer(_, _) | RuntimeType.Floating(_)) => Some((scalar, 1))
       case _                                                                                 => None
     }
@@ -646,7 +669,7 @@ private object VMCompiler {
     def mask(width: Int): Long            = if (width == 64) -1L else (1L << width) - 1L
     def signed(value: Long, width: Int): Long      = (value << (64 - width)) >> (64 - width)
     def result(lanes: Vec[Long]): Option[Constant] =
-      scalarLeafCount(types, resultType).toOption.filter(_ == lanes.size).map(_ => Constant.Bits(resultType, lanes))
+      scalarLeafCount(types, resultType).toOption.filter(_.raw == lanes.size).map(_ => Constant.Bits(resultType, lanes))
     def component(t: Int, indices: Vec[Long]): Option[(Int, Int)] =
       if (indices.isEmpty) Some((t, 0))
       else {
@@ -654,13 +677,13 @@ private object VMCompiler {
         val child = types.get(t) match {
           case Some(RuntimeType.Structure(members)) if index >= 0 && index < members.size =>
             val preceding = members.take(index.toInt).map(m => scalarLeafCount(types, m).toOption)
-            if (preceding.forall(_.isDefined)) Some((members(index.toInt), preceding.flatten.sum)) else None
-          case Some(RuntimeType.VectorType(element, count)) if index >= 0 && index < count =>
-            scalarLeafCount(types, element).toOption.map(n => (element, Math.toIntExact(index * n)))
-          case Some(RuntimeType.MatrixType(element, count)) if index >= 0 && index < count =>
-            scalarLeafCount(types, element).toOption.map(n => (element, Math.toIntExact(index * n)))
-          case Some(RuntimeType.Array(element, count)) if index >= 0 && index < count =>
-            scalarLeafCount(types, element).toOption.map(n => (element, Math.toIntExact(index * n)))
+            if (preceding.forall(_.isDefined)) Some((members(index.toInt), preceding.flatten.foldLeft(0: Int >= 0)(_ + _).raw)) else None
+          case Some(RuntimeType.VectorType(element, count)) if index >= 0 && index < count.raw =>
+            scalarLeafCount(types, element).toOption.map(n => (element, Math.toIntExact(index * n.raw)))
+          case Some(RuntimeType.MatrixType(element, count)) if index >= 0 && index < count.raw =>
+            scalarLeafCount(types, element).toOption.map(n => (element, Math.toIntExact(index * n.raw)))
+          case Some(RuntimeType.Array(element, count)) if index >= 0 && index < count.raw =>
+            scalarLeafCount(types, element).toOption.map(n => (element, Math.toIntExact(index * n.raw)))
           case _ => None
         }
         child.flatMap { case (element, offset) =>
@@ -674,7 +697,7 @@ private object VMCompiler {
           selected  <- component(composite._1, operands.drop(1))
           if selected._1 == resultType
           count <- scalarLeafCount(types, resultType).toOption
-          value <- result(composite._2.slice(selected._2, selected._2 + count))
+          value <- result(composite._2.slice(selected._2, selected._2 + count.raw))
         } yield value
       case SPIRV.Opcode.CompositeInsert if operands.size >= 3 =>
         for {
@@ -793,7 +816,7 @@ private object VMCompiler {
     def shape(id: Int): Option[(Int, Int)] = types.get(id) match {
       case Some(RuntimeType.Integer(width, _))          => Some((width.raw, 1))
       case Some(RuntimeType.VectorType(element, count)) => types.get(element) match {
-          case Some(RuntimeType.Integer(width, _)) => Some((width.raw, count))
+          case Some(RuntimeType.Integer(width, _)) => Some((width.raw, count.raw))
           case _                                   => None
         }
       case _ => None

@@ -39,7 +39,7 @@ class BinarySASSDisassemblerSuite extends munit.FunSuite {
     ).fold(fail(_), identity).head.instructions
     expected.foreach { textInstruction =>
       val bytes  = code.slice(textInstruction.address.raw, textInstruction.address.raw + 16)
-      val actual = InstructionDecoder.decodeTyped(textInstruction.address.raw, bytes, "SM89").fold(fail(_), identity)
+      val actual = InstructionDecoder.decodeTyped(textInstruction.address, bytes, "SM89").fold(fail(_), identity)
       assertEquals(actual.address, textInstruction.address)
       assertEquals(actual.mnemonic, textInstruction.mnemonic, textInstruction.toString)
       assertEquals(actual.modifiers, textInstruction.modifiers, textInstruction.toString)

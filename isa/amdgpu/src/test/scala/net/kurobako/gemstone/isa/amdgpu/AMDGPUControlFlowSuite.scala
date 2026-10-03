@@ -6,6 +6,7 @@ import fixtures.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
@@ -129,11 +130,11 @@ class AMDGPUControlFlowSuite extends munit.FunSuite {
   }
 
   test("gfx900 DS bpermute selects a source lane from a byte address") {
-    assertEquals(VMArithmetic.bpermuteSourceLane(0L), 0)
-    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 37L), 37)
-    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 69L), 5)
-    assertEquals(VMArithmetic.bpermuteSourceLane(0L, 124L), 31)
-    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 37L, 124L), 4)
+    assertEquals(VMArithmetic.bpermuteSourceLane(0L).raw, 0)
+    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 37L).raw, 37)
+    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 69L).raw, 5)
+    assertEquals(VMArithmetic.bpermuteSourceLane(0L, 124L).raw, 31)
+    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 37L, 124L).raw, 4)
     assertEquals(
       VMCompiler.validate(
         Vec[Byte](
@@ -157,10 +158,10 @@ class AMDGPUControlFlowSuite extends munit.FunSuite {
   }
 
   test("gfx1036 DS permute selects a destination lane from a byte address") {
-    assertEquals(VMArithmetic.permuteDestinationLane(0L, 0L, 32), 0)
-    assertEquals(VMArithmetic.permuteDestinationLane(4L * 29L, 0L, 32), 29)
-    assertEquals(VMArithmetic.permuteDestinationLane(0L, 124L, 32), 31)
-    assertEquals(VMArithmetic.permuteDestinationLane(4L * 37L, 124L, 32), 4)
+    assertEquals(VMArithmetic.permuteDestinationLane(0L, 0L, 32).raw, 0)
+    assertEquals(VMArithmetic.permuteDestinationLane(4L * 29L, 0L, 32).raw, 29)
+    assertEquals(VMArithmetic.permuteDestinationLane(0L, 124L, 32).raw, 31)
+    assertEquals(VMArithmetic.permuteDestinationLane(4L * 37L, 124L, 32).raw, 4)
     assertEquals(
       VMCompiler.decodeInstruction(
         Vec[Byte](0x00, 0x00, 0xc8.toByte, 0xda.toByte, 0x01, 0x02, 0x00, 0x05),
@@ -215,22 +216,22 @@ class AMDGPUControlFlowSuite extends munit.FunSuite {
 
   test("gfx900 DPP routes quad, row-rotate, and row-broadcast sources") {
     assertEquals(
-      Vec.tabulate(8)(lane => VMArithmetic.dppQuadSourceLane(lane, 0xb1)),
+      Vec.range[0, 8].map(lane => VMArithmetic.dppQuadSourceLane(lane, 0xb1).raw),
       Vec(1, 0, 3, 2, 5, 4, 7, 6)
     )
-    assert((0 until 64).forall(lane => VMArithmetic.dppLaneEnabled(lane, 0xf, 0xf)))
+    assert(Vec.range[0, 64].forall(lane => VMArithmetic.dppLaneEnabled(lane, 0xf, 0xf)))
     assert(!VMArithmetic.dppLaneEnabled(0, 0xe, 0xf))
     assert(!VMArithmetic.dppLaneEnabled(1, 0xf, 0xd))
     assertEquals(
-      Vec(0, 4, 15, 16).map(VMArithmetic.dppSourceLane(_, 0x124)),
+      Vec[VMState.Lane](0, 4, 15, 16).map(lane => VMArithmetic.dppSourceLane(lane, 0x124).map(_.raw)),
       Vec(Some(12), Some(0), Some(11), Some(28))
     )
     assertEquals(
-      Vec(0, 16, 32, 48).map(VMArithmetic.dppSourceLane(_, 0x142)),
+      Vec[VMState.Lane](0, 16, 32, 48).map(lane => VMArithmetic.dppSourceLane(lane, 0x142).map(_.raw)),
       Vec(None, Some(15), None, Some(47))
     )
     assertEquals(
-      Vec(0, 16, 32, 48).map(VMArithmetic.dppSourceLane(_, 0x143)),
+      Vec[VMState.Lane](0, 16, 32, 48).map(lane => VMArithmetic.dppSourceLane(lane, 0x143).map(_.raw)),
       Vec(None, None, Some(31), Some(31))
     )
     assertEquals(

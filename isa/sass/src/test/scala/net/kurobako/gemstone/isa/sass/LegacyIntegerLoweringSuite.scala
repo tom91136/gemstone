@@ -12,11 +12,11 @@ import net.kurobako.gemstone.vm.*
 class LegacyIntegerLoweringSuite extends munit.FunSuite {
   private def saxpyModule: Cubin.Module = SASSFixture.module(
     86,
-    Vec(SASSFixture.Kernel("saxpy", 352, Vec(0 -> 8, 8 -> 8, 16 -> 4, 20 -> 4), registers = 10))
+    Vec(SASSFixture.Kernel("saxpy", 352, Vec((0, 8), (8, 8), (16, 4), (20, 4)), registers = 10))
   )
   private def icmpModule: Cubin.Module = SASSFixture.module(
     35,
-    Vec(SASSFixture.Kernel("probe", 320, Vec(0 -> 8, 8 -> 4, 12 -> 4, 16 -> 4), registers = 7))
+    Vec(SASSFixture.Kernel("probe", 320, Vec((0, 8), (8, 4), (12, 4), (16, 4)), registers = 7))
   )
 
   private def execute(body: Vec[(String, String)], expected: Vec[Int]): Unit = {
@@ -89,7 +89,7 @@ class LegacyIntegerLoweringSuite extends munit.FunSuite {
     val scalar = (value: Int) => LittleEndian.toVec(value.toLong, 4)
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(12L.unsafe[Long > 0])
+      val output  = service.allocate(12L)
       val program = service.compile(sass)
         .fold(e => fail(e.message), identity)
       Vec((-1, Vec(11, 11, 22)), (0, Vec(22, 22, 22)), (1, Vec(11, 22, 11))).foreach {

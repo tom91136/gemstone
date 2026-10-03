@@ -2,7 +2,6 @@ package net.kurobako.gemstone.isa.sass
 
 import cats.syntax.all.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
@@ -20,7 +19,7 @@ object LoadedProgram {
       globalSymbols: Map[NonEmpty[String], GuestAddress] = Map.empty
   ): Either[Fault, Compiled] =
     VMCompiler.compile(module, kernel, functions, globalSymbols)
-      .leftMap(detail => Fault.Unsupported(detail.unsafe[NonEmpty[String]]))
+      .leftMap(Fault.Unsupported(_))
       .map(Compiled(_))
 
   def execute(

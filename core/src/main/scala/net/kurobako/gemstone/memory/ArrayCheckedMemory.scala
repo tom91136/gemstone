@@ -4,8 +4,10 @@ import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 
 object ArrayCheckedMemory {
   def allocate(
@@ -25,14 +27,14 @@ class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes: Arra
   override def readInt8(address: GuestAddress): Either[MemoryError, Byte] = lock.withLock {
     validate(address, 1) match {
       case Left(error)   => Left(error)
-      case Right(offset) => Right(mutableBytes(offset))
+      case Right(offset) => Right(mutableBytes(offset.raw))
     }
   }
 
   override def readInt32(address: GuestAddress): Either[MemoryError, Int] = lock.withLock {
     validate(address, 4) match {
       case Left(error)   => Left(error)
-      case Right(offset) => Right(LittleEndian.decodeInt32(mutableBytes, offset))
+      case Right(offset) => Right(LittleEndian.decodeInt32(mutableBytes, offset.raw))
     }
   }
 
@@ -40,7 +42,7 @@ class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes: Arra
     validate(address, 4) match {
       case Left(error)   => Left(error)
       case Right(offset) =>
-        LittleEndian.write(value.toLong, mutableBytes, offset, 4)
+        LittleEndian.write(value.toLong, mutableBytes, offset.raw, 4)
         Right(())
     }
   }
@@ -49,56 +51,56 @@ class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes: Arra
     validate(address, 1) match {
       case Left(error)   => Left(error)
       case Right(offset) =>
-        mutableBytes(offset) = value
+        mutableBytes(offset.raw) = value
         Right(())
     }
   }
 
   override def readBytes(address: GuestAddress, size: Int >= 0): Either[MemoryError, Vec[Byte]] = lock.withLock {
-    validate(address, size.raw) match {
+    validate(address, size) match {
       case Left(error)   => Left(error)
       case Right(offset) =>
-        Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(mutableBytes, offset, offset + size.raw)))
+        Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(mutableBytes, offset.raw, (offset + size).raw)))
     }
   }
 
   override def writeBytes(address: GuestAddress, bytes: Vec[Byte]): Either[MemoryError, Unit] = lock.withLock {
-    validate(address, bytes.length) match {
+    validate(address, bytes.nonNegativeSize) match {
       case Left(error)   => Left(error)
       case Right(offset) =>
-        val _ = bytes.copyToArray(mutableBytes, offset, bytes.size)
+        val _ = bytes.copyToArray(mutableBytes, offset.raw, bytes.size)
         Right(())
     }
   }
 
-  override def readLittleEndian(address: GuestAddress, size: Int where Between[1, 8]): Either[MemoryError, Long] =
+  override def readLittleEndian(address: GuestAddress, size: Int in 1 ~ 8): Either[MemoryError, Long] =
     lock.withLock {
-      validate(address, size.raw).map(offset =>
-        LittleEndian.decode(mutableBytes, offset, size.scalarByteWidth)
+      validate(address, size).map(offset =>
+        LittleEndian.decode(mutableBytes, offset.raw, size.scalarByteWidth)
       )
     }
 
   override def writeLittleEndian(
       address: GuestAddress,
       value: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[MemoryError, Unit] =
     lock.withLock {
-      validate(address, size.raw) match {
+      validate(address, size) match {
         case Left(error)   => Left(error)
         case Right(offset) =>
-          LittleEndian.write(value, mutableBytes, offset, size.scalarByteWidth)
+          LittleEndian.write(value, mutableBytes, offset.raw, size.scalarByteWidth)
           Right(())
       }
     }
 
   override def atomicModifyLittleEndian(
       address: GuestAddress,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   )(update: Long => Long): Either[MemoryError, Long] = lock.withLock {
-    validate(address, size.raw) match {
+    validate(address, size) match {
       case Left(error)   => Left(error)
-      case Right(offset) => Right(LittleEndian.atomicModify(mutableBytes, offset, size.scalarByteWidth)(update))
+      case Right(offset) => Right(LittleEndian.atomicModify(mutableBytes, offset.raw, size.scalarByteWidth)(update))
     }
   }
 
@@ -106,13 +108,15 @@ class ArrayCheckedMemory private (val allocation: Allocation, mutableBytes: Arra
     live = false
   }
 
-  private def validate(address: GuestAddress, width: Int): Either[MemoryError, Int] =
+  private def validate(address: GuestAddress, width: Int >= 0): Either[MemoryError, Int >= 0] =
     if (!live) Left(MemoryError.UseAfterFree(address, allocation))
     else {
       val relative = address.raw - allocation.start.raw
-      if (AddressRanges.containsUnsigned(allocation.start.raw, allocation.size.raw.toLong, address.raw, width.toLong))
-        Right(relative.toInt)
-      else Left(MemoryError.OutOfBounds(address, width, allocation))
+      if (
+        AddressRanges.containsUnsigned(allocation.start.raw, allocation.size.raw.toLong, address.raw, width.toLong.raw)
+      )
+        Right(relative.toInt.unsafe[Int >= 0])
+      else Left(MemoryError.OutOfBounds(address, width.raw, allocation))
     }
 
 }

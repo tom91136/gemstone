@@ -239,16 +239,16 @@ object abi {
 
     def fromUnsignedLong[Name <: String & Singleton](
         value: Long,
-        byteSize: Int where Between[1, 8]
+        byteSize: Int in 1 ~ 8
     ): ScalarCValue[Name] = {
-      val bytes: Vec[Byte] = LittleEndian.toVec(value, byteSize)
-      ScalarCValue(bytes.unsafe, byteSize)
+      val bytes = LittleEndian.toNonEmptyVec(value, byteSize)
+      ScalarCValue(bytes, byteSize)
     }
   }
 
   object ScalarCValue {
     def either[Name <: String & Singleton](bytes: NonEmpty[Vec[Byte]]): Either[String, ScalarCValue[Name]] =
-      bytes.length.refine[Int where Between[1, 8]].map(size =>
+      bytes.length.refine[Int in 1 ~ 8].map(size =>
         ScalarCValue(bytes, size)
       )
 
@@ -256,10 +256,10 @@ object abi {
 
   class ScalarCValue[Name <: String & Singleton] private[abi] (
       val scalarBytes: NonEmpty[Vec[Byte]],
-      val scalarByteSize: Int where Between[1, 8]
+      val scalarByteSize: Int in 1 ~ 8
   ) extends CValue[Name](scalarBytes) {
     def toUnsignedLong: Long =
-      LittleEndian.decode(scalarBytes, 0, scalarByteSize.widen[Between[0, 8]])
+      LittleEndian.decode(scalarBytes, 0, scalarByteSize.widen[Int in 0 ~ 8])
   }
 
   /** Process-neutral bytes for a C typedef, enum, record, or other by-value ABI type. The literal C spelling keeps
@@ -274,7 +274,7 @@ object abi {
 
     /** Narrow a by-value ABI value to the machine-word representation used by enums, flags, and handles. */
     def scalar: Option[ScalarCValue[Name]] =
-      Option.when(bytes.length <= MachineWordSize)(ScalarCValue(bytes, bytes.length.unsafe[Int where Between[1, 8]]))
+      Option.when(bytes.length <= MachineWordSize)(ScalarCValue(bytes, bytes.length.unsafe[Int in 1 ~ 8]))
 
     override def equals(other: Any): Boolean = other match {
       case value: CValue[?] => Vec.sameElements(bytes, value.bytes)

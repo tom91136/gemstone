@@ -13,10 +13,10 @@ class Hmul2F32Suite extends munit.FunSuite {
   {
     def fixtureModule(sm: Int): Cubin.Module = SASSFixture.module(
       sm,
-      Vec(SASSFixture.Kernel("hmul2_f32_probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 18))
+      Vec(SASSFixture.Kernel("hmul2_f32_probe", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 18))
     )
 
-    val Kernel = "hmul2_f32_probe"
+    val Kernel: NonEmpty[String] = "hmul2_f32_probe"
 
     def halfValue(bits: Int): Float = {
       val sign     = if ((bits & 0x8000) == 0) 1.0f else -1.0f
@@ -45,7 +45,7 @@ class Hmul2F32Suite extends munit.FunSuite {
         productBits(a >>> 16, b >>> 16)
       )
 
-    val cases = Vec(
+    val cases = Vec.nonEmpty(
       0x40003c00 -> 0x44004200, // distinct lanes: 1/2 multiplied by 3/4
       0x80000000 -> 0xbc003c00, // signed zeros times +/-1
       0x03ff0001 -> 0x3c000001, // subnormal and normal lanes
@@ -87,7 +87,7 @@ class Hmul2F32Suite extends munit.FunSuite {
     }
 
     def execute(
-        inputs: Vec[(Int, Int)],
+        inputs: NonEmpty[Vec[(Int, Int)]],
         aliasDestination: Boolean = false
     ): Vec[Vec[Int]] = {
       val module   = fixtureModule(75)
@@ -100,21 +100,21 @@ class Hmul2F32Suite extends munit.FunSuite {
       val rhs = Vec.from(inputs).flatMap { case (_, b) =>
         LittleEndian.toVec(b.toLong & 0xffffffffL, 4)
       }
-      val outputBytes = inputs.size * 16
+      val outputBytes = inputs.positiveSize * 16
 
       locally {
         val service = SASSFixture.Execution()
         val output  =
-          service.allocate(outputBytes.toLong.unsafe[Long > 0])
-        val left  = service.allocate(lhs.size.toLong.unsafe[Long > 0])
-        val right = service.allocate(rhs.size.toLong.unsafe[Long > 0])
+          service.allocate(outputBytes.toLong.widen[Long > 0])
+        val left  = service.allocate(lhs)
+        val right = service.allocate(rhs)
         assert(service.write(left, 0L, lhs).isRight)
         assert(service.write(right, 0L, rhs).isRight)
         val program = service.compile(sass)
           .fold(error => fail(error.message), identity)
         val task = SASSFixture.task(
-          Kernel.unsafe[NonEmpty[String]],
-          LaunchGeometry.Dimensions(inputs.size.unsafe[Int > 0], 1, 1),
+          Kernel,
+          LaunchGeometry.Dimensions(inputs.positiveSize, 1, 1),
           LaunchGeometry.Dimensions.One,
           Vec(
             KernelTask.Argument.Memory(output, 0L),
@@ -123,7 +123,7 @@ class Hmul2F32Suite extends munit.FunSuite {
           )
         )
         service.run(program, task).fold(error => fail(error.message), identity)
-        val words = service.readWords(output, (inputs.size * 4).unsafe[Int >= 0])
+        val words = service.readWords(output, inputs.nonNegativeSize * 4)
         inputs.indices.map(index => (0 until 4).map(lane => words(index * 4 + lane).toInt).toVec).toVec
       }
     }
@@ -138,7 +138,7 @@ class Hmul2F32Suite extends munit.FunSuite {
     }
 
     test("sm_75 HMUL2.F32 reads selected inputs before an aliased destination write") {
-      val input  = Vec(0x40003c00 -> 0x44004200, 0x03ff0001 -> 0x3c000001)
+      val input  = Vec.nonEmpty(0x40003c00 -> 0x44004200, 0x03ff0001 -> 0x3c000001)
       val actual = execute(input, aliasDestination = true)
       assertEquals(actual.map(_.head), input.map((a, b) => expected(a, b).head))
     }

@@ -10,7 +10,7 @@ import net.kurobako.gemstone.vm.*
 
 class DoubleTensorSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
-    SASSFixture.module(80, Vec(SASSFixture.Kernel("double_mma", 352, Vec(0 -> 8), registers = 16)))
+    SASSFixture.module(80, Vec(SASSFixture.Kernel("double_mma", 352, Vec((0, 8)), registers = 16)))
 
   test("compiler DMMA.884 preserves FP64 fragment layout and overlapping input/output pairs") {
     val module   = fixtureModule
@@ -23,7 +23,7 @@ class DoubleTensorSuite extends munit.FunSuite {
     val source = SASSFixture(module, module.kernels.head, Vec(function))
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(512L.unsafe[Long > 0])
+      val output  = service.allocate(512L)
       val program = service.compile(source)
         .fold(e => fail(e.message), identity)
       val task = SASSFixture.task(

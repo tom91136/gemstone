@@ -231,6 +231,61 @@ enum EncodingField {
   case `WAIT_VM_VSRC`
   case `X2ENCODING`
   case `X3ENCODING`
+  def assemblyName: net.kurobako.gemstone.constraint.NonEmpty[String] = this match {
+    case `A16` => "a16"; case `ABID` => "abid"; case `ABS` => "abs"; case `ACC` => "acc"; case `ACC_CD` => "acc_cd";
+    case `ADDR` => "addr"; case `ADDR64` => "addr64"; case `ATTR` => "attr"; case `ATTR_CHAN` => "attr_chan";
+    case `BANK_MASK` => "bank_mask"; case `BITOP3` => "bitop3"; case `BLGP` => "blgp";
+    case `BOUND_CTRL` => "bound_ctrl"; case `BREAK_SPAN` => "break_span"; case `BYTE_SEL` => "byte_sel";
+    case `CBSZ` => "cbsz"; case `CLAMP` => "clamp"; case `COMPR` => "compr"; case `D16` => "d16"; case `DA` => "da";
+    case `DATA` => "data"; case `DATA0` => "data0"; case `DATA1` => "data1"; case `DFMT` => "dfmt"; case `DIM` => "dim";
+    case `DLC` => "dlc"; case `DMASK` => "dmask"; case `DONE` => "done";
+    case `DONT_WAIT_EXPORT_READY` => "dont_wait_export_ready"; case `DPP_CTRL` => "dpp_ctrl"; case `DS` => "ds";
+    case `DST_MSB` => "dst_msb"; case `DST_SEL` => "dst_sel"; case `DST_UNUSED` => "dst_unused";
+    case `DURATION` => "duration"; case `EN` => "en"; case `ENCODING` => "encoding"; case `EXP` => "exp";
+    case `EXPORT_READY` => "export_ready"; case `FI` => "fi"; case `FMT` => "fmt"; case `FORMAT` => "format";
+    case `GDS` => "gds"; case `GLC` => "glc"; case `GSOP` => "gsop"; case `HAS_RTN` => "has_rtn";
+    case `HOLD_CNT` => "hold_cnt"; case `ID` => "id"; case `IDXEN` => "idxen"; case `IMM` => "imm";
+    case `INSTID0` => "instid0"; case `INSTID1` => "instid1"; case `INSTSKIP` => "instskip";
+    case `IOFFSET` => "ioffset"; case `LANE_SEL_0` => "lane_sel_0"; case `LANE_SEL_1` => "lane_sel_1";
+    case `LANE_SEL_2` => "lane_sel_2"; case `LANE_SEL_3` => "lane_sel_3"; case `LANE_SEL_4` => "lane_sel_4";
+    case `LANE_SEL_5` => "lane_sel_5"; case `LANE_SEL_6` => "lane_sel_6"; case `LANE_SEL_7` => "lane_sel_7";
+    case `LDS` => "lds"; case `LENGTH` => "length"; case `LGKM` => "lgkm"; case `LITERAL` => "literal";
+    case `LITERAL64` => "literal64"; case `LWE` => "lwe"; case `MDP` => "mdp"; case `MEM` => "mem"; case `MSG` => "msg";
+    case `NEG` => "neg"; case `NEGX` => "negx"; case `NEGY` => "negy"; case `NEG_HI` => "neg_hi"; case `NFMT` => "nfmt";
+    case `NSA` => "nsa"; case `NT` => "nt"; case `NV` => "nv"; case `OFFEN` => "offen"; case `OFFSET` => "offset";
+    case `OFFSET0` => "offset0"; case `OFFSET1` => "offset1"; case `OMOD` => "omod"; case `OP` => "op";
+    case `OPX` => "opx"; case `OPY` => "opy"; case `OP_SEL` => "op_sel"; case `OP_SEL_HI` => "op_sel_hi";
+    case `OP_SEL_HI_2` => "op_sel_hi_2"; case `R128` => "r128"; case `ROW_EN` => "row_en";
+    case `ROW_MASK` => "row_mask"; case `RSRC` => "rsrc"; case `S0` => "s0"; case `S1` => "s1"; case `SADDR` => "saddr";
+    case `SAMP` => "samp"; case `SA_SDST` => "sa_sdst"; case `SBASE` => "sbase"; case `SC0` => "sc0";
+    case `SC1` => "sc1"; case `SCALE` => "scale"; case `SCALE_CLAMP` => "scale_clamp"; case `SCALE_FMT` => "scale_fmt";
+    case `SCALE_NEG` => "scale_neg"; case `SCALE_NEG_HI` => "scale_neg_hi"; case `SCALE_OFFSET` => "scale_offset";
+    case `SCALE_OP_SEL` => "scale_op_sel"; case `SCALE_OP_SEL_HI` => "scale_op_sel_hi";
+    case `SCALE_SRC0` => "scale_src0"; case `SCALE_SRC1` => "scale_src1"; case `SCALE_SRC2` => "scale_src2";
+    case `SCC` => "scc"; case `SCOPE` => "scope"; case `SD` => "sd"; case `SDATA` => "sdata"; case `SDST` => "sdst";
+    case `SEG` => "seg"; case `SIMM16` => "simm16"; case `SIZE` => "size"; case `SLC` => "slc";
+    case `SLEEP_FOREVER` => "sleep_forever"; case `SOFFSET` => "soffset"; case `SOFFSET_EN` => "soffset_en";
+    case `SRC0` => "src0"; case `SRC0_ABS` => "src0_abs"; case `SRC0_MSB` => "src0_msb"; case `SRC0_NEG` => "src0_neg";
+    case `SRC0_SEL` => "src0_sel"; case `SRC0_SEXT` => "src0_sext"; case `SRC1` => "src1";
+    case `SRC1_ABS` => "src1_abs"; case `SRC1_MSB` => "src1_msb"; case `SRC1_NEG` => "src1_neg";
+    case `SRC1_SEL` => "src1_sel"; case `SRC1_SEXT` => "src1_sext"; case `SRC2` => "src2";
+    case `SRC2_MSB` => "src2_msb"; case `SRCX0` => "srcx0"; case `SRCY0` => "srcy0"; case `SRSRC` => "srsrc";
+    case `SSAMP` => "ssamp"; case `SSRC0` => "ssrc0"; case `SSRC1` => "ssrc1"; case `STREAMID` => "streamid";
+    case `SVE` => "sve"; case `SYSTEM` => "system"; case `TARGET` => "target"; case `TFE` => "tfe"; case `TGT` => "tgt";
+    case `TH` => "th"; case `UNORM` => "unorm"; case `VADDR` => "vaddr"; case `VADDR0` => "vaddr0";
+    case `VADDR1` => "vaddr1"; case `VADDR2` => "vaddr2"; case `VADDR3` => "vaddr3"; case `VADDR4` => "vaddr4";
+    case `VADDRA` => "vaddra"; case `VADDRB` => "vaddrb"; case `VADDRC` => "vaddrc"; case `VADDRD` => "vaddrd";
+    case `VADDRE` => "vaddre"; case `VADDRF` => "vaddrf"; case `VADDRG` => "vaddrg"; case `VADDRH` => "vaddrh";
+    case `VADDRI` => "vaddri"; case `VADDRJ` => "vaddrj"; case `VADDRK` => "vaddrk"; case `VADDRL` => "vaddrl";
+    case `VALUE` => "value"; case `VA_SDST` => "va_sdst"; case `VA_SSRC` => "va_ssrc"; case `VA_VCC` => "va_vcc";
+    case `VA_VDST` => "va_vdst"; case `VDATA` => "vdata"; case `VDST` => "vdst"; case `VDSTX` => "vdstx";
+    case `VDSTY` => "vdsty"; case `VERSION` => "version"; case `VM` => "vm"; case `VM_VSRC` => "vm_vsrc";
+    case `VSRC` => "vsrc"; case `VSRC0` => "vsrc0"; case `VSRC1` => "vsrc1"; case `VSRC2` => "vsrc2";
+    case `VSRC3` => "vsrc3"; case `VSRCX1` => "vsrcx1"; case `VSRCX2` => "vsrcx2"; case `VSRCY1` => "vsrcy1";
+    case `VSRCY2` => "vsrcy2"; case `W32` => "w32"; case `W64` => "w64"; case `WAIT_EXP` => "wait_exp";
+    case `WAIT_VA_VDST` => "wait_va_vdst"; case `WAIT_VDST` => "wait_vdst"; case `WAIT_VM_VSRC` => "wait_vm_vsrc";
+    case `X2ENCODING` => "x2encoding"; case `X3ENCODING` => "x3encoding"
+  }
   def isVectorSource: Boolean = this match {
     case `VSRC` | `VSRC0` | `VSRC1` | `VSRC2` | `VSRC3` | `VSRCX1` | `VSRCX2` | `VSRCY1` | `VSRCY2` => true;
     case _ => false

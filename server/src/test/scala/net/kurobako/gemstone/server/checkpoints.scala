@@ -66,45 +66,45 @@ private object checkpoints {
       override def readValue(
           region: AllocationId,
           offset: Long >= 0,
-          size: Int where Between[1, 8]
+          size: Int in 1 ~ 8
       ): Either[Fault, Long] =
         delegate.readValue(region, offset, size)
       override def writeValue(
           region: AllocationId,
           offset: Long >= 0,
           value: Long,
-          size: Int where Between[1, 8]
+          size: Int in 1 ~ 8
       ): Either[Fault, Unit] =
         delegate.writeValue(region, offset, value, size)
       override def read(address: GuestAddress, size: Int >= 0): Either[Fault, Vec[Byte]] =
         addresses.read(address, size)
       override def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
         addresses.write(address, bytes)
-      override def readValue(address: GuestAddress, size: Int where Between[1, 8]): Either[Fault, Long] =
+      override def readValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
         addresses.readValue(address, size)
-      override def readSystemValue(address: GuestAddress, size: Int where Between[1, 8]): Either[Fault, Long] =
+      override def readSystemValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
         addresses.readSystemValue(address, size)
-      override def writeValue(address: GuestAddress, value: Long, size: Int where Between[1, 8]): Either[Fault, Unit] =
+      override def writeValue(address: GuestAddress, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
         addresses.writeValue(address, value, size)
       override def writeSystemValue(
           address: GuestAddress,
           value: Long,
-          size: Int where Between[1, 8]
+          size: Int in 1 ~ 8
       ): Either[Fault, Unit] = addresses.writeSystemValue(address, value, size)
       override def writeSystemBatch(
-          writes: Vec[(GuestAddress, Long, Int where Between[1, 8])]
+          writes: Vec[(GuestAddress, Long, Int in 1 ~ 8)]
       ): Either[Fault, Unit] = addresses.writeSystemBatch(writes)
       override def atomicModifyValue(
           region: AllocationId,
           offset: Long >= 0,
-          size: Int where Between[1, 8]
+          size: Int in 1 ~ 8
       )(update: Long => Long): Either[Fault, Long] =
         addresses.address(region, offset).flatMap(address =>
           contend(address, update)(next => delegate.atomicModifyValue(region, offset, size)(next))
         )
       override def atomicModifyValue(
           address: GuestAddress,
-          size: Int where Between[1, 8]
+          size: Int in 1 ~ 8
       )(update: Long => Long): Either[Fault, Long] =
         contend(address, update)(next => addresses.atomicModifyValue(address, size)(next))
 

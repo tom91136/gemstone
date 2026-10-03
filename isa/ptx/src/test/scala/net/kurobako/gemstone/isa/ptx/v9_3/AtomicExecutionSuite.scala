@@ -48,7 +48,7 @@ class AtomicExecutionSuite extends munit.FunSuite {
       ),
       Right(())
     )
-    val byteWidth = size.unsafe[Int where Between[1, 8]]
+    val byteWidth = size.unsafe[Int in 1 ~ 8]
     assertEquals(memory.readLittleEndian(start, byteWidth).toOption.get, 7L)
     assertEquals(
       memory.readLittleEndian(start.offset(size.toLong), byteWidth).toOption.get,
@@ -88,7 +88,7 @@ class AtomicExecutionSuite extends munit.FunSuite {
       ),
       Right(())
     )
-    val byteWidth = size.unsafe[Int where Between[1, 8]]
+    val byteWidth = size.unsafe[Int in 1 ~ 8]
     val observed  = (1 to 32).map(i => memory.readLittleEndian(start.offset(i.toLong * size), byteWidth).toOption.get)
     assertEquals(observed.count(_ == 0L), 1)
     assertEquals(observed.count(_ == 1L), 31)
@@ -238,7 +238,7 @@ class AtomicExecutionSuite extends munit.FunSuite {
     test(s"unsigned atomic min $space/$width over $groups groups preserves high-bit ordering") {
       val memory = ArrayCheckedMemory.allocate((groups * 2 + 1) * 8, GuestAddress(0x100000L))
       val max    = if (width == 64) -1L else 0xffffffffL
-      val byteWidth: Int where Between[1, 8] = if (width == 64) 8 else 4
+      val byteWidth: Int in 1 ~ 8 = if (width == 64) 8 else 4
       memory.writeLittleEndian(memory.allocation.start, max, byteWidth).toOption.get
       val init   = if (space == "shared") s"st.shared.u$width [scratch], $max;" else ""
       val target = if (space == "shared") "scratch" else "%out"

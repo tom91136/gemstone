@@ -67,7 +67,7 @@ class ShiftSuite extends munit.FunSuite {
     assertEquals(result, Right(()))
 
     val actual = allCases.zip(offsets).map { case ((width, _, _, _, _), offset) =>
-      memory.readLittleEndian(start.offset(offset.toLong), (width / 8).unsafe[Int where Between[1, 8]]).toOption.get
+      memory.readLittleEndian(start.offset(offset.toLong), (width / 8).unsafe[Int in 1 ~ 8]).toOption.get
     }
     val expected = allCases.map { case (width, raw, signed, count, operation) =>
       val mask   = if (width == 64) -1L else (1L << width) - 1L

@@ -7,6 +7,7 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
@@ -27,21 +28,21 @@ object CUDACloverleafFluxBenchmark {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def run(arguments: Array[String]): Unit = {
     val parsed        = BenchmarkArguments.parse(name, arguments.toSeq, options)
-    val length        = CloverleafFluxFixture.length(parsed.cells.raw)
-    val bytesPerArray = Math.multiplyExact(length, 8)
+    val length        = CloverleafFluxFixture.length(parsed.cells)
+    val bytesPerArray = length * 8
     val memory        = ArrayCheckedMemory.allocate(
-      Math.multiplyExact(bytesPerArray, CloverleafFluxFixture.arrays).unsafe[Int >= 0]
+      bytesPerArray * CloverleafFluxFixture.arrays
     )
     val base                                  = memory.allocation.start
     def address(array: Int, index: Int): Long =
-      base.raw + array.toLong * bytesPerArray + index.toLong * 8L
+      base.raw + array.toLong * bytesPerArray.raw + index.toLong * 8L
     var array = 0
     while (array < CloverleafFluxFixture.inputs) {
       var index = 0
-      while (index < length) {
+      while (index < length.raw) {
         val bits = java.lang.Double.doubleToRawLongBits(CloverleafFluxFixture.value(array, index))
         memory.writeLittleEndian(
-          base.offset(array.toLong * bytesPerArray + index.toLong * 8L),
+          base.offset(array.toLong * bytesPerArray.raw + index.toLong * 8L),
           bits,
           8
         ).fold(error => throw IllegalStateException(error.toString), identity)
@@ -62,11 +63,11 @@ object CUDACloverleafFluxBenchmark {
       ("clover_flux_param_6": NonEmpty[String])  -> Argument.fromLong(address(6, 0)),
       ("clover_flux_param_7": NonEmpty[String])  -> Argument.fromLong(address(7, 0)),
       ("clover_flux_param_8": NonEmpty[String])  -> Argument.fromLong(parsed.cells.raw.toLong),
-      ("clover_flux_param_9": NonEmpty[String])  -> Argument.fromLong(CloverleafFluxFixture.rowStride.toLong),
+      ("clover_flux_param_9": NonEmpty[String])  -> Argument.fromLong(CloverleafFluxFixture.rowStride.toLong.raw),
       ("clover_flux_param_10": NonEmpty[String]) ->
         Argument.fromLong(java.lang.Double.doubleToRawLongBits(CloverleafFluxFixture.dt))
     )
-    val groups   = ((parsed.cells.raw.toLong + 31L) / 32L).toInt.unsafe[Int > 0]
+    val groups   = parsed.cells.ceilDiv(32)
     val geometry = LaunchGeometry.forLaunch(
       Dimensions(32, 1, 1),
       Dimensions(groups, 1, 1)

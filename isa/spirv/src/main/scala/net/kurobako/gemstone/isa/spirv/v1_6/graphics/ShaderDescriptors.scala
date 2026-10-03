@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6.graphics
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.graphics.GraphicsProtocol.*
@@ -51,18 +52,23 @@ private object ShaderDescriptors {
     }
   }
   // Compute and validate the entire decoded allocation before allocating any pixels.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def decodedLayout(image: GraphicsImage): (NonEmpty[Vec[GraphicsImageLevel]], Int > 0) = {
-    val unit           = image.format.decoded.texelBytes.toLong
-    val (levels, size) =
-      image.levels.foldLeft((Vector.empty[GraphicsImageLevel], 0L: Long >= 0)) { case ((levels, offset), level) =>
-        val row   = level.extent.width.toLong * unit
-        val slice = row * level.extent.height.toLong
-        val layer = slice * level.extent.depth.toLong
-        val end   = offset + layer * image.layers.toLong
-        require(end.raw <= Int.MaxValue, "decoded image exceeds allocation limit")
-        (levels :+ GraphicsImageLevel(level.extent, offset, row, slice, layer), end)
-      }
-    (Vec.from(levels).unsafe, size.raw.toInt.unsafe[Int > 0])
+    val unit              = image.format.decoded.texelBytes.toLong
+    var offset: Long >= 0 = 0L
+    val levels            = image.levels.mapNonEmpty { level =>
+      val row   = level.extent.width.toLong.widen[Long > 0] * unit
+      val slice = row * level.extent.height.toLong
+      val layer = slice * level.extent.depth.toLong
+      val end   = offset + layer * image.layers.toLong
+      require(end.raw <= Int.MaxValue, "decoded image exceeds allocation limit")
+      val result = GraphicsImageLevel(level.extent, offset, row, slice, layer)
+      offset = end
+      result
+    }
+    val last = levels.last
+    val size = last.layerPitch * image.layers.toLong + last.offset
+    (levels, size.toIntExact)
   }
 }
 
@@ -80,10 +86,10 @@ private class ShaderDescriptors(memory: GraphicsAccess) {
     val (region, size) = memory.allocate(bytes)
     GraphicsRange(region, 0L, size)
   }
-  private def point(source: GraphicsRange, offset: Int, target: GraphicsRange): Unit =
+  private def point(source: GraphicsRange, offset: Int >= 0, target: GraphicsRange): Unit =
     pointers += PointerRelocation(
       RelocationSource.Memory(source.allocation),
-      offset.toLong.unsafe,
+      offset.toLong,
       target.allocation,
       target.offset
     )

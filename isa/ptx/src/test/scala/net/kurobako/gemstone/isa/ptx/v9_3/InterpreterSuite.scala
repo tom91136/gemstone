@@ -47,7 +47,7 @@ class InterpreterSuite extends munit.FunSuite {
       assertEquals(
         memory.readLittleEndian(
           start.offset(index.toLong * size),
-          size.unsafe[Int where Between[1, 8]]
+          size.unsafe[Int in 1 ~ 8]
         ).toOption.get,
         if (width == 32) expected & 0xffffffffL else expected
       )

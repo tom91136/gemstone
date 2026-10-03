@@ -31,14 +31,13 @@ object Assembler {
   }
 
   def encode(instruction: Instruction, target: String, address: Int = 0): Either[String, Array[Byte]] =
-    encodeCanonical(instruction, target, address).map(_.bytes.toArray)
+    address.refine[Int >= 0].left.map(_.raw).flatMap(encodeCanonical(instruction, target, _)).map(_.bytes.toArray)
 
   private def encodeCanonical(
       instruction: Instruction,
       target: String,
-      address: Int
+      address: Int >= 0
   ): Either[String, EncodedInstruction] = for {
-    _        <- address.refine[Int >= 0].left.map(_.raw)
     database <- NVDisasm.forTarget(target).toRight(s"unknown SASS target $target")
     text     <- Printer.print(instruction)
     forms = database.forms.filter(form =>
@@ -47,7 +46,7 @@ object Assembler {
     )
     attempts = forms.map { form =>
       for {
-        bindings <- SASSFormatParser.parse(database, form, address, text)
+        bindings <- SASSFormatParser.parse(database, form, address.raw, text)
         opcode   <- form.opcodes.find(value => bindings.get("Opcode").contains(value.value))
           .toRight(s"missing opcode binding for ${form.name}")
         bytes   <- Encoder.encode(database, form, opcode.name, bindings)
@@ -184,7 +183,7 @@ class Assembler(target: Target) extends isa.Encoder[Program, Vec[Byte], Error] {
                 assembly("preserved encoding does not match the instruction")
               )
               _ <- Either.cond(
-                decoded.address.raw == address,
+                decoded.address == address,
                 (),
                 assembly("encoding annotation address differs from program layout")
               )
@@ -233,11 +232,11 @@ class Assembler(target: Target) extends isa.Encoder[Program, Vec[Byte], Error] {
             address <- addressOf(first + slot)
             _       <- control match {
               case Control.Maxwell(values, _) =>
-                validateControl(word.bytes, values(slot), address, word.operation)
+                validateControl(word.bytes, values(slot), address.raw, word.operation)
               case _ => Right(())
             }
           } yield SASSCodeWords.CodeWord(
-            address.unsafe[SASSCodeWords.Address],
+            address,
             word.bytes.take(if (slots == 1) 16 else 8)
           )
         }
@@ -271,19 +270,26 @@ class Assembler(target: Target) extends isa.Encoder[Program, Vec[Byte], Error] {
       ((bytes(8) & 255) | ((bytes(9) & 255) << 8) | ((bytes(10) & 31) << 16)).unsafe[SASSCodeWords.ControlBits]
     )
 
-  private def addressOf(index: Int): Either[Error, Int] = {
+  private def addressOf(index: Int): Either[Error, Int >= 0] = {
     val address = if (target.sm.raw < 50) index.toLong / 7 * 64 + 8 + index % 7 * 8
     else if (target.sm.raw < 70) index.toLong / 3 * 32 + 8 + index % 3 * 8
     else index.toLong * 16
-    Either.cond(address <= Int.MaxValue, address.toInt, assembly("program address exceeds the supported range"))
+    Either.cond(
+      address <= Int.MaxValue,
+      address.toInt.unsafe[Int >= 0],
+      assembly("program address exceeds the supported range")
+    )
   }
 
   private def locate(
       program: Program
-  ): Either[Error, (Vec[Operation], Map[String, Int], Map[Int, Control])] = {
-    val initial = (Vec.empty[Operation], Map.empty[String, Int], Map.empty[Int, Control])
+  ): Either[Error, (Vec[Operation], Map[String, Int >= 0], Map[Int, Control])] = {
+    val initial = (Vec.empty[Operation], Map.empty[String, Int >= 0], Map.empty[Int, Control])
     val slots   = if (target.sm.raw < 50) 7 else if (target.sm.raw < 70) 3 else 1
-    program.statements.foldLeft[Either[Error, (Vec[Operation], Map[String, Int], Map[Int, Control])]](Right(initial)) {
+    program.statements.foldLeft[Either[
+      Error,
+      (Vec[Operation], Map[String, Int >= 0], Map[Int, Control])
+    ]](Right(initial)) {
       case (result, statement) => result.flatMap { (operations, labels, controls) =>
           statement match {
             case operation: Operation => Right((operations :+ operation, labels, controls))
@@ -319,13 +325,13 @@ class Assembler(target: Target) extends isa.Encoder[Program, Vec[Byte], Error] {
     }
   }
 
-  private def resolve(operation: Operation, labels: Map[String, Int]): Either[Error, Instruction] =
+  private def resolve(operation: Operation, labels: Map[String, Int >= 0]): Either[Error, Instruction] =
     if (operation.references.isEmpty) Right(operation.instruction)
     else for {
       reference <- Parser.symbolicReference(operation).left.map(assembly(_))
       address   <- labels.get(reference.name.raw).toRight(Error.UndefinedLabel(reference.name))
       instruction = operation.instruction
-      operands    = instruction.operands.updated(reference.operand.raw, Operand.Integer(BigInt(address)))
+      operands    = instruction.operands.updated(reference.operand.raw, Operand.Integer(BigInt(address.raw)))
       resolved <- Instruction.decode(
         instruction.mnemonic.raw,
         instruction.modifiers,

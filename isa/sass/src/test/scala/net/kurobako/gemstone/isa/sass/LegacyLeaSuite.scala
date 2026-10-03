@@ -16,14 +16,14 @@ class LegacyLeaSuite extends munit.FunSuite {
 
   private val carryDestination =
     Operand.Qualified(Operand.Register(RegisterBank.R, 0), Vec(OperandSelector.CC))
-  private val divKernels = Vec("div_u5", "div_s24", "div_s6", "div_s5").map { name =>
-    SASSFixture.Kernel(name, 320, Vec(0 -> 8, 8 -> 8), registers = 7)
+  private val divKernels = Vec[NonEmpty[String]]("div_u5", "div_s24", "div_s6", "div_s5").map { name =>
+    SASSFixture.Kernel(name, 320, Vec((0, 8), (8, 8)), registers = 7)
   }
-  private val pairKernels = Vec("lea_s31", "lea_s3", "lea_s2", "lea_s1", "lea_s0").map { name =>
+  private val pairKernels = Vec[NonEmpty[String]]("lea_s31", "lea_s3", "lea_s2", "lea_s1", "lea_s0").map { name =>
     SASSFixture.Kernel(
       name,
       320,
-      Vec(0 -> 8, 8 -> 4, 12 -> 4, 16 -> 4, 20 -> 4),
+      Vec((0, 8), (8, 4), (12, 4), (16, 4), (20, 4)),
       registers = if (name == "lea_s0") 5 else 6
     )
   }
@@ -120,7 +120,7 @@ class LegacyLeaSuite extends munit.FunSuite {
 
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(8L.unsafe[Long > 0])
+        val output  = service.allocate(8L)
         val program = service.compile(lowered)
           .fold(error => fail(error.message), identity)
         inputs.foreach { words =>
@@ -149,7 +149,7 @@ class LegacyLeaSuite extends munit.FunSuite {
   }
     test(s"CUDA 11.8 sm_$sm no-carry LEA.HI folds signed division correction by $divisor") {
       val module = fixtureModule(sm, division = true)
-      assertEquals(module.sm, sm)
+      assertEquals(module.sm.raw, sm)
       val name   = s"div_$suffix"
       val kernel = module.kernels.find(_.name == name).getOrElse(fail(s"missing $name kernel"))
       val text   = divisionListing(sm, suffix)
@@ -249,7 +249,7 @@ class LegacyLeaSuite extends munit.FunSuite {
     val expectedValue = expected((0x12345678, 0x10203040, 0x55667788, 0x99aabbcc), 2)
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(8L.unsafe[Long > 0])
+      val output  = service.allocate(8L)
       Vec(("EQ", true), ("NE", false)).foreach { case (comparison, execute) =>
         assert(service.write(output, 0L, words(Vec(0xdeadbeef, 0x13579bdf))).isRight)
         val setGuard =
@@ -336,7 +336,7 @@ class LegacyLeaSuite extends munit.FunSuite {
       )
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(8L.unsafe[Long > 0])
+        val output  = service.allocate(8L)
         val program = service.compile(sass)
           .fold(error => fail(error.message), identity)
         cases.foreach { case (lowWord, highWord) =>
@@ -399,7 +399,7 @@ class LegacyLeaSuite extends munit.FunSuite {
       val cases = Vec(0x00000001 -> 0x12345678, 0x3fffffff -> 0x87654321)
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(8L.unsafe[Long > 0])
+        val output  = service.allocate(8L)
         val program = service.compile(sass)
           .fold(error => fail(error.message), identity)
         cases.foreach { case (lowWord, highWord) =>

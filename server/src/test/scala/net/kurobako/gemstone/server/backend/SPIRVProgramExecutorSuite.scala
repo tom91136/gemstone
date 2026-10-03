@@ -426,7 +426,7 @@ class SPIRVProgramExecutorSuite extends munit.FunSuite {
   private def stringOperand(value: String): Operand = {
     val bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8) :+ 0.toByte
     val words = bytes.grouped(4).map { group =>
-      Word(LittleEndian.decode(group, 0, group.length.unsafe[Int where Between[0, 8]]).toInt)
+      Word(LittleEndian.decode(group, 0, group.length.unsafe[Int in 0 ~ 8]).toInt)
     }
     Operand(OperandKind.LiteralString, Vec.from(words).unsafe)
   }

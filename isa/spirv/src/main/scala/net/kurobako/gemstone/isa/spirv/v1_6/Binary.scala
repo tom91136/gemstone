@@ -118,8 +118,8 @@ object Binary extends Decoder[Vec[Byte], RawModule, Binary.BinaryError]
     // Physical layout: zero byte, major byte, minor byte, zero byte.
     if ((raw & 0xff0000ffL) != 0L) None
     else for {
-      major <- Bits.unsignedIntField(raw, 16, 8).refine[Int > 0].toOption
-      minor <- Bits.unsignedIntField(raw, 8, 8).refine[Int >= 0].toOption
+      major <- Bits.unsignedIntField(raw, 16, 8).raw.refine[Int > 0].toOption
+      minor = Bits.unsignedIntField(raw, 8, 8)
     } yield Version(major, minor)
   }
 

@@ -7,6 +7,7 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionProtocol.given
 import net.kurobako.gemstone.server.Transport.*
@@ -21,9 +22,9 @@ object protocol {
   }
 
   /** Reads exactly `size` bytes, failing with `failure` when the stream ends early. */
-  def readExactly(input: DataInputStream, size: Int, failure: String => Throwable): Array[Byte] = {
-    val result = input.readNBytes(size)
-    if (result.length != size) throw failure(s"expected $size bytes, received ${result.length}")
+  def readExactly(input: DataInputStream, size: Int >= 0, failure: String => Throwable): Array[Byte] = {
+    val result = input.readNBytes(size.raw)
+    if (result.length != size.raw) throw failure(s"expected $size bytes, received ${result.length}")
     result
   }
 
@@ -98,7 +99,7 @@ object protocol {
 
   private def validTagSize(size: Int): Boolean = size > 0 && size <= ExecutionRPC.MaximumTagBytes.raw
 
-  case class Header(client: ClientId, session: SessionId, operation: String, payloadSize: Int >= 0)
+  case class Header(client: ClientId, session: SessionId, operation: NonEmpty[String], payloadSize: Int >= 0)
 
   /** Reads the execution header after its magic. The stream is never marked or rewound. */
   def readHeader(input: DataInputStream): Header = {
@@ -106,17 +107,20 @@ object protocol {
     val high    = input.readLong()
     val low     = input.readLong()
     val session = SessionId.either((high, low)).fold(message => throw IllegalArgumentException(message), identity)
-    val tagSize = input.readInt()
-    require(validTagSize(tagSize), s"invalid operation tag size: $tagSize")
-    val size = input.readInt()
-    require(size >= 0 && size <= ExecutionRPC.MaximumPayload.raw, s"invalid execution payload size: $size")
+    val tagSize = input.readInt().refine[Int > 0]
+      .fold(message => throw IllegalArgumentException(s"invalid operation tag size: $message"), identity)
+    require(tagSize.raw <= ExecutionRPC.MaximumTagBytes.raw, s"invalid operation tag size: $tagSize")
+    val size = input.readInt().refine[Int >= 0]
+      .fold(message => throw IllegalArgumentException(s"invalid execution payload size: $message"), identity)
+    require(size.raw <= ExecutionRPC.MaximumPayload.raw, s"invalid execution payload size: $size")
     val tag       = readExactly(input, tagSize, EOFException(_))
     val operation = StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(tag)).toString
-    Header(client, session, operation, size.unsafe[Int >= 0])
+      .refine[NonEmpty[String]].fold(message => throw IllegalArgumentException(message), identity)
+    Header(client, session, operation, size)
   }
 
   def readPayload(input: DataInputStream, header: Header): Array[Byte] =
-    readExactly(input, header.payloadSize.raw, EOFException(_))
+    readExactly(input, header.payloadSize, EOFException(_))
 
   def writeResponse(output: DataOutputStream, result: Either[ExecutionFailure, Array[Byte]]): Unit = {
     val (status, payload) = result match {
@@ -148,8 +152,9 @@ object protocol {
   }
 
   def acceptHello(input: DataInputStream, output: DataOutputStream): Boolean = {
-    val size = input.readInt()
-    require(size > 0 && size <= ExecutionRPC.MaximumSchemaBytes.raw, s"invalid execution schema size: $size")
+    val size = input.readInt().refine[Int > 0]
+      .fold(message => throw IllegalArgumentException(s"invalid execution schema size: $message"), identity)
+    require(size.raw <= ExecutionRPC.MaximumSchemaBytes.raw, s"invalid execution schema size: $size")
     val received = readExactly(input, size, EOFException(_))
     val accepted = java.util.Arrays.equals(received, ExecutionRPC.Schema.canonical.getBytes(StandardCharsets.UTF_8))
     output.writeInt(ExecutionRPC.HelloResponseMagic)
@@ -248,8 +253,8 @@ object protocol {
     def readResponse(input: DataInputStream, operation: Int): Array[Byte] = {
       if (input.readInt() != ResponseMagic || input.readInt() != operation)
         throw IOException("invalid control response")
-      val size = input.readInt()
-      if (size != (if (operation == RegisterClient) 8 else 4)) throw IOException("invalid control response size")
+      val size: Int > 0 = if (operation == RegisterClient) 8 else 4
+      if (input.readInt() != size.raw) throw IOException("invalid control response size")
       readExactly(input, size, IOException(_))
     }
 

@@ -100,7 +100,7 @@ private trait BenchmarkAddressSpace extends AddressSpace {
 
   final override def readValue(
       address: GuestAddress,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[Fault, Long] = regionSizes match {
     case indexed: IndexedSeq[(AllocationId, Long)] @unchecked =>
       val index = mappedIndex(address, size.nonNegative, indexed)
@@ -120,7 +120,7 @@ private trait BenchmarkAddressSpace extends AddressSpace {
   final override def writeValue(
       address: GuestAddress,
       value: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[Fault, Unit] = regionSizes match {
     case indexed: IndexedSeq[(AllocationId, Long)] @unchecked =>
       val index = mappedIndex(address, size.nonNegative, indexed)
@@ -139,7 +139,7 @@ private trait BenchmarkAddressSpace extends AddressSpace {
 
   final override def atomicModifyValue(
       address: GuestAddress,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   )(update: Long => Long): Either[Fault, Long] = regionSizes match {
     case indexed: IndexedSeq[(AllocationId, Long)] @unchecked =>
       val index = mappedIndex(address, size.nonNegative, indexed)

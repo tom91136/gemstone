@@ -97,7 +97,7 @@ object Assembly {
       .flatMap { module =>
         val executable = module.sections.filter(value => (value.flags & 4L) != 0L)
         val selected   = section.fold(executable)(name => executable.filter(_.name == name))
-        if (module.sm != target.sm.raw)
+        if (module.sm != target.sm)
           Left(Error.Cubin(s"cubin sm_${module.sm} differs from requested ${target.name}"))
         else selected match {
           case Vec(value) => disassembleSASS(value.bytes, target)

@@ -18,7 +18,9 @@ private object VMDispatchMemory {
       allocation: AllocationId,
       offset: Long >= 0,
       allocationSize: Long > 0
-  )
+  ) {
+    def offsetOf(value: Long): Long >= 0 = offset + (value - address).unsafe[Long >= 0]
+  }
 
   val KernargAddress  = 0x100000000000L
   val DispatchAddress = 0x200000000000L
@@ -41,12 +43,12 @@ private class VMDispatchMemory(
   def flushHostWrites(): Either[Fault, Unit]                                   = memory.flushHostWrites()
   def invalidateHostReads(): Unit                                              = memory.invalidateHostReads()
   def prepareReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] = memory.prepareReads(ranges)
-  def isImmutable(address: Long, size: Int): Boolean                           =
-    ByteRange.contains(kernarg.length, address - KernargAddress, size.toLong) ||
-      ByteRange.contains(dispatch.length, address - DispatchAddress, size.toLong) ||
-      ByteRange.contains(readOnly.length, address - readOnlyAddress, size.toLong)
+  def isImmutable(address: Long, size: Int >= 0): Boolean                      =
+    ByteRange.contains(kernarg.length, address - KernargAddress, size.toLong.raw) ||
+      ByteRange.contains(dispatch.length, address - DispatchAddress, size.toLong.raw) ||
+      ByteRange.contains(readOnly.length, address - readOnlyAddress, size.toLong.raw)
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-  def isExternal(address: Long, size: Int): Boolean =
+  def isExternal(address: Long, size: Int >= 0): Boolean =
     aliasedRegion(address) == null && !isImmutable(address, size) &&
       globalRegionIndex(address, size) < 0
 
@@ -60,13 +62,13 @@ private class VMDispatchMemory(
     if (binding != null)
       memory.read(
         binding.allocation,
-        (binding.offset.raw + address - binding.address).unsafe[Long >= 0],
+        binding.offsetOf(address),
         size
       )
-    else localRead(address, size.raw, KernargAddress, kernarg)
-      .orElse(localRead(address, size.raw, DispatchAddress, dispatch))
-      .orElse(localRead(address, size.raw, readOnlyAddress, readOnly))
-      .orElse(globalRead(address, size.raw)) match {
+    else localRead(address, size, KernargAddress, kernarg)
+      .orElse(localRead(address, size, DispatchAddress, dispatch))
+      .orElse(localRead(address, size, readOnlyAddress, readOnly))
+      .orElse(globalRead(address, size)) match {
       case Some(bytes) => Right(Vec.unsafeWrapArray(bytes))
       case None        =>
         memory.read(GuestAddress(address), size).leftMap {
@@ -81,14 +83,14 @@ private class VMDispatchMemory(
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def readValue(
       address: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[Fault, Long] = {
     val scalarSize = size
     val binding    = aliasedRegion(address)
     if (binding != null)
       memory.readValue(
         binding.allocation,
-        (binding.offset.raw + address - binding.address).unsafe[Long >= 0],
+        binding.offsetOf(address),
         size
       )
     else {
@@ -104,7 +106,7 @@ private class VMDispatchMemory(
           if (ByteRange.contains(readOnly.length, readOnlyOffset, size.raw.toLong))
             Right(LittleEndian.decode(readOnly, readOnlyOffset.toInt, scalarSize))
           else {
-            val globalIndex = globalRegionIndex(address, size.raw)
+            val globalIndex = globalRegionIndex(address, size)
             if (globalIndex >= 0) {
               val (base, bytes) = globalMemory(globalIndex)
               Right(LittleEndian.decode(bytes, (address - base).toInt, scalarSize))
@@ -130,7 +132,7 @@ private class VMDispatchMemory(
     if (binding != null)
       memory.write(
         binding.allocation,
-        (binding.offset.raw + address - binding.address).unsafe[Long >= 0],
+        binding.offsetOf(address),
         Vec.unsafeWrapArray(bytes)
       )
     else globalWrite(address, bytes) match {
@@ -150,19 +152,19 @@ private class VMDispatchMemory(
   def writeValue(
       address: Long,
       value: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[Fault, Unit] = {
     val scalarSize = size
     val binding    = aliasedRegion(address)
     if (binding != null)
       memory.writeValue(
         binding.allocation,
-        (binding.offset.raw + address - binding.address).unsafe[Long >= 0],
+        binding.offsetOf(address),
         value,
         size
       )
     else {
-      val globalIndex = globalRegionIndex(address, size.raw)
+      val globalIndex = globalRegionIndex(address, size)
       if (globalIndex >= 0) {
         val (base, bytes) = globalMemory(globalIndex)
         LittleEndian.write(value, bytes, (address - base).toInt, scalarSize)
@@ -180,18 +182,18 @@ private class VMDispatchMemory(
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def atomicModifyValue(
       address: Long,
-      size: Int where Between[1, 8]
+      size: Int in (4, 8)
   )(update: Long => Long): Either[Fault, Long] = {
     val scalarSize = size
     val binding    = aliasedRegion(address)
     if (binding != null)
       memory.atomicModifyValue(
         binding.allocation,
-        (binding.offset.raw + address - binding.address).unsafe[Long >= 0],
+        binding.offsetOf(address),
         size
       )(update)
     else {
-      val globalIndex = globalRegionIndex(address, size.raw)
+      val globalIndex = globalRegionIndex(address, size)
       if (globalIndex >= 0) {
         val (base, bytes) = globalMemory(globalIndex)
         globalMemoryLocks(globalIndex).withLock {
@@ -210,18 +212,18 @@ private class VMDispatchMemory(
     }
   }
 
-  private def globalRead(address: Long, size: Int): Option[Array[Byte]] = {
+  private def globalRead(address: Long, size: Int >= 0): Option[Array[Byte]] = {
     val index = globalRegionIndex(address, size)
     if (index < 0) None
     else {
       val (base, bytes) = globalMemory(index)
       val offset        = address - base
-      Some(java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size))
+      Some(java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size.raw))
     }
   }
 
   private def globalWrite(address: Long, value: Array[Byte]): Option[Unit] = {
-    val index = globalRegionIndex(address, value.length)
+    val index = globalRegionIndex(address, value.length.unsafe[Int >= 0])
     if (index < 0) None
     else {
       val (base, bytes) = globalMemory(index)
@@ -232,13 +234,13 @@ private class VMDispatchMemory(
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def globalRegionIndex(address: Long, size: Int): Int = {
+  private def globalRegionIndex(address: Long, size: Int >= 0): Int = {
     var index = 0
     var found = -1
     while (index < globalMemory.length && found < 0) {
       val (base, bytes) = globalMemory(index)
       val offset        = address - base
-      if (address >= base && offset <= bytes.length.toLong - size.toLong) found = index
+      if (address >= base && offset <= bytes.length.toLong - size.toLong.raw) found = index
       index += 1
     }
     found
@@ -257,10 +259,10 @@ private class VMDispatchMemory(
     result
   }
 
-  private def localRead(address: Long, size: Int, base: Long, bytes: Array[Byte]): Option[Array[Byte]] = {
+  private def localRead(address: Long, size: Int >= 0, base: Long, bytes: Array[Byte]): Option[Array[Byte]] = {
     val offset = address - base
-    Option.when(ByteRange.contains(bytes.length, offset, size.toLong))(
-      java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size)
+    Option.when(ByteRange.contains(bytes.length, offset, size.toLong.raw))(
+      java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size.raw)
     )
   }
 

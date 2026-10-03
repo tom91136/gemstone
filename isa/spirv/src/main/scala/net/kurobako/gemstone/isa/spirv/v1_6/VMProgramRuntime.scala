@@ -10,6 +10,7 @@ import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -171,33 +172,21 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
         compiled.functions.get(functionId).toRight(
           Fault.InvalidTask(s"SPIR-V entry point $name has no function body")
         ).flatMap { function =>
-          function.parameters.foldLeft[Either[Fault, (Vec[KernelMetadata.Parameter], Int)]](
+          function.parameters.foldLeft[Either[Fault, (Vec[KernelMetadata.Parameter], Int >= 0)]](
             Right((Vec.empty[KernelMetadata.Parameter], 0))
           ) { case (result, (parameterId, parameterType)) =>
             result.flatMap { case (parameters, currentOffset) =>
-              parameterMetadata(parameterId, parameterType).flatMap { parameter =>
-                val offset = alignUp(currentOffset, math.min(8, compiled.layout.typeAlignment(parameterType)))
-                offset.refine[Int >= 0]
-                  .leftMap(_ =>
-                    Fault.InvalidTask(s"negative SPIR-V parameter offset $offset")
-                  )
-                  .map(refinedOffset =>
-                    parameters.appended(parameter.copy(offset =
-                      refinedOffset
-                    )) -> Math.addExact(offset, parameter.width.raw)
-                  )
+              parameterMetadata(parameterId, parameterType).map { parameter =>
+                val offset = layout.alignUp(currentOffset, compiled.layout.typeAlignment(parameterType).min(8))
+                parameters.appended(parameter.copy(offset = offset)) -> (offset + parameter.width)
               }
             }
           }.flatMap { case (parameters, size) =>
             for {
-              refinedSize <- size.refine[Int >= 0]
-                .leftMap(_ =>
-                  Fault.InvalidTask(s"negative SPIR-V argument block size $size")
-                )
               entryPointId <-
                 functionId.refine[Int >= 0].leftMap(_ => Fault.InvalidTask(s"negative SPIR-V function ID $functionId"))
               metadata <- KernelMetadata.validated(
-                refinedSize,
+                size,
                 parameters.nonNegativeSize,
                 parameters,
                 requiredWorkGroupSize = workGroupSize(functionId),
@@ -253,11 +242,11 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
     }
 
   private def parameterMetadata(
-      width: Int,
+      width: Int >= 0,
       kind: KernelMetadata.ParameterKind,
       containsPointers: Boolean
   ): Either[Fault, KernelMetadata.Parameter] =
-    width.refine[Int > 0]
+    width.raw.refine[Int > 0]
       .leftMap(_ =>
         Fault.InvalidTask(s"SPIR-V parameter width must be positive: $width")
       )
@@ -277,7 +266,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
       if (!this.builtins.contains(variable) && includeStorageClass(global.storageClass)) {
         val pointee = this.layout.pointerPointee(global.pointerType)
         val bytes   = global.initializer match {
-          case None              => Array.ofDim[Byte](this.layout.typeSize(pointee))
+          case None              => Array.ofDim[Byte](this.layout.typeSize(pointee).raw)
           case Some(initializer) => this.constants.get(initializer) match {
               case None =>
                 return Left(
@@ -290,11 +279,11 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
                   case Left(error) => return Left(error)
                   case Right(data) => data
                 }
-                if (encoded.length != this.layout.typeSize(pointee))
+                if (encoded.length != this.layout.typeSize(pointee).raw)
                   return Left(
                     Fault.InvalidTask(
                       s"SPIR-V global variable %$variable initializer has ${encoded.length} bytes, " +
-                        s"expected ${this.layout.typeSize(pointee)}"
+                        s"expected ${this.layout.typeSize(pointee).raw}"
                     )
                   )
                 encoded
@@ -322,15 +311,15 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
   def decode(typeId: Int, bytes: Array[Byte]): Either[Fault, VMValue] =
     this.layout.scalarLeafCount(typeId).flatMap { count =>
       try {
-        val lanes = Array.ofDim[Long](count)
+        val lanes = Array.ofDim[Long](count.raw)
         val used  = if (layout.hasMatrixStorage(typeId)) {
           val leaves = layout.matrixStorageLeaves(typeId, None)
           leaves.zipWithIndex.foreach { case ((offset, scalar), lane) =>
             lanes(lane) =
               LittleEndian.decode(
                 bytes,
-                Math.toIntExact(offset),
-                this.layout.typeSize(scalar).unsafe[Int where Between[0, 8]]
+                offset.toIntExact.raw,
+                this.layout.scalarWidth(scalar).toScalarByteWidth
               )
           }
           leaves.size
@@ -342,6 +331,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
         else Right(VMValue.Bits(typeId, lanes))
       } catch {
         case error: IllegalArgumentException => Left(Fault.InvalidTask(throwables.detail(error)))
+        case error: ArithmeticException => Left(Fault.InvalidTask(throwables.detail(error)))
       }
     }
 
@@ -361,38 +351,38 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
       val width     = this.layout.scalarWidth(typeId)
       val byteCount = width.toScalarByteWidth
       val offset    = Math.min(byteStart, input.length)
-      val available = Math.min(byteCount.raw, input.length - offset).unsafe[Int where Between[0, 8]]
+      val available = Math.min(byteCount.raw, input.length - offset).unsafe[Int in 0 ~ 8]
       lanes(laneStart) = LittleEndian.decode(input, offset, available) & mask(width)
       laneStart + 1
     case Some(RuntimeType.Pointer(_, _)) =>
       if (laneStart >= lanes.length)
         throw IllegalArgumentException(s"SPIR-V value of type %$typeId has too many pointer leaves")
       val offset    = Math.min(byteStart, input.length)
-      val available = Math.min(8, input.length - offset).unsafe[Int where Between[0, 8]]
+      val available = Math.min(8, input.length - offset).unsafe[Int in 0 ~ 8]
       lanes(laneStart) = LittleEndian.decode(input, offset, available)
       laneStart + 1
     case Some(RuntimeType.VectorType(component, count)) =>
       var lane  = laneStart
       var index = 0
-      while (index < count) {
-        lane = decodeBits(component, input, byteStart + index * this.layout.typeSize(component), lanes, lane)
+      while (index < count.raw) {
+        lane = decodeBits(component, input, Math.addExact(byteStart, Math.multiplyExact(index, this.layout.typeSize(component).raw)), lanes, lane)
         index += 1
       }
       lane
     case Some(RuntimeType.MatrixType(column, count)) =>
       var lane  = laneStart
       var index = 0
-      while (index < count) {
-        lane = decodeBits(column, input, byteStart + index * this.layout.typeSize(column), lanes, lane)
+      while (index < count.raw) {
+        lane = decodeBits(column, input, Math.addExact(byteStart, Math.multiplyExact(index, this.layout.typeSize(column).raw)), lanes, lane)
         index += 1
       }
       lane
     case Some(RuntimeType.Array(element, count)) =>
-      val stride = this.arrayStrides.getOrElse(typeId, this.layout.typeSize(element))
+      val stride = this.arrayStrides.get(typeId).fold(this.layout.typeSize(element).raw)(_.raw)
       var lane   = laneStart
       var index  = 0L
-      while (index < count) {
-        lane = decodeBits(element, input, byteStart + Math.toIntExact(index * stride.toLong), lanes, lane)
+      while (index < count.raw) {
+        lane = decodeBits(element, input, Math.addExact(byteStart, Math.toIntExact(Math.multiplyExact(index, stride.toLong))), lanes, lane)
         index += 1L
       }
       lane
@@ -403,7 +393,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
         lane = decodeBits(
           members(index),
           input,
-          byteStart + this.layout.structMemberOffset(typeId, members, index),
+          Math.addExact(byteStart, this.layout.structMemberOffset(typeId, members, index).raw),
           lanes,
           lane
         )
@@ -416,7 +406,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
   def encode(value: VMValue): Either[Fault, Array[Byte]] = value match {
     case VMValue.Bits(typeId, lanes) =>
       try {
-        val bytes = Array.ofDim[Byte](this.layout.typeSize(typeId))
+        val bytes = Array.ofDim[Byte](this.layout.typeSize(typeId).raw)
         val used  = if (layout.hasMatrixStorage(typeId)) {
           val leaves = layout.matrixStorageLeaves(typeId, None)
           if (leaves.size != lanes.length)
@@ -425,8 +415,8 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
             LittleEndian.write(
               lanes(lane),
               bytes,
-              Math.toIntExact(offset),
-              this.layout.typeSize(scalar).unsafe[Int where Between[0, 8]]
+              offset.toIntExact.raw,
+              this.layout.scalarWidth(scalar).toScalarByteWidth
             )
           }
           leaves.size
@@ -438,6 +428,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
         else Right(bytes)
       } catch {
         case error: IllegalArgumentException => Left(Fault.InvalidTask(throwables.detail(error)))
+        case error: ArithmeticException => Left(Fault.InvalidTask(throwables.detail(error)))
       }
     case VMValue.Address(_, pointer) =>
       Left(Fault.InvalidTask(s"cannot encode runtime pointer $pointer as process-neutral bytes"))
@@ -472,30 +463,30 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
     case Some(RuntimeType.VectorType(component, count)) =>
       var lane  = laneStart
       var index = 0
-      while (index < count) {
-        lane = encodeBits(component, lanes, lane, output, byteStart + index * this.layout.typeSize(component))
+      while (index < count.raw) {
+        lane = encodeBits(component, lanes, lane, output, Math.addExact(byteStart, Math.multiplyExact(index, this.layout.typeSize(component).raw)))
         index += 1
       }
       lane
     case Some(RuntimeType.MatrixType(column, count)) =>
       var lane  = laneStart
       var index = 0
-      while (index < count) {
-        lane = encodeBits(column, lanes, lane, output, byteStart + index * this.layout.typeSize(column))
+      while (index < count.raw) {
+        lane = encodeBits(column, lanes, lane, output, Math.addExact(byteStart, Math.multiplyExact(index, this.layout.typeSize(column).raw)))
         index += 1
       }
       lane
     case Some(RuntimeType.Array(element, count)) =>
-      val stride = this.arrayStrides.getOrElse(typeId, this.layout.typeSize(element))
+      val stride = this.arrayStrides.get(typeId).fold(this.layout.typeSize(element).raw)(_.raw)
       var lane   = laneStart
       var index  = 0L
-      while (index < count) {
+      while (index < count.raw) {
         lane = encodeBits(
           element,
           lanes,
           lane,
           output,
-          byteStart + Math.toIntExact(index * stride.toLong)
+          Math.addExact(byteStart, Math.toIntExact(Math.multiplyExact(index, stride.toLong)))
         )
         index += 1L
       }
@@ -509,7 +500,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
           lanes,
           lane,
           output,
-          byteStart + this.layout.structMemberOffset(typeId, members, index)
+          Math.addExact(byteStart, this.layout.structMemberOffset(typeId, members, index).raw)
         )
         index += 1
       }
@@ -517,5 +508,4 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
     case value => throw IllegalArgumentException(s"SPIR-V type %$typeId cannot be encoded as data: $value")
   }
 
-  private def alignUp(value: Int, alignment: Int): Int = layout.alignUp(value, alignment)
 }

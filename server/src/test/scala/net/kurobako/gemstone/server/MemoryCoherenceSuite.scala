@@ -146,7 +146,7 @@ class MemoryCoherenceSuite extends munit.FunSuite {
             assertEquals(checkpoint.contendedOperations.get(), operations)
             assertEquals(checkpoint.contendedAttempts.get(), operations * 3)
           }
-          assert(server.usage > 0, "the native client did not exercise the real RPC transport")
+          assert(server.usage.raw > 0, "the native client did not exercise the real RPC transport")
       }
       Using.resource(Journal.open(archive)) { journal =>
         val hostAllocations = mutable.Set.empty[Long]

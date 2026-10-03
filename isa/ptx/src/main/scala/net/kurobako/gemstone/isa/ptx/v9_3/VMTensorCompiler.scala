@@ -224,8 +224,8 @@ private object VMTensorCompiler {
 
   private def check(condition: Boolean, message: NonEmpty[String]): Either[Error, Unit] =
     Either.cond(condition, (), Error.Invalid(message))
-  private def count(actual: Int, expected: Int): Either[Error, Unit] =
-    check(actual == expected, s"tensor fragment requires $expected registers, found $actual")
+  private def count(actual: Int, expected: Int >= 0): Either[Error, Unit] =
+    check(actual == expected.raw, s"tensor fragment requires $expected registers, found $actual")
   private def countMatrix(actual: Int, expected: Int in (1, 2, 4)): Either[Error, Unit] =
     check(actual == expected.raw, s"matrix operation requires ${expected.raw} registers, found $actual")
 

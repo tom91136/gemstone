@@ -33,7 +33,7 @@ class Hmma884Suite extends munit.FunSuite {
     ("f32", "row-row") -> Hmma884Fixtures.hmma884Sm70Hmma884F32RowRowSource
   )
 
-  private def kernelName(kind: String, layout: String): String =
+  private def kernelName(kind: String, layout: String): NonEmpty[String] =
     s"hmma884_${kind}_${layout.replace('-', '_')}_probe"
 
   private def module(kind: String, layout: String): Cubin.Module =
@@ -42,7 +42,7 @@ class Hmma884Suite extends munit.FunSuite {
       Vec(SASSFixture.Kernel(
         kernelName(kind, layout),
         352,
-        Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8),
+        Vec((0, 8), (8, 8), (16, 8), (24, 8)),
         registers = if (kind == "f16") 20 else 24
       ))
     )
@@ -131,7 +131,7 @@ class Hmma884Suite extends munit.FunSuite {
   }
 
   test("paired execution gives each program fresh poisoned output") {
-    val image = SASSFixture.module(89, Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8))))
+    val image = SASSFixture.module(89, Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)))))
     val empty = SASSFixture(
       image,
       image.kernels.head,
@@ -207,7 +207,7 @@ class Hmma884Suite extends munit.FunSuite {
   test("sm70 HMMA.884 treats RZ accumulator operands as a zero C pair") {
     val image = SASSFixture.module(
       70,
-      Vec(SASSFixture.Kernel("hmma884_f32_probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 22))
+      Vec(SASSFixture.Kernel("hmma884_f32_probe", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 22))
     )
     val kernel = image.kernels.find(_.name == "hmma884_f32_probe").getOrElse(fail("zero-C probe is missing"))
     val sass   = ListingDecoder.parse(

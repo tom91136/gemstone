@@ -12,10 +12,10 @@ import scala.util.Random
 
 class LegacyIscaddSuite extends munit.FunSuite {
   private val kernels = Vec(
-    SASSFixture.Kernel("guarded_index_scaled_minus_base", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 10),
-    SASSFixture.Kernel("index_scaled9_minus_base", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 8),
-    SASSFixture.Kernel("index_scaled7_minus_base", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 8),
-    SASSFixture.Kernel("index_scaled_minus_base", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 8)
+    SASSFixture.Kernel("guarded_index_scaled_minus_base", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 10),
+    SASSFixture.Kernel("index_scaled9_minus_base", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 8),
+    SASSFixture.Kernel("index_scaled7_minus_base", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 8),
+    SASSFixture.Kernel("index_scaled_minus_base", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 8)
   )
   private def fixtureModule(sm: Int): Cubin.Module = SASSFixture.module(sm, kernels)
 
@@ -40,14 +40,14 @@ class LegacyIscaddSuite extends munit.FunSuite {
 
   private def execute(
       sm: Int,
-      kernelName: String,
+      kernelName: NonEmpty[String],
       shift: Int,
-      indices: Vec[Int],
-      base: Vec[Int],
+      indices: NonEmpty[Vec[Int]],
+      base: NonEmpty[Vec[Int]],
       testFalseGuard: Boolean = false
   ): Unit = {
     val module = fixtureModule(sm)
-    assertEquals(module.sm, sm)
+    assertEquals(module.sm.raw, sm)
     val function = ListingDecoder.parse(
       listings((sm, kernelName)),
       kernelName,
@@ -73,9 +73,9 @@ class LegacyIscaddSuite extends munit.FunSuite {
       val service = SASSFixture.Execution()
       val program = service.compile(sass)
         .fold(error => fail(error.message), identity)
-      val indexInput = service.allocate((indices.size.toLong * 4L).unsafe[Long > 0])
-      val baseInput  = service.allocate((base.size.toLong * 4L).unsafe[Long > 0])
-      val output     = service.allocate((base.size.toLong * 4L).unsafe[Long > 0])
+      val indexInput = service.allocate(indices.positiveSize.toLong.widen[Long > 0] * 4L)
+      val baseInput  = service.allocate(base.positiveSize.toLong.widen[Long > 0] * 4L)
+      val output     = service.allocate(base.positiveSize.toLong.widen[Long > 0] * 4L)
       assert(service.write(indexInput, 0L, dwords(indices)).isRight)
       assert(service.write(baseInput, 0L, dwords(base)).isRight)
       val arguments = Vec(
@@ -84,16 +84,16 @@ class LegacyIscaddSuite extends munit.FunSuite {
         KernelTask.Argument.Memory(output, 0L)
       )
       val task = SASSFixture.task(
-        kernelName.unsafe[NonEmpty[String]],
+        kernelName,
         LaunchGeometry.Dimensions.One,
-        LaunchGeometry.Dimensions(base.size.unsafe[Int > 0], 1, 1),
+        LaunchGeometry.Dimensions(base.positiveSize, 1, 1),
         Vec.from(arguments)
       )
       service.run(program, task).fold(error => fail(error.message), identity)
       val bytes = service.read(
         output,
         0L,
-        (base.size * 4).unsafe[Int >= 0]
+        base.nonNegativeSize * 4
       ).fold(error => fail(error.message), identity)
       val expected = if (testFalseGuard) Vec.fill(base.size)(0x5a5a5a5a)
       else indices.indices.map(index => (base(index).toLong - (indices(index).toLong << shift)).toInt).toVec
@@ -148,10 +148,10 @@ class LegacyIscaddSuite extends munit.FunSuite {
   }
 
   test("CUDA 11.8 sm_50/sm_60 negated ISCADD wraps shifted index at 32 bits") {
-    val boundary = Vec(0, 1, -1, Int.MinValue, Int.MaxValue, 0x100, -0x100, 0x01000000, 0x7fffffff)
+    val boundary = Vec.nonEmpty(0, 1, -1, Int.MinValue, Int.MaxValue, 0x100, -0x100, 0x01000000, 0x7fffffff)
     val random   = Random(0x1caddL)
-    val indices  = boundary ++ Vec.fill(64)(random.nextInt())
-    val base     = Vec.fill(indices.size)(random.nextInt())
+    val indices  = boundary.concatNonEmpty(Vec.fill(64)(random.nextInt()))
+    val base     = Vec.tabulateNonEmpty(indices.positiveSize)(_ => random.nextInt())
     Vec(50, 60).foreach { sm =>
       execute(sm, "index_scaled7_minus_base", 7, indices, base)
       execute(sm, "index_scaled_minus_base", 8, indices, base)

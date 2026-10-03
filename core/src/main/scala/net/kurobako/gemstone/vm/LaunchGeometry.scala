@@ -18,7 +18,7 @@ object LaunchGeometry {
       GlobalDimensions(x.toLong, y.toLong, z.toLong)
 
     def volume: Either[NonEmpty[String], Long > 0] =
-      try Right(x.toLong * y.toLong * z.toLong)
+      try Right(x.toLong.widen[Long > 0] * y.toLong.widen[Long > 0] * z.toLong.widen[Long > 0])
       catch {
         case _: ArithmeticException =>
           Left(s"dimension volume overflows 64 bits: ($x, $y, $z)")
@@ -26,7 +26,7 @@ object LaunchGeometry {
 
     def volumeInt: Either[NonEmpty[String], Int > 0] =
       volume.flatMap(size =>
-        if (size.raw <= Int.MaxValue.toLong) Right(size.raw.toInt.unsafe[Int > 0])
+        if (size.raw <= Int.MaxValue.toLong) Right(size.toIntExact)
         else Left(s"dimension volume exceeds Int range: $size")
       )
 
@@ -79,7 +79,7 @@ object LaunchGeometry {
       groupSize: Dimensions,
       groupCount: Dimensions,
       globalSize: Option[GlobalDimensions] = None,
-      workDim: Int where Between[1, 3] = 3,
+      workDim: Int in 1 ~ 3 = 3,
       globalOffset: Coordinates = Coordinates.origin
   ): Either[NonEmpty[String], LaunchGeometry] =
     for {
@@ -95,7 +95,7 @@ object LaunchGeometry {
   def virtual(
       groupSize: Dimensions,
       groupCount: Dimensions,
-      workDim: Int where Between[1, 3] = 3,
+      workDim: Int in 1 ~ 3 = 3,
       globalOffset: Coordinates = Coordinates.origin
   ): Either[NonEmpty[String], LaunchGeometry] =
     paddedExtent(groupSize, groupCount).map(extent =>
@@ -106,9 +106,9 @@ object LaunchGeometry {
     try
       Right(
         GlobalDimensions(
-          groupSize.x.toLong * groupCount.x.toLong,
-          groupSize.y.toLong * groupCount.y.toLong,
-          groupSize.z.toLong * groupCount.z.toLong
+          groupSize.x.toLong.widen[Long > 0] * groupCount.x.toLong.widen[Long > 0],
+          groupSize.y.toLong.widen[Long > 0] * groupCount.y.toLong.widen[Long > 0],
+          groupSize.z.toLong.widen[Long > 0] * groupCount.z.toLong.widen[Long > 0]
         )
       )
     catch {
@@ -120,7 +120,7 @@ object LaunchGeometry {
 case class LaunchGeometry private (
     groupSize: Dimensions,
     groupCount: Dimensions,
-    workDim: Int where Between[1, 3],
+    workDim: Int in 1 ~ 3,
     globalOffset: Coordinates,
     globalExtent: GlobalDimensions
 ) {
@@ -144,9 +144,9 @@ case class LaunchGeometry private (
     try
       Right(
         LongCoordinates(
-          globalOffset.x.toLong + group.x.toLong * groupSize.x.toLong + local.x.toLong,
-          globalOffset.y.toLong + group.y.toLong * groupSize.y.toLong + local.y.toLong,
-          globalOffset.z.toLong + group.z.toLong * groupSize.z.toLong + local.z.toLong
+          globalOffset.x.toLong.widen[Long >= 0] + group.x.toLong.widen[Long >= 0] * groupSize.x.toLong.widen[Long > 0] + local.x.toLong.widen[Long >= 0],
+          globalOffset.y.toLong.widen[Long >= 0] + group.y.toLong.widen[Long >= 0] * groupSize.y.toLong.widen[Long > 0] + local.y.toLong.widen[Long >= 0],
+          globalOffset.z.toLong.widen[Long >= 0] + group.z.toLong.widen[Long >= 0] * groupSize.z.toLong.widen[Long > 0] + local.z.toLong.widen[Long >= 0]
         )
       )
     catch {
@@ -171,9 +171,9 @@ case class LaunchGeometry private (
       Left(s"work-group coordinate $group is outside group count $groupCount")
     else
       try {
-        val origin    = (groupIndex.toLong * nominalSize.toLong).raw
+        val origin    = (groupIndex.toLong.widen[Long >= 0] * nominalSize.toLong.widen[Long > 0]).raw
         val remaining = Math.subtractExact(globalSize.raw, origin)
-        math.min(nominalSize.raw.toLong, remaining).toInt.refine[Int > 0].left.map { _ =>
+        math.min(nominalSize.raw.toLong, remaining).refine[Long > 0].map(_.toIntExact).left.map { _ =>
           s"work-group coordinate $group has no active work-items on axis $axis"
         }
       } catch {

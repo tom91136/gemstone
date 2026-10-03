@@ -4,6 +4,7 @@ import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import scala.collection.mutable
 import scala.util.control.NonFatal
 
@@ -17,18 +18,18 @@ object WorkerPool {
   */
 class WorkerPool(
     val parallelism: Int > 0,
-    minGroups: Long = 16L,
-    minWorkItems: Long = 64L,
+    minGroups: Long >= 0 = 16L,
+    minWorkItems: Long >= 0 = 64L,
     reporter: Throwable => Unit = _.printStackTrace(),
     measurement: Option[WorkerPool.Measurement => Unit] = None
 ) extends Workgroups with scala.concurrent.ExecutionContext with AutoCloseable {
   private class Job(
       val count: Long >= 0,
-      val grain: Int,
+      val grain: Int in 1 ~ 128,
       val task: Long >= 0 => Either[Fault, Unit]
   ) {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    var next = 0L
+    var next: Long >= 0 = 0L
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var active = 0
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -52,10 +53,10 @@ class WorkerPool(
   }
 
   /** Bound each claim so a large dispatch cannot monopolize workers while another client waits. */
-  private def grainFor(count: Long): Int = {
+  private def grainFor(count: Long >= 0): Int in 1 ~ 128 = {
     val perWorker = parallelism.raw.toLong * 4L
-    val grain     = if (count <= perWorker) 1L else (count - 1L) / perWorker + 1L
-    math.max(1L, math.min(count, math.min(grain, 128L))).toInt
+    val grain     = if (count.raw <= perWorker) 1L else (count.raw - 1L) / perWorker + 1L
+    math.max(1L, math.min(count.raw, math.min(grain, 128L))).toInt.unsafe[Int in 1 ~ 128]
   }
 
   private def enqueue(
@@ -63,7 +64,7 @@ class WorkerPool(
       task: Long >= 0 => Either[Fault, Unit]
   ): Job = lock.withLock {
     if (closed) throw java.util.concurrent.RejectedExecutionException("execution pool is closed")
-    val job = Job(count, grainFor(count.raw), task)
+    val job = Job(count, grainFor(count), task)
     if (count.raw > 0L) {
       queue.append(job)
       workReady.signalAll()
@@ -71,35 +72,36 @@ class WorkerPool(
     job
   }
 
-  private def take(until: Option[Job]): Option[(Job, Long, Int)] = lock.withLock {
+  private def take(until: Option[Job]): Option[(Job, Long >= 0, Int >= 0)] = lock.withLock {
     // Helping another job can trap this caller in a long group even after its own
     // dispatch completes. Idle workers still share the full queue.
     def eligible: Int = queue.indexWhere(job => until.forall(_ eq job))
     while (!closed && eligible < 0 && until.forall(!_.finished)) workReady.await()
     if (closed || until.exists(_.finished)) None
     else {
-      val job   = queue.remove(eligible)
-      val start = job.next
-      val end   = math.min(job.count.raw, start + job.grain.toLong)
+      val job    = queue.remove(eligible)
+      val start  = job.next
+      val length = (job.count - start).min(job.grain.toLong)
+      val end    = start + length
       job.next = end
       job.active += 1
       job.observed.foreach(_ += Thread.currentThread().getName)
-      if (job.next < job.count.raw) {
+      if (job.next < job.count) {
         queue.append(job)
         workReady.signal()
       }
-      Some((job, start, (end - start).toInt))
+      Some((job, start, length.toIntExact))
     }
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def execute(work: (Job, Long, Int)): Unit = {
+  private def execute(work: (Job, Long >= 0, Int >= 0)): Unit = {
     val (job, start, length)         = work
     var outcome: Either[Fault, Unit] = Right(())
     try {
-      var offset = 0
+      var offset: Int >= 0 = 0
       while (offset < length && outcome.isRight) {
-        outcome = job.task((start + offset.toLong).unsafe[Long >= 0])
+        outcome = job.task(start + offset.toLong)
         offset += 1
       }
     } catch {
@@ -115,9 +117,9 @@ class WorkerPool(
         completed.left.toOption.foreach { error =>
           if (job.failure.isEmpty) job.failure = Some(error)
           queue.filterInPlace(_ ne job)
-          job.next = job.count.raw
+          job.next = job.count
         }
-        if (job.active == 0 && job.next == job.count.raw) {
+        if (job.active == 0 && job.next == job.count) {
           job.finished = true
           jobComplete.signalAll()
           workReady.signalAll()
@@ -159,7 +161,7 @@ class WorkerPool(
 
   override def shouldParallel(taskCount: Long >= 0, workItemsPerTask: Long >= 0): Boolean =
     parallelism.raw > 1 && taskCount.raw > 1L &&
-      (taskCount.raw >= minGroups || workItemsPerTask.raw >= minWorkItems)
+      (taskCount >= minGroups || workItemsPerTask >= minWorkItems)
 
   override def parallelFor(taskCount: Long >= 0)(
       task: Long >= 0 => Either[Fault, Unit]

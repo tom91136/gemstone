@@ -16,39 +16,33 @@ private object VMAssembler {
   }
 
   def compile(
-      name: String,
-      parameters: Vec[(String, Int)],
+      name: NonEmpty[String],
+      parameters: Vec[KernelParameter],
       statements: Vec[Statement],
-      sharedBytes: Long,
       globalSymbols: Map[NonEmpty[String], GuestAddress]
-  ): Either[String, VMIR.Kernel] =
-    for {
-      kernelName <- requiredName(name)
-      params     <- parameters.traverse { case (parameter, size) =>
-        for {
-          parameterName <- requiredName(parameter)
-          parameterSize <- size.refine[Int > 0].left.map(identity)
-        } yield VMIR.KernelParameter(parameterName, parameterSize)
-      }
-      program <- compileProgram(statements)
-      _       <- Either.cond(sharedBytes >= 0L, (), "negative shared memory size")
-    } yield VMIR.Kernel(
-      kernelName,
-      params,
-      program,
-      sharedSymbols = Map.empty,
-      globalSymbols = globalSymbols,
-      registerChunkCount = 96,
-      isaName = "SASS"
+  ): Either[NonEmpty[String], VMIR.Kernel] =
+    compileProgram(statements).map(program =>
+      VMIR.Kernel(
+        name,
+        parameters,
+        program,
+        sharedSymbols = Map.empty,
+        globalSymbols = globalSymbols,
+        registerChunkCount = 96,
+        isaName = "SASS"
+      )
     )
 
   private def compileProgram(
       statements: Vec[Statement]
-  ): Either[String, VMIR.ExecutableProgram[VMIR.PredicatedInstruction]] = {
-    val labelState = statements.foldLeft[Either[String, (Map[String, Pc], Int)]](Right(Map.empty[String, Pc] -> 0)) {
+  ): Either[NonEmpty[String], VMIR.ExecutableProgram[VMIR.PredicatedInstruction]] = {
+    val labelState = statements.foldLeft[Either[
+      NonEmpty[String],
+      (Map[NonEmpty[String], Pc], Int >= 0)
+    ]](Right(Map.empty[NonEmpty[String], Pc] -> (0: Int >= 0))) {
       case (Right((labels, pc)), Statement.Label(label)) =>
         if (labels.contains(label)) Left(s"duplicate SASS label: $label")
-        else Right(labels.updated(label, pc.unsafe[Pc]) -> pc)
+        else Right(labels.updated(label, Pc(pc)) -> pc)
       case (Right((labels, pc)), _: Statement.Execute) => Right(labels -> (pc + 1))
       case (Right((labels, pc)), _: Statement.Branch)  => Right(labels -> (pc + 1))
       case (left @ Left(_), _)                         => left
@@ -59,12 +53,10 @@ private object VMAssembler {
         case Statement.Execute(instruction, predication) =>
           Right(Some(VMIR.PredicatedInstruction(instruction, predication)))
         case Statement.Branch(target, predication) =>
-          labels.get(target).toRight(s"unknown SASS branch label $target")
+          labels.get(target).toRight[NonEmpty[String]](s"unknown SASS branch label $target")
             .map(pc => Some(VMIR.PredicatedInstruction(Instruction.Branch(pc), predication)))
       }.map(instructions => VMIR.ExecutableProgram(instructions))
     }
   }
 
-  private def requiredName(value: String): Either[String, NonEmpty[String]] =
-    value.refine[NonEmpty[String]].left.map(identity)
 }

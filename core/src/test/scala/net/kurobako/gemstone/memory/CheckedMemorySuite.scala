@@ -9,8 +9,8 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 class CheckedMemorySuite extends munit.FunSuite {
-  private val doubleWord: Int where Between[1, 8] = 4
-  private val quadWord: Int where Between[1, 8]   = 8
+  private val doubleWord: Int in 1 ~ 8 = 4
+  private val quadWord: Int in 1 ~ 8   = 8
 
   private def allocate(
       memory: DynamicAddressMemory,
@@ -18,6 +18,37 @@ class CheckedMemorySuite extends munit.FunSuite {
       initial: Vec[Byte] = Vec.empty
   ): GuestAddress =
     memory.allocate(size, initial).fold(error => fail(error.message), address => address)
+
+  test("dynamic allocations check the unsigned address limit before publishing storage") {
+    val memory = DynamicAddressMemory(ArrayCheckedMemory.allocate(0), GuestAddress(-128L))
+    assert(memory.allocate(256).isLeft)
+    val last = allocate(memory, 128)
+    assertEquals(last.raw, -128L)
+    assert(memory.writeInt8(last.offset(127L), 42.toByte).isRight)
+    assertEquals(memory.readInt8(last.offset(127L)), Right(42.toByte))
+    assertEquals(memory.readBytes(last, 128).map(_.last), Right(42.toByte))
+    assert(memory.allocate(1).isLeft)
+    assertEquals(memory.readInt8(last.offset(127L)), Right(42.toByte))
+  }
+
+  test("the final guest address byte can be allocated once") {
+    val memory = DynamicAddressMemory(ArrayCheckedMemory.allocate(0), GuestAddress(-1L))
+    val last = allocate(memory, 1)
+    assertEquals(last.raw, -1L)
+    assert(memory.writeInt8(last, 42.toByte).isRight)
+    assertEquals(memory.readInt8(last), Right(42.toByte))
+    assert(memory.allocate(1).isLeft)
+  }
+
+  test("dynamic allocations can cross the signed Long boundary") {
+    val memory = DynamicAddressMemory(ArrayCheckedMemory.allocate(0), GuestAddress(Long.MaxValue - 127L))
+    val first = allocate(memory, 256)
+    assert(memory.writeInt8(first.offset(128L), 42.toByte).isRight)
+    assertEquals(memory.readInt8(first.offset(128L)), Right(42.toByte))
+    assertEquals(memory.readBytes(first, 256).map(_(128)), Right(42.toByte))
+    val next = allocate(memory, 1)
+    assertEquals(next.raw, first.raw + 256L)
+  }
 
   test("integer access is little endian and bounds checked") {
     val memory =
@@ -95,14 +126,14 @@ class CheckedMemorySuite extends munit.FunSuite {
         backing.writeInt8(address, value)
       override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
         backing.writeInt32(address, value)
-      override def readLittleEndian(address: GuestAddress, size: Int where Between[1, 8]): Either[MemoryError, Long] = {
+      override def readLittleEndian(address: GuestAddress, size: Int in 1 ~ 8): Either[MemoryError, Long] = {
         val _ = readCalls.incrementAndGet()
         backing.readLittleEndian(address, size)
       }
       override def writeLittleEndian(
           address: GuestAddress,
           value: Long,
-          size: Int where Between[1, 8]
+          size: Int in 1 ~ 8
       ): Either[MemoryError, Unit] = {
         val _ = writeCalls.incrementAndGet()
         backing.writeLittleEndian(address, value, size)
@@ -123,8 +154,8 @@ class CheckedMemorySuite extends munit.FunSuite {
     class ScopedDelegate extends AddressMemory {
       val prepared: ArrayBuffer[(GuestAddress.Type, Int)] = mutable.ArrayBuffer.empty[(GuestAddress, Int)]
       val reads: ArrayBuffer[(GuestAddress.Type, Int)]    = mutable.ArrayBuffer.empty[(GuestAddress, Int)]
-      val batches: ArrayBuffer[ArraySeq[(GuestAddress.Type, Long, Int where AtLeast[1] & AtMost[8])]] =
-        mutable.ArrayBuffer.empty[Vec[(GuestAddress, Long, Int where Between[1, 8])]]
+      val batches: ArrayBuffer[ArraySeq[(GuestAddress.Type, Long, Int in 1 ~ 8)]] =
+        mutable.ArrayBuffer.empty[Vec[(GuestAddress, Long, Int in 1 ~ 8)]]
       override def readInt8(address: GuestAddress): Either[MemoryError, Byte]               = backing.readInt8(address)
       override def readInt32(address: GuestAddress): Either[MemoryError, Int]               = backing.readInt32(address)
       override def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit] =
@@ -137,13 +168,13 @@ class CheckedMemorySuite extends munit.FunSuite {
       }
       override def readSystemLittleEndian(
           address: GuestAddress,
-          size: Int where Between[1, 8]
+          size: Int in 1 ~ 8
       ): Either[MemoryError, Long] = {
         reads += address -> size.raw
         backing.readLittleEndian(address, size)
       }
       override def writeSystemBatch(
-          writes: Vec[(GuestAddress, Long, Int where Between[1, 8])]
+          writes: Vec[(GuestAddress, Long, Int in 1 ~ 8)]
       ): Either[MemoryError, Unit] = {
         batches += writes
         writes.foldLeft[Either[MemoryError, Unit]](Right(())) { case (result, (address, value, size)) =>

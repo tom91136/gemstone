@@ -64,7 +64,7 @@ class FmaRoundingSuite extends munit.FunSuite {
       Right(())
     )
     val actual = (0 until cases.size * 4).toVec.map { index =>
-      memory.readLittleEndian(start.offset(index.toLong * size), size.unsafe[Int where Between[1, 8]]).toOption.get
+      memory.readLittleEndian(start.offset(index.toLong * size), size.unsafe[Int in 1 ~ 8]).toOption.get
     }
     assertEquals(actual, cases.flatMap(_._4))
   }
@@ -112,8 +112,8 @@ class FmaRoundingSuite extends munit.FunSuite {
     )
     cases.zipWithIndex.foreach { case ((_, _, _, expected), index) =>
       val base = memory.allocation.start.offset(index.toLong * 8)
-      assertEquals(memory.readLittleEndian(base, 2.unsafe[Int where Between[1, 8]]), Right(expected.toLong))
-      assertEquals(memory.readLittleEndian(base.offset(4), 4.unsafe[Int where Between[1, 8]]), Right(pair(expected)))
+      assertEquals(memory.readLittleEndian(base, 2), Right(expected.toLong))
+      assertEquals(memory.readLittleEndian(base.offset(4), 4), Right(pair(expected)))
     }
   }
 

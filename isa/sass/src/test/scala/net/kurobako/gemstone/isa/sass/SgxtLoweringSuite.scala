@@ -10,7 +10,7 @@ import net.kurobako.gemstone.vm.*
 
 class SgxtLoweringSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
-    SASSFixture.module(70, Vec(SASSFixture.Kernel("sgxt_probe", 352, Vec(0 -> 8, 8 -> 4, 12 -> 4), registers = 14)))
+    SASSFixture.module(70, Vec(SASSFixture.Kernel("sgxt_probe", 352, Vec((0, 8), (8, 4), (12, 4)), registers = 14)))
 
   private def scalar(value: Int): KernelTask.Argument.Scalar =
     KernelTask.Argument.Scalar(LittleEndian.toVec(value.toLong, 4))
@@ -54,7 +54,7 @@ class SgxtLoweringSuite extends munit.FunSuite {
       immediateWidth: Option[Int] = None
   ): Unit = {
     val module = fixtureModule
-    assertEquals(module.sm, 70)
+    assertEquals(module.sm.raw, 70)
     val parsed   = ListingDecoder.parse(sassText, "sgxt_probe", 70).fold(fail(_), _.head)
     val function = immediateWidth.fold(parsed) { width =>
       parsed.copy(instructions = parsed.instructions.map { instruction =>
@@ -73,7 +73,7 @@ class SgxtLoweringSuite extends munit.FunSuite {
 
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(20L.unsafe[Long > 0])
+      val output  = service.allocate(20L)
       val program = service.compile(lowered)
         .fold(e => fail(e.message), identity)
 

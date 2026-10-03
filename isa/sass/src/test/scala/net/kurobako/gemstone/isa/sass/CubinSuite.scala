@@ -63,7 +63,7 @@ class CubinSuite extends munit.FunSuite {
       Vec(SASSFixture.Kernel(
         "_ZN11cuda_tensor11tensor_gemmEPK6__halfS2_Pf",
         352,
-        Vec(0 -> 8, 8 -> 8, 16 -> 8),
+        Vec((0, 8), (8, 8), (16, 8)),
         registers = 26,
         shared = 0
       ))
@@ -102,13 +102,13 @@ class CubinSuite extends munit.FunSuite {
       )
       val program = service.compile(source).fold(e => fail(e.message), identity)
       val task    = SASSFixture.task(
-        k.name.unsafe[NonEmpty[String]],
+        k.name,
         LaunchGeometry.Dimensions(64, 1, 1),
         LaunchGeometry.Dimensions(2, 1, 1),
         Vec.from(allocations.map(a => KernelTask.Argument.Memory(a, 0L)))
       )
       service.run(program, task).fold(e => fail(e.message), identity)
-      assertEquals(service.readWords(allocations(2), expected.size.unsafe[Int >= 0]), floatWords(expected))
+      assertEquals(service.readWords(allocations(2), expected.nonNegativeSize), floatWords(expected))
     }
   }
 }

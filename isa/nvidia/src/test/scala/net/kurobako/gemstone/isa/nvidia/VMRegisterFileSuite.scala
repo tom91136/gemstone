@@ -18,4 +18,21 @@ class VMRegisterFileSuite extends munit.FunSuite {
       assertEquals(VMRegisterFile.indexRaw(name), -1, name)
     )
   }
+  test("valid architectural slots grow beyond the initial chunk allocation") {
+    val registers = VMRegisterFile(1)
+    registers.updateSlot(0, 17L)
+    assertEquals(registers.getSlot(64), 0L)
+    registers.updateSlot(64, 23L)
+    registers.updateSlot(6143, 31L)
+    assertEquals(registers.getSlot(0), 17L)
+    assertEquals(registers.getSlot(64), 23L)
+    assertEquals(registers.getSlot(6143), 31L)
+    assertEquals(registers.get("%p1023"), 31L)
+    registers.clear()
+    assertEquals(registers.getSlot(0), 0L)
+    assertEquals(registers.getSlot(64), 0L)
+    assertEquals(registers.getSlot(6143), 0L)
+    intercept[IllegalArgumentException](registers.getSlotRaw(-1))
+    intercept[IllegalArgumentException](registers.updateSlotRaw(6144, 1L))
+  }
 }

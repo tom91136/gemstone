@@ -30,7 +30,7 @@ class PRMTSignExtensionSuite extends munit.FunSuite {
       execute(
         kernel,
         1,
-        256.unsafe[Int > 0],
+        256,
         Map(("output": NonEmpty[String]) -> Argument.fromLong(start.raw)),
         memory
       ),
@@ -38,7 +38,7 @@ class PRMTSignExtensionSuite extends munit.FunSuite {
     )
 
     val actual = (0 until 256).map { value =>
-      memory.readLittleEndian(start.offset(value.toLong * 4), 4.unsafe[Int where Between[1, 8]]).toOption.get
+      memory.readLittleEndian(start.offset(value.toLong * 4), 4).toOption.get
     }
     val expected = (0 until 256).map(value => if ((value & 0x80) != 0) 0xffffff00L | value else value.toLong)
     assertEquals(actual, expected)

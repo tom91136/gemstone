@@ -2,7 +2,9 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
@@ -14,7 +16,7 @@ class PairedNumericSuite extends munit.FunSuite {
       check: (SASSFixture.Execution, KernelTask => Unit, Boolean) => Unit
   ): Unit = {
     val kernel    = module.kernels.head
-    val functions = ListingDecoder.parse(listing, kernel.name, module.sm).fold(fail(_), identity)
+    val functions = ListingDecoder.parse(listing, kernel.name, module.sm.raw).fold(fail(_), identity)
     val fixture   = SASSFixture(module, kernel, functions)
     for (isPtx <- Vec(true, false)) {
       val service                 = SASSFixture.Execution()
@@ -39,32 +41,34 @@ class PairedNumericSuite extends munit.FunSuite {
       Vec(SASSFixture.Kernel(
         "f2f_conversion_probe",
         352,
-        Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8, 32 -> 4),
+        Vec((0, 8), (8, 8), (16, 8), (24, 8), (32, 4)),
         registers = 16
       ))
     )
     both(ptx, module, listing) { (service, run, isPtx) =>
-      val count = NumericCases.f64ToF32.size.max(NumericCases.f32ToF64.size)
-      val in64  = service.allocate((NumericCases.f64ToF32.map(_._1) ++ Vec.fill(count - NumericCases.f64ToF32.size)(0L))
-        .flatMap(LittleEndian.toVec(_, 8)))
-      val in32 = service.allocate((NumericCases.f32ToF64.map(_._1) ++ Vec.fill(count - NumericCases.f32ToF64.size)(0L))
-        .flatMap(LittleEndian.toVec(_, 4)))
-      val out32 = service.allocate(Vec.fill(count * 4)(0xa5.toByte))
-      val out64 = service.allocate(Vec.fill(count * 8)(0xa5.toByte))
+      val count = NumericCases.f64ToF32.positiveSize.max(NumericCases.f32ToF64.positiveSize)
+      val in64  =
+        service.allocate((NumericCases.f64ToF32.map(_._1) ++ Vec.fill(count.raw - NumericCases.f64ToF32.size)(0L))
+          .flatMap(LittleEndian.toVec(_, 8)))
+      val in32 =
+        service.allocate((NumericCases.f32ToF64.map(_._1) ++ Vec.fill(count.raw - NumericCases.f32ToF64.size)(0L))
+          .flatMap(LittleEndian.toVec(_, 4)))
+      val out32 = service.allocate(Vec.fill(count.raw * 4)(0xa5.toByte))
+      val out64 = service.allocate(Vec.fill(count.raw * 8)(0xa5.toByte))
       run(SASSFixture.task(
         "f2f_conversion_probe",
-        LaunchGeometry.Dimensions(count.unsafe[Int > 0], 1, 1),
+        LaunchGeometry.Dimensions(count, 1, 1),
         LaunchGeometry.Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(out32, 0L),
           KernelTask.Argument.Memory(in64, 0L),
           KernelTask.Argument.Memory(out64, 0L),
           KernelTask.Argument.Memory(in32, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(count.toLong, 4))
+          KernelTask.Argument.Scalar(LittleEndian.toVec(count.toLong.raw, 4))
         )
       ))
-      val actual32 = service.readWords(out32, NumericCases.f64ToF32.size.unsafe[Int >= 0])
-      val actual64 = service.readWords(out64, NumericCases.f32ToF64.size.unsafe[Int >= 0], 8)
+      val actual32 = service.readWords(out32, NumericCases.f64ToF32.nonNegativeSize)
+      val actual64 = service.readWords(out64, NumericCases.f32ToF64.nonNegativeSize, 8)
       assertEquals(actual32, NumericCases.f64ToF32.map(_._2), clues(isPtx))
       assertEquals(actual64, NumericCases.f32ToF64.map(_._2), clues(isPtx))
     }
@@ -72,7 +76,7 @@ class PairedNumericSuite extends munit.FunSuite {
 
   test("PTX and FMNMX fixture independently match NaN selection and signed-zero extrema") {
     val module =
-      SASSFixture.module(86, Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 14)))
+      SASSFixture.module(86, Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 14)))
     both(FmnmxFixtures.fmnmxSm86ProbePtxSource, module, FmnmxFixtures.fmnmxSm86Probe) { (service, run, isPtx) =>
       val cases  = NumericCases.f32Extrema
       val output = service.allocate(Vec.fill(cases.size * 8)(0xa5.toByte))
@@ -80,7 +84,7 @@ class PairedNumericSuite extends munit.FunSuite {
       val right  = service.allocate(cases.flatMap(value => LittleEndian.toVec(value._2, 4)))
       run(SASSFixture.task(
         "probe",
-        LaunchGeometry.Dimensions(cases.size.unsafe[Int > 0], 1, 1),
+        LaunchGeometry.Dimensions(cases.positiveSize, 1, 1),
         LaunchGeometry.Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(output, 0L),
@@ -88,14 +92,14 @@ class PairedNumericSuite extends munit.FunSuite {
           KernelTask.Argument.Memory(right, 0L)
         )
       ))
-      val actual   = service.readWords(output, (cases.size * 2).unsafe[Int >= 0])
+      val actual   = service.readWords(output, cases.nonNegativeSize * 2)
       val expected = cases.flatMap(value => Vec(value._3, value._4))
       assertEquals(if (isPtx) actual.map(NumericCases.canonicalFloat(_)) else actual, expected, clues(isPtx))
     }
   }
 
   private def scalar(instruction: String, left: Long, right: Long, alias: Boolean, suffix: String = ""): Long = {
-    val module      = SASSFixture.module(89, Vec(SASSFixture.Kernel("numeric", 352, Vec(0 -> 8), registers = 8)))
+    val module      = SASSFixture.module(89, Vec(SASSFixture.Kernel("numeric", 352, Vec((0, 8)), registers = 8)))
     val destination = if (alias) "R2" else "R4"
     val lines       = Vec(
       "MOV R0, c[0x0][0x160]",

@@ -81,7 +81,7 @@ object ImageDescriptorABI {
     val body = groups.map { case (group, tpe, values) =>
       val fields = values.map { case (name, value) =>
         val suffix = if (tpe == "Long") "L" else ""
-        s"    final val $name: $tpe = $value$suffix"
+        s"    inline val $name = $value$suffix"
       }.mkString("\n")
       s"  object $group {\n$fields\n  }"
     }.mkString("\n\n")

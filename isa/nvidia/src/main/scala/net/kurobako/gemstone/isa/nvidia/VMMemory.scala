@@ -37,43 +37,43 @@ class VMMemory(addresses: AddressSpace) extends AddressMemory {
 
   override def readLittleEndian(
       address: GuestAddress,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[MemoryError, Long] = readValue(address, size)
 
   override def readSystemLittleEndian(
       address: GuestAddress,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[MemoryError, Long] = addresses.readSystemValue(address, size).left.map(error(_))
 
   override def writeLittleEndian(
       address: GuestAddress,
       value: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[MemoryError, Unit] = writeValue(address, value, size)
 
   override def writeSystemLittleEndian(
       address: GuestAddress,
       value: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[MemoryError, Unit] = addresses.writeSystemValue(address, value, size).left.map(error(_))
 
   override def writeSystemBatch(
-      writes: Vec[(GuestAddress, Long, Int where Between[1, 8])]
+      writes: Vec[(GuestAddress, Long, Int in 1 ~ 8)]
   ): Either[MemoryError, Unit] = addresses.writeSystemBatch(writes).left.map(error(_))
 
   override def atomicModifyLittleEndian(
       address: GuestAddress,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   )(update: Long => Long): Either[MemoryError, Long] =
     addresses.atomicModifyValue(address, size)(update).left.map(error(_))
 
-  private def readValue(address: GuestAddress, size: Int where Between[1, 8]): Either[MemoryError, Long] =
+  private def readValue(address: GuestAddress, size: Int in 1 ~ 8): Either[MemoryError, Long] =
     addresses.readValue(address, size).left.map(error(_))
 
   private def writeValue(
       address: GuestAddress,
       value: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[MemoryError, Unit] =
     addresses.writeValue(address, value, size).left.map(error(_))
 

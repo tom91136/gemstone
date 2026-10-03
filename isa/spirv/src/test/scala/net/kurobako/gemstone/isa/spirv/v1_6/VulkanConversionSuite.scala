@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -10,16 +11,18 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class VulkanConversionSuite extends munit.FunSuite {
   for {
-    width  <- Seq(32, 64)
+    width  <- Seq[Int in (32, 64)](32, 64)
+    rawWidth = width.raw
+    byteWidth = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     signed <- Seq(0, 1)
   }
-    test(s"Vulkan $width-bit floating conversion chooses saturated $signed integer endpoints") {
+    test(s"Vulkan $rawWidth-bit floating conversion chooses saturated $signed integer endpoints") {
       def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
       val module               = Module(
         Header(ISA.version, Word(0), Word(32), Word(0)),
         Vec(
           Instruction.TypeVoid(ref(1)),
-          Instruction.TypeFloat(ref(2), operand(OperandKind.LiteralInteger, width), None),
+          Instruction.TypeFloat(ref(2), operand(OperandKind.LiteralInteger, rawWidth), None),
           Instruction.TypeInt(
             ref(3),
             operand(OperandKind.LiteralInteger, 32),
@@ -73,13 +76,13 @@ class VulkanConversionSuite extends munit.FunSuite {
         ),
         Endianness.Little
       )
-      val region  = AllocationId(1L); val inputSize = width / 8 * 4
-      val memory  = ArrayMemory(region, inputSize + 16)
+      val region  = AllocationId(1L); val inputSize = byteWidth.widen[Int > 0] * (4: Int > 0)
+      val memory  = ArrayMemory(region, (inputSize + 16).raw)
       val inputs  = Vec(Double.NegativeInfinity, -0.75, Double.PositiveInfinity, Double.NaN)
       val encoded = inputs.flatMap { value =>
-        val bits = if (width == 32) java.lang.Float.floatToRawIntBits(value.toFloat).toLong
+        val bits = if (rawWidth == 32) java.lang.Float.floatToRawIntBits(value.toFloat).toLong
         else java.lang.Double.doubleToRawLongBits(value)
-        LittleEndian.toVec(bits, (width / 8).unsafe[Int where Between[0, 8]])
+        LittleEndian.toVec(bits, byteWidth.widen[Int in 0 ~ 8])
       }
       assertEquals(memory.write(region, 0L, encoded), Right(()))
       val task = KernelTask.validated(
@@ -90,12 +93,12 @@ class VulkanConversionSuite extends munit.FunSuite {
           KernelTask.Argument.Memory(region, 0L),
           KernelTask.Argument.Memory(
             region,
-            inputSize.toLong.unsafe[Long >= 0]
+            inputSize.toLong.widen[Long >= 0]
           )
         )
       ).toOption.get
       assertEquals(executeUnchecked(module, task, memory), Right(()))
       val expected = Vec(if (signed == 1) 0x80000000L else 0L, 0L, if (signed == 1) 0x7fffffffL else 0xffffffffL, 0L)
-      assertEquals(memory.bytes.drop(inputSize), expected.flatMap(LittleEndian.toVec(_, 4)))
+      assertEquals(memory.bytes.drop(inputSize.raw), expected.flatMap(LittleEndian.toVec(_, 4)))
     }
 }

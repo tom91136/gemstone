@@ -67,13 +67,13 @@ object Replay {
     private val clients     = mutable.Map.empty[Journal.RecordedClientId, ClientId]
     private val connections = mutable.Map.empty[Journal.RecordedConnectionId, Active]
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private var cursor = 0
+    private var cursor: Int >= 0 = 0
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private var requests = 0
+    private var requests: Int >= 0 = 0
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private var polls          = 0L
-    private def report: Report =
-      Report(cursor.unsafe[Int >= 0], requests.unsafe[Int >= 0], polls.unsafe[Long >= 0])
+    private var polls: Long >= 0 = 0L
+    private def report: Report   =
+      Report(cursor, requests, polls)
 
     private def assignedClient(client: Journal.RecordedClientId): ClientId = clients.get(client) match {
       case Some(assigned) => assigned

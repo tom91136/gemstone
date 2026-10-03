@@ -1004,7 +1004,7 @@ for name in sorted(module.instructions):
       .foldLeft((0, Vector.empty[(String, Int)])) { case ((next, values), member) =>
         val (key, value) = member match {
           case Entry(key, raw) =>
-            def atom(text: String): Int = scala.util.Try(java.lang.Integer.decode(text.trim).intValue).toOption
+            def atom(text: String): Int = parseIntLiteral(text.trim)
               .orElse(values.find(_._1 == text.trim).map(_._2))
               .getOrElse(throw IllegalArgumentException(s"unsupported LLVM enum initializer: $member"))
             def expression(text: String): Int = text.split("\\|", -1).map { term =>
@@ -1042,7 +1042,7 @@ for name in sorted(module.instructions):
     def names(name: String, member: String): String = {
       val values = enumValues(text, "SDWA", name).sortBy(_._2)
       require(values.map(_._2) == values.indices.toVector, s"noncontiguous LLVM SDWA $name")
-      s"  val $member: Vector[String] = Vector(${values.map(value => ujson.write(value._1)).mkString(", ")})\n"
+      s"  val $member: Vector[NonEmpty[String]] = Vector(${values.map(value => ujson.write(value._1)).mkString(", ")})\n"
     }
     val policy                                                      = enumValues(text, "CPol", "CPol").toMap
     def table(name: String, entries: Vector[(String, Int)]): String =
@@ -1083,7 +1083,7 @@ for name in sorted(module.instructions):
       "SccSource"       -> "src_scc",
       "LdsDirectSource" -> "src_lds_direct"
     )
-      .map { case (name, key) => s"    val $name: Int = ${source(key).str}" }.mkString("\n")
+      .map { case (name, key) => s"    inline val $name = ${source(key).str}" }.mkString("\n")
     // These are the leading bits consumed by the VM's existing dispatch windows.
     val prefixes = Vector(
       ("SmemGfx6Prefix", "GFX6", "SMEM", 26),
@@ -1113,9 +1113,9 @@ for name in sorted(module.instructions):
       val body = (raw"(?s)class\s+" + owner + raw"\s*<.*?\n}").r.findFirstIn(text)
         .getOrElse(throw IllegalArgumentException(s"missing LLVM $owner"))
       val value = raw"let Inst\{8-0\}\s*=\s*(0x[0-9a-fA-F]+);".r.findFirstMatchIn(body)
-        .map(value => Integer.decode(value.group(1)).intValue)
+        .flatMap(value => parseIntLiteral(value.group(1)))
         .getOrElse(throw IllegalArgumentException(s"missing LLVM $owner source sentinel"))
-      s"    val $name: Int = $value\n"
+      s"    inline val $name = $value\n"
     }
     val floating = source.obj.toVector.filter(_._1.contains('.')).sortBy(_._2.str.toInt)
     val numbers  = floating.map(_._1).mkString(", ")
@@ -1397,7 +1397,7 @@ for name in sorted(module.instructions):
     val header =
       Files.readString(references.resolve("llvm/llvm/lib/Target/AMDGPU/SIDefines.h"), StandardCharsets.UTF_8)
     GeneratedHeader.scala("encoding constants from pinned AMD and LLVM inputs") +
-      s"package net.kurobako.gemstone.isa.amdgpu\n\n${GeneratedHeader.annotation()}private object EncodingConstants {\n" +
+      s"package net.kurobako.gemstone.isa.amdgpu\n\nimport net.kurobako.gemstone.constraint.*\n\n${GeneratedHeader.annotation()}private object EncodingConstants {\n" +
       renderOperandConstants(header) + renderSharedConstants(result, references) + relocations + "\n}\n"
   }
 
@@ -1483,6 +1483,8 @@ for name in sorted(module.instructions):
         predicate("excludesLiteral")(_.endsWith("NOLIT"))
       ).mkString("\n")
       else if (name == "EncodingField") Vector(
+        "  def assemblyName: net.kurobako.gemstone.constraint.NonEmpty[String] = this match { " +
+          names.map(value => s"case `$value` => ${Emission.literal(value.toLowerCaseRoot)}").mkString("; ") + " }",
         predicate("isVectorSource")(_.startsWith("VSRC")),
         sourceModifier("absoluteModifier", "SRC", "_ABS"),
         sourceModifier("negativeModifier", "SRC", "_NEG"),
@@ -1697,7 +1699,10 @@ for name in sorted(module.instructions):
         |    decodeWithSuffixes(name, operands, mods, name)
         |  }
         |
-        |  private val EncodingSuffixes: Vec[String] = Vec("_dpp8", "_sdwa", "_dpp", "_e64", "_e32")
+        |  private val EncodingSuffixes: Vec[(String, Modifier)] = Vec(
+        |    "_dpp8" -> Modifier("dpp8"), "_sdwa" -> Modifier("sdwa"), "_dpp" -> Modifier("dpp"),
+        |    "_e64" -> Modifier("e64"), "_e32" -> Modifier("e32")
+        |  )
         |
         |  @annotation.tailrec
         |  private def decodeWithSuffixes(
@@ -1709,8 +1714,8 @@ for name in sorted(module.instructions):
         |    decodeCanonical(name, operands, mods) match {
         |      case Left(DecodeError.UnknownOpcode(_)) =>
         |        EncodingSuffixes.collectFirst {
-        |          case suffix if name.endsWith(suffix) =>
-        |            name.dropRight(suffix.length) -> Modifier((suffix.drop(1)).unsafe[NonEmpty[String]])
+        |          case (suffix, modifier) if name.endsWith(suffix) =>
+        |            name.dropRight(suffix.length) -> modifier
         |        } match {
         |          case Some((canonical, modifier)) => decodeWithSuffixes(canonical, operands, modifier +: mods, original)
         |          case None                        => Left(DecodeError.UnknownOpcode(original))

@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 
@@ -18,10 +19,10 @@ class AssemblerSuite extends munit.FunSuite {
 
   test("compiler-produced instructions re-encode and printed assembly assembles byte exactly") {
     SASSCodeWords.words(code, 89).fold(fail(_), identity).foreach { (address, bytes) =>
-      val decoded = Disassembler.decode(bytes, "SM89", address).fold(fail(_), identity)
+      val decoded = Disassembler.decode(bytes, "SM89", address.raw).fold(fail(_), identity)
       assertEquals(Assembler.encode(decoded).fold(fail(_), _.toVec), bytes.toVec, clues(address, decoded))
       val text = Printer.print(decoded).fold(fail(_), identity)
-      assertEquals(Assembler.assemble(text, "SM89", address).fold(fail(_), _.toVec), bytes.toVec, clues(text))
+      assertEquals(Assembler.assemble(text, "SM89", address.raw).fold(fail(_), _.toVec), bytes.toVec, clues(text))
     }
   }
 
@@ -116,4 +117,9 @@ class AssemblerSuite extends munit.FunSuite {
     assert(Assembler.assemble("NOP;", "SM89", -1).isLeft)
     assert(Assembler.assemble("NOP;", "SM999").isLeft)
   }
+  test("public machine-code APIs reject negative addresses before decoding") {
+    assert(Disassembler.decode(Array.emptyByteArray, "SM89", -1).isLeft)
+    assert(Assembler.assemble("NOP;", "SM89", -1).isLeft)
+  }
+
 }

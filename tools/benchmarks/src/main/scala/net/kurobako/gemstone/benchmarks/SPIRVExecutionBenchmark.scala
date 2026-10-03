@@ -104,7 +104,7 @@ object SPIRVExecutionBenchmark {
     Operand(
       OperandKind.LiteralString,
       Vec.from(bytes.grouped(4).map { group =>
-        val width = group.length.refine[Int where Between[0, 8]]
+        val width = group.length.refine[Int in 0 ~ 8]
           .fold(message => throw IllegalArgumentException(message), value => value)
         Word(LittleEndian.decode(group, 0, width).toInt)
       }).unsafe

@@ -12,9 +12,9 @@ class NanosleepWarpSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module = SASSFixture.module(
     75,
     Vec(
-      SASSFixture.Kernel("nanosleep_predicated", 352, Vec(0 -> 8, 8 -> 4), registers = 8),
-      SASSFixture.Kernel("nanosleep_immediates", 352, Vec(0 -> 8), registers = 8),
-      SASSFixture.Kernel("nanosleep_dynamic", 352, Vec(0 -> 8, 8 -> 4), registers = 8)
+      SASSFixture.Kernel("nanosleep_predicated", 352, Vec((0, 8), (8, 4)), registers = 8),
+      SASSFixture.Kernel("nanosleep_immediates", 352, Vec((0, 8)), registers = 8),
+      SASSFixture.Kernel("nanosleep_dynamic", 352, Vec((0, 8), (8, 4)), registers = 8)
     )
   )
 

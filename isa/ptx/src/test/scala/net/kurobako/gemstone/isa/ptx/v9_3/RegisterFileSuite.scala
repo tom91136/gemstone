@@ -24,9 +24,9 @@ class RegisterFileSuite extends munit.FunSuite {
   ret;
 }""")
 
-    assertEquals(namedOnly.registerChunkCount, 1)
-    assertEquals(numbered.registerChunkCount, 33, numbered.program.instructions.toString)
-    assertEquals(predicateNamedScalar.registerChunkCount, 81)
+    assertEquals(namedOnly.registerChunkCount.raw, 1)
+    assertEquals(numbered.registerChunkCount.raw, 33, numbered.program.instructions.toString)
+    assertEquals(predicateNamedScalar.registerChunkCount.raw, 81)
   }
 
   test("a numbered p register can hold a non-predicate value") {
@@ -39,7 +39,7 @@ class RegisterFileSuite extends munit.FunSuite {
   st.global.u32 [%p63], 42;
   ret;
 }""")
-    assertEquals(kernel.registerChunkCount, 81)
+    assertEquals(kernel.registerChunkCount.raw, 81)
     val memory = ArrayCheckedMemory.allocate(4)
     assertEquals(
       execute(
@@ -69,7 +69,7 @@ class RegisterFileSuite extends munit.FunSuite {
 }""")
 
     assert(kernel.functions.keys.exists(_.raw == "scalar"))
-    assertEquals(kernel.registerChunkCount, 81)
+    assertEquals(kernel.registerChunkCount.raw, 81)
   }
 
   test("mov.pred reads the predicate bank regardless of the register name") {

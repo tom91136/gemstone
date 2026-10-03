@@ -166,7 +166,7 @@ class CubeSamplingSuite extends munit.FunSuite {
       memory.write(
         region,
         at.toLong.unsafe[Long >= 0],
-        LittleEndian.toVec(value, bytes.refine[Int where Between[0, 8]].toOption.get)
+        LittleEndian.toVec(value, bytes.refine[Int in 0 ~ 8].toOption.get)
       ),
       Right(())
     )

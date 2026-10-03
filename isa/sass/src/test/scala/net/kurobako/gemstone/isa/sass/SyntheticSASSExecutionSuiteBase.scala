@@ -10,17 +10,17 @@ import net.kurobako.gemstone.vm.*
 abstract class SyntheticSASSExecutionSuiteBase extends munit.FunSuite {
   protected def executeSynthetic(
       body: Vec[(String, String, Option[String])],
-      expected: Vec[Int],
-      shared: Int = 0,
+      expected: NonEmpty[Vec[Int]],
+      shared: Int >= 0 = 0,
       sm: Int = 86,
       rewrite: DecodedInstruction => DecodedInstruction = instruction => instruction
   ): Unit = {
     val original = CubinSuiteFixtures.module
     val m        = original.copy(
-      sm = sm,
+      sm = sm.refine[Int >= 35].fold(error => fail(error.raw), identity),
       sections =
         original.sections :+ Cubin.Section(
-          original.sections.size,
+          original.sections.nonNegativeSize,
           ".nv.shared.saxpy",
           8,
           3,
@@ -37,11 +37,11 @@ abstract class SyntheticSASSExecutionSuiteBase extends munit.FunSuite {
     locally {
       val service = SASSFixture.Execution()
       val output  =
-        service.allocate((expected.size * 4L).unsafe[Long > 0])
+        service.allocate(expected.positiveSize.toLong.widen[Long > 0] * 4L)
       val program = service.compile(source).fold(e => fail(e.message), identity)
       val task    = SASSFixture.task(
         "saxpy": NonEmpty[String],
-        LaunchGeometry.Dimensions(expected.size.unsafe[Int > 0], 1, 1),
+        LaunchGeometry.Dimensions(expected.positiveSize, 1, 1),
         LaunchGeometry.Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(output, 0L),
@@ -51,7 +51,7 @@ abstract class SyntheticSASSExecutionSuiteBase extends munit.FunSuite {
         )
       )
       service.run(program, task).fold(e => fail(e.message), identity)
-      assertEquals(service.readWords(output, expected.size.unsafe[Int >= 0]).map(_.toInt), expected)
+      assertEquals(service.readWords(output, expected.nonNegativeSize).map(_.toInt), expected)
     }
   }
 

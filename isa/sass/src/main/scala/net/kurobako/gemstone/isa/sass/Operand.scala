@@ -8,13 +8,13 @@ import net.kurobako.gemstone.isa.sass.SpecialRegister as SpecialRegisterName
   * Floating point immediates use Bits so their payloads survive decoding unchanged.
   */
 enum Operand {
-  case Register(bank: RegisterBank, index: Int where Between[0, 255])
+  case Register(bank: RegisterBank, index: Int in 0 ~ 255)
   case Integer(value: BigInt)
   case Bits(value: BigInt, width: Int >= 0)
   case Symbol(value: String)
   case Group(values: Vec[Operand])
   case Decorated(value: Operand, attributes: Map[OperandDecoration, Operand])
-  case Predicate(index: Option[Int where Between[0, 6]], uniform: Boolean, negated: Boolean)
+  case Predicate(index: Option[Int in 0 ~ 6], uniform: Boolean, negated: Boolean)
   case SpecialRegister(name: SpecialRegisterName)
   case FloatingBits(format: FloatEncoding, width: Int in (16, 32, 64), bits: BigInt)
   case Floating(value: BigDecimal, spelling: String, negativeZero: Boolean)

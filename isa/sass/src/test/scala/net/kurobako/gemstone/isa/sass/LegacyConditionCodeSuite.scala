@@ -10,7 +10,7 @@ import net.kurobako.gemstone.vm.*
 class LegacyConditionCodeSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module = SASSFixture.module(
     35,
-    Vec(SASSFixture.Kernel("arith_probe", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 4), registers = 24))
+    Vec(SASSFixture.Kernel("arith_probe", 320, Vec((0, 8), (8, 8), (16, 8), (24, 4)), registers = 24))
   )
 
   private def instructions(lhs: String, rhs: String): Vec[DecodedInstruction] = {
@@ -68,7 +68,7 @@ class LegacyConditionCodeSuite extends munit.FunSuite {
     )
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(8L.unsafe[Long > 0])
+      val output  = service.allocate(8L)
       variants.foreach { case (lhs, rhs) =>
         val sass = SASSFixture(
           module,
@@ -132,7 +132,7 @@ class LegacyConditionCodeSuite extends munit.FunSuite {
     val sass = SASSFixture(module, kernel, Vec(DecodedFunction("arith_probe", body)))
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(8L.unsafe[Long > 0])
+      val output  = service.allocate(8L)
       val program = service.compile(sass)
         .fold(e => fail(e.message), identity)
       inputs.foreach { case (a, b) =>
@@ -185,7 +185,7 @@ class LegacyConditionCodeSuite extends munit.FunSuite {
     )
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(8L.unsafe[Long > 0])
+      val output  = service.allocate(8L)
       variants.foreach { case (setup, (opcode, operands, predicate)) =>
         val body = Vec(
           ("LDC.64", "R4,c[0x0][0x140]", None),

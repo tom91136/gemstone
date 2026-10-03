@@ -20,10 +20,10 @@ object GenerateAMDGPUOracle {
   private case class Golden(
       target: NonEmpty[String],
       assembly: NonEmpty[String],
-      bytes: Vector[Int where Between[0, 255]],
+      bytes: Vector[Int in 0 ~ 255],
       source: NonEmpty[String],
       sourceFile: NonEmpty[String],
-      waveSize: Int
+      waveSize: Int in (32, 64)
   ) {
     val opcode: NonEmpty[String] = assembly.takeWhile(!_.isWhitespace).unsafe[NonEmpty[String]]
   }
@@ -41,7 +41,7 @@ object GenerateAMDGPUOracle {
   }
 
   private case class Corpus(
-      positiveSeen: Set[(NonEmpty[String], NonEmpty[String], Vector[Int where Between[0, 255]], Int)],
+      positiveSeen: Set[(NonEmpty[String], NonEmpty[String], Vector[Int in 0 ~ 255], Int in (32, 64))],
       diagnosticSeen: Set[(NonEmpty[String], NonEmpty[String], NonEmpty[String])],
       positives: Chain[Golden],
       diagnostics: Chain[Diagnostic],
@@ -336,7 +336,7 @@ object GenerateAMDGPUOracle {
     val _ = GeneratedFiles.write(output, content)
   }
 
-  private def targetsByCheckPrefix(lines: Vector[String]): Map[String, Set[(NonEmpty[String], Int)]] = {
+  private def targetsByCheckPrefix(lines: Vector[String]): Map[String, Set[(NonEmpty[String], Int in (32, 64))]] = {
     val pairs = lines.flatMap {
       case Run(command) if command.contains("llvm-mc") && !command.contains("-disassemble") =>
         Mcpu.findFirstMatchIn(command).toVector.flatMap { targetMatch =>
@@ -345,9 +345,10 @@ object GenerateAMDGPUOracle {
             val target = rawTarget.unsafe[NonEmpty[String]]
             CheckPrefixes.findFirstMatchIn(command).map(_.group(1).split(',').toVector).getOrElse(Vector("CHECK"))
               .map { prefix =>
-                val waveSize = if (command.contains("+wavefrontsize64") || command.contains("-wavefrontsize32")) 64
-                else if (command.contains("+wavefrontsize32") || command.contains("-wavefrontsize64")) 32
-                else if (familyForTarget(target).startsWith("gfx1")) 32 else 64
+                val waveSize: Int in (32, 64) =
+                  if (command.contains("+wavefrontsize64") || command.contains("-wavefrontsize32")) 64
+                  else if (command.contains("+wavefrontsize32") || command.contains("-wavefrontsize64")) 32
+                  else if (familyForTarget(target).startsWith("gfx1")) 32 else 64
                 normalizePrefix(prefix) -> (target -> waveSize)
               }
           }
@@ -400,14 +401,14 @@ object GenerateAMDGPUOracle {
 
   private def containsFileCheckExpression(value: String): Boolean = value.contains("{{") || value.contains("[[")
 
-  private def parseBytes(value: String): Option[Vector[Int where Between[0, 255]]] = {
+  private def parseBytes(value: String): Option[Vector[Int in 0 ~ 255]] = {
     val fields = value.split(',').view.map(_.trim).filter(_.nonEmpty).toVector
     Option.when(
       fields.forall(field =>
         field.length >= 3 && field.length <= 4 && field.take(2).equalsIgnoreCase("0x") &&
           field.drop(2).forall(character => Character.digit(character, 16) >= 0)
       )
-    )(fields.map(field => Integer.parseInt(field.drop(2), 16).unsafe[Int where Between[0, 255]]))
+    )(fields.map(field => Integer.parseInt(field.drop(2), 16).unsafe[Int in 0 ~ 255]))
   }
 
   private def goldenKey(value: Golden): (String, String, String, String) =

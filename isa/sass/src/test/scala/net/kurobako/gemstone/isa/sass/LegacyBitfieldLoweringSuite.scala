@@ -14,7 +14,7 @@ class LegacyBitfieldLoweringSuite extends munit.FunSuite {
     Vec(SASSFixture.Kernel(
       "bitfield_probe",
       320,
-      Vec(0 -> 8, 8 -> 4, 12 -> 4, 16 -> 4, 20 -> 4, 24 -> 4),
+      Vec((0, 8), (8, 4), (12, 4), (16, 4), (20, 4), (24, 4)),
       registers = 8
     ))
   )
@@ -54,7 +54,7 @@ class LegacyBitfieldLoweringSuite extends munit.FunSuite {
 
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(16L.unsafe[Long > 0])
+      val output  = service.allocate(16L)
       val program = service.compile(lowered)
         .fold(e => fail(e.message), identity)
       val inputs = Vec(

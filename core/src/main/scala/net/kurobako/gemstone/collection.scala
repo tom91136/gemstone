@@ -29,6 +29,9 @@ object collection {
 
     def tabulate[A: ClassTag](count: Int)(value: Int => A): Vec[A] = ArraySeq.tabulate(count)(value)
 
+    def tabulateNonEmpty[A: ClassTag](count: Int > 0)(value: Int >= 0 => A): NonEmpty[Vec[A]] =
+      ArraySeq.tabulate(count.raw)(index => value(index.unsafe[Int >= 0])).unsafe[NonEmpty[Vec[A]]]
+
     /** Construct a half-open integer range whose elements retain the compile-time bounds. Empty ranges are allowed;
       * reversed ranges and ranges too large for an indexed Vec are rejected before allocation.
       */
@@ -40,12 +43,17 @@ object collection {
       val from  = fromValue.value
       val until = untilValue.value
       if (from > until) throw IllegalArgumentException(s"invalid integer range [$from, $until)")
-      val count = until.toLong - from.toLong
-      if (count > Int.MaxValue.toLong)
-        throw IllegalArgumentException(s"integer range [$from, $until) exceeds Vec capacity")
-      ArraySeq.tabulate[Int where (AtLeast[From] & LessThan[Until])](count.toInt) { index =>
-        (from.toLong + index.toLong).toInt.unsafe[Int where (AtLeast[From] & LessThan[Until])]
-      }(using tag)
+      // Empty ranges have no elements whose refinement needs to be materialized.
+      inline if (scala.compiletime.constValue[From] >= scala.compiletime.constValue[Until])
+        ArraySeq.empty[Int where (AtLeast[From] & LessThan[Until])](using tag)
+      else {
+        val count = until.toLong - from.toLong
+        if (count > Int.MaxValue.toLong)
+          throw IllegalArgumentException(s"integer range [$from, $until) exceeds Vec capacity")
+        ArraySeq.tabulate[Int where (AtLeast[From] & LessThan[Until])](count.toInt) { index =>
+          (from.toLong + index.toLong).toInt.unsafe[Int where (AtLeast[From] & LessThan[Until])]
+        }(using tag)
+      }
     }
 
     /** Generate the zero-based indexes for a runtime-sized sequence, retaining nonnegative evidence. */
@@ -62,6 +70,13 @@ object collection {
 
     extension [A](values: NonEmpty[Vec[A]]) {
       def positiveSize: Int > 0 = values.size.unsafe[Int > 0]
+
+      def mapNonEmpty[B](f: A => B): NonEmpty[Vec[B]] = values.map(f).unsafe[NonEmpty[Vec[B]]]
+
+      def flatMapNonEmpty[B](f: A => NonEmpty[Vec[B]]): NonEmpty[Vec[B]] =
+        values.flatMap(f).unsafe[NonEmpty[Vec[B]]]
+
+      def concatNonEmpty[B >: A](other: Vec[B]): NonEmpty[Vec[B]] = (values ++ other).unsafe[NonEmpty[Vec[B]]]
     }
 
     /** Copies a runtime collection into mutable storage for a Java/native interop boundary. */

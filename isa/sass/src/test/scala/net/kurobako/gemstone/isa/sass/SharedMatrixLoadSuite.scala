@@ -13,7 +13,7 @@ class SharedMatrixLoadSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
     SASSFixture.module(
       89,
-      Vec(SASSFixture.Kernel("matrix_load", 352, Vec(0 -> 8, 8 -> 4), registers = 30, shared = 528))
+      Vec(SASSFixture.Kernel("matrix_load", 352, Vec((0, 8), (8, 4)), registers = 30, shared = 528))
     )
 
   private val expected = (0 until 32).toVec.flatMap { lane =>

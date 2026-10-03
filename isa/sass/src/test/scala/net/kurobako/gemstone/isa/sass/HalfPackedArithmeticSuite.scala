@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.asm.*
@@ -15,15 +16,15 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
     val mmaModule = SASSFixture.module(
       89,
       Vec(
-        SASSFixture.Kernel("hfma2_add_reference", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 12),
-        SASSFixture.Kernel("hfma2_mma_probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 12)
+        SASSFixture.Kernel("hfma2_add_reference", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 12),
+        SASSFixture.Kernel("hfma2_mma_probe", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 12)
       )
     )
     val selectionModule = SASSFixture.module(
       89,
       Vec(
-        SASSFixture.Kernel("hadd2_selected_high", 0x160, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 12),
-        SASSFixture.Kernel("hadd2_selected_low", 0x160, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 12)
+        SASSFixture.Kernel("hadd2_selected_high", 0x160, Vec((0, 8), (8, 8), (16, 8)), registers = 12),
+        SASSFixture.Kernel("hadd2_selected_low", 0x160, Vec((0, 8), (8, 8), (16, 8)), registers = 12)
       )
     )
     val fixtureModules = Map(
@@ -31,19 +32,19 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
       "hfma2_mma_probe"     -> mmaModule,
       "hfma2_selected"      -> SASSFixture.module(
         89,
-        Vec(SASSFixture.Kernel("hfma2_selected", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 14))
+        Vec(SASSFixture.Kernel("hfma2_selected", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 14))
       ),
       "hfma2_vector" -> SASSFixture.module(
         89,
-        Vec(SASSFixture.Kernel("hfma2_vector", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 14))
+        Vec(SASSFixture.Kernel("hfma2_vector", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 14))
       ),
       "hsetp2_probe" -> SASSFixture.module(
         89,
-        Vec(SASSFixture.Kernel("hsetp2_probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 14))
+        Vec(SASSFixture.Kernel("hsetp2_probe", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 14))
       ),
       "hsetp2_ne_probe" -> SASSFixture.module(
         89,
-        Vec(SASSFixture.Kernel("hsetp2_ne_probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 12))
+        Vec(SASSFixture.Kernel("hsetp2_ne_probe", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 12))
       ),
       "hadd2_selected_high" -> selectionModule,
       "hadd2_selected_low"  -> selectionModule
@@ -52,8 +53,8 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
 
     def run(
         sassText: String,
-        kernelName: String,
-        cases: Vec[(Long, Long, Long, Long)],
+        kernelName: NonEmpty[String],
+        cases: NonEmpty[Vec[(Long, Long, Long, Long)]],
         transform: DecodedFunction => DecodedFunction = identity
     ): Unit = {
       val module   = fixtureModules(kernelName)
@@ -66,9 +67,9 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
       ).map(values => Vec.from(values).flatMap(LittleEndian.toVec(_, 4)))
       locally {
         val service     = SASSFixture.Execution()
-        val output      = service.allocate((cases.size * 4L).unsafe[Long > 0])
-        val allocations = inputs.map(bytes =>
-          service.allocate(bytes.size.toLong.unsafe[Long > 0])
+        val output      = service.allocate(cases.positiveSize.toLong.widen[Long > 0] * 4L)
+        val allocations = inputs.map(_ =>
+          service.allocate(cases.positiveSize.toLong.widen[Long > 0] * 4L)
         )
         allocations.zip(inputs).foreach { case (allocation, bytes) =>
           assert(service.write(allocation, 0L, bytes).isRight)
@@ -76,8 +77,8 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
         val program = service.compile(sass)
           .fold(error => fail(error.message), identity)
         val task = SASSFixture.task(
-          kernelName.unsafe[NonEmpty[String]],
-          LaunchGeometry.Dimensions(cases.size.unsafe[Int > 0], 1, 1),
+          kernelName,
+          LaunchGeometry.Dimensions(cases.positiveSize, 1, 1),
           LaunchGeometry.Dimensions.One,
           Vec(
             KernelTask.Argument.Memory(output, 0L),
@@ -87,16 +88,16 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
           )
         )
         service.run(program, task).fold(error => fail(error.message), identity)
-        val actual = service.readWords(output, cases.size.unsafe[Int >= 0])
+        val actual = service.readWords(output, cases.nonNegativeSize)
         assertEquals(actual, cases.map(_._4))
       }
     }
 
     def runThreeInput(
         sassFixture: String,
-        kernelName: String,
+        kernelName: NonEmpty[String],
         instructionText: String,
-        cases: Vec[(Long, Long, Long)],
+        cases: NonEmpty[Vec[(Long, Long, Long)]],
         transform: DecodedFunction => DecodedFunction = identity
     ): Unit = {
       val module   = fixtureModules(kernelName)
@@ -115,9 +116,9 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
       )
       locally {
         val service     = SASSFixture.Execution()
-        val output      = service.allocate((cases.size * 4L).unsafe[Long > 0])
-        val allocations = inputs.map(bytes =>
-          service.allocate(bytes.size.toLong.unsafe[Long > 0])
+        val output      = service.allocate(cases.positiveSize.toLong.widen[Long > 0] * 4L)
+        val allocations = inputs.map(_ =>
+          service.allocate(cases.positiveSize.toLong.widen[Long > 0] * 4L)
         )
         allocations.zip(inputs).foreach { case (allocation, bytes) =>
           assert(service.write(allocation, 0L, bytes).isRight)
@@ -125,8 +126,8 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
         val program = service.compile(sass)
           .fold(error => fail(error.message), identity)
         val task = SASSFixture.task(
-          kernelName.unsafe[NonEmpty[String]],
-          LaunchGeometry.Dimensions(cases.size.unsafe[Int > 0], 1, 1),
+          kernelName,
+          LaunchGeometry.Dimensions(cases.positiveSize, 1, 1),
           LaunchGeometry.Dimensions.One,
           Vec(
             KernelTask.Argument.Memory(output, 0L),
@@ -135,12 +136,12 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
           )
         )
         service.run(program, task).fold(error => fail(error.message), identity)
-        val actual = service.readWords(output, cases.size.unsafe[Int >= 0])
+        val actual = service.readWords(output, cases.nonNegativeSize)
         assertEquals(actual, cases.map(_._3))
       }
     }
 
-    val exactRoundingCases = Vec(
+    val exactRoundingCases = Vec.nonEmpty(
       (0x5f90, 0xc7c0, 0x037c, 0xeb53),
       (0x630a, 0x82b3, 0x45c0, 0x45b7),
       (0xc65e, 0xc957, 0x712f, 0x7137),
@@ -152,12 +153,13 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
     test("compiler-produced sm_89 HFMA2 is fused and canonicalizes NaNs") {
       val sassText = Hfma2Fixtures.hfma2Sm89
       assert(sassText.contains("HFMA2 R11, R2, R5, R6"))
-      val cases = exactRoundingCases.map { case (a, b, c, result) =>
+      val cases = exactRoundingCases.mapNonEmpty { case (a, b, c, result) =>
         (pair(a), pair(b), pair(c), pair(result))
-      } ++ Vec(
+      }.concatNonEmpty(Vec(
         (pair(0x7e01), pair(0x3c00), pair(0x0000), pair(0x7fff)),
         (pair(0x7c00), pair(0x0000), pair(0x3c00), pair(0x7fff))
-      )
+      ))
+
       run(Hfma2Fixtures.hfma2Sm89, "hfma2_vector", cases)
     }
 
@@ -167,7 +169,7 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
       run(
         Hfma2Fixtures.hfma2SelectedSm89,
         "hfma2_selected",
-        Vec(
+        Vec.nonEmpty(
           (0x3c003c00L, 0x40003c00L, 0xfc004900L, 0xfc004a00L),
           (0x04000001L, 0x38003c00L, 0x00000000L, 0x00000000L),
           (0x00007e01L, 0x3c000000L, 0x00000000L, 0x7fff7fffL)
@@ -191,7 +193,7 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
       run(
         Hfma2Fixtures.hfma2Sm89,
         "hfma2_vector",
-        Vec(
+        Vec.nonEmpty(
           (0x3c004000L, 0x42004200L, 0x3c003c00L, 0x44004400L),
           (0x35550000L, 0x35553555L, 0x00003555L, 0x2f1c371cL)
         ),
@@ -213,7 +215,7 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
         Hfma2Fixtures.hfma2MmaZeroAliasSm89,
         "hfma2_mma_probe",
         "HFMA2.MMA R5, R2, RZ, R5",
-        Vec(
+        Vec.nonEmpty(
           (0x3c003c00L, 0xc0004000L, 0xc0004000L),
           (0x7e013c00L, 0x3c007e01L, 0x7fff7fffL),
           (0x7c003c00L, 0x3c007c00L, 0x7fff7c00L),
@@ -231,7 +233,7 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
         Hsetp2Fixtures.hsetp2Sm89,
         "hsetp2_probe",
         "HSETP2.GEU.AND P0, PT, R2.H0_H0, R5.H0_H0, PT",
-        Vec(
+        Vec.nonEmpty(
           (0x38003c00L, 0x3c003800L, 0x78007001L),
           (0x3c003800L, 0x38003c00L, 0x70007800L),
           (0x00007e01L, 0x00003c00L, 0x00000001L),
@@ -250,7 +252,7 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
         Hsetp2Fixtures.hsetp2GeuRawSm89,
         "hsetp2_probe",
         "HSETP2.GEU.AND P0, PT, R2, R5, PT",
-        Vec(
+        Vec.nonEmpty(
           (0x38003c00L, 0x3c003800L, 0x78007001L),
           (0x3c003800L, 0x38003c00L, 0x70007800L),
           (0x00007e01L, 0x00003c00L, 0x00000001L),
@@ -269,7 +271,7 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
         Hsetp2Fixtures.hsetp2NeRawSm89,
         "hsetp2_ne_probe",
         "HSETP2.NE.AND P0, PT, R2, RZ, PT",
-        Vec(
+        Vec.nonEmpty(
           (0x3c000000L, 0L, 0x7800L),
           (0x3c008000L, 0L, 0x7800L),
           (0x3c000001L, 0L, 0x7801L),
@@ -327,7 +329,7 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
     }
 
     test("HADD2 duplicates selected H0 and H1 lanes across both packed results") {
-      val cases = Vec(
+      val cases = Vec.nonEmpty(
         (0x42003c00L, 0x45004400L, 0x45004500L, 0x48004800L),
         (0x40003c00L, 0x42004000L, 0x42004200L, 0x45004500L)
       )
@@ -335,13 +337,13 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
         Hadd2Fixtures.hadd2SelectedLowSm89,
         "hadd2_selected_low",
         "HADD2 R9, R2.H0_H0, R5.H0_H0",
-        cases.map { case (left, right, lowExpected, _) => (left, right, lowExpected) }
+        cases.mapNonEmpty { case (left, right, lowExpected, _) => (left, right, lowExpected) }
       )
       runThreeInput(
         Hadd2Fixtures.hadd2SelectedHighSm89,
         "hadd2_selected_high",
         "HADD2 R9, R2.H0_H0, R5.H0_H0",
-        cases.map { case (left, right, _, highExpected) => (left, right, highExpected) }
+        cases.mapNonEmpty { case (left, right, _, highExpected) => (left, right, highExpected) }
       )
     }
 
@@ -350,7 +352,7 @@ class HalfPackedArithmeticSuite extends munit.FunSuite {
         Hfma2Fixtures.hfma2MmaAddReferenceSm89,
         "hfma2_add_reference",
         "HADD2 R9, R2.H1_H1, R5.H1_H1",
-        Vec(
+        Vec.nonEmpty(
           (0x42003c00L, 0x45004400L, 0x48004800L),
           (0x40003c00L, 0x42004000L, 0x45004500L)
         ),

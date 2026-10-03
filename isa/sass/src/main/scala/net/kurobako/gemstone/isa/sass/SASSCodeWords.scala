@@ -9,7 +9,7 @@ import net.kurobako.gemstone.constraint.*
   */
 object SASSCodeWords {
   type Address     = Int >= 0
-  type ControlBits = Int where Between[0, 0x1fffff]
+  type ControlBits = Int in 0 ~ 0x1fffff
 
   case class CodeWord(address: Address, bytes: Vec[Byte])
 
@@ -27,9 +27,9 @@ object SASSCodeWords {
 
   /** Splits code bytes without losing bundle controls or their reserved bits. */
   def split(code: Array[Byte], sm: Int): Either[String, CodeSection] =
-    if (sm >= 35 && sm < 50) splitKepler(code, sm)
-    else if (sm >= 50 && sm < 70) splitMaxwell(code, sm)
-    else if (sm >= 70 && sm <= 121) splitModern(code, sm)
+    if (sm >= 35 && sm < 50) splitKepler(code, sm.unsafe[Int >= 35])
+    else if (sm >= 50 && sm < 70) splitMaxwell(code, sm.unsafe[Int >= 35])
+    else if (sm >= 70 && sm <= 121) splitModern(code, sm.unsafe[Int >= 35])
     else Left(s"unsupported SASS architecture sm_$sm")
 
   /** Reassembles a section after validating its layout, addresses, counts, widths, and controls. */
@@ -60,73 +60,73 @@ object SASSCodeWords {
   /** Compatibility view used by the existing disassembler: `(section byte address, encoded word)` pairs. Maxwell
     * instructions retain the historical 11-byte form, with their 21-bit control word appended little-endian.
     */
-  def words(code: Array[Byte], sm: Int): Either[String, Vec[(Int, Array[Byte])]] =
+  def words(code: Array[Byte], sm: Int): Either[String, Vec[(Address, Array[Byte])]] =
     split(code, sm).map(words(_))
 
   /** Presents each instruction with the control bits required by the encoding tables. */
-  def words(section: CodeSection): Vec[(Int, Array[Byte])] =
+  def words(section: CodeSection): Vec[(Address, Array[Byte])] =
     section.bundles.flatMap { bundle =>
       bundle.control match {
         case BundleControl.Kepler(_) | BundleControl.Modern =>
-          bundle.words.map(word => (word.address.raw, word.bytes.toArray))
+          bundle.words.map(word => (word.address, word.bytes.toArray))
         case BundleControl.Maxwell(controls, _) =>
           bundle.words.zip(controls).map { (word, control) =>
             val suffix = Array.tabulate[Byte](3) { index =>
               (control.value.raw >>> (index * 8)).toByte
             }
-            (word.address.raw, word.bytes.toArray ++ suffix)
+            (word.address, word.bytes.toArray ++ suffix)
           }
       }
     }
 
-  private def splitKepler(code: Array[Byte], sm: Int): Either[String, CodeSection] =
+  private def splitKepler(code: Array[Byte], sm: Int >= 35): Either[String, CodeSection] =
     if (code.length % 64 != 0) Left("SM35-SM49 code must contain complete 64-byte bundles")
     else Right(CodeSection(
-      sm.unsafe[Int >= 35],
-      Vec.tabulate(code.length / 64) { index =>
+      sm,
+      Vec.indices((code.length / 64).unsafe[Int >= 0]).map { index =>
         val base = index * 64
         CodeBundle(
-          base.unsafe[Address],
-          BundleControl.Kepler(code.slice(base, base + 8).toVec),
-          Vec.tabulate(7) { slot =>
-            val address = base + 8 + slot * 8
-            CodeWord(address.unsafe[Address], code.slice(address, address + 8).toVec)
+          base,
+          BundleControl.Kepler(code.slice(base.raw, (base + 8).raw).toVec),
+          Vec.range[0, 7].map { slot =>
+            val address = base + 8 + slot.widen[Int >= 0] * 8
+            CodeWord(address, code.slice(address.raw, (address + 8).raw).toVec)
           }
         )
       }
     ))
 
-  private def splitMaxwell(code: Array[Byte], sm: Int): Either[String, CodeSection] =
+  private def splitMaxwell(code: Array[Byte], sm: Int >= 35): Either[String, CodeSection] =
     if (code.length % 32 != 0) Left("SM50-SM69 code must contain complete 32-byte bundles")
     else Right(CodeSection(
-      sm.unsafe[Int >= 35],
-      Vec.tabulate(code.length / 32) { index =>
+      sm,
+      Vec.indices((code.length / 32).unsafe[Int >= 0]).map { index =>
         val base    = index * 32
-        val control = readLong(code, base)
-        val slots   = Vec.tabulate(3) { slot =>
-          ControlWord(((control >>> (slot * 21)) & 0x1fffffL).toInt.unsafe[ControlBits])
+        val control = readLong(code, base.raw)
+        val slots   = Vec.range[0, 3].map { slot =>
+          ControlWord(((control >>> (slot.raw * 21)) & 0x1fffffL).toInt.unsafe[ControlBits])
         }
         CodeBundle(
-          base.unsafe[Address],
+          base,
           BundleControl.Maxwell(slots, ((control >>> 63) & 1L).toInt.unsafe[Int in (0, 1)]),
-          Vec.tabulate(3) { slot =>
-            val address = base + 8 + slot * 8
-            CodeWord(address.unsafe[Address], code.slice(address, address + 8).toVec)
+          Vec.range[0, 3].map { slot =>
+            val address = base + 8 + slot.widen[Int >= 0] * 8
+            CodeWord(address, code.slice(address.raw, (address + 8).raw).toVec)
           }
         )
       }
     ))
 
-  private def splitModern(code: Array[Byte], sm: Int): Either[String, CodeSection] =
+  private def splitModern(code: Array[Byte], sm: Int >= 35): Either[String, CodeSection] =
     if (code.length % 16 != 0) Left("SM70+ code must contain complete 128-bit instructions")
     else Right(CodeSection(
-      sm.unsafe[Int >= 35],
-      Vec.tabulate(code.length / 16) { index =>
+      sm,
+      Vec.indices((code.length / 16).unsafe[Int >= 0]).map { index =>
         val address = index * 16
         CodeBundle(
-          address.unsafe[Address],
+          address,
           BundleControl.Modern,
-          Vec(CodeWord(address.unsafe[Address], code.slice(address, address + 16).toVec))
+          Vec(CodeWord(address, code.slice(address.raw, (address + 16).raw).toVec))
         )
       }
     ))

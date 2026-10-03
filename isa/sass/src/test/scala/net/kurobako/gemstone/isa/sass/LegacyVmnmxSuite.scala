@@ -4,6 +4,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.memory.*
@@ -16,15 +17,15 @@ class LegacyVmnmxSuite extends munit.FunSuite {
     SASSFixture.module(
       sm,
       Vec(
-        SASSFixture.Kernel("nested_max", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 11),
-        SASSFixture.Kernel("nested_min", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 11)
+        SASSFixture.Kernel("nested_max", 320, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 11),
+        SASSFixture.Kernel("nested_min", 320, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 11)
       )
     )
 
   private def words(values: Vec[Int]): Vec[Byte] =
     Vec.from(values.flatMap(value => LittleEndian.toVec(value.toLong, 4)))
 
-  private val boundaryValues = Vec(
+  private val boundaryValues = Vec.nonEmpty(
     Int.MinValue,
     Int.MinValue + 1,
     -16777217,
@@ -41,20 +42,22 @@ class LegacyVmnmxSuite extends munit.FunSuite {
   )
 
   private val cases = {
-    val boundaries = for a <- boundaryValues; b <- boundaryValues; c <- boundaryValues yield (a, b, c)
-    val random     = Random(0x51a7L)
-    val sampled    = Vec.fill(10000)(
+    val boundaries = boundaryValues.flatMapNonEmpty(a =>
+      boundaryValues.flatMapNonEmpty(b => boundaryValues.mapNonEmpty(c => (a, b, c)))
+    )
+    val random  = Random(0x51a7L)
+    val sampled = Vec.fill(10000)(
       (random.nextInt(), random.nextInt(), random.nextInt())
     )
-    val unpadded = boundaries ++ sampled
-    unpadded ++ Vec.fill((128 - (unpadded.size % 128)) % 128)((0, 0, 0))
+    val unpadded = boundaries.concatNonEmpty(sampled)
+    unpadded.concatNonEmpty(Vec.fill((128 - (unpadded.size % 128)) % 128)((0, 0, 0)))
   }
 
   test("CUDA 11.8 sm_50/sm_60 signed nested VMNMX kernels match scalar min/max") {
     Vec(50, 60).foreach { sm =>
       val module = fixtureModule(sm)
-      assertEquals(module.sm, sm)
-      val functions = Vec(
+      assertEquals(module.sm.raw, sm)
+      val functions = Vec[(NonEmpty[String], Vec[Instruction.Modifier], (Int, Int, Int) => Int)](
         ("nested_min", Vec(Instruction.Modifier("MIN")), (a: Int, b: Int, c: Int) => math.min(math.min(a, b), c)),
         (
           "nested_max",
@@ -64,13 +67,13 @@ class LegacyVmnmxSuite extends munit.FunSuite {
       )
       locally {
         val service    = SASSFixture.Execution()
-        val count      = cases.size
-        val allocation = count.toLong * 4L
-        val output     = service.allocate(allocation.unsafe[Long > 0])
+        val count      = cases.positiveSize
+        val allocation = count.toLong.widen[Long > 0] * 4L
+        val output     = service.allocate(allocation)
         val inputs     = Vec(
-          service.allocate(allocation.unsafe[Long > 0]),
-          service.allocate(allocation.unsafe[Long > 0]),
-          service.allocate(allocation.unsafe[Long > 0])
+          service.allocate(allocation),
+          service.allocate(allocation),
+          service.allocate(allocation)
         )
         val values = Vec(cases.map(_._1), cases.map(_._2), cases.map(_._3))
         inputs.zip(values).foreach { case (memory, data) =>
@@ -97,9 +100,9 @@ class LegacyVmnmxSuite extends munit.FunSuite {
           val program = service.compile(sass)
             .fold(error => fail(error.message), identity)
           val task = SASSFixture.task(
-            kernelName.unsafe[NonEmpty[String]],
+            kernelName,
             LaunchGeometry.Dimensions(128, 1, 1),
-            LaunchGeometry.Dimensions(((count + 127) / 128).unsafe[Int > 0], 1, 1),
+            LaunchGeometry.Dimensions(count.ceilDiv(128), 1, 1),
             Vec(
               KernelTask.Argument.Memory(inputs(0), 0L),
               KernelTask.Argument.Memory(inputs(1), 0L),
@@ -108,7 +111,7 @@ class LegacyVmnmxSuite extends munit.FunSuite {
             )
           )
           service.run(program, task).fold(error => fail(error.message), identity)
-          val bytes  = service.read(output, 0L, (count * 4).unsafe[Int >= 0]).toOption.get
+          val bytes  = service.read(output, 0L, count * 4).toOption.get
           val actual = cases.indices.map { index =>
             (0 until 4).foldLeft(0)((value, byte) =>
               value | ((bytes(index * 4 + byte).toInt & 255) << (byte * 8))
@@ -150,8 +153,8 @@ class LegacyVmnmxSuite extends munit.FunSuite {
             val guardedProgram = service.compile(guardedSass).fold(error => fail(error.message), identity)
             service.run(guardedProgram, task).fold(error => fail(error.message), identity)
 
-            val guardedBytes = service.read(output, 0L, (count * 4).unsafe[Int >= 0]).toOption.get
-            assertEquals(guardedBytes, words(Vec.fill(count)(sentinel)), s"sm_$sm false VMNMX guard")
+            val guardedBytes = service.read(output, 0L, count * 4).toOption.get
+            assertEquals(guardedBytes, words(Vec.fill(count.raw)(sentinel)), s"sm_$sm false VMNMX guard")
           }
         }
       }

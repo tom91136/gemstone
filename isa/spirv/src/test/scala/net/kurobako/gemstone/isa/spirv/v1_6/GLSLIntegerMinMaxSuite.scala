@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -10,16 +11,18 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class GLSLIntegerMinMaxSuite extends munit.FunSuite {
   for {
-    width  <- Seq(8, 16, 32, 64)
+    width  <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
+    rawWidth = width.raw
+    byteWidth = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     opcode <- Seq(5, 7, 38, 39, 41, 42, 44, 45, 73, 74, 75)
-    if opcode < 73 || width == 32
+    if opcode < 73 || rawWidth == 32
     count          <- Seq(1, 4)
     declaredSigned <- Seq(0, 1)
   }
-    test(s"GLSL integer opcode $opcode: $width bits, $count lanes, declared signedness $declaredSigned") {
+    test(s"GLSL integer opcode $opcode: $rawWidth bits, $count lanes, declared signedness $declaredSigned") {
       val signed  = Set(5, 7, 39, 42, 45).contains(opcode)
       val unary   = opcode == 5 || opcode == 7 || opcode >= 73
-      val high    = BigInt(1) << (width - 1)
+      val high    = BigInt(1) << (rawWidth - 1)
       val maximum = if (signed) high - 1 else (high << 1) - 1
       val inputs  = if (opcode >= 73) Seq(BigInt(0), BigInt(-1), -high, high - 1)
       else if (unary) Seq(BigInt(0), BigInt(-5), -high, maximum)
@@ -62,7 +65,7 @@ class GLSLIntegerMinMaxSuite extends munit.FunSuite {
           Instruction.ExtInstImport(importId, stringOperand("GLSL.std.450")),
           Instruction.TypeInt(
             scalar,
-            operand(OperandKind.LiteralInteger, width),
+            operand(OperandKind.LiteralInteger, rawWidth),
             operand(OperandKind.LiteralInteger, declaredSigned)
           ),
           Instruction.TypeVector(vector, scalar, operand(OperandKind.LiteralInteger, 4)),
@@ -99,10 +102,10 @@ class GLSLIntegerMinMaxSuite extends munit.FunSuite {
         Endianness.Little
       )
       def encoded(values: Seq[BigInt]): Vec[Byte] = Vec.from(values.take(count).flatMap { value =>
-        LittleEndian.toVec(value.toLong, (width / 8).unsafe[Int where Between[0, 8]])
+        LittleEndian.toVec(value.toLong, byteWidth.widen[Int in 0 ~ 8])
       })
       val allocation = AllocationId(1L)
-      val memory     = ArrayMemory(allocation, width / 8 * count)
+      val memory     = ArrayMemory(allocation, byteWidth.raw * count)
       val dispatch   = KernelTask.validated(
         "minmax",
         Dimensions.One,

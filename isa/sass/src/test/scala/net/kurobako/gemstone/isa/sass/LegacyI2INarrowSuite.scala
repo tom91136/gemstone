@@ -10,7 +10,7 @@ import net.kurobako.gemstone.vm.*
 
 class LegacyI2INarrowSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
-    SASSFixture.module(35, Vec(SASSFixture.Kernel("probe", 320, Vec(0 -> 8, 8 -> 8), registers = 8)))
+    SASSFixture.module(35, Vec(SASSFixture.Kernel("probe", 320, Vec((0, 8), (8, 8)), registers = 8)))
 
   test("unsupported I2I modifiers, destinations, and operands fail through the cubin compiler") {
     val module = fixtureModule
@@ -44,8 +44,8 @@ class LegacyI2INarrowSuite extends munit.FunSuite {
     )
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(4L.unsafe[Long > 0])
-      val input   = service.allocate(4L.unsafe[Long > 0])
+      val output  = service.allocate(4L)
+      val input   = service.allocate(4L)
       val program = service.compile(lowered)
         .fold(error => fail(error.message), identity)
       cases.foreach { case (byte, half) =>

@@ -29,7 +29,7 @@ import scala.util.Using
 class CrossWorkgroupSuite extends munit.FunSuite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
-  private val counts             = Vector(1, 2, 3, 5, 9) // P=4; deduplicated controls, P+1 and 2P+1.
+  private val counts             = Vec[Int > 0](1, 2, 3, 5, 9) // P=4; deduplicated controls, P+1 and 2P+1.
   private val output             = AllocationId(1)
   private val markers            = AllocationId(2)
   private val partials           = AllocationId(3)
@@ -89,14 +89,17 @@ class CrossWorkgroupSuite extends munit.FunSuite {
   )
 
   for {
-    parallel <- Vector(false, true)
-    groups   <- counts
-    width    <- Vector(31, 32, 33)
-    tail     <- Vector(0, 1)
+    parallel   <- Vector(false, true)
+    groupCount <- counts
+    widthCount <- Vec[Int > 0](31, 32, 33)
+    tail       <- Vector(0, 1)
   }
-    test(s"groups=$groups width=$width tail=$tail parallel=$parallel publication-reduction-LDS") {
-      val n      = groups * width - tail
-      val memory = Memory(n, groups)
+    test(s"groups=$groupCount width=$widthCount tail=$tail parallel=$parallel publication-reduction-LDS") {
+      val groups      = groupCount.raw
+      val width       = widthCount.raw
+      val globalCount = (groups * width - tail).refine[Int > 0].fold(fail(_), identity)
+      val n           = globalCount.raw
+      val memory      = Memory(n, groups)
       Using.resource(Workers(memory)) { workers =>
         val policy = if (parallel) workers else Workgroups.Sequential
         def run(program: VMIR.Kernel, args: Vec[KernelTask.Argument]): Unit = {
@@ -105,10 +108,10 @@ class CrossWorkgroupSuite extends munit.FunSuite {
               fail(_),
               value => value
             ),
-            testDimensions(width),
-            testDimensions(groups),
+            testDimensions(widthCount),
+            testDimensions(groupCount),
             args,
-            globalSize = Some(testDimensions(n).toGlobalDimensions)
+            globalSize = Some(testDimensions(globalCount).toGlobalDimensions)
           ).toOption.get
           assertEquals(
             executeKernel(
@@ -162,12 +165,14 @@ class CrossWorkgroupSuite extends munit.FunSuite {
   )
 
   for {
-    parallel <- Vector(false, true)
-    groups   <- counts
-    width    <- Vector(33, 64, 65)
+    parallel   <- Vector(false, true)
+    groupCount <- counts
+    widthCount <- Vec[Int > 0](33, 64, 65)
   }
-    test(s"groups=$groups width=$width parallel=$parallel later-wave-LDS-producer") {
-      val n      = groups * width
+    test(s"groups=$groupCount width=$widthCount parallel=$parallel later-wave-LDS-producer") {
+      val groups = groupCount.raw
+      val width  = widthCount.raw
+      val n      = (groupCount * widthCount).raw
       val memory = Memory(n, groups)
       Using.resource(Workers(memory)) { workers =>
         val policy = if (parallel) workers else Workgroups.Sequential
@@ -178,8 +183,8 @@ class CrossWorkgroupSuite extends munit.FunSuite {
               fail(_),
               value => value
             ),
-            testDimensions(width),
-            testDimensions(groups),
+            testDimensions(widthCount),
+            testDimensions(groupCount),
             Vec(pointer(output), pointer(markers), scalar(n), scalar(width), scalar(epoch))
           ).toOption.get
           assertEquals(
@@ -277,7 +282,7 @@ class CrossWorkgroupSuite extends munit.FunSuite {
     override def atomicModifyValue(
         id: AllocationId,
         offset: Long >= 0,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     )(update: Long => Long): Either[Fault, Long] = lock.withLock {
       val destination = data(id)
       val scalarWidth = size.scalarByteWidth

@@ -2,7 +2,9 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -13,7 +15,9 @@ class MatrixSuite extends munit.FunSuite {
   private def literal(n: Int): Operand = operand(OperandKind.LiteralInteger, n)
 
   for {
-    width     <- Seq(16, 32, 64)
+    width <- Seq[Int in (16, 32, 64)](16, 32, 64)
+    rawWidth = width.raw
+    widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     rows      <- 2 to 4
     columns   <- 2 to 4
     operation <- Seq(
@@ -34,7 +38,7 @@ class MatrixSuite extends munit.FunSuite {
     )
     if operation != "determinant_negative_zero" || rows == 2 && columns == 2
     if !operation.startsWith("determinant") && !operation.startsWith("inverse") || rows == columns
-  } test(s"$operation on $width-bit $rows by $columns matrices") {
+  } test(s"$operation on $rawWidth-bit $rows by $columns matrices") {
     // Reference data is row-major; the shader record serializer explicitly writes columns.
     val special = operation.startsWith("determinant") || operation.startsWith("inverse")
     val base    = if (special) Vector.tabulate(rows, columns)((r, c) => if (r == c) 2.0 else if (r < c) 1.0 else 0.0)
@@ -108,7 +112,7 @@ class MatrixSuite extends munit.FunSuite {
       Vec(
         Instruction.ExtInstImport(ref(39), stringOperand("GLSL.std.450")),
         Instruction.TypeVoid(ref(1)),
-        Instruction.TypeFloat(ref(2), literal(width), None),
+        Instruction.TypeFloat(ref(2), literal(rawWidth), None),
         Instruction.TypeVector(ref(3), ref(2), literal(rows)),
         Instruction.TypeVector(ref(4), ref(2), literal(columns)),
         Instruction.TypeMatrix(ref(5), ref(3), literal(columns)),
@@ -147,12 +151,12 @@ class MatrixSuite extends munit.FunSuite {
       Endianness.Little
     )
     def encoded(data: Vector[Double]): Vec[Byte] = Vec.from(data.flatMap { value =>
-      val bits = width match {
+      val bits = rawWidth match {
         case 16 => IEEE754.floatToBinary16(value.toFloat).raw.toLong
         case 32 => java.lang.Float.floatToRawIntBits(value.toFloat).toLong
         case _  => java.lang.Double.doubleToRawLongBits(value)
       }
-      LittleEndian.toVec(bits, (width / 8).unsafe[Int where Between[0, 8]])
+      LittleEndian.toVec(bits, widthBytes.widen[Int in 0 ~ 8])
     })
     val first  = encoded(left)
     val second = encoded(right)
@@ -166,18 +170,18 @@ class MatrixSuite extends munit.FunSuite {
       Dimensions.One,
       Vec(
         KernelTask.Argument.Memory(region, 0L),
-        KernelTask.Argument.Memory(region, first.size.toLong.unsafe[Long >= 0]),
-        KernelTask.Argument.Memory(region, (first.size.toLong + second.size).unsafe[Long >= 0])
+        KernelTask.Argument.Memory(region, first.nonNegativeSize.toLong.widen[Long >= 0]),
+        KernelTask.Argument.Memory(region, (first.nonNegativeSize + second.nonNegativeSize).toLong.widen[Long >= 0])
       )
     ).toOption.get
     assertEquals(executeUnchecked(module, task, memory), Right(()))
     val actual = memory.bytes.drop(first.size + second.size)
     if (operation.startsWith("inverse")) {
-      val byteWidth = (width / 8).unsafe[Int where Between[0, 8]]
+      val byteWidth = widthBytes.widen[Int in 0 ~ 8]
       for (index <- expected.indices) {
         val bits = LittleEndian.decode(actual, index * byteWidth.raw, byteWidth)
         if (expected(index) == 0.0)
-          assertEquals(bits & (if (width == 64) Long.MaxValue else (1L << (width - 1)) - 1), 0L)
+          assertEquals(bits & (if (rawWidth == 64) Long.MaxValue else (1L << (rawWidth - 1)) - 1), 0L)
         else assertEquals(
           actual.slice(index * byteWidth.raw, (index + 1) * byteWidth.raw),
           output.slice(index * byteWidth.raw, (index + 1) * byteWidth.raw)

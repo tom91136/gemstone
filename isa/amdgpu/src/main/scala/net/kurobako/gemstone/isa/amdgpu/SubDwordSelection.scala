@@ -9,9 +9,9 @@ object SubDwordSelection {
 
 enum SubDwordSelection(
     val encoding: Int,
-    val width: Int where Between[1, 64],
-    val shift: Int where Between[0, 24],
-    val upperBit: Int where Between[1, 64]
+    val width: Int in 1 ~ 64,
+    val shift: Int in 0 ~ 24,
+    val upperBit: Int in 1 ~ 64
 ) {
   case Byte0 extends SubDwordSelection(EncodingConstants.SDWA.BYTE_0, 8, 0, 8)
   case Byte1 extends SubDwordSelection(EncodingConstants.SDWA.BYTE_1, 8, 8, 16)
@@ -20,5 +20,5 @@ enum SubDwordSelection(
   case Word0 extends SubDwordSelection(EncodingConstants.SDWA.WORD_0, 16, 0, 16)
   case Word1 extends SubDwordSelection(EncodingConstants.SDWA.WORD_1, 16, 16, 32)
   case DWord extends SubDwordSelection(EncodingConstants.SDWA.DWORD, 32, 0, 32)
-  def assemblyName: String = EncodingConstants.SdwaSelectors(encoding)
+  def assemblyName: NonEmpty[String] = EncodingConstants.SdwaSelectors(encoding)
 }

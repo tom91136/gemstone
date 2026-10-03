@@ -1,11 +1,23 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import VMIR.*
+import VMState.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
 
 /** Pure arithmetic and lane-selection semantics shared by instruction execution. */
 private object VMArithmetic {
+  // The instruction's nonnegative left shift is masked to 53 bits, so only this tail of 2/pi contributes.
+  private inline val TrigPreopBits = 0x856033046fc7bL
+
+  def trigPreopF64(value: Double, segment: Int): Double = {
+    val exponent = ((IEEE754.doubleToBinary64(value) >>> 52) & 0x7ffL).toInt
+    val shift    = (segment & 0x1f) * 53 + (exponent - 1077).max(0)
+    val chunk    = if (shift >= 53) 0L else (TrigPreopBits << shift) & 0x1fffffffffffffL
+    val scale    = -53 - shift + (if (exponent >= 1968) 128 else 0)
+    Math.scalb(chunk.toDouble, scale)
+  }
+
   def unsignedMultiplyHigh32(left: Long, right: Long): Long =
     Bits.high32(Bits.low32(left).toLong * Bits.low32(right).toLong).toLong
   def signedMultiplyHigh32(left: Long, right: Long): Long =
@@ -349,44 +361,48 @@ private object VMArithmetic {
   }
   def floatingLiteralToDouble(raw: Long): Double =
     IEEE754.binary64ToDouble(Bits.join32(0L, Bits.low32(raw).toLong))
-  def bpermuteSourceLane(address: Long): Int =
+  def bpermuteSourceLane(address: Long): Lane =
     bpermuteSourceLane(address, 0L)
-  def bpermuteSourceLane(address: Long, offset: Long): Int = (((address + offset) >>> 2) & 63L).toInt
-  def permuteDestinationLane(address: Long, offset: Long, waveSize: Int in (32, 64)): Int =
-    (((address + offset) >>> 2) & (waveSize.raw - 1L)).toInt
-  def dppQuadSourceLane(lane: Int, control: Int): Int     = (lane & ~3) | ((control >>> ((lane & 3) * 2)) & 3)
-  def dppSourceLane(lane: Int, control: Int): Option[Int] =
-    if (control <= 0xff) Some(dppQuadSourceLane(lane, control))
-    else if (control >= 0x100 && control <= 0x10f) {
-      val source = (lane & 15) + (control & 15)
-      Option.when(source < 16)((lane & ~15) | source)
-    } else if (control >= 0x110 && control <= 0x11f) {
-      val source = (lane & 15) - (control & 15)
-      Option.when(source >= 0)((lane & ~15) | source)
-    } else if (control >= 0x121 && control <= 0x12f) {
-      val rowBase = lane & ~15
-      Some(rowBase | (((lane & 15) - (control & 15)) & 15))
-    } else control match {
-      case 0x130 => Option.when(lane < 63)(lane + 1)
-      case 0x134 => Some((lane + 1) & 63)
-      case 0x138 => Option.when(lane > 0)(lane - 1)
-      case 0x13c => Some((lane - 1) & 63)
-      case 0x142 => Option.when(((lane / 16) & 1) == 1)((lane / 16 - 1) * 16 + 15)
-      case 0x143 => Option.when(lane / 16 >= 2)(31)
-      case _     => None
-    }
-  def dppLaneEnabled(lane: Int, rowMask: Int, bankMask: Int): Boolean =
-    (rowMask & (1 << (lane / 16))) != 0 && (bankMask & (1 << (lane & 3))) != 0
-  def waveConditionMask(mask: Long, lanes: Int where Between[1, 64]): Long =
+  def bpermuteSourceLane(address: Long, offset: Long): Lane = (((address + offset) >>> 2) & 63L).toInt.unsafe[Lane]
+  def permuteDestinationLane(address: Long, offset: Long, waveSize: Int in (32, 64)): Lane =
+    (((address + offset) >>> 2) & (waveSize.raw - 1L)).toInt.unsafe[Lane]
+  def dppQuadSourceLane(lane: Lane, control: Int): Lane =
+    ((lane.raw & ~3) | ((control >>> ((lane.raw & 3) * 2)) & 3)).unsafe[Lane]
+  def dppSourceLane(lane: Lane, control: Int): Option[Lane] = {
+    val selected: Option[Int] =
+      if (control <= 0xff) Some(dppQuadSourceLane(lane, control).raw)
+      else if (control >= 0x100 && control <= 0x10f) {
+        val source = (lane.raw & 15) + (control & 15)
+        Option.when(source < 16)((lane.raw & ~15) | source)
+      } else if (control >= 0x110 && control <= 0x11f) {
+        val source = (lane.raw & 15) - (control & 15)
+        Option.when(source >= 0)((lane.raw & ~15) | source)
+      } else if (control >= 0x121 && control <= 0x12f) {
+        val rowBase = lane.raw & ~15
+        Some(rowBase | (((lane.raw & 15) - (control & 15)) & 15))
+      } else control match {
+        case 0x130 => Option.when(lane.raw < 63)(lane.raw + 1)
+        case 0x134 => Some((lane.raw + 1) & 63)
+        case 0x138 => Option.when(lane.raw > 0)(lane.raw - 1)
+        case 0x13c => Some((lane.raw - 1) & 63)
+        case 0x142 => Option.when(((lane.raw / 16) & 1) == 1)((lane.raw / 16 - 1) * 16 + 15)
+        case 0x143 => Option.when(lane.raw / 16 >= 2)(31)
+        case _     => None
+      }
+    selected.map(_.unsafe[Lane])
+  }
+  def dppLaneEnabled(lane: Lane, rowMask: Int, bankMask: Int): Boolean =
+    (rowMask & (1 << (lane.raw / 16))) != 0 && (bankMask & (1 << (lane.raw & 3))) != 0
+  def waveConditionMask(mask: Long, lanes: Int in 1 ~ 64): Long =
     if (lanes.raw <= 32) Bits.low32(mask).toLong else mask
-  def mbCount(mask: Long, executionMask: Long, lane: Int, high: Boolean, base: Long): Long = {
-    val laneInHalf = lane & 31
+  def mbCount(mask: Long, executionMask: Long, lane: Lane, high: Boolean, base: Long): Long = {
+    val laneInHalf = lane.raw & 31
     val belowLane  = if (laneInHalf == 0) 0L else (1L << laneInHalf) - 1L
     val relevant   =
       if (high) {
-        if (lane < 32) 0L else Bits.high32(executionMask).toLong & belowLane
+        if (lane.raw < 32) 0L else Bits.high32(executionMask).toLong & belowLane
       } else {
-        val belowLow = if (lane < 32) belowLane else Bits.Mask32
+        val belowLow = if (lane.raw < 32) belowLane else Bits.Mask32
         executionMask & belowLow
       }
     Bits.low32(base + java.lang.Integer.bitCount((mask & relevant).toInt).toLong).toLong

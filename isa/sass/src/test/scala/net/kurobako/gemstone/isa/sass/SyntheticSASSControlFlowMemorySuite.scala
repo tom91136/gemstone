@@ -6,7 +6,7 @@ import net.kurobako.gemstone.isa.sass.asm.*
 
 class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBase {
   test("BSSY and BSYNC reconverge divergent shared-memory producers before consumption") {
-    val body = Vec(
+    val body = Vec.nonEmpty(
       ("S2R", "R0,SR_TID.X", None),
       ("BSSY", "B0,0xa0", None),
       ("ISETP.LT.U32.AND", "P0,PT,R0,16,PT", None),
@@ -24,12 +24,16 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
       ("STG.E", "[R2.64],R4", None),
       ("EXIT", "", None)
     )
-    executeSynthetic(body, Vec.fill(16)(2) ++ Vec.fill(16)(1), shared = 128)
+    executeSynthetic(
+      body,
+      Vec.tabulateNonEmpty(16)(_ => 2).concatNonEmpty(Vec.tabulateNonEmpty(16)(_ => 1)),
+      shared = 128
+    )
   }
 
   test("zero-fill loads skip memory reads and preserve an inactive instruction destination") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("LDC.64", "R2,c[0x0][0x160]", None),
         ("IMAD.WIDE.U32", "R2,R0,4,R2", None),
@@ -40,7 +44,7 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E", "[R2.64],R6", None),
         ("EXIT", "", None)
       ),
-      Vec(17, 0)
+      Vec.nonEmpty(17, 0)
     )
   }
 
@@ -63,7 +67,7 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
 
   test("local subroutine returns use the saved PC and preserve caller registers") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("MOV", "R5,1", None),
         ("LEPC", "R16", None),
         ("CALL.REL.NOINC", "0x70", None),
@@ -74,13 +78,13 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("IADD3", "R5,R5,4,RZ", None),
         ("RET.ABS", "R16,0x20", None)
       ),
-      Vec(7)
+      Vec.nonEmpty(7)
     )
   }
 
   test("dependency barriers accept completed copy scoreboards and explicit wait masks") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("LDC.64", "R2,c[0x0][0x160]", None),
         ("MOV", "R5,41", None),
         ("STG.E", "[R2.64],R5", None),
@@ -91,15 +95,15 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E", "[R2.64],R6", None),
         ("EXIT", "", None)
       ),
-      Vec(42),
+      Vec.nonEmpty(42),
       shared = 4
     )
   }
 
   test("Maxwell and Pascal mask-only dependency barriers observe completed loads") {
-    Vec(50, 60).foreach { sm =>
+    Vec.nonEmpty(50, 60).foreach { sm =>
       executeSynthetic(
-        Vec(
+        Vec.nonEmpty(
           ("LDC.64", "R2,c[0x0][0x160]", None),
           ("MOV", "R5,41", None),
           ("STG.E", "[R2],R5", None),
@@ -110,16 +114,16 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
           ("STG.E", "[R2],R6", None),
           ("EXIT", "", None)
         ),
-        Vec(42),
+        Vec.nonEmpty(42),
         sm = sm
       )
     }
   }
 
   test("register and absolute shared addresses refer to the same storage on legacy and modern SASS") {
-    Vec(35, 86).foreach { sm =>
+    Vec.nonEmpty(35, 86).foreach { sm =>
       executeSynthetic(
-        Vec(
+        Vec.nonEmpty(
           ("MOV", "R4,31", None),
           ("STS", "[RZ],R4", None),
           ("LDS", "R5,[0x0]", None),
@@ -132,7 +136,7 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
           ("STG.E", "[R2],R8", None),
           ("EXIT", "", None)
         ),
-        Vec(42),
+        Vec.nonEmpty(42),
         shared = 8,
         sm = sm
       )
@@ -141,7 +145,7 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
 
   test("LDS.U.128 reads a four-register vector from shared memory") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("MOV", "R4,1", None),
         ("MOV", "R5,2", None),
         ("MOV", "R6,3", None),
@@ -152,14 +156,14 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E.128", "[R2.64],R8", None),
         ("EXIT", "", None)
       ),
-      Vec(1, 2, 3, 4),
+      Vec.nonEmpty(1, 2, 3, 4),
       shared = 16
     )
   }
 
   test("BREAK removes lanes from a pending convergence barrier") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("BSSY", "B0,0x90", None),
         ("ISETP.LT.U32.AND", "P0,PT,R0,16,PT", None),
@@ -174,13 +178,13 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec.fill(16)(1) ++ Vec.fill(16)(2)
+      Vec.tabulateNonEmpty(16)(_ => 1).concatNonEmpty(Vec.tabulateNonEmpty(16)(_ => 2))
     )
   }
 
   test("block predicate reduction and per-lane local spills preserve values") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("STL", "[RZ],R0", None),
         ("ISETP.EQ.U32.AND", "P0,PT,R0,17,PT", None),
@@ -193,7 +197,7 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      (0 until 64).toVec
+      Vec.tabulateNonEmpty(64)(_.raw)
     )
   }
 
@@ -201,18 +205,18 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
     def lowerBarrier(opcode: String, operands: String) = {
       val function = DecodedFunction(
         "saxpy",
-        Vec(SASSFixture.instruction(0, opcode, operands.split(',').toVec.map(_.trim), None))
+        Vec.nonEmpty(SASSFixture.instruction(0, opcode, operands.split(',').toVec.map(_.trim), None))
       )
-      val decoded = Vec(function)
+      val decoded = Vec.nonEmpty(function)
       SASSFixture.lower(CubinSuiteFixtures.module, CubinSuiteFixtures.module.kernels.head, decoded)
     }
 
-    Vec(
+    Vec.nonEmpty(
       ("BAR.SYNC", "3"),
       ("BAR.RED.OR.DEFER_BLOCKING", "3,P0")
     ).foreach { case (opcode, validOperands) =>
       assert(lowerBarrier(opcode, validOperands).isRight, s"$opcode $validOperands")
-      Vec("4294967296", "-4294967296").foreach { outOfRange =>
+      Vec.nonEmpty("4294967296", "-4294967296").foreach { outOfRange =>
         val operands = validOperands.replace("3", outOfRange)
         val result   = lowerBarrier(opcode, operands)
         assert(result.left.exists(_.contains("barrier id is outside Int range")), s"$opcode $operands: $result")
@@ -222,7 +226,7 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
 
   test("signed shared atomic minimum includes negative lane values") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("ISETP.EQ.U32.AND", "P0,PT,R0,RZ,PT", None),
         ("STS", "[RZ],RZ", Some("@P0")),
@@ -236,14 +240,14 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec.fill(32)(-31),
+      Vec.tabulateNonEmpty(32)(_ => -31),
       shared = 4
     )
   }
 
   test("signed shared atomic maximum compares both signs") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("ISETP.EQ.U32.AND", "P0,PT,R0,RZ,PT", None),
         ("MOV", "R5,0x80000000", None),
@@ -258,14 +262,14 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec.fill(32)(15),
+      Vec.tabulateNonEmpty(32)(_ => 15),
       shared = 4
     )
   }
 
   test("lane masks and bit reversal preserve warp-local lane numbering") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("S2R", "R4,SR_GEMASK", None),
         ("BREV", "R4,R4", None),
@@ -274,13 +278,13 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec.tabulate(64)(lane => Integer.reverse(-1 << (lane % 32)))
+      Vec.tabulateNonEmpty(64)(lane => Integer.reverse(-1 << (lane.raw % 32)))
     )
   }
 
   test("legacy entry RET followed by EXIT completes without a device-call token") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("LDC.64", "R2,c[0x0][0x160]", None),
         ("IMAD.WIDE.U32", "R2,R0,4,R2", None),
@@ -288,14 +292,14 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("RET", "", None),
         ("EXIT", "", None)
       ),
-      (0 until 32).toVec,
+      Vec.tabulateNonEmpty(32)(_.raw),
       sm = 35
     )
   }
 
   test("legacy SSY and predicated NOP.S rendezvous at the forward target") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("MOV", "R4,1", None),
         ("SSY", "0x70", None),
@@ -308,14 +312,14 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec.fill(16)(1) ++ Vec.fill(16)(2),
+      Vec.tabulateNonEmpty(16)(_ => 1).concatNonEmpty(Vec.tabulateNonEmpty(16)(_ => 2)),
       sm = 35
     )
   }
 
   test("legacy stores with .S execute before reconverging at the SSY target") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("MOV", "R4,1", None),
         ("SSY", "0x80", None),
@@ -331,7 +335,7 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec.fill(16)(2) ++ Vec.fill(16)(1),
+      Vec.tabulateNonEmpty(16)(_ => 2).concatNonEmpty(Vec.tabulateNonEmpty(16)(_ => 1)),
       shared = 128,
       sm = 35
     )
@@ -339,7 +343,7 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
 
   test("skipping a legacy SSY does not revive the previous token in its reused slot") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("SSY", "0xb0", None),
         ("SSY", "0x40", None),
@@ -357,14 +361,14 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec(7) ++ Vec.fill(31)(1),
+      Vec.nonEmpty(7).concatNonEmpty(Vec.tabulateNonEmpty(31)(_ => 1)),
       sm = 35
     )
   }
 
   test("legacy BRK removes bypassed nested SSY lanes before the PBK target") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("MOV", "R4,1", None),
         ("PBK", "0xc0", None),
@@ -382,14 +386,14 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec.fill(16)(1) ++ Vec.fill(16)(2),
+      Vec.tabulateNonEmpty(16)(_ => 1).concatNonEmpty(Vec.tabulateNonEmpty(16)(_ => 2)),
       sm = 35
     )
   }
 
   test("BRX adds its register and displacement to the following instruction address") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("MOV", "R0,0x30", None),
         ("BRX", "R0,-0x20", None),
         ("EXIT", "", None),
@@ -398,7 +402,7 @@ class SyntheticSASSControlFlowMemorySuite extends SyntheticSASSExecutionSuiteBas
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec(19)
+      Vec.nonEmpty(19)
     )
   }
 }

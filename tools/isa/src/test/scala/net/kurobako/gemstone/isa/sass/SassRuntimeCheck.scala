@@ -22,7 +22,7 @@ object SassRuntimeCheck {
       "runtime SASS fixture did not decode to EXIT"
     )
     val entry   = Cubin.Kernel("runtime_exit", 0, 0, 0, Vec.empty)
-    val section = Cubin.Section(0, ".text.runtime_exit", 1, 0L, bytes.size, 0, 0, bytes)
+    val section = Cubin.Section(0, ".text.runtime_exit", 1, 0L, bytes.nonNegativeSize, 0, 0, bytes)
     val module  = Cubin.Module(89, Vec(section), Vec(entry), Vec.empty)
     val kernel  = VMCompiler.compile(module, entry, Vec(DecodedFunction(entry.name, decoded.instructions)))
       .fold(error => throw IllegalStateException(error), identity)

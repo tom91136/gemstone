@@ -610,7 +610,7 @@ private:
               HostMemoryBytes bytes{};
               bytes.address = GuestAddress{static_cast<int64_t>(hostOutputAddress_ + range.first)};
               bytes.bytes.assign(hostOutputBytes_.begin() + range.first, hostOutputBytes_.begin() + range.first + range.second);
-              bytes.atomicWidth = 0;
+              bytes.atomicWidth = {0};
               batch.writes.push_back(std::move(bytes));
             }
           encodePayload(result, batch);

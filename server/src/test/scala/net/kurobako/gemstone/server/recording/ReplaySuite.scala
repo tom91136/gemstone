@@ -9,7 +9,6 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
 import java.nio.ByteBuffer
-import java.util.concurrent.ConcurrentHashMap.KeySetView
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -28,15 +27,15 @@ class ReplaySuite extends munit.FunSuite {
   import journal.*
   // The connection loop flag is mutable state confined to this final peer fixture.
   private class Peer(handle: (Array[Byte], DataInputStream, DataOutputStream) => Unit) extends AutoCloseable {
-    private val server            = ServerSocket(0, 32, InetAddress.getLoopbackAddress)
-    private val stopping          = AtomicBoolean(false)
-    private val error             = AtomicReference(Option.empty[Throwable])
-    private val sockets           = java.util.concurrent.ConcurrentHashMap.newKeySet[Socket]()
-    private val threads           = java.util.concurrent.ConcurrentHashMap.newKeySet[Thread]()
-    val registered: AtomicInteger = AtomicInteger()
-    val released: AtomicInteger   = AtomicInteger()
-    val clients: KeySetView[java.lang.Long, java.lang.Boolean] =
-      java.util.concurrent.ConcurrentHashMap.newKeySet[java.lang.Long]()
+    private val server               = ServerSocket(0, 32, InetAddress.getLoopbackAddress)
+    private val stopping             = AtomicBoolean(false)
+    private val error                = AtomicReference(Option.empty[Throwable])
+    private val sockets              = java.util.concurrent.ConcurrentHashMap.newKeySet[Socket]()
+    private val threads              = java.util.concurrent.ConcurrentHashMap.newKeySet[Thread]()
+    val registered: AtomicInteger    = AtomicInteger()
+    val released: AtomicInteger      = AtomicInteger()
+    val clients: java.util.Set[Long] =
+      java.util.concurrent.ConcurrentHashMap.newKeySet[Long]()
     private val acceptor = Thread(() =>
       while (!stopping.get())
         try {

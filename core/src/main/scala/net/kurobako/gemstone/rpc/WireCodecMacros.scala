@@ -9,9 +9,8 @@ import scala.quoted.*
 object WireCodecMacros {
   def refined[A: Type, P: Type](base: Expr[Codec[A]])(using Quotes): Expr[Codec[A where P]] = {
     import quotes.reflect.*
-    val int                                 = TypeRepr.of[A] =:= TypeRepr.of[Int]
-    val minimum                             = if (int) BigInt(Int.MinValue) else BigInt(Long.MinValue)
-    val maximum                             = if (int) BigInt(Int.MaxValue) else BigInt(Long.MaxValue)
+    val int                                 = !(TypeRepr.of[A] =:= TypeRepr.of[Long])
+    val (minimum, maximum, _)               = macros.numericDomain[A, Any].head
     val ranges                              = macros.numericDomain[A, P]
     val constraints: List[Expr[Constraint]] = ranges match {
       case List((low, high, step)) if step == 1 && high == maximum && low == 1 => List('{ Constraint.Positive })
@@ -32,7 +31,13 @@ object WireCodecMacros {
         List('{ Constraint.OneOf($encoded.toVector) })
     }
     val metadata = Expr.ofSeq(constraints)
-    val name     = Expr(if (int) "Int" else "Long")
+    val name     = Expr(Type.of[A] match {
+      case '[Byte]  => "Byte"
+      case '[Short] => "Short"
+      case '[Int]   => "Int"
+      case '[Long]  => "Long"
+      case _        => report.errorAndAbort(s"unsupported numeric carrier ${Type.show[A]}")
+    })
     '{
       Codec.domain[A where P, A]($name, $base, $metadata.toVector)(
         value => value.refine[A where P],

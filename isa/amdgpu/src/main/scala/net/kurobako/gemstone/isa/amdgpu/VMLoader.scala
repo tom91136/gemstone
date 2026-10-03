@@ -153,7 +153,7 @@ private object VMLoader {
         GlobalSymbol.validated(
           global.name,
           Some(global.address),
-          global.size.toLong,
+          global.size.toLong.widen[Long >= 0],
           global.pointerOffsets
         ).leftMap(detail => Fault.InvalidTask(detail))
       }

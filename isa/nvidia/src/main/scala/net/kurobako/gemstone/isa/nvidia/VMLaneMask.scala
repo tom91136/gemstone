@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.nvidia
 
+import net.kurobako.gemstone.constraint.*
+
 object VMLaneMask {
   val MaximumLanes: Int = 1024
   val WordCount: Int    = MaximumLanes / java.lang.Long.SIZE
@@ -18,7 +20,7 @@ object VMLaneMask {
         words(lane >>> 6) |= 1L << (lane & 63)
         lane += 1
       }
-      Right(VMLaneMask(words, laneCount, (laneCount + 63) >>> 6))
+      Right(VMLaneMask(words, laneCount.unsafe[Int in 0 ~ 1024], (laneCount + 63) >>> 6))
     }
 
   def one(lane: Int): Either[VMFault, VMLaneMask] =
@@ -40,12 +42,20 @@ object VMLaneMask {
 /** Compact immutable set of active lanes. */
 class VMLaneMask private (
     private val words: Array[Long],
-    private val count: Int,
+    private val count: Int in 0 ~ 1024,
     private val limit: Int
 ) {
-  def isEmpty: Boolean             = count == 0
-  def nonEmpty: Boolean            = count != 0
-  def size: Int                    = count
+  def isEmpty: Boolean                  = count.raw == 0
+  def nonEmpty: Boolean                 = count.raw != 0
+  def size: Int in 0 ~ 1024                    = count
+  def positiveSize: Option[Int in 1 ~ 1024] =
+    Option.when(nonEmpty)(count.raw.unsafe[Int in 1 ~ 1024])
+  def headOption: Option[WorkgroupLane] = {
+    val wordIndex = words.indexWhere(_ != 0L)
+    Option.when(wordIndex >= 0)(WorkgroupLane.fromIndex((wordIndex << 6) +
+      java.lang.Long.numberOfTrailingZeros(words(wordIndex))))
+  }
+
   def contains(lane: Int): Boolean =
     lane >= 0 && lane < VMLaneMask.MaximumLanes && (words(lane >>> 6) & (1L << (lane & 63))) != 0L
 
@@ -54,27 +64,27 @@ class VMLaneMask private (
     else (words(lane >>> 6) >>> (lane & 32)) & 0xffffffffL
 
   def intersect(other: VMLaneMask): VMLaneMask =
-    if (count == 0 || other.count == 0) VMLaneMask.Empty
+    if (count.raw == 0 || other.count.raw == 0) VMLaneMask.Empty
     else combine(other, (left, right) => left & right)
 
   def union(other: VMLaneMask): VMLaneMask =
-    if (count == 0) other
-    else if (other.count == 0) this
+    if (count.raw == 0) other
+    else if (other.count.raw == 0) this
     else combine(other, (left, right) => left | right)
 
   def subtract(other: VMLaneMask): VMLaneMask =
-    if (count == 0 || other.count == 0) this
+    if (count.raw == 0 || other.count.raw == 0) this
     else combine(other, (left, right) => left & ~right)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def filterLanes(predicate: Int => Boolean): VMLaneMask =
-    if (count == 0) VMLaneMask.Empty
+  def filterLanes(predicate: WorkgroupLane => Boolean): VMLaneMask =
+    if (count.raw == 0) VMLaneMask.Empty
     else {
       val filtered = Array.fill(VMLaneMask.WordCount)(0L)
       var size     = 0
       foreachLane { lane =>
         if (predicate(lane)) {
-          filtered(lane >>> 6) |= 1L << (lane & 63)
+          filtered(lane.raw >>> 6) |= 1L << (lane.raw & 63)
           size += 1
         }
       }
@@ -82,18 +92,18 @@ class VMLaneMask private (
       else {
         var last = VMLaneMask.WordCount
         while (filtered(last - 1) == 0L) last -= 1
-        VMLaneMask(filtered, size, last)
+        VMLaneMask(filtered, size.unsafe[Int in 0 ~ 1024], last)
       }
     }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  inline def foreachLane(inline function: Int => Unit): Unit = {
+  inline def foreachLane(inline function: WorkgroupLane => Unit): Unit = {
     var wordIndex = 0
     while (wordIndex < limit) {
       var word = words(wordIndex)
       while (word != 0L) {
         val bit = java.lang.Long.numberOfTrailingZeros(word)
-        function((wordIndex << 6) + bit)
+        function(WorkgroupLane.fromIndex((wordIndex << 6) + bit))
         word &= word - 1L
       }
       wordIndex += 1
@@ -114,7 +124,7 @@ class VMLaneMask private (
       if (word != 0L) last = index + 1
       index += 1
     }
-    if (size == 0) VMLaneMask.Empty else VMLaneMask(combined, size, last)
+    if (size == 0) VMLaneMask.Empty else VMLaneMask(combined, size.unsafe[Int in 0 ~ 1024], last)
   }
 
   override def equals(other: Any): Boolean = other match {
@@ -122,5 +132,5 @@ class VMLaneMask private (
     case _                => false
   }
 
-  override def hashCode(): Int = 31 * count + java.util.Arrays.hashCode(words)
+  override def hashCode(): Int = 31 * count.raw + java.util.Arrays.hashCode(words)
 }

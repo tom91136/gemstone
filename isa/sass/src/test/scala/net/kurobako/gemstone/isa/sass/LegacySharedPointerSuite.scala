@@ -12,7 +12,7 @@ import net.kurobako.gemstone.vm.*
 class LegacySharedPointerSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module = SASSFixture.module(
     35,
-    Vec(SASSFixture.Kernel("shared_base_probe", 320, Vec(0 -> 8, 8 -> 8), registers = 14, shared = 512))
+    Vec(SASSFixture.Kernel("shared_base_probe", 320, Vec((0, 8), (8, 8)), registers = 14, shared = 512))
   )
 
   test("sm_35 cvta shared base is nonnull and generic LD/ST dispatches to shared memory") {

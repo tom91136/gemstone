@@ -65,7 +65,7 @@ trait AddressMemory {
     validate(0)
   }
 
-  def readLittleEndian(address: GuestAddress, size: Int where Between[1, 8]): Either[MemoryError, Long] = {
+  def readLittleEndian(address: GuestAddress, size: Int in 1 ~ 8): Either[MemoryError, Long] = {
     @scala.annotation.tailrec
     def read(index: Int, value: Long): Either[MemoryError, Long] =
       if (index == size.raw) Right(value)
@@ -78,10 +78,10 @@ trait AddressMemory {
 
   def readSystemLittleEndian(
       address: GuestAddress,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[MemoryError, Long] = readLittleEndian(address, size)
 
-  def writeLittleEndian(address: GuestAddress, value: Long, size: Int where Between[1, 8]): Either[MemoryError, Unit] =
+  def writeLittleEndian(address: GuestAddress, value: Long, size: Int in 1 ~ 8): Either[MemoryError, Unit] =
     validateRange(address, size.nonNegative) match {
       case Left(error) => Left(error)
       case Right(())   =>
@@ -98,11 +98,11 @@ trait AddressMemory {
   def writeSystemLittleEndian(
       address: GuestAddress,
       value: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[MemoryError, Unit] = writeLittleEndian(address, value, size)
 
   def writeSystemBatch(
-      writes: Vec[(GuestAddress, Long, Int where Between[1, 8])]
+      writes: Vec[(GuestAddress, Long, Int in 1 ~ 8)]
   ): Either[MemoryError, Unit] = writes.foldLeft[Either[MemoryError, Unit]](Right(())) {
     case (result, (address, value, size)) => result.flatMap(_ => writeSystemLittleEndian(address, value, size))
   }
@@ -113,7 +113,7 @@ trait AddressMemory {
   @nowarn("msg=unused explicit parameter")
   def atomicModifyLittleEndian(
       address: GuestAddress,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   )(update: Long => Long): Either[MemoryError, Long] =
     Left(MemoryError.UnsupportedAtomic(address, size))
 }

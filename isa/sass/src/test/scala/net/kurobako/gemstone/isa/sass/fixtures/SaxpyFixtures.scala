@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.sass.fixtures
 import java.nio.file.Files
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 
 object SaxpyFixtures {
@@ -989,11 +990,11 @@ object SaxpyFixtures {
         |""".stripMargin
   ).flatMap((targets, text) => targets.map(_ -> text)).toMap
 
-  val parameters: Map[Int, (base: Int, registers: Int)] =
-    Vec(35, 50, 60).map(_ -> (base = 320, registers = 7)).toMap ++
-      Vec(70, 75, 80, 86, 87, 89).map(_ -> (base = 352, registers = 10)).toMap ++
-      Map(90 -> (base = 528, registers = 0)) ++
-      Vec(100, 103, 120).map(_ -> (base = 896, registers = 0)).toMap
+  val parameters: Map[Int, (base: Int >= 0, registers: Int)] =
+    Vec(35, 50, 60).map(_ -> (base = 320: Int >= 0, registers = 7)).toMap ++
+      Vec(70, 75, 80, 86, 87, 89).map(_ -> (base = 352: Int >= 0, registers = 10)).toMap ++
+      Map(90 -> (base = 528: Int >= 0, registers = 0)) ++
+      Vec(100, 103, 120).map(_ -> (base = 896: Int >= 0, registers = 0)).toMap
 
 }
 

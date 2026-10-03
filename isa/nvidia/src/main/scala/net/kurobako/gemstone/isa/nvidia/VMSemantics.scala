@@ -30,7 +30,7 @@ object VMSemantics {
 
   private def stageRegisterResult(
       effects: VMBlockState.WriteBuffer,
-      lane: Int,
+      lane: WorkgroupLane,
       destination: NonEmpty[String],
       result: Either[VMFault, Long]
   ): Either[VMFault, Unit] =
@@ -66,7 +66,7 @@ object VMSemantics {
           }.map(_ => Step.Advance)
         case VMIR.Instruction.ReadConditionFlag(destination, flag, predicate) =>
           forEveryLane(context) { lane =>
-            context.state.conditionCodes(lane).read(flag).toRight(
+            context.state.conditionCodes(lane.raw).read(flag).toRight(
               VMFault.InvalidState(s"condition flag $flag is undefined at pc ${context.pc}, lane $lane")
             ).map { value =>
               if (predicate) effects.stage(VMWrite.Predicate(lane, destination, value))
@@ -93,7 +93,7 @@ object VMSemantics {
           forEveryLane(context) { lane =>
             val carry = carryMode match {
               case AddThreeCarryMode.Consume =>
-                context.state.conditionCodes(lane).readThreeInputCarry.toRight(
+                context.state.conditionCodes(lane.raw).readThreeInputCarry.toRight(
                   VMFault.InvalidState(s"IADD3 carry state is undefined at pc ${context.pc}, lane $lane")
                 )
               case _ => Right(0)
@@ -104,17 +104,32 @@ object VMSemantics {
               thirdValue  <- context.read(lane, third)
               carryValue  <- carry
             } yield {
-              val mask     = (BigInt(1) << width.raw) - 1
-              val operands = Vec(firstValue, secondValue, thirdValue).zip(
-                Vec(negateFirst, negateSecond, negateThird)
-              ).map { case (value, negate) =>
-                val bits = unsignedInteger(value, width)
-                if (negate) mask - bits + (if (carryMode == AddThreeCarryMode.Produce) 1 else 0) else bits
-              }
-              val sum = operands.sum + carryValue
-              effects.stageRegister(lane, destination, (sum & mask).longValue)
+              val mask                                        = Bits.mask(width)
+              def operand(value: Long, negate: Boolean): Long =
+                if (negate) mask - truncate(value, width) else truncate(value, width)
+              val (firstSum, firstCarry) = IntegerArithmetic.addUnsigned(
+                operand(firstValue, negateFirst),
+                operand(secondValue, negateSecond),
+                false,
+                width
+              )
+              val (secondSum, secondCarry) = IntegerArithmetic.addUnsigned(
+                firstSum,
+                operand(thirdValue, negateThird),
+                false,
+                width
+              )
+              val correction =
+                carryValue + (if (carryMode == AddThreeCarryMode.Produce)
+                                (if (negateFirst) 1 else 0) + (if (negateSecond) 1 else 0) + (if (negateThird) 1 else 0)
+                              else 0)
+              val (sum, finalCarry) = IntegerArithmetic.addUnsigned(secondSum, correction.toLong, false, width)
+              effects.stageRegister(lane, destination, sum)
               if (carryMode == AddThreeCarryMode.Produce)
-                effects.stage(VMWrite.AddThreeCarry(lane, Some((sum >> width.raw).toInt)))
+                effects.stage(VMWrite.AddThreeCarry(
+                  lane,
+                  Some((if (firstCarry) 1 else 0) + (if (secondCarry) 1 else 0) + (if (finalCarry) 1 else 0))
+                ))
               else if (carryMode == AddThreeCarryMode.Consume)
                 effects.stage(VMWrite.AddThreeCarry(lane, None))
             }
@@ -154,7 +169,7 @@ object VMSemantics {
           var failure: Option[VMFault] = None
           context.active.foreachLane { lane =>
             if (failure.isEmpty)
-              context.state.parameters(lane).get(parameter) match {
+              context.state.parameters(lane.raw).get(parameter) match {
                 case Some(value) if offset.raw == 0 && destinations.size == 1 =>
                   effects.stageRegister(lane, destinations.head, loadBits(value, elementWidth, signed))
                 case Some(_) =>
@@ -249,15 +264,15 @@ object VMSemantics {
                 if (offset.raw == 0)
                   effects.stage(VMWrite.Parameter(lane, parameter, stored))
                 source match {
-                  case Value.Register(name) if context.state.functionRegisters(lane).contains(name) =>
+                  case Value.Register(name) if context.state.functionRegisters(lane.raw).contains(name) =>
                     effects.stage(VMWrite.FunctionParameter(
                       lane,
                       parameter,
-                      context.state.functionRegisters(lane)(name)
+                      context.state.functionRegisters(lane.raw)(name)
                     ))
                   case Value.RegisterSlot(index) =>
-                    val name = VMRegisterFile.name(index)
-                    context.state.functionRegisters(lane).get(name).foreach(function =>
+                    val name = VMRegisterFile.name(index.raw)
+                    context.state.functionRegisters(lane.raw).get(name).foreach(function =>
                       effects.stage(VMWrite.FunctionParameter(lane, parameter, function))
                     )
                   case _ => ()
@@ -272,11 +287,11 @@ object VMSemantics {
               clampValue <- context.read(lane, clamp)
               distance   = (deltaValue & 31L).toInt
               clampLane  = shuffleClamp(clampValue)
-              sourceLane = lane + distance
-              laneInWarp = lane & 31
-              valid      = laneInWarp + distance <= clampLane && sourceLane < context.state.laneCount
-              targetLane = if (valid) sourceLane else lane
-              value <- if (targetLane < context.state.laneCount)
+              sourceLane = lane.raw + distance
+              laneInWarp = lane.raw & 31
+              valid      = laneInWarp + distance <= clampLane && sourceLane < context.state.laneCount.raw
+              targetLane = if (valid) WorkgroupLane.fromIndex(sourceLane) else lane
+              value <- if (targetLane.raw < context.state.laneCount.raw)
                 context.read(targetLane, source)
               else Right(0L)
             } yield validity.fold(
@@ -296,10 +311,10 @@ object VMSemantics {
               clampValue <- context.read(lane, clamp)
               distance   = (deltaValue & 31L).toInt
               clampLane  = shuffleClamp(clampValue)
-              laneInWarp = lane & 31
+              laneInWarp = lane.raw & 31
               valid      = laneInWarp >= distance && laneInWarp - distance >= clampLane
-              targetLane = if (valid) lane - distance else lane
-              value <- if (targetLane < context.state.laneCount)
+              targetLane = if (valid) WorkgroupLane.fromIndex(lane.raw - distance) else lane
+              value <- if (targetLane.raw < context.state.laneCount.raw)
                 context.read(targetLane, source)
               else Right(0L)
             } yield validity.fold(
@@ -317,15 +332,15 @@ object VMSemantics {
             val writes = for {
               indexValue <- context.read(lane, index)
               clampValue <- context.read(lane, clamp)
-              laneInWarp   = lane & 31
+              laneInWarp   = lane.raw & 31
               requested    = (indexValue & 31L).toInt
               segmentMask  = ((clampValue >>> 8) & 31L).toInt
               segmentBase  = laneInWarp & segmentMask
               targetInWarp = segmentBase | (requested & ~segmentMask)
               maxLane      = segmentBase | ((clampValue & 31L).toInt & ~segmentMask)
-              targetLane   = (lane - laneInWarp) + targetInWarp
-              valid        = targetInWarp <= maxLane && targetLane < context.state.laneCount
-              value <- context.read(if (valid) targetLane else lane, source)
+              targetLane   = (lane.raw - laneInWarp) + targetInWarp
+              valid        = targetInWarp <= maxLane && targetLane < context.state.laneCount.raw
+              value <- context.read(if (valid) WorkgroupLane.fromIndex(targetLane) else lane, source)
             } yield validity.fold(
               Vec(VMWrite.Register(lane, destination, truncate(value, width)))
             )(name =>
@@ -341,14 +356,17 @@ object VMSemantics {
             val writes = for {
               indexValue <- context.read(lane, index)
               clampValue <- context.read(lane, clamp)
-              laneInWarp = lane & 31
+              laneInWarp = lane.raw & 31
               bflyLane   = laneInWarp ^ (indexValue & 31L).toInt
               segmask    = ((clampValue >>> 8) & 31L).toInt
               clampLane  = (clampValue & 31L).toInt
               maxLane    = (laneInWarp & segmask) | (clampLane & ~segmask)
               valid      = bflyLane <= maxLane
-              targetLane = (lane - laneInWarp) + bflyLane
-              value <- context.read(if (valid && targetLane < context.state.laneCount) targetLane else lane, source)
+              targetLane = (lane.raw - laneInWarp) + bflyLane
+              value <- context.read(
+                if (valid && targetLane < context.state.laneCount.raw) WorkgroupLane.fromIndex(targetLane) else lane,
+                source
+              )
             } yield validity.fold(
               Vec(VMWrite.Register(lane, destination, truncate(value, width)))
             )(name =>
@@ -362,18 +380,18 @@ object VMSemantics {
         case VMIR.Instruction.VoteBallot(destination, predicate, memberMask) =>
           forEveryLane(context) { lane =>
             val write = context.read(lane, memberMask).flatMap { maskValue =>
-              val warpBase = lane & ~31
+              val warpBase = lane.raw & ~31
               (0 until 32).foldLeft[Either[VMFault, Long]](Right(0L)) {
                 case (result, laneInWarp) =>
                   val candidate = warpBase + laneInWarp
                   if (
                     (maskValue & (1L << laneInWarp)) == 0L || !context.active.contains(candidate) ||
-                    candidate >= context.state.laneCount
+                    candidate >= context.state.laneCount.raw
                   ) result
                   else
                     result.flatMap { ballot =>
                       context.state.predicates(candidate).get(predicate).toRight(
-                        VMFault.UndefinedRegister(predicate, context.pc, candidate)
+                        VMFault.UndefinedRegister(predicate, context.pc, WorkgroupLane.fromIndex(candidate))
                       ).map { selected =>
                         if (selected) ballot | (1L << laneInWarp) else ballot
                       }
@@ -391,18 +409,18 @@ object VMSemantics {
         case VMIR.Instruction.VotePredicate(destination, predicate, memberMask, operation) =>
           forEveryLane(context) { lane =>
             val write = context.read(lane, memberMask).flatMap { maskValue =>
-              val warpBase = lane & ~31
+              val warpBase = lane.raw & ~31
               (0 until 32).foldLeft[Either[VMFault, Vec[Boolean]]](Right(Vec.empty)) {
                 case (result, laneInWarp) =>
                   val candidate = warpBase + laneInWarp
                   if (
                     (maskValue & (1L << laneInWarp)) == 0L || !context.active.contains(candidate) ||
-                    candidate >= context.state.laneCount
+                    candidate >= context.state.laneCount.raw
                   ) result
                   else
                     result.flatMap { values =>
                       context.state.predicates(candidate).get(predicate).toRight(
-                        VMFault.UndefinedRegister(predicate, context.pc, candidate)
+                        VMFault.UndefinedRegister(predicate, context.pc, WorkgroupLane.fromIndex(candidate))
                       ).map(values :+ _)
                     }
               }.map { values =>
@@ -462,7 +480,7 @@ object VMSemantics {
           )
         }.map(_ => Step.Advance)
       case _ =>
-        prepareGlobalReads(context, address, width.byteCount.raw, generic, system = system).flatMap { _ =>
+        prepareGlobalReads(context, address, width.byteCount, generic, system = system).flatMap { _ =>
           var failure: Option[VMFault] = None
           context.active.foreachLane { lane =>
             if (failure.isEmpty) {
@@ -540,7 +558,7 @@ object VMSemantics {
     access match {
       case MemoryAccess.Shared | MemoryAccess.Local => execute()
       case _                                        =>
-        val totalBytes = destinations.size * width.byteCount.raw
+        val totalBytes = destinations.nonNegativeSize * width.byteCount
         prepareGlobalReads(context, address, totalBytes, generic, system = system).flatMap(_ => execute())
     }
   }
@@ -573,7 +591,7 @@ object VMSemantics {
       context.active.foreachLane { lane =>
         val rawAddress = readFast(context, lane, address)
         val value      = readFast(context, lane, source)
-        if (context.state.parameterBufferRange(rawAddress, width.byteCount.raw).nonEmpty)
+        if (context.state.parameterBufferRange(rawAddress, width.byteCount.widen[Int >= 0]).nonEmpty)
           effects.stage(VMWrite.ParameterBuffer(rawAddress, width, value))
         else access match {
           case MemoryAccess.Generic(_) if isSharedAddress(rawAddress) =>
@@ -639,7 +657,7 @@ object VMSemantics {
           val value          = readFast(context, lane, source)
           if (
             access != MemoryAccess.Shared && access != MemoryAccess.Local &&
-            context.state.parameterBufferRange(elementAddress, width.byteCount.raw).nonEmpty
+            context.state.parameterBufferRange(elementAddress, width.byteCount.widen[Int >= 0]).nonEmpty
           )
             effects.stage(VMWrite.ParameterBuffer(elementAddress, width, value))
           else access match {
@@ -698,8 +716,8 @@ object VMSemantics {
       }.map(_ => Step.Advance)
     case VMIR.Instruction.AsyncCommit | VMIR.Instruction.AsyncWait                      => Right(Step.Advance)
     case VMIR.Instruction.WarpReduce(destination, source, memberMask, operation, width) =>
-      val values                   = mutable.Map.empty[Int, Long]
-      val masks                    = mutable.Map.empty[Int, Long]
+      val values                   = mutable.Map.empty[WorkgroupLane, Long]
+      val masks                    = mutable.Map.empty[WorkgroupLane, Long]
       var failure: Option[VMFault] = None
       context.active.foreachLane { lane =>
         if (failure.isEmpty)
@@ -717,13 +735,13 @@ object VMSemantics {
         case Some(error) => Left(error)
         case None        =>
           context.active.foreachLane { lane =>
-            val warpBase = lane & ~31
+            val warpBase = lane.raw & ~31
             val mask     = masks.getOrElse(lane, 0L)
             val members  = Vec.toVec(values.view.collect {
               case (candidate, value)
-                  if (candidate & ~31) == warpBase && (mask & (1L << (candidate & 31))) != 0L => value
+                  if (candidate.raw & ~31) == warpBase && (mask & (1L << (candidate.raw & 31))) != 0L => value
             })
-            if ((mask & (1L << (lane & 31))) == 0L || members.isEmpty)
+            if ((mask & (1L << (lane.raw & 31))) == 0L || members.isEmpty)
               failure = Some(VMFault.InvalidState(
                 s"redux.sync lane $lane is absent from its member mask"
               ))
@@ -839,11 +857,11 @@ object VMSemantics {
     case VMIR.Instruction.BarrierReduce(_, id, _, _) =>
       Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.raw.toLong, 0L)))
     case VMIR.Instruction.SASSReturnPush(address) =>
-      context.active.foreachLane(lane => context.state.sassReturns(lane) += address)
+      context.active.foreachLane(lane => context.state.sassReturns(lane.raw) += address)
       Right(Step.Advance)
     case VMIR.Instruction.SASSReturnPop(destination) =>
       forEveryLane(context) { lane =>
-        val stack = context.state.sassReturns(lane)
+        val stack = context.state.sassReturns(lane.raw)
         if (stack.isEmpty) Left(VMFault.InvalidState("SASS return stack is empty"))
         else {
           effects.stageRegister(lane, destination, stack.remove(stack.size - 1).toLong)
@@ -853,8 +871,8 @@ object VMSemantics {
     case VMIR.Instruction.Convergence(slot, action) =>
       val masks = mutable.Map.empty[Int, Long]
       context.active.foreachLane { lane =>
-        val warp = lane & ~31
-        masks(warp) = masks.getOrElse(warp, 0L) | (1L << (lane & 31))
+        val warp = lane.raw & ~31
+        masks(warp) = masks.getOrElse(warp, 0L) | (1L << (lane.raw & 31))
       }
       action match {
         case VMIR.ConvergenceAction.Setup =>
@@ -869,9 +887,8 @@ object VMSemantics {
         case VMIR.ConvergenceAction.Synchronize => Right(Step.Suspend(WaitKey(WaitScope.Warp, 0L, -slot.toLong - 1L)))
       }
     case VMIR.Instruction.WarpBarrier(memberMask) =>
-      var firstLane = -1
-      context.active.foreachLane { lane => if (firstLane < 0) firstLane = lane }
-      context.read(firstLane, memberMask) match {
+      context.active.headOption.toRight(VMFault.InvalidState("bar.warp.sync has no active lanes"))
+        .flatMap(context.read(_, memberMask)) match {
         case Left(fault)            => Left(fault)
         case Right(memberMaskValue) =>
           var mismatch = false
@@ -895,7 +912,7 @@ object VMSemantics {
       val groups = mutable.LinkedHashMap.empty[NonEmpty[String], VMLaneMask]
       forEveryLane(context) { lane =>
         context.functionName(lane, function).flatMap { name =>
-          VMLaneMask.one(lane).map { member =>
+          VMLaneMask.one(lane.raw).map { member =>
             groups(name) = groups.getOrElse(name, VMLaneMask.Empty).union(member)
           }
         }
@@ -930,7 +947,7 @@ object VMSemantics {
       }.map(_ => Step.Advance)
     case VMIR.Instruction.Trap =>
       Left(VMFault.ArchitecturalTrap(
-        context.kernel.isaName.toLowerCaseRoot.unsafe[NonEmpty[String]],
+        context.kernel.isaName.toLowerCaseRoot,
         0L,
         context.pc
       ))
@@ -951,13 +968,13 @@ object VMSemantics {
     val size = count * width.byteCount.raw
     size > 0 && size <= 16 && (size & (size - 1)) == 0 && (address & (size - 1).toLong) == 0L &&
     !isSharedAddress(address) && !isLocalAddress(address) &&
-    context.state.parameterBufferRange(address, size).isEmpty
+    context.state.parameterBufferRange(address, size.unsafe[Int > 0].widen[Int >= 0]).isEmpty
   }
 
   private def prepareGlobalReads(
       context: VMInstructionContext,
       address: Value,
-      size: Int,
+      size: Int >= 0,
       generic: Boolean,
       system: Boolean
   ): Either[VMFault, Unit] = {
@@ -970,7 +987,7 @@ object VMSemantics {
           size
         ).isEmpty && (!generic || (!isSharedAddress(raw) && !isLocalAddress(raw)))
       ) {
-        val _ = ranges += ((GuestAddress(raw), size.unsafe[Int >= 0]))
+        val _ = ranges += ((GuestAddress(raw), size))
       }
     }
     (if (system) context.memory.prepareSystemReads(ranges.result())
@@ -981,14 +998,14 @@ object VMSemantics {
 
   private def loadCoherentVector(
       context: VMInstructionContext,
-      lane: Int,
+      lane: WorkgroupLane,
       address: Long,
       destinations: Vec[NonEmpty[String]],
       width: Int where (Between[8, 64] & MultipleOf[8]),
       signed: Boolean
   ): Either[VMFault, Vec[VMWrite]] =
     if (destinations.nonEmpty && destinations.size * width.byteCount.raw <= 8) {
-      val packedBytes = (destinations.size * width.byteCount.raw).unsafe[Int where Between[1, 8]]
+      val packedBytes = (destinations.size * width.byteCount.raw).unsafe[Int in 1 ~ 8]
       context.memory.readLittleEndian(GuestAddress(address), packedBytes)
         .leftMap(error =>
           VMFault.fromMemory(error, s"pc ${context.pc}, lane $lane: ")
@@ -1024,7 +1041,7 @@ object VMSemantics {
 
   private def storeCoherentVector(
       context: VMInstructionContext,
-      lane: Int,
+      lane: WorkgroupLane,
       address: Long,
       sources: Vec[Value],
       width: Int where (Between[8, 64] & MultipleOf[8])
@@ -1054,13 +1071,13 @@ object VMSemantics {
       context: VMInstructionContext
   ): Boolean = instruction match {
     case VMIR.Instruction.Move(destination, Value.Function(function), _) =>
-      context.active.foreachLane(lane => context.state.functionRegisters(lane)(destination) = function)
+      context.active.foreachLane(lane => context.state.functionRegisters(lane.raw)(destination) = function)
       true
     case VMIR.Instruction.Move(destination, source, width) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane(lane =>
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           truncate(readFast(context, lane, source), width)
@@ -1071,7 +1088,7 @@ object VMSemantics {
       val destinationIndex = VMPredicateFile.index(destination)
       context.active.foreachLane(lane =>
         writePredicate(
-          context.state.predicates(lane),
+          context.state.predicates(lane.raw),
           destination,
           destinationIndex,
           readFast(context, lane, source) != 0L
@@ -1084,10 +1101,10 @@ object VMSemantics {
       context.active.foreachLane { lane =>
         val value = readFast(context, lane, source)
         if (destinations(0) != "_")
-          writeRegister(context.state.registers(lane), destinations(0), lowIndex, truncate(value, partWidth))
+          writeRegister(context.state.registers(lane.raw), destinations(0), lowIndex, truncate(value, partWidth))
         if (destinations(1) != "_")
           writeRegister(
-            context.state.registers(lane),
+            context.state.registers(lane.raw),
             destinations(1),
             highIndex,
             truncate(value >>> partWidth.raw, partWidth)
@@ -1101,7 +1118,7 @@ object VMSemantics {
         val low  = readFast(context, lane, sources(0))
         val high = readFast(context, lane, sources(1))
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           truncate((low & truncate(-1L, partWidth)) | (truncate(high, partWidth) << partWidth.raw), combinedWidth)
@@ -1112,7 +1129,7 @@ object VMSemantics {
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           integerUnaryResult(operation, readFast(context, lane, source), width)
@@ -1123,7 +1140,7 @@ object VMSemantics {
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           bitFind(readFast(context, lane, source), width, signed, shiftAmount)
@@ -1134,7 +1151,7 @@ object VMSemantics {
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           dotProduct4(
@@ -1155,10 +1172,10 @@ object VMSemantics {
           readFast(context, lane, right),
           width,
           carryIn,
-          context.state.carry(lane)
+          context.state.carry(lane.raw)
         )
-        writeRegister(context.state.registers(lane), destination, destinationIndex, result)
-        if (carryOut) context.state.carry(lane) = nextCarry
+        writeRegister(context.state.registers(lane.raw), destination, destinationIndex, result)
+        if (carryOut) context.state.carry(lane.raw) = nextCarry
       }
       true
     case VMIR.Instruction.IntegerSubWithBorrow(destination, left, right, width, borrowIn, borrowOut) =>
@@ -1169,10 +1186,10 @@ object VMSemantics {
           readFast(context, lane, right),
           width,
           borrowIn,
-          context.state.carry(lane)
+          context.state.carry(lane.raw)
         )
-        writeRegister(context.state.registers(lane), destination, destinationIndex, result)
-        if (borrowOut) context.state.carry(lane) = nextBorrow
+        writeRegister(context.state.registers(lane.raw), destination, destinationIndex, result)
+        if (borrowOut) context.state.carry(lane.raw) = nextBorrow
       }
       true
     case VMIR.Instruction.IntegerBinary(operation, destination, left, right, width) =>
@@ -1181,7 +1198,7 @@ object VMSemantics {
         val leftValue  = readFast(context, lane, left)
         val rightValue = readFast(context, lane, right)
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           integerBinaryResult(operation, leftValue, rightValue, width)
@@ -1192,7 +1209,7 @@ object VMSemantics {
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           funnelShiftResult(
@@ -1211,7 +1228,7 @@ object VMSemantics {
       val destinationFormat = destinationType.format
       context.active.foreachLane(lane =>
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           convert(readFast(context, lane, source), sourceFormat, destinationFormat, rounding)
@@ -1226,12 +1243,12 @@ object VMSemantics {
           readFast(context, lane, right),
           readFast(context, lane, addend),
           operation,
-          context.state.carry(lane)
+          context.state.carry(lane.raw)
         )
-        writeRegister(context.state.registers(lane), destination, destinationIndex, result)
+        writeRegister(context.state.registers(lane.raw), destination, destinationIndex, result)
         operation match {
           case IntegerMultiplyAddOperation.Low(_, _, _, true) | IntegerMultiplyAddOperation.High(_, _, _, true) =>
-            context.state.carry(lane) = carry
+            context.state.carry(lane.raw) = carry
           case _ => ()
         }
       }
@@ -1240,7 +1257,7 @@ object VMSemantics {
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           insertBits(
@@ -1257,7 +1274,7 @@ object VMSemantics {
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           bitMask(readFast(context, lane, start), readFast(context, lane, widthValue), mode)
@@ -1268,7 +1285,7 @@ object VMSemantics {
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           permuteBytes(
@@ -1286,14 +1303,14 @@ object VMSemantics {
         val leftBits  = floatInput(readFast(context, lane, left), width, control)
         val rightBits = floatInput(readFast(context, lane, right), width, control)
         val result    = floatResult(floatBinaryBits(operation, leftBits, rightBits, width, control), width, control)
-        writeRegister(context.state.registers(lane), destination, destinationIndex, result)
+        writeRegister(context.state.registers(lane.raw), destination, destinationIndex, result)
       }
       true
     case VMIR.Instruction.FloatBinaryPacked(operation, destination, left, right, bf16) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           packedBinaryBits(operation, readFast(context, lane, left), readFast(context, lane, right), bf16)
@@ -1305,7 +1322,7 @@ object VMSemantics {
       context.active.foreachLane { lane =>
         val sourceValue = floatInput(readFast(context, lane, source), width, control)
         val result      = floatResult(floatUnaryBits(operation, sourceValue, width), width, control)
-        writeRegister(context.state.registers(lane), destination, destinationIndex, result)
+        writeRegister(context.state.registers(lane.raw), destination, destinationIndex, result)
       }
       true
     case VMIR.Instruction.FusedMultiplyAdd(destination, left, right, addend, width, control, rounding) =>
@@ -1321,14 +1338,14 @@ object VMSemantics {
           width,
           control
         )
-        writeRegister(context.state.registers(lane), destination, destinationIndex, result)
+        writeRegister(context.state.registers(lane.raw), destination, destinationIndex, result)
       }
       true
     case VMIR.Instruction.FusedMultiplyAddPacked(destination, left, right, addend, bf16, saturate) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           packedFmaBits(
@@ -1345,7 +1362,7 @@ object VMSemantics {
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
-          context.state.registers(lane),
+          context.state.registers(lane.raw),
           destination,
           destinationIndex,
           bf16FmaBits(
@@ -1365,7 +1382,7 @@ object VMSemantics {
           comparison,
           format
         )
-        writePredicate(context.state.predicates(lane), destination, destinationIndex, value)
+        writePredicate(context.state.predicates(lane.raw), destination, destinationIndex, value)
       }
       true
     case VMIR.Instruction.PredicateCompare(destination, comparison, left, right) =>
@@ -1373,10 +1390,10 @@ object VMSemantics {
       val leftIndex        = VMPredicateFile.index(left)
       val rightIndex       = VMPredicateFile.index(right)
       context.active.foreachLane { lane =>
-        val leftValue  = readPredicateFast(context.state.predicates(lane), left, leftIndex)
-        val rightValue = readPredicateFast(context.state.predicates(lane), right, rightIndex)
+        val leftValue  = readPredicateFast(context.state.predicates(lane.raw), left, leftIndex)
+        val rightValue = readPredicateFast(context.state.predicates(lane.raw), right, rightIndex)
         writePredicate(
-          context.state.predicates(lane),
+          context.state.predicates(lane.raw),
           destination,
           destinationIndex,
           comparePredicates(leftValue, rightValue, comparison)
@@ -1388,10 +1405,10 @@ object VMSemantics {
       val sourceIndex      = VMPredicateFile.index(source)
       context.active.foreachLane { lane =>
         writePredicate(
-          context.state.predicates(lane),
+          context.state.predicates(lane.raw),
           destination,
           destinationIndex,
-          !readPredicateFast(context.state.predicates(lane), source, sourceIndex)
+          !readPredicateFast(context.state.predicates(lane.raw), source, sourceIndex)
         )
       }
       true
@@ -1400,10 +1417,10 @@ object VMSemantics {
       val leftIndex        = VMPredicateFile.index(left)
       val rightIndex       = VMPredicateFile.index(right)
       context.active.foreachLane { lane =>
-        val leftValue  = readPredicateFast(context.state.predicates(lane), left, leftIndex)
-        val rightValue = readPredicateFast(context.state.predicates(lane), right, rightIndex)
+        val leftValue  = readPredicateFast(context.state.predicates(lane.raw), left, leftIndex)
+        val rightValue = readPredicateFast(context.state.predicates(lane.raw), right, rightIndex)
         writePredicate(
-          context.state.predicates(lane),
+          context.state.predicates(lane.raw),
           destination,
           destinationIndex,
           operation match {
@@ -1418,41 +1435,41 @@ object VMSemantics {
       val destinationIndex = VMRegisterFile.index(destination)
       val predicateIndex   = VMPredicateFile.index(predicate)
       context.active.foreachLane { lane =>
-        val selected = if (readPredicateFast(context.state.predicates(lane), predicate, predicateIndex))
+        val selected = if (readPredicateFast(context.state.predicates(lane.raw), predicate, predicateIndex))
           readFast(context, lane, whenTrue)
         else readFast(context, lane, whenFalse)
-        writeRegister(context.state.registers(lane), destination, destinationIndex, truncate(selected, width))
+        writeRegister(context.state.registers(lane.raw), destination, destinationIndex, truncate(selected, width))
       }
       true
     case _ => false
   }
 
   private def writeRegister(registers: VMRegisterFile, name: NonEmpty[String], index: Int, value: Long): Unit =
-    if (index >= 0) registers.updateSlot(index, value) else registers.update(name, value)
+    if (index >= 0) registers.updateSlotRaw(index, value) else registers.update(name, value)
 
   private def writePredicate(predicates: VMPredicateFile, name: NonEmpty[String], index: Int, value: Boolean): Unit =
-    if (index >= 0) predicates.updateSlot(index, value) else predicates.update(name, value)
+    if (index >= 0) predicates.updateSlotRaw(index, value) else predicates.update(name, value)
 
   private def readPredicateFast(predicates: VMPredicateFile, name: NonEmpty[String], index: Int): Boolean =
-    if (index >= 0) predicates.getSlot(index).getOrElse(false) else predicates.get(name).getOrElse(false)
+    if (index >= 0) predicates.getSlotRaw(index).getOrElse(false) else predicates.get(name).getOrElse(false)
 
   private def executeBuiltin(
       context: VMInstructionContext,
-      lane: Int,
+      lane: WorkgroupLane,
       name: NonEmpty[String],
       returnParameters: Vec[NonEmpty[String]],
       parameters: Vec[NonEmpty[String]]
   ): Option[Either[VMFault, Unit]] = {
-    def parameter(index: Int, width: Int where Between[0, 8] = 8): Long =
+    def parameter(index: Int, width: Int in 0 ~ 8 = 8): Long =
       if (index < parameters.size)
-        context.state.parameters(lane).getOrElse(
+        context.state.parameters(lane.raw).getOrElse(
           parameters(index),
           context.state.readParameterBytes(lane, parameters(index), 0, width)
         )
       else 0L
 
     def returnValue(value: Long): Unit =
-      returnParameters.headOption.foreach(name => context.state.parameters(lane)(name) = value)
+      returnParameters.headOption.foreach(name => context.state.parameters(lane.raw)(name) = value)
 
     def writeLocalPointer(index: Int, value: Long): Unit =
       if (index < parameters.size)
@@ -1483,7 +1500,7 @@ object VMSemantics {
       case "cudaGetParameterBuffer" =>
         // The first argument is the requested alignment; the second is the
         // number of bytes needed for the child kernel's argument packet.
-        val size   = Math.max(1L, parameter(1)).min(Int.MaxValue.toLong).toInt
+        val size   = Math.max(1L, parameter(1)).min(Int.MaxValue.toLong).toInt.unsafe[Int > 0]
         val buffer = context.state.allocateParameterBuffer(size)
         returnValue(buffer)
         Some(Right(()))
@@ -1536,17 +1553,17 @@ object VMSemantics {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def executeDeviceLaunch(
       context: VMInstructionContext,
-      lane: Int,
+      lane: WorkgroupLane,
       returnParameters: Vec[NonEmpty[String]],
       parameters: Vec[NonEmpty[String]],
-      parameter: (Int, Int where Between[0, 8]) => Long
+      parameter: (Int, Int in 0 ~ 8) => Long
   ): Either[VMFault, Unit] =
     if (parameters.size < 6)
       Left(VMFault.InvalidState(
         s"cudaLaunchDevice expects six parameters, found ${parameters.size}"
       ))
     else {
-      val target = context.state.functionParameters(lane).get(parameters(0))
+      val target = context.state.functionParameters(lane.raw).get(parameters(0))
       val child  = target.flatMap(context.kernel.functions.get).toRight(
         VMFault.InvalidState(
           s"cudaLaunchDevice target is not a lowered entry: ${target.getOrElse("<unknown>")}"
@@ -1572,7 +1589,7 @@ object VMSemantics {
           while (index < function.parameters.size && argumentFailure.isEmpty) {
             val width  = function.parameterWidths(index)
             val offset = function.parameterOffsets(index)
-            context.state.readParameterBufferBytes(buffer + offset.raw.toLong, width.raw) match {
+            context.state.readParameterBufferBytes(buffer + offset.raw.toLong, width.widen[Int >= 0]) match {
               case Some(bytes) =>
                 childArguments(function.parameters(index)) =
                   Argument(Vec.unsafeWrapArray(bytes).unsafe)
@@ -1617,36 +1634,37 @@ object VMSemantics {
       } match {
         case Left(fault) => Left(fault)
         case Right(_)    =>
-          returnParameters.headOption.foreach(name => context.state.parameters(lane)(name) = 0L)
+          returnParameters.headOption.foreach(name => context.state.parameters(lane.raw)(name) = 0L)
           Right(())
       }
     }
 
-  private def readFast(context: VMInstructionContext, lane: Int, value: Value): Long = value match {
-    case Value.Register(name)       => context.state.registers(lane)(name)
-    case Value.RegisterSlot(index)  => context.state.registers(lane).getSlot(index)
-    case Value.Predicate(name)      => if (context.state.predicates(lane).get(name).getOrElse(false)) 1L else 0L
-    case Value.PredicateSlot(index) => if (context.state.predicates(lane).getSlot(index).getOrElse(false)) 1L else 0L
-    case Value.Symbol(name)         =>
+  private def readFast(context: VMInstructionContext, lane: WorkgroupLane, value: Value): Long = value match {
+    case Value.Register(name)       => context.state.registers(lane.raw)(name)
+    case Value.RegisterSlot(index)  => context.state.registers(lane.raw).getSlot(index)
+    case Value.Predicate(name)      => if (context.state.predicates(lane.raw).get(name).getOrElse(false)) 1L else 0L
+    case Value.PredicateSlot(index) =>
+      if (context.state.predicates(lane.raw).getSlot(index).getOrElse(false)) 1L else 0L
+    case Value.Symbol(name) =>
       context.state.parameterAddresses.get(name)
         .orElse(context.kernel.sharedSymbols.get(name))
         .orElse(context.kernel.globalSymbols.get(name).map(_.raw))
         .getOrElse(0L)
     case Value.Immediate(immediate)  => immediate
     case Value.Address(base, offset) => readFast(context, lane, base) + offset
-    case Value.LaneId                => (lane & 31).toLong
-    case Value.ActiveMask            => context.active.warpBits(lane)
-    case Value.LaneMaskGreaterEqual  => (0xffffffffL << (lane & 31)) & 0xffffffffL
-    case Value.LaneMaskGreater       => (0xffffffffL << ((lane & 31) + 1)) & 0xffffffffL
-    case Value.LaneMaskLessEqual     => (1L << ((lane & 31) + 1)) - 1L
-    case Value.LaneMaskLess          => (1L << (lane & 31)) - 1L
-    case Value.LaneMaskEqual         => 1L << (lane & 31)
+    case Value.LaneId                => (lane.raw & 31).toLong
+    case Value.ActiveMask            => context.active.warpBits(lane.raw)
+    case Value.LaneMaskGreaterEqual  => (0xffffffffL << (lane.raw & 31)) & 0xffffffffL
+    case Value.LaneMaskGreater       => (0xffffffffL << ((lane.raw & 31) + 1)) & 0xffffffffL
+    case Value.LaneMaskLessEqual     => (1L << ((lane.raw & 31) + 1)) - 1L
+    case Value.LaneMaskLess          => (1L << (lane.raw & 31)) - 1L
+    case Value.LaneMaskEqual         => 1L << (lane.raw & 31)
     case Value.ThreadId(axis)        =>
       val sizeX = context.geometry.groupSize.x.raw
       val index = axis match {
-        case Axis.X => lane           % sizeX
-        case Axis.Y => (lane / sizeX) % context.geometry.groupSize.y.raw
-        case Axis.Z => lane / sizeX / context.geometry.groupSize.y.raw
+        case Axis.X => lane.raw           % sizeX
+        case Axis.Y => (lane.raw / sizeX) % context.geometry.groupSize.y.raw
+        case Axis.Z => lane.raw / sizeX / context.geometry.groupSize.y.raw
       }
       index.toLong
     case Value.BlockId(axis)  => axis.select(context.group).raw.toLong
@@ -1665,7 +1683,7 @@ object VMSemantics {
   // Preserve the first lane fault without evaluating later lanes after failure.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def forEveryLane(context: VMInstructionContext)(
-      function: Int => Either[VMFault, Unit]
+      function: WorkgroupLane => Either[VMFault, Unit]
   ): Either[VMFault, Unit] = {
     var failure: Option[VMFault] = None
     context.active.foreachLane { lane =>
@@ -1695,7 +1713,7 @@ object VMSemantics {
       case IntegerUnaryOperation.Negate           => -value
       case IntegerUnaryOperation.Absolute         => Math.abs(signExtend(truncate(value, width), width))
       case IntegerUnaryOperation.BitwiseNot       => ~value
-      case IntegerUnaryOperation.PopulationCount  => bitCount(value, width).toLong
+      case IntegerUnaryOperation.PopulationCount  => bitCount(value, width).raw.toLong
       case IntegerUnaryOperation.LeadingZeroCount =>
         if (width.raw == 32) Integer.numberOfLeadingZeros(Bits.signed32(value)).toLong
         else java.lang.Long.numberOfLeadingZeros(value).toLong
@@ -1727,7 +1745,7 @@ object VMSemantics {
       case IntegerOperation.BitwiseAnd             => left & right
       case IntegerOperation.BitwiseXor             => left ^ right
       case IntegerOperation.MultiplyLow            => left * right
-      case IntegerOperation.MultiplyHigh(signed)   => multiplyHigh(left, right, width, signed)
+      case IntegerOperation.MultiplyHigh(signed)   => IntegerArithmetic.multiplyHigh(left, right, width, signed)
       case IntegerOperation.Divide(signed)         => divideInteger(left, right, width, signed)
       case IntegerOperation.Remainder(signed)      => remainderInteger(left, right, width, signed)
       case IntegerOperation.MultiplyWideUnsigned16 => Bits.low16(left).toLong * Bits.low16(right).toLong
@@ -2101,7 +2119,7 @@ object VMSemantics {
       val extractedWidth    = Math.min(bitCount, width.raw - bitStart)
       val mask              = if (extractedWidth == 64) -1L else (1L << extractedWidth) - 1L
       val extracted         = (sourceBits >>> bitStart) & mask
-      val extractedBitWidth = extractedWidth.unsafe[Int where Between[1, 64]]
+      val extractedBitWidth = extractedWidth.unsafe[Int in 1 ~ 64]
       truncate(if (signed) Bits.signExtend(extracted, extractedBitWidth) else extracted, width)
     }
   }
@@ -2123,45 +2141,6 @@ object VMSemantics {
     truncate(mask0 & ~mask1, 32)
   }
 
-  private def multiplyHigh(
-      left: Long,
-      right: Long,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      signed: Boolean
-  ): Long = {
-    val leftValue =
-      if (signed) BigInt(signExtend(left, width)) else BigInt(java.lang.Long.toUnsignedString(truncate(left, width)))
-    val rightValue =
-      if (signed) BigInt(signExtend(right, width)) else BigInt(java.lang.Long.toUnsignedString(truncate(right, width)))
-    ((leftValue * rightValue) >> width.raw).longValue
-  }
-
-  private def unsignedMultiplyHigh(left: Long, right: Long): Long = {
-    val mask      = 0xffffffffL
-    val leftLow   = left & mask
-    val leftHigh  = left >>> 32
-    val rightLow  = right & mask
-    val rightHigh = right >>> 32
-    val low       = leftLow * rightLow
-    val middle1   = leftHigh * rightLow + (low >>> 32)
-    val middle2   = leftLow * rightHigh + (middle1 & mask)
-    leftHigh * rightHigh + (middle1 >>> 32) + (middle2 >>> 32)
-  }
-
-  private def addUnsigned(
-      left: Long,
-      right: Long,
-      carryIn: Boolean,
-      width: Int where (Between[8, 64] & MultipleOf[8])
-  ): (Long, Boolean) = {
-    val first         = left + right
-    val firstOverflow = java.lang.Long.compareUnsigned(first, left) < 0
-    val result        = if (carryIn) first + 1L else first
-    val nextOverflow  = carryIn && java.lang.Long.compareUnsigned(result, first) < 0
-    if (width.raw == 64) result  -> (firstOverflow || nextOverflow)
-    else truncate(result, width) -> ((result >>> width.raw) != 0L)
-  }
-
   def integerMultiplyAdd(
       left: Long,
       right: Long,
@@ -2173,7 +2152,7 @@ object VMSemantics {
       val leftValue    = truncate(left, operandWidth)
       val rightValue   = truncate(right, operandWidth)
       val productLow   = leftValue * rightValue
-      val productHigh  = unsignedMultiplyHigh(leftValue, rightValue)
+      val productHigh  = IntegerArithmetic.unsignedMultiplyHigh(leftValue, rightValue)
       val addendValue  = truncate(addend, resultWidth)
       val first        = productLow + addendValue
       val firstCarry   = java.lang.Long.compareUnsigned(first, productLow) < 0
@@ -2189,7 +2168,7 @@ object VMSemantics {
       val leftValue   = truncate(left, operandWidth)
       val rightValue  = truncate(right, operandWidth)
       val productLow  = leftValue * rightValue
-      val productHigh = unsignedMultiplyHigh(leftValue, rightValue)
+      val productHigh = IntegerArithmetic.unsignedMultiplyHigh(leftValue, rightValue)
       val high        =
         if (operandWidth.raw == 64) productHigh
         else truncate(
@@ -2197,7 +2176,7 @@ object VMSemantics {
           operandWidth
         )
       val addendValue = truncate(addend, resultWidth)
-      addUnsigned(high, addendValue, usesCarry && carryIn, resultWidth)
+      IntegerArithmetic.addUnsigned(high, addendValue, usesCarry && carryIn, resultWidth)
   }
 
   private def integerAddWithCarry(
@@ -2206,18 +2185,7 @@ object VMSemantics {
       width: Int where (Between[8, 64] & MultipleOf[8]),
       usesCarry: Boolean,
       carryIn: Boolean
-  ): (Long, Boolean) = {
-    val sum =
-      BigInt(java.lang.Long.toUnsignedString(truncate(left, width))) +
-        BigInt(java.lang.Long.toUnsignedString(truncate(right, width))) +
-        (if (usesCarry && carryIn) 1 else 0)
-    (truncate(sum.longValue, width), (sum >> width.raw) != 0)
-  }
-
-  private def unsignedInteger(
-      value: Long,
-      width: Int where (Between[8, 64] & MultipleOf[8])
-  ): BigInt = BigInt(java.lang.Long.toUnsignedString(truncate(value, width)))
+  ): (Long, Boolean) = IntegerArithmetic.addUnsigned(left, right, usesCarry && carryIn, width)
 
   private def integerSubWithBorrow(
       left: Long,
@@ -2225,13 +2193,7 @@ object VMSemantics {
       width: Int where (Between[8, 64] & MultipleOf[8]),
       usesBorrow: Boolean,
       borrowIn: Boolean
-  ): (Long, Boolean) = {
-    val difference =
-      BigInt(java.lang.Long.toUnsignedString(truncate(left, width))) -
-        BigInt(java.lang.Long.toUnsignedString(truncate(right, width))) -
-        (if (usesBorrow && borrowIn) 1 else 0)
-    (truncate(difference.longValue, width), difference < 0)
-  }
+  ): (Long, Boolean) = IntegerArithmetic.subtractUnsigned(left, right, usesBorrow && borrowIn, width)
 
   private def insertBits(
       insert: Long,
@@ -2246,7 +2208,7 @@ object VMSemantics {
     else {
       val insertedWidth    = Math.min(bitCount, width.raw - bitStart)
       val fieldMask        = if (insertedWidth == 64) -1L else ((1L << insertedWidth) - 1L) << bitStart
-      val insertedBitWidth = insertedWidth.unsafe[Int where Between[1, 64]]
+      val insertedBitWidth = insertedWidth.unsafe[Int in 1 ~ 64]
       truncate((base & ~fieldMask) | ((insert & Bits.truncate(-1L, insertedBitWidth)) << bitStart), width)
     }
   }
@@ -2380,43 +2342,19 @@ object VMSemantics {
 
   // The bf16 branch terminates before the shared conversion matrix.
 
-  private def exactIntegerOfBinary(bits: Long, width: Int in (32, 64)): BigInt = {
-    val (exponentWidth, fractionWidth, bias) =
-      if (width.raw == 32) (8, 23, 127) else (11, 52, 1023)
-    val signMask     = 1L << (width.raw - 1)
-    val fractionMask = (1L << fractionWidth) - 1L
-    val exponentMask = (1L << exponentWidth) - 1L
-    val negative     = (bits & signMask) != 0L
-    val exponent     = ((bits >>> fractionWidth) & exponentMask).toInt
-    val fraction     = bits & fractionMask
-    val significand  = if (exponent == 0) BigInt(fraction) else BigInt(fraction | (1L << fractionWidth))
-    val shift        = (if (exponent == 0) 1 - bias else exponent - bias) - fractionWidth
-    val magnitude    = if (shift >= 0) significand << shift else significand >> -shift
-    if (negative) -magnitude else magnitude
-  }
-
-  private def integerToFloat(value: BigInt, width: Int in (32, 64), rounding: Option[ConversionRounding]): Long = {
-    val nearestBits = if (width.raw == 32) java.lang.Float.floatToRawIntBits(value.toFloat).toLong & 0xffffffffL
-    else java.lang.Double.doubleToRawLongBits(value.toDouble)
-    val nearestExact = exactIntegerOfBinary(nearestBits, width)
-    val direction    = rounding match {
-      case Some(ConversionRounding.RP | ConversionRounding.RPI)                     => 1
-      case Some(ConversionRounding.RM | ConversionRounding.RMI)                     => -1
-      case Some(ConversionRounding.RZ | ConversionRounding.RZI) if value.signum > 0 => -1
-      case Some(ConversionRounding.RZ | ConversionRounding.RZI) if value.signum < 0 => 1
-      case _                                                                        => 0
+  private def integerToFloat(
+      value: Long,
+      unsigned: Boolean,
+      width: Int in (32, 64),
+      rounding: Option[ConversionRounding]
+  ): Long = {
+    val mode = rounding match {
+      case Some(ConversionRounding.RP | ConversionRounding.RPI) => IEEE754.Rounding.Up
+      case Some(ConversionRounding.RM | ConversionRounding.RMI) => IEEE754.Rounding.Down
+      case Some(ConversionRounding.RZ | ConversionRounding.RZI) => IEEE754.Rounding.TowardZero
+      case _                                                    => IEEE754.Rounding.NearestEven
     }
-    val adjustUp   = direction > 0 && nearestExact < value
-    val adjustDown = direction < 0 && nearestExact > value
-    if (!adjustUp && !adjustDown) nearestBits
-    else if (width.raw == 32) {
-      val nearest = java.lang.Float.intBitsToFloat(nearestBits.toInt)
-      java.lang.Float.floatToRawIntBits(if (adjustUp) Math.nextUp(nearest)
-      else Math.nextDown(nearest)).toLong & 0xffffffffL
-    } else {
-      val nearest = java.lang.Double.longBitsToDouble(nearestBits)
-      java.lang.Double.doubleToRawLongBits(if (adjustUp) Math.nextUp(nearest) else Math.nextDown(nearest))
-    }
+    IEEE754.integerToBinary(value, unsigned, width, mode)
   }
 
   private def convert(
@@ -2497,8 +2435,8 @@ object VMSemantics {
     }
     destination match {
       case NumericFormat.IEEE(bits) => bits.raw match {
-          case 32 => integerToFloat(integerValue(integer, unsigned64), 32, rounding)
-          case 64 => integerToFloat(integerValue(integer, unsigned64), 64, rounding)
+          case 32 => integerToFloat(integer, unsigned64, 32, rounding)
+          case 64 => integerToFloat(integer, unsigned64, 64, rounding)
           case _  => IEEE754.fromDouble(integerAsDouble(integer, unsigned64), bits)
         }
       case NumericFormat.BF16 => bfloat16FromFloat(integerAsDouble(integer, unsigned64).toFloat, rounding)
@@ -2506,11 +2444,8 @@ object VMSemantics {
     }
   }
 
-  private def integerValue(value: Long, unsigned64: Boolean): BigInt =
-    if (unsigned64) BigInt(java.lang.Long.toUnsignedString(value)) else BigInt(value)
-
   private def integerAsDouble(value: Long, unsigned64: Boolean): Double =
-    if (unsigned64) integerValue(value, true).toDouble else value.toDouble
+    IEEE754.binary64ToDouble(IEEE754.integerToBinary(value, unsigned64, 64))
 
   private def bfloat16FromFloat(value: Float, rounding: Option[ConversionRounding]): Long = {
     val bits    = IEEE754.floatToBinary32(value)

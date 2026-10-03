@@ -28,7 +28,7 @@ private object interleaving {
     Operand(
       OperandKind.LiteralString,
       Vec.from(bytes.grouped(4).map { group =>
-        val width = group.length.refine[Int where Between[0, 8]]
+        val width = group.length.refine[Int in 0 ~ 8]
           .fold(message => throw IllegalArgumentException(message), value => value)
         Word(LittleEndian.decode(group, 0, width).toInt)
       }).unsafe
@@ -239,7 +239,7 @@ private object interleaving {
       override def atomicModifyValue(
           id: AllocationId,
           offset: Long >= 0,
-          size: Int where Between[1, 8]
+          size: Int in 1 ~ 8
       )(update: Long => Long): Either[Fault, Long] = {
         checkpoint()
         delegate.atomicModifyValue(id, offset, size)(update)

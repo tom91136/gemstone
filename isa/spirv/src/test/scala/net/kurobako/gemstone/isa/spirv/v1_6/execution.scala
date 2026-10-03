@@ -76,7 +76,7 @@ private object execution extends munit.Assertions {
     override def atomicModifyValue(
         id: AllocationId,
         offset: Long >= 0,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     )(update: Long => Long): Either[Fault, Long] = atomicLock.withLock {
       checked(id, offset, size.nonNegative) match {
         case Left(error)  => Left(error)
@@ -121,7 +121,7 @@ private object execution extends munit.Assertions {
       .fold(message => fail(message), valid => valid)
     val bytes = checked.getBytes(java.nio.charset.StandardCharsets.UTF_8) :+ 0.toByte
     val words = bytes.grouped(4).map { group =>
-      val width = group.length.refine[Int where Between[0, 8]].fold(
+      val width = group.length.refine[Int in 0 ~ 8].fold(
         message => fail(message),
         value => value
       )

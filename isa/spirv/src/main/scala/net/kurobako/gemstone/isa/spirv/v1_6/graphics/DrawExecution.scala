@@ -81,7 +81,8 @@ private class DrawExecution(memory: GraphicsAccess, workgroups: Workgroups, hand
     val coverage     = fragments.map(f => if (early) test(f, f.coverage, None) else f.coverage).toArray
     val earlySamples = if (early) coverage.foldLeft(0L)((sum, mask) => sum + Integer.bitCount(mask)) else 0L
     val shader       = draw.fragment
-    val records      = shader.fold(Array.empty[Array[Byte]])(allocate(_, fragments.size))
+    val count        = fragments.size.unsafe[Int >= 0]
+    val records      = shader.fold(Array.empty[Array[Byte]])(allocate(_, count))
     shader.foreach { stage =>
       fields(stage, ShaderDirection.Input).foreach { (variable, field) =>
         fragments.zipWithIndex.foreach { (fragment, invocation) =>
@@ -122,7 +123,7 @@ private class DrawExecution(memory: GraphicsAccess, workgroups: Workgroups, hand
         }
       }
       val executor = ShaderExecutor(stage, memory, workgroups, handler, load(stage.image))
-      executor.execute(fragments.size, records)
+      executor.execute(count, records)
     }
     val outputs = shader.toVector.flatMap(stage => fields(stage, ShaderDirection.Output))
     def read(variable: Int, fieldOffset: Int, invocation: Int): Int =

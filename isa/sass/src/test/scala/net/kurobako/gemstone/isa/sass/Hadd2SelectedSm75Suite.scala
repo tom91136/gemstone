@@ -12,7 +12,7 @@ import net.kurobako.gemstone.vm.*
 class Hadd2SelectedSm75Suite extends munit.FunSuite {
   {
     def fixtureModule: Cubin.Module =
-      SASSFixture.module(75, Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 8), registers = 5)))
+      SASSFixture.module(75, Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 8)), registers = 5)))
 
     test("CUDA 13.3 sm_75 HADD2.F32 accepts the selected negative-zero source") {
       val module   = fixtureModule
@@ -46,7 +46,7 @@ class Hadd2SelectedSm75Suite extends munit.FunSuite {
           )
         )
         service.run(program, task).fold(error => fail(error.message), identity)
-        val words = service.readWords(output, halves.size.unsafe[Int >= 0])
+        val words = service.readWords(output, halves.nonNegativeSize)
         halves.zipWithIndex.foreach { case (half, index) =>
           val actual    = words(index).toInt
           val converted = java.lang.Float.floatToRawIntBits(IEEE754.binary16ToFloat(Binary16.low(half.toLong)))

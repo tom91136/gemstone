@@ -70,7 +70,7 @@ class SASSDisassemblerSuite extends munit.FunSuite {
     assertEquals(instructions.map(_.operands), Vec(32, 32, 48).map(address => Vec[Operand](Operand.Bits(address, 0))))
   }
 
-  for ((sm, slots) <- Vec(35 -> 7, 50 -> 3))
+  for ((sm, slots) <- Vec((35, 7), (50, 3)))
     test(s"SM$sm trailing labels skip the next bundle control word") {
       val records = Vec.tabulate(slots) { index =>
         val address     = (index + 1) * 8

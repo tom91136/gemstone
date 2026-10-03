@@ -13,7 +13,7 @@ import net.kurobako.gemstone.vm.*
 class SASSExtremaSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module = SASSFixture.module(
     89,
-    Vec(SASSFixture.Kernel("extrema", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 17))
+    Vec(SASSFixture.Kernel("extrema", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 17))
   )
 
   test("compiler-produced sm_89 DSETP.MAX/MIN preserve NaN and signed-zero selection") {

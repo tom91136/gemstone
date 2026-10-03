@@ -1,10 +1,11 @@
 package net.kurobako.gemstone.isa.nvidia
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 
 /** Independent bit-pattern expectations shared by the PTX and SASS frontend tests. */
 object NumericCases {
-  val f64ToF32: Vec[(Long, Long)] = Vec(
+  val f64ToF32: NonEmpty[Vec[(Long, Long)]] = Vec.nonEmpty(
     0x0000000000000000L -> 0x00000000L,
     0x8000000000000000L -> 0x80000000L,
     0x0000000000000001L -> 0x00000000L,
@@ -25,7 +26,7 @@ object NumericCases {
     0x7ff0123456789abcL -> 0x7fc091a2L
   )
 
-  val f32ToF64: Vec[(Long, Long)] = Vec(
+  val f32ToF64: NonEmpty[Vec[(Long, Long)]] = Vec.nonEmpty(
     0x00000000L -> 0x0000000000000000L,
     0x80000000L -> 0x8000000000000000L,
     0x00000001L -> 0x36a0000000000000L,
@@ -39,7 +40,7 @@ object NumericCases {
     0x7f812345L -> 0x7ff82468a0000000L
   )
 
-  val f32ToF16: Vec[(Long, Long)] = Vec(
+  val f32ToF16: NonEmpty[Vec[(Long, Long)]] = Vec.nonEmpty(
     0x00000000L -> 0x0000L,
     0x80000000L -> 0x8000L,
     0x33800000L -> 0x0001L,
@@ -65,7 +66,7 @@ object NumericCases {
     0xff7fffffL -> 0xfc00L
   )
 
-  val packedMultiply: Vec[(Long, Long, Long)] = Vec(
+  val packedMultiply: NonEmpty[Vec[(Long, Long, Long)]] = Vec.nonEmpty(
     (0x80000000L, 0x40007c00L, 0x80007fffL),
     (0x03ff0001L, 0x3c003800L, 0x03ff0000L),
     (0x7c000400L, 0xfc003800L, 0xfc000200L),
@@ -73,7 +74,7 @@ object NumericCases {
     (0x80003555L, 0x80003555L, 0x00002f1cL)
   )
 
-  val packedAdd: Vec[(Long, Long, Long)] = Vec(
+  val packedAdd: NonEmpty[Vec[(Long, Long, Long)]] = Vec.nonEmpty(
     (0x3c003c00L, 0xc0004000L, 0xbc004200L),
     (0x7e013c00L, 0x3c007e01L, 0x7fff7fffL),
     (0x7c003c00L, 0x3c007c00L, 0x7c007c00L),
@@ -84,7 +85,7 @@ object NumericCases {
     (0x3c003c00L, 0x00010001L, 0x3c003c00L)
   )
 
-  val f32Extrema: Vec[(Long, Long, Long, Long)] = Vec(
+  val f32Extrema: NonEmpty[Vec[(Long, Long, Long, Long)]] = Vec.nonEmpty(
     (0x3f800000L, 0x40000000L, 0x3f800000L, 0x40000000L),
     (0x40000000L, 0x3f800000L, 0x3f800000L, 0x40000000L),
     (0x00000000L, 0x80000000L, 0x80000000L, 0x00000000L),
@@ -97,7 +98,7 @@ object NumericCases {
   )
 
   // Ordered equality and unordered inequality, including signed zeros and NaNs.
-  val f32Comparisons: Vec[(Long, Long, Boolean, Boolean)] = Vec(
+  val f32Comparisons: NonEmpty[Vec[(Long, Long, Boolean, Boolean)]] = Vec.nonEmpty(
     (0L, 0x80000000L, true, false),
     (0x3f800000L, 0x3f800000L, true, false),
     (0xbf800000L, 0x3f800000L, false, true),

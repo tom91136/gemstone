@@ -36,7 +36,7 @@ class GenerateEnvironmentSuite extends munit.FunSuite {
       GenerateEnvironment.main((Vector(root.toString, "--check") ++ arguments).toArray)
       val scala  = root.resolve("core/src/generated/main/scala/net/kurobako/gemstone/environment.scala")
       val native = root.resolve("native/generated/environment_keys.hpp")
-      assert(Files.readString(scala).contains("TimeoutDefault: Long"))
+      assert(Files.readString(scala).contains("TimeoutDefault: Long > 0 = 7L"))
       assert(!Files.exists(root.resolve("conformance")))
       assert(!Files.exists(root.resolve("config")))
       for (path <- List(scala, native)) {
@@ -55,6 +55,15 @@ class GenerateEnvironmentSuite extends munit.FunSuite {
         intercept[IllegalArgumentException](GenerateEnvironment.generate(root = root, entries = entries, check = true))
       GenerateEnvironment.generate(root = root, entries = entries, check = false)
       GenerateEnvironment.generate(root = root, entries = entries, check = true)
+    }
+  }
+
+  test("zero defaults retain nonnegative evidence without claiming positivity") {
+    inDirectory { root =>
+      GenerateEnvironment.generate(root, GenerateEnvironment.parse(Vector(name, "0")), check = false)
+      val scala =
+        Files.readString(root.resolve("core/src/generated/main/scala/net/kurobako/gemstone/environment.scala"))
+      assert(scala.contains("TimeoutDefault: Long >= 0 = 0L"))
     }
   }
 

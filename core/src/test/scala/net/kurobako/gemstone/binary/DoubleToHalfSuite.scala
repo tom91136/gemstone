@@ -3,7 +3,7 @@ package net.kurobako.gemstone.binary
 import net.kurobako.gemstone.constraint.*
 
 class DoubleToHalfSuite extends munit.FunSuite {
-  private val halfWidth: OneOf[(16, 32, 64)] = 16
+  private val halfWidth: Int in (16, 32, 64) = 16
 
   test("binary64 conversion rounds once around every finite half midpoint, for both signs") {
     for (lower <- 0 until 0x7bff) {

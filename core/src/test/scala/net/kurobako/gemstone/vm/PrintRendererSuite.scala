@@ -89,6 +89,8 @@ class PrintRendererSuite extends munit.FunSuite {
     assertEquals(render("[%.0v4u]", PrintArgument.Integer(Vec(0L, 1L, 0L, 42L), 32)), Right("[,1,,42]"))
     assertEquals(render("[%+.0hhd]", PrintArgument.Integer(Vec(256L), 32)), Right("[+]"))
     assertEquals(render("%u", PrintArgument.Integer(Vec(-1L), 64)), Right("18446744073709551615"))
+    assertEquals(render("%d", PrintArgument.Integer(Vec(Long.MinValue), 64)), Right("-9223372036854775808"))
+    assertEquals(render("%#x", PrintArgument.Integer(Vec(Long.MinValue), 64)), Right("0x8000000000000000"))
     assertEquals(render("%08.4x", PrintArgument.Integer(Vec(255L), 32)), Right("    00ff"))
   }
 

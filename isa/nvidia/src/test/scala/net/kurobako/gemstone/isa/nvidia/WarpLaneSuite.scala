@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.nvidia
 
+import net.kurobako.gemstone.constraint.*
+
 class WarpLaneSuite extends munit.FunSuite {
   test("warp lanes retain the complete zero-based NVIDIA lane range") {
     assertEquals(WarpLane.values.size, 32)
@@ -15,7 +17,7 @@ class WarpLaneSuite extends munit.FunSuite {
       wmma = false
     )
 
-    assertEquals(fragment.partition(WarpLane.values(31)), 3)
-    assertEquals(fragment.coordinate(WarpLane.values(31), 0), (7, 0))
+    assertEquals(fragment.partition(WarpLane.values(31)).raw, 3)
+    assertEquals(fragment.coordinate(WarpLane.values(31), 0), (7: Int >= 0, 0: Int >= 0))
   }
 }

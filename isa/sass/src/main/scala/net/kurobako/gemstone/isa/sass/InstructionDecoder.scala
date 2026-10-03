@@ -17,7 +17,7 @@ object InstructionDecoder {
 
   /** Decode FORMAT fields directly to typed operands; this path never consumes rendered disassembly text. */
   def decodeTyped(
-      address: Int,
+      address: Int >= 0,
       bytes: Array[Byte],
       target: String = "SM89"
   ): Either[String, DecodedInstruction] =
@@ -41,7 +41,7 @@ object InstructionDecoder {
 
   private def decodeCandidate(
       database: NVDisasm.Database,
-      address: Int,
+      address: Int >= 0,
       originalCandidate: FieldDecoder.Candidate,
       bytes: Array[Byte]
   ): Either[NVDisasm.CandidateFailure, DecodedInstruction] = {
@@ -103,7 +103,7 @@ object InstructionDecoder {
       parts.flatMap { (bank, suffix) =>
         val index = if (suffix == "Z") Some(if (bank == "UR") 63 else 255)
         else Option.when(suffix.nonEmpty && suffix.forall(c => c >= '0' && c <= '9'))(suffix).flatMap(_.toIntOption)
-        index.flatMap(_.refine[Int where Between[0, 255]].toOption)
+        index.flatMap(_.refine[Int in 0 ~ 255].toOption)
           .map(value => Operand.Register(RegisterBank.fromSpelling(bank), value))
       }
     }
@@ -167,7 +167,7 @@ object InstructionDecoder {
               Right(hexadecimalOperand(fieldWidth(field).fold(value)(signed(value, _))))
             case NVDisasm.FieldKind.RelativeImmediate =>
               val bits = fieldWidth(field).getOrElse(0)
-              val pc   = BigInt(address) + (if (database.width == 128) 16 else 8)
+              val pc   = BigInt(address.raw) + (if (database.width == 128) 16 else 8)
               Right(hexadecimalOperand(pc + signed(value, bits)))
             case NVDisasm.FieldKind.ConstantBank => symbol(field, value).map(_ => Operand.Symbol("c"))
                 .toRight(illegal(s"illegal constant selector $value (${field.binding})"))
@@ -342,9 +342,8 @@ object InstructionDecoder {
               Set("X1", "X2", "X4", "X8", "X16", "U32", "U64", "32", "64")(value)
             )
         }.flatten
-        val mode  = addressModes.headOption.map(AddressMode.fromSpelling)
-        val scale = mode.map(_.spelling).filter(_.startsWith("X")).flatMap(_.drop(1).toIntOption).getOrElse(1)
-          .unsafe[Int in (1, 2, 4, 8, 16)]
+        val mode                           = addressModes.headOption.map(AddressMode.fromSpelling)
+        val scale: Int in (1, 2, 4, 8, 16) = mode.flatMap(AddressMode.scale).getOrElse(1)
         values match {
           case Vec(Operand.Symbol("c"), Operand.Bits(bank, _), offset) =>
             Vec(Operand.ConstantBank(bank, offset))
@@ -574,9 +573,6 @@ object InstructionDecoder {
         )
           operands.patch(1, Vec.empty[Operand], 1)
         else operands
-      nonnegativeAddress <- address.refine[Int >= 0].left.map(error =>
-        NVDisasm.CandidateFailure(NVDisasm.FailureCategory.Unsupported, error.raw)
-      )
       operation <- Instruction.decode(
         opcodeParts.headOption.getOrElse(candidate.opcode),
         modifiers,
@@ -584,7 +580,7 @@ object InstructionDecoder {
         guard
       ).left.map(message => NVDisasm.CandidateFailure(NVDisasm.FailureCategory.Unsupported, message))
     } yield DecodedInstruction(
-      nonnegativeAddress,
+      address,
       operation,
       Some(BigInt(1, bytes.reverse)),
       Some(DecodedInstruction.Machine(
@@ -610,7 +606,7 @@ object InstructionDecoder {
     parts.flatMap { (uniform, index) =>
       if (index == "T") Some(Operand.Predicate(None, uniform, negated))
       else if (index.length == 1 && index.head >= '0' && index.head <= '6')
-        index.toIntOption.flatMap(_.refine[Int where Between[0, 6]].toOption)
+        index.toIntOption.flatMap(_.refine[Int in 0 ~ 6].toOption)
           .map(value => Operand.Predicate(Some(value), uniform, negated))
       else None
     }

@@ -9,6 +9,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
@@ -25,10 +26,12 @@ object HIPCloverleafFluxBenchmark {
       .refined[Int > 0]("iterations must be positive")
   ).mapN(Options(_, _))
 
-  private class FluxMemory(length: Int) extends Memory with BenchmarkAddressSpace {
-    private val arrays = Array.fill(CloverleafFluxFixture.arrays)(Array.ofDim[Byte](Math.multiplyExact(length, 8)))
+  private class FluxMemory(length: Int > 0) extends Memory with BenchmarkAddressSpace {
+    private val arrays = Array.fill(CloverleafFluxFixture.arrays.raw)(Array.ofDim[Byte]((length * 8).raw))
     override protected val regionSizes: Iterable[(AllocationId, Long)] =
-      arrays.indices.map(index => (index.toLong + 1L).unsafe[AllocationId] -> arrays(index).length.toLong)
+      Vec.indices(CloverleafFluxFixture.arrays).map(index =>
+        AllocationId((1L: Long > 0) + index.toLong) -> arrays(index.raw).length.toLong
+      )
 
     private def array(region: AllocationId): Either[Fault, Array[Byte]] =
       if (region.toLong >= 1L && region.toLong <= arrays.length) Right(arrays(region.toLong.toInt - 1))
@@ -64,7 +67,7 @@ object HIPCloverleafFluxBenchmark {
     override def readValue(
         region: AllocationId,
         offset: Long >= 0,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Long] =
       array(region).flatMap { source =>
         Either.cond(
@@ -78,7 +81,7 @@ object HIPCloverleafFluxBenchmark {
         region: AllocationId,
         offset: Long >= 0,
         value: Long,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Unit] =
       array(region).flatMap { destination =>
         if (!ByteRange.contains(destination.length, offset.raw, size.raw.toLong))
@@ -113,7 +116,7 @@ object HIPCloverleafFluxBenchmark {
     if (manifest.metadata.argumentBlockSize.raw != kernargSize || kernargSize < explicitArgumentBytes)
       throw IllegalArgumentException("HIP CloverLeaf kernarg layout differs from its code-object metadata")
     val hidden = Array.ofDim[Byte](kernargSize - explicitArgumentBytes)
-    def write(name: String, value: Long, width: Int where Between[0, 8]): Unit = {
+    def write(name: String, value: Long, width: Int in 0 ~ 8): Unit = {
       val field = manifest.hiddenArguments.find(_.valueKind == name)
         .getOrElse(throw IllegalArgumentException(s"missing HIP kernarg field $name"))
       val offset = field.offset.raw - explicitArgumentBytes
@@ -135,12 +138,12 @@ object HIPCloverleafFluxBenchmark {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def run(arguments: Array[String]): Unit = {
     val parsed = BenchmarkArguments.parse(name, arguments.toSeq, options)
-    val length = CloverleafFluxFixture.length(parsed.cells.raw)
+    val length = CloverleafFluxFixture.length(parsed.cells)
     val memory = FluxMemory(length)
     var array  = 0
     while (array < CloverleafFluxFixture.inputs) {
       var index = 0
-      while (index < length) {
+      while (index < length.raw) {
         memory.put(array, index, CloverleafFluxFixture.value(array, index))
         index += 1
       }
@@ -152,16 +155,16 @@ object HIPCloverleafFluxBenchmark {
       kernel     <- codeObject.kernel("clover_flux")
       compiled   <- VMCompiler.compile(kernel).left.map(error => CodeObjectError.Invalid(error.message))
     } yield compiled).fold(error => throw IllegalArgumentException(error.message), identity)
-    val groups = ((parsed.cells.raw.toLong + 63L) / 64L).toInt.unsafe[Int > 0]
+    val groups = parsed.cells.ceilDiv(64)
     val hidden = hiddenArguments(image, prepared.source.kernargSize, parsed.cells.raw, groups.raw)
     val task   = KernelTask.validated(
       "clover_flux",
       Dimensions(64, 1, 1),
       Dimensions(groups, 1, 1),
-      Vec.from((1L to 8L).map(id => KernelTask.Argument.Memory(id.unsafe[AllocationId], 0L))) ++ Vec(
+      Vec.range[1, 9].map(id => KernelTask.Argument.Memory(AllocationId(id.toLong), 0L)) ++ Vec(
         KernelTask.Argument.Scalar(LittleEndian.toVec(parsed.cells.raw.toLong, 4)),
         KernelTask.Argument.Scalar(LittleEndian.toVec(
-          CloverleafFluxFixture.rowStride.toLong,
+          CloverleafFluxFixture.rowStride.toLong.raw,
           4
         )),
         KernelTask.Argument.Scalar(LittleEndian.toVec(

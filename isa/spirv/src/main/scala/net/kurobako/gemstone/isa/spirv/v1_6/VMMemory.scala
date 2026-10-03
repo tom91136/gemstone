@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import VMIR.*
 import cats.syntax.all.*
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.binary.*
@@ -24,8 +25,6 @@ private object VMMemory {
   class InternalMemory(val bytes: Array[Byte]) {
     val lock: ReentrantLock = ReentrantLock()
   }
-
-  case class MatrixLayout(stride: Int, rowMajor: Boolean)
 
   case class Pointer(
       region: Region,
@@ -98,7 +97,7 @@ private object VMMemory {
 
     private val writes                   = mutable.HashMap.empty[AllocationId, mutable.LongMap[DirtyPage]]
     private val externalVirtualAddresses = mutable.HashMap.empty[AllocationId, Long]
-    private val internalVirtualAddresses = java.util.IdentityHashMap[Array[Byte], java.lang.Long]()
+    private val internalVirtualAddresses = java.util.IdentityHashMap[Array[Byte], Long]()
     private val virtualPointers          = mutable.LongMap.empty[Pointer]
     private val exceptionalAddresses     = mutable.HashMap.empty[(Region, Long), Long]
     private val exceptionalPointers      = mutable.LongMap.empty[Pointer]
@@ -145,8 +144,8 @@ private object VMMemory {
       case None => DirtyPage()
     }
 
-    /** IdentityHashMap uses null for a missing Java entry; confine it to this interop pattern. */
-    @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.return"))
+    /** Virtual allocations have nonzero bases; zero represents an absent identity-map entry. */
+    @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
     def pointerInteger(pointer: Pointer): Either[Fault, Long] = {
       (memory, pointer.region) match {
         case (addresses: AddressSpace, Region.External(id)) if pointer.offset >= 0 =>
@@ -156,12 +155,12 @@ private object VMMemory {
       val base = pointer.region match {
         case Region.External(id)     => externalVirtualAddresses.getOrElseUpdate(id, allocateVirtualAddress(pointer))
         case Region.Internal(memory) =>
-          internalVirtualAddresses.get(memory.bytes) match {
-            case null =>
+          internalVirtualAddresses.getOrDefault(memory.bytes, 0L) match {
+            case 0L =>
               val allocated = allocateVirtualAddress(pointer)
               internalVirtualAddresses.put(memory.bytes, allocated)
               allocated
-            case existing => existing.longValue()
+            case existing => existing
           }
         case Region.Absolute(address) => return Right(address.offset(pointer.offset).raw)
         case Region.Opaque(bits)      =>
@@ -375,11 +374,11 @@ private object VMMemory {
         case region @ (Region.Null | Region.Opaque(_)) => Left(regionFailure(region, "read through"))
       }
 
-    def readScalar(pointer: Pointer, size: Int where Between[1, 8]): Memory.ReadResult[Long] =
+    def readScalar(pointer: Pointer, size: Int in 1 ~ 8): Memory.ReadResult[Long] =
       if (outsideBounds(pointer, size.raw)) Right(0L)
       else readScalarInBounds(pointer, size)
 
-    private def readScalarInBounds(pointer: Pointer, size: Int where Between[1, 8]): Memory.ReadResult[Long] = {
+    private def readScalarInBounds(pointer: Pointer, size: Int in 1 ~ 8): Memory.ReadResult[Long] = {
       val relocation =
         if (size.raw != 8) None
         else
@@ -400,7 +399,7 @@ private object VMMemory {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private def readExternalScalar(
         pointer: Pointer,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Memory.ReadResult[Long] = pointer.region match {
       case Region.Internal(internal) =>
         checkedRange(internal.bytes.length, pointer.offset, size.raw)
@@ -480,7 +479,7 @@ private object VMMemory {
           ))
       }
 
-    def writeScalar(pointer: Pointer, value: Long, size: Int where Between[1, 8]): Either[Fault, Unit] =
+    def writeScalar(pointer: Pointer, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
       if (suppressed(pointer) || outsideBounds(pointer, size.raw)) Right(())
       else pointer.region match {
         case Region.Internal(internal) =>
@@ -544,7 +543,7 @@ private object VMMemory {
         Right(())
       }
 
-    def atomicReadScalar(pointer: Pointer, size: Int where Between[1, 8]): Either[Fault, Long] =
+    def atomicReadScalar(pointer: Pointer, size: Int in 1 ~ 8): Either[Fault, Long] =
       if (outsideBounds(pointer, size.raw)) Right(0L)
       else pointer.region match {
         case Region.Internal(internal) => internal.lock.withLock(memory.awaitRead(readExternalScalar(pointer, size)))
@@ -571,13 +570,13 @@ private object VMMemory {
     def atomicWriteScalar(
         pointer: Pointer,
         value: Long,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Unit] =
       atomicModifyScalar(pointer, size)(_ => value).map(_ => ())
 
     def atomicModifyScalar(
         pointer: Pointer,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     )(update: Long => Long): Either[Fault, Long] =
       if (suppressed(pointer) || outsideBounds(pointer, size.raw)) Right(0L)
       else pointer.region match {
@@ -651,7 +650,7 @@ private object VMMemory {
         size: Int
     ): Either[Fault, Int] =
       ByteRange
-        .start(length, offset, size)
+        .start(length, offset, size).map(_.raw)
         .toRight(
           Fault.InvalidTask(s"internal byte range $offset + $size exceeds $length")
         )

@@ -13,9 +13,9 @@ import net.kurobako.gemstone.vm.*
 class Hsetp2DualOutputSuite extends munit.FunSuite {
   {
     def fixtureModule(sm: Int): Cubin.Module =
-      SASSFixture.module(sm, Vec(SASSFixture.Kernel("hsetp2_two", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 14)))
+      SASSFixture.module(sm, Vec(SASSFixture.Kernel("hsetp2_two", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 14)))
 
-    val comparisonCases = Vec(
+    val comparisonCases = Vec.nonEmpty(
       (0x38003c00, 0x3c003800), // low true, high false
       (0x3c003800, 0x38003c00), // low false, high true
       (0x00007e01, 0x3c000000), // low NaN gives unordered GEU true
@@ -69,9 +69,9 @@ class Hsetp2DualOutputSuite extends munit.FunSuite {
 
         locally {
           val service     = SASSFixture.Execution()
-          val output      = service.allocate((64 * 4L).unsafe[Long > 0])
-          val allocations = inputs.map(bytes =>
-            service.allocate(bytes.size.toLong.unsafe[Long > 0])
+          val output      = service.allocate(256L)
+          val allocations = inputs.map(_ =>
+            service.allocate(comparisonCases.positiveSize.toLong.widen[Long > 0] * 4L)
           )
           service.write(
             output,
@@ -85,7 +85,7 @@ class Hsetp2DualOutputSuite extends munit.FunSuite {
             .fold(error => fail(error.message), identity)
           val task = SASSFixture.task(
             "hsetp2_two": NonEmpty[String],
-            LaunchGeometry.Dimensions(comparisonCases.size.unsafe[Int > 0], 1, 1),
+            LaunchGeometry.Dimensions(comparisonCases.positiveSize, 1, 1),
             LaunchGeometry.Dimensions.One,
             Vec(
               KernelTask.Argument.Memory(output, 0L),
@@ -94,7 +94,7 @@ class Hsetp2DualOutputSuite extends munit.FunSuite {
             )
           )
           service.run(program, task).fold(error => fail(error.message), identity)
-          val actual = service.readWords(output, 64.unsafe[Int >= 0])
+          val actual = service.readWords(output, 64)
           Right(actual)
         }
       }

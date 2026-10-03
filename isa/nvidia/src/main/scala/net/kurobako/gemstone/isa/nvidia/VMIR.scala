@@ -12,18 +12,17 @@ object VMIR {
   enum ConvergenceAction { case Setup, Synchronize, Break }
 
   extension (width: Int where (Between[8, 64] & MultipleOf[8])) {
-    def byteCount: Int where Between[1, 8] = (width.raw / 8).unsafe[Int where Between[1, 8]]
+    def byteCount: Int in 1 ~ 8 = (width.raw / 8).unsafe[Int in 1 ~ 8]
   }
   extension (width: Int in (16, 32)) {
-    def combined: Int where (Between[8, 64] & MultipleOf[8]) = (width.raw * 2).unsafe[Int where
-      (Between[8, 64] & MultipleOf[8])]
+    def combined: Int in (32, 64) = (width.raw * 2).unsafe[Int in (32, 64)]
   }
 
   enum Value {
     case Register(name: NonEmpty[String])
-    case RegisterSlot(index: Int)
+    case RegisterSlot(index: VMRegisterFile.Slot)
     case Predicate(name: NonEmpty[String])
-    case PredicateSlot(index: Int)
+    case PredicateSlot(index: VMPredicateFile.Slot)
     case Function(name: NonEmpty[String])
     case Symbol(name: NonEmpty[String])
     case Immediate(value: Long)
@@ -733,7 +732,7 @@ object VMIR {
   case class KernelParameter(name: NonEmpty[String], widthBytes: Int > 0, pointer: Boolean = false)
   object Argument {
     def fromLong(value: Long): Argument =
-      Argument(LittleEndian.toVec(value, 8).unsafe)
+      Argument(LittleEndian.toNonEmptyVec(value, 8))
   }
 
   case class DeviceFunction(
@@ -755,7 +754,7 @@ object VMIR {
       functions: Map[NonEmpty[String], DeviceFunction] = Map.empty,
       sharedSymbols: Map[NonEmpty[String], Long] = Map.empty,
       globalSymbols: Map[NonEmpty[String], GuestAddress] = Map.empty,
-      registerChunkCount: Int = 96,
+      registerChunkCount: VMRegisterFile.ChunkCount = 96,
       isaName: NonEmpty[String] = "PTX"
   )
 

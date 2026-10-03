@@ -33,7 +33,8 @@ object ExecutionProtocol {
   given Codec[KernelTask.PointerRelocation]    = Codec.derived
 
   case class HostMemoryRange(address: GuestAddress, size: Int > 0) derives Codec
-  case class HostMemoryBytes(address: GuestAddress, bytes: Vec[Byte], atomicWidth: Int = 0) derives Codec
+  case class HostMemoryBytes(address: GuestAddress, bytes: Vec[Byte], atomicWidth: Int in (0, 1, 2, 4, 8) = 0)
+      derives Codec
   enum HostMemoryAtomicOperation derives Codec {
     case CompareExchange
     case Load
@@ -41,7 +42,7 @@ object ExecutionProtocol {
   }
   case class HostMemoryAtomic(
       address: GuestAddress,
-      size: Int,
+      size: Int in (1, 2, 4, 8),
       expected: Long,
       desired: Long,
       operation: HostMemoryAtomicOperation = HostMemoryAtomicOperation.CompareExchange

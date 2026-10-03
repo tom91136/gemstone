@@ -46,6 +46,33 @@ class JournalSuite extends munit.FunSuite {
       val _ = intercept[IOException](Journal.Writer(file, Journal.Header(schema)))
     }
   }
+  test("client identities survive map storage and distinguish equal owners") {
+    case class Owner(value: Int)
+    temporary { file =>
+      val first = Owner(1)
+      val equal = Owner(1)
+      capture(file) { writer =>
+        writer.clientClosed(Owner(2))
+        for (owner <- List(first, first, equal)) {
+          val connection = writer.connection(owner)
+          connection.request(execution())
+          connection.response(response())
+          connection.close()
+        }
+        writer.clientClosed(first)
+        writer.clientClosed(equal)
+      }
+      Using.resource(Journal.open(file)) { reader =>
+        assert(reader.summary.replayable)
+        assertEquals(
+          reader.events.filter(_.kind == Journal.Kind.Request).map(_.client).toList,
+          List(Journal.RecordedClientId(1L), Journal.RecordedClientId(1L), Journal.RecordedClientId(2L))
+        )
+        assertEquals(reader.events.count(_.kind == Journal.Kind.ClientClose), 2)
+      }
+    }
+  }
+
   test("execution profile survives the archive and reaches the fresh endpoint factory") {
     temporary { file =>
       val profile =

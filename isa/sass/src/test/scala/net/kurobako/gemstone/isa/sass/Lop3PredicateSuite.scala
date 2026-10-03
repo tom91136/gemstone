@@ -4,6 +4,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.memory.*
@@ -12,13 +13,13 @@ import net.kurobako.gemstone.vm.*
 
 class Lop3PredicateSuite extends munit.FunSuite {
   private def fixtureModule(sm: Int): Cubin.Module =
-    SASSFixture.module(sm, Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 8), registers = 14)))
+    SASSFixture.module(sm, Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 8)), registers = 14)))
 
-  private val rows = for {
-    a <- Vec(0L, 1L, 0x80000000L, 0xffffffffL)
-    b <- Vec(0L, 1L, 0x80000000L, 0xffffffffL)
-    q <- Vec(0L, 0xffffffffL)
-  } yield Vec(a, b, 0x12345678L, q)
+  private val rows = Vec.nonEmpty(0L, 1L, 0x80000000L, 0xffffffffL).flatMapNonEmpty { a =>
+    Vec.nonEmpty(0L, 1L, 0x80000000L, 0xffffffffL).flatMapNonEmpty { b =>
+      Vec.nonEmpty(0L, 0xffffffffL).mapNonEmpty(q => Vec(a, b, 0x12345678L, q))
+    }
+  }
   private def bytes(values: Vec[Long]): Vec[Byte] =
     Vec.from(values).flatMap(LittleEndian.toVec(_, 4))
   private val expected = rows.flatMap { row =>
@@ -56,20 +57,20 @@ class Lop3PredicateSuite extends munit.FunSuite {
     val source = SASSFixture(module, kernel, functions)
     locally {
       val service = SASSFixture.Execution()
-      val size    = rows.size * 16
-      val input   = service.allocate(size.toLong.unsafe[Long > 0])
-      val output  = service.allocate(size.toLong.unsafe[Long > 0])
+      val size    = rows.positiveSize * 16
+      val input   = service.allocate(size.toLong)
+      val output  = service.allocate(size.toLong)
       assert(service.write(input, 0L, bytes(rows.flatten)).isRight)
       val program = service.compile(source)
         .fold(e => fail(e.message), identity)
       val task = SASSFixture.task(
-        kernel.name.unsafe[NonEmpty[String]],
-        LaunchGeometry.Dimensions(rows.size.unsafe[Int > 0], 1, 1),
+        kernel.name,
+        LaunchGeometry.Dimensions(rows.positiveSize, 1, 1),
         LaunchGeometry.Dimensions.One,
         Vec(output, input).map(id => KernelTask.Argument.Memory(id, 0L))
       )
       service.run(program, task).fold(e => fail(e.message), identity)
-      assertEquals(service.read(output, 0L, size.unsafe[Int >= 0]), Right(bytes(expected)))
+      assertEquals(service.read(output, 0L, size), Right(bytes(expected)))
     }
   }
 
@@ -82,7 +83,7 @@ class Lop3PredicateSuite extends munit.FunSuite {
       i.mnemonic.raw == "LOP3" && i.modifiers == Vec(Instruction.Modifier.`LUT`) &&
         i.operands.head == SASSFixture.operand("P0")
     ).get
-    def rejected(sm: Int, opcode: String, input: String): Boolean = {
+    def rejected(sm: Int >= 35, opcode: String, input: String): Boolean = {
       val parts   = opcode.split('.').toVec
       val changed = lop.rewrite(
         mnemonic = parts.head.refine[NonEmpty[String]].fold(fail(_), identity),

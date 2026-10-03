@@ -16,10 +16,10 @@ class BinarySASSExecutionSuite extends munit.FunSuite {
     val image   = CubinImageSuite.image.clone()
     val module  = Cubin.decode(image).fold(fail(_), identity(_))
     val kernel  = module.kernels.find(_.name == "copy_add").getOrElse(fail("missing copy_add"))
-    val section = elf.sections64(image).fold(message => fail(message.raw), identity(_))(kernel.section)
-    java.util.Arrays.fill(image, section.offset, section.offset + 16, 0.toByte)
+    val section = elf.sections64(image).fold(message => fail(message.raw), identity(_))(kernel.section.raw)
+    java.util.Arrays.fill(image, section.offset.raw, (section.offset + 16).raw, 0.toByte)
     Using.resource(ExecutionSession(Backends.default().programs)) { service =>
-      val memory  = service.registerAllocation(128L.unsafe[Long > 0], AllocationKind.Shared).toOption.get
+      val memory  = service.registerAllocation(128L, AllocationKind.Shared).toOption.get
       val program = service.load(CubinBackend.encoding, Vec.from(image)).fold(error => fail(error.message), identity)
       val task    = KernelTask.validated(
         "copy_add": NonEmpty[String],
@@ -43,8 +43,8 @@ class BinarySASSExecutionSuite extends munit.FunSuite {
     def integers(values: Vec[Int]): Vec[Byte] =
       Vec.from(values).flatMap(value => LittleEndian.toVec(value.toLong, 4))
     Using.resource(ExecutionSession(Backends.default().programs)) { service =>
-      val input  = service.registerAllocation(128L.unsafe[Long > 0], AllocationKind.Shared).toOption.get
-      val output = service.registerAllocation(128L.unsafe[Long > 0], AllocationKind.Shared).toOption.get
+      val input  = service.registerAllocation(128L, AllocationKind.Shared).toOption.get
+      val output = service.registerAllocation(128L, AllocationKind.Shared).toOption.get
       assert(service.write(input, 0L, integers(values)).isRight)
       assert(service.write(output, 0L, integers(Vec.fill(32)(0xdeadbeef))).isRight)
       val program = service.load(CubinBackend.encoding, Vec.from(bytes)).fold(error => fail(error.message), identity)
@@ -56,8 +56,8 @@ class BinarySASSExecutionSuite extends munit.FunSuite {
       ).toOption.get
       val completion = service.launch(program, task).fold(error => fail(error.message), identity)
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
-      assertEquals(service.read(output, 0L, 128.unsafe[Int >= 0]), Right(integers(values.map(_ + 1))))
-      assertEquals(service.read(input, 0L, 128.unsafe[Int >= 0]), Right(integers(values)))
+      assertEquals(service.read(output, 0L, 128), Right(integers(values.map(_ + 1))))
+      assertEquals(service.read(input, 0L, 128), Right(integers(values)))
     }
   }
 

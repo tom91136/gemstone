@@ -24,19 +24,19 @@ class VMMemoryAccessSuite extends munit.FunSuite {
       backing.writeInt8(address, value)
     override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
       backing.writeInt32(address, value)
-    override def readLittleEndian(address: GuestAddress, size: Int where Between[1, 8]): Either[MemoryError, Long] =
+    override def readLittleEndian(address: GuestAddress, size: Int in 1 ~ 8): Either[MemoryError, Long] =
       backing.readLittleEndian(address, size)
     override def writeLittleEndian(
         address: GuestAddress,
         value: Long,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[MemoryError, Unit] = {
       scalarWrites += size.raw
       backing.writeLittleEndian(address, value, size)
     }
     override def readSystemLittleEndian(
         address: GuestAddress,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[MemoryError, Long] = {
       systemReads += size.raw
       backing.readSystemLittleEndian(address, size)
@@ -44,7 +44,7 @@ class VMMemoryAccessSuite extends munit.FunSuite {
     override def writeSystemLittleEndian(
         address: GuestAddress,
         value: Long,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[MemoryError, Unit] = {
       systemWrites += size.raw
       backing.writeSystemLittleEndian(address, value, size)

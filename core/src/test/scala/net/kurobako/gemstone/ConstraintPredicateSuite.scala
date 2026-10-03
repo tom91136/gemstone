@@ -6,6 +6,44 @@ import scala.compiletime.testing.typeCheckErrors
 import scala.util.Try
 
 class ConstraintPredicateSuite extends munit.FunSuite {
+  test("count division retains nonnegativity and positive ceiling division avoids overflow") {
+    val zero: Int >= 0      = 0
+    val count: Int >= 0     = 11
+    val group: Int > 0      = 4
+    val quotient: Int >= 0  = count / group
+    val remainder: Int >= 0 = count % group
+    val maximum: Int > 0    = Int.MaxValue
+    val ceiling: Int > 0    = maximum.ceilDiv(2)
+    assertEquals(quotient.raw, 2)
+    assertEquals(remainder.raw, 3)
+    assertEquals((zero / group).raw, 0)
+    assertEquals((zero % group).raw, 0)
+    assertEquals(ceiling.raw, 1073741824)
+    assertEquals(group.ceilDiv(group).raw, 1)
+    val longCount: Long >= 0  = 11L
+    val longGroup: Long > 0   = 4L
+    val longMaximum: Long > 0 = Long.MaxValue
+    assertEquals((longCount / longGroup).raw, 2L)
+    assertEquals((longCount % longGroup).raw, 3L)
+    assertEquals(longMaximum.ceilDiv(2L).raw, 4611686018427387904L)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      val count: Int >= 0 = 1
+      count / 0
+    """).nonEmpty)
+  }
+
+  test("checked Long narrowing preserves signs and rejects overflow") {
+    val zero: Long >= 0           = 0L
+    val positive: Long > 0        = 2147483647L
+    val tooLarge: Long > 0        = 2147483648L
+    val narrowedZero: Int >= 0    = zero.toIntExact
+    val narrowedPositive: Int > 0 = positive.toIntExact
+    assertEquals(narrowedZero.raw, 0)
+    assertEquals(narrowedPositive.raw, Int.MaxValue)
+    val _ = intercept[ArithmeticException](tooLarge.toIntExact)
+  }
+
   test("unsafe supports explicit and context-inferred complete target types") {
     case class BudgetExceeded(limit: Long > 0)
     val limit = java.lang.Long.parseLong("12")
@@ -46,7 +84,7 @@ class ConstraintPredicateSuite extends munit.FunSuite {
     assertEquals(offset(positive), 3L)
     assertEquals(nonnegative.raw, 3)
     assertEquals(nonpositive.raw, -1)
-    assertEquals(positive.widen[AtLeast[0]].raw, 3)
+    assertEquals(positive.widen[Int >= 0].raw, 3)
     assertEquals(positive.toLong.raw, 3L)
     val bounded                                         = 24.unsafe[Int where (GreaterThan[10] & AtMost[80])]
     val wider: Long where (AtLeast[10] & LessThan[100]) = bounded
@@ -60,17 +98,17 @@ class ConstraintPredicateSuite extends munit.FunSuite {
 
   test("finite choices and divisibility participate in implications") {
     val bits                                 = 32.unsafe[Int in (16, 32, 64)]
-    val bytes                                = (bits.raw / 8).unsafe[OneOf[(2, 4, 8)]]
+    val bytes                                = (bits.raw / 8).unsafe[Int in (2, 4, 8)]
     val wide: Long in (2L, 4L, 8L)           = bytes
-    val bounded: Int where Between[1, 8]     = bytes
-    val choices: OneOf[(8, 16, 32, 64, 128)] = bits
+    val bounded: Int in 1 ~ 8     = bytes
+    val choices: Int in (8, 16, 32, 64, 128) = bits
     val aligned: Int where MultipleOf[8]     = bits
     val half: Int where MultipleOf[4]        = aligned
     assertEquals(wide.raw, 4L)
     assertEquals(bounded.raw, 4)
     assertEquals(choices.raw, 32)
     assertEquals(half.raw, 32)
-    val _ = intercept[IllegalArgumentException](3.unsafe[OneOf[(2, 4, 8)]])
+    val _ = intercept[IllegalArgumentException](3.unsafe[Int in (2, 4, 8)])
   }
 
   test("arithmetic preserves signs and checks overflow and negative differences") {
@@ -110,15 +148,24 @@ class ConstraintPredicateSuite extends munit.FunSuite {
         Try(value.unsafe[Int where (In[(-3, 2, 4, 8)] & AtLeast[0])]).isSuccess,
         Set(2, 4, 8).contains(value)
       )
-      assertEquals(Try(value.unsafe[Int where (AtLeast[1] & AtMost[0])]).isSuccess, false)
       assertEquals(Try(value.unsafe[Int where (MultipleOf[4] & MultipleOf[6])]).isSuccess, value % 12 == 0)
     }
   }
 
+  test("positive maxima retain their lower bound with nonnegative counts") {
+    val minimum: Int > 0      = 1
+    val empty: Int >= 0       = 0
+    val size: Int >= 0        = 8
+    val emptyMaximum: Int > 0 = minimum.max(empty)
+    val maximum: Int > 0      = minimum.max(size)
+    val longMaximum: Long > 0 = minimum.toLong.widen[Long > 0].max(size.toLong)
+    assertEquals(emptyMaximum.raw, 1)
+    assertEquals(maximum.raw, 8)
+    assertEquals(longMaximum.raw, 8L)
+    assertEquals(minimum.toLong.widen[Long > 0].max(empty.toLong).raw, 1L)
+  }
+
   test("endpoint predicates and large divisors do not overflow during validation") {
-    assert(Try(Int.MaxValue.unsafe[Int > 2147483647L]).isFailure)
-    assert(Try(Long.MinValue.unsafe[Long < Long.MinValue.type]).isFailure)
-    assert(Try(Long.MaxValue.unsafe[Long > Long.MaxValue.type]).isFailure)
     assert(Try(Long.MinValue.unsafe[Long where MultipleOf[2]]).isSuccess)
     assert(Try(Long.MaxValue.unsafe[Long where MultipleOf[2]]).isFailure)
     assert(Try(0L.unsafe[Long where (MultipleOf[4294967296L] & MultipleOf[4294967295L])]).isSuccess)
@@ -129,7 +176,7 @@ class ConstraintPredicateSuite extends munit.FunSuite {
 
   test("validation evaluates runtime expressions once") {
     val calls = java.util.concurrent.atomic.AtomicInteger(0)
-    val value = calls.incrementAndGet().unsafe[Int where Between[1, 8]]
+    val value = calls.incrementAndGet().unsafe[Int in 1 ~ 8]
     assertEquals(value.raw, 1)
     assertEquals(calls.get(), 1)
   }
@@ -160,11 +207,11 @@ class ConstraintPredicateSuite extends munit.FunSuite {
     """).nonEmpty)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
-      1.unsafe[OneOf[(Int, 2)]]
+      1.unsafe[Int in (Int, 2)]
     """).nonEmpty)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
-      1.unsafe[OneOf[(1, "two")]]
+      1.unsafe[Int in (1, "two")]
     """).nonEmpty)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*

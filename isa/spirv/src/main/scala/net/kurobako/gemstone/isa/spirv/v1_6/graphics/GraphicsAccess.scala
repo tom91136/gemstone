@@ -4,7 +4,9 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -56,54 +58,54 @@ private class GraphicsAccess(val backing: Memory, val control: TaskControl) exte
   private def localRange(
       region: AllocationId,
       offset: Long >= 0,
-      size: Int
-  ): Either[Fault, (Array[Byte], Int)] = {
+      size: Int >= 0
+  ): Either[Fault, (Array[Byte], Int >= 0)] = {
     val slot = index(region)
     if (slot < 0 || slot >= local.size) Left(Fault.Memory("unknown graphics scratch region"))
-    else if (offset.raw > local(slot).length.toLong || size < 0 || size.toLong > local(slot).length.toLong - offset.raw)
-      Left(Fault.Memory("graphics scratch access exceeds allocation"))
-    else Right(local(slot) -> offset.raw.toInt)
+    else ByteRange.start(local(slot).length, offset.raw, size.raw)
+      .toRight(Fault.Memory("graphics scratch access exceeds allocation"))
+      .map(start => local(slot) -> start)
   }
   override def readDeferred(region: AllocationId, offset: Long >= 0, size: Int >= 0): Memory.ReadResult[Vec[Byte]] =
     if (index(region) < 0) backing.readDeferred(region, offset, size) else read(region, offset, size)
   override def readValueDeferred(
       region: AllocationId,
       offset: Long >= 0,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Memory.ReadResult[Long] =
     if (index(region) < 0) backing.readValueDeferred(region, offset, size) else readValue(region, offset, size)
 
   override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
     if (index(region) < 0) backing.read(region, offset, size)
-    else localRange(region, offset, size.raw).map((bytes, start) => Vec.from(bytes.slice(start, start + size.raw)))
+    else localRange(region, offset, size).map((bytes, start) => Vec.from(bytes.slice(start.raw, (start + size).raw)))
   override def write(region: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
     if (index(region) < 0) backing.write(region, offset, bytes)
-    else localRange(region, offset, bytes.size).map { (target, start) =>
-      val _ = bytes.copyToArray(target, start)
+    else localRange(region, offset, bytes.nonNegativeSize).map { (target, start) =>
+      val _ = bytes.copyToArray(target, start.raw)
     }
   override def readValue(
       region: AllocationId,
       offset: Long >= 0,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[Fault, Long] =
     if (index(region) < 0) backing.readValue(region, offset, size)
-    else localRange(region, offset, size.raw).map((bytes, start) =>
-      LittleEndian.decode(bytes, start, size.scalarByteWidth)
+    else localRange(region, offset, size).map((bytes, start) =>
+      LittleEndian.decode(bytes, start.raw, size.scalarByteWidth)
     )
   override def writeValue(
       region: AllocationId,
       offset: Long >= 0,
       value: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[Fault, Unit] =
     if (index(region) < 0) backing.writeValue(region, offset, value, size)
-    else localRange(region, offset, size.raw).map((bytes, start) =>
-      LittleEndian.write(value, bytes, start, size.scalarByteWidth)
+    else localRange(region, offset, size).map((bytes, start) =>
+      LittleEndian.write(value, bytes, start.raw, size.scalarByteWidth)
     )
   override def atomicModifyValue(
       region: AllocationId,
       offset: Long >= 0,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   )(update: Long => Long): Either[Fault, Long] =
     if (index(region) < 0) backing.atomicModifyValue(region, offset, size)(update)
     else Left(Fault.Unsupported("atomic access to shader interface records"))
@@ -119,15 +121,15 @@ private class GraphicsAccess(val backing: Memory, val control: TaskControl) exte
     if (isScratch(address)) super.read(address, size) else addressSpace.read(address, size)
   override def readDeferred(address: GuestAddress, size: Int >= 0): Memory.ReadResult[Vec[Byte]] =
     if (isScratch(address)) super.readDeferred(address, size) else addressSpace.readDeferred(address, size)
-  override def readValue(address: GuestAddress, size: Int where Between[1, 8]): Either[Fault, Long] =
+  override def readValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
     if (isScratch(address)) super.readValue(address, size) else addressSpace.readValue(address, size)
   override def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
     if (isScratch(address)) super.write(address, bytes) else addressSpace.write(address, bytes)
-  override def writeValue(address: GuestAddress, value: Long, size: Int where Between[1, 8]): Either[Fault, Unit] =
+  override def writeValue(address: GuestAddress, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
     if (isScratch(address)) super.writeValue(address, value, size) else addressSpace.writeValue(address, value, size)
   override def atomicModifyValue(
       address: GuestAddress,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   )(update: Long => Long): Either[Fault, Long] =
     if (isScratch(address)) super.atomicModifyValue(address, size)(update)
     else addressSpace.atomicModifyValue(address, size)(update)
@@ -140,7 +142,7 @@ private class GraphicsAccess(val backing: Memory, val control: TaskControl) exte
       else {
         val region = (Long.MaxValue - slot).unsafe[AllocationId]
         val offset = (relative % ScratchStride).unsafe[Long >= 0]
-        localRange(region, offset, size.raw).map(_ => AddressSpace.Location.Within(region, offset))
+        localRange(region, offset, size).map(_ => AddressSpace.Location.Within(region, offset))
       }
     }
   override def prepareReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] =
@@ -153,36 +155,34 @@ private class GraphicsAccess(val backing: Memory, val control: TaskControl) exte
 
   def prepare(ranges: IterableOnce[GraphicsRange]): Unit = {
     val reads = Vec.from(ranges).distinct.map { range =>
-      GraphicsAccess.get(address(range.allocation, range.offset)) -> Math.toIntExact(range.size.raw).unsafe[Int >= 0]
+      GraphicsAccess.get(address(range.allocation, range.offset)) -> range.size.toIntExact.widen[Int >= 0]
     }
     GraphicsAccess.get(prepareReads(reads))
   }
 
-  private def checked(range: GraphicsRange, offset: Long, length: Int): Long >= 0 = {
+  private def checked(range: GraphicsRange, offset: Long, length: Int >= 0): Long >= 0 = {
     require(
-      offset >= 0 && length >= 0 && offset <= range.size.raw && length.toLong <= range.size.raw - offset,
+      offset >= 0 && offset <= range.size.raw && length.toLong.raw <= range.size.raw - offset,
       "graphics access exceeds its view"
     )
-    Math.addExact(range.offset.raw, offset).unsafe[Long >= 0]
+    range.offset + offset.unsafe[Long >= 0]
   }
-  def bytes(range: GraphicsRange, offset: Long, length: Int): Array[Byte] =
-    GraphicsAccess.get(read(
-      range.allocation,
-      checked(range, offset, length),
-      length.unsafe[Int >= 0]
-    )).toArray
+  def bytes(range: GraphicsRange, offset: Long, length: Int): Array[Byte] = {
+    val size = length.unsafe[Int >= 0]
+    GraphicsAccess.get(read(range.allocation, checked(range, offset, size), size)).toArray
+  }
   def store(range: GraphicsRange, offset: Long, bytes: Array[Byte]): Unit =
-    GraphicsAccess.get(write(range.allocation, checked(range, offset, bytes.length), Vec.from(bytes)))
-  def word(range: GraphicsRange, offset: Long, width: Int where Between[1, 8]): Long =
+    GraphicsAccess.get(write(range.allocation, checked(range, offset, bytes.length.unsafe[Int >= 0]), Vec.from(bytes)))
+  def word(range: GraphicsRange, offset: Long, width: Int in 1 ~ 8): Long =
     GraphicsAccess.get(readValue(
       range.allocation,
-      checked(range, offset, width.raw),
+      checked(range, offset, width),
       width
     ))
-  def putWord(range: GraphicsRange, offset: Long, width: Int where Between[1, 8], value: Long): Unit =
+  def putWord(range: GraphicsRange, offset: Long, width: Int in 1 ~ 8, value: Long): Unit =
     GraphicsAccess.get(writeValue(
       range.allocation,
-      checked(range, offset, width.raw),
+      checked(range, offset, width),
       value,
       width
     ))

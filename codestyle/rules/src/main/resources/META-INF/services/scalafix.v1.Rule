@@ -21,3 +21,4 @@ fix.GemstoneRequireTailRec
 fix.GemstoneRedundantCollectionConversion
 fix.GemstoneRedundantCaseClassVal
 fix.GemstoneInterpolationBraces
+fix.GemstoneNoBoxedPrimitives

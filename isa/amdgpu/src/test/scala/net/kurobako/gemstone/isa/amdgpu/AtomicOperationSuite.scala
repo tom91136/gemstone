@@ -38,7 +38,7 @@ class AtomicOperationSuite extends munit.FunSuite {
     override def atomicModifyValue(
         id: AllocationId,
         offset: Long >= 0,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     )(update: Long => Long): Either[Fault, Long] = lock.withLock {
       val scalarWidth = size.scalarByteWidth
       if (id == allocation && ByteRange.contains(bytes.length, offset.raw, size.raw)) {
@@ -68,7 +68,7 @@ class AtomicOperationSuite extends munit.FunSuite {
     width <-
       if (op.startsWith("flat") && op != "flatcas" && op != "flatswap" && op != "flatinc") Seq(32) else Seq(32, 64)
     returning <- Seq(false, true)
-    groups    <- Seq(1, 5)
+    groups    <- Vec[Int > 0](1, 5)
     scenario  <- if (op.endsWith("inc")) Seq("below", "equal", "above", "high")
     else if (op.endsWith("cas")) Seq("equal", "different", "same-operands") else Seq("add")
   } test(s"$op width=$width return=$returning groups=$groups scenario=$scenario") {
@@ -100,8 +100,8 @@ class AtomicOperationSuite extends munit.FunSuite {
         KernelTask.Argument.Scalar(LittleEndian.toVec(7, 8))
       )
     ).toOption.get
-    val memory   = Memory(groups, old)
-    val expected = (0 until groups).scanLeft(old) { (previous, _) =>
+    val memory   = Memory(groups.raw, old)
+    val expected = (0 until groups.raw).scanLeft(old) { (previous, _) =>
       if (op == "add" || op == "flatadd") (previous + operand) & mask
       else if (op.endsWith("inc")) { if (java.lang.Long.compareUnsigned(previous, operand) >= 0) 0L else previous + 1 }
       else if (op == "flatswap") operand & mask
@@ -122,9 +122,9 @@ class AtomicOperationSuite extends munit.FunSuite {
       ),
       Right(())
     )
-    val byteWidth: Int where Between[0, 8] = if (width == 64) 8 else 4
+    val byteWidth: Int in 0 ~ 8 = if (width == 64) 8 else 4
     assertEquals(LittleEndian.decode(memory.bytes, 0, byteWidth), expected.last)
-    val result = (0 until groups).map(index =>
+    val result = (0 until groups.raw).map(index =>
       LittleEndian.decode(memory.bytes, 16 + index * 8, 8)
     )
     val returns = expected.dropRight(1).map(value =>

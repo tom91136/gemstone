@@ -128,21 +128,21 @@ object PrintRenderer {
       lane: Int
   ): Either[String, String] = argument match {
     case PrintArgument.Integer(bits, width) =>
-      if (lane >= bits.size || width <= 0 || width > 64) Left("device printf integer argument is invalid")
+      if (lane >= bits.size) Left("device printf integer argument is invalid")
       else {
-        val effectiveWidth: Int where Between[1, 64] =
+        val effectiveWidth: Int in 1 ~ 64 =
           if (lengthSpecifier == "hh") 8
-          else if (lengthSpecifier == "h") 16 else if (lengthSpecifier == "l") 64 else width.unsafe
+          else if (lengthSpecifier == "h") 16 else if (lengthSpecifier == "l") 64 else width
         if (conversion == 'c') formatted(flagsAndSize, 'c', (bits(lane) & 0xff).toInt)
         else if ("diuoxX".indexOf(conversion) >= 0)
           integer(flagsAndSize, conversion, bits(lane), effectiveWidth)
         else Left(s"device printf conversion %$conversion is unsupported")
       }
     case PrintArgument.Floating(bits, width) =>
-      if (lane >= bits.size || (width != 16 && width != 32 && width != 64))
+      if (lane >= bits.size)
         Left("device printf floating argument is invalid")
       else if ("aAeEfFgG".indexOf(conversion) < 0) Left(s"device printf conversion %$conversion is unsupported")
-      else floating(flagsAndSize, conversion, IEEE754.toDouble(bits(lane), width.unsafe[OneOf[(16, 32, 64)]]))
+      else floating(flagsAndSize, conversion, IEEE754.toDouble(bits(lane), width))
     case PrintArgument.Pointer(address) =>
       if (lane != 0 || conversion != 'p') Left(s"device printf conversion %$conversion is unsupported")
       else Right(s"0x${java.lang.Long.toHexString(address)}")
@@ -181,14 +181,15 @@ object PrintRenderer {
       specifier: String,
       conversion: Char,
       bits: Long,
-      width: Int where Between[1, 64]
+      width: Int in 1 ~ 64
   ): Either[String, String] =
     formatOptions(specifier).map { format =>
-      val signed = conversion == 'd' || conversion == 'i'
-      val value  = if (signed) BigInt(Bits.signExtend(bits, width))
-      else BigInt(bits) & ((BigInt(1) << width.raw) - 1)
-      val base      = if (conversion == 'o') 8 else if (conversion == 'x' || conversion == 'X') 16 else 10
-      val digits    = if (format.precision.contains(0) && value == 0) "" else value.abs.toString(base)
+      val signed        = conversion == 'd' || conversion == 'i'
+      val value         = if (signed) Bits.signExtend(bits, width) else Bits.truncate(bits, width)
+      val base          = if (conversion == 'o') 8 else if (conversion == 'x' || conversion == 'X') 16 else 10
+      val magnitudeBits = if (signed && value < 0L) -value else value
+      val digits        = if (format.precision.contains(0) && value == 0L) ""
+      else java.lang.Long.toUnsignedString(magnitudeBits, base)
       val padded    = "0" * math.max(0, format.precision.getOrElse(0) - digits.length) + digits
       val magnitude =
         if (format.flags.contains('#') && conversion == 'o' && !padded.startsWith("0")) "0" + padded else padded
@@ -270,6 +271,8 @@ object PrintRenderer {
       (if (exponent < 0) "" else "+") + exponent.toString
   }
 
+  // Java Formatter's Object varargs require a boxed argument at this boundary.
+  @SuppressWarnings(Array("scalafix:GemstoneNoBoxedPrimitives"))
   private def formatted(specifier: String, conversion: Char, value: Int): Either[String, String] =
     formatValue(specifier, conversion, java.lang.Integer.valueOf(value))
 

@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import VMIR.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
@@ -35,7 +36,7 @@ private object VMShaderInterface {
             g.pointerType
           ).collect { case RuntimeType.Pointer(_, pointee) => pointee }.flatMap(program.layout.runtimeType(_))
         ) match {
-          case Some(RuntimeType.Array(_, count)) => Math.toIntExact(count)
+          case Some(RuntimeType.Array(_, count)) => Math.toIntExact(count.raw)
           case _                                 => 1
         }
       Seq.fill(count)(variable)
@@ -52,17 +53,18 @@ private object VMShaderInterface {
       case Some(_) =>
         val functionId  = program.entryPoints(name)
         val descriptors = argumentVariables(program, name)
-        val parameters  = descriptors.indices.map(index =>
+        val count       = descriptors.nonNegativeSize
+        val parameters  = Vec.indices(count).map(index =>
           KernelMetadata.Parameter(
             8,
-            (index * 8).unsafe[Int >= 0],
+            index * 8,
             KernelMetadata.ParameterKind.Allocation,
             containsPointers = false
           )
         )
         KernelMetadata.validated(
-          (descriptors.size * 8).unsafe[Int >= 0],
-          descriptors.size.unsafe[Int >= 0],
+          count * 8,
+          count,
           Vec.from(parameters),
           requiredWorkGroupSize = program.workGroupSize(functionId),
           workGroupSizeHint = program.workGroupSizeHint(functionId),

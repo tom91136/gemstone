@@ -21,16 +21,16 @@ object CLI {
   private val format = (
     Opts.option[String]("isa", help = "spirv, amdgpu, sass, or ptx (textual)"),
     Opts.option[String]("target", help = "AMDGPU or SASS processor, e.g. gfx1030 or sm_89").orNone,
-    Opts.option[Int]("wave-size", help = "AMDGPU wave size: 32 (default) or 64").orNone
+    Opts.option[Int]("wave-size", help = "AMDGPU wave size: 32 (default) or 64")
+      .mapValidated(_.refine[Int in (32, 64)].leftMap(_ => "--wave-size must be 32 or 64").toValidatedNel).orNone
   ).tupled.mapValidated { (isa, target, waveSize) =>
-    if (waveSize.exists(value => value != 32 && value != 64)) "--wave-size must be 32 or 64".invalidNel
-    else if (waveSize.nonEmpty && isa != "amdgpu") "--wave-size is only used with --isa amdgpu".invalidNel
+    if (waveSize.nonEmpty && isa != "amdgpu") "--wave-size is only used with --isa amdgpu".invalidNel
     else (isa, target) match {
       case ("spirv", None)         => Assembly.Format.SPIRV.validNel
       case ("ptx", None)           => Assembly.Format.PTX.validNel
       case ("amdgpu", Some(value)) =>
         Target.either(value).leftMap(_.toString).map(target =>
-          Assembly.Format.AMDGPU(target, waveSize.getOrElse(32).unsafe[Int in (32, 64)])
+          Assembly.Format.AMDGPU(target, waveSize.getOrElse(32))
         ).toValidatedNel
       case ("sass", Some(value))      => sass.Target.parse(value).map(Assembly.Format.SASS(_)).toValidatedNel
       case ("sass", None)             => "SASS requires --target".invalidNel

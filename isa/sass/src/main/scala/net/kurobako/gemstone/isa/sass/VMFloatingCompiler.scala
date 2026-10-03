@@ -536,11 +536,11 @@ private object VMFloatingCompiler {
       case Operand.FloatingSymbol(
             FloatingConstant.`QNAN` | FloatingConstant.`+QNAN` | FloatingConstant.`-QNAN` | FloatingConstant.`SNAN` | FloatingConstant.`+SNAN` | FloatingConstant.`-SNAN`
           ) => 0x7fffL
-      case Operand.FloatingBits(_, width, bits) if width.raw == 16 => bits.longValue & HalfMask
+      case Operand.FloatingBits(_, width, bits) if width.raw == 16 => bits.toLong & HalfMask
       case Operand.FloatingBits(_, width, bits) if width.raw == 32 =>
-        IEEE754.floatToBinary16(java.lang.Float.intBitsToFloat(bits.intValue)).raw & HalfMask
+        IEEE754.floatToBinary16(java.lang.Float.intBitsToFloat(bits.toInt)).raw & HalfMask
       case Operand.FloatingBits(_, width, bits) if width.raw == 64 =>
-        IEEE754.doubleToBinary16(java.lang.Double.longBitsToDouble(bits.longValue)).raw & HalfMask
+        IEEE754.doubleToBinary16(java.lang.Double.longBitsToDouble(bits.toLong)).raw & HalfMask
       case Operand.Unary(inner, true, false, false) => inner match {
           case Operand.FloatingSymbol(
                 FloatingConstant.`QNAN` | FloatingConstant.`+QNAN` | FloatingConstant.`-QNAN` | FloatingConstant.`SNAN` | FloatingConstant.`+SNAN` | FloatingConstant.`-SNAN` | FloatingConstant.`NAN`

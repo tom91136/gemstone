@@ -47,6 +47,84 @@ class ExecutionOperandSuite extends munit.FunSuite {
     memory.getInt(allocation, 0)
   }
 
+  test("memory transfers can end at the final vector register") {
+    val target = Target("gfx900")
+    for (width <- Seq[Int in (1, 2, 4)](1, 2, 4)) {
+      val load = Instruction.GlobalLoad(255, 0, None, width.widen[Int in 1 ~ 16], 8, false)
+      val expected = width.raw match {
+        case 1 => 0x80
+        case 2 => 0x8080
+        case _ => 0x89ab8080
+      }
+      assertEquals(runSequence(target, Vec(load,
+        Instruction.VMove(2, InstructionSource.VectorRegister(255)))), expected)
+    }
+  }
+
+  test("wave32 mask writes decode and execute at the last scalar slot") {
+    val target = Target("gfx1030")
+    for (text <- Seq("v_add_co_u32 v2, exec_hi, v3, v4", "v_cmp_eq_u32 exec_hi, v3, v4")) {
+      val bytes = asm.Assembler.encode(asm.Parser.parse(text).toOption.get, target).toOption.get
+      assert(VMCompiler.decodeInstruction(bytes, target).isRight, text)
+    }
+    val operation = Instruction.VAddCarry(2, 127, InstructionSource.Constant(1), InstructionSource.Constant(1), None)
+    assert(VMRegisterBounds.validate(operation, 32).isRight)
+    assert(VMRegisterBounds.validate(operation, 64).isLeft)
+    assertEquals(run(target, operation), 2)
+  }
+
+  test("64-bit vector operations read live EXEC and VCC values") {
+    val target = Target("gfx900")
+    for (scalar <- Seq[ScalarRegisterIndex](106, 126)) {
+      val initialize = Instruction.SMove64(scalar, InstructionSource.Constant(1))
+      for (operation <- Seq(
+        Instruction.VShiftRight64(2, InstructionSource.Constant(0), InstructionSource.Scalar(scalar)),
+        Instruction.VShiftLeft64(2, InstructionSource.Constant(0), InstructionSource.Scalar(scalar)),
+        Instruction.VShiftRightArithmetic64(2, InstructionSource.Constant(0), InstructionSource.Scalar(scalar)),
+        Instruction.VBinary64Modified(VectorBinary64Operation.Add, 2, InstructionSource.Scalar(scalar),
+          InstructionSource.Constant(0), false, false, false, false)
+      )) assertEquals(runSequence(target, Vec(initialize, operation)), 1)
+      val fullMask = Instruction.SMove64(scalar, InstructionSource.Constant(0x1234567800000001L))
+      assertEquals(runSequence(target, Vec(fullMask,
+        Instruction.VShiftRight64(2, InstructionSource.Constant(32), InstructionSource.Scalar(scalar)))), 0x12345678)
+      val high = scalar.offsetBy(1)
+      val highRead = Instruction.VShiftRight64(2, InstructionSource.Constant(0), InstructionSource.Scalar(high))
+      assert(VMRegisterBounds.validate(highRead).isRight)
+      assertEquals(runSequence(target, Vec(fullMask, highRead)), 0x12345678)
+    }
+  }
+
+  test("scalar bank validation preserves EXEC and VCC special sources") {
+    val target = Target("gfx900")
+    for (register <- Seq[ScalarRegisterIndex](106, 107, 126, 127)) {
+      val move = Instruction.SMove64(4, InstructionSource.Scalar(register))
+      assert(VMRegisterBounds.validate(move).isRight)
+      val expected = if (register.raw == 126) 1 else 0
+      assertEquals(runSequence(target, Vec(move, Instruction.VMove(2, InstructionSource.Scalar(4)))), expected)
+    }
+    val writeExec = Instruction.SMove64(126, InstructionSource.Constant(1))
+    assert(VMRegisterBounds.validate(writeExec).isRight)
+    assertEquals(run(target, writeExec), 0x11223344)
+  }
+
+  test("ldexp executes with a signed scalar exponent in v255") {
+    for (exponent <- Seq(3, -2)) {
+      val operations = Vec(
+        Instruction.VMove(4, InstructionSource.Constant(0L)),
+        Instruction.VMove(5, InstructionSource.Constant(0x3ff80000L)), // 1.5
+        Instruction.VMove(255, InstructionSource.Constant(exponent.toLong)),
+        Instruction.VBinary64Modified(
+          VectorBinary64Operation.LoadExponent, 2,
+          InstructionSource.VectorRegister(4), InstructionSource.VectorRegister(255),
+          false, false, false, false
+        ),
+        Instruction.VMove(2, InstructionSource.VectorRegister(3))
+      )
+      val expected = (java.lang.Double.doubleToRawLongBits(Math.scalb(1.5, exponent)) >>> 32).toInt
+      assertEquals(runSequence(Target("gfx900"), operations), expected)
+    }
+  }
+
   private val destinations = Seq(
     (SubDwordSelection.Byte0, 0x00000080L, 0xffffff80L, 0x11223380L),
     (SubDwordSelection.Byte1, 0x00008000L, 0xffff8000L, 0x11228044L),

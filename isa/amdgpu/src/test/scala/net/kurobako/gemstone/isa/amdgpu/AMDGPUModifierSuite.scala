@@ -4,7 +4,6 @@ import VMIR.*
 import fixtures.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
@@ -44,22 +43,22 @@ class AMDGPUModifierSuite extends munit.FunSuite {
       Target("gfx900")
     )
 
-    instruction match {
-      case Right(
-            Instruction.VBinaryF32Modified(
-              VectorF32BinaryOperation.Add,
-              1,
-              InstructionSource.VectorRegister(3),
-              InstructionSource.VectorRegister(5),
-              false,
-              false,
-              false,
-              false,
-              true
-            )
-          ) => ()
-      case other => fail(s"decoded VOP3 f32 clamp was lost: $other")
-    }
+    assertEquals(
+      instruction,
+      Right(
+        Instruction.VBinaryF32Modified(
+          VectorF32BinaryOperation.Add,
+          1,
+          InstructionSource.VectorRegister(3),
+          InstructionSource.VectorRegister(5),
+          false,
+          false,
+          false,
+          false,
+          true
+        )
+      )
+    )
   }
 
   test("VOP3 floating-point clamp uses the [0, 1] range and preserves NaN") {
@@ -88,25 +87,25 @@ class AMDGPUModifierSuite extends munit.FunSuite {
       Target("gfx1036")
     )
 
-    instruction match {
-      case Right(
-            Instruction.VMadF32(
-              VectorMadF32Operation.FusedMultiplyAdd,
-              49,
-              InstructionSource.Literal(0xbfc90fdaL),
-              InstructionSource.VectorRegister(38),
-              InstructionSource.VectorRegister(1),
-              false,
-              false,
-              true,
-              false,
-              false,
-              false,
-              false
-            )
-          ) => ()
-      case other => fail(s"decoded VOP3 FMA lost source-2 absolute modifier: $other")
-    }
+    assertEquals(
+      instruction,
+      Right(
+        Instruction.VMadF32(
+          VectorMadF32Operation.FusedMultiplyAdd,
+          49,
+          InstructionSource.Literal(0xbfc90fdaL),
+          InstructionSource.VectorRegister(38),
+          InstructionSource.VectorRegister(1),
+          false,
+          false,
+          true,
+          false,
+          false,
+          false,
+          false
+        )
+      )
+    )
   }
 
   test("VOP3 f32 FMA does not confuse source 3 encoding with absolute") {
@@ -115,25 +114,25 @@ class AMDGPUModifierSuite extends munit.FunSuite {
       Target("gfx1036")
     )
 
-    instruction match {
-      case Right(
-            Instruction.VMadF32(
-              VectorMadF32Operation.FusedMultiplyAdd,
-              19,
-              InstructionSource.VectorRegister(3),
-              InstructionSource.VectorRegister(20),
-              InstructionSource.VectorRegister(4),
-              false,
-              false,
-              false,
-              false,
-              false,
-              true,
-              false
-            )
-          ) => ()
-      case other => fail(s"decoded VOP3 source-3 modifier incorrectly: $other")
-    }
+    assertEquals(
+      instruction,
+      Right(
+        Instruction.VMadF32(
+          VectorMadF32Operation.FusedMultiplyAdd,
+          19,
+          InstructionSource.VectorRegister(3),
+          InstructionSource.VectorRegister(20),
+          InstructionSource.VectorRegister(4),
+          false,
+          false,
+          false,
+          false,
+          false,
+          true,
+          false
+        )
+      )
+    )
   }
 
   test("gfx900 VOPC SDWA preserves a scalar source-0 encoding") {
@@ -151,21 +150,21 @@ class AMDGPUModifierSuite extends munit.FunSuite {
       Target("gfx900")
     )
 
-    instruction match {
-      case Right(
-            Instruction.VCompareSubDword(
-              VectorComparison(VectorComparisonKind.Unsigned32, VectorComparisonRelation.Equal, false),
-              InstructionSource.Scalar(3),
-              InstructionSource.VectorRegister(2),
-              SubDwordSelection.DWord,
-              SubDwordSelection.DWord,
-              false,
-              false,
-              Some(0)
-            )
-          ) => ()
-      case other => fail(s"decoded VOPC SDWA source-0 mode was lost: $other")
-    }
+    assertEquals(
+      instruction,
+      Right(
+        Instruction.VCompareSubDword(
+          VectorComparison(VectorComparisonKind.Unsigned32, VectorComparisonRelation.Equal, false),
+          InstructionSource.Scalar(3),
+          InstructionSource.VectorRegister(2),
+          SubDwordSelection.DWord,
+          SubDwordSelection.DWord,
+          false,
+          false,
+          Some(0)
+        )
+      )
+    )
   }
 
   test("gfx900 VOPC SDWA unsigned 16-bit greater-than is supported") {
@@ -174,21 +173,21 @@ class AMDGPUModifierSuite extends munit.FunSuite {
       Target("gfx900")
     )
 
-    instruction match {
-      case Right(
-            Instruction.VCompareSubDword(
-              VectorComparison(VectorComparisonKind.Unsigned16, VectorComparisonRelation.Greater, false),
-              InstructionSource.Scalar(3),
-              InstructionSource.VectorRegister(2),
-              SubDwordSelection.DWord,
-              SubDwordSelection.DWord,
-              false,
-              false,
-              Some(0)
-            )
-          ) => ()
-      case other => fail(s"decoded VOPC SDWA unsigned comparison was rejected: $other")
-    }
+    assertEquals(
+      instruction,
+      Right(
+        Instruction.VCompareSubDword(
+          VectorComparison(VectorComparisonKind.Unsigned16, VectorComparisonRelation.Greater, false),
+          InstructionSource.Scalar(3),
+          InstructionSource.VectorRegister(2),
+          SubDwordSelection.DWord,
+          SubDwordSelection.DWord,
+          false,
+          false,
+          Some(0)
+        )
+      )
+    )
   }
 
   test("gfx900 VOPC SDWA unsigned 16-bit less-than-or-equal is supported") {
@@ -220,19 +219,19 @@ class AMDGPUModifierSuite extends munit.FunSuite {
       Target("gfx1036")
     )
 
-    instruction match {
-      case Right(
-            Instruction.VPackedBinary(
-              VectorPackedBinaryOperation.MaximumI16,
-              1,
-              InstructionSource.VectorRegister(2),
-              InstructionSource.VectorRegister(3),
-              false,
-              false
-            )
-          ) => ()
-      case other => fail(s"decoded packed signed maximum was rejected: $other")
-    }
+    assertEquals(
+      instruction,
+      Right(
+        Instruction.VPackedBinary(
+          VectorPackedBinaryOperation.MaximumI16,
+          1,
+          InstructionSource.VectorRegister(2),
+          InstructionSource.VectorRegister(3),
+          false,
+          false
+        )
+      )
+    )
   }
 
   test("gfx1036 packed unsigned 16-bit maximum is supported") {
@@ -505,23 +504,23 @@ class AMDGPUModifierSuite extends munit.FunSuite {
       Target("gfx900")
     )
 
-    instruction match {
-      case Right(
-            Instruction.VBinarySubDword(
-              actualOpcode,
-              30,
-              InstructionSource.VectorRegister(53),
-              InstructionSource.Scalar(0),
-              SubDwordSelection.DWord,
-              SubDwordDestinationUnused.Pad,
-              SubDwordSelection.Word0,
-              SubDwordSelection.DWord,
-              true,
-              false
-            )
-          ) => assertEquals(actualOpcode, VectorSubDwordOperation.MultiplyI24)
-      case other => fail(s"decoded SDWA instruction lost its operand selections: $other")
-    }
+    assertEquals(
+      instruction,
+      Right(
+        Instruction.VBinarySubDword(
+          VectorSubDwordOperation.MultiplyI24,
+          30,
+          InstructionSource.VectorRegister(53),
+          InstructionSource.Scalar(0),
+          SubDwordSelection.DWord,
+          SubDwordDestinationUnused.Pad,
+          SubDwordSelection.Word0,
+          SubDwordSelection.DWord,
+          true,
+          false
+        )
+      )
+    )
   }
 
   test("gfx900 SDWA cndmask decodes with sub-dword selections") {
@@ -539,23 +538,23 @@ class AMDGPUModifierSuite extends munit.FunSuite {
       Target("gfx900")
     )
 
-    instruction match {
-      case Right(
-            Instruction.VBinarySubDword(
-              actualOpcode,
-              0,
-              InstructionSource.VectorRegister(1),
-              InstructionSource.VectorRegister(2),
-              SubDwordSelection.Byte0,
-              SubDwordDestinationUnused.Preserve,
-              SubDwordSelection.Byte1,
-              SubDwordSelection.Byte2,
-              false,
-              false
-            )
-          ) => assertEquals(actualOpcode, VectorSubDwordOperation.ConditionalMask32)
-      case other => fail(s"decoded SDWA cndmask lost its operand selections: $other")
-    }
+    assertEquals(
+      instruction,
+      Right(
+        Instruction.VBinarySubDword(
+          VectorSubDwordOperation.ConditionalMask32,
+          0,
+          InstructionSource.VectorRegister(1),
+          InstructionSource.VectorRegister(2),
+          SubDwordSelection.Byte0,
+          SubDwordDestinationUnused.Preserve,
+          SubDwordSelection.Byte1,
+          SubDwordSelection.Byte2,
+          false,
+          false
+        )
+      )
+    )
   }
 
   test("gfx900 SDWA signed 16-bit maximum validates") {

@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -10,17 +11,19 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class BitFieldSuite extends munit.FunSuite {
   for {
-    width            <- Seq(8, 16, 32, 64)
+    width <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
+    rawWidth = width.raw
+    widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     count            <- Seq(1, 4)
     resultSigned     <- Seq(0, 1)
     leftSigned       <- Seq(resultSigned)
     rightSigned      <- Seq(resultSigned)
     operation        <- Seq("uextract", "sextract", "insert", "reverse")
     (offset, length) <-
-      Seq((0, 0), (width, 0), (0, width), (width - 1, 1), (1, width - 2), (-1, 1), (width, 1), (0, width + 1))
+      Seq((0, 0), (rawWidth, 0), (0, rawWidth), (rawWidth - 1, 1), (1, rawWidth - 2), (-1, 1), (rawWidth, 1), (0, rawWidth + 1))
     if operation != "reverse" || (offset == 0 && length == 0)
   } test(
-    s"$operation: $width bits, $count lanes, signedness $resultSigned/$leftSigned/$rightSigned, offset $offset length $length"
+    s"$operation: $rawWidth bits, $count lanes, signedness $resultSigned/$leftSigned/$rightSigned, offset $offset length $length"
   ) {
     def ref(n: Int): Operand            = operand(OperandKind.IdRef, n)
     def literal(n: Int): Operand        = operand(OperandKind.LiteralInteger, n)
@@ -38,8 +41,8 @@ class BitFieldSuite extends munit.FunSuite {
       Header(ISA.version, Word(0), Word(17), Word(0)),
       Vec(
         Instruction.TypeVoid(ref(1)),
-        Instruction.TypeInt(ref(2), literal(width), literal(0)),
-        Instruction.TypeInt(ref(3), literal(width), literal(1)),
+        Instruction.TypeInt(ref(2), literal(rawWidth), literal(0)),
+        Instruction.TypeInt(ref(3), literal(rawWidth), literal(1)),
         Instruction.TypeVector(ref(4), ref(2), literal(4)),
         Instruction.TypeVector(ref(5), ref(3), literal(4)),
         Instruction.TypePointer(ref(6), operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), resultType),
@@ -67,8 +70,8 @@ class BitFieldSuite extends munit.FunSuite {
     )
     val left     = Seq(-1L, 0L, Long.MinValue | 0x80L, 0x5555555555555555L).take(count)
     val right    = Seq(0xaaaaaaaaaaaaaaaaL, -1L, 0x7fL, 0L).take(count)
-    val valid    = offset >= 0 && length >= 0 && offset + length <= width
-    val wordMask = (BigInt(1) << width) - 1
+    val valid    = offset >= 0 && length >= 0 && offset + length <= rawWidth
+    val wordMask = (BigInt(1) << rawWidth) - 1
     val expected = left.zip(right).map { (a, b) =>
       val word      = BigInt(a) & wordMask
       val fieldMask = if (valid) (BigInt(1) << length) - 1 else BigInt(0)
@@ -80,15 +83,15 @@ class BitFieldSuite extends munit.FunSuite {
         case "insert" =>
           if (valid) (word & (wordMask ^ (fieldMask << offset))) | ((BigInt(b) & fieldMask) << offset) else BigInt(0)
         case _ =>
-          (0 until width).foldLeft(BigInt(0))((n, bit) => if (word.testBit(bit)) n.setBit(width - 1 - bit) else n)
+          (0 until rawWidth).foldLeft(BigInt(0))((n, bit) => if (word.testBit(bit)) n.setBit(rawWidth - 1 - bit) else n)
       }
       (result & wordMask).toLong
     }
     def encoded(values: Seq[Long]): Vec[Byte] = Vec.from(values.flatMap(value =>
-      LittleEndian.toVec(value, (width / 8).unsafe[Int where Between[0, 8]])
+      LittleEndian.toVec(value, widthBytes.widen[Int in 0 ~ 8])
     ))
     val region = AllocationId(1L)
-    val memory = ArrayMemory(region, width / 8 * count)
+    val memory = ArrayMemory(region, rawWidth / 8 * count)
     val task   = KernelTask.validated(
       "bits",
       Dimensions.One,
@@ -104,7 +107,7 @@ class BitFieldSuite extends munit.FunSuite {
       assertEquals(memory.bytes, encoded(expected))
     } else {
       assert(executeUnchecked(module, task, memory).isLeft)
-      assertEquals(memory.bytes, Vec.fill(width / 8 * count)(0.toByte))
+      assertEquals(memory.bytes, Vec.fill(rawWidth / 8 * count)(0.toByte))
     }
   }
 }

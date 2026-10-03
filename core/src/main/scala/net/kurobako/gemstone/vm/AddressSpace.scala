@@ -59,7 +59,7 @@ trait AddressSpace extends Memory {
     }
 
   /** Scalar form of [[read]], preserving a backing memory's allocation-free scalar implementation. */
-  def readValue(address: GuestAddress, size: Int where Between[1, 8]): Either[Fault, Long] =
+  def readValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
     locate(address, size.nonNegative) match {
       case Left(error)                                => Left(error)
       case Right(Location.Within(allocation, offset)) => readValue(allocation, offset, size)
@@ -67,14 +67,14 @@ trait AddressSpace extends Memory {
         Left(Fault.Unsupported(s"absolute address ${address.show} requires an address-backed memory"))
     }
 
-  def readSystemValue(address: GuestAddress, size: Int where Between[1, 8]): Either[Fault, Long] =
+  def readSystemValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
     readValue(address, size)
 
   /** Scalar form of [[write]], preserving a backing memory's allocation-free scalar implementation. */
   def writeValue(
       address: GuestAddress,
       value: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[Fault, Unit] =
     locate(address, size.nonNegative) match {
       case Left(error)                                => Left(error)
@@ -86,11 +86,11 @@ trait AddressSpace extends Memory {
   def writeSystemValue(
       address: GuestAddress,
       value: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[Fault, Unit] = writeValue(address, value, size)
 
   def writeSystemBatch(
-      writes: Vec[(GuestAddress, Long, Int where Between[1, 8])]
+      writes: Vec[(GuestAddress, Long, Int in 1 ~ 8)]
   ): Either[Fault, Unit] = writes.foldLeft[Either[Fault, Unit]](Right(())) {
     case (result, (address, value, size)) => result.flatMap(_ => writeSystemValue(address, value, size))
   }
@@ -98,7 +98,7 @@ trait AddressSpace extends Memory {
   /** Resolve and perform one indivisible scalar update. */
   def atomicModifyValue(
       address: GuestAddress,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   )(update: Long => Long): Either[Fault, Long] =
     locate(address, size.nonNegative) match {
       case Left(error)                                => Left(error)

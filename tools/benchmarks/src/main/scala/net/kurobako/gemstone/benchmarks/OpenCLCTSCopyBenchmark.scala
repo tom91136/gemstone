@@ -126,7 +126,7 @@ object OpenCLCTSCopyBenchmark {
       Vec(
         KernelTask.Argument.Memory(inputRegion, 0L),
         KernelTask.Argument.Memory(outputRegion, 0L),
-        KernelTask.Argument.Local(parsed.localSize.toLong * 3L * 4L),
+        KernelTask.Argument.Local(parsed.localSize.toLong.widen[Long > 0] * 3L * 4L),
         KernelTask.Argument.Scalar(LittleEndian.toVec(parsed.stride.raw.toLong, 4))
       )
     ).fold(error => throw IllegalArgumentException(error), identity)

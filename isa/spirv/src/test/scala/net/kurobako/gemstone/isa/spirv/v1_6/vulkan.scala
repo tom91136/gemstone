@@ -23,7 +23,7 @@ private object vulkan {
     val bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8) :+ 0.toByte
     val words = bytes.grouped(4).map { group =>
       val width =
-        group.length.refine[Int where Between[0, 8]].fold(
+        group.length.refine[Int in 0 ~ 8].fold(
           message => throw IllegalArgumentException(message),
           identity
         )

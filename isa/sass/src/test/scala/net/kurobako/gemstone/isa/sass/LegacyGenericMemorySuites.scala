@@ -38,12 +38,12 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
 
   {
     val addressKernels = Vec(
-      SASSFixture.Kernel("local_store", 320, Vec(0 -> 8, 8 -> 4), registers = 7),
-      SASSFixture.Kernel("local_load", 320, Vec(0 -> 8, 8 -> 4), registers = 8),
-      SASSFixture.Kernel("shared_store", 320, Vec(0 -> 8, 8 -> 4), registers = 7, shared = 16),
-      SASSFixture.Kernel("shared_load", 320, Vec(0 -> 8, 8 -> 4), registers = 6, shared = 16),
-      SASSFixture.Kernel("global_store", 320, Vec(0 -> 8, 8 -> 4), registers = 4),
-      SASSFixture.Kernel("global_load", 320, Vec(0 -> 8, 8 -> 8), registers = 6)
+      SASSFixture.Kernel("local_store", 320, Vec((0, 8), (8, 4)), registers = 7),
+      SASSFixture.Kernel("local_load", 320, Vec((0, 8), (8, 4)), registers = 8),
+      SASSFixture.Kernel("shared_store", 320, Vec((0, 8), (8, 4)), registers = 7, shared = 16),
+      SASSFixture.Kernel("shared_load", 320, Vec((0, 8), (8, 4)), registers = 6, shared = 16),
+      SASSFixture.Kernel("global_store", 320, Vec((0, 8), (8, 4)), registers = 4),
+      SASSFixture.Kernel("global_load", 320, Vec((0, 8), (8, 8)), registers = 6)
     )
     def fixtureModule(sm: Int): Cubin.Module = SASSFixture.module(sm, addressKernels)
 
@@ -233,7 +233,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
     for (sm <- Vec(50, 60))
       test(s"CUDA 11.8 sm_$sm generic global/shared/local load and store preserve all bits") {
         val module = fixtureModule(sm)
-        assertEquals(module.sm, sm)
+        assertEquals(module.sm.raw, sm)
 
         val listings = if (sm == 50) Vec(
           "global_load"  -> GenericMemoryFixtures.legacyGenericAddressGlobalLoadSm50,
@@ -278,9 +278,9 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
             name -> service.compile(source).fold(error => fail(error.message), identity)
           }
 
-          val target = service.allocate(8L.unsafe[Long > 0])
+          val target = service.allocate(8L)
           assertEquals(service.registerAllocationAddress(target, GuestAddress(carryTarget)), Right(()))
-          val globalOutput = service.allocate(4L.unsafe[Long > 0])
+          val globalOutput = service.allocate(4L)
           values.foreach { value =>
             assert(service.write(
               target,
@@ -317,7 +317,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
             )
           }
 
-          val spaceOutput = service.allocate(4L.unsafe[Long > 0])
+          val spaceOutput = service.allocate(4L)
           for {
             space     <- Vec("shared", "local")
             operation <- Vec("load", "store")
@@ -399,11 +399,11 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
 
   {
     val byteKernels = Vec(
-      SASSFixture.Kernel("local_u8", 320, Vec(0 -> 8, 8 -> 4), registers = 12),
-      SASSFixture.Kernel("shared_u8", 320, Vec(0 -> 8, 8 -> 4), registers = 12, shared = 16),
-      SASSFixture.Kernel("global_u8_barrier", 320, Vec(0 -> 8, 8 -> 4, 16 -> 8), registers = 8),
-      SASSFixture.Kernel("global_s8", 320, Vec(0 -> 8, 8 -> 4, 16 -> 8), registers = 8),
-      SASSFixture.Kernel("global_u8", 320, Vec(0 -> 8, 8 -> 4, 16 -> 8), registers = 8)
+      SASSFixture.Kernel("local_u8", 320, Vec((0, 8), (8, 4)), registers = 12),
+      SASSFixture.Kernel("shared_u8", 320, Vec((0, 8), (8, 4)), registers = 12, shared = 16),
+      SASSFixture.Kernel("global_u8_barrier", 320, Vec((0, 8), (8, 4), (16, 8)), registers = 8),
+      SASSFixture.Kernel("global_s8", 320, Vec((0, 8), (8, 4), (16, 8)), registers = 8),
+      SASSFixture.Kernel("global_u8", 320, Vec((0, 8), (8, 4), (16, 8)), registers = 8)
     )
     def fixtureModule(sm: Int): Cubin.Module = SASSFixture.module(sm, byteKernels)
 
@@ -447,7 +447,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
     for (sm <- Vec(50, 60))
       test(s"CUDA 11.8 sm_$sm generic byte stores preserve neighboring bytes and loads extend correctly") {
         val module = fixtureModule(sm)
-        assertEquals(module.sm, sm)
+        assertEquals(module.sm.raw, sm)
         val entries = if (sm == 50) Vec(
           ("global_u8", GenericMemoryFixtures.legacyGenericMemoryExtensionsByteGlobalU8Sm50),
           ("global_s8", GenericMemoryFixtures.legacyGenericMemoryExtensionsByteGlobalS8Sm50),
@@ -559,9 +559,9 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
               .fold(error => fail(error.message), identity)
           }.toMap
           val base   = 0x5fffffff0L + sm.toLong * 0x100000000L
-          val source = service.allocate(64L.unsafe[Long > 0])
+          val source = service.allocate(64L)
           assertEquals(service.registerAllocationAddress(source, GuestAddress(base)), Right(()))
-          val output = service.allocate(8L.unsafe[Long > 0])
+          val output = service.allocate(8L)
 
           def verifyGlobal(name: String, expectedLoad: Int): Unit = {
             assert(service.write(source, 0L, initial).isRight)
@@ -594,12 +594,12 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
     def fixtureModule: Cubin.Module = SASSFixture.module(
       60,
       Vec(
-        SASSFixture.Kernel("local_store", 320, Vec(0 -> 8, 8 -> 4), registers = 7),
-        SASSFixture.Kernel("local_load", 320, Vec(0 -> 8, 8 -> 4), registers = 8),
-        SASSFixture.Kernel("shared_store", 320, Vec(0 -> 8, 8 -> 4), registers = 7, shared = 16),
-        SASSFixture.Kernel("shared_load", 320, Vec(0 -> 8, 8 -> 4), registers = 6, shared = 16),
-        SASSFixture.Kernel("global_store", 320, Vec(0 -> 8, 8 -> 4), registers = 4),
-        SASSFixture.Kernel("global_load", 320, Vec(0 -> 8, 8 -> 8), registers = 6)
+        SASSFixture.Kernel("local_store", 320, Vec((0, 8), (8, 4)), registers = 7),
+        SASSFixture.Kernel("local_load", 320, Vec((0, 8), (8, 4)), registers = 8),
+        SASSFixture.Kernel("shared_store", 320, Vec((0, 8), (8, 4)), registers = 7, shared = 16),
+        SASSFixture.Kernel("shared_load", 320, Vec((0, 8), (8, 4)), registers = 6, shared = 16),
+        SASSFixture.Kernel("global_store", 320, Vec((0, 8), (8, 4)), registers = 4),
+        SASSFixture.Kernel("global_load", 320, Vec((0, 8), (8, 8)), registers = 6)
       )
     )
 
@@ -700,20 +700,20 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
 
   {
     val compoundSpaceKernels = Vec(
-      SASSFixture.Kernel("compound_local", 320, Vec(0 -> 8, 8 -> 4), registers = 8),
-      SASSFixture.Kernel("compound_shared", 320, Vec(0 -> 8, 8 -> 4), registers = 8, shared = 16),
-      SASSFixture.Kernel("compound_global", 320, Vec(0 -> 8, 8 -> 8, 16 -> 4), registers = 7)
+      SASSFixture.Kernel("compound_local", 320, Vec((0, 8), (8, 4)), registers = 8),
+      SASSFixture.Kernel("compound_shared", 320, Vec((0, 8), (8, 4)), registers = 8, shared = 16),
+      SASSFixture.Kernel("compound_global", 320, Vec((0, 8), (8, 8), (16, 4)), registers = 7)
     )
     val vectorGenericKernels = Vec(
-      SASSFixture.Kernel("repeated_store", 320, Vec(0 -> 8, 8 -> 4, 12 -> 4), registers = 4),
-      SASSFixture.Kernel("repeated_load", 320, Vec(0 -> 8, 8 -> 8), registers = 8),
-      SASSFixture.Kernel("repeated_store_then_load", 320, Vec(0 -> 8, 8 -> 4), registers = 7),
-      SASSFixture.Kernel("load_v4_u32", 320, Vec(0 -> 8, 8 -> 8), registers = 8),
-      SASSFixture.Kernel("load_v2_u64", 320, Vec(0 -> 8, 8 -> 8), registers = 8),
-      SASSFixture.Kernel("load_v2_u32", 320, Vec(0 -> 8, 8 -> 8), registers = 6),
-      SASSFixture.Kernel("store_v4_u32", 320, Vec(0 -> 8, 8 -> 4, 12 -> 4, 16 -> 4, 20 -> 4), registers = 8),
-      SASSFixture.Kernel("store_v2_u64", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 8),
-      SASSFixture.Kernel("store_v2_u32", 320, Vec(0 -> 8, 8 -> 4, 12 -> 4), registers = 6)
+      SASSFixture.Kernel("repeated_store", 320, Vec((0, 8), (8, 4), (12, 4)), registers = 4),
+      SASSFixture.Kernel("repeated_load", 320, Vec((0, 8), (8, 8)), registers = 8),
+      SASSFixture.Kernel("repeated_store_then_load", 320, Vec((0, 8), (8, 4)), registers = 7),
+      SASSFixture.Kernel("load_v4_u32", 320, Vec((0, 8), (8, 8)), registers = 8),
+      SASSFixture.Kernel("load_v2_u64", 320, Vec((0, 8), (8, 8)), registers = 8),
+      SASSFixture.Kernel("load_v2_u32", 320, Vec((0, 8), (8, 8)), registers = 6),
+      SASSFixture.Kernel("store_v4_u32", 320, Vec((0, 8), (8, 4), (12, 4), (16, 4), (20, 4)), registers = 8),
+      SASSFixture.Kernel("store_v2_u64", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 8),
+      SASSFixture.Kernel("store_v2_u32", 320, Vec((0, 8), (8, 4), (12, 4)), registers = 6)
     )
     def fixtureModule(sm: Int, vectorGeneric: Boolean): Cubin.Module =
       SASSFixture.module(sm, if (vectorGeneric) vectorGenericKernels else compoundSpaceKernels)
@@ -758,8 +758,8 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
       test(s"CUDA 11.8 sm_$sm generic vector widths and repeated P consumers preserve memory results") {
         val vectorModule = fixtureModule(sm, vectorGeneric = true)
         val spacesModule = fixtureModule(sm, vectorGeneric = false)
-        assertEquals(vectorModule.sm, sm)
-        assertEquals(spacesModule.sm, sm)
+        assertEquals(vectorModule.sm.raw, sm)
+        assertEquals(spacesModule.sm.raw, sm)
 
         def lower(module: Cubin.Module, name: String, listing: String): SASSFixture = {
           val kernel   = module.kernels.find(_.name == name).getOrElse(fail(s"missing $name"))
@@ -814,10 +814,10 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           }.toMap
 
           val base   = 0x400000000L + sm.toLong * 0x10000L
-          val source = service.allocate(528L.unsafe[Long > 0])
+          val source = service.allocate(528L)
           assertEquals(service.registerAllocationAddress(source, GuestAddress(base)), Right(()))
-          val vectorOutput = service.allocate(32L.unsafe[Long > 0])
-          val scalarOutput = service.allocate(4L.unsafe[Long > 0])
+          val vectorOutput = service.allocate(32L)
+          val scalarOutput = service.allocate(4L)
 
           val pointer = scalar64(base)
           val data32  = Vec(0x00000000, 0x7fc00001, 0x80000000, 0xffffffff)
@@ -835,13 +835,13 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           )
           assertEquals(bytes(service, source, 512, 16), words(data32*))
 
-          assert(service.write(source, 512L.unsafe[Long >= 0], words(data32*)).isRight)
+          assert(service.write(source, 512L, words(data32*)).isRight)
           run(service, loaded("load_v2_u32"), "load_v2_u32", Vec(pointer, memory(vectorOutput)))
           assertEquals(bytes(service, vectorOutput, 0, 8), words(data32.take(2)*))
           run(service, loaded("load_v4_u32"), "load_v4_u32", Vec(pointer, memory(vectorOutput)))
           assertEquals(bytes(service, vectorOutput, 0, 16), words(data32*))
 
-          assert(service.write(source, 512L.unsafe[Long >= 0], longWords(data64*)).isRight)
+          assert(service.write(source, 512L, longWords(data64*)).isRight)
           run(service, loaded("load_v2_u64"), "load_v2_u64", Vec(pointer, memory(vectorOutput)))
           assertEquals(bytes(service, vectorOutput, 0, 16), longWords(data64*))
 
@@ -938,7 +938,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           VMAddressAnalysis.rewrite(sm, unsupportedWidth)
         }
         assertEquals(vectorKernel.name, "store_v4_u32")
-        assertEquals(module.sm, sm)
+        assertEquals(module.sm.raw, sm)
       }
   }
 }

@@ -29,8 +29,8 @@ class ElfSuite extends munit.FunSuite {
       assertEquals(section.sectionType, 1)
       assertEquals(section.flags, 6L)
       assertEquals(section.address, 0x12345678L)
-      assertEquals(section.offset, 128)
-      assertEquals(section.size, 0)
+      assertEquals(section.offset.raw, 128)
+      assertEquals(section.size.raw, 0)
     }
   }
 
@@ -51,7 +51,7 @@ class ElfSuite extends munit.FunSuite {
     buffer.putLong(96, 4096)
     assert(elf.sections64(bytes).isLeft)
     buffer.putInt(68, 8) // SHT_NOBITS occupies memory without file contents.
-    assertEquals(elf.sections64(bytes).map(_.head.size), Right(4096))
+    assertEquals(elf.sections64(bytes).map(_.head.size.raw), Right(4096))
     buffer.putLong(40, Long.MaxValue)
     assert(elf.sections64(bytes).isLeft)
   }

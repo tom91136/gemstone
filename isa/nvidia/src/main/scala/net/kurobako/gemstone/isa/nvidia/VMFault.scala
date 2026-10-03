@@ -9,7 +9,7 @@ object VMFault {
   def fromMemory(error: MemoryError, context: String = ""): VMFault =
     error match {
       case MemoryError.Cancelled => Cancelled
-      case other                 => Memory(s"$context${other.message}".unsafe[NonEmpty[String]])
+      case other                 => Memory(context + other.message)
     }
 
   def fromControl(failure: Fault): VMFault = failure match {
@@ -23,7 +23,7 @@ enum VMFault {
   case Unsupported(opcode: NonEmpty[String], detail: NonEmpty[String])
   case InvalidProgram(detail: NonEmpty[String])
   case InvalidState(detail: NonEmpty[String])
-  case UndefinedRegister(name: NonEmpty[String], pc: Pc, lane: Int)
+  case UndefinedRegister(name: NonEmpty[String], pc: Pc, lane: WorkgroupLane)
   case Memory(detail: NonEmpty[String])
   case ArchitecturalTrap(isa: NonEmpty[String], code: Long, pc: Pc)
   case BudgetExceeded(limit: Long > 0)

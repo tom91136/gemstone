@@ -12,8 +12,8 @@ class LegacyMinMaxLoweringSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module = SASSFixture.module(
     35,
     Vec(
-      SASSFixture.Kernel("minmax_signed_probe", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 8),
-      SASSFixture.Kernel("minmax_probe", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 8)
+      SASSFixture.Kernel("minmax_signed_probe", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 8),
+      SASSFixture.Kernel("minmax_probe", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 8)
     )
   )
 
@@ -54,7 +54,7 @@ class LegacyMinMaxLoweringSuite extends munit.FunSuite {
 
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(16L.unsafe[Long > 0])
+      val output  = service.allocate(16L)
       outputs.foreach { case (name, vectors, unsigned) =>
         val kernel = module.kernels.find(_.name == name).get
         val text   = if (unsigned) MinMaxFixtures.minmaxSm35 else MinMaxFixtures.minmaxSignedSm35

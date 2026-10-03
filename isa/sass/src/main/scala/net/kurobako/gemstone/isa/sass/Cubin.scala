@@ -4,31 +4,37 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import scala.util.control.NonFatal
 
 /** Bounds-checked CUDA ELF metadata. Instruction decoding is deliberately separate from module loading. */
 object Cubin {
   case class Section(
-      index: Int,
+      index: Int >= 0,
       name: String,
       kind: Int,
       flags: Long,
-      size: Int,
-      link: Int,
+      size: Int >= 0,
+      link: Int >= 0,
       info: Int,
       bytes: Vec[Byte]
   )
-  case class Parameter(ordinal: Int, offset: Int, size: Int)
+  case class Parameter(ordinal: Int >= 0, offset: Int >= 0, size: Int > 0)
   case class Kernel(
-      name: String,
-      section: Int,
-      parameterBase: Int,
-      parameterSize: Int,
+      name: NonEmpty[String],
+      section: Int >= 0,
+      parameterBase: Int >= 0,
+      parameterSize: Int >= 0,
       parameters: Vec[Parameter]
   )
-  case class Global(name: String, bytes: Vec[Byte], constantSection: Option[Int] = None, offset: Int = 0)
-  case class Module(sm: Int, sections: Vec[Section], kernels: Vec[Kernel], globals: Vec[Global])
+  case class Global(
+      name: NonEmpty[String],
+      bytes: Vec[Byte],
+      constantSection: Option[Int >= 0] = None,
+      offset: Int >= 0 = 0
+  )
+  case class Module(sm: Int >= 35, sections: Vec[Section], kernels: Vec[Kernel], globals: Vec[Global])
 
   private def validName(name: String): Boolean = {
     def initial(c: Char): Boolean =
@@ -60,16 +66,16 @@ object Cubin {
     val headers = checked(elf.sections64(image))
     val count   = headers.size
     requireImage(count > 0 && header.names > 0 && header.names < count, "invalid cubin section table")
-    headers.foreach(section => requireImage(section.size <= 64 * 1024 * 1024, "cubin section is too large"))
+    headers.foreach(section => requireImage(section.size.raw <= 64 * 1024 * 1024, "cubin section is too large"))
     val strings  = checked(elf.sectionBytes(image, headers(header.names)))
-    val sections = headers.zipWithIndex.map { (section, index) =>
+    val sections = headers.zip(Vec.indices(headers.nonNegativeSize)).map { (section, index) =>
       Section(
         index,
         checked(elf.stringAt(strings, section.nameOffset)),
         section.sectionType,
         section.flags,
         section.size,
-        section.link,
+        checked(section.link.refine[Int >= 0]),
         section.info,
         checked(elf.sectionBytes(image, section))
       )
@@ -100,7 +106,11 @@ object Cubin {
       val parameters = attrs.collect { case (0x17, value) =>
         requireImage(value.size == 12, "invalid cubin kernel parameter record")
         val v = ByteBuffer.wrap(value.toArray).order(ByteOrder.LITTLE_ENDIAN)
-        Parameter(v.getShort(4) & 65535, v.getShort(6) & 65535, v.getInt(8) >>> 18)
+        Parameter(
+          checked((v.getShort(4) & 65535).refine[Int >= 0]),
+          checked((v.getShort(6) & 65535).refine[Int >= 0]),
+          checked((v.getInt(8) >>> 18).refine[Int > 0])
+        )
       }.sortBy(_.ordinal)
       val cbank = attrs.collectFirst { case (0x0a, value) =>
         requireImage(value.size == 8, "invalid cubin parameter constant bank")
@@ -108,15 +118,24 @@ object Cubin {
         (v.getShort(4) & 65535, v.getShort(6) & 65535)
       }.getOrElse((0x160, 0))
       requireImage(
-        parameters.zipWithIndex.forall((p, i) => p.ordinal == i && p.size > 0 && p.offset + p.size <= cbank._2),
+        parameters.zipWithIndex.forall((p, i) => p.ordinal.raw == i && p.offset.raw + p.size.raw <= cbank._2),
         "invalid cubin parameter layout"
       )
-      Kernel(name, section.index, cbank._1, cbank._2, parameters)
+      Kernel(
+        checked(name.refine[NonEmpty[String]]),
+        section.index,
+        checked(cbank._1.refine[Int >= 0]),
+        checked(cbank._2.refine[Int >= 0]),
+        parameters
+      )
     }
     val globals = sections.filter(_.kind == 2).flatMap { section =>
-      requireImage(section.link > 0 && section.link < count && section.size % 24 == 0, "invalid cubin symbol table")
-      val stride = headers(section.index).entrySize
-      requireImage(stride == 0 || stride == 24, "invalid cubin symbol table stride")
+      requireImage(
+        section.link.raw > 0 && section.link.raw < count && section.size.raw % 24 == 0,
+        "invalid cubin symbol table"
+      )
+      val stride = headers(section.index.raw).entrySize
+      requireImage(stride.raw == 0 || stride.raw == 24, "invalid cubin symbol table stride")
       checked(elf.symbols64(section.bytes, header.byteOrder)).flatMap { symbol =>
         val kind   = symbol.kind
         val target = symbol.section
@@ -128,22 +147,22 @@ object Cubin {
         ) {
           val start = symbol.value
           requireImage(
-            start >= 0 && size >= 0 && start <= sections(target).size && size <= sections(target).size - start,
+            start >= 0 && size >= 0 && start <= sections(target).size.raw && size <= sections(target).size.raw - start,
             "invalid cubin global range"
           )
-          val name = checked(elf.stringAt(sections(section.link).bytes, symbol.nameOffset))
+          val name = checked(elf.stringAt(sections(section.link.raw).bytes, symbol.nameOffset))
           requireImage(validName(name), "invalid cubin global name")
           requireImage(size <= 1024 * 1024, "cubin global exceeds supported initializer size")
           Some(Global(
-            name,
+            checked(name.refine[NonEmpty[String]]),
             if (sections(target).kind == 8) Vec.fill(size.toInt)(0.toByte)
             else sections(target).bytes.slice(start.toInt, (start + size).toInt),
-            Option.when(sections(target).name.startsWith(".nv.constant"))(target),
-            start.toInt
+            Option.when(sections(target).name.startsWith(".nv.constant"))(checked(target.refine[Int >= 0])),
+            checked(start.toInt.refine[Int >= 0])
           ))
         } else None
       }
     }
-    Right(Module(sm, sections, kernels, globals))
+    Right(Module(checked(sm.refine[Int >= 35]), sections, kernels, globals))
   } catch { case NonFatal(error) => Left(Option(error.getMessage).getOrElse("invalid cubin")) }
 }

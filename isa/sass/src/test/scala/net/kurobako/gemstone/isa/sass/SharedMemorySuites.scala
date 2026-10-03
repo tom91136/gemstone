@@ -14,7 +14,7 @@ class SharedMemorySuites extends munit.FunSuite {
   {
     def fixtureModule: Cubin.Module = SASSFixture.module(
       86,
-      Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 4, 12 -> 4), registers = 10, shared = 512))
+      Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 4), (12, 4)), registers = 10, shared = 512))
     )
 
     def scalar(value: Int): KernelTask.Argument.Scalar =
@@ -28,7 +28,7 @@ class SharedMemorySuites extends munit.FunSuite {
       val lowered  = SASSFixture(module, module.kernels.head, Vec(function))
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(128L.unsafe[Long > 0])
+        val output  = service.allocate(128L)
         val program = service.compile(lowered)
           .fold(e => fail(e.message), identity)
         def task(addressLow: Int, addressHigh: Int) = SASSFixture.task(
@@ -59,7 +59,7 @@ class SharedMemorySuites extends munit.FunSuite {
   {
     def fixtureModule: Cubin.Module = SASSFixture.module(
       75,
-      Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 4, 12 -> 4), registers = 10, shared = 512))
+      Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 4), (12, 4)), registers = 10, shared = 512))
     )
 
     def scalar(value: Int): KernelTask.Argument.Scalar =
@@ -73,7 +73,7 @@ class SharedMemorySuites extends munit.FunSuite {
 
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(128L.unsafe[Long > 0])
+        val output  = service.allocate(128L)
         val program = service.compile(lowered)
           .fold(e => fail(e.message), identity)
         def resultFor(low: Int, high: Int): Vec[Long] = {
@@ -123,7 +123,7 @@ class SharedMemorySuites extends munit.FunSuite {
   {
     def fixtureModule: Cubin.Module = SASSFixture.module(
       86,
-      Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 4, 20 -> 4), registers = 16, shared = 256))
+      Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 8), (16, 4), (20, 4)), registers = 16, shared = 256))
     )
 
     def scalar(value: Int): KernelTask.Argument.Scalar =
@@ -137,8 +137,8 @@ class SharedMemorySuites extends munit.FunSuite {
       val lowered  = SASSFixture(module, module.kernels.head, Vec(function))
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(256L.unsafe[Long > 0])
-        val input   = service.allocate(128L.unsafe[Long > 0])
+        val output  = service.allocate(256L)
+        val input   = service.allocate(128L)
         val values  = Vec.from((2100 until 2132).flatMap(i => LittleEndian.toVec(i.toLong, 4)))
         assert(service.write(input, 0L, values).isRight)
         val program = service.compile(lowered)
@@ -172,7 +172,7 @@ class SharedMemorySuites extends munit.FunSuite {
   {
     def fixtureModule: Cubin.Module = SASSFixture.module(
       86,
-      Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 4, 12 -> 4), registers = 14, shared = 512))
+      Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 4), (12, 4)), registers = 14, shared = 512))
     )
 
     def scalar(value: Int): KernelTask.Argument.Scalar =
@@ -186,7 +186,7 @@ class SharedMemorySuites extends munit.FunSuite {
       val lowered  = SASSFixture(module, module.kernels.head, Vec(function))
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(256L.unsafe[Long > 0])
+        val output  = service.allocate(256L)
         val program = service.compile(lowered)
           .fold(e => fail(e.message), identity)
         def task(addressLow: Int, addressHigh: Int) = SASSFixture.task(
@@ -217,7 +217,7 @@ class SharedMemorySuites extends munit.FunSuite {
   {
     def fixtureModule: Cubin.Module = SASSFixture.module(
       89,
-      Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 4, 12 -> 4), registers = 23, shared = 1024))
+      Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 4), (12, 4)), registers = 23, shared = 1024))
     )
 
     def scalar(value: Int): KernelTask.Argument.Scalar =
@@ -231,7 +231,7 @@ class SharedMemorySuites extends munit.FunSuite {
       val lowered  = SASSFixture(module, module.kernels.head, Vec(function))
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(1024L.unsafe[Long > 0])
+        val output  = service.allocate(1024L)
         val program = service.compile(lowered)
           .fold(e => fail(e.message), identity)
         def task(addressLow: Int, addressHigh: Int) = SASSFixture.task(
@@ -267,7 +267,7 @@ class SharedMemorySuites extends munit.FunSuite {
   {
     def fixtureModule: Cubin.Module = SASSFixture.module(
       89,
-      Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 4, 12 -> 4), registers = 14, shared = 512))
+      Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 4), (12, 4)), registers = 14, shared = 512))
     )
 
     def scalar(value: Int): KernelTask.Argument.Scalar =
@@ -281,7 +281,7 @@ class SharedMemorySuites extends munit.FunSuite {
       val lowered  = SASSFixture(module, module.kernels.head, Vec(function))
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(256L.unsafe[Long > 0])
+        val output  = service.allocate(256L)
         val program = service.compile(lowered)
           .fold(e => fail(e.message), identity)
         def task(addressLow: Int, addressHigh: Int) = SASSFixture.task(
@@ -312,7 +312,7 @@ class SharedMemorySuites extends munit.FunSuite {
   {
     def fixtureModule: Cubin.Module = SASSFixture.module(
       86,
-      Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 4, 20 -> 4), registers = 12, shared = 128))
+      Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 8), (16, 4), (20, 4)), registers = 12, shared = 128))
     )
 
     def scalar(value: Int): KernelTask.Argument.Scalar =
@@ -336,8 +336,8 @@ class SharedMemorySuites extends munit.FunSuite {
 
       locally {
         val service    = SASSFixture.Execution()
-        val input      = service.allocate(144L.unsafe[Long > 0])
-        val output     = service.allocate(128L.unsafe[Long > 0])
+        val input      = service.allocate(144L)
+        val output     = service.allocate(128L)
         val inputBytes = Vec.from((0 until 36).flatMap(i =>
           LittleEndian.toVec(0x12340000L + i, 4)
         ))

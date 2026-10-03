@@ -49,11 +49,11 @@ object VMInterpreter {
     }
     val everyGroupFull =
       geometry.globalExtent.x ==
-        (geometry.groupSize.x.toLong * geometry.groupCount.x.toLong) &&
+        (geometry.groupSize.x.toLong.widen[Long > 0] * geometry.groupCount.x.toLong.widen[Long > 0]) &&
         geometry.globalExtent.y ==
-        (geometry.groupSize.y.toLong * geometry.groupCount.y.toLong) &&
+        (geometry.groupSize.y.toLong.widen[Long > 0] * geometry.groupCount.y.toLong.widen[Long > 0]) &&
         geometry.globalExtent.z ==
-        (geometry.groupSize.z.toLong * geometry.groupCount.z.toLong)
+        (geometry.groupSize.z.toLong.widen[Long > 0] * geometry.groupCount.z.toLong.widen[Long > 0])
     def liveLanes(group: Coordinates): Either[VMFault, VMLaneMask] =
       if (everyGroupFull) Right(allLanes)
       else geometry.activeGroupSize(group) match {
@@ -64,14 +64,14 @@ object VMInterpreter {
           var failure: Option[String] = None
           allLanes.foreachLane { lane =>
             if (failure.isEmpty)
-              geometry.localCoordinates(lane) match {
+              geometry.localCoordinates(lane.raw) match {
                 case Left(message) => failure = Some(message)
                 case Right(local)  =>
                   geometry.globalCoordinatesLong(group, local) match {
                     case Left(message) => failure = Some(message)
                     case Right(global) =>
                       if (geometry.containsGlobal(global))
-                        live = live.union(VMLaneMask.ofLane(lane))
+                        live = live.union(VMLaneMask.ofLane(lane.raw))
                   }
               }
           }
@@ -106,9 +106,9 @@ object VMInterpreter {
                 ).map(_ => ())
             }
         }
-    val selectedCount                  = blockIndices.fold(groupCount.raw)(_.size)
+    val selectedCount                  = blockIndices.fold[Int >= 0](groupCount)(_.nonNegativeSize)
     def selectedBlock(index: Int): Int = blockIndices.fold(index)(_(index))
-    val selectedTasks                  = selectedCount.toLong.unsafe[Long >= 0]
+    val selectedTasks                  = selectedCount.toLong
     val workItems: Long >= 0           = laneCount.toLong
     val parallelBlocks                 = workgroups.shouldParallel(selectedTasks, workItems)
     val executionFailure               = AtomicReference(Option.empty[VMFault])
@@ -130,7 +130,11 @@ object VMInterpreter {
   private val blockState = AtomicReference[VMBlockState | Null](null)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-  private def borrowState(laneCount: Int, initialLive: VMLaneMask, registerChunkCount: Int): VMBlockState = {
+  private def borrowState(
+      laneCount: Int > 0,
+      initialLive: VMLaneMask,
+      registerChunkCount: VMRegisterFile.ChunkCount
+  ): VMBlockState = {
     val cached = blockState.getAndSet(null)
     cached match {
       case state: VMBlockState if state.laneCount == laneCount && state.registerChunkCount == registerChunkCount =>
@@ -160,7 +164,7 @@ object VMInterpreter {
   ): Either[VMFault, VMBlockState] = {
     val laneCount =
       geometry.groupSize.volumeInt.fold(message => throw IllegalArgumentException(message), value => value)
-    val state    = initialState.getOrElse(borrowState(laneCount.raw, initialLive, kernel.registerChunkCount))
+    val state    = initialState.getOrElse(borrowState(laneCount, initialLive, kernel.registerChunkCount))
     val reusable = initialState.isEmpty
     try
       executeBlockWithState(
@@ -244,7 +248,7 @@ object VMInterpreter {
           control,
           workgroups
         )
-        val masks                    = mutable.Map.empty[Int, Long]
+        val masks                    = mutable.Map.empty[WorkgroupLane, Long]
         var failure: Option[VMFault] = None
         cohort.lanes.foreachLane { lane =>
           if (failure.isEmpty) {
@@ -260,15 +264,15 @@ object VMInterpreter {
             var runnable = VMLaneMask.Empty
             var delayed  = VMLaneMask.Empty
             masks.foreach { case (lane, maskValue) =>
-              val warpBase = lane & ~31
-              val present  = cohort.lanes.filterLanes(candidate => (candidate & ~31) == warpBase)
+              val warpBase = lane.raw & ~31
+              val present  = cohort.lanes.filterLanes(candidate => (candidate.raw & ~31) == warpBase)
               val expected = state.live.filterLanes { candidate =>
-                (candidate & ~31) == warpBase &&
-                ((maskValue & 0xffffffffL) & (1L << (candidate & 31))) != 0L
+                (candidate.raw & ~31) == warpBase &&
+                ((maskValue & 0xffffffffL) & (1L << (candidate.raw & 31))) != 0L
               }
               if (expected.subtract(present).nonEmpty)
-                delayed = delayed.union(VMLaneMask.ofLane(lane))
-              else runnable = runnable.union(VMLaneMask.ofLane(lane))
+                delayed = delayed.union(VMLaneMask.ofLane(lane.raw))
+              else runnable = runnable.union(VMLaneMask.ofLane(lane.raw))
             }
             Right(runnable -> delayed)
         }
@@ -285,8 +289,8 @@ object VMInterpreter {
           val memberMask = if (key.phase < 0) state.convergence.getOrElse((warpBase, (-key.phase - 1).toInt), 0L)
           else warpBarrierMasks.getOrElse(key, -1L)
           state.live.filterLanes { lane =>
-            (lane & ~31) == warpBase &&
-            ((memberMask & 0xffffffffL) & (1L << (lane & 31))) != 0L
+            (lane.raw & ~31) == warpBase &&
+            ((memberMask & 0xffffffffL) & (1L << (lane.raw & 31))) != 0L
           }
         case _ => state.live
       }
@@ -309,7 +313,7 @@ object VMInterpreter {
           })
           arrived.foreachLane { lane =>
             reduced = reduced.flatMap { current =>
-              state.predicates(lane).get(reduction.predicate).toRight(
+              state.predicates(lane.raw).get(reduction.predicate).toRight(
                 VMFault.UndefinedRegister(reduction.predicate, reduction.pc, lane)
               ).map { value =>
                 reduction.operation match {
@@ -321,7 +325,7 @@ object VMInterpreter {
             }
           }
           reduced.foreach { value =>
-            arrived.foreachLane(lane => state.predicates(lane)(reduction.destination) = value)
+            arrived.foreachLane(lane => state.predicates(lane.raw)(reduction.destination) = value)
           }
         }
         var releasedIndex = 0
@@ -367,8 +371,9 @@ object VMInterpreter {
           enqueue(cohort.pc, delayed)
           cohort = cohort.copy(lanes = runnable)
       }
-      if (cohort.lanes.nonEmpty) {
-        control.checkpoint(cohort.lanes.size.unsafe[Int > 0]) match {
+      val activeSize = cohort.lanes.positiveSize
+      if (activeSize.nonEmpty) {
+        control.checkpoint(activeSize.get.widen[Int > 0]) match {
           case Left(fault) => return Left(VMFault.fromControl(fault))
           case Right(())   => ()
         }
@@ -378,9 +383,9 @@ object VMInterpreter {
           executable.predication.map(predicate => VMPredicateFile.index(predicate.name)).getOrElse(-1)
         executable.predication.foreach { predicate =>
           active = cohort.lanes.filterLanes { lane =>
-            val value = if (predicateIndex >= 0) state.predicates(lane).getSlot(predicateIndex)
+            val value = if (predicateIndex >= 0) state.predicates(lane.raw).getSlotRaw(predicateIndex)
             else
-              state.predicates(lane).get(predicate.name)
+              state.predicates(lane.raw).get(predicate.name)
             value match {
               case Some(predicateValue) => predicateValue != predicate.negated
               case None                 =>
@@ -472,9 +477,12 @@ object VMInterpreter {
                   case WaitScope.Warp =>
                     val lanesByWarp = mutable.Map.empty[Int, VMLaneMask]
                     active.foreachLane { lane =>
-                      val warpBase = lane & ~31
+                      val warpBase = lane.raw & ~31
                       lanesByWarp(warpBase) = lanesByWarp.getOrElse(warpBase, VMLaneMask.Empty).union(
-                        VMLaneMask.one(lane).fold(fault => throw IllegalStateException(fault.message), value => value)
+                        VMLaneMask.one(lane.raw).fold(
+                          fault => throw IllegalStateException(fault.message),
+                          value => value
+                        )
                       )
                     }
                     val warps     = Vec.from(lanesByWarp).sortBy(_._1)
@@ -545,7 +553,7 @@ object VMInterpreter {
     // never written holds an undefined value, so it binds as zero.
     caller.active.foreachLane { lane =>
       parameters.zip(function.parameters).foreach { case (callerName, functionName) =>
-        state.parameters(lane)(functionName) = caller.state.parameters(lane).getOrElse(callerName, 0L)
+        state.parameters(lane.raw)(functionName) = caller.state.parameters(lane.raw).getOrElse(callerName, 0L)
       }
     }
     val kernel = caller.kernel.copy(
@@ -568,8 +576,8 @@ object VMInterpreter {
     ).map { completed =>
       caller.active.foreachLane { lane =>
         returnParameters.zip(function.returnParameters).foreach { case (callerName, functionName) =>
-          completed.parameters(lane).get(functionName).foreach { value =>
-            caller.state.parameters(lane)(callerName) = value
+          completed.parameters(lane.raw).get(functionName).foreach { value =>
+            caller.state.parameters(lane.raw)(callerName) = value
           }
         }
       }

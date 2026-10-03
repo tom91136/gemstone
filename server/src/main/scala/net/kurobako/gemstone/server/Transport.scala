@@ -10,7 +10,7 @@ import scala.util.control.NonFatal
 
 object Transport {
   type Port = Port.Type
-  object Port extends Newtype[Int where Between[1, 65535]] {
+  object Port extends Newtype[Int in 1 ~ 65535] {
     extension (value: Port) def toInt: Int = value.raw
   }
 
@@ -45,7 +45,7 @@ object Transport {
             Option(uri.getHost).exists(_.nonEmpty) && Option(uri.getRawPath).forall(_.isEmpty),
             "TCP endpoint requires a host and port"
           )
-          Right(Tcp(uri.getHost, uri.getPort.unsafe[Int where Between[0, 65535]]))
+          Right(Tcp(uri.getHost, uri.getPort.unsafe[Int in 0 ~ 65535]))
         case "unix" =>
           require(Option(uri.getRawAuthority).forall(_.isEmpty), "Unix endpoint must not contain a host")
           val path = Path.of(Option(uri.getPath).getOrElse(""))
@@ -56,7 +56,7 @@ object Transport {
     } catch { case NonFatal(error) => Left(s"invalid endpoint '$value': ${throwables.detail(error)}") }
   }
   enum Bind {
-    case Tcp(host: String = "127.0.0.1", port: Int where Between[0, 65535] = 0)
+    case Tcp(host: String = "127.0.0.1", port: Int in 0 ~ 65535 = 0)
     case Unix(path: Path)
   }
 

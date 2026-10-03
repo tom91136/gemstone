@@ -9,7 +9,7 @@ import net.kurobako.gemstone.vm.*
 class LegacyNegatedAddSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module = SASSFixture.module(
     35,
-    Vec(SASSFixture.Kernel("arith_probe", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 4), registers = 24))
+    Vec(SASSFixture.Kernel("arith_probe", 320, Vec((0, 8), (8, 8), (16, 8), (24, 4)), registers = 24))
   )
 
   test("legacy paired IADD with negated sources carries correctly across 64-bit words") {
@@ -41,7 +41,7 @@ class LegacyNegatedAddSuite extends munit.FunSuite {
     )
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(8L.unsafe[Long > 0])
+      val output  = service.allocate(8L)
       val program = service.compile(sass)
         .fold(e => fail(e.message), identity)
       cases.foreach { case (a, b) =>

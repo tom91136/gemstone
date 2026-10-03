@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
@@ -11,10 +12,10 @@ private object VMIR {
   enum RuntimeType {
     case Void
     case Bool
-    case Integer(width: Int where Between[1, 64], signed: Boolean)
-    case Floating(width: OneOf[(16, 32, 64)])
-    case VectorType(component: Int, count: Int)
-    case Array(element: Int, count: Long)
+    case Integer(width: ScalarBitWidth, signed: Boolean)
+    case Floating(width: Int in (16, 32, 64))
+    case VectorType(component: Int, count: Int > 0)
+    case Array(element: Int, count: Long >= 0)
     case Structure(members: Vec[Int])
     case Pointer(storageClass: Int, pointee: Int)
     case Function(result: Int, parameters: Vec[Int])
@@ -31,10 +32,12 @@ private object VMIR {
     case Sampler
     case CubeTexture(sampledType: Int, arrayed: Boolean)
     case SampledImage(imageType: Int)
-    case MatrixType(column: Int, count: Int)
+    case MatrixType(column: Int, count: Int in 2 ~ 4)
     case InputAttachment(sampledType: Int, multisampled: Boolean)
     case MultisampledTexture(sampledType: Int, arrayed: Boolean = false)
   }
+
+  case class MatrixLayout(stride: Int > 0, rowMajor: Boolean)
 
   enum Constant {
     case Bits(typeId: Int, lanes: Vec[Long])
@@ -58,8 +61,9 @@ private object VMIR {
       globals: Map[Int, Global],
       descriptorBindings: Map[Int, (Int >= 0, Int >= 0)],
       builtins: Map[Int, Int],
-      arrayStrides: Map[Int, Int],
-      memberOffsets: Map[(Int, Int), Int],
+      arrayStrides: Map[Int, Int > 0],
+      memberOffsets: Map[(Int, Int), Int >= 0],
+      memberMatrixLayouts: Map[(Int, Int), MatrixLayout],
       packedStructures: Set[Int],
       byValueParameters: Set[Int],
       saturatedConversions: Set[Int],
@@ -105,7 +109,7 @@ private object VMIR {
         Right(Constant.NullPointer(typeId, typeId, 0))
       case _ =>
         scalarLeafCount(types, typeId) match {
-          case Right(count)                     => Right(Constant.Bits(typeId, Vec.fill(count)(0L)))
+          case Right(count)                     => Right(Constant.Bits(typeId, Vec.fill(count.raw)(0L)))
           case Left(Fault.InvalidTask(message)) =>
             Left(Fault.InvalidTask(s"$opcode %${id(destination)} has invalid result type: $message"))
           case Left(error) => Left(error)
@@ -116,29 +120,35 @@ private object VMIR {
   def scalarLeafCount(
       types: scala.collection.Map[Int, RuntimeType],
       typeId: Int
-  ): Either[Fault, Int] = types.get(typeId) match {
+  ): Either[Fault, Int >= 0] = types.get(typeId) match {
     case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) |
         Some(RuntimeType.Event) => Right(1)
     case Some(RuntimeType.Pointer(_, _))                => Right(1)
     case Some(RuntimeType.VectorType(component, count)) =>
-      scalarLeafCount(types, component).flatMap(value => checkedLeafCount(typeId, value.toLong * count.toLong))
+      scalarLeafCount(types, component).flatMap(value => checkedLeafProduct(typeId, value, count.toLong.widen[Long >= 0]))
     case Some(RuntimeType.MatrixType(column, count)) =>
-      scalarLeafCount(types, column).flatMap(value => checkedLeafCount(typeId, value.toLong * count.toLong))
+      scalarLeafCount(types, column).flatMap(value => checkedLeafProduct(typeId, value, count.toLong.widen[Long >= 0]))
     case Some(RuntimeType.Array(element, count)) =>
-      scalarLeafCount(types, element).flatMap(value => checkedLeafCount(typeId, value.toLong * count))
+      scalarLeafCount(types, element).flatMap(value => checkedLeafProduct(typeId, value, count))
     case Some(RuntimeType.Structure(members)) =>
-      members.foldLeft[Either[Fault, Int]](Right(0)) { (total, member) =>
+      members.foldLeft[Either[Fault, Int >= 0]](Right(0)) { (total, member) =>
         total.flatMap(left =>
-          scalarLeafCount(types, member).flatMap(right => checkedLeafCount(typeId, left.toLong + right))
+          scalarLeafCount(types, member).flatMap(right => checkedLeafCount(typeId, left.raw.toLong + right.raw))
         )
       }
     case value => Left(Fault.InvalidTask(s"SPIR-V type %$typeId has no scalar data leaves: $value"))
   }
 
-  private def checkedLeafCount(typeId: Int, count: Long): Either[Fault, Int] =
+  private def checkedLeafProduct(typeId: Int, leaves: Int >= 0, count: Long >= 0): Either[Fault, Int >= 0] =
+    if (leaves.raw == 0) Right(0)
+    else if (count.raw > Int.MaxValue.toLong / leaves.raw)
+      Left(Fault.InvalidTask(s"SPIR-V type %$typeId has an invalid scalar leaf count: $leaves * ${count.raw}"))
+    else checkedLeafCount(typeId, leaves.raw.toLong * count.raw)
+
+  private def checkedLeafCount(typeId: Int, count: Long): Either[Fault, Int >= 0] =
     Either.cond(
       count >= 0L && count <= Int.MaxValue.toLong,
-      count.toInt,
+      count.toInt.unsafe[Int >= 0],
       Fault.InvalidTask(s"SPIR-V type %$typeId has an invalid scalar leaf count: $count")
     )
 }

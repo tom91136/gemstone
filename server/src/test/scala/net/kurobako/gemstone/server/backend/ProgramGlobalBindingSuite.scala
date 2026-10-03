@@ -35,7 +35,7 @@ class ProgramGlobalBindingSuite extends munit.FunSuite {
       service: ExecutionSession,
       id: AllocationId,
       offset: Long,
-      size: Int where Between[0, 8] = 4
+      size: Int in 0 ~ 8 = 4
   ): Long =
     service.read(id, offset.unsafe[Long >= 0], size.nonNegative)
       .map(bytes => LittleEndian.decode(bytes, 0, size)).toOption.get

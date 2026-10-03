@@ -64,7 +64,7 @@ object AMDGPUALUExecutionBenchmark {
   def run(arguments: Array[String]): Unit = {
     val parsed           = BenchmarkArguments.parse(BenchmarkName("amdgpu-alu"), arguments.toSeq, options)
     val measured         = parsed.measured
-    val warmup           = parsed.warmup.getOrElse(math.max(10, measured.raw / 10).unsafe[Int >= 0])
+    val warmup           = parsed.warmup.getOrElse((measured.widen[Int >= 0] / 10).max(10))
     val instructionCount = parsed.instructionCount
     val mode             = parsed.mode
     val instruction      = mode match {

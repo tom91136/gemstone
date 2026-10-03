@@ -1,9 +1,47 @@
 package net.kurobako.gemstone
 
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
 
 class StringSuite extends munit.FunSuite {
+  test("primitive integer literals retain signed bounds and Java radix prefixes") {
+    Vec(
+      "0"             -> 0,
+      "-0"            -> 0,
+      "+17"           -> 17,
+      "017"           -> 15,
+      "0x7fffffff"    -> Int.MaxValue,
+      "-0X80000000"   -> Int.MinValue,
+      "-#80000000"    -> Int.MinValue,
+      "-020000000000" -> Int.MinValue,
+      "2147483647"    -> Int.MaxValue,
+      "-2147483648"   -> Int.MinValue
+    ).foreach { (text, expected) =>
+      assertEquals(parseIntLiteral(text), Some(expected))
+    }
+    Vec(
+      "",
+      "+",
+      "-",
+      "0x",
+      "#",
+      "0x-1",
+      "-0x+1",
+      "08",
+      " 1",
+      "1 ",
+      "--1",
+      "++1",
+      "2147483648",
+      "-2147483649",
+      "0x80000000",
+      "037777777777"
+    ).foreach { text =>
+      assertEquals(parseIntLiteral(text), None, text)
+    }
+  }
+
   test("integer literals share decimal and hex signs without accepting grammar fragments") {
     assertEquals(parseBigIntLiteral("-0Xff"), Some(BigInt(-255)))
     assertEquals(parseBigIntLiteral("+0xFf"), Some(BigInt(255)))
@@ -82,4 +120,13 @@ class StringSuite extends munit.FunSuite {
     assertEquals(format.toLowerCaseRoot, "sopp")
     assertEquals(format.toUpperCaseRoot, "SOPP")
   }
+  test("case conversion preserves nonemptiness when Unicode changes the length") {
+    val upperInput: NonEmpty[String] = "Straße"
+    val lowerInput: NonEmpty[String] = "İ"
+    val upper: NonEmpty[String]      = upperInput.toUpperCaseRoot
+    val lower: NonEmpty[String]      = lowerInput.toLowerCaseRoot
+    assertEquals(upper, "STRASSE")
+    assertEquals(lower, "i\u0307")
+  }
+
 }

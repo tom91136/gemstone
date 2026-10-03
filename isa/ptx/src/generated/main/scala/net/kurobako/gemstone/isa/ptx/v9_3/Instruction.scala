@@ -17157,9 +17157,9 @@ object Instruction {
       mods: Vec[Modifier] = Vec.empty,
       pred: Option[Predication] = None
   ): Either[DecodeError, Instruction] = {
-    val opcodeParts = Vec.from(opcode.toLowerCaseRoot.split('.')).filter(_.nonEmpty)
+    val opcodeParts = Vec.from(opcode.toLowerCaseRoot.split('.')).flatMap(_.refine[NonEmpty[String]].toOption)
     val name = opcodeParts.headOption.getOrElse("")
-    val allModifiers = opcodeParts.drop(1).map(value => Modifier(value.unsafe[NonEmpty[String]])) ++ mods
+    val allModifiers = opcodeParts.drop(1).map(value => Modifier(value)) ++ mods
     decodeParsed(name, operands, allModifiers, pred)
   }
 

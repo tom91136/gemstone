@@ -8,7 +8,7 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 
 class NumericEdgeSuite extends munit.FunSuite {
-  private def run(body: String, outputType: String, width: Int where Between[1, 8]): Long = {
+  private def run(body: String, outputType: String, width: Int in 1 ~ 8): Long = {
     val source = s""".version 8.0
       |.target sm_89
       |.address_size 64

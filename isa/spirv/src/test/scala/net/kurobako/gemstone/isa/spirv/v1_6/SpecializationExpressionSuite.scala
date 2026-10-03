@@ -135,7 +135,7 @@ class SpecializationExpressionSuite extends munit.FunSuite {
       identity
     )
     assertEquals((compiled.descriptorBindings(30)._1.raw, compiled.descriptorBindings(30)._2.raw), (3, 7))
-    assertEquals(compiled.memberOffsets((8, 1)), 16)
+    assertEquals(compiled.memberOffsets((8, 1)).raw, 16)
   }
 
 }

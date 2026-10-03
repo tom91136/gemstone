@@ -11,7 +11,7 @@ import net.kurobako.gemstone.vm.*
 class LegacyVideoMinMaxSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module = SASSFixture.module(
     35,
-    Vec(SASSFixture.Kernel("video_minmax", 320, Vec(0 -> 8, 8 -> 4, 12 -> 4, 16 -> 4), registers = 15))
+    Vec(SASSFixture.Kernel("video_minmax", 320, Vec((0, 8), (8, 4), (12, 4), (16, 4)), registers = 15))
   )
 
   test("Kepler VMNMX preserves signedness and secondary min, max and accumulation") {
@@ -31,7 +31,7 @@ class LegacyVideoMinMaxSuite extends munit.FunSuite {
     )
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(48L.unsafe[Long > 0])
+      val output  = service.allocate(48L)
       val program = service.compile(source)
         .fold(e => fail(e.message), identity)
       cases.foreach { case (a, b, c) =>

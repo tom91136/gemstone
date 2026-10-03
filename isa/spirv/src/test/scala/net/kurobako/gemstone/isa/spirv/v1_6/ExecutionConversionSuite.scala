@@ -394,7 +394,7 @@ class ExecutionConversionSuite extends munit.FunSuite {
         case 32 => java.lang.Float.floatToRawIntBits(value.toFloat).toLong
         case _  => java.lang.Double.doubleToRawLongBits(value)
       }
-      LittleEndian.toVec(bits, (sourceWidth / 8).refine[Int where Between[0, 8]].toOption.get)
+      LittleEndian.toVec(bits, (sourceWidth / 8).refine[Int in 0 ~ 8].toOption.get)
     })
     val task = KernelTask.validated(
       "convert",
@@ -406,7 +406,7 @@ class ExecutionConversionSuite extends munit.FunSuite {
     assertEquals(
       memory.bytes,
       Vec.from(expected.flatMap(value =>
-        LittleEndian.toVec(value, (resultWidth / 8).refine[Int where Between[0, 8]].toOption.get)
+        LittleEndian.toVec(value, (resultWidth / 8).refine[Int in 0 ~ 8].toOption.get)
       ))
     )
   }

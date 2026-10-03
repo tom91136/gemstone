@@ -16,7 +16,7 @@ class StgU8UniformBaseSm75Suite extends munit.FunSuite {
   private def fixtureModule(sm: Int): Cubin.Module =
     SASSFixture.module(
       sm,
-      Vec(SASSFixture.Kernel("stg_u8_sys_u32_ur_probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 4), registers = 8))
+      Vec(SASSFixture.Kernel("stg_u8_sys_u32_ur_probe", 352, Vec((0, 8), (8, 8), (16, 8), (24, 4)), registers = 8))
     )
 
   test("sm75 U8 SYS store adds the zero-extended R offset to the UR64 base") {
@@ -77,7 +77,7 @@ class StgU8UniformBaseSm75Suite extends munit.FunSuite {
           )
         )
         service.run(program, task).fold(e => fail(e.message), identity)
-        val actual   = service.read(output, 0L, 128.unsafe[Int >= 0]).toOption.get
+        val actual   = service.read(output, 0L, 128).toOption.get
         val expected = Vec.from((0 until 128).map(i => if (i < count) i.toByte else 0xa5.toByte))
         assertEquals(actual, expected)
       }
@@ -183,7 +183,7 @@ class StgU8UniformBaseSm75Suite extends munit.FunSuite {
         instruction.modifiers ==
         Vec(SASSInstruction.Modifier.`E`, SASSInstruction.Modifier.`U8`, SASSInstruction.Modifier.`SYS`)
     ).get
-    def rejected(instruction: DecodedInstruction, sm: Int = 75): Boolean =
+    def rejected(instruction: DecodedInstruction, sm: Int >= 35 = 75): Boolean =
       SASSFixture.lower(
         module.copy(sm = sm),
         kernel,

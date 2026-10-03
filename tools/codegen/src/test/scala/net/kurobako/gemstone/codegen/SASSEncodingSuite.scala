@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.codegen
 
+import net.kurobako.gemstone.constraint.*
+
 class SASSEncodingSuite extends munit.FunSuite {
   private def parse(source: String): SASSDescription.Description =
     SASSDescription.parse(source).fold(error => fail(error.message), identity)
@@ -37,7 +39,7 @@ class SASSEncodingSuite extends munit.FunSuite {
         |  BITS_8_7_0_dst = Rd;
         |""".stripMargin
     val compiled = SASSEncoding.compile(parse(source))
-    assertEquals(compiled.width, 128)
+    assertEquals(compiled.width.raw, 128)
     assertEquals(compiled.forms.head.opcodes, Vector("MOV" -> BigInt(10)))
     assertEquals(compiled.forms.head.fields.map(_.positions), Vector(Vector(1, 5)))
     assertEquals(
@@ -271,7 +273,7 @@ class SASSEncodingSuite extends munit.FunSuite {
            | BITS_test = Rd;
            |""".stripMargin
       val compiled = SASSEncoding.compile(parse(source))
-      assertEquals(compiled.width, width)
+      assertEquals(compiled.width.raw, width)
       assertEquals(compiled.forms.head.fields.head.positions, Vector(0, 1, 2, 3))
     }
   }

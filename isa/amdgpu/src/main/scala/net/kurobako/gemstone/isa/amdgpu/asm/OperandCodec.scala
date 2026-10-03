@@ -4,12 +4,13 @@ import Program.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.EncodingConstants.*
 
 private object OperandCodec {
   case class Literal(value: Long, size: Int in (4, 8) = 4) {
-    def bytes: Vec[Byte] = LittleEndian.toVec(value, size.raw.unsafe[Int where Between[0, 8]])
+    def bytes: Vec[Byte] = LittleEndian.toVec(value, size)
   }
   private val ForcedWideLiteral = "lit64\\((0[xX][0-9a-fA-F]+|[+-]?[0-9]+)\\)".r
   private val ForcedLiteral     = "lit\\((0[xX][0-9a-fA-F]+|[+-]?[0-9]+)\\)".r
@@ -18,7 +19,7 @@ private object OperandCodec {
     OperandEncoding.Catalogue.forKind(target.isa, OperandKind.SRC)
       .getOrElse(throw IllegalStateException(s"missing generated source selectors for ${target.isa}"))
 
-  def literalSize(code: Int, target: Target): Int = SourceOperand.literalSize(code, target.isa)
+  def literalSize(code: Int, target: Target): Option[Int in (4, 8)] = SourceOperand.literalSize(code, target.isa)
 
   private def special(name: String, target: Target): Option[(Int, Int)] = {
     val selectors = source(target).selectors
@@ -38,21 +39,21 @@ private object OperandCodec {
       ).map(value => (value.toInt, None))
     else operand match {
       case Operand.Register(RegisterFile.Scalar, first, last)
-          if first >= 0 && last < 128 && last - first + 1 == info.bits.raw.max(32) / 32 &&
+          if first >= 0 && last < 128 && last - first + 1 == math.max(info.bits.raw, 32) / 32 &&
             (info.bits.raw <= 32 || first % 2 == 0) =>
         Some((first, None))
       case Operand.Register(RegisterFile.TrapTemporary, first, last)
-          if first >= 0 && last - first + 1 == info.bits.raw.max(32) / 32 =>
+          if first >= 0 && last - first + 1 == math.max(info.bits.raw, 32) / 32 =>
         for {
           start <- encoding.selectors.get(s"ttmp$first")
           end   <- encoding.selectors.get(s"ttmp$last")
           if end - start == last - first && (info.bits.raw <= 32 || first % 2 == 0)
         } yield (start, None)
       case Operand.Identifier(name) => special(name, target).filter(value =>
-          value._2 == 0 || value._2 == info.bits.raw.max(32)
+          value._2 == 0 || value._2 == math.max(info.bits.raw, 32)
         ).map { case (index, _) => (index, None) }
       case Operand.SpecialRegister(name) => special(name, target).filter { case (_, bits) =>
-          bits == 0 || bits == info.bits.raw.max(32)
+          bits == 0 || bits == math.max(info.bits.raw, 32)
         }
           .map { case (index, _) => (index, None) }
       case Operand.IntegerLiteral(value, _) if isSource =>
@@ -100,19 +101,19 @@ private object OperandCodec {
     val isSource = !info.field.contains(EncodingField.SDST)
     if (info.kind.isMessage || info.kind == OperandKind.SIMM4) Some(Operand.IntegerLiteral(BigInt(value), 10))
     else if (value < 128) {
-      val aliases = if (info.bits.raw.max(32) == 64) Vec("vcc", "exec", "null")
+      val aliases = if (math.max(info.bits.raw, 32) == 64) Vec("vcc", "exec", "null")
       else Vec("vcc_lo", "vcc_hi", "exec_lo", "exec_hi", "m0", "null")
       aliases.find(name => special(name, target).exists(_._1 == value)).map(Operand.SpecialRegister(_))
-        .orElse(Option.when(info.bits.raw.max(32) == 32 || (value % 2 == 0 && value < 127))(
-          Operand.Register(RegisterFile.Scalar, value, value + info.bits.raw.max(32) / 32 - 1)
+        .orElse(Option.when(math.max(info.bits.raw, 32) == 32 || (value % 2 == 0 && value < 127))(
+          Operand.Register(RegisterFile.Scalar, value, value + math.max(info.bits.raw, 32) / 32 - 1)
         ))
     } else if (!isSource) None
     else SourceOperand.decode(value, target.isa).flatMap {
       case SourceOperand.Integer(number)   => Some(Operand.IntegerLiteral(BigInt(number), 10))
       case SourceOperand.Floating(number)  => Some(Operand.DecimalLiteral(number.toString))
       case SourceOperand.Special(register) => Some(Operand.SpecialRegister(register.toString))
-      case SourceOperand.Literal(size)     => literal.filter(_.size.raw == size).map(bits =>
-          Operand.Expression(s"${if (size == 8) "lit64" else "lit"}(0x${bits.value.toHexString})")
+      case SourceOperand.Literal(size)     => literal.filter(_.size == size).map(bits =>
+          Operand.Expression(s"${if (size.raw == 8) "lit64" else "lit"}(0x${bits.value.toHexString})")
         )
       case _ => None
     }

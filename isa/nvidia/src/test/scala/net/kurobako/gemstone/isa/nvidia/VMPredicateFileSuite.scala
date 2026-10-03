@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 class VMPredicateFileSuite extends munit.FunSuite {
   test("numbered predicate boundaries retain independent defined and value bits") {
     val predicates = VMPredicateFile()
-    val indices    = Vec(0, 1, 62, 63, 64, 65, 127, 128, 959, 960, 1022, 1023)
+    val indices    = Vec[VMPredicateFile.Slot](0, 1, 62, 63, 64, 65, 127, 128, 959, 960, 1022, 1023)
     indices.foreach(index => assertEquals(predicates.getSlot(index), None))
     indices.foreach { index =>
       predicates.updateSlot(index, false)

@@ -8,7 +8,7 @@ import net.kurobako.gemstone.constraint.*
 class SASSCodeWordsSuite extends munit.FunSuite {
   private def bytes(words: Long*): Array[Byte] = words.toArray.flatMap(LittleEndian.toArray(_, 8))
 
-  private def expected(address: Int, raw: Long, slot: Int): (Int, Vec[Byte]) =
+  private def expected(address: Int >= 0, raw: Long, slot: Int): (Int >= 0, Vec[Byte]) =
     (address, (LittleEndian.toArray(raw, 8) ++ Array.tabulate[Byte](3)(index => (slot >>> (index * 8)).toByte)).toVec)
 
   test("Kepler skips each control word and preserves NVIDIA oracle addresses") {
@@ -24,7 +24,7 @@ class SASSCodeWordsSuite extends munit.FunSuite {
     )
     val actual = SASSCodeWords.words(code, 35).fold(fail(_), identity)
 
-    assertEquals(actual.map(_._1), Vec(8, 16, 24, 32, 40, 48, 56))
+    assertEquals(actual.map(_._1.raw), Vec(8, 16, 24, 32, 40, 48, 56))
     assertEquals(
       actual.map(_._2.toVec),
       Vec(
@@ -56,7 +56,7 @@ class SASSCodeWordsSuite extends munit.FunSuite {
         expected(24, 0xf0c8000002170002L, 0x0073f)
       )
     )
-    assertEquals(actual.map(_._1), Vec(8, 16, 24))
+    assertEquals(actual.map(_._1.raw), Vec(8, 16, 24))
     assertEquals(actual.map(_._2.length), Vec(11, 11, 11))
     assertEquals(actual.map(_._2(10) & 0xe0), Vec(0, 0, 0))
   }
@@ -70,7 +70,7 @@ class SASSCodeWordsSuite extends munit.FunSuite {
     )
     val actual = SASSCodeWords.words(code, 60).fold(fail(_), identity)
 
-    assertEquals(actual.map(_._1), Vec(8, 16, 24))
+    assertEquals(actual.map(_._1.raw), Vec(8, 16, 24))
     assertEquals(
       actual.map(_._2.toVec),
       Vec(
@@ -85,7 +85,7 @@ class SASSCodeWordsSuite extends munit.FunSuite {
     val code   = Array.tabulate[Byte](32)(_.toByte)
     val actual = SASSCodeWords.words(code, 70).fold(fail(_), identity)
 
-    assertEquals(actual.map(_._1), Vec(0, 16))
+    assertEquals(actual.map(_._1.raw), Vec(0, 16))
     assertEquals(actual.map(_._2.toVec), Vec(code.slice(0, 16).toVec, code.slice(16, 32).toVec))
   }
 
@@ -128,7 +128,7 @@ class SASSCodeWordsSuite extends munit.FunSuite {
     val invalidAddress = bundle.copy(words =
       bundle.words.updated(
         0,
-        bundle.words.head.copy(address = 9.unsafe[SASSCodeWords.Address])
+        bundle.words.head.copy(address = 9)
       )
     )
     val invalidWidth = bundle.copy(words =
@@ -149,6 +149,6 @@ class SASSCodeWordsSuite extends munit.FunSuite {
     assert(SASSCodeWords.words(Array.fill[Byte](63)(0), 35).isLeft)
     assert(SASSCodeWords.words(Array.fill[Byte](31)(0), 50).isLeft)
     assert(SASSCodeWords.words(Array.fill[Byte](15)(0), 89).isLeft)
-    assertEquals(SASSCodeWords.words(Array.empty[Byte], 35), Right(Vec.empty[(Int, Array[Byte])]))
+    assertEquals(SASSCodeWords.words(Array.empty[Byte], 35), Right(Vec.empty[(Int >= 0, Array[Byte])]))
   }
 }

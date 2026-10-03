@@ -6,6 +6,7 @@ import java.nio.ByteOrder
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 
 object elf {
   def hasMagic(bytes: Vec[Byte]): Boolean =
@@ -33,9 +34,9 @@ object elf {
 
   def sectionBytes(image: Array[Byte], section: SectionHeader): Either[NonEmpty[String], Vec[Byte]] =
     if (section.sectionType == 8) Right(Vec.empty)
-    else if (!ByteRange.contains(image.length, section.offset.toLong, section.size.toLong))
+    else if (!ByteRange.contains(image.length, section.offset.toLong.raw, section.size.toLong.raw))
       Left("ELF section exceeds image")
-    else Right(Vec.unsafeWrapArray(image.slice(section.offset, section.offset + section.size)))
+    else Right(Vec.unsafeWrapArray(image.slice(section.offset.raw, (section.offset + section.size).raw)))
 
   def stringAt(bytes: Vec[Byte], offset: Int): Either[NonEmpty[String], String] =
     if (offset < 0 || offset >= bytes.size) Left("invalid ELF string offset")
@@ -66,17 +67,18 @@ object elf {
       sectionType: Int,
       flags: Long,
       address: Long,
-      offset: Int,
-      size: Int,
+      offset: Int >= 0,
+      size: Int >= 0,
       link: Int,
       info: Int,
-      entrySize: Int
+      entrySize: Int >= 0
   )
   def sections64(bytes: Array[Byte]): Either[NonEmpty[String], Vec[SectionHeader]] =
     header64(bytes).flatMap(header => readSections(ByteBuffer.wrap(bytes).order(header.byteOrder), bytes.length))
 
-  private def intValue(value: Long, name: String): Either[NonEmpty[String], Int] =
-    Either.cond(value >= 0 && value <= Int.MaxValue, value.toInt, s"$name exceeds supported range")
+  private def intValue(value: Long, name: String): Either[NonEmpty[String], Int >= 0] =
+    value.refine[Long in 0L ~ 2147483647L].map[Int >= 0](_.toIntExact)
+      .left.map[NonEmpty[String]](_ => s"$name exceeds supported range")
 
   private def readSections(buffer: ByteBuffer, imageSize: Int): Either[NonEmpty[String], Vec[SectionHeader]] = {
     val tableOffset = buffer.getLong(40)

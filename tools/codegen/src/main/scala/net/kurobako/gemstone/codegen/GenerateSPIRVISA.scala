@@ -9,7 +9,6 @@ import java.nio.file.Path
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
-import scala.util.Try
 import ujson.Value
 
 object GenerateSPIRVISA {
@@ -54,8 +53,8 @@ object GenerateSPIRVISA {
   )
   private case class Grammar(
       magic: Long,
-      major: Int where Between[0, 255],
-      minor: Int where Between[0, 255],
+      major: Int in 0 ~ 255,
+      minor: Int in 0 ~ 255,
       revision: Int >= 0,
       entries: NonEmpty[Vec[Entry]],
       kinds: NonEmpty[Vec[OperandKind]]
@@ -189,7 +188,7 @@ object GenerateSPIRVISA {
       magic = parseUnsigned(valueField(root, "magic_number")),
       major = versionField(root, "major_version"),
       minor = versionField(root, "minor_version"),
-      revision = Try(numberField(root, "revision").unsafe[Int >= 0]).toEither.left.map(_.getMessage)
+      revision = numberField(root, "revision").refine[Int >= 0]
         .fold(error => throw IllegalArgumentException(s"invalid grammar revision: $error"), identity),
       entries = wrappedEntries,
       kinds = Vec.from(kinds).unsafe[NonEmpty[Vec[OperandKind]]]
@@ -297,12 +296,12 @@ object GenerateSPIRVISA {
         |          case Vec() =>
         |            Left(InstructionDecodeError.NoMatchingDefinition(
         |              raw.opcodeNumber,
-        |              (definitions.map(_.opcode)).unsafe
+        |              Vec.nonEmpty(definitions.head.opcode, definitions.tail.map(_.opcode)*)
         |            ))
         |          case values =>
         |            Left(InstructionDecodeError.AmbiguousDefinition(
         |              raw.opcodeNumber,
-        |              (values.map(_._1.opcode)).unsafe
+        |              Vec.nonEmpty(values.head._1.opcode, values.tail.map(_._1.opcode)*)
         |            ))
         |        }
         |    }
@@ -658,8 +657,8 @@ object GenerateSPIRVISA {
     else throw IllegalArgumentException(s"JSON field $name must be between 0 and 65535: $value")
   }
 
-  private def versionField(obj: ujson.Obj, name: String): Int where Between[0, 255] =
-    scala.util.Try(numberField(obj, name).unsafe[Int where Between[0, 255]]).toEither.left.map(_.getMessage)
+  private def versionField(obj: ujson.Obj, name: String): Int in 0 ~ 255 =
+    numberField(obj, name).refine[Int in 0 ~ 255]
       .fold(error => throw IllegalArgumentException(s"invalid JSON field $name: $error"), identity)
 
   private def nonEmpty(value: String, description: String): NonEmpty[String] =

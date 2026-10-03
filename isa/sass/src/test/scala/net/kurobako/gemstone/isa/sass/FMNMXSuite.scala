@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.nvidia.*
@@ -12,7 +13,7 @@ import net.kurobako.gemstone.vm.*
 
 class FMNMXSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
-    SASSFixture.module(86, Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 14)))
+    SASSFixture.module(86, Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 14)))
 
   private def parsedFunction(): (Cubin.Module, DecodedFunction) = {
     val module   = fixtureModule
@@ -40,13 +41,13 @@ class FMNMXSuite extends munit.FunSuite {
     )
     locally {
       val service     = SASSFixture.Execution()
-      val output      = service.allocate((cases.size * 8L).unsafe[Long > 0])
+      val output      = service.allocate(cases.positiveSize.toLong.widen[Long > 0] * 8L)
       val allocations = inputs.map(service.allocate(_))
       val program     = service.compile(lowered)
         .fold(error => fail(error.message), identity)
       val task = SASSFixture.task(
         "probe": NonEmpty[String],
-        LaunchGeometry.Dimensions(cases.size.unsafe[Int > 0], 1, 1),
+        LaunchGeometry.Dimensions(cases.positiveSize, 1, 1),
         LaunchGeometry.Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(output, 0L),
@@ -55,7 +56,7 @@ class FMNMXSuite extends munit.FunSuite {
         )
       )
       service.run(program, task).fold(error => fail(error.message), identity)
-      val actual   = service.readWords(output, (cases.size * 2).unsafe[Int >= 0])
+      val actual   = service.readWords(output, cases.nonNegativeSize * 2)
       val expected = cases.flatMap { case (_, _, minimum, maximum) => Vec(minimum, maximum) }
       assertEquals(actual, expected)
     }
@@ -81,7 +82,7 @@ class FMNMXSuite extends munit.FunSuite {
     val inputB  = Vec.from(Vec(0x3f800000L)).flatMap(LittleEndian.toVec(_, 4))
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(8L.unsafe[Long > 0])
+      val output  = service.allocate(8L)
       val a       = service.allocate(inputA)
       val b       = service.allocate(inputB)
       val program = service.compile(lowered)

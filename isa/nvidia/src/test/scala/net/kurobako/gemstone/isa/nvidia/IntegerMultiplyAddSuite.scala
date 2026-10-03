@@ -40,7 +40,7 @@ class IntegerMultiplyAddSuite extends munit.FunSuite {
     val selected = if (high) product >> operandWidth.raw else product
     val sum      = selected + unsigned(addend, resultWidth) + (if (usesCarry && carryIn) 1 else 0)
     val mask     = (BigInt(1) << resultWidth.raw) - 1
-    (sum & mask).longValue -> ((sum >> resultWidth.raw) != 0)
+    (sum & mask).toLong -> ((sum >> resultWidth.raw) != 0)
   }
 
   test("primitive multiply-add matches unsigned wide arithmetic") {

@@ -732,9 +732,9 @@ object GeneratePTXISA {
         |      mods: Vec[Modifier] = Vec.empty,
         |      pred: Option[Predication] = None
         |  ): Either[DecodeError, Instruction] = {
-        |    val opcodeParts = Vec.from(opcode.toLowerCaseRoot.split('.')).filter(_.nonEmpty)
+        |    val opcodeParts = Vec.from(opcode.toLowerCaseRoot.split('.')).flatMap(_.refine[NonEmpty[String]].toOption)
         |    val name = opcodeParts.headOption.getOrElse("")
-        |    val allModifiers = opcodeParts.drop(1).map(value => Modifier(value.unsafe[NonEmpty[String]])) ++ mods
+        |    val allModifiers = opcodeParts.drop(1).map(value => Modifier(value)) ++ mods
         |    decodeParsed(name, operands, allModifiers, pred)
         |  }
         |
@@ -1222,12 +1222,12 @@ object GeneratePTXISA {
       case Vector(major, minor) if major.forall(_.isDigit) && minor.forall(_.isDigit) =>
         val source = value.refine[NonEmpty[String]]
           .fold(message => throw IllegalArgumentException(s"invalid PTX version '$value': $message"), valid => valid)
-        val majorValue = Try(major.toInt.unsafe[Int >= 0]).toEither.left.map(_.getMessage)
+        val majorValue = Try(major.toInt).toEither.left.map(_.getMessage).flatMap(_.refine[Int >= 0])
           .fold(
             message => throw IllegalArgumentException(s"invalid PTX major version '$major': $message"),
             valid => valid
           )
-        val minorValue = Try(minor.toInt.unsafe[Int >= 0]).toEither.left.map(_.getMessage)
+        val minorValue = Try(minor.toInt).toEither.left.map(_.getMessage).flatMap(_.refine[Int >= 0])
           .fold(
             message => throw IllegalArgumentException(s"invalid PTX minor version '$minor': $message"),
             valid => valid

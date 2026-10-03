@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
@@ -11,7 +12,7 @@ import net.kurobako.gemstone.vm.*
 class Hadd2SelectedSm89Suite extends munit.FunSuite {
   {
     def fixtureModule: Cubin.Module =
-      SASSFixture.module(89, Vec(SASSFixture.Kernel("convert_half", 352, Vec(0 -> 8, 8 -> 8), registers = 12)))
+      SASSFixture.module(89, Vec(SASSFixture.Kernel("convert_half", 352, Vec((0, 8), (8, 8)), registers = 12)))
 
     test("CUDA 13.3 sm_89 HADD2.F32 converts selected half lanes including IEEE edge values") {
       val module   = fixtureModule
@@ -57,7 +58,7 @@ class Hadd2SelectedSm89Suite extends munit.FunSuite {
           )
         )
         service.run(program, task).fold(error => fail(error.message), identity)
-        val words     = service.readWords(output, halves.size.unsafe[Int >= 0])
+        val words     = service.readWords(output, halves.nonNegativeSize)
         val knownBits = Map(
           0x0000 -> 0x00000000,
           0x8000 -> 0x80000000,

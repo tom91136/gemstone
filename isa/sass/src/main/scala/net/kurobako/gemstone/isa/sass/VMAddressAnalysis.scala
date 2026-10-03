@@ -133,7 +133,7 @@ private object VMAddressAnalysis {
   private def isGeneralRegister(operand: Operand, allowZero: Boolean = false): Boolean =
     operandSelectors(operand).isEmpty && generalRegisterBase(operand, allowZero)
   @annotation.tailrec
-  private def registerIndex(operand: Operand): Option[Int where Between[0, 255]] =
+  private def registerIndex(operand: Operand): Option[Int in 0 ~ 255] =
     VMOperand.without(operand, OperandSelector.reuse) match {
       case Operand.Register(RegisterBank.R, index) => Some(index)
       case Operand.Qualified(inner, _)             => registerIndex(inner)
@@ -175,7 +175,7 @@ private object VMAddressAnalysis {
   private def isUnconditionalPredicateDefinition(instruction: DecodedInstruction, target: Int): Boolean =
     isPredicateDefinition(instruction, target) && instruction.guard.isEmpty && !hasPredicateRead(instruction, target)
 
-  private def isAddress(operand: Operand, register: Int where Between[0, 255]): Boolean = operand match {
+  private def isAddress(operand: Operand, register: Int in 0 ~ 255): Boolean = operand match {
     case Operand.Address(Some(Operand.Register(RegisterBank.R, baseIndex)), None, displacement, scale, None, None) =>
       scale.raw == 1 && baseIndex == register && displacement == 0
     case _ => false
@@ -190,7 +190,7 @@ private object VMAddressAnalysis {
   private def isGenericMemory(
       instruction: DecodedInstruction,
       target: Int,
-      lowAddress: Int where Between[0, 255]
+      lowAddress: Int in 0 ~ 255
   ): Boolean = {
     val args = instruction.operands
     args.size == 3 && positivePredicate(args.last).contains(target) && GenericMemoryModifiers(modifiers(instruction)) &&
@@ -208,7 +208,7 @@ private object VMAddressAnalysis {
       !isCarryWriter(instruction)
 
   /** Retained scalar instructions with one register result and no predicate outputs. */
-  private def scalarDestination(instruction: DecodedInstruction): Option[Int where Between[0, 255]] = {
+  private def scalarDestination(instruction: DecodedInstruction): Option[Int in 0 ~ 255] = {
     val args       = instruction.operands
     val mods       = modifiers(instruction)
     val scalarForm = instruction.operation match {

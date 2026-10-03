@@ -46,12 +46,12 @@ object BenchmarkRunner {
         PlatformBenchmarks.run(options.invocation)
         warmup += 1
       }
-      var sample = 0
-      while sample < options.samples.raw do {
+      var sample: Int >= 0 = 0
+      while sample.raw < options.samples.raw do {
         val started = platform.monotonicNanos
         PlatformBenchmarks.run(options.invocation)
         val elapsed = math.max(0L, platform.monotonicNanos - started).unsafe[Long >= 0]
-        Console.out.println(ujson.write(result(options, sample.unsafe[Int >= 0], elapsed)))
+        Console.out.println(ujson.write(result(options, sample, elapsed)))
         sample += 1
       }
   }

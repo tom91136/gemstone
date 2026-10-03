@@ -13,8 +13,8 @@ class LegacyLogicSuite extends munit.FunSuite {
     SASSFixture.module(
       sm,
       Vec(
-        SASSFixture.Kernel("predicate_probe", 320, Vec(0 -> 8, 8 -> 4, 12 -> 4), registers = 6),
-        SASSFixture.Kernel("logic_probe", 320, Vec(0 -> 8, 8 -> 4, 12 -> 4, 16 -> 4), registers = 11)
+        SASSFixture.Kernel("predicate_probe", 320, Vec((0, 8), (8, 4), (12, 4)), registers = 6),
+        SASSFixture.Kernel("logic_probe", 320, Vec((0, 8), (8, 4), (12, 4), (16, 4)), registers = 11)
       )
     )
 
@@ -58,7 +58,7 @@ class LegacyLogicSuite extends munit.FunSuite {
     val lowered = SASSFixture(module, kernel, Vec(function))
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(24L.unsafe[Long > 0])
+      val output  = service.allocate(24L)
       val program = service.compile(lowered)
         .fold(e => fail(e.message), identity)
       inputs.foreach { case (a, b, c) =>

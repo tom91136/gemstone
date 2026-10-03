@@ -817,7 +817,7 @@ class ExecutionMathSuite extends munit.FunSuite {
     val memory      = ArrayMemory(allocation, stride + (if (lanes == 3) 4 else lanes) * storedWidth / 8)
     def bytes(bits: Seq[Long], bitsWidth: Int): Vec[Byte] =
       Vec.from(bits.flatMap(value =>
-        LittleEndian.toVec(value, (bitsWidth / 8).refine[Int where Between[0, 8]].toOption.get)
+        LittleEndian.toVec(value, (bitsWidth / 8).refine[Int in 0 ~ 8].toOption.get)
       ))
     val task = KernelTask.validated(
       "math",
@@ -835,7 +835,7 @@ class ExecutionMathSuite extends munit.FunSuite {
         LittleEndian.decode(
           memory.bytes,
           lane * resultWidth / 8,
-          (resultWidth / 8).refine[Int where Between[0, 8]].toOption.get
+          (resultWidth / 8).refine[Int in 0 ~ 8].toOption.get
         )
       val wanted = if (integerResult) value.toLong & 0xffffffffL else raw(width, value)
       if (value.isNaN && !integerResult) {

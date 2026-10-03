@@ -6,8 +6,8 @@ import net.kurobako.gemstone.memory.*
 
 object Event {
   enum PrintArgument {
-    case Integer(bits: Vec[Long], width: Int)
-    case Floating(bits: Vec[Long], width: Int)
+    case Integer(bits: Vec[Long], width: Int in 1 ~ 64)
+    case Floating(bits: Vec[Long], width: Int in (16, 32, 64))
     case Pointer(address: Long)
     case Text(value: String)
   }

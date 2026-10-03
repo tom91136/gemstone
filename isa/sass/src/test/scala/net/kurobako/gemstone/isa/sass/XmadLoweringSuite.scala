@@ -11,8 +11,9 @@ import net.kurobako.gemstone.vm.*
 
 class XmadLoweringSuite extends munit.FunSuite {
   private def fixtureModule(sm: Int, signedHi: Boolean = false): Cubin.Module = {
-    val (name, registers) = if (signedHi) ("signed_hi", 9) else ("xmad_patterns", 14)
-    SASSFixture.module(sm, Vec(SASSFixture.Kernel(name, 320, Vec(0 -> 8, 8 -> 8), registers = registers)))
+    val name: NonEmpty[String] = if (signedHi) "signed_hi" else "xmad_patterns"
+    val registers              = if (signedHi) 9 else 14
+    SASSFixture.module(sm, Vec(SASSFixture.Kernel(name, 320, Vec((0, 8), (8, 8)), registers = registers)))
   }
 
   private def words(values: Vec[Long]): Vec[Byte] =
@@ -134,7 +135,7 @@ class XmadLoweringSuite extends munit.FunSuite {
 
     Vec(50, 60).foreach { sm =>
       val module = fixtureModule(sm)
-      assertEquals(module.sm, sm)
+      assertEquals(module.sm.raw, sm)
       val listing = Map(50 -> XmadFixtures.xmadCompilerFormsSm50, 60 -> XmadFixtures.xmadArithmeticSm60)(sm)
       Vec("XMAD.MRG", "XMAD.CHI", "XMAD.PSL.CBCC", "XMAD.S16.U16").foreach { form =>
         assert(listing.contains(form), s"sm_$sm compiler fixture did not contain $form")
@@ -144,8 +145,8 @@ class XmadLoweringSuite extends munit.FunSuite {
 
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(52L.unsafe[Long > 0])
-        val input   = service.allocate(12L.unsafe[Long > 0])
+        val output  = service.allocate(52L)
+        val input   = service.allocate(12L)
         val program = service.compile(sass)
           .fold(e => fail(e.message), identity)
         cases.foreach { case (a, b, c) =>
@@ -203,7 +204,7 @@ class XmadLoweringSuite extends munit.FunSuite {
       )
     Vec(50, 60).foreach { sm =>
       val module = fixtureModule(sm, signedHi = true)
-      assertEquals(module.sm, sm)
+      assertEquals(module.sm.raw, sm)
       val listing = Map(50 -> XmadFixtures.xmadSignedHiSm50, 60 -> XmadFixtures.xmadSignedHiSm60)(sm)
       assert(listing.contains("XMAD.S16.S16.CSFU"), s"sm_$sm mul.hi.s32 did not emit CSFU")
       assert(listing.contains("IADD3.RS"), s"sm_$sm mul.hi.s32 fixture lost the final partial-product combine")
@@ -213,8 +214,8 @@ class XmadLoweringSuite extends munit.FunSuite {
 
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(4L.unsafe[Long > 0])
-        val input   = service.allocate(8L.unsafe[Long > 0])
+        val output  = service.allocate(4L)
+        val input   = service.allocate(8L)
         val program = service.compile(sass)
           .fold(e => fail(e.message), identity)
         cases.foreach { case (a, b) =>
@@ -248,7 +249,7 @@ class XmadLoweringSuite extends munit.FunSuite {
     )
     Vec(50, 60).foreach { sm =>
       val module = fixtureModule(sm)
-      assertEquals(module.sm, sm)
+      assertEquals(module.sm.raw, sm)
       val listing  = Map(50 -> XmadFixtures.xmadArithmeticSm50, 60 -> XmadFixtures.xmadArithmeticSm60)(sm)
       val function = ListingDecoder.parse(listing, "xmad_patterns", sm).fold(fail(_), _.head)
       val kernel   = module.kernels.find(_.name == "xmad_patterns").get
@@ -256,8 +257,8 @@ class XmadLoweringSuite extends munit.FunSuite {
 
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(28L.unsafe[Long > 0])
-        val input   = service.allocate(12L.unsafe[Long > 0])
+        val output  = service.allocate(28L)
+        val input   = service.allocate(12L)
         val program = service.compile(sass)
           .fold(e => fail(e.message), identity)
         cases.foreach { case (a, b, c) =>

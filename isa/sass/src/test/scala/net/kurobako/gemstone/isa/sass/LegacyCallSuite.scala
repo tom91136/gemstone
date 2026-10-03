@@ -10,8 +10,8 @@ import net.kurobako.gemstone.vm.*
 
 class LegacyCallSuite extends munit.FunSuite {
   private def fixtureModule(sm: Int, indirect: Boolean): Cubin.Module = {
-    val name = if (indirect) "indirect_call" else "calls"
-    SASSFixture.module(sm, Vec(SASSFixture.Kernel(name, 320, Vec(0 -> 8), registers = 5)))
+    val name: NonEmpty[String] = if (indirect) "indirect_call" else "calls"
+    SASSFixture.module(sm, Vec(SASSFixture.Kernel(name, 320, Vec((0, 8)), registers = 5)))
   }
 
   for (
@@ -24,15 +24,16 @@ class LegacyCallSuite extends munit.FunSuite {
   )
     test(s"$label preserves per-lane return stacks across nested or indirect calls") {
       val module   = fixtureModule(sm, indirect)
-      val function = ListingDecoder.parse(text, name, module.sm).fold(fail(_), _.head)
+      val function = ListingDecoder.parse(text, name, module.sm.raw).fold(fail(_), _.head)
       if (name == "calls") {
         assertEquals(function.instructions.count(_.mnemonic.raw == "CAL"), 3)
-        if (module.sm == 35) assert(function.instructions.exists(i => i.address.raw == 0xb8 && i.mnemonic.raw == "CAL"))
+        if (module.sm.raw == 35)
+          assert(function.instructions.exists(i => i.address.raw == 0xb8 && i.mnemonic.raw == "CAL"))
       } else assert(function.instructions.exists(_.mnemonic.raw == "PRET"))
       val source = SASSFixture(module, module.kernels.head, Vec(function))
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(256L.unsafe[Long > 0])
+        val output  = service.allocate(256L)
         val program = service.compile(source)
           .fold(e => fail(e.message), identity)
         val task = SASSFixture.task(

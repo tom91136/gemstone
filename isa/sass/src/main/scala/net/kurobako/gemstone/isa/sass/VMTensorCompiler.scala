@@ -214,7 +214,7 @@ private object VMTensorCompiler {
     registerBase(operand, "register pair", allowZero = true) match {
       case Operand.Register(RegisterBank.R, index) if index.raw == 255 => VMOperand.Zero
       case Operand.Register(bank, index)                               =>
-        (index.raw + offset).refine[Int where Between[0, 255]].fold(
+        (index.raw + offset).refine[Int in 0 ~ 255].fold(
           _ => unsupported("register pair exceeds the physical register file"),
           Operand.Register(bank, _)
         )

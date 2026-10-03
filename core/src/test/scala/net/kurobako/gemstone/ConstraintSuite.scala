@@ -8,7 +8,7 @@ import net.kurobako.gemstone.rpc.*
 import scala.compiletime.testing.typeCheckErrors
 
 class ConstraintSuite extends munit.FunSuite {
-  private object Small     extends Newtype[Int where Between[1, 8]]
+  private object Small     extends Newtype[Int in 1 ~ 8]
   private object Name      extends Newtype[NonEmpty[String]]
   private object OtherName extends Newtype[NonEmpty[String]]
 
@@ -34,7 +34,7 @@ class ConstraintSuite extends munit.FunSuite {
   test("unwrap retains the carrier while raw removes nested wrapper layers") {
     val small                            = Small(8)
     val nested                           = Nested(small)
-    val carrier: Int where Between[1, 8] = small.unwrap
+    val carrier: Int in 1 ~ 8 = small.unwrap
     val inner: Small.Type                = nested.unwrap
     val primitive: Int                   = nested.raw
     val text: String                     = Name("kernel").raw
@@ -147,10 +147,6 @@ class ConstraintSuite extends munit.FunSuite {
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       where.either[Int, GreaterThan[0]](1)
-    """).nonEmpty)
-    assert(typeCheckErrors("""
-      import net.kurobako.gemstone.constraint.*
-      OneOf[(1, 2)](1)
     """).nonEmpty)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*

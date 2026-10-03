@@ -1,6 +1,7 @@
 package net.kurobako.gemstone
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import scala.compiletime.testing.typeCheckErrors
@@ -8,7 +9,7 @@ import scala.compiletime.testing.typeCheckErrors
 class VecRangeSuite extends munit.FunSuite {
   test("range produces half-open elements with refined lower and upper bounds") {
     val values: Vec[Int where (AtLeast[-2] & LessThan[3])] = Vec.range[-2, 3]
-    val atMostTwo: Int where AtMost[2]                     = values.last
+    val atMostTwo: Int <= 2                     = values.last
     assertEquals(values.map(_.raw), Vec(-2, -1, 0, 1, 2))
     assertEquals(atMostTwo.raw, 2)
   }
@@ -44,9 +45,26 @@ class VecRangeSuite extends munit.FunSuite {
       import net.kurobako.gemstone.constraint.auto.*
       val lane = Vec.range[0, 32].head
       val nonnegative: Int >= 0 = lane
-      val tooNarrow: Int where AtMost[30] = lane
+      val tooNarrow: Int <= 30 = lane
     """).nonEmpty)
     val lane: Int >= 0 = Vec.range[0, 32].head
     assertEquals(lane.raw, 0)
   }
+  test("nonempty tabulation and mapping retain size evidence and primitive storage") {
+    val bytes: NonEmpty[Vec[Byte]]    = Vec.tabulateNonEmpty(3)(index => (index.raw + 1).toByte)
+    val labels: NonEmpty[Vec[String]] = bytes.mapNonEmpty(_.toString)
+    val count: Int > 0                = labels.positiveSize
+    assertEquals(bytes, Vec[Byte](1, 2, 3))
+    assertEquals(labels, Vec("1", "2", "3"))
+    assertEquals(count.raw, 3)
+    val pairs: NonEmpty[Vec[String]]    = labels.flatMapNonEmpty(label => Vec.nonEmpty(label, label))
+    val extended: NonEmpty[Vec[String]] = pairs.concatNonEmpty(Vec.empty)
+    assertEquals(extended, Vec("1", "1", "2", "2", "3", "3"))
+    assertEquals(extended.positiveSize.raw, 6)
+    bytes match {
+      case _: scala.collection.immutable.ArraySeq.ofByte => ()
+      case _                                             => fail("byte tabulation must retain primitive storage")
+    }
+  }
+
 }

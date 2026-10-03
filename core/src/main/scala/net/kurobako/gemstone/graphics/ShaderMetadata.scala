@@ -23,7 +23,7 @@ object ShaderMetadata {
       flat: Boolean,
       noPerspective: Boolean,
       centroid: Boolean,
-      component: Int where Between[0, 3]
+      component: Int in 0 ~ 3
   ) derives Codec
 
   case class ShaderField(

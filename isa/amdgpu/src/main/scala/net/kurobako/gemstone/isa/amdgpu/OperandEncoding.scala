@@ -1,9 +1,12 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.constraint.*
 import scala.util.Using
 import upickle.default.*
 
 private object OperandEncoding {
+  given ReadWriter[Int in (4, 8)] = readwriter[Int].bimap(_.raw, _.unsafe[Int in (4, 8)])
+
   case class NamedField(field: InstructionLayout.Field, names: Map[String, String]) derives ReadWriter
 
   object Catalogue {
@@ -24,5 +27,5 @@ private case class OperandEncoding(
     integers: Map[Int, Long] = Map.empty,
     floating: Map[Int, Double] = Map.empty,
     special: Map[Int, SpecialSource] = Map.empty,
-    literals: Map[Int, Int] = Map.empty
+    literals: Map[Int, Int in (4, 8)] = Map.empty
 ) derives ReadWriter

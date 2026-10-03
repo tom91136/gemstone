@@ -4,6 +4,13 @@ import net.kurobako.gemstone.constraint.*
 import scala.collection.mutable
 
 object VMPredicateFile {
+  type Slot = Int in 0 ~ 1023
+
+  def slot(name: NonEmpty[String]): Option[Slot] = {
+    val index = indexRaw(name)
+    if (index < 0) None else Some(index.unsafe[Slot])
+  }
+
   def index(name: NonEmpty[String]): Int = indexRaw(name)
 
   def indexRaw(name: String): Int = {
@@ -22,14 +29,19 @@ class VMPredicateFile {
   private var named: mutable.Map[String, Boolean] | Null = null
 
   def get(name: NonEmpty[String]): Option[Boolean] = predicateSlot(name) match {
-    case Some(index) => getSlot(index)
+    case Some(index) => getSlotRaw(index)
     case None        => named match {
         case null   => None
         case values => values.get(name)
       }
   }
 
-  def getSlot(index: Int): Option[Boolean] = {
+  inline def getSlot(index: VMPredicateFile.Slot): Option[Boolean] = getSlotRaw(index.raw)
+
+  inline def updateSlot(index: VMPredicateFile.Slot, value: Boolean): Unit = updateSlotRaw(index.raw, value)
+
+  // Instruction fast paths call the raw entry points after excluding the name lookup's -1 sentinel.
+  def getSlotRaw(index: Int): Option[Boolean] = {
     val word = index >>> 6
     val bit  = 1L << (index & 63)
     bits match {
@@ -42,7 +54,7 @@ class VMPredicateFile {
   def apply(name: NonEmpty[String]): Boolean = get(name).getOrElse(false)
 
   def update(name: NonEmpty[String], value: Boolean): Unit = predicateSlot(name) match {
-    case Some(index) => updateSlot(index, value)
+    case Some(index) => updateSlotRaw(index, value)
     case None        =>
       val values = named match {
         case null =>
@@ -54,7 +66,7 @@ class VMPredicateFile {
       values(name) = value
   }
 
-  def updateSlot(index: Int, value: Boolean): Unit = {
+  def updateSlotRaw(index: Int, value: Boolean): Unit = {
     val values = bits match {
       case null =>
         val allocated = Array.ofDim[Long](32)

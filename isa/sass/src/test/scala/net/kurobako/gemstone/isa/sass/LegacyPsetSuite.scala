@@ -10,7 +10,7 @@ import net.kurobako.gemstone.vm.*
 
 class LegacyPsetSuite extends munit.FunSuite {
   private def fixtureModule(sm: Int): Cubin.Module =
-    SASSFixture.module(sm, Vec(SASSFixture.Kernel("probe", 320, Vec(0 -> 8, 8 -> 4), registers = 4)))
+    SASSFixture.module(sm, Vec(SASSFixture.Kernel("probe", 320, Vec((0, 8), (8, 4)), registers = 4)))
 
   for (sm <- Vec(50, 60))
     test(s"sm_$sm decoded PSET predicate mask agrees with the source selection") {
@@ -30,7 +30,7 @@ class LegacyPsetSuite extends munit.FunSuite {
       val lowered = SASSFixture(module, module.kernels.head, Vec(function))
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(4L.unsafe[Long > 0])
+        val output  = service.allocate(4L)
         val program = service.compile(lowered)
           .fold(e => fail(e.message), identity)
         Vec(0, 1, Int.MinValue, -1, 0).foreach { input =>

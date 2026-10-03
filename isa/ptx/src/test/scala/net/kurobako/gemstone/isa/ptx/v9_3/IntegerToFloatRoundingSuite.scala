@@ -4,14 +4,15 @@ import execution.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 
 class IntegerToFloatRoundingSuite extends munit.FunSuite {
-  private def run(source: String, input: Long, width: Int): Vec[Long] = {
+  private def run(source: String, input: Long, width: Int where (Between[8, 64] & MultipleOf[8])): Vec[Long] = {
     val kernel = compileKernel(source)
-    val bytes  = 4 * (width / 8)
-    val memory = ArrayCheckedMemory.allocate(bytes.unsafe[Int >= 0])
+    val bytes  = width.byteCount * (4: Int > 0)
+    val memory = ArrayCheckedMemory.allocate(bytes)
     val start  = memory.allocation.start
     assertEquals(
       execute(
@@ -28,8 +29,8 @@ class IntegerToFloatRoundingSuite extends munit.FunSuite {
     )
     (0 until 4).map { index =>
       memory.readLittleEndian(
-        start.offset(index.toLong * (width / 8)),
-        (width / 8).unsafe[Int where Between[1, 8]]
+        start.offset(index.toLong * width.byteCount.raw),
+        width.byteCount
       ).toOption.get
     }.toVec
   }

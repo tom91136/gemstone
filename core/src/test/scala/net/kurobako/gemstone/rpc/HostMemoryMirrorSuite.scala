@@ -209,7 +209,7 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
     assertEquals(batch.size, 16)
     batch.zipWithIndex.foreach { case (range, index) =>
       assertEquals(range.address.raw, 0x100000L + index.toLong * 65536)
-      assertEquals(range.atomicWidth, 4)
+      assertEquals(range.atomicWidth.raw, 4)
       assertEquals(range.bytes, Vec.from((0 until 65536).map(offset => word(offset % 4))))
     }
     assert(!mirror.hasDirty)
@@ -251,7 +251,7 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
     mirror.write(0x5004, Vec[Byte](4, 5, 6, 7), 4)
     mirror.write(0x5008, Vec[Byte](8, 9, 10, 11, 12, 13, 14, 15), 8)
     val published = mirror.takeDirty(Vec(HostMemoryRange(GuestAddress(0x5000L), 16)))
-    assertEquals(published.map(_.atomicWidth), Vec(1, 2, 4, 8))
+    assertEquals(published.map(_.atomicWidth.raw), Vec(1, 2, 4, 8))
     assertEquals(published.map(_.address.raw), Vec(0x5000L, 0x5002L, 0x5004L, 0x5008L))
   }
 

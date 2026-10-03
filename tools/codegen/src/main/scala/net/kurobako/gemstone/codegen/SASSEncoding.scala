@@ -2,6 +2,7 @@ package net.kurobako.gemstone.codegen
 
 import cats.parse.Parser
 import cats.parse.Parser0
+import net.kurobako.gemstone.constraint.*
 import scala.annotation.tailrec
 
 /** Compiles the bit-layout and simple value expressions in an extracted SASS description. */
@@ -28,7 +29,7 @@ object SASSEncoding {
       issues: Vector[String]
   )
   case class LookupTable(name: String, rows: Vector[(Vector[BigInt], BigInt)], issues: Vector[String] = Vector.empty)
-  case class Compiled(width: Int, forms: Vector[Form], tables: Vector[LookupTable])
+  case class Compiled(width: Int in (64, 88, 128), forms: Vector[Form], tables: Vector[LookupTable])
 
   private enum TableAtom {
     case Number(value: BigInt)
@@ -252,14 +253,17 @@ object SASSEncoding {
   }
 
   def compile(description: SASSDescription.Description): Compiled = {
-    val width = parseWidth(description.preamble).getOrElse {
+    val rawWidth = parseWidth(description.preamble).getOrElse {
       throw IllegalArgumentException("FUNIT ENCODING WIDTH is missing")
     }
     // The pinned descriptions cover the legacy 64-bit instruction format, the
     // 88-bit format used by several intermediate architectures, and modern
     // 128-bit instructions. Derive masks from the declared width; don't force
     // legacy descriptions through the current SM89 layout.
-    require(Set(64, 88, 128).contains(width), s"unsupported SASS encoding width: $width (expected 64, 88, or 128)")
+    val width = rawWidth.refine[Int in (64, 88, 128)].fold(
+      _ => throw IllegalArgumentException(s"unsupported SASS encoding width: $rawWidth (expected 64, 88, or 128)"),
+      identity
+    )
     val unitMasks    = parseUnitMasks(description.preamble, width)
     val enums        = parseEnums(description.preamble)
     val vocabularies = if (description.preamble.linesIterator.exists(_.trim == "REGISTERS")) {
@@ -333,9 +337,9 @@ object SASSEncoding {
   private def parseWidth(source: String): Option[Int] =
     source.split("\n", -1).toVector.flatMap(line => widthHeader.parseAll(line.trim).toOption).headOption
 
-  private def parseUnitMasks(source: String, width: Int): Map[String, Vector[Int]] = {
+  private def parseUnitMasks(source: String, width: Int in (64, 88, 128)): Map[String, Vector[Int]] = {
     val definitions   = source.split("\n", -1).toVector.flatMap(line => unitHeader.parseAll(line).toOption)
-    val invalidWidths = definitions.filter(_._2.length != width).map { case (name, mask) =>
+    val invalidWidths = definitions.filter(_._2.length != width.raw).map { case (name, mask) =>
       s"$name has mask width ${mask.length}, expected $width"
     }
     require(invalidWidths.isEmpty, invalidWidths.mkString("invalid FUNIT masks: ", "; ", ""))

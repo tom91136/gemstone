@@ -106,7 +106,7 @@ private object VMCompiler {
   private def registerChunkCount(
       program: ExecutableProgram[PredicatedInstruction],
       functions: Map[NonEmpty[String], DeviceFunction]
-  ): Int = {
+  ): VMRegisterFile.ChunkCount = {
     var highest                                   = -1
     def inspectName(name: NonEmpty[String]): Unit = {
       val index = VMRegisterFile.indexRaw(name.raw)
@@ -115,7 +115,7 @@ private object VMCompiler {
     @annotation.tailrec
     def inspectValue(value: Value): Unit = value match {
       case Value.Register(name)       => inspectName(name)
-      case Value.RegisterSlot(index)  => highest = math.max(highest, index)
+      case Value.RegisterSlot(index)  => highest = math.max(highest, index.raw)
       case Value.Predicate(name)      => inspectName(name)
       case Value.PredicateSlot(_)     => ()
       case Value.Function(name)       => inspectName(name)
@@ -388,7 +388,7 @@ private object VMCompiler {
 
     inspectProgram(program)
     functions.values.foreach(function => inspectProgram(function.program))
-    if (highest < 0) 1 else (highest >>> 6) + 1
+    if (highest < 0) 1 else ((highest >>> 6) + 1).unsafe[VMRegisterFile.ChunkCount]
   }
 
   // Traverse the reachable call graph with a mutable work queue and fail on the first invalid callee.
@@ -462,22 +462,22 @@ private object VMCompiler {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
-    val labels           = mutable.Map.empty[NonEmpty[String], Pc]
-    var instructionIndex = 0
-    var statementIndex   = 0
+    val labels                     = mutable.Map.empty[NonEmpty[String], Pc]
+    var instructionIndex: Int >= 0 = 0
+    var statementIndex             = 0
     while (statementIndex < flat.size) {
       flat(statementIndex) match {
         case Statement.Label(label) =>
           if (labels.contains(label))
             return Left(Error.Invalid(s"duplicate label: $label"))
-          labels(label) = instructionIndex.unsafe[Pc]
+          labels(label) = Pc(instructionIndex)
         case Statement.Instruction(_)                                       => instructionIndex += 1
         case Statement.UnsupportedInstruction(opcode, operands, mods, pred) =>
-          val qualified = (opcode +: mods.map(_.name.raw)).mkString(".")
-          val rendered  = pred.map(value => s"$value ").getOrElse("") +
+          val qualified                  = (opcode +: mods.map(_.name.raw)).mkString(".")
+          val rendered: NonEmpty[String] = pred.map(value => s"$value ").getOrElse("") +
             qualified + (if (operands.isEmpty) "" else operands.mkString(" ", ", ", "")) + ";"
           return Left(
-            Error.Unsupported(rendered.unsafe[NonEmpty[String]], "instruction is not implemented")
+            Error.Unsupported(rendered, "instruction is not implemented")
           )
         case _ => ()
       }
@@ -589,26 +589,29 @@ private object VMCompiler {
     val result = Vec.newBuilder[KernelParameter]
     var index  = 0
     while (index < parameters.length) {
-      val parameter = parameters(index)
-      val width     = (parameter.elementType.widthBits.raw / 8).unsafe[Int > 0]
-      val elements  = parameter.dimensions.foldLeft[Either[Error, Long > 0]](Right(1L)) {
+      val parameter      = parameters(index)
+      val width: Int > 0 = parameter.elementType.byteCount.widen[Int > 0]
+      val elements       = parameter.dimensions.foldLeft[Either[Error, Long > 0]](Right(1L)) {
         (current, value) =>
           for {
             count   <- current
             element <- value.toRight(
               Error.Invalid(s"kernel parameter ${parameter.name} has an unsized dimension")
             ).flatMap(immediate(_))
+            elementCount <- element.refine[Long > 0].left.map(_ =>
+              Error.Invalid(s"kernel parameter ${parameter.name} has an invalid array dimension: $element")
+            )
             product <-
-              if (element > 0 && count.raw <= Int.MaxValue.toLong / element)
-                Right((count.raw * element).unsafe[Long > 0])
+              if (count.raw <= Int.MaxValue.toLong / elementCount.raw)
+                Right(count * elementCount)
               else invalid(s"kernel parameter ${parameter.name} has an invalid array dimension: $element")
           } yield product
       }
       elements match {
         case Left(error)  => return Left(error)
         case Right(count) =>
-          val totalWidth = width.raw.toLong * count.raw
-          if (totalWidth > Int.MaxValue.toLong)
+          val totalWidth = width.toLong.widen[Long > 0] * count
+          if (totalWidth.raw > Int.MaxValue.toLong)
             return invalid(
               s"kernel parameter ${parameter.name} is too wide: $totalWidth bytes"
             )
@@ -616,7 +619,7 @@ private object VMCompiler {
             case DeclarationQualifier.Attribute(name) => name.raw == "ptr"
             case _                                    => false
           }
-          result += KernelParameter(parameter.name, totalWidth.toInt.unsafe[Int > 0], pointer)
+          result += KernelParameter(parameter.name, totalWidth.toIntExact, pointer)
       }
       index += 1
     }
@@ -2751,10 +2754,8 @@ private object VMCompiler {
     case other                        => value(other)
   }
 
-  private def predicateValue(name: NonEmpty[String]): Value = {
-    val index = VMPredicateFile.index(name)
-    if (index >= 0) Value.PredicateSlot(index) else Value.Predicate(name)
-  }
+  private def predicateValue(name: NonEmpty[String]): Value =
+    VMPredicateFile.slot(name).fold[Value](Value.Predicate(name))(Value.PredicateSlot(_))
 
   private def registerName(operand: Operand, describe: String = "register"): Either[Error, NonEmpty[String]] =
     operand match {
@@ -2991,13 +2992,11 @@ private object VMCompiler {
   def value(operand: Operand): Either[Error, Value] = operand match {
     case Operand.Register(name, None) =>
       specialRegisterValue(name).fold {
-        val index = VMRegisterFile.indexRaw(name.raw)
-        if (index >= 0) Right(Value.RegisterSlot(index)) else Right(Value.Register(name))
+        Right(VMRegisterFile.slot(name).fold[Value](Value.Register(name))(Value.RegisterSlot(_)))
       }(Right(_))
     case Operand.Symbol(name) if isBareRegisterName(name.raw) =>
-      val raw   = s"%${name.raw}"
-      val index = VMRegisterFile.indexRaw(raw)
-      if (index >= 0) Right(Value.RegisterSlot(index)) else Right(Value.Register(name))
+      val canonical: NonEmpty[String] = s"%${name.raw}"
+      Right(VMRegisterFile.slot(canonical).fold[Value](Value.Register(name))(Value.RegisterSlot(_)))
     case Operand.Symbol(name)     => Right(Value.Symbol(name))
     case other: Operand.Immediate => immediate(other).map(Value.Immediate(_))
     case Operand.Negate(value)    => immediate(value).map(number => Value.Immediate(-number))
@@ -3021,8 +3020,8 @@ private object VMCompiler {
           case _: NumberFormatException => None
         }
       parsed match {
-        case Some(number) if number.isValidLong                        => Right(number.longValue)
-        case Some(number) if number >= 0 && number < (BigInt(1) << 64) => Right(number.longValue)
+        case Some(number) if number.isValidLong                        => Right(number.toLong)
+        case Some(number) if number >= 0 && number < (BigInt(1) << 64) => Right(number.toLong)
         case Some(_) => invalid(s"integer immediate is outside 64-bit range: $raw")
         case None    => invalid(s"expected integer immediate, found $raw")
       }

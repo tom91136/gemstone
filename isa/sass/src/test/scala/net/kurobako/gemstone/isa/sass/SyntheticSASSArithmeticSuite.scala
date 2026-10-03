@@ -1,26 +1,27 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.asm.*
 
 class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
   test("unsupported instructions preserve the kernel, architecture, offset and opcode in diagnostics") {
     val m      = CubinSuiteFixtures.module
-    val result = ListingDecoder.parse("saxpy:\n/*0000*/ NOP;\n/*0010*/ NOP;\n/*0020*/ UNSUPPORTED;", "saxpy", m.sm)
+    val result = ListingDecoder.parse("saxpy:\n/*0000*/ NOP;\n/*0010*/ NOP;\n/*0020*/ UNSUPPORTED;", "saxpy", m.sm.raw)
     assert(result.left.exists(_.contains(s"saxpy+0x20 (sm_${m.sm}): UNSUPPORTED")))
   }
 
   test("preserved vendor modifiers and operand qualifiers do not acquire execution semantics") {
     val module = CubinSuiteFixtures.module
-    Vec("MOV.FUTURE R0, R1;", "MOV R0, R1.FUTURE;", "MOV R0, XR1;").foreach { source =>
+    Vec.nonEmpty("MOV.FUTURE R0, R1;", "MOV R0, R1.FUTURE;", "MOV R0, XR1;").foreach { source =>
       val parsed   = Parser.parse(source)
       val rejected = parsed.fold(
         _ => true,
         operation => {
           val instruction = DecodedInstruction(0, operation, None, None)
-          val function    = CubinSuiteFixtures.functions.head.copy(instructions = Vec(instruction))
-          SASSFixture.lower(module, module.kernels.head, Vec(function)).isLeft
+          val function    = CubinSuiteFixtures.functions.head.copy(instructions = Vec.nonEmpty(instruction))
+          SASSFixture.lower(module, module.kernels.head, Vec.nonEmpty(function)).isLeft
         }
       )
       assert(rejected, source)
@@ -32,41 +33,46 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
     val instruction = SASSFixture.instruction(
       8,
       "FSET.GTU.AND",
-      Vec("RZ.CC", "|R3|", "R4", "PT"),
+      Vec.nonEmpty("RZ.CC", "|R3|", "R4", "PT"),
       None
     )
     val result =
-      SASSFixture.lower(m, m.kernels.head, Vec(CubinSuiteFixtures.functions.head.copy(instructions = Vec(instruction))))
+      SASSFixture.lower(
+        m,
+        m.kernels.head,
+        Vec.nonEmpty(CubinSuiteFixtures.functions.head.copy(instructions = Vec.nonEmpty(instruction)))
+      )
     assert(result.isRight)
-    val unsupported = instruction.rewrite(modifiers = Vec(Instruction.Modifier("GT"), Instruction.Modifier("AND")))
-    val rejected    = SASSFixture.lower(
+    val unsupported =
+      instruction.rewrite(modifiers = Vec.nonEmpty(Instruction.Modifier("GT"), Instruction.Modifier("AND")))
+    val rejected = SASSFixture.lower(
       m,
       m.kernels.head,
-      Vec(CubinSuiteFixtures.functions.head.copy(instructions = Vec(unsupported)))
+      Vec.nonEmpty(CubinSuiteFixtures.functions.head.copy(instructions = Vec.nonEmpty(unsupported)))
     )
     assert(rejected.left.exists(_.contains("FSET condition-code output is not implemented")))
     val newer = SASSFixture.lower(
       m.copy(sm = 86),
       m.kernels.head,
-      Vec(CubinSuiteFixtures.functions.head.copy(instructions = Vec(instruction)))
+      Vec.nonEmpty(CubinSuiteFixtures.functions.head.copy(instructions = Vec.nonEmpty(instruction)))
     )
     assert(newer.left.exists(_.contains("FSET condition-code output is not implemented")))
   }
 
   test("sm35 FSET.GTU.CC drives CC.NEU for numeric, unordered, predicate-masked, and overwritten flags") {
     def check(a: String, b: String, predicate: String, expected: Int, overwrite: Boolean = false): Unit = {
-      val prefix = Vec(
+      val prefix = Vec.nonEmpty(
         ("MOV", s"R0,$a", None),
         ("MOV", s"R1,$b", None),
         ("ISETP.EQ.AND", s"P0,PT,RZ,${if (predicate == "PT") "RZ" else "1"},PT", None),
         ("FSET.GTU.AND", s"RZ.CC,|R0|,|R1|,$predicate", None)
       ) ++
-        (if (overwrite) Vec(("FSET.GTU.AND", "RZ.CC,|R1|,|R0|,PT", None))
+        (if (overwrite) Vec.nonEmpty(("FSET.GTU.AND", "RZ.CC,|R1|,|R0|,PT", None))
          else Vec.empty[(String, String, Option[String])])
       val branchIndex = prefix.size
       val yesIndex    = branchIndex + 3
       val endIndex    = branchIndex + 4
-      val body        = prefix ++ Vec(
+      val body        = prefix ++ Vec.nonEmpty(
         ("BRA", s"CC.NEU,0x${(yesIndex * 16).toHexString}", None),
         ("MOV", "R2,0", None),
         ("BRA", s"0x${(endIndex * 16).toHexString}", None),
@@ -75,7 +81,7 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
         ("STG.E", "[R4.64],R2", None),
         ("EXIT", "", None)
       )
-      executeSynthetic(body, Vec(expected), sm = 35)
+      executeSynthetic(body, Vec.nonEmpty(expected), sm = 35)
     }
     check("0x40000000", "0x3f800000", "PT", 1)
     check("0x3f800000", "0x3f800000", "PT", 0)
@@ -86,10 +92,10 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
   }
 
   test("wide signed and unsigned IMAD preserve negative 32-bit operands") {
-    def executeUnsigned(unsigned: Boolean, expected: Vec[Int]): Unit = {
+    def executeUnsigned(unsigned: Boolean, expected: NonEmpty[Vec[Int]]): Unit = {
       val opcode = if (unsigned) "IMAD.WIDE.U32" else "IMAD.WIDE"
       executeSynthetic(
-        Vec(
+        Vec.nonEmpty(
           ("MOV", "R0,0xffffffff", None),
           ("MOV", "R1,2", None),
           (opcode, "R2,R0,R1,RZ", None),
@@ -102,12 +108,12 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
       )
     }
 
-    executeUnsigned(unsigned = false, Vec(-2, -1))
-    executeUnsigned(unsigned = true, Vec(-2, 1))
+    executeUnsigned(unsigned = false, Vec.nonEmpty(-2, -1))
+    executeUnsigned(unsigned = true, Vec.nonEmpty(-2, 1))
   }
 
   test("carry, extended comparison, float negation and aliased predicates retain their inputs") {
-    val body = Vec(
+    val body = Vec.nonEmpty(
       ("MOV", "R0,0xffffffff", None),
       ("MOV", "R8,8", None),
       ("MOV", "R9,4", None),
@@ -128,12 +134,12 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
       ("STG.E", "[R2.64],R5", None),
       ("EXIT", "", None)
     )
-    executeSynthetic(body, Vec(15))
+    executeSynthetic(body, Vec.nonEmpty(15))
   }
 
   test("LEA subtraction propagates the full 64-bit complement and zero-operand carry") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("IMAD", "R4,R0,17,RZ", None),
         ("MOV", "R5,RZ", None),
@@ -147,13 +153,13 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
         ("STG.E", "[R2.64],R6", None),
         ("EXIT", "", None)
       ),
-      Vec(98, 29)
+      Vec.nonEmpty(98, 29)
     )
   }
 
   test("predicate packing retains unselected bits and restores a selected byte") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("MOV", "R4,0x55", None),
         ("R2P", "PR,R4,0x7f", None),
         ("MOV", "R5,0xa50000ff", None),
@@ -165,13 +171,13 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
         ("STG.E", "[R2.64],R6", None),
         ("EXIT", "", None)
       ),
-      Vec(0xa50055d5)
+      Vec.nonEmpty(0xa50055d5)
     )
   }
 
   test("funnel shifts, two carry outputs and extended ordered comparison") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("MOV", "R0,0xffffffff", None),
         ("IADD3", "R4,P0,P1,R0,1,R0", None),
         ("IADD3.X", "R5,RZ,RZ,RZ,P0,P1", None),
@@ -183,33 +189,33 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
         ("STG.E", "[R2.64],R6", None),
         ("EXIT", "", None)
       ),
-      Vec(2)
+      Vec.nonEmpty(2)
     )
   }
 
   test("directed binary32 multiplication retains the exact product before rounding") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("MOV", "R0,0x3f800001", None),
         ("FMUL.RP", "R4,R0,R0", None),
         ("LDC.64", "R2,c[0x0][0x160]", None),
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec(0x3f800003)
+      Vec.nonEmpty(0x3f800003)
     )
   }
 
   test("FFMA preserves each rounding direction for positive and negative results") {
     // The exact result lies three quarters of an ulp beyond +/-1.
     for {
-      mode     <- Vec("RN", "RM", "RP", "RZ")
-      negative <- Vec(false, true)
+      mode     <- Vec.nonEmpty("RN", "RM", "RP", "RZ")
+      negative <- Vec.nonEmpty(false, true)
     } {
       val sign         = if (negative) 0x80000000 else 0
       val awayFromZero = mode == "RN" || mode == (if (negative) "RM" else "RP")
       executeSynthetic(
-        Vec(
+        Vec.nonEmpty(
           ("MOV", s"R0,0x${Integer.toHexString(0x3f800000 | sign)}", None),
           ("MOV", "R1,0x3f800000", None),
           ("MOV", s"R4,0x${Integer.toHexString(0x33c00000 | sign)}", None),
@@ -218,20 +224,20 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
           ("STG.E", "[R2.64],R4", None),
           ("EXIT", "", None)
         ),
-        Vec((if (awayFromZero) 0x3f800001 else 0x3f800000) | sign)
+        Vec.nonEmpty((if (awayFromZero) 0x3f800001 else 0x3f800000) | sign)
       )
     }
   }
 
   test("DFMA preserves each rounding direction for positive and negative results") {
     for {
-      mode     <- Vec("RN", "RM", "RP", "RZ")
-      negative <- Vec(false, true)
+      mode     <- Vec.nonEmpty("RN", "RM", "RP", "RZ")
+      negative <- Vec.nonEmpty(false, true)
     } {
       val sign         = if (negative) 0x80000000 else 0
       val awayFromZero = mode == "RN" || mode == (if (negative) "RM" else "RP")
       executeSynthetic(
-        Vec(
+        Vec.nonEmpty(
           ("MOV", "R0,0", None),
           ("MOV", s"R1,0x${Integer.toHexString(0x3ff00000 | sign)}", None),
           ("MOV", "R4,0", None),
@@ -243,35 +249,35 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
           ("STG.E.64", "[R2.64],R6", None),
           ("EXIT", "", None)
         ),
-        Vec(if (awayFromZero) 1 else 0, 0x3ff00000 | sign)
+        Vec.nonEmpty(if (awayFromZero) 1 else 0, 0x3ff00000 | sign)
       )
     }
   }
 
   test("modern MUFU trigonometry uses cycles and preserves large integral periods") {
     for (
-      (op, input, expected) <- Vec(
+      (op, input, expected) <- Vec.nonEmpty(
         ("SIN", 0.25f, 1.0f),
         ("SIN", -0.25f, -1.0f),
         ("COS", 16777216.0f, 1.0f),
         ("SIN", -0.0f, -0.0f)
       )
     ) executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("MOV", s"R0,0x${Integer.toHexString(java.lang.Float.floatToRawIntBits(input))}", None),
         (s"MUFU.$op", "R4,R0", None),
         ("LDC.64", "R2,c[0x0][0x160]", None),
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec(java.lang.Float.floatToRawIntBits(expected))
+      Vec.nonEmpty(java.lang.Float.floatToRawIntBits(expected))
     )
   }
 
   test("signed warp extrema retain negative values across the direct SASS compiler") {
-    Vec("MIN" -> -16, "MAX" -> 15).foreach { case (operation, expected) =>
+    Vec.nonEmpty("MIN" -> -16, "MAX" -> 15).foreach { case (operation, expected) =>
       executeSynthetic(
-        Vec(
+        Vec.nonEmpty(
           ("S2R", "R0,SR_TID.X", None),
           ("IADD3", "R4,R0,-16,RZ", None),
           (s"REDUX.$operation.S32", "R4,R4", None),
@@ -280,14 +286,14 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
           ("STG.E", "[R2.64],R4", None),
           ("EXIT", "", None)
         ),
-        Vec.fill(32)(expected)
+        Vec.tabulateNonEmpty(32)(_ => expected)
       )
     }
   }
 
   test("legacy IADD condition codes retain low-word ordering for extended bounds checks") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("S2R", "R0,SR_TID.X", None),
         ("IADD", "RZ.CC,-R0,16", None),
         ("ISETP.GT.U32.X.AND", "P0,PT,RZ,RZ,PT", None),
@@ -298,15 +304,15 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
         ("STG.E", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec.fill(16)(1) ++ Vec.fill(16)(0),
+      Vec.tabulateNonEmpty(16)(_ => 1).concatNonEmpty(Vec.tabulateNonEmpty(16)(_ => 0)),
       sm = 35
     )
   }
 
   test("FP64 reciprocal seeds consume the high word and compare as register pairs") {
-    for ((operation, high) <- Vec(("RCP64H", "0x40000000"), ("RSQ64H", "0x40100000")))
+    for ((operation, high) <- Vec.nonEmpty(("RCP64H", "0x40000000"), ("RSQ64H", "0x40100000")))
       executeSynthetic(
-        Vec(
+        Vec.nonEmpty(
           ("MOV", "R8,0", None),
           ("MOV", s"R9,$high", None),
           ("MOV", "R10,0", None),
@@ -317,13 +323,13 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
           ("STG.E", "[R2.64],R4", None),
           ("EXIT", "", None)
         ),
-        Vec(0x3fe00000)
+        Vec.nonEmpty(0x3fe00000)
       )
   }
 
   test("FP32 exceptional literals and absolute modifiers preserve their floating bits") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("FADD", "R4,RZ,+INF", None),
         ("FADD", "R5,RZ,-INF", None),
         ("FADD", "R6,RZ,|-INF|", None),
@@ -335,23 +341,23 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
         ("STG.E.128", "[R2.64],R4", None),
         ("EXIT", "", None)
       ),
-      Vec(0x7f800000, 0xff800000, 0x7f800000, 1)
+      Vec.nonEmpty(0x7f800000, 0xff800000, 0x7f800000, 1)
     )
   }
 
   test("MUFU double high-word immediates accept numeric and raw binary operands") {
     for {
-      encoded <- Vec(false, true)
-      value   <- Vec(6.0, -6.0)
+      encoded <- Vec.nonEmpty(false, true)
+      value   <- Vec.nonEmpty(6.0, -6.0)
     }
       executeSynthetic(
-        Vec(
+        Vec.nonEmpty(
           ("LDC.64", "R4,c[0x0][0x160]", None),
           ("MUFU.RCP64H", s"R0,$value", None),
           ("STG.E", "[R4.64],R0", None),
           ("EXIT", "", None)
         ),
-        Vec((java.lang.Double.doubleToRawLongBits(1.0 / value) >>> 32).toInt),
+        Vec.nonEmpty((java.lang.Double.doubleToRawLongBits(1.0 / value) >>> 32).toInt),
         rewrite = instruction =>
           if (encoded && instruction.mnemonic.raw == "MUFU")
             instruction.rewrite(operands =
@@ -370,7 +376,7 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
 
   test("double NaN and numeric predicates preserve boolean combinations") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("LDC.64", "R4,c[0x0][0x160]", None),
         ("MOV", "R0,0", None),
         ("MOV", "R1,0x7ff80000", None),
@@ -385,13 +391,13 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
         ("STG.E", "[R4.64],R6", None),
         ("EXIT", "", None)
       ),
-      Vec(1)
+      Vec.nonEmpty(1)
     )
   }
 
   test("double conversion and absolute comparisons preserve negative integer inputs") {
     executeSynthetic(
-      Vec(
+      Vec.nonEmpty(
         ("MOV", "R0,-7", None),
         ("I2F.F64", "R4,R0", None),
         ("DSETP.LT.AND", "P0,PT,|R4|,+INF,PT", None),
@@ -401,14 +407,15 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
         ("STG.E", "[R2.64],R6", None),
         ("EXIT", "", None)
       ),
-      Vec(-7)
+      Vec.nonEmpty(-7)
     )
   }
 
   test("unapplied constant-bank relocations fail explicitly") {
     val m          = CubinSuiteFixtures.module
     val constant   = m.sections.find(_.name.startsWith(".nv.constant0")).get
-    val relocation = Cubin.Section(m.sections.size, ".rel" + constant.name, 9, 0, 16, 0, constant.index, Vec.empty)
+    val relocation =
+      Cubin.Section(m.sections.nonNegativeSize, ".rel" + constant.name, 9, 0, 16, 0, constant.index.raw, Vec.empty)
     assert(SASSFixture.lower(
       m.copy(sections = m.sections :+ relocation),
       m.kernels.head,

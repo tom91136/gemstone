@@ -12,10 +12,10 @@ import net.kurobako.gemstone.vm.*
 
 class FSELImmediateSuite extends munit.FunSuite {
   private def probeModule: Cubin.Module =
-    SASSFixture.module(86, Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8), registers = 8)))
+    SASSFixture.module(86, Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8)), registers = 8)))
   private def saxpyModule: Cubin.Module = SASSFixture.module(
     86,
-    Vec(SASSFixture.Kernel("saxpy", 352, Vec(0 -> 8, 8 -> 8, 16 -> 4, 20 -> 4), registers = 10))
+    Vec(SASSFixture.Kernel("saxpy", 352, Vec((0, 8), (8, 8), (16, 4), (20, 4)), registers = 10))
   )
 
   private def lower(
@@ -96,7 +96,7 @@ class FSELImmediateSuite extends munit.FunSuite {
 
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(16L.unsafe[Long > 0])
+      val output  = service.allocate(16L)
       val program = service.compile(lowered)
         .fold(e => fail(e.message), identity)
       val task = SASSFixture.task(

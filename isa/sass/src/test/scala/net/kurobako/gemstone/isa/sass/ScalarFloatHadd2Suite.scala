@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.asm.*
@@ -12,11 +13,11 @@ import net.kurobako.gemstone.vm.*
 class ScalarFloatHadd2Suite extends munit.FunSuite {
   {
     def fixtureModule: Cubin.Module =
-      SASSFixture.module(75, Vec(SASSFixture.Kernel("probe", 352, Vec(0 -> 8, 8 -> 8), registers = 5)))
+      SASSFixture.module(75, Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 8)), registers = 5)))
 
-    val Kernel = "probe"
+    val Kernel: NonEmpty[String] = "probe"
 
-    val inputs = NumericCases.f32ToF16.map(_._1)
+    val inputs = NumericCases.f32ToF16.mapNonEmpty(_._1)
 
     val expected = NumericCases.f32ToF16.map(_._2 * 0x00010001L)
 
@@ -35,21 +36,21 @@ class ScalarFloatHadd2Suite extends munit.FunSuite {
       val inputBytes = Vec.from(inputs).flatMap(LittleEndian.toVec(_, 4))
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate((inputs.size.toLong * 4).unsafe[Long > 0])
+        val output  = service.allocate(inputs.positiveSize.toLong.widen[Long > 0] * 4L)
         val input   = service.allocate(inputBytes)
         val program = service.compile(sass)
           .fold(error => fail(error.message), identity)
         val task = SASSFixture.task(
-          Kernel.unsafe[NonEmpty[String]],
+          Kernel,
           LaunchGeometry.Dimensions.One,
-          LaunchGeometry.Dimensions(inputs.size.unsafe[Int > 0], 1, 1),
+          LaunchGeometry.Dimensions(inputs.positiveSize, 1, 1),
           Vec(
             KernelTask.Argument.Memory(output, 0L),
             KernelTask.Argument.Memory(input, 0L)
           )
         )
         service.run(program, task).fold(error => fail(error.message), identity)
-        val actual = service.readWords(output, inputs.size.unsafe[Int >= 0])
+        val actual = service.readWords(output, inputs.nonNegativeSize)
         assertEquals(actual, expected)
       }
     }

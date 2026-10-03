@@ -5,6 +5,7 @@ import cats.syntax.all.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.amdgpu.*
 
 /** Scalar ALU layouts. Operand order and register widths come from the generated catalogue. */
@@ -72,20 +73,18 @@ private object ScalarCodec {
         schemas match {
           case Vec(schema) =>
             val literalBytes = schema.flatMap { info =>
-              info.field.filter(_ != EncodingField.SDST).map { field =>
+              info.field.filter(_ != EncodingField.SDST).flatMap { field =>
                 OperandCodec.literalSize(layout.get(BigInt(word), field).toInt, target)
               }
-            }.maxOption.getOrElse(0)
-            val size = (4 + literalBytes).unsafe[Int > 0]
+            }.maxOption
+            val byteCount: Int >= 0 = literalBytes.fold[Int >= 0](0)(identity)
+            val size: Int > 0       = (4: Int > 0) + byteCount
             if (bytes.size - offset < size.raw)
               Left(CodecError.InvalidEncoding(s"truncated $format instruction: requires $size bytes"))
-            else if (!layout.accepts(BigInt(word), literalBytes))
+            else if (!layout.accepts(BigInt(word), byteCount.raw))
               Left(CodecError.InvalidEncoding(s"invalid $format encoding selectors"))
             else {
-              val literal = Option.when(literalBytes != 0)(Literal(
-                LittleEndian.decode(bytes, offset + 4, literalBytes.unsafe[Int where Between[0, 8]]),
-                literalBytes.unsafe[Int in (4, 8)]
-              ))
+              val literal = literalBytes.map(size => Literal(LittleEndian.decode(bytes, offset + 4, size), size))
               schema.traverse { info =>
                 val field = info.field
                 field.flatMap(field =>

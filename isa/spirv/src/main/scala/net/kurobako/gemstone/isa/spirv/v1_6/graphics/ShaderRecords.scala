@@ -1,12 +1,14 @@
 package net.kurobako.gemstone.isa.spirv.v1_6.graphics
 
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.graphics.ShaderMetadata.*
 
 private object ShaderRecords {
-  def allocate(shader: GraphicsShader, count: Int): Array[Array[Byte]] =
-    shader.interfaces.map(i => Array.ofDim[Byte](Math.multiplyExact(i.size.raw, count))).toArray
+  def allocate(shader: GraphicsShader, count: Int >= 0): Array[Array[Byte]] =
+    shader.interfaces.map(i => Array.ofDim[Byte]((count * i.size).raw)).toArray
   def fields(
       shader: GraphicsShader,
       direction: ShaderDirection

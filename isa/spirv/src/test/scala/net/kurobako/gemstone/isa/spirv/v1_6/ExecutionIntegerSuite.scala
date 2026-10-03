@@ -241,7 +241,7 @@ class ExecutionIntegerSuite extends munit.FunSuite {
     val module     = Module(Header(ISA.version, Word(0), Word(22), Word(0)), instructions, Endianness.Little)
     val allocation = AllocationId(1L)
     val memory     = ArrayMemory(allocation, (if (lanes == 3) 4 else lanes) * outputWidth / 8)
-    val byteWidth  = (width / 8).refine[Int where Between[0, 8]].toOption.get
+    val byteWidth  = (width / 8).refine[Int in 0 ~ 8].toOption.get
     def bytes(values: Seq[Long]): Vec[Byte] = Vec.from(values.flatMap(value => LittleEndian.toVec(value, byteWidth)))
     val task                                = KernelTask.validated(
       "integer",
@@ -254,7 +254,7 @@ class ExecutionIntegerSuite extends munit.FunSuite {
     assertEquals(
       memory.bytes.take(lanes * outputWidth / 8),
       Vec.from(expected.flatMap(value =>
-        LittleEndian.toVec(value, (outputWidth / 8).refine[Int where Between[0, 8]].toOption.get)
+        LittleEndian.toVec(value, (outputWidth / 8).refine[Int in 0 ~ 8].toOption.get)
       ))
     )
   }

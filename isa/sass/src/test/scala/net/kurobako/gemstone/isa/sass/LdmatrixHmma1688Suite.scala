@@ -12,7 +12,7 @@ import net.kurobako.gemstone.vm.*
 class LdmatrixHmma1688Suite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module = SASSFixture.module(
     80,
-    Vec(SASSFixture.Kernel("ldmatrix_trans_mma_f16", 352, Vec(0 -> 8), registers = 18, shared = 384))
+    Vec(SASSFixture.Kernel("ldmatrix_trans_mma_f16", 352, Vec((0, 8)), registers = 18, shared = 384))
   )
 
   private def half(value: Int): Long            = IEEE754.floatToBinary16(value.toFloat).raw & 0xffffL
@@ -40,12 +40,12 @@ class LdmatrixHmma1688Suite extends munit.FunSuite {
     assert(sassText.contains("LDSM.16.MT88"))
     assert(sassText.contains("LDSM.16.M88.2"))
     assert(sassText.contains("HMMA.1688.F16"))
-    val function = ListingDecoder.parse(sassText, "ldmatrix_trans_mma_f16", module.sm).fold(fail(_), _.head)
+    val function = ListingDecoder.parse(sassText, "ldmatrix_trans_mma_f16", module.sm.raw).fold(fail(_), _.head)
     val kernel   = module.kernels.find(_.name == "ldmatrix_trans_mma_f16").get
     val sass     = SASSFixture(module, kernel, Vec(function))
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(256L.unsafe[Long > 0])
+      val output  = service.allocate(256L)
       val program = service.compile(sass)
         .fold(error => fail(error.message), identity)
       val task = SASSFixture.task(

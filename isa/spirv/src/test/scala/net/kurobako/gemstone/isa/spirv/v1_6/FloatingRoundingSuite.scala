@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -12,17 +13,21 @@ class FloatingRoundingSuite extends munit.FunSuite {
   private def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
 
   for {
-    (sourceWidth, width) <- Seq((32, 16), (64, 16), (64, 32))
+    (sourceWidth, width) <- Seq[(Int in (32, 64), Int in (16, 32))]((32, 16), (64, 16), (64, 32))
+    rawSourceWidth = sourceWidth.raw
+    rawWidth = width.raw
+    sourceWidthBytes = sourceWidth.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
+    widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     mode                 <- 0 to 3
     grouped              <- Seq(false, true)
   } {
-    val fraction = if (width == 16) 10 else 23
-    val one      = if (width == 16) 0x3c00L else 0x3f800000L
-    val infinity = if (width == 16) 0x7c00L else 0x7f800000L
-    val sign     = 1L << (width - 1)
+    val fraction = if (rawWidth == 16) 10 else 23
+    val one      = if (rawWidth == 16) 0x3c00L else 0x3f800000L
+    val infinity = if (rawWidth == 16) 0x7c00L else 0x7f800000L
+    val sign     = 1L << (rawWidth - 1)
     val ulp      = math.scalb(1.0, -fraction)
-    val tiny     = math.scalb(1.0, if (width == 16) -24 else -149)
-    val maximum  = if (width == 16) 65504.0 else Float.MaxValue.toDouble
+    val tiny     = math.scalb(1.0, if (rawWidth == 16) -24 else -149)
+    val maximum  = if (rawWidth == 16) 65504.0 else Float.MaxValue.toDouble
     // Expected encodings in RTE, RTZ, RTP, RTN order, independently specified.
     val cases = Seq(
       ("zero", 0.0, Seq(0L, 0L, 0L, 0L)),
@@ -37,7 +42,7 @@ class FloatingRoundingSuite extends munit.FunSuite {
       ("overflow", maximum * 2.0, Seq(infinity, infinity - 1, infinity, infinity - 1)),
       ("infinity", Double.PositiveInfinity, Seq(infinity, infinity, infinity, infinity))
     ) ++
-      (if (sourceWidth == 64 && width == 16) Seq(
+      (if (rawSourceWidth == 64 && rawWidth == 16) Seq(
          ("double just above midpoint", 1.0 + ulp * 0.5 + math.scalb(1.0, -40), Seq(one + 1, one, one + 1, one)),
          ("double just below midpoint", 1.0 + ulp * 0.5 - math.scalb(1.0, -40), Seq(one, one, one + 1, one))
        )
@@ -47,7 +52,7 @@ class FloatingRoundingSuite extends munit.FunSuite {
       (label, value, expected) <- cases
       lanes                    <- Seq(1, 4)
     }
-      test(s"FConvert $sourceWidth to $width mode $mode $label lanes $lanes grouped $grouped") {
+      test(s"FConvert $rawSourceWidth to $rawWidth mode $mode $label lanes $lanes grouped $grouped") {
         val decorations = if (grouped) Vec(
           Instruction.DecorationGroup(ref(30)),
           Instruction.Decorate(ref(30), operand(OperandKind.Decoration, Decoration.FPRoundingMode, mode)),
@@ -60,8 +65,8 @@ class FloatingRoundingSuite extends munit.FunSuite {
           Header(ISA.version, Word(0), Word(32), Word(0)),
           decorations ++ Vec(
             Instruction.TypeVoid(ref(1)),
-            Instruction.TypeFloat(ref(2), operand(OperandKind.LiteralInteger, sourceWidth), None),
-            Instruction.TypeFloat(ref(3), operand(OperandKind.LiteralInteger, width), None),
+            Instruction.TypeFloat(ref(2), operand(OperandKind.LiteralInteger, rawSourceWidth), None),
+            Instruction.TypeFloat(ref(3), operand(OperandKind.LiteralInteger, rawWidth), None),
             Instruction.TypeVector(ref(4), ref(2), operand(OperandKind.LiteralInteger, 4)),
             Instruction.TypeVector(ref(5), ref(3), operand(OperandKind.LiteralInteger, 4)),
             Instruction.TypePointer(
@@ -89,10 +94,10 @@ class FloatingRoundingSuite extends munit.FunSuite {
         )
         for (negative <- Seq(false, true)) {
           val input = if (negative) -value else value
-          val raw   = if (sourceWidth == 32) java.lang.Float.floatToRawIntBits(input.toFloat).toLong
+          val raw   = if (rawSourceWidth == 32) java.lang.Float.floatToRawIntBits(input.toFloat).toLong
           else java.lang.Double.doubleToRawLongBits(input)
           val region = AllocationId(1L)
-          val memory = ArrayMemory(region, lanes * width / 8)
+          val memory = ArrayMemory(region, lanes * rawWidth / 8)
           val task   = KernelTask.validated(
             "convert",
             Dimensions.One,
@@ -100,7 +105,7 @@ class FloatingRoundingSuite extends munit.FunSuite {
             Vec(
               KernelTask.Argument.Memory(region, 0L),
               KernelTask.Argument.Scalar(Vec.from(Vector.fill(lanes)(raw)).flatMap(
-                LittleEndian.toVec(_, (sourceWidth / 8).unsafe[Int where Between[0, 8]])
+                LittleEndian.toVec(_, sourceWidthBytes.widen[Int in 0 ~ 8])
               ))
             )
           ).toOption.get
@@ -110,7 +115,7 @@ class FloatingRoundingSuite extends munit.FunSuite {
           assertEquals(
             memory.bytes,
             Vec.from(Vector.fill(lanes)(bits)).flatMap(
-              LittleEndian.toVec(_, (width / 8).unsafe[Int where Between[0, 8]])
+              LittleEndian.toVec(_, widthBytes.widen[Int in 0 ~ 8])
             )
           )
         }

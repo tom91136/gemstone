@@ -30,12 +30,12 @@ class CubinConstantSuite extends munit.FunSuite {
         Vec(SASSFixture.Kernel(
           "constant_read",
           if (sm == 35) 0x140 else 0x160,
-          Vec(0 -> 8),
+          Vec((0, 8)),
           registers = if (sm == 35) 6 else 8
         )),
         constants = Vec(".nv.constant3" -> initial)
       )
-      val bankIndex = base.sections.indexWhere(_.name == ".nv.constant3")
+      val bankIndex = base.sections.find(_.name == ".nv.constant3").get.index
       val module    = base.copy(globals = Vec(Cubin.Global("values", initial, Some(bankIndex))))
       val functions = ListingDecoder.parse(
         text.replace(original, instruction),
@@ -55,7 +55,7 @@ class CubinConstantSuite extends munit.FunSuite {
         assert(alias.offset.raw + named.size.raw <= bank.size.raw)
         val storage = service.registerAllocation(bank.size.raw.unsafe[Long > 0], AllocationKind.Shared).toOption.get
         assert(service.write(storage, 0L, bank.initial).isRight)
-        val output  = service.registerAllocation(8L.unsafe[Long > 0], AllocationKind.Shared).toOption.get
+        val output  = service.registerAllocation(8L, AllocationKind.Shared).toOption.get
         val program = service.load(CubinBackendFixture.encoding, fixtures.image(lowered))
           .fold(e => fail(e.message), identity)
         assert(service.bindGlobal(program, alias.name, storage, 0L).isRight)

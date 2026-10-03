@@ -126,8 +126,8 @@ class DecoderSuite extends munit.FunSuite {
     Vec("saxpy" -> SaxpyFixtures.saxpy, "copy-add" -> CopyAddFixtures.copyAdd).foreach { (name, text) =>
       SASSOracleWords.read(text).foreach { (address, bytes) =>
         val candidates = FieldDecoder.candidates("SM89", bytes)
-          .fold(error => fail(s"$name+0x${address.toHexString}: $error"), identity)
-        assert(candidates.exists(!_.alternate), s"$name+0x${address.toHexString}: no primary form")
+          .fold(error => fail(s"$name+0x${address.raw.toHexString}: $error"), identity)
+        assert(candidates.exists(!_.alternate), s"$name+0x${address.raw.toHexString}: no primary form")
       }
     }
   }

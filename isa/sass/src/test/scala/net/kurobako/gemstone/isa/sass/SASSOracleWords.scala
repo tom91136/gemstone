@@ -2,10 +2,11 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.constraint.*
 
 /** Machine words printed by nvdisasm in the checked-in text oracle fixtures. */
 object SASSOracleWords {
-  def read(text: String): Vec[(Int, Array[Byte])] = {
+  def read(text: String): Vec[(Int >= 0, Array[Byte])] = {
     val lines = text.linesIterator.toVec
     lines.indices.flatMap { index =>
       for {
@@ -15,7 +16,7 @@ object SASSOracleWords {
     }.toVec
   }
 
-  private def instructionWord(line: String): Option[(Int, String)] = {
+  private def instructionWord(line: String): Option[(Int >= 0, String)] = {
     val first = line.indexOf("/*")
     if (first < 0) None
     else {
@@ -49,9 +50,9 @@ object SASSOracleWords {
     }
   }
 
-  private def parseHex(value: String): Option[Int] =
+  private def parseHex(value: String): Option[Int >= 0] =
     if (value.isEmpty || !value.forall(character => Character.digit(character, 16) >= 0)) None
-    else scala.util.Try(Integer.parseInt(value, 16)).toOption
+    else scala.util.Try(Integer.parseInt(value, 16).unsafe[Int >= 0]).toOption
 
   private def bytes(hex: String): Array[Byte] = {
     val word = BigInt(hex.drop(2), 16)

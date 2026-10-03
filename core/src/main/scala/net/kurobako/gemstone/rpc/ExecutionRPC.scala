@@ -89,7 +89,7 @@ object ExecutionRPC {
         groupSize: LaunchGeometry.Dimensions,
         groupCount: LaunchGeometry.Dimensions,
         globalSize: LaunchGeometry.GlobalDimensions,
-        workDim: Int where Between[1, 3],
+        workDim: Int in 1 ~ 3,
         globalOffset: LaunchGeometry.Coordinates,
         privateSegmentBytes: Int >= 0,
         groupSegmentBytes: Int >= 0,

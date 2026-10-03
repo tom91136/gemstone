@@ -93,8 +93,8 @@ bool await_completion(Client &client, CompletionId completion, std::string &erro
         error = "invalid host write range";
         return false;
       }
-      if (range.atomicWidth != 0) {
-        const auto width = range.atomicWidth;
+      const auto width = range.atomicWidth.value;
+      if (width != 0) {
         if ((width != 1 && width != 2 && width != 4 && width != 8) || address % width || range.bytes.size() % width) {
           error = "invalid host atomic store range";
           return false;
@@ -115,20 +115,22 @@ bool await_completion(Client &client, CompletionId completion, std::string &erro
         const auto &request = *sync.atomic;
         const auto address = static_cast<uintptr_t>(request.address.value);
         observed = static_cast<uint64_t>(request.expected);
-        if (!address || (request.size != 1 && request.size != 2 && request.size != 4 && request.size != 8) || address % request.size != 0) {
+        const auto width = request.size.value;
+        if (!address || (width != 1 && width != 2 && width != 4 && width != 8) || address % width != 0) {
           error = "invalid host atomic range";
           return false;
         }
         observed = visit_atomic_width(
-            request.size, [&]<typename T>() { return apply_atomic_request<T>(address, request.operation, observed, request.desired); });
+            width, [&]<typename T>() { return apply_atomic_request<T>(address, request.operation, observed, request.desired); });
       }
       for (const auto &request : sync.atomicStores) {
         const auto address = static_cast<uintptr_t>(request.address.value);
-        if (!address || (request.size != 1 && request.size != 2 && request.size != 4 && request.size != 8) || address % request.size != 0) {
+        const auto width = request.size.value;
+        if (!address || (width != 1 && width != 2 && width != 4 && width != 8) || address % width != 0) {
           error = "invalid host atomic store range";
           return false;
         }
-        visit_atomic_width(request.size, [&]<typename T>() { atomic_store<T>(address, request.desired, std::memory_order_relaxed); });
+        visit_atomic_width(width, [&]<typename T>() { atomic_store<T>(address, request.desired, std::memory_order_relaxed); });
       }
       if (!sync.relaxed && !sync.atomic && sync.publish.empty()) std::atomic_thread_fence(std::memory_order_seq_cst);
       auto supplied = client.call(SupplyHostSync{completion, sync.ticket, static_cast<int64_t>(observed)});

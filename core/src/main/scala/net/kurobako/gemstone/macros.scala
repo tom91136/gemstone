@@ -28,11 +28,27 @@ object macros {
     b <- right
   } yield Span(a.low.max(b.low), a.high.min(b.high), a.step / a.step.gcd(b.step) * b.step))
 
+  /** Cover the source progression with target spans without enumerating its values. */
+  private def coveredBy(source: Span, target: List[Span]): Boolean = {
+    if (target.exists(source.subsetOf(_))) true
+    else {
+      val pieces = intersect(List(source), target).sortBy(_.low)
+      val next = pieces.foldLeft(source.low) { (next, piece) =>
+        if (piece.low <= next && piece.high >= next &&
+            (piece.low == piece.high || piece.step == source.step)) piece.high + source.step
+        else next
+      }
+      next > source.high
+    }
+  }
+
   private def carrier(using q: Quotes)(tpe: q.reflect.TypeRepr): Span = {
     import q.reflect.*
-    if (tpe =:= TypeRepr.of[Int]) Span(BigInt(Int.MinValue), BigInt(Int.MaxValue))
+    if (tpe =:= TypeRepr.of[Byte]) Span(BigInt(Byte.MinValue), BigInt(Byte.MaxValue))
+    else if (tpe =:= TypeRepr.of[Short]) Span(BigInt(Short.MinValue), BigInt(Short.MaxValue))
+    else if (tpe =:= TypeRepr.of[Int]) Span(BigInt(Int.MinValue), BigInt(Int.MaxValue))
     else if (tpe =:= TypeRepr.of[Long]) Span(BigInt(Long.MinValue), BigInt(Long.MaxValue))
-    else report.errorAndAbort(s"constraint supports Int and Long, found ${tpe.show}")
+    else report.errorAndAbort(s"constraint supports Byte, Short, Int and Long, found ${tpe.show}")
   }
 
   private def constant(using q: Quotes)(tpe: q.reflect.TypeRepr): BigInt = {
@@ -51,13 +67,22 @@ object macros {
   }
 
   private def domain(using q: Quotes)(base: q.reflect.TypeRepr, predicate: q.reflect.TypeRepr): List[Span] = {
+    val spans = uncheckedDomain(base, predicate)
+    if (spans.isEmpty)
+      q.reflect.report.errorAndAbort(
+        s"Unsatisfiable constraint: ${base.show} where ${predicate.show} has no representable values"
+      )
+    spans
+  }
+
+  private def uncheckedDomain(using q: Quotes)(base: q.reflect.TypeRepr, predicate: q.reflect.TypeRepr): List[Span] = {
     import q.reflect.*
     import constraint.*
     val limits                                                      = carrier(base)
     def clipped(spans: List[Span]): List[Span]                      = intersect(spans, List(limits))
     def unary(bound: TypeRepr)(f: BigInt => List[Span]): List[Span] = clipped(f(constant(bound)))
     predicate.dealias match {
-      case AndType(left, right)        => intersect(domain(base, left), domain(base, right))
+      case AndType(left, right)        => intersect(uncheckedDomain(base, left), uncheckedDomain(base, right))
       case p if p =:= TypeRepr.of[Any] => List(limits)
       case p                           => p.asType match {
           case '[GreaterThan[n]] => unary(TypeRepr.of[n])(n => List(Span(n + 1, limits.high)))
@@ -66,7 +91,7 @@ object macros {
           case '[AtMost[n]]      => unary(TypeRepr.of[n])(n => List(Span(limits.low, n)))
           case '[In[t]]          =>
             val values = choices(TypeRepr.of[t])
-            if (values.isEmpty) report.errorAndAbort("OneOf requires at least one integer literal")
+            if (values.isEmpty) report.errorAndAbort("in requires at least one integer literal")
             clipped(values.map(n => Span(n, n)))
           case '[MultipleOf[n]] => unary(TypeRepr.of[n]) { n =>
               if (n <= 0) report.errorAndAbort("MultipleOf requires a positive divisor")
@@ -86,12 +111,37 @@ object macros {
     val source   = domain(TypeRepr.of[A], TypeRepr.of[P])
     val target   = domain(TypeRepr.of[B], TypeRepr.of[Q])
     val same     = TypeRepr.of[A] =:= TypeRepr.of[B]
-    val widening = TypeRepr.of[A] =:= TypeRepr.of[Int] && TypeRepr.of[B] =:= TypeRepr.of[Long]
-    if (!(same || widening) || !source.forall(s => target.exists(s.subsetOf(_))))
+    val widening = carrier(TypeRepr.of[A]).subsetOf(carrier(TypeRepr.of[B]))
+    if (!(same || widening) || !source.forall(coveredBy(_, target)))
       report.errorAndAbort(
-        s"Cannot prove ${Type.show[A]} where ${Type.show[P]} implies ${Type.show[B]} where ${Type.show[Q]}; use raw.unsafe with the target type for a runtime check"
+        s"Cannot prove ${Type.show[A]} where ${Type.show[P]} implies ${Type.show[B]} where ${Type.show[Q]}; retain the producer refinement, or validate the original boundary value with .refine after explicitly converting its carrier"
       )
     '{ () }
+  }
+
+  /** Explicit widening shares the same proofs and numeric conversions as implicit widening. */
+  def widen[A: Type, P: Type, R: Type](value: Expr[constraint.where[A, P]])(using Quotes): Expr[R] = {
+    import quotes.reflect.*
+    import constraint.*
+    TypeRepr.of[R].dealias match {
+      case AppliedType(base, List(b, q)) if base.typeSymbol == TypeRepr.of[where[Any, Any]].typeSymbol =>
+        q.asType match {
+          case '[q] =>
+            val result =
+              if (TypeRepr.of[A] =:= b) '{ auto.implication[A, P, q]($value) }
+              else (Type.of[A], b.asType) match {
+                case ('[Byte], '[Short]) => '{ auto.byteToShort[P, q](${ value.asExprOf[Byte where P] }) }
+                case ('[Byte], '[Int])   => '{ auto.byteToInt[P, q](${ value.asExprOf[Byte where P] }) }
+                case ('[Byte], '[Long])  => '{ auto.byteToLong[P, q](${ value.asExprOf[Byte where P] }) }
+                case ('[Short], '[Int])  => '{ auto.shortToInt[P, q](${ value.asExprOf[Short where P] }) }
+                case ('[Short], '[Long]) => '{ auto.shortToLong[P, q](${ value.asExprOf[Short where P] }) }
+                case ('[Int], '[Long])   => '{ auto.intToLong[P, q](${ value.asExprOf[Int where P] }) }
+                case _ => report.errorAndAbort(s"Cannot widen representation ${Type.show[A]} to ${b.show}")
+              }
+            result.asExprOf[R]
+        }
+      case _ => report.errorAndAbort("Supply a complete numeric refinement target, for example value.widen[Int >= 0]")
+    }
   }
 
   /** Peel only our wrappers; collection elements and unrelated opaque types remain intact. */
@@ -166,18 +216,23 @@ object macros {
             }
           case _ => report.errorAndAbort("Supply a refinement or Newtype target")
         }
-      case _ => report.errorAndAbort("Supply a supported refinement target, for example value.unsafe[Int > 0]")
+      case _ => report.errorAndAbort("Supply a supported refinement target, for example value.refine[Int > 0]")
     }
   }
 
   def checkNumericLiteral[A: Type, P: Type](value: Expr[A])(using Quotes): Expr[Unit] = {
     import quotes.reflect.*
     val number = Type.of[A] match {
-      case '[Int]  => value.asExprOf[Int].value.map(BigInt(_))
-      case '[Long] => value.asExprOf[Long].value.map(BigInt(_))
-      case _ => report.errorAndAbort("Numeric refinement literals require the matching Int or Long representation")
+      case '[Byte]  => value.asExprOf[Byte].value.map(value => BigInt(value.toInt))
+      case '[Short] => value.asExprOf[Short].value.map(value => BigInt(value.toInt))
+      case '[Int]   => value.asExprOf[Int].value.map(BigInt(_))
+      case '[Long]  => value.asExprOf[Long].value.map(BigInt(_))
+      case _        =>
+        report.errorAndAbort("Numeric refinement literals require the matching Byte, Short, Int or Long representation")
     }
-    val literal = number.getOrElse(report.errorAndAbort("Runtime values require .unsafe with the refinement target"))
+    val literal = number.getOrElse(report.errorAndAbort(
+      "Runtime inputs require .refine at the domain boundary; propagate already-refined values directly"
+    ))
     if (!domain(TypeRepr.of[A], TypeRepr.of[P]).exists(_.contains(literal)))
       report.errorAndAbort(s"$literal does not satisfy ${Type.show[A]} where ${Type.show[P]}")
     '{ () }
@@ -209,7 +264,9 @@ object macros {
         }
     }
     if (!nonEmpty(value))
-      report.errorAndAbort("Cannot prove this string is nonempty; use .unsafe for runtime validation")
+      report.errorAndAbort(
+        "Cannot prove this string is nonempty; retain a NonEmpty producer type or validate the boundary input with .refine"
+      )
     '{ () }
   }
 
@@ -228,9 +285,11 @@ object macros {
       else '{ $number >= $low && $number <= $high && $number % ${ Expr(span.step.toLong) } == 0L }
     }.foldRight(Expr(false))((check, rest) => '{ $check || $rest })
     Type.of[A] match {
-      case '[Int]  => test('{ ${ value.asExprOf[Int] }.toLong })
-      case '[Long] => test(value.asExprOf[Long])
-      case _       => report.errorAndAbort("constraint supports Int and Long")
+      case '[Byte]  => test('{ ${ value.asExprOf[Byte] }.toLong })
+      case '[Short] => test('{ ${ value.asExprOf[Short] }.toLong })
+      case '[Int]   => test('{ ${ value.asExprOf[Int] }.toLong })
+      case '[Long]  => test(value.asExprOf[Long])
+      case _        => report.errorAndAbort("constraint supports Byte, Short, Int and Long")
     }
   }
 }

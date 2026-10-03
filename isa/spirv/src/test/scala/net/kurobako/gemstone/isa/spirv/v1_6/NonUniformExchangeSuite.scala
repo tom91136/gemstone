@@ -2,7 +2,9 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -13,11 +15,13 @@ class NonUniformExchangeSuite extends munit.FunSuite {
   private def lit(n: Int): Operand = operand(OperandKind.LiteralInteger, n)
 
   for {
-    width  <- Seq(8, 16, 32, 64)
+    width <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
+    rawWidth = width.raw
+    widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     lanes  <- Seq(1, 2, 3, 4)
     kind   <- Seq("broadcast", "first", "shuffle", "xor", "up", "down")
     branch <- Seq("uniform", "divergent", "return")
-  } test(s"nonuniform $kind $width x $lanes $branch reconverges across partial subgroups") {
+  } test(s"nonuniform $kind $rawWidth x $lanes $branch reconverges across partial subgroups") {
     val count                                     = 69 // Two complete subgroups and one partial subgroup.
     val valueType                                 = if (lanes == 1) 3 else 4
     val storageLanes                              = if (lanes == 3) 4 else lanes
@@ -53,7 +57,7 @@ class NonUniformExchangeSuite extends munit.FunSuite {
       Vec(
         Instruction.TypeVoid(ref(1)),
         Instruction.TypeInt(ref(2), lit(32), lit(0)),
-        Instruction.TypeInt(ref(3), lit(width), lit(0)),
+        Instruction.TypeInt(ref(3), lit(rawWidth), lit(0)),
         Instruction.TypeVector(ref(4), ref(3), lit(4)),
         Instruction.TypePointer(ref(5), operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), ref(valueType)),
         Instruction.TypeVector(ref(6), ref(2), lit(3)),
@@ -106,9 +110,9 @@ class NonUniformExchangeSuite extends munit.FunSuite {
       ),
       Endianness.Little
     )
-    val bytes                                    = (width / 8).unsafe[Int where Between[0, 8]]
+    val bytes                                    = widthBytes.widen[Int in 0 ~ 8]
     def input(thread: Int, component: Int): Long =
-      (thread * 37L + component * 13L) & (if (width == 64) -1L else (1L << width) - 1)
+      (thread * 37L + component * 13L) & (if (rawWidth == 64) -1L else (1L << rawWidth) - 1)
     def encode(value: Long): Vec[Byte] = LittleEndian.toVec(value, bytes)
     val source = Vec.from((0 until count).flatMap(t => (0 until storageLanes).flatMap(c => encode(input(t, c)))))
     val region = AllocationId(1L)
@@ -127,7 +131,7 @@ class NonUniformExchangeSuite extends munit.FunSuite {
       Dimensions.One,
       Vec(
         KernelTask.Argument.Memory(region, 0L),
-        KernelTask.Argument.Memory(region, source.size.toLong.unsafe[Long >= 0])
+        KernelTask.Argument.Memory(region, source.nonNegativeSize.toLong.widen[Long >= 0])
       )
     ).toOption.get
     assertEquals(executeUnchecked(module, task, memory), Right(()))
@@ -150,10 +154,10 @@ class NonUniformExchangeSuite extends munit.FunSuite {
       val inactive     = masked && thread % 2 == 0
       val defined = sourceLane >= 0 && sourceLane < 32 && sourceThread < count && (!masked || sourceThread % 2 == 1)
       if (inactive || defined) {
-        val expected = if (inactive) Vec.fill(lanes * width / 8)(0x55.toByte)
+        val expected = if (inactive) Vec.fill(lanes * rawWidth / 8)(0x55.toByte)
         else Vec.from((0 until lanes).flatMap(c => encode(input(sourceThread, c))))
-        val offset = source.size + (output * count + thread) * storageLanes * width / 8
-        assertEquals(memory.bytes.slice(offset, offset + lanes * width / 8), expected, s"output=$output lane=$thread")
+        val offset = source.size + (output * count + thread) * storageLanes * rawWidth / 8
+        assertEquals(memory.bytes.slice(offset, offset + lanes * rawWidth / 8), expected, s"output=$output lane=$thread")
       }
     }
   }

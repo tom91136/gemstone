@@ -46,7 +46,7 @@ class PTX(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBackend
         case Some(cached) =>
           decoded.set(cache.updated(
             image,
-            cached.copy(references = (cached.references.raw + 1).unsafe[Int > 0])
+            cached.copy(references = cached.references + 1)
           ))
           Right(cached.program)
         case None =>

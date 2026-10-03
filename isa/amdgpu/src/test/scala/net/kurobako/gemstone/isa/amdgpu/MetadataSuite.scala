@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.constraint.*
 import scala.util.Try
 import upickle.default.read
 
@@ -27,13 +28,26 @@ class MetadataSuite extends munit.FunSuite {
     assertEquals(SourceOperand.decode(254, ISA.CDNA1), Some(SourceOperand.Special(SpecialSource.src_lds_direct)))
     assertEquals(SourceOperand.decode(254, ISA.CDNA5), Some(SourceOperand.Literal(8)))
     assertEquals(SourceOperand.decode(254, ISA.RDNA4), None)
-    assertEquals(SourceOperand.literalSize(254, ISA.CDNA1), 0)
-    assertEquals(SourceOperand.literalSize(254, ISA.CDNA5), 8)
+    assertEquals(SourceOperand.literalSize(254, ISA.CDNA1), None)
+    assertEquals(SourceOperand.literalSize(254, ISA.CDNA5).map(_.raw), Some(8))
     assertEquals(SourceOperand.decode(248, ISA.GFX6), None)
     assertEquals(SourceOperand.decode(248, ISA.GFX8), Some(SourceOperand.Floating(0.15915494)))
     assertEquals(SourceOperand.decode(193, ISA.CDNA1), Some(SourceOperand.Integer(-1)))
     assertEquals(SourceOperand.decode(-1, ISA.CDNA1), None)
     assertEquals(SourceOperand.decode(512, ISA.CDNA1), None)
+  }
+
+  test("literal metadata accepts only four-byte and eight-byte encodings") {
+    val valid = ujson.Obj(
+      "isa"      -> ujson.Str("CDNA5"),
+      "kind"     -> ujson.Str("SRC"),
+      "fields"   -> ujson.Arr(),
+      "literals" -> ujson.Obj("255" -> ujson.Num(4), "254" -> ujson.Num(8))
+    )
+    val decoded = read[OperandEncoding](valid)
+    assertEquals(decoded.literals.view.mapValues(_.raw).toMap, Map(255 -> 4, 254 -> 8))
+    valid("literals") = ujson.Obj("255" -> ujson.Num(3))
+    assert(Try(read[OperandEncoding](valid)).isFailure)
   }
 
 }

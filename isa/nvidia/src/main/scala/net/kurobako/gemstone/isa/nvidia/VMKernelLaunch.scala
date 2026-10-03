@@ -58,8 +58,9 @@ object VMKernelLaunch {
                   s"${kernel.isaName} argument ${parameter.name} expects ${parameter.widthBytes} bytes, found ${bytes.size}"
                 )
               )
-              relocated <- relocateArgument(kernel.isaName, index, bytes, relocations, addresses)
-            } yield values.updated(parameter.name, Argument(relocated.unsafe))
+              nonEmpty  <- bytes.refine[NonEmpty[Vec[Byte]]].left.map(Fault.InvalidTask(_))
+              relocated <- relocateArgument(kernel.isaName, index, nonEmpty, relocations, addresses)
+            } yield values.updated(parameter.name, Argument(relocated))
           case KernelTask.Argument.Memory(region, offset, _) =>
             for {
               _ <- Either.cond(
@@ -82,10 +83,10 @@ object VMKernelLaunch {
   private def relocateArgument(
       isaName: NonEmpty[String],
       index: Int,
-      bytes: Vec[Byte],
+      bytes: NonEmpty[Vec[Byte]],
       relocations: Vec[KernelTask.PointerRelocation],
       addresses: AddressSpace
-  ): Either[Fault, Vec[Byte]] = {
+  ): Either[Fault, NonEmpty[Vec[Byte]]] = {
     val relocated = Vec.toArray(bytes)
     relocations.foldLeft[Either[Fault, Unit]](Right(())) {
       case (
@@ -109,6 +110,6 @@ object VMKernelLaunch {
           )
         }
       case (result, _) => result
-    }.map(_ => Vec.from(relocated))
+    }.map(_ => Vec.from(relocated).unsafe[NonEmpty[Vec[Byte]]])
   }
 }

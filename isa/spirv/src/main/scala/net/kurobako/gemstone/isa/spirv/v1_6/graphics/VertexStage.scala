@@ -69,10 +69,10 @@ private object VertexStage {
       else indices += (raw + (if (draw.index.nonEmpty) draw.call.vertexOffset else 0))
     }
     segments += begin -> indices.size
-    val count   = Math.multiplyExact(indices.size, draw.call.instances.raw)
+    val count   = indices.size.unsafe[Int >= 0] * draw.call.instances
     val records = allocate(draw.vertex, count)
     fields(draw.vertex, ShaderDirection.Input).foreach { (variable, field) =>
-      for (invocation <- 0 until count) {
+      for (invocation <- 0 until count.raw) {
         val instance = draw.call.firstInstance + invocation / indices.size
         val vertex   = indices(invocation % indices.size)
         val offset   = invocation * draw.vertex.interfaces(variable).size.raw + field.offset.raw
@@ -117,7 +117,7 @@ private object VertexStage {
     executor.execute(count, records)
     val outputs     = fields(draw.vertex, ShaderDirection.Output)
     val hasPosition = outputs.exists(_._2.builtin.exists(_.raw == BuiltIn.Position))
-    val vertices    = Array.tabulate(count) { invocation =>
+    val vertices    = Array.tabulate(count.raw) { invocation =>
       val position = Array.ofDim[Float](4)
       val varying  = mutable.Map.empty[Int, Array[Float]]
       outputs.foreach { (variable, field) =>

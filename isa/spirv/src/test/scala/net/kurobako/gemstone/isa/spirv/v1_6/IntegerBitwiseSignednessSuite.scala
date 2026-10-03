@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -10,14 +11,16 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class IntegerBitwiseSignednessSuite extends munit.FunSuite {
   for {
-    width        <- Seq(8, 16, 32, 64)
+    width <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
+    rawWidth = width.raw
+    widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     count        <- Seq(1, 4)
     resultSigned <- Seq(0, 1)
     leftSigned   <- Seq(0, 1)
     rightSigned  <- Seq(0, 1)
     operation    <- Seq("and", "or", "xor", "not")
     if operation != "not" || rightSigned == 0
-  } test(s"$operation: $width bits, $count lanes, signedness $resultSigned/$leftSigned/$rightSigned") {
+  } test(s"$operation: $rawWidth bits, $count lanes, signedness $resultSigned/$leftSigned/$rightSigned") {
     def ref(n: Int): Operand            = operand(OperandKind.IdRef, n)
     def literal(n: Int): Operand        = operand(OperandKind.LiteralInteger, n)
     def valueType(signed: Int): Operand = ref((if (count == 1) 2 else 4) + signed)
@@ -34,8 +37,8 @@ class IntegerBitwiseSignednessSuite extends munit.FunSuite {
       Header(ISA.version, Word(0), Word(14), Word(0)),
       Vec(
         Instruction.TypeVoid(ref(1)),
-        Instruction.TypeInt(ref(2), literal(width), literal(0)),
-        Instruction.TypeInt(ref(3), literal(width), literal(1)),
+        Instruction.TypeInt(ref(2), literal(rawWidth), literal(0)),
+        Instruction.TypeInt(ref(3), literal(rawWidth), literal(1)),
         Instruction.TypeVector(ref(4), ref(2), literal(4)),
         Instruction.TypeVector(ref(5), ref(3), literal(4)),
         Instruction.TypePointer(ref(6), operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), resultType),
@@ -69,10 +72,10 @@ class IntegerBitwiseSignednessSuite extends munit.FunSuite {
       }
     }
     def encoded(values: Seq[Long]): Vec[Byte] = Vec.from(values.flatMap(value =>
-      LittleEndian.toVec(value, (width / 8).unsafe[Int where Between[0, 8]])
+      LittleEndian.toVec(value, widthBytes.widen[Int in 0 ~ 8])
     ))
     val region = AllocationId(1L)
-    val memory = ArrayMemory(region, width / 8 * count)
+    val memory = ArrayMemory(region, rawWidth / 8 * count)
     val task   = KernelTask.validated(
       "bits",
       Dimensions.One,

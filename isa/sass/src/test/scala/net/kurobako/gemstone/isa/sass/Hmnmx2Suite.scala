@@ -14,14 +14,14 @@ class Hmnmx2Suite extends munit.FunSuite {
     def fixtureModule: Cubin.Module = SASSFixture.module(
       80,
       Vec(
-        SASSFixture.Kernel("hmnmx2_mixed_alias_probe", 352, Vec(0 -> 8, 8 -> 8), registers = 10),
-        SASSFixture.Kernel("hmnmx2_mixed_probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 12),
-        SASSFixture.Kernel("hmnmx2_alias_probe", 352, Vec(0 -> 8, 8 -> 8), registers = 8),
-        SASSFixture.Kernel("hmnmx2_select_probe", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 14)
+        SASSFixture.Kernel("hmnmx2_mixed_alias_probe", 352, Vec((0, 8), (8, 8)), registers = 10),
+        SASSFixture.Kernel("hmnmx2_mixed_probe", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 12),
+        SASSFixture.Kernel("hmnmx2_alias_probe", 352, Vec((0, 8), (8, 8)), registers = 8),
+        SASSFixture.Kernel("hmnmx2_select_probe", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 14)
       )
     )
 
-    val cases = Vec(
+    val cases = Vec.nonEmpty(
       (0x40003c00L, 0x3c004000L, 0x40004000L),
       (0x49003c00L, 0x3c004200L, 0x49004200L),
       (0x3c004800L, 0x3c004000L, 0x40004800L),
@@ -51,7 +51,7 @@ class Hmnmx2Suite extends munit.FunSuite {
       0x4000L, 0x3c00L, 0x4000L, 0x3c00L, 0x7fffL, 0x7fffL, 0x4000L, 0x0001L, 0x3c00L, 0x3c00L, 0x4000L
     )
 
-    def execute(kernel: String, text: String, expected: Vec[Long]): Unit = {
+    def execute(kernel: NonEmpty[String], text: String, expected: NonEmpty[Vec[Long]]): Unit = {
       val module   = fixtureModule
       val function = ListingDecoder.parse(text, kernel, 80).fold(fail(_), _.head)
       val sass     =
@@ -59,21 +59,15 @@ class Hmnmx2Suite extends munit.FunSuite {
       val left  = Vec.from(cases.map(_._1)).flatMap(LittleEndian.toVec(_, 4))
       val right = Vec.from(cases.map(_._2)).flatMap(LittleEndian.toVec(_, 4))
       locally {
-        val service                      = SASSFixture.Execution()
-        def allocation(bytes: Vec[Byte]) = {
-          val value =
-            service.allocate(bytes.size.toLong.unsafe[Long > 0])
-          assert(service.write(value, 0L, bytes).isRight)
-          value
-        }
-        val a       = allocation(left); val b = allocation(right)
+        val service = SASSFixture.Execution()
+        val a       = service.allocate(left); val b = service.allocate(right)
         val inPlace = kernel == "hmnmx2_mixed_alias_probe"
         val out     = if (inPlace) a
-        else service.allocate((expected.size * 4L).unsafe[Long > 0])
+        else service.allocate(expected.positiveSize.toLong.widen[Long > 0] * 4L)
         val program = service.compile(sass).fold(e => fail(e.message), identity)
         val task    = SASSFixture.task(
-          kernel.unsafe[NonEmpty[String]],
-          LaunchGeometry.Dimensions(cases.size.unsafe[Int > 0], 1, 1),
+          kernel,
+          LaunchGeometry.Dimensions(cases.positiveSize, 1, 1),
           LaunchGeometry.Dimensions.One,
           if (inPlace) Vec(
             KernelTask.Argument.Memory(a, 0L),
@@ -86,19 +80,21 @@ class Hmnmx2Suite extends munit.FunSuite {
           )
         )
         service.run(program, task).fold(e => fail(e.message), identity)
-        val actual = service.readWords(out, expected.size.unsafe[Int >= 0])
+        val actual = service.readWords(out, expected.nonNegativeSize)
         assertEquals(actual, expected)
       }
     }
 
     test("HMNMX2 H0 selectors implement ordered min and max with measured NaN and signed-zero behavior") {
-      val expected = cases.indices.flatMap(i => Vec(minLow(i), maxLow(i))).toVec
+      val expected = Vec.tabulateNonEmpty(cases.positiveSize)(i =>
+        Vec.nonEmpty(minLow(i.raw), maxLow(i.raw))
+      ).flatMapNonEmpty(identity)
       execute("hmnmx2_select_probe", Hmnmx2Fixtures.hmnmx2Sm80Hmnmx2SelectSm80, expected)
     }
 
     test("HMNMX2 mixed packed source computes both halves and handles source/destination alias") {
-      execute("hmnmx2_mixed_probe", Hmnmx2Fixtures.hmnmx2Sm80Hmnmx2MixedSm80, cases.map(_._3))
-      execute("hmnmx2_mixed_alias_probe", Hmnmx2Fixtures.hmnmx2Sm80Hmnmx2MixedAliasPatchedSm80, cases.map(_._3))
+      execute("hmnmx2_mixed_probe", Hmnmx2Fixtures.hmnmx2Sm80Hmnmx2MixedSm80, cases.mapNonEmpty(_._3))
+      execute("hmnmx2_mixed_alias_probe", Hmnmx2Fixtures.hmnmx2Sm80Hmnmx2MixedAliasPatchedSm80, cases.mapNonEmpty(_._3))
     }
 
     test("HMNMX2 lowering rejects unverified selectors and modifiers") {

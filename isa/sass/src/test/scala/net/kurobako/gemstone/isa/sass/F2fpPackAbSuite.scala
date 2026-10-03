@@ -11,9 +11,9 @@ import net.kurobako.gemstone.vm.*
 
 class F2fpPackAbSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
-    SASSFixture.module(89, Vec(SASSFixture.Kernel("f2fp_pack_ab_probe", 352, Vec(0 -> 8, 8 -> 8), registers = 10)))
+    SASSFixture.module(89, Vec(SASSFixture.Kernel("f2fp_pack_ab_probe", 352, Vec((0, 8), (8, 8)), registers = 10)))
 
-  private val cases = Vec(
+  private val cases = Vec.nonEmpty(
     (0x00000000L, 0x80000000L, 0x80000000L),
     (0x80000000L, 0x3f800000L, 0x3c008000L),
     (0x3f800000L, 0xc0000000L, 0xc0003c00L),
@@ -50,15 +50,15 @@ class F2fpPackAbSuite extends munit.FunSuite {
     val inputs     = Vec.from(inputWords).flatMap(LittleEndian.toVec(_, 4))
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate((cases.size * 4L).unsafe[Long > 0])
+      val output  = service.allocate(cases.positiveSize.toLong.widen[Long > 0] * 4L)
       val input   =
-        service.allocate(inputs.size.toLong.unsafe[Long > 0])
+        service.allocate(cases.positiveSize.toLong.widen[Long > 0] * 8L)
       assert(service.write(input, 0L, inputs).isRight)
       val program = service.compile(sass)
         .fold(error => fail(error.message), identity)
       val task = SASSFixture.task(
         "f2fp_pack_ab_probe": NonEmpty[String],
-        LaunchGeometry.Dimensions(cases.size.unsafe[Int > 0], 1, 1),
+        LaunchGeometry.Dimensions(cases.positiveSize, 1, 1),
         LaunchGeometry.Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(input, 0L),
@@ -66,7 +66,7 @@ class F2fpPackAbSuite extends munit.FunSuite {
         )
       )
       service.run(program, task).fold(error => fail(error.message), identity)
-      val bytes  = service.read(output, 0L, (cases.size * 4).unsafe[Int >= 0]).toOption.get
+      val bytes  = service.read(output, 0L, cases.nonNegativeSize * 4).toOption.get
       val actual = cases.indices.map { index =>
         LittleEndian.decode(bytes, index * 4, 4)
       }.toVec

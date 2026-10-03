@@ -51,7 +51,7 @@ object AMDGPUAtomicBenchmark {
     override def atomicModifyValue(
         region: AllocationId,
         offset: Long >= 0,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     )(update: Long => Long): Either[Fault, Long] = lock.withLock {
       if (region == allocation && ByteRange.contains(bytes.length, offset.raw, size.raw.toLong)) {
         val scalarSize = size.scalarByteWidth

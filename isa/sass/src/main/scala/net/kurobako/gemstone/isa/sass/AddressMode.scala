@@ -7,12 +7,14 @@ import net.kurobako.gemstone.constraint.*
 object AddressMode {
   private val known                            = Vec(`64`, U32, X4, X8, X16)
   def fromSpelling(value: String): AddressMode = known.find(_.spelling == value).getOrElse(Unknown(nonEmpty(value)))
-  def scale(value: AddressMode): Option[Int]   = value match {
-    case X4         => Some(4)
-    case X8         => Some(8)
-    case X16        => Some(16)
-    case `64` | U32 => Some(1)
-    case _: Unknown => None
+  def scale(value: AddressMode): Option[Int in (1, 2, 4, 8, 16)] = value match {
+    case X4            => Some(4)
+    case X8            => Some(8)
+    case X16           => Some(16)
+    case `64` | U32    => Some(1)
+    case Unknown("X1") => Some(1)
+    case Unknown("X2") => Some(2)
+    case _: Unknown    => None
   }
 }
 

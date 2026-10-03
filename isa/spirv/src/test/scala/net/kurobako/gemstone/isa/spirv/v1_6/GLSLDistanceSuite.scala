@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -10,11 +11,13 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class GLSLDistanceSuite extends munit.FunSuite {
   for {
-    width     <- Seq(16, 32, 64)
+    width     <- Seq[Int in (16, 32, 64)](16, 32, 64)
+    rawWidth = width.raw
+    byteWidth = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     operation <- Seq("Length", "Distance")
     count     <- Seq(1, 4)
   }
-    test(s"$operation computes $width-bit results from $count components") {
+    test(s"$operation computes $rawWidth-bit results from $count components") {
       val voidType     = operand(OperandKind.IdResult, 1)
       val scalar       = operand(OperandKind.IdResult, 2)
       val vector       = operand(OperandKind.IdResult, 3)
@@ -30,7 +33,7 @@ class GLSLDistanceSuite extends munit.FunSuite {
         Vec(
           Instruction.TypeVoid(voidType),
           Instruction.ExtInstImport(operand(OperandKind.IdResult, 12), stringOperand("GLSL.std.450")),
-          Instruction.TypeFloat(scalar, operand(OperandKind.LiteralInteger, width), None),
+          Instruction.TypeFloat(scalar, operand(OperandKind.LiteralInteger, rawWidth), None),
           Instruction.TypeVector(vector, scalar, operand(OperandKind.LiteralInteger, 4)),
           Instruction.TypePointer(pointer, operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), scalar),
           Instruction.TypeFunction(
@@ -68,15 +71,15 @@ class GLSLDistanceSuite extends munit.FunSuite {
         Endianness.Little
       )
       def encoded(values: Seq[Double]): Vec[Byte] = Vec.from(values.flatMap { value =>
-        val bits = width match {
+        val bits = rawWidth match {
           case 16 => IEEE754.floatToBinary16(value.toFloat).raw.toLong
           case 32 => java.lang.Float.floatToRawIntBits(value.toFloat).toLong
           case 64 => java.lang.Double.doubleToRawLongBits(value)
         }
-        LittleEndian.toVec(bits, (width / 8).unsafe[Int where Between[0, 8]])
+        LittleEndian.toVec(bits, byteWidth.widen[Int in 0 ~ 8])
       })
       val allocation = AllocationId(1L)
-      val memory     = ArrayMemory(allocation, width / 8)
+      val memory     = ArrayMemory(allocation, byteWidth.raw)
       val dispatch   = KernelTask.validated(
         "remainder",
         Dimensions.One,

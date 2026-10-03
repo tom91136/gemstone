@@ -27,7 +27,7 @@ class SettingsSuite extends munit.FunSuite {
     assertEquals(Server.Settings.fromEnvironment(Map(key -> "7")).map(_.requestTimeoutMillis.raw), Right(7000))
     assertEquals(
       Server.Settings.fromEnvironment(Map.empty).map(_.requestTimeoutMillis.raw.toLong),
-      Right(environment.RpcTimeoutSecondsDefault * 1000)
+      Right((environment.RpcTimeoutSecondsDefault * 1000L).raw)
     )
     for (value <- List("0", "-1", "+1", "1 ", "2147484", "18446744073709551616"))
       assert(Server.Settings.fromEnvironment(Map(key -> value)).isLeft, value)

@@ -10,6 +10,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.graphics.*
 import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.graphics.ShaderMetadata.*
@@ -41,9 +42,11 @@ class ExecutionSession(
     private val locks     = Array.fill(math.min(64, ((bytes.length.toLong + 63L) / 64L).toInt))(ReentrantLock())
     def lockAll(): Unit   = locks.foreach(_.lock())
     def unlockAll(): Unit = locks.reverseIterator.foreach(_.unlock())
-    def access[A](offset: Int, size: Int)(operation: => A): A = {
-      val first = offset / 64
-      val last  = if (size == 0) first else (offset + size - 1) / 64
+    def access[A](offset: Int >= 0, size: Int >= 0)(operation: => A): A = {
+      val start  = offset.raw
+      val length = size.raw
+      val first  = start / 64
+      val last   = if (length == 0) first else (start + length - 1) / 64
       if (first == last) locks(first % locks.length).withLock(operation)
       else {
         val selected = if (last - first + 1 >= locks.length) locks
@@ -156,7 +159,7 @@ class ExecutionSession(
       require(readWaiters > 0, "no host read waiter to release")
       readWaiters -= 1
     }
-    def markDirty(id: AllocationId, offset: Int, size: Int): Unit =
+    def markDirty(id: AllocationId, offset: Int >= 0, size: Int >= 0): Unit =
       dirtyWrites.computeIfAbsent(Thread.currentThread(), _ => mutable.HashMap.empty)
         .getOrElseUpdate(id, WrittenRanges()).add(offset, size)
     private lazy val allDirtyRanges: Vec[DirtyRange] = {
@@ -169,7 +172,7 @@ class ExecutionSession(
       }
       Vec.from(merged.toArray.sortBy(_._1.raw).view.flatMap { (allocationId, written) =>
         written.chunks(65536).map { (offset, size) =>
-          DirtyRange(allocationId, offset.toLong.unsafe[Long >= 0], size.unsafe[Int > 0])
+          DirtyRange(allocationId, offset.toLong, size)
         }
       })
     }
@@ -490,7 +493,7 @@ class ExecutionSession(
       ExecutionSession.this.read(region, offset, size).left.map(memoryFault(_))
     override def write(region: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
       ExecutionSession.this.write(region, offset, bytes).left.map(memoryFault(_))
-    override def atomicModifyValue(region: AllocationId, offset: Long >= 0, size: Int where Between[1, 8])(
+    override def atomicModifyValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)(
         update: Long => Long
     ): Either[Fault, Long] =
       ExecutionSession.this.atomicModifyValue(region, offset, size)(update).left.map(memoryFault(_))
@@ -816,8 +819,8 @@ class ExecutionSession(
 
   private def hostBacked(id: AllocationId): Boolean = state.get().allocations.get(id).exists(_.hostBacked)
   private def hostTransfers: Boolean = hostMemoryEnabled || state.get().allocations.values.exists(_.hostBacked)
-  private def hostAccessible(address: GuestAddress, size: Int): Boolean = hostMemoryEnabled ||
-    locateAddress(address, size.unsafe[Int >= 0]).exists(location =>
+  private def hostAccessible(address: GuestAddress, size: Int >= 0): Boolean = hostMemoryEnabled ||
+    locateAddress(address, size).exists(location =>
       hostBacked(location.allocation)
     )
 
@@ -827,20 +830,21 @@ class ExecutionSession(
   private def atomicHostMemory(
       id: CompletionId,
       address: GuestAddress,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   )(update: Long => Long): Either[Fault, Long] =
     if ((size.raw != 4 && size.raw != 8) || address.raw % size.raw != 0)
       Left(Fault.Memory("host atomics require aligned 32- or 64-bit storage"))
-    else if (address.raw <= 0 || address.raw > Long.MaxValue - size.raw || !hostAccessible(address, size.raw))
+    else if (address.raw <= 0 || address.raw > Long.MaxValue - size.raw || !hostAccessible(address, size))
       Left(Fault.Memory("host atomic address is unavailable or overflows"))
     else hostSyncLock.withLock {
-      val mask     = if (size.raw == 4) 0xffffffffL else -1L
-      var expected = lastHostAtomic.filter(request => request.address == address && request.size == size.raw)
+      val atomicSize: Int in (1, 2, 4, 8) = if (size.raw == 4) 4 else 8
+      val mask                            = if (size.raw == 4) 0xffffffffL else -1L
+      var expected = lastHostAtomic.filter(request => request.address == address && request.size.raw == size.raw)
         .fold(0L)(_.desired) & mask
       var result: Option[Either[Fault, Long]] = None
       while (result.isEmpty) {
         val desired  = update(expected) & mask
-        val request  = HostMemoryAtomic(address, size.raw, expected, desired)
+        val request  = HostMemoryAtomic(address, atomicSize, expected, desired)
         val observed = synchronizeHost(id, Some(request)).map(_ & mask)
         observed match {
           case Left(error)                       => result = Some(Left(error))
@@ -856,20 +860,24 @@ class ExecutionSession(
   private def atomicHostLoad(
       id: CompletionId,
       address: GuestAddress,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[Fault, Long] =
-    if (!Set(1, 2, 4, 8).contains(size.raw) || address.raw % size.raw != 0)
-      Left(Fault.Memory("host atomic loads require naturally aligned 8-, 16-, 32-, or 64-bit storage"))
-    else if (address.raw <= 0 || address.raw > Long.MaxValue - size.raw || !hostAccessible(address, size.raw))
-      Left(Fault.Memory("host atomic address is unavailable or overflows"))
-    else hostSyncLock.withLock {
-      val request = HostMemoryAtomic(address, size.raw, 0L, 0L, HostMemoryAtomicOperation.Load)
-      val target  = Vec(HostMemoryRange(address, size.raw.unsafe[Int > 0]))
-      synchronizeHost(id, Some(request), target, relaxed = true).map { observed =>
-        val mask  = if (size.raw == 8) -1L else (1L << (size.raw * 8)) - 1L
-        val value = observed & mask
-        stateLock.withLock(hostMemory(id).observeAtomic(address.raw, LittleEndian.toVec(value, size.scalarByteWidth)))
-        value
+    size.raw.refine[Int in (1, 2, 4, 8)].left.map(_ =>
+      Fault.Memory("host atomic loads require naturally aligned 8-, 16-, 32-, or 64-bit storage")
+    ).flatMap { atomicSize =>
+      if (address.raw % atomicSize.raw != 0)
+        Left(Fault.Memory("host atomic loads require naturally aligned 8-, 16-, 32-, or 64-bit storage"))
+      else if (address.raw <= 0 || address.raw > Long.MaxValue - size.raw || !hostAccessible(address, size))
+        Left(Fault.Memory("host atomic address is unavailable or overflows"))
+      else hostSyncLock.withLock {
+        val request = HostMemoryAtomic(address, atomicSize, 0L, 0L, HostMemoryAtomicOperation.Load)
+        val target  = Vec(HostMemoryRange(address, size))
+        synchronizeHost(id, Some(request), target, relaxed = true).map { observed =>
+          val mask  = if (size.raw == 8) -1L else (1L << (size.raw * 8)) - 1L
+          val value = observed & mask
+          stateLock.withLock(hostMemory(id).observeAtomic(address.raw, LittleEndian.toVec(value, size.scalarByteWidth)))
+          value
+        }
       }
     }
 
@@ -909,7 +917,7 @@ class ExecutionSession(
 
   private def readHostMemory(id: CompletionId, address: GuestAddress, size: Int >= 0): Memory.ReadResult[Vec[Byte]] =
     stateLock.withLock {
-      if (!hostAccessible(address, size.raw) || address.raw <= 0 || address.raw > Long.MaxValue - size.raw.toLong)
+      if (!hostAccessible(address, size) || address.raw <= 0 || address.raw > Long.MaxValue - size.raw.toLong)
         Left(Fault.Memory(
           s"host memory read at 0x${address.raw.toHexString} (${size.raw} bytes) is unavailable or overflows"
         ))
@@ -918,12 +926,17 @@ class ExecutionSession(
 
   private def writeHostMemory(id: CompletionId, address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
     stateLock.withLock {
-      if (!hostAccessible(address, bytes.size) || address.raw <= 0 || address.raw > Long.MaxValue - bytes.size.toLong)
+      if (
+        !hostAccessible(address, bytes.nonNegativeSize) || address.raw <= 0 ||
+        address.raw > Long.MaxValue - bytes.size.toLong
+      )
         Left(Fault.Memory(
           s"host memory write at 0x${address.raw.toHexString} (${bytes.size} bytes) is unavailable or overflows"
         ))
       else {
-        val atomicWidth = if (Set(1, 2, 4, 8).contains(bytes.size) && address.raw % bytes.size == 0) bytes.size else 0
+        val atomicWidth: Int in (0, 1, 2, 4, 8) =
+          bytes.size.refine[Int in (1, 2, 4, 8)].toOption
+            .filter(width => address.raw % width.raw == 0).fold[Int in (0, 1, 2, 4, 8)](0)(identity)
         hostMemory(id).write(address.raw, bytes, atomicWidth)
         Right(())
       }
@@ -995,9 +1008,9 @@ class ExecutionSession(
   private def accessAllocation[A](
       id: AllocationId,
       offset: Long >= 0,
-      size: Int,
+      size: Int >= 0,
       completion: Option[CompletionId] = None
-  )(operation: (RemoteAllocation, Int) => A): Either[ExecutionFailure, A] =
+  )(operation: (RemoteAllocation, Int >= 0) => A): Either[ExecutionFailure, A] =
     if (closed && completion.isEmpty) Left(ExecutionFailure.Failed("execution session is closed"))
     else state.get().allocations.get(id).toRight(
       ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered")
@@ -1018,17 +1031,17 @@ class ExecutionSession(
       offset: Long >= 0,
       size: Int >= 0
   ): Either[ExecutionFailure, Vec[Byte]] =
-    accessAllocation(id, offset, size.raw) { (allocation, start) =>
-      Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(allocation.bytes, start, start + size.raw))
+    accessAllocation(id, offset, size) { (allocation, start) =>
+      Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(allocation.bytes, start.raw, start.raw + size.raw))
     }
 
   def readValue(
       id: AllocationId,
       offset: Long >= 0,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[ExecutionFailure, Long] =
-    accessAllocation(id, offset, size.raw)((allocation, start) =>
-      LittleEndian.decode(allocation.bytes, start, size.scalarByteWidth)
+    accessAllocation(id, offset, size)((allocation, start) =>
+      LittleEndian.decode(allocation.bytes, start.raw, size.scalarByteWidth)
     )
 
   def write(id: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[ExecutionFailure, Unit] =
@@ -1038,13 +1051,13 @@ class ExecutionSession(
       id: AllocationId,
       offset: Long >= 0,
       value: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[ExecutionFailure, Unit] = writeValue(id, offset, value, size, None)
 
   def atomicModifyValue(
       id: AllocationId,
       offset: Long >= 0,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   )(update: Long => Long): Either[ExecutionFailure, Long] =
     atomicModifyValue(id, offset, size, None)(update)
 
@@ -1085,7 +1098,7 @@ class ExecutionSession(
       staged.flatMap(_ => flushHostReads())
     }
     private def systemHostRange(address: GuestAddress, size: Int >= 0): Boolean =
-      hostTransfers && hostAccessible(address, size.raw) && segments(address, size).forall { (begin, length) =>
+      hostTransfers && hostAccessible(address, size) && segments(address, size).forall { (begin, length) =>
         findContainingAllocation(begin, length).forall((id, _) => hostBacked(id))
       }
 
@@ -1151,7 +1164,7 @@ class ExecutionSession(
 
     // Device atomics serialize against every lane using this address space. Host
     // CPU participation still requires a separate coherence/atomic protocol.
-    private def atomicAddress(address: GuestAddress, size: Int where Between[1, 8])(
+    private def atomicAddress(address: GuestAddress, size: Int in 1 ~ 8)(
         update: Long => Long
     ): Either[Fault, Long] = awaitRead {
       stateLock.withLock {
@@ -1179,14 +1192,14 @@ class ExecutionSession(
     override def readValue(
         region: AllocationId,
         offset: Long >= 0,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Long] =
       awaitRead(readValueDeferred(region, offset, size))
 
     override def readValueDeferred(
         region: AllocationId,
         offset: Long >= 0,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Memory.ReadResult[Long] =
       if (hostBacked(region) || crossesRegion(region, offset, size.raw))
         readDeferred(region, offset, size.nonNegative).map(bytes => LittleEndian.decode(bytes, 0, size.scalarByteWidth))
@@ -1194,7 +1207,7 @@ class ExecutionSession(
 
     override def readSystemValue(
         address: GuestAddress,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Long] =
       if (hostTransfers && systemHostRange(address, size.nonNegative))
         atomicHostLoad(completion, address, size)
@@ -1213,7 +1226,7 @@ class ExecutionSession(
         region: AllocationId,
         offset: Long >= 0,
         value: Long,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Unit] =
       if (hostBacked(region) || crossesRegion(region, offset, size.raw))
         write(region, offset, LittleEndian.toVec(value, size.scalarByteWidth))
@@ -1228,18 +1241,17 @@ class ExecutionSession(
     override def writeSystemValue(
         address: GuestAddress,
         value: Long,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Unit] = writeSystemBatch(Vec((address, value, size)))
 
     override def writeSystemBatch(
-        writes: Vec[(GuestAddress, Long, Int where Between[1, 8])]
+        writes: Vec[(GuestAddress, Long, Int in 1 ~ 8)]
     ): Either[Fault, Unit] = {
-      val nativeAtomic = Vec.from(writes.collect {
-        case (address, value, size)
-            if hostTransfers && Set(1, 2, 4, 8).contains(size.raw) && systemHostRange(address, size.nonNegative) &&
-              address.raw % size.raw == 0 =>
-          HostMemoryAtomic(address, size.raw, 0L, value, HostMemoryAtomicOperation.Store)
-      })
+      val nativeAtomic = writes.flatMap { (address, value, size) =>
+        size.raw.refine[Int in (1, 2, 4, 8)].toOption.filter { width =>
+          hostTransfers && systemHostRange(address, width) && address.raw % width.raw == 0
+        }.map(width => HostMemoryAtomic(address, width, 0L, value, HostMemoryAtomicOperation.Store))
+      }
       val stored = writes.foldLeft[Either[Fault, Unit]](Right(())) {
         case (result, (address, value, size)) =>
           if (nativeAtomic.exists(_.address == address)) result
@@ -1254,7 +1266,7 @@ class ExecutionSession(
                 ).getOrElse(false) => HostMemoryRange(begin, length.raw.unsafe[Int > 0])
           }
         })
-        val atomicRanges = Vec.from(nativeAtomic.map(atom => HostMemoryRange(atom.address, atom.size.unsafe[Int > 0])))
+        val atomicRanges = Vec.from(nativeAtomic.map(atom => HostMemoryRange(atom.address, atom.size)))
         if (!hostTransfers || (selected.isEmpty && nativeAtomic.isEmpty)) Right(())
         else hostSyncLock.withLock {
           synchronizeHost(
@@ -1267,7 +1279,7 @@ class ExecutionSession(
             stateLock.withLock(nativeAtomic.foreach(atom =>
               hostMemory(completion).observeAtomic(
                 atom.address.raw,
-                LittleEndian.toVec(atom.desired, atom.size.unsafe[Int where Between[0, 8]])
+                LittleEndian.toVec(atom.desired, atom.size)
               )
             ))
           }
@@ -1275,7 +1287,7 @@ class ExecutionSession(
       }
     }
 
-    override def atomicModifyValue(region: AllocationId, offset: Long >= 0, size: Int where Between[1, 8])(
+    override def atomicModifyValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)(
         update: Long => Long
     ): Either[Fault, Long] =
       if (hostBacked(region))
@@ -1312,7 +1324,7 @@ class ExecutionSession(
 
     override def readValue(
         address: GuestAddress,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Long] =
       withAllocation(address, size.nonNegative)((id, offset) =>
         if (id.isEmpty || id.exists(hostBacked(_))) awaitRead(readSegments(address, size.nonNegative)).map(bytes =>
@@ -1330,7 +1342,7 @@ class ExecutionSession(
     override def writeValue(
         address: GuestAddress,
         value: Long,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Unit] =
       withAllocation(address, size.nonNegative)((id, offset) =>
         if (id.isEmpty || id.exists(hostBacked(_)))
@@ -1340,7 +1352,7 @@ class ExecutionSession(
 
     override def atomicModifyValue(
         address: GuestAddress,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     )(update: Long => Long): Either[Fault, Long] =
       withAllocation(address, size.nonNegative)((id, offset) =>
         if (id.isEmpty || id.exists(hostBacked(_))) atomicHostMemory(completion, address, size)(update)
@@ -1376,42 +1388,42 @@ class ExecutionSession(
       bytes: Vec[Byte],
       completion: Option[CompletionId]
   ): Either[ExecutionFailure, Unit] =
-    accessAllocation(id, offset, bytes.size, completion) { (allocation, start) =>
-      val _ = bytes.copyToArray(allocation.bytes, start, bytes.length)
-      if (bytes.nonEmpty) markDirty(completion, id, start, bytes.size)
+    accessAllocation(id, offset, bytes.nonNegativeSize, completion) { (allocation, start) =>
+      val _ = bytes.copyToArray(allocation.bytes, start.raw, bytes.length)
+      if (bytes.nonEmpty) markDirty(completion, id, start, bytes.nonNegativeSize)
     }
 
   private def writeValue(
       id: AllocationId,
       offset: Long >= 0,
       value: Long,
-      size: Int where Between[1, 8],
+      size: Int in 1 ~ 8,
       completion: Option[CompletionId]
   ): Either[ExecutionFailure, Unit] =
-    accessAllocation(id, offset, size.raw, completion) { (allocation, start) =>
-      LittleEndian.write(value, allocation.bytes, start, size.scalarByteWidth)
-      markDirty(completion, id, start, size.raw)
+    accessAllocation(id, offset, size, completion) { (allocation, start) =>
+      LittleEndian.write(value, allocation.bytes, start.raw, size.scalarByteWidth)
+      markDirty(completion, id, start, size)
     }
 
   private def atomicModifyValue(
       id: AllocationId,
       offset: Long >= 0,
-      size: Int where Between[1, 8],
+      size: Int in 1 ~ 8,
       completion: Option[CompletionId]
   )(update: Long => Long): Either[ExecutionFailure, Long] =
-    accessAllocation(id, offset, size.raw, completion) { (allocation, start) =>
+    accessAllocation(id, offset, size, completion) { (allocation, start) =>
       val width    = size.scalarByteWidth
-      val previous = LittleEndian.decode(allocation.bytes, start, width)
-      LittleEndian.write(update(previous), allocation.bytes, start, width)
-      markDirty(completion, id, start, size.raw)
+      val previous = LittleEndian.decode(allocation.bytes, start.raw, width)
+      LittleEndian.write(update(previous), allocation.bytes, start.raw, width)
+      markDirty(completion, id, start, size)
       previous
     }
 
   private def markDirty(
       completion: Option[CompletionId],
       id: AllocationId,
-      offset: Int,
-      size: Int
+      offset: Int >= 0,
+      size: Int >= 0
   ): Unit = completion.foreach { completionId =>
     execution(completionId).markDirty(id, offset, size)
   }
@@ -1425,10 +1437,10 @@ class ExecutionSession(
       loaded: RuntimeBackend.Program
   ): Either[ExecutionFailure, Vec[KernelTask.PointerRelocation]] =
     loaded.kernel(task.kernelName).map { metadata =>
-      Vec.from(task.arguments.zipWithIndex.flatMap { case (argument, index) =>
+      Vec.from(task.arguments.zip(Vec.indices(task.arguments.nonNegativeSize)).flatMap { case (argument, index) =>
         argument match {
-          case KernelTask.Argument.Scalar(bytes) if metadata.parameters.lift(index).exists(_.containsPointers) =>
-            scanArgument(bytes, index.unsafe[Int >= 0], current)
+          case KernelTask.Argument.Scalar(bytes) if metadata.parameters.lift(index.raw).exists(_.containsPointers) =>
+            scanArgument(bytes, index, current)
           case _ => Vector.empty
         }
       })
@@ -1594,10 +1606,10 @@ class ExecutionSession(
   private def checkedRange(
       length: Int,
       offset: Long >= 0,
-      size: Int
-  ): Either[ExecutionFailure, Int] =
+      size: Int >= 0
+  ): Either[ExecutionFailure, Int >= 0] =
     ByteRange
-      .start(length, offset.raw, size)
+      .start(length, offset.raw, size.raw)
       .toRight(ExecutionFailure.InvalidRequest(
         s"byte range $offset + $size exceeds allocation size $length"
       ))

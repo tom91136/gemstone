@@ -131,9 +131,9 @@ class CubinImageSuite extends NvidiaFixtureSuite {
   test("embedded CUDA ELF ABI 8 exposes the kernel parameter layout") {
     val image  = CubinImageSuite.image
     val module = Cubin.decode(image).fold(fail(_), identity)
-    assertEquals(module.sm, 89)
+    assertEquals(module.sm, 89: Int >= 35)
     assertEquals(module.kernels.map(_.name), Vec("copy_add"))
-    assertEquals(module.kernels.head.parameters.map(p => p.offset -> p.size), Vec(0 -> 8, 8 -> 8))
+    assertEquals(module.kernels.head.parameters.map(p => p.offset -> p.size), Vec[(Int >= 0, Int > 0)]((0, 8), (8, 8)))
     val program = CubinBackend().load(Vec.from(image)).fold(e => fail(e.message), identity)
     try {
       val metadata = program.kernel("copy_add").fold(e => fail(e.message), identity)

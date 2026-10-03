@@ -57,7 +57,7 @@ private object VMInvocation {
     private var touchedSize      = 0
     private val overflow         = mutable.LongMap.empty[VMValue]
 
-    metrics.recordInvocationValues(dense.length, 16)
+    metrics.recordInvocationValues(dense.length.unsafe[Int >= 0], 16)
 
     def get(key: Long): Option[VMValue] = {
       val local =

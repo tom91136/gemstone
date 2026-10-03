@@ -6,6 +6,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.spirv.v1_6 as spv
 import net.kurobako.gemstone.memory.*
@@ -18,12 +19,12 @@ class PrecisionLayoutSuite extends munit.FunSuite {
     Vec.from(values.map(Word(_))).unsafe[NonEmpty[Vec[Word]]]
   )
   private def r(value: Int)                                    = o(OperandKind.IdResult, value)
-  private def literal(value: Long, width: OneOf[(16, 32, 64)]) = {
+  private def literal(value: Long, width: Int in (16, 32, 64)) = {
     val byteWidth = width.scalarByteWidth
     Operand(
       OperandKind.LiteralContextDependentNumber,
       Vec.from(LittleEndian.toArray(value, byteWidth).grouped(4).map { bytes =>
-        val chunkWidth = bytes.length.refine[Int where Between[0, 8]]
+        val chunkWidth = bytes.length.refine[Int in 0 ~ 8]
           .fold(message => throw IllegalArgumentException(message), value => value)
         Word(LittleEndian.decode(bytes, 0, chunkWidth).toInt)
       }).unsafe
@@ -69,12 +70,12 @@ class PrecisionLayoutSuite extends munit.FunSuite {
   }
   for {
     (width, count) <- Seq(
-      (32: OneOf[(16, 32, 64)]) -> 4,
-      (32: OneOf[(16, 32, 64)]) -> 8,
-      (32: OneOf[(16, 32, 64)]) -> 16,
-      (64: OneOf[(16, 32, 64)]) -> 3,
-      (64: OneOf[(16, 32, 64)]) -> 4,
-      (64: OneOf[(16, 32, 64)]) -> 8
+      (32: Int in (16, 32, 64)) -> 4,
+      (32: Int in (16, 32, 64)) -> 8,
+      (32: Int in (16, 32, 64)) -> 16,
+      (64: Int in (16, 32, 64)) -> 3,
+      (64: Int in (16, 32, 64)) -> 4,
+      (64: Int in (16, 32, 64)) -> 8
     )
     byValue <- Seq(false, true)
   }

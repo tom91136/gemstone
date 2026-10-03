@@ -804,7 +804,7 @@ class ExecutionLayoutSuite extends munit.FunSuite {
     )
 
     assertEquals(
-      VMInterpreter.pointerLeafOffsetsForTest(module, 5),
+      VMInterpreter.pointerLeafOffsetsForTest(module, 5).map(_.map { case (offset, kind) => offset.raw -> kind }),
       Right(Vec(0L -> 3, 16L -> 3))
     )
   }

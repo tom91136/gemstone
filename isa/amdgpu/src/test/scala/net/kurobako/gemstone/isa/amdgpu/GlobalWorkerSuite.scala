@@ -56,7 +56,7 @@ class GlobalWorkerSuite extends munit.FunSuite {
     }
     val calls = Using.resource(Workers()) { workers =>
       for {
-        groups   <- Seq(2, 3, 5, 9)
+        groups   <- Vec[Int > 0](2, 3, 5, 9)
         parallel <- Seq(false, true)
       } {
         val input  = Array.ofDim[Byte](256)
@@ -93,8 +93,8 @@ class GlobalWorkerSuite extends munit.FunSuite {
             ),
             Right(())
           )
-          assert(output.take(groups * 16).sameElements(input.take(groups * 16)))
-          assert(output.drop(groups * 16).forall(_ == 0x55.toByte))
+          assert(output.take(groups.raw * 16).sameElements(input.take(groups.raw * 16)))
+          assert(output.drop(groups.raw * 16).forall(_ == 0x55.toByte))
         }
       }
       workers.calls.get()

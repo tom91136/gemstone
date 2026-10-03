@@ -10,7 +10,7 @@ import net.kurobako.gemstone.vm.*
 
 class LegacyExtendedSetSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
-    SASSFixture.module(35, Vec(SASSFixture.Kernel("iset_probe", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 10)))
+    SASSFixture.module(35, Vec(SASSFixture.Kernel("iset_probe", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 10)))
 
   test("compiler-produced ISET.X compares signed and unsigned 64-bit values across low-word ties and borrows") {
     val values = Vec(
@@ -34,7 +34,7 @@ class LegacyExtendedSetSuite extends munit.FunSuite {
     val lowered = SASSFixture(module, module.kernels.head, functions)
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(20L.unsafe[Long > 0])
+      val output  = service.allocate(20L)
       val program = service.compile(lowered)
         .fold(e => fail(e.message), identity)
       for {

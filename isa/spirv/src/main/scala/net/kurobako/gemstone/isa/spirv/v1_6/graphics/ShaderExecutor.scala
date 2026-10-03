@@ -25,33 +25,34 @@ private class ShaderExecutor(
     val (region, size) = memory.allocate(shader.pushConstants.toArray)
     Vec(KernelTask.Argument.Memory(region, 0L, Some(size)))
   }
-  private val relocations                                    = shader.relocations
-  def execute(count: Int, records: Array[Array[Byte]]): Unit = {
-    require(count >= 0 && (!shader.fragmentQuads || count % 4 == 0), "invalid shader invocation count")
+  private val relocations = shader.relocations
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def execute(count: Int >= 0, records: Array[Array[Byte]]): Unit = {
+    require(!shader.fragmentQuads || count.raw % 4 == 0, "invalid shader invocation count")
     require(records.length == shader.interfaces.size, "shader interface record count mismatch")
-    if (count > 0) {
+    if (count.raw > 0) {
       val regions = records.zipWithIndex.map { (bytes, index) =>
         require(
-          bytes.length.toLong == count.toLong * shader.interfaces(index).size.raw,
+          bytes.length.toLong == (count.toLong.widen[Long >= 0] * shader.interfaces(index).size.toLong).raw,
           "shader record storage size mismatch"
         )
         memory.allocate(bytes)._1
       }
-      for (first <- 0 until count by 1024) {
-        val batch          = math.min(1024, count - first).unsafe[Int > 0]
-        val start          = first.unsafe[Int >= 0]
+      var start: Int >= 0 = 0
+      while (start < count) {
+        val batch          = (count - start).raw.unsafe[Int > 0].min(1024)
         val group: Int > 0 = if (shader.fragmentQuads) 4 else 1
         val arguments      = descriptors ++ push ++ Vec.from(regions.zipWithIndex.map { (region, index) =>
           KernelTask.Argument.Memory(
             region,
-            start.toLong * shader.interfaces(index).size.toLong,
-            Some(batch.toLong * shader.interfaces(index).size.toLong)
+            start.toLong.widen[Long >= 0] * shader.interfaces(index).size.toLong,
+            Some(batch.toLong.widen[Long > 0] * shader.interfaces(index).size.toLong)
           )
         })
         val task = KernelTask.validated(
           shader.entry,
           LaunchGeometry.Dimensions(group, 1, 1),
-          LaunchGeometry.Dimensions((batch.raw / group.raw).unsafe[Int > 0], 1, 1),
+          LaunchGeometry.Dimensions(batch.ceilDiv(group), 1, 1),
           arguments,
           pointerRelocations = relocations,
           workDim = 1
@@ -59,6 +60,7 @@ private class ShaderExecutor(
           .fold(error => throw GraphicsAccess.Failure(Fault.InvalidTask(error)), identity)
         program.execute(task, memory, memory.control, workgroups, handler)
           .fold(fault => throw GraphicsAccess.Failure(fault), _ => ())
+        start = start + batch
       }
     }
   }

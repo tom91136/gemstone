@@ -10,7 +10,7 @@ import net.kurobako.gemstone.vm.*
 
 class LegacyCacheInvalidationSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
-    SASSFixture.module(35, Vec(SASSFixture.Kernel("cache_probe", 320, Vec(0 -> 8, 8 -> 8), registers = 10)))
+    SASSFixture.module(35, Vec(SASSFixture.Kernel("cache_probe", 320, Vec((0, 8), (8, 8)), registers = 10)))
 
   test("compiler-produced sm_35 cache invalidation preserves atomic-to-normal-load coherence") {
     val module    = fixtureModule
@@ -23,8 +23,8 @@ class LegacyCacheInvalidationSuite extends munit.FunSuite {
     val lowered = SASSFixture(module, module.kernels.head, functions)
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(8L.unsafe[Long > 0])
-      val input   = service.allocate(4L.unsafe[Long > 0])
+      val output  = service.allocate(8L)
+      val input   = service.allocate(4L)
       val program = service.compile(lowered)
         .fold(e => fail(e.message), identity)
       for (initial <- Vec(0L, 42L, 0xfffffffcL)) {

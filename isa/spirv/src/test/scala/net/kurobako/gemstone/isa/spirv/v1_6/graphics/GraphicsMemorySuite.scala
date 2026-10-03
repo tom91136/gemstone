@@ -57,7 +57,7 @@ class GraphicsMemorySuite extends munit.FunSuite {
       override def readValueDeferred(
           region: AllocationId,
           offset: Long >= 0,
-          size: Int where Between[1, 8]
+          size: Int in 1 ~ 8
       ): Memory.ReadResult[Long] =
         Left(Memory.Pending)
       override def locate(address: GuestAddress, size: Int >= 0): Either[Fault, AddressSpace.Location] =
@@ -212,8 +212,8 @@ class GraphicsMemorySuite extends munit.FunSuite {
     )
     val result =
       GraphicsRuntime.withDescriptorBindings(bindings, backing, TaskControl()) { (memory, descriptors, relocations) =>
-        def read(range: GraphicsRange, offset: Long, width: Int): Long =
-          memory.readValue(range.allocation, (range.offset.raw + offset).unsafe, width.unsafe).toOption.get
+        def read(range: GraphicsRange, offset: Long, width: Int in 1 ~ 8): Long =
+          memory.readValue(range.allocation, (range.offset.raw + offset).unsafe, width).toOption.get
         def target(range: GraphicsRange, offset: Long): GraphicsRange = {
           val relocation = relocations.find(r =>
             r.source == KernelTask.RelocationSource.Memory(range.allocation) &&
@@ -321,8 +321,8 @@ class GraphicsMemorySuite extends munit.FunSuite {
     assertEquals(GraphicsRuntime.validateDescriptorBindings(bindings, 2, _ => Some(128L)), Right(Set(allocation)))
     val result =
       GraphicsRuntime.withDescriptorBindings(bindings, backing, TaskControl()) { (memory, descriptors, relocations) =>
-        def readDescriptor(index: Int, offset: Int, width: Int): Long =
-          memory.readValue(descriptors(index).allocation, offset.toLong.unsafe, width.unsafe).toOption.get
+        def readDescriptor(index: Int, offset: Int, width: Int in 1 ~ 8): Long =
+          memory.readValue(descriptors(index).allocation, offset.toLong.unsafe, width).toOption.get
         def target(index: Int): KernelTask.PointerRelocation = relocations.find(r =>
           r.source == KernelTask.RelocationSource.Memory(descriptors(index).allocation) &&
             r.sourceOffset.raw == ImageDescriptor.Layout.Texels

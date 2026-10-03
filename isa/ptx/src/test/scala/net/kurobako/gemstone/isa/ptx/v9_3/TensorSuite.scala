@@ -31,13 +31,13 @@ ret;
   private def run(
       text: String,
       memory: ArrayCheckedMemory,
-      lanes: Int = 32
+      lanes: Int > 0 = 32
   ): Either[VMFault, Unit] = {
     val kernel = compileKernel(text)
     execute(
       kernel,
       1,
-      lanes.unsafe[Int > 0],
+      lanes,
       Map(("data": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
       memory
     )

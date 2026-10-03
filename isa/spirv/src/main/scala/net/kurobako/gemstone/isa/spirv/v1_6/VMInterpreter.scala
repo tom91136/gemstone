@@ -161,7 +161,7 @@ private object VMInterpreter {
           )
         )
     }
-    metrics.recordElapsed(math.max(0L, platform.monotonicNanos - started))
+    metrics.recordElapsed(math.max(0L, platform.monotonicNanos - started).unsafe[Long >= 0])
     measurement(metrics.snapshot)
     result
   }
@@ -432,7 +432,7 @@ private object VMInterpreter {
                 pointer.copy(
                   offset = Math.addExact(
                     pointer.offset,
-                    Math.multiplyExact(global.x.raw, program.layout.typeSize(pointer.pointee).toLong)
+                    Math.multiplyExact(global.x.raw, program.layout.typeSize(pointer.pointee).raw.toLong)
                   )
                 )
               )
@@ -743,7 +743,7 @@ private object VMInterpreter {
       if (!execution.fragmentInvocation) Left(Fault.InvalidTask("OpKill requires a fragment invocation"))
       else {
         val cleared = execution.sampleMask match {
-          case Some(pointer) => memory.write(pointer, Array.ofDim[Byte](program.layout.typeSize(pointer.pointee)))
+          case Some(pointer) => memory.write(pointer, Array.ofDim[Byte](program.layout.typeSize(pointer.pointee).raw))
           case None          => Right(())
         }
         cleared.map { _ =>
@@ -899,12 +899,12 @@ private object VMInterpreter {
     instruction match {
       case Instruction.Variable(resultType, dest, storageClass, initializer) =>
         val pointee = program.layout.pointerPointee(id(resultType))
-        val buffer  = Array.ofDim[Byte](program.layout.typeSize(pointee))
+        val buffer  = Array.ofDim[Byte](program.layout.typeSize(pointee).raw)
         val slots   = mutable.LongMap.empty[(Int, Pointer)]
         program.layout.pointerLeafOffsets(pointee, 0L).toOption.foreach(_.foreach { case (offset, pointerType) =>
           program.layout.runtimeType(pointerType) match {
             case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
-              slots.update(offset, pointerType -> Pointer(Region.Null, 0L, pointerPointee, pointerStorage))
+              slots.update(offset.raw, pointerType -> Pointer(Region.Null, 0L, pointerPointee, pointerStorage))
             case _ => ()
           }
         })
@@ -1005,17 +1005,14 @@ private object VMInterpreter {
                   case Left(error)  => return Left(error)
                   case Right(value) => values.update(id(dest), retag(value, id(resultType))); execution.pc += 1
                 }
-              case _ => program.layout.nonNegativeTypeSize(id(resultType)) match {
-                  case Left(error) => return Left(error)
-                  case Right(size) => memory.read(source, size) match {
+              case _ => memory.read(source, program.layout.typeSize(id(resultType))) match {
+                  case Left(error)  => return Left(error)
+                  case Right(bytes) =>
+                    program.decode(id(resultType), bytes) match {
                       case Left(error)  => return Left(error)
-                      case Right(bytes) =>
-                        program.decode(id(resultType), bytes) match {
-                          case Left(error)  => return Left(error)
-                          case Right(value) => values.update(id(dest), value)
-                        }
-                        execution.pc += 1
+                      case Right(value) => values.update(id(dest), value)
                     }
+                    execution.pc += 1
                 }
             }
         }
@@ -1079,17 +1076,15 @@ private object VMInterpreter {
               case Right(())   => execution.pc += 1
             }
           case (Right(destination), Right(origin)) =>
-            program.layout.nonNegativeTypeSize(origin.pointee) match {
-              case Left(error) => return Left(error)
-              case Right(size) => memory.read(origin, size) match {
-                  case Left(error)  => return Left(error)
-                  case Right(bytes) =>
-                    memory.write(destination, bytes).flatMap(_ =>
-                      memory.copySlots(destination, origin, size.raw)
-                    ) match {
-                      case Left(error) => return Left(error)
-                      case Right(())   => execution.pc += 1
-                    }
+            val size = program.layout.typeSize(origin.pointee)
+            memory.read(origin, size) match {
+              case Left(error)  => return Left(error)
+              case Right(bytes) =>
+                memory.write(destination, bytes).flatMap(_ =>
+                  memory.copySlots(destination, origin, size.raw)
+                ) match {
+                  case Left(error) => return Left(error)
+                  case Right(())   => execution.pc += 1
                 }
             }
           case (Left(error), _) => return Left(error)
@@ -2542,13 +2537,14 @@ private object VMInterpreter {
                 if (member < 0 || member >= members.size)
                   Left(Fault.InvalidTask("OpArrayLength member is outside its structure"))
                 else program.layout.runtimeType(members(member)) match {
-                  case Some(RuntimeType.Array(element, 0)) =>
-                    val stride = program.arrayStrides.getOrElse(members(member), program.layout.typeSize(element))
+                  case Some(RuntimeType.Array(element, count)) if count.raw == 0L =>
+                    val stride =
+                      program.arrayStrides.get(members(member)).fold(program.layout.typeSize(element).raw)(_.raw)
                     pointer.bounds.toRight(Fault.InvalidTask("OpArrayLength requires a bounded descriptor")).flatMap {
                       case (_, end) =>
                         val offset = Math.addExact(
                           pointer.offset,
-                          program.layout.structMemberOffset(pointer.pointee, members, member).toLong
+                          program.layout.structMemberOffset(pointer.pointee, members, member).raw.toLong
                         )
                         if (stride <= 0 || offset > end)
                           Left(Fault.InvalidTask("OpArrayLength array is outside its descriptor"))
@@ -2597,7 +2593,7 @@ private object VMInterpreter {
         }
         val result = lanes.result()
         program.layout.scalarLeafCount(id(resultType)) match {
-          case Right(expected) if result.length == expected =>
+          case Right(expected) if result.length == expected.raw =>
             values.update(id(dest), VMValue.Bits(id(resultType), result))
             execution.pc += 1
           case Right(expected) =>
@@ -2664,7 +2660,7 @@ private object VMInterpreter {
         (values.get(id(vector1)), values.get(id(vector2))) match {
           case (Some(VMValue.Bits(_, left)), Some(VMValue.Bits(_, right))) =>
             program.layout.scalarLeafCount(id(resultType)) match {
-              case Right(expected) if expected == components.size =>
+              case Right(expected) if expected.raw == components.size =>
                 val combined = left ++ right
                 val result   = Array.ofDim[Long](components.size)
                 var index    = 0
@@ -3699,9 +3695,9 @@ private object VMInterpreter {
               ) =>
             (booleanLanes(program, conditionType), program.layout.scalarLeafCount(id(resultType))) match {
               case (Some(conditionCount), Right(resultCount))
-                  if trueLanes.length == resultCount && falseLanes.length == resultCount &&
-                    (conditionCount == 1 || conditionCount == resultCount) =>
-                val result = Array.tabulate(resultCount) { index =>
+                  if trueLanes.length == resultCount.raw && falseLanes.length == resultCount.raw &&
+                    (conditionCount == 1 || conditionCount == resultCount.raw) =>
+                val result = Array.tabulate(resultCount.raw) { index =>
                   val selected = if (conditionLanes(if (conditionCount == 1) 0 else index) != 0L) trueLanes
                   else falseLanes
                   selected(index)
@@ -5748,7 +5744,7 @@ private object VMInterpreter {
                   )
                 )
               else {
-                val width: Int where Between[1, 64] = integerShape(program, resultType).map(_._1).getOrElse(64)
+                val width: Int in 1 ~ 64 = integerShape(program, resultType).map(_._1).getOrElse(64)
                 val signed  = expected.kind == CollectiveKind.SignedMin || expected.kind == CollectiveKind.SignedMax
                 val maximum = expected.kind == CollectiveKind.UnsignedMax || expected.kind == CollectiveKind.SignedMax
                 def extremum(left: Long, right: Long): Long = {
@@ -5780,7 +5776,7 @@ private object VMInterpreter {
                   "OpGroupIAdd participants do not all provide integer values"
                 ))
               else {
-                val width: Int where Between[1, 64] = integerShape(program, resultType).map(_._1).getOrElse(64)
+                val width: Int in 1 ~ 64 = integerShape(program, resultType).map(_._1).getOrElse(64)
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.foldLeft(0L)((sum, input) => (sum + input(lane)) & mask(width))
@@ -5825,7 +5821,7 @@ private object VMInterpreter {
                   "OpGroupIMulKHR participants do not all provide integer values"
                 ))
               else {
-                val width: Int where Between[1, 64] = integerShape(program, resultType).map(_._1).getOrElse(64)
+                val width: Int in 1 ~ 64 = integerShape(program, resultType).map(_._1).getOrElse(64)
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.foldLeft(1L)((product, input) => (product * input(lane)) & mask(width))
@@ -5842,7 +5838,7 @@ private object VMInterpreter {
                   "OpGroupFAdd participants do not all provide floating values"
                 ))
               else {
-                val width: OneOf[(16, 32, 64)] = floatingShape(program, resultType).map(_._1).getOrElse(64)
+                val width: Int in (16, 32, 64) = floatingShape(program, resultType).map(_._1).getOrElse(64)
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.view.foldLeft(0L)((sum, input) => floatingAddBits(width, sum, input(lane)))
@@ -5859,7 +5855,7 @@ private object VMInterpreter {
                   s"${expected.kind} participants do not all provide values"
                 ))
               else {
-                val width: OneOf[(16, 32, 64)]              = floatingShape(program, resultType).map(_._1).getOrElse(64)
+                val width: Int in (16, 32, 64)              = floatingShape(program, resultType).map(_._1).getOrElse(64)
                 val maximum                                 = expected.kind == CollectiveKind.FloatingMax
                 def extremum(left: Long, right: Long): Long =
                   if (maximum) floatingMaximumBits(width, left, right)
@@ -5881,7 +5877,7 @@ private object VMInterpreter {
                   "OpGroupFMulKHR participants do not all provide floating values"
                 ))
               else {
-                val width: OneOf[(16, 32, 64)] = floatingShape(program, resultType).map(_._1).getOrElse(64)
+                val width: Int in (16, 32, 64) = floatingShape(program, resultType).map(_._1).getOrElse(64)
                 val identity                   = floatingOneBits(width)
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
@@ -6082,7 +6078,7 @@ private object VMInterpreter {
         )
       )
       _ <- {
-        val elementSize = program.layout.typeSize(destination.pointee)
+        val elementSize = program.layout.typeSize(destination.pointee).raw
         if (elementSize <= 0)
           Left(Fault.InvalidTask("OpGroupAsyncCopy element type has no data size"))
         else if (invocation.localX != 0L || invocation.localY != 0L || invocation.localZ != 0L) {
@@ -6627,7 +6623,7 @@ private object VMInterpreter {
           if sourceType == id(resultType) && integerShape(program, localIdType).exists { case (_, count) =>
             count == lanes.length && Vec(1, 2, 3).contains(count)
           } =>
-        val width: Int where Between[1, 64] = integerShape(program, localIdType).map(_._1).getOrElse(64)
+        val width: Int in 1 ~ 64 = integerShape(program, localIdType).map(_._1).getOrElse(64)
         Right(
           CollectiveRequest(
             CollectiveKind.Broadcast,
@@ -6678,7 +6674,7 @@ private object VMInterpreter {
                   storageClass,
                   pointee,
                   allocation,
-                  offset.raw,
+                  offset,
                   memory
                 )
               case Left(error) => Left(error)
@@ -6695,7 +6691,7 @@ private object VMInterpreter {
               // That relocation belongs inside the private copy, not to the parameter pointer itself.
               if !byValue && memory.argumentRelocation(argumentIndex, 0L).isDefined &&
                 (program.layout.pointerLeafOffsets(pointee, 0L).toOption.exists(_.isEmpty) ||
-                  program.layout.typeSize(pointee) > bytes.size) =>
+                  program.layout.typeSize(pointee).raw > bytes.size) =>
             memory.argumentRelocation(argumentIndex, 0L) match {
               case Some((target, targetOffset)) =>
                 Right(
@@ -6718,7 +6714,7 @@ private object VMInterpreter {
             memory.relocateArgument(argumentIndex, bytes) match {
               case Left(error)      => Left(error)
               case Right(relocated) =>
-                val size   = math.max(program.layout.typeSize(pointee), relocated.length)
+                val size   = math.max(program.layout.typeSize(pointee).raw, relocated.length)
                 val buffer = Array.ofDim[Byte](size)
                 Array.copy(relocated, 0, buffer, 0, relocated.length)
                 val slots = mutable.LongMap.empty[(Int, Pointer)]
@@ -6726,9 +6722,9 @@ private object VMInterpreter {
                   case Right(leaves) => leaves.foreach { case (offset, pointerType) =>
                       program.layout.runtimeType(pointerType) match {
                         case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
-                          memory.argumentRelocation(argumentIndex, offset).foreach { (target, targetOffset) =>
+                          memory.argumentRelocation(argumentIndex, offset.raw).foreach { (target, targetOffset) =>
                             val pointer = Pointer(Region.External(target), targetOffset, pointerPointee, pointerStorage)
-                            slots.update(offset, pointerType -> pointer)
+                            slots.update(offset.raw, pointerType -> pointer)
                           }
                         case _ => ()
                       }
@@ -6781,10 +6777,10 @@ private object VMInterpreter {
       storageClass: Int,
       pointee: Int,
       allocation: AllocationId,
-      allocationOffset: Long,
+      allocationOffset: Long >= 0,
       memory: MemoryState
   ): Either[Fault, VMValue] =
-    program.layout.pointerLeafOffsets(pointee, 0L) match {
+    program.layout.pointerLeafOffsets(pointee, allocationOffset) match {
       case Left(error)   => Left(error)
       case Right(leaves) =>
         val slots = mutable.LongMap.empty[(Int, Pointer)]
@@ -6793,9 +6789,9 @@ private object VMInterpreter {
             case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
               // Missing relocation metadata says nothing about the stored pointer.
               // Leave the slot absent so loadPointer reads the registered native bytes.
-              memory.allocationRelocation(allocation, allocationOffset + slotOffset).foreach { (target, targetOffset) =>
+              memory.allocationRelocation(allocation, slotOffset.raw).foreach { (target, targetOffset) =>
                 val pointer = Pointer(Region.External(target), targetOffset, pointerPointee, pointerStorage)
-                slots.update(allocationOffset + slotOffset, pointerType -> pointer)
+                slots.update(slotOffset.raw, pointerType -> pointer)
               }
             case _ => ()
           }
@@ -6805,7 +6801,7 @@ private object VMInterpreter {
             parameterType,
             Pointer(
               Region.External(allocation),
-              allocationOffset,
+              allocationOffset.raw,
               pointee,
               storageClass,
               Option.when(slots.nonEmpty)(slots)
@@ -6817,7 +6813,7 @@ private object VMInterpreter {
   def pointerLeafOffsetsForTest(
       module: Module,
       typeId: Int
-  ): Either[Fault, Vec[(Long, Int)]] =
+  ): Either[Fault, Vec[(Long >= 0, Int)]] =
     VMCompiler.compileUnchecked(module)
       .map(VMProgramRuntime(_))
       .flatMap(program => program.layout.pointerLeafOffsets(typeId, 0L))
@@ -6931,7 +6927,11 @@ private object VMInterpreter {
       case Some(value) =>
         scalar(values, value).map(index =>
           (
-            memory.elementOffset(source, index, program.layout.storageTypeSize(source.pointee, source.matrixLayout)),
+            memory.elementOffset(
+              source,
+              index,
+              program.layout.storageTypeSize(source.pointee, source.matrixLayout).raw
+            ),
             source.pointee
           )
         )
@@ -6956,7 +6956,7 @@ private object VMInterpreter {
             return Left(
               Fault.InvalidTask(s"structure member index $index is out of range")
             )
-          offset += program.layout.structMemberOffset(typeId, members, index.toInt)
+          offset += program.layout.structMemberOffset(typeId, members, index.toInt).raw
           matrixLayout = program.layout.memberMatrixLayouts.get(typeId -> index.toInt)
           typeId = members(index.toInt)
         case Some(RuntimeType.Array(member, _)) =>
@@ -6967,23 +6967,24 @@ private object VMInterpreter {
               source = descriptors(index.toInt)
               offset = source.offset
             case None =>
-              offset += index * program.arrayStrides.getOrElse(
-                typeId,
-                program.layout.storageTypeSize(member, matrixLayout)
-              )
+              offset += index * program.arrayStrides.get(
+                typeId
+              ).fold(program.layout.storageTypeSize(member, matrixLayout).raw)(_.raw)
           }
           typeId = member
         case Some(RuntimeType.MatrixType(column, _)) =>
           val stride = if (matrixLayout.exists(_.rowMajor)) program.layout.runtimeType(column) match {
-            case Some(RuntimeType.VectorType(component, _)) => program.layout.typeSize(component)
+            case Some(RuntimeType.VectorType(component, _)) => program.layout.typeSize(component).raw
             case _ => return Left(Fault.InvalidTask("invalid matrix column type"))
           }
-          else matrixLayout.map(_.stride).getOrElse(program.layout.typeSize(column))
+          else matrixLayout.map(_.stride.raw).getOrElse(program.layout.typeSize(column).raw)
           offset += index * stride
           matrixLayout = matrixLayout.filter(_.rowMajor)
           typeId = column
         case Some(RuntimeType.VectorType(component, _)) =>
-          offset += index * matrixLayout.filter(_.rowMajor).map(_.stride).getOrElse(program.layout.typeSize(component))
+          offset += index * matrixLayout.filter(
+            _.rowMajor
+          ).map(_.stride.raw).getOrElse(program.layout.typeSize(component).raw)
           matrixLayout = None
           typeId = component
         case Some(value) =>
@@ -7107,29 +7108,29 @@ private object VMInterpreter {
       program: Program,
       typeId: Int,
       indexes: Vec[Operand]
-  ): Either[Fault, (Int, Int)] = {
+  ): Either[Fault, (Int, Int >= 0)] = {
     var current = typeId
     var offset  = 0
     var index   = 0
     while (index < indexes.size) {
       val selected = unsigned(indexes(index))
       program.layout.runtimeType(current) match {
-        case Some(RuntimeType.VectorType(component, count)) if selected < count.toLong =>
+        case Some(RuntimeType.VectorType(component, count)) if selected < count.raw.toLong =>
           program.layout.scalarLeafCount(component) match {
             case Left(error)   => return Left(error)
-            case Right(leaves) => offset += Math.toIntExact(selected * leaves.toLong)
+            case Right(leaves) => offset += Math.toIntExact(selected * leaves.raw.toLong)
           }
           current = component
-        case Some(RuntimeType.MatrixType(column, count)) if selected < count.toLong =>
+        case Some(RuntimeType.MatrixType(column, count)) if selected < count.raw.toLong =>
           program.layout.scalarLeafCount(column) match {
             case Left(error)   => return Left(error)
-            case Right(leaves) => offset += Math.toIntExact(selected * leaves.toLong)
+            case Right(leaves) => offset += Math.toIntExact(selected * leaves.raw.toLong)
           }
           current = column
-        case Some(RuntimeType.Array(element, count)) if selected < count =>
+        case Some(RuntimeType.Array(element, count)) if selected < count.raw =>
           program.layout.scalarLeafCount(element) match {
             case Left(error)   => return Left(error)
-            case Right(leaves) => offset += Math.toIntExact(selected * leaves.toLong)
+            case Right(leaves) => offset += Math.toIntExact(selected * leaves.raw.toLong)
           }
           current = element
         case Some(RuntimeType.Structure(members)) if selected < members.size.toLong =>
@@ -7137,7 +7138,7 @@ private object VMInterpreter {
           while (member < selected.toInt) {
             program.layout.scalarLeafCount(members(member)) match {
               case Left(error)   => return Left(error)
-              case Right(leaves) => offset = Math.addExact(offset, leaves)
+              case Right(leaves) => offset = Math.addExact(offset, leaves.raw)
             }
             member += 1
           }
@@ -7166,8 +7167,8 @@ private object VMInterpreter {
   ): Either[Fault, Unit] = values.get(id(composite)) match {
     case Some(VMValue.Bits(compositeType, lanes)) =>
       compositeLeafRange(program, compositeType, indexes) match {
-        case Right((offset, count)) if offset >= 0 && offset + count <= lanes.length =>
-          values.update(id(destination), VMValue.Bits(id(resultType), lanes.slice(offset, offset + count)))
+        case Right((offset, count)) if offset >= 0 && offset + count.raw <= lanes.length =>
+          values.update(id(destination), VMValue.Bits(id(resultType), lanes.slice(offset, offset + count.raw)))
           Right(())
         case Right((offset, count)) =>
           Left(
@@ -7193,9 +7194,9 @@ private object VMInterpreter {
     (values.get(id(source)), values.get(id(composite))) match {
       case (Some(VMValue.Bits(_, sourceLanes)), Some(VMValue.Bits(compositeType, compositeLanes))) =>
         compositeLeafRange(program, compositeType, indexes) match {
-          case Right((offset, count)) if sourceLanes.length == count && offset + count <= compositeLanes.length =>
+          case Right((offset, count)) if sourceLanes.length == count.raw && offset + count.raw <= compositeLanes.length =>
             val result = compositeLanes.clone()
-            Array.copy(sourceLanes, 0, result, offset, count)
+            Array.copy(sourceLanes, 0, result, offset, count.raw)
             values.update(id(destination), VMValue.Bits(id(resultType), result))
             Right(())
           case Right((offset, count)) =>
@@ -7350,18 +7351,18 @@ private object VMInterpreter {
         case (_, Left(error), _) => Left(error)
         case (_, _, Left(error)) => Left(error)
         case (Some(RuntimeType.VectorType(component, count)), Right(offset), Right(pointer))
-            if unsigned(sources(2)) == count.toLong =>
+            if unsigned(sources(2)) == count.raw.toLong =>
           val elementSize = program.layout.scalarMemoryWidth(component) match {
             case Left(error) => return Left(error)
             case Right(size) => size
           }
           val base = Math.addExact(
             pointer.offset,
-            Math.multiplyExact(Math.multiplyExact(offset, count.toLong), elementSize.raw.toLong)
+            Math.multiplyExact(Math.multiplyExact(offset, count.raw.toLong), elementSize.raw.toLong)
           )
-          val lanes = Array.ofDim[Long](count)
+          val lanes = Array.ofDim[Long](count.raw)
           var index = 0
-          while (index < count) {
+          while (index < count.raw) {
             memory.readScalar(
               pointer.copy(
                 offset = Math.addExact(base, Math.multiplyExact(index.toLong, elementSize.raw.toLong)),
@@ -7407,17 +7408,17 @@ private object VMInterpreter {
       (values.get(id(source)), scalar(values, sources(0)), address(values, sources(1))) match {
         case (Some(VMValue.Bits(sourceType, lanes)), Right(offset), Right(pointer)) =>
           program.layout.runtimeType(sourceType) match {
-            case Some(RuntimeType.VectorType(component, count)) if lanes.length == count =>
+            case Some(RuntimeType.VectorType(component, count)) if lanes.length == count.raw =>
               val elementSize = program.layout.scalarMemoryWidth(component) match {
                 case Left(error) => return Left(error)
                 case Right(size) => size
               }
               val base = Math.addExact(
                 pointer.offset,
-                Math.multiplyExact(Math.multiplyExact(offset, count.toLong), elementSize.raw.toLong)
+                Math.multiplyExact(Math.multiplyExact(offset, count.raw.toLong), elementSize.raw.toLong)
               )
               var index = 0
-              while (index < count) {
+              while (index < count.raw) {
                 memory.writeScalar(
                   pointer.copy(
                     offset = Math.addExact(base, Math.multiplyExact(index.toLong, elementSize.raw.toLong)),
@@ -7561,7 +7562,7 @@ private object VMInterpreter {
       case Some((width, count))
           if (width.raw == 8 || width.raw == 16 || width.raw == 32 || width.raw == 64) &&
             (!widening || width.raw != 8) && (!smallProduct || width.raw == 32) =>
-        val inputWidth = if (widening) (width.raw / 2).refine[Int where Between[1, 64]].toOption.get else width
+        val inputWidth = if (widening) (width.raw / 2).refine[Int in 1 ~ 64].toOption.get else width
         val inputs     = Array.ofDim[Array[Long]](arity)
         var index      = 0
         while (index < arity) {
@@ -7581,38 +7582,36 @@ private object VMInterpreter {
               `SMulHi` | `SSubSat` | `SUpsample` | `SMad24` | `SMul24` => true
           case _ => false
         }
-        // Preserve wide intermediates until saturation or high-half extraction, including 64-bit products.
-        val modulus                                = BigInt(1) << inputWidth.raw
-        val maximum                                = if (signed) (modulus >> 1) - 1 else modulus - 1
-        val minimum                                = if (signed) -(modulus >> 1) else BigInt(0)
-        val productWidth: Int where Between[1, 64] = if (smallProduct) 24 else inputWidth
-        val productMask                            = (BigInt(1) << productWidth.raw) - 1
-        def integer(raw: Long): BigInt             =
-          if (signed) BigInt(signExtend(raw, inputWidth)) else BigInt(raw) & (modulus - 1)
-        def factor(raw: Long): BigInt =
-          if (signed) BigInt(signExtend(raw, productWidth)) else BigInt(raw) & productMask
+        val productWidth: Int in 1 ~ 64                   = if (smallProduct) 24 else inputWidth
+        def integer(raw: Long, bits: Int in 1 ~ 64): Long =
+          if (signed) signExtend(raw, bits) else raw & mask(bits)
         val result = Array.tabulate(count) { lane =>
-          val left       = factor(inputs(0)(lane))
-          val right      = factor(inputs(1)(lane))
-          val third      = if (arity == 3) integer(inputs(2)(lane)) else BigInt(0)
+          val left       = integer(inputs(0)(lane), productWidth)
+          val right      = integer(inputs(1)(lane), productWidth)
+          val third      = if (arity == 3) integer(inputs(2)(lane), inputWidth) else 0L
           val calculated = opcode match {
-            case `SAbsDiff` | `UAbsDiff` => (left - right).abs
-            case `SAddSat` | `UAddSat`   => (left + right).max(minimum).min(maximum)
-            case `SSubSat` | `USubSat`   => (left - right).max(minimum).min(maximum)
-            case `SClamp` | `UClamp`     => left.max(right).min(third)
-            case `UHadd`                 => (left + right) >> 1
-            case `SRhadd` | `URhadd`     => (left + right + 1) >> 1
-            case `SMulHi` | `UMulHi`     => (left * right) >> width.raw
-            case `SMadHi` | `UMadHi`     => ((left * right) >> width.raw) + third
-            case `SMadSat` | `UMadSat`   => (left * right + third).max(minimum).min(maximum)
-            case `Rotate`                =>
+            case `SAbsDiff` => if (left >= right) left - right else right - left
+            case `UAbsDiff` => if (java.lang.Long.compareUnsigned(left, right) >= 0) left - right else right - left
+            case `SAddSat` | `UAddSat` => IntegerArithmetic.addSaturated(left, right, inputWidth, signed)
+            case `SSubSat` | `USubSat` => IntegerArithmetic.subtractSaturated(left, right, inputWidth, signed)
+            case `SClamp`              => left.max(right).min(third)
+            case `UClamp`              =>
+              val lower = if (java.lang.Long.compareUnsigned(left, right) < 0) right else left
+              if (java.lang.Long.compareUnsigned(lower, third) > 0) third else lower
+            case `UHadd`               => (left & right) + ((left ^ right) >>> 1)
+            case `SRhadd`              => (left & right) + ((left ^ right) >> 1) + ((left ^ right) & 1L)
+            case `URhadd`              => (left & right) + ((left ^ right) >>> 1) + ((left ^ right) & 1L)
+            case `SMulHi` | `UMulHi`   => IntegerArithmetic.multiplyHigh(left, right, inputWidth, signed)
+            case `SMadHi` | `UMadHi`   => IntegerArithmetic.multiplyHigh(left, right, inputWidth, signed) + third
+            case `SMadSat` | `UMadSat` => IntegerArithmetic.multiplyAddSaturated(left, right, third, inputWidth, signed)
+            case `Rotate`              =>
               val shift = right.toInt & (width.raw - 1)
-              (left << shift) | (left >> (width.raw - shift))
-            case `SUpsample` | `UUpsample` => (left << inputWidth.raw) | (right & (modulus - 1))
+              if (shift == 0) left else (left << shift) | (left >>> (width.raw - shift))
+            case `SUpsample` | `UUpsample` => (left << inputWidth.raw) | (right & mask(inputWidth))
             case `SMul24` | `UMul24`       => left * right
             case `SMad24` | `UMad24`       => left * right + third
           }
-          calculated.toLong & mask(width)
+          calculated & mask(width)
         }
         values.update(id(destination), VMValue.Bits(id(resultType), result))
         Right(())
@@ -7714,7 +7713,7 @@ private object VMInterpreter {
       (integerShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
             if sourceWidth == resultWidth && sourceLanes == resultLanes && lanes.length == sourceLanes =>
-          val result = lanes.map(raw => bitCount(raw, sourceWidth).toLong & mask(resultWidth))
+          val result = lanes.map(raw => bitCount(raw, sourceWidth).raw.toLong & mask(resultWidth))
           values.update(id(destination), VMValue.Bits(id(resultType), result))
           Right(())
         case _ =>
@@ -7763,10 +7762,10 @@ private object VMInterpreter {
         case Some(VMValue.Bits(typeId, lanes)) =>
           signedIntegerShape(program, typeId) match {
             case Some((width, _, _)) =>
-              arguments += Event.PrintArgument.Integer(Vec.from(lanes), width.raw)
+              arguments += Event.PrintArgument.Integer(Vec.from(lanes), width)
             case None => floatingShape(program, typeId) match {
                 case Some((width, _)) =>
-                  arguments += Event.PrintArgument.Floating(Vec.from(lanes), width.raw)
+                  arguments += Event.PrintArgument.Floating(Vec.from(lanes), width)
                 case None =>
                   return Left(
                     Fault.InvalidTask(
@@ -7799,11 +7798,11 @@ private object VMInterpreter {
     }
   }
 
-  private def signedIntegerShape(program: Program, typeId: Int): Option[(Int where Between[1, 64], Int, Boolean)] =
+  private def signedIntegerShape(program: Program, typeId: Int): Option[(Int in 1 ~ 64, Int, Boolean)] =
     program.layout.runtimeType(typeId) match {
       case Some(RuntimeType.Integer(width, signed))       => Some((width, 1, signed))
       case Some(RuntimeType.VectorType(component, count)) => program.layout.runtimeType(component) match {
-          case Some(RuntimeType.Integer(width, signed)) => Some((width, count, signed))
+          case Some(RuntimeType.Integer(width, signed)) => Some((width, count.raw, signed))
           case _                                        => None
         }
       case _ => None
@@ -8036,7 +8035,7 @@ private object VMInterpreter {
           case ExtendedInstruction.OpenClStd.SMin => "s_min"
           case _                                  => "u_min"
         }
-        val width: Int where Between[1, 64] = integerShape(program, id(resultType)).map(_._1).getOrElse(64)
+        val width: Int in 1 ~ 64 = integerShape(program, id(resultType)).map(_._1).getOrElse(64)
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std $name expects 2 operands, received ${sources.size}"
@@ -8888,9 +8887,9 @@ private object VMInterpreter {
       case None    => Left(undefined(sources.head))
     }
 
-  private def floatingToDouble(width: OneOf[(16, 32, 64)], bits: Long): Double = IEEE754.toDouble(bits, width)
+  private def floatingToDouble(width: Int in (16, 32, 64), bits: Long): Double = IEEE754.toDouble(bits, width)
 
-  private def doubleToFloating(width: OneOf[(16, 32, 64)], value: Double): Long = IEEE754.fromDouble(value, width)
+  private def doubleToFloating(width: Int in (16, 32, 64), value: Double): Long = IEEE754.fromDouble(value, width)
 
   private def openCLSinPi(value: Double): Double =
     if (!value.isFinite) Double.NaN
@@ -9066,7 +9065,7 @@ private object VMInterpreter {
         )
       )
     val operands = Array.ofDim[Array[Long]](arity)
-    var width    = Option.empty[OneOf[(16, 32, 64)]]
+    var width    = Option.empty[Int in (16, 32, 64)]
     var count    = 0
     var index    = 0
     while (index < arity) {
@@ -9507,7 +9506,7 @@ private object VMInterpreter {
                 }
                 (doubleToFloating(width, result), stored)
               }
-              val bytes = Array.ofDim[Byte](program.layout.typeSize(pointer.pointee))
+              val bytes = Array.ofDim[Byte](program.layout.typeSize(pointer.pointee).raw)
               val _     = program.encodeBits(pointer.pointee, paired.map(_._2), 0, bytes, 0)
               memory.write(pointer, bytes).map { _ =>
                 values.update(id(destination), VMValue.Bits(id(resultType), paired.map(_._1)))
@@ -9569,18 +9568,9 @@ private object VMInterpreter {
             val quotients = Array.tabulate(count) { lane =>
               val x = floatingToDouble(width, left(lane))
               val y = floatingToDouble(width, right(lane))
-              if (!x.isFinite || y.isNaN || y == 0.0 || y.isInfinite) 0L
-              else {
-                // Exact binary inputs avoid quotient rounding errors and overflow in x/y.
-                val quotient = java.math.BigDecimal(x).divide(
-                  java.math.BigDecimal(y),
-                  0,
-                  java.math.RoundingMode.HALF_EVEN
-                ).toBigInteger
-                (quotient.abs.intValue & 0x7f).toLong * quotient.signum
-              }
+              IEEE754.remainderQuotient(x, y).toLong
             }
-            val bytes = Array.ofDim[Byte](program.layout.typeSize(pointer.pointee))
+            val bytes = Array.ofDim[Byte](program.layout.typeSize(pointer.pointee).raw)
             val _     = program.encodeBits(pointer.pointee, quotients, 0, bytes, 0)
             memory.write(pointer, bytes).map { _ =>
               values.update(id(destination), VMValue.Bits(id(resultType), remainders))
@@ -9800,7 +9790,7 @@ private object VMInterpreter {
       base: Operand,
       shift: Operand,
       opcode: String
-  )(operation: (Long, Long, Int where Between[1, 64]) => Long): Either[Fault, Unit] =
+  )(operation: (Long, Long, Int in 1 ~ 64) => Long): Either[Fault, Unit] =
     (values.get(id(base)), values.get(id(shift))) match {
       case (
             Some(VMValue.Bits(baseType, baseLanes)),
@@ -10050,7 +10040,7 @@ private object VMInterpreter {
         case Right(value) => value
       }
       memory.readScalar(
-        pointer.copy(offset = Math.addExact(pointer.offset, offset), pointee = scalar, matrixLayout = None),
+        pointer.copy(offset = Math.addExact(pointer.offset, offset.raw), pointee = scalar, matrixLayout = None),
         size
       ) match {
         case Left(error)  => return Left(error)
@@ -10078,7 +10068,7 @@ private object VMInterpreter {
         case Right(value) => value
       }
       memory.writeScalar(
-        pointer.copy(offset = Math.addExact(pointer.offset, offset), pointee = scalar, matrixLayout = None),
+        pointer.copy(offset = Math.addExact(pointer.offset, offset.raw), pointee = scalar, matrixLayout = None),
         value.lanes(index),
         size
       ) match {
@@ -10222,14 +10212,14 @@ private object VMInterpreter {
     }
   }
 
-  private def numericShape(program: Program, typeId: Int): Option[(Int where Between[1, 64], Int)] =
+  private def numericShape(program: Program, typeId: Int): Option[(Int in 1 ~ 64, Int)] =
     integerShape(program, typeId)
-      .orElse(floatingShape(program, typeId).map((width, count) => width.bitWidth -> count))
+      .orElse(floatingShape(program, typeId).map((width, count) => width.bitWidth.widen[Int in 1 ~ 64] -> count))
       .orElse {
         program.layout.runtimeType(typeId) match {
           case Some(RuntimeType.Bool) => Some((8, 1))
           case Some(RuntimeType.VectorType(component, count))
-              if program.layout.runtimeType(component).contains(RuntimeType.Bool) => Some((8, count))
+              if program.layout.runtimeType(component).contains(RuntimeType.Bool) => Some((8, count.raw))
           case _ => None
         }
       }
@@ -10791,8 +10781,8 @@ private object VMInterpreter {
   /** Converts an IEEE-754 bit pattern by truncating toward zero without first narrowing through a signed Long. */
   private def floatingToUnsigned(
       raw: Long,
-      sourceWidth: OneOf[(16, 32, 64)],
-      resultWidth: Int where Between[1, 64]
+      sourceWidth: Int in (16, 32, 64),
+      resultWidth: Int in 1 ~ 64
   ): Either[String, Long] = {
     val (exponentBits, fractionBits, bias) = sourceWidth.raw match {
       case 16 => (5, 10, 15)
@@ -10811,13 +10801,14 @@ private object VMInterpreter {
     else if (encodedExponent < bias) Right(0L) // Truncation of either sign below one is representable.
     else if (negative && !magnitudeIsZero) Left("negative values are outside the unsigned range")
     else {
-      val exponent    = encodedExponent.toInt - bias
-      val significand = BigInt((1L << fractionBits) | fraction)
-      val integer     =
-        if (exponent >= fractionBits) significand << (exponent - fractionBits)
-        else significand >> (fractionBits - exponent)
-      if (integer.bitLength > resultWidth.raw) Left("value exceeds the result width")
-      else Right(integer.longValue & mask(resultWidth))
+      val exponent = encodedExponent.toInt - bias
+      if (exponent >= resultWidth.raw) Left("value exceeds the result width")
+      else {
+        val significand = (1L << fractionBits) | fraction
+        val integer     = if (exponent >= fractionBits) significand << (exponent - fractionBits)
+        else significand >>> (fractionBits - exponent)
+        Right(integer & mask(resultWidth))
+      }
     }
   }
 
@@ -11069,7 +11060,7 @@ private object VMInterpreter {
             if count == baseCount && lanes.length == count =>
           values.update(
             id(destination),
-            VMValue.Bits(id(resultType), lanes.map(value => bitCount(value, baseWidth).toLong & mask(resultWidth)))
+            VMValue.Bits(id(resultType), lanes.map(value => bitCount(value, baseWidth).raw.toLong & mask(resultWidth)))
           )
           Right(())
         case _ =>
@@ -11148,7 +11139,7 @@ private object VMInterpreter {
   private def matrixShape(program: Program, typeId: Int): Option[(Int in (16, 32, 64), Int, Int)] =
     program.layout.runtimeType(typeId) match {
       case Some(RuntimeType.MatrixType(column, columns)) =>
-        floatingShape(program, column).map { case (width, rows) => (width, rows, columns) }
+        floatingShape(program, column).map { case (width, rows) => (width, rows, columns.raw) }
       case _ => None
     }
 
@@ -11681,9 +11672,9 @@ private object VMInterpreter {
       )
     } yield ()
 
-  private def atomicScalarShape(program: Program, typeId: Int): Option[(Int where Between[1, 64], Int)] =
+  private def atomicScalarShape(program: Program, typeId: Int): Option[(Int in 1 ~ 64, Int)] =
     integerShape(program, typeId)
-      .orElse(floatingShape(program, typeId).map((width, count) => width.bitWidth -> count))
+      .orElse(floatingShape(program, typeId).map((width, count) => width.bitWidth.widen[Int in 1 ~ 64] -> count))
 
   // Atomic validation exits before any invalid integer memory update.
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
@@ -12107,27 +12098,27 @@ private object VMInterpreter {
     case (_, None) => Left(undefined(right))
   }
 
-  private def integerShape(program: Program, typeId: Int): Option[(Int where Between[1, 64], Int)] =
+  private def integerShape(program: Program, typeId: Int): Option[(Int in 1 ~ 64, Int)] =
     program.layout.runtimeType(typeId) match {
       case Some(RuntimeType.Integer(width, _))            => Some((width, 1))
       case Some(RuntimeType.VectorType(component, count)) => program.layout.runtimeType(component) match {
-          case Some(RuntimeType.Integer(width, _)) => Some((width, count))
+          case Some(RuntimeType.Integer(width, _)) => Some((width, count.raw))
           case _                                   => None
         }
       case _ => None
     }
 
-  private def floatingShape(program: Program, typeId: Int): Option[(OneOf[(16, 32, 64)], Int)] =
+  private def floatingShape(program: Program, typeId: Int): Option[(Int in (16, 32, 64), Int)] =
     program.layout.runtimeType(typeId) match {
       case Some(RuntimeType.Floating(width))              => Some((width, 1))
       case Some(RuntimeType.VectorType(component, count)) => program.layout.runtimeType(component) match {
-          case Some(RuntimeType.Floating(width)) => Some((width, count))
+          case Some(RuntimeType.Floating(width)) => Some((width, count.raw))
           case _                                 => None
         }
       case _ => None
     }
 
-  def floatingAddBits(width: OneOf[(16, 32, 64)], left: Long, right: Long): Long = width.raw match {
+  def floatingAddBits(width: Int in (16, 32, 64), left: Long, right: Long): Long = width.raw match {
     case 16 =>
       IEEE754.floatToBinary16(
         IEEE754.binary16ToFloat(Binary16.low(left)) +
@@ -12142,20 +12133,20 @@ private object VMInterpreter {
       IEEE754.doubleToBinary64(IEEE754.binary64ToDouble(left) + IEEE754.binary64ToDouble(right))
   }
 
-  private def floatingOneBits(width: OneOf[(16, 32, 64)]): Long = width.raw match {
+  private def floatingOneBits(width: Int in (16, 32, 64)): Long = width.raw match {
     case 16 => IEEE754.floatToBinary16(1.0f).toLong
     case 32 => IEEE754.floatToBinary32(1.0f).toLong
     case 64 => IEEE754.doubleToBinary64(1.0)
   }
 
-  private def floatingInfinityBits(width: OneOf[(16, 32, 64)], negative: Boolean): Long = width.raw match {
+  private def floatingInfinityBits(width: Int in (16, 32, 64), negative: Boolean): Long = width.raw match {
     case 16 => if (negative) 0xfc00L else 0x7c00L
     case 32 => if (negative) 0xff800000L else 0x7f800000L
     case 64 => if (negative) 0xfff0000000000000L else 0x7ff0000000000000L
   }
 
   def floatingMultiplyBits(
-      width: OneOf[(16, 32, 64)],
+      width: Int in (16, 32, 64),
       left: Long,
       right: Long
   ): Long = width.raw match {
@@ -12173,7 +12164,7 @@ private object VMInterpreter {
       IEEE754.doubleToBinary64(IEEE754.binary64ToDouble(left) * IEEE754.binary64ToDouble(right))
   }
 
-  private def floatingFmaBits(width: OneOf[(16, 32, 64)], left: Long, right: Long, addend: Long): Long =
+  private def floatingFmaBits(width: Int in (16, 32, 64), left: Long, right: Long, addend: Long): Long =
     width.raw match {
       case 16 =>
         IEEE754.floatToBinary16(
@@ -12198,7 +12189,7 @@ private object VMInterpreter {
     }
 
   def floatingMinimumBits(
-      width: OneOf[(16, 32, 64)],
+      width: Int in (16, 32, 64),
       left: Long,
       right: Long
   ): Long = width.raw match {
@@ -12221,7 +12212,7 @@ private object VMInterpreter {
   }
 
   def floatingMaximumBits(
-      width: OneOf[(16, 32, 64)],
+      width: Int in (16, 32, 64),
       left: Long,
       right: Long
   ): Long = width.raw match {
@@ -12304,7 +12295,7 @@ private object VMInterpreter {
     case Some(RuntimeType.Bool) => Some(1)
     case Some(RuntimeType.VectorType(component, count))
         if program.layout.runtimeType(component).contains(RuntimeType.Bool) =>
-      Some(count)
+      Some(count.raw)
     case _ => None
   }
 

@@ -49,7 +49,8 @@ private object MachineSyntax {
   ): Either[String, (bytes: Array[Byte], instruction: DecodedInstruction)] = for {
     expected     <- InstructionSyntax.parse(source)
     bytes        <- encode(annotation)
-    actual       <- InstructionDecoder.decodeTyped(annotation.address, bytes, annotation.target)
+    address      <- annotation.address.refine[Int >= 0].left.map(_.raw)
+    actual       <- InstructionDecoder.decodeTyped(address, bytes, annotation.target)
     expectedText <- InstructionSyntax.print(expected)
     actualText   <- InstructionSyntax.print(actual.operation)
     _            <- Either.cond(

@@ -21,7 +21,7 @@ class SASSScalarSgemmSuite extends munit.FunSuite {
         Vec(SASSFixture.Kernel(
           "scalar_sgemm",
           0x160,
-          Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 4),
+          Vec((0, 8), (8, 8), (16, 8), (24, 4)),
           registers = 25
         ))
       )
@@ -41,7 +41,7 @@ class SASSScalarSgemmSuite extends munit.FunSuite {
         val left    = service.allocate((a.size.max(1) * 4L).unsafe[Long > 0])
         val right   =
           service.allocate((b.size.max(1) * 4L).unsafe[Long > 0])
-        val output = service.allocate(128L.unsafe[Long > 0])
+        val output = service.allocate(128L)
         assert(service.write(left, 0L, floats(a)).isRight)
         assert(service.write(right, 0L, floats(b)).isRight)
         assert(service.write(output, 0L, floats(Vec.fill(32)(-999f))).isRight)
@@ -59,7 +59,7 @@ class SASSScalarSgemmSuite extends munit.FunSuite {
           )
         )
         service.run(program, task).fold(error => fail(error.message), identity)
-        assertEquals(service.read(output, 0L, 128.unsafe[Int >= 0]), Right(floats(expected)))
+        assertEquals(service.read(output, 0L, 128), Right(floats(expected)))
         assertEquals(service.read(left, 0L, (a.size * 4).unsafe[Int >= 0]), Right(floats(a)))
         assertEquals(service.read(right, 0L, (b.size * 4).unsafe[Int >= 0]), Right(floats(b)))
       }

@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.asm.*
@@ -14,17 +15,17 @@ class Hmul2Suite extends munit.FunSuite {
     val fixtureModules = Map(
       "hmul2_selected" -> SASSFixture.module(
         89,
-        Vec(SASSFixture.Kernel("hmul2_selected", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 12))
+        Vec(SASSFixture.Kernel("hmul2_selected", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 12))
       ),
       "hmul2_vector" -> SASSFixture.module(
         89,
-        Vec(SASSFixture.Kernel("hmul2_vector", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 12))
+        Vec(SASSFixture.Kernel("hmul2_vector", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 12))
       )
     )
     def run(
         sassText: String,
-        kernelName: String,
-        cases: Vec[(Long, Long, Long)],
+        kernelName: NonEmpty[String],
+        cases: NonEmpty[Vec[(Long, Long, Long)]],
         transform: DecodedFunction => DecodedFunction = identity
     ): Unit = {
       val module   = fixtureModules(kernelName)
@@ -34,25 +35,25 @@ class Hmul2Suite extends munit.FunSuite {
       val rhs      = Vec.from(cases).flatMap { case (_, b, _) => LittleEndian.toVec(b, 4) }
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate((cases.size * 4L).unsafe[Long > 0])
-        val left    = service.allocate(lhs.size.toLong.unsafe[Long > 0])
-        val right   = service.allocate(rhs.size.toLong.unsafe[Long > 0])
+        val output  = service.allocate(cases.positiveSize.toLong.widen[Long > 0] * 4L)
+        val left    = service.allocate(cases.positiveSize.toLong.widen[Long > 0] * 4L)
+        val right   = service.allocate(cases.positiveSize.toLong.widen[Long > 0] * 4L)
         assert(service.write(left, 0L, lhs).isRight)
         assert(service.write(right, 0L, rhs).isRight)
         val program = service.compile(sass)
           .fold(error => fail(error.message), identity)
         val task = SASSFixture.task(
-          kernelName.unsafe[NonEmpty[String]],
-          LaunchGeometry.Dimensions(cases.size.unsafe[Int > 0], 1, 1),
+          kernelName,
+          LaunchGeometry.Dimensions(cases.positiveSize, 1, 1),
           LaunchGeometry.Dimensions.One,
-          Vec(
+          Vec.nonEmpty(
             KernelTask.Argument.Memory(output, 0L),
             KernelTask.Argument.Memory(left, 0L),
             KernelTask.Argument.Memory(right, 0L)
           )
         )
         service.run(program, task).fold(error => fail(error.message), identity)
-        val actual = service.readWords(output, cases.size.unsafe[Int >= 0])
+        val actual = service.readWords(output, cases.nonNegativeSize)
         assertEquals(actual, cases.map(_._3))
       }
     }
@@ -73,7 +74,7 @@ class Hmul2Suite extends munit.FunSuite {
       run(
         Hmul2Fixtures.hmul2SelectedSm89,
         "hmul2_selected",
-        Vec(
+        Vec.nonEmpty(
           (0x3c004000L, 0x40003c00L, 0x44004400L),
           (0x04000001L, 0x38003c00L, 0x00000000L),
           (0x00007e01L, 0x3c000000L, 0x7fff7fffL)
@@ -97,7 +98,7 @@ class Hmul2Suite extends munit.FunSuite {
       run(
         Hmul2Fixtures.hmul2Sm89,
         "hmul2_vector",
-        Vec(
+        Vec.nonEmpty(
           (0x40003c00L, 0x40004000L, 0x44004400L),
           (0x35550000L, 0x35550000L, 0x2f1c2f1cL),
           (0x3c007e01L, 0x3c003c00L, 0x3c003c00L)

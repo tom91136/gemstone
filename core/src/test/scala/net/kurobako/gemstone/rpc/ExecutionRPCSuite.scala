@@ -28,7 +28,7 @@ class ExecutionRPCSuite extends munit.FunSuite {
     assert(decodeInt[GraphicsAddressMode](-1).isLeft)
     assert(decodeInt[Int in (1, 4)](2).isLeft)
     assert(decodeInt[Int in (2, 4)](1).isLeft)
-    assert(decodeInt[Int where Between[0, 3]](4).isLeft)
+    assert(decodeInt[Int in 0 ~ 3](4).isLeft)
     assertEquals(decodeInt[GraphicsFilter](1), Right(GraphicsFilter.Linear))
     val sampler = GraphicsSampler(
       minFilter = GraphicsFilter.Linear,

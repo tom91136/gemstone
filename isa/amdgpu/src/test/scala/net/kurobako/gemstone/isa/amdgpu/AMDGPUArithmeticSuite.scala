@@ -10,6 +10,26 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
 class AMDGPUArithmeticSuite extends munit.FunSuite {
+  test("trig preparation retains the 1200-bit reference calculation for every exponent and segment") {
+    val reference = BigInt(
+      "a2f9836e4e441529fc2757d1f534ddc0db6295993c439041fe5163abdebbc561b7246e3a424dd2e006492eea09d1921cfe1deb1cb129a73ee88235f52ebb4484e99c7026b45f7e413991d639835339f49c845f8bbdf9283b1ff897ffde05980fef2f118b5a0a6d1f6d367ecf27cb09b74f463f669e5fea2d7527bac7ebe5f17b3d0739f78a5292ea6bfb5fb11f8d5d0856033046fc7b",
+      16
+    )
+    val mask = (BigInt(1) << 53) - 1
+    for {
+      exponent <- 0 until 2048
+      segment  <- 0 until 32
+    } {
+      val shift    = segment * 53 + (exponent - 1077).max(0)
+      val expected = Math.scalb(
+        ((reference << shift) & mask).toDouble,
+        -53 - shift + (if (exponent >= 1968) 128 else 0)
+      )
+      val input = IEEE754.binary64ToDouble(exponent.toLong << 52)
+      assertEquals(VMArithmetic.trigPreopF64(input, segment), expected)
+    }
+  }
+
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
 
   test("gfx1030 SOP2 shift-left-two and add decodes") {
@@ -39,7 +59,13 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
 
   test("gfx1030 VOP3 bitwise operations decode to their VOP2 semantics") {
     for (
-      (bytes, operation, destination, left, right) <- Seq(
+      (bytes, operation, destination, left, right) <- Vec[(
+          Vec[Byte],
+          VectorBinaryOperation,
+          VectorRegisterIndex,
+          VectorRegisterIndex,
+          VectorRegisterIndex
+      )](
         (Vec[Byte](0, 0, 0x1c, 0xd5.toByte, 1, 5, 2, 0), VectorBinaryOperation.Or32, 0, 1, 2),
         (Vec[Byte](3, 0, 0x1b, 0xd5.toByte, 4, 0x0b, 2, 0), VectorBinaryOperation.And32, 3, 4, 5),
         (Vec[Byte](6, 0, 0x1d, 0xd5.toByte, 7, 0x11, 2, 0), VectorBinaryOperation.Xor32, 6, 7, 8)
@@ -66,8 +92,8 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
     )
     assert(
       decoded.exists {
-        case Instruction.VTernary(VectorTernaryOperation.Median3I16, 5, _, _, _) => true
-        case _                                                                   => false
+        case Instruction.VTernary(VectorTernaryOperation.Median3I16, dest, _, _, _) => dest.raw == 5
+        case _                                                                      => false
       },
       decoded.toString
     )
@@ -520,18 +546,18 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
       Target("gfx900")
     )
 
-    instruction match {
-      case Right(
-            Instruction.VMadI64I32(
-              254,
-              12,
-              InstructionSource.VectorRegister(1),
-              InstructionSource.VectorRegister(2),
-              InstructionSource.VectorRegister(3)
-            )
-          ) => ()
-      case other => fail(s"decoded VOP3 signed 64-bit multiply-add incorrectly: $other")
-    }
+    assertEquals(
+      instruction,
+      Right(
+        Instruction.VMadI64I32(
+          254,
+          12,
+          InstructionSource.VectorRegister(1),
+          InstructionSource.VectorRegister(2),
+          InstructionSource.VectorRegister(3)
+        )
+      )
+    )
   }
 
   test("gfx900 VOP1 half-to-single conversion decodes") {

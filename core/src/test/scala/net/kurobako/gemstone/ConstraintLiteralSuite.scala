@@ -64,7 +64,7 @@ class ConstraintLiteralSuite extends munit.FunSuite {
   test("literal arguments and newtypes are checked at compile time") {
     val positive: Int > 0                                   = 4
     val nonnegative: Long >= 0                              = 0L
-    val choice: OneOf[(16, 32, 64)]                         = 32
+    val choice: Int in (16, 32, 64)                         = 32
     val aligned: Int where (Between[0, 64] & MultipleOf[8]) = 24
     val name: NonEmpty[String]                              = "kernel"
     val text: NonEmpty[String]                              = "text"
@@ -85,11 +85,11 @@ class ConstraintLiteralSuite extends munit.FunSuite {
     """).nonEmpty)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
-      val value: Int where Between[0, 8] = 9
+      val value: Int in 0 ~ 8 = 9
     """).nonEmpty)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
-      val value: OneOf[(16, 32, 64)] = 8
+      val value: Int in (16, 32, 64) = 8
     """).nonEmpty)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*

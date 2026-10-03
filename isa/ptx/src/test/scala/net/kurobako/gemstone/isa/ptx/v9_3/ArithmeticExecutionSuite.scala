@@ -8,7 +8,7 @@ import net.kurobako.gemstone.memory.*
 
 class ArithmeticExecutionSuite extends munit.FunSuite {
   // Exact bit patterns are independent of the VM's arithmetic and conversion helpers.
-  private val cases: Vec[(String, String, Int where Between[1, 8], String, Long)] = Vec(
+  private val cases: Vec[(String, String, Int in 1 ~ 8, String, Long)] = Vec(
     (
       "fma rounds toward positive infinity",
       "f32",

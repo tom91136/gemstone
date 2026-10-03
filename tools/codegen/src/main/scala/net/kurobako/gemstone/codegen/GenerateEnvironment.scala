@@ -35,10 +35,14 @@ object GenerateEnvironment {
   private def outputs(root: Path, entries: Vector[Entry]): Vector[(Path, String)] = {
     val banner    = "Generated from build.sbt: environmentVariables. Regenerate with: sbt codegen"
     val scalaPath = root.resolve("core/src/generated/main/scala/net/kurobako/gemstone/environment.scala")
-    val scala     = s"// $banner\npackage net.kurobako.gemstone\n\nobject environment {\n" + entries.map { entry =>
-      s"  val ${entry.symbol}: String = \"${entry.name}\"\n" +
-        entry.default.map(value => s"  val ${entry.symbol}Default: Long = ${value}L\n").getOrElse("")
-    }.mkString + "}\n"
+    val scala     =
+      s"// $banner\npackage net.kurobako.gemstone\n\nimport net.kurobako.gemstone.constraint.*\n\nobject environment {\n" +
+        entries.map { entry =>
+          s"  val ${entry.symbol}: String = \"${entry.name}\"\n" +
+            entry.default.map(value =>
+              s"  val ${entry.symbol}Default: Long ${if (value > 0) ">" else ">="} 0 = ${value}L\n"
+            ).getOrElse("")
+        }.mkString + "}\n"
     val cpp = s"// $banner\n#pragma once\n\n#include <cstdint>\n\nnamespace gemstone::environment {\n" +
       entries.map { entry =>
         s"inline constexpr char ${entry.symbol}[] = \"${entry.name}\";\n" +

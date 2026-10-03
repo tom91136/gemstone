@@ -16,7 +16,7 @@ class ExecutionAtomicSuite extends munit.FunSuite {
     val backing                        = ArrayMemory(allocation, 12288)
     val memory                         = VMMemory.MemoryState(backing, Vec.empty, _ => Right(()))
     val pointer                        = VMMemory.Pointer(VMMemory.Region.External(allocation), 0L, 0, 5)
-    val width: Int where Between[1, 8] = 4
+    val width: Int in 1 ~ 8 = 4
     val expected                       = Array.ofDim[Byte](12288)
     for {
       round  <- 1 to 3
@@ -50,7 +50,7 @@ class ExecutionAtomicSuite extends munit.FunSuite {
     }
     val memory                         = VMMemory.MemoryState(FailingStorage(), Vec.empty, _ => Right(()))
     val pointer                        = VMMemory.Pointer(VMMemory.Region.External(allocation), 4094L, 0, 5)
-    val width: Int where Between[1, 8] = 4
+    val width: Int in 1 ~ 8 = 4
     assertEquals(memory.writeScalar(pointer, 0x12345678L, width), Right(()))
     assertEquals(memory.flush(), Left(failure))
     assertEquals(memory.readScalar(pointer, width), Right(0x12345678L))
@@ -69,7 +69,7 @@ class ExecutionAtomicSuite extends munit.FunSuite {
   }
     test(s"$width-bit descriptor atomics preserve prior values in storage class $storageClass") {
       def ref(value: Int): Operand             = operand(OperandKind.IdRef, value)
-      val scalarWidth: Int where Between[0, 8] = if (width == 32) 4 else 8
+      val scalarWidth: Int in 0 ~ 8 = if (width == 32) 4 else 8
       val module                               = Module(
         Header(ISA.version, Word(0), Word(64), Word(0)),
         Vec(

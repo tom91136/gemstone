@@ -1,6 +1,8 @@
 // Generated encoding constants from pinned AMD and LLVM inputs. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.constraint.*
+
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 private object EncodingConstants {
   object Source {
@@ -163,8 +165,9 @@ private object EncodingConstants {
     val VOLATILE: Int = -2147483648
     val VIRTUAL_BITS: Int = -2147483648
   }
-  val SdwaSelectors: Vector[String] = Vector("BYTE_0", "BYTE_1", "BYTE_2", "BYTE_3", "WORD_0", "WORD_1", "DWORD")
-  val SdwaUnused: Vector[String] = Vector("UNUSED_PAD", "UNUSED_SEXT", "UNUSED_PRESERVE")
+  val SdwaSelectors: Vector[NonEmpty[String]] =
+    Vector("BYTE_0", "BYTE_1", "BYTE_2", "BYTE_3", "WORD_0", "WORD_1", "DWORD")
+  val SdwaUnused: Vector[NonEmpty[String]] = Vector("UNUSED_PAD", "UNUSED_SEXT", "UNUSED_PRESERVE")
   val TemporalHints: Map[String, Int] = Map(
     "BYPASS" -> 3,
     "HT" -> 2,
@@ -181,16 +184,16 @@ private object EncodingConstants {
   val AtomicHints: Map[String, Int] =
     Map("CASCADE" -> 4, "CASCADE_RETURN" -> 5, "NT" -> 2, "NT_RETURN" -> 3, "RETURN" -> 1, "RT" -> 0)
   object Fixed {
-    val VccLo: Int = 106
-    val VccHi: Int = 107
-    val M0: Int = 124
-    val NullSgpr: Int = 125
-    val ExecLo: Int = 126
-    val ExecHi: Int = 127
-    val VccZeroSource: Int = 251
-    val ExecZeroSource: Int = 252
-    val SccSource: Int = 253
-    val LdsDirectSource: Int = 254
+    inline val VccLo = 106
+    inline val VccHi = 107
+    inline val M0 = 124
+    inline val NullSgpr = 125
+    inline val ExecLo = 126
+    inline val ExecHi = 127
+    inline val VccZeroSource = 251
+    inline val ExecZeroSource = 252
+    inline val SccSource = 253
+    inline val LdsDirectSource = 254
     val SmemGfx6Prefix: Long = 48L
     val SmemGfx10Prefix: Long = 61L
     val Sop1Prefix: Long = 381L
@@ -206,8 +209,8 @@ private object EncodingConstants {
     val MubufPrefix: Long = 56L
     val Vop1Prefix: Long = 63L
     val VopCPrefix: Long = 62L
-    val DppSource: Int = 250
-    val SdwaSource: Int = 249
+    inline val DppSource = 250
+    inline val SdwaSource = 249
     val InlineFloatingValues: Vector[Double] = Vector(0.5, -0.5, 1.0, -1.0, 2.0, -2.0, 4.0, -4.0, 0.15915494)
     val InlineFloatingConstants: Vector[Long] = Vector(1056964608L, 3204448256L, 1065353216L, 3212836864L, 1073741824L,
       3221225472L, 1082130432L, 3229614080L, 1042479491L)

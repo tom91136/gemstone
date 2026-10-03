@@ -11,7 +11,7 @@ import net.kurobako.gemstone.vm.*
 class LegacyMultiplySubtractSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module = SASSFixture.module(
     35,
-    Vec(SASSFixture.Kernel("subtract_product", 320, Vec(0 -> 8, 8 -> 4, 12 -> 4, 16 -> 8), registers = 6))
+    Vec(SASSFixture.Kernel("subtract_product", 320, Vec((0, 8), (8, 4), (12, 4), (16, 8)), registers = 6))
   )
 
   test("CUDA 11.8 sm_35 IMAD low/high subtracts a 64-bit addend with borrow") {
@@ -35,7 +35,7 @@ class LegacyMultiplySubtractSuite extends munit.FunSuite {
     )
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(8L.unsafe[Long > 0])
+      val output  = service.allocate(8L)
       val program = service.compile(sass)
         .fold(e => fail(e.message), identity)
       cases.foreach { case (a, b, c) =>

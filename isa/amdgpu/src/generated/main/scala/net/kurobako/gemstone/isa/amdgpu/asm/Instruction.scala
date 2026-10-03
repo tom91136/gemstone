@@ -57,7 +57,13 @@ object Instruction {
     decodeWithSuffixes(name, operands, mods, name)
   }
 
-  private val EncodingSuffixes: Vec[String] = Vec("_dpp8", "_sdwa", "_dpp", "_e64", "_e32")
+  private val EncodingSuffixes: Vec[(String, Modifier)] = Vec(
+    "_dpp8" -> Modifier("dpp8"),
+    "_sdwa" -> Modifier("sdwa"),
+    "_dpp" -> Modifier("dpp"),
+    "_e64" -> Modifier("e64"),
+    "_e32" -> Modifier("e32")
+  )
 
   @annotation.tailrec
   private def decodeWithSuffixes(
@@ -69,8 +75,8 @@ object Instruction {
     decodeCanonical(name, operands, mods) match {
       case Left(DecodeError.UnknownOpcode(_)) =>
         EncodingSuffixes.collectFirst {
-          case suffix if name.endsWith(suffix) =>
-            name.dropRight(suffix.length) -> Modifier((suffix.drop(1)).unsafe[NonEmpty[String]])
+          case (suffix, modifier) if name.endsWith(suffix) =>
+            name.dropRight(suffix.length) -> modifier
         } match {
           case Some((canonical, modifier)) => decodeWithSuffixes(canonical, operands, modifier +: mods, original)
           case None => Left(DecodeError.UnknownOpcode(original))

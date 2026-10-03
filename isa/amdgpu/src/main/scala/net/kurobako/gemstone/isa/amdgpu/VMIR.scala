@@ -1,17 +1,42 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import ELF.*
+import scala.annotation.targetName
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 private object VMIR {
+  type VectorRegisterIndex = Int in 0 ~ 255
+  type ScalarRegisterIndex = Int in 0 ~ 127
+
+  /** Executable wave width: GCN/CDNA use wave64 and the VM's RDNA targets use wave32. */
+  def waveSize(target: Target): Int in (32, 64) = target.isa match {
+    case ISA.GFX6 | ISA.GFX7 | ISA.GFX8 | ISA.GFX9 | ISA.CDNA1 | ISA.CDNA2 | ISA.CDNA3 | ISA.CDNA4 |
+        ISA.CDNA5 => 64
+    case ISA.RDNA1 | ISA.RDNA2 | ISA.RDNA3 | ISA.RDNA3_5 | ISA.RDNA4 | ISA.GFX11_7 => 32
+  }
+
+  extension (index: VectorRegisterIndex) {
+    def offsetBy(words: Int >= 0): VectorRegisterIndex = {
+      require(words.raw <= 255 - index.raw, "register span exceeds the register bank")
+      (index.raw + words.raw).unsafe[VectorRegisterIndex]
+    }
+  }
+
+  extension (index: ScalarRegisterIndex) {
+    @targetName("offsetScalarRegister")
+    def offsetBy(words: Int >= 0): ScalarRegisterIndex = {
+      require(words.raw <= 127 - index.raw, "scalar register span exceeds the register bank")
+      (index.raw + words.raw).unsafe[ScalarRegisterIndex]
+    }
+  }
 
   enum ScalarBranchCondition {
     case Always, SccZero, SccNonZero, VccZero, VccNonZero, ExecZero, ExecNonZero
   }
 
   enum InstructionSource {
-    case Scalar(index: Int)
-    case VectorRegister(index: Int)
+    case Scalar(index: ScalarRegisterIndex)
+    case VectorRegister(index: VectorRegisterIndex)
     case Constant(value: Long)
 
     /** A literal dword embedded in the instruction stream.
@@ -154,47 +179,68 @@ private object VMIR {
 
   enum Instruction {
 
-    case SLoad(dest: Int, count: Int in (1, 2, 4, 8, 16), base: Int, offset: Int, scalarOffset: Option[Int])
-    case SMove(dest: Int, src: InstructionSource)
-    case SMoveImmediate(dest: Int, value: Int)
-    case SMultiplyImmediate(dest: Int, value: Int)
-    case SMove64(dest: Int, src: InstructionSource)
+    case SLoad(
+        dest: ScalarRegisterIndex,
+        count: Int in (1, 2, 4, 8, 16),
+        base: ScalarRegisterIndex,
+        offset: Int,
+        scalarOffset: Option[ScalarRegisterIndex]
+    )
+    case SMove(dest: ScalarRegisterIndex, src: InstructionSource)
+    case SMoveImmediate(dest: ScalarRegisterIndex, value: Int)
+    case SMultiplyImmediate(dest: ScalarRegisterIndex, value: Int)
+    case SMove64(dest: ScalarRegisterIndex, src: InstructionSource)
 
     /** Set a hardware register (for example the flat-scratch base). */
-    case SSetReg(hwreg: Int, src: Int)
-    case SGetPc(dest: Int, offset: Int)
+    case SSetReg(hwreg: Int, src: ScalarRegisterIndex)
+    case SGetPc(dest: ScalarRegisterIndex, offset: Int)
     case SSetPc(src: InstructionSource)
-    case SSwapPc(dest: Int, src: InstructionSource)
+    case SSwapPc(dest: ScalarRegisterIndex, src: InstructionSource)
 
     /** Save the current EXEC mask and update EXEC with a 32- or 64-bit mask. */
-    case SAndSaveExec(dest: Int, src: InstructionSource, width: Int)
-    case SAndn2SaveExec(dest: Int, src: InstructionSource, width: Int)
-    case SOrSaveExec(dest: Int, src: InstructionSource, width: Int)
-    case SXorSaveExec(dest: Int, src: InstructionSource, width: Int)
-    case SUnary(operation: ScalarUnaryOperation, dest: Int, src: InstructionSource)
-    case SBinary(operation: ScalarBinaryOperation, dest: Int, srcA: InstructionSource, srcB: InstructionSource)
-    case SMinMax(operation: ScalarMinMaxOperation, dest: Int, srcA: InstructionSource, srcB: InstructionSource)
-    case SBinary64(operation: ScalarBinary64Operation, dest: Int, srcA: InstructionSource, srcB: InstructionSource)
+    case SAndSaveExec(dest: ScalarRegisterIndex, src: InstructionSource, width: Int in (32, 64))
+    case SAndn2SaveExec(dest: ScalarRegisterIndex, src: InstructionSource, width: Int in (32, 64))
+    case SOrSaveExec(dest: ScalarRegisterIndex, src: InstructionSource, width: Int in (32, 64))
+    case SXorSaveExec(dest: ScalarRegisterIndex, src: InstructionSource, width: Int in (32, 64))
+    case SUnary(operation: ScalarUnaryOperation, dest: ScalarRegisterIndex, src: InstructionSource)
+    case SBinary(
+        operation: ScalarBinaryOperation,
+        dest: ScalarRegisterIndex,
+        srcA: InstructionSource,
+        srcB: InstructionSource
+    )
+    case SMinMax(
+        operation: ScalarMinMaxOperation,
+        dest: ScalarRegisterIndex,
+        srcA: InstructionSource,
+        srcB: InstructionSource
+    )
+    case SBinary64(
+        operation: ScalarBinary64Operation,
+        dest: ScalarRegisterIndex,
+        srcA: InstructionSource,
+        srcB: InstructionSource
+    )
     case SSetGprIdxOn
-    case SCSelect(dest: Int, srcA: InstructionSource, srcB: InstructionSource, width: Int)
-    case SCmpImmediate(operation: ScalarImmediateCompareOperation, src: Int, immediate: Int)
-    case SAddImmediate(dest: Int, immediate: Int)
+    case SCSelect(dest: ScalarRegisterIndex, srcA: InstructionSource, srcB: InstructionSource, width: Int in (32, 64))
+    case SCmpImmediate(operation: ScalarImmediateCompareOperation, src: ScalarRegisterIndex, immediate: Int)
+    case SAddImmediate(dest: ScalarRegisterIndex, immediate: Int)
     case SCmp(operation: ScalarCompareOperation, srcA: InstructionSource, srcB: InstructionSource)
-    case VMove(dest: Int, src: InstructionSource)
+    case VMove(dest: VectorRegisterIndex, src: InstructionSource)
 
     /** Read a VGPR through the scalar M0 register (v_movrels_b32). */
-    case VMoveRelative(dest: Int, src: InstructionSource)
+    case VMoveRelative(dest: VectorRegisterIndex, src: InstructionSource)
 
     /** Write a VGPR through the scalar M0 register (v_movreld_b32). */
-    case VMoveRelativeDestination(dest: Int, src: InstructionSource)
-    case VNot(dest: Int, src: InstructionSource)
-    case VSwap(dest: Int, src: InstructionSource)
-    case VBitReverse(dest: Int, src: InstructionSource)
-    case VBitFind(operation: VectorBitFindOperation, dest: Int, src: InstructionSource)
-    case VConvert(operation: VectorConvertOperation, dest: Int, src: InstructionSource)
+    case VMoveRelativeDestination(dest: VectorRegisterIndex, src: InstructionSource)
+    case VNot(dest: VectorRegisterIndex, src: InstructionSource)
+    case VSwap(dest: VectorRegisterIndex, src: InstructionSource)
+    case VBitReverse(dest: VectorRegisterIndex, src: InstructionSource)
+    case VBitFind(operation: VectorBitFindOperation, dest: VectorRegisterIndex, src: InstructionSource)
+    case VConvert(operation: VectorConvertOperation, dest: VectorRegisterIndex, src: InstructionSource)
     case VMoveDPP(
-        dest: Int,
-        src: Int,
+        dest: VectorRegisterIndex,
+        src: VectorRegisterIndex,
         control: Int,
         rowMask: Int,
         bankMask: Int,
@@ -202,7 +248,7 @@ private object VMIR {
         fetchInactive: Boolean
     )
     case VCndMask(
-        dest: Int,
+        dest: VectorRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         condition: InstructionSource,
@@ -211,27 +257,27 @@ private object VMIR {
         negateA: Boolean,
         negateB: Boolean
     )
-    case VReadFirstLane(dest: Int, src: InstructionSource)
-    case VReadLane(dest: Int, src: InstructionSource, lane: InstructionSource)
-    case VWriteLane(dest: Int, src: InstructionSource, lane: InstructionSource)
-    case VMaskBitCount(dest: Int, mask: InstructionSource, base: InstructionSource, high: Boolean)
-    case VBitCount(dest: Int, src: InstructionSource, base: InstructionSource)
+    case VReadFirstLane(dest: ScalarRegisterIndex, src: InstructionSource)
+    case VReadLane(dest: ScalarRegisterIndex, src: InstructionSource, lane: InstructionSource)
+    case VWriteLane(dest: VectorRegisterIndex, src: InstructionSource, lane: InstructionSource)
+    case VMaskBitCount(dest: VectorRegisterIndex, mask: InstructionSource, base: InstructionSource, high: Boolean)
+    case VBitCount(dest: VectorRegisterIndex, src: InstructionSource, base: InstructionSource)
     case VBinary(
         operation: VectorBinaryOperation,
-        dest: Int,
+        dest: VectorRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         clamp: Boolean
     )
 
     /** Two packed f16 products accumulated into an f32 destination. */
-    case VDot2F32F16(dest: Int, srcA: InstructionSource, srcB: InstructionSource, accumulate: Boolean)
+    case VDot2F32F16(dest: VectorRegisterIndex, srcA: InstructionSource, srcB: InstructionSource, accumulate: Boolean)
 
     /** Four unsigned byte products accumulated into a u32 destination. */
-    case VDot4U32U8(dest: Int, srcA: InstructionSource, srcB: InstructionSource, srcC: InstructionSource)
+    case VDot4U32U8(dest: VectorRegisterIndex, srcA: InstructionSource, srcB: InstructionSource, srcC: InstructionSource)
     case VBinaryF32Modified(
         operation: VectorF32BinaryOperation,
-        dest: Int,
+        dest: VectorRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         absA: Boolean,
@@ -241,47 +287,47 @@ private object VMIR {
         clamp: Boolean
     )
     case VUnaryF32Modified(
-        dest: Int,
+        dest: VectorRegisterIndex,
         src: InstructionSource,
         absolute: Boolean,
         negate: Boolean,
         clamp: Boolean
     )
     case VFrexpMantF32Modified(
-        dest: Int,
+        dest: VectorRegisterIndex,
         src: InstructionSource,
         absolute: Boolean,
         negate: Boolean,
         clamp: Boolean
     )
     case VCvtF64F32Modified(
-        dest: Int,
+        dest: VectorRegisterIndex,
         src: InstructionSource,
         absolute: Boolean,
         negate: Boolean,
         clamp: Boolean
     )
     case VUnaryF64Modified(
-        dest: Int,
+        dest: VectorRegisterIndex,
         src: InstructionSource,
         absolute: Boolean,
         negate: Boolean
     )
     case VTrigPreopF64(
-        dest: Int,
+        dest: VectorRegisterIndex,
         src: InstructionSource,
         segment: InstructionSource,
         absolute: Boolean,
         negate: Boolean
     )
-    case VFlatLoadD16(dest: Int, address: Int, offset: Int, high: Boolean)
-    case VMadMkF32(dest: Int, srcA: InstructionSource, multiplier: Long, addend: InstructionSource)
+    case VFlatLoadD16(dest: VectorRegisterIndex, address: VectorRegisterIndex, offset: Int, high: Boolean)
+    case VMadMkF32(dest: VectorRegisterIndex, srcA: InstructionSource, multiplier: Long, addend: InstructionSource)
 
     /** Fused multiply-add with an inline literal addend: dst = srcA * srcB + literal. */
-    case VMadAkF32(dest: Int, srcA: InstructionSource, srcB: InstructionSource, addend: Long)
+    case VMadAkF32(dest: VectorRegisterIndex, srcA: InstructionSource, srcB: InstructionSource, addend: Long)
     case VBinary64Modified(
         operation: VectorBinary64Operation,
-        dest: Int,
+        dest: VectorRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         absA: Boolean,
@@ -291,7 +337,7 @@ private object VMIR {
     )
     case VBinarySubDword(
         operation: VectorSubDwordOperation,
-        dest: Int,
+        dest: VectorRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         destSelection: SubDwordSelection,
@@ -303,15 +349,15 @@ private object VMIR {
     )
     case VPackedBinary(
         operation: VectorPackedBinaryOperation,
-        dest: Int,
+        dest: VectorRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         srcAHighForHigh: Boolean,
         srcBHighForHigh: Boolean
     )
-    case VPackB32F16(dest: Int, srcA: InstructionSource, srcB: InstructionSource)
+    case VPackB32F16(dest: VectorRegisterIndex, srcA: InstructionSource, srcB: InstructionSource)
     case VPackedFmaF16(
-        dest: Int,
+        dest: VectorRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         srcC: InstructionSource,
@@ -329,7 +375,7 @@ private object VMIR {
       * negate and bit 1 is absolute (rather than packed neg_hi).
       */
     case VFmaMixF16(
-        dest: Int,
+        dest: VectorRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         srcC: InstructionSource,
@@ -343,7 +389,7 @@ private object VMIR {
 
     /** FMA with mixed f32/f16 inputs and an f32 result. */
     case VFmaMixF32(
-        dest: Int,
+        dest: VectorRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         srcC: InstructionSource,
@@ -354,29 +400,29 @@ private object VMIR {
         clamp: Boolean
     )
     case VAddCarry(
-        dest: Int,
-        carryDest: Int,
+        dest: VectorRegisterIndex,
+        carryDest: ScalarRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         carryIn: Option[InstructionSource]
     )
     case VSubCarry(
-        dest: Int,
-        carryDest: Int,
+        dest: VectorRegisterIndex,
+        carryDest: ScalarRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         carryIn: Option[InstructionSource]
     )
     case VSubReverseCarry(
-        dest: Int,
-        carryDest: Int,
+        dest: VectorRegisterIndex,
+        carryDest: ScalarRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         carryIn: Option[InstructionSource]
     )
     case VMadF32(
         operation: VectorMadF32Operation,
-        dest: Int,
+        dest: VectorRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         srcC: InstructionSource,
@@ -389,7 +435,7 @@ private object VMIR {
         clamp: Boolean
     )
     case VMadF64(
-        dest: Int,
+        dest: VectorRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         srcC: InstructionSource,
@@ -402,21 +448,21 @@ private object VMIR {
     )
     case VTernary(
         operation: VectorTernaryOperation,
-        dest: Int,
+        dest: VectorRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         srcC: InstructionSource
     )
     case VMadU64U32(
-        dest: Int,
-        carryDest: Int,
+        dest: VectorRegisterIndex,
+        carryDest: ScalarRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         srcC: InstructionSource
     )
     case VMadI64I32(
-        dest: Int,
-        carryDest: Int,
+        dest: VectorRegisterIndex,
+        carryDest: ScalarRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         srcC: InstructionSource
@@ -430,10 +476,10 @@ private object VMIR {
         srcBSelection: SubDwordSelection,
         srcASignExtend: Boolean,
         srcBSignExtend: Boolean,
-        destination: Option[Int]
+        destination: Option[ScalarRegisterIndex]
     )
     case VCompareTo(
-        dest: Int,
+        dest: ScalarRegisterIndex,
         operation: VectorComparison,
         srcA: InstructionSource,
         srcB: InstructionSource,
@@ -443,22 +489,22 @@ private object VMIR {
         negateB: Boolean
     )
     case VDivScaleF32(
-        dest: Int,
-        conditionDest: Int,
+        dest: VectorRegisterIndex,
+        conditionDest: ScalarRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         srcC: InstructionSource
     )
     case VDivScaleF64(
-        dest: Int,
-        conditionDest: Int,
+        dest: VectorRegisterIndex,
+        conditionDest: ScalarRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
         srcC: InstructionSource
     )
-    case VDivFmasF64(dest: Int, srcA: InstructionSource, srcB: InstructionSource, srcC: InstructionSource)
+    case VDivFmasF64(dest: VectorRegisterIndex, srcA: InstructionSource, srcB: InstructionSource, srcC: InstructionSource)
     case VDivFixupF32(
-        dest: Int,
+        dest: VectorRegisterIndex,
         quotient: InstructionSource,
         denominator: InstructionSource,
         numerator: InstructionSource,
@@ -466,157 +512,193 @@ private object VMIR {
         negate: Int
     )
     case VDivFixupF64(
-        dest: Int,
+        dest: VectorRegisterIndex,
         quotient: InstructionSource,
         denominator: InstructionSource,
         numerator: InstructionSource,
         absolute: Int,
         negate: Int
     )
-    case VShiftLeft64(dest: Int, amount: InstructionSource, src: InstructionSource)
-    case VShiftRight64(dest: Int, amount: InstructionSource, src: InstructionSource)
-    case VShiftRightArithmetic64(dest: Int, amount: InstructionSource, src: InstructionSource)
+    case VShiftLeft64(dest: VectorRegisterIndex, amount: InstructionSource, src: InstructionSource)
+    case VShiftRight64(dest: VectorRegisterIndex, amount: InstructionSource, src: InstructionSource)
+    case VShiftRightArithmetic64(dest: VectorRegisterIndex, amount: InstructionSource, src: InstructionSource)
     case GlobalLoad(
-        dest: Int,
-        address: Int,
-        scalarAddress: Option[Int],
-        bytes: Int where Between[1, 16],
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        scalarAddress: Option[ScalarRegisterIndex],
+        bytes: Int in 1 ~ 16,
         offset: Int,
         coherent: Boolean
     )
     case GlobalLoadSigned(
-        dest: Int,
-        address: Int,
-        scalarAddress: Option[Int],
-        bytes: Int where Between[1, 2],
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        scalarAddress: Option[ScalarRegisterIndex],
+        bytes: Int in 1 ~ 2,
         offset: Int
     )
-    case GlobalLoadD16(dest: Int, address: Int, scalarAddress: Option[Int], offset: Int, high: Boolean)
+    case GlobalLoadD16(
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        scalarAddress: Option[ScalarRegisterIndex],
+        offset: Int,
+        high: Boolean
+    )
     case GlobalStore(
-        address: Int,
-        scalarAddress: Option[Int],
-        src: Int,
-        bytes: Int where Between[1, 16],
+        address: VectorRegisterIndex,
+        scalarAddress: Option[ScalarRegisterIndex],
+        src: VectorRegisterIndex,
+        bytes: Int in 1 ~ 16,
         offset: Int
     )
     case GlobalStoreD16High(
-        address: Int,
-        scalarAddress: Option[Int],
-        src: Int,
-        bytes: Int where Between[1, 2],
+        address: VectorRegisterIndex,
+        scalarAddress: Option[ScalarRegisterIndex],
+        src: VectorRegisterIndex,
+        bytes: Int in 1 ~ 2,
         offset: Int
     )
     case GlobalAtomicAdd(
-        dest: Int,
-        address: Int,
-        scalarAddress: Option[Int],
-        src: Int,
-        bytes: Int where Between[4, 8],
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        scalarAddress: Option[ScalarRegisterIndex],
+        src: VectorRegisterIndex,
+        bytes: Int in (4, 8),
         offset: Int,
         returnValue: Boolean
     )
     case GlobalAtomicSwap(
-        dest: Int,
-        address: Int,
-        scalarAddress: Option[Int],
-        src: Int,
-        bytes: Int where Between[4, 8],
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        scalarAddress: Option[ScalarRegisterIndex],
+        src: VectorRegisterIndex,
+        bytes: Int in (4, 8),
         offset: Int,
         returnValue: Boolean
     )
     case GlobalAtomicBinary(
         operation: AtomicBinaryOperation,
-        dest: Int,
-        address: Int,
-        scalarAddress: Option[Int],
-        src: Int,
-        bytes: Int where Between[4, 8],
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        scalarAddress: Option[ScalarRegisterIndex],
+        src: VectorRegisterIndex,
+        bytes: Int in (4, 8),
         offset: Int,
         returnValue: Boolean
     )
     case GlobalAtomicInc(
-        dest: Int,
-        address: Int,
-        scalarAddress: Option[Int],
-        src: Int,
-        bytes: Int where Between[4, 8],
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        scalarAddress: Option[ScalarRegisterIndex],
+        src: VectorRegisterIndex,
+        bytes: Int in (4, 8),
         offset: Int,
         returnValue: Boolean
     )
     case GlobalAtomicCompareSwap(
-        dest: Int,
-        address: Int,
-        scalarAddress: Option[Int],
-        compareSrc: Int,
-        swapSrc: Int,
-        bytes: Int where Between[4, 8],
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        scalarAddress: Option[ScalarRegisterIndex],
+        compareSrc: VectorRegisterIndex,
+        swapSrc: VectorRegisterIndex,
+        bytes: Int in (4, 8),
         offset: Int,
         returnValue: Boolean
     )
-    case FlatLoad(dest: Int, address: Int, bytes: Int where Between[1, 16], offset: Int, coherent: Boolean = false)
-    case FlatLoadSigned(dest: Int, address: Int, bytes: Int where Between[1, 2], offset: Int)
-    case FlatStore(address: Int, src: Int, bytes: Int where Between[1, 16], offset: Int)
-    case FlatStoreD16High(address: Int, src: Int, bytes: Int where Between[1, 2], offset: Int)
+    case FlatLoad(
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        bytes: Int in 1 ~ 16,
+        offset: Int,
+        coherent: Boolean = false
+    )
+    case FlatLoadSigned(dest: VectorRegisterIndex, address: VectorRegisterIndex, bytes: Int in 1 ~ 2, offset: Int)
+    case FlatStore(address: VectorRegisterIndex, src: VectorRegisterIndex, bytes: Int in 1 ~ 16, offset: Int)
+    case FlatStoreD16High(address: VectorRegisterIndex, src: VectorRegisterIndex, bytes: Int in 1 ~ 2, offset: Int)
     case BufferCacheInvalidate
     case BufferLoad(
-        dest: Int,
-        address: Option[Int],
-        resource: Int,
-        scalarOffset: Option[Int],
-        bytes: Int where Between[1, 16],
+        dest: VectorRegisterIndex,
+        address: Option[VectorRegisterIndex],
+        resource: ScalarRegisterIndex,
+        scalarOffset: Option[ScalarRegisterIndex],
+        bytes: Int in 1 ~ 16,
         offset: Int
     )
     case BufferLoadD16(
-        dest: Int,
-        address: Option[Int],
-        resource: Int,
-        scalarOffset: Option[Int],
-        bytes: Int where Between[1, 2],
+        dest: VectorRegisterIndex,
+        address: Option[VectorRegisterIndex],
+        resource: ScalarRegisterIndex,
+        scalarOffset: Option[ScalarRegisterIndex],
+        bytes: Int in 1 ~ 2,
         offset: Int,
         high: Boolean
     )
     case BufferStore(
-        address: Option[Int],
-        resource: Int,
-        scalarOffset: Option[Int],
-        src: Int,
-        bytes: Int where Between[1, 16],
+        address: Option[VectorRegisterIndex],
+        resource: ScalarRegisterIndex,
+        scalarOffset: Option[ScalarRegisterIndex],
+        src: VectorRegisterIndex,
+        bytes: Int in 1 ~ 16,
         offset: Int
     )
     case BufferStoreD16High(
-        address: Option[Int],
-        resource: Int,
-        scalarOffset: Option[Int],
-        src: Int,
-        bytes: Int where Between[1, 2],
+        address: Option[VectorRegisterIndex],
+        resource: ScalarRegisterIndex,
+        scalarOffset: Option[ScalarRegisterIndex],
+        src: VectorRegisterIndex,
+        bytes: Int in 1 ~ 2,
         offset: Int
     )
-    case DSRead(dest: Int, address: Int, bytes: Int where Between[1, 16], offsetA: Int, offsetB: Option[Int])
-    case DSSignedRead(dest: Int, address: Int, bytes: Int where Between[1, 2], offsetA: Int, offsetB: Option[Int])
-    case DSReadD16(dest: Int, address: Int, bytes: Int where Between[1, 2], offset: Int, high: Boolean)
-    case DSSignedReadD16(dest: Int, address: Int, bytes: Int where Between[1, 2], offset: Int, high: Boolean)
-    case DSPermute(dest: Int, address: Int, src: Int, offset: Int)
-    case DSBPermute(dest: Int, address: Int, src: Int, offset: Int)
-    case DSSwizzle(dest: Int, src: Int, control: Int)
+    case DSRead(
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        bytes: Int in 1 ~ 16,
+        offsetA: Int,
+        offsetB: Option[Int]
+    )
+    case DSSignedRead(
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        bytes: Int in 1 ~ 2,
+        offsetA: Int,
+        offsetB: Option[Int]
+    )
+    case DSReadD16(
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        bytes: Int in 1 ~ 2,
+        offset: Int,
+        high: Boolean
+    )
+    case DSSignedReadD16(
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        bytes: Int in 1 ~ 2,
+        offset: Int,
+        high: Boolean
+    )
+    case DSPermute(dest: VectorRegisterIndex, address: VectorRegisterIndex, src: VectorRegisterIndex, offset: Int)
+    case DSBPermute(dest: VectorRegisterIndex, address: VectorRegisterIndex, src: VectorRegisterIndex, offset: Int)
+    case DSSwizzle(dest: VectorRegisterIndex, src: VectorRegisterIndex, control: Int)
     case DSAtomic(
         operation: DSAtomicOperation,
-        dest: Int,
-        address: Int,
-        src: Int,
-        bytes: Int where Between[4, 8],
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        src: VectorRegisterIndex,
+        bytes: Int in (4, 8),
         offset: Int,
         returnValue: Boolean
     )
     case DSWrite(
-        address: Int,
-        srcA: Int,
-        srcB: Option[Int],
-        bytes: Int where Between[1, 16],
+        address: VectorRegisterIndex,
+        srcA: VectorRegisterIndex,
+        srcB: Option[VectorRegisterIndex],
+        bytes: Int in 1 ~ 16,
         offsetA: Int,
         offsetB: Option[Int]
     )
-    case DSWriteD16High(address: Int, src: Int, offset: Int)
-    case DSWriteD16HighByte(address: Int, src: Int, offset: Int)
+    case DSWriteD16High(address: VectorRegisterIndex, src: VectorRegisterIndex, offset: Int)
+    case DSWriteD16HighByte(address: VectorRegisterIndex, src: VectorRegisterIndex, offset: Int)
     case BranchRelative(condition: ScalarBranchCondition, displacement: Int)
     case Branch(condition: ScalarBranchCondition, target: Int)
     case Barrier

@@ -38,17 +38,18 @@ object GenerateExecutionRPC {
   private def numberName(value: Long): String =
     if (value < 0L) s"Negative${value.toString.drop(1)}" else value.toString
   private def aliasName(name: String, constraints: Vector[Wire.Constraint]): String =
-    if (name == "Int" || name == "Long" || name == "String") identifier(name + constraints.map {
-      case Wire.Constraint.Positive               => "Positive"
-      case Wire.Constraint.Positive0              => "Positive0"
-      case Wire.Constraint.IntInterval(min, max)  => s"Interval${numberName(min)}To${numberName(max)}"
-      case Wire.Constraint.LongInterval(min, max) => s"Interval${numberName(min)}To${numberName(max)}"
-      case Wire.Constraint.OneOf(values)          => s"OneOf${values.map(numberName(_)).mkString("Or")}"
-      case Wire.Constraint.MultipleOf(divisor)    => s"MultipleOf${numberName(divisor)}"
-      case Wire.Constraint.MinimumLength(min)     => s"MinimumLength$min"
-      case Wire.Constraint.NotContains(value)     =>
-        s"NotContains${value.getBytes(java.nio.charset.StandardCharsets.UTF_8).view.map(byte => f"${byte & 0xff}%02x").mkString}"
-    }.mkString)
+    if (name == "Byte" || name == "Short" || name == "Int" || name == "Long" || name == "String")
+      identifier(name + constraints.map {
+        case Wire.Constraint.Positive               => "Positive"
+        case Wire.Constraint.Positive0              => "Positive0"
+        case Wire.Constraint.IntInterval(min, max)  => s"Interval${numberName(min)}To${numberName(max)}"
+        case Wire.Constraint.LongInterval(min, max) => s"Interval${numberName(min)}To${numberName(max)}"
+        case Wire.Constraint.OneOf(values)          => s"OneOf${values.map(numberName(_)).mkString("Or")}"
+        case Wire.Constraint.MultipleOf(divisor)    => s"MultipleOf${numberName(divisor)}"
+        case Wire.Constraint.MinimumLength(min)     => s"MinimumLength$min"
+        case Wire.Constraint.NotContains(value)     =>
+          s"NotContains${value.getBytes(java.nio.charset.StandardCharsets.UTF_8).view.map(byte => f"${byte & 0xff}%02x").mkString}"
+      }.mkString)
     else identifier(name)
   private def alternativeName(sum: String, alternative: String): String = s"$sum$alternative"
   private def isNullary(alternative: Alternative): Boolean              = alternative.shape match {
@@ -67,7 +68,7 @@ object GenerateExecutionRPC {
     }
 
     private def register(shape: Shape): Unit = shape match {
-      case Shape.UnitValue | Shape.BooleanValue | Shape.Int8 | Shape.Int32 | Shape.Int64 | Shape.Float32 | Shape.Float64 | Shape.Text =>
+      case Shape.UnitValue | Shape.BooleanValue | Shape.Int8 | Shape.Int16 | Shape.Int32 | Shape.Int64 | Shape.Float32 | Shape.Float64 | Shape.Text =>
         ()
       case Shape.Sequence(element)                            => register(element)
       case Shape.Optional(element)                            => register(element)
@@ -100,6 +101,7 @@ object GenerateExecutionRPC {
       case Shape.UnitValue                   => "Unit"
       case Shape.BooleanValue                => "bool"
       case Shape.Int8                        => "uint8_t"
+      case Shape.Int16                       => "int16_t"
       case Shape.Int32                       => "int32_t"
       case Shape.Int64                       => "int64_t"
       case Shape.Float32                     => "float"
@@ -119,8 +121,9 @@ object GenerateExecutionRPC {
 
   private def definition(named: Named, model: Model): String = named.shape match {
     case Shape.Alias(_, underlying, _) =>
+      val carrier = if (underlying == Shape.Int8) "int8_t" else model.cppType(underlying)
       s"""struct ${named.name} {
-         |  ${model.cppType(underlying)} value{};
+         |  $carrier value{};
          |};""".stripMargin
     case Shape.Product(_, productFields) =>
       s"struct ${named.name} {\n${fields(productFields, model)}};"

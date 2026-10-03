@@ -1,12 +1,15 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 
 private object VMState {
+  type Lane = Int where (AtLeast[0] & LessThan[64])
+  val LaneIndices: Vec[Lane] = Vec.range[0, 64]
 
   /** Mutable architectural VCC/EXEC storage for one wave. */
-  class LaneBits(lanes: Int where Between[1, 64], initial: Long) {
+  class LaneBits(lanes: Int in 1 ~ 64, initial: Long) {
     private val laneLimit = Bits.mask(lanes)
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var value = initial & laneLimit
@@ -31,10 +34,14 @@ private object VMState {
       bitCount = java.lang.Long.bitCount(value)
     }
 
-    def apply(lane: Int): Boolean = (value & (1L << lane)) != 0L
+    def apply(lane: Lane): Boolean = {
+      require(lane.raw < lanes.raw, s"lane ${lane.raw} exceeds wave size ${lanes.raw}")
+      (value & (1L << lane.raw)) != 0L
+    }
 
-    def update(lane: Int, enabled: Boolean): Unit = {
-      val mask       = 1L << lane
+    def update(lane: Lane, enabled: Boolean): Unit = {
+      require(lane.raw < lanes.raw, s"lane ${lane.raw} exceeds wave size ${lanes.raw}")
+      val mask       = 1L << lane.raw
       val wasEnabled = (value & mask) != 0L
       if (enabled != wasEnabled) {
         if (enabled) {
@@ -52,35 +59,40 @@ private object VMState {
     def count: Int                              = bitCount
     def isEmpty: Boolean                        = bitCount == 0
     def nonEmpty: Boolean                       = bitCount != 0
-    def first: Option[Int where Between[0, 63]] =
-      Option.when(value != 0L)(java.lang.Long.numberOfTrailingZeros(value).unsafe[Int where Between[0, 63]])
+    def first: Option[Int in 0 ~ 63] =
+      Option.when(value != 0L)(java.lang.Long.numberOfTrailingZeros(value).unsafe[Int in 0 ~ 63])
   }
 
   /** Dense interpreter register banks are allocated on first access; null is the allocation-free hot-path sentinel. */
-  class VectorRegisters(lanes: Int where Between[1, 64]) {
+  class VectorRegisters(lanes: Int in 1 ~ 64) {
     private val registers = Array.ofDim[Array[Long] | Null](256)
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-    def apply(index: Int): Array[Long] = registers(index) match {
-      case null =>
-        val allocated = Array.ofDim[Long](lanes.raw)
-        registers(index) = allocated
-        allocated
-      case value => value
+    def apply(index: VMIR.VectorRegisterIndex): Array[Long] = {
+      registers(index.raw) match {
+        case null =>
+          val allocated = Array.ofDim[Long](lanes.raw)
+          registers(index.raw) = allocated
+          allocated
+        case value => value
+      }
     }
   }
 
   /** Per-lane scratch is allocated on first access; null is the allocation-free hot-path sentinel. */
-  class ScratchMemory(lanes: Int where Between[1, 64], bytesPerLane: Int) {
+  class ScratchMemory(lanes: Int in 1 ~ 64, bytesPerLane: Int >= 0) {
     private val values = Array.ofDim[Array[Byte] | Null](lanes.raw)
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-    def apply(lane: Int): Array[Byte] = values(lane) match {
-      case null =>
-        val allocated = Array.ofDim[Byte](bytesPerLane)
-        values(lane) = allocated
-        allocated
-      case value => value
+    def apply(lane: Lane): Array[Byte] = {
+      require(lane.raw < lanes.raw, s"lane ${lane.raw} exceeds the wave size ${lanes.raw}")
+      values(lane.raw) match {
+        case null =>
+          val allocated = Array.ofDim[Byte](bytesPerLane.raw)
+          values(lane.raw) = allocated
+          allocated
+        case value => value
+      }
     }
   }
 

@@ -67,7 +67,7 @@ class CrossWorkgroupSuite extends munit.FunSuite {
       lock.withLock(backing.writeInt8(address, value))
     override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
       lock.withLock(backing.writeInt32(address, value))
-    override def readLittleEndian(address: GuestAddress, size: Int where Between[1, 8]): Either[MemoryError, Long] = {
+    override def readLittleEndian(address: GuestAddress, size: Int in 1 ~ 8): Either[MemoryError, Long] = {
       val result = lock.withLock(backing.readLittleEndian(address, size))
       if (delayPayload && address == base.offset(16) && result.contains(0L)) flagRead.countDown()
       if (delayPrefix && address == base && result.exists(value => (value & 0xffffffffL) == 0L))
@@ -83,14 +83,14 @@ class CrossWorkgroupSuite extends munit.FunSuite {
     override def writeLittleEndian(
         address: GuestAddress,
         value: Long,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[MemoryError, Unit] = {
       beforeWrite(address)
       lock.withLock(backing.writeLittleEndian(address, value, size))
     }
     override def atomicModifyLittleEndian(
         address: GuestAddress,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     )(update: Long => Long): Either[MemoryError, Long] =
       lock.withLock(backing.atomicModifyLittleEndian(address, size)(update))
     override def writeBytes(address: GuestAddress, bytes: Vec[Byte]): Either[MemoryError, Unit] = {
@@ -99,7 +99,7 @@ class CrossWorkgroupSuite extends munit.FunSuite {
     }
 
     def clear(): Unit = (0 until size).foreach(index => backing.writeInt8(base.offset(index), 0).toOption.get)
-    def word(offset: Long, size: Int where Between[1, 8] = 4): Long =
+    def word(offset: Long, size: Int in 1 ~ 8 = 4): Long =
       backing.readLittleEndian(base.offset(offset), size).toOption.get
   }
 

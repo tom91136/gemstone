@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.server
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.vm.*
 import scala.concurrent.duration.*
@@ -23,7 +24,7 @@ class VulkanGraphicsSuite extends munit.FunSuite {
         timeout = 300.seconds
       )
       assertEquals(result.exit, 0, result.diagnostic)
-      assert(server.usage > 0, "graphics tests did not exercise RPC")
+      assert(server.usage.raw > 0, "graphics tests did not exercise RPC")
     }
   }
 }

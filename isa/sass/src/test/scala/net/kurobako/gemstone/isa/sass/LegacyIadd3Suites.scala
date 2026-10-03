@@ -4,6 +4,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.memory.*
@@ -51,11 +52,11 @@ class LegacyIadd3Suites extends munit.FunSuite {
       "probe_constant" -> 10,
       "probe_multi"    -> 32
     )
-    def fixtureModule(sm: Int, variant: String): Cubin.Module = {
+    def fixtureModule(sm: Int, variant: NonEmpty[String]): Cubin.Module = {
       val registers = registerCounts(variant)
       SASSFixture.module(
         sm,
-        Vec(SASSFixture.Kernel(variant, 320, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = registers))
+        Vec(SASSFixture.Kernel(variant, 320, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = registers))
       )
     }
 
@@ -66,7 +67,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
       Vec(50, 60).foreach {
         sm =>
           val module = fixtureModule(sm, "probe")
-          assertEquals(module.sm, sm)
+          assertEquals(module.sm.raw, sm)
           val listing = Map(50 -> Iadd3Fixtures.iadd3LegacyProbeSm50, 60 -> Iadd3Fixtures.iadd3LegacyProbeSm60)(sm)
           assert(listing.contains("IADD3 R8.CC, R6, R4, R2"))
           assert(listing.contains("IADD3.X R9, R7, R5, R3"))
@@ -74,7 +75,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
           val kernel   = module.kernels.find(_.name == "probe").get
           val sass     = SASSFixture(module, kernel, Vec(function))
 
-        val cases = Vec(
+        val cases = Vec.nonEmpty(
           (0x0000000000000002L, 0x0000000000000004L, 0x0000000000000008L),
           (0x00000000ffffffffL, 0x0000000000000000L, 0x0000000000000001L),
           (0x00000000ffffffffL, 0x00000000ffffffffL, 0x00000000fffffffeL),
@@ -86,11 +87,11 @@ class LegacyIadd3Suites extends munit.FunSuite {
         val cValues = cases.map(_._3)
         locally {
           val service  = SASSFixture.Execution()
-          val byteSize = cases.size * 8L
-          val output   = service.allocate(byteSize.unsafe[Long > 0])
-          val a        = service.allocate(byteSize.unsafe[Long > 0])
-          val b        = service.allocate(byteSize.unsafe[Long > 0])
-          val c        = service.allocate(byteSize.unsafe[Long > 0])
+          val byteSize = cases.positiveSize.toLong.widen[Long > 0] * 8L
+          val output   = service.allocate(byteSize)
+          val a        = service.allocate(byteSize)
+          val b        = service.allocate(byteSize)
+          val c        = service.allocate(byteSize)
           assert(service.write(a, 0L, qwords(aValues)).isRight)
           assert(service.write(b, 0L, qwords(bValues)).isRight)
           assert(service.write(c, 0L, qwords(cValues)).isRight)
@@ -98,7 +99,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
             .fold(e => fail(e.message), identity)
           val task = SASSFixture.task(
             "probe": NonEmpty[String],
-            LaunchGeometry.Dimensions(cases.size.unsafe[Int > 0], 1, 1),
+            LaunchGeometry.Dimensions(cases.positiveSize, 1, 1),
             LaunchGeometry.Dimensions.One,
             Vec(
               KernelTask.Argument.Memory(output, 0L),
@@ -108,7 +109,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
             )
           )
           service.run(program, task).fold(e => fail(e.message), identity)
-          val bytes  = service.read(output, 0L, (cases.size * 8).unsafe[Int >= 0]).toOption.get
+          val bytes  = service.read(output, 0L, cases.nonNegativeSize * 8).toOption.get
           val actual = cases.indices.map { i =>
             LittleEndian.decode(bytes, i * 8, 8)
           }.toVec
@@ -120,7 +121,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
     }
 
     test("CUDA 11.8 sm_50/sm_60 IADD3.CC/X pairs accept parameter constants in both halves") {
-      val cases = Vec(
+      val cases = Vec.nonEmpty(
         0x0000000000000000L -> 0x0000000000000000L,
         0x00000000ffffffffL -> 0x0000000000000000L,
         0x00000000ffffffffL -> 0x00000000ffffffffL,
@@ -131,7 +132,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
 
       Vec(50, 60).foreach { sm =>
         val module = fixtureModule(sm, "probe_constant")
-        assertEquals(module.sm, sm)
+        assertEquals(module.sm.raw, sm)
         val listing =
           Map(50 -> Iadd3Fixtures.iadd3LegacyProbeConstantSm50, 60 -> Iadd3Fixtures.iadd3LegacyProbeConstantSm60)(sm)
         assert(listing.contains("IADD3 R6.CC, R4, c[0x0][0x158], R2"))
@@ -139,20 +140,20 @@ class LegacyIadd3Suites extends munit.FunSuite {
         val function = ListingDecoder.parse(listing, "probe_constant", sm).fold(fail(_), _.head)
         val kernel   = module.kernels.find(_.name == "probe_constant").get
         val sass     = SASSFixture(module, kernel, Vec(function))
-        val byteSize = cases.size * 8L
+        val byteSize = cases.positiveSize.toLong.widen[Long > 0] * 8L
         constants.foreach { constant =>
           locally {
             val service = SASSFixture.Execution()
-            val output  = service.allocate(byteSize.unsafe[Long > 0])
-            val a       = service.allocate(byteSize.unsafe[Long > 0])
-            val b       = service.allocate(byteSize.unsafe[Long > 0])
+            val output  = service.allocate(byteSize)
+            val a       = service.allocate(byteSize)
+            val b       = service.allocate(byteSize)
             assert(service.write(a, 0L, qwords(cases.map(_._1))).isRight)
             assert(service.write(b, 0L, qwords(cases.map(_._2))).isRight)
             val program = service.compile(sass)
               .fold(error => fail(error.message), identity)
             val task = SASSFixture.task(
               "probe_constant": NonEmpty[String],
-              LaunchGeometry.Dimensions(cases.size.unsafe[Int > 0], 1, 1),
+              LaunchGeometry.Dimensions(cases.positiveSize, 1, 1),
               LaunchGeometry.Dimensions.One,
               Vec(
                 KernelTask.Argument.Memory(output, 0L),
@@ -162,7 +163,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
               )
             )
             service.run(program, task).fold(error => fail(error.message), identity)
-            val bytes  = service.read(output, 0L, (cases.size * 8).unsafe[Int >= 0]).toOption.get
+            val bytes  = service.read(output, 0L, cases.nonNegativeSize * 8).toOption.get
             val actual = cases.indices.map { i =>
               LittleEndian.decode(bytes, i * 8, 8)
             }.toVec
@@ -176,33 +177,33 @@ class LegacyIadd3Suites extends munit.FunSuite {
 
     test("CUDA 11.8 sm_50/sm_60 IADD3 carry survives an unrelated scheduled store") {
       val maxLow = 0x00000000ffffffffL
-      val rows   = Vec(
-        Vec(
+      val rows   = Vec.nonEmpty(
+        Vec.nonEmpty(
           (0L, 0L, 0L),
           (maxLow, 0L, 0L),
           (maxLow, maxLow, 0L),
           (maxLow, maxLow, maxLow)
         ),
-        Vec(
+        Vec.nonEmpty(
           (0x00000001ffffffffL, 1L, maxLow),
           (0x12345678ffffffffL, 0x87654321ffffffffL, 0xfedcba98ffffffffL),
           (0x7fffffffffffffffL, 0x0000000000000001L, 0x8000000000000000L),
           (0xffffffffffffffffL, 0xffffffffffffffffL, 0xffffffffffffffffL)
         ),
-        Vec(
+        Vec.nonEmpty(
           (0x01020304aabbccddL, 0x10203040ddeeff01L, 0x5566778899aabbccL),
           (0x80000000ffffffffL, 0x7fffffff00000001L, 0x00000000ffffffffL),
           (0x00000000ffffffffL, 0x0000000000000001L, 0x0000000000000001L),
           (0xaaaaaaaaaaaaaaaaL, 0x5555555555555555L, 1L)
         ),
-        Vec(
+        Vec.nonEmpty(
           (0x1111111122222222L, 0x3333333344444444L, 0x5555555566666666L),
           (0x00000000ffffffffL, 0x00000000ffffffffL, 0x0000000000000001L),
           (0xdeadbeefffffffffL, 0x10203040ffffffffL, 0x99887766ffffffffL),
           (0x0000000000000001L, 0x0000000000000002L, 0x0000000000000003L)
         )
       )
-      val triples  = rows.flatten
+      val triples  = rows.flatMapNonEmpty(identity)
       val mask     = (BigInt(1) << 64) - 1
       val expected = triples.map { case (a, b, c) =>
         ((BigInt(a) + BigInt(b) + BigInt(c)) & mask).toLong
@@ -215,20 +216,20 @@ class LegacyIadd3Suites extends munit.FunSuite {
           case 60    => Iadd3Fixtures.iadd3LegacyProbeMultipairSm60;
           case other => fail(s"unknown fixture architecture $other")
         }
-        assertEquals(module.sm, sm)
+        assertEquals(module.sm.raw, sm)
         assert(listing.contains("IADD3 R12.CC, R28, R8, R2"))
         assert(listing.contains("STG.E.64 [R18], R20"))
         assert(listing.contains("IADD3.X R13, R29, R9, R3"))
         val function = ListingDecoder.parse(listing, "probe_multi", sm).fold(fail(_), _.head)
         val kernel   = module.kernels.find(_.name == "probe_multi").get
         val sass     = SASSFixture(module, kernel, Vec(function))
-        val byteSize = triples.size * 8L
+        val byteSize = triples.positiveSize.toLong.widen[Long > 0] * 8L
         locally {
           val service = SASSFixture.Execution()
-          val output  = service.allocate(byteSize.unsafe[Long > 0])
-          val a       = service.allocate(byteSize.unsafe[Long > 0])
-          val b       = service.allocate(byteSize.unsafe[Long > 0])
-          val c       = service.allocate(byteSize.unsafe[Long > 0])
+          val output  = service.allocate(byteSize)
+          val a       = service.allocate(byteSize)
+          val b       = service.allocate(byteSize)
+          val c       = service.allocate(byteSize)
           assert(service.write(a, 0L, qwords(triples.map(_._1))).isRight)
           assert(service.write(b, 0L, qwords(triples.map(_._2))).isRight)
           assert(service.write(c, 0L, qwords(triples.map(_._3))).isRight)
@@ -236,7 +237,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
             .fold(error => fail(error.message), identity)
           val task = SASSFixture.task(
             "probe_multi": NonEmpty[String],
-            LaunchGeometry.Dimensions(rows.size.unsafe[Int > 0], 1, 1),
+            LaunchGeometry.Dimensions(rows.positiveSize, 1, 1),
             LaunchGeometry.Dimensions.One,
             Vec(
               KernelTask.Argument.Memory(output, 0L),
@@ -246,7 +247,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
             )
           )
           service.run(program, task).fold(error => fail(error.message), identity)
-          val actual = service.read(output, 0L, (triples.size * 8).unsafe[Int >= 0]).toOption.get
+          val actual = service.read(output, 0L, triples.nonNegativeSize * 8).toOption.get
           assertEquals(actual, qwords(expected), s"sm_$sm scheduled carry pair")
         }
       }
@@ -282,10 +283,10 @@ class LegacyIadd3Suites extends munit.FunSuite {
 
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(8L.unsafe[Long > 0])
-        val a       = service.allocate(8L.unsafe[Long > 0])
-        val b       = service.allocate(8L.unsafe[Long > 0])
-        val c       = service.allocate(8L.unsafe[Long > 0])
+        val output  = service.allocate(8L)
+        val a       = service.allocate(8L)
+        val b       = service.allocate(8L)
+        val c       = service.allocate(8L)
         Vec(a, b, c).zip(values).foreach { case (allocation, value) =>
           assert(service.write(allocation, 0L, qwords(Vec(value))).isRight)
         }
@@ -294,7 +295,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
           service.compile(valid).fold(error => fail(error.message), identity)
         val task = SASSFixture.task(
           "probe": NonEmpty[String],
-          LaunchGeometry.Dimensions(1.unsafe[Int > 0], 1, 1),
+          LaunchGeometry.Dimensions(1, 1, 1),
           LaunchGeometry.Dimensions.One,
           Vec(
             KernelTask.Argument.Memory(output, 0L),
@@ -330,15 +331,15 @@ class LegacyIadd3Suites extends munit.FunSuite {
 
   {
     val negativeKernelsLegacy = Vec(
-      SASSFixture.Kernel("add_sub", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 12),
-      SASSFixture.Kernel("negative_constant_sub", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 10),
-      SASSFixture.Kernel("add_large_constant_sub", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 10),
-      SASSFixture.Kernel("add_constant_sub", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 10)
+      SASSFixture.Kernel("add_sub", 320, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 12),
+      SASSFixture.Kernel("negative_constant_sub", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 10),
+      SASSFixture.Kernel("add_large_constant_sub", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 10),
+      SASSFixture.Kernel("add_constant_sub", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 10)
     )
     val negativeKernelsModern = Vec(
-      SASSFixture.Kernel("add_sub", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8), registers = 14),
-      SASSFixture.Kernel("add_large_constant_sub", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 12),
-      SASSFixture.Kernel("add_constant_sub", 352, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 12)
+      SASSFixture.Kernel("add_sub", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 14),
+      SASSFixture.Kernel("add_large_constant_sub", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 12),
+      SASSFixture.Kernel("add_constant_sub", 352, Vec((0, 8), (8, 8), (16, 8)), registers = 12)
     )
     def fixtureModule(sm: Int): Cubin.Module = {
       val constants: Vec[(String, Vec[Byte])] = if (sm == 50 || sm == 60)
@@ -374,10 +375,10 @@ class LegacyIadd3Suites extends munit.FunSuite {
         service: SASSFixture.Execution,
         module: Cubin.Module,
         sm: Int,
-        kernelName: String,
+        kernelName: NonEmpty[String],
         listing: String,
         inputBytes: Vec[Vec[Byte]],
-        expected: Vec[Long]
+        expected: NonEmpty[Vec[Long]]
     ): Unit = {
       val function = ListingDecoder.parse(
         listing,
@@ -409,10 +410,10 @@ class LegacyIadd3Suites extends munit.FunSuite {
       )
       val program = service.compile(sass)
         .fold(error => fail(error.message), identity)
-      val count  = expected.size
-      val output = service.allocate((count.toLong * 8L).unsafe[Long > 0])
+      val count  = expected.positiveSize
+      val output = service.allocate(count.toLong.widen[Long > 0] * 8L)
       val inputs = inputBytes.map(bytes =>
-        service.allocate(bytes.size.toLong.unsafe[Long > 0])
+        service.allocate(bytes)
       )
       inputs.zip(inputBytes).foreach { case (memory, bytes) =>
         assert(service.write(memory, 0L, bytes).isRight)
@@ -421,16 +422,16 @@ class LegacyIadd3Suites extends munit.FunSuite {
         KernelTask.Argument.Memory(memory, 0L)
       ) :+ KernelTask.Argument.Memory(output, 0L)
       val task = SASSFixture.task(
-        kernelName.unsafe[NonEmpty[String]],
+        kernelName,
         LaunchGeometry.Dimensions.One,
-        LaunchGeometry.Dimensions(count.unsafe[Int > 0], 1, 1),
+        LaunchGeometry.Dimensions(count, 1, 1),
         Vec.from(args)
       )
       service.run(program, task).fold(error => fail(error.message), identity)
       val bytes = service.read(
         output,
         0L,
-        (count * 8).unsafe[Int >= 0]
+        count * 8
       ).fold(error => fail(error.message), identity)
       val actual = bytes.indices.grouped(8).map(_.zipWithIndex.foldLeft(0L) { case (value, (index, byte)) =>
         value | ((bytes(index).toLong & 255L) << (byte * 8))
@@ -438,7 +439,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
       assertEquals(actual, expected, s"sm_$sm $kernelName")
     }
 
-    val wideValues = Vec(
+    val wideValues = Vec.nonEmpty(
       0L,
       1L,
       0xfffffffeL,
@@ -450,29 +451,30 @@ class LegacyIadd3Suites extends munit.FunSuite {
       0xfffffffffffffffeL,
       -1L
     )
-    val narrowValues = Vec(0, 1, 0x3eff, 0x3f00, 0x3f01, 0x7fffffff, Int.MinValue, -2, -1)
+    val narrowValues = Vec.nonEmpty(0, 1, 0x3eff, 0x3f00, 0x3f01, 0x7fffffff, Int.MinValue, -2, -1)
 
     val constantCases = {
-      val boundary = for a <- wideValues; b <- narrowValues yield (a, b)
+      val boundary = wideValues.flatMapNonEmpty(a => narrowValues.mapNonEmpty(b => (a, b)))
       val random   = Random(0x51a7L)
-      boundary ++ Vec.fill(256)((random.nextLong(), random.nextInt()))
+      boundary.concatNonEmpty(Vec.fill(256)((random.nextLong(), random.nextInt())))
     }
 
     val subtractCases = {
-      val boundary = for a <- wideValues; b <- wideValues; c <- wideValues yield (a, b, c)
-      val random   = Random(0x51a8L)
-      boundary ++ Vec.fill(256)((random.nextLong(), random.nextLong(), random.nextLong()))
+      val boundary =
+        wideValues.flatMapNonEmpty(a => wideValues.flatMapNonEmpty(b => wideValues.mapNonEmpty(c => (a, b, c))))
+      val random = Random(0x51a8L)
+      boundary.concatNonEmpty(Vec.fill(256)((random.nextLong(), random.nextLong(), random.nextLong())))
     }
 
     test("CUDA 11.8 sm_50/sm_60 negative-source IADD3 pairs implement full 64-bit expressions") {
       Vec(50, 60).foreach { sm =>
         val module = fixtureModule(sm)
-        assertEquals(module.sm, sm)
+        assertEquals(module.sm.raw, sm)
         locally {
           val service          = SASSFixture.Execution()
-          val aConstant        = constantCases.map(_._1)
-          val bConstant        = constantCases.map(_._2)
-          val expectedConstant = constantCases.map { case (a, b) =>
+          val aConstant        = constantCases.mapNonEmpty(_._1)
+          val bConstant        = constantCases.mapNonEmpty(_._2)
+          val expectedConstant = constantCases.mapNonEmpty { case (a, b) =>
             (unsigned(a) + BigInt(0x3f00) - BigInt(b.toLong & 0xffffffffL) & mask64).toLong
           }
           execute(
@@ -485,7 +487,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
             expectedConstant
           )
 
-          val expectedLargeConstant = constantCases.map { case (a, b) =>
+          val expectedLargeConstant = constantCases.mapNonEmpty { case (a, b) =>
             (unsigned(a) + BigInt(0xfc100) - BigInt(b.toLong & 0xffffffffL) & mask64).toLong
           }
           execute(
@@ -499,13 +501,13 @@ class LegacyIadd3Suites extends munit.FunSuite {
           )
 
           val negativeConstantCases = {
-            val boundary = for a <- wideValues; b <- wideValues yield (a, b)
+            val boundary = wideValues.flatMapNonEmpty(a => wideValues.mapNonEmpty(b => (a, b)))
             val random   = Random(0x51a9L)
-            boundary ++ Vec.fill(256)((random.nextLong(), random.nextLong()))
+            boundary.concatNonEmpty(Vec.fill(256)((random.nextLong(), random.nextLong())))
           }
-          val negativeA                = negativeConstantCases.map(_._1)
-          val negativeB                = negativeConstantCases.map(_._2)
-          val expectedNegativeConstant = negativeConstantCases.map { case (a, b) =>
+          val negativeA                = negativeConstantCases.mapNonEmpty(_._1)
+          val negativeB                = negativeConstantCases.mapNonEmpty(_._2)
+          val expectedNegativeConstant = negativeConstantCases.mapNonEmpty { case (a, b) =>
             (unsigned(a) - BigInt(0x3f00) - unsigned(b) & mask64).toLong
           }
           execute(
@@ -518,10 +520,10 @@ class LegacyIadd3Suites extends munit.FunSuite {
             expectedNegativeConstant
           )
 
-          val aSubtract        = subtractCases.map(_._1)
-          val bSubtract        = subtractCases.map(_._2)
-          val cSubtract        = subtractCases.map(_._3)
-          val expectedSubtract = subtractCases.map { case (a, b, c) =>
+          val aSubtract        = subtractCases.mapNonEmpty(_._1)
+          val bSubtract        = subtractCases.mapNonEmpty(_._2)
+          val cSubtract        = subtractCases.mapNonEmpty(_._3)
+          val expectedSubtract = subtractCases.mapNonEmpty { case (a, b, c) =>
             (unsigned(a) + unsigned(b) - unsigned(c) & mask64).toLong
           }
           execute(
@@ -542,7 +544,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
     def fixtureModule(sm: Int): Cubin.Module =
       SASSFixture.module(
         sm,
-        Vec(SASSFixture.Kernel("mulwide", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 4), registers = 14))
+        Vec(SASSFixture.Kernel("mulwide", 320, Vec((0, 8), (8, 8), (16, 8), (24, 4)), registers = 14))
       )
 
     for (execute <- Vec(None, Some(true), Some(false)))
@@ -560,7 +562,7 @@ class LegacyIadd3Suites extends munit.FunSuite {
         )
         Vec(50, 60).foreach { sm =>
           val module = fixtureModule(sm)
-          assertEquals(module.sm, sm)
+          assertEquals(module.sm.raw, sm)
           val listing = Map(50 -> Iadd3Fixtures.iadd3LegacyMulwideSm50, 60 -> Iadd3Fixtures.iadd3LegacyMulwideSm60)(sm)
           assert(listing.contains("IADD3.RS R7, R13, R10, R11"))
           val original = ListingDecoder.parse(listing, "mulwide", sm).fold(fail(_), _.head)
@@ -599,9 +601,9 @@ class LegacyIadd3Suites extends munit.FunSuite {
 
           locally {
             val service = SASSFixture.Execution()
-            val output  = service.allocate(8L.unsafe[Long > 0])
-            val a       = service.allocate(4L.unsafe[Long > 0])
-            val b       = service.allocate(4L.unsafe[Long > 0])
+            val output  = service.allocate(8L)
+            val a       = service.allocate(4L)
+            val b       = service.allocate(4L)
             val program = service.compile(sass)
               .fold(error => fail(error.message), identity)
             val task = SASSFixture.task(
@@ -639,8 +641,8 @@ class LegacyIadd3Suites extends munit.FunSuite {
     def fixtureModule: Cubin.Module = SASSFixture.module(
       35,
       Vec(
-        SASSFixture.Kernel("eq64s", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 6),
-        SASSFixture.Kernel("eq64", 320, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 8)
+        SASSFixture.Kernel("eq64s", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 6),
+        SASSFixture.Kernel("eq64", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 8)
       )
     )
 
@@ -657,8 +659,8 @@ class LegacyIadd3Suites extends munit.FunSuite {
       )
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(16L.unsafe[Long > 0])
-        Vec("eq64", "eq64s").foreach { name =>
+        val output  = service.allocate(16L)
+        Vec[NonEmpty[String]]("eq64", "eq64s").foreach { name =>
           val sassText = name match {
             case "eq64"  => Iadd3Fixtures.eq64ExtendedSm35
             case "eq64s" => Iadd3Fixtures.eq64sExtendedSm35
@@ -671,10 +673,10 @@ class LegacyIadd3Suites extends munit.FunSuite {
           val sass     = SASSFixture(module, kernel, Vec(function))
           val program  = service.compile(sass)
             .fold(e => fail(e.message), identity)
-          val count = if (name == "eq64") 4 else 2
+          val count: Int > 0 = if (name == "eq64") 4 else 2
           cases.foreach { case (a, b, expectedAll) =>
             val task = SASSFixture.task(
-              name.unsafe[NonEmpty[String]],
+              name,
               LaunchGeometry.Dimensions.One,
               LaunchGeometry.Dimensions.One,
               Vec(
@@ -684,9 +686,9 @@ class LegacyIadd3Suites extends munit.FunSuite {
               )
             )
             service.run(program, task).fold(e => fail(e.message), identity)
-            val expected = expectedAll.take(count)
-            val bytes    = service.read(output, 0L, (count * 4).unsafe[Int >= 0]).toOption.get
-            val actual   = (0 until count).map { i =>
+            val expected = expectedAll.take(count.raw)
+            val bytes    = service.read(output, 0L, count * 4).toOption.get
+            val actual   = (0 until count.raw).map { i =>
               val at = i * 4
               (bytes(at) & 255) | ((bytes(at + 1) & 255) << 8) |
                 ((bytes(at + 2) & 255) << 16) | (bytes(at + 3) << 24)

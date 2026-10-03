@@ -6,6 +6,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.EncodingConstants.*
 import net.kurobako.gemstone.isa.amdgpu.PackedVectorInstructionDefs.*
@@ -924,33 +925,35 @@ private object InstructionCodec {
     )
     val memoryLiteral = layout.format == EncodingFormat.SMEM && layout.bits == 32 && layout.isa == ISA.GFX7 &&
       layout.get(word, EncodingField.IMM) == 0 && layout.get(word, EncodingField.OFFSET) == Source.LITERAL_CONST
-    val literalBytes =
-      if (layout.byName.contains(EncodingField.LITERAL) || layout.byName.contains(EncodingField.LITERAL64)) 0
-      else operands.flatMap(_.field).filter(SourceFields(_)).map(field =>
+    val literalBytes: Option[Int in (4, 8)] =
+      if (layout.byName.contains(EncodingField.LITERAL) || layout.byName.contains(EncodingField.LITERAL64)) None
+      else operands.flatMap(_.field).filter(SourceFields(_)).flatMap(field =>
         OperandCodec.literalSize(layout.get(word, field).toInt, target)
-      )
-        .maxOption.getOrElse(0).max(if (memoryLiteral) 4 else 0)
-    val size = layout.bits / 8 + literalBytes
-    if (bytes.size - offset < size || !layout.accepts(word, literalBytes)) None
+      ).maxOption.orElse(Option.when(memoryLiteral)(4))
+    val byteCount = literalBytes.fold(0)(_.raw)
+    val size      = layout.bits / 8 + byteCount
+    if (bytes.size - offset < size || !layout.accepts(word, byteCount)) None
     else {
       val literal =
         Option.when(layout.byName.contains(EncodingField.LITERAL))(OperandCodec.Literal(layout.get(
           word,
           EncodingField.LITERAL
         ).toLong))
-          .orElse(Option.when(literalBytes != 0)(OperandCodec.Literal(
-            LittleEndian.decode(bytes, offset + layout.bits / 8, literalBytes.unsafe[Int where Between[0, 8]]),
-            literalBytes.unsafe[Int in (4, 8)]
-          )))
+          .orElse(literalBytes.map(size =>
+            OperandCodec.Literal(
+              LittleEndian.decode(bytes, offset + layout.bits / 8, size),
+              size
+            )
+          ))
       val fields = layout.fields.map(field => field.name -> field.get(word)).toMap
       val mods   = layout.fields.toVec.flatMap { field =>
         val value = field.get(word)
         if (
           value == 0 && field.name != EncodingField.OP_SEL_HI && field.name != EncodingField.DFMT && field.name != EncodingField.FORMAT && !field.name.isWait
         ) Vec.empty[Modifier]
-        else if (Flags(field.name)) Vec(Modifier(field.name.toString.toLowerCaseRoot.unsafe[NonEmpty[String]]))
+        else if (Flags(field.name)) Vec(Modifier(field.name.assemblyName))
         else if (NumericModifiers(field.name)) Vec(Modifier(
-          field.name.toString.toLowerCaseRoot.unsafe[NonEmpty[String]],
+          field.name.assemblyName,
           Some(value.toString.unsafe[NonEmpty[String]])
         ))
         else if (

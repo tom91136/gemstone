@@ -11,10 +11,10 @@ import net.kurobako.gemstone.vm.*
 
 class DoubleSetSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
-    SASSFixture.module(35, Vec(SASSFixture.Kernel("probe", 320, Vec(0 -> 8, 8 -> 8), registers = 24)))
+    SASSFixture.module(35, Vec(SASSFixture.Kernel("probe", 320, Vec((0, 8), (8, 8)), registers = 24)))
 
   test("compiler-produced legacy DSET preserves ordered, unordered, boolean and BF comparisons") {
-    val pairs = Vec(
+    val pairs = Vec.nonEmpty(
       (1.0, 2.0),
       (2.0, 1.0),
       (1.0, 1.0),
@@ -51,9 +51,9 @@ class DoubleSetSuite extends munit.FunSuite {
     locally {
       val service = SASSFixture.Execution()
       val input   =
-        service.allocate((pairs.size.toLong * 16).unsafe[Long > 0])
+        service.allocate(pairs.positiveSize.toLong.widen[Long > 0] * 16L)
       val output =
-        service.allocate((expected.size.toLong * 4).unsafe[Long > 0])
+        service.allocate(pairs.positiveSize.toLong.widen[Long > 0] * 32L)
       val bytes = pairs.flatMap { case (a, b) =>
         Vec(a, b).flatMap(value =>
           LittleEndian.toArray(java.lang.Double.doubleToRawLongBits(value), 8)
@@ -64,7 +64,7 @@ class DoubleSetSuite extends munit.FunSuite {
         .fold(e => fail(e.message), identity)
       val task = SASSFixture.task(
         "probe": NonEmpty[String],
-        LaunchGeometry.Dimensions(pairs.size.unsafe[Int > 0], 1, 1),
+        LaunchGeometry.Dimensions(pairs.positiveSize, 1, 1),
         LaunchGeometry.Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(output, 0L),
@@ -72,7 +72,7 @@ class DoubleSetSuite extends munit.FunSuite {
         )
       )
       service.run(program, task).fold(e => fail(e.message), identity)
-      val actual = service.read(output, 0L, (expected.size * 4).unsafe[Int >= 0]).toOption.get
+      val actual = service.read(output, 0L, expected.nonNegativeSize * 4).toOption.get
       assertEquals(
         expected.indices.map(i => LittleEndian.decode(actual, i * 4, 4)).toVec,
         expected

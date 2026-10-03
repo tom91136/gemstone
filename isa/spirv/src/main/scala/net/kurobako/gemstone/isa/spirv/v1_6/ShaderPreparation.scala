@@ -41,10 +41,10 @@ object ShaderPreparation {
       } yield {
         // This is the argument order used by execution, including expanded descriptor arrays.
         val arguments   = VMShaderInterface.argumentVariables(program, entry)
-        val counts      = scala.collection.mutable.Map.empty[Int, Int]
+        val counts      = scala.collection.mutable.Map.empty[Int, Int >= 0]
         val descriptors = arguments.filter(program.descriptorBindings.contains(_)).map { variable =>
           val (set, binding) = program.descriptorBindings(variable)
-          val element        = counts.getOrElse(variable, 0)
+          val element        = counts.getOrElse(variable, 0: Int >= 0)
           counts.update(variable, element + 1)
           val pointee = program.types(program.globals(variable).pointerType) match {
             case RuntimeType.Pointer(_, value) => value
@@ -64,7 +64,7 @@ object ShaderPreparation {
           ShaderDescriptor(
             set,
             binding,
-            element.unsafe[Int >= 0],
+            element,
             resource
           )
         }

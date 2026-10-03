@@ -9,6 +9,18 @@ import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
 class VMModelSuite extends munit.FunSuite {
+  test("inactive groups remain inactive across the Int narrowing boundary") {
+    val geometry = LaunchGeometry.forLaunch(
+      LaunchGeometry.Dimensions(1024, 1, 1),
+      LaunchGeometry.Dimensions(4194306, 1, 1),
+      Some(LaunchGeometry.GlobalDimensions(1L, 1L, 1L))
+    ).toOption.get
+    for (group <- Seq[Int >= 0](1, 2097152, 4194304, 4194305))
+      assert(geometry.activeGroupSize(LaunchGeometry.Coordinates(group, 0, 0)).isLeft)
+    assertEquals(geometry.activeGroupSize(LaunchGeometry.Coordinates.origin),
+      Right(LaunchGeometry.Dimensions.One))
+  }
+
   test("kernel task excludes runtime identity and validates relocation sources") {
     val arguments = Vec[KernelTask.Argument](KernelTask.Argument.Memory(AllocationId(7L), 0L))
     val valid     = KernelTask.validated(

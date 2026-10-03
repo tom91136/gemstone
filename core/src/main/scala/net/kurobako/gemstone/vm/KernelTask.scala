@@ -32,7 +32,7 @@ object KernelTask {
       privateSegmentBytes: Int >= 0 = 0,
       groupSegmentBytes: Int >= 0 = 0,
       pointerRelocations: Vec[PointerRelocation] = Vec.empty,
-      workDim: Int where Between[1, 3] = 3,
+      workDim: Int in 1 ~ 3 = 3,
       globalOffset: LaunchGeometry.Coordinates = LaunchGeometry.Coordinates.origin,
       discoverArgumentRelocations: Boolean = false
   ): Either[NonEmpty[String], KernelTask] =

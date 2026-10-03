@@ -19,7 +19,7 @@ enum MemoryError(val message: NonEmpty[String]) {
         s"${address.show} refers to freed allocation ${allocation.provenance}"
       )
 
-  case UnsupportedAtomic(address: GuestAddress, width: Int where Between[1, 8])
+  case UnsupportedAtomic(address: GuestAddress, width: Int in 1 ~ 8)
       extends MemoryError(s"${address.show} + $width bytes does not support atomic modification")
 
   case AddressSpaceExhausted(size: Int > 0)

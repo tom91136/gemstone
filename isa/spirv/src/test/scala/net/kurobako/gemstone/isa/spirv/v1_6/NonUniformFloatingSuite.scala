@@ -2,7 +2,9 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -13,12 +15,14 @@ class NonUniformFloatingSuite extends munit.FunSuite {
   private def lit(n: Int): Operand = operand(OperandKind.LiteralInteger, n)
 
   for {
-    width     <- Seq(16, 32, 64)
+    width <- Seq[Int in (16, 32, 64)](16, 32, 64)
+    rawWidth = width.raw
+    widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     lanes     <- Seq(1, 2, 4)
     kind      <- Seq("add", "multiply", "minimum", "maximum")
     operation <- 0 to 2
     branch    <- Seq("uniform", "divergent", "return")
-  } test(s"nonuniform $kind $width x $lanes operation $operation $branch reconverges across partial subgroups") {
+  } test(s"nonuniform $kind $rawWidth x $lanes operation $operation $branch reconverges across partial subgroups") {
     val count                                     = 69 // Two complete subgroups and one partial subgroup.
     val valueType                                 = if (lanes == 1) 3 else 4
     def collective(destination: Int): Instruction = {
@@ -52,7 +56,7 @@ class NonUniformFloatingSuite extends munit.FunSuite {
       Vec(
         Instruction.TypeVoid(ref(1)),
         Instruction.TypeInt(ref(2), lit(32), lit(0)),
-        Instruction.TypeFloat(ref(3), lit(width), None),
+        Instruction.TypeFloat(ref(3), lit(rawWidth), None),
         Instruction.TypeVector(ref(4), ref(3), lit(4)),
         Instruction.TypePointer(ref(5), operand(OperandKind.StorageClass, StorageClass.CrossWorkgroup), ref(valueType)),
         Instruction.TypeVector(ref(6), ref(2), lit(3)),
@@ -97,8 +101,8 @@ class NonUniformFloatingSuite extends munit.FunSuite {
       ),
       Endianness.Little
     )
-    val bytes                                      = (width / 8).unsafe[Int where Between[0, 8]]
-    val floatWidth                                 = width.unsafe[Int in (16, 32, 64)]
+    val bytes                                      = widthBytes.widen[Int in 0 ~ 8]
+    val floatWidth                                 = width
     def input(thread: Int, component: Int): Double =
       if (kind == "multiply") if ((thread + component) % 2 == 0) -1.0 else 1.0
       else (thread % 5 + component + 1).toDouble
@@ -120,7 +124,7 @@ class NonUniformFloatingSuite extends munit.FunSuite {
       Dimensions.One,
       Vec(
         KernelTask.Argument.Memory(region, 0L),
-        KernelTask.Argument.Memory(region, source.size.toLong.unsafe[Long >= 0])
+        KernelTask.Argument.Memory(region, source.nonNegativeSize.toLong.widen[Long >= 0])
       )
     ).toOption.get
     assertEquals(executeUnchecked(module, task, memory), Right(()))
@@ -139,7 +143,7 @@ class NonUniformFloatingSuite extends munit.FunSuite {
     val expected = Vec.from((0 until 2).flatMap { output =>
       (0 until count).flatMap { thread =>
         val masked = branch != "uniform" && (output == 0 || branch == "return")
-        if (masked && thread % 2 != 0) Vec.fill(lanes * width / 8)(0x55.toByte)
+        if (masked && thread % 2 != 0) Vec.fill(lanes * rawWidth / 8)(0x55.toByte)
         else {
           val start    = thread / 32 * 32
           val active   = (start until math.min(start + 32, count)).filter(t => !masked || t % 2 == 0)

@@ -1,20 +1,23 @@
 package net.kurobako.gemstone.benchmarks
 
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
+
 /** One bounded, deterministic neighbouring-cell flux calculation. */
 object CloverleafFluxFixture {
-  val rowStride = 32
-  val dt        = 0.125
-  val inputs    = 6
-  val arrays    = 8
+  val rowStride: Int > 0 = 32
+  val dt                 = 0.125
+  val inputs             = 6
+  val arrays: Int > 0    = 8
 
-  def length(cells: Int): Int = Math.addExact(cells, rowStride + 1)
+  def length(cells: Int > 0): Int > 0 = cells + (rowStride + 1)
 
   def value(array: Int, index: Int): Double =
     0.5 + array.toDouble * 0.125 + (index % 17).toDouble * 0.03125
 
   def expectedX(index: Int): Double =
     0.25 * dt * value(0, index) *
-      (value(2, index) + value(2, index + rowStride) + value(4, index) + value(4, index + rowStride))
+      (value(2, index) + value(2, index + rowStride.raw) + value(4, index) + value(4, index + rowStride.raw))
 
   def expectedY(index: Int): Double =
     0.25 * dt * value(1, index) *

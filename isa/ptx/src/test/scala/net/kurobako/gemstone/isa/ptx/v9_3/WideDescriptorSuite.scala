@@ -55,7 +55,7 @@ class WideDescriptorSuite extends munit.FunSuite {
       backing.writeInt8(address, value)
     override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
       backing.writeInt32(address, value)
-    override def readLittleEndian(address: GuestAddress, size: Int where Between[1, 8]): Either[MemoryError, Long] = {
+    override def readLittleEndian(address: GuestAddress, size: Int in 1 ~ 8): Either[MemoryError, Long] = {
       val result = backing.readLittleEndian(address, size)
       afterRead(address)
       result
@@ -63,7 +63,7 @@ class WideDescriptorSuite extends munit.FunSuite {
     override def writeLittleEndian(
         address: GuestAddress,
         value: Long,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[MemoryError, Unit] = {
       val result = backing.writeLittleEndian(address, value, size)
       observe()

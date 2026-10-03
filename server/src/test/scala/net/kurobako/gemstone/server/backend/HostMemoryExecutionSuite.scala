@@ -17,11 +17,11 @@ import scala.collection.mutable
 import scala.util.Using
 
 class HostMemoryExecutionSuite extends munit.FunSuite {
-  private def encoded(value: Long, size: Int where Between[0, 8]): Vec[Byte] =
+  private def encoded(value: Long, size: Int in 0 ~ 8): Vec[Byte] =
     LittleEndian.toVec(value, size)
-  private def scalar(value: Long, size: Int where Between[0, 8] = 8): KernelTask.Argument =
+  private def scalar(value: Long, size: Int in 0 ~ 8 = 8): KernelTask.Argument =
     KernelTask.Argument.Scalar(encoded(value, size))
-  private def bytes(address: Long, value: Long, size: Int where Between[0, 8]): Map[Long, Byte] =
+  private def bytes(address: Long, value: Long, size: Int in 0 ~ 8): Map[Long, Byte] =
     encoded(value, size).zipWithIndex.map((byte, index) => (address + index.toLong) -> byte).toMap
 
   private object Async extends scala.concurrent.ExecutionContext {
@@ -88,7 +88,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         batch.sync.foreach { sync =>
           native ++= beforeSync(sync, native.toMap)
           val observed = sync.atomic.fold(0L) { request =>
-            val size     = request.size.unsafe[Int where Between[1, 8]]
+            val size     = request.size
             val observed = (0 until size.raw).foldLeft(0L)((value, index) =>
               value | ((native(request.address.raw + index).toLong & 255L) << (index * 8))
             )
@@ -103,7 +103,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
             }
           }
           sync.atomicStores.foreach { request =>
-            val size    = request.size.unsafe[Int where Between[1, 8]]
+            val size    = request.size
             val updated = bytes(request.address.raw, request.desired, size)
             native ++= updated
             writes ++= updated
@@ -501,8 +501,8 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       beforeSync = (sync, _) => { syncs += sync; Map.empty }
     )
     assertEquals(reads, Vector.empty)
-    assertEquals(syncs.flatMap(_.atomic.map(_.size)).toVector, Vector(1, 2))
-    assertEquals(syncs.flatMap(_.atomicStores.map(_.size)).toVector, Vector(1, 2))
+    assertEquals(syncs.flatMap(_.atomic.map(_.size)).toVector, Vector[Int in (1, 2, 4, 8)](1, 2))
+    assertEquals(syncs.flatMap(_.atomicStores.map(_.size)).toVector, Vector[Int in (1, 2, 4, 8)](1, 2))
     assert(syncs.forall(_.relaxed))
     assertEquals(writes, bytes(0x100002000L, 0x33L, 1) ++ bytes(0x100002002L, 0x6655L, 2))
   }

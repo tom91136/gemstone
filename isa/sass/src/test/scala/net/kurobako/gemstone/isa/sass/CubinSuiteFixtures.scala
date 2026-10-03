@@ -12,7 +12,7 @@ object CubinSuiteFixtures {
       Vec(SASSFixture.Kernel(
         "saxpy",
         metadata.base,
-        Vec(0 -> 8, 8 -> 8, 16 -> 4, 20 -> 4),
+        Vec((0, 8), (8, 8), (16, 4), (20, 4)),
         registers = metadata.registers
       ))
     )

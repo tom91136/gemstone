@@ -74,7 +74,7 @@ object Journal {
   }
 
   type FrameByteSize = FrameByteSize.Type
-  object FrameByteSize extends Newtype[Int where Between[1, MaximumFrameBytes.type]] {
+  object FrameByteSize extends Newtype[Int in 1 ~ MaximumFrameBytes.type] {
     extension (value: FrameByteSize) def toInt: Int = value.raw
   }
 
@@ -314,7 +314,7 @@ object Journal {
     private val lock = ReentrantLock()
     // Recording owners are capabilities: equal objects must remain distinct clients. Scala's AnyRefMap uses
     // value equality, so IdentityHashMap is intentional here.
-    private val clients = java.util.IdentityHashMap[AnyRef, java.lang.Long]()
+    private val clients = java.util.IdentityHashMap[AnyRef, RecordedClientId]()
     private val order   = Order()
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var nextClient = RecordedClientId(1L)
@@ -323,7 +323,7 @@ object Journal {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var sequence = EventId(0L)
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private var frames = 0
+    private var frames: Int >= 0 = 0
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var written = 0L
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -353,14 +353,14 @@ object Journal {
     )
     written = Math.addExact(written, writeRecord(output, encodedHeader))
 
-    private def clientId(client: AnyRef): RecordedClientId = Option(clients.get(client)) match {
-      case Some(found) => found.longValue().unsafe[RecordedClientId]
-      case None        =>
+    private def clientId(client: AnyRef): RecordedClientId =
+      if (clients.containsKey(client)) clients.get(client)
+      else {
         val id = nextClient
         nextClient = nextClient.next
-        clients.put(client, id.toLong)
+        clients.put(client, id)
         id
-    }
+      }
     def connection(client: AnyRef): Connection = lock.withLock {
       ensure(!closed, "capture is closed")
       val id = nextConnection
@@ -368,14 +368,13 @@ object Journal {
       Connection(this, clientId(client), id)
     }
     def clientClosed(client: AnyRef): Unit = lock.withLock {
-      Option(clients.get(client)).foreach(found =>
+      if (clients.containsKey(client))
         append(
           Kind.ClientClose,
-          found.longValue().unsafe[RecordedClientId],
+          clients.get(client),
           None,
           Array.emptyByteArray
         )
-      )
     }
     def markUnreplayable(reason: String): Unit = lock.withLock {
       if (failure.isEmpty) {
@@ -426,7 +425,7 @@ object Journal {
         if (!order.complete && failure.isEmpty)
           failure = Some(FailureReason("capture ended with an open or incomplete exchange"))
         Using.resource(output) { output =>
-          val footer = encode(FooterRecord(sequence.toLong.toInt, frames, failure.isEmpty, failure.map(_.raw)))
+          val footer = encode(FooterRecord(sequence.toLong.toInt, frames.raw, failure.isEmpty, failure.map(_.raw)))
           ensure(footer.length <= MetadataRecordLimit, "archive footer exceeds its byte limit")
           ensure(
             footer.length.toLong + RecordFramingBytes <= header.limits.maxArchiveBytes.toLong - written,
@@ -556,17 +555,17 @@ object Journal {
     val order       = Order()
     val recordLimit = declared.maxFrameBytes.toInt + RecordOverheadBytes
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    var count = 0
+    var count: Int >= 0 = 0
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    var frames = 0
+    var frames: Int >= 0 = 0
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var summary = Option.empty[Summary]
     while (summary.isEmpty)
       readRecord(input, math.max(recordLimit, MetadataRecordLimit)) match {
         case Some((location, EventRecord(sequence, code, client, connection, frame))) =>
-          ensure(count < declared.maxEvents.raw, "too many events")
+          ensure(count.raw < declared.maxEvents.raw, "too many events")
           val kind = Kind.values.find(_.code == code).getOrElse(invalid("unknown event kind"))
-          ensure(sequence == count.toLong, "event sequence is not contiguous")
+          ensure(sequence == count.toLong.raw, "event sequence is not contiguous")
           ensure(frame.nonEmpty == kind.hasFrame, "event frame does not match its kind")
           frame.foreach(bytes =>
             Journal.Frames.validate(kind = kind, bytes = bytes, maximum = declared.maxFrameBytes, normalized = true)
@@ -587,7 +586,7 @@ object Journal {
           count += 1
         case Some((location, FooterRecord(expectedEvents, expectedFrames, replayable, reason))) =>
           ensure(location.payloadBytes <= MetadataRecordLimit, "archive footer exceeds its byte limit")
-          ensure(expectedEvents == count && expectedFrames == frames, "footer totals differ")
+          ensure(expectedEvents == count.raw && expectedFrames == frames.raw, "footer totals differ")
           val failure: Option[FailureReason] = reason.map(raw =>
             FailureReason.either(raw)
               .fold(message => invalid(s"invalid failure reason: $message"), value => value)
@@ -602,8 +601,8 @@ object Journal {
             .fold(message => invalid(s"invalid archive size: $message"), value => value)
           summary = Some(Summary(
             header,
-            count.unsafe[Int >= 0],
-            frames.unsafe[Int >= 0],
+            count,
+            frames,
             storedBytes,
             replayable,
             failure

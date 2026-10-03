@@ -12,7 +12,7 @@ import net.kurobako.gemstone.vm.*
 
 class LegacyLds32Suite extends munit.FunSuite {
   private def fixtureModule(sm: Int): Cubin.Module =
-    SASSFixture.module(sm, Vec(SASSFixture.Kernel("probe", 320, Vec(0 -> 8, 8 -> 4), registers = 5, shared = 8)))
+    SASSFixture.module(sm, Vec(SASSFixture.Kernel("probe", 320, Vec((0, 8), (8, 4)), registers = 5, shared = 8)))
 
   for (sm <- Vec(50, 60))
     test(s"sm_$sm compiler LDS.U.32 preserves all data bits across a shared-memory barrier") {
@@ -29,7 +29,7 @@ class LegacyLds32Suite extends munit.FunSuite {
       val lowered = SASSFixture(module, module.kernels.head, Vec(function))
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(4L.unsafe[Long > 0])
+        val output  = service.allocate(4L)
         val program = service.compile(lowered)
           .fold(e => fail(e.message), identity)
         Vec(0, 1, Int.MinValue, -1, 0).foreach { input =>

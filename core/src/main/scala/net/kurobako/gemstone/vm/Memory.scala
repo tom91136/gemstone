@@ -29,7 +29,7 @@ trait Memory {
   def readDeferred(region: AllocationId, offset: Long >= 0, size: Int >= 0): ReadResult[Vec[Byte]] =
     read(region, offset, size)
 
-  def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int where Between[1, 8]): ReadResult[Long] =
+  def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): ReadResult[Long] =
     readValue(region, offset, size)
 
   /** Pointer bytes use canonical addresses shared by all dispatches. Relocation metadata must not cache or replay them.
@@ -58,7 +58,7 @@ trait Memory {
   def readValue(
       region: AllocationId,
       offset: Long >= 0,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[Fault, Long] =
     read(region, offset, size.nonNegative)
       .map(bytes => LittleEndian.decode(bytes, 0, size.scalarByteWidth))
@@ -67,14 +67,14 @@ trait Memory {
       region: AllocationId,
       offset: Long >= 0,
       value: Long,
-      size: Int where Between[1, 8]
+      size: Int in 1 ~ 8
   ): Either[Fault, Unit] =
     write(region, offset, LittleEndian.toVec(value, size.scalarByteWidth))
 
   def atomicModifyValue(
       @scala.annotation.unused region: AllocationId,
       @scala.annotation.unused offset: Long >= 0,
-      @scala.annotation.unused size: Int where Between[1, 8]
+      @scala.annotation.unused size: Int in 1 ~ 8
   )(@scala.annotation.unused update: Long => Long): Either[Fault, Long] =
     Left(Fault.Unsupported("memory does not support atomic modification"))
 }

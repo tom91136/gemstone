@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.sass
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 
 class CubinParserSuite extends munit.FunSuite {
   private def metadataElf(abi: Int, sm: Int): Array[Byte] = {
@@ -29,7 +30,7 @@ class CubinParserSuite extends munit.FunSuite {
   }
 
   test("CUDA ELF ABI 7 reads the architecture from the low flags byte") {
-    assertEquals(Cubin.decode(metadataElf(7, 35)).map(_.sm), Right(35))
+    assertEquals(Cubin.decode(metadataElf(7, 35)).map(_.sm.raw), Right(35))
   }
 
   test("truncated and corrupt ELF metadata fails without throwing") {
@@ -42,4 +43,21 @@ class CubinParserSuite extends munit.FunSuite {
     invalidAbi(8) = 6
     assert(Cubin.decode(invalidAbi).isLeft)
   }
+  test("cubin metadata rejects empty kernel names and invalid parameter sizes at construction") {
+    assert(scala.compiletime.testing.typeCheckErrors("""
+      import net.kurobako.gemstone.isa.sass.Cubin
+      Cubin.Parameter(0, 0, 0)
+    """).nonEmpty)
+    assert(scala.compiletime.testing.typeCheckErrors("""
+      import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+      import net.kurobako.gemstone.isa.sass.Cubin
+      Cubin.Kernel("", 0, 0, 0, Vec.empty)
+    """).nonEmpty)
+    assert(scala.compiletime.testing.typeCheckErrors("""
+      import net.kurobako.gemstone.isa.sass.Cubin
+      Cubin.Parameter(0, -1, 8)
+    """).nonEmpty)
+  }
+
 }

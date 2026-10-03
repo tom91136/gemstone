@@ -1,18 +1,21 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import EncodingConstants.*
+import net.kurobako.gemstone.constraint.*
 
 object SourceOperand {
   private def encoding(isa: ISA): OperandEncoding =
     OperandEncoding.Catalogue.forKind(isa, OperandKind.SRC)
       .getOrElse(throw IllegalStateException(s"missing generated source selectors for $isa"))
 
-  def literalSize(code: Int, isa: ISA): Int = encoding(isa).literals.getOrElse(code, 0)
+  def literalSize(code: Int, isa: ISA): Option[Int in (4, 8)] = encoding(isa).literals.get(code)
 
   def decode(code: Int, isa: ISA): Option[SourceOperand] = {
     val table = encoding(isa)
-    if (code >= Source.SGPR_MIN && code < Source.INLINE_INTEGER_C_MIN) Some(Scalar(code))
-    else if (code >= Source.VGPR_MIN && code <= Source.VGPR_MAX) Some(VectorRegister(code - Source.VGPR_MIN))
+    if (code >= Source.SGPR_MIN && code < Source.INLINE_INTEGER_C_MIN)
+      code.refine[Int in 0 ~ 127].toOption.map(Scalar(_))
+    else if (code >= Source.VGPR_MIN && code <= Source.VGPR_MAX)
+      (code - Source.VGPR_MIN).refine[Int in 0 ~ 255].toOption.map(VectorRegister(_))
     else table.integers.get(code).map(Integer(_))
       .orElse(table.floating.get(code).map(Floating(_)))
       .orElse(table.special.get(code).map(Special(_)))
@@ -21,10 +24,10 @@ object SourceOperand {
 }
 
 enum SourceOperand {
-  case Scalar(index: Int)
-  case VectorRegister(index: Int)
+  case Scalar(index: Int in 0 ~ 127)
+  case VectorRegister(index: Int in 0 ~ 255)
   case Integer(value: Long)
   case Floating(value: Double)
   case Special(value: SpecialSource)
-  case Literal(bytes: Int)
+  case Literal(bytes: Int in (4, 8))
 }

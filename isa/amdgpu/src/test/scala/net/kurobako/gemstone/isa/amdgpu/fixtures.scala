@@ -54,19 +54,10 @@ private object fixtures extends munit.Assertions {
       }).toRight(Fault.Memory("test address"))
   }
 
-  def testDimensions(x: Int, y: Int = 1, z: Int = 1): Dimensions =
-    Dimensions(
-      x.unsafe[Int > 0],
-      y.unsafe[Int > 0],
-      z.unsafe[Int > 0]
-    )
+  def testDimensions(x: Int > 0, y: Int > 0 = 1, z: Int > 0 = 1): Dimensions = Dimensions(x, y, z)
 
-  def testCoordinates(x: Int, y: Int, z: Int): LaunchGeometry.Coordinates =
-    LaunchGeometry.Coordinates(
-      x.unsafe[Int >= 0],
-      y.unsafe[Int >= 0],
-      z.unsafe[Int >= 0]
-    )
+  def testCoordinates(x: Int >= 0, y: Int >= 0, z: Int >= 0): LaunchGeometry.Coordinates =
+    LaunchGeometry.Coordinates(x, y, z)
 
   // Mutable allocations are confined to this final in-memory execution fixture.
   class TestMemory extends Memory with TestAddressSpace {

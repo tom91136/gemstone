@@ -4,6 +4,7 @@ import execution.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.spirv.v1_6 as spv
 import net.kurobako.gemstone.memory.*
@@ -11,14 +12,16 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 class ExecutionControlFlowSuite extends munit.FunSuite {
   for {
-    width  <- Seq(8, 16, 32, 64)
+    width <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
+    rawWidth = width.raw
+    widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     signed <- Seq(false, true)
   }
-    test(s"OpSwitch compares $width-bit literals at selector width, signed=$signed") {
+    test(s"OpSwitch compares $rawWidth-bit literals at selector rawWidth, signed=$signed") {
       def resultType(n: Int): Operand = operand(OperandKind.IdResultType, n)
       def ref(n: Int): Operand        = operand(OperandKind.IdRef, n)
       def result(n: Int): Operand     = operand(OperandKind.IdResult, n)
-      val literal                     = if (width == 64) operand(OperandKind.PairLiteralIntegerIdRef, -7, -1, 22)
+      val literal                     = if (rawWidth == 64) operand(OperandKind.PairLiteralIntegerIdRef, -7, -1, 22)
       else operand(OperandKind.PairLiteralIntegerIdRef, -7, 22)
       val module = Module(
         Header(ISA.version, Word(0), Word(32), Word(0)),
@@ -26,7 +29,7 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
           Instruction.TypeVoid(result(1)),
           Instruction.TypeInt(
             result(2),
-            operand(OperandKind.LiteralInteger, width),
+            operand(OperandKind.LiteralInteger, rawWidth),
             operand(OperandKind.LiteralInteger, if (signed) 1 else 0)
           ),
           Instruction.TypeInt(
@@ -65,7 +68,7 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
           Dimensions.One,
           Vec(
             KernelTask.Argument.Memory(region, 0L),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(selector, (width / 8).unsafe[Int where Between[0, 8]]))
+            KernelTask.Argument.Scalar(LittleEndian.toVec(selector, widthBytes.widen[Int in 0 ~ 8]))
           )
         ).fold(fail(_), identity)
         assertEquals(executeUnchecked(decoded, task, memory), Right(()))

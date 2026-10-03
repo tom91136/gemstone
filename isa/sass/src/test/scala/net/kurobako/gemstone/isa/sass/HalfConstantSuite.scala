@@ -41,12 +41,12 @@ class HalfConstantSuite extends munit.FunSuite {
         } else ListingDecoder.parse(text, "hfma2_mma_probe", 89).fold(fail(_), identity)
         val module = SASSFixture.module(
           89,
-          Vec(SASSFixture.Kernel("hfma2_mma_probe", 0x160, Vec(0 -> 8, 8 -> 8, 16 -> 8), registers = 12))
+          Vec(SASSFixture.Kernel("hfma2_mma_probe", 0x160, Vec((0, 8), (8, 8), (16, 8)), registers = 12))
         )
         val lowered = SASSFixture(module, module.kernels.head, functions)
         locally {
           val service = SASSFixture.Execution()
-          val output  = service.allocate(4L.unsafe[Long > 0])
+          val output  = service.allocate(4L)
           val program = service.compile(lowered)
             .fold(error => fail(error.message), identity)
           val pointer = KernelTask.Argument.Memory(output, 0L)

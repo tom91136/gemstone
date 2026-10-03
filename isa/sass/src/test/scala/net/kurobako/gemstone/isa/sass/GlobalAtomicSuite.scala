@@ -11,7 +11,7 @@ import net.kurobako.gemstone.vm.*
 
 class GlobalAtomicSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
-    SASSFixture.module(86, Vec(SASSFixture.Kernel("atomic_add", 352, Vec(0 -> 8, 8 -> 8), registers = 14)))
+    SASSFixture.module(86, Vec(SASSFixture.Kernel("atomic_add", 352, Vec((0, 8), (8, 8)), registers = 14)))
 
   test("compiler ATOMG returns the prior value through a predicated warp-aggregated atomic") {
     val module   = fixtureModule
@@ -21,8 +21,8 @@ class GlobalAtomicSuite extends munit.FunSuite {
     val source = SASSFixture(module, module.kernels.head, Vec(function))
     locally {
       val service = SASSFixture.Execution()
-      val counter = service.allocate(4L.unsafe[Long > 0])
-      val output  = service.allocate(128L.unsafe[Long > 0])
+      val counter = service.allocate(4L)
+      val output  = service.allocate(128L)
       assert(service.write(counter, 0L, LittleEndian.toVec(-16L, 4)).isRight)
       val program = service.compile(source)
         .fold(e => fail(e.message), identity)

@@ -69,7 +69,7 @@ private object VMIntegerCompiler {
   private def legacyIadd3Source(context: VMCompilationContext, operand: Operand): Value =
     VMOperand.integer(operand) match {
       case Some(value) if value >= 0 && value <= 0xfffff =>
-        Value.Immediate((if (value >= 0x80000) value - 0x100000 else value).longValue)
+        Value.Immediate((if (value >= 0x80000) value - 0x100000 else value).toLong)
       case _ => context.source(VMOperand.positive(operand))
     }
 
@@ -350,7 +350,7 @@ private object VMIntegerCompiler {
         IntegerOperation.ShiftLeft,
         scaled.name,
         context.source(VMOperand.positive(operands(1))),
-        Value.Immediate(shift.longValue),
+        Value.Immediate(shift.toLong),
         32
       ))
       val result = context.temp()
@@ -411,7 +411,7 @@ private object VMIntegerCompiler {
   private def field(context: VMCompilationContext, operand: Operand): (Value, Value) =
     VMOperand.integer(operand) match {
       case Some(value) if value >= 0 && value <= 0xffff =>
-        (Value.Immediate((value & 0xff).longValue), Value.Immediate(((value >> 8) & 0xff).longValue))
+        (Value.Immediate((value & 0xff).toLong), Value.Immediate(((value >> 8) & 0xff).toLong))
       case Some(_)                           => fail("bit-field descriptor exceeds 16 bits")
       case None if VMOperand.isZero(operand) => (Value.Immediate(0L), Value.Immediate(0L))
       case None                              =>
@@ -526,7 +526,7 @@ private object VMIntegerCompiler {
     val _ = uniqueModifiers(modifiers, Set(Modifier.`U32`), "SGXT")
     requiredOperands(operands, 3, "SGXT")
     val length = VMOperand.integer(operands(2)) match {
-      case Some(value) if value >= 0 && value <= 0x1ff => Value.Immediate(value.longValue)
+      case Some(value) if value >= 0 && value <= 0x1ff => Value.Immediate(value.toLong)
       case Some(_) => fail("SGXT immediate width exceeds the measured 9-bit operand")
       case None if VMOperand.isRegister(operands(2), RegisterBank.R) =>
         val width = context.temp()

@@ -39,8 +39,8 @@ object AMDGPUExecutionBenchmark {
       help = "Warmup dispatches"
     ).refined[Int >= 0]("warmup dispatches must be non-negative").orNone,
     Opts.option[Int]("groups", help = "Workgroups per dispatch").withDefault(1)
-      .refined[Int where Between[1, 65536]]("workgroup count must be between 1 and 65536")
-      .map(_.widen[GreaterThan[0]])
+      .refined[Int in 1 ~ 65536]("workgroup count must be between 1 and 65536")
+      .map(_.widen[Int > 0])
   ).mapN(Options(_, _, _))
   private val InputId  = AllocationId(1L)
   private val OutputId = AllocationId(2L)
@@ -51,7 +51,7 @@ object AMDGPUExecutionBenchmark {
   def run(arguments: Array[String]): Unit = {
     val parsed            = BenchmarkArguments.parse(BenchmarkName("amdgpu-execution"), arguments.toSeq, options)
     val measured          = parsed.measured
-    val warmup            = parsed.warmup.getOrElse(math.max(20, measured.raw / 10).unsafe[Int >= 0])
+    val warmup            = parsed.warmup.getOrElse((measured.widen[Int >= 0] / 10).max(20))
     val groups            = parsed.groups
     val elements: Int > 0 = groups * 64
 
@@ -72,8 +72,8 @@ object AMDGPUExecutionBenchmark {
     memory.allocate(InputId, elements * 4)
     memory.allocate(OutputId, elements * 4)
     memory.allocate(UnusedId, 256)
-    Array.tabulate(elements.raw)(index => index * 97 - 11).zipWithIndex.foreach { case (value, index) =>
-      memory.putInt(InputId, (index * 4).unsafe[Int >= 0], value)
+    Vec.indices(elements.widen[Int >= 0]).foreach { index =>
+      memory.putInt(InputId, index * 4, index.raw * 97 - 11)
     }
 
     val zero     = KernelTask.Argument.Scalar(Vec.fill(8)(0.toByte))
@@ -126,9 +126,9 @@ object AMDGPUExecutionBenchmark {
           }
         }
       }
-    val checksum = Array.tabulate(elements.raw) { index =>
-      val observed = memory.getInt(OutputId, (index * 4).unsafe[Int >= 0])
-      if (observed != index * 97 - 11)
+    val checksum = Vec.indices(elements.widen[Int >= 0]).map { index =>
+      val observed = memory.getInt(OutputId, index * 4)
+      if (observed != index.raw * 97 - 11)
         throw IllegalStateException(s"copy mismatch at $index: $observed")
       observed.toLong
     }.sum
@@ -174,7 +174,7 @@ object AMDGPUExecutionBenchmark {
     override def readValue(
         id: AllocationId,
         offset: Long >= 0,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Long] =
       allocations.get(id) match {
         case None        => Left(Fault.Memory("benchmark memory region"))
@@ -203,7 +203,7 @@ object AMDGPUExecutionBenchmark {
         id: AllocationId,
         offset: Long >= 0,
         value: Long,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Unit] =
       allocations.get(id) match {
         case None              => Left(Fault.Memory("benchmark memory region"))

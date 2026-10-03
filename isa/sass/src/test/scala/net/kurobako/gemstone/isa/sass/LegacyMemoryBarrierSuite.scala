@@ -11,7 +11,7 @@ import net.kurobako.gemstone.vm.*
 
 class LegacyMemoryBarrierSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
-    SASSFixture.module(35, Vec(SASSFixture.Kernel("probe", 320, Vec(0 -> 8), registers = 5)))
+    SASSFixture.module(35, Vec(SASSFixture.Kernel("probe", 320, Vec((0, 8)), registers = 5)))
 
   test("compiler-produced sm_35 MEMBAR.GL reaches the generic global memory fence") {
     val module = fixtureModule
@@ -22,7 +22,7 @@ class LegacyMemoryBarrierSuite extends munit.FunSuite {
     assert(lowered.instructions.contains(Instruction.MemoryBarrier))
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(8L.unsafe[Long > 0])
+      val output  = service.allocate(8L)
       val program = service.compile(lowered)
         .fold(error => fail(error.message), identity)
       val task = SASSFixture.task(

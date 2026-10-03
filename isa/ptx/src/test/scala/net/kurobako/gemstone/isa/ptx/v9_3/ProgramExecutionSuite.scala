@@ -49,7 +49,7 @@ class ProgramExecutionSuite extends munit.FunSuite {
   }
   test("cancellation during a backing read stays cancellation through PTX memory conversion") {
     class CancelledMemory extends EmptyMemory {
-      override def readValue(address: GuestAddress, size: Int where Between[1, 8]): Either[Fault, Long] =
+      override def readValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
         Left(Fault.Cancelled)
     }
     val source = """.version 8.0

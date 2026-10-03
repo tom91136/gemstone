@@ -12,7 +12,7 @@ import net.kurobako.gemstone.vm.*
 class ModernSharedPointerSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module = SASSFixture.module(
     89,
-    Vec(SASSFixture.Kernel("shared_pointer_probe", 352, Vec(0 -> 8, 8 -> 4, 12 -> 4), registers = 12, shared = 16))
+    Vec(SASSFixture.Kernel("shared_pointer_probe", 352, Vec((0, 8), (8, 4), (12, 4)), registers = 12, shared = 16))
   )
 
   test("sm_89 opaque generic shared pointers alias direct shared-space accesses") {
@@ -28,7 +28,7 @@ class ModernSharedPointerSuite extends munit.FunSuite {
 
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(16L.unsafe[Long > 0])
+      val output  = service.allocate(16L)
       val program = service.compile(sass)
         .fold(e => fail(e.message), identity)
       val task = SASSFixture.task(

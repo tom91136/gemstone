@@ -75,7 +75,7 @@ private object VMOperand {
     case Operand.Unary(inner, true, complement, absolute) => Operand.Unary(inner, false, complement, absolute)
     case other                                            => other
   }
-  def registerIndex(value: Operand): Int where Between[0, 255] = base(value) match {
+  def registerIndex(value: Operand): Int in 0 ~ 255 = base(value) match {
     case Operand.Register(_, index) => index
     case _                          => throw IllegalArgumentException(s"expected register, found $value")
   }

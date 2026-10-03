@@ -330,9 +330,18 @@ class ShaderPreparationSuite extends munit.FunSuite {
   }
 
   test("location spans preserve wide scalar words and reject invalid component assignments") {
-    assertEquals(ShaderReflection.interfaceSpans(32, 2, 2), Vec((0, 8, 2)))
-    assertEquals(ShaderReflection.interfaceSpans(64, 3, 0), Vec((0, 16, 0), (16, 8, 0)))
-    assertEquals(ShaderReflection.interfaceSpans(64, 1, 2), Vec((0, 8, 2)))
+    assertEquals(
+      ShaderReflection.interfaceSpans(32, 2, 2),
+      Vec[(Int >= 0, Int > 0, Int in 0 ~ 3)]((0, 8, 2))
+    )
+    assertEquals(
+      ShaderReflection.interfaceSpans(64, 3, 0),
+      Vec[(Int >= 0, Int > 0, Int in 0 ~ 3)]((0, 16, 0), (16, 8, 0))
+    )
+    assertEquals(
+      ShaderReflection.interfaceSpans(64, 1, 2),
+      Vec[(Int >= 0, Int > 0, Int in 0 ~ 3)]((0, 8, 2))
+    )
     for (
       (
         width,
@@ -340,6 +349,10 @@ class ShaderPreparationSuite extends munit.FunSuite {
         component
       ) <- List((32, 3, 2), (64, 1, 1), (64, 2, 2), (64, 3, 2), (32, 0, 0), (32, 5, 0), (16, 2, 0), (32, 1, 4))
     )
-      intercept[IllegalArgumentException](ShaderReflection.interfaceSpans(width, lanes, component))
+      intercept[IllegalArgumentException](ShaderReflection.interfaceSpans(
+        width.unsafe[Int in 1 ~ 64],
+        lanes.unsafe[Int > 0],
+        component.unsafe[Int in 0 ~ 3]
+      ))
   }
 }

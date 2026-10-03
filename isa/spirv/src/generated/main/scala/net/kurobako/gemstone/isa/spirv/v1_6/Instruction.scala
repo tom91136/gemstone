@@ -15951,12 +15951,12 @@ object Instruction {
           case Vec() =>
             Left(InstructionDecodeError.NoMatchingDefinition(
               raw.opcodeNumber,
-              (definitions.map(_.opcode)).unsafe
+              Vec.nonEmpty(definitions.head.opcode, definitions.tail.map(_.opcode)*)
             ))
           case values =>
             Left(InstructionDecodeError.AmbiguousDefinition(
               raw.opcodeNumber,
-              (values.map(_._1.opcode)).unsafe
+              Vec.nonEmpty(values.head._1.opcode, values.tail.map(_._1.opcode)*)
             ))
         }
     }

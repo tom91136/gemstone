@@ -7,6 +7,7 @@ import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import scala.annotation.targetName
 
 /** Locale-independent text operations for identifiers and other machine-readable text. */
 object string {
@@ -54,6 +55,21 @@ object string {
     }
   }
 
+  /** Java-style signed integer literal: decimal, leading-zero octal, or 0x/0X/# hexadecimal. */
+  def parseIntLiteral(text: String): Option[Int] = {
+    val negative        = text.startsWith("-")
+    val unsigned        = if (negative || text.startsWith("+")) text.drop(1) else text
+    val (digits, radix) = unsigned match {
+      case s"0x$value"                  => (value, 16)
+      case s"0X$value"                  => (value, 16)
+      case s"#$value"                   => (value, 16)
+      case s"0$value" if value.nonEmpty => (value, 8)
+      case _                            => (unsigned, 10)
+    }
+    if (digits.isEmpty || digits.startsWith("-") || digits.startsWith("+")) None
+    else scala.util.Try(Integer.parseInt(if (negative) s"-$digits" else digits, radix)).toOption
+  }
+
   /** Signed decimal or hexadecimal text; whitespace and suffixes belong to the caller's grammar. */
   def parseBigIntLiteral(text: String): Option[BigInt] = {
     def unsigned(num: String): Option[BigInt] = {
@@ -79,6 +95,14 @@ object string {
   /** Decode an encoded name without silently replacing malformed bytes. */
   def decodeUtf8(bytes: Array[Byte], offset: Int, length: Int): Either[CharacterCodingException, String] =
     UTF8.decode(bytes, offset, length).left.map(_.cause)
+
+  extension (value: NonEmpty[String]) {
+    @targetName("nonEmptyUpperCaseRoot")
+    def toUpperCaseRoot: NonEmpty[String] = PlatformString.upper(value).unsafe[NonEmpty[String]]
+
+    @targetName("nonEmptyLowerCaseRoot")
+    def toLowerCaseRoot: NonEmpty[String] = PlatformString.lower(value).unsafe[NonEmpty[String]]
+  }
 
   extension (value: String) {
     def toUpperCaseRoot: String = PlatformString.upper(value)

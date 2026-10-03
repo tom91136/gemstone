@@ -2,7 +2,9 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
@@ -17,15 +19,15 @@ class ConversionSuites extends munit.FunSuite {
       Vec(SASSFixture.Kernel(
         "f2f_conversion_probe",
         352,
-        Vec(0 -> 8, 8 -> 8, 16 -> 8, 24 -> 8, 32 -> 4),
+        Vec((0, 8), (8, 8), (16, 8), (24, 8), (32, 4)),
         registers = 16
       ))
     )
 
-    val f64Input    = NumericCases.f64ToF32.map(_._1)
-    val f32Expected = NumericCases.f64ToF32.map(_._2)
-    val f32Input    = NumericCases.f32ToF64.map(_._1)
-    val f64Expected = NumericCases.f32ToF64.map(_._2)
+    val f64Input    = NumericCases.f64ToF32.mapNonEmpty(_._1)
+    val f32Expected = NumericCases.f64ToF32.mapNonEmpty(_._2)
+    val f32Input    = NumericCases.f32ToF64.mapNonEmpty(_._1)
+    val f64Expected = NumericCases.f32ToF64.mapNonEmpty(_._2)
 
     val architectures = Vec(
       70 -> ConversionFixtures.f2fF32F64Sm70Probe,
@@ -56,32 +58,32 @@ class ConversionSuites extends munit.FunSuite {
 
         locally {
           val service = SASSFixture.Execution()
-          val n       = math.max(f64Input.size, f32Input.size)
-          val in64    = service.allocate(words64(f64Input ++ Vec.fill(n - f64Input.size)(0L)))
-          val in32    = service.allocate(words32(f32Input ++ Vec.fill(n - f32Input.size)(0L)))
-          val out32   = service.allocate((n * 4L).unsafe[Long > 0])
-          val out64   = service.allocate((n * 8L).unsafe[Long > 0])
+          val n       = f64Input.positiveSize.max(f32Input.positiveSize)
+          val in64    = service.allocate(words64(f64Input ++ Vec.fill(n.raw - f64Input.size)(0L)))
+          val in32    = service.allocate(words32(f32Input ++ Vec.fill(n.raw - f32Input.size)(0L)))
+          val out32   = service.allocate(n.toLong.widen[Long > 0] * 4L)
+          val out64   = service.allocate(n.toLong.widen[Long > 0] * 8L)
           val program = service.compile(lowered)
             .fold(e => fail(e.message), identity)
           val task = SASSFixture.task(
-            kernel.name.unsafe[NonEmpty[String]],
-            LaunchGeometry.Dimensions(n.unsafe[Int > 0], 1, 1),
+            kernel.name,
+            LaunchGeometry.Dimensions(n, 1, 1),
             LaunchGeometry.Dimensions.One,
             Vec(
               KernelTask.Argument.Memory(out32, 0L),
               KernelTask.Argument.Memory(in64, 0L),
               KernelTask.Argument.Memory(out64, 0L),
               KernelTask.Argument.Memory(in32, 0L),
-              KernelTask.Argument.Scalar(LittleEndian.toVec(n.toLong, 4))
+              KernelTask.Argument.Scalar(LittleEndian.toVec(n.toLong.raw, 4))
             )
           )
           service.run(program, task).fold(e => fail(e.message), identity)
           assertEquals(
-            service.readWords(out32, f32Expected.size.unsafe[Int >= 0], width = 4),
+            service.readWords(out32, f32Expected.nonNegativeSize, width = 4),
             f32Expected
           )
           assertEquals(
-            service.readWords(out64, f64Expected.size.unsafe[Int >= 0], width = 8),
+            service.readWords(out64, f64Expected.nonNegativeSize, width = 8),
             f64Expected
           )
         }
@@ -112,12 +114,12 @@ class ConversionSuites extends munit.FunSuite {
       Vec(SASSFixture.Kernel(
         "probe",
         352,
-        Vec(0 -> 8, 8 -> 8),
+        Vec((0, 8), (8, 8)),
         registers = registerCounts.getOrElse(sm, fail(s"unsupported F2F fixture sm_$sm"))
       ))
     )
 
-    val Kernel = "probe"
+    val Kernel: NonEmpty[String] = "probe"
 
     val listings = Vec(
       70 -> ConversionFixtures.f2fF16F32Sm75ProbeSm70,
@@ -125,7 +127,7 @@ class ConversionSuites extends munit.FunSuite {
       89 -> ConversionFixtures.f2fF16F32Sm75ProbeSm89
     )
 
-    val inputs = NumericCases.f32ToF16.map(_._1)
+    val inputs = NumericCases.f32ToF16.mapNonEmpty(_._1)
 
     def module(sm: Int): Cubin.Module = fixtureModule(sm)
 
@@ -140,21 +142,21 @@ class ConversionSuites extends munit.FunSuite {
       val inputBytes = Vec.from(inputs).flatMap(LittleEndian.toVec(_, 4))
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate((inputs.size.toLong * 4).unsafe[Long > 0])
+        val output  = service.allocate(inputs.positiveSize.toLong.widen[Long > 0] * 4L)
         val input   = service.allocate(inputBytes)
         val program = service.compile(source)
           .fold(error => fail(error.message), identity)
         val task = SASSFixture.task(
-          Kernel.unsafe[NonEmpty[String]],
+          Kernel,
           LaunchGeometry.Dimensions.One,
-          LaunchGeometry.Dimensions(inputs.size.unsafe[Int > 0], 1, 1),
+          LaunchGeometry.Dimensions(inputs.positiveSize, 1, 1),
           Vec(
             KernelTask.Argument.Memory(output, 0L),
             KernelTask.Argument.Memory(input, 0L)
           )
         )
         service.run(program, task).fold(error => fail(error.message), identity)
-        service.readWords(output, inputs.size.unsafe[Int >= 0]).map(_.toLong & 0xffffffffL)
+        service.readWords(output, inputs.nonNegativeSize).map(_.toLong & 0xffffffffL)
       }
     }
 
@@ -164,7 +166,7 @@ class ConversionSuites extends munit.FunSuite {
         assert(sass.instructions.exists(i =>
           i.mnemonic.raw == "F2F" && i.modifiers.map(_.name) == Vec("F16", "F32") && i.operands.size == 2
         ))
-        assertEquals(execute(module(sm), sass), NumericCases.f32ToF16.map(_._2), s"sm_$sm")
+        assertEquals(execute(module(sm), sass), NumericCases.f32ToF16.mapNonEmpty(_._2), s"sm_$sm")
       }
     }
 
@@ -186,7 +188,7 @@ class ConversionSuites extends munit.FunSuite {
         )
         else Vec(instruction)
       })
-      assertEquals(execute(module(75), predicated), NumericCases.f32ToF16.map(_._2))
+      assertEquals(execute(module(75), predicated), NumericCases.f32ToF16.mapNonEmpty(_._2))
     }
   }
 
@@ -194,12 +196,12 @@ class ConversionSuites extends munit.FunSuite {
     def fixtureModule: Cubin.Module = SASSFixture.module(
       80,
       Vec(
-        SASSFixture.Kernel("i2f_f16_immediate_probe", 352, Vec(0 -> 8), registers = 8),
-        SASSFixture.Kernel("i2f_f16_probe", 352, Vec(0 -> 8, 8 -> 8), registers = 10)
+        SASSFixture.Kernel("i2f_f16_immediate_probe", 352, Vec((0, 8)), registers = 8),
+        SASSFixture.Kernel("i2f_f16_probe", 352, Vec((0, 8), (8, 8)), registers = 10)
       )
     )
 
-    val cases = Vec(
+    val cases = Vec.nonEmpty(
       (0, 0x0000L),
       (1, 0x3c00L),
       (-1, 0xbc00L),
@@ -227,10 +229,10 @@ class ConversionSuites extends munit.FunSuite {
     )
 
     def execute(
-        kernelName: String,
+        kernelName: NonEmpty[String],
         sassText: String,
         input: Option[Vec[Long]],
-        count: Int,
+        count: Int > 0,
         expected: Vec[Long]
     ): Unit = {
       val module   = fixtureModule
@@ -239,7 +241,7 @@ class ConversionSuites extends munit.FunSuite {
       val inputs   = input.map(values => Vec.from(values).flatMap(LittleEndian.toVec(_, 4)))
       locally {
         val service         = SASSFixture.Execution()
-        val output          = service.allocate((count * 4L).unsafe[Long > 0])
+        val output          = service.allocate(count.toLong.widen[Long > 0] * 4L)
         val inputAllocation = inputs.map(service.allocate)
         val args            = inputAllocation match {
           case Some(allocation) => Vec(
@@ -251,13 +253,13 @@ class ConversionSuites extends munit.FunSuite {
         val program = service.compile(sass)
           .fold(error => fail(error.message), identity)
         val task = SASSFixture.task(
-          kernelName.unsafe[NonEmpty[String]],
-          LaunchGeometry.Dimensions(count.unsafe[Int > 0], 1, 1),
+          kernelName,
+          LaunchGeometry.Dimensions(count, 1, 1),
           LaunchGeometry.Dimensions.One,
           args
         )
         service.run(program, task).fold(error => fail(error.message), identity)
-        val actual = service.readWords(output, count.unsafe[Int >= 0])
+        val actual = service.readWords(output, count)
         assertEquals(actual, expected)
       }
     }
@@ -269,7 +271,7 @@ class ConversionSuites extends munit.FunSuite {
         "i2f_f16_probe",
         ConversionFixtures.i2fF16Sm80I2fF16Sm80,
         Some(cases.map { case (value, _) => value.toLong & 0xffffffffL }),
-        cases.size,
+        cases.positiveSize,
         cases.map(_._2)
       )
     }
@@ -300,7 +302,7 @@ class ConversionSuites extends munit.FunSuite {
 
   {
     def fixtureModule: Cubin.Module =
-      SASSFixture.module(86, Vec(SASSFixture.Kernel("convert", 352, Vec(0 -> 8, 8 -> 4), registers = 14)))
+      SASSFixture.module(86, Vec(SASSFixture.Kernel("convert", 352, Vec((0, 8), (8, 4)), registers = 14)))
 
     test("sm_86 I2FP and I2F preserve signed conversion rounding modes") {
       val module   = fixtureModule
@@ -311,7 +313,7 @@ class ConversionSuites extends munit.FunSuite {
       val kernel   = module.kernels.find(_.name == "convert").get
       val sass     = SASSFixture(module, kernel, Vec(function))
       // Expected binary32 bits for RN, RM, RP, RZ, including inexact conversion at 2^24.
-      val cases = Vec(
+      val cases = Vec.nonEmpty(
         (0, Vec(0, 0, 0, 0)),
         (1, Vec.fill(4)(0x3f800000)),
         (-1, Vec.fill(4)(0xbf800000)),
@@ -322,7 +324,7 @@ class ConversionSuites extends munit.FunSuite {
       )
       locally {
         val service = SASSFixture.Execution()
-        val output  = service.allocate(16L.unsafe[Long > 0])
+        val output  = service.allocate(16L)
         val program = service.compile(sass)
           .fold(e => fail(e.message), identity)
         cases.foreach { case (input, expected) =>

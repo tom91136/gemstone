@@ -68,7 +68,7 @@ object HSAVectorCopyBenchmark {
     override def readValue(
         region: AllocationId,
         offset: Long >= 0,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Long] =
       array(region).flatMap { bytes =>
         Either.cond(
@@ -82,7 +82,7 @@ object HSAVectorCopyBenchmark {
         region: AllocationId,
         offset: Long >= 0,
         value: Long,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     ): Either[Fault, Unit] =
       array(region).flatMap { bytes =>
         if (!ByteRange.contains(bytes.length, offset.raw, size.raw.toLong))

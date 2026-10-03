@@ -10,7 +10,7 @@ import net.kurobako.gemstone.isa.sass.asm.Program.Statement.*
 /** Public binary/text frontend. Execution and printing consume the same generated instruction cases. */
 object Disassembler {
   def decode(bytes: Array[Byte], target: String, address: Int = 0): Either[String, DecodedInstruction] =
-    InstructionDecoder.decodeTyped(address, bytes, target)
+    address.refine[Int >= 0].left.map(_.raw).flatMap(InstructionDecoder.decodeTyped(_, bytes, target))
 
   def disassemble(bytes: Array[Byte], target: String, address: Int = 0): Either[String, String] =
     decode(bytes, target, address).flatMap(Printer.print(_))

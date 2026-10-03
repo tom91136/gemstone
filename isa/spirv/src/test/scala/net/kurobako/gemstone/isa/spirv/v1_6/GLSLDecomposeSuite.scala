@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
@@ -10,31 +11,31 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class GLSLDecomposeSuite extends munit.FunSuite {
   for {
-    width  <- Seq(32, 64)
-    count  <- Seq(1, 4)
+    width  <- Seq[Int in (32, 64)](32, 64)
+    count  <- Seq[Int in (1, 4)](1, 4)
     opcode <- Seq(35, 51)
   }
     test(s"pointer decomposition opcode=$opcode width=$width lanes=$count") {
       def ref(n: Int): Operand       = operand(OperandKind.IdRef, n)
       def lit(n: Int): Operand       = operand(OperandKind.LiteralInteger, n)
-      def floatBits(v: Double): Long = if (width == 32) java.lang.Float.floatToRawIntBits(v.toFloat).toLong &
+      def floatBits(v: Double): Long = if (width.raw == 32) java.lang.Float.floatToRawIntBits(v.toFloat).toLong &
         0xffffffffL
       else java.lang.Double.doubleToRawLongBits(v)
       val source =
-        Seq(-2.5, -0.0, Math.scalb(1.0, if (width == 32) -140 else -1070), Double.PositiveInfinity).take(count)
-      val exponent  = Seq(2L, 0L, if (width == 32) -139L else -1069L, 0L).take(count)
+        Seq(-2.5, -0.0, Math.scalb(1.0, if (width.raw == 32) -140 else -1070), Double.PositiveInfinity).take(count.raw)
+      val exponent  = Seq(2L, 0L, if (width.raw == 32) -139L else -1069L, 0L).take(count.raw)
       val fractions = if (opcode == 35)
-        Seq(-0.5, -0.0, Math.scalb(1.0, if (width == 32) -140 else -1070), 0.0).take(count)
-      else Seq(-0.625, -0.0, 0.5, Double.PositiveInfinity).take(count)
+        Seq(-0.5, -0.0, Math.scalb(1.0, if (width.raw == 32) -140 else -1070), 0.0).take(count.raw)
+      else Seq(-0.625, -0.0, 0.5, Double.PositiveInfinity).take(count.raw)
       val integral =
-        if (opcode == 35) Seq(-2.0, -0.0, 0.0, Double.PositiveInfinity).take(count).map(floatBits(_)) else exponent
-      val valueType    = if (count == 1) 2 else 4
-      val integralType = if (opcode == 35) valueType else if (count == 1) 3 else 5
+        if (opcode == 35) Seq(-2.0, -0.0, 0.0, Double.PositiveInfinity).take(count.raw).map(floatBits(_)) else exponent
+      val valueType    = if (count.raw == 1) 2 else 4
+      val integralType = if (opcode == 35) valueType else if (count.raw == 1) 3 else 5
       val module       = Module(
         Header(ISA.version, Word(0), Word(64), Word(0)),
         Vec(
           Instruction.TypeVoid(ref(1)),
-          Instruction.TypeFloat(ref(2), lit(width), None),
+          Instruction.TypeFloat(ref(2), lit(width.raw), None),
           Instruction.TypeInt(ref(3), lit(64), lit(1)),
           Instruction.TypeVector(ref(4), ref(2), lit(4)),
           Instruction.TypeVector(ref(5), ref(3), lit(4)),
@@ -74,17 +75,19 @@ class GLSLDecomposeSuite extends munit.FunSuite {
         ),
         Endianness.Little
       )
-      def bytes(v: Seq[Long], bits: Int): Vec[Byte] =
-        Vec.from(v.flatMap(LittleEndian.toVec(_, (bits / 8).unsafe[Int where Between[0, 8]])))
+      def bytes(v: Seq[Long], bits: Int in (32, 64)): Vec[Byte] =
+        Vec.from(v.flatMap(LittleEndian.toVec(_, bits.widen[Int in (16, 32, 64)].scalarByteWidth.widen[Int in 0 ~ 8])))
       val expected = bytes(fractions.map(floatBits(_)), width) ++ bytes(integral, if (opcode == 35) width else 64)
       val region   = AllocationId(1L); val memory = ArrayMemory(region, expected.size)
+      val byteWidth = width.widen[Int in (16, 32, 64)].scalarByteWidth
+      val outputOffset = (count.widen[Int >= 0] * byteWidth.widen[Int >= 0]).toLong.widen[Long >= 0]
       val task     = KernelTask.validated(
         "decompose",
         Dimensions.One,
         Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(region, 0L),
-          KernelTask.Argument.Memory(region, (count * width / 8).toLong.unsafe[Long >= 0]),
+          KernelTask.Argument.Memory(region, outputOffset),
           KernelTask.Argument.Scalar(bytes(source.map(floatBits(_)), width))
         )
       ).toOption.get

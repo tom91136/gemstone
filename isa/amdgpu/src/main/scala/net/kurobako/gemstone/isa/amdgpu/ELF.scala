@@ -97,8 +97,8 @@ private object ELF {
     private val globalImageLock = ReentrantLock()
     private lazy val textImage  = java.util.Arrays.copyOfRange(
       bytes,
-      textSection.offset,
-      textSection.offset + textSection.size
+      textSection.offset.raw,
+      textSection.offset.raw + textSection.size.raw
     )
     private lazy val readOnly = readOnlySection.fold(0L -> Array.emptyByteArray) { section =>
       globalSections.view.collectFirst {
@@ -108,14 +108,14 @@ private object ELF {
     private lazy val globalImages: Map[Int, Array[Byte]] = {
       val images = globalSections.view.map { case (index, section) =>
         val image =
-          if (section.sectionType == 8) Array.ofDim[Byte](section.size)
-          else java.util.Arrays.copyOfRange(bytes, section.offset, section.offset + section.size)
+          if (section.sectionType == 8) Array.ofDim[Byte](section.size.raw)
+          else java.util.Arrays.copyOfRange(bytes, section.offset.raw, section.offset.raw + section.size.raw)
         index -> image
       }.toMap
       globalRelocations.foreach { case (address, value) =>
         globalSections.view.collectFirst {
           case (index, section)
-              if address >= section.address && address - section.address <= section.size.toLong - 8L =>
+              if address >= section.address && address - section.address <= section.size.raw.toLong - 8L =>
             LittleEndian.write(
               value,
               images(index),
@@ -198,8 +198,8 @@ private object ELF {
         globalSections.get(symbol.section).flatMap { section =>
           Option.when(
             symbol.value >= section.address &&
-              symbol.value - section.address <= section.size.toLong &&
-              symbol.size.raw.toLong <= section.size.toLong - (symbol.value - section.address)
+              symbol.value - section.address <= section.size.raw.toLong &&
+              symbol.size.raw.toLong <= section.size.raw.toLong - (symbol.value - section.address)
           )(GuestAddress(symbol.value) -> symbol.size)
         }
       }
@@ -239,8 +239,8 @@ private object ELF {
                 )).flatMap { image =>
                   val relative = symbol.value - section.address
                   if (
-                    relative < 0L || relative > section.size.toLong ||
-                    symbol.size.raw.toLong > section.size.toLong - relative
+                    relative < 0L || relative > section.size.raw.toLong ||
+                    symbol.size.raw.toLong > section.size.raw.toLong - relative
                   )
                     Left(CodeObjectError.Invalid(
                       s"AMDGPU global symbol $name exceeds its section"
@@ -394,7 +394,7 @@ private object ELF {
   private val NoteSection = 7
 
   private def sectionBytes(bytes: Array[Byte], section: SectionHeader): Vec[Byte] =
-    Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, section.offset, section.offset + section.size))
+    Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, section.offset.raw, section.offset.raw + section.size.raw))
 
   def notes(image: Vec[Byte]): Either[CodeObjectError, Vec[Vec[Byte]]] = {
     val bytes = Vec.toArray(image)
@@ -439,8 +439,8 @@ private object ELF {
               val relative = symbol.value - (if (buffer.getShort(16) == 1) 0L else section.address)
               for {
                 _ <- Either.cond(
-                  relative >= 0 && relative <= section.size &&
-                    symbol.size.raw <= section.size - relative,
+                  relative >= 0 && relative <= section.size.raw &&
+                    symbol.size.raw <= section.size.raw - relative,
                   (),
                   CodeObjectError.Invalid(s"symbol ${symbol.name} exceeds section ${names(index)}")
                 )
@@ -471,7 +471,7 @@ private object ELF {
       external: Map[String, Long],
       addresses: Map[String, Long]
   ): Either[CodeObjectError, Vec[Byte]] = {
-    val output = java.util.Arrays.copyOfRange(bytes, code.offset, code.offset + code.size)
+    val output = java.util.Arrays.copyOfRange(bytes, code.offset.raw, code.offset.raw + code.size.raw)
     val base   = addresses.getOrElse(names(index), code.address)
     def symbol(tableIndex: Int, symbolIndex: Long): Either[CodeObjectError, BigInt] = for {
       table <- sections.lift(tableIndex).filter(value =>
@@ -479,14 +479,15 @@ private object ELF {
       )
         .toRight(CodeObjectError.Invalid("relocation has no valid symbol table"))
       _ <- Either.cond(
-        table.entrySize >= SymbolEntrySize && symbolIndex >= 0 && symbolIndex < table.size / table.entrySize,
+        table.entrySize.raw >= SymbolEntrySize && symbolIndex >= 0 &&
+          symbolIndex < table.size.raw / table.entrySize.raw,
         (),
         CodeObjectError.Invalid("relocation symbol index exceeds table")
       )
       strings <- sections.lift(table.link).toRight(CodeObjectError.Invalid("relocation has no symbol string table"))
-      start = table.offset + symbolIndex.toInt * table.entrySize
+      start = table.offset.raw + symbolIndex.toInt * table.entrySize.raw
       name <- cString(bytes, strings, decodeInt32(bytes, start))
-      sectionIndex = decodeUInt16(bytes, start + 6)
+      sectionIndex = decodeUInt16(bytes, start + 6).raw
       value        = decodeInt64(bytes, start + 8)
       resolved <- if (symbolIndex == 0) Right(BigInt(0)) // ELF STN_UNDEF contributes zero.
       else if (sectionIndex == 0)
@@ -505,22 +506,22 @@ private object ELF {
     } yield resolved
     sections.filter(section =>
       (section.sectionType == RelocationSection || section.sectionType == RelocationWithoutAddend) &&
-        section.size > 0 && (section.info == index || section.info == 0)
+        section.size.raw > 0 && (section.info == index || section.info == 0)
     )
       .traverse { table =>
         val explicit = table.sectionType == RelocationSection
         val minimum  = if (explicit) 24 else 16
-        if (table.entrySize < minimum || table.size % table.entrySize != 0)
+        if (table.entrySize.raw < minimum || table.size.raw % table.entrySize.raw != 0)
           Left(CodeObjectError.Invalid("invalid relocation table"))
-        else (0 until table.size by table.entrySize).toVec.traverse { record =>
-          val start   = table.offset + record
+        else (0 until table.size.raw by table.entrySize.raw).toVec.traverse { record =>
+          val start   = table.offset.raw + record
           val address = decodeInt64(bytes, start)
           val offset  = address - (if (relocatable && table.info != 0) 0 else code.address)
           val info    = decodeInt64(bytes, start + 8)
           val kind    = (info & 0xffffffffL).toInt
-          if (kind == R_AMDGPU_NONE || (table.info == 0 && (offset < 0 || offset >= code.size))) Right(())
+          if (kind == R_AMDGPU_NONE || (table.info == 0 && (offset < 0 || offset >= code.size.raw))) Right(())
           else {
-            val width: Int where Between[0, 8] = if (kind == R_AMDGPU_ABS64 || kind == R_AMDGPU_REL64) 8 else 4
+            val width: Int in 0 ~ 8 = if (kind == R_AMDGPU_ABS64 || kind == R_AMDGPU_REL64) 8 else 4
             for {
               _ <- Either.cond(
                 Set(
@@ -537,7 +538,7 @@ private object ELF {
                 CodeObjectError.Unsupported(s"unsupported AMDGPU relocation type $kind")
               )
               _ <- Either.cond(
-                offset >= 0 && offset <= code.size - width.raw,
+                offset >= 0 && offset <= code.size.raw - width.raw,
                 (),
                 CodeObjectError.Invalid("text relocation exceeds section")
               )
@@ -588,7 +589,7 @@ private object ELF {
       if (symbol.kind != 2 || symbol.size.raw != 0 || symbol.section <= 0) symbol
       else
         sections.lift(symbol.section).flatMap { section =>
-          val sectionEnd = section.address + section.size.toLong
+          val sectionEnd = section.address + section.size.raw.toLong
           inferredFunctionSize(symbol.value, sectionEnd, functionValuesBySection(symbol.section))
         }.fold(symbol)(size => symbol.copy(size = size.unsafe[Int >= 0], inferredSize = true))
     }
@@ -629,10 +630,10 @@ private object ELF {
     val builder = Vec.newBuilder[(Long, Long)]
     var failure = Option.empty[CodeObjectError]
     sections.view.filter(section => section.sectionType == RelocationSection).foreach { section =>
-      val stride = math.max(RelocationEntrySize, section.entrySize)
+      val stride = math.max(RelocationEntrySize, section.entrySize.raw)
       var index  = 0
-      while (failure.isEmpty && index + stride <= section.size) {
-        val start  = section.offset + index
+      while (failure.isEmpty && index + stride <= section.size.raw) {
+        val start  = section.offset.raw + index
         val target = buffer.getLong(start)
         val info   = buffer.getLong(start + 8)
         val addend = buffer.getLong(start + 16)
@@ -649,11 +650,11 @@ private object ELF {
   }
 
   private def symbolValue(bytes: Array[Byte], sections: Vec[SectionHeader], table: Int, index: Int): Option[Long] =
-    sections.lift(table).filter(section => section.entrySize >= SymbolEntrySize).flatMap { section =>
-      val start = section.offset + index * SymbolEntrySize
+    sections.lift(table).filter(section => section.entrySize.raw >= SymbolEntrySize).flatMap { section =>
+      val start = section.offset.raw + index * SymbolEntrySize
       Option.when(
         start >= 0 && start + SymbolEntrySize <= bytes.length &&
-          start + SymbolEntrySize <= section.offset + section.size
+          start + SymbolEntrySize <= section.offset.raw + section.size.raw
       )(
         ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong(start + 8)
       )
@@ -678,12 +679,12 @@ private object ELF {
         for {
           strings <- sections.lift(table.link).toRight(CodeObjectError.Invalid("invalid ELF symbol string table"))
           _       <- Either.cond(
-            table.entrySize >= SymbolEntrySize && table.size % table.entrySize == 0,
+            table.entrySize.raw >= SymbolEntrySize && table.size.raw % table.entrySize.raw == 0,
             (),
             CodeObjectError.Invalid("invalid ELF symbol-table entry size")
           )
-          symbols <- Vec.tabulate(table.size / table.entrySize) { index =>
-            val start = table.offset + index * table.entrySize
+          symbols <- Vec.tabulate(table.size.raw / table.entrySize.raw) { index =>
+            val start = table.offset.raw + index * table.entrySize.raw
             for {
               name <- cString(bytes, strings, decodeInt32(bytes, start))
               size <- intValue(decodeInt64(bytes, start + 16), "symbol size")
@@ -691,7 +692,7 @@ private object ELF {
               name,
               decodeInt64(bytes, start + 8),
               size.unsafe[Int >= 0],
-              decodeUInt16(bytes, start + 6),
+              decodeUInt16(bytes, start + 6).raw,
               bytes(start + 4) & 0x0f
             )
           }.sequence
@@ -735,11 +736,11 @@ private object ELF {
       )
       relative <- intValue(symbol.value - section.address, s"${symbol.name} section offset")
       _        <- Either.cond(
-        relative <= section.size && symbol.size.raw <= section.size - relative,
+        relative <= section.size.raw && symbol.size.raw <= section.size.raw - relative,
         (),
         CodeObjectError.Invalid(s"kernel ${symbol.name} exceeds .text")
       )
-      start = section.offset + relative
+      start = section.offset.raw + relative
       descriptorSymbol <- descriptors.get(s"${symbol.name}.kd")
         .toRight(CodeObjectError.Invalid(
           s"kernel ${symbol.name} has no descriptor symbol"
@@ -755,7 +756,7 @@ private object ELF {
         s"${symbol.name} private-segment size"
       )
       computePgmRsrc2      = decodeInt32(descriptor, 52)
-      kernelCodeProperties = decodeUInt16(descriptor, 56)
+      kernelCodeProperties = decodeUInt16(descriptor, 56).raw
     } yield KernelRecord(
       symbol,
       start,
@@ -784,11 +785,12 @@ private object ELF {
       )
       relative <- intValue(symbol.value - section.address, s"$label section offset")
       _        <- Either.cond(
-        symbol.size.raw >= minimumSize && relative <= section.size && symbol.size.raw <= section.size - relative,
+        symbol.size.raw >= minimumSize && relative <= section.size.raw &&
+          symbol.size.raw <= section.size.raw - relative,
         (),
         CodeObjectError.Invalid(s"$label is truncated")
       )
-      start = section.offset + relative
+      start = section.offset.raw + relative
     } yield java.util.Arrays.copyOfRange(bytes, start, start + symbol.size.raw)
 
   // Scan the untrusted ELF bytes without materializing every candidate substring.
@@ -828,11 +830,11 @@ private object ELF {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def cString(bytes: Array[Byte], table: SectionHeader, offset: Int): Either[CodeObjectError, String] =
     if (table.sectionType != StringTable) Left(CodeObjectError.Invalid("ELF string table has an invalid section type"))
-    else if (offset < 0 || offset >= table.size)
+    else if (offset < 0 || offset >= table.size.raw)
       Left(CodeObjectError.Invalid("ELF string offset is outside its table"))
     else {
-      val start = table.offset + offset
-      val limit = table.offset + table.size
+      val start = table.offset.raw + offset
+      val limit = table.offset.raw + table.size.raw
       var end   = start
       while (end < limit && bytes(end) != 0) end += 1
       if (end == limit) Left(CodeObjectError.Invalid("unterminated ELF string"))

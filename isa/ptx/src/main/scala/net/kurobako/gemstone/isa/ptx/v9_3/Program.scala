@@ -40,6 +40,14 @@ object Program {
     case F16  extends DataType("f16", 16, 'f')
     case F32  extends DataType("f32", 32, 'f')
     case F64  extends DataType("f64", 64, 'f')
+
+    def byteCount: Int in (1, 2, 4, 8, 16) = widthBits.raw match {
+      case 8   => 1
+      case 16  => 2
+      case 32  => 4
+      case 64  => 8
+      case 128 => 16
+    }
   }
 
   enum DeclarationQualifier {

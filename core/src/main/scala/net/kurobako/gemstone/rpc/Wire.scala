@@ -37,6 +37,7 @@ object Wire {
     case UnitValue
     case BooleanValue
     case Int8
+    case Int16
     case Int32
     case Int64
     case Float32
@@ -270,6 +271,15 @@ object Wire {
         reader.readInt().flatMap { value =>
           if (value < Byte.MinValue || value > Byte.MaxValue) Left(s"integer out of Byte range: $value")
           else Right(value.toByte)
+        }
+    )
+    given Codec[Short] = instance(
+      Shape.Int16,
+      (writer, value) => writer.writeInt(value.toInt),
+      reader =>
+        reader.readInt().flatMap { value =>
+          if (value < Short.MinValue || value > Short.MaxValue) Left(s"integer out of Short range: $value")
+          else Right(value.toShort)
         }
     )
     given Codec[Int]    = instance(Shape.Int32, (writer, value) => writer.writeInt(value), _.readInt())
@@ -696,6 +706,7 @@ object Wire {
         case Shape.UnitValue                        => "unit"
         case Shape.BooleanValue                     => "bool"
         case Shape.Int8                             => "i8"
+        case Shape.Int16                            => "i16"
         case Shape.Int32                            => "i32"
         case Shape.Int64                            => "i64"
         case Shape.Float32                          => "f32"

@@ -27,6 +27,14 @@ import net.kurobako.gemstone.vm.*
 import scala.collection.immutable.IntMap
 
 private object VMCompiler {
+  extension (layout: InstructionLayout) {
+    private def scalarRegister(word: Long, field: EncodingField): ScalarRegisterIndex =
+      layout.get(word, field).toInt.unsafe[ScalarRegisterIndex]
+
+    private def register(word: Long, field: EncodingField): VectorRegisterIndex =
+      layout.get(word, field).toInt.unsafe[VectorRegisterIndex]
+  }
+
   private type VendorInstruction = Opcode
 
   private def isAbsentScalarOffset(value: Long): Boolean =
@@ -368,7 +376,7 @@ private object VMCompiler {
     case _                      => None
   }
 
-  private def dsAtomicByteWidth(operation: DSAtomicOperation): Int where Between[4, 8] = operation match {
+  private def dsAtomicByteWidth(operation: DSAtomicOperation): Int in (4, 8) = operation match {
     case DSAtomicOperation.AddU64 | DSAtomicOperation.SubtractU64 | DSAtomicOperation.IncrementU64 |
         DSAtomicOperation.DecrementU64 | DSAtomicOperation.And64 | DSAtomicOperation.Or64 | DSAtomicOperation.Xor64 |
         DSAtomicOperation.MinimumI64 | DSAtomicOperation.MaximumI64 | DSAtomicOperation.MinimumU64 |
@@ -591,7 +599,7 @@ private object VMCompiler {
               InstructionSource.Scalar(jump)
             )
             if base >= 0 && base < 105 && temporary >= 0 && temporary < 106 &&
-              base == jump && low == base && lowSource == base && high == base + 1 && highSource == high &&
+              base == jump && low == base && lowSource == base && high.raw == base.raw + 1 && highSource == high &&
               addend == temporary && temporary != base && temporary != high && constant(zero).contains(0L) =>
           for {
             a <- constant(left)
@@ -774,7 +782,17 @@ private object VMCompiler {
       .sortBy(layout => -layout.fixedMask.bitCount)
   ).toMap
 
-  private def decode(bytes: Array[Byte], offset: Int, target: Target): Either[NonEmpty[String], Decoded] = {
+  private def decode(bytes: Array[Byte], offset: Int, target: Target): Either[NonEmpty[String], Decoded] =
+    try decodeInstructionBytes(bytes, offset, target).flatMap(decoded =>
+      VMRegisterBounds.validate(decoded.operation, VMIR.waveSize(target)).map(_ => decoded)
+    )
+    catch { case error: IllegalArgumentException => Left(s"invalid register encoding: ${error.getMessage}") }
+
+  private def decodeInstructionBytes(
+      bytes: Array[Byte],
+      offset: Int,
+      target: Target
+  ): Either[NonEmpty[String], Decoded] = {
     val word = unsignedWord(bytes, offset)
     layouts.getOrElse(target.isa, Vec.empty[InstructionLayout]).find(_.matches(word))
       .toRight[NonEmpty[String]](s"unknown instruction encoding for ${target.name} at byte $offset")
@@ -826,11 +844,11 @@ private object VMCompiler {
         ) == Fixed.NullSgpr.toLong)(_.get(word) != 0)
     } yield Decoded(
       Instruction.SLoad(
-        layout.get(word, EncodingField.SDATA).toInt,
+        layout.scalarRegister(word, EncodingField.SDATA),
         count,
-        layout.get(word, EncodingField.SBASE).toInt,
+        layout.scalarRegister(word, EncodingField.SBASE),
         if (immediate) layout.get(encoded, EncodingField.OFFSET).toInt else 0,
-        Option.when(!immediate)(layout.get(encoded, EncodingField.SOFFSET).toInt)
+        Option.when(!immediate)(layout.scalarRegister(encoded, EncodingField.SOFFSET))
       ),
       8
     )
@@ -852,7 +870,7 @@ private object VMCompiler {
         literal.map(_ => unsignedWord(bytes, offset + 4)),
         target
       )
-      destination = layout.get(word, EncodingField.SDST).toInt
+      destination = layout.scalarRegister(word, EncodingField.SDST)
       operation <- opcode match {
         case SMovB32  => Right(Instruction.SMove(destination, src))
         case SMovB64  => Right(Instruction.SMove64(destination, src))
@@ -902,7 +920,7 @@ private object VMCompiler {
       literal = Option.when(hasLiteral)(unsignedWord(bytes, offset + 4))
       srcA <- scalarSource(srcAEncoding, literal, target)
       srcB <- scalarSource(srcBEncoding, literal, target)
-      destination = layout.get(word, EncodingField.SDST).toInt
+      destination = layout.scalarRegister(word, EncodingField.SDST)
       operation <- opcode match {
         case SCselectB32 => Right(Instruction.SCSelect(destination, srcA, srcB, 32))
         case SCselectB64 => Right(Instruction.SCSelect(destination, srcA, srcB, 64))
@@ -929,19 +947,19 @@ private object VMCompiler {
       case SMovkI32                        =>
         val immediate = layout.signed(word, EncodingField.SIMM16)
         Right(Decoded(
-          Instruction.SMoveImmediate(layout.get(word, EncodingField.SDST).toInt, immediate),
+          Instruction.SMoveImmediate(layout.scalarRegister(word, EncodingField.SDST), immediate),
           4
         ))
       case SMulkI32 =>
         val immediate = layout.signed(word, EncodingField.SIMM16)
         Right(Decoded(
-          Instruction.SMultiplyImmediate(layout.get(word, EncodingField.SDST).toInt, immediate),
+          Instruction.SMultiplyImmediate(layout.scalarRegister(word, EncodingField.SDST), immediate),
           4
         ))
       case SAddkI32 =>
         val immediate = layout.signed(word, EncodingField.SIMM16)
         Right(Decoded(
-          Instruction.SAddImmediate(layout.get(word, EncodingField.SDST).toInt, immediate),
+          Instruction.SAddImmediate(layout.scalarRegister(word, EncodingField.SDST), immediate),
           4
         ))
       case SSetregB32 | SSetregImm32B32 =>
@@ -953,7 +971,7 @@ private object VMCompiler {
           Decoded(
             Instruction.SSetReg(
               layout.get(word, EncodingField.SIMM16).toInt,
-              layout.get(word, EncodingField.SDST).toInt
+              layout.scalarRegister(word, EncodingField.SDST)
             ),
             4
           )
@@ -963,7 +981,7 @@ private object VMCompiler {
         scalarImmediateCompareOperation(compare)
           .map(operation =>
             Decoded(
-              Instruction.SCmpImmediate(operation, layout.get(word, EncodingField.SDST).toInt, immediate),
+              Instruction.SCmpImmediate(operation, layout.scalarRegister(word, EncodingField.SDST), immediate),
               4
             )
           )
@@ -1061,7 +1079,7 @@ private object VMCompiler {
         case Some(sdwa) =>
           val encoding = Bits.low8Int(sdwa)
           Right(
-            if (Bits.isSet(sdwa, 23)) InstructionSource.Scalar(encoding)
+            if (Bits.isSet(sdwa, 23)) InstructionSource.Scalar(encoding.raw.unsafe[ScalarRegisterIndex])
             else InstructionSource.VectorRegister(encoding)
           )
         case None => vectorSource(
@@ -1075,11 +1093,11 @@ private object VMCompiler {
       // selects scalar source mode.
       srcB = extension match {
         case Some(sdwa) if Bits.isSet(sdwa, 31) =>
-          InstructionSource.Scalar(layout.get(word, EncodingField.VSRC1).toInt)
-        case _ => InstructionSource.VectorRegister(layout.get(word, EncodingField.VSRC1).toInt)
+          InstructionSource.Scalar(layout.scalarRegister(word, EncodingField.VSRC1))
+        case _ => InstructionSource.VectorRegister(layout.register(word, EncodingField.VSRC1))
       }
       literal = Option.when(hasLiteral)(unsignedWord(bytes, offset + 4))
-      dest    = layout.get(word, EncodingField.VDST).toInt
+      dest    = layout.register(word, EncodingField.VDST)
       operation <- opcode match {
         case supported if hasSDWA && SDWAVOP2Opcodes.contains(supported) =>
           for {
@@ -1095,10 +1113,10 @@ private object VMCompiler {
               (),
               s"$supported SDWA destination clamp modifiers are not implemented"
             )
-            destSelection   <- subDwordSelection(Bits.unsignedIntField(sdwa, 8, 3))
-            destUnused      <- subDwordDestinationUnused(Bits.unsignedIntField(sdwa, 11, 2))
-            srcASelection   <- subDwordSelection(Bits.unsignedIntField(sdwa, 16, 3))
-            srcBSelection   <- subDwordSelection(Bits.unsignedIntField(sdwa, 24, 3))
+            destSelection   <- subDwordSelection(Bits.unsignedIntField(sdwa, 8, 3).raw)
+            destUnused      <- subDwordDestinationUnused(Bits.unsignedIntField(sdwa, 11, 2).raw)
+            srcASelection   <- subDwordSelection(Bits.unsignedIntField(sdwa, 16, 3).raw)
+            srcBSelection   <- subDwordSelection(Bits.unsignedIntField(sdwa, 24, 3).raw)
             binaryOperation <- vectorSubDwordOperation(supported)
               .toRight[NonEmpty[String]](s"$supported SDWA execution is not implemented")
           } yield Instruction.VBinarySubDword(
@@ -1220,7 +1238,7 @@ private object VMCompiler {
       src <- extension match {
         case Some(sdwa) if hasSDWA =>
           val encoding = Bits.low8Int(sdwa)
-          Right(if (Bits.isSet(sdwa, 23)) InstructionSource.Scalar(encoding)
+          Right(if (Bits.isSet(sdwa, 23)) InstructionSource.Scalar(encoding.raw.unsafe[ScalarRegisterIndex])
           else InstructionSource.VectorRegister(encoding))
         case Some(dpp) => Right(InstructionSource.VectorRegister(Bits.low8Int(dpp)))
         case None      => vectorSource(
@@ -1229,11 +1247,11 @@ private object VMCompiler {
             target
           )
       }
-      destination = layout.get(word, EncodingField.VDST).toInt
+      destination = layout.register(word, EncodingField.VDST)
       operation <- opcode match {
         case VMovB32 if hasDPP =>
           val dpp     = extension.get
-          val control = Bits.unsignedIntField(dpp, 8, 9)
+          val control = Bits.unsignedIntField(dpp, 8, 9).raw
           for {
             _ <- Either.cond[NonEmpty[String], Unit](
               control <= 0xff || (control >= 0x100 && control <= 0x13f) || control == 0x142 || control == 0x143,
@@ -1249,8 +1267,8 @@ private object VMCompiler {
             dest = destination,
             src = Bits.low8Int(dpp),
             control = control,
-            rowMask = Bits.unsignedIntField(dpp, 28, 4),
-            bankMask = Bits.unsignedIntField(dpp, 24, 4),
+            rowMask = Bits.unsignedIntField(dpp, 28, 4).raw,
+            bankMask = Bits.unsignedIntField(dpp, 24, 4).raw,
             boundControl = Bits.isSet(dpp, 19),
             fetchInactive = Bits.isSet(dpp, 18)
           )
@@ -1264,7 +1282,7 @@ private object VMCompiler {
         case VBfrevB32   =>
           Right(Instruction.VBitReverse(destination, src))
         case VReadfirstlaneB32 =>
-          Right(Instruction.VReadFirstLane(Bits.unsignedIntField(word, 17, 7), src))
+          Right(Instruction.VReadFirstLane(Bits.unsignedIntField(word, 17, 7).raw.unsafe[ScalarRegisterIndex], src))
         case other =>
           vectorBitFindOperation(other)
             .map(operation => Instruction.VBitFind(operation, destination, src))
@@ -1292,9 +1310,10 @@ private object VMCompiler {
       opcode <- OpcodeIndex.resolve(EncodingFormat.VOPC, layout.get(word, EncodingField.OP).toInt, target)
       extension = Option.when(hasSDWA)(unsignedWord(bytes, offset + 4))
       srcA <- extension match {
-        case Some(sdwa) if Bits.isSet(sdwa, 23) => Right(InstructionSource.Scalar(Bits.low8Int(sdwa)))
-        case Some(sdwa)                         => Right(InstructionSource.VectorRegister(Bits.low8Int(sdwa)))
-        case None                               => vectorSource(
+        case Some(sdwa) if Bits.isSet(sdwa, 23) =>
+          Right(InstructionSource.Scalar(Bits.low8Int(sdwa).raw.unsafe[ScalarRegisterIndex]))
+        case Some(sdwa) => Right(InstructionSource.VectorRegister(Bits.low8Int(sdwa)))
+        case None       => vectorSource(
             srcAEncoding,
             Option.when(hasLiteral)(unsignedWord(bytes, offset + 4)),
             target
@@ -1304,18 +1323,18 @@ private object VMCompiler {
       // SRC0, its 8-bit field does not use the scalar/constant source table.
       srcB = extension match {
         case Some(sdwa) if Bits.isSet(sdwa, 31) =>
-          InstructionSource.Scalar(layout.get(word, EncodingField.VSRC1).toInt)
-        case _ => InstructionSource.VectorRegister(layout.get(word, EncodingField.VSRC1).toInt)
+          InstructionSource.Scalar(layout.scalarRegister(word, EncodingField.VSRC1))
+        case _ => InstructionSource.VectorRegister(layout.register(word, EncodingField.VSRC1))
       }
       destination = extension.flatMap(sdwa =>
-        Option.when(Bits.isSet(sdwa, 15))(Bits.unsignedIntField(sdwa, 8, 7))
+        Option.when(Bits.isSet(sdwa, 15))(Bits.unsignedIntField(sdwa, 8, 7).raw.unsafe[ScalarRegisterIndex])
       )
       comparison <- vectorComparison(opcode).toRight[NonEmpty[String]](s"$opcode VOPC execution is not implemented")
       operation  <- if (hasSDWA) {
         for {
           sdwa          <- extension.toRight[NonEmpty[String]]("missing SDWA extension word")
-          srcASelection <- subDwordSelection(Bits.unsignedIntField(sdwa, 16, 3))
-          srcBSelection <- subDwordSelection(Bits.unsignedIntField(sdwa, 24, 3))
+          srcASelection <- subDwordSelection(Bits.unsignedIntField(sdwa, 16, 3).raw)
+          srcBSelection <- subDwordSelection(Bits.unsignedIntField(sdwa, 24, 3).raw)
           _             <- Either.cond[NonEmpty[String], Unit](
             Bits.unsignedField(sdwa, 20, 2) == 0L,
             (),
@@ -1381,8 +1400,8 @@ private object VMCompiler {
         (),
         s"$opcode source modifiers are not implemented"
       )
-      destination      = layout.get(word, EncodingField.VDST).toInt
-      carryDestination = Bits.unsignedIntField(word, 8, 7)
+      destination      = layout.register(word, EncodingField.VDST)
+      carryDestination = Bits.unsignedIntField(word, 8, 7).raw.unsafe[ScalarRegisterIndex]
       absoluteA        = Bits.isSet(word, 8)
       absoluteB        = Bits.isSet(word, 9)
       absoluteC        = Bits.isSet(word, 10)
@@ -1493,7 +1512,7 @@ private object VMCompiler {
         case VMbcntHiU32B32 =>
           Right(Instruction.VMaskBitCount(destination, srcA, srcB, high = true))
         case VReadlaneB32 =>
-          Right(Instruction.VReadLane(destination, srcA, srcB))
+          Right(Instruction.VReadLane(layout.scalarRegister(word, EncodingField.VDST), srcA, srcB))
         case VWritelaneB32 =>
           Right(Instruction.VWriteLane(destination, srcA, srcB))
         case VAddU32 | VAddNcU32 | VAddNcU16 | VSubNcU16 | VMulLoU16 | VAshrrevI16 | VAshrrevI32 |
@@ -1618,9 +1637,9 @@ private object VMCompiler {
             srcA = srcA,
             srcB = srcB,
             srcC = srcC,
-            lowSelection = Bits.unsignedIntField(word, 11, 3),
+            lowSelection = Bits.unsignedIntField(word, 11, 3).raw,
             highSelection = layout.get(encoded, EncodingField.OMOD).toInt |
-              (Bits.unsignedIntField(word, 14, 1) << 2),
+              (Bits.unsignedIntField(word, 14, 1).raw << 2),
             negateLow = layout.get(encoded, EncodingField.NEG).toInt,
             negateHigh = layout.get(word, EncodingField.ABS).toInt,
             clamp = clamp
@@ -1699,7 +1718,7 @@ private object VMCompiler {
           vectorComparison(other)
             .map(comparison =>
               Instruction.VCompareTo(
-                dest = Bits.unsignedIntField(word, 0, 7),
+                dest = Bits.unsignedIntField(word, 0, 7).raw.unsafe[ScalarRegisterIndex],
                 operation = comparison,
                 srcA = srcA,
                 srcB = srcB,
@@ -1747,10 +1766,10 @@ private object VMCompiler {
       srcC <- vectorSource(srcCEncoding, literal, target).leftMap[NonEmpty[String]](error =>
         s"$error in VOP3P word 0x${word.toHexString}/0x${second.toHexString}"
       )
-      destination     = layout.get(word, EncodingField.VDST).toInt
+      destination     = layout.register(word, EncodingField.VDST)
       opSelection     = layout.get(word, EncodingField.OP_SEL).toInt
-      opSelectionHigh = Bits.unsignedIntField(second, 27, 2) |
-        (Bits.unsignedIntField(word, 14, 1) << 2)
+      opSelectionHigh = Bits.unsignedIntField(second, 27, 2).raw |
+        (Bits.unsignedIntField(word, 14, 1).raw << 2)
       negateLow  = layout.get(encoded, EncodingField.NEG).toInt
       negateHigh = layout.get(word, EncodingField.NEG_HI).toInt
       clamp      = Bits.isSet(word, 15)
@@ -1845,13 +1864,13 @@ private object VMCompiler {
       )
       second   = unsignedWord(bytes, offset + 4)
       encoded  = word | (second << 32)
-      address  = layout.get(encoded, EncodingField.ADDR).toInt
-      dataA    = layout.get(encoded, EncodingField.DATA0).toInt
-      dataB    = layout.get(encoded, EncodingField.DATA1).toInt
-      dest     = layout.get(encoded, EncodingField.VDST).toInt
+      address  = layout.register(encoded, EncodingField.ADDR)
+      dataA    = layout.register(encoded, EncodingField.DATA0)
+      dataB    = layout.register(encoded, EncodingField.DATA1)
+      dest     = layout.register(encoded, EncodingField.VDST)
       offsetA  = layout.get(word, EncodingField.OFFSET0).toInt
       offsetB  = layout.get(word, EncodingField.OFFSET1).toInt
-      dsOffset = Bits.low16Int(word)
+      dsOffset = Bits.low16Int(word).raw
       operation <- opcode match {
         case DsPermuteB32  => Right(Instruction.DSPermute(dest, address, dataA, dsOffset))
         case DsBpermuteB32 => Right(Instruction.DSBPermute(dest, address, dataA, dsOffset))
@@ -1978,10 +1997,10 @@ private object VMCompiler {
 
   private def vmemLoad(
       global: Boolean,
-      dest: Int,
-      address: Int,
-      scalar: Option[Int],
-      bytes: Int where Between[1, 16],
+      dest: VectorRegisterIndex,
+      address: VectorRegisterIndex,
+      scalar: Option[ScalarRegisterIndex],
+      bytes: Int in 1 ~ 16,
       offset: Int,
       coherent: Boolean
   ): Instruction =
@@ -1998,10 +2017,10 @@ private object VMCompiler {
 
   private def vmemLoadSigned(
       global: Boolean,
-      dest: Int,
-      address: Int,
-      scalar: Option[Int],
-      bytes: Int where Between[1, 2],
+      dest: VectorRegisterIndex,
+      address: VectorRegisterIndex,
+      scalar: Option[ScalarRegisterIndex],
+      bytes: Int in 1 ~ 2,
       offset: Int
   ): Instruction =
     if (global)
@@ -2016,9 +2035,9 @@ private object VMCompiler {
 
   private def vmemLoadD16(
       global: Boolean,
-      dest: Int,
-      address: Int,
-      scalar: Option[Int],
+      dest: VectorRegisterIndex,
+      address: VectorRegisterIndex,
+      scalar: Option[ScalarRegisterIndex],
       offset: Int,
       high: Boolean
   ): Instruction =
@@ -2028,10 +2047,10 @@ private object VMCompiler {
 
   private def vmemStore(
       global: Boolean,
-      address: Int,
-      scalar: Option[Int],
-      src: Int,
-      bytes: Int where Between[1, 16],
+      address: VectorRegisterIndex,
+      scalar: Option[ScalarRegisterIndex],
+      src: VectorRegisterIndex,
+      bytes: Int in 1 ~ 16,
       offset: Int
   ): Instruction =
     if (global)
@@ -2040,10 +2059,10 @@ private object VMCompiler {
 
   private def vmemStoreD16(
       global: Boolean,
-      address: Int,
-      scalar: Option[Int],
-      src: Int,
-      bytes: Int where Between[1, 2],
+      address: VectorRegisterIndex,
+      scalar: Option[ScalarRegisterIndex],
+      src: VectorRegisterIndex,
+      bytes: Int in 1 ~ 2,
       offset: Int
   ): Instruction =
     if (global)
@@ -2058,11 +2077,11 @@ private object VMCompiler {
 
   private def vmemCompareSwap(
       global: Boolean,
-      dest: Int,
-      address: Int,
-      scalar: Option[Int],
-      src: Int,
-      bytes: Int where Between[4, 8],
+      dest: VectorRegisterIndex,
+      address: VectorRegisterIndex,
+      scalar: Option[ScalarRegisterIndex],
+      src: VectorRegisterIndex,
+      bytes: Int in (4, 8),
       compareOffset: Int,
       offset: Int,
       returnValue: Boolean
@@ -2071,7 +2090,7 @@ private object VMCompiler {
       dest = dest,
       address = address,
       scalarAddress = if (global) scalar else None,
-      compareSrc = src + compareOffset,
+      compareSrc = (src.raw + compareOffset).unsafe[VectorRegisterIndex],
       swapSrc = src,
       bytes = bytes,
       offset = offset,
@@ -2091,16 +2110,16 @@ private object VMCompiler {
       memoryOffset  = layout.signed(word, EncodingField.OFFSET)
       second        = unsignedWord(bytes, offset + 4)
       encoded       = word | (second << 32)
-      vectorAddress = layout.get(encoded, EncodingField.ADDR).toInt
-      dataRegister  = layout.get(encoded, EncodingField.DATA).toInt
-      scalarAddress = layout.get(encoded, EncodingField.SADDR).toInt
-      destination   = layout.get(encoded, EncodingField.VDST).toInt
+      vectorAddress = layout.register(encoded, EncodingField.ADDR)
+      dataRegister  = layout.register(encoded, EncodingField.DATA)
+      scalarAddress = layout.scalarRegister(encoded, EncodingField.SADDR)
+      destination   = layout.register(encoded, EncodingField.VDST)
       returnValue   = Bits.isSet(word, 16)
       operation <- if (Bits.isSet(word, 15)) {
         // GFX10 encodes the absent scalar address as 0x7d (the disassembler
         // prints it as `null`); older encodings use 0x7f.  Neither is an
         // actual SGPR pair for the flat/global operations we interpret.
-        val scalar = Option.when(!isAbsentScalarOffset(scalarAddress))(scalarAddress)
+        val scalar = Option.when(!isAbsentScalarOffset(scalarAddress.raw.toLong))(scalarAddress)
         OpcodeIndex.resolve(EncodingFormat.GLOBAL, layout.get(word, EncodingField.OP).toInt, target).flatMap {
           case GlobalLoadDword =>
             Right(vmemLoad(
@@ -2252,7 +2271,7 @@ private object VMCompiler {
             Right(vmemStoreD16(true, vectorAddress, scalar, dataRegister, 2, memoryOffset))
           case other => Left[NonEmpty[String], Nothing](s"$other GLOBAL execution is not implemented")
         }
-      } else if (scalarAddress == 0 || isAbsentScalarOffset(scalarAddress)) {
+      } else if (scalarAddress.raw == 0 || isAbsentScalarOffset(scalarAddress.raw.toLong)) {
         OpcodeIndex.resolve(EncodingFormat.FLAT, layout.get(word, EncodingField.OP).toInt, target).flatMap {
           case FlatLoadUbyte =>
             Right(vmemLoad(
@@ -2422,7 +2441,7 @@ private object VMCompiler {
       } else Left[
         NonEmpty[String],
         Nothing
-      ](s"VMEM scalar address s[$scalarAddress:${scalarAddress + 1}] is not implemented")
+      ](s"VMEM scalar address s[$scalarAddress:${scalarAddress.raw + 1}] is not implemented")
     } yield Decoded(operation, 8)
 
   private def decodeMUBUF(
@@ -2443,11 +2462,11 @@ private object VMCompiler {
         (),
         s"$opcode buffer addressing/modifiers are not implemented"
       )
-      address      = Option.when(Bits.unsignedIntField(word, 12, 2) != 0)(Bits.low8Int(second))
-      dataRegister = layout.get(encoded, EncodingField.VDATA).toInt
-      resource     = layout.get(encoded, EncodingField.SRSRC).toInt
-      soffset      = layout.get(encoded, EncodingField.SOFFSET).toInt
-      scalarOffset = Option.when(soffset != 0x80)(soffset)
+      address      = Option.when(Bits.unsignedIntField(word, 12, 2).raw != 0)(Bits.low8Int(second))
+      dataRegister = layout.register(encoded, EncodingField.VDATA)
+      resource     = layout.scalarRegister(encoded, EncodingField.SRSRC)
+      soffset      = layout.register(encoded, EncodingField.SOFFSET)
+      scalarOffset = Option.when(soffset.raw != 0x80)(soffset.raw.unsafe[ScalarRegisterIndex])
       immediate    = layout.get(word, EncodingField.OFFSET).toInt
       operation <- opcode match {
         case BufferWbinvl1 | BufferWbinvl1Vol |
@@ -2588,7 +2607,7 @@ private object VMCompiler {
       vector: Boolean
   ): Either[NonEmpty[String], InstructionSource] =
     SourceOperand.decode(encoding, target.isa).flatMap {
-      case SourceOperand.Scalar(index)                   => Some(InstructionSource.Scalar(index))
+      case SourceOperand.Scalar(index)                   => Some(InstructionSource.Scalar(index.raw.unsafe[ScalarRegisterIndex]))
       case SourceOperand.VectorRegister(index) if vector => Some(InstructionSource.VectorRegister(index))
       case SourceOperand.Integer(value)                  => Some(InstructionSource.Constant(value))
       case SourceOperand.Floating(value)                 =>
@@ -2597,8 +2616,8 @@ private object VMCompiler {
       case SourceOperand.Special(SpecialSource.src_shared_base | SpecialSource.src_shared_limit |
           SpecialSource.src_private_base | SpecialSource.src_private_limit | SpecialSource.src_pops_exiting_wave_id) =>
         Some(InstructionSource.Constant(0L))
-      case SourceOperand.Literal(4) => literal.map(InstructionSource.Literal(_))
-      case _                        => None
+      case SourceOperand.Literal(bytes) if bytes.raw == 4 => literal.map(InstructionSource.Literal(_))
+      case _                                              => None
     }.toRight[NonEmpty[String]](s"source encoding $encoding is not implemented or its literal is missing")
 
   private def subDwordSelection(encoding: Int): Either[NonEmpty[String], SubDwordSelection] =

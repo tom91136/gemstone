@@ -4,6 +4,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
@@ -17,7 +18,7 @@ class FCHKSuite extends munit.FunSuite {
       Vec(SASSFixture.Kernel(
         "probe",
         352,
-        Vec(0 -> 8, 8 -> 8, 16 -> 8),
+        Vec((0, 8), (8, 8), (16, 8)),
         registers = registerCounts.getOrElse(sm, fail(s"unsupported FCHK fixture sm_$sm"))
       ))
     )
@@ -73,8 +74,8 @@ class FCHKSuite extends munit.FunSuite {
     }
   }
 
-  private def execute(sm: Int, pairs: Vec[(Int, Int)], guarded: Boolean = false): Vec[Int] = {
-    require(pairs.nonEmpty && pairs.size <= 256)
+  private def execute(sm: Int, pairs: NonEmpty[Vec[(Int, Int)]], guarded: Boolean = false): Vec[Int] = {
+    require(pairs.size <= 256)
     val module   = fixtureModule(sm)
     val kernel   = module.kernels.find(_.name == "probe").getOrElse(fail("probe kernel is missing"))
     val function = if (guarded) DecodedFunction("probe", probeInstructions(guarded))
@@ -85,21 +86,21 @@ class FCHKSuite extends munit.FunSuite {
         sm
       ).fold(fail(_), _.find(_.name == "probe").getOrElse(fail("probe SASS function is missing")))
     val sass                               = SASSFixture(module, kernel, Vec(function))
-    val bytes                              = pairs.size * 4
+    val bytes                              = pairs.positiveSize * 4
     def words(values: Vec[Int]): Vec[Byte] =
       Vec.from(values).flatMap(v => LittleEndian.toVec(v.toLong & 0xffffffffL, 4))
     locally {
       val service = SASSFixture.Execution()
-      val a       = service.allocate(bytes.toLong.unsafe[Long > 0])
-      val b       = service.allocate(bytes.toLong.unsafe[Long > 0])
-      val out     = service.allocate(bytes.toLong.unsafe[Long > 0])
+      val a       = service.allocate(bytes.toLong)
+      val b       = service.allocate(bytes.toLong)
+      val out     = service.allocate(bytes.toLong)
       assert(service.write(a, 0L, words(pairs.map(_._1))).isRight)
       assert(service.write(b, 0L, words(pairs.map(_._2))).isRight)
       val program = service.compile(sass)
         .fold(e => fail(e.message), identity)
       val task = SASSFixture.task(
         "probe": NonEmpty[String],
-        LaunchGeometry.Dimensions(pairs.size.unsafe[Int > 0], 1, 1),
+        LaunchGeometry.Dimensions(pairs.positiveSize, 1, 1),
         LaunchGeometry.Dimensions.One,
         Vec(
           KernelTask.Argument.Memory(a, 0L),
@@ -108,7 +109,7 @@ class FCHKSuite extends munit.FunSuite {
         )
       )
       service.run(program, task).fold(e => fail(e.message), identity)
-      val data   = service.read(out, 0L, bytes.unsafe[Int >= 0]).toOption.get
+      val data   = service.read(out, 0L, bytes).toOption.get
       val stored = pairs.indices.map { i =>
         (0 until 4).foldLeft(0)((value, byte) => value | ((data(i * 4 + byte).toInt & 255) << (8 * byte)))
       }.toVec
@@ -118,15 +119,20 @@ class FCHKSuite extends munit.FunSuite {
     }
   }
 
-  private val boundaryPairs: Vec[(Int, Int)] = {
-    val exponents = Vec(0, 1, 2, 24, 25, 26, 127, 250, 251, 252, 253, 254, 255)
-    val matrix    = for {
-      (ea, i) <- exponents.zipWithIndex
-      (eb, j) <- exponents.zipWithIndex
-    } yield (
-      bits(ea, (i * 0x10203 + j * 0x301) & 0x7fffff, (i & 1) != 0),
-      bits(eb, (j * 0x507 + i * 0x10001) & 0x7fffff, (j & 1) != 0)
-    )
+  private val boundaryPairs: NonEmpty[Vec[(Int, Int)]] = {
+    val exponents = Vec.nonEmpty(0, 1, 2, 24, 25, 26, 127, 250, 251, 252, 253, 254, 255)
+    val matrix    = Vec.tabulateNonEmpty(exponents.positiveSize) { index =>
+      (exponents(index.raw), index.raw)
+    }.flatMapNonEmpty { (ea, i) =>
+      Vec.tabulateNonEmpty(exponents.positiveSize) { index =>
+        val j  = index.raw
+        val eb = exponents(j)
+        (
+          bits(ea, (i * 0x10203 + j * 0x301) & 0x7fffff, (i & 1) != 0),
+          bits(eb, (j * 0x507 + i * 0x10001) & 0x7fffff, (j & 1) != 0)
+        )
+      }
+    }
     val special = Vec(
       bits(0),
       bits(0, negative = true), // signed zeros
@@ -149,7 +155,7 @@ class FCHKSuite extends munit.FunSuite {
     ).grouped(2).map {
       case Vec(a, b) => (a, b); case Vec(a) => (a, 0); case _ => fail("bad special-value fixture")
     }.toVec
-    matrix ++ special
+    matrix.concatNonEmpty(special)
   }
 
   for (sm <- Vec(70, 75, 80, 86, 89))
@@ -181,7 +187,7 @@ class FCHKSuite extends munit.FunSuite {
   }
 
   test("predicated FCHK may read and write the same predicate without changing the guard") {
-    val pairs = Vec(
+    val pairs = Vec.nonEmpty(
       bits(127)                  -> bits(127), // lane 0 has a false guard and must retain it
       bits(24)                   -> bits(127),
       bits(127, negative = true) -> bits(2),

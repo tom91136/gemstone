@@ -5,6 +5,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.Transport.*
@@ -40,15 +41,15 @@ object Server {
         )
         timeout <- positive(
           name = env.RpcTimeoutSeconds,
-          default = env.RpcTimeoutSecondsDefault.unsafe[Long > 0],
+          default = env.RpcTimeoutSecondsDefault,
           maximum = Int.MaxValue / 1000,
           expected = "positive seconds fitting an Int millisecond timeout"
         )
         record <- scala.util.Try(values.get(env.Record).map(Path.of(_))).toEither.left.map(throwables.detail(_))
       } yield Settings(
         limits = TaskControl.Limits(instructions),
-        parallelism = parallelism.raw.toInt.unsafe[Int > 0],
-        requestTimeoutMillis = (timeout * 1000L).raw.toInt.unsafe[Int > 0],
+        parallelism = parallelism.toIntExact,
+        requestTimeoutMillis = (timeout * 1000L).toIntExact,
         record = record,
         tracePerformance = values.get(env.Trace).exists(configuration.traceEnabled(_, "perf"))
       )
@@ -58,7 +59,7 @@ object Server {
   case class Settings(
       limits: TaskControl.Limits = TaskControl.Limits.Default,
       parallelism: Int > 0 = Settings.defaultParallelism,
-      requestTimeoutMillis: Int > 0 = Math.toIntExact(env.RpcTimeoutSecondsDefault * 1000).unsafe[Int > 0],
+      requestTimeoutMillis: Int > 0 = (env.RpcTimeoutSecondsDefault * 1000L).toIntExact,
       record: Option[Path] = None,
       tracePerformance: Boolean = false,
       bind: Bind = Bind.Tcp()
@@ -79,7 +80,7 @@ object Server {
     try {
       val pool = own(WorkerPool(
         parallelism = settings.parallelism,
-        minGroups = settings.parallelism.raw.toLong,
+        minGroups = settings.parallelism.toLong,
         minWorkItems = 32L,
         reporter = error => scribe.error(error),
         measurement = Option.when(settings.tracePerformance) { measured =>
@@ -139,8 +140,8 @@ class Server private (
   private val acceptThread = Thread(() => accept(), "gemstone-rpc-accept")
   acceptThread.setDaemon(true)
 
-  def await(): Unit = acceptThread.join()
-  def usage: Long   = clients.usage(client)
+  def await(): Unit    = acceptThread.join()
+  def usage: Long >= 0 = clients.usage(client)
 
   private def accept(): Unit =
     try

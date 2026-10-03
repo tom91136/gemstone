@@ -8,7 +8,10 @@ class StringLocaleSuite extends munit.FunSuite {
     val previous = Locale.getDefault
     try {
       Locale.setDefault(Locale.FRANCE)
-      assertEquals(string.formatRoot("%.1f", java.lang.Double.valueOf(1.5)), "1.5")
+      // Exercise the Java Formatter Object-argument boundary under a non-root locale.
+      @SuppressWarnings(Array("scalafix:GemstoneNoBoxedPrimitives"))
+      val rendered = string.formatRoot("%.1f", java.lang.Double.valueOf(1.5))
+      assertEquals(rendered, "1.5")
     } finally Locale.setDefault(previous)
   }
 

@@ -10,7 +10,7 @@ import net.kurobako.gemstone.vm.*
 
 class LegacyI2ICCZeroSuite extends munit.FunSuite {
   private def fixtureModule: Cubin.Module =
-    SASSFixture.module(35, Vec(SASSFixture.Kernel("probe", 320, Vec(0 -> 8, 8 -> 8), registers = 5)))
+    SASSFixture.module(35, Vec(SASSFixture.Kernel("probe", 320, Vec((0, 8), (8, 8)), registers = 5)))
 
   private val cases = Vec(
     0L                  -> 0L,
@@ -33,7 +33,7 @@ class LegacyI2ICCZeroSuite extends munit.FunSuite {
 
     locally {
       val service = SASSFixture.Execution()
-      val output  = service.allocate(4L.unsafe[Long > 0])
+      val output  = service.allocate(4L)
       val program = service.compile(lowered)
         .fold(error => fail(error.message), identity)
       cases.foreach { case (input, expected) =>

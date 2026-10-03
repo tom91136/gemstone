@@ -8,6 +8,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
+import net.kurobako.gemstone.constraint.*
 import scala.collection.mutable
 import scala.util.Try
 import scala.util.Using
@@ -610,7 +611,7 @@ object GenerateSASSISA {
     ujson.Obj(
       "target"     -> target,
       "sha256"     -> table.digest,
-      "width"      -> compiled.width,
+      "width"      -> compiled.width.raw,
       "parameters" -> upickle.default.writeJs(parameters),
       "constants"  -> upickle.default.writeJs(constants),
       "symbols"    -> ujson.Arr.from(symbols.map(vocabulary =>

@@ -2,8 +2,10 @@ package net.kurobako.gemstone.isa.sass
 
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.{Instruction as VMInstruction, *}
 import net.kurobako.gemstone.isa.ptx.v9_3 as PTX
 import net.kurobako.gemstone.isa.sass.asm.*
@@ -42,11 +44,11 @@ object SASSFixture extends munit.Assertions {
     )
   }
   case class Kernel(
-      name: String,
-      parameterBase: Int,
-      parameters: Vec[(Int, Int)],
+      name: NonEmpty[String],
+      parameterBase: Int >= 0,
+      parameters: Vec[(Int >= 0, Int > 0)],
       registers: Int = 0,
-      shared: Int = 0
+      shared: Int >= 0 = 0
   )
 
   def module(
@@ -56,42 +58,53 @@ object SASSFixture extends munit.Assertions {
       globals: Vec[Cubin.Global] = Vec.empty
   ): Cubin.Module = {
     val metadata = kernels.map { kernel =>
-      val parameters = kernel.parameters.zipWithIndex.map { case ((offset, size), ordinal) =>
-        Cubin.Parameter(ordinal, offset, size)
+      val parameters = kernel.parameters.zip(Vec.indices(kernel.parameters.nonNegativeSize)).map {
+        case ((offset, size), ordinal) =>
+          Cubin.Parameter(ordinal, offset, size)
       }
-      val parameterSize = kernel.parameters.foldLeft(0) { case (size, (offset, width)) =>
-        math.max(size, offset + width)
+      val parameterSize = kernel.parameters.foldLeft[Int >= 0](0) { case (size, (offset, width)) =>
+        size.max(offset + width)
       }
       (kernel, parameters, parameterSize)
     }
     val generated = metadata.foldLeft(Vec.empty[Cubin.Section]) { case (sections, (kernel, _, parameterSize)) =>
-      val text = Cubin.Section(sections.size, s".text.${kernel.name}", 1, 0L, 0, 0, kernel.registers << 24, Vec.empty)
+      val text =
+        Cubin.Section(sections.nonNegativeSize, s".text.${kernel.name}", 1, 0L, 0, 0, kernel.registers << 24, Vec.empty)
       val withText   = sections :+ text
-      val withShared = if (kernel.shared > 0)
-        withText :+ Cubin.Section(withText.size, s".nv.shared.${kernel.name}", 8, 3L, kernel.shared, 0, 0, Vec.empty)
+      val withShared = if (kernel.shared.raw > 0)
+        withText :+
+          Cubin.Section(withText.nonNegativeSize, s".nv.shared.${kernel.name}", 8, 3L, kernel.shared, 0, 0, Vec.empty)
       else withText
       val constantSize = kernel.parameterBase + parameterSize
-      if (constantSize > 0)
+      if (constantSize.raw > 0)
         withShared :+ Cubin.Section(
-          withShared.size,
+          withShared.nonNegativeSize,
           s".nv.constant0.${kernel.name}",
           1,
           2L,
           constantSize,
           0,
           0,
-          Vec.fill(constantSize)(0.toByte)
+          Vec.fill(constantSize.raw)(0.toByte)
         )
       else withShared
     }
     val entries = metadata.map { case (kernel, parameters, parameterSize) =>
-      val textIndex = generated.indexWhere(_.name == s".text.${kernel.name}")
+      val textIndex = generated.indexWhere(_.name == s".text.${kernel.name}").refine[Int >= 0].fold(
+        error => fail(error.raw),
+        identity
+      )
       Cubin.Kernel(kernel.name, textIndex, kernel.parameterBase, parameterSize, parameters)
     }
-    val constantSections = constants.zipWithIndex.map { case ((name, bytes), index) =>
-      Cubin.Section(generated.size + index, name, 1, 2L, bytes.size, 0, 0, bytes)
+    val constantSections = constants.zip(Vec.indices(constants.nonNegativeSize)).map { case ((name, bytes), index) =>
+      Cubin.Section(generated.nonNegativeSize + index, name, 1, 2L, bytes.nonNegativeSize, 0, 0, bytes)
     }
-    Cubin.Module(sm, generated ++ constantSections, entries, globals)
+    Cubin.Module(
+      sm.refine[Int >= 35].fold(error => fail(error.raw), identity),
+      generated ++ constantSections,
+      entries,
+      globals
+    )
   }
 
   def lower(
@@ -129,13 +142,13 @@ object SASSFixture extends munit.Assertions {
       id
     }
 
-    def readWords(region: AllocationId, count: Int >= 0, width: Int where Between[1, 8] = 4)(using
+    def readWords(region: AllocationId, count: Int >= 0, width: Int in 1 ~ 8 = 4)(using
         munit.Location
     ): Vec[Long] =
-      Vec.tabulate(count.raw)(index =>
+      Vec.indices(count).map(index =>
         readValue(
           region,
-          (index.toLong * width.raw).unsafe[Long >= 0],
+          index.toLong.widen[Long >= 0] * width.toLong,
           width
         ).fold(error => fail(error.message), identity)
       )
@@ -214,7 +227,7 @@ object SASSFixture extends munit.Assertions {
     override def atomicModifyValue(
         region: AllocationId,
         offset: Long >= 0,
-        size: Int where Between[1, 8]
+        size: Int in 1 ~ 8
     )(update: Long => Long): Either[Fault, Long] = atomicLock.withLock {
       for {
         previous <- readValue(region, offset, size)

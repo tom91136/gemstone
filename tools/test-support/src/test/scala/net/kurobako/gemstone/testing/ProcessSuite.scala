@@ -33,4 +33,22 @@ class ProcessSuite extends munit.FunSuite {
       assert(result.stderr.contains("timed out"))
     }
   }
+
+  test("empty arguments remain valid while NUL arguments are rejected before starting a process") {
+    files.temporary { root =>
+      val result = process.run(
+        Seq("/bin/sh", "-c", "printf '<%s>' \"$1\"", "fixture", ""),
+        root,
+        Map.empty,
+        Set.empty,
+        5.seconds
+      )
+      assertEquals(result.exit, 0)
+      assertEquals(result.stdout, "<>")
+      val _ = intercept[IllegalArgumentException] {
+        process.run(Seq("/bin/sh", "bad\u0000argument"), root, Map.empty, Set.empty, 5.seconds)
+      }
+    }
+  }
+
 }
