@@ -78,7 +78,7 @@ class RPCInputStreamSuite extends munit.FunSuite {
             val bytes = Array.ofDim[Byte](body.length)
             input.readFully(bytes)
             bytes
-          } else input.readNBytes(body.length)
+          } else readPayload(input, header)
           assert(java.util.Arrays.equals(actual, body), "header parsing changed payload bytes or stream position")
         }
         assertEquals(input.read(), -1)
@@ -98,6 +98,19 @@ class RPCInputStreamSuite extends munit.FunSuite {
         .putLong(1L).putLong(1L).putLong(1L).putInt(tagSize).putInt(payloadSize).array()
       intercept[IllegalArgumentException](readHeader(DataInputStream(ByteArrayInputStream(prefix))))
     }
+  }
+
+  test("exact reads preserve empty frames, partial-read diagnostics, and stream position") {
+    val input = DataInputStream(FragmentedInput(ByteArrayInputStream(Array[Byte](1, 2, 3))))
+    assertEquals(readExactly(input, 0, java.io.EOFException(_)).toSeq, Seq.empty[Byte])
+    assertEquals(readExactly(input, 2, java.io.EOFException(_)).toSeq, Seq[Byte](1, 2))
+    val error = intercept[java.io.EOFException](readExactly(input, 2, java.io.EOFException(_)))
+    assertEquals(error.getMessage, "expected 2 bytes, received 1")
+    assert(scala.compiletime.testing.typeCheckErrors("""
+      import java.io.*
+      import net.kurobako.gemstone.server.protocol.*
+      readExactly(DataInputStream(ByteArrayInputStream(Array.emptyByteArray)), -1, EOFException(_))
+    """).nonEmpty)
   }
 
   test("malformed UTF-8 tags are rejected") {

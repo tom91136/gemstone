@@ -101,7 +101,7 @@ object InstructionDecoder {
         case _           => None
       }
       parts.flatMap { (bank, suffix) =>
-        val index = if (suffix == "Z") Some(if (bank == "UR") 63 else 255)
+        val index = if (suffix == "Z") Some(255)
         else Option.when(suffix.nonEmpty && suffix.forall(c => c >= '0' && c <= '9'))(suffix).flatMap(_.toIntOption)
         index.flatMap(_.refine[Int in 0 ~ 255].toOption)
           .map(value => Operand.Register(RegisterBank.fromSpelling(bank), value))
@@ -120,6 +120,7 @@ object InstructionDecoder {
         NVDisasm.FieldKind.Immediate,
         NVDisasm.FieldKind.SignedImmediate,
         NVDisasm.FieldKind.RelativeImmediate,
+        NVDisasm.FieldKind.ConditionRegisterBank,
         NVDisasm.FieldKind.PredicateRegister
       )(category)
     }
@@ -156,11 +157,7 @@ object InstructionDecoder {
             case NVDisasm.FieldKind.FloatingImmediate(baseFormat) =>
               val format = candidate.floatFormats.getOrElse(field.binding, baseFormat)
               val width  = format.width.toRight(unsupported(s"unsupported floating format ${format.spelling}"))
-              val bits   = format match {
-                case FloatEncoding.F64Imm  => value << 32
-                case FloatEncoding.E8M7Imm => value << 16
-                case _                     => value
-              }
+              val bits   = value << SASSFormatBindings.floatingShift(database, form, field, format)
               width.map(value => Operand.FloatingBits(format, value, bits))
             case NVDisasm.FieldKind.Immediate       => Right(hexadecimalOperand(value))
             case NVDisasm.FieldKind.SignedImmediate =>
@@ -173,6 +170,8 @@ object InstructionDecoder {
                 .toRight(illegal(s"illegal constant selector $value (${field.binding})"))
             case NVDisasm.FieldKind.ConditionCode => symbol(field, value).map(Operand.Symbol.apply)
                 .toRight(illegal(s"illegal condition-code selector $value (${field.binding})"))
+            case NVDisasm.FieldKind.ConditionRegisterBank => symbol(field, value).map(Operand.Symbol.apply)
+                .toRight(illegal(s"illegal condition register bank $value (${field.binding})"))
             case NVDisasm.FieldKind.DescriptorRegister =>
               symbol(field, value).map(name => Operand.SpecialRegister(SpecialRegister.fromSpelling(name)))
                 .toRight(unsupported(s"unknown descriptor $value (${field.binding})"))
@@ -281,26 +280,30 @@ object InstructionDecoder {
         case FormatPiece.Field(field, _)                                    => !isOperandKind(field)
         case _                                                              => true
       }
-      def modifiers(pieces: Vec[FormatPiece]): Vec[SASSInstruction.Modifier] = pieces.flatMap {
-        case FormatPiece.Text(raw) =>
-          raw.split(Array(';', ',', '*', '.', '/', ' ', '\t', '\r', '\n', '\f', '\u000b')).toVec.filter(_.nonEmpty)
-            .map(SASSInstruction.Modifier(_))
-        case FormatPiece.Group("{", "}", children) if !children.exists {
-              case FormatPiece.Field(field, _) => isOperandKind(field)
-              case _                           => false
-            } => modifiers(children)
-        case FormatPiece.Field(field, _) if !Set("Pg", "UPg")(field.binding) =>
-          raw(field).toVec.flatMap { value =>
-            val isDefault = analysis.defaultValues(field).contains(value) &&
-              Vec("not", "negate", "absolute", "invert").forall(attribute(field, _) == 0)
-            val isStep = NVDisasm.fieldKind(field.kind) == NVDisasm.FieldKind.StepField
-            Option.when(!isDefault || isStep) {
-              val spelling = symbol(field, value).getOrElse(value.toString)
-              spelling.split('.').toVec.filter(_.nonEmpty).map(SASSInstruction.Modifier(_))
-            }.toVec.flatten
-          }
-        case _ => Vec.empty
-      }
+      def modifiers(pieces: Vec[FormatPiece], preserveDefaults: Boolean = false): Vec[SASSInstruction.Modifier] =
+        pieces.flatMap {
+          case FormatPiece.Text(raw) =>
+            raw.split(Array(';', ',', '*', '.', '/', ' ', '\t', '\r', '\n', '\f', '\u000b')).toVec.filter(_.nonEmpty)
+              .map(SASSInstruction.Modifier(_))
+          case FormatPiece.Group("{", "}", children) if !children.exists {
+                case FormatPiece.Field(field, _) => isOperandKind(field)
+                case _                           => false
+              } =>
+            val groupedFields = children.collect { case FormatPiece.Field(field, _) => field }
+            val changed       = groupedFields.exists(field => raw(field).exists(value => !isDefault(field, value)))
+            modifiers(children, preserveDefaults || (groupedFields.size > 1 && changed))
+          case FormatPiece.Field(field, _) if !Set("Pg", "UPg")(field.binding) =>
+            raw(field).toVec.flatMap { value =>
+              val isDefault = analysis.defaultValues(field).contains(value) &&
+                Vec("not", "negate", "absolute", "invert").forall(attribute(field, _) == 0)
+              val isStep = NVDisasm.fieldKind(field.kind) == NVDisasm.FieldKind.StepField
+              Option.when(!isDefault || isStep || preserveDefaults) {
+                val spelling = symbol(field, value).getOrElse(value.toString)
+                spelling.split('.').toVec.filter(_.nonEmpty).map(SASSInstruction.Modifier(_))
+              }.toVec.flatten
+            }
+          case _ => Vec.empty
+        }
       modifiers(prefix)
     }
     def operandValue(piece: FormatPiece): Vec[Operand] = piece match {
@@ -351,7 +354,7 @@ object InstructionDecoder {
             Vec(Operand.ConstantBank(bank, offset))
           case Vec(Operand.Register(bank, index), displacement) if offsetValue(displacement).nonEmpty =>
             Vec(Operand.Address(
-              Option.when(index.raw != 255 && !(bank == RegisterBank.UR && index.raw == 63))(Operand.Register(
+              Option.when(index.raw != 255)(Operand.Register(
                 bank,
                 index
               )),
@@ -364,16 +367,14 @@ object InstructionDecoder {
           case Vec(Operand.Register(baseBank, baseIndex), Operand.Register(indexBank, indexIndex), offset)
               if offsetValue(offset).nonEmpty =>
             Vec(Operand.Address(
-              Option.when[Operand.Register](baseIndex.raw != 255 &&
-                !(baseBank == RegisterBank.UR && baseIndex.raw == 63))(
+              Option.when[Operand.Register](baseIndex.raw != 255)(
                 Operand.Register(baseBank, baseIndex)
-              ).orElse(Option.when[Operand.Register](indexIndex.raw != 255 &&
-                !(indexBank == RegisterBank.UR && indexIndex.raw == 63))(
+              ).orElse(Option.when[Operand.Register](indexIndex.raw != 255)(
                 Operand.Register(indexBank, indexIndex)
               )),
               Option.when[Operand.Register](
-                baseIndex.raw != 255 && !(baseBank == RegisterBank.UR && baseIndex.raw == 63) &&
-                  indexIndex.raw != 255 && !(indexBank == RegisterBank.UR && indexIndex.raw == 63)
+                baseIndex.raw != 255 &&
+                  indexIndex.raw != 255
               )(
                 Operand.Register(indexBank, indexIndex)
               ),
@@ -387,7 +388,7 @@ object InstructionDecoder {
                 Operand.Unary(Operand.Bits(displacement, _), true, false, false)
               ) =>
             Vec(Operand.Address(
-              Option.when(index.raw != 255 && !(bank == RegisterBank.UR && index.raw == 63))(Operand.Register(
+              Option.when(index.raw != 255)(Operand.Register(
                 bank,
                 index
               )),
@@ -411,7 +412,7 @@ object InstructionDecoder {
             ))
           case Vec(Operand.Register(bank, index)) =>
             Vec(Operand.Address(
-              Option.when(index.raw != 255 && !(bank == RegisterBank.UR && index.raw == 63))(Operand.Register(
+              Option.when(index.raw != 255)(Operand.Register(
                 bank,
                 index
               )),
@@ -431,8 +432,8 @@ object InstructionDecoder {
         Operand.Unary(qualify(inner, selector), negative, not, absolute)
       case Operand.Decorated(inner, attributes) => Operand.Decorated(qualify(inner, selector), attributes)
       case Operand.Qualified(inner, selectors)  =>
-        Operand.Qualified(inner, selectors :+ OperandSelector.fromSpelling(selector))
-      case other => Operand.Qualified(other, Vec(OperandSelector.fromSpelling(selector)))
+        Operand.Qualified(inner, OperandSelector.fromSpellings(selectors.map(_.spelling) :+ selector))
+      case other => Operand.Qualified(other, OperandSelector.fromSpellings(Vec(selector)))
     }
     def isOperandValueField(field: Field, allowCC: Boolean = false): Boolean =
       (isOperandKind(field) || (allowCC && NVDisasm.fieldKind(field.kind) == NVDisasm.FieldKind.ConditionCode)) &&

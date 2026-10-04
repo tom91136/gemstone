@@ -22,7 +22,8 @@ object SASSInstructionModel {
     "F16Imm",
     "F32Imm",
     "F64Imm",
-    "PR"
+    "PR",
+    "CCPR"
   )
   private val attrs = Set("not", "negate", "absolute", "invert")
 
@@ -41,8 +42,10 @@ object SASSInstructionModel {
     val nodes = form.section("FORMAT").toVector.flatMap(section =>
       SASSFormat.parse(section.body).fold(error => throw IllegalArgumentException(error.toString), identity)
     )
-    allFields(nodes).filterNot(field => Set("Pg", "UPg")(field.binding))
-      .takeWhile(field => !isOperandField(field)).map(_.kind)
+    val fields = allFields(nodes).filterNot(field => Set("Pg", "UPg")(field.binding))
+    // R2P also accepts its bank as a qualifier (R2P.PR).
+    fields.takeWhile(field => !isOperandField(field)).map(_.kind) ++
+      fields.filter(_.kind == "CCPR").map(_.kind)
   }.toSet
 
   private def fieldKind(field: SASSFormat.Field): String = {
@@ -54,7 +57,7 @@ object SASSInstructionModel {
     else if (kind.contains("Register") || Set("B", "BD", "CBU_STATE", "CBU_STATE_DIST", "Scoreboard")(kind)) "Register"
     else if (kind == "BITSET") "Immediate|Group"
     else if (Set("UImm", "SImm", "RSImm", "F16Imm", "F32Imm", "F64Imm")(kind)) "Immediate"
-    else if (Set("CC", "optCC", "Partsel", "PR")(kind)) "Symbol"
+    else if (Set("CC", "optCC", "Partsel", "PR", "CCPR")(kind)) "Symbol"
     else "Any"
   }
 
@@ -193,7 +196,10 @@ object SASSInstructionModel {
         form.opcodes.exists(_.startsWith("P2R")) && projected.size == 4 &&
         projected.lift(1).exists(_.name == "PR")
       ) projected.patch(1, Vector.empty, 1)
-      else projected
+      else if (form.opcodes.exists(opcode => opcode.startsWith("P2R") || opcode.startsWith("R2P"))) {
+        val banks = allFields(operandSyntax).filter(_.kind == "CCPR").map(_.binding).toSet
+        projected.map(slot => if (banks(slot.name)) slot.copy(optional = true) else slot)
+      } else projected
     form.opcodes.map(opcode => FormShape(form.name, opcode.takeWhile(_ != '.'), slots))
   }
 

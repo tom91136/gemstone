@@ -6,7 +6,7 @@ import net.kurobako.gemstone.isa.sass.*
 class SASSOperandParserSuite extends munit.FunSuite {
   test("preserves register classes and SASS zero-register sentinels") {
     assertEquals(SASSOperandParser.parse("R17"), Right(Operand.Register(RegisterBank.R, 17)))
-    assertEquals(SASSOperandParser.parse("URZ"), Right(Operand.Register(RegisterBank.UR, 63)))
+    assertEquals(SASSOperandParser.parse("URZ"), Right(Operand.Register(RegisterBank.UR, 255)))
     assertEquals(SASSOperandParser.parse("RZ"), Right(Operand.Register(RegisterBank.R, 255)))
     assertEquals(SASSOperandParser.parse("R255"), Right(Operand.Register(RegisterBank.R, 255)))
     assert(SASSOperandParser.parse("R256").isLeft)
@@ -62,7 +62,7 @@ class SASSOperandParserSuite extends munit.FunSuite {
     )
     assertEquals(
       SASSOperandParser.parse("c[0x0][0x8].H1"),
-      Right(Operand.Qualified(Operand.ConstantBank(0, Operand.Bits(8, 0)), Vec(OperandSelector.H1)))
+      Right(Operand.Qualified(Operand.ConstantBank(0, Operand.Bits(8, 0)), Vec.nonEmpty(OperandSelector.H1)))
     )
     assertEquals(
       SASSOperandParser.parse("[R0+UR6+-0x10]"),
@@ -77,7 +77,7 @@ class SASSOperandParserSuite extends munit.FunSuite {
     )
     assertEquals(
       SASSOperandParser.parse("{R0, R1, R2, R3}"),
-      Right(Operand.Group(Vec(
+      Right(Operand.Group(Vec.nonEmpty(
         Operand.Register(RegisterBank.R, 0),
         Operand.Register(RegisterBank.R, 1),
         Operand.Register(RegisterBank.R, 2),
@@ -86,12 +86,12 @@ class SASSOperandParserSuite extends munit.FunSuite {
     )
     assertEquals(
       SASSOperandParser.parse("R3.H0_H0"),
-      Right(Operand.Qualified(Operand.Register(RegisterBank.R, 3), Vec(OperandSelector.H0_H0)))
+      Right(Operand.Qualified(Operand.Register(RegisterBank.R, 3), Vec.nonEmpty(OperandSelector.H0_H0)))
     )
   }
 
   test("rejects floating address terms instead of dropping their displacement") {
-    Vec(
+    Vec.nonEmpty(
       "[1.5]",
       "[1e2]",
       "[R0+1.5]",
@@ -102,7 +102,7 @@ class SASSOperandParserSuite extends munit.FunSuite {
   }
 
   test("rejects index-register selectors instead of silently discarding them") {
-    Vec(
+    Vec.nonEmpty(
       "[R0+UR1.X4]",
       "[R0+UR1.reuse]",
       "c[0][R0+UR1.U32]",
@@ -122,7 +122,7 @@ class SASSOperandParserSuite extends munit.FunSuite {
           Some(AddressMode.X4),
           None
         ),
-        Vec(OperandSelector.reuse)
+        Vec.nonEmpty(OperandSelector.reuse)
       ))
     )
     assertEquals(SASSOperandParser.parse("[R0.X4.X4]"), SASSOperandParser.parse("[R0.X4]"))
@@ -157,7 +157,7 @@ class SASSOperandParserSuite extends munit.FunSuite {
       SASSOperandParser.parse(s"{$source}"),
       SASSOperandParser.parseMany(source).map(Operand.Group(_))
     )
-    Vec("R0,", "R0 R1", "R0 ").foreach { source =>
+    Vec.nonEmpty("R0,", "R0 R1", "R0 ").foreach { source =>
       assert(SASSOperandParser.parseMany(source).isLeft, source)
       assert(SASSOperandParser.parse(s"{$source}").isLeft, source)
     }

@@ -1,11 +1,13 @@
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -34,16 +36,28 @@ extern "C" char **environ;
 namespace conformance::driver {
 namespace {
 
+std::mutex spawn_mutex;
+
 class LineSink {
   std::ostream *stream_;
   std::string prefix_, pending_;
   std::string *capture_;
   std::ostream *log_;
   bool overflow_ = false;
+  const std::function<std::string(std::string_view)> &format_line_;
+
+  void emit(std::string_view line) {
+    std::osyncstream output(*stream_);
+    output << prefix_;
+    if (format_line_) output << format_line_(line);
+    else output << line;
+    output << std::endl;
+  }
 
 public:
-  LineSink(std::ostream *stream, std::string prefix, std::string *capture = nullptr, std::ostream *log = nullptr)
-      : stream_(stream), prefix_(std::move(prefix)), capture_(capture), log_(log) {}
+  LineSink(std::ostream *stream, std::string prefix, std::string *capture, std::ostream *log,
+           const std::function<std::string(std::string_view)> &format_line)
+      : stream_(stream), prefix_(std::move(prefix)), capture_(capture), log_(log), format_line_(format_line) {}
   void write(const uint8_t *data, size_t size) {
     if (log_) {
       log_->write(reinterpret_cast<const char *>(data), static_cast<std::streamsize>(size));
@@ -57,7 +71,7 @@ public:
     pending_.append(reinterpret_cast<const char *>(data), size);
     size_t begin = 0;
     for (auto end = pending_.find('\n'); end != std::string::npos; end = pending_.find('\n', begin)) {
-      std::osyncstream(*stream_) << prefix_ << std::string_view(pending_).substr(begin, end - begin) << '\n';
+      emit(std::string_view(pending_).substr(begin, end - begin));
       begin = end + 1;
     }
     pending_.erase(0, begin);
@@ -66,7 +80,7 @@ public:
   bool overflow() const { return overflow_; }
   void finish() {
     if (stream_ && !pending_.empty()) {
-      std::osyncstream(*stream_) << prefix_ << pending_ << '\n';
+      emit(pending_);
       pending_.clear();
     }
   }
@@ -106,38 +120,48 @@ std::wstring quote_argument(const std::wstring &argument) {
   return result;
 }
 #else
-volatile sig_atomic_t active_group = 0;
-volatile sig_atomic_t interrupted = 0;
-void forward_signal(int32_t signal) {
-  interrupted = signal;
-  if (active_group > 0) ::kill(-active_group, signal);
-}
+// The handler only publishes cancellation; each caller owns and reaps its child group.
+static_assert(std::atomic<int32_t>::is_always_lock_free);
+std::atomic<int32_t> interrupted{0};
+std::mutex process_mutex;
+size_t active_processes = 0;
+struct sigaction old_term = {}, old_int = {};
+void forward_signal(int32_t signal) { interrupted.store(signal); }
 class ProcessGroup {
-  int32_t pid_;
-  struct sigaction old_term_ = {};
-  struct sigaction old_int_ = {};
+  int32_t pid_ = 0;
 
 public:
-  explicit ProcessGroup(int32_t pid) : pid_(pid) {
-    interrupted = 0;
-    active_group = pid;
-    struct sigaction action = {};
-    action.sa_handler = forward_signal;
-    sigemptyset(&action.sa_mask);
-    sigaction(SIGTERM, &action, &old_term_);
-    sigaction(SIGINT, &action, &old_int_);
+  ProcessGroup() {
+    const std::lock_guard lock(process_mutex);
+    if (active_processes++ == 0) {
+      interrupted.store(0);
+      struct sigaction action = {};
+      action.sa_handler = forward_signal;
+      sigemptyset(&action.sa_mask);
+      sigaction(SIGTERM, &action, &old_term);
+      sigaction(SIGINT, &action, &old_int);
+    }
+  }
+  void started(int32_t pid) {
+    pid_ = pid;
+    ::setpgid(pid, pid);
   }
   ~ProcessGroup() {
-    // Also reap a group's surviving workers when its leader exits successfully.
-    ::kill(-pid_, SIGKILL);
-    active_group = 0;
-    sigaction(SIGTERM, &old_term_, nullptr);
-    sigaction(SIGINT, &old_int_, nullptr);
+    if (pid_ > 0) {
+      ::kill(-pid_, SIGKILL);
+      while (::waitpid(pid_, nullptr, 0) < 0 && errno == EINTR) {
+      }
+    }
+    const std::lock_guard lock(process_mutex);
+    if (--active_processes == 0) {
+      sigaction(SIGTERM, &old_term, nullptr);
+      sigaction(SIGINT, &old_int, nullptr);
+    }
   }
 };
 
-// Returns the exit status, -1 on error, or -2 when the deadline expires.
-int wait_for_exit(int32_t pid, std::chrono::steady_clock::time_point deadline) {
+// Returns the exit status, -1 on error, or -2 on timeout or cancellation.
+int wait_for_exit(int32_t pid, std::chrono::steady_clock::time_point deadline, bool cancellable = true) {
   for (;;) {
     int status = 0;
     const auto result = ::waitpid(pid, &status, WNOHANG);
@@ -150,7 +174,7 @@ int wait_for_exit(int32_t pid, std::chrono::steady_clock::time_point deadline) {
       if (errno == EINTR) continue;
       return -1;
     }
-    if (std::chrono::steady_clock::now() >= deadline) return -2;
+    if (std::chrono::steady_clock::now() >= deadline || (cancellable && interrupted.load())) return -2;
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
 }
@@ -160,7 +184,8 @@ int wait_for_exit(int32_t pid, std::chrono::steady_clock::time_point deadline) {
 
 ProcessResult run_process(const std::vector<std::string> &command, const std::filesystem::path &directory,
                           const std::map<std::string, std::string> &environment, std::chrono::milliseconds timeout,
-                          const std::string &prefix, bool capture_output, std::ostream *output_log) {
+                          const std::string &prefix, bool capture_output, std::ostream *output_log,
+                          const std::function<std::string(std::string_view)> &format_line) {
   if (command.empty() || timeout.count() <= 0 || timeout.count() > INT32_MAX)
     throw std::invalid_argument("invalid process command or timeout");
   const auto working = directory.string();
@@ -178,8 +203,10 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
     environment_storage.push_back(key + "=" + value);
 
   std::string output, error_output;
-  LineSink stdout_sink(capture_output || output_log ? nullptr : &std::cout, prefix, capture_output ? &output : nullptr, output_log);
-  LineSink stderr_sink(capture_output || output_log ? nullptr : &std::cerr, prefix, capture_output ? &error_output : nullptr, output_log);
+  LineSink stdout_sink(capture_output || output_log ? nullptr : &std::cout, prefix, capture_output ? &output : nullptr, output_log,
+                       format_line);
+  LineSink stderr_sink(capture_output || output_log ? nullptr : &std::cerr, prefix, capture_output ? &error_output : nullptr, output_log,
+                       format_line);
 
   const auto completed = [&](int32_t status) {
     if (stdout_sink.overflow() || stderr_sink.overflow())
@@ -193,6 +220,7 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
   };
 
 #if defined(_WIN32)
+  std::unique_lock spawn_lock(spawn_mutex);
   SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
   HANDLE output_read = nullptr, output_write = nullptr, error_read = nullptr, error_write = nullptr;
   if (!CreatePipe(&output_read, &output_write, &attributes, 0))
@@ -251,6 +279,7 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
   }
   ResumeThread(information.hThread);
   CloseHandle(information.hThread);
+  spawn_lock.unlock();
 
   std::array<uint8_t, 4096> buffer{};
   bool output_open = true, error_open = true;
@@ -303,6 +332,13 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
   CloseHandle(information.hProcess);
   return completed(static_cast<int32_t>(status));
 #else
+  std::vector<char *> environment_pointers;
+  for (auto &entry : environment_storage)
+    environment_pointers.push_back(entry.data());
+  environment_pointers.push_back(nullptr);
+  ProcessGroup group;
+  // Serialize pipe creation through fork so another child cannot retain our writers.
+  std::unique_lock spawn_lock(spawn_mutex);
   int output_pipe[2], error_pipe[2];
   if (::pipe(output_pipe) != 0) throw std::runtime_error("cannot create output pipes for " + command.front());
   if (::pipe(error_pipe) != 0) {
@@ -311,6 +347,12 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
     throw std::runtime_error("cannot create error pipes for " + command.front());
   }
 
+  for (int fd : {output_pipe[0], output_pipe[1], error_pipe[0], error_pipe[1]})
+    if (::fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
+      for (int opened : {output_pipe[0], output_pipe[1], error_pipe[0], error_pipe[1]})
+        ::close(opened);
+      throw std::runtime_error("cannot protect process pipes for " + command.front());
+    }
   const auto pid = ::fork();
   if (pid < 0) {
     ::close(output_pipe[0]);
@@ -334,11 +376,6 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
     ::close(error_pipe[0]);
     ::close(error_pipe[1]);
     if (::chdir(working.c_str()) != 0) std::_Exit(127);
-    std::vector<char *> environment_pointers;
-    environment_pointers.reserve(environment_storage.size() + 1);
-    for (auto &entry : environment_storage)
-      environment_pointers.push_back(entry.data());
-    environment_pointers.push_back(nullptr);
     environ = environment_pointers.data();
     ::execvp(arguments.front(), arguments.data());
     std::_Exit(127);
@@ -346,7 +383,8 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
 
   ::close(output_pipe[1]);
   ::close(error_pipe[1]);
-  const ProcessGroup group(static_cast<int32_t>(pid));
+  group.started(static_cast<int32_t>(pid));
+  spawn_lock.unlock();
 
   struct pollfd descriptors[2]{{output_pipe[0], POLLIN, 0}, {error_pipe[0], POLLIN, 0}};
   bool open[2]{true, true};
@@ -355,10 +393,10 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
   const auto terminate = [&] {
     ::kill(-pid, SIGTERM);
     ::kill(pid, SIGTERM);
-    if (wait_for_exit(pid, std::chrono::steady_clock::now() + std::chrono::seconds(1)) == -2) {
+    if (wait_for_exit(pid, std::chrono::steady_clock::now() + std::chrono::seconds(1), false) == -2) {
       ::kill(-pid, SIGKILL);
       ::kill(pid, SIGKILL);
-      (void)wait_for_exit(pid, std::chrono::steady_clock::now() + std::chrono::seconds(2));
+      (void)wait_for_exit(pid, std::chrono::steady_clock::now() + std::chrono::seconds(2), false);
     }
   };
   const auto closeStreams = [&] {
@@ -370,7 +408,7 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
   };
   while (open[0] || open[1]) {
     const auto now = std::chrono::steady_clock::now();
-    if (now >= deadline) {
+    if (now >= deadline || interrupted.load()) {
       expired = true;
       break;
     }
@@ -384,16 +422,13 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
       ++count;
     }
     const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
-    const auto ready = ::poll(active, static_cast<nfds_t>(count), static_cast<int>(std::min<int64_t>(remaining, INT32_MAX)));
+    const auto ready = ::poll(active, static_cast<nfds_t>(count), static_cast<int>(std::min<int64_t>(remaining, 100)));
     if (ready < 0) {
       if (errno == EINTR) continue;
       closeStreams();
       throw std::runtime_error("cannot read " + command.front() + ": " + std::strerror(errno));
     }
-    if (ready == 0) {
-      expired = true;
-      break;
-    }
+    if (ready == 0) continue;
     for (int slot = 0; slot < count; ++slot) {
       if ((active[slot].revents & (POLLIN | POLLHUP | POLLERR)) == 0) continue;
       const int stream = indices[slot];
@@ -414,15 +449,15 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
   if (expired) {
     terminate();
     closeStreams();
-    return timed_out();
+    return interrupted.load() ? completed(128 + interrupted.load()) : timed_out();
   }
   const auto status = wait_for_exit(pid, deadline);
   if (status == -2) {
     terminate();
     closeStreams();
-    return timed_out();
+    return interrupted.load() ? completed(128 + interrupted.load()) : timed_out();
   }
-  if (interrupted) return completed(128 + interrupted);
+  if (interrupted.load()) return completed(128 + interrupted.load());
   return completed(static_cast<int32_t>(status));
 #endif
 }

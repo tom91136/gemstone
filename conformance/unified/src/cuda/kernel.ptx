@@ -1,17 +1,9 @@
 .version 7.8
-.target sm_80
+.target sm_35
 .address_size 64
 .visible .entry probe(.param .u64 input, .param .u64 output, .param .u64 indices, .param .u32 mode) {
  .reg .u64 %p, %q, %r, %offset; .reg .u32 %i, %b, %m, %v, %sum; .reg .pred %pred;
  ld.param.u64 %p, [input]; ld.param.u64 %q, [output]; ld.param.u64 %r, [indices]; ld.param.u32 %m, [mode];
- setp.eq.u32 %pred, %m, 15; @%pred bra disjoint_first;
- setp.eq.u32 %pred, %m, 16; @%pred bra disjoint_second;
- setp.eq.u32 %pred, %m, 17; @%pred bra mixed_consumer;
- setp.eq.u32 %pred, %m, 18; @%pred bra mixed_producer;
- setp.eq.u32 %pred, %m, 19; @%pred bra pointer_replace;
- setp.eq.u32 %pred, %m, 21; @%pred bra device_pointer_consumer;
- setp.eq.u32 %pred, %m, 22; @%pred bra device_pointer_producer;
- setp.eq.u32 %pred, %m, 20; @%pred bra noop;
  setp.eq.u32 %pred, %m, 4; @%pred bra bytes;
  setp.eq.u32 %pred, %m, 3; @%pred bra linked;
  mov.u32 %i, %tid.x; mov.u32 %b, %ctaid.x; mad.lo.u32 %i, %b, 32, %i;
@@ -28,28 +20,4 @@
  again: setp.eq.u64 %pred, %p, 0; @%pred bra finish;
  ld.global.u32 %v, [%p+8]; add.u32 %sum, %sum, %v; ld.global.u64 %p, [%p]; bra again;
  finish: st.global.u32 [%q], %sum; ret;
- disjoint_first:
- st.global.u32 [%q], 1; st.release.sys.global.u32 [%p], 1;
- disjoint_wait: ld.acquire.sys.global.u32 %v, [%p]; setp.ne.u32 %pred, %v, 3; @%pred bra disjoint_wait; ret;
- disjoint_second:
- st.global.u32 [%q], 2; st.release.sys.global.u32 [%p+4], 2; ret;
- mixed_consumer:
- ld.global.u32 %v, [%p+8]; st.global.u32 [%p+16], %v; st.release.sys.global.u32 [%p], 1;
- mixed_wait: ld.acquire.gpu.global.u32 %v, [%q]; setp.ne.u32 %pred, %v, 1; @%pred bra mixed_wait;
- ld.global.u32 %v, [%p+8]; st.global.u32 [%p+12], %v; st.release.gpu.global.u32 [%q+4], 2; ret;
- mixed_producer:
- st.global.u32 [%p+8], 73; st.release.gpu.global.u32 [%q], 1;
- mixed_ack: ld.acquire.gpu.global.u32 %v, [%q+4]; setp.ne.u32 %pred, %v, 2; @%pred bra mixed_ack;
- st.release.sys.global.u32 [%p+4], 2; ret;
- pointer_replace:
- st.global.u64 [%p], %q; st.release.sys.global.u32 [%p+8], 1;
- pointer_wait: ld.acquire.sys.global.u32 %v, [%p+8]; setp.ne.u32 %pred, %v, 2; @%pred bra pointer_wait;
- ld.global.u64 %q, [%p]; ld.global.u32 %v, [%q+8]; st.global.u32 [%p+12], %v; ret;
- device_pointer_consumer:
- ld.global.u64 %r, [%p]; st.global.u64 [%q], %r; st.release.sys.global.u32 [%p+8], 1;
- device_pointer_wait: ld.acquire.gpu.global.u32 %v, [%q+8]; setp.ne.u32 %pred, %v, 2; @%pred bra device_pointer_wait;
- ld.global.u64 %r, [%q]; ld.global.u32 %v, [%r+8]; st.global.u32 [%p+12], %v; ret;
- device_pointer_producer:
- ld.global.u64 %r, [%p]; ld.global.u64 %r, [%r]; st.global.u64 [%q], %r; st.release.gpu.global.u32 [%q+8], 2; ret;
- noop: ret;
 }

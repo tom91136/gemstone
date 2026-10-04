@@ -15,15 +15,15 @@ class LegacyLeaSuite extends munit.FunSuite {
     instruction.mnemonic.raw == mnemonic && instruction.modifiers == Vec.from(modifiers)
 
   private val carryDestination =
-    Operand.Qualified(Operand.Register(RegisterBank.R, 0), Vec(OperandSelector.CC))
+    Operand.Qualified(Operand.Register(RegisterBank.R, 0), Vec.nonEmpty(OperandSelector.CC))
   private val divKernels = Vec[NonEmpty[String]]("div_u5", "div_s24", "div_s6", "div_s5").map { name =>
-    SASSFixture.Kernel(name, 320, Vec((0, 8), (8, 8)), registers = 7)
+    SASSFixture.Kernel(name, 320, Vec.nonEmpty((0, 8), (8, 8)), registers = 7)
   }
   private val pairKernels = Vec[NonEmpty[String]]("lea_s31", "lea_s3", "lea_s2", "lea_s1", "lea_s0").map { name =>
     SASSFixture.Kernel(
       name,
       320,
-      Vec((0, 8), (8, 4), (12, 4), (16, 4), (20, 4)),
+      Vec.nonEmpty((0, 8), (8, 4), (12, 4), (16, 4), (20, 4)),
       registers = if (name == "lea_s0") 5 else 6
     )
   }
@@ -59,7 +59,7 @@ class LegacyLeaSuite extends munit.FunSuite {
   private def scalar(value: Int): KernelTask.Argument.Scalar =
     KernelTask.Argument.Scalar(LittleEndian.toVec(value.toLong & 0xffffffffL, 4))
 
-  private val inputs = Vec(
+  private val inputs = Vec.nonEmpty(
     (0, 0, 0, 0),
     (0x12345678, 0x10203040, 0x55667788, 0x99aabbcc),
     (0xffffffff, 0x00000001, 0x00000001, 0x00000002),
@@ -68,13 +68,13 @@ class LegacyLeaSuite extends munit.FunSuite {
     (0x87654321, 0x13579bdf, 0xfedcba98, 0x2468ace0)
   )
 
-  private def expected(words: (Int, Int, Int, Int), shift: Int): (Int, Int) = {
+  private def expected(words: (Int, Int, Int, Int), shift: Int, negative: Boolean = false): (Int, Int) = {
     val mask                            = (BigInt(1) << 64) - 1
     def unsigned(value: Int): BigInt    = BigInt(java.lang.Integer.toUnsignedLong(value))
     val (low, upper, baseLow, baseHigh) = words
     val offset                          = (unsigned(upper) << 32) | unsigned(low)
     val base                            = (unsigned(baseHigh) << 32) | unsigned(baseLow)
-    val result                          = ((offset << shift) + base) & mask
+    val result                          = (base + (if (negative) -(offset << shift) else offset << shift)) & mask
     ((result & 0xffffffff).toLong.toInt, ((result >> 32) & 0xffffffff).toLong.toInt)
   }
 
@@ -86,10 +86,11 @@ class LegacyLeaSuite extends munit.FunSuite {
     Vec.from(values.flatMap(value => LittleEndian.toVec(value.toLong & 0xffffffffL, 4)))
 
   for {
-    sm    <- Vec(50, 60)
-    shift <- Vec(0, 1, 2, 3, 31)
+    sm       <- Vec.nonEmpty(50, 60)
+    shift    <- Vec.nonEmpty(0, 1, 2, 3, 31)
+    negative <- if (shift == 0) Vec.nonEmpty(false) else Vec.nonEmpty(false, true)
   }
-    test(s"CUDA 11.8 sm_$sm 64-bit address pair matches unsigned arithmetic at shift $shift") {
+    test(s"CUDA 11.8 sm_$sm 64-bit address pair matches unsigned arithmetic at shift $shift, negative=$negative") {
       val module   = fixtureModule(sm)
       val name     = s"lea_s$shift"
       val kernel   = module.kernels.find(_.name == name).getOrElse(fail(s"missing $name kernel"))
@@ -112,7 +113,14 @@ class LegacyLeaSuite extends munit.FunSuite {
         val between   = function.instructions.slice(lowIndex + 1, highIndex)
         if (sm == 60) assert(between.nonEmpty) // Pascal schedules ordinary MOVs between the instructions.
       }
-      val lowered = SASSFixture(module, kernel, Vec(function))
+      val executed = if (!negative) function
+      else function.copy(instructions = function.instructions.map { instruction =>
+        if (instruction.mnemonic.raw == "LEA") instruction.rewrite(operands =
+          instruction.operands.updated(1, Operand.Unary(instruction.operands(1), true, false, false))
+        )
+        else instruction
+      })
+      val lowered = SASSFixture(module, kernel, Vec.nonEmpty(executed))
       if (shift != 0) assert(lowered.instructions.exists {
         case VMInstruction.ReadConditionFlag(_, VMConditionCodes.Flag.Carry, true) => true
         case _                                                                     => false
@@ -128,7 +136,7 @@ class LegacyLeaSuite extends munit.FunSuite {
             name.unsafe[NonEmpty[String]],
             LaunchGeometry.Dimensions.One,
             LaunchGeometry.Dimensions.One,
-            Vec(
+            Vec.nonEmpty(
               KernelTask.Argument.Memory(output, 0L),
               scalar(words._1),
               scalar(words._2),
@@ -138,14 +146,14 @@ class LegacyLeaSuite extends munit.FunSuite {
           )
           service.run(program, task).fold(error => fail(error.message), identity)
           val bytes = service.read(output, 0L, 8).toOption.get
-          assertEquals((intAt(bytes, 0), intAt(bytes, 4)), expected(words, shift), s"inputs=$words")
+          assertEquals((intAt(bytes, 0), intAt(bytes, 4)), expected(words, shift, negative), s"inputs=$words")
         }
       }
     }
 
   for {
-    sm                       <- Vec(50, 60)
-    (suffix, divisor, shift) <- Vec(("s5", 32, 5), ("s6", 64, 6), ("s24", 16777216, 24))
+    sm                       <- Vec.nonEmpty(50, 60)
+    (suffix, divisor, shift) <- Vec.nonEmpty(("s5", 32, 5), ("s6", 64, 6), ("s24", 16777216, 24))
   }
     test(s"CUDA 11.8 sm_$sm no-carry LEA.HI folds signed division correction by $divisor") {
       val module = fixtureModule(sm, division = true)
@@ -157,9 +165,9 @@ class LegacyLeaSuite extends munit.FunSuite {
       val function = ListingDecoder.parse(text, name, sm).fold(fail(_), _.head)
       val lea      = function.instructions.find(is(_, "LEA", Instruction.Modifier.HI)).getOrElse(fail("missing LEA.HI"))
       assertEquals(lea.operands(3), Operand.Register(RegisterBank.R, 255))
-      val lowered = SASSFixture(module, kernel, Vec(function))
+      val lowered = SASSFixture(module, kernel, Vec.nonEmpty(function))
       val count   = 128
-      val inputs  = Vec(
+      val inputs  = Vec.nonEmpty(
         Int.MinValue,
         Int.MinValue + 1,
         -16777217,
@@ -198,7 +206,7 @@ class LegacyLeaSuite extends munit.FunSuite {
           name.unsafe[NonEmpty[String]],
           LaunchGeometry.Dimensions(count.unsafe[Int > 0], 1, 1),
           LaunchGeometry.Dimensions.One,
-          Vec(
+          Vec.nonEmpty(
             KernelTask.Argument.Memory(output, 0L),
             KernelTask.Argument.Memory(input, 0L)
           )
@@ -218,23 +226,29 @@ class LegacyLeaSuite extends munit.FunSuite {
     val sassText = pairListing(sm, 2)
     val function = ListingDecoder.parse(sassText, "lea_s2", sm).fold(fail(_), _.head)
     val original = function.instructions.find(is(_, "LEA", Instruction.Modifier.HI, Instruction.Modifier.X)).get
-    Vec(
+    Vec.nonEmpty(
       original.rewrite(operands = original.operands.updated(4, Operand.Integer(BigInt(0x20)))),
       original.rewrite(operands =
-        original.operands.updated(2, Operand.Qualified(Operand.Register(RegisterBank.R, 4), Vec(OperandSelector.H1)))
+        original.operands.updated(
+          2,
+          Operand.Qualified(Operand.Register(RegisterBank.R, 4), Vec.nonEmpty(OperandSelector.H1))
+        )
       ),
-      original.rewrite(modifiers = Vec(Instruction.Modifier.HI)),
+      original.rewrite(modifiers = Vec.nonEmpty(Instruction.Modifier.HI)),
       original.rewrite(operands =
-        original.operands.updated(0, Operand.Qualified(Operand.Register(RegisterBank.R, 4), Vec(OperandSelector.CC)))
+        original.operands.updated(
+          0,
+          Operand.Qualified(Operand.Register(RegisterBank.R, 4), Vec.nonEmpty(OperandSelector.CC))
+        )
       )
     ).foreach { invalid =>
       val changed = function.copy(instructions = function.instructions.map(i => if (i == original) invalid else i))
-      assert(SASSFixture.lower(module, module.kernels.find(_.name == "lea_s2").get, Vec(changed)).isLeft)
+      assert(SASSFixture.lower(module, module.kernels.find(_.name == "lea_s2").get, Vec.nonEmpty(changed)).isLeft)
     }
     val predicated =
       original.rewrite(guard = Some(Instruction.Guard(Operand.Predicate(Some(0), uniform = false, negated = false))))
     val changed = function.copy(instructions = function.instructions.map(i => if (i == original) predicated else i))
-    assert(SASSFixture.lower(module, module.kernels.find(_.name == "lea_s2").get, Vec(changed)).isRight)
+    assert(SASSFixture.lower(module, module.kernels.find(_.name == "lea_s2").get, Vec.nonEmpty(changed)).isRight)
   }
 
   test("predicated LEA carry pairs execute and skip together when their guard is equal") {
@@ -250,10 +264,14 @@ class LegacyLeaSuite extends munit.FunSuite {
     locally {
       val service = SASSFixture.Execution()
       val output  = service.allocate(8L)
-      Vec(("EQ", true), ("NE", false)).foreach { case (comparison, execute) =>
-        assert(service.write(output, 0L, words(Vec(0xdeadbeef, 0x13579bdf))).isRight)
+      Vec.nonEmpty(("EQ", true), ("NE", false)).foreach { case (comparison, execute) =>
+        assert(service.write(output, 0L, words(Vec.nonEmpty(0xdeadbeef, 0x13579bdf))).isRight)
         val setGuard =
-          SASSFixture.instruction(low.address.raw - 1, s"ISETP.$comparison.AND", Vec("P1", "PT", "RZ", "RZ", "PT"))
+          SASSFixture.instruction(
+            low.address.raw - 1,
+            s"ISETP.$comparison.AND",
+            Vec.nonEmpty("P1", "PT", "RZ", "RZ", "PT")
+          )
         val guarded = function.copy(instructions = function.instructions.map { instruction =>
           if (
             instruction.address == low.address || instruction.address == high.address ||
@@ -263,15 +281,15 @@ class LegacyLeaSuite extends munit.FunSuite {
               Some(Instruction.Guard(Operand.Predicate(Some(1), uniform = false, negated = false)))
             )
           else instruction
-        }.patch(function.instructions.indexOf(low), Vec(setGuard), 0))
-        val sass    = SASSFixture(module, kernel, Vec(guarded))
+        }.patch(function.instructions.indexOf(low), Vec.nonEmpty(setGuard), 0))
+        val sass    = SASSFixture(module, kernel, Vec.nonEmpty(guarded))
         val program = service.compile(sass)
           .fold(error => fail(error.message), identity)
         val task = SASSFixture.task(
           name.unsafe[NonEmpty[String]],
           LaunchGeometry.Dimensions.One,
           LaunchGeometry.Dimensions.One,
-          Vec(
+          Vec.nonEmpty(
             KernelTask.Argument.Memory(output, 0L),
             scalar(0x12345678),
             scalar(0x10203040),
@@ -288,7 +306,7 @@ class LegacyLeaSuite extends munit.FunSuite {
   }
 
   test("shifted immediate LEA.CC/HI.X pairs match independent 64-bit wrap arithmetic") {
-    Vec(50 -> 0x2400, 60 -> 0x1c00).foreach { case (sm, addend) =>
+    Vec.nonEmpty(50 -> 0x2400, 60 -> 0x1c00).foreach { case (sm, addend) =>
       val module  = fixtureModule(sm)
       val name    = "lea_s2"
       val kernel  = module.kernels.find(_.name == name).get
@@ -299,7 +317,7 @@ class LegacyLeaSuite extends munit.FunSuite {
       val changed = parsed.copy(instructions = parsed.instructions.map { instruction =>
         if (instruction.address == low.address)
           instruction.rewrite(operands =
-            Vec(
+            Vec.nonEmpty(
               carryDestination,
               Operand.Register(RegisterBank.R, 4),
               Operand.Integer(BigInt(addend)),
@@ -308,7 +326,7 @@ class LegacyLeaSuite extends munit.FunSuite {
           )
         else if (instruction.address == high.address)
           instruction.rewrite(operands =
-            Vec(
+            Vec.nonEmpty(
               Operand.Register(RegisterBank.R, 4),
               Operand.Register(RegisterBank.R, 4),
               Operand.Register(RegisterBank.R, 255),
@@ -318,16 +336,16 @@ class LegacyLeaSuite extends munit.FunSuite {
           )
         else instruction
       })
-      Vec("0x80000", "0xfc100", "0xfffff", "0x100000").foreach { encoded =>
+      Vec.nonEmpty("0x80000", "0xfc100", "0xfffff", "0x100000").foreach { encoded =>
         val unverifiedImmediate = changed.copy(instructions = changed.instructions.map { item =>
           if (item.address == low.address)
             item.rewrite(operands = item.operands.updated(2, Operand.Integer(BigInt(encoded.drop(2), 16))))
           else item
         })
-        assert(SASSFixture.lower(module, kernel, Vec(unverifiedImmediate)).isLeft)
+        assert(SASSFixture.lower(module, kernel, Vec.nonEmpty(unverifiedImmediate)).isLeft)
       }
-      val sass  = SASSFixture(module, kernel, Vec(changed))
-      val cases = Vec(
+      val sass  = SASSFixture(module, kernel, Vec.nonEmpty(changed))
+      val cases = Vec.nonEmpty(
         0x00000000 -> 0x00000000,
         0xffffffff -> 0xffffffff,
         0xfffff000 -> 0x3fffffff,
@@ -344,7 +362,7 @@ class LegacyLeaSuite extends munit.FunSuite {
             name.unsafe[NonEmpty[String]],
             LaunchGeometry.Dimensions.One,
             LaunchGeometry.Dimensions.One,
-            Vec(
+            Vec.nonEmpty(
               KernelTask.Argument.Memory(output, 0L),
               scalar(lowWord),
               scalar(highWord),
@@ -365,7 +383,7 @@ class LegacyLeaSuite extends munit.FunSuite {
   }
 
   test("LEA.CC carry is visible to the following IADD.X") {
-    Vec(50 -> 0x2400, 60 -> 0x1c00).foreach { case (sm, addend) =>
+    Vec.nonEmpty(50 -> 0x2400, 60 -> 0x1c00).foreach { case (sm, addend) =>
       val module  = fixtureModule(sm)
       val name    = "lea_s2"
       val kernel  = module.kernels.find(_.name == name).get
@@ -376,7 +394,7 @@ class LegacyLeaSuite extends munit.FunSuite {
       val changed = parsed.copy(instructions = parsed.instructions.map { instruction =>
         if (instruction.address == low.address)
           instruction.rewrite(operands =
-            Vec(
+            Vec.nonEmpty(
               carryDestination,
               Operand.Register(RegisterBank.R, 4),
               Operand.Integer(BigInt(addend)),
@@ -386,8 +404,8 @@ class LegacyLeaSuite extends munit.FunSuite {
         else if (instruction.address == high.address)
           instruction.rewrite(
             mnemonic = "IADD".unsafe[NonEmpty[String]],
-            modifiers = Vec(Instruction.Modifier.X),
-            operands = Vec(
+            modifiers = Vec.nonEmpty(Instruction.Modifier.X),
+            operands = Vec.nonEmpty(
               Operand.Register(RegisterBank.R, 4),
               Operand.Register(RegisterBank.R, 5),
               Operand.Register(RegisterBank.R, 255)
@@ -395,8 +413,8 @@ class LegacyLeaSuite extends munit.FunSuite {
           )
         else instruction
       })
-      val sass  = SASSFixture(module, kernel, Vec(changed))
-      val cases = Vec(0x00000001 -> 0x12345678, 0x3fffffff -> 0x87654321)
+      val sass  = SASSFixture(module, kernel, Vec.nonEmpty(changed))
+      val cases = Vec.nonEmpty(0x00000001 -> 0x12345678, 0x3fffffff -> 0x87654321)
       locally {
         val service = SASSFixture.Execution()
         val output  = service.allocate(8L)
@@ -407,7 +425,7 @@ class LegacyLeaSuite extends munit.FunSuite {
             name.unsafe[NonEmpty[String]],
             LaunchGeometry.Dimensions.One,
             LaunchGeometry.Dimensions.One,
-            Vec(
+            Vec.nonEmpty(
               KernelTask.Argument.Memory(output, 0L),
               scalar(lowWord),
               scalar(highWord),

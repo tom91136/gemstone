@@ -1,10 +1,10 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -16,7 +16,7 @@ class NonUniformExchangeSuite extends munit.FunSuite {
 
   for {
     width <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
-    rawWidth = width.raw
+    rawWidth   = width.raw
     widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     lanes  <- Seq(1, 2, 3, 4)
     kind   <- Seq("broadcast", "first", "shuffle", "xor", "up", "down")
@@ -157,7 +157,11 @@ class NonUniformExchangeSuite extends munit.FunSuite {
         val expected = if (inactive) Vec.fill(lanes * rawWidth / 8)(0x55.toByte)
         else Vec.from((0 until lanes).flatMap(c => encode(input(sourceThread, c))))
         val offset = source.size + (output * count + thread) * storageLanes * rawWidth / 8
-        assertEquals(memory.bytes.slice(offset, offset + lanes * rawWidth / 8), expected, s"output=$output lane=$thread")
+        assertEquals(
+          memory.bytes.slice(offset, offset + lanes * rawWidth / 8),
+          expected,
+          s"output=$output lane=$thread"
+        )
       }
     }
   }

@@ -677,7 +677,9 @@ private object VMCompiler {
         val child = types.get(t) match {
           case Some(RuntimeType.Structure(members)) if index >= 0 && index < members.size =>
             val preceding = members.take(index.toInt).map(m => scalarLeafCount(types, m).toOption)
-            if (preceding.forall(_.isDefined)) Some((members(index.toInt), preceding.flatten.foldLeft(0: Int >= 0)(_ + _).raw)) else None
+            if (preceding.forall(_.isDefined))
+              Some((members(index.toInt), preceding.flatten.foldLeft(0: Int >= 0)(_ + _).raw))
+            else None
           case Some(RuntimeType.VectorType(element, count)) if index >= 0 && index < count.raw =>
             scalarLeafCount(types, element).toOption.map(n => (element, Math.toIntExact(index * n.raw)))
           case Some(RuntimeType.MatrixType(element, count)) if index >= 0 && index < count.raw =>

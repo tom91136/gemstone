@@ -19,7 +19,7 @@ object OperandPrinter {
   private def render(operand: Operand): Either[String, String] = operand match {
     case Operand.Register(bank, index) =>
       if (bank == RegisterBank.R && index.raw == 255) Right("RZ")
-      else if (bank == RegisterBank.UR && index.raw == 63) Right("URZ")
+      else if (bank == RegisterBank.UR && index.raw == 255) Right("URZ")
       else if (RegisterBank.capacity(bank).nonEmpty || identifier(bank.spelling)) Right(s"${bank.spelling}${index.raw}")
       else Left(s"unsupported SASS register bank $bank")
     case Operand.Integer(value)     => Right(value.toString)

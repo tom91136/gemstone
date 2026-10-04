@@ -342,6 +342,39 @@ class AMDGPUControlFlowSuite extends munit.FunSuite {
     )
   }
 
+  test("RDNA4 split barriers keep arrivals, completion bits, and phases independent") {
+    val barriers = VMState.WorkgroupBarriers(3)
+    assertEquals(barriers.signal(-1, 0), Right(true))
+    assertEquals(barriers.await(-1, 0), Right(false))
+    assertEquals(barriers.signal(-2, 1), Right(true))
+    assertEquals(barriers.signal(-1, 1), Right(false))
+    assertEquals(barriers.await(-1, 0), Right(false))
+    barriers.drop(2)
+    assertEquals(barriers.await(-1, 0), Right(true))
+    assertEquals(barriers.await(-1, 0), Right(false))
+    assertEquals(barriers.await(-1, 1), Right(true))
+    assertEquals(barriers.await(-2, 1), Right(false))
+    assertEquals(barriers.signal(-2, 0), Right(false))
+    assertEquals(barriers.await(-2, 1), Right(true))
+    assertEquals(barriers.signal(-1, 1), Right(true))
+    assertEquals(barriers.signal(-1, 0), Right(false))
+    assertEquals(barriers.await(-1, 0), Right(true))
+    assertEquals(barriers.await(0, 0), Right(true))
+    assert(barriers.signal(1, 0).isLeft)
+  }
+
+  test("RDNA4 signal and wait retain distinct execution operations") {
+    // LLVM gfx12 machine fixtures for the implicit workgroup barrier (-1).
+    assertEquals(
+      VMCompiler.decodeInstruction(Vec[Byte](0xc1.toByte, 0x4e, 0x80.toByte, 0xbe.toByte), Target("gfx1200")),
+      Right(VMIR.Instruction.BarrierSignal(VMIR.InstructionSource.Constant(-1L), false))
+    )
+    assertEquals(
+      VMCompiler.decodeInstruction(Vec[Byte](0xff.toByte, 0xff.toByte, 0x94.toByte, 0xbf.toByte), Target("gfx1200")),
+      Right(VMIR.Instruction.BarrierWait(-1))
+    )
+  }
+
   test("gfx1036 releases a workgroup barrier after an earlier wave ends") {
     // The first wave takes the barrier path (local ids 0..31); the second
     // wave exits before it (local ids 32..63).  A hardware workgroup barrier

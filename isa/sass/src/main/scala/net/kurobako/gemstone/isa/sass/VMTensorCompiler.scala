@@ -62,7 +62,7 @@ private object VMTensorCompiler {
       operands: Vec[Operand]
   ): Boolean = {
     if (context.instruction.guard.nonEmpty) unsupported("predicated HMMA.884 is not implemented")
-    if (context.sm != 70) unsupported(s"HMMA.884 is supported only on sm_70, not sm_${context.sm}")
+    if (context.sm != 70 && context.sm != 75) unsupported(s"HMMA.884 requires sm_70 or sm_75, found sm_${context.sm}")
     requireSize(operands, 4, "HMMA.884 requires destination, A fragment, B fragment and accumulator")
     val decoded = modifiers match {
       case Vec(Modifier.`884`, Modifier.F32, Modifier.F32, value) =>

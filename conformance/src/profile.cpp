@@ -59,6 +59,23 @@ void validate_route(std::string_view backend, const std::optional<std::string> &
   } else if (arch) throw std::invalid_argument(fmt::format("{} cannot set an architecture", backend));
 }
 
+void validate_compiler(std::string_view backend, std::string_view compiler) {
+  if (compiler == "vendor") return;
+  if (compiler == "clang" && backend == "cuda") return;
+  if (compiler == "gcc" && (backend == "cuda" || backend == "hsa")) return;
+  throw std::invalid_argument(fmt::format("unsupported compiler {} for backend {}", compiler, backend));
+}
+
+void apply_compiler(ResolvedTarget &target) {
+  if (target.compiler != "gcc") return;
+  if (target.backend != "cuda") return;
+  if (const auto mode = target.environment.find("CONFORMANCE_CUDA_CODE"); mode != target.environment.end() && mode->second != "ptx")
+    throw std::invalid_argument("GCC CUDA offload requires PTX execution");
+  target.environment["CONFORMANCE_CUDA_CODE"] = "ptx";
+  target.environment["CUDA_FORCE_PTX_JIT"] = "1";
+  target.environment["CUDA_DISABLE_PTX_JIT"] = "0";
+}
+
 std::string normalize_name(std::string value) {
   constexpr std::string_view suffix = ".toml";
   if (value.ends_with(suffix)) value.resize(value.size() - suffix.size());
@@ -90,6 +107,7 @@ void validate(std::string_view name, const Profile &profile) {
     by_backend[target.backend].push_back(&target);
 
     validate_route(target.backend, target.architecture);
+    validate_compiler(target.backend, target.compiler);
     for (const auto &[key, value] : target.environment) {
       if (!valid_environment_entry(key, value))
         throw std::invalid_argument(fmt::format("machine profile {} has a blank environment variable for {}", name, target.backend));
@@ -193,10 +211,17 @@ std::vector<ResolvedTarget> resolve_targets(const Profile &profile, const std::v
          })
          | map([&](const ProfileTarget &target) {
              const auto id = target_id(target);
-             ResolvedTarget planned{
-                 id, target.backend, target.architecture, profile.environment, target.deviceLock, target.routeSkips, target.skipReason};
+             ResolvedTarget planned{id,
+                                    target.backend,
+                                    target.architecture,
+                                    profile.environment,
+                                    target.deviceLock,
+                                    target.routeSkips,
+                                    target.skipReason,
+                                    target.compiler};
              for (const auto &[key, value] : target.environment)
                planned.environment[key] = value;
+             apply_compiler(planned);
              planned.environment["CONFORMANCE_DEVICE"] = target.device.value_or("");
              planned.environment["CONFORMANCE_SKIPS"] = join(concat(profile.skips, target.skips) ^ distinct(), "\n");
              return planned;
@@ -205,31 +230,41 @@ std::vector<ResolvedTarget> resolve_targets(const Profile &profile, const std::v
 }
 
 std::vector<ResolvedTarget> direct_targets(const std::vector<std::string> &routes) {
-  if (routes.empty()) throw std::invalid_argument("--direct requires explicit backend[/architecture] targets");
+  if (routes.empty()) throw std::invalid_argument("--direct requires explicit backend[/architecture[/compiler]] targets");
   std::vector<ResolvedTarget> result;
   std::set<std::string> seen;
   const auto append = [&](ResolvedTarget target) {
     if (!seen.insert(target.id).second) throw std::invalid_argument("duplicate direct target: " + target.id);
+    apply_compiler(target);
     result.push_back(std::move(target));
   };
   for (const auto &route : routes) {
     const auto slash = route.find('/');
     const auto selector = route.substr(0, slash);
     const auto backend = selector == "cuda-ptx" || selector == "cuda-sass" ? "cuda" : selector;
-    const auto arch = slash == std::string::npos ? std::nullopt : std::optional(route.substr(slash + 1));
+    const auto compilerSlash = slash == std::string::npos ? std::string::npos : route.find('/', slash + 1);
+    const auto arch = slash == std::string::npos ? std::nullopt : std::optional(route.substr(slash + 1, compilerSlash - slash - 1));
+    const auto compiler = compilerSlash == std::string::npos ? "vendor" : route.substr(compilerSlash + 1);
     validate_route(backend, arch);
+    validate_compiler(backend, compiler);
+    const auto suffix = compiler == "vendor" ? "" : "-" + compiler;
+    if (compiler == "gcc" && selector == "cuda-sass") throw std::invalid_argument("GCC CUDA offload requires PTX execution");
     if (backend == "cuda") {
       for (const auto *mode : {"ptx", "sass"}) {
         const auto name = std::string("cuda-") + mode;
         if (selector != "cuda" && selector != name) continue;
+        if (compiler == "gcc" && std::string_view(mode) != "ptx") continue;
         const bool ptx = std::string_view(mode) == "ptx";
-        append({name + "-" + *arch,
+        append({name + "-" + *arch + suffix,
                 backend,
                 arch,
                 {{"CONFORMANCE_CUDA_CODE", mode}, {"CUDA_FORCE_PTX_JIT", ptx ? "1" : "0"}, {"CUDA_DISABLE_PTX_JIT", ptx ? "0" : "1"}},
-                false});
+                false,
+                {},
+                std::nullopt,
+                compiler});
       }
-    } else append({backend + (arch ? "-" + *arch : ""), backend, arch, {}, false});
+    } else append({backend + (arch ? "-" + *arch : "") + suffix, backend, arch, {}, false, {}, std::nullopt, compiler});
   }
   return result;
 }

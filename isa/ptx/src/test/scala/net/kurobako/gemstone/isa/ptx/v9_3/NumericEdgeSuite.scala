@@ -2,12 +2,73 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import execution.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 
 class NumericEdgeSuite extends munit.FunSuite {
+  for {
+    (opcode, operation) <- Vec(
+      Opcode.Add -> ((a: Float, b: Float) => a + b),
+      Opcode.Sub -> ((a: Float, b: Float) => a - b),
+      Opcode.Mul -> ((a: Float, b: Float) => a * b)
+    )
+    flush <- Vec(false, true)
+  }
+    test(s"packed float32 ${opcode.name} rounds each half independently, flush=$flush") {
+      val inputs = Vec(
+        (1.25f, -4.0f, 2.5f, 10.0f),
+        (-0.0f, -0.0f, -0.0f, 0.0f),
+        (Float.PositiveInfinity, Float.NegativeInfinity, Float.NegativeInfinity, Float.PositiveInfinity),
+        (java.lang.Float.MIN_VALUE, -java.lang.Float.MIN_VALUE, java.lang.Float.MIN_VALUE, -java.lang.Float.MIN_VALUE),
+        (16777216.0f, -16777216.0f, 1.0f, -1.0f),
+        (java.lang.Float.MIN_NORMAL, -java.lang.Float.MIN_NORMAL, 0.5f, 0.5f)
+      )
+      def bits(value: Float): Long            = java.lang.Float.floatToRawIntBits(value).toLong & 0xffffffffL
+      def pair(low: Float, high: Float): Long = bits(low) | (bits(high) << 32)
+      def flushed(value: Float): Float        =
+        if (flush && math.abs(value) < java.lang.Float.MIN_NORMAL) math.copySign(0.0f, value) else value
+      val code = inputs.zipWithIndex.map { case ((a, b, c, d), index) =>
+        s"${opcode.name}${
+            if (flush) ".ftz" else ""
+          }.f32x2 %result, ${pair(a, b)}, ${pair(c, d)}; st.global.b64 [%out+${index * 8}], %result;"
+      }.mkString("\n")
+      val kernel = compileKernel(s""".version 8.6
+        |.target sm_100
+        |.address_size 64
+        |.visible .entry packed(.param .u64 output) {
+        | .reg .b64 %out, %result;
+        | ld.param.u64 %out, [output];
+        | $code
+        | ret;
+        |}""".stripMargin)
+      val memory = ArrayCheckedMemory.allocate(inputs.nonNegativeSize * 8)
+      assertEquals(
+        execute(
+          kernel,
+          1,
+          1,
+          Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
+          memory
+        ),
+        Right(())
+      )
+      inputs.zipWithIndex.foreach { case ((a, b, c, d), index) =>
+        Vec(
+          flushed(operation(flushed(a), flushed(c))),
+          flushed(operation(flushed(b), flushed(d)))
+        ).zipWithIndex.foreach {
+          (expected, half) =>
+            val actualBits =
+              memory.readInt32(memory.allocation.start.offset(index.toLong * 8 + half.toLong * 4)).toOption.get
+            if (expected.isNaN) assert(java.lang.Float.intBitsToFloat(actualBits).isNaN)
+            else assertEquals(actualBits, java.lang.Float.floatToRawIntBits(expected))
+        }
+      }
+    }
+
   private def run(body: String, outputType: String, width: Int in 1 ~ 8): Long = {
     val source = s""".version 8.0
       |.target sm_89

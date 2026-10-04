@@ -15,6 +15,7 @@ import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
 import net.kurobako.gemstone.server.recording.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.vm.*
 import scala.concurrent.duration.*
 import scala.util.Using
 
@@ -30,15 +31,18 @@ class CLIProcessSuite extends munit.FunSuite {
     )
   }(value => Seq(Path.of(value).toAbsolutePath.toString))
 
-  private class Child(directory: Path, arguments: Seq[String]) extends AutoCloseable {
+  private class Child(directory: Path, arguments: Seq[String], environment: Map[String, String] = Map.empty)
+      extends AutoCloseable {
     private val output  = Files.createTempFile(directory, "cli-", ".log")
     private val builder = ProcessBuilder((executable ++ arguments)*)
       .directory(directory.toFile).redirectErrorStream(true).redirectOutput(output.toFile)
     // Child behavior should not depend on a developer's recording or worker settings.
     builder.environment().keySet().removeIf(_.startsWith("GEMSTONE_"))
-    private val process  = builder.start()
-    def text: String     = Files.readString(output)
-    def awaitExit(): Int = {
+    environment.foreach((key, value) => builder.environment().put(key, value))
+    private val process   = builder.start()
+    def text: String      = Files.readString(output)
+    def terminate(): Unit = { val _ = process.destroy() }
+    def awaitExit(): Int  = {
       assert(process.waitFor(20, TimeUnit.SECONDS), s"CLI timed out: $text")
       process.exitValue()
     }
@@ -111,6 +115,70 @@ class CLIProcessSuite extends munit.FunSuite {
       }
     }
   }
+  test("terminating a launcher revokes its client and releases its shared-server worker") {
+    files.temporary { directory =>
+      Using.Manager { use =>
+        val server = use(Server.start(Server.Settings(
+          limits = TaskControl.Limits(1000000000000L),
+          parallelism = 1
+        )))
+        val child = use(Child(
+          directory = directory,
+          arguments = Seq(
+            "run",
+            "--apis",
+            "hsa",
+            "--server",
+            server.endpoint.toString,
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf '%s' \"$GEMSTONE_RPC_CLIENT\" > client-id; exec sleep 60"
+          ),
+          environment = Map(env.NativeDirectory -> native.directory.toString)
+        ))
+        val clientFile = directory.resolve("client-id")
+        val deadline   = monotonicNanos + TimeUnit.SECONDS.toNanos(10)
+        while (!Files.exists(clientFile) && monotonicNanos < deadline) Thread.sleep(10)
+        assert(Files.exists(clientFile), child.text)
+        val clientId   = ClientId.either(Files.readString(clientFile).toLong).toOption.get
+        val connection = use(connections.Client(server.endpoint, clientId))
+        def launch(client: connections.Client, body: String): CompletionId = {
+          val source  = s".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry kernel() { $body }"
+          val program = client.call(ExecutionRPC.Operation.LoadProgram(
+            "ptx-text",
+            Vec.from(source.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+          )).toOption.get
+          val one = LaunchGeometry.Dimensions.One
+          client.call(ExecutionRPC.Operation.Launch(
+            program,
+            "kernel",
+            one,
+            one,
+            one.toGlobalDimensions,
+            1,
+            LaunchGeometry.Coordinates.origin,
+            0,
+            0,
+            Vec.empty,
+            Vec.empty
+          )).toOption.get
+        }
+        val pending = launch(connection, "LOOP: bra LOOP;")
+        assertEquals(
+          connection.call(ExecutionRPC.Operation.QueryCompletion(pending)),
+          Right(ExecutionProtocol.CompletionStatus.Pending)
+        )
+        child.terminate()
+        assert(child.awaitExit() != 0, child.text)
+        assert(connection.call(ExecutionRPC.Operation.Ping).isLeft, "terminated launcher's client remained live")
+        val next       = use(connections.Client(server.endpoint, server.client))
+        val completion = launch(next, "ret;")
+        assertEquals(next.call(ExecutionRPC.Operation.AwaitCompletion(completion)), Right(()))
+      }.get
+    }
+  }
+
   test("packaged CLI loads AMDGPU metadata and executes an HSA kernel from an unrelated directory") {
     files.temporary { directory =>
       val endpointFile = directory.resolve("endpoint.json")

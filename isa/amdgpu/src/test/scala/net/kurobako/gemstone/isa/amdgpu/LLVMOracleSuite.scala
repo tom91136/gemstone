@@ -39,9 +39,9 @@ class LLVMOracleSuite extends munit.FunSuite {
             case (Statement.Instruction(expected), Statement.Instruction(found)) =>
               // Legacy names may share an opcode; the decoded instruction must retain the encoding identity.
               val expectedEncodings =
-                Metadata.encodingsFor(expected.definition, golden.target.isa).map(value => value.format -> value.opcode)
+                Metadata.encodingsFor(expected.definition, golden.target).map(value => value.format -> value.opcode)
               assert(
-                Metadata.encodingsFor(found.definition, golden.target.isa).exists(value =>
+                Metadata.encodingsFor(found.definition, golden.target).exists(value =>
                   expectedEncodings.contains(value.format -> value.opcode)
                 ),
                 clue

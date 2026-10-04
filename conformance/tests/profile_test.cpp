@@ -154,3 +154,98 @@ TEST_CASE("direct CUDA routes select strict PTX and SASS independently from the 
   CHECK_THROWS(direct_targets({"cuda/sm_89", "cuda-ptx/sm_89"}));
   CHECK_THROWS(direct_targets({"cuda-sass/sm_89", "cuda-sass/sm_89"}));
 }
+
+TEST_CASE("compiler routes preserve code modes and reject unsupported combinations", "[profile]") {
+  using conformance::profile::direct_targets;
+  const auto targets = direct_targets({"cuda/sm_80", "cuda/sm_80/clang", "cuda/sm_80/gcc", "hsa/gfx906/gcc"});
+  REQUIRE(targets.size() == 6);
+  CHECK(targets[0].compiler == "vendor");
+  CHECK(targets[2].id == "cuda-ptx-sm_80-clang");
+  CHECK(targets[3].id == "cuda-sass-sm_80-clang");
+  CHECK(targets[2].compiler == "clang");
+  CHECK(targets[3].environment.at("CONFORMANCE_CUDA_CODE") == "sass");
+  CHECK(targets[4].id == "cuda-ptx-sm_80-gcc");
+  CHECK(targets[4].compiler == "gcc");
+  CHECK(targets[4].backend == "cuda");
+  CHECK(targets[4].environment.at("CONFORMANCE_CUDA_CODE") == "ptx");
+  CHECK(targets[5].backend == "hsa");
+  for (const auto &route : {"cuda/sm_80/", "cuda/sm_80/../clang", "cuda/sm_80/unknown", "hip/gfx906/gcc", "hsa/gfx906/clang",
+                            "cuda-sass/sm_80/gcc", "opencl//gcc"})
+    CHECK_THROWS(direct_targets({route}));
+  CHECK_THROWS(direct_targets({"cuda-ptx/sm_80", "cuda-ptx/sm_80/vendor"}));
+  CHECK_THROWS(direct_targets({"cuda/sm_80/gcc", "cuda-ptx/sm_80/gcc"}));
+}
+
+TEST_CASE("machine compiler selection requires a compatible backend and code mode", "[profile]") {
+  TemporaryDirectory directory;
+  std::string compiler = "gcc", backend = "cuda", architecture = "sm_80", mode;
+  bool invalid = false;
+  SECTION("GCC CUDA selects PTX") {}
+  SECTION("GCC supports HSA") {
+    backend = "hsa";
+    architecture = "gfx906";
+  }
+  SECTION("GCC rejects SASS execution") {
+    mode = "CONFORMANCE_CUDA_CODE = 'sass'";
+    invalid = true;
+  }
+  SECTION("blank compiler is rejected") {
+    compiler.clear();
+    invalid = true;
+  }
+  SECTION("path traversal compiler is rejected") {
+    compiler = "../gcc";
+    invalid = true;
+  }
+  SECTION("Clang HSA is not declared supported") {
+    compiler = "clang";
+    backend = "hsa";
+    architecture = "gfx906";
+    invalid = true;
+  }
+  std::ofstream(directory.path() / "compiler.toml") << "[[targets]]\nbackend = '" << backend << "'\narchitecture = '" << architecture
+                                                    << "'\ncompiler = '" << compiler << "'\nenvironment = { " << mode << " }\n";
+  const auto resolve = [&] {
+    return conformance::profile::resolve_targets(conformance::profile::resolve_profile(directory.path(), "compiler"), {});
+  };
+  if (invalid) CHECK_THROWS(resolve());
+  else {
+    const auto targets = resolve();
+    REQUIRE(targets.size() == 1);
+    CHECK(targets[0].compiler == "gcc");
+    if (backend == "cuda") {
+      CHECK(targets[0].environment.at("CONFORMANCE_CUDA_CODE") == "ptx");
+      CHECK(targets[0].environment.at("CUDA_FORCE_PTX_JIT") == "1");
+    }
+  }
+}
+
+TEST_CASE("profile selectors preserve all compilers by backend and narrow by target name", "[profile]") {
+  TemporaryDirectory directory;
+  std::ofstream(directory.path() / "compilers.toml") << R"(
+[[targets]]
+name = "cuda-vendor"
+backend = "cuda"
+architecture = "sm_80"
+[[targets]]
+name = "cuda-clang"
+backend = "cuda"
+architecture = "sm_80"
+compiler = "clang"
+[[targets]]
+name = "cuda-gcc"
+backend = "cuda"
+architecture = "sm_80"
+compiler = "gcc"
+)";
+  const auto profile = conformance::profile::resolve_profile(directory.path(), "compilers");
+  const auto all = conformance::profile::resolve_targets(profile, {"cuda"});
+  REQUIRE(all.size() == 3);
+  CHECK(all[0].compiler == "vendor");
+  CHECK(all[1].compiler == "clang");
+  CHECK(all[2].compiler == "gcc");
+  const auto selected = conformance::profile::resolve_targets(profile, {"cuda-clang"});
+  REQUIRE(selected.size() == 1);
+  CHECK(selected[0].compiler == "clang");
+  CHECK_FALSE(selected[0].environment.contains("OMP_TARGET_OFFLOAD"));
+}

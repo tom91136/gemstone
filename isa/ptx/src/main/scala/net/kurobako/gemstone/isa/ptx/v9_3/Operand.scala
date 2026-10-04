@@ -31,6 +31,7 @@ enum Operand {
   case Immediate(raw: NonEmpty[String])
   case Register(name: NonEmpty[String], part: Option[RegisterPart])
   case Symbol(name: NonEmpty[String])
+  case GenericAddress(symbol: Operand)
   case StringLiteral(rawContents: String)
   case Qualifier(path: NonEmpty[Vec[NonEmpty[String]]])
   case VectorLiteral(items: Vec[Operand])

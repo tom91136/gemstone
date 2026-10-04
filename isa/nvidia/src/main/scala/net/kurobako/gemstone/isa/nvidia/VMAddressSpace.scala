@@ -7,8 +7,19 @@ object VMAddressSpace {
   inline val SharedLimit        = 0x40000000L
   inline val KernelSharedStride = 0x100000L
   inline val ModuleSharedBase   = 0x20000000L
-  inline val ModuleSharedStride = 0x10000000000L
 
-  def isShared(address: Long): Boolean =
-    java.lang.Long.compareUnsigned(address, SharedBase) >= 0 && java.lang.Long.compareUnsigned(address, SharedLimit) < 0
+  // SASS SR_SWINHI supplies the high word; its low word retains the raw shared offset.
+  // Only rank zero is supported: bits 24..31 of that low word select another cluster CTA.
+  inline val SharedWindowBase = 0x4000000000000000L
+  inline val SharedWindowSize = 0x1000000L
+
+  def isShared(address: Long, size: Int = 1): Boolean =
+    size >= 0 &&
+      ((address >= SharedBase && address <= SharedLimit - size.toLong) ||
+        (address >= SharedWindowBase && address <= SharedWindowBase + SharedWindowSize - size.toLong))
+
+  def sharedAddress(address: Long): Long =
+    if (address >= SharedWindowBase && address < SharedWindowBase + SharedWindowSize)
+      SharedBase + (address - SharedWindowBase)
+    else address
 }

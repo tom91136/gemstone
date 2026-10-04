@@ -177,4 +177,24 @@ class WorkerPoolSuite extends munit.FunSuite {
       assert(result.elapsedNanos >= 0L)
     }
   }
+  test("fatal workgroup errors wake callers with failure and reject subsequent submissions") {
+    val escaped  = java.util.concurrent.CountDownLatch(1)
+    val observed = java.util.concurrent.atomic.AtomicReference[Throwable]()
+    val fatal    = LinkageError("broken workgroup linkage")
+    Using.resource(WorkerPool(1)) { pool =>
+      val result = pool.parallelFor(1L) { _ =>
+        Thread.currentThread().setUncaughtExceptionHandler { (_, error) =>
+          observed.set(error)
+          escaped.countDown()
+        }
+        throw fatal
+      }
+      assert(result.isLeft)
+      assert(escaped.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+      assert(observed.get() eq fatal)
+      assert(pool.parallelFor(1L)(_ => Right(())).isLeft)
+      intercept[java.util.concurrent.RejectedExecutionException](pool.execute(() => ()))
+    }
+  }
+
 }

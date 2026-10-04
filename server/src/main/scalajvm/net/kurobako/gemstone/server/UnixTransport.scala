@@ -1,29 +1,41 @@
 package net.kurobako.gemstone.server
 
 import java.io.InputStream
+import java.io.InterruptedIOException
 import java.io.OutputStream
 import java.net.SocketTimeoutException
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
 import java.nio.ByteBuffer
+import java.nio.channels.CancelledKeyException
+import java.nio.channels.ClosedChannelException
+import java.nio.channels.ClosedSelectorException
 import java.nio.channels.SelectionKey
 import java.nio.channels.Selector
 import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
 import java.nio.file.Path
+import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.server.Transport.*
 import scala.util.control.NonFatal
 
 private object UnixTransport {
   def connect(path: Path, timeoutMillis: Int): Channel = {
-    val socket = SocketChannel.open(StandardProtocolFamily.UNIX)
+    val socket  = SocketChannel.open(StandardProtocolFamily.UNIX)
+    val channel = UnixChannel(socket, timeoutMillis)
     try {
       socket.configureBlocking(false)
-      val channel = UnixChannel(socket, timeoutMillis)
       if (!socket.connect(UnixDomainSocketAddress.of(path))) channel.connect(timeoutMillis)
       channel
-    } catch { case NonFatal(error) => socket.close(); throw error }
+    } catch {
+      case NonFatal(error) =>
+        try channel.close()
+        catch { case NonFatal(cleanup) => error.addSuppressed(cleanup) }
+        throw error
+    }
   }
 
   def listen(path: Path): Listener = {
@@ -47,27 +59,70 @@ private object UnixTransport {
 
   private class UnixChannel(socket: SocketChannel, writeTimeout: Int) extends Channel {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    @volatile private var timeout            = writeTimeout
+    @volatile private var timeout = writeTimeout
+    private val readable          = Readiness()
+    private val writable          = Readiness()
+
     def isClosed: Boolean                    = !socket.isOpen
     def readTimeout(milliseconds: Int): Unit = { require(milliseconds >= 0); timeout = milliseconds }
-    def close(): Unit                        = socket.close()
+    def close(): Unit = throwables.closeAll(Vec(() => socket.close(), () => readable.close(), () => writable.close()))
 
-    // Short bounded selector waits also observe close without retaining a selector per idle connection.
-    private def ready(operation: Int, milliseconds: Int): Unit = {
-      val selector = Selector.open()
-      try {
-        socket.register(selector, operation)
-        val deadline = platform.monotonicNanos + milliseconds.toLong * 1000000L
-        while (socket.isOpen && selector.select(100L) == 0)
-          if (milliseconds > 0 && platform.monotonicNanos >= deadline)
-            throw SocketTimeoutException("Unix socket timed out")
-        if (!socket.isOpen) throw java.nio.channels.ClosedChannelException()
-      } finally selector.close()
+    // Read and write wait independently; close never needs either operation lock.
+    private class Readiness {
+      val operationLock: ReentrantLock = ReentrantLock()
+      private val lifecycleLock        = ReentrantLock()
+      @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+      private var registration = Option.empty[(Selector, SelectionKey)]
+
+      private def registered(operation: Int): (Selector, SelectionKey) = lifecycleLock.withLock {
+        if (!socket.isOpen) throw ClosedChannelException()
+        registration match {
+          case Some(value) => value
+          case None        =>
+            val selector = Selector.open()
+            try {
+              val value = selector -> socket.register(selector, operation)
+              registration = Some(value)
+              value
+            } catch {
+              case NonFatal(error) =>
+                try selector.close()
+                catch { case NonFatal(cleanup) => error.addSuppressed(cleanup) }
+                throw error
+            }
+        }
+      }
+
+      @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
+      def await(operation: Int, milliseconds: Int, deadline: Long): Unit = try {
+        val (selector, key) = registered(operation)
+        key.interestOps(operation)
+        while (socket.isOpen) {
+          if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Unix socket wait interrupted")
+          val selected = if (milliseconds == 0) selector.select()
+          else {
+            val remaining = deadline - platform.monotonicNanos
+            if (remaining <= 0L) throw SocketTimeoutException("Unix socket timed out")
+            selector.select((remaining + 999999L) / 1000000L)
+          }
+          selector.selectedKeys().clear()
+          if (!socket.isOpen) throw ClosedChannelException()
+          if (selected > 0) return
+        }
+        throw ClosedChannelException()
+      } catch {
+        case _: ClosedSelectorException | _: CancelledKeyException if !socket.isOpen => throw ClosedChannelException()
+      }
+
+      def close(): Unit = lifecycleLock.withLock {
+        registration.foreach { case (selector, _) => selector.close() }
+        registration = None
+      }
     }
 
-    def connect(milliseconds: Int): Unit = {
-      ready(SelectionKey.OP_CONNECT, milliseconds)
-      if (!socket.finishConnect()) throw SocketTimeoutException("Unix socket connection timed out")
+    def connect(milliseconds: Int): Unit = writable.operationLock.withLock {
+      val deadline = platform.monotonicNanos + milliseconds.toLong * 1000000L
+      while (!socket.finishConnect()) writable.await(SelectionKey.OP_CONNECT, milliseconds, deadline)
     }
 
     private class ChannelInput extends InputStream {
@@ -75,14 +130,18 @@ private object UnixTransport {
         val byte = Array.ofDim[Byte](1)
         if (read(byte, 0, 1) < 0) -1 else byte(0) & 0xff
       }
-      override def read(bytes: Array[Byte], offset: Int, length: Int): Int = {
+      override def read(bytes: Array[Byte], offset: Int, length: Int): Int = readable.operationLock.withLock {
         java.util.Objects.checkFromIndexSize(offset, length, bytes.length)
         if (length == 0) 0
         else {
-          val buffer = ByteBuffer.wrap(bytes, offset, length)
+          val milliseconds = timeout
+          val deadline     = platform.monotonicNanos + milliseconds.toLong * 1000000L
+          val buffer       = ByteBuffer.wrap(bytes, offset, length)
           @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
           var count = socket.read(buffer)
-          while (count == 0) { ready(SelectionKey.OP_READ, timeout); count = socket.read(buffer) }
+          while (count == 0) {
+            readable.await(SelectionKey.OP_READ, milliseconds, deadline); count = socket.read(buffer)
+          }
           count
         }
       }
@@ -90,15 +149,15 @@ private object UnixTransport {
     }
     private class ChannelOutput extends OutputStream {
       override def write(value: Int): Unit                                   = write(Array(value.toByte), 0, 1)
-      override def write(bytes: Array[Byte], offset: Int, length: Int): Unit = {
-        val buffer = ByteBuffer.wrap(bytes, offset, length)
+      override def write(bytes: Array[Byte], offset: Int, length: Int): Unit = writable.operationLock.withLock {
+        val deadline = platform.monotonicNanos + writeTimeout.toLong * 1000000L
+        val buffer   = ByteBuffer.wrap(bytes, offset, length)
         while (buffer.hasRemaining)
-          if (socket.write(buffer) == 0) ready(SelectionKey.OP_WRITE, writeTimeout)
+          if (socket.write(buffer) == 0) writable.await(SelectionKey.OP_WRITE, writeTimeout, deadline)
       }
       override def close(): Unit = UnixChannel.this.close()
     }
     val input: InputStream   = ChannelInput()
     val output: OutputStream = ChannelOutput()
-
   }
 }

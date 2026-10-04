@@ -37,17 +37,17 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
   }
 
   {
-    val addressKernels = Vec(
-      SASSFixture.Kernel("local_store", 320, Vec((0, 8), (8, 4)), registers = 7),
-      SASSFixture.Kernel("local_load", 320, Vec((0, 8), (8, 4)), registers = 8),
-      SASSFixture.Kernel("shared_store", 320, Vec((0, 8), (8, 4)), registers = 7, shared = 16),
-      SASSFixture.Kernel("shared_load", 320, Vec((0, 8), (8, 4)), registers = 6, shared = 16),
-      SASSFixture.Kernel("global_store", 320, Vec((0, 8), (8, 4)), registers = 4),
-      SASSFixture.Kernel("global_load", 320, Vec((0, 8), (8, 8)), registers = 6)
+    val addressKernels = Vec.nonEmpty(
+      SASSFixture.Kernel("local_store", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 7),
+      SASSFixture.Kernel("local_load", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 8),
+      SASSFixture.Kernel("shared_store", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 7, shared = 16),
+      SASSFixture.Kernel("shared_load", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 6, shared = 16),
+      SASSFixture.Kernel("global_store", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 4),
+      SASSFixture.Kernel("global_load", 320, Vec.nonEmpty((0, 8), (8, 8)), registers = 6)
     )
     def fixtureModule(sm: Int): Cubin.Module = SASSFixture.module(sm, addressKernels)
 
-    val values      = Vec(0x00000000, 0x7fc00001, 0x80000000, 0xffffffff, 0x12345678)
+    val values      = Vec.nonEmpty(0x00000000, 0x7fc00001, 0x80000000, 0xffffffff, 0x12345678)
     val carryBase   = 0x1fffffffcL
     val carryTarget = 0x200000000L
 
@@ -55,7 +55,8 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
       VMAddressAnalysis.rewrite(sm, function)
 
     def isHigh(instruction: DecodedInstruction): Boolean =
-      instruction.mnemonic.raw == "LEA" && instruction.modifiers == Vec(Instruction.Modifier.HI, Instruction.Modifier.X)
+      instruction.mnemonic.raw == "LEA" &&
+        instruction.modifiers == Vec.nonEmpty(Instruction.Modifier.HI, Instruction.Modifier.X)
 
     def guard(text: String): Option[Instruction.Guard] =
       Parser.parse(s"$text NOP;").fold(error => fail(error), _.guard)
@@ -91,7 +92,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
       service.run(program, task).fold(error => fail(error.message), identity)
     }
 
-    for (sm <- Vec(50, 60))
+    for (sm <- Vec.nonEmpty(50, 60))
       test(s"sm_$sm generic-address rewrite rejects escaped predicates, mismatched guards, and addresses") {
         val function = ListingDecoder.parse(
           if (sm == 50) GenericMemoryFixtures.legacyGenericAddressGlobalLoadSm50
@@ -102,9 +103,10 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val highIndex = function.instructions.indexWhere(hasInstruction(
           _,
           "LEA",
-          Vec(Instruction.Modifier.HI, Instruction.Modifier.X)
+          Vec.nonEmpty(Instruction.Modifier.HI, Instruction.Modifier.X)
         ))
-        val memoryIndex = function.instructions.indexWhere(hasInstruction(_, "LD", Vec(Instruction.Modifier.E)))
+        val memoryIndex =
+          function.instructions.indexWhere(hasInstruction(_, "LD", Vec.nonEmpty(Instruction.Modifier.E)))
         assert(highIndex >= 0 && memoryIndex > highIndex)
         val high      = function.instructions(highIndex)
         val memory    = function.instructions(memoryIndex)
@@ -113,13 +115,13 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val implicitPredicateRead = SASSFixture.instruction(
           memory.address.raw + 1,
           "P2R",
-          Vec("R8", "PR", "RZ", "0x7f"),
+          Vec.nonEmpty("R8", "PR", "RZ", "0x7f"),
           None
         )
         val withPredicateBankRead = function.copy(instructions =
           function.instructions.patch(
             memoryIndex + 1,
-            Vec(implicitPredicateRead),
+            Vec.nonEmpty(implicitPredicateRead),
             0
           )
         )
@@ -128,7 +130,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val enteringBranch = SASSFixture.instruction(
           high.address.raw - 1,
           "BRA",
-          Vec(s"0x${high.address.raw.toHexString}"),
+          Vec.nonEmpty(s"0x${high.address.raw.toHexString}"),
           None
         )
         val withEnteringBranch = function.copy(instructions = enteringBranch +: function.instructions)
@@ -137,12 +139,12 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val clobberAddress = typedInstruction(
           high.address.raw + 1,
           "MOV",
-          Vec(high.operands(1), SASSFixture.operand("RZ"))
+          Vec.nonEmpty(high.operands(1), SASSFixture.operand("RZ"))
         )
         val withAddressClobber = function.copy(instructions =
           function.instructions.patch(
             highIndex + 1,
-            Vec(clobberAddress),
+            Vec.nonEmpty(clobberAddress),
             0
           )
         )
@@ -179,7 +181,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val negatedEscape = typedInstruction(
           memory.address.raw + 8,
           "SEL",
-          Vec(
+          Vec.nonEmpty(
             SASSFixture.operand("R8"),
             SASSFixture.operand("RZ"),
             Operand.Bits(BigInt(1), 0),
@@ -187,13 +189,13 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           )
         )
         val withNegatedEscape =
-          function.copy(instructions = function.instructions.patch(memoryIndex + 1, Vec(negatedEscape), 0))
+          function.copy(instructions = function.instructions.patch(memoryIndex + 1, Vec.nonEmpty(negatedEscape), 0))
         val _ = intercept[IllegalArgumentException](rewrite(sm, withNegatedEscape))
 
         val guardedOverwrite = typedInstruction(
           high.address.raw + 8,
           "ISETP.EQ.AND",
-          Vec(
+          Vec.nonEmpty(
             predicate,
             SASSFixture.operand("PT"),
             SASSFixture.operand("RZ"),
@@ -203,39 +205,46 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           Parser.parse("@P1 NOP;").toOption.get.guard
         )
         val withPredicatedOverwrite = function.copy(
-          instructions = function.instructions.patch(highIndex + 1, Vec(guardedOverwrite), 0)
+          instructions = function.instructions.patch(highIndex + 1, Vec.nonEmpty(guardedOverwrite), 0)
         )
         val _ = intercept[IllegalArgumentException](rewrite(sm, withPredicatedOverwrite))
 
-        val afterConsumerBranch     = SASSFixture.instruction(memory.address.raw + 8, "BRA", Vec("0x100"), None)
+        val afterConsumerBranch = SASSFixture.instruction(memory.address.raw + 8, "BRA", Vec.nonEmpty("0x100"), None)
         val withAfterConsumerBranch = function.copy(
-          instructions = function.instructions.patch(memoryIndex + 1, Vec(afterConsumerBranch), 0)
+          instructions = function.instructions.patch(memoryIndex + 1, Vec.nonEmpty(afterConsumerBranch), 0)
         )
         val _ = intercept[IllegalArgumentException](rewrite(sm, withAfterConsumerBranch))
 
-        val wrongGuard = function.copy(instructions =
+        val guardedConsumer = function.copy(instructions =
           function.instructions.updated(
             memoryIndex,
             memory.rewrite(guard = guard("@P1"))
           )
+        )
+        assertEquals(rewrite(sm, guardedConsumer).instructions(memoryIndex).guard, guard("@P1"))
+        val wrongGuard = guardedConsumer.copy(instructions =
+          guardedConsumer.instructions
+            .updated(highIndex - 1, function.instructions(highIndex - 1).rewrite(guard = guard("@!P1")))
+            .updated(highIndex, high.rewrite(guard = guard("@!P1")))
         )
         val _ = intercept[IllegalArgumentException](rewrite(sm, wrongGuard))
 
         val escapedRead = typedInstruction(
           high.address.raw + 8,
           "SEL",
-          Vec(SASSFixture.operand("R8"), SASSFixture.operand("RZ"), SASSFixture.operand("RZ"), predicate)
+          Vec.nonEmpty(SASSFixture.operand("R8"), SASSFixture.operand("RZ"), SASSFixture.operand("RZ"), predicate)
         )
-        val observable = function.copy(instructions = function.instructions.patch(highIndex + 1, Vec(escapedRead), 0))
-        val _          = intercept[IllegalArgumentException](rewrite(sm, observable))
+        val observable =
+          function.copy(instructions = function.instructions.patch(highIndex + 1, Vec.nonEmpty(escapedRead), 0))
+        val _ = intercept[IllegalArgumentException](rewrite(sm, observable))
       }
 
-    for (sm <- Vec(50, 60))
+    for (sm <- Vec.nonEmpty(50, 60))
       test(s"CUDA 11.8 sm_$sm generic global/shared/local load and store preserve all bits") {
         val module = fixtureModule(sm)
         assertEquals(module.sm.raw, sm)
 
-        val listings = if (sm == 50) Vec(
+        val listings = if (sm == 50) Vec.nonEmpty(
           "global_load"  -> GenericMemoryFixtures.legacyGenericAddressGlobalLoadSm50,
           "global_store" -> GenericMemoryFixtures.legacyGenericAddressGlobalStoreSm50,
           "shared_load"  -> GenericMemoryFixtures.legacyGenericAddressSharedLoadSm50,
@@ -243,7 +252,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           "local_load"   -> GenericMemoryFixtures.legacyGenericAddressLocalLoadSm50,
           "local_store"  -> GenericMemoryFixtures.legacyGenericAddressLocalStoreSm50
         )
-        else Vec(
+        else Vec.nonEmpty(
           "global_load"  -> GenericMemoryFixtures.legacyGenericAddressGlobalLoadSm60,
           "global_store" -> GenericMemoryFixtures.legacyGenericAddressGlobalStoreSm60,
           "shared_load"  -> GenericMemoryFixtures.legacyGenericAddressSharedLoadSm60,
@@ -268,7 +277,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           val rewrittenMemory = rewritten.instructions.find(isMemory(_))
             .getOrElse(fail(s"$name lost generic memory instruction"))
           assert(!rewrittenMemory.operands.contains(auxiliary), name)
-          val source = SASSFixture(module, kernel, Vec(function))
+          val source = SASSFixture(module, kernel, Vec.nonEmpty(function))
           name -> source
         }.toMap
 
@@ -291,7 +300,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
               service,
               programs("global_load"),
               "global_load",
-              Vec(
+              Vec.nonEmpty(
                 scalar64(carryBase),
                 memory(globalOutput)
               )
@@ -309,7 +318,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
               0L,
               LittleEndian.toVec(0L, 4)
             ).isRight)
-            run(service, programs("global_store"), "global_store", Vec(scalar64(carryBase), scalar32(value)))
+            run(service, programs("global_store"), "global_store", Vec.nonEmpty(scalar64(carryBase), scalar32(value)))
             assertEquals(
               intAt(service.read(target, 0L, 4).toOption.get),
               value,
@@ -319,15 +328,15 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
 
           val spaceOutput = service.allocate(4L)
           for {
-            space     <- Vec("shared", "local")
-            operation <- Vec("load", "store")
+            space     <- Vec.nonEmpty("shared", "local")
+            operation <- Vec.nonEmpty("load", "store")
             value     <- values
           } {
             run(
               service,
               programs(s"${space}_$operation"),
               s"${space}_$operation",
-              Vec(memory(spaceOutput), scalar32(value))
+              Vec.nonEmpty(memory(spaceOutput), scalar32(value))
             )
             assertEquals(
               intAt(service.read(spaceOutput, 0L, 4).toOption.get),
@@ -346,9 +355,10 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           ).fold(fail(_), _.head)
           val lowIndex  = storeFunction.instructions.indexWhere(hasInstruction(_, "LEA"))
           val highIndex = storeFunction.instructions.indexWhere(
-            hasInstruction(_, "LEA", Vec(Instruction.Modifier.HI, Instruction.Modifier.X))
+            hasInstruction(_, "LEA", Vec.nonEmpty(Instruction.Modifier.HI, Instruction.Modifier.X))
           )
-          val memoryIndex = storeFunction.instructions.indexWhere(hasInstruction(_, "ST", Vec(Instruction.Modifier.E)))
+          val memoryIndex =
+            storeFunction.instructions.indexWhere(hasInstruction(_, "ST", Vec.nonEmpty(Instruction.Modifier.E)))
           val guardedInstructions = storeFunction.instructions.zipWithIndex.map { case (instruction, index) =>
             if (Set(lowIndex, highIndex, memoryIndex)(index))
               instruction.rewrite(guard = guard("@P1"))
@@ -357,12 +367,12 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           val falsePredicate = SASSFixture.instruction(
             storeFunction.instructions.head.address.raw - 8,
             "ISETP.EQ.AND",
-            Vec("P1", "PT", "RZ", "0x1", "PT"),
+            Vec.nonEmpty("P1", "PT", "RZ", "0x1", "PT"),
             None
           )
           val guardedFunction = storeFunction.copy(instructions = falsePredicate +: guardedInstructions)
           assert(rewrite(sm, guardedFunction).instructions.exists(isHigh(_)))
-          val guardedSource  = SASSFixture(module, storeKernel, Vec(guardedFunction))
+          val guardedSource  = SASSFixture(module, storeKernel, Vec.nonEmpty(guardedFunction))
           val guardedProgram = service.compile(guardedSource).fold(error => fail(error.message), identity)
           val guardedTarget  = target
           val sentinel       = 0x89abcdef
@@ -371,7 +381,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
             0L,
             LittleEndian.toVec(sentinel.toLong & 0xffffffffL, 4)
           ).isRight)
-          run(service, guardedProgram, storeName, Vec(scalar64(carryBase), scalar32(0x12345678)))
+          run(service, guardedProgram, storeName, Vec.nonEmpty(scalar64(carryBase), scalar32(0x12345678)))
           assertEquals(
             intAt(service.read(guardedTarget, 0L, 4).toOption.get),
             sentinel,
@@ -385,9 +395,9 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
               )
             )
           )
-          val truePredicateSource  = SASSFixture(module, storeKernel, Vec(truePredicateFunction))
+          val truePredicateSource  = SASSFixture(module, storeKernel, Vec.nonEmpty(truePredicateFunction))
           val truePredicateProgram = service.compile(truePredicateSource).fold(error => fail(error.message), identity)
-          run(service, truePredicateProgram, storeName, Vec(scalar64(carryBase), scalar32(0x12345678)))
+          run(service, truePredicateProgram, storeName, Vec.nonEmpty(scalar64(carryBase), scalar32(0x12345678)))
           assertEquals(
             intAt(service.read(guardedTarget, 0L, 4).toOption.get),
             0x12345678,
@@ -398,12 +408,12 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
   }
 
   {
-    val byteKernels = Vec(
-      SASSFixture.Kernel("local_u8", 320, Vec((0, 8), (8, 4)), registers = 12),
-      SASSFixture.Kernel("shared_u8", 320, Vec((0, 8), (8, 4)), registers = 12, shared = 16),
-      SASSFixture.Kernel("global_u8_barrier", 320, Vec((0, 8), (8, 4), (16, 8)), registers = 8),
-      SASSFixture.Kernel("global_s8", 320, Vec((0, 8), (8, 4), (16, 8)), registers = 8),
-      SASSFixture.Kernel("global_u8", 320, Vec((0, 8), (8, 4), (16, 8)), registers = 8)
+    val byteKernels = Vec.nonEmpty(
+      SASSFixture.Kernel("local_u8", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 12),
+      SASSFixture.Kernel("shared_u8", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 12, shared = 16),
+      SASSFixture.Kernel("global_u8_barrier", 320, Vec.nonEmpty((0, 8), (8, 4), (16, 8)), registers = 8),
+      SASSFixture.Kernel("global_s8", 320, Vec.nonEmpty((0, 8), (8, 4), (16, 8)), registers = 8),
+      SASSFixture.Kernel("global_u8", 320, Vec.nonEmpty((0, 8), (8, 4), (16, 8)), registers = 8)
     )
     def fixtureModule(sm: Int): Cubin.Module = SASSFixture.module(sm, byteKernels)
 
@@ -444,18 +454,18 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
     val canary      = 0x3c.toByte
     val initial     = Vec.from(Vec.fill[Byte](64)(canary))
 
-    for (sm <- Vec(50, 60))
+    for (sm <- Vec.nonEmpty(50, 60))
       test(s"CUDA 11.8 sm_$sm generic byte stores preserve neighboring bytes and loads extend correctly") {
         val module = fixtureModule(sm)
         assertEquals(module.sm.raw, sm)
-        val entries = if (sm == 50) Vec(
+        val entries = if (sm == 50) Vec.nonEmpty(
           ("global_u8", GenericMemoryFixtures.legacyGenericMemoryExtensionsByteGlobalU8Sm50),
           ("global_s8", GenericMemoryFixtures.legacyGenericMemoryExtensionsByteGlobalS8Sm50),
           ("global_u8_barrier", GenericMemoryFixtures.legacyGenericMemoryExtensionsByteGlobalU8BarrierSm50),
           ("shared_u8", GenericMemoryFixtures.legacyGenericMemoryExtensionsByteSharedU8Sm50),
           ("local_u8", GenericMemoryFixtures.legacyGenericMemoryExtensionsByteLocalU8Sm50)
         )
-        else Vec(
+        else Vec.nonEmpty(
           ("global_u8", GenericMemoryFixtures.legacyGenericMemoryExtensionsByteGlobalU8Sm60),
           ("global_s8", GenericMemoryFixtures.legacyGenericMemoryExtensionsByteGlobalS8Sm60),
           ("global_u8_barrier", GenericMemoryFixtures.legacyGenericMemoryExtensionsByteGlobalU8BarrierSm60),
@@ -465,7 +475,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val programs = entries.map { case (name, listing) =>
           val kernel   = module.kernels.find(_.name == name).getOrElse(fail(s"missing $name"))
           val function = ListingDecoder.parse(listing, name, sm).fold(fail(_), _.head)
-          name -> SASSFixture(module, kernel, Vec(function))
+          name -> SASSFixture(module, kernel, Vec.nonEmpty(function))
         }
 
         val globalU8 = ListingDecoder.parse(
@@ -477,7 +487,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val byteStore = globalU8.instructions.find(hasInstruction(
           _,
           "ST",
-          Vec(
+          Vec.nonEmpty(
             Instruction.Modifier.E,
             Instruction.Modifier.CG,
             Instruction.Modifier.U8
@@ -486,7 +496,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val byteLoad = globalU8.instructions.find(hasInstruction(
           _,
           "LD",
-          Vec(
+          Vec.nonEmpty(
             Instruction.Modifier.E,
             Instruction.Modifier.CG,
             Instruction.Modifier.U8
@@ -495,7 +505,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val high = globalU8.instructions.find(hasInstruction(
           _,
           "LEA",
-          Vec(
+          Vec.nonEmpty(
             Instruction.Modifier.HI,
             Instruction.Modifier.X
           )
@@ -510,15 +520,15 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           sm
         ).fold(fail(_), _.head)
         val barrierIndex =
-          barrierFunction.instructions.indexWhere(hasInstruction(_, "MEMBAR", Vec(Instruction.Modifier.CTA)))
+          barrierFunction.instructions.indexWhere(hasInstruction(_, "MEMBAR", Vec.nonEmpty(Instruction.Modifier.CTA)))
         val barrierHighIndex = barrierFunction.instructions.indexWhere { instruction =>
-          hasInstruction(instruction, "LEA", Vec(Instruction.Modifier.HI, Instruction.Modifier.X)) &&
+          hasInstruction(instruction, "LEA", Vec.nonEmpty(Instruction.Modifier.HI, Instruction.Modifier.X)) &&
           instruction.operands.head == Operand.Predicate(Some(1), false, false)
         }
         val barrierLoadIndex = barrierFunction.instructions.indexWhere(hasInstruction(
           _,
           "LD",
-          Vec(
+          Vec.nonEmpty(
             Instruction.Modifier.E,
             Instruction.Modifier.CG,
             Instruction.Modifier.U8
@@ -532,7 +542,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val pointerLow = barrierFunction.instructions.find(hasInstruction(
           _,
           "ST",
-          Vec(
+          Vec.nonEmpty(
             Instruction.Modifier.E,
             Instruction.Modifier.CG,
             Instruction.Modifier.U8
@@ -547,7 +557,9 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val corruptPointer = barrierFunction.copy(instructions =
           barrierFunction.instructions.updated(
             carryIndex,
-            carry.rewrite(operands = carry.operands.updated(0, Operand.Qualified(pointerLow, Vec(OperandSelector.CC))))
+            carry.rewrite(operands =
+              carry.operands.updated(0, Operand.Qualified(pointerLow, Vec.nonEmpty(OperandSelector.CC)))
+            )
           )
         )
         val _ = intercept[IllegalArgumentException](VMAddressAnalysis.rewrite(sm, corruptPointer))
@@ -566,7 +578,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           def verifyGlobal(name: String, expectedLoad: Int): Unit = {
             assert(service.write(source, 0L, initial).isRight)
             assert(service.write(output, 0L, Vec.from(Vec.fill[Byte](8)(0.toByte))).isRight)
-            run(service, loaded(name), name, Vec(scalar64(base), scalar32(sourceValue), memory(output)))
+            run(service, loaded(name), name, Vec.nonEmpty(scalar64(base), scalar32(sourceValue), memory(output)))
             val result = read(service, output, 0, 8)
             assertEquals(intAt(result), expectedLoad, s"$name byte-load extension")
             assertEquals(intAt(result, 4), sourceValue, s"$name retains full-width parameter value")
@@ -579,9 +591,9 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           verifyGlobal("global_s8", 0xffffff80)
           verifyGlobal("global_u8_barrier", 0x00000080)
 
-          for ((name, expected) <- Vec("shared_u8" -> 0x005a80a5, "local_u8" -> 0x005a80a5)) {
+          for ((name, expected) <- Vec.nonEmpty("shared_u8" -> 0x005a80a5, "local_u8" -> 0x005a80a5)) {
             assert(service.write(output, 0L, Vec.from(Vec.fill[Byte](8)(0.toByte))).isRight)
-            run(service, loaded(name), name, Vec(memory(output), scalar32(sourceValue)))
+            run(service, loaded(name), name, Vec.nonEmpty(memory(output), scalar32(sourceValue)))
             val result = read(service, output, 0, 8)
             assertEquals(intAt(result), expected, s"$name preserves adjacent canaries around byte offset 4")
             assertEquals(intAt(result, 4), sourceValue, s"$name retains full-width parameter value")
@@ -593,13 +605,13 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
   {
     def fixtureModule: Cubin.Module = SASSFixture.module(
       60,
-      Vec(
-        SASSFixture.Kernel("local_store", 320, Vec((0, 8), (8, 4)), registers = 7),
-        SASSFixture.Kernel("local_load", 320, Vec((0, 8), (8, 4)), registers = 8),
-        SASSFixture.Kernel("shared_store", 320, Vec((0, 8), (8, 4)), registers = 7, shared = 16),
-        SASSFixture.Kernel("shared_load", 320, Vec((0, 8), (8, 4)), registers = 6, shared = 16),
-        SASSFixture.Kernel("global_store", 320, Vec((0, 8), (8, 4)), registers = 4),
-        SASSFixture.Kernel("global_load", 320, Vec((0, 8), (8, 8)), registers = 6)
+      Vec.nonEmpty(
+        SASSFixture.Kernel("local_store", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 7),
+        SASSFixture.Kernel("local_load", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 8),
+        SASSFixture.Kernel("shared_store", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 7, shared = 16),
+        SASSFixture.Kernel("shared_load", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 6, shared = 16),
+        SASSFixture.Kernel("global_store", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 4),
+        SASSFixture.Kernel("global_load", 320, Vec.nonEmpty((0, 8), (8, 8)), registers = 6)
       )
     )
 
@@ -614,50 +626,52 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
       val highIndex = function.instructions.indexWhere(hasInstruction(
         _,
         "LEA",
-        Vec(
+        Vec.nonEmpty(
           Instruction.Modifier.HI,
           Instruction.Modifier.X
         )
       ))
-      val loadIndex  = function.instructions.indexWhere(hasInstruction(_, "LD", Vec(Instruction.Modifier.E)))
-      val storeIndex = function.instructions.indexWhere(hasInstruction(_, "STG", Vec(Instruction.Modifier.E)))
+      val loadIndex  = function.instructions.indexWhere(hasInstruction(_, "LD", Vec.nonEmpty(Instruction.Modifier.E)))
+      val storeIndex = function.instructions.indexWhere(hasInstruction(_, "STG", Vec.nonEmpty(Instruction.Modifier.E)))
       assert(lowIndex >= 0 && highIndex == lowIndex + 1 && loadIndex > highIndex && storeIndex > loadIndex)
 
       val bridgeValue = 0x1234
       val bridge      = SASSFixture.instruction(
         function.instructions(lowIndex).address.raw + 4,
         "MOV",
-        Vec("R22", s"0x${bridgeValue.toHexString}"),
+        Vec.nonEmpty("R22", s"0x${bridgeValue.toHexString}"),
         None
       )
-      val clobber = bridge.rewrite(operands = bridge.operands.updated(0, function.instructions(highIndex).operands(1)))
+      val clobber = bridge.rewrite(operands =
+        bridge.operands.updated(0, VMOperand.base(function.instructions(lowIndex).operands.head))
+      )
       val invalidCarryBridge = bridge.rewrite(SASSFixture.instruction(
         bridge.address.raw,
         "IADD.X",
-        Vec("R22", "R0", "RZ")
+        Vec.nonEmpty("R22", "R0", "RZ")
       ).operation)
       val _ = intercept[IllegalArgumentException](
         VMAddressAnalysis.rewrite(
           60,
-          function.copy(instructions = function.instructions.patch(highIndex, Vec(clobber), 0))
+          function.copy(instructions = function.instructions.patch(highIndex, Vec.nonEmpty(clobber), 0))
         )
       )
       val _ = intercept[IllegalArgumentException](
         VMAddressAnalysis.rewrite(
           60,
-          function.copy(instructions = function.instructions.patch(highIndex, Vec(invalidCarryBridge), 0))
+          function.copy(instructions = function.instructions.patch(highIndex, Vec.nonEmpty(invalidCarryBridge), 0))
         )
       )
-      val withBridge        = function.copy(instructions = function.instructions.patch(highIndex, Vec(bridge), 0))
+      val withBridge = function.copy(instructions = function.instructions.patch(highIndex, Vec.nonEmpty(bridge), 0))
       val adjustedLoadIndex = loadIndex + 1
       val load              = withBridge.instructions(adjustedLoadIndex)
       val addAfterLoad      = SASSFixture.instruction(
         load.address.raw + 4,
         "IADD",
-        Vec("R23", "R22", "R4"),
+        Vec.nonEmpty("R23", "R22", "R4"),
         None
       )
-      val withResult         = withBridge.instructions.patch(adjustedLoadIndex + 1, Vec(addAfterLoad), 0)
+      val withResult         = withBridge.instructions.patch(adjustedLoadIndex + 1, Vec.nonEmpty(addAfterLoad), 0)
       val adjustedStoreIndex = storeIndex + 2
       val withObservedResult = withResult.updated(
         adjustedStoreIndex,
@@ -667,7 +681,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
       )
       val kernel = module.kernels.find(_.name == "global_load").fold(fail("missing global_load kernel"))(identity)
       val source =
-        SASSFixture(module, kernel, Vec(function.copy(instructions = withObservedResult)))
+        SASSFixture(module, kernel, Vec.nonEmpty(function.copy(instructions = withObservedResult)))
 
       val baseAddress   = 0x1fffffffcL
       val targetAddress = 0x200000000L
@@ -684,7 +698,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           "global_load",
           LaunchGeometry.Dimensions.One,
           LaunchGeometry.Dimensions.One,
-          Vec(
+          Vec.nonEmpty(
             KernelTask.Argument.Scalar(LittleEndian.toVec(baseAddress, 8)),
             KernelTask.Argument.Memory(output, 0L)
           )
@@ -699,21 +713,21 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
   }
 
   {
-    val compoundSpaceKernels = Vec(
-      SASSFixture.Kernel("compound_local", 320, Vec((0, 8), (8, 4)), registers = 8),
-      SASSFixture.Kernel("compound_shared", 320, Vec((0, 8), (8, 4)), registers = 8, shared = 16),
-      SASSFixture.Kernel("compound_global", 320, Vec((0, 8), (8, 8), (16, 4)), registers = 7)
+    val compoundSpaceKernels = Vec.nonEmpty(
+      SASSFixture.Kernel("compound_local", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 8),
+      SASSFixture.Kernel("compound_shared", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 8, shared = 16),
+      SASSFixture.Kernel("compound_global", 320, Vec.nonEmpty((0, 8), (8, 8), (16, 4)), registers = 7)
     )
-    val vectorGenericKernels = Vec(
-      SASSFixture.Kernel("repeated_store", 320, Vec((0, 8), (8, 4), (12, 4)), registers = 4),
-      SASSFixture.Kernel("repeated_load", 320, Vec((0, 8), (8, 8)), registers = 8),
-      SASSFixture.Kernel("repeated_store_then_load", 320, Vec((0, 8), (8, 4)), registers = 7),
-      SASSFixture.Kernel("load_v4_u32", 320, Vec((0, 8), (8, 8)), registers = 8),
-      SASSFixture.Kernel("load_v2_u64", 320, Vec((0, 8), (8, 8)), registers = 8),
-      SASSFixture.Kernel("load_v2_u32", 320, Vec((0, 8), (8, 8)), registers = 6),
-      SASSFixture.Kernel("store_v4_u32", 320, Vec((0, 8), (8, 4), (12, 4), (16, 4), (20, 4)), registers = 8),
-      SASSFixture.Kernel("store_v2_u64", 320, Vec((0, 8), (8, 8), (16, 8)), registers = 8),
-      SASSFixture.Kernel("store_v2_u32", 320, Vec((0, 8), (8, 4), (12, 4)), registers = 6)
+    val vectorGenericKernels = Vec.nonEmpty(
+      SASSFixture.Kernel("repeated_store", 320, Vec.nonEmpty((0, 8), (8, 4), (12, 4)), registers = 4),
+      SASSFixture.Kernel("repeated_load", 320, Vec.nonEmpty((0, 8), (8, 8)), registers = 8),
+      SASSFixture.Kernel("repeated_store_then_load", 320, Vec.nonEmpty((0, 8), (8, 4)), registers = 7),
+      SASSFixture.Kernel("load_v4_u32", 320, Vec.nonEmpty((0, 8), (8, 8)), registers = 8),
+      SASSFixture.Kernel("load_v2_u64", 320, Vec.nonEmpty((0, 8), (8, 8)), registers = 8),
+      SASSFixture.Kernel("load_v2_u32", 320, Vec.nonEmpty((0, 8), (8, 8)), registers = 6),
+      SASSFixture.Kernel("store_v4_u32", 320, Vec.nonEmpty((0, 8), (8, 4), (12, 4), (16, 4), (20, 4)), registers = 8),
+      SASSFixture.Kernel("store_v2_u64", 320, Vec.nonEmpty((0, 8), (8, 8), (16, 8)), registers = 8),
+      SASSFixture.Kernel("store_v2_u32", 320, Vec.nonEmpty((0, 8), (8, 4), (12, 4)), registers = 6)
     )
     def fixtureModule(sm: Int, vectorGeneric: Boolean): Cubin.Module =
       SASSFixture.module(sm, if (vectorGeneric) vectorGenericKernels else compoundSpaceKernels)
@@ -754,7 +768,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         identity
       )
 
-    for (sm <- Vec(50, 60))
+    for (sm <- Vec.nonEmpty(50, 60))
       test(s"CUDA 11.8 sm_$sm generic vector widths and repeated P consumers preserve memory results") {
         val vectorModule = fixtureModule(sm, vectorGeneric = true)
         val spacesModule = fixtureModule(sm, vectorGeneric = false)
@@ -768,11 +782,11 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
             name,
             sm
           ).fold(fail(_), _.head)
-          val source = SASSFixture(module, kernel, Vec(function))
+          val source = SASSFixture(module, kernel, Vec.nonEmpty(function))
           source
         }
 
-        val entries = if (sm == 50) Vec(
+        val entries = if (sm == 50) Vec.nonEmpty(
           "store_v2_u32"             -> GenericMemoryFixtures.legacyGenericMemoryExtensionsStoreV2U32Sm50,
           "store_v2_u64"             -> GenericMemoryFixtures.legacyGenericMemoryExtensionsStoreV2U64Sm50,
           "store_v4_u32"             -> GenericMemoryFixtures.legacyGenericMemoryExtensionsStoreV4U32Sm50,
@@ -781,7 +795,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           "load_v4_u32"              -> GenericMemoryFixtures.legacyGenericMemoryExtensionsLoadV4U32Sm50,
           "repeated_store_then_load" -> GenericMemoryFixtures.legacyGenericMemoryExtensionsRepeatedStoreThenLoadSm50
         )
-        else Vec(
+        else Vec.nonEmpty(
           "store_v2_u32"             -> GenericMemoryFixtures.legacyGenericMemoryExtensionsStoreV2U32Sm60,
           "store_v2_u64"             -> GenericMemoryFixtures.legacyGenericMemoryExtensionsStoreV2U64Sm60,
           "store_v4_u32"             -> GenericMemoryFixtures.legacyGenericMemoryExtensionsStoreV4U32Sm60,
@@ -790,12 +804,12 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           "load_v4_u32"              -> GenericMemoryFixtures.legacyGenericMemoryExtensionsLoadV4U32Sm60,
           "repeated_store_then_load" -> GenericMemoryFixtures.legacyGenericMemoryExtensionsRepeatedStoreThenLoadSm60
         )
-        val spaceEntries = if (sm == 50) Vec(
+        val spaceEntries = if (sm == 50) Vec.nonEmpty(
           "compound_global" -> GenericMemoryFixtures.legacyGenericMemoryExtensionsCompoundGlobalSm50,
           "compound_shared" -> GenericMemoryFixtures.legacyGenericMemoryExtensionsCompoundSharedSm50,
           "compound_local"  -> GenericMemoryFixtures.legacyGenericMemoryExtensionsCompoundLocalSm50
         )
-        else Vec(
+        else Vec.nonEmpty(
           "compound_global" -> GenericMemoryFixtures.legacyGenericMemoryExtensionsCompoundGlobalSm60,
           "compound_shared" -> GenericMemoryFixtures.legacyGenericMemoryExtensionsCompoundSharedSm60,
           "compound_local"  -> GenericMemoryFixtures.legacyGenericMemoryExtensionsCompoundLocalSm60
@@ -820,29 +834,39 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
           val scalarOutput = service.allocate(4L)
 
           val pointer = scalar64(base)
-          val data32  = Vec(0x00000000, 0x7fc00001, 0x80000000, 0xffffffff)
-          val data64  = Vec(0x0123456789abcdefL, 0xfedcba9876543210L)
+          val data32  = Vec.nonEmpty(0x00000000, 0x7fc00001, 0x80000000, 0xffffffff)
+          val data64  = Vec.nonEmpty(0x0123456789abcdefL, 0xfedcba9876543210L)
 
-          run(service, loaded("store_v2_u32"), "store_v2_u32", Vec(pointer, scalar32(data32(0)), scalar32(data32(1))))
+          run(
+            service,
+            loaded("store_v2_u32"),
+            "store_v2_u32",
+            Vec.nonEmpty(pointer, scalar32(data32(0)), scalar32(data32(1)))
+          )
           assertEquals(bytes(service, source, 512, 8), words(data32(0), data32(1)))
-          run(service, loaded("store_v2_u64"), "store_v2_u64", Vec(pointer, scalar64(data64(0)), scalar64(data64(1))))
+          run(
+            service,
+            loaded("store_v2_u64"),
+            "store_v2_u64",
+            Vec.nonEmpty(pointer, scalar64(data64(0)), scalar64(data64(1)))
+          )
           assertEquals(bytes(service, source, 512, 16), longWords(data64(0), data64(1)))
           run(
             service,
             loaded("store_v4_u32"),
             "store_v4_u32",
-            Vec(pointer) ++ data32.map(scalar32(_))
+            Vec.nonEmpty(pointer) ++ data32.map(scalar32(_))
           )
           assertEquals(bytes(service, source, 512, 16), words(data32*))
 
           assert(service.write(source, 512L, words(data32*)).isRight)
-          run(service, loaded("load_v2_u32"), "load_v2_u32", Vec(pointer, memory(vectorOutput)))
+          run(service, loaded("load_v2_u32"), "load_v2_u32", Vec.nonEmpty(pointer, memory(vectorOutput)))
           assertEquals(bytes(service, vectorOutput, 0, 8), words(data32.take(2)*))
-          run(service, loaded("load_v4_u32"), "load_v4_u32", Vec(pointer, memory(vectorOutput)))
+          run(service, loaded("load_v4_u32"), "load_v4_u32", Vec.nonEmpty(pointer, memory(vectorOutput)))
           assertEquals(bytes(service, vectorOutput, 0, 16), words(data32*))
 
           assert(service.write(source, 512L, longWords(data64*)).isRight)
-          run(service, loaded("load_v2_u64"), "load_v2_u64", Vec(pointer, memory(vectorOutput)))
+          run(service, loaded("load_v2_u64"), "load_v2_u64", Vec.nonEmpty(pointer, memory(vectorOutput)))
           assertEquals(bytes(service, vectorOutput, 0, 16), longWords(data64*))
 
           val aliasValue = 0x89abcdef
@@ -850,20 +874,20 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
             service,
             loaded("repeated_store_then_load"),
             "repeated_store_then_load",
-            Vec(pointer, scalar32(aliasValue))
+            Vec.nonEmpty(pointer, scalar32(aliasValue))
           )
           assertEquals(bytes(service, source, 512, 4), words(aliasValue), "the aliased generic store writes offset 512")
           assertEquals(bytes(service, source, 0, 4), words(aliasValue), "the later generic load feeds the output store")
 
-          val compoundInput = Vec(0x01020304, 0x7fc00001, 0xffffffff)
+          val compoundInput = Vec.nonEmpty(0x01020304, 0x7fc00001, 0xffffffff)
           for (
-            (name, value) <- Vec(
+            (name, value) <- Vec.nonEmpty(
               "compound_global" -> compoundInput(0),
               "compound_shared" -> compoundInput(1),
               "compound_local"  -> compoundInput(2)
             )
           ) {
-            val args = Vec(memory(scalarOutput), scalar32(value))
+            val args = Vec.nonEmpty(memory(scalarOutput), scalar32(value))
             run(service, loaded(name), name, if (name == "compound_global") pointer +: args else args)
             val expected = if (name == "compound_global") value else value + value
             assertEquals(bytes(service, scalarOutput, 0, 4), words(expected), name)
@@ -871,7 +895,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         }
       }
 
-    for (sm <- Vec(50, 60))
+    for (sm <- Vec.nonEmpty(50, 60))
       test(s"sm_$sm generic memory extension rejects a clobbered address between reused-predicate consumers") {
         val module   = fixtureModule(sm, vectorGeneric = false)
         val function = ListingDecoder.parse(
@@ -883,8 +907,8 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val lowIndex  = function.instructions.indexWhere(hasInstruction(_, "LEA"))
         val consumers = function.instructions.indices.filter { index =>
           val instruction = function.instructions(index)
-          (hasInstruction(instruction, "LD", Vec(Instruction.Modifier.E, Instruction.Modifier.CG)) ||
-            hasInstruction(instruction, "ST", Vec(Instruction.Modifier.E, Instruction.Modifier.CG))) &&
+          (hasInstruction(instruction, "LD", Vec.nonEmpty(Instruction.Modifier.E, Instruction.Modifier.CG)) ||
+            hasInstruction(instruction, "ST", Vec.nonEmpty(Instruction.Modifier.E, Instruction.Modifier.CG))) &&
           instruction.operands.lastOption.exists {
             case Operand.Predicate(Some(_), false, false) => true
             case _                                        => false
@@ -898,11 +922,12 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val clobber = SASSFixture.instruction(
           function.instructions(consumers.last).address.raw - 1,
           "MOV",
-          Vec(OperandPrinter.print(lowAddress).fold(fail(_), identity), "RZ"),
+          Vec.nonEmpty(OperandPrinter.print(lowAddress).fold(fail(_), identity), "RZ"),
           None
         )
-        val clobbered = function.copy(instructions = function.instructions.patch(consumers.last, Vec(clobber), 0))
-        val _         = intercept[IllegalArgumentException](VMAddressAnalysis.rewrite(sm, clobbered))
+        val clobbered =
+          function.copy(instructions = function.instructions.patch(consumers.last, Vec.nonEmpty(clobber), 0))
+        val _ = intercept[IllegalArgumentException](VMAddressAnalysis.rewrite(sm, clobbered))
 
         val vector         = fixtureModule(sm, vectorGeneric = true)
         val vectorKernel   = vector.kernels.find(_.name == "store_v4_u32").getOrElse(fail("missing store_v4_u32"))
@@ -915,7 +940,7 @@ class LegacyGenericMemorySuites extends munit.FunSuite {
         val widthIndex = vectorFunction.instructions.indexWhere(hasInstruction(
           _,
           "ST",
-          Vec(
+          Vec.nonEmpty(
             Instruction.Modifier.E,
             Instruction.Modifier.CG,
             Instruction.Modifier.`128`

@@ -62,6 +62,30 @@ object elf {
       })
     }
 
+  case class Relocation64(offset: Long, symbol: Long >= 0, kind: Long >= 0, addend: Option[Long])
+
+  def relocations64(
+      bytes: Vec[Byte],
+      byteOrder: ByteOrder,
+      explicitAddend: Boolean
+  ): Either[NonEmpty[String], Vec[Relocation64]] = {
+    val width = if (explicitAddend) 24 else 16
+    if (bytes.size % width != 0) Left("invalid ELF64 relocation table size")
+    else {
+      val buffer = ByteBuffer.wrap(Vec.toArray(bytes)).order(byteOrder)
+      Right(Vec.tabulate(bytes.size / width) { index =>
+        val start = index * width
+        val info  = buffer.getLong(start + 8)
+        Relocation64(
+          buffer.getLong(start),
+          Bits.high32(info).unwrap.widen[Long >= 0],
+          Bits.low32(info).unwrap.widen[Long >= 0],
+          Option.when(explicitAddend)(buffer.getLong(start + 16))
+        )
+      })
+    }
+  }
+
   case class SectionHeader(
       nameOffset: Int,
       sectionType: Int,

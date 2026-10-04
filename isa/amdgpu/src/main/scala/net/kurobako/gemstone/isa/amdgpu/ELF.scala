@@ -42,7 +42,15 @@ private object ELF {
       /** Device globals share these mutable section images across all kernels in one code object. */
       globalMemory: Array[(Long, Array[Byte])] = Array.empty
   ) {
-    val emulatedCalls: Map[Long, VMFunction] = functionTargets.flatMap { case (address, name) =>
+    val waveSize: Int in (32, 64) =
+      if (
+        TargetDefaults.waveSize(target).raw == 32 &&
+        (kernelCodeProperties & KernelCodeProperty.ENABLE_WAVEFRONT_SIZE32) != 0
+      ) 32
+      else 64
+
+    // Most kernels never execute a device call.
+    lazy val emulatedCalls: Map[Long, VMFunction] = functionTargets.flatMap { case (address, name) =>
       VMFunction.matching(name).headOption.map(address -> _)
     }
     val globalMemoryLocks: Array[ReentrantLock] =
@@ -89,7 +97,8 @@ private object ELF {
       private val globalSections: Map[Int, SectionHeader],
       private val globalSymbols: Map[NonEmpty[String], Symbol],
       private val globalRelocations: Vec[(Long, Long)],
-      private val noteSections: Vec[SectionHeader]
+      private val noteSections: Vec[SectionHeader],
+      val globals: Vec[CodeObjectGlobal]
   ) {
     lazy val notes: Vec[Vec[Byte]] = noteSections.map(sectionBytes(bytes, _))
 
@@ -132,10 +141,26 @@ private object ELF {
         section.address -> globalImages(index)
       }
 
+    private def kernelCodeSize(record: KernelRecord): Int =
+      if (record.symbol.inferredSize) unpaddedCodeSize(bytes, record.codeStart, record.symbol.size.raw)
+      else record.symbol.size.raw
+
+    private def kernelCode(record: KernelRecord): Vec[Byte] =
+      Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(
+        bytes,
+        record.codeStart,
+        record.codeStart + kernelCodeSize(record)
+      ))
+
+    def kernelCodeSize(name: String): Option[Int] = records.get(name).map(kernelCodeSize(_))
+
+    /** Inspect code without allocating the module's executable text, relocated globals, or kernel state. */
+    def kernelCode(name: String): Either[CodeObjectError, Vec[Byte]] = {
+      val missing: NonEmpty[String] = s"AMDGPU code object has no kernel symbol $name"
+      records.get(name).toRight(CodeObjectError.Invalid(missing)).map(kernelCode(_))
+    }
+
     private def materialize(record: KernelRecord): CodeObjectKernel = {
-      val codeBytes = java.util.Arrays.copyOfRange(bytes, record.codeStart, record.codeStart + record.symbol.size.raw)
-      val code      =
-        Vec.unsafeWrapArray(if (record.symbol.inferredSize) trimTrailingKernelPadding(codeBytes) else codeBytes)
       val (readOnlyAddress, readOnlyBytes) = readOnly
       CodeObjectKernel(
         name = record.symbol.name,
@@ -145,7 +170,7 @@ private object ELF {
         privateSegmentSize = record.privateSegmentSize,
         computePgmRsrc2 = record.computePgmRsrc2,
         kernelCodeProperties = record.kernelCodeProperties,
-        code = code,
+        code = kernelCode(record),
         codeAddress = record.symbol.value,
         functionTargets = functionTargets,
         readOnlyAddress = readOnlyAddress,
@@ -158,21 +183,6 @@ private object ELF {
     }
 
     val kernelNames: Set[String] = records.keySet
-
-    val globals: Vec[CodeObjectGlobal] = Vec.from(
-      globalSymbols.view.map { case (name, symbol) =>
-        val pointerOffsets = globalRelocations.collect {
-          case (address, _) if address >= symbol.value && address - symbol.value <= symbol.size.raw.toLong - 8L =>
-            (address - symbol.value).toInt.unsafe[Int >= 0]
-        }.distinct.sorted
-        CodeObjectGlobal(
-          name,
-          GuestAddress(symbol.value),
-          symbol.size,
-          pointerOffsets
-        )
-      }.toSeq.sortBy(global => (global.address.raw, global.name))
-    )
 
     /** Make a session-local view over the immutable parsed index. Mutable global images and lazy kernel materialization
       * intentionally remain private to the view; the code-object bytes and parsed tables are safe to share.
@@ -189,7 +199,8 @@ private object ELF {
         globalSections,
         globalSymbols,
         globalRelocations,
-        noteSections
+        noteSections,
+        globals
       )
 
     /** Returns the device address and size of a mutable HIP/HSA-visible global. */
@@ -269,9 +280,27 @@ private object ELF {
     }
   }
 
+  private def describeGlobals(
+      globalSymbols: Map[NonEmpty[String], Symbol],
+      globalRelocations: Vec[(Long, Long)]
+  ): Vec[CodeObjectGlobal] = Vec.from(
+    globalSymbols.view.map { case (name, symbol) =>
+      val pointerOffsets = globalRelocations.collect {
+        case (address, _) if address >= symbol.value && address - symbol.value <= symbol.size.raw.toLong - 8L =>
+          (address - symbol.value).toInt.unsafe[Int >= 0]
+      }.distinct.sorted
+      CodeObjectGlobal(
+        name,
+        GuestAddress(symbol.value),
+        symbol.size,
+        pointerOffsets
+      )
+    }.toSeq.sortBy(global => (global.address.raw, global.name))
+  )
+
   // Target IDs use ASCII; ELF symbol names below may contain non-ASCII UTF-8.
   private val TargetPrefix = "amdgcn-amd-amdhsa--".getBytes(StandardCharsets.US_ASCII)
-  private val indexCache   = LRUCache[Vec[Byte], Either[CodeObjectError, Index]](capacity = 4)
+  private val indexCache   = LRUCache[CodeObjectKey, Either[CodeObjectError, Index]](capacity = 4)
 
   def selectFunctionTarget(names: Vec[String]): Either[CodeObjectError, String] = {
     val aliases    = names.distinct.sorted
@@ -285,11 +314,9 @@ private object ELF {
       )
     else
       kinds.headOption match {
-        case Some(kind)                => Right(recognized.collectFirst { case (`kind`, name) => name }.get)
-        case None if aliases.size == 1 => Right(aliases.head)
-        case None                      => Left(CodeObjectError.Invalid(
-            s"AMDGPU function aliases are ambiguous: ${aliases.mkString(", ")}"
-          ))
+        case Some(kind) => Right(recognized.collectFirst { case (`kind`, name) => name }.get)
+        // Ordinary aliases execute the same address; the selected name is only a diagnostic label.
+        case None => aliases.headOption.toRight(CodeObjectError.Invalid("AMDGPU function has no symbol names"))
       }
   }
 
@@ -385,11 +412,12 @@ private object ELF {
       globalSections,
       globalSymbols,
       globalRelocations,
-      sections.filter(_.sectionType == NoteSection)
+      sections.filter(_.sectionType == NoteSection),
+      describeGlobals(globalSymbols, globalRelocations)
     )
 
   def index(image: Vec[Byte]): Either[CodeObjectError, Index] =
-    indexCache.get(image)(indexBytes(Vec.toArray(image))).map(_.fork())
+    indexCache.get(CodeObjectKey(image))(indexBytes(Vec.toArray(image))).map(_.fork())
 
   private val NoteSection = 7
 
@@ -597,22 +625,25 @@ private object ELF {
 
   // Locate the last terminating instruction in one allocation-free scan.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def trimTrailingKernelPadding(code: Array[Byte]): Array[Byte] = {
+  private def unpaddedCodeSize(code: Array[Byte], start: Int, size: Int): Int = {
     var offset  = 0
     var lastEnd = -1
-    while (offset <= code.length - 4) {
-      if (decodeInt32(code, offset) == 0xbf810000) lastEnd = offset + 4
+    while (offset <= size - 4) {
+      if (decodeInt32(code, start + offset) == 0xbf810000) lastEnd = offset + 4
       offset += 4
     }
-    if (lastEnd < 0 || lastEnd == code.length) code
-    else java.util.Arrays.copyOf(code, lastEnd)
+    if (lastEnd < 0) size else lastEnd
+  }
+
+  def trimTrailingKernelPadding(code: Array[Byte]): Array[Byte] = {
+    val size = unpaddedCodeSize(code, 0, code.length)
+    if (size == code.length) code else java.util.Arrays.copyOf(code, size)
   }
 
   private def elfBuffer(bytes: Array[Byte]): Either[CodeObjectError, ByteBuffer] =
     validateHeader(Vec.unsafeWrapArray(bytes)).map(_ => ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN))
 
   private val RelocationSection   = 4
-  private val RelocationAbs64     = 3L
   private val SymbolEntrySize     = 24
   private val RelocationEntrySize = 24
 
@@ -638,7 +669,9 @@ private object ELF {
         val info   = buffer.getLong(start + 8)
         val addend = buffer.getLong(start + 16)
         val symbol = (info >>> 32).toInt
-        if ((info & 0xffffffffL) == RelocationAbs64)
+        if ((info & 0xffffffffL) == EncodingConstants.R_AMDGPU_RELATIVE64)
+          builder += (target -> addend)
+        else if ((info & 0xffffffffL) == EncodingConstants.R_AMDGPU_ABS64)
           symbolValue(bytes, sections, section.link, symbol) match {
             case Some(resolved) => builder += (target -> (resolved + addend))
             case None => failure = Some(CodeObjectError.Invalid(s"unresolved AMDGPU relocation symbol $symbol"))
@@ -805,8 +838,12 @@ private object ELF {
       if (matched == TargetPrefix.length) prefixStart = candidate
       candidate += 1
     }
-    if (prefixStart < 0) Left(CodeObjectError.Invalid("AMDGPU target metadata is absent"))
-    else {
+    if (prefixStart < 0) {
+      val machine = decodeInt32(bytes, 48) & EncodingConstants.ELFMachine.Mask
+      EncodingConstants.ELFMachine.Names.get(machine)
+        .toRight(CodeObjectError.Unsupported(s"unknown AMDGPU ELF machine 0x${machine.toHexString}"))
+        .flatMap(name => Target.either(name).leftMap(CodeObjectError.Unsupported(_)))
+    } else {
       val valueStart = prefixStart + TargetPrefix.length
       var valueEnd   = valueStart
       var scanning   = true

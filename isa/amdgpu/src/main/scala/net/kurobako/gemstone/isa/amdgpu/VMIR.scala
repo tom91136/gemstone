@@ -1,19 +1,15 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import ELF.*
-import scala.annotation.targetName
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import scala.annotation.targetName
 private object VMIR {
   type VectorRegisterIndex = Int in 0 ~ 255
   type ScalarRegisterIndex = Int in 0 ~ 127
 
-  /** Executable wave width: GCN/CDNA use wave64 and the VM's RDNA targets use wave32. */
-  def waveSize(target: Target): Int in (32, 64) = target.isa match {
-    case ISA.GFX6 | ISA.GFX7 | ISA.GFX8 | ISA.GFX9 | ISA.CDNA1 | ISA.CDNA2 | ISA.CDNA3 | ISA.CDNA4 |
-        ISA.CDNA5 => 64
-    case ISA.RDNA1 | ISA.RDNA2 | ISA.RDNA3 | ISA.RDNA3_5 | ISA.RDNA4 | ISA.GFX11_7 => 32
-  }
+  /** Default device wave width; code objects can select a different supported width. */
+  def waveSize(target: Target): Int in (32, 64) = TargetDefaults.waveSize(target)
 
   extension (index: VectorRegisterIndex) {
     def offsetBy(words: Int >= 0): VectorRegisterIndex = {
@@ -38,6 +34,8 @@ private object VMIR {
     case Scalar(index: ScalarRegisterIndex)
     case VectorRegister(index: VectorRegisterIndex)
     case Constant(value: Long)
+    case Floating(value: Double)
+    case Condition(value: ScalarBranchCondition)
 
     /** A literal dword embedded in the instruction stream.
       *
@@ -48,13 +46,23 @@ private object VMIR {
     case Literal(value: Long)
   }
 
+  enum RegisterBank {
+    case Vector, Accumulator
+  }
+
+  enum PackedF32Operation {
+    case Add, Multiply, Fma
+  }
+
   enum ScalarUnaryOperation {
-    case AbsoluteI32, SignExtendI8, SignExtendI16, CountBits32, CountBits64, ReverseBits32
-    case Not32, Not64, FirstBitHighI32, ClearBit32, SetBit32
+    case U32FromF32, F32FromU32, TruncateF32, AbsoluteI32, SignExtendI8, SignExtendI16, CountBits32, CountBits64,
+      ReverseBits32
+    case Not32, Not64, FirstBitHighI32, FirstBitHighI64, FirstBitHighU32, FirstBitHighU64, ClearBit32, SetBit32
   }
 
   enum ScalarBinaryOperation {
-    case And32, Or32, MultiplyI32, MultiplyHighU32, MultiplyHighI32, AddI32, SubtractI32
+    case AddF32, SubtractF32, MultiplyF32, And32, Or32, MultiplyI32, MultiplyHighU32, MultiplyHighI32, AddI32,
+      SubtractI32
     case ShiftLeft32, ShiftLeftTwoAndAddU32, ShiftRightArithmetic32, BitFieldExtractU32, BitFieldExtractI32,
       ShiftRight32
     case AndNot32, OrNot32, Nor32
@@ -66,6 +74,7 @@ private object VMIR {
   }
 
   enum ScalarBinary64Operation {
+    case Multiply, AddNoCarry, SubtractNoCarry
     case And, AndNot, Or, OrNot, Nor, Xor, ShiftLeft, ShiftRight, ShiftRightArithmetic, BitFieldExtractI64
   }
 
@@ -79,18 +88,13 @@ private object VMIR {
     case EqualU64, NotEqualU64, BitSet32, BitClear32
   }
 
-  enum ScalarImmediateCompareOperation {
-    case EqualI32, NotEqualI32, GreaterI32, LessI32
-    case EqualU32, NotEqualU32, GreaterU32, GreaterOrEqualU32, LessU32, LessOrEqualU32
-  }
-
   enum VectorBitFindOperation {
     case FirstBitLow32, FirstBitHighI32, FirstBitHighU32
   }
 
   enum VectorConvertOperation {
     case FrexpExponentF64, FrexpExponentF32, FrexpMantissaF32, FrexpMantissaF64
-    case ReciprocalF32, ReciprocalF64, TruncateF32, FloorF32, RoundNearestEvenF32
+    case ReciprocalF32, ReciprocalF64, TruncateF32, FloorF32, FractionF32, RoundNearestEvenF32
     case TruncateF64, FloorF64, FractionF64, RoundNearestEvenF64
     case ReciprocalSquareRootF32, ReciprocalSquareRootF64, SquareRootF32, ExponentBase2F32
     case SineF32, CosineF32, LogarithmBase2F32
@@ -103,6 +107,19 @@ private object VMIR {
   enum VectorMadF32Operation {
     case MultiplyAdd, FusedMultiplyAdd
   }
+
+  enum DualVectorOperation {
+    case Move, AddF32, SubtractF32, ReverseSubtractF32, MultiplyF32, FmaF32, MinimumF32, MaximumF32
+    case ConditionalMask, AddU32, ShiftLeft32, And32
+  }
+
+  case class DualVector(
+      operation: DualVectorOperation,
+      destination: VectorRegisterIndex,
+      left: InstructionSource,
+      right: InstructionSource,
+      addend: InstructionSource
+  )
 
   enum VectorBinaryOperation {
     case AddU32, MultiplyLowU32, MultiplyHighU32, MultiplyHighI32
@@ -166,7 +183,7 @@ private object VMIR {
   }
 
   enum VectorComparisonRelation {
-    case Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual
+    case Equal, NotEqual, OrderedNotEqual, Less, LessOrEqual, Greater, GreaterOrEqual
     case NotLess, NotLessOrEqual, NotGreater, NotGreaterOrEqual
     case Ordered, Unordered, NotLessOrGreater, Class
   }
@@ -181,10 +198,11 @@ private object VMIR {
 
     case SLoad(
         dest: ScalarRegisterIndex,
-        count: Int in (1, 2, 4, 8, 16),
+        count: Int in (1, 2, 3, 4, 8, 16),
         base: ScalarRegisterIndex,
         offset: Int,
-        scalarOffset: Option[ScalarRegisterIndex]
+        scalarOffset: Option[ScalarRegisterIndex],
+        elementBytes: Int in (1, 2, 4) = 4
     )
     case SMove(dest: ScalarRegisterIndex, src: InstructionSource)
     case SMoveImmediate(dest: ScalarRegisterIndex, value: Int)
@@ -203,6 +221,14 @@ private object VMIR {
     case SOrSaveExec(dest: ScalarRegisterIndex, src: InstructionSource, width: Int in (32, 64))
     case SXorSaveExec(dest: ScalarRegisterIndex, src: InstructionSource, width: Int in (32, 64))
     case SUnary(operation: ScalarUnaryOperation, dest: ScalarRegisterIndex, src: InstructionSource)
+    case SReciprocalF32(
+        dest: ScalarRegisterIndex,
+        src: InstructionSource,
+        absolute: Boolean,
+        negate: Boolean,
+        clamp: Boolean
+    )
+    case SFmaF32(dest: ScalarRegisterIndex, srcA: InstructionSource, srcB: InstructionSource, srcC: InstructionSource)
     case SBinary(
         operation: ScalarBinaryOperation,
         dest: ScalarRegisterIndex,
@@ -223,10 +249,61 @@ private object VMIR {
     )
     case SSetGprIdxOn
     case SCSelect(dest: ScalarRegisterIndex, srcA: InstructionSource, srcB: InstructionSource, width: Int in (32, 64))
-    case SCmpImmediate(operation: ScalarImmediateCompareOperation, src: ScalarRegisterIndex, immediate: Int)
     case SAddImmediate(dest: ScalarRegisterIndex, immediate: Int)
+    case SFloatCompare(operation: VectorComparison, srcA: InstructionSource, srcB: InstructionSource)
     case SCmp(operation: ScalarCompareOperation, srcA: InstructionSource, srcB: InstructionSource)
     case VMove(dest: VectorRegisterIndex, src: InstructionSource)
+    case VDual(left: DualVector, right: DualVector)
+    case VMove64(dest: VectorRegisterIndex, src: InstructionSource)
+    case VPackedF32(
+        operation: PackedF32Operation,
+        dest: VectorRegisterIndex,
+        srcA: InstructionSource,
+        srcB: InstructionSource,
+        srcC: InstructionSource,
+        lowSelection: Int,
+        highSelection: Int,
+        negateLow: Int,
+        negateHigh: Int
+    )
+    case VBitOp3(
+        dest: VectorRegisterIndex,
+        srcA: InstructionSource,
+        srcB: InstructionSource,
+        srcC: InstructionSource,
+        table: Int,
+        half: Boolean
+    )
+    case VAccumulatorRead(dest: VectorRegisterIndex, src: VectorRegisterIndex)
+    case VAccumulatorWrite(dest: VectorRegisterIndex, src: InstructionSource)
+    case VMatrixF32(
+        dest: VectorRegisterIndex,
+        srcA: InstructionSource,
+        srcB: InstructionSource,
+        srcC: InstructionSource,
+        size: Int in (4, 16, 32),
+        blockBroadcast: Int where Between[0, 4],
+        blockId: Int where Between[0, 15],
+        accumulatorMask: Int where Between[0, 7],
+        broadcast: Int where Between[0, 7]
+    )
+    case VWaveMatrixF16(
+        dest: VectorRegisterIndex,
+        srcA: VectorRegisterIndex,
+        srcB: VectorRegisterIndex,
+        srcC: InstructionSource,
+        halfResult: Boolean,
+        high: Boolean,
+        negateLow: Int,
+        negateHigh: Int
+    )
+    case VPackedMove32(
+        dest: VectorRegisterIndex,
+        srcA: InstructionSource,
+        srcB: InstructionSource,
+        highA: Boolean,
+        highB: Boolean
+    )
 
     /** Read a VGPR through the scalar M0 register (v_movrels_b32). */
     case VMoveRelative(dest: VectorRegisterIndex, src: InstructionSource)
@@ -274,7 +351,12 @@ private object VMIR {
     case VDot2F32F16(dest: VectorRegisterIndex, srcA: InstructionSource, srcB: InstructionSource, accumulate: Boolean)
 
     /** Four unsigned byte products accumulated into a u32 destination. */
-    case VDot4U32U8(dest: VectorRegisterIndex, srcA: InstructionSource, srcB: InstructionSource, srcC: InstructionSource)
+    case VDot4U32U8(
+        dest: VectorRegisterIndex,
+        srcA: InstructionSource,
+        srcB: InstructionSource,
+        srcC: InstructionSource
+    )
     case VBinaryF32Modified(
         operation: VectorF32BinaryOperation,
         dest: VectorRegisterIndex,
@@ -404,21 +486,24 @@ private object VMIR {
         carryDest: ScalarRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
-        carryIn: Option[InstructionSource]
+        carryIn: Option[InstructionSource],
+        clamp: Boolean = false
     )
     case VSubCarry(
         dest: VectorRegisterIndex,
         carryDest: ScalarRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
-        carryIn: Option[InstructionSource]
+        carryIn: Option[InstructionSource],
+        clamp: Boolean = false
     )
     case VSubReverseCarry(
         dest: VectorRegisterIndex,
         carryDest: ScalarRegisterIndex,
         srcA: InstructionSource,
         srcB: InstructionSource,
-        carryIn: Option[InstructionSource]
+        carryIn: Option[InstructionSource],
+        clamp: Boolean = false
     )
     case VMadF32(
         operation: VectorMadF32Operation,
@@ -502,7 +587,12 @@ private object VMIR {
         srcB: InstructionSource,
         srcC: InstructionSource
     )
-    case VDivFmasF64(dest: VectorRegisterIndex, srcA: InstructionSource, srcB: InstructionSource, srcC: InstructionSource)
+    case VDivFmasF64(
+        dest: VectorRegisterIndex,
+        srcA: InstructionSource,
+        srcB: InstructionSource,
+        srcC: InstructionSource
+    )
     case VDivFixupF32(
         dest: VectorRegisterIndex,
         quotient: InstructionSource,
@@ -520,6 +610,12 @@ private object VMIR {
         negate: Int
     )
     case VShiftLeft64(dest: VectorRegisterIndex, amount: InstructionSource, src: InstructionSource)
+    case VShiftLeftAdd64(
+        dest: VectorRegisterIndex,
+        src: InstructionSource,
+        amount: InstructionSource,
+        addend: InstructionSource
+    )
     case VShiftRight64(dest: VectorRegisterIndex, amount: InstructionSource, src: InstructionSource)
     case VShiftRightArithmetic64(dest: VectorRegisterIndex, amount: InstructionSource, src: InstructionSource)
     case GlobalLoad(
@@ -528,7 +624,8 @@ private object VMIR {
         scalarAddress: Option[ScalarRegisterIndex],
         bytes: Int in 1 ~ 16,
         offset: Int,
-        coherent: Boolean
+        coherent: Boolean,
+        bank: RegisterBank = RegisterBank.Vector
     )
     case GlobalLoadSigned(
         dest: VectorRegisterIndex,
@@ -549,7 +646,8 @@ private object VMIR {
         scalarAddress: Option[ScalarRegisterIndex],
         src: VectorRegisterIndex,
         bytes: Int in 1 ~ 16,
-        offset: Int
+        offset: Int,
+        bank: RegisterBank = RegisterBank.Vector
     )
     case GlobalStoreD16High(
         address: VectorRegisterIndex,
@@ -608,14 +706,47 @@ private object VMIR {
     case FlatLoad(
         dest: VectorRegisterIndex,
         address: VectorRegisterIndex,
-        bytes: Int in 1 ~ 16,
+        bytes: Int where Between[1, 16],
         offset: Int,
-        coherent: Boolean = false
+        coherent: Boolean = false,
+        bank: RegisterBank = RegisterBank.Vector
     )
-    case FlatLoadSigned(dest: VectorRegisterIndex, address: VectorRegisterIndex, bytes: Int in 1 ~ 2, offset: Int)
-    case FlatStore(address: VectorRegisterIndex, src: VectorRegisterIndex, bytes: Int in 1 ~ 16, offset: Int)
-    case FlatStoreD16High(address: VectorRegisterIndex, src: VectorRegisterIndex, bytes: Int in 1 ~ 2, offset: Int)
-    case BufferCacheInvalidate
+    case FlatLoadSigned(
+        dest: VectorRegisterIndex,
+        address: VectorRegisterIndex,
+        bytes: Int where Between[1, 2],
+        offset: Int
+    )
+    case FlatStore(
+        address: VectorRegisterIndex,
+        src: VectorRegisterIndex,
+        bytes: Int where Between[1, 16],
+        offset: Int,
+        bank: RegisterBank = RegisterBank.Vector
+    )
+    case FlatStoreD16High(
+        address: VectorRegisterIndex,
+        src: VectorRegisterIndex,
+        bytes: Int where Between[1, 2],
+        offset: Int
+    )
+    case ScratchLoad(
+        dest: VectorRegisterIndex,
+        address: Option[VectorRegisterIndex],
+        scalarOffset: Option[ScalarRegisterIndex],
+        bytes: Int where Between[1, 16],
+        offset: Int,
+        signed: Boolean
+    )
+    case ScratchStore(
+        address: Option[VectorRegisterIndex],
+        scalarOffset: Option[ScalarRegisterIndex],
+        src: VectorRegisterIndex,
+        bytes: Int where Between[1, 16],
+        offset: Int
+    )
+    case CacheInvalidate
+    case CacheWritebackInvalidate
     case BufferLoad(
         dest: VectorRegisterIndex,
         address: Option[VectorRegisterIndex],
@@ -702,6 +833,8 @@ private object VMIR {
     case BranchRelative(condition: ScalarBranchCondition, displacement: Int)
     case Branch(condition: ScalarBranchCondition, target: Int)
     case Barrier
+    case BarrierSignal(id: InstructionSource, isFirst: Boolean)
+    case BarrierWait(id: Int)
     case Wait
     case End
     case Trap(code: Int)

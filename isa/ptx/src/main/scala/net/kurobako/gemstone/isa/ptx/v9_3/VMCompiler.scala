@@ -78,26 +78,45 @@ private object VMCompiler {
       functions: Vec[Statement.Function],
       globalSymbols: Map[NonEmpty[String], GuestAddress],
       additionalSharedSymbols: Map[NonEmpty[String], Long],
-      additionalEntries: Vec[Statement.Entry]
+      additionalEntries: Vec[Statement.Entry],
+      initializedFunctions: Set[NonEmpty[String]] = Set.empty
   ): Either[Error, Kernel] = {
-    val Statement.Entry(_, name, parameters, definition, _) = entry
-    val functionNames                                       = functions.view.map(_.name).toSet ++
+    val Statement.Entry(_, name, parameters, definition, directives) = entry
+    val functionNames                                                = functions.view.map(_.name).toSet ++
       additionalEntries.view
         .map(entry => entry.name)
         .toSet
     for {
+      _ <- directives.traverse_ {
+        case Statement.Directive(path, arguments, _, _) if path.raw == Vec("reqnctapercluster") =>
+          arguments.traverse(argument => immediate(argument.operand)).flatMap { dimensions =>
+            if (dimensions == Vec(1L, 1L, 1L)) Right(())
+            else invalid("multi-workgroup PTX clusters are not supported")
+          }
+        case Statement.Directive(path, _, _, _) if path.raw == Vec("explicitcluster") =>
+          invalid("PTX kernels requiring an explicit cluster launch are not supported")
+        case _ => Right(())
+      }
       body              <- definition.toRight(Error.Invalid(s"entry $name has no body"))
       loweredParameters <- lowerParameters(parameters)
-      loweredProgram    <- lowerProgram(body, functionNames)
-      loweredFunctions  <- lowerReachableFunctions(loweredProgram, functions, additionalEntries, functionNames)
+      loweredProgram    <- lowerProgram(body, functionNames, parameters.map(_.name).toSet)
+      loweredFunctions  <- lowerReachableFunctions(
+        loweredProgram.program,
+        functions,
+        additionalEntries,
+        functionNames,
+        initializedFunctions
+      )
     } yield Kernel(
-      name,
-      loweredParameters,
-      loweredProgram,
-      loweredFunctions,
-      sharedSymbols(body) ++ additionalSharedSymbols,
-      globalSymbols,
-      registerChunkCount(loweredProgram, loweredFunctions)
+      name = name,
+      parameters = loweredParameters,
+      program = loweredProgram.program,
+      functions = loweredFunctions,
+      sharedSymbols = sharedSymbols(body) ++ additionalSharedSymbols,
+      globalSymbols = globalSymbols,
+      registerChunkCount = registerChunkCount(loweredProgram.program, loweredFunctions),
+      functionTable = FunctionTable(functionNames),
+      localParameters = loweredProgram.localParameters
     )
   }
 
@@ -116,14 +135,16 @@ private object VMCompiler {
     def inspectValue(value: Value): Unit = value match {
       case Value.Register(name)       => inspectName(name)
       case Value.RegisterSlot(index)  => highest = math.max(highest, index.raw)
-      case Value.Predicate(name)      => inspectName(name)
+      case Value.Predicate(_)         => ()
       case Value.PredicateSlot(_)     => ()
-      case Value.Function(name)       => inspectName(name)
-      case Value.Symbol(name)         => inspectName(name)
+      case Value.Function(_)          => ()
+      case Value.Symbol(_)            => ()
       case Value.Immediate(_)         => ()
       case Value.Address(base, _)     => inspectValue(base)
+      case Value.DynamicSharedBytes   => ()
       case Value.LaneId               => ()
       case Value.ActiveMask           => ()
+      case Value.LiveMask             => ()
       case Value.LaneMaskGreaterEqual => ()
       case Value.LaneMaskGreater      => ()
       case Value.LaneMaskLessEqual    => ()
@@ -135,7 +156,6 @@ private object VMCompiler {
       case Value.GridDim(_)           => ()
     }
     def inspectInstruction(instruction: PredicatedInstruction): Unit = {
-      instruction.predication.foreach(predicate => inspectName(predicate.name))
       instruction.instruction match {
         case VMIR.Instruction.Tensor(operation, _) => operation match {
             case VMTensor.Operation.Load(_, destinations, address, stride, _, _) =>
@@ -169,15 +189,32 @@ private object VMCompiler {
         case VMIR.Instruction.LoadParameterIndirectVector(destinations, address, _, _) =>
           destinations.foreach(inspectName(_))
           inspectValue(address)
+        case VMIR.Instruction.AsyncBulkStore(destination, source, size, mask) =>
+          inspectValue(destination)
+          inspectValue(source)
+          inspectValue(size)
+          inspectValue(mask)
+        case VMIR.Instruction.ClusterTryCancel(response, barrier) =>
+          inspectValue(response)
+          inspectValue(barrier)
+        case VMIR.Instruction.ClusterCancelStatus(_, response)            => inspectValue(response)
+        case VMIR.Instruction.ClusterCancelCta(destination, low, high, _) =>
+          inspectName(destination)
+          inspectValue(low)
+          inspectValue(high)
         case VMIR.Instruction.Move(destination, source, _) =>
           inspectName(destination)
           inspectValue(source)
-        case VMIR.Instruction.MovePredicate(destination, source) =>
+        case VMIR.Instruction.UniformMove(destination, source) =>
           inspectName(destination)
           inspectValue(source)
+        case VMIR.Instruction.MovePredicate(_, source)           => inspectValue(source)
         case VMIR.Instruction.MoveSplit(destinations, source, _) =>
           destinations.foreach(inspectName(_))
           inspectValue(source)
+        case VMIR.Instruction.MoveVector(destinations, sources, _) =>
+          destinations.foreach(inspectName(_))
+          sources.foreach(inspectValue(_))
         case VMIR.Instruction.MoveCombine(destination, sources, _) =>
           inspectName(destination)
           sources.foreach(inspectValue(_))
@@ -201,6 +238,11 @@ private object VMCompiler {
           inspectValue(low)
           inspectValue(high)
           inspectValue(amount)
+        case VMIR.Instruction.IntegerSubtractAdd(destination, left, right, addend, _) =>
+          inspectName(destination)
+          inspectValue(left)
+          inspectValue(right)
+          inspectValue(addend)
         case VMIR.Instruction.IntegerAddWithCarry(destination, left, right, _, _, _) =>
           inspectName(destination)
           inspectValue(left)
@@ -226,7 +268,7 @@ private object VMCompiler {
           inspectName(destination)
           inspectValue(left)
           inspectValue(right)
-        case VMIR.Instruction.FloatBinaryPacked(_, destination, left, right, _) =>
+        case VMIR.Instruction.FloatBinaryPacked(_, destination, left, right, _, _) =>
           inspectName(destination)
           inspectValue(left)
           inspectValue(right)
@@ -248,42 +290,37 @@ private object VMCompiler {
           inspectValue(left)
           inspectValue(right)
           inspectValue(addend)
-        case VMIR.Instruction.ShuffleDown(destination, validity, source, delta, clamp, memberMask, _) =>
+        case VMIR.Instruction.ShuffleDown(destination, _, source, delta, clamp, memberMask, _) =>
           inspectName(destination)
-          validity.foreach(inspectName(_))
           inspectValue(source)
           inspectValue(delta)
           inspectValue(clamp)
           inspectValue(memberMask)
-        case VMIR.Instruction.ShuffleUp(destination, validity, source, delta, clamp, memberMask, _) =>
+        case VMIR.Instruction.ShuffleUp(destination, _, source, delta, clamp, memberMask, _) =>
           inspectName(destination)
-          validity.foreach(inspectName(_))
           inspectValue(source)
           inspectValue(delta)
           inspectValue(clamp)
           inspectValue(memberMask)
-        case VMIR.Instruction.ShuffleIndex(destination, validity, source, index, clamp, memberMask, _) =>
+        case VMIR.Instruction.ShuffleIndex(destination, _, source, index, clamp, memberMask, _) =>
           inspectName(destination)
-          validity.foreach(inspectName(_))
           inspectValue(source)
           inspectValue(index)
           inspectValue(clamp)
           inspectValue(memberMask)
-        case VMIR.Instruction.ShuffleBfly(destination, validity, source, index, clamp, memberMask, _) =>
+        case VMIR.Instruction.ShuffleBfly(destination, _, source, index, clamp, memberMask, _) =>
           inspectName(destination)
-          validity.foreach(inspectName(_))
           inspectValue(source)
           inspectValue(index)
           inspectValue(clamp)
           inspectValue(memberMask)
-        case VMIR.Instruction.VoteBallot(destination, predicate, memberMask) =>
+        case VMIR.Instruction.VoteBallot(destination, _, memberMask) =>
           inspectName(destination)
-          inspectName(predicate)
           inspectValue(memberMask)
-        case VMIR.Instruction.VotePredicate(destination, predicate, memberMask, _) =>
-          inspectName(destination)
-          inspectName(predicate)
+        case VMIR.Instruction.Elect(destination, _, memberMask) =>
+          destination.foreach(inspectName(_))
           inspectValue(memberMask)
+        case VMIR.Instruction.VotePredicate(_, _, memberMask, _)                            => inspectValue(memberMask)
         case VMIR.Instruction.BitFieldExtract(destination, source, start, widthValue, _, _) =>
           inspectName(destination)
           inspectValue(source)
@@ -304,11 +341,10 @@ private object VMCompiler {
           inspectValue(left)
           inspectValue(right)
           inspectValue(control)
-        case VMIR.Instruction.Select(destination, whenTrue, whenFalse, predicate, _) =>
+        case VMIR.Instruction.Select(destination, whenTrue, whenFalse, _, _) =>
           inspectName(destination)
           inspectValue(whenTrue)
           inspectValue(whenFalse)
-          inspectName(predicate)
         case VMIR.Instruction.Convert(destination, source, _, _, _) =>
           inspectName(destination)
           inspectValue(source)
@@ -324,29 +360,44 @@ private object VMCompiler {
         case VMIR.Instruction.StoreVector(address, sources, _, _) =>
           inspectValue(address)
           sources.foreach(inspectValue(_))
-        case VMIR.Instruction.AsyncCopy(destination, source, _) =>
+        case VMIR.Instruction.AsyncCopy(destination, source, _, sourceSize) =>
           inspectValue(destination)
           inspectValue(source)
+          inspectValue(sourceSize)
+        case VMIR.Instruction.MemoryBarrierLoad(address)        => inspectValue(address)
+        case VMIR.Instruction.MemoryBarrierInit(address, count) =>
+          inspectValue(address)
+          inspectValue(count)
+        case VMIR.Instruction.MemoryBarrierArrive(destination, address, count, bytes) =>
+          destination.foreach(inspectName(_))
+          inspectValue(address)
+          inspectValue(count)
+          inspectValue(bytes)
+        case VMIR.Instruction.MemoryBarrierTest(_, address, phase, _) =>
+          inspectValue(address)
+          inspectValue(phase)
+        case VMIR.Instruction.MemoryBarrierInvalidate(address)                  => inspectValue(address)
+        case VMIR.Instruction.AsyncBulkCopy(destination, source, size, barrier) =>
+          inspectValue(destination)
+          inspectValue(source)
+          inspectValue(size)
+          inspectValue(barrier)
         case VMIR.Instruction.AsyncCommit | VMIR.Instruction.AsyncWait | VMIR.Instruction.Prefetch => ()
-        case VMIR.Instruction.SetPredicate(destination, _, _, left, right, _)                      =>
-          inspectName(destination)
+        case VMIR.Instruction.SetPredicate(_, _, _, left, right, _)                                =>
           inspectValue(left)
           inspectValue(right)
-        case VMIR.Instruction.PredicateCompare(destination, _, left, right) =>
-          inspectName(destination)
-          inspectName(left)
-          inspectName(right)
-        case VMIR.Instruction.PredicateUnary(destination, source) =>
-          inspectName(destination)
-          inspectName(source)
-        case VMIR.Instruction.PredicateBinary(_, destination, left, right) =>
-          inspectName(destination)
-          inspectName(left)
-          inspectName(right)
-        case VMIR.Instruction.Branch(_) | VMIR.Instruction.BarrierSync(_) => ()
-        case VMIR.Instruction.BarrierReduce(destination, _, predicate, _) =>
-          inspectName(destination)
-          inspectName(predicate)
+        case VMIR.Instruction.PredicateCompare(_, _, _, _) |
+            VMIR.Instruction.PredicateUnary(_, _) | VMIR.Instruction.PredicateBinary(_, _, _, _) => ()
+        case VMIR.Instruction.Branch(_) | VMIR.Instruction.ClusterBarrier(_) => ()
+        case VMIR.Instruction.BarrierSync(id, count)                         =>
+          inspectValue(id)
+          count.foreach(inspectValue(_))
+        case VMIR.Instruction.BarrierArrive(id, count) =>
+          inspectValue(id)
+          inspectValue(count)
+        case VMIR.Instruction.BarrierReduce(_, id, _, _, count) =>
+          inspectValue(id)
+          count.foreach(inspectValue(_))
         case VMIR.Instruction.AtomicAdd(destination, address, source, _, _) =>
           inspectName(destination)
           inspectValue(address)
@@ -374,13 +425,10 @@ private object VMCompiler {
           inspectValue(memberMask)
         case VMIR.Instruction.MemoryBarrier | VMIR.Instruction.Convergence(_, _) | VMIR.Instruction.SASSReturnPush(_) =>
           ()
-        case VMIR.Instruction.SASSReturnPop(destination)                   => inspectName(destination)
-        case VMIR.Instruction.WarpBarrier(memberMask)                      => inspectValue(memberMask)
-        case VMIR.Instruction.Call(function, returnParameters, parameters) =>
-          inspectValue(function)
-          returnParameters.foreach(inspectName(_))
-          parameters.foreach(inspectName(_))
-        case VMIR.Instruction.Trap | VMIR.Instruction.Return => ()
+        case VMIR.Instruction.SASSReturnPop(destination)                             => inspectName(destination)
+        case VMIR.Instruction.WarpBarrier(memberMask)                                => inspectValue(memberMask)
+        case VMIR.Instruction.Call(function, _, _)                                   => inspectValue(function)
+        case VMIR.Instruction.Trap | VMIR.Instruction.Return | VMIR.Instruction.Exit => ()
       }
     }
     def inspectProgram(value: ExecutableProgram[PredicatedInstruction]): Unit =
@@ -401,11 +449,12 @@ private object VMCompiler {
       program: ExecutableProgram[PredicatedInstruction],
       functions: Vec[Statement.Function],
       entries: Vec[Statement.Entry],
-      functionNames: Set[NonEmpty[String]]
+      functionNames: Set[NonEmpty[String]],
+      initializedFunctions: Set[NonEmpty[String]]
   ): Either[Error, Map[NonEmpty[String], DeviceFunction]] = {
-    val functionDefinitions = functions.view.map(function => function.name -> function).toMap
-    val entryDefinitions    = entries.view.map(entry => entry.name -> entry).toMap
-    val pending             = mutable.Queue.empty[NonEmpty[String]]
+    val functionDefinitions = functions.groupMapReduce(_.name)(identity)(Linker.preferDefinition(_, _))
+    val entryDefinitions    = entries.groupMapReduce(_.name)(identity)(Linker.preferDefinition(_, _))
+    val pending             = mutable.Queue.from(initializedFunctions.toVector.sorted)
     val lowered             = mutable.Map.empty[NonEmpty[String], DeviceFunction]
 
     def enqueueFunctionReferences(value: ExecutableProgram[PredicatedInstruction]): Unit = {
@@ -447,6 +496,11 @@ private object VMCompiler {
     Right(lowered.toMap)
   }
 
+  private case class LoweredBody(
+      program: ExecutableProgram[PredicatedInstruction],
+      localParameters: Set[NonEmpty[String]]
+  )
+
   // Resolve labels and emit instructions in two allocation-conscious passes over the flattened program.
   @SuppressWarnings(
     Array(
@@ -456,9 +510,10 @@ private object VMCompiler {
   )
   private def lowerProgram(
       body: Vec[Statement],
-      functionNames: Set[NonEmpty[String]]
-  ): Either[Error, ExecutableProgram[PredicatedInstruction]] = {
-    val flat = flattenScoped(body) match {
+      functionNames: Set[NonEmpty[String]],
+      parameters: Set[NonEmpty[String]]
+  ): Either[Error, LoweredBody] = {
+    val flat = flattenScoped(body, parameters) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
@@ -505,7 +560,11 @@ private object VMCompiler {
       }
       statementIndex += 1
     }
-    Right(ExecutableProgram(lowered.result()))
+    val localParameters = flat.collect {
+      case Statement.Directive(path, arguments, _, _) if path.head.raw == "param" =>
+        arguments.flatMap(argument => parameterNames(argument.operand))
+    }.flatten.toSet
+    Right(LoweredBody(ExecutableProgram(lowered.result()), localParameters))
   }
 
   private def lowerFunction(
@@ -520,15 +579,16 @@ private object VMCompiler {
           _                 <- lowerParameters(returnParameters)
           loweredParameters <- lowerParameters(parameters)
           offsets           <- parameterOffsets(parameters, loweredParameters)
-          program           <- lowerProgram(statements, functionNames)
+          program <- lowerProgram(statements, functionNames, (parameters ++ returnParameters).map(_.name).toSet)
         } yield DeviceFunction(
           name,
           parameters.map(_.name),
           loweredParameters.map(_.widthBytes),
           offsets,
           returnParameters.map(_.name),
-          program,
-          sharedSymbols(statements)
+          program.program,
+          sharedSymbols(statements),
+          program.localParameters
         )
     }
   }
@@ -537,20 +597,31 @@ private object VMCompiler {
       entry: Statement.Entry,
       functionNames: Set[NonEmpty[String]]
   ): Either[Error, DeviceFunction] = {
-    val Statement.Entry(_, name, parameters, definition, _) = entry
+    val Statement.Entry(_, name, parameters, definition, directives) = entry
     for {
+      _ <- directives.traverse_ {
+        case Statement.Directive(path, arguments, _, _) if path.raw == Vec("reqnctapercluster") =>
+          arguments.traverse(argument => immediate(argument.operand)).flatMap { dimensions =>
+            if (dimensions == Vec(1L, 1L, 1L)) Right(())
+            else invalid("multi-workgroup PTX clusters are not supported")
+          }
+        case Statement.Directive(path, _, _, _) if path.raw == Vec("explicitcluster") =>
+          invalid("PTX kernels requiring an explicit cluster launch are not supported")
+        case _ => Right(())
+      }
       body              <- definition.toRight(Error.Invalid(s"entry $name has no body"))
       loweredParameters <- lowerParameters(parameters)
       offsets           <- parameterOffsets(parameters, loweredParameters)
-      program           <- lowerProgram(body, functionNames)
+      program           <- lowerProgram(body, functionNames, parameters.map(_.name).toSet)
     } yield DeviceFunction(
       name,
       parameters.map(_.name),
       loweredParameters.map(_.widthBytes),
       offsets,
       Vec.empty,
-      program,
-      sharedSymbols(body)
+      program.program,
+      sharedSymbols(body),
+      program.localParameters
     )
   }
 
@@ -626,10 +697,21 @@ private object VMCompiler {
     Right(result.result())
   }
 
-  /** Flatten PTX blocks while alpha-renaming registers declared in nested scopes. */
+  private def parameterNames(operand: Operand): Vec[NonEmpty[String]] = operand match {
+    case Operand.Symbol(name)         => Vec(name)
+    case Operand.Register(name, _)    => Vec(name)
+    case Operand.Index(base, _)       => parameterNames(base)
+    case Operand.VectorLiteral(items) => items.flatMap(parameterNames(_))
+    case _                            => Vec.empty
+  }
+
+  /** Resolve declared parameter names and alpha-rename block-local storage before flattening PTX scopes. */
   // The nested visitor shares one monotonically increasing scope identity and fails fast.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
-  private def flattenScoped(statements: Vec[Statement]): Either[Error, Vec[Statement]] = {
+  private def flattenScoped(
+      statements: Vec[Statement],
+      parameters: Set[NonEmpty[String]]
+  ): Either[Error, Vec[Statement]] = {
     var nextScope = 0
 
     def registerNames(operand: Operand): scala.collection.View[NonEmpty[String]] = operand match {
@@ -641,18 +723,52 @@ private object VMCompiler {
       case _                            => Vec.empty[NonEmpty[String]].view
     }
 
-    def declaredRegisters(body: Vec[Statement]): Vec[NonEmpty[String]] =
+    def declaredNames(body: Vec[Statement], kind: String): Vec[NonEmpty[String]] =
       Vec.toVec(body.view.flatMap {
-        case Statement.Directive(path, arguments, _, _)
-            if path.head.raw == "reg" =>
+        case Statement.Directive(path, arguments, _, _) if path.head.raw == kind =>
           arguments.view.flatMap(argument => registerNames(argument.operand))
         case _ => Vec.empty[NonEmpty[String]].view
-      }).distinct
+      }).flatMap { name =>
+        name.raw match {
+          case s"$base<$count>" if base.nonEmpty && count.toIntOption.exists(_ > 0) =>
+            Vec.tabulate(count.toInt)(index => s"$base$index".unsafe[NonEmpty[String]])
+          case _ => Vec(name)
+        }
+      }.distinct
 
-    def renameOperand(operand: Operand, names: Map[NonEmpty[String], NonEmpty[String]]): Operand = operand match {
-      case Operand.Register(name, part)                 => Operand.Register(names.getOrElse(name, name), part)
-      case Operand.Symbol(name) if names.contains(name) =>
-        Operand.Register(names(name), None)
+    def registerBindings(body: Vec[Statement], scope: Option[Int]): Map[NonEmpty[String], Operand] =
+      body.collect { case value: Statement.Directive if value.path.head.raw == "reg" => value }.flatMap { declaration =>
+        val qualifiers = declaration.path.raw ++ declaration.arguments.flatMap {
+          case DirectiveArgument(_, Operand.Qualifier(path)) => path.raw
+          case _                                             => Vec.empty[NonEmpty[String]]
+        }
+        val components = if (qualifiers.contains("v2") || qualifiers.contains("b128")) 2
+        else if (qualifiers.contains("v4")) 4 else 1
+        declaredNames(Vec(declaration), "reg").flatMap { name =>
+          val scoped: NonEmpty[String] = scope.fold(name)(index => s"$name$$scope$index")
+          if (components == 1) Vec(name -> Operand.Register(scoped, None))
+          else {
+            val aliases   = Vec(Vec("x", "r"), Vec("y", "g"), Vec("z", "b"), Vec("w", "a")).take(components)
+            val registers = aliases.map(fields => Operand.Register(s"$scoped.${fields.head}", None))
+            Vec(name -> Operand.VectorLiteral(registers)) ++ aliases.zip(registers).flatMap { case (fields, register) =>
+              fields.map { field =>
+                val component: NonEmpty[String] = s"$name.$field"
+                component -> register
+              }
+            }
+          }
+        }
+      }.toMap
+
+    def renameOperand(operand: Operand, names: Map[NonEmpty[String], Operand]): Operand = operand match {
+      case Operand.Register(name, part) =>
+        val component = part.flatMap(part => names.get(s"$name.${part.spelling}"))
+        component.getOrElse(names.get(name) match {
+          case Some(Operand.Register(renamed, _)) => Operand.Register(renamed, part)
+          case Some(value) if part.isEmpty        => value
+          case _                                  => operand
+        })
+      case Operand.Symbol(name)          => names.getOrElse(name, operand)
       case Operand.VectorLiteral(items)  => Operand.VectorLiteral(items.map(renameOperand(_, names)))
       case Operand.Parenthesized(items)  => Operand.Parenthesized(items.map(renameOperand(_, names)))
       case Operand.Address(items)        => Operand.Address(items.map(renameOperand(_, names)))
@@ -669,7 +785,7 @@ private object VMCompiler {
 
     def renameInstruction(
         instruction: Instruction,
-        names: Map[NonEmpty[String], NonEmpty[String]]
+        names: Map[NonEmpty[String], Operand]
     ): Either[Error, Instruction] = {
       val operands = instruction.operands.map(renameOperand(_, names))
       val pred     = instruction.pred.map(value => value.copy(operand = renameOperand(value.operand, names)))
@@ -682,7 +798,7 @@ private object VMCompiler {
 
     def visit(
         body: Vec[Statement],
-        names: Map[NonEmpty[String], NonEmpty[String]]
+        names: Map[NonEmpty[String], Operand]
     ): Either[Error, Vec[Statement]] = {
       val result = Vec.newBuilder[Statement]
       var index  = 0
@@ -691,13 +807,29 @@ private object VMCompiler {
           case Statement.Block(nested) =>
             val scope = nextScope
             nextScope += 1
-            val scopedNames = declaredRegisters(nested).foldLeft(names) { (current, name) =>
-              current.updated(name, s"$name$$scope$scope")
+            val registers   = names ++ registerBindings(nested, Some(scope))
+            val scopedNames = declaredNames(nested, "param").foldLeft(registers) { (current, name) =>
+              current.updated(name, Operand.Symbol(s"$name$$scope$scope"))
             }
             visit(nested, scopedNames) match {
               case Left(error)  => return Left(error)
               case Right(value) => value.foreach(result += _)
             }
+          case directive: Statement.Directive if directive.path.head.raw == "param" =>
+            result += directive.copy(arguments =
+              directive.arguments.map(argument =>
+                argument.copy(operand = argument.operand match {
+                  case value @ Operand.Register(name, _) => name.raw match {
+                      case s"$base<$count>" if count.toIntOption.exists(_ > 0) =>
+                        Operand.VectorLiteral(Vec.tabulate(count.toInt)(index =>
+                          renameOperand(Operand.Register(s"$base$index".unsafe[NonEmpty[String]], None), names)
+                        ))
+                      case _ => renameOperand(value, names)
+                    }
+                  case value => renameOperand(value, names)
+                })
+              )
+            )
           case Statement.Instruction(instruction) =>
             renameInstruction(instruction, names) match {
               case Left(error)  => return Left(error)
@@ -714,7 +846,11 @@ private object VMCompiler {
       Right(result.result())
     }
 
-    visit(statements, Map.empty)
+    val parameterNames = parameters ++ declaredNames(statements, "param")
+    visit(
+      statements,
+      registerBindings(statements, None) ++ parameterNames.map(name => name -> Operand.Symbol(name)).toMap
+    )
   }
 
   // The native host CAS path provides sequential consistency, satisfying these
@@ -851,6 +987,27 @@ private object VMCompiler {
               width,
               hasAnyModifier(instruction, signedScalarModifiers)
             )
+      case Instruction.Mov(destination, source, _, _) if modifiersAre(instruction, Modifier.B128) =>
+        for {
+          destinations <- registerNames(destination)
+          sources      <- vectorValues(source)
+          _            <- requirePair(destinations, "mov.b128 destination")
+          _            <- requirePair(sources, "mov.b128 source")
+        } yield VMIR.Instruction.MoveVector(destinations, sources, 64)
+      case Instruction.Mov(destination, source, _, _)
+          if hasModifier(instruction, Modifier.V2) || hasModifier(instruction, Modifier.V4) =>
+        for {
+          destinations <- registerNames(destination)
+          sources      <- vectorValues(source)
+          count = if (hasModifier(instruction, Modifier.V2)) 2 else 4
+          _ <- Either.cond(
+            destinations.size == count && sources.size == count,
+            (),
+            Error.Invalid(s"vector move requires $count source and destination components")
+          )
+          width <- integerWidth(allModifiers(instruction))
+          _     <- Either.cond(count * width.raw <= 128, (), Error.Invalid("vector move exceeds 128 bits"))
+        } yield VMIR.Instruction.MoveVector(destinations, sources, width)
       case Instruction.Mov(destination, source, _, _)
           if modifiersAre(instruction, Modifier.Pred) =>
         for {
@@ -868,7 +1025,7 @@ private object VMCompiler {
             !Operand.isVectorLiteral(source) =>
         for {
           destinationName <- registerName(destination)
-          sourceValue     <- value(source)
+          sourceValue     <- functionValue(source, functionNames, promoteUnknown = false)
         } yield VMIR.Instruction.Move(destinationName, sourceValue, 32: Int where (Between[8, 64] & MultipleOf[8]))
       case Instruction.Mov(destination, source, _, _)
           if modifiersAre(instruction, Modifier.U8) || modifiersAre(instruction, Modifier.S8) ||
@@ -1008,6 +1165,43 @@ private object VMCompiler {
             sourceValue,
             width
           )
+      case Instruction.Vadd(destination, left, Some(right), Some(addend), None, None, _, _)
+          if modifiersAre(instruction, Modifier.U32, Modifier.U32, Modifier.U32, Modifier.Add) =>
+        for {
+          destinationName <- registerName(destination)
+          leftValue       <- value(left)
+          rightValue      <- value(right)
+          addendValue     <- value(addend)
+        } yield VMIR.Instruction.IntegerAddThree(
+          destinationName,
+          leftValue,
+          rightValue,
+          addendValue,
+          32,
+          AddThreeCarryMode.None,
+          false,
+          false,
+          false
+        )
+      case Instruction.Vsub(destination, left, Some(right), Some(addend), None, None, _, _)
+          if modifiersAre(instruction, Modifier.U32, Modifier.U32, Modifier.U32, Modifier.Add) =>
+        for {
+          destinationName <- registerName(destination)
+          leftValue       <- value(left)
+          rightValue      <- value(right)
+          addendValue     <- value(addend)
+        } yield VMIR.Instruction.IntegerSubtractAdd(destinationName, leftValue, rightValue, addendValue, 32)
+      case Instruction.Cnot(destination, source, _, _) =>
+        for {
+          destinationName <- registerName(destination)
+          sourceValue     <- value(source)
+          width           <- integerWidth(allModifiers(instruction))
+        } yield VMIR.Instruction.IntegerUnary(
+          IntegerUnaryOperation.LogicalNot,
+          destinationName,
+          sourceValue,
+          width
+        )
       case Instruction.Popc(destination, source, _, _) =>
         for {
           destinationName <- registerName(destination)
@@ -1168,13 +1362,14 @@ private object VMCompiler {
           )
         }
       case Instruction.Mul(destination, left, right, _, _)
-          if endsWithModifier(instruction, Modifier.F16x2) || endsWithModifier(instruction, Modifier.Bf16x2) =>
+          if endsWithModifier(instruction, Modifier.F16x2) || endsWithModifier(instruction, Modifier.Bf16x2) ||
+            endsWithModifier(instruction, Modifier.F32x2) =>
         packedFloatBinary(
           FloatOperation.Multiply,
           destination,
           left,
           right,
-          endsWithModifier(instruction, Modifier.Bf16x2)
+          allModifiers(instruction)
         )
       case Instruction.Mul(destination, left, right, _, _)
           if endsWithModifier(instruction, Modifier.F16) ||
@@ -1359,6 +1554,16 @@ private object VMCompiler {
           memberMask = memberMaskValue,
           width = width
         )
+      case Instruction.ElectSync(Operand.WithPredicate(destination, predicate), memberMask, _, _)
+          if modifiersAre(instruction, Modifier.Sync) =>
+        for {
+          destinationName <- destination match {
+            case Operand.Symbol("_") => Right(None)
+            case other               => valueRegisterName(other).map(Some(_))
+          }
+          predicateName <- predicateRegisterName(predicate)
+          maskValue     <- value(memberMask)
+        } yield VMIR.Instruction.Elect(destinationName, predicateName, maskValue)
       case Instruction.Vote(destination, Some(predicate), _, _)
           if modifiersAre(instruction, Modifier.Ballot, Modifier.B32) =>
         for {
@@ -1675,13 +1880,14 @@ private object VMCompiler {
           right
         ))
       case Instruction.Add(destination, left, right, _, _)
-          if endsWithModifier(instruction, Modifier.F16x2) || endsWithModifier(instruction, Modifier.Bf16x2) =>
+          if endsWithModifier(instruction, Modifier.F16x2) || endsWithModifier(instruction, Modifier.Bf16x2) ||
+            endsWithModifier(instruction, Modifier.F32x2) =>
         packedFloatBinary(
           FloatOperation.Add,
           destination,
           left,
           right,
-          endsWithModifier(instruction, Modifier.Bf16x2)
+          allModifiers(instruction)
         )
       case Instruction.Add(destination, left, right, _, _)
           if endsWithModifier(instruction, Modifier.F16) ||
@@ -1689,13 +1895,14 @@ private object VMCompiler {
             endsWithModifier(instruction, Modifier.F64) =>
         floatBinary(FloatOperation.Add, destination, left, right, allModifiers(instruction))
       case Instruction.Sub(destination, left, right, _, _)
-          if endsWithModifier(instruction, Modifier.F16x2) || endsWithModifier(instruction, Modifier.Bf16x2) =>
+          if endsWithModifier(instruction, Modifier.F16x2) || endsWithModifier(instruction, Modifier.Bf16x2) ||
+            endsWithModifier(instruction, Modifier.F32x2) =>
         packedFloatBinary(
           FloatOperation.Subtract,
           destination,
           left,
           right,
-          endsWithModifier(instruction, Modifier.Bf16x2)
+          allModifiers(instruction)
         )
       case Instruction.Sub(destination, left, right, _, _)
           if endsWithModifier(instruction, Modifier.F16) ||
@@ -1725,7 +1932,7 @@ private object VMCompiler {
           destination,
           left,
           right,
-          endsWithModifier(instruction, Modifier.Bf16x2)
+          allModifiers(instruction)
         )
       case Instruction.Min(destination, left, right, _, _, _)
           if hasAnyModifier(instruction, floatScalarModifiers) =>
@@ -1743,7 +1950,7 @@ private object VMCompiler {
           destination,
           left,
           right,
-          endsWithModifier(instruction, Modifier.Bf16x2)
+          allModifiers(instruction)
         )
       case Instruction.Max(destination, left, right, _, _, _)
           if hasAnyModifier(instruction, floatScalarModifiers) =>
@@ -1775,30 +1982,19 @@ private object VMCompiler {
           )
         }
       case Instruction.Cvta(destination, source, _, _)
-          if modifiersAre(instruction, Modifier.Global, Modifier.U64) ||
-            modifiersAre(instruction, Modifier.To, Modifier.Global, Modifier.U64) =>
+          if {
+            val modifiers =
+              allModifiers(instruction).drop(if (allModifiers(instruction).headOption.contains(Modifier.To)) 1 else 0)
+            modifiers match {
+              case Vec(space, Modifier.U64) =>
+                Set(Modifier.Const, Modifier.Global, Modifier.Local, Modifier.Param, Modifier.Shared).contains(space)
+              case _ => false
+            }
+          } =>
         for {
           destinationName <- registerName(destination)
-          sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
-      case Instruction.Cvta(destination, source, _, _) if modifiersAre(instruction, Modifier.Local, Modifier.U64) =>
-        for {
-          destinationName <- registerName(destination)
-          sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
-      case Instruction.Cvta(destination, source, _, _)
-          if modifiersAre(instruction, Modifier.To, Modifier.Local, Modifier.U64) =>
-        for {
-          destinationName <- registerName(destination)
-          sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
-      case Instruction.Cvta(destination, source, _, _)
-          if modifiersAre(instruction, Modifier.Shared, Modifier.U64) ||
-            modifiersAre(instruction, Modifier.To, Modifier.Shared, Modifier.U64) =>
-        for {
-          destinationName <- registerName(destination)
-          sourceValue     <- value(source)
-        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64: Int where (Between[8, 64] & MultipleOf[8]))
+          sourceValue     <- valueWithOffset(source)
+        } yield VMIR.Instruction.Move(destinationName, sourceValue, 64)
       case Instruction.Cvt(destination, Some(source), None, None, None, None, modifiers, _) =>
         val types = modifiers.flatMap(conversionType(_))
         if (types.size < 2) invalid(s"expected conversion source and destination types: ${instruction.qualifiedOpcode}")
@@ -1822,6 +2018,22 @@ private object VMCompiler {
           predicateName   <- predicateRegisterName(predicate)
           width           <- scalarWidth(allModifiers(instruction))
         } yield VMIR.Instruction.Select(destinationName, trueValue, falseValue, predicateName, width)
+      case Instruction.Ld(destination, address, None, None, _, _)
+          if hasModifier(instruction, Modifier.B128) =>
+        for {
+          access       <- wideMemoryAccess(allModifiers(instruction))
+          destinations <- registerNames(destination)
+          _            <- requirePair(destinations, "ld.b128 destination")
+          pointer      <- addressValue(address)
+        } yield VMIR.Instruction.LoadVector(destinations, pointer, 64, false, access)
+      case Instruction.St(address, source, None, _, _)
+          if hasModifier(instruction, Modifier.B128) =>
+        for {
+          access  <- wideMemoryAccess(allModifiers(instruction))
+          sources <- vectorValues(source)
+          _       <- requirePair(sources, "st.b128 source")
+          pointer <- addressValue(address)
+        } yield VMIR.Instruction.StoreVector(pointer, sources, 64, access)
       case Instruction.Ld(destination, address, None, None, _, _)
           if modifiersStartWith(instruction, Modifier.Relaxed, Modifier.Sys, Modifier.Global) &&
             Operand.isVectorLiteral(destination) =>
@@ -2101,7 +2313,7 @@ private object VMCompiler {
           addressValue,
           width,
           allModifiers(instruction).lastOption.exists(signedScalarModifiers.contains),
-          MemoryAccess.Generic(false)
+          if (hasModifier(instruction, Modifier.Global)) MemoryAccess.Global(false) else MemoryAccess.Generic(false)
         )
       case Instruction.Ld(destination, address, None, None, _, _)
           if hasModifier(instruction, Modifier.Global) =>
@@ -2193,7 +2405,12 @@ private object VMCompiler {
           addressValue <- addressValue(address)
           sourceNames  <- vectorValues(source)
           width        <- integerWidth(allModifiers(instruction))
-        } yield VMIR.Instruction.StoreVector(addressValue, sourceNames, width, MemoryAccess.Generic(false))
+        } yield VMIR.Instruction.StoreVector(
+          addressValue,
+          sourceNames,
+          width,
+          if (hasModifier(instruction, Modifier.Global)) MemoryAccess.Global(false) else MemoryAccess.Generic(false)
+        )
       case Instruction.St(address, source, None, _, _)
           if !hasModifier(instruction, Modifier.Shared) &&
             !hasModifier(instruction, Modifier.Local) &&
@@ -2287,7 +2504,84 @@ private object VMCompiler {
           sourceValue  <- value(source)
           width        <- integerWidth(allModifiers(instruction))
         } yield VMIR.Instruction.Store(addressValue, sourceValue, width, MemoryAccess.Local)
-      case Instruction.CpAsync(destination, source, copySize, _, _, _, _) =>
+      case Instruction.MbarrierInit(address, count, _, _) if localMemoryBarrier(instruction) =>
+        for {
+          address <- addressValue(address)
+          count   <- value(count)
+        } yield VMIR.Instruction.MemoryBarrierInit(address, count)
+      case Instruction.MbarrierInval(address, _, _) if localMemoryBarrier(instruction) =>
+        addressValue(address).map(VMIR.Instruction.MemoryBarrierInvalidate(_))
+      case Instruction.MbarrierArrive(destination, address, count, _, _) if localMemoryBarrier(instruction) =>
+        for {
+          destination <- destination match {
+            case Operand.Symbol("_") => Right(None)
+            case other               => registerName(other).map(Some(_))
+          }
+          address <- addressValue(address)
+          count   <- count.traverse(value(_)).map(_.getOrElse(Value.Immediate(1L)))
+          expected = hasModifier(instruction, Modifier.ExpectTx)
+        } yield VMIR.Instruction.MemoryBarrierArrive(
+          destination,
+          address,
+          if (expected) Value.Immediate(1L) else count,
+          if (expected) count else Value.Immediate(0L)
+        )
+      case Instruction.MbarrierTestWait(destination, None, address, phase, _, _) if localMemoryBarrier(instruction) =>
+        for {
+          destination <- predicateRegisterName(destination)
+          address     <- addressValue(address)
+          phase       <- value(phase)
+        } yield VMIR.Instruction.MemoryBarrierTest(
+          destination,
+          address,
+          phase,
+          hasModifier(instruction, Modifier.Parity)
+        )
+      case Instruction.MbarrierTryWait(destination, None, address, phase, _, _, _) if localMemoryBarrier(instruction) =>
+        for {
+          destination <- predicateRegisterName(destination)
+          address     <- addressValue(address)
+          phase       <- value(phase)
+        } yield VMIR.Instruction.MemoryBarrierTest(
+          destination,
+          address,
+          phase,
+          hasModifier(instruction, Modifier.Parity)
+        )
+      case Instruction.CpAsyncBulkMBarrier(destination, source, size, barrier, None, None, None, _, _, _)
+          if modifiersAre(
+            instruction,
+            Modifier.Async,
+            Modifier.Bulk,
+            Modifier.SharedCta,
+            Modifier.Global,
+            Modifier.MbarrierCompleteTxBytes
+          ) =>
+        for {
+          destination <- addressValue(destination)
+          source      <- addressValue(source)
+          size        <- value(size)
+          barrier     <- addressValue(barrier)
+        } yield VMIR.Instruction.AsyncBulkCopy(destination, source, size, barrier)
+      case Instruction.CpAsyncBulkGroup(destination, source, size, None, byteMask, _, _) if
+            instruction.mods == Vec(Modifier.Global, Modifier.SharedCta, Modifier.BulkGroup) ||
+              instruction.mods == Vec(Modifier.Global, Modifier.SharedCta, Modifier.BulkGroup, Modifier.CpMask) =>
+        for {
+          destination <- addressValue(destination)
+          source      <- addressValue(source)
+          size        <- value(size)
+          mask        <- if (hasModifier(instruction, Modifier.CpMask))
+            byteMask.toRight(Error.Invalid("masked bulk copy requires a byte mask")).flatMap(value(_))
+          else if (byteMask.isEmpty) Right(Value.Immediate(0xffffL))
+          else invalid("unexpected bulk copy operand")
+        } yield VMIR.Instruction.AsyncBulkStore(destination, source, size, mask)
+      case Instruction.CpAsyncBulkCommitGroup(_, _) if instruction.mods.isEmpty => Right(VMIR.Instruction.AsyncCommit)
+      case Instruction.CpAsyncBulkWaitGroup(count, _, _) if instruction.mods == Vec(Modifier.Read) =>
+        immediate(count).flatMap(count =>
+          if (count >= 0 && count <= 7) Right(VMIR.Instruction.AsyncWait)
+          else invalid("bulk copy pending group count must be between zero and seven")
+        )
+      case Instruction.CpAsync(destination, source, copySize, sourceSize, _, _, _) =>
         for {
           destinationValue <- addressValue(destination)
           sourceValue      <- addressValue(source)
@@ -2295,15 +2589,17 @@ private object VMCompiler {
             if (Set(4L, 8L, 16L).contains(value)) Right(value.toInt.unsafe[Int > 0])
             else invalid(s"cp.async copy size must be 4, 8, or 16 bytes, found $value")
           }
-        } yield VMIR.Instruction.AsyncCopy(destinationValue, sourceValue, size)
+          sourceBytes <- sourceSize.traverse(value(_)).map(_.getOrElse(Value.Immediate(size.raw.toLong)))
+        } yield VMIR.Instruction.AsyncCopy(destinationValue, sourceValue, size, sourceBytes)
       case Instruction.CpAsyncCommitGroup(_, _)  => Right(VMIR.Instruction.AsyncCommit)
       case Instruction.CpAsyncWaitAll(_, _)      => Right(VMIR.Instruction.AsyncWait)
       case Instruction.CpAsyncWaitGroup(_, _, _) => Right(VMIR.Instruction.AsyncWait)
       case Instruction.ReduxSync(destination, source, memberMask, _, _)
           if allModifiers(instruction) match {
             case Vec(Modifier.Sync, operation, width) =>
-              Set(Modifier.Add, Modifier.Min, Modifier.Max).contains(operation) &&
-              Set(Modifier.U32, Modifier.S32, Modifier.U64, Modifier.S64).contains(width)
+              (Set(Modifier.Add, Modifier.Min, Modifier.Max).contains(operation) &&
+                Set(Modifier.U32, Modifier.S32, Modifier.U64, Modifier.S64).contains(width)) ||
+              (Set(Modifier.And, Modifier.Or, Modifier.Xor).contains(operation) && width == Modifier.B32)
             case _ => false
           } =>
         for {
@@ -2314,7 +2610,10 @@ private object VMCompiler {
           operation = allModifiers(instruction)(1) match {
             case Modifier.Add => IntegerOperation.Add
             case Modifier.Min => IntegerOperation.Minimum(hasAnyModifier(instruction, signedScalarModifiers))
-            case _            => IntegerOperation.Maximum(hasAnyModifier(instruction, signedScalarModifiers))
+            case Modifier.Max => IntegerOperation.Maximum(hasAnyModifier(instruction, signedScalarModifiers))
+            case Modifier.And => IntegerOperation.BitwiseAnd
+            case Modifier.Or  => IntegerOperation.BitwiseOr
+            case _            => IntegerOperation.BitwiseXor
           }
         } yield VMIR.Instruction.WarpReduce(destinationName, sourceValue, memberMaskValue, operation, width)
       case Instruction.Atom(destination, address, source, None, _, _)
@@ -2412,21 +2711,64 @@ private object VMCompiler {
         } yield VMIR.Instruction.AtomicAddFloat(destinationName, addressValue, sourceValue, width)
       case Instruction.Setp(destination, left, right, None, _, _) =>
         lowerSetPredicate(destination, left, right, allModifiers(instruction))
-      case Instruction.Bar(destination, Some(barrier), Some(predicate), None, _, _)
+      case Instruction.Barrier(barrier, count, None, None, _, None) if modifiersAre(instruction, Modifier.Sync) =>
+        for {
+          id    <- value(barrier)
+          count <- count.traverse(value(_))
+        } yield VMIR.Instruction.BarrierSync(id, count)
+      case Instruction.BarrierCluster(_, _) if {
+            val modifiers = instruction.mods.filterNot(_ == Modifier.Aligned)
+            modifiers == Vec(Modifier.Arrive) || modifiers == Vec(Modifier.Arrive, Modifier.Release) ||
+            modifiers == Vec(Modifier.Arrive, Modifier.Relaxed) || modifiers == Vec(Modifier.Wait) ||
+            modifiers == Vec(Modifier.Wait, Modifier.Acquire)
+          } => Right(VMIR.Instruction.ClusterBarrier(hasModifier(instruction, Modifier.Arrive)))
+      case Instruction.ClusterLaunchControlTryCancel(response, barrier, _, _) if {
+            val modifiers = instruction.mods
+            modifiers == Vec(Modifier.Async, Modifier.SharedCta, Modifier.MbarrierCompleteTxBytes, Modifier.B128) ||
+            modifiers == Vec(Modifier.Async, Modifier.MbarrierCompleteTxBytes, Modifier.B128)
+          } =>
+        for {
+          response <- addressValue(response)
+          barrier  <- addressValue(barrier)
+        } yield VMIR.Instruction.ClusterTryCancel(response, barrier)
+      case Instruction.ClusterLaunchControlQueryCancel(Some(destination), Some(response), None, None, None, _, _)
+          if instruction.mods == Vec(Modifier.IsCanceled, Modifier.Pred, Modifier.B128) =>
+        for {
+          destination <- predicateRegisterName(destination)
+          response    <- vectorValues(response)
+          _           <- requirePair(response, "cluster cancellation response")
+        } yield VMIR.Instruction.ClusterCancelStatus(destination, response(1))
+      case Instruction.ClusterLaunchControlQueryCancel(Some(destination), Some(response), None, None, None, _, _)
+          if instruction.mods.drop(1) == Vec(Modifier.B32, Modifier.B128) =>
+        for {
+          destination <- registerName(destination)
+          response    <- vectorValues(response)
+          _           <- requirePair(response, "cluster cancellation response")
+          axis        <- instruction.mods.headOption match {
+            case Some(Modifier.GetFirstCtaidX) => Right(Axis.X)
+            case Some(Modifier.GetFirstCtaidY) => Right(Axis.Y)
+            case Some(Modifier.GetFirstCtaidZ) => Right(Axis.Z)
+            case _                             => invalid("expected a cluster cancellation coordinate dimension")
+          }
+        } yield VMIR.Instruction.ClusterCancelCta(destination, response(0), response(1), axis)
+      case Instruction.Bar(destination, Some(barrier), Some(third), fourth, _, _)
           if allModifiers(instruction) == Vec(Modifier.Red, Modifier.And, Modifier.Pred) ||
             allModifiers(instruction) == Vec(Modifier.Red, Modifier.Or, Modifier.Pred) =>
         for {
           destinationName <- predicateRegisterName(destination)
-          barrierId       <- immediate(barrier)
-          predicateName   <- predicateRegisterName(predicate)
+          barrierId       <- value(barrier)
+          predicateName   <- predicateRegisterName(fourth.getOrElse(third))
+          participants    <- fourth.map(_ => third).traverse(value(_))
           operation = if (modifiersAre(instruction, Modifier.Red, Modifier.And, Modifier.Pred))
             PredicateOperation.And
           else PredicateOperation.Or
-          checkedBarrierId <-
-            if (barrierId >= 0L && barrierId <= Int.MaxValue.toLong)
-              Right(barrierId.toInt.unsafe[Int >= 0])
-            else invalid(s"barrier id is outside Int range: $barrierId")
-        } yield VMIR.Instruction.BarrierReduce(destinationName, checkedBarrierId, predicateName, operation)
+        } yield VMIR.Instruction.BarrierReduce(destinationName, barrierId, predicateName, operation, participants)
+      case Instruction.Bar(barrier, Some(count), None, None, _, None)
+          if modifiersAre(instruction, Modifier.Arrive) =>
+        for {
+          id           <- value(barrier)
+          participants <- value(count)
+        } yield VMIR.Instruction.BarrierArrive(id, participants)
       case Instruction.Bra(target, _, _)
           if allModifiers(instruction).isEmpty || allModifiers(instruction) == Vec(Modifier.Uni) =>
         target match {
@@ -2439,13 +2781,12 @@ private object VMCompiler {
       case Instruction.Bar(_, _, _, _, _, Some(_))
           if allModifiers(instruction) == Vec(Modifier.Sync) =>
         invalid("bar.sync must not be predicated in the supported execution profile")
-      case Instruction.Bar(barrier, None, None, None, _, _)
+      case Instruction.Bar(barrier, count, None, None, _, _)
           if allModifiers(instruction) == Vec(Modifier.Sync) =>
-        immediate(barrier).flatMap { value =>
-          if (value >= 0L && value <= Int.MaxValue.toLong)
-            Right(VMIR.Instruction.BarrierSync(value.toInt.unsafe[Int >= 0]))
-          else invalid(s"barrier id is outside Int range: $value")
-        }
+        for {
+          id           <- value(barrier)
+          participants <- count.traverse(value(_))
+        } yield VMIR.Instruction.BarrierSync(id, participants)
       case Instruction.GridDependencyControl(_, _)
           if allModifiers(instruction) == Vec(Modifier.Wait) ||
             allModifiers(instruction) == Vec(Modifier.LaunchDependents) =>
@@ -2456,6 +2797,9 @@ private object VMCompiler {
       case Instruction.Membar(_, _)
           if allModifiers(instruction).size == 1 &&
             allModifiers(instruction).headOption.exists(Set(Modifier.Cta, Modifier.Gl, Modifier.Sys).contains) =>
+        Right(VMIR.Instruction.MemoryBarrier)
+      case Instruction.Fence(None, None, _, _)
+          if modifiersAre(instruction, Modifier.Proxy, Modifier.Async, Modifier.SharedCta) =>
         Right(VMIR.Instruction.MemoryBarrier)
       case Instruction.Fence(None, None, _, _)
           if {
@@ -2478,7 +2822,7 @@ private object VMCompiler {
         Right(VMIR.Instruction.Prefetch)
       case Instruction.BarWarpSync(memberMask, _, _) =>
         value(memberMask).map(VMIR.Instruction.WarpBarrier(_))
-      case Instruction.Exit(_, _)                                        => Right(VMIR.Instruction.Return)
+      case Instruction.Exit(_, _)                                        => Right(VMIR.Instruction.Exit)
       case Instruction.Ret(_, _)                                         => Right(VMIR.Instruction.Return)
       case Instruction.Trap(_, _)                                        => Right(VMIR.Instruction.Trap)
       case Instruction.Call(returnParameters, function, params, _, _, _) =>
@@ -2553,7 +2897,9 @@ private object VMCompiler {
     else {
       val packed  = modifiers.exists(PackedFloatTypes)
       val bf16    = modifiers.contains(Modifier.Bf16)
-      val allowed = if (packed)
+      val allowed = if (modifiers.contains(Modifier.F32x2) && Set(Opcode.Add, Opcode.Sub, Opcode.Mul)(signature.opcode))
+        Set(Modifier.F32x2, Modifier.Rn, Modifier.Ftz)
+      else if (packed)
         PackedFloatTypes ++
           (signature.opcode match {
             case Opcode.Fma              => Set(Modifier.Rn, Modifier.Sat)
@@ -2618,18 +2964,35 @@ private object VMCompiler {
       floatControl(modifiers)
     )
 
+  private def wideMemoryAccess(modifiers: Vec[Modifier]): Either[Error, MemoryAccess] = modifiers match {
+    case Vec(Modifier.Relaxed, scope, Modifier.B128) if Set(Modifier.Cta, Modifier.Gpu)(scope) =>
+      Right(MemoryAccess.Generic(false))
+    case Vec(Modifier.Relaxed, scope, Modifier.Global, Modifier.B128) if Set(Modifier.Cta, Modifier.Gpu)(scope) =>
+      Right(MemoryAccess.Global(false))
+    case _ => invalid("b128 memory access requires relaxed CTA or GPU scope")
+  }
+
   private def packedFloatBinary(
       operation: FloatOperation,
       destination: Operand,
       left: Operand,
       right: Operand,
-      bf16: Boolean
+      modifiers: Vec[Modifier]
   ): Either[Error, VMIR.Instruction] =
     for {
       destinationName <- registerName(destination)
       leftValue       <- value(left)
       rightValue      <- value(right)
-    } yield VMIR.Instruction.FloatBinaryPacked(operation, destinationName, leftValue, rightValue, bf16)
+    } yield VMIR.Instruction.FloatBinaryPacked(
+      operation,
+      destinationName,
+      leftValue,
+      rightValue,
+      if (modifiers.contains(Modifier.F32x2)) PackedFloatFormat.F32x2
+      else if (modifiers.contains(Modifier.Bf16x2)) PackedFloatFormat.BF16x2
+      else PackedFloatFormat.F16x2,
+      floatControl(modifiers)
+    )
 
   private def floatUnary(
       operation: FloatUnaryOperation,
@@ -2744,6 +3107,24 @@ private object VMCompiler {
       case Some(Predication(negated, operand)) =>
         predicateRegisterName(operand).map(name => Some(ExecutionPredicate(name, negated)))
     }
+
+  private def localMemoryBarrier(instruction: Instruction): Boolean =
+    allModifiers(instruction).forall(Set(
+      Modifier.Init,
+      Modifier.Inval,
+      Modifier.Arrive,
+      Modifier.ExpectTx,
+      Modifier.TestWait,
+      Modifier.TryWait,
+      Modifier.Parity,
+      Modifier.B64,
+      Modifier.Shared,
+      Modifier.SharedCta,
+      Modifier.Cta,
+      Modifier.Acquire,
+      Modifier.Release,
+      Modifier.Relaxed
+    ).contains)
 
   private def predicateRegisterName(operand: Operand): Either[Error, NonEmpty[String]] =
     registerName(operand, "predicate register")
@@ -2968,25 +3349,26 @@ private object VMCompiler {
 
   private def specialRegisterValue(name: NonEmpty[String]): Option[Value] =
     OperandDomains.SpecialRegister.fromSpelling(name) match {
-      case OperandDomains.SpecialRegister.TidX       => Some(Value.ThreadId(Axis.X))
-      case OperandDomains.SpecialRegister.TidY       => Some(Value.ThreadId(Axis.Y))
-      case OperandDomains.SpecialRegister.TidZ       => Some(Value.ThreadId(Axis.Z))
-      case OperandDomains.SpecialRegister.CtaidX     => Some(Value.BlockId(Axis.X))
-      case OperandDomains.SpecialRegister.CtaidY     => Some(Value.BlockId(Axis.Y))
-      case OperandDomains.SpecialRegister.CtaidZ     => Some(Value.BlockId(Axis.Z))
-      case OperandDomains.SpecialRegister.NtidX      => Some(Value.BlockDim(Axis.X))
-      case OperandDomains.SpecialRegister.NtidY      => Some(Value.BlockDim(Axis.Y))
-      case OperandDomains.SpecialRegister.NtidZ      => Some(Value.BlockDim(Axis.Z))
-      case OperandDomains.SpecialRegister.NctaidX    => Some(Value.GridDim(Axis.X))
-      case OperandDomains.SpecialRegister.NctaidY    => Some(Value.GridDim(Axis.Y))
-      case OperandDomains.SpecialRegister.NctaidZ    => Some(Value.GridDim(Axis.Z))
-      case OperandDomains.SpecialRegister.LaneId     => Some(Value.LaneId)
-      case OperandDomains.SpecialRegister.LaneMaskGe => Some(Value.LaneMaskGreaterEqual)
-      case OperandDomains.SpecialRegister.LaneMaskGt => Some(Value.LaneMaskGreater)
-      case OperandDomains.SpecialRegister.LaneMaskLe => Some(Value.LaneMaskLessEqual)
-      case OperandDomains.SpecialRegister.LaneMaskLt => Some(Value.LaneMaskLess)
-      case OperandDomains.SpecialRegister.LaneMaskEq => Some(Value.LaneMaskEqual)
-      case OperandDomains.SpecialRegister.Unknown(_) => None
+      case OperandDomains.SpecialRegister.TidX            => Some(Value.ThreadId(Axis.X))
+      case OperandDomains.SpecialRegister.TidY            => Some(Value.ThreadId(Axis.Y))
+      case OperandDomains.SpecialRegister.TidZ            => Some(Value.ThreadId(Axis.Z))
+      case OperandDomains.SpecialRegister.CtaidX          => Some(Value.BlockId(Axis.X))
+      case OperandDomains.SpecialRegister.CtaidY          => Some(Value.BlockId(Axis.Y))
+      case OperandDomains.SpecialRegister.CtaidZ          => Some(Value.BlockId(Axis.Z))
+      case OperandDomains.SpecialRegister.NtidX           => Some(Value.BlockDim(Axis.X))
+      case OperandDomains.SpecialRegister.NtidY           => Some(Value.BlockDim(Axis.Y))
+      case OperandDomains.SpecialRegister.NtidZ           => Some(Value.BlockDim(Axis.Z))
+      case OperandDomains.SpecialRegister.NctaidX         => Some(Value.GridDim(Axis.X))
+      case OperandDomains.SpecialRegister.NctaidY         => Some(Value.GridDim(Axis.Y))
+      case OperandDomains.SpecialRegister.NctaidZ         => Some(Value.GridDim(Axis.Z))
+      case OperandDomains.SpecialRegister.DynamicSmemSize => Some(Value.DynamicSharedBytes)
+      case OperandDomains.SpecialRegister.LaneId          => Some(Value.LaneId)
+      case OperandDomains.SpecialRegister.LaneMaskGe      => Some(Value.LaneMaskGreaterEqual)
+      case OperandDomains.SpecialRegister.LaneMaskGt      => Some(Value.LaneMaskGreater)
+      case OperandDomains.SpecialRegister.LaneMaskLe      => Some(Value.LaneMaskLessEqual)
+      case OperandDomains.SpecialRegister.LaneMaskLt      => Some(Value.LaneMaskLess)
+      case OperandDomains.SpecialRegister.LaneMaskEq      => Some(Value.LaneMaskEqual)
+      case OperandDomains.SpecialRegister.Unknown(_)      => None
     }
 
   def value(operand: Operand): Either[Error, Value] = operand match {

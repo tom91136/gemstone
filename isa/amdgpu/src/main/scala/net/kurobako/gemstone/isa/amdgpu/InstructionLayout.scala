@@ -82,6 +82,12 @@ private case class InstructionLayout(
     ((descriptor.get(word) << shift) >> shift).toInt
   }
 
+  def signed(word: BigInt, field: EncodingField): Int = {
+    val descriptor = byName(field)
+    val value      = descriptor.get(word)
+    (if (value.testBit(descriptor.width - 1)) value - (BigInt(1) << descriptor.width) else value).toInt
+  }
+
   def accepts(word: BigInt, literalBytes: Int = 0): Boolean = {
     val candidate = if (literalBytes == 0) Some(this)
     else InstructionLayout.Catalogue.all.find(value =>

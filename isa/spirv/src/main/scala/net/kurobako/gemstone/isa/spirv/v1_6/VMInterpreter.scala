@@ -152,7 +152,10 @@ private object VMInterpreter {
   ): Either[Fault, Unit] = {
     val metrics = VMMetrics()
     val started = platform.monotonicNanos
-    val result  = try executeValidated(program, dispatch, memory, control, workgroups, handler, metrics)
+    val result  = try
+      if (dispatch.argumentBuffer.nonEmpty)
+        Left(Fault.Unsupported("SPIR-V does not support allocation-backed argument buffers"))
+      else executeValidated(program, dispatch, memory, control, workgroups, handler, metrics)
     catch {
       case NonFatal(error) =>
         Left(
@@ -257,6 +260,15 @@ private object VMInterpreter {
         case Right(value) => value
       }
     }
+    // The entry and its visible builtins do not change between invocations.
+    val entry      = program.entryPoints.view.collectFirst { case (name, entryId) if entryId == function.id => name }
+    val shader     = entry.exists(program.vulkanEntries.contains)
+    val interfaces = entry.flatMap(program.ir.entryPointInterfaces.get).getOrElse(Set.empty)
+    val invocationGlobals = program.globals.toVector.filter { case (variable, global) =>
+      program.builtins.contains(variable) &&
+      (!shader || (global.storageClass != StorageClass.Input && global.storageClass != StorageClass.Output) ||
+        interfaces.contains(variable))
+    }
     val stageInterfaces   = stageInterfaceVariables(program, dispatch.kernelName).toSet
     val stageInitializers = stageInterfaces.toVector.flatMap { variable =>
       program.globals.get(variable).filter(_.storageClass == StorageClass.Output).flatMap(_.initializer).map {
@@ -284,8 +296,9 @@ private object VMInterpreter {
       function.id,
       if (program.vulkanEntries.nonEmpty) 32 else math.max(1, math.min(32, totalLocal.raw))
     )
-    val enqueuedSubgroups = (totalLocal.raw.toLong + subgroup.toLong - 1L) / subgroup.toLong
-    val hasCollectives    = program.collectiveFunctions.contains(function.id) || memory.defersHostReads
+    val enqueuedSubgroups    = (totalLocal.raw.toLong + subgroup.toLong - 1L) / subgroup.toLong
+    val hasStaticCollectives = program.collectiveFunctions.contains(function.id)
+    val hasCollectives       = hasStaticCollectives || memory.defersHostReads
     val baseScalars = BaseScalarValues(program.constants, globalValues, program.module.header.bound.toUnsigned.toLong)
     metrics.recordDispatch(hasCollectives)
     val groupCount = dispatch.geometry.groupCount.volume match {
@@ -301,7 +314,7 @@ private object VMInterpreter {
     val state                = MemoryState(memory, dispatch.pointerRelocations, handler)
     val flushLock            = ReentrantLock()
     val reusableValues       =
-      if (hasCollectives || parallelWork) None
+      if (hasStaticCollectives || parallelWork) None
       else
         Some(
           InvocationValues(
@@ -317,7 +330,7 @@ private object VMInterpreter {
     // but a completed workgroup no longer needs them. Reuse each local lane's file in the
     // next workgroup when dispatch is sequential.
     val collectiveValues =
-      if (hasCollectives && !parallelWork && groupCount.raw > 1L)
+      if (hasStaticCollectives && !parallelWork && groupCount.raw > 1L)
         Array.fill[Option[InvocationValues]](totalLocal.raw)(None)
       else Array.empty[Option[InvocationValues]]
 
@@ -352,21 +365,22 @@ private object VMInterpreter {
           dispatch.arguments.zipWithIndex.collect { case (KernelTask.Argument.Local(size), argumentIndex) =>
             argumentIndex -> Region.Internal(InternalMemory(Array.ofDim[Byte](checkedSize(size.raw))))
           }.toMap
-      val reusableValues = if (hasCollectives) None
-      else reuseValues.orElse(
-        Some(
-          InvocationValues(
-            program.constants,
-            globalValues,
-            program.module.header.bound.toUnsigned.toLong,
-            baseScalars,
-            groupMetrics
-          )
-        )
-      )
       var reusableExecution: InvocationState | Null = reuseExecution match {
         case Some(slot) => slot(0)
         case None       => null
+      }
+      var reusableValues = if (hasStaticCollectives) None
+      else reusableExecution match {
+        case execution: InvocationState => Some(execution.values)
+        case null                       => reuseValues.orElse(
+            Some(InvocationValues(
+              program.constants,
+              globalValues,
+              program.module.header.bound.toUnsigned.toLong,
+              baseScalars,
+              groupMetrics
+            ))
+          )
       }
       val executions  = if (hasCollectives) mutable.ArrayBuffer.empty[InvocationState] else null
       var linearLocal = 0
@@ -455,6 +469,7 @@ private object VMInterpreter {
           prepareInvocation(
             program,
             function,
+            invocationGlobals,
             dispatch.arguments,
             shared,
             invocation,
@@ -464,7 +479,7 @@ private object VMInterpreter {
             groupState,
             baseScalars,
             groupMetrics,
-            collectiveValues.nonEmpty
+            collectiveValues.nonEmpty || !hasStaticCollectives
           ) match {
             case Left(error)  => return Left(error)
             case Right(value) =>
@@ -483,25 +498,34 @@ private object VMInterpreter {
                 case _ => false
               }
               if (collectiveValues.nonEmpty) collectiveValues(linearLocal) = Some(value.values)
-              if (hasCollectives) {
+              if (hasStaticCollectives) {
                 val _ = executions.nn += value
               } else {
-                if (reuseInvocationState) {
-                  reusableExecution = value
-                  reuseExecution match {
-                    case Some(slot) => slot(0) = value
-                    case None       => ()
-                  }
-                }
+                // Deferred host reads need a retained frame only when the lane actually suspends.
+                // Completed independent lanes can reuse their storage, even when the memory transport can defer.
                 resumeInvocation(program, value, groupState, control, groupMetrics) match {
                   case Left(error)                  => return Left(error)
-                  case Right(()) if value.completed => ()
-                  case Right(())                    =>
-                    return Left(
-                      Fault.InvalidTask(
-                        "SPIR-V program suspended at a collective absent from its static instruction set"
-                      )
-                    )
+                  case Right(()) if value.completed =>
+                    if (reuseInvocationState) {
+                      reusableExecution = value
+                      reusableValues = Some(value.values)
+                      reuseExecution match {
+                        case Some(slot) => slot(0) = value
+                        case None       => ()
+                      }
+                    }
+                  case Right(()) if hasCollectives && value.memoryPending =>
+                    val _ = executions.nn += value
+                    reusableExecution = null
+                    reusableValues = None
+                    reuseExecution match {
+                      case Some(slot) => slot(0) = null
+                      case None       => ()
+                    }
+                  case Right(()) =>
+                    return Left(Fault.InvalidTask(
+                      "SPIR-V program suspended at a collective absent from its static instruction set"
+                    ))
                 }
               }
           }
@@ -519,7 +543,7 @@ private object VMInterpreter {
         val groupState   = MemoryState(memory, dispatch.pointerRelocations, handler)
         runGroup(
           groupIndex = groupIndex,
-          reuseInvocationState = false,
+          reuseInvocationState = true,
           groupMetrics = groupMetrics,
           reuseValues = None,
           reuseExecution = None,
@@ -562,6 +586,7 @@ private object VMInterpreter {
   private def prepareInvocation(
       program: Program,
       function: Function,
+      globals: Vector[(Int, Global)],
       arguments: Vec[KernelTask.Argument],
       shared: Map[Int, Region],
       invocation: InvocationBuiltins,
@@ -588,14 +613,6 @@ private object VMInterpreter {
           trackTouched
         )
     }
-    val entry      = program.entryPoints.view.collectFirst { case (name, entryId) if entryId == function.id => name }
-    val shader     = entry.exists(program.vulkanEntries.contains)
-    val interfaces = entry.flatMap(program.ir.entryPointInterfaces.get).getOrElse(Set.empty)
-    val globals    = program.globals.view.filter { case (variable, global) =>
-      !shader || (global.storageClass != StorageClass.Input && global.storageClass != StorageClass.Output) || interfaces.contains(
-        variable
-      )
-    }.toVector
     var globalIndex = 0
     while (globalIndex < globals.size) {
       val (variable, global) = globals(globalIndex)
@@ -772,7 +789,7 @@ private object VMInterpreter {
       executeImage(program, execution, memory, instruction)
     case _: Instruction.BitFieldUExtract | _: Instruction.BitFieldSExtract | _: Instruction.BitFieldInsert | _: Instruction.BitReverse =>
       executeBitField(program, execution, instruction)
-    case _: Instruction.ArrayLength | _: Instruction.Bitcast | _: Instruction.BitCount | _: Instruction.PtrCastToGeneric | _: Instruction.GenericCastToPtr | _: Instruction.GenericCastToPtrExplicit | _: Instruction.PtrAccessChain | _: Instruction.InBoundsPtrAccessChain | _: Instruction.AccessChain | _: Instruction.InBoundsAccessChain | _: Instruction.CompositeExtract | _: Instruction.CompositeConstruct | _: Instruction.CompositeInsert | _: Instruction.VectorExtractDynamic | _: Instruction.VectorInsertDynamic =>
+    case _: Instruction.PtrEqual | _: Instruction.PtrNotEqual | _: Instruction.PtrDiff | _: Instruction.ArrayLength | _: Instruction.Bitcast | _: Instruction.BitCount | _: Instruction.PtrCastToGeneric | _: Instruction.GenericCastToPtr | _: Instruction.GenericCastToPtrExplicit | _: Instruction.PtrAccessChain | _: Instruction.InBoundsPtrAccessChain | _: Instruction.AccessChain | _: Instruction.InBoundsAccessChain | _: Instruction.CompositeExtract | _: Instruction.CompositeConstruct | _: Instruction.CompositeInsert | _: Instruction.VectorExtractDynamic | _: Instruction.VectorInsertDynamic =>
       executeComposite(program, execution, memory, instruction)
     case _: Instruction.VectorShuffle | _: Instruction.ExtInst =>
       executeExtended(program, execution, memory, instruction)
@@ -2447,29 +2464,48 @@ private object VMInterpreter {
   ): Either[Fault, Unit] = {
     val values = execution.values
     instruction match {
+      case _: Instruction.PtrEqual | _: Instruction.PtrNotEqual | _: Instruction.PtrDiff =>
+        pointerCompare(program, values, memory, instruction) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
       case Instruction.Bitcast(resultType, dest, source) =>
-        values.get(id(source)) match {
-          case Some(VMValue.Address(_, pointer)) =>
-            val pointee = program.layout.pointerPointee(id(resultType))
-            val result  = if (pointer.pointee == pointee) pointer else pointer.copy(pointee = pointee)
-            values.update(id(dest), VMValue.Address(id(resultType), result))
-            execution.pc += 1
-          case Some(value) =>
-            value match {
-              case VMValue.Bits(sourceType, lanes) =>
-                bitcast(program, sourceType, id(resultType), lanes) match {
-                  case Left(error)   => return Left(error)
-                  case Right(result) =>
-                    values.update(id(dest), VMValue.Bits(id(resultType), result))
-                    execution.pc += 1
+        val targetType = id(resultType)
+        val result     = values.get(id(source)) match {
+          case Some(VMValue.Address(sourceType, pointer)) =>
+            program.layout.runtimeType(targetType) match {
+              case Some(RuntimeType.Pointer(storageClass, pointee)) =>
+                program.layout.runtimeType(sourceType) match {
+                  case Some(RuntimeType.Pointer(sourceStorage, _)) if sourceStorage == storageClass =>
+                    Right(VMValue.Address(targetType, pointer.copy(pointee = pointee)))
+                  case _ => Left(Fault.InvalidTask("OpBitcast pointer types must have the same storage class"))
                 }
-              case VMValue.Address(_, pointer) =>
-                val pointee = program.layout.pointerPointee(id(resultType))
-                val result  = if (pointer.pointee == pointee) pointer else pointer.copy(pointee = pointee)
-                values.update(id(dest), VMValue.Address(id(resultType), result))
-                execution.pc += 1
+              case _ if integerShape(program, targetType).nonEmpty =>
+                memory.pointerInteger(pointer).flatMap(value =>
+                  bitcast(program, sourceType, targetType, Array(value)).map(VMValue.Bits(targetType, _))
+                )
+              case _ => Left(Fault.InvalidTask("OpBitcast pointer requires an integer or pointer result"))
             }
-          case None => return Left(undefined(source))
+          case Some(VMValue.Bits(sourceType, lanes)) =>
+            program.layout.runtimeType(targetType) match {
+              case Some(RuntimeType.Pointer(storageClass, pointee)) if integerShape(program, sourceType).nonEmpty =>
+                bitcast(program, sourceType, targetType, lanes).flatMap { bits =>
+                  program.layout.runtimeType(pointee) match {
+                    case Some(_: RuntimeType.Function) => Right(VMValue.Bits(targetType, bits))
+                    case _ => memory.integerPointer(bits(0), pointee, storageClass).map(VMValue.Address(targetType, _))
+                  }
+                }
+              case Some(_: RuntimeType.Pointer) =>
+                Left(Fault.InvalidTask("OpBitcast pointer requires an integer or pointer operand"))
+              case _ => bitcast(program, sourceType, targetType, lanes).map(VMValue.Bits(targetType, _))
+            }
+          case None => Left(undefined(source))
+        }
+        result match {
+          case Left(error)  => return Left(error)
+          case Right(value) =>
+            values.update(id(dest), value)
+            execution.pc += 1
         }
       case Instruction.BitCount(resultType, dest, base) =>
         integerBitCount(program, values, resultType, dest, base) match {
@@ -4604,8 +4640,8 @@ private object VMInterpreter {
     InstructionCompleted
   }
 
-  // Builtin and function-call argument decoding is indexed and fails fast.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
+  // Keep call dispatch below HotSpot's huge-method threshold.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeCall(
       program: Program,
       execution: InvocationState,
@@ -4642,137 +4678,11 @@ private object VMInterpreter {
             )
           )
         program.functionNames.get(id(called)) match {
-          case Some("_Z12get_local_idj") =>
-            scalar(values, arguments.head) match {
-              case Left(error)                                           => return Left(error)
-              case Right(dimension) if dimension >= 0L && dimension < 3L =>
-                integerShape(program, id(resultType)) match {
-                  case Some((width, 1)) =>
-                    values.update(
-                      id(dest),
-                      VMValue.Bits(
-                        id(resultType),
-                        Array(execution.invocation.local(dimension.toInt) & mask(width))
-                      )
-                    )
-                    execution.pc += 1
-                  case _ =>
-                    return Left(
-                      Fault.InvalidTask(
-                        s"OpenCL get_local_id result type %${id(resultType)} is not an integer scalar"
-                      )
-                    )
-                }
-              case Right(dimension) =>
-                return Left(Fault.InvalidTask(
-                  s"OpenCL get_local_id dimension $dimension is invalid"
-                ))
-            }
-          case Some("_Z12get_group_idj") | Some("_Z14get_local_sizej") | Some("_Z23get_enqueued_local_sizej") =>
-            scalar(values, arguments.head) match {
-              case Left(error)                                           => return Left(error)
-              case Right(dimension) if dimension >= 0L && dimension < 3L =>
-                integerShape(program, id(resultType)) match {
-                  case Some((width, 1)) =>
-                    val source = program.functionNames.get(id(called)) match {
-                      case Some("_Z12get_group_idj")            => execution.invocation.group(dimension.toInt)
-                      case Some("_Z14get_local_sizej")          => execution.invocation.workgroupSize(dimension.toInt)
-                      case Some("_Z23get_enqueued_local_sizej") =>
-                        execution.invocation.enqueuedWorkgroupSize(dimension.toInt)
-                      case _ => 0L
-                    }
-                    values.update(id(dest), VMValue.Bits(id(resultType), Array(source & mask(width))))
-                    execution.pc += 1
-                  case _ =>
-                    return Left(
-                      Fault.InvalidTask(
-                        s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} result type " +
-                          s"%${id(resultType)} is not an integer scalar"
-                      )
-                    )
-                }
-              case Right(dimension) =>
-                return Left(
-                  Fault.InvalidTask(
-                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} dimension $dimension is invalid"
-                  )
-                )
-            }
-          case Some("_Z13get_global_idj") =>
-            scalar(values, arguments.head) match {
-              case Left(error)                                           => return Left(error)
-              case Right(dimension) if dimension >= 0L && dimension < 3L =>
-                integerShape(program, id(resultType)) match {
-                  case Some((width, 1)) =>
-                    values.update(
-                      id(dest),
-                      VMValue.Bits(
-                        id(resultType),
-                        Array(execution.invocation.global(dimension.toInt) & mask(width))
-                      )
-                    )
-                    execution.pc += 1
-                  case _ =>
-                    return Left(
-                      Fault.InvalidTask(
-                        "OpenCL get_global_id result type is not an integer scalar"
-                      )
-                    )
-                }
-              case Right(dimension) =>
-                return Left(Fault.InvalidTask(
-                  s"OpenCL get_global_id dimension $dimension is invalid"
-                ))
-            }
-          case Some("_Z15get_global_sizej") | Some("_Z17get_global_offsetj") | Some("_Z14get_num_groupsj") =>
-            scalar(values, arguments.head) match {
-              case Left(error)                                           => return Left(error)
-              case Right(dimension) if dimension >= 0L && dimension < 3L =>
-                integerShape(program, id(resultType)) match {
-                  case Some((width, 1)) =>
-                    val source = program.functionNames.get(id(called)) match {
-                      case Some("_Z15get_global_sizej")   => execution.invocation.globalSize(dimension.toInt)
-                      case Some("_Z17get_global_offsetj") => execution.invocation.globalOffset(dimension.toInt)
-                      case Some("_Z14get_num_groupsj")    => execution.invocation.numWorkgroups(dimension.toInt)
-                      case _                              => 0L
-                    }
-                    values.update(id(dest), VMValue.Bits(id(resultType), Array(source & mask(width))))
-                    execution.pc += 1
-                  case _ =>
-                    return Left(
-                      Fault.InvalidTask(
-                        s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} result type is not an integer scalar"
-                      )
-                    )
-                }
-              case Right(dimension) =>
-                return Left(
-                  Fault.InvalidTask(
-                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} dimension $dimension is invalid"
-                  )
-                )
-            }
-          case Some("_Z18get_sub_group_sizev") | Some("_Z22get_sub_group_local_idv") |
-              Some("_Z16get_sub_group_idv") | Some("_Z18get_num_sub_groupsv") =>
-            integerShape(program, id(resultType)) match {
-              case Some((width, 1)) =>
-                val source = program.functionNames.get(id(called)) match {
-                  case Some("_Z18get_sub_group_sizev")     => execution.invocation.subgroupSize.toLong
-                  case Some("_Z22get_sub_group_local_idv") => execution.invocation.subgroupLocal.toLong
-                  case Some("_Z16get_sub_group_idv")       => execution.invocation.subgroupIndex.toLong
-                  case Some("_Z18get_num_sub_groupsv")     => execution.invocation.numSubgroups
-                  case _                                   => 0L
-                }
-                values.update(id(dest), VMValue.Bits(id(resultType), Array(source & mask(width))))
-                execution.pc += 1
-              case _ =>
-                return Left(
-                  Fault.InvalidTask(
-                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} result type " +
-                      s"%${id(resultType)} is not an integer scalar"
-                  )
-                )
-            }
+          case Some("_Z12get_local_idj" | "_Z12get_group_idj" | "_Z14get_local_sizej" |
+              "_Z23get_enqueued_local_sizej" | "_Z13get_global_idj" | "_Z15get_global_sizej" |
+              "_Z17get_global_offsetj" | "_Z14get_num_groupsj" | "_Z18get_sub_group_sizev" |
+              "_Z22get_sub_group_local_idv" | "_Z16get_sub_group_idv" | "_Z18get_num_sub_groupsv") =>
+            return executeGeometryCall(program, execution, resultType, dest, called, arguments)
           case Some("_Z3minmm") =>
             (
               scalar(values, arguments(0)),
@@ -5075,37 +4985,196 @@ private object VMInterpreter {
                   )
                 )
             }
-          case _ =>
-            if (execution.calls.size >= 128)
-              return Left(Fault.Backend("SPIR-V function call depth exceeds 128 frames"))
-            var argumentIndex = 0
-            while (argumentIndex < arguments.size) {
-              values.get(id(arguments(argumentIndex))) match {
-                case Some(value) =>
-                  val (parameterId, parameterType) = callee.parameters(argumentIndex)
-                  values.update(parameterId, retag(value, parameterType))
-                case None => return Left(undefined(arguments(argumentIndex)))
-              }
-              argumentIndex += 1
-            }
-            execution.calls.append(
-              CallFrame(
-                execution.currentFunction,
-                execution.pc + 1,
-                execution.currentLabel,
-                execution.predecessor,
-                id(resultType),
-                id(dest)
-              )
-            )
-            execution.currentFunction = callee
-            execution.pc = callee.start + 1
-            execution.currentLabel = -1
-            execution.predecessor = -1
+          case _ => return enterFunction(execution, callee, resultType, dest, arguments)
         }
       case other =>
         return Left(Fault.Unsupported(s"${other.opcode} execution is not implemented"))
     }
+    InstructionCompleted
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
+  private def executeGeometryCall(
+      program: Program,
+      execution: InvocationState,
+      resultType: Operand,
+      dest: Operand,
+      called: Operand,
+      arguments: Vec[Operand]
+  ): Either[Fault, Unit] = {
+    val values = execution.values
+    program.functionNames.get(id(called)) match {
+      case Some("_Z12get_local_idj") =>
+        scalar(values, arguments.head) match {
+          case Left(error)                                           => return Left(error)
+          case Right(dimension) if dimension >= 0L && dimension < 3L =>
+            integerShape(program, id(resultType)) match {
+              case Some((width, 1)) =>
+                values.update(
+                  id(dest),
+                  VMValue.Bits(
+                    id(resultType),
+                    Array(execution.invocation.local(dimension.toInt) & mask(width))
+                  )
+                )
+                execution.pc += 1
+              case _ =>
+                return Left(
+                  Fault.InvalidTask(
+                    s"OpenCL get_local_id result type %${id(resultType)} is not an integer scalar"
+                  )
+                )
+            }
+          case Right(dimension) =>
+            return Left(Fault.InvalidTask(
+              s"OpenCL get_local_id dimension $dimension is invalid"
+            ))
+        }
+      case Some("_Z12get_group_idj") | Some("_Z14get_local_sizej") | Some("_Z23get_enqueued_local_sizej") =>
+        scalar(values, arguments.head) match {
+          case Left(error)                                           => return Left(error)
+          case Right(dimension) if dimension >= 0L && dimension < 3L =>
+            integerShape(program, id(resultType)) match {
+              case Some((width, 1)) =>
+                val source = program.functionNames.get(id(called)) match {
+                  case Some("_Z12get_group_idj")            => execution.invocation.group(dimension.toInt)
+                  case Some("_Z14get_local_sizej")          => execution.invocation.workgroupSize(dimension.toInt)
+                  case Some("_Z23get_enqueued_local_sizej") =>
+                    execution.invocation.enqueuedWorkgroupSize(dimension.toInt)
+                  case _ => 0L
+                }
+                values.update(id(dest), VMValue.Bits(id(resultType), Array(source & mask(width))))
+                execution.pc += 1
+              case _ =>
+                return Left(
+                  Fault.InvalidTask(
+                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} result type " +
+                      s"%${id(resultType)} is not an integer scalar"
+                  )
+                )
+            }
+          case Right(dimension) =>
+            return Left(
+              Fault.InvalidTask(
+                s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} dimension $dimension is invalid"
+              )
+            )
+        }
+      case Some("_Z13get_global_idj") =>
+        scalar(values, arguments.head) match {
+          case Left(error)                                           => return Left(error)
+          case Right(dimension) if dimension >= 0L && dimension < 3L =>
+            integerShape(program, id(resultType)) match {
+              case Some((width, 1)) =>
+                values.update(
+                  id(dest),
+                  VMValue.Bits(
+                    id(resultType),
+                    Array(execution.invocation.global(dimension.toInt) & mask(width))
+                  )
+                )
+                execution.pc += 1
+              case _ =>
+                return Left(
+                  Fault.InvalidTask(
+                    "OpenCL get_global_id result type is not an integer scalar"
+                  )
+                )
+            }
+          case Right(dimension) =>
+            return Left(Fault.InvalidTask(
+              s"OpenCL get_global_id dimension $dimension is invalid"
+            ))
+        }
+      case Some("_Z15get_global_sizej") | Some("_Z17get_global_offsetj") | Some("_Z14get_num_groupsj") =>
+        scalar(values, arguments.head) match {
+          case Left(error)                                           => return Left(error)
+          case Right(dimension) if dimension >= 0L && dimension < 3L =>
+            integerShape(program, id(resultType)) match {
+              case Some((width, 1)) =>
+                val source = program.functionNames.get(id(called)) match {
+                  case Some("_Z15get_global_sizej")   => execution.invocation.globalSize(dimension.toInt)
+                  case Some("_Z17get_global_offsetj") => execution.invocation.globalOffset(dimension.toInt)
+                  case Some("_Z14get_num_groupsj")    => execution.invocation.numWorkgroups(dimension.toInt)
+                  case _                              => 0L
+                }
+                values.update(id(dest), VMValue.Bits(id(resultType), Array(source & mask(width))))
+                execution.pc += 1
+              case _ =>
+                return Left(
+                  Fault.InvalidTask(
+                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} result type is not an integer scalar"
+                  )
+                )
+            }
+          case Right(dimension) =>
+            return Left(
+              Fault.InvalidTask(
+                s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} dimension $dimension is invalid"
+              )
+            )
+        }
+      case Some("_Z18get_sub_group_sizev") | Some("_Z22get_sub_group_local_idv") |
+          Some("_Z16get_sub_group_idv") | Some("_Z18get_num_sub_groupsv") =>
+        integerShape(program, id(resultType)) match {
+          case Some((width, 1)) =>
+            val source = program.functionNames.get(id(called)) match {
+              case Some("_Z18get_sub_group_sizev")     => execution.invocation.subgroupSize.toLong
+              case Some("_Z22get_sub_group_local_idv") => execution.invocation.subgroupLocal.toLong
+              case Some("_Z16get_sub_group_idv")       => execution.invocation.subgroupIndex.toLong
+              case Some("_Z18get_num_sub_groupsv")     => execution.invocation.numSubgroups
+              case _                                   => 0L
+            }
+            values.update(id(dest), VMValue.Bits(id(resultType), Array(source & mask(width))))
+            execution.pc += 1
+          case _ =>
+            return Left(
+              Fault.InvalidTask(
+                s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_)} result type " +
+                  s"%${id(resultType)} is not an integer scalar"
+              )
+            )
+        }
+      case _ => return Left(Fault.InvalidTask("unrecognized OpenCL geometry builtin"))
+    }
+    InstructionCompleted
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
+  private def enterFunction(
+      execution: InvocationState,
+      callee: Function,
+      resultType: Operand,
+      dest: Operand,
+      arguments: Vec[Operand]
+  ): Either[Fault, Unit] = {
+    val values = execution.values
+    if (execution.calls.size >= 128)
+      return Left(Fault.Backend("SPIR-V function call depth exceeds 128 frames"))
+    var argumentIndex = 0
+    while (argumentIndex < arguments.size) {
+      values.get(id(arguments(argumentIndex))) match {
+        case Some(value) =>
+          val (parameterId, parameterType) = callee.parameters(argumentIndex)
+          values.update(parameterId, retag(value, parameterType))
+        case None => return Left(undefined(arguments(argumentIndex)))
+      }
+      argumentIndex += 1
+    }
+    execution.calls.append(
+      CallFrame(
+        execution.currentFunction,
+        execution.pc + 1,
+        execution.currentLabel,
+        execution.predecessor,
+        id(resultType),
+        id(dest)
+      )
+    )
+    execution.currentFunction = callee
+    execution.pc = callee.start + 1
+    execution.currentLabel = -1
+    execution.predecessor = -1
     InstructionCompleted
   }
 
@@ -5354,8 +5423,14 @@ private object VMInterpreter {
       case Left(error)  => return Left(error)
       case Right(count) => count
     }
-    val subgroups = executions.view.map(_.invocation.subgroupIndex).toSet.toArray.sorted
-    var index     = 0
+    val subgroups =
+      if (
+        executions.exists(execution =>
+          execution.fragmentJoin.nonEmpty || execution.suspended.exists(_.scope == Scope.Subgroup)
+        )
+      ) executions.view.map(_.invocation.subgroupIndex).toSet.toArray.sorted
+      else Array.emptyIntArray
+    var index = 0
     while (index < subgroups.length) {
       val subgroup     = subgroups(index)
       val participants = Vec.from(executions.view.filter(_.invocation.subgroupIndex == subgroup))
@@ -7168,7 +7243,8 @@ private object VMInterpreter {
     case Some(VMValue.Bits(compositeType, lanes)) =>
       compositeLeafRange(program, compositeType, indexes) match {
         case Right((offset, count)) if offset >= 0 && offset + count.raw <= lanes.length =>
-          values.update(id(destination), VMValue.Bits(id(resultType), lanes.slice(offset, offset + count.raw)))
+          if (count.raw == 1) values.updateScalar(id(destination), id(resultType), lanes(offset))
+          else values.update(id(destination), VMValue.Bits(id(resultType), lanes.slice(offset, offset + count.raw)))
           Right(())
         case Right((offset, count)) =>
           Left(
@@ -7194,7 +7270,8 @@ private object VMInterpreter {
     (values.get(id(source)), values.get(id(composite))) match {
       case (Some(VMValue.Bits(_, sourceLanes)), Some(VMValue.Bits(compositeType, compositeLanes))) =>
         compositeLeafRange(program, compositeType, indexes) match {
-          case Right((offset, count)) if sourceLanes.length == count.raw && offset + count.raw <= compositeLanes.length =>
+          case Right((offset, count))
+              if sourceLanes.length == count.raw && offset + count.raw <= compositeLanes.length =>
             val result = compositeLanes.clone()
             Array.copy(sourceLanes, 0, result, offset, count.raw)
             values.update(id(destination), VMValue.Bits(id(resultType), result))
@@ -10164,6 +10241,59 @@ private object VMInterpreter {
     case VMValue.Address(_, pointer) => VMValue.Address(typeId, pointer)
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
+  private def pointerCompare(
+      program: Program,
+      values: InvocationValues,
+      memory: MemoryState,
+      instruction: Instruction
+  ): Either[Fault, Unit] = {
+    val (resultType, dest, left, right) = instruction match {
+      case Instruction.PtrEqual(resultType, dest, left, right)    => (resultType, dest, left, right)
+      case Instruction.PtrNotEqual(resultType, dest, left, right) => (resultType, dest, left, right)
+      case Instruction.PtrDiff(resultType, dest, left, right)     => (resultType, dest, left, right)
+      case _ => return Left(Fault.InvalidTask("expected a pointer comparison"))
+    }
+    (values.get(id(left)), values.get(id(right))) match {
+      case (Some(VMValue.Address(leftType, a)), Some(VMValue.Address(rightType, b)))
+          if leftType == rightType && program.layout.runtimeType(leftType).exists {
+            case RuntimeType.Pointer(storageClass, _) => storageClass != StorageClass.PhysicalStorageBuffer
+            case _                                    => false
+          } =>
+        for {
+          leftAddress  <- memory.pointerInteger(a)
+          rightAddress <- memory.pointerInteger(b)
+          result       <- instruction match {
+            case _: Instruction.PtrDiff =>
+              integerShape(program, id(resultType)) match {
+                case Some((width, 1)) =>
+                  val stride = program.layout.storageTypeSize(a.pointee, a.matrixLayout).raw
+                  if (stride == 0) Left(Fault.InvalidTask("OpPtrDiff requires a nonempty element type"))
+                  else {
+                    val difference = if (a.region == b.region) BigInt(a.offset) - BigInt(b.offset)
+                    else
+                      (BigInt(leftAddress) & ((BigInt(1) << 64) - 1)) - (BigInt(rightAddress) & ((BigInt(1) << 64) - 1))
+                    Right((difference / stride).toLong & mask(width))
+                  }
+                case _ => Left(Fault.InvalidTask("OpPtrDiff requires a scalar integer result"))
+              }
+            case _ if program.layout.runtimeType(id(resultType)).contains(RuntimeType.Bool) =>
+              val equal   = leftAddress == rightAddress
+              val matches = instruction match {
+                case _: Instruction.PtrEqual => equal
+                case _                       => !equal
+              }
+              Right(if (matches) 1L else 0L)
+            case _ => Left(Fault.InvalidTask("pointer equality requires a scalar Boolean result"))
+          }
+        } yield values.update(id(dest), VMValue.Bits(id(resultType), Array(result)))
+      case (None, _) => Left(undefined(left))
+      case (_, None) => Left(undefined(right))
+      case _         =>
+        Left(Fault.InvalidTask(s"${instruction.opcode} requires matching non-PhysicalStorageBuffer pointer types"))
+    }
+  }
+
   // Bitcast packs and unpacks lane bits without allocating intermediate collections.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def bitcast(
@@ -10172,8 +10302,12 @@ private object VMInterpreter {
       resultType: Int,
       sourceLanes: Array[Long]
   ): Either[Fault, Array[Long]] = {
-    val sourceShape = numericShape(program, sourceType)
-    val resultShape = numericShape(program, resultType)
+    def shape(typeId: Int): Option[(Int in 1 ~ 64, Int)] = program.layout.runtimeType(typeId) match {
+      case Some(_: RuntimeType.Pointer) => Some((64, 1))
+      case _                            => numericShape(program, typeId)
+    }
+    val sourceShape = shape(sourceType)
+    val resultShape = shape(resultType)
     (sourceShape, resultShape) match {
       case (Some((sourceWidth, sourceCount)), Some((resultWidth, resultCount)))
           if sourceLanes.length == sourceCount &&
@@ -12099,24 +12233,10 @@ private object VMInterpreter {
   }
 
   private def integerShape(program: Program, typeId: Int): Option[(Int in 1 ~ 64, Int)] =
-    program.layout.runtimeType(typeId) match {
-      case Some(RuntimeType.Integer(width, _))            => Some((width, 1))
-      case Some(RuntimeType.VectorType(component, count)) => program.layout.runtimeType(component) match {
-          case Some(RuntimeType.Integer(width, _)) => Some((width, count.raw))
-          case _                                   => None
-        }
-      case _ => None
-    }
+    program.layout.integerShape(typeId)
 
   private def floatingShape(program: Program, typeId: Int): Option[(Int in (16, 32, 64), Int)] =
-    program.layout.runtimeType(typeId) match {
-      case Some(RuntimeType.Floating(width))              => Some((width, 1))
-      case Some(RuntimeType.VectorType(component, count)) => program.layout.runtimeType(component) match {
-          case Some(RuntimeType.Floating(width)) => Some((width, count.raw))
-          case _                                 => None
-        }
-      case _ => None
-    }
+    program.layout.floatingShape(typeId)
 
   def floatingAddBits(width: Int in (16, 32, 64), left: Long, right: Long): Long = width.raw match {
     case 16 =>

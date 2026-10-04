@@ -10,7 +10,7 @@
 namespace {
 using namespace memory_patterns;
 // Prerequisites apply only to the selected allocation and operation.
-uint64_t prerequisites(const std::string &kind, bool atomic, bool wide) {
+uint64_t prerequisites(const std::string &kind, bool atomic) {
   auto selected = conformance::device_selection().native_handle;
   CUdevice ordinal{};
   check(cuCtxGetDevice(&ordinal));
@@ -20,7 +20,10 @@ uint64_t prerequisites(const std::string &kind, bool atomic, bool wide) {
     check(cuDeviceGetAttribute(&value, name, ordinal));
     return value;
   };
-  if (attribute(CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR) < 8) SKIP("memory PTX fixture requires sm_80 or newer");
+  const auto architecture =
+      attribute(CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR) * 10 + attribute(CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR);
+  if (architecture < 35) SKIP("memory access fixture requires sm_35 or newer");
+  if (atomic && architecture < 70) SKIP("acquire/release memory fixtures require sm_70 or newer");
   if (!attribute(CU_DEVICE_ATTRIBUTE_UNIFIED_ADDRESSING)) SKIP("shared pointer graphs require unified addressing");
   if (kind == "managed" && !attribute(CU_DEVICE_ATTRIBUTE_MANAGED_MEMORY)) SKIP("managed allocations unavailable");
   if (kind != "managed" && !attribute(CU_DEVICE_ATTRIBUTE_CAN_MAP_HOST_MEMORY)) SKIP("mapped host allocations unavailable");
@@ -31,11 +34,11 @@ uint64_t prerequisites(const std::string &kind, bool atomic, bool wide) {
   return selected;
 }
 void execute(const char *kind, unsigned scenario) {
-  const bool wide = scenario >= 11;
-  const auto selected = prerequisites(kind, scenario >= 6, wide);
+  const auto selected = prerequisites(kind, scenario >= 6);
   const unsigned operation = scenario >= 7 ? (scenario - 7) % 4 : 4;
   Backend backend(kind, selected,
-                  operation == 1   ? "fence.ptx"
+                  scenario == 6    ? "exchange.ptx"
+                  : operation == 1 ? "fence.ptx"
                   : operation == 2 ? "contended.ptx"
                   : operation < 4  ? "atomic.ptx"
                                    : "kernel.ptx");

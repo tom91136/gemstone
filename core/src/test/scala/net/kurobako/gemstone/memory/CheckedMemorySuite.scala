@@ -33,7 +33,7 @@ class CheckedMemorySuite extends munit.FunSuite {
 
   test("the final guest address byte can be allocated once") {
     val memory = DynamicAddressMemory(ArrayCheckedMemory.allocate(0), GuestAddress(-1L))
-    val last = allocate(memory, 1)
+    val last   = allocate(memory, 1)
     assertEquals(last.raw, -1L)
     assert(memory.writeInt8(last, 42.toByte).isRight)
     assertEquals(memory.readInt8(last), Right(42.toByte))
@@ -42,7 +42,7 @@ class CheckedMemorySuite extends munit.FunSuite {
 
   test("dynamic allocations can cross the signed Long boundary") {
     val memory = DynamicAddressMemory(ArrayCheckedMemory.allocate(0), GuestAddress(Long.MaxValue - 127L))
-    val first = allocate(memory, 256)
+    val first  = allocate(memory, 256)
     assert(memory.writeInt8(first.offset(128L), 42.toByte).isRight)
     assertEquals(memory.readInt8(first.offset(128L)), Right(42.toByte))
     assertEquals(memory.readBytes(first, 256).map(_(128)), Right(42.toByte))

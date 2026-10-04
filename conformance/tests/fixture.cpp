@@ -66,6 +66,18 @@ int main(int argc, char **argv) {
 #endif
   }
   if (std::filesystem::path(argv[0]).stem() == "conformance-device") {
+    if (std::filesystem::exists("probe-barrier")) {
+#if !defined(_WIN32)
+      std::ofstream("probe-pids") << getppid() << ' ' << getpid();
+#endif
+      std::ofstream("probe-ready") << "ready";
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+      while (!std::filesystem::exists("probe-release")) {
+        if (std::chrono::steady_clock::now() >= deadline) return 3;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+    }
+    if (std::filesystem::exists("probe-failure")) return 7;
     std::cout << R"({"device":"pci-0123456789abcdef0123456789abcdef","environment":{"CL_DEVICE_INDEX":"0"}})";
     return 0;
   }

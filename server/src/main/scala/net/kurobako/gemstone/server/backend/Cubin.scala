@@ -3,9 +3,11 @@ package net.kurobako.gemstone.server.backend
 import cats.syntax.all.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.sass.{Cubin as ELF, *}
 import net.kurobako.gemstone.memory.*
@@ -39,9 +41,37 @@ class Cubin(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBacke
       module: ELF.Module,
       decoded: Map[NonEmpty[String], Vec[DecodedFunction]]
   ) extends RuntimeBackend.Program {
-    private val closed   = AtomicBoolean(false)
-    private val compiled = ConcurrentHashMap[NonEmpty[String], LoadedProgram.Compiled]()
-    private val bindings = ConcurrentHashMap[NonEmpty[String], Binding]()
+    private val closed      = AtomicBoolean(false)
+    private val compiled    = ConcurrentHashMap[NonEmpty[String], LoadedProgram.Compiled]()
+    private val bindings    = ConcurrentHashMap[NonEmpty[String], Binding]()
+    private val relocations = ELF.constantRelocations(module).left.map(ExecutionFailure.Unsupported(_))
+    private val relocated   = ConcurrentHashMap[ELF.ConstantRelocation, (Binding, Binding)]()
+
+    private def relocateBoundConstants(): Either[ExecutionFailure, Unit] = relocations.flatMap { entries =>
+      entries.foldLeft[Either[ExecutionFailure, Unit]](Right(())) { (result, relocation) =>
+        result.flatMap { _ =>
+          (Option(bindings.get(constantName(relocation.section))), Option(bindings.get(relocation.target))) match {
+            case (Some(destination), Some(source))
+                if Option(relocated.get(relocation)) != Some(destination -> source) =>
+              source.memory match {
+                case addresses: AddressSpace => addresses.address(source.region, source.offset)
+                    .left.map(ExecutionFailure.fromFault(_)).flatMap { address =>
+                      destination.memory.write(
+                        destination.region,
+                        destination.offset + relocation.offset.toLong,
+                        LittleEndian.toVec(address.offset(relocation.addend).raw, 8)
+                      )
+                        .left.map(ExecutionFailure.fromFault(_))
+                    }.map { _ =>
+                      val _ = relocated.put(relocation, destination -> source)
+                    }
+                case _ => Left(ExecutionFailure.Unsupported("cubin relocation requires address-space capable memory"))
+              }
+            case _ => Right(())
+          }
+        }
+      }
+    }
 
     private def openProgram[A](body: => Either[ExecutionFailure, A]): Either[ExecutionFailure, A] =
       if (closed.get()) Left(ExecutionFailure.Failed("cubin program is closed")) else body
@@ -56,9 +86,9 @@ class Cubin(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBacke
         Vec.empty
       ).left.map(_.raw)
 
-    private def globalSize(name: String): Option[Long >= 0] =
-      if (name.startsWith("__sass_const")) {
-        name.stripPrefix("__sass_const").toIntOption.flatMap(index =>
+    private def globalSize(name: NonEmpty[String]): Option[Long >= 0] =
+      if (name.raw.startsWith("__sass_const")) {
+        name.raw.stripPrefix("__sass_const").toIntOption.flatMap(index =>
           module.sections.find(section =>
             section.index.raw == index && section.name.matches("\\.nv\\.constant[1-9][0-9]*(?:\\..*)?")
           ).map(_.size.toLong.widen[Long >= 0])
@@ -101,7 +131,7 @@ class Cubin(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBacke
               containsPointers = true
             )
           )),
-          registerCount = Some((module.sections(kernel.section.raw).info >>> 24).unsafe[Int >= 0])
+          registerCount = Some(kernel.registerCount)
         ).left.map(error => ExecutionFailure.InvalidRequest(error.toString))
       }
     }
@@ -128,7 +158,8 @@ class Cubin(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBacke
                   global.offset.toLong.widen[Long >= 0]
                 ))
               ).left.map(ExecutionFailure.InvalidRequest(_))
-            case Some(global) => GlobalImage.validated(global.bytes.nonNegativeSize.toLong.widen[Long >= 0], global.bytes)
+            case Some(global) =>
+              GlobalImage.validated(global.bytes.nonNegativeSize.toLong.widen[Long >= 0], global.bytes)
                 .left.map(ExecutionFailure.InvalidRequest(_))
             case None => Left(ExecutionFailure.NotFound(s"cubin global '${name.raw}' is not present"))
           }
@@ -142,7 +173,7 @@ class Cubin(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBacke
         regionSize: Long > 0,
         memory: Memory
     ): Either[ExecutionFailure, Unit] = openProgram {
-      globalSize(name.raw).toRight(ExecutionFailure.NotFound(s"cubin global '${name.raw}' is not present"))
+      globalSize(name).toRight(ExecutionFailure.NotFound(s"cubin global '${name.raw}' is not present"))
         .flatMap { size =>
           Either.cond(
             offset.raw <= regionSize.raw && size.raw <= regionSize.raw - offset.raw,
@@ -153,9 +184,18 @@ class Cubin(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBacke
           memory match {
             case addresses: AddressSpace => addresses.address(region, offset)
                 .left.map(ExecutionFailure.fromFault(_))
-                .map { _ =>
-                  val _ = bindings.put(name, Binding(region, offset, regionSize, memory))
+                .flatMap { _ =>
+                  val previous = Option(bindings.put(name, Binding(region, offset, regionSize, memory)))
                   compiled.clear()
+                  // Unused library catalogues can contain unsupported device relocations. Compilation still
+                  // validates the entire module before execution; supported data relocations apply during binding.
+                  relocations.fold(_ => Right(()), _ => relocateBoundConstants()).left.map { error =>
+                    previous match {
+                      case Some(binding) => val _ = bindings.put(name, binding)
+                      case None          => val _ = bindings.remove(name)
+                    }
+                    error
+                  }
                 }
             case _ => Left(ExecutionFailure.Unsupported("cubin global binding requires address-space capable memory"))
           }
@@ -169,7 +209,7 @@ class Cubin(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBacke
     ): Either[ExecutionFailure, Unit] = openProgram {
       Option(bindings.get(name)).toRight(ExecutionFailure.NotFound(s"cubin global '${name.raw}' is not bound"))
         .flatMap { binding =>
-          val size: Long >= 0 = globalSize(name.raw).getOrElse(0L)
+          val size: Long >= 0 = globalSize(name).getOrElse(0L)
           Either.cond(
             offset.raw <= size.raw && bytes.size.toLong <= size.raw - offset.raw,
             (),
@@ -205,8 +245,13 @@ class Cubin(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBacke
                 case _ => None
               }
             }.flatten.toMap
-            LoadedProgram.compile(module, kernel, functions, globalSymbols)
-              .left.map(error => ExecutionFailure.Unsupported(error.message))
+            relocateBoundConstants().flatMap { _ =>
+              ELF.relocateConstants(module, globalSymbols)
+                .left.map(ExecutionFailure.Unsupported(_)).flatMap { resolved =>
+                  LoadedProgram.compile(resolved, kernel, functions, globalSymbols)
+                    .left.map(error => ExecutionFailure.Unsupported(error.message))
+                }
+            }
           }
         }.map(kernel => Option(compiled.putIfAbsent(name, kernel)).getOrElse(kernel))
       }(Right(_))
@@ -230,6 +275,7 @@ class Cubin(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBacke
     override def close(): Unit = if (closed.compareAndSet(false, true)) {
       compiled.clear()
       bindings.clear()
+      relocated.clear()
       super.close()
     }
   }

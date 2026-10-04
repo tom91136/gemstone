@@ -46,7 +46,24 @@ object Assembler {
     )
     attempts = forms.map { form =>
       for {
-        bindings <- SASSFormatParser.parse(database, form, address.raw, text)
+        encodingText <-
+          if (
+            instruction.mnemonic == "P2R" && instruction.operands.size == 3 &&
+            SASSFormatBindings.fields(form.syntax, includeMarkedOptionals = false).exists(field =>
+              Set(
+                NVDisasm.FieldKind.ConditionRegisterBank,
+                NVDisasm.FieldKind.PredicateRegister
+              )(NVDisasm.fieldKind(field.kind))
+            )
+          )
+            Instruction.decode(
+              instruction.mnemonic.raw,
+              instruction.modifiers,
+              instruction.operands.patch(1, Vec(Operand.Symbol("PR")), 0),
+              instruction.guard
+            ).flatMap(Printer.print(_))
+          else Right(text)
+        bindings <- SASSFormatParser.parse(database, form, address.raw, encodingText)
         opcode   <- form.opcodes.find(value => bindings.get("Opcode").contains(value.value))
           .toRight(s"missing opcode binding for ${form.name}")
         bytes   <- Encoder.encode(database, form, opcode.name, bindings)

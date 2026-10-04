@@ -10,7 +10,7 @@ import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.*
 
 class Hmma884Suite extends munit.FunSuite {
-  private val Layouts = Vec("row-col", "row-row", "col-col", "col-row")
+  private val Layouts = Vec.nonEmpty("row-col", "row-row", "col-col", "col-row")
 
   private val listings: Map[(String, String), String] = Map(
     ("f16", "col-col") -> Hmma884Fixtures.hmma884Sm70Hmma884F16ColColSm70,
@@ -39,10 +39,10 @@ class Hmma884Suite extends munit.FunSuite {
   private def module(kind: String, layout: String): Cubin.Module =
     SASSFixture.module(
       70,
-      Vec(SASSFixture.Kernel(
+      Vec.nonEmpty(SASSFixture.Kernel(
         kernelName(kind, layout),
         352,
-        Vec((0, 8), (8, 8), (16, 8), (24, 8)),
+        Vec.nonEmpty((0, 8), (8, 8), (16, 8), (24, 8)),
         registers = if (kind == "f16") 20 else 24
       ))
     )
@@ -114,7 +114,7 @@ class Hmma884Suite extends munit.FunSuite {
           kernel.unsafe[NonEmpty[String]],
           LaunchGeometry.Dimensions(32, 1, 1),
           LaunchGeometry.Dimensions.One,
-          Vec(
+          Vec.nonEmpty(
             KernelTask.Argument.Memory(output, 0L),
             KernelTask.Argument.Memory(left, 0L),
             KernelTask.Argument.Memory(right, 0L),
@@ -131,13 +131,16 @@ class Hmma884Suite extends munit.FunSuite {
   }
 
   test("paired execution gives each program fresh poisoned output") {
-    val image = SASSFixture.module(89, Vec(SASSFixture.Kernel("probe", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)))))
+    val image = SASSFixture.module(
+      89,
+      Vec.nonEmpty(SASSFixture.Kernel("probe", 352, Vec.nonEmpty((0, 8), (8, 8), (16, 8), (24, 8))))
+    )
     val empty = SASSFixture(
       image,
       image.kernels.head,
-      Vec(DecodedFunction(
+      Vec.nonEmpty(DecodedFunction(
         "probe",
-        Vec(SASSFixture.instruction(0, "EXIT", Vec.empty, None))
+        Vec.nonEmpty(SASSFixture.instruction(0, "EXIT", Vec.empty, None))
       ))
     )
     val ptx = """.version 8.0
@@ -150,20 +153,24 @@ class Hmma884Suite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val results = runPrograms(Vec(Left(ptx), Right(empty)), "probe", (Vec(0.toByte), Vec(0.toByte), Vec(0.toByte), 4))
+    val results = runPrograms(
+      Vec.nonEmpty(Left(ptx), Right(empty)),
+      "probe",
+      (Vec.nonEmpty(0.toByte), Vec.nonEmpty(0.toByte), Vec.nonEmpty(0.toByte), 4)
+    )
     assertEquals(results(0), LittleEndian.toVec(42, 4))
     assertEquals(results(1), Vec.fill(4)(0xa5.toByte))
   }
 
-  private def compareDirectAndLowered(kind: String, layout: String): Unit = {
-    val image            = module(kind, layout)
+  private def compareDirectAndLowered(kind: String, layout: String, sm: Int >= 35 = 70): Unit = {
+    val image            = module(kind, layout).copy(sm = sm)
     val name             = kernelName(kind, layout)
     val kernel           = image.kernels.find(_.name == name).getOrElse(fail("HMMA probe is missing"))
     val sass             = function(kind, layout)
-    val lowered          = SASSFixture(image, kernel, Vec(sass))
+    val lowered          = SASSFixture(image, kernel, Vec.nonEmpty(sass))
     val directPtx        = directSources((kind, layout))
     val (direct, actual) = runPrograms(
-      Vec(Left(directPtx), Right(lowered)),
+      Vec.nonEmpty(Left(directPtx), Right(lowered)),
       name,
       matrixInputs(kind)
     ) match {
@@ -176,7 +183,8 @@ class Hmma884Suite extends munit.FunSuite {
   private def checkLayouts(kind: String, stepsCount: Int): Unit = Layouts.foreach { layout =>
     val instructions = function(kind, layout).instructions
     val steps = instructions.filter(i => i.mnemonic.raw == "HMMA" && i.modifiers.headOption.exists(_.name == "884"))
-    val expectedSteps = if (stepsCount == 4) Vec("STEP0", "STEP1", "STEP2", "STEP3") else Vec("STEP0", "STEP1")
+    val expectedSteps =
+      if (stepsCount == 4) Vec.nonEmpty("STEP0", "STEP1", "STEP2", "STEP3") else Vec.nonEmpty("STEP0", "STEP1")
     assertEquals(steps.map(_.modifiers.last.name), expectedSteps, s"$kind $layout step sequence")
     assert(steps.forall(i => i.operands.head == i.operands(3)), s"$kind $layout should exercise in-place D/C pairs")
     val Array(layoutA, layoutB) = layout.split('-')
@@ -204,10 +212,21 @@ class Hmma884Suite extends munit.FunSuite {
     checkLayouts("f16", 2)
   }
 
+  test("sm75 HMMA.884 retains Volta lane partitions for both accumulator formats") {
+    Vec.nonEmpty("f16", "f32").foreach { kind =>
+      Layouts.foreach(layout => compareDirectAndLowered(kind, layout, 75))
+    }
+  }
+
   test("sm70 HMMA.884 treats RZ accumulator operands as a zero C pair") {
     val image = SASSFixture.module(
       70,
-      Vec(SASSFixture.Kernel("hmma884_f32_probe", 352, Vec((0, 8), (8, 8), (16, 8), (24, 8)), registers = 22))
+      Vec.nonEmpty(SASSFixture.Kernel(
+        "hmma884_f32_probe",
+        352,
+        Vec.nonEmpty((0, 8), (8, 8), (16, 8), (24, 8)),
+        registers = 22
+      ))
     )
     val kernel = image.kernels.find(_.name == "hmma884_f32_probe").getOrElse(fail("zero-C probe is missing"))
     val sass   = ListingDecoder.parse(
@@ -217,12 +236,12 @@ class Hmma884Suite extends munit.FunSuite {
     ).fold(fail(_), _.head)
     assert(sass.instructions.filter(i => i.mnemonic.raw == "HMMA" && i.modifiers.headOption.exists(_.name == "884"))
       .forall(_.operands(3) == SASSFixture.operand("RZ")))
-    val lowered         = SASSFixture(image, kernel, Vec(sass))
+    val lowered         = SASSFixture(image, kernel, Vec.nonEmpty(sass))
     val inputs          = matrixInputs("f32")
     val direct          = Hmma884Fixtures.hmma884Sm70Hmma884F32ZeroSource
     val actual          = lowered
     val (expected, got) =
-      runPrograms(Vec(Left(direct), Right(actual)), "hmma884_f32_probe", inputs) match {
+      runPrograms(Vec.nonEmpty(Left(direct), Right(actual)), "hmma884_f32_probe", inputs) match {
         case Vec(reference, result) => reference -> result
         case other                  => fail(s"expected two zero-C results, got ${other.size}")
       }
@@ -249,7 +268,7 @@ class Hmma884Suite extends munit.FunSuite {
     val badSelectorSuffix    =
       original.rewrite(operands = original.operands.updated(1, SASSFixture.operand("R2.ROW.H0_H0")))
     val badBoundaryRegister = original.rewrite(operands = original.operands.updated(0, SASSFixture.operand("R254")))
-    Vec(
+    Vec.nonEmpty(
       badStep,
       badLayout,
       badTypes,
@@ -259,8 +278,8 @@ class Hmma884Suite extends munit.FunSuite {
       badBoundaryRegister
     ).foreach { invalid =>
       val changed = f32.copy(instructions = f32.instructions.map(i => if (i == original) invalid else i))
-      assert(SASSFixture.lower(image, kernel, Vec(changed)).isLeft)
+      assert(SASSFixture.lower(image, kernel, Vec.nonEmpty(changed)).isLeft)
     }
-    assert(SASSFixture.lower(image.copy(sm = 75), kernel, Vec(f32)).isLeft)
+    assert(SASSFixture.lower(image.copy(sm = 80), kernel, Vec.nonEmpty(f32)).isLeft)
   }
 }

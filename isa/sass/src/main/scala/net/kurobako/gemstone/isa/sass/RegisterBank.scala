@@ -9,7 +9,7 @@ object RegisterBank {
   def fromSpelling(value: String): RegisterBank  = known.find(_.spelling == value).getOrElse(Unknown(nonEmpty(value)))
   def capacity(value: RegisterBank): Option[Int] = value match {
     case R          => Some(256)
-    case UR         => Some(64)
+    case UR         => Some(256)
     case B          => Some(16)
     case SB         => Some(6)
     case _: Unknown => None

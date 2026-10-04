@@ -40,14 +40,14 @@ class CrossWorkgroupSuite extends munit.FunSuite {
     KernelTask.Argument.Scalar(LittleEndian.toVec(value.toLong, 4))
   private def pointer(region: AllocationId)                      = KernelTask.Argument.Memory(region, 0L)
   private def prepared(name: String, size: Int, code: Vec[Long]) =
-    VMCompiler.compile(CodeObjectKernel(
+    VMCompiler().compile(CodeObjectKernel(
       name = name,
       target = Target("gfx1030"),
       kernargSize = size,
       groupSegmentSize = 512,
       privateSegmentSize = 0,
       computePgmRsrc2 = 0x80,
-      kernelCodeProperties = 0x8,
+      kernelCodeProperties = 0x8 | EncodingConstants.KernelCodeProperty.ENABLE_WAVEFRONT_SIZE32,
       code = code.flatMap(word => LittleEndian.toVec(word, 4))
     )).toOption.get
   // Write lane values through private group LDS; publish one marker before the group barrier.

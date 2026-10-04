@@ -52,6 +52,26 @@ TEST_CASE("OpenCL device exposes half precision arithmetic", "[opencl]") {
   REQUIRE((vectorWidth > 0));
 }
 
+TEST_CASE("OpenCL IL queries expose every supported SPIR-V revision consistently", "[opencl]") {
+  cl_platform_id platform = nullptr;
+  cl_device_id device = nullptr;
+  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
+  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  size_t size = 0;
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_IL_VERSION, 0, nullptr, &size) == CL_SUCCESS));
+  std::string versions(size, '\0');
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_IL_VERSION, versions.size(), versions.data(), nullptr) == CL_SUCCESS));
+  REQUIRE((std::string(versions.c_str()) == "SPIR-V_1.0 SPIR-V_1.1 SPIR-V_1.2 SPIR-V_1.3 SPIR-V_1.4 SPIR-V_1.5 SPIR-V_1.6"));
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_ILS_WITH_VERSION, 0, nullptr, &size) == CL_SUCCESS));
+  std::array<cl_name_version, 7> namedVersions{};
+  REQUIRE((size == sizeof(namedVersions)));
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_ILS_WITH_VERSION, sizeof(namedVersions), namedVersions.data(), nullptr) == CL_SUCCESS));
+  for (cl_uint minor = 0; minor < namedVersions.size(); ++minor) {
+    REQUIRE((std::string(namedVersions[minor].name) == "SPIR-V"));
+    REQUIRE((namedVersions[minor].version == CL_MAKE_VERSION(1, minor, 0)));
+  }
+}
+
 TEST_CASE("OpenCL generated source converts to SPIR-V", "[opencl]") {
   gemstone_test::RpcFixture server;
   const gemstone_test::RpcEnvironment environment(server);

@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -11,8 +11,8 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class VulkanConversionSuite extends munit.FunSuite {
   for {
-    width  <- Seq[Int in (32, 64)](32, 64)
-    rawWidth = width.raw
+    width <- Seq[Int in (32, 64)](32, 64)
+    rawWidth  = width.raw
     byteWidth = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     signed <- Seq(0, 1)
   }

@@ -1,20 +1,25 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import execution.*
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
-import scala.compiletime.testing.typeCheckErrors
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.vm.*
+import scala.compiletime.testing.typeCheckErrors
 
 class RuntimeDomainSuite extends munit.FunSuite {
   test("pointer leaf offsets retain nonnegative input and output contracts") {
-    assertEquals(typeCheckErrors("""
+    assertEquals(
+      typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       import net.kurobako.gemstone.collection.*
       import net.kurobako.gemstone.vm.Fault
       def offsets(layout: VMTypeLayout): Either[Fault, Vec[(Long >= 0, Int)]] =
         layout.pointerLeafOffsets(1, 0L)
-    """), Nil)
+    """),
+      Nil
+    )
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       def invalid(layout: VMTypeLayout) = layout.pointerLeafOffsets(1, -1L)
@@ -29,7 +34,7 @@ class RuntimeDomainSuite extends munit.FunSuite {
       Instruction.TypeArray(ref(4), ref(2), ref(3)),
       Instruction.TypeStruct(ref(5), Vec(ref(1), ref(4)))
     )).fold(error => fail(error.message), identity)
-    val layout = VMTypeLayout(ir)
+    val layout  = VMTypeLayout(ir)
     val largest = layout.pointerLeafOffsets(4, Long.MaxValue - 8L)
     assertEquals(largest.map(_.map(_._1.raw)), Right(Vec(Long.MaxValue - 8L, Long.MaxValue)))
     assertEquals(layout.pointerLeafOffsets(5, 16L).map(_.map(_._1.raw)), Right(Vec(24L, 32L)))
@@ -39,11 +44,14 @@ class RuntimeDomainSuite extends munit.FunSuite {
   }
 
   test("matrix storage offsets preserve nonnegative evidence") {
-    assertEquals(typeCheckErrors("""
+    assertEquals(
+      typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       def offsets(layout: VMTypeLayout): Vector[(Long >= 0, Int)] =
         layout.matrixStorageLeaves(1, None)
-    """), Nil)
+    """),
+      Nil
+    )
   }
 
   test("matrix offset refinements survive cached row and column layouts") {
@@ -53,12 +61,14 @@ class RuntimeDomainSuite extends munit.FunSuite {
       Instruction.TypeMatrix(ref(3), ref(2), lit(2))
     )).fold(error => fail(error.message), identity)
     val layout = VMTypeLayout(ir)
-    for ((rowMajor, expected) <- Seq(
-      true -> Vector(0L, 16L, 32L, 4L, 20L, 36L),
-      false -> Vector(0L, 4L, 8L, 16L, 20L, 24L)
-    )) {
-      val storage = Some(VMIR.MatrixLayout(16, rowMajor))
-      val first: Vector[(Long >= 0, Int)] = layout.matrixStorageLeaves(3, storage)
+    for (
+      (rowMajor, expected) <- Seq(
+        true  -> Vector(0L, 16L, 32L, 4L, 20L, 36L),
+        false -> Vector(0L, 4L, 8L, 16L, 20L, 24L)
+      )
+    ) {
+      val storage                          = Some(VMIR.MatrixLayout(16, rowMajor))
+      val first: Vector[(Long >= 0, Int)]  = layout.matrixStorageLeaves(3, storage)
       val cached: Vector[(Long >= 0, Int)] = layout.matrixStorageLeaves(3, storage)
       assertEquals(first.map(_._1.raw), expected)
       assertEquals(cached, first)
@@ -66,12 +76,15 @@ class RuntimeDomainSuite extends munit.FunSuite {
   }
 
   test("leaf counts preserve nonnegative evidence through IR and layout") {
-    assertEquals(typeCheckErrors("""
+    assertEquals(
+      typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       import net.kurobako.gemstone.vm.Fault
       val count: Either[Fault, Int >= 0] = VMIR.scalarLeafCount(Map.empty, 1)
       def cached(layout: VMTypeLayout): Either[Fault, Int >= 0] = layout.scalarLeafCount(1)
-    """), Nil)
+    """),
+      Nil
+    )
   }
 
   private def module(instructions: Instruction*): Module = Module(
@@ -95,22 +108,31 @@ class RuntimeDomainSuite extends munit.FunSuite {
   }
 
   test("leaf-count products preserve zero and the largest supported result") {
-    import VMIR.RuntimeType
-    def leaves(count: Long >= 0): Either[net.kurobako.gemstone.vm.Fault, Int >= 0] = VMIR.scalarLeafCount(Map(
-      1 -> RuntimeType.Integer(64, false),
-      2 -> RuntimeType.VectorType(1, 4),
-      3 -> RuntimeType.Array(2, count)
-    ), 3)
+    import VMIR.*
+    def leaves(count: Long >= 0): Either[Fault, Int >= 0] = VMIR.scalarLeafCount(
+      Map(
+        1 -> RuntimeType.Integer(64, false),
+        2 -> RuntimeType.VectorType(1, 4),
+        3 -> RuntimeType.Array(2, count)
+      ),
+      3
+    )
     assertEquals(leaves(0L).map(_.raw), Right(0))
     assertEquals(leaves(1L).map(_.raw), Right(4))
     // Largest array length whose four scalar leaves fit in an Int.
     assertEquals(leaves(536870911L).map(_.raw), Right(Int.MaxValue - 3))
     assert(leaves(536870912L).isLeft)
     assert(leaves(Long.MaxValue).isLeft)
-    assertEquals(VMIR.scalarLeafCount(Map(
-      1 -> RuntimeType.Structure(Vec.empty),
-      2 -> RuntimeType.Array(1, Long.MaxValue)
-    ), 2).map(_.raw), Right(0))
+    assertEquals(
+      VMIR.scalarLeafCount(
+        Map(
+          1 -> RuntimeType.Structure(Vec.empty),
+          2 -> RuntimeType.Array(1, Long.MaxValue)
+        ),
+        2
+      ).map(_.raw),
+      Right(0)
+    )
   }
 
   test("nested offsets are checked before decoding bytes") {
@@ -124,7 +146,7 @@ class RuntimeDomainSuite extends munit.FunSuite {
       Instruction.MemberDecorate(ref(4), lit(0), operand(OperandKind.Decoration, Decoration.Offset, Int.MaxValue - 7))
     )).fold(error => fail(error.message), identity)
     val runtime = VMProgramRuntime(ir)
-    assert(runtime.decode(4, net.kurobako.gemstone.binary.LittleEndian.toArray(42L, 8)).isLeft)
+    assert(runtime.decode(4, LittleEndian.toArray(42L, 8)).isLeft)
     assert(runtime.encode(VMValue.Bits(4, Array(42L))).isLeft)
   }
 
@@ -142,7 +164,7 @@ class RuntimeDomainSuite extends munit.FunSuite {
     assertEquals(encoded.length, 24)
     runtime.decode(2, encoded).fold(error => fail(error.message), identity) match {
       case VMValue.Bits(_, lanes) => assertEquals(lanes.toSeq, Seq(1L, 2L))
-      case _ => fail("expected structure bits")
+      case _                      => fail("expected structure bits")
     }
   }
 
@@ -156,8 +178,8 @@ class RuntimeDomainSuite extends munit.FunSuite {
     assertEquals(layout.typeSize(2).raw, 32)
     assertEquals(layout.structMemberOffset(2, Vec(1, 1), 1).raw, 24)
     val runtime = VMProgramRuntime(ir)
-    val bytes = runtime.encode(VMValue.Bits(2, Array(1L, 2L))).fold(error => fail(error.message), identity)
-    assertEquals(net.kurobako.gemstone.binary.LittleEndian.decode(bytes, 24, 8), 2L)
+    val bytes   = runtime.encode(VMValue.Bits(2, Array(1L, 2L))).fold(error => fail(error.message), identity)
+    assertEquals(LittleEndian.decode(bytes, 24, 8), 2L)
   }
 
   test("aggregate decoding returns a fault on offset overflow") {
@@ -184,9 +206,9 @@ class RuntimeDomainSuite extends munit.FunSuite {
       val ir = VMCompiler.compileUnchecked(module(
         Instruction.TypeInt(ref(1), lit(bits), lit(0))
       )).fold(error => fail(error.message), identity)
-      val layout = VMTypeLayout(ir)
+      val layout                = VMTypeLayout(ir)
       val width: ScalarBitWidth = layout.scalarWidth(1)
-      val bytes: Int in 1 ~ 8 = width.toScalarByteWidth
+      val bytes: Int in 1 ~ 8   = width.toScalarByteWidth
       assertEquals(bytes.raw, bits / 8)
       assertEquals(layout.scalarMemoryWidth(1).map(_.raw), Right(bits / 8))
       ir.types(1) match {
@@ -195,13 +217,13 @@ class RuntimeDomainSuite extends munit.FunSuite {
           assertEquals(aligned.raw, bits)
         case _ => fail("expected integer type")
       }
-      val runtime = VMProgramRuntime(ir)
+      val runtime  = VMProgramRuntime(ir)
       val expected = if (bits == 64) -1L else (1L << bits) - 1L
-      val encoded = runtime.encode(VMValue.Bits(1, Array(expected))).fold(error => fail(error.message), identity)
+      val encoded  = runtime.encode(VMValue.Bits(1, Array(expected))).fold(error => fail(error.message), identity)
       assertEquals(encoded.length, bytes.raw)
       runtime.decode(1, encoded).fold(error => fail(error.message), identity) match {
         case VMValue.Bits(_, lanes) => assertEquals(lanes.toSeq, Seq(expected))
-        case _ => fail("expected integer bits")
+        case _                      => fail("expected integer bits")
       }
     }
     for (bits <- Seq(0, 1, 7, 12, 65))

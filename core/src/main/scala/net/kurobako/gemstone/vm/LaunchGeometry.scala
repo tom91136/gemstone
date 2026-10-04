@@ -144,9 +144,12 @@ case class LaunchGeometry private (
     try
       Right(
         LongCoordinates(
-          globalOffset.x.toLong.widen[Long >= 0] + group.x.toLong.widen[Long >= 0] * groupSize.x.toLong.widen[Long > 0] + local.x.toLong.widen[Long >= 0],
-          globalOffset.y.toLong.widen[Long >= 0] + group.y.toLong.widen[Long >= 0] * groupSize.y.toLong.widen[Long > 0] + local.y.toLong.widen[Long >= 0],
-          globalOffset.z.toLong.widen[Long >= 0] + group.z.toLong.widen[Long >= 0] * groupSize.z.toLong.widen[Long > 0] + local.z.toLong.widen[Long >= 0]
+          globalOffset.x.toLong.widen[Long >= 0] +
+            group.x.toLong.widen[Long >= 0] * groupSize.x.toLong.widen[Long > 0] + local.x.toLong.widen[Long >= 0],
+          globalOffset.y.toLong.widen[Long >= 0] +
+            group.y.toLong.widen[Long >= 0] * groupSize.y.toLong.widen[Long > 0] + local.y.toLong.widen[Long >= 0],
+          globalOffset.z.toLong.widen[Long >= 0] +
+            group.z.toLong.widen[Long >= 0] * groupSize.z.toLong.widen[Long > 0] + local.z.toLong.widen[Long >= 0]
         )
       )
     catch {

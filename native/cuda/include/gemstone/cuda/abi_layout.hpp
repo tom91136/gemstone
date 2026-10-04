@@ -134,6 +134,11 @@ struct CudaMemcpy3DV1 {
   uint32_t depth;
 };
 
+struct CudaLaunchAttribute {
+  int32_t id;
+  alignas(uint64_t) uint8_t value[64];
+};
+
 struct CudaLaunchConfig {
   uint32_t grid_x;
   uint32_t grid_y;
@@ -143,7 +148,7 @@ struct CudaLaunchConfig {
   uint32_t block_z;
   uint32_t shared_memory_bytes;
   void *stream;
-  void *attributes;
+  const CudaLaunchAttribute *attributes;
   uint32_t attribute_count;
 };
 

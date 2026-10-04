@@ -163,6 +163,19 @@ bool resolveAllocation(gemstone_hsa_aql_runtime &runtime, uint64_t pointer, gems
   return false;
 }
 
+bool resolveArgumentBuffer(gemstone_hsa_aql_runtime &runtime, const KernelBinding &binding, uint64_t address,
+                           gemstone_hsa_argument_buffer &buffer) {
+  if (address == 0) return binding.kernarg_size == 0;
+  std::lock_guard<std::mutex> guard(runtime.lock);
+  for (const auto &[base, allocation] : runtime.allocations) {
+    if (address >= base && address - base < allocation.size && binding.kernarg_size <= allocation.size - (address - base)) {
+      buffer = {allocation.id, address - base};
+      return true;
+    }
+  }
+  return false;
+}
+
 bool resolveArguments(gemstone_hsa_aql_runtime &runtime, const KernelBinding &binding, uint64_t kernarg_address,
                       std::vector<gemstone_hsa_argument> &arguments) {
   if (binding.kernarg_size != 0 && kernarg_address == 0) {
@@ -579,13 +592,10 @@ extern "C" int gemstone_hsa_aql_runtime_dispatch_allocations(gemstone_hsa_aql_ru
   const auto append = [&](uint64_t id) {
     if (!(ids ^ contains(id))) ids.push_back(id);
   };
-  if (binding.kernarg_size != 0) {
-    gemstone_hsa_argument kernarg{};
-    if (!resolveAllocation(*runtime, dispatch.kernarg_address, kernarg)) {
-      return reject(kernelError(binding, "kernarg allocation pointer is not registered"));
-    }
-    append(kernarg.allocation_id);
-  }
+  gemstone_hsa_argument_buffer kernarg{};
+  if (!resolveArgumentBuffer(*runtime, binding, dispatch.kernarg_address, kernarg))
+    return reject(kernelError(binding, "kernarg allocation pointer is invalid"));
+  if (kernarg.allocation_id != 0) append(kernarg.allocation_id);
   for (const auto &argument : arguments)
     if (argument.kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION) append(argument.allocation_id);
 
@@ -686,8 +696,10 @@ extern "C" gemstone_hsa_packet_result gemstone_hsa_aql_runtime_consume(uint64_t,
   }
   if (!found_binding) return failPacket(*runtime, dispatch.completion_signal, -2, "kernel object is not installed");
 
+  gemstone_hsa_argument_buffer kernarg{};
   std::vector<gemstone_hsa_argument> arguments;
-  if (!resolveArguments(*runtime, binding, dispatch.kernarg_address, arguments))
+  if (!resolveArgumentBuffer(*runtime, binding, dispatch.kernarg_address, kernarg)
+      || !resolveArguments(*runtime, binding, dispatch.kernarg_address, arguments))
     return failPacket(*runtime, dispatch.completion_signal, -5, "kernarg buffer or allocation pointer is invalid");
 
   const gemstone_hsa_dimensions group_size{dispatch.workgroup_size_x, dispatch.workgroup_size_y, dispatch.workgroup_size_z};
@@ -702,7 +714,7 @@ extern "C" gemstone_hsa_packet_result gemstone_hsa_aql_runtime_consume(uint64_t,
   if (runtime->executor.launch(runtime->executor.context, binding.program_id, binding.name.c_str(), group_size, group_count,
                                gemstone_hsa_dimensions{dispatch.grid_size_x, dispatch.grid_size_y, dispatch.grid_size_z},
                                dispatch.private_segment_size, dispatch.group_segment_size, arguments.data(),
-                               static_cast<uint32_t>(arguments.size()), &completion_id)
+                               static_cast<uint32_t>(arguments.size()), kernarg.allocation_id == 0 ? nullptr : &kernarg, &completion_id)
           != 0
       || completion_id == 0)
     return failPacket(*runtime, dispatch.completion_signal, -3, kernelError(binding, executorError(*runtime)));

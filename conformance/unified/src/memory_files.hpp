@@ -10,6 +10,8 @@
   #include "atomic_sass_image.hpp"
   #include "contended_image.hpp"
   #include "contended_sass_image.hpp"
+  #include "exchange_image.hpp"
+  #include "exchange_sass_image.hpp"
   #include "fence_image.hpp"
   #include "fence_sass_image.hpp"
   #include "kernel_sass_image.hpp"
@@ -26,12 +28,14 @@ inline std::vector<char> image(const char *name) {
     const bool sass = code && (std::string_view(code) == "sass" || std::string_view(code) == "cubin");
     if (sass) {
       if (std::string(name) == "mma884.ptx") return {mma884_sass_image.begin(), mma884_sass_image.end()};
+      if (std::string(name) == "exchange.ptx") return {exchange_sass_image.begin(), exchange_sass_image.end()};
       if (std::string(name) == "atomic.ptx") return {atomic_sass_image.begin(), atomic_sass_image.end()};
       if (std::string(name) == "fence.ptx") return {fence_sass_image.begin(), fence_sass_image.end()};
       if (std::string(name) == "contended.ptx") return {contended_sass_image.begin(), contended_sass_image.end()};
       return {kernel_sass_image.begin(), kernel_sass_image.end()};
     }
     if (std::string(name) == "mma884.ptx") return {mma884_ptx_image.begin(), mma884_ptx_image.end()};
+    if (std::string(name) == "exchange.ptx") return {exchange_image.begin(), exchange_image.end()};
     if (std::string(name) == "atomic.ptx") return {atomic_image.begin(), atomic_image.end()};
     if (std::string(name) == "fence.ptx") return {fence_image.begin(), fence_image.end()};
     if (std::string(name) == "contended.ptx") return {contended_image.begin(), contended_image.end()};

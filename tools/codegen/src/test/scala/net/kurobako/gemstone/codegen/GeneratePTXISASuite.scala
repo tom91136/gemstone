@@ -90,6 +90,46 @@ class GeneratePTXISASuite extends munit.FunSuite {
     }
   }
 
+  test("numeric cache sizes in qualified modifiers remain typed") {
+    inDirectory { root =>
+      val input = write(
+        root,
+        "ptx.html",
+        section(
+          "async-copy",
+          "cp.async.ca.shared.global{.level}.type [dst], [src], size;\n.level = { .L2::64B, .L2::128B, .L2::256B };\n.type = { .b32 };",
+          "cp.async.ca.shared.global.L2::128B [dst], [src], 16;"
+        ) + padding
+      )
+      val output = root.resolve("output")
+      generate("instructions", input, output)
+      val modifiers = source(output, "Modifier")
+      for (size <- List(64, 128, 256))
+        assert(modifiers.contains(s"extends Modifier(\"L2::${size}B\")"))
+      val instructions = source(output, "Instruction")
+      assert(instructions.contains("Modifier.L2128B"))
+    }
+  }
+
+  test("optional subqualifiers compose typed modifiers from their spec definition") {
+    inDirectory { root =>
+      val input = write(
+        root,
+        "ptx.html",
+        section(
+          "query-cancel",
+          "clusterlaunchcontrol.query_cancel.get_first_ctaid{::dimension}.b32.b128 dest, response;\n::dimension = { ::x, ::y, ::z };",
+          "clusterlaunchcontrol.query_cancel.get_first_ctaid::x.b32.b128 %r0, %wide;"
+        ) + padding
+      )
+      val output = root.resolve("output")
+      generate("instructions", input, output)
+      val modifiers = source(output, "Modifier")
+      for (axis <- List("x", "y", "z"))
+        assert(modifiers.contains(s"extends Modifier(\"get_first_ctaid::$axis\")"))
+    }
+  }
+
   test("truncated documents and missing example corpora do not replace generated output") {
     inDirectory { root =>
       val input  = write(root, "ptx.html", special + padding)

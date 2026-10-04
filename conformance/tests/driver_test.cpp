@@ -1,9 +1,11 @@
 #include "driver.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <future>
 #include <sstream>
 #include <thread>
 
@@ -19,7 +21,9 @@
 #include "conformance/device.hpp"
 
 #include "device_lock.hpp"
+#include "device_selector.hpp"
 #include "environment.hpp"
+#include "suite_policy.hpp"
 #if !defined(_WIN32)
   #include <csignal>
 
@@ -181,6 +185,116 @@ deviceLock = false
   }
 }
 
+TEST_CASE("CTest padding stays short without truncating test names or failure output", "[driver][ctest-output]") {
+  TemporaryDirectory directory;
+  const auto artifact = fixture_artifact(directory.path / "artifacts/opencl");
+  const auto workloads = directory.path / "workloads";
+  const auto reports = directory.path / "reports";
+  const auto long_program = std::string(80, '.') + std::string(100, 'x');
+  fs::copy_file(fixture, artifact / (long_program + fixture.extension().string()));
+  fs::copy_file(fixture, artifact / ("conformance-device" + fixture.extension().string()));
+  std::ofstream(artifact / "test-programs.txt", std::ios::app) << long_program << "\t10\tcatch2\n";
+  std::ofstream(artifact / "artifact.toml") << "backend = 'opencl'\n";
+  fs::create_directories(workloads);
+  std::ofstream(workloads / "compact.toml") << "specs = ['[fixture],[failure]']\n";
+  auto environment = base_environment();
+  environment["CONFORMANCE_JOBS"] = "2";
+  const auto result = run_process({driver.string(), "run", "--direct", "--artifacts", artifact.parent_path().string(), "--output",
+                                   reports.string(), "--workloads", workloads.string(), "opencl"},
+                                  directory.path, environment, 20s, {}, true);
+  INFO(result.output);
+  INFO(result.error);
+  REQUIRE(result.status != 0);
+  CHECK(result.output.find(" " + std::string(80, '.')) == std::string::npos);
+  CHECK(result.output.find("Passed") != std::string::npos);
+  CHECK(result.output.find("***Failed") != std::string::npos);
+  CHECK(result.output.find("Skipped") != std::string::npos);
+  CHECK(result.output.find("wrong shard or spec selected") != std::string::npos);
+  CHECK(result.output.find("opencl/" + long_program + "/not selected failure") != std::string::npos);
+  for (const auto &report : fs::directory_iterator(reports / "direct")) {
+    const auto junit = read(report.path() / "ctest.xml");
+    CHECK(junit.find("opencl/" + long_program + "/not selected failure") != std::string::npos);
+    CHECK(junit.find("wrong shard or spec selected") != std::string::npos);
+  }
+}
+
+TEST_CASE("parallel discovery reports progress before probes finish and preserves inventory order", "[driver][process]") {
+  TemporaryDirectory directory;
+  const auto artifacts = directory.path / "artifacts";
+  const auto workloads = directory.path / "workloads";
+  const auto reports = directory.path / "reports";
+  fs::create_directories(workloads);
+  std::ofstream(workloads / "compact.toml") << "specs = ['[pass]']\n";
+  for (const auto *backend : {"opencl", "sycl"}) {
+    const auto artifact = fixture_artifact(artifacts / backend);
+    fs::copy_file(fixture, artifact / ("conformance-device" + fixture.extension().string()));
+    std::ofstream(artifact / "artifact.toml") << "backend = '" << backend << "'\n";
+    std::ofstream(artifact / "probe-barrier") << "wait for test release";
+  }
+  auto environment = base_environment();
+  environment["CONFORMANCE_JOBS"] = "2";
+#if !defined(_WIN32)
+  int interruption = 0;
+#endif
+  bool fail = false;
+  SECTION("both routes complete") {}
+  SECTION("a failed probe prevents CTest execution") {
+    fail = true;
+    std::ofstream(artifacts / "sycl/probe-failure") << "fail";
+  }
+#if !defined(_WIN32)
+  SECTION("SIGTERM stops every active probe") { interruption = SIGTERM; }
+  SECTION("SIGINT stops every active probe") { interruption = SIGINT; }
+#endif
+  const auto output = directory.path / "driver.log";
+  std::ofstream log(output);
+  auto running = std::async(std::launch::async, [&] {
+    return run_process({driver.string(), "run", "--direct", "--artifacts", artifacts.string(), "--output", reports.string(), "--workloads",
+                        workloads.string(), "opencl", "sycl"},
+                       directory.path, environment, 20s, {}, false, &log);
+  });
+  const auto deadline = std::chrono::steady_clock::now() + 5s;
+  while ((!fs::exists(artifacts / "opencl/probe-ready") || !fs::exists(artifacts / "sycl/probe-ready"))
+         && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(5ms);
+  CHECK(fs::exists(artifacts / "opencl/probe-ready"));
+  CHECK(fs::exists(artifacts / "sycl/probe-ready"));
+  const auto progress = read(output);
+  CHECK(progress.find("conformance discovering opencl") != std::string::npos);
+  CHECK(progress.find("conformance discovering sycl") != std::string::npos);
+#if !defined(_WIN32)
+  if (interruption) {
+    pid_t parent = 0, first = 0, second = 0;
+    std::ifstream(artifacts / "opencl/probe-pids") >> parent >> first;
+    std::ifstream(artifacts / "sycl/probe-pids") >> parent >> second;
+    REQUIRE(parent > 0);
+    REQUIRE(first > 0);
+    REQUIRE(second > 0);
+    REQUIRE(kill(parent, interruption) == 0);
+    CHECK(running.wait_for(5s) == std::future_status::ready);
+    CHECK(running.get().status != 0);
+    CHECK(kill(first, 0) == -1);
+    CHECK(kill(second, 0) == -1);
+    return;
+  }
+#endif
+  for (const auto *backend : {"opencl", "sycl"})
+    std::ofstream(artifacts / backend / "probe-release") << "go";
+  const auto result = running.get();
+  INFO(read(output));
+  REQUIRE((result.status == 0) == !fail);
+  for (const auto &report : fs::directory_iterator(reports / "direct")) {
+    if (fail) {
+      CHECK_FALSE(fs::exists(report.path() / "ctest/CTestTestfile.cmake"));
+      CHECK_FALSE(fs::exists(report.path() / "ctest.xml"));
+      continue;
+    }
+    const auto inventory = read(report.path() / "ctest/CTestTestfile.cmake");
+    CHECK(inventory.find("opencl/") < inventory.find("sycl/"));
+    CHECK(fs::exists(report.path() / "ctest.xml"));
+  }
+}
+
 TEST_CASE("bounded workloads exclude CUDA regressions that walk billions of indices", "[driver][workload-budget]") {
   for (const auto &name : {"compact", "full"}) {
     DYNAMIC_SECTION(name) {
@@ -200,6 +314,45 @@ TEST_CASE("bounded workloads exclude CUDA regressions that walk billions of indi
       }
       const Catch::TestCaseInfo shortCase("", {"stress/i8/full/dependency_diamond", "[unified]"}, {__FILE__, __LINE__});
       CHECK(selection.matches(shortCase));
+    }
+  }
+}
+
+TEST_CASE("iteration workloads retain primary OpenMP miniapps", "[driver][workload-budget]") {
+  for (const auto *name : {"compact", "full", "miniapps"}) {
+    DYNAMIC_SECTION(name) {
+      RunOptions options;
+      options.workloads = fs::path(CONFORMANCE_PROFILE_DIRECTORY).parent_path() / "workloads";
+      options.workload = name;
+      const auto workload = load_workload(options);
+      Catch::TestSpecParser parser(Catch::getRegistryHub().getTagAliasRegistry());
+      for (const auto &spec : workload.specs)
+        parser.parse(spec);
+      const auto selection = parser.testSpec();
+      for (const auto *app : {"babelstream", "minibude", "cloverleaf", "tealeaf"}) {
+        CAPTURE(app);
+        CHECK(std::ranges::none_of(workload.exclude_programs,
+                                   [&](const auto &pattern) { return conformance::glob_matches(pattern.c_str(), app); }));
+        CHECK((workload.include_programs.empty() || std::ranges::any_of(workload.include_programs, [&](const auto &pattern) {
+                 return conformance::glob_matches(pattern.c_str(), app);
+               })));
+        const auto identity = fmt::format("miniapps/{}/omp-target", app);
+        const Catch::TestCaseInfo info("", {identity, "[miniapp]"}, {__FILE__, __LINE__});
+        const bool fluid = std::string_view(app) == "cloverleaf" || std::string_view(app) == "tealeaf";
+        CHECK(selection.matches(info) == (std::string_view(name) != "compact" || !fluid));
+      }
+      if (std::string_view(name) == "miniapps") {
+        for (const auto *app : {"ggml", "imgui"}) {
+          const auto program = fmt::format("miniapp_{}_vulkan", app);
+          CHECK(std::ranges::any_of(workload.include_programs,
+                                    [&](const auto &pattern) { return conformance::glob_matches(pattern.c_str(), program.c_str()); }));
+          const auto identity = fmt::format("miniapps/{}/vulkan/example", app);
+          const Catch::TestCaseInfo info("", {identity, "[miniapps]"}, {__FILE__, __LINE__});
+          CHECK(selection.matches(info));
+        }
+        const Catch::TestCaseInfo unrelated("", {"core/copy", "[unified]"}, {__FILE__, __LINE__});
+        CHECK_FALSE(selection.matches(unrelated));
+      }
     }
   }
 }
@@ -385,7 +538,9 @@ TEST_CASE("runtime environment reserves owned keys and excludes inherited SDK pa
   env["LD_LIBRARY_PATH"] = "/host/sdk/lib";
   env["CUDA_HOME"] = "/host/sdk";
   env["ROCBLAS_TENSILE_LIBPATH"] = "stale";
+  env["OMP_TARGET_OFFLOAD"] = "DISABLED";
   prepare_runtime_environment(env, directory.path / "artifact", directory.path / "support", "opencl");
+  CHECK(env.at("OMP_TARGET_OFFLOAD") == "MANDATORY");
   env["CONFORMANCE_VULKAN_CTS_TIMEOUT"] = "7200";
   prepare_runtime_environment(env, directory.path / "artifact", directory.path / "support", "vulkan");
   apply_suite_isolated_environment(env, "vulkan");
@@ -498,6 +653,16 @@ TEST_CASE("timeout kills a TERM-resistant process tree within a fixed bound", "[
     if (alive) std::this_thread::sleep_for(20ms);
   }
   CHECK_FALSE(alive);
+}
+
+TEST_CASE("a concurrent timeout leaves another child's output and exit status intact", "[driver][process]") {
+  auto stalled = std::async(std::launch::async, [&] {
+    return run_process({fixture.string(), "--process-tree"}, fixture.parent_path(), base_environment(), 100ms, {}, true);
+  });
+  auto inventory = std::async(std::launch::async, [&] { return list_fixture(); });
+  CHECK(inventory.get().size() == 2);
+  CHECK(stalled.get().status == 124);
+  CHECK(list_fixture().size() == 2);
 }
 
 TEST_CASE("device lock acquisition has a deadline", "[driver][process]") {
@@ -678,4 +843,130 @@ TEST_CASE("large discovery logs preserve late cases and capped captures fail exp
   CHECK(deqp_case_names(input) == std::vector<std::string>{"dEQP-VK.last.case"});
   CHECK_THROWS_WITH(run_process(command, directory.path, base_environment(), 30s, {}, true),
                     "process output exceeded the 128 MiB capture limit: " + fixture.string());
+}
+
+TEST_CASE("vendor BLAS payload policy preserves available operations and unknown packages", "[driver]") {
+  const auto cuda = [](std::string_view architecture, std::string_view operation, std::string_view code = "ptx",
+                       std::string_view library = "libcublas.so.13.6.0.2") {
+    return suite_blas_skip("cuda", architecture, code, library, "unified", operation);
+  };
+  CHECK_FALSE(cuda("sm_89", "blas/f32/compact/gemm").empty());
+  CHECK(cuda("sm_89", "blas/f32/compact/gemm", "sass").empty());
+  CHECK(cuda("sm_89", "blas/f32/compact/gemm", "ptx", "libcublas.so.13.7.0.0").empty());
+  CHECK(cuda("sm_89", "blas/f32/full/gemm").empty());
+  CHECK(cuda("sm_89", "blas/f64/compact/gemm").empty());
+  CHECK(cuda("sm_89", "blas/f32/compact/axpy").empty());
+  CHECK(cuda("sm_89", "blas/f32/compact/gemm_strided_batched").empty());
+  CHECK(cuda("sm_100", "blas/f32/compact/gemm_nt").empty());
+  CHECK_FALSE(cuda("sm_100", "blas/f32/compact/gemm_tn").empty());
+  CHECK(cuda("sm_70", "blas/f32/compact/gemm", "ptx", "libcublas.so.11.11.3.6").empty());
+  CHECK(cuda("sm_50", "blas/f32/compact/gemm_strided_batched", "ptx", "libcublas.so.11.11.3.6").empty());
+  CHECK_FALSE(cuda("sm_35", "blas/f32/compact/gemm_strided_batched", "ptx", "libcublas.so.11.11.3.6").empty());
+  CHECK_FALSE(suite_blas_skip("hip", "gfx906", "", "librocblas.so.5.1.70101", "unified", "blas/f32/compact/axpy").empty());
+  CHECK(suite_blas_skip("hip", "gfx906", "", "librocblas.so.5.1.70101", "unified", "blas/f32/compact/gemm").empty());
+  CHECK(suite_blas_skip("hip", "gfx908", "", "librocblas.so.5.1.70101", "unified", "blas/f32/compact/axpy").empty());
+  CHECK(suite_blas_skip("hip", "gfx906", "", "librocblas.so.6", "unified", "blas/f32/compact/axpy").empty());
+  CHECK(suite_blas_skip("cuda", "sm_89", "ptx", "libcublas.so.13.6.0.2", "another-program", "blas/f32/compact/gemm").empty());
+}
+
+TEST_CASE("vendor BLAS skips require the actual staged library and apply with or without a launcher", "[driver]") {
+  TemporaryDirectory directory;
+  const auto support = directory.path / "support";
+  const auto artifact = directory.path / "artifact";
+  fs::create_directories(support / "lib");
+  fs::create_directories(artifact / "lib");
+  const auto version = support / "lib/libcublas.so.13.6.0.2";
+  std::ofstream(version) << "fixture";
+  fs::create_symlink(version.filename(), support / "lib/libcublas.so");
+  ExecutionConfig config;
+  config.directory = artifact.string();
+  config.device = conformance::physical_device_key(conformance::make_pci_device(1, 0, 0, 0));
+  config.environment = {{"CONFORMANCE_TARGET_BACKEND", "cuda"},
+                        {"CONFORMANCE_TARGET_ARCHITECTURE", "sm_89"},
+                        {"CONFORMANCE_CUDA_CODE", "ptx"},
+                        {"CONFORMANCE_SUPPORT_ROOT", support.string()}};
+  const auto file = directory.path / "config.json";
+  const ScheduledCase test{"blas/f32/compact/gemm", "unified", 10, 0, 1};
+  const auto execute = [&] {
+    std::string buffer;
+    REQUIRE(!glz::write_file_json(config, file.string(), buffer));
+    return execute_case(file, test);
+  };
+  CHECK(execute() == SkipReturnCode);
+  config.launcher = {"must-not-be-launched"};
+  CHECK(execute() == SkipReturnCode);
+  SECTION("a missing library remains an error") { fs::remove(version); }
+  SECTION("an unknown package remains an error") {
+    fs::remove(support / "lib/libcublas.so");
+    const auto unknown = support / "lib/libcublas.so.99";
+    std::ofstream(unknown) << "fixture";
+    fs::create_symlink(unknown.filename(), support / "lib/libcublas.so");
+  }
+  SECTION("an artifact-local library takes precedence over shared support") {
+    std::ofstream(artifact / "lib/libcublas.so") << "different package";
+  }
+  SECTION("SASS keeps executing") { config.environment["CONFORMANCE_CUDA_CODE"] = "sass"; }
+  CHECK_THROWS(execute());
+}
+
+TEST_CASE("isolated compiler variants remain distinct while duplicate devices collapse", "[driver]") {
+  const auto targets = conformance::profile::direct_targets({"cuda/sm_80", "cuda/sm_80/clang", "cuda/sm_80/gcc"});
+  auto duplicated = targets;
+  for (auto target : targets) {
+    target.id += "-another-device";
+    target.environment["CONFORMANCE_DEVICE"] = "another";
+    duplicated.push_back(std::move(target));
+  }
+  const auto isolated = unique_routes(duplicated, true);
+  REQUIRE(isolated.size() == targets.size());
+  for (size_t index = 0; index < targets.size(); ++index) {
+    CHECK(isolated[index].id == targets[index].id);
+    CHECK(isolated[index].compiler == targets[index].compiler);
+  }
+}
+
+TEST_CASE("compiler artifacts require matching metadata and colocated support", "[driver]") {
+  TemporaryDirectory directory;
+  RunOptions options;
+  options.direct = true;
+  options.artifacts = directory.path / "artifacts";
+  options.output = directory.path / "reports";
+  options.workloads = directory.path / "workloads";
+  options.selectors = {"cuda-ptx/sm_80/gcc"};
+  fs::create_directories(options.workloads);
+  std::ofstream(options.workloads / "compact.toml") << "specs = ['[skip]']\n";
+  const auto root = options.artifacts / "cuda/gcc";
+  const auto artifact = fixture_artifact(root / "sm_80");
+  fs::copy_file(fixture, artifact / ("conformance-device" + fixture.extension().string()));
+  std::string support = "support";
+  std::string compiler = "compiler = 'gcc'\n";
+  bool mismatch = false;
+  SECTION("matching compiler selects its own support directory") {}
+  SECTION("SDK-specific support remains inside the compiler directory") { support = "support-11.8"; }
+  SECTION("absent compiler means vendor and cannot satisfy GCC") {
+    compiler.clear();
+    mismatch = true;
+  }
+  SECTION("different compiler cannot satisfy GCC") {
+    compiler = "compiler = 'clang'\n";
+    mismatch = true;
+  }
+  SECTION("invalid compiler is rejected") {
+    compiler = "compiler = '../gcc'\n";
+    mismatch = true;
+  }
+  fs::create_directories(root / support / "lib");
+  std::ofstream(artifact / "artifact.toml") << "backend = 'cuda'\narchitecture = 'sm_80'\nsupport = '" << support << "'\n" << compiler;
+  if (mismatch) {
+    CHECK_THROWS_WITH(run(options, driver),
+                      "conformance artifact metadata does not match requested cuda: " + (artifact / "artifact.toml").string());
+    CHECK_FALSE(fs::exists(options.output));
+  } else {
+    CHECK(run(options, driver) == 0);
+    for (const auto &entry : fs::directory_iterator(options.output / "direct")) {
+      const auto config = read(entry.path() / "ctest/targets/cuda-ptx-sm_80-gcc.json");
+      CHECK(config.find((root / support / "lib").string()) != std::string::npos);
+      CHECK(config.find("MANDATORY") != std::string::npos);
+    }
+  }
 }

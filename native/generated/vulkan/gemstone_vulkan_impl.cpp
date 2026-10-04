@@ -5615,3 +5615,4 @@ static_assert(static_cast<long long>(gemstone::vulkan::api::VK_VIEWPORT_COORDINA
 static_assert(static_cast<long long>(gemstone::vulkan::api::VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV) == static_cast<long long>(VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV));
 static_assert(static_cast<long long>(gemstone::vulkan::api::VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV) == static_cast<long long>(VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV));
 static_assert(static_cast<long long>(gemstone::vulkan::api::VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV) == static_cast<long long>(VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV));
+

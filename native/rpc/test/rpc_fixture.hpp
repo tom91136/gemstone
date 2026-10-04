@@ -707,7 +707,30 @@ private:
     GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.globalOffset.x.value) == expected_.offset);
     GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.globalOffset.y.value) == 0);
     GEMSTONE_RPC_REQUIRE(static_cast<uint32_t>(request.globalOffset.z.value) == 0);
-    const auto &arguments = request.arguments;
+    auto arguments = request.arguments;
+    if (request.argumentBuffer) {
+      GEMSTONE_RPC_REQUIRE(arguments.empty());
+      const auto id = static_cast<uint64_t>(request.argumentBuffer->region.value);
+      const auto offset = static_cast<uint64_t>(request.argumentBuffer->offset.value);
+      const auto &storage = allocations_.at(id);
+      // This fixture's kernel takes a pointer and a 32-bit seed, then optional trailing bytes.
+      const size_t size = 12 + (trailingArguments_ ? trailingArguments_->size() : 0);
+      GEMSTONE_RPC_REQUIRE(offset <= storage.size() && size <= storage.size() - offset);
+      const auto *bytes =
+          hostBacked_[id] ? reinterpret_cast<const uint8_t *>(allocationAddresses_.at(id) + offset) : storage.data() + offset;
+      uint64_t pointer = 0;
+      std::memcpy(&pointer, bytes, sizeof(pointer));
+      std::optional<ArgumentMemory> output;
+      for (const auto &[allocation, address] : allocationAddresses_)
+        if (pointer >= address && pointer - address <= allocations_.at(allocation).size()) {
+          output = ArgumentMemory{AllocationId{static_cast<int64_t>(allocation)}, static_cast<int64_t>(pointer - address)};
+          break;
+        }
+      if (output) arguments.emplace_back(*output);
+      else arguments.emplace_back(ArgumentScalar{std::vector<uint8_t>(bytes, bytes + 8)});
+      arguments.emplace_back(ArgumentScalar{std::vector<uint8_t>(bytes + 8, bytes + 12)});
+      if (size > 12) arguments.emplace_back(ArgumentScalar{std::vector<uint8_t>(bytes + 12, bytes + size)});
+    }
     if (allocationArguments_) {
       GEMSTONE_RPC_REQUIRE(arguments.size() == allocationArguments_->size());
       GEMSTONE_RPC_REQUIRE(request.pointerRelocations.empty());

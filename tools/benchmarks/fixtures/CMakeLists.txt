@@ -31,7 +31,7 @@ function(add_benchmark_fixture name toolchain architecture source filename)
     set(arguments -DCONFORMANCE_ARTIFACT_KIND=command
       "-DCONFORMANCE_COMMAND_SOURCE=${REPOSITORY_DIRECTORY}"
       "-DCONFORMANCE_COMMAND_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/Generate.cmake"
-      "-DCONFORMANCE_COMMAND_ARGUMENTS=-DFIXTURE=${name}"
+      "-DCONFORMANCE_COMMAND_ARGUMENTS=-DFIXTURE=${name}\;-DARCHITECTURE=${architecture}"
       "-DCONFORMANCE_COMMAND_INPUTS=tools/benchmarks/src/main/resources/${source}"
       "-DCONFORMANCE_COMMAND_OUTPUTS=${filename}")
     set(copy)

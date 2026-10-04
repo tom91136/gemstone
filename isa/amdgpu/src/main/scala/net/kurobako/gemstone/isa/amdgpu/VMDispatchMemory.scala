@@ -24,6 +24,11 @@ private object VMDispatchMemory {
 
   val KernargAddress  = 0x100000000000L
   val DispatchAddress = 0x200000000000L
+  val QueueAddress    = 0x300000000000L
+  // ROCr amd_queue_t ABI: aperture upper words follow the public queue, capabilities and write index.
+  private val QueueApertureAddress = QueueAddress + 64L
+  private val QueueApertures       = LittleEndian.toArray(VMAddressSpace.LocalBase >>> 32, 4) ++
+    LittleEndian.toArray(VMAddressSpace.PrivateBase >>> 32, 4)
 }
 
 /** One dispatch's memory routing; global bytes and their locks remain owned by the loaded program. */
@@ -32,13 +37,23 @@ private class VMDispatchMemory(
     kernarg: Array[Byte],
     dispatch: Array[Byte],
     allocations: Array[GlobalBinding],
-    memory: AddressSpace
+    memory: AddressSpace,
+    val kernargAddress: Long = KernargAddress
 ) {
   import VMDispatchMemory.*
   private val readOnlyAddress   = kernel.readOnlyAddress
   private val readOnly          = kernel.readOnly
   private val globalMemory      = kernel.globalMemory
   private val globalMemoryLocks = kernel.globalMemoryLocks
+  // Heap and stack addresses lie outside the ELF image; reject them before scanning its symbols and sections.
+  private val aliasStart = allocations.view.map(_.address).minOption.getOrElse(Long.MaxValue)
+  private val aliasEnd   = allocations.view.map(region =>
+    if (region.address > Long.MaxValue - region.size.raw) Long.MaxValue else region.address + region.size.raw
+  ).maxOption.getOrElse(Long.MinValue)
+  private val globalStart = globalMemory.view.map(_._1).minOption.getOrElse(Long.MaxValue)
+  private val globalEnd   = globalMemory.view.map { case (base, bytes) =>
+    if (base > Long.MaxValue - bytes.length) Long.MaxValue else base + bytes.length
+  }.maxOption.getOrElse(Long.MinValue)
 
   def flushHostWrites(): Either[Fault, Unit]                                   = memory.flushHostWrites()
   def invalidateHostReads(): Unit                                              = memory.invalidateHostReads()
@@ -46,6 +61,7 @@ private class VMDispatchMemory(
   def isImmutable(address: Long, size: Int >= 0): Boolean                      =
     ByteRange.contains(kernarg.length, address - KernargAddress, size.toLong.raw) ||
       ByteRange.contains(dispatch.length, address - DispatchAddress, size.toLong.raw) ||
+      ByteRange.contains(QueueApertures.length, address - QueueApertureAddress, size.toLong.raw) ||
       ByteRange.contains(readOnly.length, address - readOnlyAddress, size.toLong.raw)
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def isExternal(address: Long, size: Int >= 0): Boolean =
@@ -67,6 +83,7 @@ private class VMDispatchMemory(
       )
     else localRead(address, size, KernargAddress, kernarg)
       .orElse(localRead(address, size, DispatchAddress, dispatch))
+      .orElse(localRead(address, size, QueueApertureAddress, QueueApertures))
       .orElse(localRead(address, size, readOnlyAddress, readOnly))
       .orElse(globalRead(address, size)) match {
       case Some(bytes) => Right(Vec.unsafeWrapArray(bytes))
@@ -93,6 +110,8 @@ private class VMDispatchMemory(
         binding.offsetOf(address),
         size
       )
+    else if (ByteRange.contains(QueueApertures.length, address - QueueApertureAddress, size.raw.toLong))
+      Right(LittleEndian.decode(QueueApertures, (address - QueueApertureAddress).toInt, scalarSize))
     else {
       val kernargOffset = address - KernargAddress
       if (ByteRange.contains(kernarg.length, kernargOffset, size.raw.toLong))
@@ -237,7 +256,7 @@ private class VMDispatchMemory(
   private def globalRegionIndex(address: Long, size: Int >= 0): Int = {
     var index = 0
     var found = -1
-    while (index < globalMemory.length && found < 0) {
+    while (address >= globalStart && address <= globalEnd && index < globalMemory.length && found < 0) {
       val (base, bytes) = globalMemory(index)
       val offset        = address - base
       if (address >= base && offset <= bytes.length.toLong - size.toLong.raw) found = index
@@ -251,7 +270,7 @@ private class VMDispatchMemory(
   private def aliasedRegion(address: Long): GlobalBinding | Null = {
     var index                        = 0
     var result: GlobalBinding | Null = null
-    while (index < allocations.length && result == null) {
+    while (address >= aliasStart && address <= aliasEnd && index < allocations.length && result == null) {
       val region = allocations(index)
       if (address >= region.address && address - region.address < region.size.raw) result = region
       index += 1

@@ -3393,3 +3393,6 @@ static_assert(static_cast<long long>(gemstone::cuda::api::cudaSyncPolicyBlocking
 static_assert(static_cast<long long>(gemstone::cuda::api::cudaSyncPolicySpin) == static_cast<long long>(cudaSyncPolicySpin));
 static_assert(static_cast<long long>(gemstone::cuda::api::cudaSyncPolicyYield) == static_cast<long long>(cudaSyncPolicyYield));
 static_assert(static_cast<long long>(gemstone::cuda::api::cudaUserObjectNoDestructorSync) == static_cast<long long>(cudaUserObjectNoDestructorSync));
+const void *const gemstone::cuda::api::LaunchParamEnd = CU_LAUNCH_PARAM_END;
+const void *const gemstone::cuda::api::LaunchParamBufferPointer = CU_LAUNCH_PARAM_BUFFER_POINTER;
+const void *const gemstone::cuda::api::LaunchParamBufferSize = CU_LAUNCH_PARAM_BUFFER_SIZE;

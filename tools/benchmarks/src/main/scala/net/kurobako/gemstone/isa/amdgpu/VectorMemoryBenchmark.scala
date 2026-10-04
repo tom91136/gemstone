@@ -6,6 +6,7 @@ import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
@@ -33,12 +34,12 @@ object VectorMemoryBenchmark {
   }
   // Benchmark repetitions intentionally use an allocation-free counter loop.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(args: Array[String]): Unit = {
+  def run(args: Array[String]): BenchmarkSample = {
     val iterations =
       BenchmarkArguments.iterations(BenchmarkName("amdgpu-vector-memory"), args.toSeq, 2000)
     val code = Vec[Long](0xc00a0100L, 0x0L, 0xbf8cc07fL, 0x24000084L, 0xdc5c8000L, 0x1040000L, 0xbf8c0f70L, 0xdc7c8000L,
       0x60100L, 0xbf810000L).flatMap(w => LittleEndian.toVec(w, 4))
-    val kernel = VMCompiler.compile(CodeObjectKernel(
+    val kernel = VMCompiler().compile(CodeObjectKernel(
       "kernel",
       Target("gfx900"),
       16,
@@ -75,20 +76,9 @@ object VectorMemoryBenchmark {
         i += 1
       }
     }
-    run(iterations)
-    val before = PlatformMetrics.allocatedBytes
-    run(iterations)
-    val allocated = for {
-      start <- before
-      end   <- PlatformMetrics.allocatedBytes
-      if end >= start
-    } yield end - start
+    val measurement = Measurement(run(iterations))
     if (!memory.source.sameElements(memory.destination))
       throw IllegalStateException("vector-memory copy mismatch")
-    Console.out.println(
-      s"iterations=$iterations allocated=${allocated.fold(-1L)(identity)} " +
-        s"bytes_per_dispatch=${allocated.fold(Double.NaN)(_.raw.toDouble / iterations.raw)} " +
-        s"checksum=${memory.destination.map(_.toLong).sum}"
-    )
+    measurement.sample(iterations.toLong)
   }
 }

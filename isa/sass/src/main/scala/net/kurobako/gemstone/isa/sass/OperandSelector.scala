@@ -21,6 +21,9 @@ object OperandSelector {
     GTU,
     GEU,
     F32,
+    F32x2,
+    HI_LO,
+    LO_HI,
     B0,
     B1,
     B2,
@@ -31,6 +34,12 @@ object OperandSelector {
     X8
   )
   def fromSpelling(value: String): OperandSelector = known.find(_.spelling == value).getOrElse(Unknown(nonEmpty(value)))
+
+  def fromSpellings(values: Vec[String]): Vec[OperandSelector] =
+    values.flatMap(value => Vec.from(value.split('.'))).map(fromSpelling(_)).foldLeft(Vec.empty[OperandSelector]) {
+      case (result, HI_LO) if result.lastOption.contains(F32x2) => result
+      case (result, selector)                                   => result :+ selector
+    }
 }
 
 enum OperandSelector(val spellingValue: NonEmpty[String]) {
@@ -50,6 +59,9 @@ enum OperandSelector(val spellingValue: NonEmpty[String]) {
   case GTU                                       extends OperandSelector("GTU")
   case GEU                                       extends OperandSelector("GEU")
   case F32                                       extends OperandSelector("F32")
+  case F32x2                                     extends OperandSelector("F32x2")
+  case HI_LO                                     extends OperandSelector("HI_LO")
+  case LO_HI                                     extends OperandSelector("LO_HI")
   case B0                                        extends OperandSelector("B0")
   case B1                                        extends OperandSelector("B1")
   case B2                                        extends OperandSelector("B2")

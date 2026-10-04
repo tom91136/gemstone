@@ -1512,3 +1512,4 @@ static_assert(static_cast<long long>(gemstone::hip::api::hipSyncPolicyBlockingSy
 static_assert(static_cast<long long>(gemstone::hip::api::hipSyncPolicySpin) == static_cast<long long>(hipSyncPolicySpin));
 static_assert(static_cast<long long>(gemstone::hip::api::hipSyncPolicyYield) == static_cast<long long>(hipSyncPolicyYield));
 static_assert(static_cast<long long>(gemstone::hip::api::hipUserObjectNoDestructorSync) == static_cast<long long>(hipUserObjectNoDestructorSync));
+

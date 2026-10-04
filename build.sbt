@@ -614,7 +614,7 @@ lazy val sassToolsReferenceBundle = ReferenceBundle(
 
 lazy val amdgpuReferenceBundle = ReferenceBundle(
   name = "amdgpu",
-  recipeRevision = "4",
+  recipeRevision = "6",
   artifacts = referenceArtifactsNamed(
     "llvm",
     "mesa",
@@ -630,6 +630,8 @@ lazy val amdgpuReferenceBundle = ReferenceBundle(
           "llvm/test/MC/AMDGPU"
         ) || relative == path"llvm/lib/Target/AMDGPU/SIDefines.h" ||
           relative == path"llvm/include/llvm/BinaryFormat/ELFRelocs/AMDGPU.def" ||
+          relative == path"llvm/include/llvm/BinaryFormat/ELF.h" ||
+          relative == path"llvm/include/llvm/Support/AMDHSAKernelDescriptor.h" ||
           (relative.startsWith("llvm/include") && relative.fileName.endsWith(".td")) ||
           (relative.parent.contains(path"llvm/lib/Target/AMDGPU") && relative.fileName.endsWith(".td"))
     )
@@ -650,6 +652,11 @@ lazy val amdgpuReferenceBundle = ReferenceBundle(
   },
   verify = output => {
     require((output / "llvm/llvm/test/MC/AMDGPU").isDirectory, "LLVM AMDGPU MC tests are absent")
+    require((output / "llvm/llvm/include/llvm/BinaryFormat/ELF.h").isFile, "LLVM ELF machine definitions are absent")
+    require(
+      (output / "llvm/llvm/include/llvm/Support/AMDHSAKernelDescriptor.h").isFile,
+      "LLVM HSA kernel descriptor definitions are absent"
+    )
     require((output / "mesa/src/amd/compiler/aco_opcodes.py").isFile, "ACO opcodes are absent")
     require((output / "amd/xml/amdgpu_isa_rdna2.xml").isFile, "AMD RDNA2 XML is absent")
   }
@@ -747,18 +754,23 @@ lazy val conformanceExecutable     = taskKey[Path]("Built native conformance exe
 lazy val generateBenchmarkFixtures = inputKey[Path]("Build selected benchmark fixtures in pinned toolchain containers.")
 lazy val gemstoneRun               = inputKey[Unit]("Build Gemstone and run a command through selected compute APIs.")
 lazy val conformanceTargetSet      = settingKey[String]("Conformance artifact matrix used by builds and emulation.")
-lazy val conformanceEmulationTargets = taskKey[Seq[String]]("Backend/architecture routes tested through Gemstone.")
-lazy val emulate                     = inputKey[Unit]("Run conformance through Gemstone.")
-lazy val cmakeExecutable             = settingKey[String]("CMake command used by native builds.")
-lazy val ctestExecutable             = settingKey[String]("CTest command used by native tests.")
-lazy val ninjaExecutable             = settingKey[String]("Ninja command used by CMake builds.")
-lazy val clangExecutable             = settingKey[String]("Clang command used by API generation.")
-lazy val clangFormatExecutable       = settingKey[String]("Clang-format command used by native codestyle tasks.")
-lazy val pythonExecutable            = settingKey[String]("Python command used by AMDGPU generation.")
-lazy val containerExecutable         = settingKey[String]("OCI container executable used by pinned toolchain builds.")
-lazy val buildParallelism            = settingKey[Int]("Parallelism for CMake and Ninja builds.")
-lazy val testParallelism             = settingKey[Int]("Parallelism for CTest runs.")
-lazy val conformanceJobs             = settingKey[Int]("Concurrent conformance jobs for the emulated suite.")
+lazy val conformanceEmulationTargets  = taskKey[Seq[String]]("Backend/architecture routes tested through Gemstone.")
+lazy val emulate                      = inputKey[Unit]("Run conformance through Gemstone.")
+lazy val cmakeExecutable              = settingKey[String]("CMake command used by native builds.")
+lazy val ctestExecutable              = settingKey[String]("CTest command used by native tests.")
+lazy val ninjaExecutable              = settingKey[String]("Ninja command used by CMake builds.")
+lazy val clangExecutable              = settingKey[String]("Clang command used by API generation.")
+lazy val clangFormatExecutable        = settingKey[String]("Clang-format command used by native codestyle tasks.")
+lazy val pythonExecutable             = settingKey[String]("Python command used by AMDGPU generation.")
+lazy val containerExecutable          = settingKey[String]("OCI container executable used by pinned toolchain builds.")
+lazy val buildParallelism             = settingKey[Int]("Parallelism for CMake and Ninja builds.")
+lazy val testParallelism              = settingKey[Int]("Parallelism for CTest runs.")
+lazy val conformanceJobs              = settingKey[Int]("Concurrent conformance jobs for the emulated suite.")
+lazy val conformanceServerJavaOptions =
+  settingKey[Seq[String]]("JVM options for the shared conformance emulation server.")
+lazy val conformanceJfr          = settingKey[Boolean]("Record the conformance emulation server with JFR.")
+lazy val conformanceServerListen =
+  settingKey[Option[String]]("Override the per-run Unix socket listen address for conformance emulation.")
 lazy val conformanceArtifactParallelism =
   settingKey[Int]("Parallelism for conformance artifact builds.")
 lazy val offlineMode = settingKey[Boolean]("Require cached dependencies and forbid network fetches.")
@@ -781,8 +793,11 @@ Global / testParallelism := positiveEnvironmentInt(
 )
 Global / conformanceJobs := positiveEnvironmentInt(
   "CONFORMANCE_JOBS",
-  math.max(1, math.min(8, sys.runtime.availableProcessors() / 4))
+  math.max(1, math.min(16, sys.runtime.availableProcessors() / 2))
 )
+Global / conformanceServerJavaOptions   := Seq("-Xms4g")
+Global / conformanceJfr                 := true
+Global / conformanceServerListen        := None
 Global / conformanceArtifactParallelism :=
   positiveEnvironmentInt(
     "CONFORMANCE_ARTIFACT_PARALLELISM",
@@ -1561,6 +1576,7 @@ lazy val amdgpu = projectMatrix
       val sourceRoot   = (Compile / checkedInGeneratedSourceDirectory).value
       val metadataRoot = (Compile / checkedInGeneratedResourceDirectory).value
       val resourceRoot = (Test / checkedInGeneratedResourceDirectory).value
+      val nativeRoot   = (LocalRootProject / baseDirectory).value.toPath / "native/generated"
       val classpath    = (codegenProject / Compile / fullClasspath).value.map(entry => converter.toPath(entry.data))
       val run          = (codegenProject / Compile / runner).value
       val log          = streams.value.log
@@ -1574,7 +1590,8 @@ lazy val amdgpu = projectMatrix
           s"$tablegen",
           s"$references",
           s"$sourceRoot",
-          s"$metadataRoot"
+          s"$metadataRoot",
+          s"$nativeRoot"
         ),
         log
       ).get
@@ -1590,12 +1607,14 @@ lazy val amdgpu = projectMatrix
       val sources       = sourceRoot.descendants("*.scala")
       val metadataFiles = metadataRoot.descendants("*.json")
       val oracleFiles   = resourceRoot.descendants("*").filter(_.isFile)
+      val nativeFiles   = Seq(nativeRoot / "amdgpu/gemstone_amdgpu_target.hpp")
       require(
         sources.nonEmpty && metadataFiles.nonEmpty && oracleFiles.nonEmpty &&
-          sources.forall(_.isFile) && metadataFiles.forall(_.isFile) && oracleFiles.forall(_.isFile),
+          sources.forall(_.isFile) && metadataFiles.forall(_.isFile) && oracleFiles.forall(_.isFile) &&
+          nativeFiles.forall(_.isFile),
         "AMDGPU generator outputs are incomplete"
       )
-      sources ++ metadataFiles ++ oracleFiles
+      sources ++ metadataFiles ++ oracleFiles ++ nativeFiles
     }
   )
   .jvmPlatform(
@@ -1938,10 +1957,11 @@ lazy val conformance = project.in(file("conformance"))
       val jobs            = (Global / conformanceJobs).value
       val workers         = positiveEnvironmentInt(
         environmentName("EXECUTION_PARALLELISM"),
-        math.max(1, math.min(64, sys.runtime.availableProcessors()) - 2)
+        math.max(1, math.min(64, sys.runtime.availableProcessors() / 2))
       )
-      // Stay below the compressed-reference limit; 32 GiB disables it on the supported JVM.
-      val serverHeap  = s"${math.max(8L, math.min(28L, jobs.toLong * 6L))}g"
+      // Reserve shared server state in addition to the per-test allowance. Keep the conservative heap cap
+      // below the compressed-reference boundary.
+      val serverHeap  = s"${math.max(8L, math.min(28L, 2L + jobs.toLong * 6L))}g"
       val environment = Map(
         "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS" -> sys.env.getOrElse(
           "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS",
@@ -1952,9 +1972,12 @@ lazy val conformance = project.in(file("conformance"))
         "CONFORMANCE_OPENCL_CTS_WIMPY"          -> sys.env.getOrElse("CONFORMANCE_OPENCL_CTS_WIMPY", "1"),
         "CONFORMANCE_OPENCL_CTS_TIMEOUT"        -> sys.env.getOrElse("CONFORMANCE_OPENCL_CTS_TIMEOUT", "600"),
 
-        "CONFORMANCE_JOBS"                            -> jobs.toString,
-        environmentName("EXECUTION_PARALLELISM")      -> workers.toString,
-        environmentName("NATIVE_DIRECTORY")           -> s"$nativeDirectory",
+        "CONFORMANCE_JOBS" -> jobs.toString,
+        // Match OpenMP team defaults to CPU execution capacity; GPU defaults create mostly idle teams.
+        "OMP_NUM_TEAMS_DEV"                      -> positiveEnvironmentInt("OMP_NUM_TEAMS_DEV", workers).toString,
+        "OMP_TEAMS_THREAD_LIMIT_DEV"             -> positiveEnvironmentInt("OMP_TEAMS_THREAD_LIMIT_DEV", 2).toString,
+        environmentName("EXECUTION_PARALLELISM") -> workers.toString,
+        environmentName("NATIVE_DIRECTORY")      -> s"$nativeDirectory",
         environmentName("EXECUTION_MAX_INSTRUCTIONS") -> sys.env.getOrElse(
           environmentName("EXECUTION_MAX_INSTRUCTIONS"),
           conformanceMaxInstructions
@@ -1963,13 +1986,24 @@ lazy val conformance = project.in(file("conformance"))
         val name = environmentName(key)
         sys.env.get(name).map(name -> _)
       }
-      val mainClass = s"$rootPackage.server.CLI"
-      val classpath = (server.jvm(scala3Version) / Runtime / fullClasspath).value
+      val mainClass     = s"$rootPackage.server.CLI"
+      val listenAddress = (Global / conformanceServerListen).value
+      val classpath     = (server.jvm(scala3Version) / Runtime / fullClasspath).value
         .map(entry => converter.toPath(entry.data))
+      val recording = Option.when((Global / conformanceJfr).value) {
+        val directory = (root / "target/conformance/jfr").createDirectories()
+        Files.createTempDirectory(directory, "emulate-") / "server.jfr"
+      }
+      val recordingOptions = recording.toSeq.map { destination =>
+        s"""-XX:StartFlightRecording=settings=profile,disk=true,maxsize=512m,dumponexit=true,filename="$destination""""
+      }
       val baseForkOptions = (server.jvm(scala3Version) / Compile / run / forkOptions).value
       val serverOptions   = baseForkOptions
         .withWorkingDirectory(root.toFile)
-        .withRunJVMOptions(baseForkOptions.runJVMOptions ++ Seq("-Xms512m", s"-Xmx$serverHeap"))
+        .withRunJVMOptions(
+          baseForkOptions.runJVMOptions ++ Seq(s"-Xmx$serverHeap") ++
+            (Global / conformanceServerJavaOptions).value ++ recordingOptions
+        )
         .withEnvVars(baseForkOptions.envVars ++ environment)
       val clientOptions = baseForkOptions
         .withWorkingDirectory(root.toFile)
@@ -1981,31 +2015,47 @@ lazy val conformance = project.in(file("conformance"))
       val java            = javaHome / "bin" / "java"
       val launcherCommand = Vector(s"$java") ++ clientOptions.runJVMOptions ++
         Vector("-cp", classpath.mkString(sys.props("path.separator")), mainClass)
-      withGemstoneServer(
-        root = root,
-        launchServer = endpointFile =>
-          ForkRun(serverOptions).fork(mainClass, classpath, Seq("serve", "--endpoint-file", s"$endpointFile"), log),
-        shutdownServer = endpoint =>
-          ForkRun(clientOptions).run(mainClass, classpath, Seq("shutdown", "--server", endpoint), log).isSuccess,
-        log = log
-      ) { endpoint =>
-        withConformanceLauncher(root, launcherCommand ++ Seq("run", "--server", endpoint), environment.toSeq) {
-          launcher =>
-            runConformance(
-              root = root,
-              artifacts = root / "target/conformance/artifacts",
-              direct = true,
-              executable = conformanceExecutable.value,
-              ctest = (Global / ctestExecutable).value,
-              arguments = arguments :+ "--isolated-launcher",
-              output = root / "target/conformance/emulated",
-              launcher = launcher,
-              environment = environment.toSeq,
-              log = log.info,
-              error = log.error
-            )
+      recording.foreach(path => log.info(s"Conformance JFR recording: $path (up to 512 MiB; oldest events rotate)"))
+      try withGemstoneServer(
+          root = root,
+          launchServer = endpointFile =>
+            ForkRun(serverOptions).fork(
+              mainClass,
+              classpath,
+              Seq(
+                "serve",
+                "--listen",
+                listenAddress.getOrElse(s"unix://${endpointFile.resolveSibling("rpc.sock").toUri.getRawPath}"),
+                "--endpoint-file",
+                s"$endpointFile"
+              ),
+              log
+            ),
+          shutdownServer = endpoint =>
+            ForkRun(clientOptions).run(mainClass, classpath, Seq("shutdown", "--server", endpoint), log).isSuccess,
+          log = log
+        ) { endpoint =>
+          withConformanceLauncher(root, launcherCommand ++ Seq("run", "--server", endpoint), environment.toSeq) {
+            launcher =>
+              runConformance(
+                root = root,
+                artifacts = root / "target/conformance/artifacts",
+                direct = true,
+                executable = conformanceExecutable.value,
+                ctest = (Global / ctestExecutable).value,
+                arguments = arguments :+ "--isolated-launcher",
+                output = root / "target/conformance/emulated",
+                launcher = launcher,
+                environment = environment.toSeq,
+                log = log.info,
+                error = log.error
+              )
+          }
         }
-      }
+      finally recording.foreach { path =>
+          if (path.isFile && Files.size(path) > 0) log.info(s"Conformance JFR written to: $path")
+          else log.warn(s"Conformance JFR was not written: $path")
+        }
     },
     cleanFiles := Seq((LocalRootProject / baseDirectory).value / "target/conformance")
   )

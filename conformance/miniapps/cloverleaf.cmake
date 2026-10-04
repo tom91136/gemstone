@@ -8,9 +8,11 @@ set(miniapp_cloverleaf_catch_executable
 set(miniapp_cloverleaf_openmp_definitions OMP_TARGET DIFFUSE_OVERLOAD)
 
 function(miniapp_cloverleaf_patch model source)
-  if(CONFORMANCE_BACKEND STREQUAL "hip")
-    patch_exact("${source}/src/hip/initialise.cpp"
-      [=[<< "gfx" << props.gcnArch << ")"]=] [=[<< props.gcnArchName << ")"]=])
+  if(model STREQUAL "cuda")
+    # The 1.0 release disables CMake's architecture selection in favour of its
+    # own -arch option. Conformance needs both real and virtual code images.
+    patch_exact("${source}/src/cuda/model.cmake"
+      "        set(CMAKE_CUDA_ARCHITECTURES OFF)" "")
   endif()
 endfunction()
 

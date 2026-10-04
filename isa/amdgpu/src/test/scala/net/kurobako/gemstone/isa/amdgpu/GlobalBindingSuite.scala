@@ -46,7 +46,7 @@ class GlobalBindingSuite extends munit.FunSuite {
       code = code,
       globalMemory = Array(0x3000L -> shadow)
     )
-    val prepared = VMCompiler.compile(kernel).toOption.get
+    val prepared = VMCompiler().compile(kernel).toOption.get
     val global   = AllocationId(1)
     val output   = AllocationId(2)
     val dispatch = KernelTask.validated(
@@ -101,7 +101,7 @@ class GlobalBindingSuite extends munit.FunSuite {
       code = code,
       globalMemory = Array(0x3000L -> Array.ofDim[Byte](16))
     )
-    val prepared = VMCompiler.compile(kernel).toOption.get
+    val prepared = VMCompiler().compile(kernel).toOption.get
     val bindings = Vec(VMDispatchMemory.GlobalBinding(
       0x3000L,
       16,
@@ -140,6 +140,53 @@ class GlobalBindingSuite extends munit.FunSuite {
       assertEquals(LittleEndian.decode(memory.storage(output), 0, 4), value)
       assertEquals(LittleEndian.decode(memory.storage(output), 4, 4), equal)
     }
+  }
+
+  test("dispatch routing preserves image boundaries, alias precedence and external allocations") {
+    val memory = Memory()
+    val first  = Array.fill[Byte](16)(0x11)
+    val shadow = Array.fill[Byte](16)(0x55)
+    val last   = Array.fill[Byte](8)(0x22)
+    val kernel = CodeObjectKernel(
+      name = "routing",
+      target = Target("gfx900"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
+      computePgmRsrc2 = 0,
+      kernelCodeProperties = 0,
+      code = Vec.empty,
+      globalMemory = Array(0x3000L -> shadow, 0x2000L -> first, (Long.MaxValue - 3L) -> last)
+    )
+    val global  = AllocationId(1)
+    val routing = VMDispatchMemory(
+      kernel = kernel,
+      kernarg = Array.emptyByteArray,
+      dispatch = Array.emptyByteArray,
+      allocations = Array(VMDispatchMemory.GlobalBinding(0x3000L, 16, global, 8L, 32L)),
+      memory = memory
+    )
+    assertEquals(routing.readValue(0x2000L, 1), Right(0x11L))
+    assertEquals(routing.readValue(0x200fL, 1), Right(0x11L))
+    assert(routing.readValue(0x200fL, 2).isLeft)
+    assert(routing.isExternal(0x1fffL, 1))
+    assert(routing.isExternal(0x2010L, 1))
+    assert(routing.isExternal(0x2fffL, 1))
+    assert(routing.isExternal(0x3010L, 1))
+    assertEquals(routing.readBytes(0x2010L, 0), Right(Vec.empty[Byte]))
+    assertEquals(routing.readValue(Long.MaxValue, 1), Right(0x22L))
+    assertEquals(routing.writeValue(0x3000L, 41L, 4), Right(()))
+    assertEquals(routing.atomicModifyValue(0x2000L, 4)(_ + 1L), Right(0x11111111L))
+    assertEquals(routing.readValue(0x2000L, 1), Right(0x12L))
+    assertEquals(routing.writeValue(0x3000L, 42L, 4), Right(()))
+    assertEquals(routing.readValue(0x3000L, 4), Right(42L))
+    assertEquals(LittleEndian.decode(memory.storage(global), 8, 4), 42L)
+    assert(shadow.forall(_ == 0x55.toByte))
+    val external = memory.address(global, 8L).toOption.get.raw
+    assert(routing.isExternal(external, 4))
+    assertEquals(routing.readValue(external, 4), Right(42L))
+    assertEquals(routing.writeBytes(external, Array[Byte](7, 8)), Right(()))
+    assertEquals(routing.readBytes(0x3000L, 2), Right(Vec[Byte](7, 8)))
   }
 
 }

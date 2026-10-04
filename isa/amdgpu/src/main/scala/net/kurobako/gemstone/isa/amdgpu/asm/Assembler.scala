@@ -37,7 +37,7 @@ object Assembler {
   }
 
   private def branch(instruction: Instruction, target: Target): Option[String] =
-    Option.when(Metadata.encodingsFor(instruction.definition, target.isa).exists(value =>
+    Option.when(Metadata.encodingsFor(instruction.definition, target).exists(value =>
       value.format == EncodingFormat.SOPP && value.operands.exists(_.kind == OperandKind.LABEL)
     ))(instruction.operands)
       .flatMap {

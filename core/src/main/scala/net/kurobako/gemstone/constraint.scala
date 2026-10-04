@@ -6,9 +6,8 @@ import scala.language.implicitConversions
 
 /** Numeric predicates and nonempty values. Import `constraint.*`; add `constraint.auto.*` for proven implicit widening.
   * Numeric representations stay opaque so primitive methods cannot discard predicates. Validate runtime inputs at their
-  * first domain boundary and retain the refined type in fields and helper parameters.
-  * Empty numeric domains fail at compile time when validation, proofs or codecs are materialized; a type alias alone
-  * does not run these checks.
+  * first domain boundary and retain the refined type in fields and helper parameters. Empty numeric domains fail at
+  * compile time when validation, proofs or codecs are materialized; a type alias alone does not run these checks.
   */
 object constraint {
   sealed trait GreaterThan[N <: Int | Long]
@@ -26,14 +25,14 @@ object constraint {
 
   type Membership[T <: NonEmptyTuple | Interval] = T match {
     case NonEmptyTuple => In[T & NonEmptyTuple]
-    case l ~ h        => Between[l, h]
+    case l ~ h         => Between[l, h]
   }
 
   // Numeric shorthands share the same opaque representation and predicate implementation.
-  infix type >[A <: Byte | Short | Int | Long, N <: Int | Long]     = A where GreaterThan[N]
-  infix type >=[A <: Byte | Short | Int | Long, N <: Int | Long]    = A where AtLeast[N]
-  infix type <[A <: Byte | Short | Int | Long, N <: Int | Long]     = A where LessThan[N]
-  infix type <=[A <: Byte | Short | Int | Long, N <: Int | Long]    = A where AtMost[N]
+  infix type >[A <: Byte | Short | Int | Long, N <: Int | Long]                = A where GreaterThan[N]
+  infix type >=[A <: Byte | Short | Int | Long, N <: Int | Long]               = A where AtLeast[N]
+  infix type <[A <: Byte | Short | Int | Long, N <: Int | Long]                = A where LessThan[N]
+  infix type <=[A <: Byte | Short | Int | Long, N <: Int | Long]               = A where AtMost[N]
   infix type in[A <: Byte | Short | Int | Long, T <: NonEmptyTuple | Interval] = A where Membership[T]
 
   object where {
@@ -112,9 +111,9 @@ object constraint {
   extension [A, P](value: A where P) {
     inline def raw: A = value
 
-    /** Prove that every source value satisfies the complete target refinement, for example `.widen[Int >= 0]`.
-      * The carrier may stay the same or widen from Byte to Short, Int or Long, Short to Int or Long, or Int to Long.
-      * No runtime validation or narrowing is performed.
+    /** Prove that every source value satisfies the complete target refinement, for example `.widen[Int >= 0]`. The
+      * carrier may stay the same or widen from Byte to Short, Int or Long, Short to Int or Long, or Int to Long. No
+      * runtime validation or narrowing is performed.
       */
     transparent inline def widen[R]: R = ${ macros.widen[A, P, R]('value) }
   }

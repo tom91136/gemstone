@@ -228,12 +228,6 @@ template <class T> __global__ void legacy_device_dispatch_kernel(const T *first,
 }
 
 #if defined(__HIPCC__)
-inline bool uses_wave32() {
-  int device = 0;
-  hipDeviceProp_t properties{};
-  return hipGetDevice(&device) == hipSuccess && hipGetDeviceProperties(&properties, device) == hipSuccess && properties.warpSize == 32;
-}
-
 inline void check_legacy(hipError_t status, const char *where) {
   if (status != hipSuccess) throw std::runtime_error(std::string(where) + ": " + hipGetErrorString(status));
 }
@@ -247,109 +241,6 @@ inline void check_legacy(cudaError_t status, const char *where) {
 class ThrustAlgorithms : public AlgorithmCapabilities<ThrustAlgorithms> {
 public:
   template <class T> bool capability() const { return true; }
-
-  template <class T> bool supports_sort(size_t size) const {
-#if defined(__HIPCC__)
-    if constexpr (std::is_same_v<T, int32_t>)
-      if (thrust_algorithm_detail::uses_wave32() && size == 4096) return false;
-#endif
-    return true;
-  }
-
-  template <class T> bool supports_stable_sort(size_t size) const { return supports_sort<T>(size); }
-
-  template <class T> bool supports_sort_descending(size_t size) const { return supports_sort<T>(size); }
-
-  template <class T> bool supports_find(size_t size) const {
-// rocThrust/rocPRIM 4.2 scalar queries fail for 32-bit values on wave32.
-#if defined(__HIPCC__)
-    if constexpr (sizeof(T) == 4)
-      if (thrust_algorithm_detail::uses_wave32() && size >= 31) return false;
-#endif
-    return true;
-  }
-
-  template <class T> bool supports_find_if(size_t size) const {
-// rocThrust/rocPRIM 4.2 scalar queries return a bad first result on wave32.
-#if defined(__HIPCC__)
-    if (thrust_algorithm_detail::uses_wave32() && sizeof(T) >= 4 && size >= 1) return false;
-#endif
-    return true;
-  }
-
-  template <class T> bool supports_all_of(size_t size) const {
-// rocThrust/rocPRIM 4.2 scalar queries fail for 32-bit values on wave32.
-#if defined(__HIPCC__)
-    if constexpr (sizeof(T) == 4)
-      if (thrust_algorithm_detail::uses_wave32() && size >= 31) return false;
-#endif
-    return true;
-  }
-
-  template <class T> bool supports_any_of(size_t size) const {
-// rocThrust/rocPRIM 4.2 scalar queries return a bad first result on wave32.
-#if defined(__HIPCC__)
-    if (thrust_algorithm_detail::uses_wave32() && sizeof(T) >= 4 && size >= 1) return false;
-#endif
-    return true;
-  }
-
-  template <class T> bool supports_none_of(size_t size) const {
-// rocThrust/rocPRIM 4.2 scalar queries return a bad first result on wave32.
-#if defined(__HIPCC__)
-    if (thrust_algorithm_detail::uses_wave32() && sizeof(T) >= 4 && size >= 1) return false;
-#endif
-    return true;
-  }
-
-  template <class T> bool supports_equal(size_t size) const {
-// rocThrust/rocPRIM 4.2 scalar queries return a bad first result on wave32.
-#if defined(__HIPCC__)
-    if (thrust_algorithm_detail::uses_wave32() && sizeof(T) >= 4 && size >= 1) return false;
-#endif
-    return true;
-  }
-
-  template <class T> bool supports_mismatch(size_t size) const {
-// rocThrust/rocPRIM 4.2 scalar queries return a bad first result on wave32.
-#if defined(__HIPCC__)
-    if (thrust_algorithm_detail::uses_wave32() && sizeof(T) >= 4 && size >= 1) return false;
-#endif
-    return true;
-  }
-
-  template <class T> bool supports_is_partitioned_false(size_t size) const {
-// rocThrust/rocPRIM 4.2 scalar queries return a bad first result on wave32.
-#if defined(__HIPCC__)
-    if (thrust_algorithm_detail::uses_wave32() && sizeof(T) >= 4 && size >= 1) return false;
-#endif
-    return true;
-  }
-
-  template <class T> bool supports_partition_point(size_t size) const {
-// rocThrust/rocPRIM 4.2 scalar queries fail for 32-bit values on wave32.
-#if defined(__HIPCC__)
-    if constexpr (sizeof(T) == 4)
-      if (thrust_algorithm_detail::uses_wave32() && size >= 31) return false;
-#endif
-    return true;
-  }
-
-  template <class T> bool supports_is_sorted_false(size_t size) const {
-// rocThrust/rocPRIM 4.2 scalar queries return a bad first result on wave32.
-#if defined(__HIPCC__)
-    if (thrust_algorithm_detail::uses_wave32() && sizeof(T) >= 4 && size >= 1) return false;
-#endif
-    return true;
-  }
-
-  template <class T> bool supports_is_sorted_until(size_t size) const {
-// rocThrust/rocPRIM 4.2 scalar queries return a bad first result on wave32.
-#if defined(__HIPCC__)
-    if (thrust_algorithm_detail::uses_wave32() && sizeof(T) >= 4 && size >= 1) return false;
-#endif
-    return true;
-  }
 
   template <class T> bool supports_rotate(size_t) const { return false; }
 

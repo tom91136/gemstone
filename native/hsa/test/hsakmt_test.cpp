@@ -6,6 +6,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <stdint.h>
@@ -17,8 +18,10 @@
 #include <gemstone/bytes.hpp>
 #include <gemstone/test_support.hpp>
 
+#include "../../rpc/test/rpc_fixture.hpp"
 #include "code_object_fixture.hpp"
 #include "hsakmt_backend.hpp"
+#include <environment_keys.hpp>
 
 namespace {
 
@@ -116,8 +119,9 @@ int unload_program(void *context, uint64_t) {
 }
 int launch(void *context, uint64_t, const char *, gemstone_hsa_dimensions group_size, gemstone_hsa_dimensions group_count,
            gemstone_hsa_dimensions global_size, uint32_t, uint32_t, const gemstone_hsa_argument *arguments, uint32_t argument_count,
-           uint64_t *completion) {
+           const gemstone_hsa_argument_buffer *argument_buffer, uint64_t *completion) {
   auto &executor = *static_cast<ExecutorContext *>(context);
+  REQUIRE(argument_buffer);
   if (executor.reject_launch || !executor.memory || !arguments || argument_count != 3 || !completion) return -1;
   REQUIRE((arguments[0].kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION));
   REQUIRE((arguments[1].kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION));
@@ -616,3 +620,18 @@ void bootstrap_memory_events_and_direct_queue() {
 } // namespace
 
 TEST_CASE("HSA KMT memory, events, and direct queues", "[hsa][kmt]") { bootstrap_memory_events_and_direct_queue(); }
+
+TEST_CASE("KFD GPU wave size follows the selected processor", "[hsa][kmt]") {
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  REQUIRE((hsaKmtOpenKFD() == HSAKMT_STATUS_SUCCESS));
+  for (const auto &[target, expected] : std::array<std::pair<const char *, uint32_t>, 6>{
+           {{"gfx900", 64}, {"gfx90a", 64}, {"gfx1036", 32}, {"gfx1200", 32}, {"gfx1250", 32}, {"gfx1251", 32}}}) {
+    const gemstone_test::Environment selected(gemstone::environment::TargetArch, target);
+    INFO(target);
+    HsaNodeProperties properties{};
+    REQUIRE((hsaKmtGetNodeProperties(1, &properties) == HSAKMT_STATUS_SUCCESS));
+    CHECK((properties.WaveFrontSize == expected));
+  }
+  REQUIRE((hsaKmtCloseKFD() == HSAKMT_STATUS_SUCCESS));
+}

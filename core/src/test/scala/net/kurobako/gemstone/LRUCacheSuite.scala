@@ -9,6 +9,50 @@ import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
 class LRUCacheSuite extends munit.FunSuite {
+  private class HashKey(val name: String, hash: () => Int) {
+    override def hashCode(): Int             = hash()
+    override def equals(other: Any): Boolean = other match {
+      case key: HashKey => name == key.name
+      case _            => false
+    }
+  }
+
+  test("hashing a large key does not block unrelated cache hits") {
+    val cache   = LRUCache[HashKey, Int](2)
+    val entered = CountDownLatch(1)
+    val release = CountDownLatch(1)
+    val fast    = HashKey("fast", () => 1)
+    val slow    = HashKey(
+      "slow",
+      () => {
+        entered.countDown()
+        if (!release.await(5, TimeUnit.SECONDS)) throw IllegalStateException("hash was not released")
+        2
+      }
+    )
+    assertEquals(cache.get(fast)(1), 1)
+    Using.resource(threads.Pool(2)) { pool =>
+      val pending = pool.executor.submit(() => cache.get(slow)(2))
+      try {
+        assert(entered.await(5, TimeUnit.SECONDS))
+        val hit = pool.executor.submit(() => cache.get(fast)(fail("lost cached value")))
+        assertEquals(hit.get(2, TimeUnit.SECONDS), 1)
+      } finally release.countDown()
+      assertEquals(pending.get(5, TimeUnit.SECONDS), 2)
+    }
+  }
+
+  test("cache publication and eviction reuse key hashes while preserving collision equality") {
+    val hashes                     = AtomicInteger()
+    def key(name: String): HashKey = HashKey(name, () => { val _ = hashes.incrementAndGet(); 7 })
+    val cache                      = LRUCache[HashKey, Int](1)
+    assertEquals(cache.get(key("first"))(1), 1)
+    assertEquals(cache.get(key("first"))(99), 1)
+    assertEquals(cache.get(key("second"))(2), 2)
+    assertEquals(cache.get(key("first"))(3), 3)
+    assertEquals(hashes.get(), 4)
+  }
+
   test("values are reused by byte content and the least recently used value is evicted") {
     val cache = LRUCache[Vec[Byte], String](2)
     assertEquals(cache.get(Vec[Byte](1, 2))("value-a"), "value-a")

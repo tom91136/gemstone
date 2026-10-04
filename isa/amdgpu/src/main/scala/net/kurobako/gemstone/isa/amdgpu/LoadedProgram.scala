@@ -22,6 +22,7 @@ object LoadedProgram {
 }
 
 class LoadedProgram private (initialize: () => Either[Fault, VMLoader.IndexedProgram]) {
+  private val compiler = VMCompiler()
   private val compiled = java.util.concurrent.ConcurrentHashMap[
     String,
     Either[Fault, VMIR.Kernel]
@@ -228,7 +229,7 @@ class LoadedProgram private (initialize: () => Either[Fault, VMLoader.IndexedPro
   ): Either[Fault, Unit] = resolveKernel(task.kernelName) match {
     case Left(error)   => Left(error)
     case Right(kernel) =>
-      compiled.computeIfAbsent(kernel.name, _ => VMCompiler.compile(kernel)) match {
+      compiled.computeIfAbsent(kernel.name, _ => compiler.compile(kernel)) match {
         case Left(error)    => Left(error)
         case Right(program) =>
           VMInterpreter.execute(program, task, memory, control, workgroups, bindings)

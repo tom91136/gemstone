@@ -535,6 +535,7 @@ inline constexpr auto HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1 = 1;
 inline constexpr auto HSA_WAIT_STATE_ACTIVE = 1;
 inline constexpr auto HSA_WAIT_STATE_BLOCKED = 0;
 inline constexpr auto HSA_WAVEFRONT_INFO_SIZE = 0;
+
 }
 
 #endif

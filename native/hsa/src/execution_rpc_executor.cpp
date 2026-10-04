@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -112,20 +113,25 @@ int describeKernel(void *context, uint64_t program_id, const char *name, uint32_
 
 int launch(void *context, uint64_t program_id, const char *kernel_name, gemstone_hsa_dimensions group_size,
            gemstone_hsa_dimensions group_count, gemstone_hsa_dimensions global_size, uint32_t private_segment_bytes,
-           uint32_t group_segment_bytes, const gemstone_hsa_argument *arguments, uint32_t argument_count, uint64_t *completion_id) {
+           uint32_t group_segment_bytes, const gemstone_hsa_argument *arguments, uint32_t argument_count,
+           const gemstone_hsa_argument_buffer *argument_buffer, uint64_t *completion_id) {
   auto &executor = connection(context);
   if (!kernel_name || !completion_id || (!arguments && argument_count != 0)) return -1;
-  std::vector<Argument> converted;
-  converted.reserve(argument_count);
+  std::optional<ArgumentBuffer> buffer;
+  if (argument_buffer)
+    buffer =
+        ArgumentBuffer{AllocationId{static_cast<int64_t>(argument_buffer->allocation_id)}, static_cast<int64_t>(argument_buffer->offset)};
+  else if (argument_count != 0) return -1;
+  std::vector<PointerRelocation> relocations;
+  uint64_t cursor = 0;
   for (uint32_t index = 0; index < argument_count; ++index) {
-    const auto &input = arguments[index];
-    if (input.kind == GEMSTONE_HSA_ARGUMENT_SCALAR) {
-      if (!input.scalar_bytes && input.scalar_size != 0) return -1;
-      converted.emplace_back(ArgumentScalar{std::vector<uint8_t>(input.scalar_bytes, input.scalar_bytes + input.scalar_size)});
-    } else if (input.kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION) {
-      converted.emplace_back(
-          ArgumentMemory{AllocationId{static_cast<int64_t>(input.allocation_id)}, static_cast<int64_t>(input.allocation_offset)});
-    } else return -1;
+    const auto &argument = arguments[index];
+    if (argument.kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION) {
+      relocations.push_back({RelocationSourceMemory{buffer->region}, static_cast<int64_t>(argument_buffer->offset + cursor),
+                             AllocationId{static_cast<int64_t>(argument.allocation_id)}, static_cast<int64_t>(argument.allocation_offset)});
+      cursor += sizeof(uint64_t);
+    } else if (argument.kind == GEMSTONE_HSA_ARGUMENT_SCALAR) cursor += argument.scalar_size;
+    else return -1;
   }
   CompletionId completion{};
   if (gemstone::environment::enabled(gemstone::environment::SystemPaging) && !executor.client->call(EnableHostMemory{})) return -1;
@@ -141,8 +147,11 @@ int launch(void *context, uint64_t program_id, const char *kernel_name, gemstone
           Coordinates{},
           static_cast<int32_t>(private_segment_bytes),
           static_cast<int32_t>(group_segment_bytes),
-          std::move(converted),
-          {}}),
+          {},
+          std::move(relocations),
+          false,
+          {},
+          std::move(buffer)}),
       &completion);
   if (result == 0) *completion_id = static_cast<uint64_t>(completion.value);
   return result;

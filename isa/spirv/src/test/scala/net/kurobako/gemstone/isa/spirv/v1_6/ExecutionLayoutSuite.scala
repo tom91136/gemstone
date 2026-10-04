@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import execution.*
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
@@ -215,6 +216,67 @@ class ExecutionLayoutSuite extends munit.FunSuite {
     )
     assertEquals(parallelMemory.bytes, memory.bytes)
     assertEquals(parallelCalls.get(), 1)
+
+    // Alternate immediately available lanes with suspended host reads. A completed lane's frame may be reused,
+    // but the suspended lanes must keep their own IDs, arguments and values until the transport is flushed.
+    val increment = module.copy(instructions = module.instructions.flatMap {
+      case Instruction.Store(pointer, value, _) => Vec(
+          Instruction.Load(u32, operand(OperandKind.IdResult, 16), pointer, None),
+          Instruction.IAdd(u32, operand(OperandKind.IdResult, 17), operand(OperandKind.IdRef, 16), value),
+          Instruction.Store(pointer, operand(OperandKind.IdRef, 17), None)
+        )
+      case instruction => Vec(instruction)
+    })
+    for (schedule <- List[Workgroups](Workgroups.Sequential, RecordingParallelism())) {
+      val backing = ArrayMemory(allocation, 40)
+      val initial = Vec.from(0 until 8).flatMap(index => LittleEndian.toVec(index.toLong, 4))
+      assertEquals(backing.write(allocation, 4L, initial), Right(()))
+      class MixedMemory extends Memory {
+        private val pending                                = scala.collection.mutable.Set.empty[Long]
+        private val ready                                  = scala.collection.mutable.Set.empty[Long]
+        override def defersHostReads: Boolean              = true
+        override def flushHostReads(): Either[Fault, Unit] = {
+          val _ = ready.addAll(pending)
+          pending.clear()
+          Right(())
+        }
+        override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
+          awaitRead(readDeferred(region, offset, size))
+        override def readDeferred(
+            region: AllocationId,
+            offset: Long >= 0,
+            size: Int >= 0
+        ): Memory.ReadResult[Vec[Byte]] =
+          if (offset.raw % 8L == 0L || ready.contains(offset.raw)) backing.read(region, offset, size)
+          else {
+            val _ = pending.add(offset.raw)
+            Left(Memory.Pending)
+          }
+        override def readValueDeferred(
+            region: AllocationId,
+            offset: Long >= 0,
+            size: Int where Between[1, 8]
+        ): Memory.ReadResult[Long] =
+          readDeferred(region, offset, size.nonNegative).map(bytes =>
+            LittleEndian.decode(bytes, 0, size.scalarByteWidth)
+          )
+        override def write(region: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
+          backing.write(region, offset, bytes)
+      }
+      assertEquals(
+        VMInterpreter.execute(
+          loadUnchecked(increment).toOption.get,
+          dispatch,
+          MixedMemory(),
+          TaskControl(),
+          schedule,
+          _ => Right(())
+        ),
+        Right(())
+      )
+      val expected = Vec.from(0 until 8).flatMap(index => LittleEndian.toVec(0x12345678L + index, 4))
+      assertEquals(backing.bytes, Vec.fill(4)(0.toByte) ++ expected ++ Vec.fill(4)(0.toByte))
+    }
 
     val workgroupSizeModule = module.copy(instructions =
       module.instructions.updated(

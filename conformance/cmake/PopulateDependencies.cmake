@@ -1,4 +1,4 @@
-# Populate the shared dependency source cache.
+# Populate missing or changed pinned sources in the shared dependency cache.
 # Run as: cmake -DCONFORMANCE_DEPENDENCY_CACHE=<dir> -P PopulateDependencies.cmake
 cmake_minimum_required(VERSION 3.25)
 

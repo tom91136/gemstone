@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import VMIR.*
 import cats.syntax.all.*
 import java.util.concurrent.atomic.AtomicIntegerArray
+import java.util.concurrent.atomic.AtomicReferenceArray
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -23,6 +24,35 @@ private class VMTypeLayout(ir: VMIR.Program) {
     dense
   }
 
+  // Scalar/vector shapes are immutable. Keep their tuples alongside the dense type lookup instead of
+  // rebuilding Option/tuple pairs on every arithmetic instruction.
+  private def integerShapeOf(value: RuntimeType): Option[(Int in 1 ~ 64, Int)] = value match {
+    case RuntimeType.Integer(width, _)            => Some((width, 1))
+    case RuntimeType.VectorType(component, count) => runtimeType(component) match {
+        case Some(RuntimeType.Integer(width, _)) => Some((width, count.raw))
+        case _                                   => None
+      }
+    case _ => None
+  }
+  private def floatingShapeOf(value: RuntimeType): Option[(Int in (16, 32, 64), Int)] = value match {
+    case RuntimeType.Floating(width)              => Some((width, 1))
+    case RuntimeType.VectorType(component, count) => runtimeType(component) match {
+        case Some(RuntimeType.Floating(width)) => Some((width, count.raw))
+        case _                                 => None
+      }
+    case _ => None
+  }
+  private val integerShapes  = typeLookup.map(_.flatMap(integerShapeOf(_)))
+  private val floatingShapes = typeLookup.map(_.flatMap(floatingShapeOf(_)))
+
+  def integerShape(typeId: Int): Option[(Int in 1 ~ 64, Int)] =
+    if (typeId >= 0 && typeId < integerShapes.length) integerShapes(typeId)
+    else runtimeType(typeId).flatMap(integerShapeOf(_))
+
+  def floatingShape(typeId: Int): Option[(Int in (16, 32, 64), Int)] =
+    if (typeId >= 0 && typeId < floatingShapes.length) floatingShapes(typeId)
+    else runtimeType(typeId).flatMap(floatingShapeOf(_))
+
   def memberMatrixLayouts: Map[(Int, Int), MatrixLayout] = ir.memberMatrixLayouts
   private val matrixStorageTypes                         = TrieMap.empty[Int, Boolean]
   private val matrixLeafOffsets              = TrieMap.empty[(Int, Option[MatrixLayout]), Vector[(Long >= 0, Int)]]
@@ -41,8 +71,8 @@ private class VMTypeLayout(ir: VMIR.Program) {
   // Enumerate logical scalar lanes in column order and map them to their physical bytes.
   // Loading/storing only these leaves preserves padding and supports row-major column views.
   // Collection traversal supplies nonnegative indices; retain that proof through offset arithmetic.
-  private def scaled(index: Int, stride: Int >= 0): Long >= 0 =
-    index.unsafe[Int >= 0].toLong.widen[Long >= 0] * stride.toLong.widen[Long >= 0]
+  private def scaled(index: Int >= 0, stride: Int >= 0): Long >= 0 =
+    index.toLong.widen[Long >= 0] * stride.toLong.widen[Long >= 0]
 
   def matrixStorageLeaves(typeId: Int, layout: Option[MatrixLayout]): Vector[(Long >= 0, Int)] =
     matrixLeafOffsets.getOrElseUpdate(
@@ -62,7 +92,7 @@ private class VMTypeLayout(ir: VMIR.Program) {
           case Some(RuntimeType.Array(element, count)) =>
             val stride = ir.arrayStrides.get(typeId).fold(storageTypeSize(element, layout))(_.widen[Int >= 0])
             Vector.tabulate(Math.toIntExact(count.raw))(index =>
-              shifted(element, layout, scaled(index, stride))
+              shifted(element, layout, scaled(index.unsafe[Int >= 0], stride))
             ).flatten
           case Some(RuntimeType.MatrixType(column, columns)) =>
             runtimeType(column) match {
@@ -70,7 +100,9 @@ private class VMTypeLayout(ir: VMIR.Program) {
                 val scalarBytes = typeSize(component)
                 val stride      = layout.fold(typeSize(column))(_.stride.widen[Int >= 0])
                 if (stride.raw <= 0) throw IllegalArgumentException("invalid matrix stride")
-                Vector.tabulate(columns.raw, rows.raw) { (c, r) =>
+                Vector.tabulate(columns.raw, rows.raw) { (columnIndex, rowIndex) =>
+                  val c      = columnIndex.unsafe[Int >= 0]
+                  val r      = rowIndex.unsafe[Int >= 0]
                   val offset = if (layout.exists(_.rowMajor)) scaled(r, stride) + scaled(c, scalarBytes)
                   else scaled(c, stride) + scaled(r, scalarBytes)
                   offset -> component
@@ -79,7 +111,7 @@ private class VMTypeLayout(ir: VMIR.Program) {
             }
           case Some(RuntimeType.VectorType(component, count)) =>
             val stride = layout.filter(_.rowMajor).fold(typeSize(component))(_.stride.widen[Int >= 0])
-            Vector.tabulate(count.raw)(index => scaled(index, stride) -> component)
+            Vector.tabulate(count.raw)(index => scaled(index.unsafe[Int >= 0], stride) -> component)
           case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) |
               Some(RuntimeType.Pointer(_, _)) => Vector((0L: Long >= 0) -> typeId)
           case value => throw IllegalArgumentException(s"unsupported matrix storage leaf $value")
@@ -108,14 +140,15 @@ private class VMTypeLayout(ir: VMIR.Program) {
       }
     } else overflowTypeSizeCache.getOrElseUpdate(id, typeSizeUncached(id))
 
-  private val typeAlignmentCache: TrieMap[Int, Int > 0]              = TrieMap.empty
+  private val typeAlignmentCache: TrieMap[Int, Int > 0] = TrieMap.empty
+  private val denseScalarLeafCounts = AtomicReferenceArray[Either[Fault, Int >= 0] | Null](typeLookup.length)
   private val scalarLeafCountCache: TrieMap[Int, Either[Fault, Int >= 0]] = TrieMap.empty
 
   def scalarMemoryWidth(typeId: Int): Either[Fault, Int in 1 ~ 8] = runtimeType(typeId) match {
-    case Some(RuntimeType.Bool) => Right(1)
+    case Some(RuntimeType.Bool)              => Right(1)
     case Some(RuntimeType.Integer(width, _)) => Right(width.toScalarByteWidth)
-    case Some(RuntimeType.Floating(width)) => Right(width.scalarByteWidth)
-    case _ =>
+    case Some(RuntimeType.Floating(width))   => Right(width.scalarByteWidth)
+    case _                                   =>
       val size = typeSize(typeId)
       size.raw.refine[Int in 1 ~ 8].leftMap(_ =>
         Fault.InvalidTask(s"SPIR-V scalar type %$typeId has invalid byte width $size")
@@ -239,8 +272,17 @@ private class VMTypeLayout(ir: VMIR.Program) {
     case value => throw IllegalArgumentException(s"SPIR-V type %$typeId is not a pointer: $value")
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def scalarLeafCount(typeId: Int): Either[Fault, Int >= 0] =
-    scalarLeafCountCache.getOrElseUpdate(typeId, VMIR.scalarLeafCount(ir.types, typeId))
+    if (typeId >= 0 && typeId < denseScalarLeafCounts.length())
+      denseScalarLeafCounts.get(typeId) match {
+        case null =>
+          val count = VMIR.scalarLeafCount(ir.types, typeId)
+          val _     = denseScalarLeafCounts.compareAndSet(typeId, null, count)
+          count
+        case count => count
+      }
+    else scalarLeafCountCache.getOrElseUpdate(typeId, VMIR.scalarLeafCount(ir.types, typeId))
 
   def pointerLeafOffsets(
       typeId: Int,
@@ -261,7 +303,10 @@ private class VMTypeLayout(ir: VMIR.Program) {
       members.zipWithIndex.foldLeft[Either[Fault, Vec[(Long >= 0, Int)]]](Right(Vec.empty)) {
         case (result, (member, index)) =>
           result.flatMap(existing =>
-            pointerLeafOffsetsUnchecked(member, baseOffset + structMemberOffset(typeId, members, index).toLong.widen[Long >= 0]).map(
+            pointerLeafOffsetsUnchecked(
+              member,
+              baseOffset + structMemberOffset(typeId, members, index).toLong.widen[Long >= 0]
+            ).map(
               existing ++ _
             )
           )
@@ -276,7 +321,8 @@ private class VMTypeLayout(ir: VMIR.Program) {
           case (result, index) =>
             result.flatMap { existing =>
               val stride = ir.arrayStrides.get(typeId).fold(typeSize(element))(_.widen[Int >= 0])
-              pointerLeafOffsetsUnchecked(element, baseOffset + scaled(index, stride)).map(existing ++ _)
+              pointerLeafOffsetsUnchecked(element, baseOffset + scaled(index.unsafe[Int >= 0], stride)).map(existing ++
+                _)
             }
         }
     case Some(_) => Right(Vec.empty)

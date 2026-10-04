@@ -21,9 +21,32 @@ import scala.util.control.NonFatal
 
 /** Compile SASS register operations to the shared NVIDIA execution IR, preserving physical register aliases. */
 private object VMCompiler {
-  private enum LegacyToken { case Break, Synchronization }
   private def unsupported(detail: String): Nothing = throw IllegalArgumentException(detail)
   private type IntegerWidth = Int where (Between[8, 64] & MultipleOf[8])
+  private def resolveLegacyTargets(sm: Int, function: DecodedFunction): DecodedFunction =
+    if (sm >= 70) function
+    else {
+      val bundleBytes = if (sm < 50) 64 else 32
+      val addresses   = function.instructions.map(_.address.raw).toSet
+      function.copy(instructions = function.instructions.map { instruction =>
+        instruction.operation match {
+          case _: SASSInstruction.Bra | _: SASSInstruction.Jmp | _: SASSInstruction.Cal |
+              _: SASSInstruction.Call | _: SASSInstruction.Ssy | _: SASSInstruction.Pbk |
+              _: SASSInstruction.Pret =>
+            val operands = instruction.operands.map { operand =>
+              VMOperand.integer(operand) match {
+                // Control words occupy addresses but execute with their following instruction.
+                case Some(target)
+                    if target.isValidInt && target >= 0 && target % bundleBytes == 0 &&
+                      !addresses(target.toInt) && addresses(target.toInt + 8) => Operand.Integer(target + 8)
+                case _ => operand
+              }
+            }
+            if (operands == instruction.operands) instruction else instruction.rewrite(operands = operands)
+          case _ => instruction
+        }
+      })
+    }
   private def number(value: Operand): Long = VMOperand.integer(value)
     .filter(value => value >= Long.MinValue && value <= ((BigInt(1) << 64) - 1))
     .fold(unsupported(s"expected integer operand, found $value"))(_.toLong)
@@ -33,19 +56,24 @@ private object VMCompiler {
     raw.toInt.unsafe[Int >= 0]
   }
   private def register(value: Operand, add: Int = 0): Value =
-    if (VMOperand.isZero(value)) Value.Immediate(0L) else destination(value, add)
+    if (VMOperand.isZero(value)) Value.Immediate(0L)
+    else Value.RegisterSlot(VMRegisterFile.slot(destination(
+      value,
+      add
+    ).name).getOrElse(unsupported(s"invalid register slot: $value")))
 
   private def destination(value: Operand, add: Int = 0): Value.Register = VMOperand.base(value) match {
     case Operand.Register(bank @ (RegisterBank.R | RegisterBank.UR), index) =>
-      val limit = if (bank == RegisterBank.UR) 63 else 255
-      if (add < 0 || index.raw + add >= limit) unsupported(s"register range exceeds $bank bank: $value + $add")
-      Value.Register(s"%$bank${index.raw + add}")
+      val end = index.raw + add
+      if (add < 0 || end >= 255) unsupported(s"register range exceeds $bank bank: $value + $add")
+      Value.Register(if (bank == RegisterBank.R) VMRegisters.general(end) else VMRegisters.uniform(end))
     case _ => unsupported(s"expected writable register, found $value")
   }
   private def predicate(value: Operand): Value.Register = value match {
-    case Operand.Predicate(None, _, negated)            => Value.Register(if (negated) "%false" else "%true")
+    case Operand.Predicate(None, _, negated) =>
+      Value.Register(if (negated) VMRegisters.Predicate.False.name else VMRegisters.Predicate.True.name)
     case Operand.Predicate(Some(index), uniform, false) =>
-      Value.Register(s"%${if (uniform) "UP" else "P"}$index")
+      Value.Register(VMRegisters.predicate(index.raw, uniform))
     case _ => unsupported(s"expected predicate register, found $value")
   }
   private def executionPredicate(value: Operand): ExecutionPredicate = value match {
@@ -81,7 +109,23 @@ private object VMCompiler {
         kernel.parameters.map(p => KernelParameter(s"param${p.ordinal}", p.size)),
         statements,
         globalSymbols
-      )
+      ).map { compiled =>
+        val dynamicParameters =
+          kernel.parameterSize.raw > 0 && functions.exists(_.instructions.exists(_.operands.exists {
+            case Operand.ConstantBank(bank, _: Operand.Address) => bank == 0
+            case _                                              => false
+          }))
+        if (!dynamicParameters) compiled
+        else {
+          val initial = module.sections.find(_.name == s".nv.constant0.${kernel.name}").fold(Vec.empty[Byte])(_.bytes)
+            .slice(kernel.parameterBase.raw, kernel.parameterBase.raw + kernel.parameterSize.raw)
+          val bytes   = Vec.from(initial.toArray.padTo(kernel.parameterSize.raw, 0.toByte))
+          val offsets = kernel.parameters.map(p =>
+            (s"param${p.ordinal}": NonEmpty[String]) -> p.offset
+          ).toMap
+          compiled.copy(parameterBank = Some(ParameterBank(bytes, offsets)))
+        }
+      }
   }
 
   def lower(
@@ -90,6 +134,8 @@ private object VMCompiler {
       functions: Vec[DecodedFunction],
       boundSymbols: Set[NonEmpty[String]] = Set.empty
   ): Either[NonEmpty[String], Vec[VMAssembler.Statement]] = try {
+    if (kernel.requiredCluster != LaunchGeometry.Dimensions.One || kernel.explicitCluster)
+      unsupported("kernel requires unsupported thread-block cluster launch geometry")
     module.sections.filter(s => s.kind == 4 || s.kind == 9).foreach { r =>
       if (r.bytes.size != r.size.raw || r.size.raw % (if (r.kind == 4) 24 else 16) != 0)
         unsupported("invalid cubin relocations")
@@ -98,7 +144,10 @@ private object VMCompiler {
     }
     val originalFunction =
       functions.find(_.name == kernel.name).getOrElse(unsupported(s"missing SASS for ${kernel.name}"))
-    val function = VMAddressAnalysis.rewrite(module.sm.raw, originalFunction)
+    val textRelocations = Cubin.TextRelocation.resolve(module, kernel, originalFunction, boundSymbols)
+      .fold(error => unsupported(error.raw), identity)
+    val function = VMAddressAnalysis.rewrite(module.sm.raw, resolveLegacyTargets(module.sm.raw, originalFunction))
+    val rangeReductions = VMRangeReduction.inputs(module.sm.raw, function)
     function.instructions.foreach { instruction =>
       if (
         (instruction.operation match {
@@ -115,15 +164,32 @@ private object VMCompiler {
       module.sections.exists(s =>
         (s.kind == 4 || s.kind == 9) && s.size.raw != 0 &&
           module.sections.lift(s.info).exists(target =>
-            target.index == kernel.section ||
-              target.name.startsWith(".nv.global")
+            target.name.startsWith(".nv.global")
           )
       )
     )
       unsupported("relocations in kernel code, constants or globals are not implemented")
-    // Convergence uses the shared engine's explicit SASS barrier tokens.
-    // Require the compiler's structured form, where BSYNC falls through to
-    // the BSSY target; other control-stack operations remain unsupported.
+    val collectiveEnds = function.instructions.filter(i =>
+      (i.operation match { case _: SASSInstruction.Warpsync => true; case _ => false }) &&
+        (i.modifiers == Vec(Modifier.COLLECTIVE) || i.modifiers == Vec(Modifier.COLLECTIVE, Modifier.ALL))
+    ).map { setup =>
+      if (setup.guard.nonEmpty || setup.operands.size != (if (setup.modifiers.contains(Modifier.ALL)) 1 else 2))
+        unsupported("collective warp synchronization requires an unguarded mask and end target")
+      val target = number(setup.operands.last).toInt
+      if (
+        target <= setup.address.raw || !function.instructions.exists(i =>
+          i.address.raw == target - 16 && i.guard.isEmpty &&
+            (i.operation match { case _: SASSInstruction.Endcollective => true; case _ => false })
+        )
+      ) unsupported("collective warp target must immediately follow ENDCOLLECTIVE")
+      target - 16
+    }.toSet
+    function.instructions.filter(_.operation match {
+      case _: SASSInstruction.Endcollective => true; case _ => false
+    }).foreach { end =>
+      if (!collectiveEnds(end.address.raw)) unsupported("ENDCOLLECTIVE has no matching warp synchronization")
+    }
+    // BSYNC falls through to the setup target; BMOV may restore the token into a different B register.
     function.instructions.filter(_.operation match { case _: SASSInstruction.Bssy => true; case _ => false }).foreach {
       setup =>
         if (setup.operands.size != 2 || !VMOperand.isRegister(setup.operands.head, RegisterBank.B))
@@ -134,52 +200,13 @@ private object VMCompiler {
           !function.instructions.exists(i =>
             i.address.raw == target - 16 && (i.operation match {
               case _: SASSInstruction.Bsync => true; case _ => false
-            }) && i.operands == Vec(
-              setup.operands.head
-            )
+            })
           )
         )
           unsupported("convergence barrier target must be forward and immediately after its BSYNC")
     }
-    // Volta and Turing compiler output discard a cleared barrier before its next setup.
-    // Only accept that inactive form; save/restore and clearing a live token need
-    // a fuller barrier-register model than the structured convergence lowering.
-    function.instructions.filter(i =>
-      (i.operation match { case _: SASSInstruction.Bmov => true; case _ => false }) && i.modifiers == Vec(
-        Modifier.`32`,
-        Modifier.`CLEAR`
-      ) && i.operands.headOption.contains(VMOperand.Zero)
-    )
-      .foreach { clear =>
-        if (
-          !Set(70, 75)(module.sm.raw) || clear.guard.nonEmpty || clear.operands.size != 2 ||
-          !VMOperand.isRegister(clear.operands(1), RegisterBank.B)
-        )
-          unsupported("unsupported discarded barrier clear")
-        if (
-          function.instructions.exists(setup =>
-            (setup.operation match { case _: SASSInstruction.Bssy => true; case _ => false }) &&
-              setup.operands.head == clear.operands(1) && setup.address.raw < clear.address.raw &&
-              clear.address.raw < number(setup.operands(1))
-          )
-        )
-          unsupported("discarded barrier clear inside an active convergence region is not implemented")
-      }
-    // Kepler/Maxwell/Pascal convergence tokens have lexical targets rather than B registers.
-    // Validate this structured subset and rendezvous at the target after each .S/SYNC transfer.
-    val legacyTokens = ArrayBuffer.empty[(DecodedInstruction, Int, Int)]
-    if (module.sm.raw < 70) function.instructions.filter(i =>
-      i.operation match { case _: SASSInstruction.Ssy | _: SASSInstruction.Pbk => true; case _ => false }
-    ).foreach { i =>
-      if (i.operands.size != 1 || i.guard.nonEmpty)
-        unsupported("unsupported legacy control-stack setup")
-      val target = number(i.operands.head).toInt
-      if (target <= i.address.raw || !function.instructions.exists(_.address.raw == target))
-        unsupported("legacy convergence target must be a forward instruction")
-      val occupied = legacyTokens.filter(_._3 > i.address.raw).map(_._2).toSet
-      val slot = (0 until 16).find(!occupied(_)).getOrElse(unsupported("legacy convergence nesting exceeds 16 tokens"))
-      legacyTokens += ((i, slot, target))
-    }
+    val legacyControl   = Option.when(module.sm.raw < 70)(LegacyControlFlow(function.instructions))
+    val legacyTokens    = legacyControl.fold(Vec.empty[LegacyControlFlow.Setup])(_.setups)
     val addresses       = function.instructions.map(_.address.raw).toSet
     val sortedAddresses = addresses.toVec.sorted
     val returnBases     = function.instructions.filter(_.operation match {
@@ -198,24 +225,10 @@ private object VMCompiler {
       )
     val instructions = function.instructions.flatMap { instruction =>
       try {
-        val setup      = legacyTokens.find(_._1.address.raw == instruction.address.raw)
-        val syncSuffix = module.sm.raw < 70 && instruction.modifiers.lastOption.contains(Modifier.S)
-        val syncKind   = if (instruction.operation match { case _: SASSInstruction.Brk => true; case _ => false })
-          Some(LegacyToken.Break)
-        else if ((instruction.operation match { case _: SASSInstruction.Sync => true; case _ => false }) || syncSuffix)
-          Some(LegacyToken.Synchronization)
-        else None
-        val transferToken = syncKind.map { kind =>
-          legacyTokens.filter((i, _, target) =>
-            (kind match {
-              case LegacyToken.Break => i.operation match { case _: SASSInstruction.Pbk => true; case _ => false };
-              case LegacyToken.Synchronization =>
-                i.operation match { case _: SASSInstruction.Ssy => true; case _ => false }
-            }) && i.address.raw < instruction.address.raw && instruction.address.raw < target
-          )
-            .lastOption.getOrElse(unsupported("legacy control-stack transfer has no enclosing setup"))
-        }
-        val transfer = transferToken.map(_._3)
+        val setup         = legacyTokens.find(_.instruction.address == instruction.address)
+        val syncSuffix    = module.sm.raw < 70 && instruction.modifiers.lastOption.contains(Modifier.S)
+        val transferToken = legacyControl.flatMap(_.transfer(instruction))
+        val transfer      = transferToken.map(_.target.raw)
         // Some legacy entry points end with RET; EXIT despite having no call
         // sites or return tokens. This terminal entry epilogue ends the launch;
         // it must not consume a device-call return address.
@@ -228,13 +241,13 @@ private object VMCompiler {
                 (next.operation match { case _: SASSInstruction.Exit => true; case _ => false }) && next.guard.isEmpty
             )
         val normalized = setup match {
-          case Some((_, slot, target)) =>
+          case Some(LegacyControlFlow.Setup(_, _, slot, target)) =>
             instruction.rewrite(SASSInstruction.BssyRegImm(
               InstructionOperand.Register.from(Operand.Register(
                 RegisterBank.B,
-                slot.unsafe[Int in 0 ~ 255]
+                slot
               )).fold(unsupported(_), identity),
-              InstructionOperand.Immediate.from(Operand.Integer(target)).fold(unsupported(_), identity),
+              InstructionOperand.Immediate.from(Operand.Integer(target.raw)).fold(unsupported(_), identity),
               pred = instruction.guard
             ))
           case None if syncSuffix        => instruction.rewrite(modifiers = instruction.modifiers.dropRight(1))
@@ -247,14 +260,13 @@ private object VMCompiler {
           transfer.filter(_ =>
             !instruction.guard.exists(g => g.predicate.index.isEmpty && g.predicate.negated)
           ).toVec.flatMap { target =>
-            val predication = instruction.guard.map(_ => ExecutionPredicate("%guard", false))
+            val predication = instruction.guard.map(_ => ExecutionPredicate(VMRegisters.Predicate.Guard.name, false))
             val unwind = if (instruction.operation match { case _: SASSInstruction.Brk => true; case _ => false }) {
-              val setupAddress = transferToken.get._1.address.raw
-              legacyTokens.filter((setup, _, end) =>
-                setup.address.raw > setupAddress && setup.address.raw < instruction.address.raw && end > instruction.address.raw
-              ).reverse.map((_, slot, _) =>
-                Execute(Convergence(slot, ConvergenceAction.Break), predication)
-              ).toVec
+              val setupAddress = transferToken.get.instruction.address.raw
+              legacyTokens.filter(token =>
+                token.instruction.address.raw > setupAddress && token.instruction.address < instruction.address &&
+                  token.target > instruction.address
+              ).reverse.map(token => Execute(Convergence(token.slot, ConvergenceAction.Break), predication))
             } else Vec.empty[Statement]
             unwind :+ VMAssembler.Statement.Branch(s"L${target.toHexString}", predication)
           }
@@ -264,28 +276,30 @@ private object VMCompiler {
           normalized,
           returnBases,
           sortedAddresses,
-          boundSymbols
+          boundSymbols,
+          rangeReductions.get(instruction.address.raw),
+          textRelocations.get(instruction.address)
         ) ++ branch
-        val arrivals = legacyTokens.filter(_._3 == instruction.address.raw).reverse.map((_, slot, _) =>
-          Execute(Convergence(slot, ConvergenceAction.Synchronize))
-        ).toVec
+        val arrivals = legacyTokens.filter(_.target == instruction.address).reverse.map(token =>
+          Execute(Convergence(token.slot, ConvergenceAction.Synchronize))
+        )
         lowered.take(1) ++ arrivals ++ lowered.drop(1)
       } catch {
         case NonFatal(error) => unsupported(
-            s"${kernel.name}+0x${instruction.address.raw.toHexString} (sm_${module.sm.raw}): ${instruction.mnemonic.raw} ${instruction.operands.mkString(", ")}: ${error.getMessage}"
+            s"${kernel.name}+0x${instruction.address.raw.toHexString} (sm_${module.sm.raw}): ${(Vec(instruction.mnemonic.raw) ++ instruction.modifiers.map(_.name)).mkString(".")} ${instruction.operands.mkString(", ")}: ${error.getMessage}"
           )
       }
     }
     Right(Vec(
       Execute(SetPredicate(
-        "%true",
+        VMRegisters.Predicate.True.name,
         Comparison.Equal,
         ConversionType.U32.format,
         Value.Immediate(0L),
         Value.Immediate(0L)
       )),
       Execute(SetPredicate(
-        "%false",
+        VMRegisters.Predicate.False.name,
         Comparison.NotEqual,
         ConversionType.U32.format,
         Value.Immediate(0L),
@@ -300,11 +314,23 @@ private object VMCompiler {
       instruction: DecodedInstruction,
       returnBases: Vec[Int],
       addresses: Vec[Int],
-      boundSymbols: Set[NonEmpty[String]]
+      boundSymbols: Set[NonEmpty[String]],
+      reducedRadians: Option[Value.Register],
+      textRelocation: Option[Cubin.TextRelocation]
   ): Vec[VMAssembler.Statement] =
     if (instruction.guard.exists(g => g.predicate.index.isEmpty && g.predicate.negated))
       Vec(Label(s"L${instruction.address.raw.toHexString}"))
-    else InstructionCompiler(module, kernel, instruction, returnBases, addresses, boundSymbols).compile()
+    else
+      InstructionCompiler(
+        module,
+        kernel,
+        instruction,
+        returnBases,
+        addresses,
+        boundSymbols,
+        reducedRadians,
+        textRelocation
+      ).compile()
 
   private class InstructionCompiler(
       module: Cubin.Module,
@@ -312,7 +338,9 @@ private object VMCompiler {
       val instruction: DecodedInstruction,
       returnBases: Vec[Int],
       addresses: Vec[Int],
-      boundSymbols: Set[NonEmpty[String]]
+      boundSymbols: Set[NonEmpty[String]],
+      reducedRadians: Option[Value.Register],
+      textRelocation: Option[Cubin.TextRelocation]
   ) extends VMCompilationContext {
     def sm: Int              = module.sm.raw
     private val writtenFlags = scala.collection.mutable.Set.empty[VMConditionCodes.Flag]
@@ -322,14 +350,9 @@ private object VMCompiler {
       result
     }
     private def writeConditionFlags(): Unit =
-      Vec("c", "z", "s", "o", "eq", "lt").zip(Vec(
-        VMConditionCodes.Flag.Carry,
-        VMConditionCodes.Flag.Zero,
-        VMConditionCodes.Flag.Sign,
-        VMConditionCodes.Flag.Overflow,
-        VMConditionCodes.Flag.Equal,
-        VMConditionCodes.Flag.LessThan
-      )).foreach((name, flag) => emit(WriteConditionFlag(flag, Value.Predicate(s"%cc_$name"))))
+      VMConditionCodes.Flag.values.foreach(flag =>
+        emit(WriteConditionFlag(flag, Value.Predicate(VMRegisters.condition(flag))))
+      )
     def setZeroFlag(value: Value): Unit = {
       val zero = temp("q")
       emit(SetPredicate(zero.name, Comparison.Equal, ConversionType.U32.format, value, Value.Immediate(0L)))
@@ -351,8 +374,9 @@ private object VMCompiler {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var temporaryCount                     = 0
     def temp(prefix: String = "t"): Value.Register = {
-      if (temporaryCount >= 64) unsupported("instruction temporary limit exceeded")
-      val result: Value.Register = Value.Register(s"%$prefix$temporaryCount")
+      if (temporaryCount >= VMRegisters.TemporaryCount) unsupported("instruction temporary limit exceeded")
+      val result: Value.Register =
+        Value.Register(VMRegisters.temporary(index = temporaryCount, predicate = prefix == "q"))
       temporaryCount += 1
       result
     }
@@ -368,14 +392,21 @@ private object VMCompiler {
     def branch(target: NonEmpty[String], pred: Option[ExecutionPredicate] = None): Unit =
       code += VMAssembler.Statement.Branch(target, pred)
     private def dispatch(target: Value.Register, destinations: Vec[Int]): Unit = {
-      destinations.foreach { destination =>
+      val targets = destinations.flatMap { destination =>
+        val controlWord = destination - 8
+        val bundleBytes = if (module.sm.raw < 50) 64 else 32
+        val alias       = Option.when(module.sm.raw < 70 && controlWord >= 0 && controlWord % bundleBytes == 0 &&
+          !destinations.contains(controlWord))(controlWord -> destination)
+        Vec(destination -> destination) ++ alias.toVec
+      }
+      targets.foreach { (targetAddress, destination) =>
         val matches = temp("q")
         emit(SetPredicate(
           matches.name,
           Comparison.Equal,
           ConversionType.U32.format,
           target,
-          Value.Immediate(destination.toLong)
+          Value.Immediate(targetAddress.toLong)
         ))
         branch(s"L${destination.toHexString}", Some(ExecutionPredicate(matches.name, false)))
         temporaryCount -= 1
@@ -390,8 +421,17 @@ private object VMCompiler {
     }
     def store(text: Operand, value: Value, bits: IntegerWidth = 32): Unit =
       if (!VMOperand.isZero(text)) {
-        if (bits.raw == 64)
+        val uniform = VMOperand.base(text) match {
+          case Operand.Register(RegisterBank.UR, _) => true
+          case _                                    => false
+        }
+        if (bits.raw == 64 && uniform) {
+          val words = Vec(temp(), temp())
+          emit(MoveSplit(words.map(_.name), value, 32))
+          words.zipWithIndex.foreach((word, index) => emit(UniformMove(destination(text, index).name, word)))
+        } else if (bits.raw == 64)
           emit(MoveSplit(Vec(destination(text), destination(text, 1)).map(_.name), value, 32))
+        else if (uniform) emit(UniformMove(destination(text).name, value))
         else emit(Move(destination(text).name, value, 32))
       }
     def source(raw: Operand, bits: IntegerWidth = 32): Value = VMOperand.without(raw, OperandSelector.`reuse`) match {
@@ -406,29 +446,36 @@ private object VMCompiler {
           module.sections.find(s => s.name == s".nv.constant$bank.${kernel.name}" || s.name == s".nv.constant$bank")
             .getOrElse(unsupported("unknown dynamic constant bank"))
         if (
-          bank == 0 || module.sections.exists(s =>
+          module.sections.exists(s =>
             (s.kind == 4 || s.kind == 9) && s.info == section.index.raw && s.size.raw != 0
           )
         )
-          unsupported("dynamic access to relocated or parameter constants")
+          unsupported("dynamic access to relocated constants")
         if (offset.index.nonEmpty || offset.mode.nonEmpty || offset.scale.raw != 1 || offset.descriptor.nonEmpty)
           unsupported("unsupported dynamic constant offset")
-        val index      = offset.base.getOrElse(unsupported("missing dynamic constant index"))
-        val wideOffset = temp("wide")
+        val parameterBank = bank == 0 && kernel.parameterSize.raw > 0
+        val displacement  = offset.displacement - (if (parameterBank) kernel.parameterBase.raw else 0)
+        val index         = offset.base.getOrElse(unsupported("missing dynamic constant index"))
+        val wideOffset    = temp("wide")
         emit(Convert(wideOffset.name, source(index), ConversionType.U32, ConversionType.U64, None))
-        if (offset.displacement != 0)
+        if (displacement != 0)
           emit(IntegerBinary(
             IntegerOperation.Add,
             wideOffset.name,
             wideOffset,
-            literal(Operand.Integer(offset.displacement)),
+            literal(Operand.Integer(displacement)),
             64
           ))
         val base = temp("wide")
-        emit(Move(base.name, Value.Symbol(s"__sass_const${section.index}"), 64))
+        emit(Move(
+          base.name,
+          Value.Symbol(if (parameterBank) ParameterBank.Symbol else s"__sass_const${section.index}"),
+          64
+        ))
         emit(IntegerBinary(IntegerOperation.Add, base.name, base, wideOffset, 64))
         val result = temp(if (bits.raw == 64) "wide" else "t")
-        emit(load(Vec(result), base, bits, false, MemoryAccess.Global(false)))
+        if (parameterBank) emit(LoadParameterIndirect(result.name, base, bits, false))
+        else emit(load(Vec(result), base, bits, false, MemoryAccess.Global(false)))
         result
       case Operand.ConstantBank(bankValue, offsetValue) =>
         if (!bankValue.isValidInt) unsupported("constant bank out of range")
@@ -493,7 +540,9 @@ private object VMCompiler {
           bank == 0 && bits.raw == 32 && {
             val base =
               if (module.sm.raw < 50) 0x28 else if (module.sm.raw < 70) 8 else if (module.sm.raw >= 100) 0x360 else 0
-            offset >= base && offset < base + 24 && (offset - base) % 4 == 0
+            val gridBase = base + (if (module.sm.raw >= 100) 16 else 12)
+            ((offset >= base && offset < base + 12) || (offset >= gridBase && offset < gridBase + 12)) &&
+            (offset - base) % 4 == 0
           }
         ) {
           val base =
@@ -506,7 +555,7 @@ private object VMCompiler {
               Value.GridDim(LaunchGeometry.Axis.X),
               Value.GridDim(LaunchGeometry.Axis.Y),
               Value.GridDim(LaunchGeometry.Axis.Z)
-            )((offset - base) / 4)
+            )((offset - base) / 4 - (if (module.sm.raw >= 100 && offset >= base + 16) 1 else 0))
           emit(Move(result.name, special, 32))
         } else if (bank == 0 && module.sm.raw < 50 && bits.raw == 32 && offset == 0x20) {
           // Legacy cvta.shared.to.generic uses this c0 field as the shared-space tag.
@@ -632,16 +681,25 @@ private object VMCompiler {
         allowGlobalU32UniformBase: Boolean = false
     ): Value = raw match {
       case operand: Operand.Address =>
-        val result = temp("wide")
-        val mode   = operand.mode
-        if (mode.contains(AddressMode.U32)) {
+        val result      = temp("wide")
+        val mode        = operand.mode
+        val uniformBase =
+          if (operand.index.isEmpty) operand.base.filter(_.bank == RegisterBank.UR)
+          else if (operand.base.exists(VMOperand.isZero)) operand.index.filter(_.bank == RegisterBank.UR)
+          else None
+        if (mode.contains(AddressMode.U32) && uniformBase.nonEmpty) {
+          val base = uniformBase.get
+          if (!global || module.sm.raw < 75 || base.index >= 255 || operand.displacement != 0 || operand.scale.raw != 1)
+            unsupported("unsupported uniform-only .U32 global address")
+          emit(MoveCombine(result.name, Vec(register(base), register(base, 1)), 32))
+        } else if (mode.contains(AddressMode.U32)) {
           val base =
             operand.base.getOrElse(unsupported("unsupported .U32 uniform global address: missing general base"))
           val index =
             operand.index.getOrElse(unsupported("unsupported .U32 uniform global address: missing uniform base"))
           if (
             !global || !allowGlobalU32UniformBase || module.sm.raw != 75 || base.bank != RegisterBank.R ||
-            index.bank != RegisterBank.UR || index.index >= 63 || operand.displacement != 0
+            index.bank != RegisterBank.UR || index.index >= 255 || operand.displacement != 0
           )
             unsupported("unsupported .U32 uniform global address")
           emit(MoveCombine(result.name, Vec(register(index), register(index, 1)), 32))
@@ -670,13 +728,13 @@ private object VMCompiler {
             if (index.bank != RegisterBank.UR) unsupported("only uniform address offsets are supported")
             val offset = temp("wide")
             if (global) {
-              if (!mode.contains(AddressMode.`64`) || index.index >= 63)
+              if (!mode.contains(AddressMode.`64`) || index.index >= 255)
                 unsupported("uniform offset requires a 64-bit global base and an in-range register pair")
               emit(MoveCombine(offset.name, Vec(register(index), register(index, 1)), 32))
             } else {
               val supported = module.sm.raw >= 80 || (module.sm.raw == 75 &&
                 (instruction.operation match { case _: SASSInstruction.Lds => true; case _ => false }) &&
-                Set(Vec(Modifier.`U`, Modifier.`S8`), Vec(Modifier.`U`, Modifier.`U8`))(instruction.modifiers))
+                instruction.modifiers.contains(Modifier.`U`))
               if (!sharedUniform || !supported || mode.contains(AddressMode.`64`))
                 unsupported("uniform offsets on this non-global address form are not implemented")
               emit(Convert(offset.name, register(index), ConversionType.U32, ConversionType.U64, None))
@@ -752,17 +810,29 @@ private object VMCompiler {
     }
     def updateIntegerCC(lhs: Value, rhs: Value, result: Value, isSub: Boolean, carry: Option[Value]): Unit = {
       if (isSub)
-        emit(SetPredicate("%cc_c", Comparison.GreaterThanOrEqual, ConversionType.U32.format, lhs, rhs))
+        emit(SetPredicate(
+          VMRegisters.Predicate.Carry.name,
+          Comparison.GreaterThanOrEqual,
+          ConversionType.U32.format,
+          lhs,
+          rhs
+        ))
       else emit(SetPredicate(
-        "%cc_c",
+        VMRegisters.Predicate.Carry.name,
         Comparison.NotEqual,
         ConversionType.U32.format,
         carry.getOrElse(unsupported("missing integer carry")),
         Value.Immediate(0L)
       ))
-      emit(SetPredicate("%cc_z", Comparison.Equal, ConversionType.U32.format, result, Value.Immediate(0L)))
       emit(SetPredicate(
-        "%cc_s",
+        VMRegisters.Predicate.Zero.name,
+        Comparison.Equal,
+        ConversionType.U32.format,
+        result,
+        Value.Immediate(0L)
+      ))
+      emit(SetPredicate(
+        VMRegisters.Predicate.Sign.name,
         Comparison.LessThan,
         ConversionType.S32.format,
         result,
@@ -803,14 +873,25 @@ private object VMCompiler {
         overflowSignCondition.name,
         resultSignDiffers.name
       ))
-      emit(PredicateBinary(PredicateOperation.Or, "%cc_o", overflow.name, "%false"))
-      emit(PredicateBinary(PredicateOperation.Or, "%cc_eq", "%cc_z", "%false"))
-      emit(PredicateUnary("%cc_lt", "%cc_c"))
+      emit(PredicateBinary(
+        PredicateOperation.Or,
+        VMRegisters.Predicate.Overflow.name,
+        overflow.name,
+        VMRegisters.Predicate.False.name
+      ))
+      emit(PredicateBinary(
+        PredicateOperation.Or,
+        VMRegisters.Predicate.Equal.name,
+        VMRegisters.Predicate.Zero.name,
+        VMRegisters.Predicate.False.name
+      ))
+      emit(PredicateUnary(VMRegisters.Predicate.LessThan.name, VMRegisters.Predicate.Carry.name))
     }
-    private def scoreboardGroup(args: Vec[Operand]): Boolean = args match {
+    private def scoreboardMask(args: Vec[Operand]): Boolean = args match {
       case Vec(Operand.Group(values)) =>
         values.nonEmpty && values.forall(v => VMOperand.integer(v).exists(n => n >= 0 && n <= 5))
-      case _ => false
+      case Vec(value) => VMOperand.integer(value).exists(mask => mask >= 0 && mask <= 63)
+      case _          => false
     }
     private def supportsZeroFlagFSetCC(
         sm: Int,
@@ -821,23 +902,29 @@ private object VMCompiler {
       def input(value: Operand): Boolean = value match {
         case Operand.Unary(inner, false, false, true) => VMOperand.isRegister(inner)
         case Operand.ConstantBank(bank, offset)       => bank == 2 && VMOperand.integer(offset).exists(_ >= 0)
-        case other                                    => VMOperand.isRegister(other)
+        case Operand.FloatingBits(_, width, _) if width.raw == 32 => true
+        case other                                                => VMOperand.isRegister(other)
       }
-      sm == 35 && ((operation match { case _: SASSInstruction.Fset => true; case _ => false }) && modifiers == Vec(
-        Modifier.`GTU`,
-        Modifier.`AND`
-      )) && args.size == 4 &&
+      Set(35, 50, 60)(sm) && (operation match { case _: SASSInstruction.Fset => true; case _ => false }) &&
+      (modifiers.filterNot(_ == Modifier.FTZ) match {
+        case Vec(Modifier.GTU | Modifier.NEU, Modifier.AND) => true
+        case _                                              => false
+      }) && args.size == 4 &&
       args.head == Operand.Qualified(VMOperand.Zero, Vec(OperandSelector.CC)) && input(args(1)) && input(args(2)) &&
       VMOperand.isPredicate(args(3), allowNegated = true)
     }
     def compile(): Vec[VMAssembler.Statement] = {
       val args      = instruction.operands
-      val modifiers = instruction.modifiers
-      val op        = instruction.mnemonic.raw
+      val modifiers = instruction.modifiers.map {
+        // The generated SCO vocabulary uses VC as an alias of GPU scope.
+        case Modifier.VC => Modifier.GPU
+        case other       => other
+      }
+      val op = instruction.mnemonic.raw
       if (modifiers.exists { case Modifier.Vendor(_) => true; case _ => false })
         unsupported("unsupported vendor modifier")
       if (args.exists(VMOperand.hasUnknownDomain(_))) unsupported("unsupported vendor operand domain")
-      def negatedSource(raw: Operand): Boolean = VMOperand.negative(raw)
+      def negatedSource(raw: Operand): Boolean = VMOperand.negative(raw) && VMOperand.integer(raw).isEmpty
       // ENVY's GK110 encoding model gives plain IMAD U32 x U24 + U32 operand
       // types. Restrict its flags to the observed 24-bit immediate form.
       val ccFlagsSupported = args.headOption.exists(VMOperand.has(_, OperandSelector.`CC`)) && (
@@ -846,40 +933,44 @@ private object VMCompiler {
         ) && args.size == 3 &&
           !(negatedSource(args(1)) && negatedSource(args(2)))) ||
           ((instruction.operation match {
-            case _: SASSInstruction.Iscadd => true; case _ => false
+            case _: SASSInstruction.Iscadd | _: SASSInstruction.Iscadd32i => true; case _ => false
           }) && (modifiers.isEmpty) && args.size == 4 &&
-            !negatedSource(args(1)) && !negatedSource(args(2)) && VMOperand.integer(args(3)).nonEmpty &&
+            !(negatedSource(args(1)) && negatedSource(args(2))) && VMOperand.integer(args(3)).nonEmpty &&
             number(args(3)) >= 0 && number(args(3)) < 32) ||
           ((instruction.operation match {
             case _: SASSInstruction.Imad => true; case _ => false
           }) && (modifiers.isEmpty) && args.size == 4 &&
             !args.tail.exists(negatedSource(_)) && VMOperand.integer(args(2)).nonEmpty &&
             number(args(2)) <= 0xffffff) ||
+          ((instruction.operation match {
+            case _: SASSInstruction.Xmad => true; case _ => false
+          }) && modifiers.isEmpty) ||
           VMAddressCompiler.updatesCarry(module.sm.raw, instruction.operation, modifiers, args)
       )
-      val ccZeroFlagsSupported =
-        module.sm.raw == 35 && args.headOption.contains(Operand.Qualified(VMOperand.Zero, Vec(OperandSelector.CC))) && (
-          ((instruction.operation match { case _: SASSInstruction.I2i => true; case _ => false }) && (modifiers == Vec(
-            Modifier.`U32`,
-            Modifier.`U32`
-          )) && args.size == 2) ||
-            ((instruction.operation match {
+      val ccZeroFlagsSupported = supportsZeroFlagFSetCC(module.sm.raw, instruction.operation, modifiers, args) ||
+        (Set(
+          35,
+          50,
+          60
+        )(module.sm.raw) && args.headOption.contains(Operand.Qualified(VMOperand.Zero, Vec(OperandSelector.CC))) && (
+          ((instruction.operation match { case _: SASSInstruction.I2i => true; case _ => false }) &&
+            modifiers == Vec(Modifier.U32, Modifier.U32) && args.size == 2) ||
+            (module.sm.raw == 35 && (instruction.operation match {
               case _: SASSInstruction.Lop32i => true; case _ => false
-            }) && (modifiers == Vec(
-              Modifier.`AND`,
-              Modifier.`X`
-            )) && args.size == 3 &&
-              VMOperand.integer(args(2)).contains(BigInt(65535))) ||
-            supportsZeroFlagFSetCC(module.sm.raw, instruction.operation, modifiers, args)
-        )
+            }) &&
+              modifiers == Vec(Modifier.AND, Modifier.X) && args.size == 3 &&
+              VMOperand.integer(args(2)).contains(BigInt(65535)))
+        ))
       def requireModifiers(allowed: Set[Modifier]): Unit =
-        if (!modifiers.forall(allowed)) unsupported("unsupported modifiers")
+        if (!modifiers.forall(allowed))
+          unsupported(s"unsupported modifiers ${modifiers.filterNot(allowed).map(_.name).mkString(".")}")
       if (
         modifiers.contains(
           Modifier.`X`
         ) && (instruction.operation match {
           case _: SASSInstruction.Iadd | _: SASSInstruction.Iadd32i | _: SASSInstruction.Isub |
-              _: SASSInstruction.Iscadd | _: SASSInstruction.Imad => true
+              _: SASSInstruction.Iscadd | _: SASSInstruction.Iscadd32i | _: SASSInstruction.Imad | _: SASSInstruction.Xmad =>
+            true
           case _ => false
         }) && module.sm.raw < 70
       )
@@ -896,65 +987,98 @@ private object VMCompiler {
                 v >= 0 && v <= 0xffffffffL
               )
           }
-          if (module.sm.raw != 75 || args.size != 1 || !validSleepDuration(args.head) || instruction.guard.nonEmpty)
+          if (module.sm.raw < 70 || args.size != 1 || !validSleepDuration(args.head) || instruction.guard.nonEmpty)
             unsupported("unsupported NANOSLEEP.WARP form")
         // The PTX sleep is an approximate scheduling hint with a legal zero-delay
-        // outcome for every u32 duration. Omitting this observed sm_75 form preserves semantics.
+        // outcome for every u32 duration. Omitting the scheduling hint preserves execution semantics.
         case _: SASSInstruction.Nop | _: SASSInstruction.Yield | _: SASSInstruction.Nanosleep =>
           requireModifiers(Set.empty)
-        case _: SASSInstruction.Bmov =>
+        case _: SASSInstruction.Bpt if modifiers == Vec(Modifier.TRAP) => emit(Trap)
+        case _: SASSInstruction.Bmov                                   =>
           requireModifiers(Set(Modifier.`32`, Modifier.`CLEAR`))
+          if (args.size != 2 || !args.exists(VMOperand.isRegister(_, RegisterBank.B)))
+            unsupported("barrier move requires a barrier register")
           def barrier(value: Operand): Value.Register =
             if (VMOperand.isRegister(value, RegisterBank.B)) Value.Register(s"%B${VMOperand.registerIndex(value)}")
             else destination(value)
-          if (args.head == VMOperand.Zero && modifiers == Vec(Modifier.`32`, Modifier.`CLEAR`)) {
-            // lower() proved that no matching structured token is live here.
-            emit(Move(barrier(args(1)).name, Value.Immediate(0L), 32))
-          } else {
-            if (!VMOperand.isRegister(args.head, RegisterBank.B)) unsupported("unsupported barrier move destination")
+          if (args.head != VMOperand.Zero)
             emit(Move(
               barrier(args.head).name,
               if (VMOperand.isRegister(args(1), RegisterBank.B)) barrier(args(1)) else source(args(1)),
               32
             ))
-            if (modifiers.contains(Modifier.`CLEAR`))
-              emit(Move(barrier(args(1)).name, Value.Immediate(0L), 32))
+          if (modifiers.contains(Modifier.`CLEAR`)) {
+            if (!VMOperand.isRegister(args(1), RegisterBank.B)) unsupported("barrier clear requires a barrier source")
+            emit(Move(barrier(args(1)).name, Value.Immediate(0L), 32))
           }
         case _: SASSInstruction.Bssy =>
-          requireModifiers(Set.empty)
+          requireModifiers(Set(Modifier.RECONVERGENT, Modifier.RELIABLE))
           if (!VMOperand.isRegister(args.head, RegisterBank.B)) unsupported("invalid convergence barrier register")
-          emit(Convergence(VMOperand.registerIndex(args.head).raw, ConvergenceAction.Setup))
+          emit(Convergence(VMOperand.registerIndex(args.head), ConvergenceAction.Setup))
         case _: SASSInstruction.Bsync =>
-          requireModifiers(Set.empty)
+          requireModifiers(Set(Modifier.RECONVERGENT, Modifier.RELIABLE))
           if (!VMOperand.isRegister(args.head, RegisterBank.B)) unsupported("invalid convergence barrier register")
-          emit(Convergence(VMOperand.registerIndex(args.head).raw, ConvergenceAction.Synchronize))
+          emit(Convergence(VMOperand.registerIndex(args.head), ConvergenceAction.Synchronize))
         case _: SASSInstruction.Break =>
-          requireModifiers(Set.empty)
+          requireModifiers(Set(Modifier.RELIABLE))
           if (!VMOperand.isRegister(args.head, RegisterBank.B)) unsupported("invalid convergence barrier")
-          emit(Convergence(VMOperand.registerIndex(args.head).raw, ConvergenceAction.Break))
+          emit(Convergence(VMOperand.registerIndex(args.head), ConvergenceAction.Break))
+        case _: SASSInstruction.Endcollective =>
+          requireModifiers(Set.empty)
+          if (args.nonEmpty) unsupported("ENDCOLLECTIVE operands")
+        case _: SASSInstruction.Warpsync
+            if modifiers == Vec(Modifier.COLLECTIVE) ||
+              modifiers == Vec(Modifier.COLLECTIVE, Modifier.ALL) =>
+          if (modifiers.contains(Modifier.ALL)) emit(WarpBarrier(Value.Immediate(0xffffffffL)))
+          else {
+            val mask   = source(args.head)
+            val member = temp()
+            val absent = temp("q")
+            emit(IntegerBinary(IntegerOperation.BitwiseAnd, member.name, mask, Value.LaneMaskEqual, 32))
+            emit(SetPredicate(absent.name, Comparison.Equal, ConversionType.U32.format, member, Value.Immediate(0L)))
+            branch(s"L${number(args(1)).toHexString}", Some(ExecutionPredicate(absent.name, false)))
+            emit(WarpBarrier(mask))
+          }
         case _: SASSInstruction.Warpsync =>
-          requireModifiers(Set.empty); emit(WarpBarrier(source(args.head)))
+          requireModifiers(Set(Modifier.ALL))
+          val mask = if (modifiers.contains(Modifier.ALL)) {
+            if (args.nonEmpty) unsupported("WARPSYNC.ALL operands")
+            Value.Immediate(0xffffffffL)
+          } else {
+            if (args.size != 1) unsupported("WARPSYNC requires a member mask")
+            source(args.head)
+          }
+          emit(WarpBarrier(mask))
         case _: SASSInstruction.Bar if modifiers.contains(Modifier.`RED`) =>
           requireModifiers(Set(Modifier.`RED`, Modifier.`OR`, Modifier.`AND`, Modifier.`DEFER_BLOCKING`))
           val operation = if (modifiers.contains(Modifier.OR)) PredicateOperation.Or else PredicateOperation.And
           emit(BarrierReduce(
-            "%bar_result",
-            barrierId(args.head),
+            VMRegisters.Predicate.Barrier.name,
+            Value.Immediate(barrierId(args.head).raw.toLong),
             predicateSource(args(1)).name,
             operation
           ))
         case _: SASSInstruction.B2r if modifiers == Vec(Modifier.`RESULT`) =>
           if (args.head != VMOperand.Zero) {
             val t = temp();
-            emit(Select(t.name, Value.Immediate(1L), Value.Immediate(0L), "%bar_result", 32));
+            emit(Select(t.name, Value.Immediate(1L), Value.Immediate(0L), VMRegisters.Predicate.Barrier.name, 32));
             store(args.head, t)
           }
           if (args.size == 2 && args(1) != VMOperand.True)
-            emit(PredicateBinary(PredicateOperation.Or, predicate(args(1)).name, "%bar_result", "%false"))
+            emit(PredicateBinary(
+              PredicateOperation.Or,
+              predicate(args(1)).name,
+              VMRegisters.Predicate.Barrier.name,
+              VMRegisters.Predicate.False.name
+            ))
         case _: SASSInstruction.Bar =>
           if (modifiers != Vec(Modifier.`SYNC`, Modifier.`DEFER_BLOCKING`) && modifiers != Vec(Modifier.`SYNC`))
             unsupported("unsupported block barrier")
-          emit(BarrierSync(barrierId(args.head)))
+          if (args.size < 1 || args.size > 2) unsupported("block barrier requires an id and optional count")
+          def barrierValue(operand: Operand): Value =
+            if (VMOperand.isRegister(operand, RegisterBank.R)) source(operand)
+            else Value.Immediate(barrierId(operand).raw.toLong)
+          emit(BarrierSync(barrierValue(args.head), args.lift(1).map(barrierValue(_))))
         case _: SASSInstruction.Cal | _: SASSInstruction.Pret if module.sm.raw < 70 =>
           requireModifiers(Set.empty)
           if (args.size != 1) unsupported("unsupported legacy call operands")
@@ -977,7 +1101,7 @@ private object VMCompiler {
             emit(IntegerBinary(IntegerOperation.Add, target.name, source(args.head), source(args(1)), 32))
             dispatch(target, addresses)
           } else unsupported("unsupported device call operands")
-        case _: SASSInstruction.Brx =>
+        case _: SASSInstruction.Brx | _: SASSInstruction.Brxu =>
           requireModifiers(Set.empty)
           if (args.size != 2) unsupported("unsupported indirect branch operands")
           val target = temp()
@@ -1008,12 +1132,17 @@ private object VMCompiler {
           requireModifiers(Set(Modifier.`32`))
           if (args(1) != Operand.SpecialRegister(SpecialRegister.SRZ)) unsupported("unsupported special register")
           store(args.head, Value.Immediate(0L), if (modifiers.contains(Modifier.`32`)) 32 else 64)
-        case _: SASSInstruction.Membar if module.sm.raw < 70 && (modifiers == Vec(Modifier.`GL`)) =>
+        case _: SASSInstruction.Membar
+            if module.sm.raw < 70 && Set(Vec(Modifier.GL), Vec(Modifier.GL, Modifier.IVALLD))(modifiers) =>
+          emit(MemoryBarrier)
+        case _: SASSInstruction.Fence =>
+          if (modifiers != Vec(Modifier.VIEW, Modifier.ASYNC, Modifier.S) || args.nonEmpty)
+            unsupported("unsupported memory proxy fence")
           emit(MemoryBarrier)
         case _: SASSInstruction.Membar =>
           requireModifiers(Set(Modifier.`CTA`, Modifier.`GPU`, Modifier.`SYS`, Modifier.`SC`, Modifier.`ALL`));
           emit(MemoryBarrier)
-        case _: SASSInstruction.Bmsk =>
+        case _: SASSInstruction.Bmsk | _: SASSInstruction.Ubmsk =>
           requireModifiers(Set(Modifier.`W`))
           emit(BitMask(
             destination(args.head).name,
@@ -1021,12 +1150,18 @@ private object VMCompiler {
             source(args(2)),
             if (modifiers.contains(Modifier.`W`)) BitMaskMode.Wrap else BitMaskMode.Clamp
           ))
-        case _: SASSInstruction.Plop3 =>
+        case _: SASSInstruction.Plop3 | _: SASSInstruction.Uplop3 =>
           requireModifiers(Set(Modifier.`LUT`))
-          if (args.size != 7 || args(1) != VMOperand.True) unsupported("PLOP3 with two predicate destinations")
+          if (args.size != 7 || !VMOperand.isAlwaysPredicate(args(1)))
+            unsupported("PLOP3 with two predicate destinations")
           val inputs = args.slice(2, 5).map { p =>
             val saved = temp("q");
-            emit(PredicateBinary(PredicateOperation.Or, saved.name, predicateSource(p).name, "%false"));
+            emit(PredicateBinary(
+              PredicateOperation.Or,
+              saved.name,
+              predicateSource(p).name,
+              VMRegisters.Predicate.False.name
+            ));
             saved
           }
           val inverses = inputs.map { p =>
@@ -1035,7 +1170,12 @@ private object VMCompiler {
           val lut = number(args(5)).toInt
           if (lut < 0 || lut > 255) unsupported("invalid predicate LUT")
           val result = temp("q");
-          emit(PredicateBinary(PredicateOperation.Or, result.name, "%false", "%false"))
+          emit(PredicateBinary(
+            PredicateOperation.Or,
+            result.name,
+            VMRegisters.Predicate.False.name,
+            VMRegisters.Predicate.False.name
+          ))
           (0 until 8).filter(bit => (lut & (1 << bit)) != 0).foreach { bit =>
             val term   = temp("q")
             val values = (0 until 3).map(i => if ((bit & (1 << (2 - i))) != 0) inputs(i) else inverses(i))
@@ -1043,19 +1183,29 @@ private object VMCompiler {
             emit(PredicateBinary(PredicateOperation.And, term.name, term.name, values(2).name))
             emit(PredicateBinary(PredicateOperation.Or, result.name, result.name, term.name))
           }
-          if (args.head != VMOperand.True)
-            emit(PredicateBinary(PredicateOperation.Or, predicate(args.head).name, result.name, "%false"))
+          if (!VMOperand.isAlwaysPredicate(args.head))
+            emit(PredicateBinary(
+              PredicateOperation.Or,
+              predicate(args.head).name,
+              result.name,
+              VMRegisters.Predicate.False.name
+            ))
         case _: SASSInstruction.P2r =>
           requireModifiers(Set(Modifier.`B1`, Modifier.`B2`, Modifier.`B3`))
+          val conditionBank = args.lift(1).contains(Operand.Symbol("CC"))
+          val operands      = if (conditionBank && args.size == 4) args.patch(1, Vec.empty[Operand], 1) else args
+          if (operands.size != 3) unsupported("invalid predicate read operands")
+          if (conditionBank && !Set(50, 60)(module.sm.raw)) unsupported("unsupported condition register bank")
           val shift = modifiers.headOption.fold(0) {
             case Modifier.B1 => 8
             case Modifier.B2 => 16
             case Modifier.B3 => 24
             case _           => unsupported("unsupported predicate byte selector")
           }
-          val mask   = number(args(2)).toInt
+          val mask   = number(operands(2)).toInt
           val ccMask = mask == 0xf000
-          if (mask < 0 || ((mask & ~0x7f) != 0 && !ccMask)) unsupported("invalid predicate read mask")
+          if (mask < 0 || (conditionBank && (mask & ~0xf) != 0) || ((mask & ~0x7f) != 0 && !ccMask))
+            unsupported("invalid predicate read mask")
           if (ccMask && (module.sm.raw != 35 || shift != 0 || modifiers.nonEmpty))
             unsupported("P2R condition-code mask 0xf000 is supported only as unmodified sm_35 P2R")
 
@@ -1063,21 +1213,22 @@ private object VMCompiler {
           emit(IntegerBinary(
             IntegerOperation.BitwiseAnd,
             result.name,
-            source(args(1)),
+            source(operands(1)),
             Value.Immediate((~(mask << shift)).toLong & 0xffffffffL),
             32
           ))
-          if (ccMask)
+          if (ccMask || conditionBank)
             Vec(
               VMConditionCodes.Flag.Zero,
               VMConditionCodes.Flag.Sign,
               VMConditionCodes.Flag.Carry,
               VMConditionCodes.Flag.Overflow
-            ).map(readConditionFlag(_)).zipWithIndex.foreach { case (flag, i) =>
-              val bit = temp();
+            ).zipWithIndex.filter((_, i) => ccMask || (mask & (1 << i)) != 0).foreach { case (kind, i) =>
+              val flag = readConditionFlag(kind)
+              val bit  = temp();
               emit(Select(
                 bit.name,
-                Value.Immediate((1L << (12 + i)).toLong),
+                Value.Immediate(1L << ((if (ccMask) 12 else shift) + i)),
                 Value.Immediate(0L),
                 flag.name,
                 32
@@ -1090,43 +1241,106 @@ private object VMCompiler {
               bit.name,
               Value.Immediate((1L << (i + shift)).toLong),
               Value.Immediate(0L),
-              s"%P$i",
+              VMRegisters.predicate(index = i, uniform = false),
               32
             ))
             emit(IntegerBinary(IntegerOperation.BitwiseOr, result.name, result, bit, 32))
           }
           store(args.head, result)
-        case _: SASSInstruction.Sel | _: SASSInstruction.Fsel | _: SASSInstruction.Usel =>
-          requireModifiers(Set.empty)
+        case _: SASSInstruction.Sel | _: SASSInstruction.Fsel | _: SASSInstruction.Usel | _: SASSInstruction.Ufsel =>
+          requireModifiers(Set(Modifier.`64`))
+          val width: IntegerWidth = if (modifiers.contains(Modifier.`64`)) 64 else 32
+          if (
+            width.raw == 64 && (instruction.operation match {
+              case _: SASSInstruction.Fsel | _: SASSInstruction.Ufsel => true; case _ => false
+            })
+          )
+            unsupported("FSEL.64")
           val a =
-            if (instruction.operation match { case _: SASSInstruction.Fsel => true; case _ => false })
+            if (
+              instruction.operation match {
+                case _: SASSInstruction.Fsel | _: SASSInstruction.Ufsel => true; case _ => false
+              }
+            )
               fselSource(args(1), 1)
-            else source(args(1))
+            else source(args(1), width)
           val b =
-            if (instruction.operation match { case _: SASSInstruction.Fsel => true; case _ => false })
+            if (
+              instruction.operation match {
+                case _: SASSInstruction.Fsel | _: SASSInstruction.Ufsel => true; case _ => false
+              }
+            )
               fselSource(args(2), 2)
-            else source(args(2))
-          emit(Select(destination(args.head).name, a, b, predicateSource(args(3)).name, 32))
-        case _: SASSInstruction.Fmnmx =>
-          requireModifiers(Set.empty)
-          if (module.sm.raw < 70 || args.size != 4)
-            unsupported("FMNMX is supported only for modern four-operand forms")
-          val operation = args(3) match {
+            else source(args(2), width)
+          val result = temp()
+          emit(Select(result.name, a, b, predicateSource(args(3)).name, width))
+          store(args.head, result, width)
+        case _: SASSInstruction.Fcmp =>
+          requireModifiers(Set(
+            Modifier.EQ,
+            Modifier.NE,
+            Modifier.LT,
+            Modifier.LE,
+            Modifier.GT,
+            Modifier.GE,
+            Modifier.EQU,
+            Modifier.NEU,
+            Modifier.LTU,
+            Modifier.LEU,
+            Modifier.GTU,
+            Modifier.GEU,
+            Modifier.FTZ
+          ))
+          if (args.size != 4) unsupported("FCMP requires a destination, two values and a condition")
+          val comparisons = modifiers.filterNot(_ == Modifier.FTZ)
+          if (comparisons.size > 1) unsupported("FCMP requires one comparison")
+          // The machine format's Test field defaults to GT.
+          val comparison = comparisons.headOption.getOrElse(Modifier.GT)
+          val condition  = floatSource(args(3))
+          val selected   = temp("q")
+          emit(SetPredicate(
+            selected.name,
+            comparisonCode(comparison),
+            ConversionType.F32.format,
+            if (modifiers.contains(Modifier.FTZ)) flushFloat(condition) else condition,
+            Value.Immediate(0L)
+          ))
+          emit(Select(destination(args.head).name, floatSource(args(1)), floatSource(args(2)), selected.name, 32))
+        case _: SASSInstruction.Fmnmx | _: SASSInstruction.Dmnmx =>
+          val wide = instruction.operation match { case _: SASSInstruction.Dmnmx => true; case _ => false }
+          requireModifiers(if (wide) Set.empty else Set(Modifier.NAN))
+          if ((!wide && module.sm.raw < 70) || args.size != 4)
+            unsupported("unsupported floating min/max form")
+          val bits: Int in (32, 64) = if (wide) 64 else 32
+          val format                = if (wide) ConversionType.F64.format else ConversionType.F32.format
+          val operation             = args(3) match {
             case Operand.Predicate(None, false, false) => FloatOperation.Minimum
             case Operand.Predicate(None, false, true)  => FloatOperation.Maximum
             case _                                     => unsupported("FMNMX selector must be PT or !PT")
           }
-          val left    = floatSource(args(1)); val right = floatSource(args(2))
-          val leftNan = temp("q"); val rightNan         = temp("q"); val bothNan = temp("q")
-          emit(SetPredicate(leftNan.name, Comparison.Unordered, ConversionType.F32.format, left, left))
-          emit(SetPredicate(rightNan.name, Comparison.Unordered, ConversionType.F32.format, right, right))
-          emit(PredicateBinary(PredicateOperation.And, bothNan.name, leftNan.name, rightNan.name))
-          val result = temp()
-          emit(FloatBinary(operation, result.name, left, right, 32))
-          emit(Select(result.name, left, result, rightNan.name, 32))
-          emit(Select(result.name, right, result, leftNan.name, 32))
-          emit(Select(result.name, Value.Immediate(2147483647L), result, bothNan.name, 32))
-          store(args.head, result)
+          val left    = if (wide) doubleSource(args(1)) else floatSource(args(1))
+          val right   = if (wide) doubleSource(args(2)) else floatSource(args(2))
+          val leftNan = temp("q"); val rightNan = temp("q"); val nanResult = temp("q")
+          emit(SetPredicate(leftNan.name, Comparison.Unordered, format, left, left))
+          emit(SetPredicate(rightNan.name, Comparison.Unordered, format, right, right))
+          emit(PredicateBinary(
+            if (modifiers.contains(Modifier.NAN)) PredicateOperation.Or else PredicateOperation.And,
+            nanResult.name,
+            leftNan.name,
+            rightNan.name
+          ))
+          val result = temp(if (wide) "wide" else "t")
+          emit(FloatBinary(operation, result.name, left, right, bits))
+          emit(Select(result.name, left, result, rightNan.name, bits))
+          emit(Select(result.name, right, result, leftNan.name, bits))
+          emit(Select(
+            result.name,
+            Value.Immediate(if (wide) java.lang.Double.doubleToRawLongBits(Double.NaN) else 2147483647L),
+            result,
+            nanResult.name,
+            bits
+          ))
+          store(args.head, result, bits)
         case _: SASSInstruction.Vmnmx =>
           requireModifiers(Set(
             Modifier.`MX`,
@@ -1164,13 +1378,51 @@ private object VMCompiler {
             32
           ))
           store(args.head, result)
-        case _: SASSInstruction.Imnmx =>
-          requireModifiers(Set(Modifier.`U32`))
+        case _: SASSInstruction.Vimnmx3 =>
+          requireModifiers(Set(Modifier.U32, Modifier.S32))
+          if (args.size != 5) unsupported("expected three integer min/max inputs and a selector")
           val signed = !modifiers.contains(Modifier.U32)
-          val a      = source(args(1)); val b = source(args(2)); val lo = temp(); val hi = temp()
-          emit(IntegerBinary(IntegerOperation.Minimum(signed), lo.name, a, b, 32));
+          val a      = source(args(1)); val b = source(args(2)); val c = source(args(3))
+          val lo     = temp(); val hi         = temp()
+          emit(IntegerBinary(IntegerOperation.Minimum(signed), lo.name, a, b, 32))
+          emit(IntegerBinary(IntegerOperation.Minimum(signed), lo.name, lo, c, 32))
           emit(IntegerBinary(IntegerOperation.Maximum(signed), hi.name, a, b, 32))
-          emit(Select(destination(args.head).name, lo, hi, predicateSource(args(3)).name, 32))
+          emit(IntegerBinary(IntegerOperation.Maximum(signed), hi.name, hi, c, 32))
+          val result = temp()
+          emit(Select(result.name, lo, hi, predicateSource(args(4)).name, 32))
+          store(args.head, result)
+        case _: SASSInstruction.Imnmx | _: SASSInstruction.Uimnmx | _: SASSInstruction.Vimnmx | _: SASSInstruction.Uvimnmx =>
+          requireModifiers(Set(Modifier.U32, Modifier.S32, Modifier.U64, Modifier.S64))
+          val outputs = args.drop(1).takeWhile { case Operand.Predicate(_, _, _) => true; case _ => false }
+          if (outputs.exists(value => !VMOperand.isAlwaysPredicate(value)))
+            unsupported("integer min/max predicate outputs")
+          val data = args.take(1) ++ args.drop(1 + outputs.size)
+          if (
+            data.size != 4 && !(data.size == 5 && (data.last match {
+              case Operand.Predicate(None, _, true) => true
+              case _                                => false
+            }))
+          )
+            unsupported("integer min/max extended comparison")
+          val width: IntegerWidth = if (modifiers.exists(Set(Modifier.U64, Modifier.S64))) 64 else 32
+          val signed              = !modifiers.exists(Set(Modifier.U32, Modifier.U64))
+          val a = source(data(1), width); val b = source(data(2), width); val lo = temp(); val hi = temp()
+          emit(IntegerBinary(IntegerOperation.Minimum(signed), lo.name, a, b, width));
+          emit(IntegerBinary(IntegerOperation.Maximum(signed), hi.name, a, b, width))
+          val result = temp()
+          emit(Select(result.name, lo, hi, predicateSource(data(3)).name, width))
+          store(data.head, result, width)
+        case _: SASSInstruction.I2i if modifiers == Vec(Modifier.S32, Modifier.S32) =>
+          if (args.size != 2)
+            unsupported("unsupported integer-to-integer conversion")
+          val result = temp()
+          args(1) match {
+            case Operand.Unary(inner, negative, false, true) =>
+              emit(IntegerUnary(IntegerUnaryOperation.Absolute, result.name, source(inner), 32))
+              if (negative) emit(IntegerUnary(IntegerUnaryOperation.Negate, result.name, result, 32))
+            case operand => emit(Move(result.name, source(operand), 32))
+          }
+          store(args.head, result)
         case _: SASSInstruction.Iabs =>
           requireModifiers(Set.empty);
           emit(IntegerUnary(
@@ -1223,7 +1475,7 @@ private object VMCompiler {
             Some(ConversionRounding.RN)
           ))
           store(args.head, result)
-        case _: SASSInstruction.I2f | _: SASSInstruction.I2fp =>
+        case _: SASSInstruction.I2f | _: SASSInstruction.I2fp | _: SASSInstruction.Ui2f =>
           requireModifiers(Set(
             Modifier.`RP`,
             Modifier.`RN`,
@@ -1248,12 +1500,22 @@ private object VMCompiler {
           val rounding =
             modifiers.find(Set(Modifier.`RP`, Modifier.`RN`, Modifier.`RM`, Modifier.`RZ`)).getOrElse(Modifier.RN)
           val kind = modifiers.find(Set(Modifier.`U32`, Modifier.`U64`, Modifier.`S64`)).getOrElse(Modifier.S32)
-          val bits: IntegerWidth = if (modifiers.contains(Modifier.`F64`)) 64 else 32
-          val result             = temp(if (bits.raw == 64) "wide" else "t")
+          val bits: IntegerWidth       = if (modifiers.contains(Modifier.`F64`)) 64 else 32
+          val result                   = temp(if (bits.raw == 64) "wide" else "t")
+          val inputWidth: IntegerWidth = if (Set(Modifier.U64, Modifier.S64)(kind)) 64 else 32
+          val (input, inputType)       = args(1) match {
+            case Operand.Unary(inner, false, false, true) if Set(Modifier.S32, Modifier.S64)(kind) =>
+              val extended = temp("wide")
+              val absolute = temp("wide")
+              emit(Convert(extended.name, source(inner, inputWidth), integerConversion(kind), ConversionType.S64, None))
+              emit(IntegerUnary(IntegerUnaryOperation.Absolute, absolute.name, extended, 64))
+              (absolute, ConversionType.U64)
+            case _ => (source(args(1), inputWidth), integerConversion(kind))
+          }
           emit(Convert(
             result.name,
-            source(args(1), if (Set(Modifier.U64, Modifier.S64)(kind)) 64 else 32),
-            integerConversion(kind),
+            input,
+            inputType,
             if (bits.raw == 64) ConversionType.F64 else ConversionType.F32,
             Some(conversionRounding(rounding))
           ))
@@ -1309,7 +1571,7 @@ private object VMCompiler {
             !modifiers.contains(Modifier.`U32`),
             modifiers.contains(Modifier.`SH`)
           ))
-        case _: SASSInstruction.Redux =>
+        case _: SASSInstruction.Redux | _: SASSInstruction.Credux =>
           requireModifiers(Set(
             Modifier.`MIN`,
             Modifier.`MAX`,
@@ -1320,20 +1582,28 @@ private object VMCompiler {
             Modifier.`U32`,
             Modifier.`S32`
           ))
-          val mask   = temp(); emit(Move(mask.name, Value.ActiveMask, 32))
-          val signed =
-            !Set(
-              Modifier.AND,
-              Modifier.OR,
-              Modifier.XOR,
-              Modifier.SUM
-            )(modifiers(0)) && !modifiers.contains(Modifier.U32)
-          emit(WarpReduce(
-            destination(args.head).name,
-            source(args(1)),
-            mask,
-            integerOperation(modifiers(0), signed),
-            32
+          if (args.size != 2) unsupported("expected two reduction operands")
+          val uniform = instruction.operation match {
+            case _: SASSInstruction.Credux => true
+            case _                         => false
+          }
+          val operation = modifiers.headOption.getOrElse(Modifier.AND)
+          val mask      = temp(); emit(Move(mask.name, Value.ActiveMask, 32))
+          val signed    =
+            if (uniform) modifiers.contains(Modifier.S32)
+            else !Set(Modifier.AND, Modifier.OR, Modifier.XOR, Modifier.SUM)(operation) &&
+            !modifiers.contains(Modifier.U32)
+          val result = temp()
+          emit(WarpReduce(result.name, source(args(1)), mask, integerOperation(operation, signed), 32))
+          store(args.head, result)
+        case _: SASSInstruction.Elect =>
+          requireModifiers(Set.empty)
+          if (args.size != 3 || args(2) != VMOperand.True)
+            unsupported("unsupported leader election candidate predicate")
+          emit(Elect(
+            if (VMOperand.isZero(args(1))) None else Some(destination(args(1)).name),
+            predicate(args.head).name,
+            Value.ActiveMask
           ))
         case _: SASSInstruction.Vote | _: SASSInstruction.Voteu =>
           requireModifiers(Set(Modifier.`ANY`, Modifier.`ALL`, Modifier.`EQ`))
@@ -1358,17 +1628,19 @@ private object VMCompiler {
           emit(IntegerUnary(IntegerUnaryOperation.BitReverse, result.name, source(args(1)), 32));
           store(args.head, result)
         case _: SASSInstruction.Fchk =>
-          requireModifiers(Set.empty)
-          if (!Set(70, 75, 80, 86, 89)(module.sm.raw))
+          requireModifiers(if (Set(35, 50, 60)(module.sm.raw)) Set(Modifier.DIVIDE) else Set.empty)
+          if (Set(35, 50, 60)(module.sm.raw) && modifiers != Vec(Modifier.DIVIDE))
+            unsupported("legacy FCHK requires the explicit division mode")
+          if (!Set(35, 50, 60, 70, 75, 80, 86, 89, 90, 100, 103, 120)(module.sm.raw))
             unsupported("FCHK range check is not supported for this architecture")
           if (args.size != 3) unsupported("invalid FCHK operands")
           if (
             Set(70, 75)(module.sm.raw) && (instruction.guard.nonEmpty || !VMOperand.isPredicate(args.head) ||
               !args.tail.forall(VMOperand.isRegister(_)))
           ) unsupported("unsupported sm_70/sm_75 FCHK operand or predicate form")
-          // Division range check measured on sm_89. The sm_70/sm_75 forms use the same
-          // operation encoding; see the fchk fixture README for cross-generation limits.
-          // The predicate requests the slow path. Signs and significands do not participate.
+          // The exponent boundaries were measured on sm_89. Earlier DIVIDE forms use the
+          // same documented operation; retaining these boundaries across generations is inferred.
+          // The predicate requests the slow path; signs and significands do not participate.
           val numerator = temp(); val denominator = temp(); val difference = temp()
           emit(BitFieldExtract(
             numerator.name,
@@ -1408,8 +1680,13 @@ private object VMCompiler {
           val result = checks.reduceLeft { (a, b) =>
             emit(PredicateBinary(PredicateOperation.Or, a.name, a.name, b.name)); a
           }
-          if (args.head != VMOperand.True)
-            emit(PredicateBinary(PredicateOperation.Or, predicate(args.head).name, result.name, "%false"))
+          if (!VMOperand.isAlwaysPredicate(args.head))
+            emit(PredicateBinary(
+              PredicateOperation.Or,
+              predicate(args.head).name,
+              result.name,
+              VMRegisters.Predicate.False.name
+            ))
         case _: SASSInstruction.Mufu if modifiers.exists(Set(Modifier.`RCP64H`, Modifier.`RSQ64H`)) =>
           requireModifiers(Set(Modifier.`RCP64H`, Modifier.`RSQ64H`))
           def flushHigh(value: Value): Value = {
@@ -1475,6 +1752,9 @@ private object VMCompiler {
           ));
           emit(Convert(high.name, result, ConversionType.U64, ConversionType.U32, None))
           store(args.head, flushHigh(high))
+        case _: SASSInstruction.Rro =>
+          val captured = reducedRadians.getOrElse(unsupported("unverified range reduction"))
+          emit(Move(captured.name, floatSource(args(1)), 32))
         case _: SASSInstruction.Mufu =>
           requireModifiers(Set(
             Modifier.`RCP`,
@@ -1487,8 +1767,9 @@ private object VMCompiler {
             Modifier.`TANH`
           ))
           val operation = floatUnaryOperation(modifiers(0))
-          val input     = flushFloat(floatSource(args(1)))
-          val argument  = if (Set(Modifier.`SIN`, Modifier.`COS`)(modifiers(0))) {
+          val input     = flushFloat(reducedRadians.getOrElse(floatSource(args(1))))
+          val argument  = if (reducedRadians.nonEmpty) input
+          else if (Set(Modifier.`SIN`, Modifier.`COS`)(modifiers(0))) {
             if (module.sm.raw < 70) unsupported("legacy MUFU trigonometric range-reduction encoding")
             // Volta and later MUFU trigonometric inputs are cycles, whereas PTX uses radians.
             // Reduce before scaling so large exactly integral binary32 inputs remain periodic.
@@ -1521,10 +1802,16 @@ private object VMCompiler {
           val result = temp(); emit(FloatUnary(operation, result.name, argument, 32))
           store(args.head, flushFloat(result))
         case _: SASSInstruction.R2p =>
-          requireModifiers(Set.empty)
-          if (args.head != Operand.Symbol("PR")) unsupported("unsupported predicate register bank")
+          requireModifiers(Set(Modifier.PR, Modifier.CC))
+          val operands =
+            if (args.size == 2 && modifiers.size == 1) Vec(Operand.Symbol(modifiers.head.name)) ++ args else args
+          if (operands.size != 3) unsupported("invalid predicate register operands")
+          val conditionBank = operands.head == Operand.Symbol("CC")
+          if (operands.head != Operand.Symbol("PR") && !conditionBank)
+            unsupported("unsupported predicate register bank")
+          if (conditionBank && !Set(50, 60)(module.sm.raw)) unsupported("unsupported condition register bank")
           val value = temp()
-          val byte  = VMOperand.selectors(args(1)).filterNot(_ == OperandSelector.reuse) match {
+          val byte  = VMOperand.selectors(operands(1)).filterNot(_ == OperandSelector.reuse) match {
             case Vec()                   => 0
             case Vec(OperandSelector.B1) => 1
             case Vec(OperandSelector.B2) => 2
@@ -1534,18 +1821,42 @@ private object VMCompiler {
           if (byte != 0) emit(IntegerBinary(
             IntegerOperation.ShiftRightLogical,
             value.name,
-            source(VMOperand.base(args(1))),
+            source(VMOperand.base(operands(1))),
             Value.Immediate(byte * 8L),
             32
           ))
-          else emit(Move(value.name, source(args(1)), 32))
-          val mask   = number(args(2)).toInt
+          else emit(Move(value.name, source(operands(1)), 32))
+          val mask   = number(operands(2)).toInt
           val ccMask = mask == 0xf000
-          if (mask < 0 || ((mask & ~0x7f) != 0 && !ccMask)) unsupported("invalid predicate write mask")
+          if (mask < 0 || (conditionBank && (mask & ~0xf) != 0) || ((mask & ~0x7f) != 0 && !ccMask))
+            unsupported("invalid predicate write mask")
           if (ccMask && (module.sm.raw != 35 || byte != 0))
             unsupported("R2P condition-code mask 0xf000 is supported only for unmodified sm_35 register sources")
-          if (ccMask) {
-            Vec[NonEmpty[String]]("%cc_z", "%cc_s", "%cc_c", "%cc_o").zipWithIndex.foreach { case (flag, i) =>
+          if (conditionBank) {
+            Vec(
+              VMConditionCodes.Flag.Zero,
+              VMConditionCodes.Flag.Sign,
+              VMConditionCodes.Flag.Carry,
+              VMConditionCodes.Flag.Overflow
+            ).zipWithIndex.filter((_, i) => (mask & (1 << i)) != 0)
+              .foreach { case (flag, i) =>
+                val bit = temp()
+                emit(IntegerBinary(IntegerOperation.BitwiseAnd, bit.name, value, Value.Immediate(1L << i), 32))
+                emit(WriteConditionFlag(flag, bit))
+                if (flag == VMConditionCodes.Flag.Zero) emit(WriteConditionFlag(VMConditionCodes.Flag.Equal, bit))
+                if (flag == VMConditionCodes.Flag.Carry) {
+                  val borrow = temp("q")
+                  emit(SetPredicate(borrow.name, Comparison.Equal, ConversionType.U32.format, bit, Value.Immediate(0L)))
+                  emit(WriteConditionFlag(VMConditionCodes.Flag.LessThan, Value.Predicate(borrow.name)))
+                }
+              }
+          } else if (ccMask) {
+            Vec[NonEmpty[String]](
+              VMRegisters.Predicate.Zero.name,
+              VMRegisters.Predicate.Sign.name,
+              VMRegisters.Predicate.Carry.name,
+              VMRegisters.Predicate.Overflow.name
+            ).zipWithIndex.foreach { case (flag, i) =>
               val bit = temp();
               emit(IntegerBinary(
                 IntegerOperation.BitwiseAnd,
@@ -1562,12 +1873,17 @@ private object VMCompiler {
                 Value.Immediate(0L)
               ))
             }
-            emit(PredicateBinary(PredicateOperation.Or, "%cc_eq", "%cc_z", "%false"))
-            emit(PredicateUnary("%cc_lt", "%cc_c"))
+            emit(PredicateBinary(
+              PredicateOperation.Or,
+              VMRegisters.Predicate.Equal.name,
+              VMRegisters.Predicate.Zero.name,
+              VMRegisters.Predicate.False.name
+            ))
+            emit(PredicateUnary(VMRegisters.Predicate.LessThan.name, VMRegisters.Predicate.Carry.name))
             // The integer CC register also feeds later IADD.X carry-in.  PTX
             // has one carry bit, so rebuild it from the saved C bit.
             val carryIn = temp();
-            emit(Select(carryIn.name, Value.Immediate(1L), Value.Immediate(0L), "%cc_c", 32))
+            emit(Select(carryIn.name, Value.Immediate(1L), Value.Immediate(0L), VMRegisters.Predicate.Carry.name, 32))
             val carryState = temp();
             emit(IntegerAddWithCarry(
               carryState.name,
@@ -1588,7 +1904,7 @@ private object VMCompiler {
               32
             ))
             emit(SetPredicate(
-              s"%P$i",
+              VMRegisters.predicate(index = i, uniform = false),
               Comparison.NotEqual,
               ConversionType.U32.format,
               bit,
@@ -1598,7 +1914,7 @@ private object VMCompiler {
         case _: SASSInstruction.I2i
             if args.headOption.contains(Operand.Qualified(VMOperand.Zero, Vec(OperandSelector.CC))) =>
           if (
-            module.sm.raw != 35 || !((instruction.operation match {
+            !Set(35, 50, 60)(module.sm.raw) || !((instruction.operation match {
               case _: SASSInstruction.I2i => true; case _ => false
             }) && modifiers == Vec(
               Modifier.`U32`,
@@ -1607,12 +1923,13 @@ private object VMCompiler {
           )
             unsupported("unsupported legacy I2I condition-code conversion")
           emit(SetPredicate(
-            "%cc_z",
+            VMRegisters.Predicate.Zero.name,
             Comparison.Equal,
             ConversionType.U32.format,
             source(args(1)),
             Value.Immediate(0L)
           ))
+          emit(WriteConditionFlag(VMConditionCodes.Flag.Equal, Value.Predicate(VMRegisters.Predicate.Zero.name)))
         case _: SASSInstruction.Csetp if modifiers == Vec(Modifier.`NE`, Modifier.`AND`) =>
           if (
             module.sm.raw != 35 || args != Vec(
@@ -1626,9 +1943,48 @@ private object VMCompiler {
 
           val notZero = temp("q");
           emit(PredicateUnary(notZero.name, readConditionFlag(VMConditionCodes.Flag.Zero).name))
-          emit(PredicateBinary(PredicateOperation.And, "%P0", notZero.name, "%true"))
+          emit(PredicateBinary(
+            PredicateOperation.And,
+            VMRegisters.predicate(index = 0, uniform = false),
+            notZero.name,
+            VMRegisters.Predicate.True.name
+          ))
         case _: SASSInstruction.Exit => requireModifiers(Set.empty); emit(Return)
-        case _: SASSInstruction.Bra  =>
+        case _: SASSInstruction.Bra
+            if module.sm.raw < 70 &&
+              (modifiers.size == 2 && modifiers.head == Modifier.CC &&
+                Set(Modifier.EQ, Modifier.EQU, Modifier.NE, Modifier.NEU)(modifiers.last)) =>
+          if (args.size != 1) unsupported("condition-code branch requires a target")
+          branch(
+            s"L${number(args.head).toHexString}",
+            Some(ExecutionPredicate(
+              readConditionFlag(VMConditionCodes.Flag.Zero).name,
+              Set(Modifier.NE, Modifier.NEU)(modifiers.last)
+            ))
+          )
+        case _: SASSInstruction.Bra
+            if module.sm.raw >= 70 &&
+              (modifiers == Vec(Modifier.DIV) || modifiers == Vec(Modifier.CONV)) =>
+          if (args.size != 1 && args.size != 2) unsupported("convergence branch operands")
+          val mask      = if (args.size == 2) source(args.head) else Value.Immediate(0xffffffffL)
+          val live      = temp()
+          val active    = temp()
+          val condition = temp("q")
+          emit(IntegerBinary(IntegerOperation.BitwiseAnd, live.name, mask, Value.LiveMask, 32))
+          emit(IntegerBinary(IntegerOperation.BitwiseAnd, active.name, mask, Value.ActiveMask, 32))
+          emit(SetPredicate(condition.name, Comparison.Equal, ConversionType.U32.format, live, active))
+          branch(
+            s"L${number(args.last).toHexString}",
+            Some(ExecutionPredicate(condition.name, modifiers.head == Modifier.DIV))
+          )
+        case _: SASSInstruction.Bra if modifiers.contains(Modifier.ANY) =>
+          requireModifiers(Set(Modifier.U, Modifier.ANY))
+          if (args.size != 1) unsupported("warp branch requires a target")
+          val input = predicateSource(instruction.guard.map(_.predicate).getOrElse(VMOperand.True))
+          val taken = temp("q")
+          emit(VotePredicate(taken.name, input.name, Value.ActiveMask, VoteOperation.Any))
+          branch(s"L${number(args.head).toHexString}", Some(ExecutionPredicate(taken.name, false)))
+        case _: SASSInstruction.Bra =>
           requireModifiers(Set(Modifier.`U`, Modifier.`DIV`, Modifier.`CONV`))
           if (args.size == 2 && Set(OperandSelector.EQU, OperandSelector.NEU).exists(VMOperand.has(args.head, _))) {
 
@@ -1640,8 +1996,35 @@ private object VMCompiler {
           } else if (args.size == 2 && args.head != Operand.Unary(VMOperand.UniformZero, false, true, false))
             branch(s"L${number(args.last).toHexString}", Some(executionPredicate(args.head)))
           else branch(s"L${number(args.last).toHexString}")
+        case _: SASSInstruction.R2ur if modifiers == Vec(Modifier.BROADCAST) =>
+          if (
+            args.size != 2 || !VMOperand.isRegister(args.head, RegisterBank.UR) ||
+            !VMOperand.isRegister(args(1), RegisterBank.R)
+          )
+            unsupported("R2UR.BROADCAST requires a uniform destination and general source")
+          store(args.head, source(args(1)))
         case _: SASSInstruction.Mov | _: SASSInstruction.Umov | _: SASSInstruction.Mov32i | _: SASSInstruction.R2ur =>
-          requireModifiers(Set.empty); store(args(0), source(args(1)))
+          requireModifiers(Set(Modifier.`64`))
+          val bits: IntegerWidth = if (modifiers.contains(Modifier.`64`)) 64 else 32
+          textRelocation match {
+            case Some(relocation) =>
+              val address = Value.Address(Value.Symbol(relocation.symbol), relocation.addend)
+              if (relocation.high) {
+                val high = temp()
+                emit(IntegerBinary(IntegerOperation.ShiftRightLogical, high.name, address, Value.Immediate(32L), 64))
+                store(args(0), high, 32)
+              } else store(args(0), address, 32)
+            case None => store(args(0), source(args(1), bits), bits)
+          }
+        case _: SASSInstruction.Ldcu if modifiers == Vec(Modifier.`128`) =>
+          if (args.size != 2) unsupported("LDCU.128 operands")
+          val (bank, offset) = args(1) match {
+            case Operand.ConstantBank(bank, offset) => (bank, number(offset))
+            case _                                  => unsupported("LDCU.128 requires a constant address")
+          }
+          val values =
+            Vec.tabulate(4)(index => source(Operand.ConstantBank(bank, Operand.Integer(BigInt(offset) + index * 4))))
+          values.zipWithIndex.foreach((value, index) => emit(UniformMove(destination(args.head, index).name, value)))
         case _: SASSInstruction.Uldc | _: SASSInstruction.Ldc | _: SASSInstruction.Ldcu =>
           requireModifiers(Set(Modifier.`64`, Modifier.`U8`, Modifier.`U16`, Modifier.`S8`, Modifier.`S16`))
           val bits: IntegerWidth = if (modifiers.contains(Modifier.`64`)) 64
@@ -1672,18 +2055,22 @@ private object VMCompiler {
         case _: SASSInstruction.S2r | _: SASSInstruction.S2ur =>
           requireModifiers(Set.empty)
           val special = Map(
-            SpecialRegister.SR_TID_X   -> Value.ThreadId(LaunchGeometry.Axis.X),
-            SpecialRegister.SR_TID_Y   -> Value.ThreadId(LaunchGeometry.Axis.Y),
-            SpecialRegister.SR_TID_Z   -> Value.ThreadId(LaunchGeometry.Axis.Z),
-            SpecialRegister.SR_CTAID_X -> Value.BlockId(LaunchGeometry.Axis.X),
-            SpecialRegister.SR_CTAID_Y -> Value.BlockId(LaunchGeometry.Axis.Y),
-            SpecialRegister.SR_CTAID_Z -> Value.BlockId(LaunchGeometry.Axis.Z),
-            SpecialRegister.SR_LANEID  -> Value.LaneId,
-            SpecialRegister.SR_GEMASK  -> Value.LaneMaskGreaterEqual,
-            SpecialRegister.SR_GTMASK  -> Value.LaneMaskGreater,
-            SpecialRegister.SR_LEMASK  -> Value.LaneMaskLessEqual,
-            SpecialRegister.SR_LTMASK  -> Value.LaneMaskLess,
-            SpecialRegister.SR_EQMASK  -> Value.LaneMaskEqual
+            SpecialRegister.SR_TID_X    -> Value.ThreadId(LaunchGeometry.Axis.X),
+            SpecialRegister.SR_TID_Y    -> Value.ThreadId(LaunchGeometry.Axis.Y),
+            SpecialRegister.SR_TID_Z    -> Value.ThreadId(LaunchGeometry.Axis.Z),
+            SpecialRegister.SR_CTAID_X  -> Value.BlockId(LaunchGeometry.Axis.X),
+            SpecialRegister.SR_CTAID_Y  -> Value.BlockId(LaunchGeometry.Axis.Y),
+            SpecialRegister.SR_CTAID_Z  -> Value.BlockId(LaunchGeometry.Axis.Z),
+            SpecialRegister.SR_LANEID   -> Value.LaneId,
+            SpecialRegister.SR_CgaCtaId -> Value.Immediate(0L),
+            // The downward-growing local stack cannot enter the shared-memory aperture.
+            SpecialRegister.SR_LMEMHIOFF -> Value.Immediate(VMAddressSpace.SharedLimit),
+            SpecialRegister.SR_SWINHI    -> Value.Immediate(VMAddressSpace.SharedWindowBase >>> 32),
+            SpecialRegister.SR_GEMASK    -> Value.LaneMaskGreaterEqual,
+            SpecialRegister.SR_GTMASK    -> Value.LaneMaskGreater,
+            SpecialRegister.SR_LEMASK    -> Value.LaneMaskLessEqual,
+            SpecialRegister.SR_LTMASK    -> Value.LaneMaskLess,
+            SpecialRegister.SR_EQMASK    -> Value.LaneMaskEqual
           )
           store(
             args(0),
@@ -1765,6 +2152,16 @@ private object VMCompiler {
             emit(IntegerAddWithCarry(carry.name, Value.Immediate(0L), Value.Immediate(0L), 32, true, false))
             updateIntegerCC(product, c, result, isSub = false, Some(carry))
           }
+          if (module.sm.raw < 70 && !ccFlagsSupported && VMOperand.has(args.head, OperandSelector.CC)) {
+            val carry = temp()
+            emit(IntegerAddWithCarry(carry.name, Value.Immediate(0L), Value.Immediate(0L), 32, true, false))
+            val equal = temp("q")
+            val less  = temp("q")
+            emit(SetPredicate(equal.name, Comparison.Equal, ConversionType.U32.format, result, Value.Immediate(0L)))
+            emit(SetPredicate(less.name, Comparison.Equal, ConversionType.U32.format, carry, Value.Immediate(0L)))
+            emit(WriteConditionFlag(VMConditionCodes.Flag.Equal, Value.Predicate(equal.name)))
+            emit(WriteConditionFlag(VMConditionCodes.Flag.LessThan, Value.Predicate(less.name)))
+          }
           if (carryOut && !VMOperand.isAlwaysPredicate(args(1)))
             emit(SetPredicate(
               predicate(args(1)).name,
@@ -1828,8 +2225,14 @@ private object VMCompiler {
             ))
           } else emit(IntegerBinary(IntegerOperation.Subtract, result.name, a, b, 32))
           if (VMOperand.has(args.head, OperandSelector.`CC`)) {
-            emit(SetPredicate("%cc_lt", Comparison.LessThan, ConversionType.U32.format, a, b));
-            emit(SetPredicate("%cc_eq", Comparison.Equal, ConversionType.U32.format, a, b))
+            emit(SetPredicate(
+              VMRegisters.Predicate.LessThan.name,
+              Comparison.LessThan,
+              ConversionType.U32.format,
+              a,
+              b
+            ));
+            emit(SetPredicate(VMRegisters.Predicate.Equal.name, Comparison.Equal, ConversionType.U32.format, a, b))
           }
           store(args.head, result)
         case _: SASSInstruction.Imul | _: SASSInstruction.Imul32i =>
@@ -1844,14 +2247,80 @@ private object VMCompiler {
             32
           ))
           store(args.head, result)
-        case _: SASSInstruction.Iadd | _: SASSInstruction.Iadd32i | _: SASSInstruction.Iscadd =>
+        case _: SASSInstruction.Iadd if modifiers == Vec(Modifier.`64`) =>
+          if (args.size != 3) unsupported("IADD.64 requires two sources")
+          val a      = source(args(1), 64)
+          val b      = source(args(2), 64)
+          val result = temp("wide")
+          emit(IntegerBinary(IntegerOperation.Add, result.name, a, b, 64))
+          store(args.head, result, 64)
+        case _: SASSInstruction.Iadd
+            if module.sm.raw >= 70 && modifiers.contains(Modifier.X) && args.size == 4 && VMOperand.isPredicate(
+              args(3),
+              allowNegated = true
+            ) =>
+          requireModifiers(Set(Modifier.X, Modifier.U32))
+          def extendedSource(operand: Operand): Value =
+            if (negatedSource(operand)) {
+              val result = temp()
+              emit(IntegerUnary(IntegerUnaryOperation.BitwiseNot, result.name, source(VMOperand.positive(operand)), 32))
+              result
+            } else source(operand)
+          val left  = extendedSource(args(1))
+          val right = extendedSource(args(2))
+          val carry = temp()
+          emit(Select(carry.name, Value.Immediate(1L), Value.Immediate(0L), predicateSource(args(3)).name, 32))
+          val result = temp()
+          emit(IntegerBinary(IntegerOperation.Add, result.name, left, right, 32))
+          emit(IntegerBinary(IntegerOperation.Add, result.name, result, carry, 32))
+          store(args.head, result)
+        case _: SASSInstruction.Iadd if args.size == 4 && VMOperand.isPredicate(args(1)) =>
+          requireModifiers(Set(Modifier.U32))
+          val negativeLeft  = negatedSource(args(2))
+          val negativeRight = negatedSource(args(3))
+          if (negativeLeft && negativeRight) unsupported("IADD carry with two negated sources")
+          val left   = source(if (negativeLeft) VMOperand.positive(args(2)) else args(2))
+          val right  = source(if (negativeRight) VMOperand.positive(args(3)) else args(3))
+          val result = temp()
+          val carry  = temp()
+          if (negativeLeft || negativeRight) {
+            emit(IntegerSubWithBorrow(
+              result.name,
+              if (negativeLeft) right else left,
+              if (negativeLeft) left else right,
+              32,
+              false,
+              true
+            ))
+            emit(IntegerSubWithBorrow(carry.name, Value.Immediate(0L), Value.Immediate(0L), 32, true, false))
+          } else {
+            emit(IntegerAddWithCarry(result.name, left, right, 32, false, true))
+            emit(IntegerAddWithCarry(carry.name, Value.Immediate(0L), Value.Immediate(0L), 32, true, false))
+          }
+          if (!VMOperand.isAlwaysPredicate(args(1)))
+            emit(SetPredicate(
+              predicate(args(1)).name,
+              if (negativeLeft || negativeRight) Comparison.Equal else Comparison.NotEqual,
+              ConversionType.U32.format,
+              carry,
+              Value.Immediate(0L)
+            ))
+          store(args.head, result)
+        case _: SASSInstruction.Iadd | _: SASSInstruction.Iadd32i | _: SASSInstruction.Iscadd | _: SASSInstruction.Iscadd32i =>
+          val operandCount = instruction.operation match {
+            case _: SASSInstruction.Iscadd | _: SASSInstruction.Iscadd32i => 4
+            case _                                                        => 3
+          }
+          if (args.size != operandCount) unsupported(s"expected $operandCount operands")
           requireModifiers(Set(Modifier.`X`, Modifier.`U32`))
-          val negA = negatedSource(args(1)); val negB = negatedSource(args(2))
-          if (
-            (negA || negB) && (instruction.operation match { case _: SASSInstruction.Iscadd => true; case _ => false })
-          )
-            unsupported("negated ISCADD operands are not implemented")
-          if (negA && negB) unsupported("IADD with two negated operands is not implemented")
+          val negA      = negatedSource(args(1)); val negB = negatedSource(args(2))
+          val scaledAdd = instruction.operation match {
+            case _: SASSInstruction.Iscadd | _: SASSInstruction.Iscadd32i => true
+            case _                                                        => false
+          }
+          if (scaledAdd && modifiers.contains(Modifier.X)) unsupported("ISCADD does not consume carry")
+          if (negA && negB && (modifiers.contains(Modifier.X) || VMOperand.has(args.head, OperandSelector.CC)))
+            unsupported("IADD flags with two negated operands are not implemented")
           def addOperand(raw: Operand): Value =
             if (modifiers.contains(Modifier.`X`) && negatedSource(raw)) {
               val inverted = temp()
@@ -1864,13 +2333,29 @@ private object VMCompiler {
               inverted
             } else source(raw)
           val a       = addOperand(args(1)); val b = addOperand(args(2)); val result = temp()
-          val shifted = if (instruction.operation match { case _: SASSInstruction.Iscadd => true; case _ => false }) {
-            val t = temp(); emit(IntegerBinary(IntegerOperation.ShiftLeft, t.name, a, source(args(3)), 32));
-            t
-          } else a
+          val shifted =
+            if (
+              instruction.operation match {
+                case _: SASSInstruction.Iscadd | _: SASSInstruction.Iscadd32i => true; case _ => false
+              }
+            ) {
+              val t = temp(); emit(IntegerBinary(IntegerOperation.ShiftLeft, t.name, a, source(args(3)), 32));
+              t
+            } else a
+          val positiveLeft = if (scaledAdd && negA) {
+            val value = temp()
+            emit(IntegerBinary(
+              IntegerOperation.ShiftLeft,
+              value.name,
+              source(VMOperand.positive(args(1))),
+              source(args(3)),
+              32
+            ))
+            value
+          } else if (negA) source(VMOperand.positive(args(1))) else shifted
           val subtractInputs =
-            if (negA || negB)
-              Some((if (negA) b else a, source(if (negA) VMOperand.positive(args(1)) else VMOperand.positive(args(2)))))
+            if (negA) Some((b, positiveLeft))
+            else if (negB) Some((shifted, source(VMOperand.positive(args(2)))))
             else None
           val rawCarry =
             if (
@@ -1919,27 +2404,23 @@ private object VMCompiler {
             }
           if (VMOperand.has(args.head, OperandSelector.`CC`)) {
             emit(SetPredicate(
-              "%cc_eq",
+              VMRegisters.Predicate.Equal.name,
               Comparison.Equal,
               ConversionType.U32.format,
               result,
               Value.Immediate(0L)
             ))
-            if (
-              !(instruction.operation match {
-                case _: SASSInstruction.Iscadd => true; case _ => false
-              }) && VMOperand.negative(args(1))
-            )
+            if (negA)
               emit(SetPredicate(
-                "%cc_lt",
+                VMRegisters.Predicate.LessThan.name,
                 Comparison.LessThan,
                 ConversionType.U32.format,
                 b,
-                source(VMOperand.positive(args(1)))
+                positiveLeft
               ))
-            else if (VMOperand.negative(args(2)))
+            else if (negatedSource(args(2)))
               emit(SetPredicate(
-                "%cc_lt",
+                VMRegisters.Predicate.LessThan.name,
                 Comparison.LessThan,
                 ConversionType.U32.format,
                 shifted,
@@ -1956,7 +2437,7 @@ private object VMCompiler {
                 false
               ))
               emit(SetPredicate(
-                "%cc_lt",
+                VMRegisters.Predicate.LessThan.name,
                 Comparison.Equal,
                 ConversionType.U32.format,
                 carry,
@@ -1995,6 +2476,31 @@ private object VMCompiler {
             32
           ))
           store(args.head, result)
+        case _: SASSInstruction.Viaddmnmx =>
+          requireModifiers(Set(Modifier.U32))
+          if (args.size != 5) unsupported("VIADDMNMX operands")
+          val signed = !modifiers.contains(Modifier.U32)
+          val sum    = temp(); val low = temp(); val high = temp()
+          val third  = source(args(3))
+          emit(IntegerBinary(IntegerOperation.Add, sum.name, source(args(1)), source(args(2)), 32))
+          emit(IntegerBinary(IntegerOperation.Minimum(signed), low.name, sum, third, 32))
+          emit(IntegerBinary(IntegerOperation.Maximum(signed), high.name, sum, third, 32))
+          emit(Select(destination(args.head).name, low, high, predicateSource(args(4)).name, 32))
+        case _: SASSInstruction.Viadd =>
+          requireModifiers(Set.empty)
+          if (args.size != 3) unsupported("VIADD operands")
+          val result = temp()
+          emit(IntegerBinary(IntegerOperation.Add, result.name, source(args(1)), source(args(2)), 32))
+          store(args.head, result)
+        case _: SASSInstruction.Uiadd3 if modifiers == Vec(Modifier.`64`) =>
+          if (args.size != 4) unsupported("UIADD3.64 requires three sources")
+          val a      = source(args(1), 64)
+          val b      = source(args(2), 64)
+          val c      = source(args(3), 64)
+          val result = temp("wide")
+          emit(IntegerBinary(IntegerOperation.Add, result.name, a, b, 64))
+          emit(IntegerBinary(IntegerOperation.Add, result.name, result, c, 64))
+          store(args.head, result, 64)
         case _: SASSInstruction.Iadd3 | _: SASSInstruction.Uiadd3 =>
           requireModifiers(Set(Modifier.`X`))
           if (modifiers.contains(Modifier.`X`)) {
@@ -2083,7 +2589,7 @@ private object VMCompiler {
             PredicateOperation.Or,
             previousZero.name,
             readConditionFlag(VMConditionCodes.Flag.Zero).name,
-            "%false"
+            VMRegisters.Predicate.False.name
           ))
           val masked = temp();
           emit(IntegerBinary(
@@ -2101,35 +2607,50 @@ private object VMCompiler {
             masked,
             Value.Immediate(0L)
           ))
-          emit(PredicateBinary(PredicateOperation.And, "%cc_z", previousZero.name, highZero.name))
-        case _: SASSInstruction.Lop
-            if Set(50, 60)(module.sm.raw) && modifiers.exists(Set(Modifier.`Z`, Modifier.`NZ`)) =>
+          emit(PredicateBinary(
+            PredicateOperation.And,
+            VMRegisters.Predicate.Zero.name,
+            previousZero.name,
+            highZero.name
+          ))
+        case _: SASSInstruction.Lop if Set(50, 60)(module.sm.raw) && modifiers.exists(Set(Modifier.Z, Modifier.NZ)) =>
+          val extended           = modifiers.contains(Modifier.X)
+          val operationModifiers = modifiers.filterNot(_ == Modifier.X)
           if (
-            modifiers.size != 2 || !Set(Modifier.`AND`, Modifier.`OR`)(modifiers(0)) || !Set(
-              Modifier.`Z`,
-              Modifier.`NZ`
-            )(modifiers(1))
-          )
-            unsupported("unsupported legacy logical predicate modifiers")
+            modifiers.count(_ == Modifier.X) > 1 || operationModifiers.size != 2 ||
+            !Set(Modifier.AND, Modifier.OR)(operationModifiers(0)) ||
+            !Set(Modifier.Z, Modifier.NZ)(operationModifiers(1))
+          ) unsupported("unsupported legacy logical predicate modifiers")
           if (args.size != 4 || !VMOperand.isPredicate(args(0)) || !VMOperand.isRegister(args(1), allowZero = true))
             unsupported("invalid legacy logical predicate operands")
           val result = temp()
           emit(IntegerBinary(
-            integerOperation(modifiers(0)),
+            integerOperation(operationModifiers(0)),
             result.name,
             source(args(2)),
             source(args(3)),
             32
           ))
           store(args(1), result)
-          if (args.head != VMOperand.True)
-            emit(SetPredicate(
-              predicate(args.head).name,
-              if (modifiers(1) == Modifier.`Z`) Comparison.Equal else Comparison.NotEqual,
-              ConversionType.U32.format,
-              result,
-              Value.Immediate(0L)
-            ))
+          if (args.head != VMOperand.True) {
+            val zero = temp("q")
+            emit(SetPredicate(zero.name, Comparison.Equal, ConversionType.U32.format, result, Value.Immediate(0L)))
+            if (extended)
+              emit(PredicateBinary(
+                PredicateOperation.And,
+                zero.name,
+                zero.name,
+                readConditionFlag(VMConditionCodes.Flag.Zero).name
+              ))
+            if (operationModifiers(1) == Modifier.Z)
+              emit(PredicateBinary(
+                PredicateOperation.Or,
+                predicate(args.head).name,
+                zero.name,
+                VMRegisters.Predicate.False.name
+              ))
+            else emit(PredicateUnary(predicate(args.head).name, zero.name))
+          }
         case _: SASSInstruction.Lop | _: SASSInstruction.Lop32i =>
           requireModifiers(Set(Modifier.`AND`, Modifier.`OR`, Modifier.`XOR`, Modifier.`PASS_B`))
           val result    = temp()
@@ -2177,7 +2698,12 @@ private object VMCompiler {
           requireModifiers(Set(Modifier.`AND`, Modifier.`OR`, Modifier.`XOR`))
           if (modifiers.size != 2 || args.size != 5) unsupported("unsupported predicate logic operands")
           val result = temp("q"); val complement = temp("q"); val input = temp("q")
-          emit(PredicateBinary(PredicateOperation.Or, input.name, predicateSource(args(4)).name, "%false"))
+          emit(PredicateBinary(
+            PredicateOperation.Or,
+            input.name,
+            predicateSource(args(4)).name,
+            VMRegisters.Predicate.False.name
+          ))
           emit(PredicateBinary(
             predicateOperation(modifiers(0)),
             result.name,
@@ -2200,9 +2726,12 @@ private object VMCompiler {
               input.name
             ))
         case _: SASSInstruction.Lop3 | _: SASSInstruction.Ulop3 =>
-          requireModifiers(Set(Modifier.`LUT`, Modifier.`PAND`))
-          val withPredicate = args.size == 7
-          val operands      = if (withPredicate) args.tail
+          requireModifiers(Set(Modifier.LUT, Modifier.PAND, Modifier.NZ))
+          val legacyPredicate = Set(50, 60)(module.sm.raw) && modifiers.contains(Modifier.NZ) && args.size == 6
+          if (modifiers.contains(Modifier.NZ) && !legacyPredicate) unsupported("legacy LOP3 predicate form")
+          val withPredicate = args.size == 7 || legacyPredicate
+          val operands      = if (legacyPredicate) args.tail :+ VMOperand.True.copy(negated = true)
+          else if (withPredicate) args.tail
           else if (
             (instruction.operation match { case _: SASSInstruction.Lop3 => true; case _ => false }) && Set(
               50,
@@ -2315,7 +2844,12 @@ private object VMCompiler {
           emit(shuffle(modifiers(0), result, Some(valid), source(args(2)), source(args(3)), source(args(4)), mask, 32))
           store(args(1), result)
           if (args.head != VMOperand.True)
-            emit(PredicateBinary(PredicateOperation.Or, predicate(args.head).name, valid.name, "%false"))
+            emit(PredicateBinary(
+              PredicateOperation.Or,
+              predicate(args.head).name,
+              valid.name,
+              VMRegisters.Predicate.False.name
+            ))
         case _: SASSInstruction.Cctl if module.sm.raw == 35 && (modifiers == Vec(Modifier.`E`, Modifier.`IV`)) =>
           if (args.size != 1 || !VMOperand.plainAddress(args.head))
             unsupported("unsupported cache-line invalidation address")
@@ -2475,9 +3009,8 @@ private object VMCompiler {
             predicateSource(args(3)).name
           ))
           if (zeroFlagOnly) {
-            // The observed consumer reads only the zero flag. It is clear iff
-            // the predicate-masked unordered-greater result is true.
-            emit(PredicateUnary("%cc_z", result.name))
+            // The observed consumer reads the zero flag, clear when the masked comparison is true.
+            emit(PredicateUnary(VMRegisters.Predicate.Zero.name, result.name))
           } else {
             val value = temp();
             emit(Select(
@@ -2489,8 +3022,123 @@ private object VMCompiler {
             ))
             store(args.head, value)
           }
-        case _: SASSInstruction.Errbar => requireModifiers(Set.empty); emit(MemoryBarrier)
-        case _: SASSInstruction.Isetp | _: SASSInstruction.Uisetp | _: SASSInstruction.Fsetp | _: SASSInstruction.Dsetp =>
+        case _: SASSInstruction.Acqbulk | _: SASSInstruction.Acqshminit =>
+          requireModifiers(Set.empty)
+          if (args.nonEmpty) unsupported("bulk acquire operands")
+          // Supported shared-memory transfers finish synchronously before this acquire.
+          emit(MemoryBarrier)
+        case _: SASSInstruction.Ublkcp
+            if modifiers == Vec(Modifier.G, Modifier.S) ||
+              modifiers == Vec(Modifier.G, Modifier.S, Modifier.DST_G_BYTE_MASK) =>
+          if (args.size != 3) unsupported("bulk store operands")
+          val destination = address(args.head, true)
+          val src         = address(raw = args(1), global = false, sharedUniform = true, sharedAccess = true)
+          val descriptor  = source(args(2))
+          val bytes       = temp()
+          val mask        = temp()
+          if (modifiers.contains(Modifier.DST_G_BYTE_MASK)) {
+            emit(IntegerBinary(IntegerOperation.BitwiseAnd, bytes.name, descriptor, Value.Immediate(0xffffL), 32))
+            emit(IntegerBinary(IntegerOperation.ShiftRightLogical, mask.name, descriptor, Value.Immediate(16L), 32))
+          } else {
+            emit(Move(bytes.name, descriptor, 32))
+            emit(Move(mask.name, Value.Immediate(0xffffL), 32))
+          }
+          emit(IntegerBinary(IntegerOperation.ShiftLeft, bytes.name, bytes, Value.Immediate(4L), 32))
+          val elected = temp("q")
+          emit(Elect(None, elected.name, Value.ActiveMask))
+          guarded(AsyncBulkStore(destination, src, bytes, mask), elected)
+        case _: SASSInstruction.Ublkcp =>
+          if (modifiers != Vec(Modifier.S, Modifier.G) || args.size != 3)
+            unsupported("unsupported uniform bulk copy")
+          val base = args.head match {
+            case Operand.Address(Some(base), None, displacement, scale, None, None)
+                if base.bank == RegisterBank.UR && displacement == 0 && scale.raw == 1 => base
+            case _ => unsupported("uniform bulk copy destination descriptor")
+          }
+          val destination = address(raw = args.head, global = false, sharedUniform = true, sharedAccess = true)
+          val src         = address(args(1), true)
+          val bytes       = temp()
+          // The adjacent destination word names the barrier; size is measured in 16-byte chunks.
+          emit(IntegerBinary(IntegerOperation.ShiftLeft, bytes.name, source(args(2)), Value.Immediate(4L), 32))
+          val elected = temp("q")
+          emit(Elect(None, elected.name, Value.ActiveMask))
+          val barrier = temp("wide")
+          emit(IntegerBinary(
+            IntegerOperation.BitwiseOr,
+            barrier.name,
+            register(base, 1),
+            Value.Immediate(VMAddressSpace.SharedBase),
+            64
+          ))
+          guarded(MemoryBarrierLoad(barrier), elected)
+          guarded(AsyncBulkCopy(destination, src, bytes, barrier), elected)
+        case _: SASSInstruction.UcgabarArv_2a103ba9b90b | _: SASSInstruction.Ucgabararv_4e92c8d663b7 =>
+          requireModifiers(Set.empty)
+          emit(ClusterBarrier(arrive = true))
+        case _: SASSInstruction.UcgabarWait_c3921c43e665 | _: SASSInstruction.Ucgabarwait_83a66759c33c =>
+          requireModifiers(Set.empty)
+          emit(ClusterBarrier(arrive = false))
+        case _: SASSInstruction.Ugetnextworkid =>
+          if (modifiers != Vec(Modifier.SELFCAST) || args.size != 2)
+            unsupported("unsupported cluster cancellation operands")
+          val response = address(raw = args.head, global = false, sharedUniform = true, sharedAccess = true)
+          val barrier  = address(raw = args(1), global = false, sharedUniform = true, sharedAccess = true)
+          val elected  = temp("q")
+          emit(Elect(None, elected.name, Value.ActiveMask))
+          guarded(MemoryBarrierLoad(barrier), elected)
+          guarded(ClusterTryCancel(response, barrier), elected)
+        case _: SASSInstruction.Utmacmdflush =>
+          requireModifiers(Set.empty)
+          emit(MemoryBarrier)
+        case _: SASSInstruction.Syncs =>
+          if (modifiers == Vec(Modifier.EXCH, Modifier.`64`)) {
+            if (args.size != 3 || !VMOperand.isZero(args.head)) unsupported("mbarrier initialization result")
+            val pointer = address(raw = args(1), global = false, sharedUniform = true, sharedAccess = true)
+            emit(Store(pointer, source(args(2), 64), 64, MemoryAccess.Shared))
+            emit(MemoryBarrierLoad(pointer))
+          } else if (modifiers == Vec(Modifier.CCTL, Modifier.IVALL)) {
+            if (args.nonEmpty) unsupported("barrier cache invalidation operands")
+            emit(MemoryBarrier)
+          } else if (
+            modifiers == Vec(Modifier.ARRIVE, Modifier.TRANS64) ||
+            modifiers == Vec(Modifier.ARRIVE, Modifier.TRANS64, Modifier.A1T0)
+          ) {
+            if (args.size != 3 || !VMOperand.isZero(args.head)) unsupported("mbarrier arrival token representation")
+            val pointer = address(raw = args(1), global = false, sharedUniform = true, sharedAccess = true)
+            emit(MemoryBarrierLoad(pointer))
+            emit(MemoryBarrierArrive(None, pointer, Value.Immediate(1L), source(args(2))))
+          } else if (modifiers == Vec(Modifier.PHASECHK, Modifier.TRANS64, Modifier.TRYWAIT)) {
+            if (args.size != 3) unsupported("mbarrier phase-check operands")
+            val pointer = address(raw = args(1), global = false, sharedUniform = true, sharedAccess = true)
+            val phase   = temp()
+            emit(IntegerBinary(
+              IntegerOperation.ShiftRightLogical,
+              phase.name,
+              source(args(2)),
+              Value.Immediate(31L),
+              32
+            ))
+            emit(MemoryBarrierLoad(pointer))
+            emit(MemoryBarrierTest(
+              destination = predicate(args.head).name,
+              address = pointer,
+              phase = phase,
+              parity = true
+            ))
+          } else if (modifiers == Vec(Modifier.CCTL, Modifier.IV)) {
+            if (args.size != 1) unsupported("mbarrier invalidation operands")
+            val pointer = address(raw = args.head, global = false, sharedUniform = true, sharedAccess = true)
+            emit(MemoryBarrierLoad(pointer))
+            emit(MemoryBarrierInvalidate(pointer))
+          } else unsupported("unsupported shared memory barrier operation")
+        case _: SASSInstruction.Preexit =>
+          requireModifiers(Set.empty)
+          if (args.nonEmpty) unsupported("dependent launch hint operands")
+        // Dependent launches are serialized until kernel completion.
+        case _: SASSInstruction.Errbar | _: SASSInstruction.Cgaerrbar =>
+          requireModifiers(Set.empty); emit(MemoryBarrier)
+        case _: SASSInstruction.Isetp | _: SASSInstruction.Uisetp | _: SASSInstruction.Fsetp |
+            _: SASSInstruction.Ufsetp | _: SASSInstruction.Dsetp =>
           requireModifiers(Set(
             Modifier.`EQ`,
             Modifier.`NE`,
@@ -2507,6 +3155,8 @@ private object VMCompiler {
             Modifier.`NAN`,
             Modifier.`NUM`,
             Modifier.`U32`,
+            Modifier.U64,
+            Modifier.S64,
             Modifier.`AND`,
             Modifier.`OR`,
             Modifier.`XOR`,
@@ -2516,7 +3166,15 @@ private object VMCompiler {
             Modifier.`MAX`,
             Modifier.`MIN`
           ))
-          val extrema = modifiers.contains(Modifier.`MAX`) || modifiers.contains(Modifier.`MIN`)
+          val wide = modifiers.exists(Set(Modifier.U64, Modifier.S64))
+          if (
+            wide && (!(instruction.operation match {
+              case _: SASSInstruction.Uisetp | _: SASSInstruction.Isetp => true; case _ => false
+            }) ||
+              modifiers.exists(Set(Modifier.EX, Modifier.X)))
+          ) unsupported("unsupported 64-bit predicate comparison")
+          val integerWidth: IntegerWidth = if (wide) 64 else 32
+          val extrema                    = modifiers.contains(Modifier.`MAX`) || modifiers.contains(Modifier.`MIN`)
           if (extrema) {
             if (
               !(instruction.operation match {
@@ -2533,7 +3191,7 @@ private object VMCompiler {
               PredicateOperation.Or,
               input.name,
               predicateSource(args(4)).name,
-              "%false"
+              VMRegisters.Predicate.False.name
             ))
             val nanA     = temp("q"); val nanB     = temp("q"); val compare  = temp("q")
             val aOnly    = temp("q"); val bothNan  = temp("q"); val chooseA  = temp("q")
@@ -2592,7 +3250,7 @@ private object VMCompiler {
                 PredicateOperation.Or,
                 predicate(args.head).name,
                 chooseA.name,
-                "%false"
+                VMRegisters.Predicate.False.name
               ))
             if (!VMOperand.isAlwaysPredicate(args(1))) {
               val unordered = temp("q")
@@ -2601,14 +3259,14 @@ private object VMCompiler {
                 PredicateOperation.Or,
                 predicate(args(1)).name,
                 unordered.name,
-                "%false"
+                VMRegisters.Predicate.False.name
               ))
             }
           } else {
             val extended = modifiers.contains(Modifier.`EX`)
             if (
               args.size != (if (extended) 6 else 5) || (extended && (instruction.operation match {
-                case _: SASSInstruction.Fsetp => true; case _ => false
+                case _: SASSInstruction.Fsetp | _: SASSInstruction.Ufsetp => true; case _ => false
               }))
             )
               unsupported("extended predicate comparison")
@@ -2617,21 +3275,31 @@ private object VMCompiler {
               result.name,
               comparisonCode(modifiers(0)),
               instruction.operation match {
-                case _: SASSInstruction.Dsetp => ConversionType.F64.format
-                case _: SASSInstruction.Fsetp => ConversionType.F32.format
-                case _                        =>
-                  if (modifiers.contains(Modifier.`U32`)) ConversionType.U32.format else ConversionType.S32.format
+                case _: SASSInstruction.Dsetp                             => ConversionType.F64.format
+                case _: SASSInstruction.Fsetp | _: SASSInstruction.Ufsetp => ConversionType.F32.format
+                case _                                                    =>
+                  if (modifiers.contains(Modifier.S64)) ConversionType.S64.format
+                  else if (wide) ConversionType.U64.format
+                  else if (modifiers.contains(Modifier.`U32`)) ConversionType.U32.format else ConversionType.S32.format
               },
-              if (instruction.operation match { case _: SASSInstruction.Fsetp => true; case _ => false }) {
+              if (
+                instruction.operation match {
+                  case _: SASSInstruction.Fsetp | _: SASSInstruction.Ufsetp => true; case _ => false
+                }
+              ) {
                 val v = floatSource(args(2)); if (modifiers.contains(Modifier.`FTZ`)) flushFloat(v) else v
               } else if (instruction.operation match { case _: SASSInstruction.Dsetp => true; case _ => false })
                 doubleSource(args(2))
-              else source(args(2)),
-              if (instruction.operation match { case _: SASSInstruction.Fsetp => true; case _ => false }) {
+              else source(args(2), integerWidth),
+              if (
+                instruction.operation match {
+                  case _: SASSInstruction.Fsetp | _: SASSInstruction.Ufsetp => true; case _ => false
+                }
+              ) {
                 val v = floatSource(args(3)); if (modifiers.contains(Modifier.`FTZ`)) flushFloat(v) else v
               } else if (instruction.operation match { case _: SASSInstruction.Dsetp => true; case _ => false })
                 doubleSource(args(3))
-              else source(args(3))
+              else source(args(3), integerWidth)
             ))
             if (extended || modifiers.contains(Modifier.`X`)) {
               val low = if (extended) predicateSource(args(5))
@@ -2643,7 +3311,7 @@ private object VMCompiler {
                       PredicateOperation.Or,
                       q.name,
                       readConditionFlag(VMConditionCodes.Flag.LessThan).name,
-                      "%false"
+                      VMRegisters.Predicate.False.name
                     ))
                   case Modifier.`GE` =>
                     emit(PredicateUnary(q.name, readConditionFlag(VMConditionCodes.Flag.LessThan).name))
@@ -2652,7 +3320,7 @@ private object VMCompiler {
                       PredicateOperation.Or,
                       q.name,
                       readConditionFlag(VMConditionCodes.Flag.Equal).name,
-                      "%false"
+                      VMRegisters.Predicate.False.name
                     ))
                   case Modifier.`NE` =>
                     emit(PredicateUnary(q.name, readConditionFlag(VMConditionCodes.Flag.Equal).name))
@@ -2706,7 +3374,7 @@ private object VMCompiler {
               PredicateOperation.Or,
               input.name,
               predicateSource(args(4)).name,
-              "%false"
+              VMRegisters.Predicate.False.name
             ))
             if (args(1) != VMOperand.True && args(1) != Operand.Predicate(None, true, false)) {
               val opposite = temp("q"); emit(PredicateUnary(opposite.name, result.name))
@@ -2749,7 +3417,7 @@ private object VMCompiler {
           if (modifiers.lift(0) != Some(Modifier.`16`) || !Set(Modifier.`M88`, Modifier.`MT88`)(layout))
             unsupported("unsupported shared matrix load shape")
           val registers = (0 until count).map(i => destination(args.head, i)).toVec
-          val pointer   = address(args(1), global = false, sharedUniform = true, sharedAccess = true)
+          val pointer   = address(raw = args(1), global = false, sharedUniform = true, sharedAccess = true)
           emit(VMTensorCompiler.loadMatrix(registers, pointer, count, layout == Modifier.MT88))
         case _: SASSInstruction.Ldgsts =>
           requireModifiers(Set(
@@ -2779,13 +3447,7 @@ private object VMCompiler {
         case _: SASSInstruction.Ldgdepbar =>
           requireModifiers(Set.empty) // Copies complete synchronously in this backend.
         case _: SASSInstruction.Depbar
-            if Set(
-              50,
-              60
-            )(module.sm.raw) && ((instruction.operation match {
-              case _: SASSInstruction.Depbar => true; case _ => false
-            }) && modifiers.isEmpty) &&
-              scoreboardGroup(args) =>
+            if Set(50, 60)(module.sm.raw) && modifiers.isEmpty && scoreboardMask(args) =>
           // The legacy mask-only form waits for these scoreboards. Memory
           // instructions have already completed synchronously in this backend.
           emit(MemoryBarrier)
@@ -2798,7 +3460,7 @@ private object VMCompiler {
             ) || number(args(1)) < 0 || number(args(1)) > 63
           )
             unsupported("unsupported dependency scoreboard")
-          if (args.size > 2 && !scoreboardGroup(args.drop(2)))
+          if (args.size > 2 && !scoreboardMask(args.drop(2)))
             unsupported("unsupported dependency wait mask")
           // Loads, copies and arithmetic finish synchronously here, including
           // every scoreboard named by the optional wait mask.
@@ -2826,7 +3488,7 @@ private object VMCompiler {
             64
           ))
           store(args.head, result, 64)
-        case _: SASSInstruction.Atoms | _: SASSInstruction.Atom | _: SASSInstruction.Atomg | _: SASSInstruction.Red =>
+        case _: SASSInstruction.Atoms | _: SASSInstruction.Atom | _: SASSInstruction.Atomg | _: SASSInstruction.Red | _: SASSInstruction.Redg =>
           requireModifiers(Set(
             Modifier.`E`,
             Modifier.`ADD`,
@@ -2874,7 +3536,13 @@ private object VMCompiler {
           val atomicArgs = if (instruction.operation match { case _: SASSInstruction.Atomg => true; case _ => false })
             args.tail
           else args
-          val first = if (instruction.operation match { case _: SASSInstruction.Red => true; case _ => false }) 0 else 1
+          val first =
+            if (
+              instruction.operation match {
+                case _: SASSInstruction.Red | _: SASSInstruction.Redg => true; case _ => false
+              }
+            ) 0
+            else 1
           val pointer = address(
             atomicArgs(first),
             !(instruction.operation match { case _: SASSInstruction.Atoms => true; case _ => false }),
@@ -2906,7 +3574,11 @@ private object VMCompiler {
                 integerOperation(operation, signed)
               )
           })
-          if (!(instruction.operation match { case _: SASSInstruction.Red => true; case _ => false }))
+          if (
+            !(instruction.operation match {
+              case _: SASSInstruction.Red | _: SASSInstruction.Redg => true; case _ => false
+            })
+          )
             store(atomicArgs.head, result, bits)
         case _: SASSInstruction.Fmul
             if modifiers.exists(Set(
@@ -2928,7 +3600,7 @@ private object VMCompiler {
             Some(conversionRounding(modifiers(0)))
           ))
           store(args.head, result)
-        case _: SASSInstruction.Ffma | _: SASSInstruction.Fadd | _: SASSInstruction.Fmul =>
+        case _: SASSInstruction.Ffma | _: SASSInstruction.Fadd | _: SASSInstruction.Ufadd | _: SASSInstruction.Fmul =>
           requireModifiers(if (instruction.operation match { case _: SASSInstruction.Ffma => true; case _ => false })
             Set(Modifier.`RN`, Modifier.`RM`, Modifier.`RP`, Modifier.`RZ`, Modifier.`FTZ`)
           else Set(Modifier.`RN`, Modifier.`FTZ`))
@@ -2951,7 +3623,11 @@ private object VMCompiler {
               )).getOrElse(Modifier.RN))
             )
           else FloatBinary(
-            if (instruction.operation match { case _: SASSInstruction.Fadd => true; case _ => false })
+            if (
+              instruction.operation match {
+                case _: SASSInstruction.Fadd | _: SASSInstruction.Ufadd => true; case _ => false
+              }
+            )
               FloatOperation.Add
             else FloatOperation.Multiply,
             result.name,
@@ -2960,21 +3636,38 @@ private object VMCompiler {
             32
           ))
           store(args.head, if (modifiers.contains(Modifier.`FTZ`)) flushFloat(result) else result)
+        case _: SASSInstruction.Tex if module.sm.raw == 35 =>
+          requireModifiers(Set(Modifier.LZ, Modifier.P, Modifier.T, Modifier.NODEP))
+          val fields =
+            instruction.machine.map(_.bindings).getOrElse(unsupported("Kepler LDG requires encoded texture fields"))
+          val size     = fields.getOrElse("tid", BigInt(-1)).toInt
+          val geometry = fields.getOrElse("ParamA", BigInt(-1)).toInt
+          val count    = if (size == 5) 2 else if (size == 6) 4 else 1
+          if (
+            size < 0 || size > 6 || !Set(0, 2)(geometry) ||
+            fields.get("LOD") != Some(BigInt(1)) || fields.get("Rb") != Some(BigInt(255)) ||
+            fields.get("wmsk") != Some(BigInt((1 << count) - 1)) ||
+            Vec("TOFF1", "NDV", "DC").exists(name => fields.get(name) != Some(BigInt(0)))
+          )
+            unsupported("texture operation is not a Kepler read-only global load")
+          val width: IntegerWidth = if (size < 2) 8 else if (size < 4) 16 else 32
+          val pointer             = source(args(1), if (geometry == 2) 64 else 32)
+          val results             = Vec.tabulate(count)(index => destination(args.head, index))
+          emit(VMMemoryCompiler.load(results, pointer, width, size == 1 || size == 3, MemoryAccess.Global(false)))
         case _: SASSInstruction.Ldg | _: SASSInstruction.Stg | _: SASSInstruction.Lds | _: SASSInstruction.Sts | _: SASSInstruction.Ld | _: SASSInstruction.St | _: SASSInstruction.Ldl | _: SASSInstruction.Stl =>
           if (
-            modifiers.contains(Modifier.`32`) && (!Set(
+            modifiers.exists(Set(Modifier.`16`, Modifier.`32`)) && (!Set(
               50,
               60
             )(module.sm.raw) || !((instruction.operation match {
               case _: SASSInstruction.Lds => true; case _ => false
-            }) && modifiers == Vec(
-              Modifier.`U`,
-              Modifier.`32`
-            )))
+            }) && Set(Vec(Modifier.U, Modifier.`16`), Vec(Modifier.U, Modifier.`32`))(modifiers)))
           )
-            unsupported("unsupported explicit 32-bit memory form")
+            unsupported("unsupported explicit memory width")
           requireModifiers(Set(
             Modifier.`E`,
+            Modifier.`8`,
+            Modifier.`16`,
             Modifier.`32`,
             Modifier.`64`,
             Modifier.`128`,
@@ -3029,8 +3722,8 @@ private object VMCompiler {
             unsupported("legacy generic-memory auxiliary predicate requires a verified address sequence")
           val bits = if (modifiers.contains(Modifier.`128`)) 128
           else if (modifiers.contains(Modifier.`64`)) 64
-          else if (modifiers.exists(Set(Modifier.`U8`, Modifier.`S8`))) 8
-          else if (modifiers.exists(Set(Modifier.`U16`, Modifier.`S16`))) 16 else 32
+          else if (modifiers.exists(Set(Modifier.`8`, Modifier.`U8`, Modifier.`S8`))) 8
+          else if (modifiers.exists(Set(Modifier.`16`, Modifier.`U16`, Modifier.`S16`))) 16 else 32
 
           val pointer = address(
             args(if (load) 1 else 0),
@@ -3038,12 +3731,9 @@ private object VMCompiler {
             sharedUniform =
               (instruction.operation match {
                 case _: SASSInstruction.Lds => true; case _ => false
-              }) || ((instruction.operation match {
+              }) || (instruction.operation match {
                 case _: SASSInstruction.Sts => true; case _ => false
-              }) && (bits == 32 || modifiers.exists(Set(
-                Modifier.`U8`,
-                Modifier.`128`
-              )))),
+              }),
             sharedAccess = instruction.operation match {
               case _: SASSInstruction.Lds | _: SASSInstruction.Sts => true; case _ => false
             },
@@ -3104,11 +3794,11 @@ private object VMCompiler {
       if (instruction.operands.headOption.exists(VMOperand.has(_, OperandSelector.`CC`))) {
         if (ccFlagsSupported) writeConditionFlags()
         else if (ccZeroFlagsSupported)
-          emit(WriteConditionFlag(VMConditionCodes.Flag.Zero, Value.Predicate("%cc_z")))
+          emit(WriteConditionFlag(VMConditionCodes.Flag.Zero, Value.Predicate(VMRegisters.Predicate.Zero.name)))
         if (
           !ccFlagsSupported && (instruction.operation match {
             case _: SASSInstruction.Iadd | _: SASSInstruction.Iadd32i | _: SASSInstruction.Isub |
-                _: SASSInstruction.Iscadd | _: SASSInstruction.Imad => true
+                _: SASSInstruction.Iscadd | _: SASSInstruction.Iscadd32i | _: SASSInstruction.Imad => true
             case _ => false
           })
         ) {
@@ -3119,12 +3809,12 @@ private object VMCompiler {
         if (
           !ccFlagsSupported && (instruction.operation match {
             case _: SASSInstruction.Iadd | _: SASSInstruction.Iadd32i | _: SASSInstruction.Isub |
-                _: SASSInstruction.Iscadd => true
+                _: SASSInstruction.Iscadd | _: SASSInstruction.Iscadd32i => true
             case _ => false
           })
         ) {
-          emit(WriteConditionFlag(VMConditionCodes.Flag.Equal, Value.Predicate("%cc_eq")))
-          emit(WriteConditionFlag(VMConditionCodes.Flag.LessThan, Value.Predicate("%cc_lt")))
+          emit(WriteConditionFlag(VMConditionCodes.Flag.Equal, Value.Predicate(VMRegisters.Predicate.Equal.name)))
+          emit(WriteConditionFlag(VMConditionCodes.Flag.LessThan, Value.Predicate(VMRegisters.Predicate.LessThan.name)))
         }
         VMConditionCodes.Flag.values.filterNot(writtenFlags.contains(_)).foreach { flag =>
           if (
@@ -3142,11 +3832,15 @@ private object VMCompiler {
         )
           emit(InvalidateAddThreeCarry)
       }
-      val pred       = instruction.guard.map(_.predicate)
+      val collectiveBranch = instruction.operation match {
+        case _: SASSInstruction.Bra => modifiers.contains(Modifier.ANY)
+        case _                      => false
+      }
+      val pred       = instruction.guard.map(_.predicate).filterNot(_ => collectiveBranch)
       val guardSetup = pred.toVec.map { p =>
         val value = predicate(p.copy(negated = false))
-        Execute(if (p.negated) PredicateUnary("%guard", value.name)
-        else PredicateBinary(PredicateOperation.Or, "%guard", value.name, value.name))
+        Execute(if (p.negated) PredicateUnary(VMRegisters.Predicate.Guard.name, value.name)
+        else PredicateBinary(PredicateOperation.Or, VMRegisters.Predicate.Guard.name, value.name, value.name))
       }
       val body =
         if (
@@ -3158,12 +3852,15 @@ private object VMCompiler {
           })
         ) {
           val end: NonEmpty[String] = s"REnd${instruction.address.raw.toHexString}"
-          Vec(VMAssembler.Statement.Branch(end, Some(ExecutionPredicate("%guard", true)))) ++ code.toVec :+ Label(end)
+          Vec(VMAssembler.Statement.Branch(
+            end,
+            Some(ExecutionPredicate(VMRegisters.Predicate.Guard.name, true))
+          )) ++ code.toVec :+ Label(end)
         } else code.toVec.map {
           case statement: Execute if pred.isDefined =>
-            statement.copy(predication = Some(ExecutionPredicate("%guard", false)))
+            statement.copy(predication = Some(ExecutionPredicate(VMRegisters.Predicate.Guard.name, false)))
           case statement: VMAssembler.Statement.Branch if pred.isDefined =>
-            statement.copy(predication = Some(ExecutionPredicate("%guard", false)))
+            statement.copy(predication = Some(ExecutionPredicate(VMRegisters.Predicate.Guard.name, false)))
           case statement => statement
         }
       Vec(Label(s"L${instruction.address.raw.toHexString}")) ++ guardSetup ++ body

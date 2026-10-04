@@ -36,6 +36,7 @@ void prepare_runtime_environment(std::map<std::string, std::string> &environment
     if (reserved_environment_key(key) && !key.starts_with("CONFORMANCE_") && key != "PATH") i = environment.erase(i);
     else ++i;
   }
+  environment["OMP_TARGET_OFFLOAD"] = "MANDATORY";
 #if defined(_WIN32)
   environment["PATH"] = artifact.string() + ";" + (support / "lib").string() + ";" + base_environment().at("PATH");
 #elif defined(__APPLE__)

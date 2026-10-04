@@ -11,6 +11,9 @@ object Modifier {
     "L1::evict_unchanged" -> L1EvictUnchanged,
     "L1::no_allocate" -> L1NoAllocate,
     "L2" -> L2,
+    "L2::128B" -> L2128B,
+    "L2::256B" -> L2256B,
+    "L2::64B" -> L264B,
     "L2::cache_hint" -> L2CacheHint,
     "L2::evict_first" -> L2EvictFirst,
     "L2::evict_last" -> L2EvictLast,
@@ -88,7 +91,8 @@ object Modifier {
     "cp_mask" -> CpMask,
     "cs" -> Cs,
     "cta" -> Cta,
-    "cta_group" -> CtaGroup,
+    "cta_group::1" -> CtaGroup1,
+    "cta_group::2" -> CtaGroup2,
     "cube" -> Cube,
     "cv" -> Cv,
     "cvt" -> Cvt,
@@ -139,10 +143,14 @@ object Modifier {
     "fractional" -> Fractional,
     "ftz" -> Ftz,
     "full" -> Full,
+    "func" -> Func,
     "g" -> G,
     "ge" -> Ge,
     "generic::fabric" -> GenericFabric,
     "get_first_ctaid" -> GetFirstCtaid,
+    "get_first_ctaid::x" -> GetFirstCtaidX,
+    "get_first_ctaid::y" -> GetFirstCtaidY,
+    "get_first_ctaid::z" -> GetFirstCtaidZ,
     "geu" -> Geu,
     "gl" -> Gl,
     "global" -> Global,
@@ -160,6 +168,7 @@ object Modifier {
     "ignore_oob" -> IgnoreOob,
     "im2col" -> Im2col,
     "im2col::w" -> Im2colW,
+    "im2col::w::128" -> Im2colW128,
     "im2col_no_offs" -> Im2colNoOffs,
     "inc" -> Inc,
     "infinite" -> Infinite,
@@ -358,6 +367,7 @@ object Modifier {
     "or" -> Or,
     "p" -> P,
     "pack" -> Pack,
+    "pack::16b" -> Pack16b,
     "param" -> Param,
     "parity" -> Parity,
     "pending_count" -> PendingCount,
@@ -406,6 +416,9 @@ object Modifier {
     "sat" -> Sat,
     "satfinite" -> Satfinite,
     "sc" -> Sc,
+    "scale_vec::1X" -> ScaleVec1X,
+    "scale_vec::2X" -> ScaleVec2X,
+    "scale_vec::4X" -> ScaleVec4X,
     "scaled::n2::ue8m0" -> ScaledN2Ue8m0,
     "shared" -> Shared,
     "shared::cluster" -> SharedCluster,
@@ -458,6 +471,7 @@ object Modifier {
     "ue8m0" -> Ue8m0,
     "ue8m0x2" -> Ue8m0x2,
     "uni" -> Uni,
+    "unpack::16b" -> Unpack16b,
     "up" -> Up,
     "v2" -> V2,
     "v4" -> V4,
@@ -501,6 +515,9 @@ enum Modifier(val name: NonEmpty[String]) {
   case L1EvictUnchanged extends Modifier("L1::evict_unchanged")
   case L1NoAllocate extends Modifier("L1::no_allocate")
   case L2 extends Modifier("L2")
+  case L2128B extends Modifier("L2::128B")
+  case L2256B extends Modifier("L2::256B")
+  case L264B extends Modifier("L2::64B")
   case L2CacheHint extends Modifier("L2::cache_hint")
   case L2EvictFirst extends Modifier("L2::evict_first")
   case L2EvictLast extends Modifier("L2::evict_last")
@@ -578,7 +595,8 @@ enum Modifier(val name: NonEmpty[String]) {
   case CpMask extends Modifier("cp_mask")
   case Cs extends Modifier("cs")
   case Cta extends Modifier("cta")
-  case CtaGroup extends Modifier("cta_group")
+  case CtaGroup1 extends Modifier("cta_group::1")
+  case CtaGroup2 extends Modifier("cta_group::2")
   case Cube extends Modifier("cube")
   case Cv extends Modifier("cv")
   case Cvt extends Modifier("cvt")
@@ -629,10 +647,14 @@ enum Modifier(val name: NonEmpty[String]) {
   case Fractional extends Modifier("fractional")
   case Ftz extends Modifier("ftz")
   case Full extends Modifier("full")
+  case Func extends Modifier("func")
   case G extends Modifier("g")
   case Ge extends Modifier("ge")
   case GenericFabric extends Modifier("generic::fabric")
   case GetFirstCtaid extends Modifier("get_first_ctaid")
+  case GetFirstCtaidX extends Modifier("get_first_ctaid::x")
+  case GetFirstCtaidY extends Modifier("get_first_ctaid::y")
+  case GetFirstCtaidZ extends Modifier("get_first_ctaid::z")
   case Geu extends Modifier("geu")
   case Gl extends Modifier("gl")
   case Global extends Modifier("global")
@@ -650,6 +672,7 @@ enum Modifier(val name: NonEmpty[String]) {
   case IgnoreOob extends Modifier("ignore_oob")
   case Im2col extends Modifier("im2col")
   case Im2colW extends Modifier("im2col::w")
+  case Im2colW128 extends Modifier("im2col::w::128")
   case Im2colNoOffs extends Modifier("im2col_no_offs")
   case Inc extends Modifier("inc")
   case Infinite extends Modifier("infinite")
@@ -848,6 +871,7 @@ enum Modifier(val name: NonEmpty[String]) {
   case Or extends Modifier("or")
   case P extends Modifier("p")
   case Pack extends Modifier("pack")
+  case Pack16b extends Modifier("pack::16b")
   case Param extends Modifier("param")
   case Parity extends Modifier("parity")
   case PendingCount extends Modifier("pending_count")
@@ -896,6 +920,9 @@ enum Modifier(val name: NonEmpty[String]) {
   case Sat extends Modifier("sat")
   case Satfinite extends Modifier("satfinite")
   case Sc extends Modifier("sc")
+  case ScaleVec1X extends Modifier("scale_vec::1X")
+  case ScaleVec2X extends Modifier("scale_vec::2X")
+  case ScaleVec4X extends Modifier("scale_vec::4X")
   case ScaledN2Ue8m0 extends Modifier("scaled::n2::ue8m0")
   case Shared extends Modifier("shared")
   case SharedCluster extends Modifier("shared::cluster")
@@ -948,6 +975,7 @@ enum Modifier(val name: NonEmpty[String]) {
   case Ue8m0 extends Modifier("ue8m0")
   case Ue8m0x2 extends Modifier("ue8m0x2")
   case Uni extends Modifier("uni")
+  case Unpack16b extends Modifier("unpack::16b")
   case Up extends Modifier("up")
   case V2 extends Modifier("v2")
   case V4 extends Modifier("v4")

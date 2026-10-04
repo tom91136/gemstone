@@ -60,7 +60,7 @@ class AllocationAddressSuite extends munit.FunSuite {
   ).toOption.get
   private def run(memory: Memory, value: CodeObjectKernel = kernel) =
     executeKernel(
-      VMCompiler.compile(value).toOption.get,
+      VMCompiler().compile(value).toOption.get,
       dispatch,
       memory,
       TaskControl()

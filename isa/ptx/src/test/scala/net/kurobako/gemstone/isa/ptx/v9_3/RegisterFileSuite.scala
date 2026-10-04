@@ -29,6 +29,37 @@ class RegisterFileSuite extends munit.FunSuite {
     assertEquals(predicateNamedScalar.registerChunkCount.raw, 81)
   }
 
+  test("predicate operands do not enlarge the general register directory") {
+    val kernel = compileKernel(""".version 8.0
+.target sm_80
+.address_size 64
+.visible .entry predicates(.param .u64 output) {
+  .reg .b64 %address;
+  .reg .b32 %r0;
+  .reg .pred %p1023, %copy;
+  ld.param.u64 %address, [output];
+  mov.u32 %r0, 41;
+  setp.eq.u32 %p1023, %r0, 41;
+  mov.pred %copy, %p1023;
+  @%copy add.u32 %r0, %r0, 1;
+  st.global.u32 [%address], %r0;
+  ret;
+}""")
+    assertEquals(kernel.registerChunkCount.raw, 33)
+    val memory = ArrayCheckedMemory.allocate(4)
+    assertEquals(
+      execute(
+        kernel,
+        1,
+        1,
+        Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)),
+        memory
+      ),
+      Right(())
+    )
+    assertEquals(memory.readInt32(memory.allocation.start), Right(42))
+  }
+
   test("a numbered p register can hold a non-predicate value") {
     val kernel = compileKernel(""".version 8.0
 .target sm_80

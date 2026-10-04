@@ -3,10 +3,55 @@ package net.kurobako.gemstone.isa.amdgpu
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.vm.*
 
 private object VMState {
   type Lane = Int where (AtLeast[0] & LessThan[64])
   val LaneIndices: Vec[Lane] = Vec.range[0, 64]
+
+  /** The two implicit RDNA4 workgroup barriers have independent arrival counts and per-wave completion bits. */
+  class WorkgroupBarriers(waves: Int) {
+    private val live      = Array.fill(waves)(true)
+    private val arrived   = Array.fill(2, waves)(false)
+    private val completed = Array.fill(2, waves)(false)
+
+    private def complete(barrier: Int): Unit =
+      if (live.indices.forall(wave => !live(wave) || arrived(barrier)(wave))) {
+        java.util.Arrays.fill(arrived(barrier), false)
+        java.util.Arrays.fill(completed(barrier), true)
+      }
+
+    def signal(id: Int, wave: Int): Either[Fault, Boolean] =
+      if (id == 0) Right(false)
+      else if (id != -1 && id != -2) Left(Fault.Unsupported(s"AMDGPU barrier $id is not implemented"))
+      else {
+        val barrier = -id - 1
+        val first   = !arrived(barrier).contains(true)
+        if (arrived(barrier)(wave)) Left(Fault.Backend(s"wave $wave signalled barrier $id twice in one phase"))
+        else {
+          arrived(barrier)(wave) = true
+          complete(barrier)
+          Right(first)
+        }
+      }
+
+    def await(id: Int, wave: Int): Either[Fault, Boolean] =
+      if (id == 0) Right(true)
+      else if (id != -1 && id != -2) Left(Fault.Unsupported(s"AMDGPU barrier $id is not implemented"))
+      else {
+        val barrier = -id - 1
+        val ready   = completed(barrier)(wave)
+        if (ready) completed(barrier)(wave) = false
+        Right(ready)
+      }
+
+    def drop(wave: Int): Unit = {
+      live(wave) = false
+      arrived.indices.foreach { barrier =>
+        if (arrived(barrier).contains(true)) complete(barrier)
+      }
+    }
+  }
 
   /** Mutable architectural VCC/EXEC storage for one wave. */
   class LaneBits(lanes: Int in 1 ~ 64, initial: Long) {
@@ -56,9 +101,9 @@ private object VMState {
       }
     }
 
-    def count: Int                              = bitCount
-    def isEmpty: Boolean                        = bitCount == 0
-    def nonEmpty: Boolean                       = bitCount != 0
+    def count: Int                   = bitCount
+    def isEmpty: Boolean             = bitCount == 0
+    def nonEmpty: Boolean            = bitCount != 0
     def first: Option[Int in 0 ~ 63] =
       Option.when(value != 0L)(java.lang.Long.numberOfTrailingZeros(value).unsafe[Int in 0 ~ 63])
   }
@@ -68,7 +113,7 @@ private object VMState {
     private val registers = Array.ofDim[Array[Long] | Null](256)
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-    def apply(index: VMIR.VectorRegisterIndex): Array[Long] = {
+    def apply(index: VMIR.VectorRegisterIndex): Array[Long] =
       registers(index.raw) match {
         case null =>
           val allocated = Array.ofDim[Long](lanes.raw)
@@ -76,7 +121,6 @@ private object VMState {
           allocated
         case value => value
       }
-    }
   }
 
   /** Per-lane scratch is allocated on first access; null is the allocation-free hot-path sentinel. */
@@ -99,6 +143,7 @@ private object VMState {
   case class WaveState(
       scalar: Array[Long],
       vector: VectorRegisters,
+      accumulator: VectorRegisters,
       carry: LaneBits,
       active: LaneBits,
       scalarCarry: Boolean,

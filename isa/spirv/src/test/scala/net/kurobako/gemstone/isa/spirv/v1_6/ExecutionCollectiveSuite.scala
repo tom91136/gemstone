@@ -926,13 +926,21 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
         Vec.empty
       ).toOption.get
 
-    def observed(name: NonEmpty[String]): ExecutionMetrics = {
+    def observed(name: NonEmpty[String], deferred: Boolean = false): ExecutionMetrics = {
+      class DeferredCapableMemory extends Memory {
+        private val delegate                  = ArrayMemory(allocation, 0)
+        override def defersHostReads: Boolean = deferred
+        override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
+          delegate.read(region, offset, size)
+        override def write(region: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
+          delegate.write(region, offset, bytes)
+      }
       val observation = AtomicReference(Option.empty[ExecutionMetrics])
       assertEquals(
         VMInterpreter.execute(
           prepared,
           dispatch(name),
-          ArrayMemory(allocation, 0),
+          DeferredCapableMemory(),
           TaskControl(),
           Workgroups.Sequential,
           _ => Right(()),
@@ -947,6 +955,10 @@ class ExecutionCollectiveSuite extends munit.FunSuite {
     assertEquals(plain.invocations.raw, 16L)
     assertEquals(plain.invocationValueInstances.raw, 1L)
     assertEquals(plain.collectiveDispatches.raw, 0L)
+
+    val deferredPlain = observed("plain", deferred = true)
+    assertEquals(deferredPlain.invocations.raw, 16L)
+    assertEquals(deferredPlain.invocationValueInstances.raw, 1L)
 
     val collective = observed("collective")
     assertEquals(collective.invocations.raw, 16L)

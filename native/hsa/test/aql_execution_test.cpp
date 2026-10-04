@@ -39,12 +39,14 @@ struct FakeExecutor {
   gemstone_hsa_dimensions global_size{};
   uint32_t private_segment_bytes = 0;
   uint32_t group_segment_bytes = 0;
+  gemstone_hsa_argument_buffer argument_buffer{};
   std::vector<uint8_t> scalar;
   uint64_t allocation = 0;
   uint64_t allocation_offset = 0;
   std::string global_name;
   uint64_t global_offset = 0;
   std::vector<uint8_t> global_bytes;
+  bool buffer_only = false;
   bool fail_launch = false;
   bool fail_await = false;
   bool completion_awaited = false;
@@ -98,9 +100,18 @@ int describe_kernel(void *context, uint64_t program, const char *name, uint32_t 
 
 int launch(void *context, uint64_t program, const char *kernel, gemstone_hsa_dimensions group_size, gemstone_hsa_dimensions group_count,
            gemstone_hsa_dimensions global_size, uint32_t private_segment_bytes, uint32_t group_segment_bytes,
-           const gemstone_hsa_argument *arguments, uint32_t argument_count, uint64_t *completion) {
+           const gemstone_hsa_argument *arguments, uint32_t argument_count, const gemstone_hsa_argument_buffer *argument_buffer,
+           uint64_t *completion) {
   auto &executor = *static_cast<FakeExecutor *>(context);
+  REQUIRE(argument_buffer);
+  executor.argument_buffer = *argument_buffer;
   if (executor.fail_launch) return -1;
+  if (executor.buffer_only) {
+    REQUIRE(argument_count == 0);
+    ++executor.launches;
+    *completion = 23;
+    return 0;
+  }
   REQUIRE((program == executor.program));
   const uint32_t expected_arguments = executor.expect_openmp_environment_sentinel ? 2 : 5;
   REQUIRE((argument_count == expected_arguments));
@@ -571,6 +582,40 @@ void server_metadata_replaces_the_process_local_launch_layout() {
   REQUIRE((executor.unloads == 1));
 }
 
+void allocation_backed_kernarg_retains_zero_sized_metadata_buffer() {
+  FakeExecutor executor;
+  executor.buffer_only = true;
+  executor.dirty_ranges.clear();
+  FakeSignals signals;
+  auto executor_ops = executor_operations(executor);
+  gemstone_hsa_signal_operations signal_ops{&signals, load_signal, complete_signal, fail_signal};
+  auto *runtime = gemstone_hsa_aql_runtime_create(&executor_ops, &signal_ops);
+  REQUIRE(runtime);
+  const std::array<uint8_t, 4> image{{0x7f, 'E', 'L', 'F'}};
+  REQUIRE(gemstone_hsa_aql_runtime_install_kernel(runtime, 77, image.data(), image.size(), "implicit", 0, nullptr, 0) == 0);
+  std::array<uint8_t, 96> storage{};
+  const uint64_t base = reinterpret_cast<uint64_t>(storage.data());
+  REQUIRE(gemstone_hsa_aql_runtime_register_allocation(runtime, base, storage.size(), 100) == 0);
+  auto packet = kernel_packet(77, base + 16, 100);
+  set_signal(signals, 100, 1);
+  uint64_t allocation = 0;
+  uint32_t count = 0;
+  REQUIRE(gemstone_hsa_aql_runtime_dispatch_allocations(runtime, packet.data(), packet.size(), &allocation, 1, &count) == 0);
+  REQUIRE(count == 1);
+  REQUIRE(allocation == 100);
+  REQUIRE(gemstone_hsa_aql_runtime_consume(0, 0, packet.data(), packet.size(), runtime) == GEMSTONE_HSA_PACKET_ACCEPTED);
+  REQUIRE(executor.argument_buffer.allocation_id == 100);
+  REQUIRE(executor.argument_buffer.offset == 16);
+  REQUIRE(executor.launches == 1);
+  REQUIRE(signal_value(signals, 100) == 0);
+  packet = kernel_packet(77, base + storage.size(), 100);
+  REQUIRE(gemstone_hsa_aql_runtime_dispatch_allocations(runtime, packet.data(), packet.size(), &allocation, 1, &count) != 0);
+  REQUIRE(gemstone_hsa_aql_runtime_unregister_allocation(runtime, base) == 0);
+  packet = kernel_packet(77, base + 16, 100);
+  REQUIRE(gemstone_hsa_aql_runtime_dispatch_allocations(runtime, packet.data(), packet.size(), &allocation, 1, &count) != 0);
+  gemstone_hsa_aql_runtime_destroy(runtime);
+}
+
 void openmp_kernel_environment_sentinel_preserves_abi_without_pointer_resolution() {
   FakeExecutor executor;
   executor.expect_openmp_environment_sentinel = true;
@@ -738,3 +783,7 @@ TEST_CASE("AQL OpenMP sentinel preserves ABI without pointer resolution", "[hsa]
 TEST_CASE("AQL barriers wait and complete", "[hsa][aql]") { barriers_wait_and_complete(); }
 
 TEST_CASE("AQL waiting barriers do not block another queue", "[hsa][aql]") { a_waiting_barrier_does_not_block_another_queue(); }
+
+TEST_CASE("AQL allocation-backed kernargs retain zero-sized metadata buffers", "[hsa][aql]") {
+  allocation_backed_kernarg_retains_zero_sized_metadata_buffer();
+}

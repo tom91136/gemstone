@@ -115,7 +115,7 @@ class AtomicOperationSuite extends munit.FunSuite {
     }
     assertEquals(
       executeKernel(
-        VMCompiler.compile(kernel).fold(error => fail(error.message), identity),
+        VMCompiler().compile(kernel).fold(error => fail(error.message), identity),
         dispatch,
         memory,
         TaskControl()

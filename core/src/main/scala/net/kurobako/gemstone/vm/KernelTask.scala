@@ -11,6 +11,8 @@ object KernelTask {
     case Local(size: Long > 0)
   }
 
+  case class ArgumentBuffer(region: AllocationId, offset: Long >= 0)
+
   enum RelocationSource {
     case Memory(region: AllocationId)
     case Argument(index: Int >= 0)
@@ -34,11 +36,17 @@ object KernelTask {
       pointerRelocations: Vec[PointerRelocation] = Vec.empty,
       workDim: Int in 1 ~ 3 = 3,
       globalOffset: LaunchGeometry.Coordinates = LaunchGeometry.Coordinates.origin,
-      discoverArgumentRelocations: Boolean = false
+      discoverArgumentRelocations: Boolean = false,
+      argumentBuffer: Option[ArgumentBuffer] = None
   ): Either[NonEmpty[String], KernelTask] =
     for {
       geometry <- LaunchGeometry.forLaunch(groupSize, groupCount, globalSize, workDim, globalOffset)
-      _        <- validateRelocations(pointerRelocations, arguments.size)
+      _        <- Either.cond[NonEmpty[String], Unit](
+        argumentBuffer.isEmpty || (arguments.isEmpty && !discoverArgumentRelocations),
+        (),
+        "an argument buffer cannot be combined with structured arguments or argument relocation discovery"
+      )
+      _ <- validateRelocations(pointerRelocations, arguments.size)
     } yield KernelTask(
       kernelName,
       geometry,
@@ -46,7 +54,8 @@ object KernelTask {
       groupSegmentBytes,
       arguments,
       pointerRelocations,
-      discoverArgumentRelocations
+      discoverArgumentRelocations,
+      argumentBuffer
     )
   private def validateRelocations(
       pointerRelocations: Vec[PointerRelocation],
@@ -70,7 +79,8 @@ case class KernelTask private (
     groupSegmentBytes: Int >= 0,
     arguments: Vec[KernelTask.Argument],
     pointerRelocations: Vec[KernelTask.PointerRelocation],
-    discoverArgumentRelocations: Boolean
+    discoverArgumentRelocations: Boolean,
+    argumentBuffer: Option[KernelTask.ArgumentBuffer]
 ) {
   def withArguments(arguments: Vec[KernelTask.Argument]): Either[NonEmpty[String], KernelTask] =
     Either.cond(arguments.size == this.arguments.size, copy(arguments = arguments), "argument count cannot change")

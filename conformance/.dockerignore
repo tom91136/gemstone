@@ -1,2 +1,4 @@
 **
 !Containerfile
+!patches/
+!patches/libgomp-default-device.patch

@@ -13,7 +13,10 @@ class XmadLoweringSuite extends munit.FunSuite {
   private def fixtureModule(sm: Int, signedHi: Boolean = false): Cubin.Module = {
     val name: NonEmpty[String] = if (signedHi) "signed_hi" else "xmad_patterns"
     val registers              = if (signedHi) 9 else 14
-    SASSFixture.module(sm, Vec(SASSFixture.Kernel(name, 320, Vec((0, 8), (8, 8)), registers = registers)))
+    SASSFixture.module(
+      sm,
+      Vec.nonEmpty(SASSFixture.Kernel(name, 320, Vec.nonEmpty((0, 8), (8, 8)), registers = registers))
+    )
   }
 
   private def words(values: Vec[Long]): Vec[Byte] =
@@ -23,7 +26,7 @@ class XmadLoweringSuite extends munit.FunSuite {
     SASSFixture.instruction(address, opcode, args.split(',').filter(_.nonEmpty).toVec, None)
 
   private def synthetic(): DecodedFunction = {
-    val body = Vec(
+    val body = Vec.nonEmpty(
       instruction(0x00, "MOV", "R2,c[0x0][0x148]"),
       instruction(0x08, "MOV", "R3,c[0x0][0x14c]"),
       instruction(0x10, "MOV", "R4,c[0x0][0x140]"),
@@ -89,7 +92,7 @@ class XmadLoweringSuite extends munit.FunSuite {
     val p0 = al * bl
     val p1 = ah * bl
     val p2 = ah * bh
-    Vec(
+    Vec.nonEmpty(
       u32(p0 + c),
       u32((p1 << 16) + c),
       u32((ah * 0x1100L << 16) + (c & 0xffffL)),
@@ -110,7 +113,7 @@ class XmadLoweringSuite extends munit.FunSuite {
     val al      = half(a, high = false)
     val bl      = half(b, high = false)
     val product = al * bl
-    Vec(
+    Vec.nonEmpty(
       u32(product + c),
       u32((product << 16) + c),
       u32((product << 16) + (c & 0xffffL)),
@@ -122,7 +125,7 @@ class XmadLoweringSuite extends munit.FunSuite {
   }
 
   test("CUDA 11.8 compiler fixtures cover Maxwell/Pascal XMAD families; VM arithmetic matches independent formulas") {
-    val cases = Vec(
+    val cases = Vec.nonEmpty(
       (0x8001ffffL, 0xffff8001L, 0xffff0003L),
       (0x1234abcdL, 0x5678fedcL, 0x76543210L),
       (0x00010001L, 0x00020003L, 0x0000ffffL),
@@ -133,15 +136,15 @@ class XmadLoweringSuite extends munit.FunSuite {
       (0xffffffffL, 0x00000001L, 0x00000000L)
     )
 
-    Vec(50, 60).foreach { sm =>
+    Vec.nonEmpty(50, 60).foreach { sm =>
       val module = fixtureModule(sm)
       assertEquals(module.sm.raw, sm)
       val listing = Map(50 -> XmadFixtures.xmadCompilerFormsSm50, 60 -> XmadFixtures.xmadArithmeticSm60)(sm)
-      Vec("XMAD.MRG", "XMAD.CHI", "XMAD.PSL.CBCC", "XMAD.S16.U16").foreach { form =>
+      Vec.nonEmpty("XMAD.MRG", "XMAD.CHI", "XMAD.PSL.CBCC", "XMAD.S16.U16").foreach { form =>
         assert(listing.contains(form), s"sm_$sm compiler fixture did not contain $form")
       }
       val kernel = module.kernels.find(_.name == "xmad_patterns").get
-      val sass   = SASSFixture(module, kernel, Vec(synthetic()))
+      val sass   = SASSFixture(module, kernel, Vec.nonEmpty(synthetic()))
 
       locally {
         val service = SASSFixture.Execution()
@@ -150,12 +153,12 @@ class XmadLoweringSuite extends munit.FunSuite {
         val program = service.compile(sass)
           .fold(e => fail(e.message), identity)
         cases.foreach { case (a, b, c) =>
-          assert(service.write(input, 0L, words(Vec(a, b, c))).isRight)
+          assert(service.write(input, 0L, words(Vec.nonEmpty(a, b, c))).isRight)
           val task = SASSFixture.task(
             "xmad_patterns": NonEmpty[String],
             LaunchGeometry.Dimensions.One,
             LaunchGeometry.Dimensions.One,
-            Vec(
+            Vec.nonEmpty(
               KernelTask.Argument.Memory(output, 0L),
               KernelTask.Argument.Memory(input, 0L)
             )
@@ -175,24 +178,24 @@ class XmadLoweringSuite extends munit.FunSuite {
     }
   }
 
-  test("XMAD rejects unsupported modifiers and condition-code destinations") {
+  test("XMAD rejects unsupported modifiers and condition-code modifier combinations") {
     val module = fixtureModule(50)
     val kernel = module.kernels.find(_.name == "xmad_patterns").get
     val base   = synthetic()
     val badMod = base.copy(instructions = base.instructions.updated(7, instruction(0x38, "XMAD.SAT", "R8,R0,R6,R7")))
-    val badCC  = base.copy(instructions = base.instructions.updated(7, instruction(0x38, "XMAD", "R8.CC,R0,R6,R7")))
-    assert(SASSFixture.lower(module, kernel, Vec(badMod)).isLeft)
-    assert(SASSFixture.lower(module, kernel, Vec(badCC)).isLeft)
+    val badCC  = base.copy(instructions = base.instructions.updated(7, instruction(0x38, "XMAD.PSL", "R8.CC,R0,R6,R7")))
+    assert(SASSFixture.lower(module, kernel, Vec.nonEmpty(badMod)).isLeft)
+    assert(SASSFixture.lower(module, kernel, Vec.nonEmpty(badCC)).isLeft)
   }
 
   test("CUDA 11.8 signed mul.hi.s32 compiler chains match independent BigInt arithmetic") {
-    val boundaries = Vec(0L, 1L, 0x7fffL, 0x8000L, 0xffffL, 0x10000L, 0x7fff0000L,
+    val boundaries = Vec.nonEmpty(0L, 1L, 0x7fffL, 0x8000L, 0xffffL, 0x10000L, 0x7fff0000L,
       0x7fffffffL, 0x80000000L, 0x80000001L, 0xffff0000L, 0xffffffffL)
     val cases =
       (for {
         a <- boundaries
         b <- boundaries
-      } yield (a, b)) ++ Vec(
+      } yield (a, b)) ++ Vec.nonEmpty(
         (0x80000000L, 0x80000000L),
         (0x7fffffffL, 0xffffffffL),
         (0xffff0001L, 0x0001ffffL),
@@ -202,7 +205,7 @@ class XmadLoweringSuite extends munit.FunSuite {
         (0xffff0000L, 0x00010000L),
         (0xffffffffL, 0x00000001L)
       )
-    Vec(50, 60).foreach { sm =>
+    Vec.nonEmpty(50, 60).foreach { sm =>
       val module = fixtureModule(sm, signedHi = true)
       assertEquals(module.sm.raw, sm)
       val listing = Map(50 -> XmadFixtures.xmadSignedHiSm50, 60 -> XmadFixtures.xmadSignedHiSm60)(sm)
@@ -210,7 +213,7 @@ class XmadLoweringSuite extends munit.FunSuite {
       assert(listing.contains("IADD3.RS"), s"sm_$sm mul.hi.s32 fixture lost the final partial-product combine")
       val function = ListingDecoder.parse(listing, "signed_hi", sm).fold(fail(_), _.head)
       val kernel   = module.kernels.find(_.name == "signed_hi").get
-      val sass     = SASSFixture(module, kernel, Vec(function))
+      val sass     = SASSFixture(module, kernel, Vec.nonEmpty(function))
 
       locally {
         val service = SASSFixture.Execution()
@@ -219,12 +222,12 @@ class XmadLoweringSuite extends munit.FunSuite {
         val program = service.compile(sass)
           .fold(e => fail(e.message), identity)
         cases.foreach { case (a, b) =>
-          assert(service.write(input, 0L, words(Vec(a, b))).isRight)
+          assert(service.write(input, 0L, words(Vec.nonEmpty(a, b))).isRight)
           val task = SASSFixture.task(
             "signed_hi": NonEmpty[String],
             LaunchGeometry.Dimensions.One,
             LaunchGeometry.Dimensions.One,
-            Vec(
+            Vec.nonEmpty(
               KernelTask.Argument.Memory(output, 0L),
               KernelTask.Argument.Memory(input, 0L)
             )
@@ -242,18 +245,18 @@ class XmadLoweringSuite extends munit.FunSuite {
   }
 
   test("CUDA 11.8 compiled PTX multiply-add chains match their source arithmetic in the VM") {
-    val cases = Vec(
+    val cases = Vec.nonEmpty(
       (0x8001ffffL, 0xffff8001L, 0xffff0003L),
       (0x1234abcdL, 0x5678fedcL, 0x76543210L),
       (0x00010001L, 0x00020003L, 0x0000ffffL)
     )
-    Vec(50, 60).foreach { sm =>
+    Vec.nonEmpty(50, 60).foreach { sm =>
       val module = fixtureModule(sm)
       assertEquals(module.sm.raw, sm)
       val listing  = Map(50 -> XmadFixtures.xmadArithmeticSm50, 60 -> XmadFixtures.xmadArithmeticSm60)(sm)
       val function = ListingDecoder.parse(listing, "xmad_patterns", sm).fold(fail(_), _.head)
       val kernel   = module.kernels.find(_.name == "xmad_patterns").get
-      val sass     = SASSFixture(module, kernel, Vec(function))
+      val sass     = SASSFixture(module, kernel, Vec.nonEmpty(function))
 
       locally {
         val service = SASSFixture.Execution()
@@ -262,12 +265,12 @@ class XmadLoweringSuite extends munit.FunSuite {
         val program = service.compile(sass)
           .fold(e => fail(e.message), identity)
         cases.foreach { case (a, b, c) =>
-          assert(service.write(input, 0L, words(Vec(a, b, c))).isRight)
+          assert(service.write(input, 0L, words(Vec.nonEmpty(a, b, c))).isRight)
           val task = SASSFixture.task(
             "xmad_patterns": NonEmpty[String],
             LaunchGeometry.Dimensions.One,
             LaunchGeometry.Dimensions.One,
-            Vec(
+            Vec.nonEmpty(
               KernelTask.Argument.Memory(output, 0L),
               KernelTask.Argument.Memory(input, 0L)
             )

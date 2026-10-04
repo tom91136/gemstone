@@ -18,7 +18,8 @@ object GenerateNativeBindings {
       name: String,
       surfaces: Vector[String],
       preamble: Vector[String],
-      layout: Option[LayoutSpec] = None
+      layout: Option[LayoutSpec] = None,
+      pointerConstants: Vector[(String, String)] = Vector.empty
   )
   private case class FieldLayout(mirror: String, vendor: String)
   private case class StructLayout(
@@ -179,6 +180,11 @@ object GenerateNativeBindings {
         )
       ),
       StructLayout(
+        "gemstone::cuda::CudaLaunchAttribute",
+        "CUlaunchAttribute",
+        layoutFields("id" -> "id", "value" -> "value")
+      ),
+      StructLayout(
         "gemstone::cuda::CudaLaunchConfig",
         "CUlaunchConfig",
         layoutFields(
@@ -261,7 +267,12 @@ object GenerateNativeBindings {
       "cuda",
       Vector("cuda-driver", "cuda-runtime", "cuda-cublas"),
       Vector("#include <cuda.h>", "#include <cuda_runtime_api.h>", "#include <cublas_api.h>"),
-      layout = Some(CudaLayout)
+      layout = Some(CudaLayout),
+      pointerConstants = Vector(
+        "LaunchParamEnd"           -> "CU_LAUNCH_PARAM_END",
+        "LaunchParamBufferPointer" -> "CU_LAUNCH_PARAM_BUFFER_POINTER",
+        "LaunchParamBufferSize"    -> "CU_LAUNCH_PARAM_BUFFER_SIZE"
+      )
     ),
     Platform(
       "hip",
@@ -333,9 +344,12 @@ object GenerateNativeBindings {
         directory.resolve(s"gemstone_${platform.name}_api.h") ->
           attributed(renderPublicHeader(platform, functions), manifest),
         directory.resolve(s"gemstone_${platform.name}_constants.hpp") ->
-          attributed(renderConstants(platform.name, constants), manifest),
+          attributed(renderConstants(platform.name, constants, platform.pointerConstants), manifest),
         directory.resolve(s"gemstone_${platform.name}_impl.cpp") ->
-          attributed(renderImplementationCheck(platform.name, functions, constants), manifest)
+          attributed(
+            renderImplementationCheck(platform.name, functions, constants, platform.pointerConstants),
+            manifest
+          )
       ) ++ layout
     }
     val openCL                        = byName.getOrElse("opencl", missingSurface("opencl"))
@@ -390,7 +404,8 @@ object GenerateNativeBindings {
   private def renderImplementationCheck(
       platform: String,
       functions: Vector[GenerateOfficialAPIManifest.Function],
-      constants: Vector[GenerateOfficialAPIManifest.EnumConstant]
+      constants: Vector[GenerateOfficialAPIManifest.EnumConstant],
+      pointerConstants: Vector[(String, String)]
   ): String = {
     val references = functions.map { function =>
       val functionType = function.functionType.raw
@@ -407,6 +422,9 @@ object GenerateNativeBindings {
       val name = constant.name.raw
       s"static_assert(static_cast<long long>(gemstone::$platform::api::$name) == static_cast<long long>($name));"
     }.mkString("\n")
+    val pointerDefinitions = pointerConstants.map { case (name, macroName) =>
+      s"const void *const gemstone::$platform::api::$name = $macroName;"
+    }.mkString("\n")
     s"""#include "gemstone_${platform}_api.h"
        |#include "gemstone_${platform}_constants.hpp"
        |
@@ -421,6 +439,7 @@ object GenerateNativeBindings {
        |}
        |
        |$constantChecks
+       |$pointerDefinitions
        |""".stripMargin
   }
 
@@ -446,16 +465,20 @@ object GenerateNativeBindings {
 
   private def renderConstants(
       platform: String,
-      constants: Vector[GenerateOfficialAPIManifest.EnumConstant]
+      constants: Vector[GenerateOfficialAPIManifest.EnumConstant],
+      pointerConstants: Vector[(String, String)]
   ): String = {
     val guard  = s"GEMSTONE_${platform.toUpperCaseRoot}_CONSTANTS_HPP"
     val values =
       constants.map(constant => s"inline constexpr auto ${constant.name} = ${constant.value};").mkString("\n")
+    val pointerDeclarations =
+      pointerConstants.map { case (name, _) => s"extern const void *const $name;" }.mkString("\n")
     s"""#ifndef $guard
        |#define $guard
        |
        |namespace gemstone::$platform::api {
        |$values
+       |$pointerDeclarations
        |}
        |
        |#endif

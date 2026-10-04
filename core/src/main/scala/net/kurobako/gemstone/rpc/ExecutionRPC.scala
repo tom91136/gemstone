@@ -96,7 +96,8 @@ object ExecutionRPC {
         arguments: Vec[KernelTask.Argument],
         pointerRelocations: Vec[KernelTask.PointerRelocation],
         discoverArgumentRelocations: Boolean = false,
-        descriptorBindings: Vec[DescriptorBinding] = Vec.empty
+        descriptorBindings: Vec[DescriptorBinding] = Vec.empty,
+        argumentBuffer: Option[KernelTask.ArgumentBuffer] = None
     ) extends Operation[CompletionId]
     case QueryCompletion(completion: CompletionId)
         extends Operation[CompletionStatus]

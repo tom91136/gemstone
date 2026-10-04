@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -12,7 +12,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 class VulkanUndefinedIntegerSuite extends munit.FunSuite {
   for {
     width <- Seq[Int in (32, 64)](32, 64)
-    rawWidth = width.raw
+    rawWidth   = width.raw
     widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     count     <- Seq(1, 4)
     operation <- Seq("sdiv", "srem", "smod", "udiv", "umod")
@@ -106,7 +106,7 @@ class VulkanUndefinedIntegerSuite extends munit.FunSuite {
 
   for {
     width <- Seq[Int in (32, 64)](32, 64)
-    rawWidth = width.raw
+    rawWidth   = width.raw
     widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     count            <- Seq(1, 4)
     operation        <- Seq("uextract", "sextract", "insert")

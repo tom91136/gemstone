@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 if(NOT FIXTURE MATCHES "^(cuda|hip|opencl)$")
   message(FATAL_ERROR "FIXTURE must be cuda, hip, or opencl")
 endif()
-if(NOT FIXTURE STREQUAL "opencl" AND ARCHITECTURE STREQUAL "")
+if(NOT FIXTURE STREQUAL "opencl" AND "${ARCHITECTURE}" STREQUAL "")
   message(FATAL_ERROR "ARCHITECTURE must be set for ${FIXTURE}")
 endif()
 

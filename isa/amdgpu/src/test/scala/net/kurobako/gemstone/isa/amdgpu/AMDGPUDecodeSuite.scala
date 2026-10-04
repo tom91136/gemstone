@@ -260,7 +260,7 @@ class AMDGPUDecodeSuite extends munit.FunSuite {
           dest = 8,
           operation = VectorComparison(
             kind = VectorComparisonKind.Float32,
-            relation = VectorComparisonRelation.NotEqual,
+            relation = VectorComparisonRelation.OrderedNotEqual,
             updateExec = false
           ),
           srcA = InstructionSource.Constant(0),

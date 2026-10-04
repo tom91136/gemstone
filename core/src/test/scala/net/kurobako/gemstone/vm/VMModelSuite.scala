@@ -17,8 +17,10 @@ class VMModelSuite extends munit.FunSuite {
     ).toOption.get
     for (group <- Seq[Int >= 0](1, 2097152, 4194304, 4194305))
       assert(geometry.activeGroupSize(LaunchGeometry.Coordinates(group, 0, 0)).isLeft)
-    assertEquals(geometry.activeGroupSize(LaunchGeometry.Coordinates.origin),
-      Right(LaunchGeometry.Dimensions.One))
+    assertEquals(
+      geometry.activeGroupSize(LaunchGeometry.Coordinates.origin),
+      Right(LaunchGeometry.Dimensions.One)
+    )
   }
 
   test("kernel task excludes runtime identity and validates relocation sources") {
@@ -59,6 +61,24 @@ class VMModelSuite extends munit.FunSuite {
     ))
     assert(invalidUpdate.isLeft)
     assertEquals(valid.toOption.get.withPointerRelocations(Vec.empty), valid)
+  }
+
+  test("argument buffers exclude structured arguments and inferred argument relocations") {
+    val buffer = KernelTask.ArgumentBuffer(AllocationId(7L), 0L)
+    for {
+      structured <- Vec(false, true)
+      discover   <- Vec(false, true)
+    } {
+      val task = KernelTask.validated(
+        kernelName = "fill",
+        groupSize = LaunchGeometry.Dimensions.One,
+        groupCount = LaunchGeometry.Dimensions.One,
+        arguments = if (structured) Vec(KernelTask.Argument.Memory(buffer.region, 0L)) else Vec.empty,
+        discoverArgumentRelocations = discover,
+        argumentBuffer = Some(buffer)
+      )
+      assertEquals(task.isRight, !structured && !discover)
+    }
   }
 
   test("launch geometry maps partial and virtual work-group extents") {

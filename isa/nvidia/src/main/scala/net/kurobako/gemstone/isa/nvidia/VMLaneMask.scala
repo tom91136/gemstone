@@ -34,6 +34,27 @@ object VMLaneMask {
       Right(VMLaneMask(words, 1, (lane >>> 6) + 1))
     }
 
+  /** Collect lane groups without allocating an immutable mask for each arrival. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  class Builder {
+    private val words = Array.ofDim[Long](WordCount)
+    private var count = 0
+    private var limit = 0
+
+    def add(lane: WorkgroupLane): Unit = {
+      val index = lane.raw >>> 6
+      val bit   = 1L << (lane.raw & 63)
+      if ((words(index) & bit) == 0L) {
+        words(index) |= bit
+        count += 1
+        limit = math.max(limit, index + 1)
+      }
+    }
+
+    def result(): VMLaneMask =
+      if (count == 0) Empty else VMLaneMask(words.clone(), count.unsafe[Int in 0 ~ 1024], limit)
+  }
+
   /** The single-lane mask, or `Empty` when the lane is out of range. */
   def ofLane(lane: Int): VMLaneMask = one(lane).getOrElse(Empty)
 
@@ -45,9 +66,9 @@ class VMLaneMask private (
     private val count: Int in 0 ~ 1024,
     private val limit: Int
 ) {
-  def isEmpty: Boolean                  = count.raw == 0
-  def nonEmpty: Boolean                 = count.raw != 0
-  def size: Int in 0 ~ 1024                    = count
+  def isEmpty: Boolean                      = count.raw == 0
+  def nonEmpty: Boolean                     = count.raw != 0
+  def size: Int in 0 ~ 1024                 = count
   def positiveSize: Option[Int in 1 ~ 1024] =
     Option.when(nonEmpty)(count.raw.unsafe[Int in 1 ~ 1024])
   def headOption: Option[WorkgroupLane] = {
@@ -65,30 +86,34 @@ class VMLaneMask private (
 
   def intersect(other: VMLaneMask): VMLaneMask =
     if (count.raw == 0 || other.count.raw == 0) VMLaneMask.Empty
+    else if (this eq other) this
     else combine(other, (left, right) => left & right)
 
   def union(other: VMLaneMask): VMLaneMask =
     if (count.raw == 0) other
-    else if (other.count.raw == 0) this
+    else if (other.count.raw == 0 || (this eq other)) this
     else combine(other, (left, right) => left | right)
 
   def subtract(other: VMLaneMask): VMLaneMask =
     if (count.raw == 0 || other.count.raw == 0) this
+    else if (this eq other) VMLaneMask.Empty
     else combine(other, (left, right) => left & ~right)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def filterLanes(predicate: WorkgroupLane => Boolean): VMLaneMask =
     if (count.raw == 0) VMLaneMask.Empty
     else {
-      val filtered = Array.fill(VMLaneMask.WordCount)(0L)
-      var size     = 0
+      var filtered = words
+      var size     = count.raw
       foreachLane { lane =>
-        if (predicate(lane)) {
-          filtered(lane.raw >>> 6) |= 1L << (lane.raw & 63)
-          size += 1
+        if (!predicate(lane)) {
+          if (filtered eq words) filtered = words.clone()
+          filtered(lane.raw >>> 6) &= ~(1L << (lane.raw & 63))
+          size -= 1
         }
       }
-      if (size == 0) VMLaneMask.Empty
+      if (size == count.raw) this
+      else if (size == 0) VMLaneMask.Empty
       else {
         var last = VMLaneMask.WordCount
         while (filtered(last - 1) == 0L) last -= 1
@@ -112,19 +137,24 @@ class VMLaneMask private (
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def combine(other: VMLaneMask, operation: (Long, Long) => Long): VMLaneMask = {
-    val combined   = Array.fill(VMLaneMask.WordCount)(0L)
+    var combined   = words
     var size       = 0
     var last       = 0
     var index      = 0
     val inputLimit = Math.max(limit, other.limit)
     while (index < inputLimit) {
       val word = operation(words(index), other.words(index))
-      combined(index) = word
+      if (word != words(index)) {
+        if (combined eq words) combined = words.clone()
+        combined(index) = word
+      }
       size += java.lang.Long.bitCount(word)
       if (word != 0L) last = index + 1
       index += 1
     }
-    if (size == 0) VMLaneMask.Empty else VMLaneMask(combined, size.unsafe[Int in 0 ~ 1024], last)
+    if (combined eq words) this
+    else if (size == 0) VMLaneMask.Empty
+    else VMLaneMask(combined, size.unsafe[Int in 0 ~ 1024], last)
   }
 
   override def equals(other: Any): Boolean = other match {

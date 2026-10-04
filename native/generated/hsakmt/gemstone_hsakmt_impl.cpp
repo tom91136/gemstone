@@ -438,3 +438,4 @@ static_assert(static_cast<long long>(gemstone::hsakmt::api::HSA_SVM_FLAG_HOST_AC
 static_assert(static_cast<long long>(gemstone::hsakmt::api::HSA_SVM_UNMAP_TRIGGER_MMU_NOTIFY) == static_cast<long long>(HSA_SVM_UNMAP_TRIGGER_MMU_NOTIFY));
 static_assert(static_cast<long long>(gemstone::hsakmt::api::HSA_SVM_UNMAP_TRIGGER_MMU_NOTIFY_MIGRATE) == static_cast<long long>(HSA_SVM_UNMAP_TRIGGER_MMU_NOTIFY_MIGRATE));
 static_assert(static_cast<long long>(gemstone::hsakmt::api::HSA_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU) == static_cast<long long>(HSA_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU));
+

@@ -1,8 +1,10 @@
 package net.kurobako.gemstone.server.backend
 
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.FutureTask
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
+import java.util.zip.CRC32
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
@@ -12,6 +14,8 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.immutable.ArraySeq
+import scala.collection.mutable
 
 object PTX {
   val encoding: String = "ptx-text"
@@ -20,56 +24,73 @@ object PTX {
 class PTX(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBackend {
   override val encoding: String = PTX.encoding
 
-  private case class Cached(program: PTXProgram, references: Int > 0)
+  protected def decode(image: Vec[Byte]): Either[PTXISA.DecodeError, PTXProgram] = PTXISA.decode(image)
+
+  private case class Image(bytes: Vec[Byte]) {
+    // Hash outside the cache lock and retain it for release; modules can be many megabytes.
+    private val hash = {
+      val checksum = CRC32()
+      bytes match {
+        case image: ArraySeq.ofByte => checksum.update(image.unsafeArray)
+        case _                      => checksum.update(Vec.toArray(bytes))
+      }
+      checksum.getValue.toInt
+    }
+    override def hashCode(): Int = hash
+  }
+
+  private class Cached(val image: Image) {
+    val program: FutureTask[Either[PTXISA.DecodeError, PTXProgram]] = FutureTask(() => decode(image.bytes))
+    // Includes callers still waiting for the parse, so a completed load cannot evict their entry.
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    var references: Int >= 0 = 0
+  }
 
   // Share immutable parsed syntax only while loaded programs reference it; runtime state remains per load.
   private val cacheLock = ReentrantLock()
-  private val decoded   = AtomicReference(Map.empty[Vec[Byte], Cached])
+  private val decoded   = mutable.HashMap.empty[Image, Cached]
 
-  private def release(image: Vec[Byte]): Unit = cacheLock.withLock {
-    val cache = decoded.get()
-    cache.get(image).foreach { cached =>
-      if (cached.references.raw == 1) decoded.set(cache.removed(image))
-      else decoded.set(cache.updated(
-        image,
-        cached.copy(references = (cached.references.raw - 1).unsafe[Int > 0])
-      ))
+  private def release(cached: Cached): Unit = cacheLock.withLock {
+    cached.references -= 1
+    if (cached.references.raw == 0) {
+      val _ = decoded.remove(cached.image)
     }
   }
 
   override def load(
       image: Vec[Byte]
   ): Either[ExecutionFailure, RuntimeBackend.Program] = {
-    val program = cacheLock.withLock {
-      val cache = decoded.get()
-      cache.get(image) match {
-        case Some(cached) =>
-          decoded.set(cache.updated(
-            image,
-            cached.copy(references = cached.references + 1)
-          ))
-          Right(cached.program)
-        case None =>
-          PTXISA.decode(image)
-            .left.map(error => ExecutionFailure.InvalidRequest(error.message))
-            .map { parsed =>
-              decoded.set(cache.updated(image, Cached(parsed, 1)))
-              parsed
-            }
-      }
+    val key    = Image(image)
+    val cached = cacheLock.withLock {
+      val entry = decoded.getOrElseUpdate(key, Cached(key))
+      entry.references += 1
+      entry
     }
-    program.flatMap { parsed =>
-      LoadedProgram.load(parsed)
-        .left.map(error => ExecutionFailure.InvalidRequest(error.message))
-        .map(loaded => Program(loaded, image))
-        .left.map { error =>
-          release(image)
-          error
-        }
+
+    val loaded = try {
+      // FutureTask runs at most once. Different images parse concurrently; identical images wait here,
+      // outside the cache lock. Each load still receives its own mutable runtime state.
+      cached.program.run()
+      val parsed = try cached.program.get()
+      catch { case error: ExecutionException => throw error.getCause }
+      parsed.left.map(error => ExecutionFailure.InvalidRequest(error.message))
+        .flatMap(parsed =>
+          LoadedProgram.load(parsed)
+            .left.map(error => ExecutionFailure.InvalidRequest(error.message))
+            .map(loaded => Program(loaded, cached))
+        )
+    } catch {
+      case error: Throwable =>
+        release(cached)
+        throw error
+    }
+    loaded.left.map { error =>
+      release(cached)
+      error
     }
   }
 
-  private class Program(loaded: LoadedProgram, image: Vec[Byte])
+  private class Program(loaded: LoadedProgram, cached: Cached)
       extends RuntimeBackend.Program {
     private val closed = AtomicBoolean(false)
     override def execute(
@@ -125,7 +146,7 @@ class PTX(workgroups: Workgroups = Workgroups.Sequential) extends RuntimeBackend
 
     override def close(): Unit = if (closed.compareAndSet(false, true)) {
       super.close()
-      release(image)
+      release(cached)
     }
   }
 }

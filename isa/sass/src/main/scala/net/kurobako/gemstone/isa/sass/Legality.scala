@@ -85,7 +85,12 @@ object Legality {
         ).orElse(database.constants.get(key)).toRight(s"unsupported condition reference $key")
       case Parameter(name)       => database.parameters.get(name).toRight(s"unsupported condition parameter $name")
       case Constant(name)        => database.constants.get(name).toRight(s"unsupported condition constant $name")
-      case EnumValue(kind, name) => database.byVocabulary.get(kind).flatMap(_.values.find(_.name == name)).map(_.value)
+      case EnumValue(kind, name) => database.byVocabulary.get(kind).orElse {
+          database.symbols.filter(_.name.equalsIgnoreCase(kind)) match {
+            case Vec(vocabulary) => Some(vocabulary)
+            case _               => None
+          }
+        }.flatMap(_.values.find(_.name == name)).map(_.value)
           .toRight(s"unsupported condition enum $kind@$name")
       case Unary(UnaryOperator.LogicalNot, value)         => eval(value).map(value => truth(value == 0))
       case Unary(UnaryOperator.Negate, value)             => eval(value).map(-_)

@@ -9,6 +9,7 @@ import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
@@ -63,11 +64,11 @@ object AMDGPUAtomicBenchmark {
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(arguments: Array[String]): Unit = {
+  def run(arguments: Array[String]): BenchmarkSample = {
     val iterations =
       BenchmarkArguments.iterations(BenchmarkName("amdgpu-atomic"), arguments.toSeq, 20000)
     val code   = Vec.from(image.grouped(2).map(Integer.parseInt(_, 16).toByte))
-    val kernel = VMCompiler.compile(CodeObjectKernel("atomic", Target("gfx1030"), 24, 0, 0, 0x80, 0x08, code))
+    val kernel = VMCompiler().compile(CodeObjectKernel("atomic", Target("gfx1030"), 24, 0, 0, 0x80, 0x08, code))
       .fold(error => throw IllegalStateException(error.message), identity)
     val dispatch = KernelTask.validated(
       "atomic",
@@ -98,9 +99,6 @@ object AMDGPUAtomicBenchmark {
     val expected = (7L + iterations.raw.toLong * 9L) & 0xffffffffL
     if (observed != expected)
       throw IllegalStateException(s"atomic benchmark result $observed != $expected")
-    Console.out.println(
-      s"iterations=$iterations nsPerDispatch=${measurement.elapsedNanos.raw.toDouble / iterations.raw} " +
-        s"bytesPerDispatch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / iterations.raw)} checksum=$observed"
-    )
+    measurement.sample(iterations.toLong)
   }
 }

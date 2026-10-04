@@ -26,7 +26,7 @@ object CUDACloverleafFluxBenchmark {
   ).mapN(Options(_, _))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(arguments: Array[String]): Unit = {
+  def run(arguments: Array[String]): BenchmarkSample = {
     val parsed        = BenchmarkArguments.parse(name, arguments.toSeq, options)
     val length        = CloverleafFluxFixture.length(parsed.cells)
     val bytesPerArray = length * 8
@@ -80,20 +80,15 @@ object CUDACloverleafFluxBenchmark {
         iteration += 1
       }
     }
-    var checksum = 0L
-    var index    = 0
+    var index = 0
     while (index < parsed.cells.raw) {
       val x = memory.readLittleEndian(base.offset(address(6, index) - base.raw), 8)
         .fold(error => throw IllegalStateException(error.toString), java.lang.Double.longBitsToDouble(_))
       val y = memory.readLittleEndian(base.offset(address(7, index) - base.raw), 8)
         .fold(error => throw IllegalStateException(error.toString), java.lang.Double.longBitsToDouble(_))
-      checksum ^= CloverleafFluxFixture.verify(index, x, y)
+      val _ = CloverleafFluxFixture.verify(index, x, y)
       index += 1
     }
-    Console.out.println(
-      s"cells=${parsed.cells} iterations=${parsed.iterations} nsPerDispatch=${measurement.elapsedNanos.raw.toDouble /
-          parsed.iterations.raw} " +
-        s"bytesPerDispatch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
-    )
+    measurement.sample(parsed.iterations.toLong)
   }
 }

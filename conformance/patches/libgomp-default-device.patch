@@ -1,0 +1,11 @@
+--- a/libgomp/target.c
++++ b/libgomp/target.c
+@@ -3005,6 +3005,8 @@
+ 		 unsigned int flags, void **depend, void **args)
+ {
+   struct gomp_device_descr *devicep = resolve_device (device, true);
++  if (devicep != NULL && device == GOMP_DEVICE_ICV)
++    device = (int) (devicep - devices);
+   size_t tgt_align = 0, tgt_size = 0;
+   bool fpc_done = false;
+ 

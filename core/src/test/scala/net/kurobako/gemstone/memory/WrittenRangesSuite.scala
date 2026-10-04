@@ -44,6 +44,29 @@ class WrittenRangesSuite extends munit.FunSuite {
     assertEquals(ranges.chunks(65536), Vec[(Int >= 0, Int > 0)]((7, 65536), (65543, 65536), (131079, 1)))
   }
 
+  test("repeated contained writes preserve gaps and allow later expansion on either side") {
+    val ranges = WrittenRanges()
+    ranges.add(10, 10)
+    ranges.add(30, 10)
+    List[(Int >= 0, Int >= 0)]((10, 10), (10, 1), (19, 1), (13, 4), (30, 10), (35, 0)).foreach { (offset, size) =>
+      (0 until 3).foreach(_ => ranges.add(offset, size))
+      assertEquals(ranges.chunks(100), Vec[(Int >= 0, Int > 0)]((10, 10), (30, 10)))
+    }
+    ranges.add(5, 10)
+    ranges.add(35, 10)
+    assertEquals(ranges.chunks(100), Vec[(Int >= 0, Int > 0)]((5, 15), (30, 15)))
+    ranges.add(20, 10)
+    assertEquals(ranges.chunks(100), Vec[(Int >= 0, Int > 0)]((5, 40)))
+  }
+
+  test("contained writes near the address limit still reject overflow") {
+    val ranges = WrittenRanges()
+    ranges.add(Int.MaxValue - 8, 8)
+    ranges.add(Int.MaxValue - 4, 4)
+    val _ = intercept[ArithmeticException](ranges.add(Int.MaxValue - 4, 5))
+    assertEquals(ranges.chunks(8), Vec[(Int >= 0, Int > 0)]((Int.MaxValue - 8, 8)))
+  }
+
   test("a write bridges adjacent intervals regardless of insertion order") {
     val writes = Vec[(Int >= 0, Int >= 0)]((10, 4), (14, 6), (20, 4))
     writes.permutations.foreach { ordered =>

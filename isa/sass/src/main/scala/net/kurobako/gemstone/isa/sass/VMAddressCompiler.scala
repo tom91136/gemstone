@@ -11,8 +11,8 @@ import net.kurobako.gemstone.isa.sass.Instruction as SASSInstruction
 private object VMAddressCompiler {
   private def fail(reason: String): Nothing = throw IllegalArgumentException(reason)
 
-  private def unsignedImmediate(operand: Operand): Option[BigInt] =
-    VMOperand.integer(operand).filter(value => value >= 0 && value <= 0x7ffff)
+  private def signedImmediate(operand: Operand): Option[BigInt] =
+    VMOperand.integer(operand).filter(value => value >= -0x80000 && value <= 0x7ffff)
 
   private def source(operand: Operand): Boolean =
     VMOperand.selectors(VMOperand.without(operand, OperandSelector.`reuse`)).isEmpty &&
@@ -22,12 +22,14 @@ private object VMAddressCompiler {
         case _                                   => false
       })
 
-  private def addressAddend(operand: Operand): Boolean = source(operand) || unsignedImmediate(operand).nonEmpty
+  private def offsetSource(operand: Operand): Boolean = source(VMOperand.positive(operand))
+
+  private def addressAddend(operand: Operand): Boolean = source(operand) || signedImmediate(operand).nonEmpty
 
   private def lowForm(operands: Vec[Operand]): Option[(Operand, Int)] = operands match {
-    case Vec(_, base, addend) if source(base) && addressAddend(addend) => Some(addend -> 0)
+    case Vec(_, base, addend) if offsetSource(base) && addressAddend(addend) => Some(addend -> 0)
     case Vec(_, base, addend, shift)
-        if source(base) && addressAddend(addend) =>
+        if offsetSource(base) && addressAddend(addend) =>
       VMOperand.integer(shift).filter(value => value >= 0 && value <= 31).map(amount => addend -> amount.toInt)
     case _ => None
   }
@@ -59,7 +61,8 @@ private object VMAddressCompiler {
     if (operands.size != 3 && operands.size != 4) fail("LEA requires destination, source, and addend")
     if (!destination(operands.head)) fail("LEA destination must be a general register")
     val (addend, amount) = lowForm(operands).getOrElse(fail("unsupported LEA low form"))
-    val left             = context.source(operands(1))
+    val negative         = VMOperand.negative(operands(1))
+    val left             = context.source(VMOperand.positive(operands(1)))
     val shifted          = context.temp()
     context.emit(IntegerBinary(
       IntegerOperation.ShiftLeft,
@@ -70,8 +73,16 @@ private object VMAddressCompiler {
     ))
     val right  = context.source(addend)
     val result = context.temp()
-    context.emit(IntegerBinary(IntegerOperation.Add, result.name, shifted, right, 32))
-    if (VMOperand.has(operands.head, OperandSelector.`CC`)) {
+    context.emit(IntegerBinary(
+      if (negative) IntegerOperation.Subtract else IntegerOperation.Add,
+      result.name,
+      if (negative) right else shifted,
+      if (negative) shifted else right,
+      32
+    ))
+    if (VMOperand.has(operands.head, OperandSelector.`CC`) && negative)
+      context.updateIntegerCC(right, shifted, result, isSub = true, None)
+    else if (VMOperand.has(operands.head, OperandSelector.`CC`)) {
       val wideLeft  = context.temp("wide")
       val wideRight = context.temp("wide")
       val wideSum   = context.temp("wide")
@@ -96,7 +107,8 @@ private object VMAddressCompiler {
 
   private def compileHighCarry(context: VMCompilationContext, operands: Vec[Operand]): Boolean = {
     validateHigh(operands, carry = true)
-    val sourceLow      = context.source(operands(1))
+    val negative       = VMOperand.negative(operands(1))
+    val sourceLow      = context.source(VMOperand.positive(operands(1)))
     val baseHigh       = context.source(operands(2))
     val extraHigh      = context.source(operands(3))
     val amount         = VMOperand.integer(operands(4)).get.toInt
@@ -125,6 +137,7 @@ private object VMAddressCompiler {
     ))
     val sum = context.temp()
     context.emit(IntegerBinary(IntegerOperation.Add, sum.name, highFromLow, shiftedExtra, 32))
+    if (negative) context.emit(IntegerUnary(IntegerUnaryOperation.BitwiseNot, sum.name, sum, 32))
     context.emit(IntegerBinary(IntegerOperation.Add, sum.name, sum, baseHigh, 32))
     context.emit(IntegerBinary(IntegerOperation.Add, sum.name, sum, carry, 32))
     context.store(operands.head, sum)
@@ -158,7 +171,10 @@ private object VMAddressCompiler {
   private def validateHigh(operands: Vec[Operand], carry: Boolean): Unit = {
     if (operands.size != 5 || !destination(operands.head) || VMOperand.has(operands.head, OperandSelector.`CC`))
       fail("LEA.HI requires a general-register destination and four sources")
-    if (!operands.slice(1, if (carry) 4 else 3).forall(operand => source(operand)))
+    if (
+      !(if (carry) offsetSource(operands(1)) else source(operands(1))) ||
+      !operands.slice(2, if (carry) 4 else 3).forall(operand => source(operand))
+    )
       fail("LEA.HI has unsupported source operands")
     if (VMOperand.integer(operands(4)).forall(value => value < 0 || value > 31))
       fail("LEA.HI shift must be between 0 and 31")

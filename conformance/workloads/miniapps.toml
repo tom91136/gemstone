@@ -1,0 +1,2 @@
+specs = ['"miniapps/*"']
+include_programs = ['babelstream*', 'minibude*', 'cloverleaf*', 'tealeaf*', 'miniapp_ggml_vulkan', 'miniapp_imgui_vulkan']

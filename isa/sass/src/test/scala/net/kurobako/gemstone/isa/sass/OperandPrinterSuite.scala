@@ -14,17 +14,17 @@ class OperandPrinterSuite extends munit.FunSuite {
   test("prints registers, predicates, symbols, groups, and qualifiers") {
     assertEquals(roundTrip(Operand.Register(RegisterBank.UR, 17)), "UR17")
     assertEquals(roundTrip(Operand.Register(RegisterBank.R, 255)), "RZ")
-    assertEquals(roundTrip(Operand.Register(RegisterBank.UR, 63)), "URZ")
+    assertEquals(roundTrip(Operand.Register(RegisterBank.UR, 255)), "URZ")
     assertEquals(roundTrip(Operand.Predicate(Some(3), uniform = true, negated = true)), "!UP3")
     assertEquals(roundTrip(Operand.Predicate(None, uniform = false, negated = false)), "PT")
     assertEquals(roundTrip(Operand.SpecialRegister(SpecialRegister.SR_TID_X)), "SR_TID.X")
     assertEquals(roundTrip(Operand.Symbol("shared_mem")), "shared_mem")
     assertEquals(
-      roundTrip(Operand.Group(Vec(Operand.Register(RegisterBank.R, 0), Operand.Integer(12)))),
+      roundTrip(Operand.Group(Vec.nonEmpty(Operand.Register(RegisterBank.R, 0), Operand.Integer(12)))),
       "{R0, 12}"
     )
     assertEquals(
-      roundTrip(Operand.Qualified(Operand.Register(RegisterBank.R, 3), Vec(OperandSelector.H0_H0))),
+      roundTrip(Operand.Qualified(Operand.Register(RegisterBank.R, 3), Vec.nonEmpty(OperandSelector.H0_H0))),
       "R3.H0_H0"
     )
   }
@@ -106,19 +106,19 @@ class OperandPrinterSuite extends munit.FunSuite {
 
   test("signed normalization composes through nested operands without losing floating payloads") {
     val negative = Operand.Integer(-3)
-    val group    = Operand.Group(Vec(
+    val group    = Operand.Group(Vec.nonEmpty(
       negative,
-      Operand.Group(Vec(
+      Operand.Group(Vec.nonEmpty(
         Operand.Floating(BigDecimal(0), "0.0", negativeZero = true),
         Operand.FloatingSymbol(FloatingConstant.`-INF`),
         Operand.FloatingBits(FloatEncoding.F32Imm, 32, BigInt("7fc12345", 16))
       ))
     ))
-    Vec(
+    Vec.nonEmpty(
       group                             -> "{-3, {-0.0, -INF, bits<F32Imm>:32(0x7fc12345)}}",
       Operand.ConstantBank(0, negative) -> "c[0][-3]",
-      Operand.Qualified(Operand.ConstantBank(0, negative), Vec(OperandSelector.H0)) -> "c[0][-3].H0",
-      Operand.Unary(negative, negative = false, not = false, absolute = true)       -> "|-3|"
+      Operand.Qualified(Operand.ConstantBank(0, negative), Vec.nonEmpty(OperandSelector.H0)) -> "c[0][-3].H0",
+      Operand.Unary(negative, negative = false, not = false, absolute = true)                -> "|-3|"
     ).foreach { (value, text) =>
       assertEquals(OperandPrinter.print(value), Right(text))
       val parsed = SASSOperandParser.parse(text).fold(fail(_), identity(_))
@@ -127,9 +127,9 @@ class OperandPrinterSuite extends munit.FunSuite {
   }
 
   test("composite normalization still rejects changed operand kinds and invalid payloads") {
-    assert(OperandPrinter.print(Operand.Group(Vec(Operand.Symbol("R0")))).isLeft)
+    assert(OperandPrinter.print(Operand.Group(Vec.nonEmpty(Operand.Symbol("R0")))).isLeft)
     assert(OperandPrinter.print(Operand.ConstantBank(0, Operand.Symbol("R0"))).isLeft)
-    assert(OperandPrinter.print(Operand.Group(Vec(Operand.FloatingBits(FloatEncoding.F32Imm, 16, 1)))).isLeft)
-    assert(OperandPrinter.print(Operand.Group(Vec(Operand.Bits(256, 8)))).isLeft)
+    assert(OperandPrinter.print(Operand.Group(Vec.nonEmpty(Operand.FloatingBits(FloatEncoding.F32Imm, 16, 1)))).isLeft)
+    assert(OperandPrinter.print(Operand.Group(Vec.nonEmpty(Operand.Bits(256, 8)))).isLeft)
   }
 }

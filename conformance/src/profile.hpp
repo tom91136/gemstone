@@ -18,6 +18,7 @@ struct ProfileTarget {
   bool deviceLock = true;
   std::vector<std::string> routeSkips;
   std::optional<std::string> skipReason;
+  std::string compiler = "vendor";
 };
 
 struct Profile {
@@ -37,6 +38,7 @@ struct ResolvedTarget {
   bool deviceLock = true;
   std::vector<std::string> routeSkips;
   std::optional<std::string> skipReason;
+  std::string compiler = "vendor";
 };
 
 std::string local_hostname();

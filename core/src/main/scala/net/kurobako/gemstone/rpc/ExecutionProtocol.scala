@@ -29,6 +29,7 @@ object ExecutionProtocol {
   given Codec[LaunchGeometry.Coordinates]      = Codec.derived
   given Codec[LaunchGeometry.GlobalDimensions] = Codec.derived
   given Codec[KernelTask.Argument]             = Codec.derived
+  given Codec[KernelTask.ArgumentBuffer]       = Codec.derived
   given Codec[KernelTask.RelocationSource]     = Codec.derived
   given Codec[KernelTask.PointerRelocation]    = Codec.derived
 

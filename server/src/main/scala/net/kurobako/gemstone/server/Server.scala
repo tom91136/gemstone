@@ -80,7 +80,9 @@ object Server {
     try {
       val pool = own(WorkerPool(
         parallelism = settings.parallelism,
-        minGroups = settings.parallelism.toLong,
+        // Small groups can still contain long-running kernels. Do not raise the serial threshold
+        // with the machine core count: even two independent groups can keep another worker busy.
+        minGroups = 2L,
         minWorkItems = 32L,
         reporter = error => scribe.error(error),
         measurement = Option.when(settings.tracePerformance) { measured =>

@@ -205,20 +205,12 @@ st.relaxed.sys.v2.u32 [%rd0], {%r0, %r1};
       MemoryAccess.Global(true),
       MemoryAccess.Generic(true)
     )
-    val vectorSpaces = Vec(
-      MemoryAccess.Generic(false),
-      MemoryAccess.Generic(false),
-      MemoryAccess.Shared,
-      MemoryAccess.Local,
-      MemoryAccess.Global(true),
-      MemoryAccess.Generic(true)
-    )
     val expected = spaces.flatMap(access =>
       Vec(
         ("load-scalar", access),
         ("store-scalar", access)
       )
-    ) ++ vectorSpaces.flatMap(access =>
+    ) ++ spaces.flatMap(access =>
       Vec(
         ("load-vector", access),
         ("store-vector", access)

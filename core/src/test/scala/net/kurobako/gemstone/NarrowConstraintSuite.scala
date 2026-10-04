@@ -9,9 +9,9 @@ class NarrowConstraintSuite extends munit.FunSuite {
   private object NestedLane extends Newtype[Lane.Type]
 
   test("Byte and Short literals retain their carriers and predicates") {
-    val lane: Byte in 0 ~ 31                          = 31
-    val index: Short in 0 ~ 1023                      = 1023
-    val negative: Byte in -128 ~ -1                   = -128
+    val lane: Byte in 0 ~ 31                                     = 31
+    val index: Short in 0 ~ 1023                                 = 1023
+    val negative: Byte in -128 ~ -1                              = -128
     val aligned: Short where (Between[0, 1024] & MultipleOf[16]) = 512
     assertEquals(lane.raw, 31.toByte)
     assertEquals(index.raw, 1023.toShort)
@@ -57,11 +57,11 @@ class NarrowConstraintSuite extends munit.FunSuite {
   test("proven widening preserves ranges across every narrow carrier") {
     import constraint.auto.*
     val byte: Byte in 1 ~ 31                = 17
-    val short: Short > 0                               = byte
-    val int: Int > 0                                   = byte
-    val long: Long > 0                                 = byte
-    val shortInt: Int > 0                              = short
-    val shortLong: Long > 0                            = short
+    val short: Short > 0                    = byte
+    val int: Int > 0                        = byte
+    val long: Long > 0                      = byte
+    val shortInt: Int > 0                   = short
+    val shortLong: Long > 0                 = short
     val byteCarrierBound: Int in 1 ~ 127    = 17: Byte > 0
     val shortCarrierBound: Int in 1 ~ 32767 = short
     assertEquals(short.raw, 17.toShort)
@@ -91,7 +91,7 @@ class NarrowConstraintSuite extends munit.FunSuite {
   }
 
   test("exact narrowing preserves predicates and rejects carrier overflow") {
-    val upper: Int >= 0                         = 127
+    val upper: Int >= 0              = 127
     val lower: Int in -32768 ~ 32767 = -32768
     assertEquals(upper.toByteExact.raw, 127.toByte)
     assertEquals(lower.toShortExact.raw, (-32768).toShort)

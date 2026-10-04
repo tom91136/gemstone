@@ -13,6 +13,7 @@ object Printer extends ISAPrinter[Program] {
     case Operand.Register(name, None)       => name.raw
     case Operand.Register(name, Some(part)) => s"$name.${part.spelling}"
     case Operand.Symbol(name)               => name.raw
+    case Operand.GenericAddress(symbol)     => s"generic(${render(symbol)})"
     case Operand.StringLiteral(contents)    => s"\"$contents\""
     case Operand.Qualifier(path)            => path.raw.map(part => "." + part.raw).mkString
     case Operand.VectorLiteral(items)       => items.map(render(_)).mkString("{", ", ", "}")

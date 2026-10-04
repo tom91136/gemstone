@@ -19,6 +19,11 @@ object VMKernelLaunch {
   ): Either[Fault, Unit] =
     for {
       _ <- Either.cond(
+        task.argumentBuffer.isEmpty,
+        (),
+        Fault.Unsupported(s"${kernel.isaName} launches do not support prepacked argument buffers")
+      )
+      _ <- Either.cond(
         task.arguments.size == kernel.parameters.size,
         (),
         Fault.InvalidTask(
@@ -27,7 +32,7 @@ object VMKernelLaunch {
       )
       arguments <- prepareArguments(kernel, task.arguments, task.pointerRelocations, addresses)
       _         <- VMInterpreter.execute(
-        kernel,
+        kernel.copy(dynamicSharedBytes = task.groupSegmentBytes),
         task.geometry,
         arguments,
         DynamicAddressMemory(VMMemory(addresses)),

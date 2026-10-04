@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.elf.*
 import net.kurobako.gemstone.isa.nvidia.fixtures.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
 import net.kurobako.gemstone.server.backend.Cubin as CubinBackend
@@ -141,6 +142,60 @@ class CubinImageSuite extends NvidiaFixtureSuite {
       assert(metadata.registerCount.exists(_.raw > 0))
     } finally program.close()
     assert(program.symbols.isLeft)
+  }
+
+  test("kernel register counts use NVIDIA metadata when section-header counts are absent") {
+    val image    = CubinImageSuite.image
+    val sections = sections64(image).toOption.get
+    val module   = Cubin.decode(image).fold(fail(_), identity)
+    val kernel   = module.kernels.head
+    val buffer   = java.nio.ByteBuffer.wrap(image).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    // CUDA libraries can leave SHI_REGISTERS unset, retaining EIATTR_REGCOUNT in .nv.info.
+    val sectionTable = buffer.getLong(40).toInt
+    buffer.putInt(sectionTable + kernel.section.raw * 64 + 44, module.sections(kernel.section.raw).info & 0x00ffffff)
+    val info   = module.sections.find(_.name == ".nv.info").get
+    val record = sections(info.index.raw).offset.raw
+    assertEquals(buffer.getShort(record) & 0xffff, 0x2f04)
+    buffer.putInt(record + 8, 14)
+    val program = CubinBackend().load(Vec.from(image)).fold(e => fail(e.message), identity)
+    try assertEquals(program.kernel("copy_add").toOption.get.registerCount.map(_.raw), Some(14))
+    finally program.close()
+    buffer.putInt(record + 8, -1)
+    assert(Cubin.decode(image).isLeft)
+  }
+
+  test("stale CUDA metadata links resolve only uniquely matching kernel symbols") {
+    val image        = CubinImageSuite.image
+    val module       = Cubin.decode(image).fold(fail(_), identity)
+    val headers      = sections64(image).toOption.get
+    val kernel       = module.kernels.head
+    val info         = module.sections.find(_.name == ".nv.info").get
+    val table        = module.sections.find(_.kind == 2).get
+    val buffer       = java.nio.ByteBuffer.wrap(image).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    val sectionTable = buffer.getLong(40).toInt
+    // cuBLAS CUTLASS images retain matching old links in .nv.info and .text after stripping sections.
+    Vec(info.index.raw, kernel.section.raw).foreach(index =>
+      buffer.putInt(sectionTable + index * 64 + 40, info.index.raw)
+    )
+    val symbol = module.sections(kernel.section.raw).info & 0x00ffffff
+    buffer.putInt(sectionTable + kernel.section.raw * 64 + 44, symbol)
+    val record = headers(info.index.raw).offset.raw
+    buffer.putInt(record + 8, 14)
+    assertEquals(Cubin.decode(image).fold(fail(_), identity).kernels.head.registerCount.raw, 14)
+
+    val symbolOffset = headers(table.index.raw).offset.raw + symbol * 24
+    val originalName = buffer.getInt(symbolOffset)
+    buffer.putInt(symbolOffset, originalName + 1)
+    assert(Cubin.decode(image).isLeft, "symbol name must match its text section")
+    buffer.putInt(symbolOffset, originalName)
+
+    buffer.putInt(sectionTable + kernel.section.raw * 64 + 44, symbol - 1)
+    assert(Cubin.decode(image).isLeft, "text section must refer to the same symbol index")
+    buffer.putInt(sectionTable + kernel.section.raw * 64 + 44, symbol)
+
+    val other = module.sections.find(_.name == ".debug_frame").get
+    Array.copy(image, sectionTable + table.index.raw * 64, image, sectionTable + other.index.raw * 64, 64)
+    assert(Cubin.decode(image).isLeft, "a stale link must not choose between multiple symbol tables")
   }
 
 }

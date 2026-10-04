@@ -29,6 +29,11 @@ typedef struct gemstone_hsa_argument {
   uint64_t allocation_offset;
 } gemstone_hsa_argument;
 
+typedef struct gemstone_hsa_argument_buffer {
+  uint64_t allocation_id;
+  uint64_t offset;
+} gemstone_hsa_argument_buffer;
+
 typedef struct gemstone_hsa_kernarg_field {
   gemstone_hsa_argument_kind kind;
   uint32_t offset;
@@ -57,7 +62,8 @@ typedef struct gemstone_hsa_executor {
   int (*unload_program)(void *context, uint64_t program_id);
   int (*launch)(void *context, uint64_t program_id, const char *kernel_name, gemstone_hsa_dimensions group_size,
                 gemstone_hsa_dimensions group_count, gemstone_hsa_dimensions global_size, uint32_t private_segment_bytes,
-                uint32_t group_segment_bytes, const gemstone_hsa_argument *arguments, uint32_t argument_count, uint64_t *completion_id);
+                uint32_t group_segment_bytes, const gemstone_hsa_argument *arguments, uint32_t argument_count,
+                const gemstone_hsa_argument_buffer *argument_buffer, uint64_t *completion_id);
   int (*await_completion)(void *context, uint64_t completion_id);
   // Must be queried after a successful await and before release. A
   // zero-capacity call reports the stable range count without consuming it.

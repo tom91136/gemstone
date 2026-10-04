@@ -1,6 +1,7 @@
 #pragma once
 
 #include <gemstone/environment.hpp>
+#include <gemstone_amdgpu_target.hpp>
 
 #include <environment_keys.hpp>
 
@@ -34,6 +35,8 @@ inline TargetVersion targetVersion(const char *target) noexcept {
   }
   return TargetVersion{first, target[4] >= '0' && target[4] <= '9' ? static_cast<unsigned>(target[4] - '0') : 0U};
 }
+
+inline unsigned waveSize() noexcept { return gemstone::amdgpu::defaultWaveSize(targetArch()); }
 
 inline TargetVersion targetVersion() noexcept { return targetVersion(targetArch()); }
 

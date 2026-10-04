@@ -100,7 +100,7 @@ class ConstraintPredicateSuite extends munit.FunSuite {
     val bits                                 = 32.unsafe[Int in (16, 32, 64)]
     val bytes                                = (bits.raw / 8).unsafe[Int in (2, 4, 8)]
     val wide: Long in (2L, 4L, 8L)           = bytes
-    val bounded: Int in 1 ~ 8     = bytes
+    val bounded: Int in 1 ~ 8                = bytes
     val choices: Int in (8, 16, 32, 64, 128) = bits
     val aligned: Int where MultipleOf[8]     = bits
     val half: Int where MultipleOf[4]        = aligned

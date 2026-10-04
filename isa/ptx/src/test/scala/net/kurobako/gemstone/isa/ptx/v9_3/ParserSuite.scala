@@ -54,6 +54,19 @@ class ParserSuite extends munit.FunSuite {
     }
   }
 
+  test("generic address initializers preserve symbols and byte offsets") {
+    val program = roundTrip(".global .u64 ptr[3] = {generic($LC0), generic($LC0)+4, $LC0-8};")
+    val values  = program.statements.collect { case declaration: Statement.Data => declaration.initializer }.head
+    assertEquals(
+      values,
+      Vec(
+        Operand.GenericAddress(Operand.Symbol("$LC0")),
+        Operand.Add(Operand.GenericAddress(Operand.Symbol("$LC0")), Operand.Immediate("4")),
+        Operand.Subtract(Operand.Symbol("$LC0"), Operand.Immediate("8"))
+      )
+    )
+  }
+
   test("debug line directives do not consume the following instructions") {
     val source = ".file 1 \"kernel.cu\"\n.visible .entry kernel() {\n" +
       ".loc 1 42 7\nmov.u32 %r0, 1;\n.loc 1 43 0\nret;\n}"
@@ -204,6 +217,50 @@ class ParserSuite extends munit.FunSuite {
     assertEquals(quoteError.offset.raw, quoted.indexOf('"'))
     assertEquals(quoteError.line.raw, 3)
     assertEquals(quoteError.column.raw, 9)
+  }
+
+  test("offset-based diagnostics retain UTF-16 columns and LF line boundaries") {
+    val sources = Vec(
+      "// \ud83d\ude00\r\n\t/* unfinished",
+      ".file 1 \"\ud83d\ude00\"; /* unfinished",
+      "// header\r\n{\r\n ret;\r\n\t",
+      "// header\r\n\t\u0000"
+    )
+    sources.foreach { source =>
+      val error  = Parser.parse(source).swap.toOption.getOrElse(fail("malformed source was accepted"))
+      val offset = if (source.contains("/*")) source.indexOf("/*")
+      else if (source.contains('\u0000')) source.indexOf('\u0000')
+      else source.length
+      assertEquals(error.offset.raw, offset)
+      assertEquals(error.line.raw, source.take(offset).count(_ == '\n') + 1)
+      assertEquals(error.column.raw, offset - source.lastIndexOf('\n', offset - 1))
+    }
+  }
+
+  test("word scanning distinguishes literal slashes, comments, and Unicode whitespace") {
+    val source    = "mov.u32\u2003%r0/* comment */,\u2003value/path;"
+    val statement = Parser.parseStatement(source).fold(error => fail(error.message), identity)
+    statement match {
+      case Statement.Instruction(instruction) =>
+        assertEquals(instruction.operands, Vec(Operand.Register("%r0", None), Operand.Symbol("value/path")))
+      case other => fail(s"expected instruction, found $other")
+    }
+  }
+
+  test("line directives stop at LF inside comments and preserve adjacent instructions") {
+    Vec("\n", "\r\n").foreach { newline =>
+      val source  = s".file 1 \"kernel.cu\" /* comment${newline}continues */ ret;"
+      val program = Parser.parse(source).fold(error => fail(error.message), identity)
+      assertEquals(
+        program.statements.collect { case Statement.Instruction(value) => value },
+        Vec(Instruction.Ret(Vec.empty, None))
+      )
+      val directives = program.statements.collect { case value: Statement.Directive => value }
+      assertEquals(
+        directives.head.arguments.map(_.operand),
+        Vec(Operand.Immediate("1"), Operand.StringLiteral("kernel.cu"))
+      )
+    }
   }
 
   test("diagnostics use original source positions including leading whitespace and trailing comments") {

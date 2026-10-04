@@ -3,11 +3,13 @@ package net.kurobako.gemstone.isa.amdgpu
 import net.kurobako.gemstone.collection.*
 
 private object VMFunction {
+  private lazy val patterns = Vec.from(values)
+
   def matching(name: String): Vec[VMFunction] =
-    Vec.from(values).filter(value => if (value.exact) name == value.pattern else name.contains(value.pattern))
+    patterns.filter(value => name.contains(value.pattern))
 }
 
-private enum VMFunction(val pattern: String, val exact: Boolean = false) {
+private enum VMFunction(val pattern: String) {
   case ComplexLogF32   extends VMFunction("logIf")
   case ComplexLogF64   extends VMFunction("logId")
   case ComplexAsinhF32 extends VMFunction("casinhf")
@@ -28,7 +30,4 @@ private enum VMFunction(val pattern: String, val exact: Boolean = false) {
   case ComplexTanhF64  extends VMFunction("ctanhE")
   case ComplexExpF32   extends VMFunction("expIf")
   case ComplexExpF64   extends VMFunction("expId")
-  case GroupId         extends VMFunction("__ockl_get_group_id", true)
-  case LocalSize       extends VMFunction("__ockl_get_local_size", true)
-  case LocalId         extends VMFunction("__ockl_get_local_id", true)
 }

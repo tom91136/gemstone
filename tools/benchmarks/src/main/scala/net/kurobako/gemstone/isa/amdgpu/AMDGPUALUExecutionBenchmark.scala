@@ -10,9 +10,9 @@ import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Using
@@ -25,23 +25,18 @@ object AMDGPUALUExecutionBenchmark {
 
   private case class Options(
       measured: Int > 0,
-      warmup: Option[Int >= 0],
       instructionCount: Int >= 0,
       mode: Mode
   )
   private val options = (
     Opts.option[Int]("measured", help = "Measured dispatches").withDefault(50)
       .refined[Int > 0]("measured dispatches must be positive"),
-    Opts.option[Int](
-      "warmup",
-      help = "Warmup dispatches"
-    ).refined[Int >= 0]("warmup dispatches must be non-negative").orNone,
     Opts.option[Int]("instructions", help = "ALU instructions per dispatch").withDefault(512)
       .refined[Int >= 0]("instruction count must be non-negative"),
     Opts.option[String]("mode", help = "Instruction mode: move or binary").withDefault("move")
       .validate("mode must be move or binary")(value => value == "move" || value == "binary")
       .map(value => if (value == "binary") Mode.Binary else Mode.Move)
-  ).mapN(Options(_, _, _, _))
+  ).mapN(Options(_, _, _))
 
   private object RejectingMemory extends Memory with BenchmarkAddressSpace {
     override protected val regionSizes: Iterable[(AllocationId, Long)] = Seq.empty
@@ -59,12 +54,11 @@ object AMDGPUALUExecutionBenchmark {
       Left(Fault.Backend("ALU benchmark unexpectedly wrote memory"))
   }
 
-  // Warmup and measured dispatches share an allocation-free counter loop.
+  // Dispatch loops avoid allocating a collection per iteration.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(arguments: Array[String]): Unit = {
+  def run(arguments: Array[String]): BenchmarkSample = {
     val parsed           = BenchmarkArguments.parse(BenchmarkName("amdgpu-alu"), arguments.toSeq, options)
     val measured         = parsed.measured
-    val warmup           = parsed.warmup.getOrElse((measured.widen[Int >= 0] / 10).max(10))
     val instructionCount = parsed.instructionCount
     val mode             = parsed.mode
     val instruction      = mode match {
@@ -76,7 +70,7 @@ object AMDGPUALUExecutionBenchmark {
     val code     = words.flatMap(word => LittleEndian.toVec(word, 4))
     val kernel   = CodeObjectKernel("alu", Target("gfx900"), 0, 0, 0, 0, 0, code)
     val prepared =
-      VMCompiler.compile(kernel).fold(failure => throw RuntimeException(failure.message), value => value)
+      VMCompiler().compile(kernel).fold(failure => throw RuntimeException(failure.message), value => value)
     val dispatch = KernelTask.validated(
       "alu",
       Dimensions(64, 1, 1),
@@ -96,11 +90,7 @@ object AMDGPUALUExecutionBenchmark {
         value => value
       )
 
-    var iteration = 0
-    while (iteration < warmup.raw) {
-      execute()
-      iteration += 1
-    }
+    var iteration   = 0
     val measurement =
       Using.resource(PlatformMetrics.startRecording(sys.env.get(env.BenchmarkJfr).map(Path.of(_)))) { _ =>
         Measurement {
@@ -111,13 +101,6 @@ object AMDGPUALUExecutionBenchmark {
           }
         }
       }
-    Console.out.println(
-      f"amdgpu-alu benchmark mode=${mode.toString.toLowerCaseRoot} dispatches=$measured warmup=$warmup instructions_per_dispatch=${instructionCount.raw +
-          1} " +
-        f"elapsed_ms=${measurement.elapsedNanos.raw /
-            1000000.0}%.3f ns_per_dispatch=${measurement.elapsedNanos.raw.toDouble / measured.raw.toDouble}%.1f " +
-        f"allocated_bytes_per_dispatch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble /
-            measured.raw.toDouble)}%.1f"
-    )
+    measurement.sample(measured.toLong)
   }
 }

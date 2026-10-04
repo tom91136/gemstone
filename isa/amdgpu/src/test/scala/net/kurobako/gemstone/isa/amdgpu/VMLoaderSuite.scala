@@ -6,15 +6,67 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class VMLoaderSuite extends munit.FunSuite {
+  test("a usable architecture variant does not inspect the generic kernel body") {
+    val target    = "wrapped_target_archE1030E"
+    val generic   = "wrapped_target_archE4294967295E"
+    val inspected = scala.collection.mutable.ArrayBuffer.empty[String]
+    val aliases   = AMDGPUKernelVariants.select(
+      Set(target, generic),
+      "gfx1030",
+      name => {
+        inspected += name
+        true
+      }
+    ).toOption.get
+    assertEquals(aliases.values.toSet, Set(target))
+    assertEquals(inspected.toSeq, Seq(target))
+  }
+
+  test("concurrent module indexes isolate relocated globals for equal-content images") {
+    scala.util.Using.resource(threads.Pool(4)) { pool =>
+      val pending = Vec.fill(8)(pool.executor.submit(() =>
+        VMLoader.index(CodeObject.decode(Vec.unsafeWrapArray(minimalCodeObject(globalPointer = true))).toOption.get)
+          .toOption.get
+      ))
+      val programs = pending.map(_.get(5, java.util.concurrent.TimeUnit.SECONDS))
+      val first    = programs.head
+      assertEquals(first.index.writeGlobal("device_global", 4L, Vec[Byte](9, 8, 7, 6)), Right(()))
+      programs.tail.foreach { program =>
+        assertEquals(program.symbols, first.symbols)
+        assertEquals(program.aliases, first.aliases)
+        assertEquals(program.index.globalData("device_global").toOption.get._2.slice(4, 8), Vec[Byte](0, 0, 0, 0))
+        assertEquals(
+          program.index.kernel("kernel").toOption.get.globalMemory.find(_._1 == 0x3000L)
+            .map(_._2.slice(4, 8).toSeq),
+          Some(Seq[Byte](0, 0, 0, 0))
+        )
+      }
+    }
+  }
+
   private object EmptyMemory extends Memory with TestAddressSpace {
     override protected val regionSizes: Iterable[(AllocationId, Long)]                               = Seq.empty
     override def read(id: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
       Right(Vec.empty[Byte])
     override def write(id: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] = Right(())
+  }
+
+  test("gfx90a selects rocPRIM's decimal architecture enum instead of a generic stub") {
+    val selected = "wrapped_target_archE910E"
+    val generic  = "wrapped_target_archE4294967295E"
+    val other    = "wrapped_target_archE906E"
+    val aliases  = AMDGPUKernelVariants.select(
+      names = Set(selected, generic, other),
+      targetName = "gfx90a",
+      usable = _ == selected,
+      allowUnsupported = true
+    ).toOption.get
+    assertEquals(aliases.values.toSet, Set(selected))
   }
 
   test("AMDGPU kernel aliases select the indexed implementation matching the code-object target") {

@@ -113,6 +113,75 @@ class CodeObjectIndexSuite extends munit.FunSuite {
     assertEquals(indexed.target, Target("gfx900"))
   }
 
+  test("wave32-capable processors select wave width per kernel descriptor") {
+    val image        = minimalCodeObject()
+    val target       = "amdgcn-amd-amdhsa--gfx900".getBytes(StandardCharsets.US_ASCII)
+    val targetOffset = image.indices.find(index => image.slice(index, index + target.length).sameElements(target)).get
+    java.util.Arrays.fill(image, targetOffset, targetOffset + target.length, 0.toByte)
+    // Independent LLVM machine codes and kernel descriptor property bit 10.
+    val sections   = LittleEndian.decodeInt64(image, 40).toInt
+    val descriptor = LittleEndian.decodeInt64(image, sections + 5 * 64 + 24).toInt
+    for {
+      machine                <- Vec(0x45L, 0x48L, 0x49L, 0x5aL)
+      (properties, waveSize) <- Vec(0xe -> 64, 0x40e -> 32)
+    } {
+      LittleEndian.write(machine, image, 48, 4)
+      LittleEndian.write(properties.toLong, image, descriptor + 56, 2)
+      assertEquals(ELF.index(Vec.from(image)).flatMap(_.kernel("kernel")).map(_.waveSize.raw), Right(waveSize))
+    }
+  }
+
+  test("ELF machine flags identify code objects without optional target strings") {
+    val image  = minimalCodeObject()
+    val target = "amdgcn-amd-amdhsa--gfx900".getBytes(StandardCharsets.US_ASCII)
+    val offset = image.indices.find(index => image.slice(index, index + target.length).sameElements(target)).get
+    java.util.Arrays.fill(image, offset, offset + target.length, 0.toByte)
+    // Fixed LLVM ELF machine codes and feature bits exercise the generated lookup independently.
+    for ((flags, name) <- Vec(0x45 -> "gfx1036", 0x32f -> "gfx906", 0x344 -> "gfx1103")) {
+      LittleEndian.write(flags.toLong, image, 48, 4)
+      assertEquals(ELF.index(Vec.from(image)).map(_.target.name.raw), Right(name))
+    }
+    LittleEndian.write(0xffL, image, 48, 4)
+    assert(ELF.index(Vec.from(image)).left.exists {
+      case CodeObjectError.Unsupported(message) => message.contains("machine 0xff")
+      case _                                    => false
+    })
+  }
+
+  test("ordinary function aliases retain both symbols and share their executable address") {
+    val image   = minimalCodeObject()
+    val table   = LittleEndian.decodeInt64(image, 40).toInt
+    val symbols = LittleEndian.decodeInt64(image, table + 3 * 64 + 24).toInt
+    // Reuse symbol 3 as another STT_FUNC at kernel's address, retaining its distinct name.
+    image(symbols + 3 * 24 + 4) = 2
+    LittleEndian.write(4L, image, symbols + 3 * 24 + 6, 2)
+    LittleEndian.write(0x1000L, image, symbols + 3 * 24 + 8, 8)
+    LittleEndian.write(4L, image, symbols + 3 * 24 + 16, 8)
+    LittleEndian.write(6L, image, table + 4 * 64 + 8, 8) // SHF_ALLOC | SHF_EXECINSTR
+    val bytes   = Vec.from(image)
+    val section = CodeObject.decode(bytes).flatMap(_.executableSections).toOption.get.head
+    assertEquals(
+      section.symbols.toSet,
+      Set(ExecutableSection.Symbol("kernel", 0, 4), ExecutableSection.Symbol("device_global", 0, 4))
+    )
+    val indexed = ELF.index(bytes).toOption.get
+    assertEquals(indexed.kernelNames, Set("kernel"))
+    assertEquals(indexed.kernel("kernel").toOption.get.functionTargets.get(0x1000L), Some("device_global"))
+  }
+
+  test("relative dynamic relocations initialize global pointers from their ELF address addend") {
+    val image      = minimalCodeObject(globalPointer = true)
+    val table      = LittleEndian.decodeInt64(image, 40).toInt
+    val relocation = LittleEndian.decodeInt64(image, table + 8 * 64 + 24).toInt
+    LittleEndian.write(EncodingConstants.R_AMDGPU_RELATIVE64.toLong, image, relocation + 8, 8)
+    LittleEndian.write(0x3008L, image, relocation + 16, 8)
+    val kernel = ELF.index(Vec.from(image)).flatMap(_.kernel("kernel")).toOption.get
+    assertEquals(
+      kernel.globalMemory.find(_._1 == 0x4000L).map(_._2.take(8).toSeq),
+      Some(LittleEndian.toVec(0x3008L, 8).toSeq)
+    )
+  }
+
   test("ELF symbol names reject malformed UTF-8 instead of replacing bytes") {
     val image    = minimalCodeObject()
     val original = "kernel".getBytes(StandardCharsets.US_ASCII)
@@ -174,6 +243,26 @@ class CodeObjectIndexSuite extends munit.FunSuite {
       },
       Some(Seq[Byte](0, 0, 0, 0))
     )
+  }
+
+  test("code inspection preserves explicit sizes and trims inferred padding like materialization") {
+    Seq(0L, 4L, 8L).foreach { symbolSize =>
+      val image   = minimalCodeObject()
+      val table   = LittleEndian.decodeInt64(image, 40).toInt
+      val symbols = LittleEndian.decodeInt64(image, table + 3 * 64 + 24).toInt
+      LittleEndian.write(8L, image, table + 4 * 64 + 32, 8)
+      LittleEndian.write(symbolSize, image, symbols + 24 + 16, 8)
+      val indexed = ELF.index(Vec.unsafeWrapArray(image)).toOption.get
+      val code    = indexed.kernelCode("kernel").toOption.get
+      assertEquals(code.size, if (symbolSize == 8L) 8 else 4)
+      assertEquals(indexed.kernelCodeSize("kernel"), Some(code.size))
+      assertEquals(indexed.kernelCodeSize("missing"), None)
+      assertEquals(code, indexed.kernel("kernel").toOption.get.code)
+      assertEquals(
+        indexed.kernelCode("missing").swap.toOption.map(_.message),
+        indexed.kernel("missing").swap.toOption.map(_.message)
+      )
+    }
   }
 
   test("linked code objects infer zero-sized kernel symbols from the next function") {

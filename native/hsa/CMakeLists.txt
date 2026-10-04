@@ -34,7 +34,7 @@ set_target_properties(gemstone_hsa_core PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   CXX_VISIBILITY_PRESET hidden
   VISIBILITY_INLINES_HIDDEN YES)
-target_include_directories(gemstone_hsa_core PUBLIC include PRIVATE ${GEMSTONE_NATIVE_INCLUDE_DIRECTORY})
+target_include_directories(gemstone_hsa_core PUBLIC include ../generated/amdgpu PRIVATE ${GEMSTONE_NATIVE_INCLUDE_DIRECTORY})
 target_compile_features(gemstone_hsa_core PUBLIC cxx_std_17)
 target_compile_options(gemstone_hsa_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_link_libraries(gemstone_hsa_core PRIVATE gemstone_execution_client Aspartame::Aspartame)
@@ -96,7 +96,7 @@ if(BUILD_TESTING)
   target_link_libraries(gemstone_hsa_runtime_test PRIVATE gemstone_hsa_runtime)
   gemstone_test_target(gemstone_hsa_runtime_test)
   add_executable(gemstone_hsa_target_test test/target_test.cpp)
-  target_include_directories(gemstone_hsa_target_test PRIVATE include ${GEMSTONE_NATIVE_INCLUDE_DIRECTORY})
+  target_include_directories(gemstone_hsa_target_test PRIVATE include ../generated/amdgpu ${GEMSTONE_NATIVE_INCLUDE_DIRECTORY})
   target_link_libraries(gemstone_hsa_target_test PRIVATE Aspartame::Aspartame)
   gemstone_test_target(gemstone_hsa_target_test)
   add_executable(gemstone_hsakmt_test

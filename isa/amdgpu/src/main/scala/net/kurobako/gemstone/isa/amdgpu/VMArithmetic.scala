@@ -79,6 +79,10 @@ private object VMArithmetic {
     else if (signed >= 0) Integer.numberOfLeadingZeros(signed).toLong
     else Integer.numberOfLeadingZeros(~signed).toLong
   }
+  def signedFirstBitHigh64(value: Long): Long =
+    if (value == 0L || value == -1L) 0xffffffffL
+    else java.lang.Long.numberOfLeadingZeros(if (value >= 0L) value else ~value).toLong
+
   def firstBitHigh32(value: Long): Long = {
     val unsigned = Bits.signed32(value)
     if (unsigned == 0) 0xffffffffL else Integer.numberOfLeadingZeros(unsigned).toLong
@@ -96,6 +100,14 @@ private object VMArithmetic {
       else if (negative) 3 else 8
     1L << classBit
   }
+  def minimumNumberF32(left: Float, right: Float): Float =
+    if (left.isNaN) right else if (right.isNaN) left else math.min(left, right)
+  def maximumNumberF32(left: Float, right: Float): Float =
+    if (left.isNaN) right else if (right.isNaN) left else math.max(left, right)
+  def minimumNumberF64(left: Double, right: Double): Double =
+    if (left.isNaN) right else if (right.isNaN) left else math.min(left, right)
+  def maximumNumberF64(left: Double, right: Double): Double =
+    if (left.isNaN) right else if (right.isNaN) left else math.max(left, right)
   def clampF32(value: Float): Float =
     if (value.isNaN) value else math.max(0.0f, math.min(1.0f, value))
   def trigF32(operation: VectorConvertOperation, value: Float): Float = operation match {
@@ -218,7 +230,9 @@ private object VMArithmetic {
     * 3).
     */
   def unsignedFloatToInt32(value: Float): Long =
-    Bits.low32((if (value < 0.0f) -value else value).toLong).toLong
+    if (value.isNaN || value <= 0.0f) 0L
+    else if (value.toDouble >= 4294967295.0) 0xffffffffL
+    else value.toLong
   def doubleClassMask(value: Double): Long = {
     val bits     = IEEE754.doubleToBinary64(value)
     val exponent = (bits >>> 52) & 0x7ffL
@@ -281,6 +295,7 @@ private object VMArithmetic {
       unordered: Boolean
   ): Boolean = relation match {
     case VectorComparisonRelation.Equal             => equal
+    case VectorComparisonRelation.OrderedNotEqual   => less || greater
     case VectorComparisonRelation.NotEqual          => !equal
     case VectorComparisonRelation.Less              => less
     case VectorComparisonRelation.LessOrEqual       => less || equal

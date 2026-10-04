@@ -7,6 +7,105 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
 
 class ArithmeticExecutionSuite extends munit.FunSuite {
+  for (space <- Vec("const", "global"))
+    test(s"cvta $space preserves bound symbol offsets and round trips generic addresses") {
+      val source = s""".version 8.0
+        |.target sm_80
+        |.address_size 64
+        |.$space .u32 values[2];
+        |.visible .entry convert(.param .u64 output) {
+        | .reg .u64 %out, %generic, %specific;
+        | .reg .u32 %first, %second;
+        | ld.param.u64 %out, [output];
+        | cvta.$space.u64 %generic, values+4;
+        | ld.u32 %first, [%generic];
+        | cvta.to.$space.u64 %specific, %generic;
+        | ld.$space.u32 %second, [%specific];
+        | st.global.u32 [%out], %first;
+        | st.global.u32 [%out+4], %second;
+        | ret;
+        |}""".stripMargin
+      val memory = ArrayCheckedMemory.allocate(16, GuestAddress(0x100000000L))
+      assertEquals(memory.writeInt32(memory.allocation.start, 17), Right(()))
+      assertEquals(memory.writeInt32(memory.allocation.start.offset(4), 42), Right(()))
+      val kernel =
+        compileKernel(source).copy(globalSymbols = Map(("values": NonEmpty[String]) -> memory.allocation.start))
+      assertEquals(
+        execute(
+          kernel,
+          1,
+          1,
+          Map(("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw + 8)),
+          memory
+        ),
+        Right(())
+      )
+      assertEquals(memory.readInt32(memory.allocation.start.offset(8)), Right(42))
+      assertEquals(memory.readInt32(memory.allocation.start.offset(12)), Right(42))
+    }
+
+  test("kernel parameter addresses round trip and remain readable across device calls and launches") {
+    val kernel = compileKernel(""".version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.func (.param .u32 result) read_value(.param .u64 pointer) {
+      | .reg .u64 %pointer;
+      | .reg .u32 %value;
+      | ld.param.u64 %pointer, [pointer];
+      | ld.u32 %value, [%pointer];
+      | st.param.u32 [result], %value;
+      | ret;
+      |}
+      |.visible .entry convert(.param .align 4 .b8 values[8], .param .u64 output) {
+      | .reg .u64 %out, %generic, %specific;
+      | .reg .u32 %first, %second, %third;
+      | .param .u64 pointer;
+      | .param .u32 result;
+      | ld.param.u64 %out, [output];
+      | cvta.param.u64 %generic, values+4;
+      | ld.u32 %first, [%generic];
+      | cvta.to.param.u64 %specific, %generic;
+      | ld.param.u32 %second, [%specific];
+      | st.param.u64 [pointer], %generic;
+      | call (result), read_value, (pointer);
+      | ld.param.u32 %third, [result];
+      | st.global.u32 [%out], %first;
+      | st.global.u32 [%out+4], %second;
+      | st.global.u32 [%out+8], %third;
+      | ret;
+      |}""".stripMargin)
+    val memory = ArrayCheckedMemory.allocate(12)
+    for (expected <- Vec(42, 73)) {
+      val arguments = Map(
+        ("values": NonEmpty[String]) -> Argument.fromLong((expected.toLong << 32) | 17L),
+        ("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw)
+      )
+      assertEquals(execute(kernel, 1, 1, arguments, memory), Right(()))
+      for (offset <- Vec(0L, 4L, 8L))
+        assertEquals(memory.readInt32(memory.allocation.start.offset(offset)), Right(expected))
+    }
+  }
+
+  test("generic parameter loads cannot cross the declared argument extent") {
+    val kernel = compileKernel(""".version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry bounds(.param .align 4 .b8 values[8]) {
+      | .reg .u64 %pointer;
+      | .reg .u32 %value;
+      | cvta.param.u64 %pointer, values+6;
+      | ld.u32 %value, [%pointer];
+      | ret;
+      |}""".stripMargin)
+    assert(execute(
+      kernel,
+      1,
+      1,
+      Map(("values": NonEmpty[String]) -> Argument.fromLong(42)),
+      ArrayCheckedMemory.allocate(4)
+    ).isLeft)
+  }
+
   // Exact bit patterns are independent of the VM's arithmetic and conversion helpers.
   private val cases: Vec[(String, String, Int in 1 ~ 8, String, Long)] = Vec(
     (
@@ -105,6 +204,27 @@ class ArithmeticExecutionSuite extends munit.FunSuite {
       "b32",
       4,
       "add.cc.u32 %value, 0xffffffff, 1; addc.cc.u32 %value, 3, 4; addc.u32 %value, 7, 9;",
+      16L
+    ),
+    (
+      "64-bit addition propagates a carry from two maximal operands",
+      "b64",
+      8,
+      "add.cc.u64 %value, 0xffffffffffffffff, 0xffffffffffffffff; addc.u64 %value, 7, 9;",
+      17L
+    ),
+    (
+      "64-bit incoming carry overflows an otherwise maximal sum",
+      "b64",
+      8,
+      "add.cc.u64 %value, 0xffffffffffffffff, 1; addc.cc.u64 %value, 0xffffffffffffffff, 0; addc.u64 %value, 7, 9;",
+      17L
+    ),
+    (
+      "64-bit addition clears carry after an intermediate sum fits",
+      "b64",
+      8,
+      "add.cc.u64 %value, 0xffffffffffffffff, 1; addc.cc.u64 %value, 3, 4; addc.u64 %value, 7, 9;",
       16L
     ),
     (
@@ -270,7 +390,47 @@ class ArithmeticExecutionSuite extends munit.FunSuite {
     )
   )
 
-  cases.foreach { (name, registerType, bytes, instruction, expected) =>
+  private val logicalNegationCases = Vec(16, 32, 64).flatMap { width =>
+    Vec(
+      ("zero", "0", 1L),
+      ("one", "1", 0L),
+      ("negative", "-1", 0L),
+      ("high bit", s"0x${(BigInt(1) << (width - 1)).toString(16)}", 0L)
+    ).map {
+      case (name, input, expected) =>
+        (
+          s"cnot.b$width maps $name to $expected with aliased operands",
+          s"b$width",
+          (width / 8).unsafe[Int where Between[1, 8]],
+          s"mov.b$width %value, $input; cnot.b$width %value, %value;",
+          expected
+        )
+    }
+  }
+
+  private val subtractAddCases: Vec[(String, String, Int where Between[1, 8], String, Long)] = Vec(
+    ("video add-add", "b32", 4, "vadd.u32.u32.u32.add %value, 12, 9, 5;", 26L),
+    ("video add-add wraps overflow", "b32", 4, "vadd.u32.u32.u32.add %value, 0xffffffff, 1, 3;", 3L),
+    (
+      "video add-add permits destination alias",
+      "b32",
+      4,
+      "mov.u32 %value, 9; vadd.u32.u32.u32.add %value, 12, %value, %value;",
+      30L
+    ),
+    ("video subtract-add", "b32", 4, "vsub.u32.u32.u32.add %value, 12, 9, 5;", 8L),
+    ("video subtract-add wraps underflow", "b32", 4, "vsub.u32.u32.u32.add %value, 0, 2, 1;", 0xffffffffL),
+    ("video subtract-add wraps overflow", "b32", 4, "vsub.u32.u32.u32.add %value, 0xffffffff, 1, 3;", 1L),
+    (
+      "video subtract-add permits destination alias",
+      "b32",
+      4,
+      "mov.u32 %value, 9; vsub.u32.u32.u32.add %value, 12, %value, %value;",
+      12L
+    )
+  )
+
+  (cases ++ logicalNegationCases ++ subtractAddCases).foreach { (name, registerType, bytes, instruction, expected) =>
     test(name) {
       val source = s""".version 8.0
          |.target sm_80

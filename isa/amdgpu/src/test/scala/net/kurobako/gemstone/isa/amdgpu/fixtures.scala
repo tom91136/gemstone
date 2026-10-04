@@ -13,7 +13,7 @@ import scala.collection.mutable
 
 private object fixtures extends munit.Assertions {
   def compileKernel(kernel: ELF.CodeObjectKernel): VMIR.Kernel =
-    VMCompiler.compile(kernel).fold(error => fail(error.message), identity)
+    VMCompiler().compile(kernel).fold(error => fail(error.message), identity)
 
   def executeKernel(
       kernel: VMIR.Kernel,

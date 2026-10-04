@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import java.util.concurrent.atomic.AtomicReference
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
@@ -229,4 +230,135 @@ class ExecutionPointerSuite extends munit.FunSuite {
       case result => fail(s"expected typed invalid generic cast failure, found $result")
     }
   }
+
+  private def pointerId(value: Int): Operand = operand(OperandKind.IdRef, value)
+
+  // %21 and %22 are uint pointers; %23 is the ulong output; the body produces %30.
+  private def pointerProgram(body: Vec[Instruction]): Module = {
+    val id = pointerId
+    Module(
+      Header(ISA.version, Word(0), Word(40), Word(0)),
+      Vec(
+        Instruction.TypeVoid(id(1)),
+        Instruction.TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeInt(id(3), operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
+        Instruction.TypeBool(id(4)),
+        Instruction.TypePointer(id(5), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
+        Instruction.TypePointer(id(6), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(3)),
+        Instruction.TypeVector(id(7), id(2), operand(OperandKind.LiteralInteger, 2)),
+        Instruction.TypeFloat(id(8), operand(OperandKind.LiteralInteger, 64), None),
+        Instruction.TypePointer(id(9), operand(OperandKind.StorageClass, spv.StorageClass.Workgroup), id(2)),
+        Instruction.TypeFunction(id(11), id(1), Vec(id(5), id(5), id(6))),
+        Instruction.Constant(id(3), id(12), operand(OperandKind.LiteralContextDependentNumber, 0, 0)),
+        Instruction.Constant(id(3), id(13), operand(OperandKind.LiteralContextDependentNumber, 1, 0)),
+        Instruction.Constant(id(2), id(14), operand(OperandKind.LiteralContextDependentNumber, 0x89abcdef)),
+        Instruction.Constant(id(2), id(15), operand(OperandKind.LiteralContextDependentNumber, 0xfedcba98)),
+        Instruction.ConstantComposite(id(7), id(16), Vec(id(14), id(15))),
+        Instruction.EntryPoint(
+          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
+          id(20),
+          stringOperand("pointers"),
+          Vec.empty
+        ),
+        Instruction.Function(id(1), id(20), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(11)),
+        Instruction.FunctionParameter(id(5), id(21)),
+        Instruction.FunctionParameter(id(5), id(22)),
+        Instruction.FunctionParameter(id(6), id(23)),
+        Instruction.Label(id(24))
+      ) ++ body ++ Vec(Instruction.Store(id(23), id(30), None), Instruction.Return(), Instruction.FunctionEnd()),
+      Endianness.Little
+    )
+  }
+
+  private def executePointers(body: Vec[Instruction], first: Long >= 0, second: Long >= 0): Either[Fault, Vec[Byte]] = {
+    val allocation = AllocationId(125L)
+    val memory     = ArrayMemory(allocation, 32)
+    val dispatch   = KernelTask.validated(
+      "pointers",
+      Dimensions.One,
+      Dimensions.One,
+      Vec(
+        KernelTask.Argument.Memory(allocation, first),
+        KernelTask.Argument.Memory(allocation, second),
+        KernelTask.Argument.Memory(allocation, 24L)
+      )
+    ).toOption.get
+    executeUnchecked(pointerProgram(body), dispatch, memory).map(_ => memory.bytes.slice(24, 32))
+  }
+
+  private val comparisons: Vec[(Long >= 0, Long >= 0, Boolean, Long)] =
+    Vec((0L, 0L, true, 0L), (0L, 12L, false, -3L), (12L, 0L, false, 3L))
+
+  for ((first, second, equal, difference) <- comparisons)
+    test(s"pointer equality and signed element difference at $first and $second") {
+      val id       = pointerId
+      val equality = Vec(
+        Instruction.PtrEqual(id(4), id(31), id(21), id(22)),
+        Instruction.Select(id(3), id(30), id(31), id(13), id(12))
+      )
+      val inequality = equality.updated(0, Instruction.PtrNotEqual(id(4), id(31), id(21), id(22)))
+      assertEquals(
+        executePointers(body = equality, first = first, second = second),
+        Right(LittleEndian.toVec(if (equal) 1L else 0L, 8))
+      )
+      assertEquals(
+        executePointers(body = inequality, first = first, second = second),
+        Right(LittleEndian.toVec(if (equal) 0L else 1L, 8))
+      )
+      assertEquals(
+        executePointers(body = Vec(Instruction.PtrDiff(id(3), id(30), id(21), id(22))), first = first, second = second),
+        Right(LittleEndian.toVec(difference, 8))
+      )
+    }
+
+  test("pointer difference truncates a signed result to the result width") {
+    val id   = pointerId
+    val body = Vec(Instruction.PtrDiff(id(2), id(31), id(21), id(22)), Instruction.UConvert(id(3), id(30), id(31)))
+    assertEquals(executePointers(body = body, first = 0L, second = 12L), Right(LittleEndian.toVec(0xfffffffdL, 8)))
+  }
+
+  test("pointer equality compares addresses after pointee changes and null bitcasts") {
+    val id    = pointerId
+    val alias = Vec(
+      Instruction.Bitcast(id(6), id(31), id(21)),
+      Instruction.Bitcast(id(5), id(32), id(31)),
+      Instruction.PtrEqual(id(4), id(33), id(21), id(32)),
+      Instruction.Select(id(3), id(30), id(33), id(13), id(12))
+    )
+    assertEquals(executePointers(body = alias, first = 8L, second = 0L), Right(LittleEndian.toVec(1L, 8)))
+    val nullRoundTrip = Vec(Instruction.Bitcast(id(5), id(31), id(12)), Instruction.Bitcast(id(3), id(30), id(31)))
+    assertEquals(executePointers(body = nullRoundTrip, first = 0L, second = 0L), Right(LittleEndian.toVec(0L, 8)))
+  }
+
+  for (integerType <- Vec(3, 7))
+    test(s"pointer bitcast through integer type %$integerType preserves dereference identity") {
+      val id   = pointerId
+      val body = Vec(
+        Instruction.Bitcast(id(integerType), id(31), id(21)),
+        Instruction.Bitcast(id(5), id(32), id(31)),
+        Instruction.Store(id(32), id(14), None),
+        Instruction.Load(id(2), id(33), id(21), None),
+        Instruction.UConvert(id(3), id(30), id(33))
+      )
+      assertEquals(executePointers(body = body, first = 8L, second = 0L), Right(LittleEndian.toVec(0x89abcdefL, 8)))
+    }
+
+  test("integer-vector pointer bitcast preserves lane order and the address sign bit") {
+    val id   = pointerId
+    val body = Vec(Instruction.Bitcast(id(5), id(31), id(16)), Instruction.Bitcast(id(3), id(30), id(31)))
+    assertEquals(
+      executePointers(body = body, first = 0L, second = 0L),
+      Right(LittleEndian.toVec(0xfedcba9889abcdefL, 8))
+    )
+  }
+
+  for ((targetType, reason) <- Vec((2, "width"), (8, "floating point"), (9, "storage class")))
+    test(s"pointer bitcast rejects incompatible $reason") {
+      val id   = pointerId
+      val body = Vec(Instruction.Bitcast(id(targetType), id(31), id(21)), Instruction.CopyObject(id(3), id(30), id(12)))
+      executePointers(body = body, first = 0L, second = 0L) match {
+        case Left(Fault.InvalidTask(message)) => assert(message.contains("OpBitcast"), message)
+        case result                           => fail(s"expected invalid pointer bitcast, found $result")
+      }
+    }
 }

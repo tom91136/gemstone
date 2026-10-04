@@ -17,7 +17,7 @@ object NVDisasm {
     case Opcode, Register, UniformRegister, ZeroRegister, NonZeroRegister, ZeroUniformRegister, NonZeroUniformRegister
     case Predicate, PredicateVimnmx, UniformPredicate, PredicateRegister, Immediate, SignedImmediate, RelativeImmediate
     case FloatingImmediate(format: FloatEncoding)
-    case ConstantBank, ConditionCode, OptionalConditionCode, SpecialRegister, DescriptorRegister
+    case ConstantBank, ConditionCode, OptionalConditionCode, ConditionRegisterBank, SpecialRegister, DescriptorRegister
     case BarrierRegister, Scoreboard, CbuState, StepField, AddressQualifier, PartitionSelector, InstructionSelector
     case Vocabulary(name: String)
     def isRegister: Boolean = this match {
@@ -55,6 +55,7 @@ object NVDisasm {
       FieldKind.FloatingImmediate(FloatEncoding.fromSpelling(value))
     case "C"                                                         => FieldKind.ConstantBank
     case "CC"                                                        => FieldKind.ConditionCode
+    case "CCPR"                                                      => FieldKind.ConditionRegisterBank
     case "optCC"                                                     => FieldKind.OptionalConditionCode
     case "SpecialRegister"                                           => FieldKind.SpecialRegister
     case "DESC"                                                      => FieldKind.DescriptorRegister

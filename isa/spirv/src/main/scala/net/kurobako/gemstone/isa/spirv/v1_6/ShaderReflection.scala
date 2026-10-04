@@ -212,8 +212,8 @@ private object ShaderReflection {
       width.raw != 64 || (component.raw % 2 == 0 && (component.raw == 0 || words <= 2)),
       "misaligned wide interface"
     )
-    val first                                                      = math.min(words, 4 - component.raw).unsafe[Int > 0]
-    val bytes                                                      = first * 4
+    val first                                           = math.min(words, 4 - component.raw).unsafe[Int > 0]
+    val bytes                                           = first * 4
     val initial: Vec[(Int >= 0, Int > 0, Int in 0 ~ 3)] = Vec((0, bytes, component))
     if (first.raw == words) initial
     else initial :+ ((bytes, ((words - first.raw) * 4).unsafe[Int > 0], 0))

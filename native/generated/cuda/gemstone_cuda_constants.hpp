@@ -1745,6 +1745,9 @@ inline constexpr auto cudaSyncPolicyBlockingSync = 4;
 inline constexpr auto cudaSyncPolicySpin = 2;
 inline constexpr auto cudaSyncPolicyYield = 3;
 inline constexpr auto cudaUserObjectNoDestructorSync = 1;
+extern const void *const LaunchParamEnd;
+extern const void *const LaunchParamBufferPointer;
+extern const void *const LaunchParamBufferSize;
 }
 
 #endif

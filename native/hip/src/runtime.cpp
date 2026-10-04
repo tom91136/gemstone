@@ -64,7 +64,6 @@ constexpr uint32_t MaxBlockThreads = 1024;
 constexpr uint32_t MaxGridDimension = std::numeric_limits<int32_t>::max();
 constexpr size_t DeviceTotalMemoryBytes = size_t(1) << 30U;
 constexpr size_t DeviceSharedMemoryPerBlock = 64U * 1024U;
-constexpr uint32_t DeviceWarpSize = 64;
 constexpr uint32_t DeviceThreadsPerMultiprocessor = 1024;
 
 bool traceHip(std::string_view category) { return gemstone::traceEnabled("hip", category); }
@@ -155,6 +154,7 @@ struct State {
   bool atexit_registered = false;
   hsa_agent_t gpu{};
   hsa_region_t kernarg_region{};
+  hsa_region_t device_region{};
   hsa_queue_t *queue = nullptr;
   std::unordered_map<void **, std::shared_ptr<Module>> modules;
   std::vector<std::weak_ptr<Module>> driver_modules;
@@ -229,7 +229,15 @@ hsa_status_t findCpu(hsa_agent_t agent, void *opaque) {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t findRegion(hsa_region_t region, void *opaque) {
+template <hsa_region_global_flag_t Flag> hsa_status_t findRegion(hsa_region_t region, void *opaque) {
+  hsa_region_segment_t segment{};
+  auto status = hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment);
+  if (status != HSA_STATUS_SUCCESS) return status;
+  if (segment != HSA_REGION_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
+  uint32_t flags = 0;
+  status = hsa_region_get_info(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags);
+  if (status != HSA_STATUS_SUCCESS) return status;
+  if ((flags & Flag) == 0) return HSA_STATUS_SUCCESS;
   *static_cast<hsa_region_t *>(opaque) = region;
   return HSA_STATUS_INFO_BREAK;
 }
@@ -241,13 +249,20 @@ bool ensureInitialized() {
   if (runtime.initialized) return true;
   const hsa_status_t init = hsa_init();
   const hsa_status_t agents = init == HSA_STATUS_SUCCESS ? hsa_iterate_agents(findGpu, &runtime.gpu) : HSA_STATUS_ERROR;
-  const hsa_status_t regions =
-      agents == HSA_STATUS_INFO_BREAK ? hsa_agent_iterate_regions(runtime.gpu, findRegion, &runtime.kernarg_region) : HSA_STATUS_ERROR;
-  const hsa_status_t queue = regions == HSA_STATUS_INFO_BREAK ? hsa_queue_create(runtime.gpu, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr,
-                                                                                 UINT32_MAX, UINT32_MAX, &runtime.queue)
-                                                              : HSA_STATUS_ERROR;
-  if (init != HSA_STATUS_SUCCESS || agents != HSA_STATUS_INFO_BREAK || runtime.gpu.handle == 0 || regions != HSA_STATUS_INFO_BREAK
-      || runtime.kernarg_region.handle == 0 || queue != HSA_STATUS_SUCCESS) {
+  const hsa_status_t kernargs =
+      agents == HSA_STATUS_INFO_BREAK
+          ? hsa_agent_iterate_regions(runtime.gpu, findRegion<HSA_REGION_GLOBAL_FLAG_KERNARG>, &runtime.kernarg_region)
+          : HSA_STATUS_ERROR;
+  const hsa_status_t device =
+      kernargs == HSA_STATUS_INFO_BREAK
+          ? hsa_agent_iterate_regions(runtime.gpu, findRegion<HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED>, &runtime.device_region)
+          : HSA_STATUS_ERROR;
+  const hsa_status_t queue = device == HSA_STATUS_INFO_BREAK ? hsa_queue_create(runtime.gpu, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr,
+                                                                                UINT32_MAX, UINT32_MAX, &runtime.queue)
+                                                             : HSA_STATUS_ERROR;
+  if (init != HSA_STATUS_SUCCESS || agents != HSA_STATUS_INFO_BREAK || runtime.gpu.handle == 0 || kernargs != HSA_STATUS_INFO_BREAK
+      || device != HSA_STATUS_INFO_BREAK || runtime.kernarg_region.handle == 0 || runtime.device_region.handle == 0
+      || queue != HSA_STATUS_SUCCESS) {
     if (runtime.queue) {
       hsa_queue_destroy(runtime.queue);
       runtime.queue = nullptr;
@@ -255,6 +270,7 @@ bool ensureInitialized() {
     hsa_shut_down();
     runtime.gpu = {};
     runtime.kernarg_region = {};
+    runtime.device_region = {};
     return false;
   }
   runtime.initialized = true;
@@ -540,7 +556,11 @@ std::shared_ptr<Kernel> resolveKernel(const void *function_address) {
     binding = found->second;
   }
   if (binding.kernel) return binding.kernel;
-  if (!ensureModuleLoaded(binding.module)) return {};
+  if (!ensureModuleLoaded(binding.module)) {
+    if (traceModules())
+      std::fprintf(stderr, "Gemstone HIP kernel load failed name=%s error=%s\n", binding.name.c_str(), binding.module->error.c_str());
+    return {};
+  }
   const auto kernel = resolveModuleKernel(*binding.module, binding.name);
   if (!kernel) return {};
   {
@@ -899,7 +919,7 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
   if (!value || device != 0) return remember(hipErrorInvalidValue);
   switch (attribute) {
     case hipDeviceAttributeMaxThreadsPerBlock: *value = MaxBlockThreads; break;
-    case hipDeviceAttributeWarpSize: *value = DeviceWarpSize; break;
+    case hipDeviceAttributeWarpSize: *value = gemstone::hsa::waveSize(); break;
     case hipDeviceAttributeMaxBlockDimX: *value = MaxBlockThreads; break;
     case hipDeviceAttributeMaxBlockDimY: *value = MaxBlockThreads; break;
     case hipDeviceAttributeMaxBlockDimZ: *value = MaxBlockThreads; break;
@@ -931,7 +951,7 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   std::strncpy(properties->gcnArchName, target.c_str(), sizeof(properties->gcnArchName) - 1U);
   properties->totalGlobalMem = DeviceTotalMemoryBytes;
   properties->sharedMemPerBlock = DeviceSharedMemoryPerBlock;
-  properties->warpSize = static_cast<int>(DeviceWarpSize);
+  properties->warpSize = static_cast<int>(gemstone::hsa::waveSize());
   properties->maxThreadsPerBlock = MaxBlockThreads;
   properties->maxThreadsPerMultiProcessor = static_cast<int>(DeviceThreadsPerMultiprocessor);
   properties->maxSharedMemoryPerMultiProcessor = DeviceSharedMemoryPerBlock;
@@ -1000,7 +1020,7 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *propertie
   const auto write = [bytes](size_t offset, auto value) { std::memcpy(bytes + offset, &value, sizeof(value)); };
   write(TotalGlobalMem, DeviceTotalMemoryBytes);
   write(SharedMemPerBlock, DeviceSharedMemoryPerBlock);
-  write(WarpSize, static_cast<int>(DeviceWarpSize));
+  write(WarpSize, static_cast<int>(gemstone::hsa::waveSize()));
   write(MaxThreadsPerBlock, int(MaxBlockThreads));
   for (size_t axis = 0; axis < 3; ++axis) {
     write(MaxThreadsDim + axis * sizeof(int), int(MaxBlockThreads));
@@ -1026,7 +1046,7 @@ extern "C" hipError_t hipMalloc(void **pointer, size_t size) {
     return remember(hipSuccess);
   }
   if (!ensureInitialized()) return remember(hipErrorNoDevice);
-  const hsa_status_t status = hsa_memory_allocate(state().kernarg_region, size, pointer);
+  const hsa_status_t status = hsa_memory_allocate(state().device_region, size, pointer);
   if (traceHip("allocations"))
     std::fprintf(stderr, "Gemstone HIP malloc size=%zu status=%d pointer=%p\n", size, int(status), !pointer ? nullptr : *pointer);
   if (status == HSA_STATUS_SUCCESS) {
@@ -1176,7 +1196,7 @@ extern "C" hipError_t hipMallocManaged(void **pointer, size_t size, unsigned int
   hsa_agent_t cpu{};
   hsa_region_t region{};
   if (hsa_iterate_agents(findCpu, &cpu) != HSA_STATUS_INFO_BREAK
-      || hsa_agent_iterate_regions(cpu, findRegion, &region) != HSA_STATUS_INFO_BREAK)
+      || hsa_agent_iterate_regions(cpu, findRegion<HSA_REGION_GLOBAL_FLAG_FINE_GRAINED>, &region) != HSA_STATUS_INFO_BREAK)
     return remember(hipErrorNoDevice);
   const auto status = hsa_memory_allocate(region, size, pointer);
   if (status != HSA_STATUS_SUCCESS) return remember(mapHsa(status));

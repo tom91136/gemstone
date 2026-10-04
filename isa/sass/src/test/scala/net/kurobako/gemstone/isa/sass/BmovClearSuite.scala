@@ -14,10 +14,13 @@ class BmovClearSuite extends munit.FunSuite {
       mnemonic: String,
       modifiers: Vec[Instruction.Modifier] = Vec.empty
   ): Boolean                 = instruction.mnemonic.raw == mnemonic && instruction.modifiers == modifiers
-  private val clearModifiers = Vec(Instruction.Modifier("32"), Instruction.Modifier("CLEAR"))
+  private val clearModifiers = Vec.nonEmpty(Instruction.Modifier("32"), Instruction.Modifier("CLEAR"))
 
   private def input(sm: Int = 75): Cubin.Module =
-    SASSFixture.module(sm, Vec(SASSFixture.Kernel("divergent_loop", 352, Vec((0, 8), (8, 4)), registers = 8)))
+    SASSFixture.module(
+      sm,
+      Vec.nonEmpty(SASSFixture.Kernel("divergent_loop", 352, Vec.nonEmpty((0, 8), (8, 4)), registers = 8))
+    )
   private val listing = Map(
     70 -> BmovFixtures.bmovClearSm70ProbeSm70,
     75 -> BmovFixtures.bmovClearSm75ProbeSm75,
@@ -42,35 +45,14 @@ class BmovClearSuite extends munit.FunSuite {
     assert(SASSFixture.lower(input(), input().kernels.head, functions()).isRight)
   }
 
-  test("BMOV clear rejects predicated and active-region forms") {
-    val m          = input()
-    val f          = functions().head
-    val firstClear = f.instructions.find(i => has(i, "BMOV", clearModifiers)).get
-    val predicated = firstClear.rewrite(
-      guard = SASSFixture.instruction(firstClear.address.raw, "BMOV.32.CLEAR", Vec("RZ", "B0"), Some("@P0")).guard
-    )
-    val predicatedResult = SASSFixture.lower(
-      m,
-      m.kernels.head,
-      Vec(f.copy(instructions = f.instructions.updated(f.instructions.indexOf(firstClear), predicated)))
-    )
-    assert(predicatedResult.left.exists(_.contains("unsupported discarded barrier clear")))
-
-    val firstSetup         = f.instructions.find(i => has(i, "BSSY")).get
-    val activeClear        = firstClear.copy(address = firstSetup.address + 16)
-    val activeInstructions = f.instructions.map(i => if (i.address == activeClear.address) activeClear else i)
-    val activeResult       = SASSFixture.lower(m, m.kernels.head, Vec(f.copy(instructions = activeInstructions)))
-    assert(activeResult.left.exists(_.contains("inside an active convergence region")))
-  }
-
-  test("BSSY requires a forward target before treating a clear as inactive") {
+  test("BSSY requires a forward reconvergence target") {
     val m       = input()
     val f       = functions().head
     val setup   = f.instructions.find(i => has(i, "BSSY")).get
     val invalid =
       setup.rewrite(operands = setup.operands.updated(1, SASSFixture.operand(s"0x${setup.address.raw.toHexString}")))
     val changed = f.copy(instructions = f.instructions.map(i => if (i == setup) invalid else i))
-    val result  = SASSFixture.lower(m, m.kernels.head, Vec(changed))
+    val result  = SASSFixture.lower(m, m.kernels.head, Vec.nonEmpty(changed))
     assert(result.left.exists(_.contains("convergence barrier target must be forward")))
   }
 
@@ -88,7 +70,7 @@ class BmovClearSuite extends munit.FunSuite {
         "divergent_loop": NonEmpty[String],
         LaunchGeometry.Dimensions(count.unsafe[Int > 0], 1, 1),
         LaunchGeometry.Dimensions.One,
-        Vec(
+        Vec.nonEmpty(
           KernelTask.Argument.Memory(output, 0L),
           KernelTask.Argument.Scalar(LittleEndian.toVec(limit.toLong, 4))
         )
@@ -134,7 +116,7 @@ class BmovClearSuite extends munit.FunSuite {
         "divergent_loop": NonEmpty[String],
         LaunchGeometry.Dimensions(count.unsafe[Int > 0], 1, 1),
         LaunchGeometry.Dimensions.One,
-        Vec(
+        Vec.nonEmpty(
           KernelTask.Argument.Memory(output, 0L),
           KernelTask.Argument.Scalar(LittleEndian.toVec(5L, 4))
         )

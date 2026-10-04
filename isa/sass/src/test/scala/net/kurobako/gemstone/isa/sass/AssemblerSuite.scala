@@ -34,7 +34,7 @@ class AssemblerSuite extends munit.FunSuite {
     assert(decoded.operation match { case _: Instruction.Mov => true; case _ => false })
   }
 
-  Vec(
+  Vec.nonEmpty(
     "SM35" -> "MOV R3, R7;",
     "SM35" -> "IADD R3, R7, R8;",
     "SM50" -> "MOV R3, R7;",
@@ -54,7 +54,7 @@ class AssemblerSuite extends munit.FunSuite {
   }
 
   test("ordinary signed integer and floating immediates preserve their numeric meaning") {
-    Vec(
+    Vec.nonEmpty(
       ("SM35", "IADD R3, R7, -1;"),
       ("SM50", "IADD R3, R7, -1;")
     ).foreach { (target, source) =>
@@ -66,16 +66,18 @@ class AssemblerSuite extends munit.FunSuite {
       })
     }
 
-    Vec(
+    Vec.nonEmpty(
       "1.0"  -> BigInt("3f800000", 16),
       "-1.0" -> BigInt("bf800000", 16)
     ).foreach { (literal, expectedBits) =>
-      val floating = Assembler.assemble(s"FADD R3, R7, $literal;", "SM89").fold(fail(_), identity)
-      val decoded  = Disassembler.decode(floating, "SM89").fold(fail(_), identity)
-      assert(decoded.operands.last match {
-        case Operand.FloatingBits(FloatEncoding.F32Imm, width, bits) => width.raw == 32 && bits == expectedBits
-        case _                                                       => false
-      })
+      for (target <- Vec.nonEmpty("SM35", "SM50", "SM89")) {
+        val floating = Assembler.assemble(s"FADD R3, R7, $literal;", target).fold(fail(_), identity)
+        val decoded  = Disassembler.decode(floating, target).fold(fail(_), identity)
+        assert(decoded.operands.last match {
+          case Operand.FloatingBits(FloatEncoding.F32Imm, width, bits) => width.raw == 32 && bits == expectedBits
+          case _                                                       => false
+        })
+      }
     }
   }
 

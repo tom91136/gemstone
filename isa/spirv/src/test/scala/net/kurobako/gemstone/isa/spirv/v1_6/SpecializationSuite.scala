@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.spirv.v1_6.Specialization.*
 import net.kurobako.gemstone.isa.spirv.v1_6 as spv
@@ -108,8 +108,9 @@ class SpecializationSuite extends munit.FunSuite {
   for {
     specId     <- Seq[Long in 0L ~ 4294967295L](100L, 0x80000000L, 0xffffffffL)
     typeOpcode <- Seq(20L, 21L, 22L)
-    width      <- if (typeOpcode == 20) Seq[Int in (8, 16, 32, 64)](8) else if (typeOpcode == 21) Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64) else Seq[Int in (8, 16, 32, 64)](16, 32, 64)
-    rawWidth = width.raw
+    width      <- if (typeOpcode == 20) Seq[Int in (8, 16, 32, 64)](8)
+    else if (typeOpcode == 21) Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64) else Seq[Int in (8, 16, 32, 64)](16, 32, 64)
+    rawWidth  = width.raw
     byteWidth = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
   } test(s"specialize updates every SpecId alias for spec $specId type $typeOpcode and width $rawWidth") {
     val boolean     = typeOpcode == 20

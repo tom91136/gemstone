@@ -29,18 +29,19 @@ object macros {
   } yield Span(a.low.max(b.low), a.high.min(b.high), a.step / a.step.gcd(b.step) * b.step))
 
   /** Cover the source progression with target spans without enumerating its values. */
-  private def coveredBy(source: Span, target: List[Span]): Boolean = {
+  private def coveredBy(source: Span, target: List[Span]): Boolean =
     if (target.exists(source.subsetOf(_))) true
     else {
       val pieces = intersect(List(source), target).sortBy(_.low)
-      val next = pieces.foldLeft(source.low) { (next, piece) =>
-        if (piece.low <= next && piece.high >= next &&
-            (piece.low == piece.high || piece.step == source.step)) piece.high + source.step
+      val next   = pieces.foldLeft(source.low) { (next, piece) =>
+        if (
+          piece.low <= next && piece.high >= next &&
+          (piece.low == piece.high || piece.step == source.step)
+        ) piece.high + source.step
         else next
       }
       next > source.high
     }
-  }
 
   private def carrier(using q: Quotes)(tpe: q.reflect.TypeRepr): Span = {
     import q.reflect.*

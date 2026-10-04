@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -12,7 +12,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 class ExtendedIntegerSuite extends munit.FunSuite {
   for {
     width <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
-    rawWidth = width.raw
+    rawWidth   = width.raw
     widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     count     <- Seq(1, 4)
     operation <- Seq("carry", "borrow", "umul", "smul")
@@ -104,15 +104,17 @@ class ExtendedIntegerSuite extends munit.FunSuite {
 
   for {
     baseWidth <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
-    rawBaseWidth = baseWidth.raw
+    rawBaseWidth   = baseWidth.raw
     baseWidthBytes = baseWidth.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     resultWidth <- Seq[Int in (8, 32, 64)](8, 32, 64)
-    rawResultWidth = resultWidth.raw
+    rawResultWidth   = resultWidth.raw
     resultWidthBytes = resultWidth.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
-    count       <- Seq(1, 4)
-    signed      <- Seq(0, 1)
+    count  <- Seq(1, 4)
+    signed <- Seq(0, 1)
   }
-    test(s"bitcount accepts $rawBaseWidth-bit input and $rawResultWidth-bit result, $count lanes, input signedness $signed") {
+    test(
+      s"bitcount accepts $rawBaseWidth-bit input and $rawResultWidth-bit result, $count lanes, input signedness $signed"
+    ) {
       def ref(n: Int): Operand = operand(OperandKind.IdRef, n)
       val inputType            = ref(if (count == 1) 2 else 4); val resultType = ref(if (count == 1) 3 else 5)
       val module               = Module(

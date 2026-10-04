@@ -31,6 +31,18 @@ class GenerateNativeBindingsSuite extends munit.FunSuite {
       assert(header.contains("extern int zeta(const char *, void (*)(int, int)) GEMSTONE_PUBLIC_API;"), header)
       assert(header.indexOf("alpha(") < header.indexOf("zeta("))
       assert(files("cuda/gemstone_cuda_constants.hpp").contains("inline constexpr auto NEGATIVE = -7;"))
+      for (
+        (name, macroName) <- Vector(
+          "LaunchParamEnd"           -> "CU_LAUNCH_PARAM_END",
+          "LaunchParamBufferPointer" -> "CU_LAUNCH_PARAM_BUFFER_POINTER",
+          "LaunchParamBufferSize"    -> "CU_LAUNCH_PARAM_BUFFER_SIZE"
+        )
+      ) {
+        assert(files("cuda/gemstone_cuda_constants.hpp").contains(s"extern const void *const $name;"))
+        assert(
+          files("cuda/gemstone_cuda_impl.cpp").contains(s"const void *const gemstone::cuda::api::$name = $macroName;")
+        )
+      }
       assert(files(
         "cuda/gemstone_cuda_impl.cpp"
       ).contains("using signature_zeta = int (*)(const char *, void (*)(int, int));"))

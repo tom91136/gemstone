@@ -15,23 +15,31 @@ object VMRegisterFile {
   // This is on the execution hot path; parse without allocating substrings or retaining names globally.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
   def indexRaw(name: String): Int = {
-    val start = if (name.nonEmpty && name.charAt(0) == '%') 1 else 0
+    val length = name.length
+    val start  = if (length > 0 && name.charAt(0) == '%') 1 else 0
+    if (start == length) return -1
     // Offsets are multiples of 1024, so the low three bits can carry the digit position without a tuple allocation.
-    val parsed =
-      if (name.startsWith("rd", start)) start + 2
-      else if (name.startsWith("rs", start)) 1024 | (start + 2)
-      else if (name.startsWith("r", start)) 2048 | (start + 1)
-      else if (name.startsWith("fd", start)) 3072 | (start + 2)
-      else if (name.startsWith("f", start)) 4096 | (start + 1)
-      else if (name.startsWith("p", start)) 5120 | (start + 1)
-      else return -1
+    val parsed = name.charAt(start) match {
+      case 'r' =>
+        if (start + 1 < length) name.charAt(start + 1) match {
+          case 'd' => start + 2
+          case 's' => 1024 | (start + 2)
+          case _   => 2048 | (start + 1)
+        }
+        else return -1
+      case 'f' =>
+        if (start + 1 < length && name.charAt(start + 1) == 'd') 3072 | (start + 2)
+        else 4096 | (start + 1)
+      case 'p' => 5120 | (start + 1)
+      case _   => return -1
+    }
     val digits = parsed & 7
     val offset = parsed & ~7
-    if (digits == name.length) return -1
+    if (digits == length) return -1
 
     var index = digits
     var value = 0
-    while (index < name.length) {
+    while (index < length) {
       val digit = name.charAt(index) - '0'
       if (digit < 0 || digit > 9) return -1
       value = value * 10 + digit
@@ -59,37 +67,40 @@ object VMRegisterFile {
 // Lazy chunks avoid allocating 48 KiB per lane in the register-file hot path.
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
 class VMRegisterFile(chunkCount: VMRegisterFile.ChunkCount = 96) {
-  private var values                                  = Array.ofDim[Array[Long] | Null](chunkCount.raw)
-  private var named: mutable.Map[String, Long] | Null = null
+  private var values: Array[Array[Long] | Null] | Null = null
+  private var named: mutable.Map[String, Long] | Null  = null
 
-  def get(name: NonEmpty[String]): Long = slot(name) match {
-    case Some(index) => getSlotRaw(index)
-    case None        => named match {
-        case null   => 0L
-        case values => values.getOrElse(name, 0L)
-      }
+  def get(name: NonEmpty[String]): Long = {
+    val index = VMRegisterFile.indexRaw(name)
+    if (index >= 0) getSlotRaw(index)
+    else named match {
+      case null   => 0L
+      case values => values.getOrElse(name, 0L)
+    }
   }
 
   inline def getSlot(index: VMRegisterFile.Slot): Long = getSlotRaw(index.raw)
 
   inline def updateSlot(index: VMRegisterFile.Slot, value: Long): Unit = updateSlotRaw(index.raw, value)
 
-  // Instruction fast paths call the raw entry points after excluding the name lookup's -1 sentinel.
   def getSlotRaw(index: Int): Long = {
     require(index >= 0 && index < 6144, s"invalid register slot: $index")
-    val chunkIndex = index >>> 6
-    if (chunkIndex >= values.length) 0L
-    else values(chunkIndex) match {
-      case null  => 0L
-      case chunk => chunk(index & 63)
+    values match {
+      case null                                     => 0L
+      case chunks if (index >>> 6) >= chunks.length => 0L
+      case chunks                                   => chunks(index >>> 6) match {
+          case null  => 0L
+          case chunk => chunk(index & 63)
+        }
     }
   }
 
   def apply(name: NonEmpty[String]): Long = get(name)
 
-  def update(name: NonEmpty[String], value: Long): Unit = slot(name) match {
-    case Some(index) => updateSlotRaw(index, value)
-    case None        =>
+  def update(name: NonEmpty[String], value: Long): Unit = {
+    val index = VMRegisterFile.indexRaw(name)
+    if (index >= 0) updateSlotRaw(index, value)
+    else {
       val values = named match {
         case null =>
           val allocated = mutable.Map.empty[String, Long]
@@ -98,31 +109,45 @@ class VMRegisterFile(chunkCount: VMRegisterFile.ChunkCount = 96) {
         case existing => existing
       }
       values(name) = value
+    }
   }
 
   def updateSlotRaw(index: Int, value: Long): Unit = {
     require(index >= 0 && index < 6144, s"invalid register slot: $index")
     val chunkIndex = index >>> 6
-    // The compiler's chunk count is an allocation hint, not a restriction on architectural slots.
-    if (chunkIndex >= values.length)
-      values = java.util.Arrays.copyOf(values, math.min(96, math.max(chunkIndex + 1, values.length * 2)))
-    values(chunkIndex) match {
+    val chunks     = values match {
+      case null =>
+        val allocated = Array.ofDim[Array[Long] | Null](math.max(chunkCount.raw, chunkIndex + 1))
+        values = allocated
+        allocated
+      // The initial chunk count is an allocation hint, not an architectural limit.
+      case existing if chunkIndex >= existing.length =>
+        val grown = java.util.Arrays.copyOf(existing, math.min(96, math.max(chunkIndex + 1, existing.length * 2)))
+        values = grown
+        grown
+      case existing => existing
+    }
+    chunks(chunkIndex) match {
       case null =>
         val chunk = Array.ofDim[Long](64)
-        values(chunkIndex) = chunk
+        chunks(chunkIndex) = chunk
         chunk(index & 63) = value
       case chunk => chunk(index & 63) = value
     }
   }
 
   def clear(): Unit = {
-    var index = 0
-    while (index < values.length) {
-      values(index) match {
-        case null  => ()
-        case chunk => java.util.Arrays.fill(chunk, 0L)
-      }
-      index += 1
+    values match {
+      case null   => ()
+      case chunks =>
+        var index = 0
+        while (index < chunks.length) {
+          chunks(index) match {
+            case null  => ()
+            case chunk => java.util.Arrays.fill(chunk, 0L)
+          }
+          index += 1
+        }
     }
     named match {
       case null   => ()
@@ -130,8 +155,4 @@ class VMRegisterFile(chunkCount: VMRegisterFile.ChunkCount = 96) {
     }
   }
 
-  private def slot(name: String): Option[Int] = {
-    val value = VMRegisterFile.indexRaw(name)
-    if (value < 0) None else Some(value)
-  }
 }

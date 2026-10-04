@@ -32,14 +32,14 @@ class ConstraintSuite extends munit.FunSuite {
   private object ForeignName extends Newtype[Foreign.Type]
 
   test("unwrap retains the carrier while raw removes nested wrapper layers") {
-    val small                            = Small(8)
-    val nested                           = Nested(small)
-    val carrier: Int in 1 ~ 8 = small.unwrap
-    val inner: Small.Type                = nested.unwrap
-    val primitive: Int                   = nested.raw
-    val text: String                     = Name("kernel").raw
-    val refinedText: NonEmpty[String]    = Name("kernel").unwrap
-    val identifier: Long                 = AllocationId(3L).raw
+    val small                         = Small(8)
+    val nested                        = Nested(small)
+    val carrier: Int in 1 ~ 8         = small.unwrap
+    val inner: Small.Type             = nested.unwrap
+    val primitive: Int                = nested.raw
+    val text: String                  = Name("kernel").raw
+    val refinedText: NonEmpty[String] = Name("kernel").unwrap
+    val identifier: Long              = AllocationId(3L).raw
     assertEquals(carrier.raw, 8)
     assertEquals(inner, small)
     assertEquals(primitive, 8)

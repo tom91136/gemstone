@@ -11,6 +11,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -18,40 +19,30 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 import scala.util.Using
 
-/** Short, standalone execution benchmark for profiling the AMDGPU hot path without a GPU or vendor oracle.
-  *
-  * This deliberately uses the official ROCr vector-copy kernel subset covered by CodeObjectSuite. The benchmark is not
-  * a performance assertion: it prints stable per-dispatch measurements suitable for before/after comparisons.
-  */
+/** ROCr vector-copy execution without a GPU or vendor oracle. */
 object AMDGPUExecutionBenchmark {
   private def dimensions(x: Int > 0): Dimensions = Dimensions(x, 1, 1)
 
   private case class Options(
       measured: Int > 0,
-      warmup: Option[Int >= 0],
       groups: Int > 0
   )
   private val options = (
     Opts.option[Int]("measured", help = "Measured dispatches").withDefault(200)
       .refined[Int > 0]("measured dispatches must be positive"),
-    Opts.option[Int](
-      "warmup",
-      help = "Warmup dispatches"
-    ).refined[Int >= 0]("warmup dispatches must be non-negative").orNone,
     Opts.option[Int]("groups", help = "Workgroups per dispatch").withDefault(1)
       .refined[Int in 1 ~ 65536]("workgroup count must be between 1 and 65536")
       .map(_.widen[Int > 0])
-  ).mapN(Options(_, _, _))
+  ).mapN(Options(_, _))
   private val InputId  = AllocationId(1L)
   private val OutputId = AllocationId(2L)
   private val UnusedId = AllocationId(3L)
 
-  // Warmup and measured dispatches share an allocation-free counter loop.
+  // Dispatch loops avoid allocating a collection per iteration.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(arguments: Array[String]): Unit = {
+  def run(arguments: Array[String]): BenchmarkSample = {
     val parsed            = BenchmarkArguments.parse(BenchmarkName("amdgpu-execution"), arguments.toSeq, options)
     val measured          = parsed.measured
-    val warmup            = parsed.warmup.getOrElse((measured.widen[Int >= 0] / 10).max(20))
     val groups            = parsed.groups
     val elements: Int > 0 = groups * 64
 
@@ -67,7 +58,7 @@ object AMDGPUExecutionBenchmark {
     val code     = words.flatMap(word => LittleEndian.toVec(word, 4))
     val kernel   = CodeObjectKernel("vector_copy", Target("gfx900"), 80, 0, 0, 0x80, 0x0b, code)
     val prepared =
-      VMCompiler.compile(kernel).fold(failure => throw RuntimeException(failure.message), value => value)
+      VMCompiler().compile(kernel).fold(failure => throw RuntimeException(failure.message), value => value)
     val memory = BenchmarkMemory()
     memory.allocate(InputId, elements * 4)
     memory.allocate(OutputId, elements * 4)
@@ -110,12 +101,7 @@ object AMDGPUExecutionBenchmark {
       )
     }
 
-    var iteration = 0
-    while (iteration < warmup.raw) {
-      execute()
-      iteration += 1
-    }
-
+    var iteration   = 0
     val measurement =
       Using.resource(PlatformMetrics.startRecording(sys.env.get(env.BenchmarkJfr).map(Path.of(_)))) { _ =>
         Measurement {
@@ -126,20 +112,13 @@ object AMDGPUExecutionBenchmark {
           }
         }
       }
-    val checksum = Vec.indices(elements.widen[Int >= 0]).map { index =>
+    Vec.indices(elements.widen[Int >= 0]).foreach { index =>
       val observed = memory.getInt(OutputId, index * 4)
       if (observed != index.raw * 97 - 11)
         throw IllegalStateException(s"copy mismatch at $index: $observed")
-      observed.toLong
-    }.sum
+    }
 
-    val nanosPerDispatch = measurement.elapsedNanos.raw.toDouble / measured.raw.toDouble
-    val bytesPerDispatch = measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / measured.raw.toDouble)
-    Console.out.println(
-      f"amdgpu-execution benchmark dispatches=$measured warmup=$warmup groups=$groups " +
-        f"elapsed_ms=${measurement.elapsedNanos.raw / 1000000.0}%.3f ns_per_dispatch=$nanosPerDispatch%.1f " +
-        f"allocated_bytes_per_dispatch=$bytesPerDispatch%.1f checksum=$checksum"
-    )
+    measurement.sample(measured.toLong)
   }
 
   // Mutable allocation contents are confined to this final benchmark memory fixture.

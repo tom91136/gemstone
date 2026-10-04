@@ -28,7 +28,9 @@ object VMIR {
     case Immediate(value: Long)
     case Address(base: Value, offset: Long)
     case LaneId
+    case DynamicSharedBytes
     case ActiveMask
+    case LiveMask
     case LaneMaskGreaterEqual
     case LaneMaskGreater
     case LaneMaskLessEqual
@@ -71,6 +73,7 @@ object VMIR {
     case Negate
     case Absolute
     case BitwiseNot
+    case LogicalNot
     case PopulationCount
     case LeadingZeroCount
     case BitReverse
@@ -166,6 +169,12 @@ object VMIR {
       absolute: Boolean = false,
       xorSign: Boolean = false
   )
+
+  enum PackedFloatFormat(val mnemonic: NonEmpty[String]) {
+    case F16x2  extends PackedFloatFormat("f16x2")
+    case BF16x2 extends PackedFloatFormat("bf16x2")
+    case F32x2  extends PackedFloatFormat("f32x2")
+  }
 
   enum FloatOperation {
     case Add
@@ -296,6 +305,14 @@ object VMIR {
     case Move(destination: NonEmpty[String], source: Value, width: Int where (Between[8, 64] & MultipleOf[8]))
         extends Instruction(s"mov.u$width")
 
+    case MoveVector(
+        destinations: Vec[NonEmpty[String]],
+        sources: Vec[Value],
+        width: Int where (Between[8, 64] & MultipleOf[8])
+    ) extends Instruction(s"mov.v${destinations.size}.b$width")
+
+    case UniformMove(destination: NonEmpty[String], source: Value) extends Instruction("mov.uniform.b32")
+
     case MovePredicate(destination: NonEmpty[String], source: Value) extends Instruction("mov.pred")
 
     case MoveSplit(destinations: Vec[NonEmpty[String]], source: Value, partWidth: Int in (16, 32))
@@ -313,6 +330,7 @@ object VMIR {
           case IntegerUnaryOperation.Negate           => s"neg.b$width"
           case IntegerUnaryOperation.Absolute         => s"abs.b$width"
           case IntegerUnaryOperation.BitwiseNot       => s"not.b$width"
+          case IntegerUnaryOperation.LogicalNot       => s"cnot.b$width"
           case IntegerUnaryOperation.PopulationCount  => s"popc.b$width"
           case IntegerUnaryOperation.LeadingZeroCount => s"clz.b$width"
           case IntegerUnaryOperation.BitReverse       => s"brev.b$width"
@@ -372,6 +390,14 @@ object VMIR {
         left: Boolean,
         clamp: Boolean
     ) extends Instruction(s"shf.${if (left) "l" else "r"}.${if (clamp) "clamp" else "wrap"}.b32")
+
+    case IntegerSubtractAdd(
+        destination: NonEmpty[String],
+        left: Value,
+        right: Value,
+        addend: Value,
+        width: Int where (Between[8, 64] & MultipleOf[8])
+    ) extends Instruction(s"vsub.u$width.u$width.u$width.add")
 
     case IntegerAddWithCarry(
         destination: NonEmpty[String],
@@ -439,10 +465,9 @@ object VMIR {
         destination: NonEmpty[String],
         left: Value,
         right: Value,
-        bf16: Boolean
-    ) extends Instruction(
-          s"${operation.toString.toLowerCaseRoot}.${if (bf16) "bf16x2" else "f16x2"}"
-        )
+        format: PackedFloatFormat,
+        control: FloatControl = FloatControl()
+    ) extends Instruction(s"${operation.toString.toLowerCaseRoot}.${format.mnemonic}")
 
     case FloatUnary(
         operation: FloatUnaryOperation,
@@ -527,6 +552,9 @@ object VMIR {
 
     case VoteBallot(destination: NonEmpty[String], predicate: NonEmpty[String], memberMask: Value)
         extends Instruction("vote.sync.ballot.b32")
+
+    case Elect(destination: Option[NonEmpty[String]], predicate: NonEmpty[String], memberMask: Value)
+        extends Instruction("elect.sync")
 
     case VotePredicate(
         destination: NonEmpty[String],
@@ -614,8 +642,27 @@ object VMIR {
     /** Synchronous model of an asynchronous shared-memory copy. The emulator applies the copy at this instruction;
       * commit/wait operations below remain ordered no-ops because there is no separate copy engine.
       */
-    case AsyncCopy(destination: Value, source: Value, size: Int > 0)
+    case AsyncCopy(destination: Value, source: Value, size: Int > 0, sourceSize: Value)
         extends Instruction("cp.async")
+
+    case AsyncBulkStore(destination: Value, source: Value, size: Value, byteMask: Value)
+        extends Instruction("cp.async.bulk.global")
+    case ClusterBarrier(arrive: Boolean)                   extends Instruction("barrier.cluster")
+    case ClusterTryCancel(response: Value, barrier: Value) extends Instruction("clusterlaunchcontrol.try_cancel")
+    case ClusterCancelStatus(destination: NonEmpty[String], response: Value)
+        extends Instruction("clusterlaunchcontrol.query_cancel.is_canceled")
+    case ClusterCancelCta(destination: NonEmpty[String], responseLow: Value, responseHigh: Value, axis: Axis)
+        extends Instruction("clusterlaunchcontrol.query_cancel.get_first_ctaid")
+
+    case MemoryBarrierLoad(address: Value)               extends Instruction("mbarrier.load")
+    case MemoryBarrierInit(address: Value, count: Value) extends Instruction("mbarrier.init")
+    case MemoryBarrierArrive(destination: Option[NonEmpty[String]], address: Value, count: Value, expectedBytes: Value)
+        extends Instruction("mbarrier.arrive")
+    case MemoryBarrierTest(destination: NonEmpty[String], address: Value, phase: Value, parity: Boolean)
+        extends Instruction("mbarrier.test_wait")
+    case MemoryBarrierInvalidate(address: Value) extends Instruction("mbarrier.inval")
+    case AsyncBulkCopy(destination: Value, source: Value, size: Value, barrier: Value)
+        extends Instruction("cp.async.bulk")
 
     case AsyncCommit extends Instruction("cp.async.commit_group")
 
@@ -654,13 +701,16 @@ object VMIR {
 
     case Branch(target: Pc) extends Instruction("bra")
 
-    case BarrierSync(id: Int >= 0) extends Instruction("bar.sync")
+    case BarrierSync(id: Value, count: Option[Value] = None) extends Instruction("bar.sync")
+
+    case BarrierArrive(id: Value, count: Value) extends Instruction("bar.arrive")
 
     case BarrierReduce(
         destination: NonEmpty[String],
-        id: Int >= 0,
+        id: Value,
         predicate: NonEmpty[String],
-        operation: PredicateOperation
+        operation: PredicateOperation,
+        count: Option[Value] = None
     ) extends Instruction(s"bar.red.${operation.toString.toLowerCaseRoot}.pred")
 
     case AtomicAdd(
@@ -712,10 +762,10 @@ object VMIR {
 
     case MemoryBarrier extends Instruction("membar")
 
-    case Convergence(slot: Int, action: ConvergenceAction) extends Instruction("sass.convergence")
-    case SASSReturnPush(address: Int)                      extends Instruction("sass.return.push")
-    case SASSReturnPop(destination: NonEmpty[String])      extends Instruction("sass.return.pop")
-    case WarpBarrier(memberMask: Value)                    extends Instruction("bar.warp.sync")
+    case Convergence(slot: Int in 0 ~ 255, action: ConvergenceAction) extends Instruction("sass.convergence")
+    case SASSReturnPush(address: Int)                                 extends Instruction("sass.return.push")
+    case SASSReturnPop(destination: NonEmpty[String])                 extends Instruction("sass.return.pop")
+    case WarpBarrier(memberMask: Value)                               extends Instruction("bar.warp.sync")
 
     case Call(function: Value, returnParameters: Vec[NonEmpty[String]], parameters: Vec[NonEmpty[String]])
         extends Instruction("call")
@@ -723,6 +773,7 @@ object VMIR {
     case Trap extends Instruction("trap")
 
     case Return extends Instruction("ret")
+    case Exit   extends Instruction("exit")
   }
 
   case class ExecutionPredicate(name: NonEmpty[String], negated: Boolean)
@@ -742,10 +793,27 @@ object VMIR {
       parameterOffsets: Vec[Int >= 0],
       returnParameters: Vec[NonEmpty[String]],
       program: ExecutableProgram[PredicatedInstruction],
-      sharedSymbols: Map[NonEmpty[String], Long]
+      sharedSymbols: Map[NonEmpty[String], Long],
+      localParameters: Set[NonEmpty[String]] = Set.empty
   )
 
   case class Argument(bytes: NonEmpty[Vec[Byte]])
+
+  // Code addresses occupy their own address space; zero remains the null function pointer.
+  class FunctionTable(names: Set[NonEmpty[String]]) {
+    private val addresses = names.toVector.sortBy(_.raw).zipWithIndex.map { case (name, index) =>
+      name -> (index.toLong + 1L)
+    }.toMap
+    private val symbols = addresses.map { case (name, address) => address -> name }
+
+    def address(name: NonEmpty[String]): Option[Long] = addresses.get(name)
+    def name(address: Long): Option[NonEmpty[String]] = symbols.get(address)
+  }
+
+  object ParameterBank {
+    val Symbol: NonEmpty[String] = "__kernel_parameter_bank"
+  }
+  case class ParameterBank(initial: Vec[Byte], offsets: Map[NonEmpty[String], Int >= 0])
 
   case class Kernel(
       name: NonEmpty[String],
@@ -755,7 +823,11 @@ object VMIR {
       sharedSymbols: Map[NonEmpty[String], Long] = Map.empty,
       globalSymbols: Map[NonEmpty[String], GuestAddress] = Map.empty,
       registerChunkCount: VMRegisterFile.ChunkCount = 96,
-      isaName: NonEmpty[String] = "PTX"
+      isaName: NonEmpty[String] = "PTX",
+      functionTable: FunctionTable = FunctionTable(Set.empty),
+      parameterBank: Option[ParameterBank] = None,
+      dynamicSharedBytes: Int >= 0 = 0,
+      localParameters: Set[NonEmpty[String]] = Set.empty
   )
 
   type Pc = Pc.Type

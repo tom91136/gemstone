@@ -7,6 +7,18 @@ class LegalitySuite extends munit.FunSuite {
 
   private val database = NVDisasm.Database("SM89", "test", 128, Vec.empty, Vec.empty)
 
+  test("condition enum names resolve an unambiguous vendor case variant") {
+    val mode     = NVDisasm.Vocabulary("ChkMode", Vec.nonEmpty(NVDisasm.SymbolValue("DIVIDE", BigInt(0))))
+    val withMode = database.copy(symbols = Vec.nonEmpty(mode))
+    assertEquals(Legality.evaluate(withMode, EnumValue("Chkmode", "DIVIDE"), Map.empty), Right(BigInt(0)))
+    assert(Legality.evaluate(withMode, EnumValue("Chkmode", "OTHER"), Map.empty).isLeft)
+    assert(Legality.evaluate(
+      withMode.copy(symbols = Vec.nonEmpty(mode, mode.copy(name = "CHKMODE"))),
+      EnumValue("Chkmode", "DIVIDE"),
+      Map.empty
+    ).isLeft)
+  }
+
   test("condition operators and helper calls resolve to semantic tokens while preserving unknown names") {
     assertEquals(
       NVDisasm.BinaryOperator.from("->"),
@@ -49,7 +61,11 @@ class LegalitySuite extends munit.FunSuite {
         Vec.empty,
         Vec.empty,
         conditions =
-          Vec(NVDisasm.Condition("ERROR", Binary(NVDisasm.BinaryOperator.Equal, Number(0), Number(1)), message))
+          Vec.nonEmpty(NVDisasm.Condition(
+            "ERROR",
+            Binary(NVDisasm.BinaryOperator.Equal, Number(0), Number(1)),
+            message
+          ))
       )
       Legality.check(database, form, Map.empty).left.toOption.get
     }
@@ -96,7 +112,7 @@ class LegalitySuite extends munit.FunSuite {
       Vec.empty,
       Vec.empty,
       Vec.empty,
-      conditions = Vec(condition)
+      conditions = Vec.nonEmpty(condition)
     )
     assertEquals(Legality.check(database, form, Map("Ra" -> BigInt(12))), Right(()))
     assertEquals(
@@ -126,15 +142,15 @@ class LegalitySuite extends munit.FunSuite {
       Vec.empty,
       Vec.empty,
       Vec.empty,
-      syntax = Vec(NVDisasm.Syntax.Field("sync", "SyncMode", None, None)),
-      conditions = Vec(condition)
+      syntax = Vec.nonEmpty(NVDisasm.Syntax.Field("sync", "SyncMode", None, None)),
+      conditions = Vec.nonEmpty(condition)
     )
     val bindings = Legality.completeBindings(form, Map("SyncMode" -> BigInt(1)))
     assertEquals(bindings.get("sync"), Some(BigInt(1)))
     assertEquals(Legality.check(database, form, bindings), Right(()))
     assert(Legality.check(database, form, Legality.completeBindings(form, Map("SyncMode" -> BigInt(0)))).isLeft)
     val repeatedKind = form.copy(
-      syntax = Vec(
+      syntax = Vec.nonEmpty(
         NVDisasm.Syntax.Field("register", "Ra", None, None),
         NVDisasm.Syntax.Field("register", "Rb", None, None)
       )
@@ -145,33 +161,40 @@ class LegalitySuite extends munit.FunSuite {
   test("partial recovered lookup tables never authorize a condition") {
     val table = NVDisasm.LookupTable(
       "relation",
-      Vec(NVDisasm.Row(Vec(BigInt(1)), BigInt(2))),
-      Vec("unsupported wildcard")
+      Vec.nonEmpty(NVDisasm.Row(Vec.nonEmpty(BigInt(1)), BigInt(2))),
+      Vec.nonEmpty("unsupported wildcard")
     )
     val condition =
-      Call(NVDisasm.BuiltinCall.Defined, Vec(Call(NVDisasm.BuiltinCall.Table("relation"), Vec(Number(1)))))
-    assert(Legality.evaluate(database.copy(tables = Vec(table)), condition, Map.empty).isLeft)
+      Call(
+        NVDisasm.BuiltinCall.Defined,
+        Vec.nonEmpty(Call(NVDisasm.BuiltinCall.Table("relation"), Vec.nonEmpty(Number(1))))
+      )
+    assert(Legality.evaluate(database.copy(tables = Vec.nonEmpty(table)), condition, Map.empty).isLeft)
     assertEquals(
-      Legality.evaluate(database.copy(tables = Vec(table.copy(issues = Vec.empty))), condition, Map.empty),
+      Legality.evaluate(database.copy(tables = Vec.nonEmpty(table.copy(issues = Vec.empty))), condition, Map.empty),
       Right(BigInt(1))
     )
   }
 
   test("evaluates recovered integer parity predicates") {
     assertEquals(
-      Legality.evaluate(database, Call(NVDisasm.BuiltinCall.IsEven, Vec(Number(12))), Map.empty),
+      Legality.evaluate(database, Call(NVDisasm.BuiltinCall.IsEven, Vec.nonEmpty(Number(12))), Map.empty),
       Right(BigInt(1))
     )
     assertEquals(
-      Legality.evaluate(database, Call(NVDisasm.BuiltinCall.IsEven, Vec(Number(13))), Map.empty),
+      Legality.evaluate(database, Call(NVDisasm.BuiltinCall.IsEven, Vec.nonEmpty(Number(13))), Map.empty),
       Right(BigInt(0))
     )
     assertEquals(
-      Legality.evaluate(database, Call(NVDisasm.BuiltinCall.IsOdd, Vec(Number(-3))), Map.empty),
+      Legality.evaluate(database, Call(NVDisasm.BuiltinCall.IsOdd, Vec.nonEmpty(Number(-3))), Map.empty),
       Right(BigInt(1))
     )
     assertEquals(
-      Legality.evaluate(database, Call(NVDisasm.BuiltinCall.IsOdd, Vec(Field("Rd", None))), Map("Rd" -> BigInt(8))),
+      Legality.evaluate(
+        database,
+        Call(NVDisasm.BuiltinCall.IsOdd, Vec.nonEmpty(Field("Rd", None))),
+        Map("Rd" -> BigInt(8))
+      ),
       Right(BigInt(0))
     )
     assert(Legality.evaluate(
@@ -179,7 +202,11 @@ class LegalitySuite extends munit.FunSuite {
       Call(NVDisasm.BuiltinCall.IsEven, Vec.empty[NVDisasm.ConditionExpression]),
       Map.empty
     ).isLeft)
-    assert(Legality.evaluate(database, Call(NVDisasm.BuiltinCall.IsOdd, Vec(Number(1), Number(3))), Map.empty).isLeft)
+    assert(Legality.evaluate(
+      database,
+      Call(NVDisasm.BuiltinCall.IsOdd, Vec.nonEmpty(Number(1), Number(3))),
+      Map.empty
+    ).isLeft)
   }
 
   test("skips only the unobservable legacy scoreboard value constraint") {
@@ -195,7 +222,7 @@ class LegalitySuite extends munit.FunSuite {
       Vec.empty,
       Vec.empty,
       Vec.empty,
-      conditions = Vec(condition)
+      conditions = Vec.nonEmpty(condition)
     )
 
     assertEquals(Legality.check(database, form, Map.empty), Right(()))
@@ -204,7 +231,9 @@ class LegalitySuite extends munit.FunSuite {
 
     val unrelated =
       form.copy(conditions =
-        Vec(condition.copy(expression = Binary(NVDisasm.BinaryOperator.Equal, Field("other", None), Number(7))))
+        Vec.nonEmpty(condition.copy(expression =
+          Binary(NVDisasm.BinaryOperator.Equal, Field("other", None), Number(7))
+        ))
       )
     assert(Legality.check(database, unrelated, Map.empty).isLeft)
   }

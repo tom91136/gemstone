@@ -6,8 +6,8 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.*
-import net.kurobako.gemstone.string.*
 
 object PTXRegisterIndexBenchmark {
   private enum RegisterKind {
@@ -32,7 +32,7 @@ object PTXRegisterIndexBenchmark {
   ).mapN(Options(_, _, _))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(arguments: Array[String]): Unit = {
+  def run(arguments: Array[String]): BenchmarkSample = {
     val parsed = BenchmarkArguments.parse(name, arguments.toSeq, options)
     val names  = Array.tabulate(parsed.names.raw) { index =>
       parsed.kind match {
@@ -49,10 +49,14 @@ object PTXRegisterIndexBenchmark {
       }
       checksum
     }
-    Console.out.println(
-      s"kind=${parsed.kind.toString.toLowerCaseRoot} names=${parsed.names} iterations=${parsed.iterations} " +
-        s"nsPerIndex=${measurement.elapsedNanos.raw.toDouble / parsed.iterations.raw} " +
-        s"bytesPerIndex=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=${measurement.value}"
-    )
+    val expected = parsed.kind match {
+      case RegisterKind.Named    => -parsed.iterations.raw.toLong
+      case RegisterKind.Numbered =>
+        val complete  = (0 until names.length).map(index => (index % 6144).toLong).sum
+        val remainder = (0 until parsed.iterations.raw % names.length).map(index => (index % 6144).toLong).sum
+        complete * (parsed.iterations.raw / names.length) + remainder
+    }
+    require(measurement.value == expected, s"register index checksum ${measurement.value} != $expected")
+    measurement.sample(parsed.iterations.toLong)
   }
 }

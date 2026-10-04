@@ -72,6 +72,25 @@ class ElfSuite extends munit.FunSuite {
     }
   }
 
+  test("ELF64 REL and RELA entries preserve unsigned symbol IDs and signed explicit addends") {
+    for {
+      order    <- Vec(ByteOrder.LITTLE_ENDIAN, ByteOrder.BIG_ENDIAN)
+      explicit <- Vec(false, true)
+    } {
+      val buffer = ByteBuffer.allocate(if (explicit) 24 else 16).order(order)
+      buffer.putLong(0, 0x100000008L).putLong(8, 0xfedcba98abcdef01L)
+      if (explicit) buffer.putLong(16, -17L)
+      val bytes      = Vec.from(buffer.array())
+      val relocation = elf.relocations64(bytes, order, explicit).toOption.get.head
+      assertEquals(relocation.offset, 0x100000008L)
+      assertEquals(relocation.symbol.raw, 0xfedcba98L)
+      assertEquals(relocation.kind.raw, 0xabcdef01L)
+      assertEquals(relocation.addend, Option.when(explicit)(-17L))
+      assert(elf.relocations64(bytes.dropRight(1), order, explicit).isLeft)
+      assertEquals(elf.relocations64(Vec.empty, order, explicit), Right(Vec.empty[elf.Relocation64]))
+    }
+  }
+
   test("ELF string tables validate offsets, terminators and UTF-8") {
     val names = Vec[Byte](0, 'k'.toByte, 0)
     assertEquals(elf.stringAt(names, 1), Right("k"))

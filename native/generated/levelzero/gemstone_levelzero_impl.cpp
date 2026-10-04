@@ -1629,3 +1629,4 @@ static_assert(static_cast<long long>(gemstone::levelzero::api::ZE_VALIDATE_RUNTI
 static_assert(static_cast<long long>(gemstone::levelzero::api::ZE_VIRTUAL_MEM_READONLY_PROPERTIES_EXT_VERSION_1_0) == static_cast<long long>(ZE_VIRTUAL_MEM_READONLY_PROPERTIES_EXT_VERSION_1_0));
 static_assert(static_cast<long long>(gemstone::levelzero::api::ZE_VIRTUAL_MEM_READONLY_PROPERTIES_EXT_VERSION_CURRENT) == static_cast<long long>(ZE_VIRTUAL_MEM_READONLY_PROPERTIES_EXT_VERSION_CURRENT));
 static_assert(static_cast<long long>(gemstone::levelzero::api::ZE_VIRTUAL_MEM_READONLY_PROPERTIES_EXT_VERSION_FORCE_UINT32) == static_cast<long long>(ZE_VIRTUAL_MEM_READONLY_PROPERTIES_EXT_VERSION_FORCE_UINT32));
+

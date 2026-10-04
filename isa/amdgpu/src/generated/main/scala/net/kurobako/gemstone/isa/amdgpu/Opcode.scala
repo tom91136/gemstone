@@ -11,7 +11,7 @@ object Opcode {
   }
 
   enum ComparisonRelation {
-    case Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual
+    case Equal, NotEqual, OrderedNotEqual, Less, LessOrEqual, Greater, GreaterOrEqual
     case NotLess, NotLessOrEqual, NotGreater, NotGreaterOrEqual
     case Ordered, Unordered, NotLessOrGreater, Class
   }
@@ -324,6 +324,61 @@ object Opcode {
     FlatInstructionDefs.FlatStoreShortD16Hi
   )
   val ComparisonOpcodes: Map[Opcode, ComparisonOpcode] = Map(
+    SOPCInstructionDefs.SCmpEqF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Equal, false),
+    SOPCInstructionDefs.SCmpEqF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Equal, false),
+    SOPCInstructionDefs.SCmpEqI32 -> ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.Equal, false),
+    SOPCInstructionDefs.SCmpEqU32 -> ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.Equal, false),
+    SOPCInstructionDefs.SCmpEqU64 -> ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.Equal, false),
+    SOPCInstructionDefs.SCmpGeF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.GreaterOrEqual, false),
+    SOPCInstructionDefs.SCmpGeF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.GreaterOrEqual, false),
+    SOPCInstructionDefs.SCmpGeI32 ->
+      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.GreaterOrEqual, false),
+    SOPCInstructionDefs.SCmpGeU32 ->
+      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.GreaterOrEqual, false),
+    SOPCInstructionDefs.SCmpGtF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Greater, false),
+    SOPCInstructionDefs.SCmpGtF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Greater, false),
+    SOPCInstructionDefs.SCmpGtI32 -> ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.Greater, false),
+    SOPCInstructionDefs.SCmpGtU32 -> ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.Greater, false),
+    SOPCInstructionDefs.SCmpLeF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.LessOrEqual, false),
+    SOPCInstructionDefs.SCmpLeF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.LessOrEqual, false),
+    SOPCInstructionDefs.SCmpLeI32 -> ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.LessOrEqual, false),
+    SOPCInstructionDefs.SCmpLeU32 -> ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.LessOrEqual, false),
+    SOPCInstructionDefs.SCmpLgF16 ->
+      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.OrderedNotEqual, false),
+    SOPCInstructionDefs.SCmpLgF32 ->
+      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.OrderedNotEqual, false),
+    SOPCInstructionDefs.SCmpLgI32 ->
+      ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.OrderedNotEqual, false),
+    SOPCInstructionDefs.SCmpLgU32 ->
+      ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.OrderedNotEqual, false),
+    SOPCInstructionDefs.SCmpLgU64 ->
+      ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.OrderedNotEqual, false),
+    SOPCInstructionDefs.SCmpLtF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Less, false),
+    SOPCInstructionDefs.SCmpLtF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Less, false),
+    SOPCInstructionDefs.SCmpLtI32 -> ComparisonOpcode(ComparisonKind.Signed32, ComparisonRelation.Less, false),
+    SOPCInstructionDefs.SCmpLtU32 -> ComparisonOpcode(ComparisonKind.Unsigned32, ComparisonRelation.Less, false),
+    SOPCInstructionDefs.SCmpNeqF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotEqual, false),
+    SOPCInstructionDefs.SCmpNeqF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotEqual, false),
+    SOPCInstructionDefs.SCmpNgeF16 ->
+      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotGreaterOrEqual, false),
+    SOPCInstructionDefs.SCmpNgeF32 ->
+      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotGreaterOrEqual, false),
+    SOPCInstructionDefs.SCmpNgtF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotGreater, false),
+    SOPCInstructionDefs.SCmpNgtF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotGreater, false),
+    SOPCInstructionDefs.SCmpNleF16 ->
+      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotLessOrEqual, false),
+    SOPCInstructionDefs.SCmpNleF32 ->
+      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotLessOrEqual, false),
+    SOPCInstructionDefs.SCmpNlgF16 ->
+      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotLessOrGreater, false),
+    SOPCInstructionDefs.SCmpNlgF32 ->
+      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotLessOrGreater, false),
+    SOPCInstructionDefs.SCmpNltF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotLess, false),
+    SOPCInstructionDefs.SCmpNltF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotLess, false),
+    SOPCInstructionDefs.SCmpOF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Ordered, false),
+    SOPCInstructionDefs.SCmpOF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Ordered, false),
+    SOPCInstructionDefs.SCmpUF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Unordered, false),
+    SOPCInstructionDefs.SCmpUF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Unordered, false),
     VectorCompareInstructionDefs.VCmpClassF32 ->
       ComparisonOpcode(ComparisonKind.ClassFloat32, ComparisonRelation.Class, false),
     VectorCompareInstructionDefs.VCmpClassF64 ->
@@ -398,11 +453,11 @@ object Opcode {
     VectorCompareInstructionDefs.VCmpLeU64 ->
       ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.LessOrEqual, false),
     VectorCompareInstructionDefs.VCmpLgF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotEqual, false),
+      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.OrderedNotEqual, false),
     VectorCompareInstructionDefs.VCmpLgF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotEqual, false),
+      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.OrderedNotEqual, false),
     VectorCompareInstructionDefs.VCmpLgF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotEqual, false),
+      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.OrderedNotEqual, false),
     VectorCompareInstructionDefs.VCmpLtF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Less, false),
     VectorCompareInstructionDefs.VCmpLtF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Less, false),
     VectorCompareInstructionDefs.VCmpLtF64 -> ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.Less, false),
@@ -549,11 +604,11 @@ object Opcode {
     VectorCompareInstructionDefs.VCmpxLeU64 ->
       ComparisonOpcode(ComparisonKind.Unsigned64, ComparisonRelation.LessOrEqual, true),
     VectorCompareInstructionDefs.VCmpxLgF16 ->
-      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.NotEqual, true),
+      ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.OrderedNotEqual, true),
     VectorCompareInstructionDefs.VCmpxLgF32 ->
-      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.NotEqual, true),
+      ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.OrderedNotEqual, true),
     VectorCompareInstructionDefs.VCmpxLgF64 ->
-      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.NotEqual, true),
+      ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.OrderedNotEqual, true),
     VectorCompareInstructionDefs.VCmpxLtF16 -> ComparisonOpcode(ComparisonKind.Float16, ComparisonRelation.Less, true),
     VectorCompareInstructionDefs.VCmpxLtF32 -> ComparisonOpcode(ComparisonKind.Float32, ComparisonRelation.Less, true),
     VectorCompareInstructionDefs.VCmpxLtF64 -> ComparisonOpcode(ComparisonKind.Float64, ComparisonRelation.Less, true),

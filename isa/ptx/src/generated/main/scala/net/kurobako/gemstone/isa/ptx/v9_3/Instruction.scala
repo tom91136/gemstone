@@ -557,6 +557,254 @@ object Instruction {
     _root_.scala.collection.immutable.Set(Modifier.Relu, Modifier.Satfinite, Modifier.ScaledN2Ue8m0),
     false
   )
+  private def metadataLd_86_0(): InstructionForm = InstructionForm(
+    Vec(
+      OperandConstraint.Register,
+      OperandConstraint.Address,
+      OperandConstraint.Unknown("unparsed"),
+      OperandConstraint.Value
+    ),
+    Vec(ModifierGroup(
+      Modifier.B128,
+      Modifier.B16,
+      Modifier.B32,
+      Modifier.B64,
+      Modifier.B8,
+      Modifier.F32,
+      Modifier.F64,
+      Modifier.S16,
+      Modifier.S32,
+      Modifier.S64,
+      Modifier.S8,
+      Modifier.U16,
+      Modifier.U32,
+      Modifier.U64,
+      Modifier.U8
+    )),
+    _root_.scala.collection.immutable.Set(
+      Modifier.L2128B,
+      Modifier.L2256B,
+      Modifier.L264B,
+      Modifier.L2CacheHint,
+      Modifier.Ca,
+      Modifier.Cg,
+      Modifier.Const,
+      Modifier.Cs,
+      Modifier.Cv,
+      Modifier.Func,
+      Modifier.Global,
+      Modifier.Local,
+      Modifier.Lu,
+      Modifier.V2,
+      Modifier.V4,
+      Modifier.V8,
+      Modifier.Weak
+    ),
+    false
+  )
+  private def metadataLd_86_1(): InstructionForm = InstructionForm(
+    Vec(
+      OperandConstraint.Register,
+      OperandConstraint.Address,
+      OperandConstraint.Unknown("unparsed"),
+      OperandConstraint.Value
+    ),
+    Vec(ModifierGroup(
+      Modifier.B128,
+      Modifier.B16,
+      Modifier.B32,
+      Modifier.B64,
+      Modifier.B8,
+      Modifier.F32,
+      Modifier.F64,
+      Modifier.S16,
+      Modifier.S32,
+      Modifier.S64,
+      Modifier.S8,
+      Modifier.U16,
+      Modifier.U32,
+      Modifier.U64,
+      Modifier.U8
+    )),
+    _root_.scala.collection.immutable.Set(
+      Modifier.L1EvictFirst,
+      Modifier.L1EvictLast,
+      Modifier.L1EvictNormal,
+      Modifier.L1EvictUnchanged,
+      Modifier.L1NoAllocate,
+      Modifier.L2128B,
+      Modifier.L2256B,
+      Modifier.L264B,
+      Modifier.L2CacheHint,
+      Modifier.L2EvictFirst,
+      Modifier.L2EvictLast,
+      Modifier.L2EvictNormal,
+      Modifier.Const,
+      Modifier.Func,
+      Modifier.Global,
+      Modifier.Local,
+      Modifier.V2,
+      Modifier.V4,
+      Modifier.V8,
+      Modifier.Weak
+    ),
+    false
+  )
+  private def metadataLd_86_2(): InstructionForm = InstructionForm(
+    Vec(OperandConstraint.Register, OperandConstraint.Address),
+    Vec(
+      ModifierGroup(Modifier.Volatile),
+      ModifierGroup(
+        Modifier.B128,
+        Modifier.B16,
+        Modifier.B32,
+        Modifier.B64,
+        Modifier.B8,
+        Modifier.F32,
+        Modifier.F64,
+        Modifier.S16,
+        Modifier.S32,
+        Modifier.S64,
+        Modifier.S8,
+        Modifier.U16,
+        Modifier.U32,
+        Modifier.U64,
+        Modifier.U8
+      )
+    ),
+    _root_.scala.collection.immutable.Set(
+      Modifier.L2128B,
+      Modifier.L2256B,
+      Modifier.L264B,
+      Modifier.Const,
+      Modifier.Func,
+      Modifier.Global,
+      Modifier.Local,
+      Modifier.V2,
+      Modifier.V4,
+      Modifier.V8
+    ),
+    false
+  )
+  private def metadataLd_86_3(): InstructionForm = InstructionForm(
+    Vec(OperandConstraint.Register, OperandConstraint.Address, OperandConstraint.Value),
+    Vec(
+      ModifierGroup(Modifier.Relaxed),
+      ModifierGroup(Modifier.Cluster, Modifier.Cta, Modifier.Gpu, Modifier.Sys),
+      ModifierGroup(
+        Modifier.B128,
+        Modifier.B16,
+        Modifier.B32,
+        Modifier.B64,
+        Modifier.B8,
+        Modifier.F32,
+        Modifier.F64,
+        Modifier.S16,
+        Modifier.S32,
+        Modifier.S64,
+        Modifier.S8,
+        Modifier.U16,
+        Modifier.U32,
+        Modifier.U64,
+        Modifier.U8
+      )
+    ),
+    _root_.scala.collection.immutable.Set(
+      Modifier.L1EvictFirst,
+      Modifier.L1EvictLast,
+      Modifier.L1EvictNormal,
+      Modifier.L1EvictUnchanged,
+      Modifier.L1NoAllocate,
+      Modifier.L2128B,
+      Modifier.L2256B,
+      Modifier.L264B,
+      Modifier.L2CacheHint,
+      Modifier.L2EvictFirst,
+      Modifier.L2EvictLast,
+      Modifier.L2EvictNormal,
+      Modifier.Const,
+      Modifier.Func,
+      Modifier.Global,
+      Modifier.Local,
+      Modifier.V2,
+      Modifier.V4,
+      Modifier.V8
+    ),
+    false
+  )
+  private def metadataLd_86_4(): InstructionForm = InstructionForm(
+    Vec(OperandConstraint.Register, OperandConstraint.Address, OperandConstraint.Value),
+    Vec(
+      ModifierGroup(Modifier.Acquire),
+      ModifierGroup(Modifier.Cluster, Modifier.Cta, Modifier.Gpu, Modifier.Sys),
+      ModifierGroup(
+        Modifier.B128,
+        Modifier.B16,
+        Modifier.B32,
+        Modifier.B64,
+        Modifier.B8,
+        Modifier.F32,
+        Modifier.F64,
+        Modifier.S16,
+        Modifier.S32,
+        Modifier.S64,
+        Modifier.S8,
+        Modifier.U16,
+        Modifier.U32,
+        Modifier.U64,
+        Modifier.U8
+      )
+    ),
+    _root_.scala.collection.immutable.Set(
+      Modifier.L1EvictFirst,
+      Modifier.L1EvictLast,
+      Modifier.L1EvictNormal,
+      Modifier.L1EvictUnchanged,
+      Modifier.L1NoAllocate,
+      Modifier.L2128B,
+      Modifier.L2256B,
+      Modifier.L264B,
+      Modifier.L2CacheHint,
+      Modifier.L2EvictFirst,
+      Modifier.L2EvictLast,
+      Modifier.L2EvictNormal,
+      Modifier.Const,
+      Modifier.Func,
+      Modifier.Global,
+      Modifier.Local,
+      Modifier.V2,
+      Modifier.V4,
+      Modifier.V8
+    ),
+    false
+  )
+  private def metadataLd_86_5(): InstructionForm = InstructionForm(
+    Vec(OperandConstraint.Register, OperandConstraint.Address),
+    Vec(
+      ModifierGroup(Modifier.Mmio),
+      ModifierGroup(Modifier.Acquire, Modifier.Relaxed),
+      ModifierGroup(Modifier.Sys),
+      ModifierGroup(
+        Modifier.B128,
+        Modifier.B16,
+        Modifier.B32,
+        Modifier.B64,
+        Modifier.B8,
+        Modifier.F32,
+        Modifier.F64,
+        Modifier.S16,
+        Modifier.S32,
+        Modifier.S64,
+        Modifier.S8,
+        Modifier.U16,
+        Modifier.U32,
+        Modifier.U64,
+        Modifier.U8
+      )
+    ),
+    _root_.scala.collection.immutable.Set(Modifier.Global),
+    false
+  )
   private def metadataMma_170_0(): InstructionForm = InstructionForm(
     Vec(OperandConstraint.Register, OperandConstraint.Value, OperandConstraint.Value, OperandConstraint.Value),
     Vec(
@@ -713,7 +961,7 @@ object Instruction {
       ModifierGroup(Modifier.F32),
       ModifierGroup(Modifier.Ue8m0)
     ),
-    _root_.scala.collection.immutable.Set(),
+    _root_.scala.collection.immutable.Set(Modifier.ScaleVec1X),
     false
   )
   private def metadataMma_170_9(): InstructionForm = InstructionForm(
@@ -737,6 +985,7 @@ object Instruction {
       ModifierGroup(Modifier.Col),
       ModifierGroup(Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.BlockScale),
+      ModifierGroup(Modifier.ScaleVec1X),
       ModifierGroup(Modifier.F32),
       ModifierGroup(Modifier.E2m1),
       ModifierGroup(Modifier.E2m1),
@@ -773,7 +1022,7 @@ object Instruction {
       ModifierGroup(Modifier.F32),
       ModifierGroup(Modifier.Ue8m0)
     ),
-    _root_.scala.collection.immutable.Set(),
+    _root_.scala.collection.immutable.Set(Modifier.ScaleVec1X),
     false
   )
   private def metadataMma_170_11(): InstructionForm = InstructionForm(
@@ -1040,7 +1289,7 @@ object Instruction {
       ModifierGroup(Modifier.F32),
       ModifierGroup(Modifier.Ue8m0)
     ),
-    _root_.scala.collection.immutable.Set(),
+    _root_.scala.collection.immutable.Set(Modifier.ScaleVec1X),
     false
   )
   private def metadataMmaSpOrderedMetadata_174_9(): InstructionForm = InstructionForm(
@@ -1066,6 +1315,7 @@ object Instruction {
       ModifierGroup(Modifier.Col),
       ModifierGroup(Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.BlockScale),
+      ModifierGroup(Modifier.ScaleVec1X),
       ModifierGroup(Modifier.F32),
       ModifierGroup(Modifier.E2m1),
       ModifierGroup(Modifier.E2m1),
@@ -1104,7 +1354,7 @@ object Instruction {
       ModifierGroup(Modifier.F32),
       ModifierGroup(Modifier.Ue8m0)
     ),
-    _root_.scala.collection.immutable.Set(),
+    _root_.scala.collection.immutable.Set(Modifier.ScaleVec1X),
     false
   )
   private def metadataMmaSpOrderedMetadata_174_11(): InstructionForm = InstructionForm(
@@ -1528,7 +1778,10 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4)),
+    Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+      ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4)
+    ),
     _root_.scala.collection.immutable.Set(),
     false
   )
@@ -1542,7 +1795,10 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4)),
+    Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+      ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4)
+    ),
     _root_.scala.collection.immutable.Set(),
     false
   )
@@ -1557,10 +1813,17 @@ object Instruction {
       OperandConstraint.Value
     ),
     Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
       ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.BlockScale)
     ),
-    _root_.scala.collection.immutable.Set(Modifier.Block16, Modifier.Block32),
+    _root_.scala.collection.immutable.Set(
+      Modifier.Block16,
+      Modifier.Block32,
+      Modifier.ScaleVec1X,
+      Modifier.ScaleVec2X,
+      Modifier.ScaleVec4X
+    ),
     false
   )
   private def metadataTcgen05Mma_186_3(): InstructionForm = InstructionForm(
@@ -1574,10 +1837,17 @@ object Instruction {
       OperandConstraint.Value
     ),
     Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
       ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.BlockScale)
     ),
-    _root_.scala.collection.immutable.Set(Modifier.Block16, Modifier.Block32),
+    _root_.scala.collection.immutable.Set(
+      Modifier.Block16,
+      Modifier.Block32,
+      Modifier.ScaleVec1X,
+      Modifier.ScaleVec2X,
+      Modifier.ScaleVec4X
+    ),
     false
   )
   private def metadataTcgen05Mma_186_4(): InstructionForm = InstructionForm(
@@ -1591,6 +1861,7 @@ object Instruction {
       OperandConstraint.Value
     ),
     Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
       ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.CollectorBufferOp)
     ),
@@ -1608,6 +1879,7 @@ object Instruction {
       OperandConstraint.Value
     ),
     Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
       ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.CollectorBufferOp)
     ),
@@ -1624,7 +1896,11 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4), ModifierGroup(Modifier.Ashift)),
+    Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+      ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
+      ModifierGroup(Modifier.Ashift)
+    ),
     _root_.scala.collection.immutable.Set(Modifier.CollectorBufferOp),
     false
   )
@@ -1639,11 +1915,18 @@ object Instruction {
       OperandConstraint.Value
     ),
     Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
       ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.BlockScale),
       ModifierGroup(Modifier.CollectorBufferOp)
     ),
-    _root_.scala.collection.immutable.Set(Modifier.Block16, Modifier.Block32),
+    _root_.scala.collection.immutable.Set(
+      Modifier.Block16,
+      Modifier.Block32,
+      Modifier.ScaleVec1X,
+      Modifier.ScaleVec2X,
+      Modifier.ScaleVec4X
+    ),
     false
   )
   private def metadataTcgen05Mma_186_8(): InstructionForm = InstructionForm(
@@ -1657,11 +1940,18 @@ object Instruction {
       OperandConstraint.Value
     ),
     Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
       ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.BlockScale),
       ModifierGroup(Modifier.CollectorBufferOp)
     ),
-    _root_.scala.collection.immutable.Set(Modifier.Block16, Modifier.Block32),
+    _root_.scala.collection.immutable.Set(
+      Modifier.Block16,
+      Modifier.Block32,
+      Modifier.ScaleVec1X,
+      Modifier.ScaleVec2X,
+      Modifier.ScaleVec4X
+    ),
     false
   )
   private def metadataTcgen05Mma_186_9(): InstructionForm = InstructionForm(
@@ -1673,7 +1963,7 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindI8)),
+    Vec(ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2), ModifierGroup(Modifier.KindI8)),
     _root_.scala.collection.immutable.Set(),
     false
   )
@@ -1686,7 +1976,7 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindI8)),
+    Vec(ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2), ModifierGroup(Modifier.KindI8)),
     _root_.scala.collection.immutable.Set(),
     false
   )
@@ -1699,7 +1989,11 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindI8), ModifierGroup(Modifier.CollectorBufferOp)),
+    Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+      ModifierGroup(Modifier.KindI8),
+      ModifierGroup(Modifier.CollectorBufferOp)
+    ),
     _root_.scala.collection.immutable.Set(),
     false
   )
@@ -1712,7 +2006,11 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindI8), ModifierGroup(Modifier.Ashift)),
+    Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+      ModifierGroup(Modifier.KindI8),
+      ModifierGroup(Modifier.Ashift)
+    ),
     _root_.scala.collection.immutable.Set(Modifier.CollectorBufferOp),
     false
   )
@@ -1725,7 +2023,11 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindI8), ModifierGroup(Modifier.CollectorBufferOp)),
+    Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+      ModifierGroup(Modifier.KindI8),
+      ModifierGroup(Modifier.CollectorBufferOp)
+    ),
     _root_.scala.collection.immutable.Set(Modifier.Ashift),
     false
   )
@@ -1740,7 +2042,10 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4)),
+    Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+      ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4)
+    ),
     _root_.scala.collection.immutable.Set(),
     false
   )
@@ -1755,7 +2060,10 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4)),
+    Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+      ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4)
+    ),
     _root_.scala.collection.immutable.Set(),
     false
   )
@@ -1771,10 +2079,17 @@ object Instruction {
       OperandConstraint.Value
     ),
     Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
       ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.BlockScale)
     ),
-    _root_.scala.collection.immutable.Set(Modifier.Block16, Modifier.Block32),
+    _root_.scala.collection.immutable.Set(
+      Modifier.Block16,
+      Modifier.Block32,
+      Modifier.ScaleVec1X,
+      Modifier.ScaleVec2X,
+      Modifier.ScaleVec4X
+    ),
     false
   )
   private def metadataTcgen05MmaSp_187_3(): InstructionForm = InstructionForm(
@@ -1789,10 +2104,17 @@ object Instruction {
       OperandConstraint.Value
     ),
     Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
       ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.BlockScale)
     ),
-    _root_.scala.collection.immutable.Set(Modifier.Block16, Modifier.Block32),
+    _root_.scala.collection.immutable.Set(
+      Modifier.Block16,
+      Modifier.Block32,
+      Modifier.ScaleVec1X,
+      Modifier.ScaleVec2X,
+      Modifier.ScaleVec4X
+    ),
     false
   )
   private def metadataTcgen05MmaSp_187_4(): InstructionForm = InstructionForm(
@@ -1807,6 +2129,7 @@ object Instruction {
       OperandConstraint.Value
     ),
     Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
       ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.CollectorBufferOp)
     ),
@@ -1824,7 +2147,11 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4), ModifierGroup(Modifier.Ashift)),
+    Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+      ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
+      ModifierGroup(Modifier.Ashift)
+    ),
     _root_.scala.collection.immutable.Set(Modifier.CollectorBufferOp),
     false
   )
@@ -1840,6 +2167,7 @@ object Instruction {
       OperandConstraint.Value
     ),
     Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
       ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.CollectorBufferOp)
     ),
@@ -1858,11 +2186,18 @@ object Instruction {
       OperandConstraint.Value
     ),
     Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
       ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.BlockScale),
       ModifierGroup(Modifier.CollectorBufferOp)
     ),
-    _root_.scala.collection.immutable.Set(Modifier.Block16, Modifier.Block32),
+    _root_.scala.collection.immutable.Set(
+      Modifier.Block16,
+      Modifier.Block32,
+      Modifier.ScaleVec1X,
+      Modifier.ScaleVec2X,
+      Modifier.ScaleVec4X
+    ),
     false
   )
   private def metadataTcgen05MmaSp_187_8(): InstructionForm = InstructionForm(
@@ -1877,11 +2212,18 @@ object Instruction {
       OperandConstraint.Value
     ),
     Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
       ModifierGroup(Modifier.KindMxf4, Modifier.KindMxf4nvf4, Modifier.KindMxf8f6f4),
       ModifierGroup(Modifier.BlockScale),
       ModifierGroup(Modifier.CollectorBufferOp)
     ),
-    _root_.scala.collection.immutable.Set(Modifier.Block16, Modifier.Block32),
+    _root_.scala.collection.immutable.Set(
+      Modifier.Block16,
+      Modifier.Block32,
+      Modifier.ScaleVec1X,
+      Modifier.ScaleVec2X,
+      Modifier.ScaleVec4X
+    ),
     false
   )
   private def metadataTcgen05MmaSp_187_9(): InstructionForm = InstructionForm(
@@ -1894,7 +2236,7 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindI8)),
+    Vec(ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2), ModifierGroup(Modifier.KindI8)),
     _root_.scala.collection.immutable.Set(),
     false
   )
@@ -1908,7 +2250,7 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindI8)),
+    Vec(ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2), ModifierGroup(Modifier.KindI8)),
     _root_.scala.collection.immutable.Set(),
     false
   )
@@ -1922,7 +2264,11 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindI8), ModifierGroup(Modifier.CollectorBufferOp)),
+    Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+      ModifierGroup(Modifier.KindI8),
+      ModifierGroup(Modifier.CollectorBufferOp)
+    ),
     _root_.scala.collection.immutable.Set(),
     false
   )
@@ -1936,7 +2282,11 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindI8), ModifierGroup(Modifier.Ashift)),
+    Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+      ModifierGroup(Modifier.KindI8),
+      ModifierGroup(Modifier.Ashift)
+    ),
     _root_.scala.collection.immutable.Set(Modifier.CollectorBufferOp),
     false
   )
@@ -1950,7 +2300,11 @@ object Instruction {
       OperandConstraint.Value,
       OperandConstraint.Value
     ),
-    Vec(ModifierGroup(Modifier.KindI8), ModifierGroup(Modifier.CollectorBufferOp)),
+    Vec(
+      ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+      ModifierGroup(Modifier.KindI8),
+      ModifierGroup(Modifier.CollectorBufferOp)
+    ),
     _root_.scala.collection.immutable.Set(Modifier.Ashift),
     false
   )
@@ -4606,12 +4960,17 @@ object Instruction {
                   InstructionForm(
                     Vec(OperandConstraint.Value, OperandConstraint.Value),
                     Vec(
-                      ModifierGroup(Modifier.GetFirstCtaid),
+                      ModifierGroup(
+                        Modifier.GetFirstCtaid,
+                        Modifier.GetFirstCtaidX,
+                        Modifier.GetFirstCtaidY,
+                        Modifier.GetFirstCtaidZ
+                      ),
                       ModifierGroup(Modifier.B32),
                       ModifierGroup(Modifier.B128)
                     ),
                     _root_.scala.collection.immutable.Set(),
-                    false
+                    true
                   )
                 )
               )
@@ -4827,8 +5186,17 @@ object Instruction {
                       OperandConstraint.Value,
                       OperandConstraint.Value
                     ),
-                    Vec(ModifierGroup(Modifier.Ca), ModifierGroup(Modifier.Shared), ModifierGroup(Modifier.Global)),
-                    _root_.scala.collection.immutable.Set(Modifier.L2CacheHint),
+                    Vec(
+                      ModifierGroup(Modifier.Ca),
+                      ModifierGroup(Modifier.Shared, Modifier.SharedCta),
+                      ModifierGroup(Modifier.Global)
+                    ),
+                    _root_.scala.collection.immutable.Set(
+                      Modifier.L2128B,
+                      Modifier.L2256B,
+                      Modifier.L264B,
+                      Modifier.L2CacheHint
+                    ),
                     false
                   ),
                   InstructionForm(
@@ -4839,8 +5207,17 @@ object Instruction {
                       OperandConstraint.Value,
                       OperandConstraint.Value
                     ),
-                    Vec(ModifierGroup(Modifier.Cg), ModifierGroup(Modifier.Shared), ModifierGroup(Modifier.Global)),
-                    _root_.scala.collection.immutable.Set(Modifier.L2CacheHint),
+                    Vec(
+                      ModifierGroup(Modifier.Cg),
+                      ModifierGroup(Modifier.Shared, Modifier.SharedCta),
+                      ModifierGroup(Modifier.Global)
+                    ),
+                    _root_.scala.collection.immutable.Set(
+                      Modifier.L2128B,
+                      Modifier.L2256B,
+                      Modifier.L264B,
+                      Modifier.L2CacheHint
+                    ),
                     false
                   ),
                   InstructionForm(
@@ -4851,8 +5228,17 @@ object Instruction {
                       OperandConstraint.Value,
                       OperandConstraint.Value
                     ),
-                    Vec(ModifierGroup(Modifier.Ca), ModifierGroup(Modifier.Shared), ModifierGroup(Modifier.Global)),
-                    _root_.scala.collection.immutable.Set(Modifier.L2CacheHint),
+                    Vec(
+                      ModifierGroup(Modifier.Ca),
+                      ModifierGroup(Modifier.Shared, Modifier.SharedCta),
+                      ModifierGroup(Modifier.Global)
+                    ),
+                    _root_.scala.collection.immutable.Set(
+                      Modifier.L2128B,
+                      Modifier.L2256B,
+                      Modifier.L264B,
+                      Modifier.L2CacheHint
+                    ),
                     false
                   ),
                   InstructionForm(
@@ -4863,8 +5249,17 @@ object Instruction {
                       OperandConstraint.Value,
                       OperandConstraint.Value
                     ),
-                    Vec(ModifierGroup(Modifier.Cg), ModifierGroup(Modifier.Shared), ModifierGroup(Modifier.Global)),
-                    _root_.scala.collection.immutable.Set(Modifier.L2CacheHint),
+                    Vec(
+                      ModifierGroup(Modifier.Cg),
+                      ModifierGroup(Modifier.Shared, Modifier.SharedCta),
+                      ModifierGroup(Modifier.Global)
+                    ),
+                    _root_.scala.collection.immutable.Set(
+                      Modifier.L2128B,
+                      Modifier.L2256B,
+                      Modifier.L264B,
+                      Modifier.L2CacheHint
+                    ),
                     false
                   )
                 )
@@ -5382,6 +5777,7 @@ object Instruction {
                     Modifier.L2CacheHint,
                     Modifier.Im2col,
                     Modifier.Im2colW,
+                    Modifier.Im2colW128,
                     Modifier.Tile,
                     Modifier.TileGather4
                   ),
@@ -5482,6 +5878,8 @@ object Instruction {
                     ),
                     _root_.scala.collection.immutable.Set(
                       Modifier.L2CacheHint,
+                      Modifier.CtaGroup1,
+                      Modifier.CtaGroup2,
                       Modifier.Im2colNoOffs,
                       Modifier.Tile,
                       Modifier.TileScatter4
@@ -5504,6 +5902,8 @@ object Instruction {
                     ),
                     _root_.scala.collection.immutable.Set(
                       Modifier.L2CacheHint,
+                      Modifier.CtaGroup1,
+                      Modifier.CtaGroup2,
                       Modifier.Im2colNoOffs,
                       Modifier.MulticastCluster,
                       Modifier.Tile,
@@ -5574,6 +5974,8 @@ object Instruction {
                     ),
                     _root_.scala.collection.immutable.Set(
                       Modifier.L2CacheHint,
+                      Modifier.CtaGroup1,
+                      Modifier.CtaGroup2,
                       Modifier.Im2colNoOffs,
                       Modifier.Tile,
                       Modifier.TileScatter4
@@ -5596,6 +5998,8 @@ object Instruction {
                     ),
                     _root_.scala.collection.immutable.Set(
                       Modifier.L2CacheHint,
+                      Modifier.CtaGroup1,
+                      Modifier.CtaGroup2,
                       Modifier.Im2colNoOffs,
                       Modifier.MulticastCluster,
                       Modifier.Tile,
@@ -6173,7 +6577,7 @@ object Instruction {
                   InstructionForm(
                     Vec(OperandConstraint.Register, OperandConstraint.Value),
                     Vec(
-                      ModifierGroup(Modifier.Const, Modifier.Global, Modifier.Local),
+                      ModifierGroup(Modifier.Cluster, Modifier.Const, Modifier.Global, Modifier.Local),
                       ModifierGroup(Modifier.U32, Modifier.U64)
                     ),
                     _root_.scala.collection.immutable.Set(),
@@ -6182,7 +6586,7 @@ object Instruction {
                   InstructionForm(
                     Vec(OperandConstraint.Register, OperandConstraint.Value),
                     Vec(
-                      ModifierGroup(Modifier.Const, Modifier.Global, Modifier.Local),
+                      ModifierGroup(Modifier.Cluster, Modifier.Const, Modifier.Global, Modifier.Local),
                       ModifierGroup(Modifier.U32, Modifier.U64)
                     ),
                     _root_.scala.collection.immutable.Set(),
@@ -6191,7 +6595,7 @@ object Instruction {
                   InstructionForm(
                     Vec(OperandConstraint.Register, OperandConstraint.Value),
                     Vec(
-                      ModifierGroup(Modifier.Const, Modifier.Global, Modifier.Local),
+                      ModifierGroup(Modifier.Cluster, Modifier.Const, Modifier.Global, Modifier.Local),
                       ModifierGroup(Modifier.U32, Modifier.U64)
                     ),
                     _root_.scala.collection.immutable.Set(),
@@ -6201,7 +6605,7 @@ object Instruction {
                     Vec(OperandConstraint.Register, OperandConstraint.Value),
                     Vec(
                       ModifierGroup(Modifier.To),
-                      ModifierGroup(Modifier.Const, Modifier.Global, Modifier.Local),
+                      ModifierGroup(Modifier.Cluster, Modifier.Const, Modifier.Global, Modifier.Local),
                       ModifierGroup(Modifier.U32, Modifier.U64)
                     ),
                     _root_.scala.collection.immutable.Set(),
@@ -7526,7 +7930,7 @@ object Instruction {
                 Target(20),
                 Vec(InstructionForm(
                   Vec(OperandConstraint.Register, OperandConstraint.Value),
-                  Vec(ModifierGroup(Modifier.Const, Modifier.Global, Modifier.Local)),
+                  Vec(ModifierGroup(Modifier.Cluster, Modifier.Const, Modifier.Global, Modifier.Local)),
                   _root_.scala.collection.immutable.Set(),
                   false
                 ))
@@ -7593,234 +7997,12 @@ object Instruction {
                 Version(1, 0),
                 Target(13),
                 Vec(
-                  InstructionForm(
-                    Vec(
-                      OperandConstraint.Register,
-                      OperandConstraint.Address,
-                      OperandConstraint.Unknown("unparsed"),
-                      OperandConstraint.Value
-                    ),
-                    Vec(ModifierGroup(
-                      Modifier.B128,
-                      Modifier.B16,
-                      Modifier.B32,
-                      Modifier.B64,
-                      Modifier.B8,
-                      Modifier.F32,
-                      Modifier.F64,
-                      Modifier.S16,
-                      Modifier.S32,
-                      Modifier.S64,
-                      Modifier.S8,
-                      Modifier.U16,
-                      Modifier.U32,
-                      Modifier.U64,
-                      Modifier.U8
-                    )),
-                    _root_.scala.collection.immutable.Set(
-                      Modifier.L2CacheHint,
-                      Modifier.Ca,
-                      Modifier.Cg,
-                      Modifier.Const,
-                      Modifier.Cs,
-                      Modifier.Cv,
-                      Modifier.Global,
-                      Modifier.Local,
-                      Modifier.Lu,
-                      Modifier.V2,
-                      Modifier.V4,
-                      Modifier.V8,
-                      Modifier.Weak
-                    ),
-                    false
-                  ),
-                  InstructionForm(
-                    Vec(
-                      OperandConstraint.Register,
-                      OperandConstraint.Address,
-                      OperandConstraint.Unknown("unparsed"),
-                      OperandConstraint.Value
-                    ),
-                    Vec(ModifierGroup(
-                      Modifier.B128,
-                      Modifier.B16,
-                      Modifier.B32,
-                      Modifier.B64,
-                      Modifier.B8,
-                      Modifier.F32,
-                      Modifier.F64,
-                      Modifier.S16,
-                      Modifier.S32,
-                      Modifier.S64,
-                      Modifier.S8,
-                      Modifier.U16,
-                      Modifier.U32,
-                      Modifier.U64,
-                      Modifier.U8
-                    )),
-                    _root_.scala.collection.immutable.Set(
-                      Modifier.L1EvictFirst,
-                      Modifier.L1EvictLast,
-                      Modifier.L1EvictNormal,
-                      Modifier.L1EvictUnchanged,
-                      Modifier.L1NoAllocate,
-                      Modifier.L2CacheHint,
-                      Modifier.L2EvictFirst,
-                      Modifier.L2EvictLast,
-                      Modifier.L2EvictNormal,
-                      Modifier.Const,
-                      Modifier.Global,
-                      Modifier.Local,
-                      Modifier.V2,
-                      Modifier.V4,
-                      Modifier.V8,
-                      Modifier.Weak
-                    ),
-                    false
-                  ),
-                  InstructionForm(
-                    Vec(OperandConstraint.Register, OperandConstraint.Address),
-                    Vec(
-                      ModifierGroup(Modifier.Volatile),
-                      ModifierGroup(
-                        Modifier.B128,
-                        Modifier.B16,
-                        Modifier.B32,
-                        Modifier.B64,
-                        Modifier.B8,
-                        Modifier.F32,
-                        Modifier.F64,
-                        Modifier.S16,
-                        Modifier.S32,
-                        Modifier.S64,
-                        Modifier.S8,
-                        Modifier.U16,
-                        Modifier.U32,
-                        Modifier.U64,
-                        Modifier.U8
-                      )
-                    ),
-                    _root_.scala.collection.immutable.Set(
-                      Modifier.Const,
-                      Modifier.Global,
-                      Modifier.Local,
-                      Modifier.V2,
-                      Modifier.V4,
-                      Modifier.V8
-                    ),
-                    false
-                  ),
-                  InstructionForm(
-                    Vec(OperandConstraint.Register, OperandConstraint.Address, OperandConstraint.Value),
-                    Vec(
-                      ModifierGroup(Modifier.Relaxed),
-                      ModifierGroup(Modifier.Cluster, Modifier.Cta, Modifier.Gpu, Modifier.Sys),
-                      ModifierGroup(
-                        Modifier.B128,
-                        Modifier.B16,
-                        Modifier.B32,
-                        Modifier.B64,
-                        Modifier.B8,
-                        Modifier.F32,
-                        Modifier.F64,
-                        Modifier.S16,
-                        Modifier.S32,
-                        Modifier.S64,
-                        Modifier.S8,
-                        Modifier.U16,
-                        Modifier.U32,
-                        Modifier.U64,
-                        Modifier.U8
-                      )
-                    ),
-                    _root_.scala.collection.immutable.Set(
-                      Modifier.L1EvictFirst,
-                      Modifier.L1EvictLast,
-                      Modifier.L1EvictNormal,
-                      Modifier.L1EvictUnchanged,
-                      Modifier.L1NoAllocate,
-                      Modifier.L2CacheHint,
-                      Modifier.L2EvictFirst,
-                      Modifier.L2EvictLast,
-                      Modifier.L2EvictNormal,
-                      Modifier.Const,
-                      Modifier.Global,
-                      Modifier.Local,
-                      Modifier.V2,
-                      Modifier.V4,
-                      Modifier.V8
-                    ),
-                    false
-                  ),
-                  InstructionForm(
-                    Vec(OperandConstraint.Register, OperandConstraint.Address, OperandConstraint.Value),
-                    Vec(
-                      ModifierGroup(Modifier.Acquire),
-                      ModifierGroup(Modifier.Cluster, Modifier.Cta, Modifier.Gpu, Modifier.Sys),
-                      ModifierGroup(
-                        Modifier.B128,
-                        Modifier.B16,
-                        Modifier.B32,
-                        Modifier.B64,
-                        Modifier.B8,
-                        Modifier.F32,
-                        Modifier.F64,
-                        Modifier.S16,
-                        Modifier.S32,
-                        Modifier.S64,
-                        Modifier.S8,
-                        Modifier.U16,
-                        Modifier.U32,
-                        Modifier.U64,
-                        Modifier.U8
-                      )
-                    ),
-                    _root_.scala.collection.immutable.Set(
-                      Modifier.L1EvictFirst,
-                      Modifier.L1EvictLast,
-                      Modifier.L1EvictNormal,
-                      Modifier.L1EvictUnchanged,
-                      Modifier.L1NoAllocate,
-                      Modifier.L2CacheHint,
-                      Modifier.L2EvictFirst,
-                      Modifier.L2EvictLast,
-                      Modifier.L2EvictNormal,
-                      Modifier.Const,
-                      Modifier.Global,
-                      Modifier.Local,
-                      Modifier.V2,
-                      Modifier.V4,
-                      Modifier.V8
-                    ),
-                    false
-                  ),
-                  InstructionForm(
-                    Vec(OperandConstraint.Register, OperandConstraint.Address),
-                    Vec(
-                      ModifierGroup(Modifier.Mmio),
-                      ModifierGroup(Modifier.Acquire, Modifier.Relaxed),
-                      ModifierGroup(Modifier.Sys),
-                      ModifierGroup(
-                        Modifier.B128,
-                        Modifier.B16,
-                        Modifier.B32,
-                        Modifier.B64,
-                        Modifier.B8,
-                        Modifier.F32,
-                        Modifier.F64,
-                        Modifier.S16,
-                        Modifier.S32,
-                        Modifier.S64,
-                        Modifier.S8,
-                        Modifier.U16,
-                        Modifier.U32,
-                        Modifier.U64,
-                        Modifier.U8
-                      )
-                    ),
-                    _root_.scala.collection.immutable.Set(Modifier.Global),
-                    false
-                  )
+                  metadataLd_86_0(),
+                  metadataLd_86_1(),
+                  metadataLd_86_2(),
+                  metadataLd_86_3(),
+                  metadataLd_86_4(),
+                  metadataLd_86_5()
                 )
               )
             ))
@@ -7870,7 +8052,15 @@ object Instruction {
                       Modifier.U64,
                       Modifier.U8
                     )),
-                    _root_.scala.collection.immutable.Set(Modifier.L2CacheHint, Modifier.Ca, Modifier.Cg, Modifier.Cs),
+                    _root_.scala.collection.immutable.Set(
+                      Modifier.L2128B,
+                      Modifier.L2256B,
+                      Modifier.L264B,
+                      Modifier.L2CacheHint,
+                      Modifier.Ca,
+                      Modifier.Cg,
+                      Modifier.Cs
+                    ),
                     false
                   ),
                   InstructionForm(
@@ -7895,7 +8085,15 @@ object Instruction {
                         Modifier.U8
                       )
                     ),
-                    _root_.scala.collection.immutable.Set(Modifier.L2CacheHint, Modifier.Ca, Modifier.Cg, Modifier.Cs),
+                    _root_.scala.collection.immutable.Set(
+                      Modifier.L2128B,
+                      Modifier.L2256B,
+                      Modifier.L264B,
+                      Modifier.L2CacheHint,
+                      Modifier.Ca,
+                      Modifier.Cg,
+                      Modifier.Cs
+                    ),
                     false
                   ),
                   InstructionForm(
@@ -7923,6 +8121,9 @@ object Instruction {
                       Modifier.L1EvictNormal,
                       Modifier.L1EvictUnchanged,
                       Modifier.L1NoAllocate,
+                      Modifier.L2128B,
+                      Modifier.L2256B,
+                      Modifier.L264B,
                       Modifier.L2CacheHint,
                       Modifier.L2EvictFirst,
                       Modifier.L2EvictLast,
@@ -7958,6 +8159,9 @@ object Instruction {
                       Modifier.L1EvictNormal,
                       Modifier.L1EvictUnchanged,
                       Modifier.L1NoAllocate,
+                      Modifier.L2128B,
+                      Modifier.L2256B,
+                      Modifier.L264B,
                       Modifier.L2CacheHint,
                       Modifier.L2EvictFirst,
                       Modifier.L2EvictLast,
@@ -13367,7 +13571,12 @@ object Instruction {
                 Target(100),
                 Vec(InstructionForm(
                   Vec(OperandConstraint.Address, OperandConstraint.Value),
-                  Vec(ModifierGroup(Modifier.Sync), ModifierGroup(Modifier.Aligned), ModifierGroup(Modifier.B32)),
+                  Vec(
+                    ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+                    ModifierGroup(Modifier.Sync),
+                    ModifierGroup(Modifier.Aligned),
+                    ModifierGroup(Modifier.B32)
+                  ),
                   _root_.scala.collection.immutable.Set(Modifier.SharedCta),
                   false
                 ))
@@ -13401,7 +13610,11 @@ object Instruction {
                 Target(100),
                 Vec(InstructionForm(
                   Vec(OperandConstraint.Address, OperandConstraint.Value),
-                  Vec(ModifierGroup(Modifier.MbarrierArriveOne), ModifierGroup(Modifier.B64)),
+                  Vec(
+                    ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+                    ModifierGroup(Modifier.MbarrierArriveOne),
+                    ModifierGroup(Modifier.B64)
+                  ),
                   _root_.scala.collection.immutable.Set(Modifier.MulticastCluster, Modifier.SharedCluster),
                   false
                 ))
@@ -13435,7 +13648,7 @@ object Instruction {
                 Target(100),
                 Vec(InstructionForm(
                   Vec(OperandConstraint.Address, OperandConstraint.Value),
-                  Vec(),
+                  Vec(ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2)),
                   _root_.scala.collection.immutable.Set(Modifier.B4x16P64, Modifier.B6x16P32, Modifier.B8x16),
                   false
                 ))
@@ -13469,7 +13682,12 @@ object Instruction {
                 Target(100),
                 Vec(InstructionForm(
                   Vec(OperandConstraint.Value, OperandConstraint.Value),
-                  Vec(ModifierGroup(Modifier.Sync), ModifierGroup(Modifier.Aligned), ModifierGroup(Modifier.B32)),
+                  Vec(
+                    ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+                    ModifierGroup(Modifier.Sync),
+                    ModifierGroup(Modifier.Aligned),
+                    ModifierGroup(Modifier.B32)
+                  ),
                   _root_.scala.collection.immutable.Set(),
                   false
                 ))
@@ -13583,7 +13801,7 @@ object Instruction {
                       ),
                       ModifierGroup(Modifier.B32)
                     ),
-                    _root_.scala.collection.immutable.Set(),
+                    _root_.scala.collection.immutable.Set(Modifier.Pack16b),
                     false
                   ),
                   InstructionForm(
@@ -13603,7 +13821,7 @@ object Instruction {
                       ),
                       ModifierGroup(Modifier.B32)
                     ),
-                    _root_.scala.collection.immutable.Set(),
+                    _root_.scala.collection.immutable.Set(Modifier.Pack16b),
                     false
                   ),
                   InstructionForm(
@@ -13919,7 +14137,7 @@ object Instruction {
                       OperandConstraint.Value
                     ),
                     Vec(
-                      ModifierGroup(Modifier.CtaGroup),
+                      ModifierGroup(Modifier.CtaGroup1),
                       ModifierGroup(Modifier.KindF16, Modifier.KindF8f6f4, Modifier.KindTf32)
                     ),
                     _root_.scala.collection.immutable.Set(Modifier.CollectorBufferOp),
@@ -13935,7 +14153,7 @@ object Instruction {
                       OperandConstraint.Value
                     ),
                     Vec(
-                      ModifierGroup(Modifier.CtaGroup),
+                      ModifierGroup(Modifier.CtaGroup1),
                       ModifierGroup(Modifier.KindF16, Modifier.KindF8f6f4, Modifier.KindTf32)
                     ),
                     _root_.scala.collection.immutable.Set(Modifier.CollectorBufferOp),
@@ -13950,7 +14168,7 @@ object Instruction {
                       OperandConstraint.Value,
                       OperandConstraint.Value
                     ),
-                    Vec(ModifierGroup(Modifier.CtaGroup), ModifierGroup(Modifier.KindI8)),
+                    Vec(ModifierGroup(Modifier.CtaGroup1), ModifierGroup(Modifier.KindI8)),
                     _root_.scala.collection.immutable.Set(Modifier.CollectorBufferOp),
                     false
                   ),
@@ -13963,7 +14181,7 @@ object Instruction {
                       OperandConstraint.Value,
                       OperandConstraint.Value
                     ),
-                    Vec(ModifierGroup(Modifier.CtaGroup), ModifierGroup(Modifier.KindI8)),
+                    Vec(ModifierGroup(Modifier.CtaGroup1), ModifierGroup(Modifier.KindI8)),
                     _root_.scala.collection.immutable.Set(Modifier.CollectorBufferOp),
                     false
                   )
@@ -14017,7 +14235,7 @@ object Instruction {
                       OperandConstraint.Value
                     ),
                     Vec(
-                      ModifierGroup(Modifier.CtaGroup),
+                      ModifierGroup(Modifier.CtaGroup1),
                       ModifierGroup(Modifier.KindF16, Modifier.KindF8f6f4, Modifier.KindTf32)
                     ),
                     _root_.scala.collection.immutable.Set(Modifier.CollectorBufferOp),
@@ -14034,7 +14252,7 @@ object Instruction {
                       OperandConstraint.Value
                     ),
                     Vec(
-                      ModifierGroup(Modifier.CtaGroup),
+                      ModifierGroup(Modifier.CtaGroup1),
                       ModifierGroup(Modifier.KindF16, Modifier.KindF8f6f4, Modifier.KindTf32)
                     ),
                     _root_.scala.collection.immutable.Set(Modifier.CollectorBufferOp),
@@ -14050,7 +14268,7 @@ object Instruction {
                       OperandConstraint.Value,
                       OperandConstraint.Value
                     ),
-                    Vec(ModifierGroup(Modifier.CtaGroup), ModifierGroup(Modifier.KindI8)),
+                    Vec(ModifierGroup(Modifier.CtaGroup1), ModifierGroup(Modifier.KindI8)),
                     _root_.scala.collection.immutable.Set(Modifier.CollectorBufferOp),
                     false
                   ),
@@ -14064,7 +14282,7 @@ object Instruction {
                       OperandConstraint.Value,
                       OperandConstraint.Value
                     ),
-                    Vec(ModifierGroup(Modifier.CtaGroup), ModifierGroup(Modifier.KindI8)),
+                    Vec(ModifierGroup(Modifier.CtaGroup1), ModifierGroup(Modifier.KindI8)),
                     _root_.scala.collection.immutable.Set(Modifier.CollectorBufferOp),
                     false
                   )
@@ -14102,7 +14320,11 @@ object Instruction {
                 Target(100),
                 Vec(InstructionForm(
                   Vec(),
-                  Vec(ModifierGroup(Modifier.Sync), ModifierGroup(Modifier.Aligned)),
+                  Vec(
+                    ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2),
+                    ModifierGroup(Modifier.Sync),
+                    ModifierGroup(Modifier.Aligned)
+                  ),
                   _root_.scala.collection.immutable.Set(),
                   false
                 ))
@@ -14135,7 +14357,7 @@ object Instruction {
                 Target(10),
                 Vec(InstructionForm(
                   Vec(OperandConstraint.Address),
-                  Vec(ModifierGroup(Modifier.Down)),
+                  Vec(ModifierGroup(Modifier.CtaGroup1, Modifier.CtaGroup2), ModifierGroup(Modifier.Down)),
                   _root_.scala.collection.immutable.Set(),
                   true
                 ))
@@ -14185,7 +14407,7 @@ object Instruction {
                       ),
                       ModifierGroup(Modifier.B32)
                     ),
-                    _root_.scala.collection.immutable.Set(),
+                    _root_.scala.collection.immutable.Set(Modifier.Unpack16b),
                     false
                   ),
                   InstructionForm(
@@ -14205,7 +14427,7 @@ object Instruction {
                       ),
                       ModifierGroup(Modifier.B32)
                     ),
-                    _root_.scala.collection.immutable.Set(),
+                    _root_.scala.collection.immutable.Set(Modifier.Unpack16b),
                     false
                   )
                 )

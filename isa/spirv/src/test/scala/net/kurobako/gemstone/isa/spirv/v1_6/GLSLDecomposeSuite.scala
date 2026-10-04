@@ -77,11 +77,11 @@ class GLSLDecomposeSuite extends munit.FunSuite {
       )
       def bytes(v: Seq[Long], bits: Int in (32, 64)): Vec[Byte] =
         Vec.from(v.flatMap(LittleEndian.toVec(_, bits.widen[Int in (16, 32, 64)].scalarByteWidth.widen[Int in 0 ~ 8])))
-      val expected = bytes(fractions.map(floatBits(_)), width) ++ bytes(integral, if (opcode == 35) width else 64)
-      val region   = AllocationId(1L); val memory = ArrayMemory(region, expected.size)
-      val byteWidth = width.widen[Int in (16, 32, 64)].scalarByteWidth
+      val expected     = bytes(fractions.map(floatBits(_)), width) ++ bytes(integral, if (opcode == 35) width else 64)
+      val region       = AllocationId(1L); val memory = ArrayMemory(region, expected.size)
+      val byteWidth    = width.widen[Int in (16, 32, 64)].scalarByteWidth
       val outputOffset = (count.widen[Int >= 0] * byteWidth.widen[Int >= 0]).toLong.widen[Long >= 0]
-      val task     = KernelTask.validated(
+      val task         = KernelTask.validated(
         "decompose",
         Dimensions.One,
         Dimensions.One,

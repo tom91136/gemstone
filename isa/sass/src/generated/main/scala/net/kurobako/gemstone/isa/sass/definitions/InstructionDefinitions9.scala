@@ -85,7 +85,7 @@ object InstructionDefinitions9 {
         "P2rRegSymbol",
         "P2R",
         Vec(Slot("dst", OperandKind.Register), Slot("pr", OperandKind.Symbol)),
-        Vec("Simple P2R", "p2r_simple_")
+        Vec("Simple P2R", "Simple_P2R", "p2r_simple_")
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
@@ -127,7 +127,7 @@ object InstructionDefinitions9 {
           Slot("srcA", OperandKind.Register),
           Slot("sb", OperandKind.ConstantBank)
         ),
-        Vec("Const P2R", "p2r__RCR_RCR")
+        Vec("Const P2R", "Const_P2R", "p2r__RCR_RCR")
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
@@ -149,7 +149,7 @@ object InstructionDefinitions9 {
           Slot("srcA", OperandKind.Register),
           Slot("sb", OperandKind.Immediate)
         ),
-        Vec("Imm P2R", "p2r__RsIR_RIR", "p2r__RuIR_RIR")
+        Vec("Imm P2R", "Imm_P2R", "p2r__RsIR_RIR", "p2r__RuIR_RIR")
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
@@ -241,6 +241,85 @@ object InstructionDefinitions9 {
               InstructionOperand.Register(srcA),
               InstructionOperand.Register(srcB)
             ) => Some(Instruction.P2rfxuPipeRegRegReg(dst, srcA, srcB, modifiers, guard))
+        case _ => None
+      }
+  }
+  object P2rfxuPipeRegSymbol extends Definition(
+        "P2rfxuPipeRegSymbol",
+        "P2Rfxu_pipe",
+        Vec(Slot("dst", OperandKind.Register), Slot("pr", OperandKind.Symbol)),
+        Vec("Simple_P2R")
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Register(dst), InstructionOperand.Symbol(pr)) =>
+          Some(Instruction.P2rfxuPipeRegSymbol(dst, pr, modifiers, guard))
+        case _ => None
+      }
+  }
+  object P2rfxuPipeRegSymbolRegConst extends Definition(
+        "P2rfxuPipeRegSymbolRegConst",
+        "P2Rfxu_pipe",
+        Vec(
+          Slot("dst", OperandKind.Register),
+          Slot("pr", OperandKind.Symbol),
+          Slot("srcA", OperandKind.Register),
+          Slot("srcConst", OperandKind.ConstantBank)
+        ),
+        Vec("Const_P2R")
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Symbol(pr),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.ConstantBank(srcConst)
+            ) => Some(Instruction.P2rfxuPipeRegSymbolRegConst(dst, pr, srcA, srcConst, modifiers, guard))
+        case _ => None
+      }
+  }
+  object P2rfxuPipeRegSymbolRegImm extends Definition(
+        "P2rfxuPipeRegSymbolRegImm",
+        "P2Rfxu_pipe",
+        Vec(
+          Slot("dst", OperandKind.Register),
+          Slot("pr", OperandKind.Symbol),
+          Slot("srcA", OperandKind.Register),
+          Slot("uImm", OperandKind.Immediate)
+        ),
+        Vec("Imm_P2R")
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Symbol(pr),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(uImm)
+            ) => Some(Instruction.P2rfxuPipeRegSymbolRegImm(dst, pr, srcA, uImm, modifiers, guard))
+        case _ => None
+      }
+  }
+  object P2rfxuPipeRegSymbolRegReg extends Definition(
+        "P2rfxuPipeRegSymbolRegReg",
+        "P2Rfxu_pipe",
+        Vec(
+          Slot("dst", OperandKind.Register),
+          Slot("pr", OperandKind.Symbol),
+          Slot("srcA", OperandKind.Register),
+          Slot("srcB", OperandKind.Register)
+        ),
+        Vec("P2R")
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Symbol(pr),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB)
+            ) => Some(Instruction.P2rfxuPipeRegSymbolRegReg(dst, pr, srcA, srcB, modifiers, guard))
         case _ => None
       }
   }
@@ -4989,7 +5068,7 @@ object InstructionDefinitions9 {
         "R2pSymbolReg",
         "R2P",
         Vec(Slot("pR", OperandKind.Symbol), Slot("srcA", OperandKind.Register)),
-        Vec("Imm R2P", "r2p__RIR")
+        Vec("Imm R2P", "Imm_R2P", "r2p__RIR")
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
@@ -5024,7 +5103,7 @@ object InstructionDefinitions9 {
         "R2pSymbolRegConst",
         "R2P",
         Vec(Slot("pR", OperandKind.Symbol), Slot("srcA", OperandKind.Register), Slot("sb", OperandKind.ConstantBank)),
-        Vec("Const R2P", "r2p__RCR")
+        Vec("Const R2P", "Const_R2P", "r2p__RCR")
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
@@ -5040,7 +5119,7 @@ object InstructionDefinitions9 {
         "R2pSymbolRegImm",
         "R2P",
         Vec(Slot("pR", OperandKind.Symbol), Slot("srcA", OperandKind.Register), Slot("sb", OperandKind.Immediate)),
-        Vec("Imm R2P", "r2p__RIR")
+        Vec("Imm R2P", "Imm_R2P", "r2p__RIR")
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
@@ -5109,6 +5188,68 @@ object InstructionDefinitions9 {
         case _ => None
       }
   }
+  object R2pfxuPipeSymbolReg extends Definition(
+        "R2pfxuPipeSymbolReg",
+        "R2Pfxu_pipe",
+        Vec(Slot("pr", OperandKind.Symbol), Slot("srcA", OperandKind.Register)),
+        Vec("Imm_R2P")
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Symbol(pr), InstructionOperand.Register(srcA)) =>
+          Some(Instruction.R2pfxuPipeSymbolReg(pr, srcA, modifiers, guard))
+        case _ => None
+      }
+  }
+  object R2pfxuPipeSymbolRegConst extends Definition(
+        "R2pfxuPipeSymbolRegConst",
+        "R2Pfxu_pipe",
+        Vec(
+          Slot("pr", OperandKind.Symbol),
+          Slot("srcA", OperandKind.Register),
+          Slot("srcConst", OperandKind.ConstantBank)
+        ),
+        Vec("Const_R2P")
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Symbol(pr),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.ConstantBank(srcConst)
+            ) => Some(Instruction.R2pfxuPipeSymbolRegConst(pr, srcA, srcConst, modifiers, guard))
+        case _ => None
+      }
+  }
+  object R2pfxuPipeSymbolRegImm extends Definition(
+        "R2pfxuPipeSymbolRegImm",
+        "R2Pfxu_pipe",
+        Vec(Slot("pr", OperandKind.Symbol), Slot("srcA", OperandKind.Register), Slot("uImm", OperandKind.Immediate)),
+        Vec("Imm_R2P")
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Symbol(pr),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(uImm)
+            ) => Some(Instruction.R2pfxuPipeSymbolRegImm(pr, srcA, uImm, modifiers, guard))
+        case _ => None
+      }
+  }
+  object R2pfxuPipeSymbolRegReg extends Definition(
+        "R2pfxuPipeSymbolRegReg",
+        "R2Pfxu_pipe",
+        Vec(Slot("pr", OperandKind.Symbol), Slot("srcA", OperandKind.Register), Slot("srcB", OperandKind.Register)),
+        Vec("R2P")
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Symbol(pr), InstructionOperand.Register(srcA), InstructionOperand.Register(srcB)) =>
+          Some(Instruction.R2pfxuPipeSymbolRegReg(pr, srcA, srcB, modifiers, guard))
+        case _ => None
+      }
+  }
   object R2pintPipeSymbolReg extends Definition(
         "R2pintPipeSymbolReg",
         "R2Pint_pipe",
@@ -5160,123 +5301,6 @@ object InstructionDefinitions9 {
         case _ => None
       }
   }
-  object R2pintPipeSymbolRegImm extends Definition(
-        "R2pintPipeSymbolRegImm",
-        "R2Pint_pipe",
-        Vec(Slot("pR", OperandKind.Symbol), Slot("srcA", OperandKind.Register), Slot("sb", OperandKind.Immediate)),
-        Vec("r2p__RIR")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(pR), InstructionOperand.Register(srcA), InstructionOperand.Immediate(sb)) =>
-          Some(Instruction.R2pintPipeSymbolRegImm(pR, srcA, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object R2pintPipeSymbolRegReg extends Definition(
-        "R2pintPipeSymbolRegReg",
-        "R2Pint_pipe",
-        Vec(Slot("pR", OperandKind.Symbol), Slot("srcA", OperandKind.Register), Slot("srcB", OperandKind.Register)),
-        Vec("r2p__RRR", "r2p__RUR")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(pR), InstructionOperand.Register(srcA), InstructionOperand.Register(srcB)) =>
-          Some(Instruction.R2pintPipeSymbolRegReg(pR, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object R2pxluPipeSymbolReg extends Definition(
-        "R2pxluPipeSymbolReg",
-        "R2Pxlu_pipe",
-        Vec(Slot("pr", OperandKind.Symbol), Slot("srcA", OperandKind.Register)),
-        Vec("Imm R2P")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(pr), InstructionOperand.Register(srcA)) =>
-          Some(Instruction.R2pxluPipeSymbolReg(pr, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object R2pxluPipeSymbolRegConst extends Definition(
-        "R2pxluPipeSymbolRegConst",
-        "R2Pxlu_pipe",
-        Vec(
-          Slot("pr", OperandKind.Symbol),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("Const R2P")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(pr),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.R2pxluPipeSymbolRegConst(pr, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object R2pxluPipeSymbolRegImm extends Definition(
-        "R2pxluPipeSymbolRegImm",
-        "R2Pxlu_pipe",
-        Vec(Slot("pr", OperandKind.Symbol), Slot("srcA", OperandKind.Register), Slot("uImm", OperandKind.Immediate)),
-        Vec("Imm R2P")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(pr),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.R2pxluPipeSymbolRegImm(pr, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object R2pxluPipeSymbolRegReg extends Definition(
-        "R2pxluPipeSymbolRegReg",
-        "R2Pxlu_pipe",
-        Vec(Slot("pr", OperandKind.Symbol), Slot("srcA", OperandKind.Register), Slot("srcB", OperandKind.Register)),
-        Vec("R2P")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(pr), InstructionOperand.Register(srcA), InstructionOperand.Register(srcB)) =>
-          Some(Instruction.R2pxluPipeSymbolRegReg(pr, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object R2urPredRegReg extends Definition(
-        "R2urPredRegReg",
-        "R2UR",
-        Vec(Slot("pu", OperandKind.Predicate), Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register)),
-        Vec("r2ur__OR", "r2ur__noOR", "r2ur_nonconformity__OR", "r2ur_nonconformity__noOR")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA)
-            ) => Some(Instruction.R2urPredRegReg(pu, dst, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object R2urRegReg extends Definition(
-        "R2urRegReg",
-        "R2UR",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register)),
-        Vec("r2ur__noOR", "r2ur_nonconformity__noOR")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(dst), InstructionOperand.Register(srcA)) =>
-          Some(Instruction.R2urRegReg(dst, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
   val definitions: Vec[Definition] = Vec(
     OutmioPipeRegRegReg,
     P2rReg,
@@ -5292,6 +5316,10 @@ object InstructionDefinitions9 {
     P2rfxuPipeRegRegConst,
     P2rfxuPipeRegRegImm,
     P2rfxuPipeRegRegReg,
+    P2rfxuPipeRegSymbol,
+    P2rfxuPipeRegSymbolRegConst,
+    P2rfxuPipeRegSymbolRegImm,
+    P2rfxuPipeRegSymbolRegReg,
     P2rintPipeRegSymbol,
     P2rintPipeRegSymbolRegAddressImm,
     P2rintPipeRegSymbolRegConst,
@@ -5523,16 +5551,12 @@ object InstructionDefinitions9 {
     R2pfxuPipeRegConst,
     R2pfxuPipeRegImm,
     R2pfxuPipeRegReg,
+    R2pfxuPipeSymbolReg,
+    R2pfxuPipeSymbolRegConst,
+    R2pfxuPipeSymbolRegImm,
+    R2pfxuPipeSymbolRegReg,
     R2pintPipeSymbolReg,
     R2pintPipeSymbolRegAddressImm,
-    R2pintPipeSymbolRegConst,
-    R2pintPipeSymbolRegImm,
-    R2pintPipeSymbolRegReg,
-    R2pxluPipeSymbolReg,
-    R2pxluPipeSymbolRegConst,
-    R2pxluPipeSymbolRegImm,
-    R2pxluPipeSymbolRegReg,
-    R2urPredRegReg,
-    R2urRegReg
+    R2pintPipeSymbolRegConst
   )
 }

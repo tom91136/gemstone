@@ -26,15 +26,32 @@ private object VMIntegerCompiler {
         compileI2I(context, operands, modifiers)
       case _: SASSInstruction.Icmp | _: SASSInstruction.Iset =>
         compileCompareSelect(context, instruction.operation, operands, modifiers)
-      case _: SASSInstruction.Iadd3 if Set(50, 60)(context.sm)  => compileLegacyIadd3(context, operands, modifiers)
-      case _: SASSInstruction.Iscadd if Set(50, 60)(context.sm) => compileIscadd(context, operands, modifiers)
-      case _: SASSInstruction.Bfe | _: SASSInstruction.Bfi      =>
+      case _: SASSInstruction.Iadd3 if Set(50, 60)(context.sm) => compileLegacyIadd3(context, operands, modifiers)
+      case _: SASSInstruction.Bfe | _: SASSInstruction.Bfi     =>
         compileBitfield(context, instruction.operation, operands, modifiers)
       case _: SASSInstruction.Imnmx if modifiers.exists(Set(Modifier.`XHI`, Modifier.`XLO`)) =>
         compileExtendedMinMax(context, operands, modifiers)
       case _: SASSInstruction.Sgxt => compileSgxt(context, operands, modifiers)
       case _: SASSInstruction.Xmad => compileXmad(context, operands, modifiers)
-      case _                       => false
+      case _: SASSInstruction.Vadd if modifiers == Vec(Modifier.U16, Modifier.U16, Modifier.MRG_16H) =>
+        requiredOperands(operands, 4, "VADD.U16.U16.MRG_16H")
+        val left   = halfOperand(context, operands(1), false).selected
+        val right  = halfOperand(context, operands(2), false).selected
+        val result = context.temp()
+        context.emit(IntegerBinary(IntegerOperation.Add, result.name, left, right, 32))
+        context.emit(IntegerBinary(IntegerOperation.ShiftLeft, result.name, result, Value.Immediate(16L), 32))
+        val low = context.temp()
+        context.emit(IntegerBinary(
+          IntegerOperation.BitwiseAnd,
+          low.name,
+          context.source(operands(3)),
+          Value.Immediate(65535L),
+          32
+        ))
+        context.emit(IntegerBinary(IntegerOperation.BitwiseOr, result.name, result, low, 32))
+        context.store(operands.head, result)
+        true
+      case _ => false
     }
   }
 
@@ -68,7 +85,7 @@ private object VMIntegerCompiler {
 
   private def legacyIadd3Source(context: VMCompilationContext, operand: Operand): Value =
     VMOperand.integer(operand) match {
-      case Some(value) if value >= 0 && value <= 0xfffff =>
+      case Some(value) if value >= -0x80000 && value <= 0xfffff =>
         Value.Immediate((if (value >= 0x80000) value - 0x100000 else value).toLong)
       case _ => context.source(VMOperand.positive(operand))
     }
@@ -240,36 +257,53 @@ private object VMIntegerCompiler {
       modifiers: Vec[Modifier]
   ): Boolean = {
     val rs       = modifiers == Vec(Modifier.`RS`)
+    val ls       = modifiers == Vec(Modifier.`LS`)
     val producer = modifiers.isEmpty && operands.headOption.exists(VMOperand.has(_, OperandSelector.`CC`))
     val consumer = modifiers == Vec(Modifier.`X`)
-    if (!rs && !producer && !consumer) false
+    val plain    = modifiers.isEmpty && !producer
+    if (!rs && !ls && !producer && !consumer && !plain) false
     else {
       requiredOperands(operands, 4, "legacy IADD3")
-      writableRegister(operands.head, "IADD3 destination")
+      if (!VMOperand.isRegister(operands.head, RegisterBank.R, allowZero = plain))
+        fail("IADD3 destination must be a general register")
       val destinationModifiers = VMOperand.selectors(operands.head).filterNot(_ == OperandSelector.reuse)
       if (producer && destinationModifiers != Vec(OperandSelector.CC))
         fail("legacy IADD3.CC requires only a CC destination modifier")
-      if (consumer && destinationModifiers.nonEmpty) fail("legacy IADD3.X does not support destination modifiers")
-      if (!operands.drop(1).forall(source => isLegacyIadd3Source(source)))
+      if ((consumer || plain) && destinationModifiers.nonEmpty)
+        fail("legacy IADD3 does not support these destination modifiers")
+      if (
+        !operands.drop(1).forall(source =>
+          isLegacyIadd3Source(source) ||
+            (plain && VMOperand.integer(source).exists(value => value >= -0x80000 && value <= 0xfffff))
+        )
+      )
         fail("legacy IADD3 has unsupported source operand")
       if (
-        rs &&
+        (rs || ls) &&
         !operands.drop(1).forall(source => VMOperand.isRegister(source, RegisterBank.R) || VMOperand.isZero(source))
       )
-        fail("legacy IADD3.RS supports register sources only")
-      if (rs) {
+        fail("legacy shifted IADD3 supports register sources only")
+      def shiftedSource(operand: Operand): Value =
+        if (
+          VMOperand.selectors(operand).exists(selector =>
+            selector == OperandSelector.H0 || selector == OperandSelector.H1
+          )
+        )
+          halfOperand(context, operand, false).selected
+        else context.source(operand)
+      if (rs || ls) {
         val leftWide  = context.temp("wide")
         val rightWide = context.temp("wide")
         context.emit(Convert(
           leftWide.name,
-          context.source(operands(1)),
+          shiftedSource(operands(1)),
           ConversionType.U32,
           ConversionType.U64,
           None
         ))
         context.emit(Convert(
           rightWide.name,
-          context.source(operands(2)),
+          shiftedSource(operands(2)),
           ConversionType.U32,
           ConversionType.U64,
           None
@@ -278,7 +312,7 @@ private object VMIntegerCompiler {
         context.emit(IntegerBinary(IntegerOperation.Add, sum.name, leftWide, rightWide, 64))
         val shifted = context.temp("wide")
         context.emit(IntegerBinary(
-          IntegerOperation.ShiftRightLogical,
+          if (rs) IntegerOperation.ShiftRightLogical else IntegerOperation.ShiftLeft,
           shifted.name,
           sum,
           Value.Immediate(16L),
@@ -287,7 +321,7 @@ private object VMIntegerCompiler {
         val addend = context.temp("wide")
         context.emit(Convert(
           addend.name,
-          context.source(operands(3)),
+          shiftedSource(operands(3)),
           ConversionType.U32,
           ConversionType.U64,
           None
@@ -295,6 +329,20 @@ private object VMIntegerCompiler {
         context.emit(IntegerBinary(IntegerOperation.Add, shifted.name, shifted, addend, 64))
         val result = context.temp("t")
         context.emit(Convert(result.name, shifted, ConversionType.U64, ConversionType.U32, None))
+        context.store(operands.head, result)
+      } else if (plain) {
+        val sources = operands.drop(1).map { operand =>
+          val value = legacyIadd3Source(context, operand)
+          if (!VMOperand.negative(operand) || VMOperand.integer(operand).nonEmpty) value
+          else {
+            val negated = context.temp("t")
+            context.emit(IntegerUnary(IntegerUnaryOperation.Negate, negated.name, value, 32))
+            negated
+          }
+        }
+        val result = context.temp("t")
+        context.emit(IntegerBinary(IntegerOperation.Add, result.name, sources(0), sources(1), 32))
+        context.emit(IntegerBinary(IntegerOperation.Add, result.name, result, sources(2), 32))
         context.store(operands.head, result)
       } else {
         if (operands.drop(1).count(VMOperand.negative) > 1)
@@ -324,46 +372,7 @@ private object VMIntegerCompiler {
   private def destinationName(
       context: VMCompilationContext,
       operand: Operand
-  ): NonEmpty[String] = context.source(operand) match {
-    case Value.Register(name) => name
-    case _                    => fail("legacy IADD3 destination must be a general register")
-  }
-
-  private def compileIscadd(
-      context: VMCompilationContext,
-      operands: Vec[Operand],
-      modifiers: Vec[Modifier]
-  ): Boolean =
-    if (modifiers.nonEmpty || !operands.lift(1).exists(VMOperand.negative)) false
-    else {
-      requiredOperands(operands, 4, "ISCADD")
-      if (
-        !VMOperand.isRegister(operands.head, RegisterBank.R) || !VMOperand.negative(operands(1)) ||
-        !VMOperand.isRegister(VMOperand.positive(operands(1)), RegisterBank.R) ||
-        !(VMOperand.isRegister(operands(2), RegisterBank.R) || VMOperand.isZero(operands(2)))
-      )
-        fail("unsupported negated legacy ISCADD operands")
-      val shift = VMOperand.integer(operands(3)).filter(value => value >= 0 && value <= 31)
-        .getOrElse(fail("ISCADD shift must be between 0 and 31"))
-      val scaled = context.temp()
-      context.emit(IntegerBinary(
-        IntegerOperation.ShiftLeft,
-        scaled.name,
-        context.source(VMOperand.positive(operands(1))),
-        Value.Immediate(shift.toLong),
-        32
-      ))
-      val result = context.temp()
-      context.emit(IntegerBinary(
-        IntegerOperation.Subtract,
-        result.name,
-        context.source(operands(2)),
-        scaled,
-        32
-      ))
-      context.store(operands.head, result)
-      true
-    }
+  ): NonEmpty[String] = context.physicalRegister(operand).name
 
   private def compileBitfield(
       context: VMCompilationContext,
@@ -568,7 +577,15 @@ private object VMIntegerCompiler {
   ): Boolean = {
     if (context.sm != 50 && context.sm != 60) fail(s"unsupported XMAD architecture sm_${context.sm}")
     val allowed =
-      Set(Modifier.`MRG`, Modifier.`PSL`, Modifier.`CBCC`, Modifier.`CLO`, Modifier.`CHI`, Modifier.`CSFU`) ++ xmadTypes
+      Set(
+        Modifier.`MRG`,
+        Modifier.`PSL`,
+        Modifier.`CBCC`,
+        Modifier.`CLO`,
+        Modifier.`CHI`,
+        Modifier.`CSFU`,
+        Modifier.`X`
+      ) ++ xmadTypes
     val repeated = modifiers.groupBy(identity).collect {
       case (modifier, values) if values.size > 1 && modifier != Modifier.`S16` => modifier
     }
@@ -576,7 +593,10 @@ private object VMIntegerCompiler {
       fail(s"unsupported XMAD modifiers ${modifiers.mkString(".")}")
     val mods = modifiers.toSet
     requiredOperands(operands, 4, "XMAD")
-    if (VMOperand.has(operands.head, OperandSelector.`CC`)) fail("XMAD does not support condition-code destinations")
+    val carryOut = VMOperand.has(operands.head, OperandSelector.`CC`)
+    val carryIn  = mods(Modifier.X)
+    if (carryIn && modifiers != Vec(Modifier.X)) fail("XMAD.X requires unmodified unsigned multiplication")
+    if (carryOut && modifiers.nonEmpty) fail("XMAD condition codes require unmodified unsigned multiplication")
     val signedTypes = modifiers.filter(xmadTypes)
     val signs       = signedTypes match {
       case Vec()                               => (false, false)
@@ -648,7 +668,13 @@ private object VMIntegerCompiler {
       case _ => c
     }
     val sum = context.temp()
-    context.emit(IntegerBinary(IntegerOperation.Add, sum.name, scaled, addend, 32))
+    if (carryOut) {
+      context.emit(IntegerAddWithCarry(sum.name, scaled, addend, 32, false, true))
+      val carry = context.temp()
+      context.emit(IntegerAddWithCarry(carry.name, Value.Immediate(0L), Value.Immediate(0L), 32, true, false))
+      context.updateIntegerCC(scaled, addend, sum, isSub = false, Some(carry))
+    } else if (carryIn) context.emit(IntegerAddWithCarry(sum.name, scaled, addend, 32, true, false))
+    else context.emit(IntegerBinary(IntegerOperation.Add, sum.name, scaled, addend, 32))
     val adjusted = if (mods(Modifier.`CSFU`)) csfuCorrection(context, a, b, sum) else sum
     val result   = if (mods(Modifier.`CBCC`)) {
       val bHigh = context.temp()

@@ -2,9 +2,9 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 
 import execution.*
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.spirv.v1_6 as spv
 import net.kurobako.gemstone.memory.*
@@ -13,7 +13,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 class ExecutionControlFlowSuite extends munit.FunSuite {
   for {
     width <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
-    rawWidth = width.raw
+    rawWidth   = width.raw
     widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     signed <- Seq(false, true)
   }
@@ -247,6 +247,32 @@ class ExecutionControlFlowSuite extends munit.FunSuite {
 
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toVec(42L, 4))
+
+    val nestedFunction  = operand(OperandKind.IdResult, 18)
+    val nestedParameter = operand(OperandKind.IdResult, 19)
+    val nestedResult    = operand(OperandKind.IdResult, 21)
+    val nestedModule    = module.copy(instructions =
+      module.instructions.map {
+        case Instruction.IAdd(resultType, destination, left, _) if destination == helperResult =>
+          Instruction.FunctionCall(resultType, destination, nestedFunction, Vec(left))
+        case instruction => instruction
+      } ++ Vec(
+        Instruction.Function(
+          u32,
+          nestedFunction,
+          operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+          helperType
+        ),
+        Instruction.FunctionParameter(u32, nestedParameter),
+        Instruction.Label(operand(OperandKind.IdResult, 20)),
+        Instruction.IAdd(u32, nestedResult, nestedParameter, one),
+        Instruction.ReturnValue(nestedResult),
+        Instruction.FunctionEnd()
+      )
+    )
+    val nestedMemory = ArrayMemory(allocation, 4)
+    assertEquals(executeUnchecked(nestedModule, dispatch, nestedMemory), Right(()))
+    assertEquals(nestedMemory.bytes, LittleEndian.toVec(42L, 4))
   }
 
   test("dispatch executes structured loops and Phi values") {

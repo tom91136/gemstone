@@ -3,7 +3,7 @@
 This independent CMake/CTest project builds relocatable artifacts for `cuda`, `hip`, `hsa`, `opencl`, `sycl`,
 `levelzero`, `vulkan`, and `openacc`. Commands in this file run from this directory.
 
-Each backend has test programs, a runtime closure, and a data bundle plus one small overlay per compiled
+Each backend/compiler combination has test programs, a runtime closure, and a data bundle plus one small overlay per compiled
 architecture. CUDA support bundles are keyed by SDK because overlays built by different CUDA generations cannot safely
 share one runtime closure. Workloads select tests at runtime; they do not change what is compiled.
 
@@ -25,7 +25,7 @@ cmake --build build/memory-hsa --target artifacts
 
 | Fixture | Backend | Architecture | Exported files |
 | --- | --- | --- | --- |
-| `memory` | `cuda` | None; PTX targets sm_80 | `kernel.ptx`, `atomic.ptx`, `fence.ptx`, `contended.ptx` |
+| `memory` | `cuda` | None; access targets sm_35, synchronization sm_70 | `kernel.ptx`, `exchange.ptx`, `atomic.ptx`, `fence.ptx`, `contended.ptx` |
 | `memory` | `hsa` | Required, e.g. `gfx900` | `kernel.hsaco` |
 | `memory` | `opencl` | None | `kernel.spv` (32/64-bit atomics) |
 | `vector-copy` | `hsa` | Required | `vector-copy.hsaco` |
@@ -77,6 +77,12 @@ backend's support target and export this layout:
 cuda/support-11.8/
 cuda/support-13.3/
 cuda/sm_89/
+cuda/clang/support-13.3/
+cuda/clang/sm_89/
+cuda/gcc/support-11.8/
+cuda/gcc/sm_80/
+hsa/gcc/support/
+hsa/gcc/gfx906/
 hip/support/
 hip/gfx1030/
 hsa/support/
@@ -141,6 +147,56 @@ cmake -S artifacts -B build/gfx803 -G Ninja \
 cmake --build build/gfx803
 ```
 
+### Compiler variants
+
+Compiler selection is independent of the runtime API. Artifact builds default to all supported variants;
+`-DCONFORMANCE_COMPILERS=vendor` retains only the vendor toolchains. Comma-separated selections such as
+`-DCONFORMANCE_COMPILERS=vendor,clang` are accepted.
+
+| Compiler | Backends | Coverage |
+| --- | --- | --- |
+| `vendor` | All | Existing suites and toolchains |
+| `clang` | CUDA | Clang 22 CUDA frontend; unified tests and supported CUDA miniapps; separate PTX and SASS routes |
+| `gcc` | CUDA, HSA | GCC 14 OpenMP target miniapps; CUDA uses PTX only; no unified OpenMP suite |
+
+The matrix intersects requested architectures with compiler support. GCC CUDA currently covers
+`sm_35`, `sm_70`, `sm_75`, and `sm_80`; GCC HSA covers `gfx900`, `gfx906`, `gfx908`, `gfx90a`, `gfx90c`,
+`gfx1030`, `gfx1036`, `gfx1100`, and `gfx1103` (the packaged device libraries limit this selection). Unsupported combinations are not exported, and an entirely unsupported selection fails
+configuration. Targets are never silently mapped to another architecture.
+
+Select a smaller compiler/architecture matrix explicitly, for example:
+
+```console
+cmake -S artifacts -B build/compiler-check -G Ninja \
+  -DCONFORMANCE_BACKENDS=cuda,hsa -DCONFORMANCE_COMPILERS=clang,gcc \
+  -DCUDA_ARCHITECTURES=sm_80 -DAMDGPU_ARCHITECTURES=gfx906
+cmake --build build/compiler-check
+```
+
+Vendor artifacts retain their existing paths. Other variants use `backend/compiler/architecture`, with their
+support directory alongside the architecture directories. Each `artifact.toml` records its compiler;
+omitting that field means `vendor`. Compiler variants stay separate during isolated execution.
+
+Direct routes append the compiler after the architecture:
+
+```console
+build/executable/bin/conformance run --direct --workloads workloads \
+  --artifacts build/compiler-check/output --output build/reports/compiler-check \
+  cuda-ptx/sm_80/clang cuda-sass/sm_80/clang cuda-ptx/sm_80/gcc hsa/gfx906/gcc
+```
+
+`cuda/sm_80/clang` expands to both code modes; `cuda/sm_80/gcc` expands only to PTX.
+GCC CUDA targets are minimum compute capabilities: `sm_80` PTX can also execute on an `sm_89` GPU.
+The GCC images rebuild libgomp 14.2.0 with a default-device lookup fix so device-specific OpenMP team limits reach kernel launches.
+Explicit GCC SASS routes are rejected. The runner sets `OMP_TARGET_OFFLOAD=MANDATORY`, and OpenMP miniapp adapters
+verify execution inside a device target region so CPU fallback cannot count as a pass.
+Machine profiles use `compiler = "clang"` or `"gcc"` in each target; omission means `vendor`.
+Give targets distinct names when selecting multiple compilers for the same backend.
+
+GCC artifacts use primary program names (`babelstream`, `minibude`, `cloverleaf`, `tealeaf`).
+`compact` includes the first two; `full` includes all four. Use `--workload miniapps` to run
+only miniapps across selected compiler routes, including CloverLeaf and TeaLeaf.
+
 ### Build concurrency
 
 Share a job budget across outer and container builds with GNU Make >=4.4, Ninja >=1.13, and `setsid`:
@@ -184,13 +240,11 @@ build/executable/bin/conformance run cuda-sass \
   --isolated-launcher --launcher -- /path/to/launcher
 ```
 
-For `sm_89`, strict PTX skips `blas/*` and `edge/blas/*`. The pinned CUDA 13.3
-cuBLAS support bundle contains PTX entries targeting `sm_120`, which cannot run
-on `sm_89`; the matching `sm_120` profile keeps these cases enabled. SASS mode
-tests the same `memory/*` cases as PTX mode: the pinned `ptxas` assembles each
-checked-in memory PTX fixture to an architecture-matched cubin, and the fixture
-loader selects it for the SASS route. Both routes remain distinct under
-`--isolated-launcher`.
+BLAS cases whose kernels are absent from the pinned vendor package are reported as unsupported for the exact
+library version, architecture, code mode, and operation. Available BLAS kernels retain numerical checks.
+SASS mode tests the same `memory/*` cases as PTX mode: the pinned `ptxas` assembles each memory PTX fixture to
+an architecture-matched cubin, and the fixture loader selects it for the SASS route. Both routes remain distinct
+under `--isolated-launcher`.
 
 `CONFORMANCE_CUDA_CUBIN_ONLY=ON` remains available for a separate build that
 checks compiler-built fatbinaries contain no PTX fallback. It cannot serve the
@@ -382,6 +436,6 @@ conformance run --direct --workloads workloads --artifacts artifacts --output re
   --workload compact vulkan cuda/sm_89 --isolated-launcher --launcher -- /path/to/launcher
 ```
 
-`--direct` requires explicit `backend[/architecture]` routes and rejects `--profiles` and `--machine`.
+`--direct` requires explicit `backend[/architecture[/compiler]]` routes and rejects `--profiles` and `--machine`.
 It uses no profile environment, device selectors, skips or device locks. Every requested artifact must exist.
 The caller owns the route inventory and launcher; the conformance runner has no emulator-specific defaults.

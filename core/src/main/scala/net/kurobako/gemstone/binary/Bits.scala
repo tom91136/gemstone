@@ -59,6 +59,6 @@ object Bits {
   inline def signExtend(value: Long, width: Int in 1 ~ 64): Long =
     if (width.raw == 64) value else (value << (64 - width.raw)) >> (64 - width.raw)
 
-  inline def byteCount(width: Int where (Between[0, 64] & MultipleOf[8])): Int in 0 ~ 8 =
-    (width.raw / 8).unsafe[Int in 0 ~ 8]
+  inline def byteCount(width: Int where (Between[0, 64] & MultipleOf[8])): Int in 0 ~ 8 = (width.raw / 8).unsafe[Int in
+    0 ~ 8]
 }

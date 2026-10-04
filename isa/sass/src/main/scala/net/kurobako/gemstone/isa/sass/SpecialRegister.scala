@@ -23,12 +23,15 @@ object SpecialRegister {
     UR_CTAID_Y,
     UR_CTAID_Z,
     SR_LANEID,
+    SR_CgaCtaId,
     SR_WARPID,
     SR_CLOCKLO,
     SR_CLOCKHI,
     SR_PM0,
     SR_SMID,
     SR_GRIDID,
+    SR_LMEMHIOFF,
+    SR_SWINHI,
     SR_GLOBALTIMERLO,
     SR_GLOBALTIMERHI,
     SR_GEMASK,
@@ -60,6 +63,7 @@ enum SpecialRegister(val spellingValue: NonEmpty[String]) {
   case UR_CTAID_X                                extends SpecialRegister("UR_CTAID.X")
   case UR_CTAID_Y                                extends SpecialRegister("UR_CTAID.Y")
   case UR_CTAID_Z                                extends SpecialRegister("UR_CTAID.Z")
+  case SR_CgaCtaId                               extends SpecialRegister("SR_CgaCtaId")
   case SR_LANEID                                 extends SpecialRegister("SR_LANEID")
   case SR_WARPID                                 extends SpecialRegister("SR_WARPID")
   case SR_CLOCKLO                                extends SpecialRegister("SR_CLOCKLO")
@@ -67,6 +71,8 @@ enum SpecialRegister(val spellingValue: NonEmpty[String]) {
   case SR_PM0                                    extends SpecialRegister("SR_PM0")
   case SR_SMID                                   extends SpecialRegister("SR_SMID")
   case SR_GRIDID                                 extends SpecialRegister("SR_GRIDID")
+  case SR_SWINHI                                 extends SpecialRegister("SR_SWINHI")
+  case SR_LMEMHIOFF                              extends SpecialRegister("SR_LMEMHIOFF")
   case SR_GLOBALTIMERLO                          extends SpecialRegister("SR_GLOBALTIMERLO")
   case SR_GLOBALTIMERHI                          extends SpecialRegister("SR_GLOBALTIMERHI")
   case SR_GEMASK                                 extends SpecialRegister("SR_GEMASK")

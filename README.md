@@ -169,7 +169,23 @@ select both code variants; `cuda-ptx` and `cuda-sass` select one across all CUDA
 The 84 execution routes share 71 artifacts. Missing selected artifacts are errors.
 For the smaller matrix, set `conformance / conformanceTargetSet := "default"` before building and running.
 The full architecture matrix multiplies runtime compared with a single architecture per backend.
-`CONFORMANCE_JOBS` controls emulated CTest parallelism.
+For `conformance/emulate`, concurrent test jobs default to half the available processors, rounded down,
+with a minimum of 1 and a maximum of 16; `CONFORMANCE_JOBS` overrides this count.
+The server uses a unique Unix socket per run; set `Global / conformanceServerListen := Some("tcp://127.0.0.1:0")`
+to use TCP instead.
+Emulation records the server with JFR by default in `target/conformance/jfr/emulate-*/server.jfr`
+and prints the absolute path after shutdown, including failed runs. Set `Global / conformanceJfr := false` to disable it.
+Recordings use the `profile` settings and retain up to 512 MiB (older events rotate out).
+The shared execution pool also defaults to half the available processors, with a minimum of 1
+and a maximum of 64; `GEMSTONE_EXECUTION_PARALLELISM` overrides its worker count.
+GCC OpenMP's device team limit matches this worker count; `OMP_NUM_TEAMS_DEV` overrides it.
+OpenMP threads per device team default to 2; `OMP_TEAMS_THREAD_LIMIT_DEV` overrides this limit.
+GCC maps these threads to warps or waves, so this retains communication between them while reducing
+runtime setup for small workloads. The workload and its iteration count are unchanged.
+The shared server heap allows 2 GiB for shared state plus 6 GiB per test job, with an 8 GiB minimum
+and a 28 GiB cap to retain compressed references. Its initial heap is 4 GiB.
+`Global / conformanceServerJavaOptions` controls JVM options for this server only.
+Client JVMs use separate 256 MiB heaps.
 
 See [conformance/README.md](conformance/README.md) for target sets, toolchains, profiles, and standalone commands.
 
@@ -196,19 +212,52 @@ sbt 'benchmarks/run -- list'
 sbt 'benchmarks/generateBenchmarkFixtures all'
 sbt 'benchmarks/run -- run opencl-cts-async-copy --warmup 1 --samples 5 -- --direction global-to-local --stride 2'
 sbt 'benchmarks/run -- run cuda-cloverleaf-flux --warmup 1 --samples 5 -- --cells 64'
+sbt 'benchmarks/run -- run ptx-cache --warmup 2 --samples 3 -- --threads 8 --images 8 --iterations 10'
+sbt 'benchmarks/run -- run amdgpu-program-lifecycle --warmup 3 --samples 5 -- --image /path/to/kernel.co --iterations 10'
+sbt 'benchmarks/run -- run nvidia-control-flow --warmup 3 --samples 5 -- --isa sass'
+sbt 'benchmarks/run -- run session-memory --warmup 3 --samples 5 -- --workers 4 --shared'
+sbt 'benchmarks/run -- run rpc-roundtrip --warmup 5 --samples 7 -- --transport uds --iterations 10000'
 ```
 
-Cases cover PTX, AMDGPU, SPIR-V, and journal inspection, including bounded OpenCL CTS async-copy,
+Cases cover PTX, SASS, AMDGPU, SPIR-V, and journal inspection, including bounded OpenCL CTS async-copy,
 CUDA/HIP CloverLeaf flux, and HSA vector-copy probes. These ISA probes validate their outputs and measure
 emulator work; API client startup and queue handling are outside their timings.
+`ptx-calls` models nested GCC-style device calls, divergence, parameter spills, and shared-memory exchange with barriers.
+`spirv-execution --mode arithmetic|calls` compares scalar arithmetic with typed function calls and verifies every invocation.
+`nvidia-control-flow --isa ptx|sass` exercises predicate-heavy execution through each ISA's decoder and compiler.
+`amdgpu-dispatch-memory` measures routing between ELF aliases, sections, and external memory.
+`session-memory` exercises allocation lookup, read preparation, atomics, and device-heap access through a real
+execution session. `--shared` selects contended words; otherwise workers use separate cache lines.
+These cases use synthetic fixtures and verify their results. They exclude socket and native API overhead.
+`rpc-roundtrip --transport tcp|uds` verifies pings over a persistent connection to a real server, excluding startup
+and connection setup. Allocation measurements cover the client thread only.
+The `ptx-cache` probe measures concurrent backend loads and unloads; use `--images 1` to measure
+shared parsing. Its allocation count includes all client threads; operations count loads across those threads.
+The `amdgpu-program-lifecycle` probe repeatedly loads an AMDGPU ELF code object and enumerates its
+symbols. It reports module initialization time and allocation, including cache lookup, without RPC
+or client startup costs. Supply a code object from the workload being investigated.
 
 Fixture generation accepts `cuda`, `hip`, `hsa`, `opencl`, or `all`. It invokes the independent conformance
 artifact builder's pinned containers and writes binaries to the ignored
 `tools/benchmarks/target/generated-fixtures/` directory. Binary fixtures are not checked in.
 
 Use `benchmarksNative` instead of `benchmarks` for Scala Native. JVM benchmarks use a 4 GB heap.
-Results include versioned JSON. The runner's `elapsed_nanos` covers setup, execution, and verification;
-use case-specific timing fields such as `nsPerDispatch` when comparing execution alone.
+Each JVM benchmark invocation records JFR across warmup and samples in `target/benchmarks/jfr/`, relative to its
+working directory, and prints the absolute path to stderr on completion. Recordings use `profile` settings and
+retain up to 512 MiB. Pass `--no-jfr` before the case-argument `--` for timing comparisons without profiling.
+Scala Native does not record JFR.
+Each measured sample emits `gemstone-benchmark-v2` JSON with `elapsed_nanos`, `operation_count`,
+`allocated_bytes`, and `allocation_scope`. Divide totals by operations for per-operation comparisons.
+Timing covers the case's measured work; setup and result verification are excluded. Lifecycle cases intentionally
+measure loading. The runner controls warmup and sample counts. Integer counters are decimal strings.
+Allocation scope is `calling-thread`, `workers` (explicitly summed task measurements), or `unavailable`.
+Calling-thread counts exclude allocations on worker threads; unavailable counts are null.
+Use one worker for interpreter allocation comparisons; use concurrent cases to measure throughput and contention.
+
+For performance work, pin CPUs (for example, prefix sbt with `taskset -c 0-7`) and keep worker counts and workload
+arguments fixed. Iterate on the affected benchmarks and regression tests, use compact conformance to check whether
+the benchmark gains carry over, and run full conformance after a batch of changes. If conformance exposes a cost
+the benchmarks miss, add or adjust a case before the next optimization.
 
 ## ISA tools
 

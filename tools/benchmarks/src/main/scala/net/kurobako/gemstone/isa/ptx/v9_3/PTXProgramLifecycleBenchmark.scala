@@ -2,7 +2,6 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import cats.syntax.all.*
 import com.monovore.decline.Opts
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import net.kurobako.gemstone.*
@@ -10,8 +9,8 @@ import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
@@ -75,39 +74,38 @@ object PTXProgramLifecycleBenchmark {
   ).mapN(Options(_, _, _, _, _, _, _, _))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(arguments: Array[String]): Unit = {
+  def run(arguments: Array[String]): BenchmarkSample = {
     val parsed = BenchmarkArguments.parse(name, arguments.toSeq, options)
     val source = parsed.source.fold(generatedSource(parsed.entries, parsed.instructions))(Files.readString(_))
     val images = Vector.tabulate(parsed.images.raw)(index => s"$source\n// lifecycle benchmark image $index\n")
 
     Using.resource(PlatformMetrics.startRecording(parsed.recording)) { _ =>
-      val measurement = Measurement {
-        parsed.operation match {
-          case Operation.Decode =>
+      val measurement = parsed.operation match {
+        case Operation.Decode => Measurement {
             var iteration = 0
             var total     = 0L
             while (iteration < parsed.iterations.raw) {
               val program = decode(images(iteration % images.size))
-              total +=
-                program.symbols
-                  .fold(error => throw IllegalStateException(error.message), _.kernels.size.toLong)
+              total += program.symbols.fold(error => throw IllegalStateException(error.message), _.kernels.size.toLong)
               iteration += 1
             }
             total
-          case Operation.Launch =>
-            val program  = decode(images.head)
-            val metadata = program.kernel(parsed.kernel)
-              .fold(error => throw IllegalArgumentException(error.message), value => value)
-            if (metadata.explicitParameterCount.raw != 0)
-              throw IllegalArgumentException(
-                s"benchmark launch kernel '${parsed.kernel}' has ${metadata.explicitParameterCount} parameters"
-              )
-            val task = KernelTask.validated(
-              kernelName = parsed.kernel,
-              groupSize = LaunchGeometry.Dimensions.One,
-              groupCount = LaunchGeometry.Dimensions.One,
-              arguments = Vec.empty
-            ).fold(error => throw IllegalArgumentException(error), value => value)
+          }
+        case Operation.Launch =>
+          val program  = decode(images.head)
+          val metadata = program.kernel(parsed.kernel)
+            .fold(error => throw IllegalArgumentException(error.message), identity)
+          if (metadata.explicitParameterCount.raw != 0)
+            throw IllegalArgumentException(
+              s"benchmark launch kernel '${parsed.kernel}' has ${metadata.explicitParameterCount} parameters"
+            )
+          val task = KernelTask.validated(
+            kernelName = parsed.kernel,
+            groupSize = LaunchGeometry.Dimensions.One,
+            groupCount = LaunchGeometry.Dimensions.One,
+            arguments = Vec.empty
+          ).fold(error => throw IllegalArgumentException(error), identity)
+          Measurement {
             var iteration = 0
             while (iteration < parsed.iterations.raw) {
               program.execute(task, EmptyMemory, TaskControl())
@@ -115,15 +113,10 @@ object PTXProgramLifecycleBenchmark {
               iteration += 1
             }
             parsed.iterations.raw.toLong
-        }
+          }
       }
-      Console.out.println(
-        s"operation=${parsed.operation.toString.toLowerCaseRoot} iterations=${parsed.iterations} " +
-          s"images=${parsed.images} entries=${parsed.entries} instructions=${parsed.instructions} " +
-          s"sourceBytes=${source.getBytes(StandardCharsets.UTF_8).length} " +
-          s"nsPerOperation=${measurement.elapsedNanos.raw.toDouble / parsed.iterations.raw} " +
-          s"bytesPerOperation=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=${measurement.value}"
-      )
+      require(measurement.value > 0L, "benchmark program has no kernels")
+      measurement.sample(parsed.iterations.toLong)
     }
   }
 

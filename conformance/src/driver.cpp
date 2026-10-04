@@ -1,16 +1,19 @@
 #include "driver.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <ranges>
 #include <regex>
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <syncstream>
 #include <thread>
 #include <tuple>
 
@@ -41,6 +44,7 @@ uint32_t scaled_timeout(uint32_t seconds) {
 }
 struct ArtifactMetadata {
   std::string backend, architecture, support;
+  std::string compiler = "vendor";
 };
 struct TestProgram {
   std::string name;
@@ -199,14 +203,14 @@ std::vector<std::string> launcher_arguments(bool enabled, std::span<char *const>
 }
 std::vector<profile::ResolvedTarget> unique_routes(const std::vector<profile::ResolvedTarget> &targets, bool isolated) {
   std::vector<profile::ResolvedTarget> result;
-  std::set<std::tuple<std::string, std::optional<std::string>, std::string>> seen;
+  std::set<std::tuple<std::string, std::optional<std::string>, std::string, std::string>> seen;
   for (const auto &target : targets) {
     // An isolated launcher replaces the native provider and physical device.
     // Distinct CUDA code-mode routes still select different runtime paths.
     const auto mode = target.backend == "cuda" && target.environment.contains("CONFORMANCE_CUDA_CODE")
                           ? target.environment.at("CONFORMANCE_CUDA_CODE")
                           : std::string{};
-    if (!isolated || seen.emplace(target.backend, target.architecture, mode).second) {
+    if (!isolated || seen.emplace(target.backend, target.architecture, mode, target.compiler).second) {
       result.push_back(target);
       if (isolated) result.back().deviceLock = false;
     } else std::cout << "conformance: identical isolated route " << target.id << " omitted before discovery\n";
@@ -218,6 +222,7 @@ bool valid_artifact_key(std::string_view value) {
 }
 fs::path artifact_directory(const RunOptions &configuration, const conformance::profile::ResolvedTarget &target) {
   auto result = configuration.artifacts / target.backend;
+  if (target.compiler != "vendor") result /= target.compiler;
   if (target.architecture) result /= *target.architecture;
   return result;
 }
@@ -228,7 +233,7 @@ ArtifactMetadata validate_artifact(const fs::path &artifact, const conformance::
   if (const auto error = glz::read_file_toml(metadata, file.string(), buffer); error)
     throw std::runtime_error("cannot read conformance artifact metadata " + file.string() + ":\n" + glz::format_error(error, buffer));
   const auto architecture = target.architecture.value_or("");
-  if (metadata.backend != target.backend || metadata.architecture != architecture)
+  if (metadata.backend != target.backend || metadata.architecture != architecture || metadata.compiler != target.compiler)
     throw std::runtime_error("conformance artifact metadata does not match requested " + target.backend + ": " + file.string());
   if (!metadata.support.empty() && !valid_artifact_key(metadata.support))
     throw std::runtime_error("conformance artifact has an invalid support key: " + file.string());
@@ -236,7 +241,8 @@ ArtifactMetadata validate_artifact(const fs::path &artifact, const conformance::
 }
 fs::path support_directory(const RunOptions &configuration, const conformance::profile::ResolvedTarget &target,
                            const ArtifactMetadata &metadata) {
-  if (target.architecture) return configuration.artifacts / target.backend / (metadata.support.empty() ? "support" : metadata.support);
+  if (target.architecture)
+    return artifact_directory(configuration, target).parent_path() / (metadata.support.empty() ? "support" : metadata.support);
   return artifact_directory(configuration, target);
 }
 
@@ -636,6 +642,28 @@ int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
     std::cout << "SKIP " << test.identity << ": " << reason << '\n';
     return SkipReturnCode;
   }
+  const auto environmentValue = [&](const char *key) -> std::string_view {
+    const auto entry = config.environment.find(key);
+    return entry == config.environment.end() ? std::string_view{} : entry->second;
+  };
+  const auto backend = environmentValue("CONFORMANCE_TARGET_BACKEND");
+  const auto support = environmentValue("CONFORMANCE_SUPPORT_ROOT");
+  if (test.program == "unified" && !support.empty() && (backend == "cuda" || backend == "hip")) {
+    const auto libraryName = backend == "cuda" ? "libcublas.so" : "librocblas.so";
+    // Match the same artifact-first search order as the runtime environment.
+    for (const auto &root : {fs::path(config.directory), fs::path(support)}) {
+      const auto library = root / "lib" / libraryName;
+      if (!fs::is_regular_file(library)) continue;
+      const auto reason =
+          suite_blas_skip(backend, environmentValue("CONFORMANCE_TARGET_ARCHITECTURE"), environmentValue("CONFORMANCE_CUDA_CODE"),
+                          fs::canonical(library).filename().string(), test.program, test.identity);
+      if (!reason.empty()) {
+        std::cout << "SKIP " << test.identity << ": " << reason << '\n';
+        return SkipReturnCode;
+      }
+      break;
+    }
+  }
   const auto programs = test_programs(config.directory, Workload{});
   const auto selected = std::ranges::find(programs, test.program, &TestProgram::name);
   if (selected == programs.end()) throw std::runtime_error("test program absent from manifest");
@@ -718,32 +746,64 @@ int32_t run(RunOptions configuration, const fs::path &driver) {
   }
   const auto ctest_directory = reports / "ctest";
   fs::create_directories(ctest_directory / "targets");
-  std::vector<TargetExecution> prepared;
-  std::cout << "conformance execution: "
-            << (configuration.isolated_launcher  ? "isolated launcher"
-                : configuration.launcher.empty() ? "direct runtime"
-                                                 : "launcher")
-            << "; targets: " << (configuration.direct ? "explicit routes" : name) << '\n';
-  for (const auto &target : targets) {
-    auto value = prepare_target(configuration, workload, target, reports);
-    if (!value) {
-      std::cout << "conformance target " << target.id << " omitted: no tests match workload " << configuration.workload << '\n';
-      continue;
-    }
-    std::cout << "conformance target " << value->id;
-    if (!value->device.empty()) std::cout << " resolved to " << value->device;
-    std::cout << " with " << value->tests.size() << " test(s)\n";
-    prepared.push_back(std::move(*value));
-  }
-  if (prepared.empty()) throw std::runtime_error("conformance workload selected no tests: " + configuration.workload);
-  materialize_ctest(ctest_directory, driver, prepared);
   const auto *jobs = std::getenv("CONFORMANCE_JOBS");
   const auto count =
       configured_jobs(jobs && *jobs ? std::optional<std::string_view>(jobs) : std::nullopt, std::thread::hardware_concurrency());
-  std::cout << "conformance reports: " << reports << '\n';
+  const auto workers = std::min(static_cast<size_t>(count), targets.size());
+  const auto started = std::chrono::steady_clock::now();
+  std::cout << "conformance reports: " << reports << std::endl;
+  std::cout << "conformance discovery: " << targets.size() << " routes, " << workers << " workers" << std::endl;
+  std::vector<std::optional<TargetExecution>> discovered(targets.size());
+  std::atomic<size_t> next{0};
+  std::atomic<bool> failed{false};
+  std::mutex failure_mutex;
+  std::exception_ptr failure;
+  {
+    std::vector<std::jthread> threads;
+    for (size_t worker = 0; worker < workers; ++worker) {
+      threads.emplace_back([&] {
+        while (!failed.load()) {
+          const auto index = next.fetch_add(1);
+          if (index >= targets.size()) break;
+          const auto &target = targets[index];
+          try {
+            std::osyncstream(std::cout) << "conformance discovering " << target.id << std::endl;
+            auto value = prepare_target(configuration, workload, target, reports);
+            if (value) {
+              std::osyncstream message(std::cout);
+              message << "conformance target " << value->id;
+              if (!value->device.empty()) message << " resolved to " << value->device;
+              message << " with " << value->tests.size() << " test(s)" << std::endl;
+            } else {
+              std::osyncstream(std::cout) << "conformance target " << target.id << " omitted: no tests match workload "
+                                          << configuration.workload << std::endl;
+            }
+            discovered[index] = std::move(value);
+          } catch (...) {
+            const std::lock_guard lock(failure_mutex);
+            if (!failure) failure = std::current_exception();
+            failed.store(true);
+          }
+        }
+      });
+    }
+  }
+  if (failure) std::rethrow_exception(failure);
+  std::vector<TargetExecution> prepared;
+  for (auto &value : discovered)
+    if (value) prepared.push_back(std::move(*value));
+  std::cout << "conformance discovery completed in " << std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()
+            << "s" << std::endl;
+  if (prepared.empty()) throw std::runtime_error("conformance workload selected no tests: " + configuration.workload);
+  materialize_ctest(ctest_directory, driver, prepared);
   return run_process({configuration.ctest.string(), "--test-dir", ctest_directory.string(), "--parallel", fmt::to_string(count),
                       "--output-on-failure", "--output-junit", (reports / "ctest.xml").string()},
-                     ctest_directory, base_environment(), 24h)
+                     ctest_directory, base_environment(), 24h, {}, false, nullptr,
+                     [](std::string_view line) {
+                       // CTest expands --max-width to the longest name; shorten only its result padding.
+                       static const std::regex padding(R"(^( *[0-9]+/[0-9]+ Test +#[0-9]+: .* )\.{4,}((?:   |\*\*\*).*)$)");
+                       return std::regex_replace(std::string(line), padding, "$1...$2");
+                     })
       .status;
 }
 } // namespace conformance::driver

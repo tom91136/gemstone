@@ -189,8 +189,19 @@ class ExecutionSession(
       completions: Map[CompletionId, Execution],
       nextAllocation: AllocationId,
       nextProgram: ProgramId,
-      nextCompletion: CompletionId
-  )
+      nextCompletion: CompletionId,
+      allocationAddresses: AllocationAddressIndex = AllocationAddressIndex(Array.empty),
+      hasHostBackedAllocations: Boolean = false
+  ) {
+    def withAllocations(updated: Map[AllocationId, RemoteAllocation]): State =
+      copy(
+        allocations = updated,
+        hasHostBackedAllocations = updated.values.exists(_.hostBacked),
+        allocationAddresses = AllocationAddressIndex(updated.toArray.map { (id, allocation) =>
+          (id, allocation.address.getOrElse(syntheticAddress(id)), allocation.size)
+        })
+      )
+  }
 
   private val state = AtomicReference(
     State(Map.empty, Map.empty, Map.empty, AllocationId(1L), ProgramId(1L), CompletionId(1L))
@@ -248,8 +259,7 @@ class ExecutionSession(
       val id         = current.nextAllocation
       val allocation = RemoteAllocation(kind, AllocationStorage(Array.ofDim[Byte](size.raw.toInt)))
       state.set(
-        current.copy(
-          allocations = current.allocations.updated(id, allocation),
+        current.withAllocations(current.allocations.updated(id, allocation)).copy(
           nextAllocation = current.nextAllocation.next
         )
       )
@@ -283,7 +293,7 @@ class ExecutionSession(
             )
           ) Left(ExecutionFailure.InvalidRequest("allocation address aliases overlap"))
           else {
-            state.set(current.copy(allocations =
+            state.set(current.withAllocations(
               current.allocations.updated(id, allocation.copy(address = Some(address), hostBacked = hostBacked))
             ))
             Right(())
@@ -303,7 +313,7 @@ class ExecutionSession(
       val storage = current.allocations(id).storage
       storage.lockAll()
       try {
-        state.set(current.copy(allocations = current.allocations.removed(id)))
+        state.set(current.withAllocations(current.allocations.removed(id)))
         Right(())
       } finally storage.unlockAll()
     }
@@ -579,7 +589,17 @@ class ExecutionSession(
               .left.map(ExecutionFailure.InvalidRequest(_))
           )
           for {
-            _               <- validateTask(effective, current)
+            _ <- validateTask(effective, current)
+            _ <- effective.argumentBuffer.fold[Either[ExecutionFailure, Unit]](Right(())) { buffer =>
+              loaded.kernel(effective.kernelName).flatMap(metadata =>
+                Either.cond(
+                  metadata.argumentBlockSize.raw.toLong <=
+                    current.allocations(buffer.region).bytes.length.toLong - buffer.offset.raw,
+                  (),
+                  ExecutionFailure.InvalidRequest("kernel argument block exceeds its allocation")
+                )
+              )
+            }
             imageReferences <- images
           } yield enqueue(
             current,
@@ -634,6 +654,13 @@ class ExecutionSession(
     }
   }
 
+  private class ExecutionWorker extends WorkerPool.Task {
+    override def run(): Unit                    = runPendingExecutions()
+    override def reject(error: Throwable): Unit = failPendingExecutions(
+      ExecutionFailure.Failed(s"execution worker failed: ${throwables.detail(error)}")
+    )
+  }
+
   private def startExecutionWorker(): Unit = {
     val startWorker = stateLock.withLock {
       if (closed || pendingExecutions.isEmpty || executionWorkers >= parallelism.raw) false
@@ -643,7 +670,7 @@ class ExecutionSession(
       }
     }
     if (startWorker)
-      try executionContext.execute(() => runPendingExecutions())
+      try executionContext.execute(ExecutionWorker())
       catch {
         case scala.util.control.NonFatal(error) => failPendingExecutions(
             ExecutionFailure.Failed(
@@ -676,6 +703,16 @@ class ExecutionSession(
             catch {
               case scala.util.control.NonFatal(error) =>
                 Left(ExecutionFailure.Failed(s"program executor failed: ${throwables.detail(error)}"))
+              case error: Throwable =>
+                stateLock.withLock {
+                  state.get().completions.get(id).foreach(_.finish(
+                    CompletionStatus.Failed(
+                      ExecutionFailure.Failed(s"program executor failed: ${throwables.detail(error)}")
+                    )
+                  ))
+                  stateChanged.signalAll()
+                }
+                throw error
             }
           val following = stateLock.withLock {
             val current = state.get()
@@ -690,7 +727,13 @@ class ExecutionSession(
           }
           loop(following)
       }
-    loop(stateLock.withLock(dequeueLocked()))
+    try loop(stateLock.withLock(dequeueLocked()))
+    catch {
+      case error: Throwable =>
+        try failPendingExecutions(ExecutionFailure.Failed(s"execution worker failed: ${throwables.detail(error)}"))
+        catch { case cleanup: Throwable if cleanup ne error => error.addSuppressed(cleanup) }
+        throw error
+    }
     cleanupClosedSession()
   }
 
@@ -727,7 +770,7 @@ class ExecutionSession(
       ) None
       else {
         val current = state.get()
-        state.set(current.copy(allocations = Map.empty, programs = Map.empty, completions = Map.empty))
+        state.set(current.withAllocations(Map.empty).copy(programs = Map.empty, completions = Map.empty))
         Some(current.programs.values.view.map(_.loaded).toVector)
       }
     }
@@ -818,7 +861,7 @@ class ExecutionSession(
     }
 
   private def hostBacked(id: AllocationId): Boolean = state.get().allocations.get(id).exists(_.hostBacked)
-  private def hostTransfers: Boolean = hostMemoryEnabled || state.get().allocations.values.exists(_.hostBacked)
+  private def hostTransfers: Boolean                = hostMemoryEnabled || state.get().hasHostBackedAllocations
   private def hostAccessible(address: GuestAddress, size: Int >= 0): Boolean = hostMemoryEnabled ||
     locateAddress(address, size).exists(location =>
       hostBacked(location.allocation)
@@ -1077,23 +1120,33 @@ class ExecutionSession(
     override def fenceHostMemory(): Either[Fault, Unit] =
       if (hostTransfers) hostSyncLock.withLock(synchronizeHost(completion, None).map(_ => ()))
       else Right(())
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     override def prepareReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] = {
-      val staged = ranges.flatMap((address, size) =>
-        if (locateAddress(address, size).exists(location => !hostBacked(location.allocation)))
-          Vec.empty[(GuestAddress, Int >= 0)]
-        else segments(address, size)
-      ).foldLeft[Either[Fault, Unit]](Right(())) {
-        case (result, (address, size)) =>
-          result.flatMap(_ =>
-            withAllocation(address, size) { (id, _) =>
+      var staged: Either[Fault, Unit] = Right(())
+      var index                       = 0
+      while (index < ranges.size && staged.isRight) {
+        val (address, size) = ranges(index)
+        val deviceOwned     = locateAddress(address, size) match {
+          case Right(location) => !hostTransfers || !hostBacked(location.allocation)
+          case Left(_)         => false
+        }
+        if (!deviceOwned) {
+          val parts = segments(address, size)
+          var part  = 0
+          while (part < parts.size && staged.isRight) {
+            val (begin, length) = parts(part)
+            staged = withAllocation(begin, length) { (id, _) =>
               if (id.exists(value => !hostBacked(value))) Right(())
-              else readHostMemory(completion, address, size) match {
+              else readHostMemory(completion, begin, length) match {
                 case Left(Memory.Pending) => Right(())
                 case Left(fault: Fault)   => Left(fault)
                 case Right(_)             => Right(())
               }
             }
-          )
+            part += 1
+          }
+        }
+        index += 1
       }
       staged.flatMap(_ => flushHostReads())
     }
@@ -1452,12 +1505,13 @@ class ExecutionSession(
       current: State
   ): Vector[KernelTask.PointerRelocation] = {
     val array = bytes.toArray
-    (0 to bytes.size - 8).by(4).flatMap { offset =>
-      val value = LittleEndian.decode(array, offset, 8)
+    (0 to bytes.size - 8).by(4).flatMap { rawOffset =>
+      val offset = rawOffset.unsafe[Int >= 0]
+      val value  = LittleEndian.decode(array, offset.raw, 8)
       locateNativeAddress(value, current).map { case (allocation, targetOffset) =>
         KernelTask.PointerRelocation(
           KernelTask.RelocationSource.Argument(index),
-          offset.toLong.unsafe[Long >= 0],
+          offset.toLong,
           allocation,
           targetOffset
         )
@@ -1492,6 +1546,16 @@ class ExecutionSession(
           if range.raw > current.allocations(region).bytes.length.toLong - offset.raw =>
         ExecutionFailure.InvalidRequest("kernel argument range exceeds its allocation")
     }.toLeft(()).flatMap { _ =>
+      task.argumentBuffer.fold[Either[ExecutionFailure, Unit]](Right(())) { buffer =>
+        current.allocations.get(buffer.region) match {
+          case None =>
+            Left(ExecutionFailure.NotFound(s"argument buffer refers to unregistered allocation ${buffer.region}"))
+          case Some(allocation) if buffer.offset.raw >= allocation.bytes.length.toLong =>
+            Left(ExecutionFailure.InvalidRequest("argument buffer offset is outside its allocation"))
+          case Some(_) => Right(())
+        }
+      }
+    }.flatMap { _ =>
       task.pointerRelocations.collectFirst {
         case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(region), _, _, _)
             if !current.allocations.contains(region) =>
@@ -1533,12 +1597,13 @@ class ExecutionSession(
   private def referencedAllocations(task: KernelTask): Set[AllocationId] =
     task.arguments.collect {
       case KernelTask.Argument.Memory(region, _, _) => region
-    }.toSet ++ task.pointerRelocations.foldLeft(Set.empty[AllocationId]) { (allocations, relocation) =>
-      val withTarget = allocations + relocation.target
-      relocation.source match {
-        case KernelTask.RelocationSource.Memory(region) => withTarget + region
-        case KernelTask.RelocationSource.Argument(_)    => withTarget
-      }
+    }.toSet ++ task.argumentBuffer.map(_.region).toSet ++ task.pointerRelocations.foldLeft(Set.empty[AllocationId]) {
+      (allocations, relocation) =>
+        val withTarget = allocations + relocation.target
+        relocation.source match {
+          case KernelTask.RelocationSource.Memory(region) => withTarget + region
+          case KernelTask.RelocationSource.Argument(_)    => withTarget
+        }
     }
 
   private def program(id: ProgramId): Either[ExecutionFailure, RuntimeBackend.Program] =
@@ -1557,22 +1622,8 @@ class ExecutionSession(
     state.get().allocations.get(region).toRight(Fault.Memory(s"memory region ${region.toLong} is absent"))
       .map(allocation => allocation.address.getOrElse(syntheticAddress(region)).offset(offset.raw))
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:GemstoneNoIterator.no-iterator"))
-  private def findContainingAllocation(address: GuestAddress, size: Int >= 0): Option[(AllocationId, Long >= 0)] = {
-    val allocations                               = state.get().allocations.iterator
-    var result: Option[(AllocationId, Long >= 0)] = None
-    while (allocations.hasNext && result.isEmpty) {
-      val (id, allocation) = allocations.next()
-      val base             = allocation.address.getOrElse(syntheticAddress(id))
-      val relative         = address.raw - base.raw
-      if (
-        java.lang.Long.compareUnsigned(address.raw, base.raw) >= 0 &&
-        relative >= 0L && size.raw.toLong <= allocation.size.raw.toLong &&
-        relative <= allocation.size.raw.toLong - size.raw.toLong
-      ) result = Some(id -> relative.unsafe[Long >= 0])
-    }
-    result
-  }
+  private def findContainingAllocation(address: GuestAddress, size: Int >= 0): Option[(AllocationId, Long >= 0)] =
+    state.get().allocationAddresses.find(address, size)
 
   private def locateAddress(address: GuestAddress, size: Int >= 0): Either[Fault, AddressSpace.Location.Within] =
     findContainingAllocation(address, size) match {

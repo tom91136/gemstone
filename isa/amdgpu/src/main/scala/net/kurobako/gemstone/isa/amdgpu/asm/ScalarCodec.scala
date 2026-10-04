@@ -30,7 +30,7 @@ private object ScalarCodec {
 
   def encode(instruction: Instruction, target: Target, layout: InstructionLayout): Either[CodecError, Vec[Byte]] = {
     val unsupported = CodecError.UnsupportedOperandSyntax(instruction.opcode, target, instruction.operands)
-    val encodings   = Metadata.encodingsFor(instruction.definition, target.isa).filter(value =>
+    val encodings   = Metadata.encodingsFor(instruction.definition, target).filter(value =>
       value.format == layout.format && supported(value, layout)
     ).distinct
     if (instruction.mods.nonEmpty) Left(unsupported)
@@ -68,7 +68,7 @@ private object ScalarCodec {
     val definitions = OpcodeIndex.canonical(OpcodeIndex.definitions(format, opcode, target), target)(identity)
     definitions match {
       case Vec(definition) =>
-        val schemas = Metadata.encodingsFor(definition, target.isa)
+        val schemas = Metadata.encodingsFor(definition, target)
           .filter(value => value.format == layout.format && supported(value, layout)).map(operands(_)).distinct
         schemas match {
           case Vec(schema) =>

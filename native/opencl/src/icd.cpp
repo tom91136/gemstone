@@ -105,6 +105,21 @@ constexpr cl_name_version DeviceExtensionVersions[] = {{CL_MAKE_VERSION(1, 0, 0)
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_intel_required_subgroup_size"},
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_intel_unified_shared_memory"}};
 
+constexpr cl_name_version DeviceILVersions[] = {{CL_MAKE_VERSION(1, 0, 0), "SPIR-V"}, {CL_MAKE_VERSION(1, 1, 0), "SPIR-V"},
+                                                {CL_MAKE_VERSION(1, 2, 0), "SPIR-V"}, {CL_MAKE_VERSION(1, 3, 0), "SPIR-V"},
+                                                {CL_MAKE_VERSION(1, 4, 0), "SPIR-V"}, {CL_MAKE_VERSION(1, 5, 0), "SPIR-V"},
+                                                {CL_MAKE_VERSION(1, 6, 0), "SPIR-V"}};
+
+const std::string DeviceILVersionString = [] {
+  std::string result;
+  for (const auto &il : DeviceILVersions) {
+    if (!result.empty()) result += ' ';
+    result +=
+        std::string(il.name) + '_' + std::to_string(CL_VERSION_MAJOR(il.version)) + '.' + std::to_string(CL_VERSION_MINOR(il.version));
+  }
+  return result;
+}();
+
 struct OpenCLIdentity {
   const char *platformName;
   const char *deviceName;
@@ -1350,8 +1365,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_ILS_WITH_VERSION: {
-      static const cl_name_version ilVersions[] = {{CL_MAKE_VERSION(1, 0, 0), "SPIR-V"}};
-      return outputBytes(size, output, written, ilVersions, sizeof(ilVersions));
+      return outputBytes(size, output, written, DeviceILVersions, sizeof(DeviceILVersions));
     }
     case CL_DEVICE_BUILT_IN_KERNELS: return outputString(size, output, written, "");
     case CL_DEVICE_BUILT_IN_KERNELS_WITH_VERSION: {
@@ -1403,7 +1417,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_SVM_CAPABILITIES: return outputScalar(size, output, written, svm);
-    case CL_DEVICE_IL_VERSION: return outputString(size, output, written, "SPIR-V_1.0");
+    case CL_DEVICE_IL_VERSION: return outputString(size, output, written, DeviceILVersionString);
     case CL_DEVICE_MAX_NUM_SUB_GROUPS: {
       cl_uint v = static_cast<cl_uint>(maxWorkGroupSize() / MaxSubgroupSize);
       return outputScalar(size, output, written, v);

@@ -106,6 +106,62 @@ class ExecutionSessionSuite extends munit.FunSuite {
     }
   }
 
+  test("host transfer requirements follow allocation registration and release") {
+    val observed = AtomicBoolean()
+    class ProbeBackend extends Backend {
+      override def load(image: Vec[Byte]): Either[ExecutionFailure, RuntimeBackend.Program] =
+        Right(ProbeProgram())
+      private class ProbeProgram extends Program(AtomicBoolean()) {
+        override def execute(
+            task: KernelTask,
+            memory: Memory,
+            control: TaskControl,
+            handler: Event => Either[Fault, Unit]
+        ): Either[ExecutionFailure, Unit] = {
+          observed.set(addressSpace(memory).defersHostReads)
+          Right(())
+        }
+      }
+    }
+    Using.resource(ExecutionSession(List(ProbeBackend()))) { service =>
+      val device  = service.registerAllocation(8L, AllocationKind.Device).toOption.get
+      val program = service.load(encoding, Vec[Byte](1)).toOption.get
+      val task    = KernelTask.validated(
+        kernelName = "probe",
+        groupSize = LaunchGeometry.Dimensions.One,
+        groupCount = LaunchGeometry.Dimensions.One,
+        arguments = Vec(KernelTask.Argument.Memory(device, 0L))
+      ).toOption.get
+      def check(expected: Boolean): Unit = {
+        val completion = service.launch(program, task).toOption.get
+        assertEquals(service.awaitCompletion(completion), Right(()))
+        assertEquals(observed.get(), expected)
+        assertEquals(service.releaseCompletion(completion), Right(()))
+      }
+      check(false)
+      val host = service.registerAllocation(8L, AllocationKind.Device).toOption.get
+      assertEquals(
+        service.registerAllocationAddress(id = host, address = GuestAddress(0x1000L), hostBacked = true),
+        Right(())
+      )
+      check(true)
+      assert(service.registerAllocationAddress(id = host, address = GuestAddress(0x1000L), hostBacked = false).isLeft)
+      check(true)
+      val secondHost = service.registerAllocation(8L, AllocationKind.Device).toOption.get
+      assertEquals(
+        service.registerAllocationAddress(id = secondHost, address = GuestAddress(0x2000L), hostBacked = true),
+        Right(())
+      )
+      check(true)
+      assertEquals(service.releaseAllocation(host), Right(()))
+      check(true)
+      assertEquals(service.releaseAllocation(secondHost), Right(()))
+      check(false)
+      assertEquals(service.enableHostMemory(), Right(()))
+      check(true)
+    }
+  }
+
   test("an atomic update does not block writes to an unrelated allocation") {
     Using.resource(ExecutionSession(List(Backend()))) { service =>
       val first   = service.registerAllocation(8L, AllocationKind.Device).toOption.get
@@ -613,56 +669,87 @@ class ExecutionSessionSuite extends munit.FunSuite {
     }
   }
 
-  test("a dispatch retains its arguments while unrelated address registrations can be retired and reused") {
-    val entered = CountDownLatch(1)
-    val release = CountDownLatch(1)
-    class BlockingBackend extends Backend {
-      override def load(image: Vec[Byte]): Either[ExecutionFailure, RuntimeBackend.Program] = Right(BlockingProgram())
-      private class BlockingProgram extends Program(AtomicBoolean()) {
-        override def execute(
-            task: KernelTask,
-            memory: Memory,
-            control: TaskControl,
-            handler: Event => Either[Fault, Unit]
-        ): Either[ExecutionFailure, Unit] = {
-          entered.countDown()
-          if (release.await(5, TimeUnit.SECONDS)) super.execute(task, memory, control, handler)
-          else Left(ExecutionFailure.Failed("dispatch release timed out"))
+  test("argument buffers reject missing allocations and out-of-bounds kernel blocks before dispatch") {
+    Using.resource(ExecutionSession(List(Backend()))) { service =>
+      val allocation = service.registerAllocation(16L, AllocationKind.Device).toOption.get
+      val program    = service.load(encoding, Vec[Byte](1)).toOption.get
+      val retired    = service.registerAllocation(16L, AllocationKind.Device).toOption.get
+      assertEquals(service.releaseAllocation(retired), Right(()))
+      val invalid = Vec(
+        KernelTask.ArgumentBuffer(retired, 0L),
+        KernelTask.ArgumentBuffer(allocation, 16L),
+        KernelTask.ArgumentBuffer(allocation, 9L)
+      )
+      for (buffer <- invalid) {
+        val task = KernelTask.validated(
+          kernelName = "write",
+          groupSize = LaunchGeometry.Dimensions.One,
+          groupCount = LaunchGeometry.Dimensions.One,
+          arguments = Vec.empty,
+          argumentBuffer = Some(buffer)
+        ).toOption.get
+        assert(service.launch(program, task).isLeft, s"accepted invalid buffer $buffer")
+      }
+      assertEquals(service.releaseAllocation(allocation), Right(()))
+    }
+  }
+
+  for (bufferBacked <- Vec(false, true))
+    test(s"dispatch retains argument allocation (buffer=$bufferBacked) while unrelated addresses can be reused") {
+      val entered = CountDownLatch(1)
+      val release = CountDownLatch(1)
+      class BlockingBackend extends Backend {
+        override def load(image: Vec[Byte]): Either[ExecutionFailure, RuntimeBackend.Program] = Right(BlockingProgram())
+        private class BlockingProgram extends Program(AtomicBoolean()) {
+          override def execute(
+              task: KernelTask,
+              memory: Memory,
+              control: TaskControl,
+              handler: Event => Either[Fault, Unit]
+          ): Either[ExecutionFailure, Unit] = {
+            entered.countDown()
+            if (release.await(5, TimeUnit.SECONDS)) task.argumentBuffer match {
+              case None         => super.execute(task, memory, control, handler)
+              case Some(buffer) =>
+                memory.write(buffer.region, buffer.offset, Vec[Byte](42)).left.map(ExecutionFailure.fromFault(_))
+            }
+            else Left(ExecutionFailure.Failed("dispatch release timed out"))
+          }
+        }
+      }
+      Using.resource(WorkerPool(1)) { workers =>
+        Using.resource(ExecutionSession(
+          List(BlockingBackend()),
+          executionContext = workers,
+          parallelism = workers.parallelism
+        )) { service =>
+          val used    = service.registerAllocation(16L, AllocationKind.Device).toOption.get
+          val unused  = service.registerAllocation(8L, AllocationKind.Device).toOption.get
+          val address = GuestAddress(4096L)
+          assertEquals(service.registerAllocationAddress(unused, address), Right(()))
+          val program = service.load(encoding, Vec[Byte](1)).toOption.get
+          val task    = KernelTask.validated(
+            kernelName = "write",
+            groupSize = LaunchGeometry.Dimensions.One,
+            groupCount = LaunchGeometry.Dimensions.One,
+            arguments = if (bufferBacked) Vec.empty else Vec(KernelTask.Argument.Memory(used, 8L)),
+            argumentBuffer = Option.when(bufferBacked)(KernelTask.ArgumentBuffer(used, 8L))
+          ).toOption.get
+          val completion = service.launch(program, task).toOption.get
+          try {
+            assert(entered.await(5, TimeUnit.SECONDS))
+            assert(service.releaseAllocation(used).isLeft)
+            assertEquals(service.releaseAllocation(unused), Right(()))
+            val replacement = service.registerAllocation(8L, AllocationKind.Device).toOption.get
+            assertEquals(service.registerAllocationAddress(replacement, address), Right(()))
+          } finally release.countDown()
+          assertEquals(service.awaitCompletion(completion), Right(()))
+          assertEquals(service.read(used, 8L, 1), Right(Vec[Byte](42)))
+          assertEquals(service.releaseCompletion(completion), Right(()))
+          assertEquals(service.releaseAllocation(used), Right(()))
         }
       }
     }
-    Using.resource(WorkerPool(1)) { workers =>
-      Using.resource(ExecutionSession(
-        List(BlockingBackend()),
-        executionContext = workers,
-        parallelism = workers.parallelism
-      )) { service =>
-        val used    = service.registerAllocation(8L, AllocationKind.Device).toOption.get
-        val unused  = service.registerAllocation(8L, AllocationKind.Device).toOption.get
-        val address = GuestAddress(4096L)
-        assertEquals(service.registerAllocationAddress(unused, address), Right(()))
-        val program = service.load(encoding, Vec[Byte](1)).toOption.get
-        val task    = KernelTask.validated(
-          "write",
-          LaunchGeometry.Dimensions.One,
-          LaunchGeometry.Dimensions.One,
-          Vec(KernelTask.Argument.Memory(used, 0L))
-        ).toOption.get
-        val completion = service.launch(program, task).toOption.get
-        try {
-          assert(entered.await(5, TimeUnit.SECONDS))
-          assert(service.releaseAllocation(used).isLeft)
-          assertEquals(service.releaseAllocation(unused), Right(()))
-          val replacement = service.registerAllocation(8L, AllocationKind.Device).toOption.get
-          assertEquals(service.registerAllocationAddress(replacement, address), Right(()))
-        } finally release.countDown()
-        assertEquals(service.awaitCompletion(completion), Right(()))
-        assertEquals(service.read(used, 0L, 1), Right(Vec[Byte](42)))
-        assertEquals(service.releaseCompletion(completion), Right(()))
-        assertEquals(service.releaseAllocation(used), Right(()))
-      }
-    }
-  }
 
   test("independent dispatches can rendezvous before either completes") {
     val entered = CountDownLatch(2)
@@ -991,6 +1078,82 @@ class ExecutionSessionSuite extends munit.FunSuite {
           assertEquals(session.unload(program), Right(()))
           assert(backend.programClosed.get())
           assertEquals(session.releaseAllocation(allocation), Right(()))
+      }
+    }
+  }
+
+  test("fatal execution fails current and queued sessions without swallowing the original error") {
+    val entered  = CountDownLatch(1)
+    val release  = CountDownLatch(1)
+    val escaped  = CountDownLatch(1)
+    val observed = AtomicReference[Throwable]()
+    val fatal    = LinkageError("broken backend linkage")
+    class FatalBackend extends Backend {
+      override def load(image: Vec[Byte]): Either[ExecutionFailure, RuntimeBackend.Program] = Right(FatalProgram())
+      private class FatalProgram extends Program(programClosed) {
+        override def execute(
+            task: KernelTask,
+            memory: Memory,
+            control: TaskControl,
+            handler: Event => Either[Fault, Unit]
+        ): Either[ExecutionFailure, Unit] = {
+          Thread.currentThread().setUncaughtExceptionHandler { (_, error) =>
+            observed.set(error)
+            escaped.countDown()
+          }
+          entered.countDown()
+          if (!release.await(5, TimeUnit.SECONDS)) throw IllegalStateException("test release timed out")
+          throw fatal
+        }
+      }
+    }
+    val backend      = FatalBackend()
+    val otherBackend = Backend()
+    Using.resource(WorkerPool(1)) { workers =>
+      Using.resource(ExecutionSession(
+        backends = List(backend),
+        executionContext = workers,
+        parallelism = workers.parallelism
+      )) { first =>
+        Using.resource(ExecutionSession(
+          backends = List(otherBackend),
+          executionContext = workers,
+          parallelism = workers.parallelism
+        )) { second =>
+          val firstProgram  = first.load(encoding, Vec[Byte](1)).toOption.get
+          val secondProgram = second.load(encoding, Vec[Byte](1)).toOption.get
+          val task          = KernelTask.validated(
+            "probe",
+            LaunchGeometry.Dimensions.One,
+            LaunchGeometry.Dimensions.One,
+            Vec.empty
+          ).toOption.get
+          val current = first.launch(firstProgram, task).toOption.get
+          val queued  = try {
+            assert(entered.await(5, TimeUnit.SECONDS))
+            val sameSession  = first.launch(firstProgram, task).toOption.get
+            val otherSession = second.launch(secondProgram, task).toOption.get
+            (sameSession, otherSession)
+          } finally release.countDown()
+          assert(escaped.await(5, TimeUnit.SECONDS))
+          assert(observed.get() eq fatal)
+          List((first, current), (first, queued._1), (second, queued._2)).foreach { (session, completion) =>
+            session.completion(completion) match {
+              case Right(CompletionStatus.Failed(ExecutionFailure.Failed(message))) =>
+                assert(message.contains("broken backend linkage"))
+              case other => fail(s"expected terminal failure, got $other")
+            }
+            assert(session.awaitCompletion(completion).isLeft)
+            assert(session.pollHostMemory(completion).isLeft)
+            assertEquals(session.releaseCompletion(completion), Right(()))
+          }
+          val rejected = second.launch(secondProgram, task).toOption.get
+          assert(second.awaitCompletion(rejected).isLeft)
+          assertEquals(second.releaseCompletion(rejected), Right(()))
+          assertEquals(first.unload(firstProgram), Right(()))
+          assert(backend.programClosed.get())
+        }
+        assert(otherBackend.programClosed.get())
       }
     }
   }

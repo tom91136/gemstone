@@ -20,7 +20,7 @@ private object DualIssueCodec {
       side: Side,
       format: EncodingFormat
   ): Vec[Metadata.Encoding] =
-    Metadata.encodingsFor(instruction, target.isa).filter(value =>
+    Metadata.encodingsFor(instruction, target).filter(value =>
       (if (format == EncodingFormat.VOPD3XY) value.format == format else value.format.base == EncodingFormat.VOPDXY) &&
         value.operands.exists(_.field.contains(side.destination))
     )

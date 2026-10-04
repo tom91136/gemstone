@@ -44,7 +44,7 @@ object Binary {
       target: Target,
       waveSize: Int in (32, 64) = 32
   ): Either[CodecError, Vec[Byte]] = {
-    val definitions = encodingsFor(instruction.definition, target.isa)
+    val definitions = encodingsFor(instruction.definition, target)
     if (definitions.isEmpty) Left(CodecError.UnsupportedInstruction(instruction.opcode, target))
     else {
       val formats = definitions.map(_.format).distinct.sortBy(_.ordinal)
@@ -111,7 +111,7 @@ object Binary {
       instruction: Instruction,
       target: Target
   ): Either[CodecError, Vec[Byte]] = {
-    val definitions = encodingsFor(instruction.definition, target.isa).filter(_.format == EncodingFormat.SOPP)
+    val definitions = encodingsFor(instruction.definition, target).filter(_.format == EncodingFormat.SOPP)
     val encodings   = definitions.map(_.opcode).distinct
     if (encodings.size > 1)
       Left(CodecError.AmbiguousInstruction(instruction.opcode, target))

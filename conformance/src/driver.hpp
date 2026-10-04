@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <iosfwd>
 #include <map>
 #include <optional>
@@ -17,7 +18,7 @@
 #include "profile.hpp"
 
 namespace conformance::driver {
-/// CTest return code that marks a machine-profile skip.
+/// CTest return code for an unsupported or profile-skipped case.
 inline constexpr int32_t SkipReturnCode = 4;
 /// Upper bound accepted by the `--timeout` option, in seconds.
 inline constexpr uint64_t MaximumTimeoutSeconds = 24 * 60 * 60;
@@ -97,7 +98,8 @@ void materialize_ctest(const std::filesystem::path &directory, const std::filesy
                        const std::vector<TargetExecution> &targets);
 ProcessResult run_process(const std::vector<std::string> &command, const std::filesystem::path &directory,
                           const std::map<std::string, std::string> &environment, std::chrono::milliseconds timeout,
-                          const std::string &prefix = {}, bool capture_output = false, std::ostream *output_log = nullptr);
+                          const std::string &prefix = {}, bool capture_output = false, std::ostream *output_log = nullptr,
+                          const std::function<std::string(std::string_view)> &format_line = {});
 int32_t execute_case(const std::filesystem::path &config, const ScheduledCase &test);
 int32_t run(RunOptions configuration, const std::filesystem::path &driver);
 std::filesystem::path executable_path(const char *argument);

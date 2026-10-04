@@ -10,21 +10,24 @@ class MachineSuite extends munit.FunSuite {
   test("lane mask operations retain bounded counts and expose positive counts") {
     val full = VMLaneMask.all(1024).toOption.get
     val even = full.filterLanes(_.raw % 2 == 0)
-    val odd = full.subtract(even)
+    val odd  = full.subtract(even)
     assertEquals(full.positiveSize.map(_.raw), Some(1024))
     assertEquals(even.positiveSize.map(_.raw), Some(512))
     assertEquals(even.union(odd).positiveSize.map(_.raw), Some(1024))
     assertEquals(even.intersect(odd).positiveSize, None)
     assertEquals(VMLaneMask.Empty.positiveSize, None)
     assertEquals(full.subtract(full).size.raw, 0)
-    assertEquals(scala.compiletime.testing.typeCheckErrors("""
+    assertEquals(
+      scala.compiletime.testing.typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       val full = VMLaneMask.all(1024).toOption.get
       val masks = Seq(full, full.filterLanes(_ => true), full.union(full),
         full.intersect(full), full.subtract(full), VMLaneMask.Empty)
       val sizes: Seq[Int in 0 ~ 1024] = masks.map(_.size)
       val positive: Option[Int in 1 ~ 1024] = full.positiveSize
-    """), Nil)
+    """),
+      Nil
+    )
   }
 
   test("an executable program looks up valid PCs and rejects out-of-range PCs") {

@@ -23,7 +23,7 @@ private object VMMemory {
   }
 
   class InternalMemory(val bytes: Array[Byte]) {
-    val lock: ReentrantLock = ReentrantLock()
+    lazy val lock: ReentrantLock = ReentrantLock()
   }
 
   case class Pointer(

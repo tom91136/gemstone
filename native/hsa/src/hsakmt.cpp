@@ -755,7 +755,7 @@ extern "C" HSAKMT_STATUS hsaKmtGetNodeProperties(HSAuint32 node, HsaNodeProperti
   properties->NumMemoryBanks = 3;
   properties->MaxWavesPerSIMD = 10;
   properties->LDSSizeInKB = 64;
-  properties->WaveFrontSize = 64;
+  properties->WaveFrontSize = gemstone::hsa::waveSize();
   properties->NumShaderBanks = 1;
   properties->NumArrays = 1;
   properties->NumCUPerArray = 4;

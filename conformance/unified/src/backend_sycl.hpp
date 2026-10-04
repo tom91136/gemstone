@@ -85,26 +85,11 @@ public:
 
   template <class T> bool supports_partition_point(size_t) const { return false; }
 
-  template <class T> bool supports_set_intersection(size_t size) const {
-    // These oneDPL execution-policy paths fault on Intel Arc Level Zero.
-    if constexpr (sizeof(T) == 4)
-      if (size >= 31 && queue_.get_backend() == sycl::backend::ext_oneapi_level_zero) return false;
-    return !std::is_same_v<T, double> || sycl_support::supports_fp64(queue_.get_device());
-  }
+  template <class T> bool supports_set_intersection(size_t size) const { return supports_policy_input<T>(size); }
 
-  template <class T> bool supports_set_difference(size_t size) const {
-    // These oneDPL execution-policy paths fault on Intel Arc Level Zero.
-    if constexpr (sizeof(T) == 4)
-      if (size >= 31 && queue_.get_backend() == sycl::backend::ext_oneapi_level_zero) return false;
-    return !std::is_same_v<T, double> || sycl_support::supports_fp64(queue_.get_device());
-  }
+  template <class T> bool supports_set_difference(size_t size) const { return supports_policy_input<T>(size); }
 
-  template <class T> bool supports_set_symmetric_difference(size_t size) const {
-    // These oneDPL execution-policy paths fault on Intel Arc Level Zero.
-    if constexpr (sizeof(T) == 4)
-      if (size >= 31 && queue_.get_backend() == sycl::backend::ext_oneapi_level_zero) return false;
-    return !std::is_same_v<T, double> || sycl_support::supports_fp64(queue_.get_device());
-  }
+  template <class T> bool supports_set_symmetric_difference(size_t size) const { return supports_policy_input<T>(size); }
 
   template <class T> bool supports_gather(size_t) const { return false; }
 
@@ -114,19 +99,9 @@ public:
 
   template <class T> bool supports_merge_by_key(size_t) const { return false; }
 
-  template <class T> bool supports_partial_sort(size_t size) const {
-    // These oneDPL execution-policy paths fault on Intel Arc Level Zero.
-    if constexpr (sizeof(T) == 4)
-      if (size >= 31 && queue_.get_backend() == sycl::backend::ext_oneapi_level_zero) return false;
-    return !std::is_same_v<T, double> || sycl_support::supports_fp64(queue_.get_device());
-  }
+  template <class T> bool supports_partial_sort(size_t size) const { return supports_policy_input<T>(size); }
 
-  template <class T> bool supports_nth_element(size_t size) const {
-    // These oneDPL execution-policy paths fault on Intel Arc Level Zero.
-    if constexpr (sizeof(T) == 4)
-      if (size >= 31 && queue_.get_backend() == sycl::backend::ext_oneapi_level_zero) return false;
-    return !std::is_same_v<T, double> || sycl_support::supports_fp64(queue_.get_device());
-  }
+  template <class T> bool supports_nth_element(size_t size) const { return supports_policy_input<T>(size); }
 
   template <class T> std::vector<T> copy(const std::vector<T> &input) {
     onedpl_detail::Shared<T> source(queue_, input);
@@ -674,6 +649,14 @@ public:
 
 private:
   sycl::queue queue_;
+  // Restrict the observed oneDPL faults to the tested Arc A750 device.
+  const bool arcPolicyFaults_ =
+      queue_.get_backend() == sycl::backend::ext_oneapi_level_zero
+      && queue_.get_device().get_info<sycl::info::device::name>().find("Intel(R) Arc(TM) A750") != std::string::npos;
+
+  template <class T> bool supports_policy_input(size_t size) const {
+    return !(sizeof(T) == 4 && size >= 31 && arcPolicyFaults_) && capability<T>();
+  }
 
   template <class T, size_t Id> auto policy() { return oneapi::dpl::execution::make_device_policy<onedpl_detail::Kernel<T, Id>>(queue_); }
 

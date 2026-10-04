@@ -10,17 +10,15 @@ enum VMWrite {
   case Carry(lane: WorkgroupLane, value: Boolean)
   case ConditionFlag(lane: WorkgroupLane, flag: VMConditionCodes.Flag, value: Option[Boolean])
   case AddThreeCarry(lane: WorkgroupLane, value: Option[Int])
-  case FunctionRegister(lane: WorkgroupLane, name: NonEmpty[String], value: NonEmpty[String])
   case Predicate(lane: WorkgroupLane, name: NonEmpty[String], value: Boolean)
   case Parameter(lane: WorkgroupLane, name: NonEmpty[String], value: Long)
   case ParameterBytes(
       lane: WorkgroupLane,
       name: NonEmpty[String],
-      offset: Int,
+      offset: Int >= 0,
       width: Int where (Between[8, 64] & MultipleOf[8]),
       value: Long
   )
-  case FunctionParameter(lane: WorkgroupLane, name: NonEmpty[String], value: NonEmpty[String])
   case ParameterBuffer(address: Long, width: Int where (Between[8, 64] & MultipleOf[8]), value: Long)
   case Shared(lane: WorkgroupLane, address: Long, width: Int where (Between[8, 64] & MultipleOf[8]), value: Long)
   case Local(lane: WorkgroupLane, address: Long, width: Int where (Between[8, 64] & MultipleOf[8]), value: Long)

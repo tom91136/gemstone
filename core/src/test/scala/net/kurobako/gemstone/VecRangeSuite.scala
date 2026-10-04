@@ -9,7 +9,7 @@ import scala.compiletime.testing.typeCheckErrors
 class VecRangeSuite extends munit.FunSuite {
   test("range produces half-open elements with refined lower and upper bounds") {
     val values: Vec[Int where (AtLeast[-2] & LessThan[3])] = Vec.range[-2, 3]
-    val atMostTwo: Int <= 2                     = values.last
+    val atMostTwo: Int <= 2                                = values.last
     assertEquals(values.map(_.raw), Vec(-2, -1, 0, 1, 2))
     assertEquals(atMostTwo.raw, 2)
   }

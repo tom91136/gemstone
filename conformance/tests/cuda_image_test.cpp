@@ -41,6 +41,7 @@ TEST_CASE("CUDA embedded images default to PTX and honor explicit code modes", "
     };
     CHECK(image("mma884.ptx") == expected(mma884_ptx_image, mma884_sass_image));
     CHECK(image("kernel.ptx") == expected(memory_image, kernel_sass_image));
+    CHECK(image("exchange.ptx") == expected(exchange_image, exchange_sass_image));
     CHECK(image("atomic.ptx") == expected(atomic_image, atomic_sass_image));
     CHECK(image("fence.ptx") == expected(fence_image, fence_sass_image));
     CHECK(image("contended.ptx") == expected(contended_image, contended_sass_image));

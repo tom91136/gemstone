@@ -115,19 +115,27 @@ object collection {
   class LRUCache[K, V] private (capacity: Int > 0) {
     private val lock = ReentrantLock()
 
+    private case class Key(value: K) {
+      private val hash             = value.##
+      override def hashCode(): Int = hash
+    }
+
     // Java's LinkedHashMap supplies access ordering; Scala's mutable LinkedHashMap is insertion ordered.
-    private val mutableEntries  = java.util.LinkedHashMap[K, FutureTask[V]](capacity.raw, 0.75f, true)
-    private val mutableInFlight = mutable.HashMap.empty[K, FutureTask[V]]
+    private val mutableEntries  = java.util.LinkedHashMap[Key, FutureTask[V]](capacity.raw, 0.75f, true)
+    private val mutableInFlight = mutable.HashMap.empty[Key, FutureTask[V]]
 
     def get(key: K)(compute: => V): V = {
+      // Large immutable byte keys must be hashed once, before taking the shared lock. Publication,
+      // in-flight lookup and eviction all reuse that hash instead of rescanning the module bytes.
+      val lookup         = Key(key)
       val (entry, owner) = lock.withLock {
-        Option(mutableEntries.get(key)) match {
+        Option(mutableEntries.get(lookup)) match {
           case Some(entry) => entry -> false
-          case None        => mutableInFlight.get(key) match {
+          case None        => mutableInFlight.get(lookup) match {
               case Some(entry) => entry -> false
               case None        =>
                 val entry = FutureTask[V](() => compute)
-                val _     = mutableInFlight.put(key, entry)
+                val _     = mutableInFlight.put(lookup, entry)
                 entry -> true
             }
         }
@@ -135,8 +143,8 @@ object collection {
       if (owner) {
         entry.run()
         lock.withLock {
-          val _ = mutableInFlight.remove(key)
-          val _ = mutableEntries.put(key, entry)
+          val _ = mutableInFlight.remove(lookup)
+          val _ = mutableEntries.put(lookup, entry)
           while (mutableEntries.size() > capacity.raw)
             mutableEntries.keySet().asScala.headOption.foreach(oldest => mutableEntries.remove(oldest))
         }

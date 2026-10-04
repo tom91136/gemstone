@@ -44,6 +44,7 @@ object CodeObjectMetadata {
       size: Int
   ): Either[CodeObjectError, Option[Vec[KernelManifest]]] = {
     val limit = start + size
+    @scala.annotation.tailrec
     def loop(
         offset: Int,
         found: Vec[KernelManifest]
@@ -56,13 +57,13 @@ object CodeObjectMetadata {
         val payload           = offset + 12
         val paddedName        = alignFour(nameSize)
         val paddedDescription = alignFour(descriptionSize)
-        Either.cond(
-          paddedName <= Int.MaxValue && paddedDescription <= Int.MaxValue &&
-            ByteRange.contains(limit, payload, paddedName) &&
-            ByteRange.contains(limit, payload.toLong + paddedName, paddedDescription),
-          (),
-          CodeObjectError.Invalid("truncated ELF note")
-        ).flatMap { _ =>
+        if (
+          paddedName > Int.MaxValue || paddedDescription > Int.MaxValue ||
+          !ByteRange.contains(limit, payload, paddedName) ||
+          !ByteRange.contains(limit, payload.toLong + paddedName, paddedDescription)
+        )
+          Left(CodeObjectError.Invalid("truncated ELF note"))
+        else {
           val description = payload + paddedName.toInt
           val next        = description + paddedDescription.toInt
           val owner       = nameSize == 7L &&
@@ -76,9 +77,10 @@ object CodeObjectMetadata {
             )
           if (!owner || noteType != MetadataNoteType) loop(next, found)
           else
-            decodeMetadata(Reader(bytes, description, Math.toIntExact(descriptionSize))).flatMap(decoded =>
-              loop(next, found ++ decoded)
-            )
+            decodeMetadata(Reader(bytes, description, Math.toIntExact(descriptionSize))) match {
+              case Left(error)    => Left(error)
+              case Right(decoded) => loop(next, found ++ decoded)
+            }
         }
       }
     loop(start, Vec.empty).map(result => Option.when(result.nonEmpty)(result))
@@ -154,13 +156,11 @@ object CodeObjectMetadata {
           }
         }
       }.flatMap { fields =>
-        val parameters = fields.parameters.orElse(Option.when(fields.argumentBlockSize.contains(0))(Vec.empty[(
-            KernelMetadata.Parameter,
-            Option[String]
-        )]))
-        (fields.name, fields.symbol, fields.argumentBlockSize, parameters) match {
-          case (Some(name), Some(symbol), Some(blockSize), Some(parameters)) =>
-            val sorted = parameters.sortBy(_._1.offset)
+        (fields.name, fields.symbol, fields.argumentBlockSize) match {
+          case (Some(name), Some(symbol), Some(blockSize)) =>
+            // Argument descriptions are optional; retain the raw block without inventing parameter boundaries.
+            val parameters = fields.parameters.getOrElse(Vec.empty[(KernelMetadata.Parameter, Option[String])])
+            val sorted     = parameters.sortBy(_._1.offset)
             for {
               refinedName <- name.refine[NonEmpty[String]].left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel name must be non-empty")
@@ -180,7 +180,7 @@ object CodeObjectMetadata {
               }
             )
           case _ => Left(CodeObjectError.Invalid(
-              "AMDGPU kernel metadata is missing name, symbol, kernarg size, or arguments"
+              "AMDGPU kernel metadata is missing name, symbol, or kernarg size"
             ))
         }
       }

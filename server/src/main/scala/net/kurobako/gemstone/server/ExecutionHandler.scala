@@ -71,7 +71,8 @@ object ExecutionHandler {
           arguments,
           pointerRelocations,
           discoverArgumentRelocations,
-          descriptorBindings
+          descriptorBindings,
+          argumentBuffer
         ) =>
       val created = KernelTask.validated(
         kernelName = kernelName,
@@ -84,7 +85,8 @@ object ExecutionHandler {
         pointerRelocations = pointerRelocations,
         workDim = workDim,
         globalOffset = globalOffset,
-        discoverArgumentRelocations = discoverArgumentRelocations
+        discoverArgumentRelocations = discoverArgumentRelocations,
+        argumentBuffer = argumentBuffer
       ).leftMap(message => ExecutionFailure.InvalidRequest(message))
       val result = created match {
         case Left(error) => Left(error)

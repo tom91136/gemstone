@@ -100,6 +100,17 @@ class SASSInstructionModelSuite extends munit.FunSuite {
     val same = form("P2", "Opcode Predicate:Rd, PR:PR, Register:Ra, Register:Rb", "P2R")
     assertEquals(SASSInstructionModel.shapes(Vector(row, same)).head.forms.map(_.form), Vector("P", "P2"))
   }
+  test("condition-register bank forms preserve CC and the normalized P2R predicate-bank layout") {
+    val read   = form("Imm_P2R", "Opcode Register:Rd, CCPR:Pr, Register:Ra, SImm(20):uImm", "P2R")
+    val write  = form("Imm_R2P", "Opcode CCPR:Pr, Register:Ra, UImm(20):uImm", "R2P")
+    val shapes = SASSInstructionModel.shapes(Vector(read, write))
+    val cases  = SASSInstructionRenderer.cases(shapes)
+    assertEquals(cases.find(_.name == "P2rRegSymbolRegImm").get.forms, Vector("Imm_P2R"))
+    assertEquals(cases.find(_.name == "P2rRegRegImm").get.forms, Vector("Imm_P2R"))
+    assertEquals(cases.find(_.name == "R2pSymbolRegImm").get.forms, Vector("Imm_R2P"))
+    assertEquals(cases.find(_.name == "R2pRegImm").get.forms, Vector("Imm_R2P"))
+  }
+
   test("display omissions and condition-code operands retain their typed forms") {
     val vote = form("VOTE", "Opcode { Register(RZ):Rd ',' } Predicate:Pd ',' Predicate:Pa", "VOTE")
     assertEquals(SASSInstructionModel.formShape(vote).head.slots.map(_.optional), Vector(true, false, false))

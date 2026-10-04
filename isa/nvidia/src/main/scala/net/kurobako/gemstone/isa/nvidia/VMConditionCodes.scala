@@ -15,15 +15,27 @@ object VMConditionCodes {
 class VMConditionCodes {
   import VMConditionCodes.*
 
-  private val flags: Array[Option[Boolean]] = Array.fill(Flag.values.length)(None)
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private var defined = 0
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private var values = 0
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var threeInputCarry: Option[Int] = None
 
-  def read(flag: Flag): Option[Boolean] = flags(flag.ordinal)
+  def read(flag: Flag): Option[Boolean] = {
+    val bit = 1 << flag.ordinal
+    if ((defined & bit) == 0) None else Some((values & bit) != 0)
+  }
 
   def write(flag: Flag, value: Option[Boolean]): Unit = {
-    if (flag == Flag.Carry && value.nonEmpty) threeInputCarry = None
-    flags(flag.ordinal) = value
+    val bit = 1 << flag.ordinal
+    value match {
+      case None        => defined &= ~bit
+      case Some(value) =>
+        if (flag == Flag.Carry) threeInputCarry = None
+        defined |= bit
+        if (value) values |= bit else values &= ~bit
+    }
   }
 
   def readThreeInputCarry: Option[Int] = threeInputCarry
@@ -31,12 +43,13 @@ class VMConditionCodes {
   def writeThreeInputCarry(value: Option[Int]): Unit =
     threeInputCarry = value.map { count =>
       require(count >= 0 && count <= 2, s"IADD3 carry count is out of range: $count")
-      flags(Flag.Carry.ordinal) = None
+      defined &= ~(1 << Flag.Carry.ordinal)
       count
     }
 
   def clear(): Unit = {
-    Flag.values.foreach(flag => write(flag, None))
-    writeThreeInputCarry(None)
+    defined = 0
+    values = 0
+    threeInputCarry = None
   }
 }

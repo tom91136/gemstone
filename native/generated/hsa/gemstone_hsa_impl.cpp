@@ -1051,3 +1051,4 @@ static_assert(static_cast<long long>(gemstone::hsa::api::HSA_VEN_AMD_PCS_METHOD_
 static_assert(static_cast<long long>(gemstone::hsa::api::HSA_WAIT_STATE_ACTIVE) == static_cast<long long>(HSA_WAIT_STATE_ACTIVE));
 static_assert(static_cast<long long>(gemstone::hsa::api::HSA_WAIT_STATE_BLOCKED) == static_cast<long long>(HSA_WAIT_STATE_BLOCKED));
 static_assert(static_cast<long long>(gemstone::hsa::api::HSA_WAVEFRONT_INFO_SIZE) == static_cast<long long>(HSA_WAVEFRONT_INFO_SIZE));
+

@@ -13,6 +13,7 @@ abstract class SyntheticSASSExecutionSuiteBase extends munit.FunSuite {
       expected: NonEmpty[Vec[Int]],
       shared: Int >= 0 = 0,
       sm: Int = 86,
+      grid: LaunchGeometry.Dimensions = LaunchGeometry.Dimensions.One,
       rewrite: DecodedInstruction => DecodedInstruction = instruction => instruction
   ): Unit = {
     val original = CubinSuiteFixtures.module
@@ -33,7 +34,7 @@ abstract class SyntheticSASSExecutionSuiteBase extends munit.FunSuite {
     val instructions = body.zipWithIndex.map { case ((op, operands, pred), index) =>
       SASSFixture.instruction(index * 16, op, operands.split(',').toVec.map(_.trim).filter(_.nonEmpty), pred)
     }
-    val source = SASSFixture(m, m.kernels.head, Vec(DecodedFunction("saxpy", instructions.map(rewrite))))
+    val source = SASSFixture(m, m.kernels.head, Vec.nonEmpty(DecodedFunction("saxpy", instructions.map(rewrite))))
     locally {
       val service = SASSFixture.Execution()
       val output  =
@@ -42,8 +43,8 @@ abstract class SyntheticSASSExecutionSuiteBase extends munit.FunSuite {
       val task    = SASSFixture.task(
         "saxpy": NonEmpty[String],
         LaunchGeometry.Dimensions(expected.positiveSize, 1, 1),
-        LaunchGeometry.Dimensions.One,
-        Vec(
+        grid,
+        Vec.nonEmpty(
           KernelTask.Argument.Memory(output, 0L),
           KernelTask.Argument.Memory(output, 0L),
           KernelTask.Argument.Scalar(LittleEndian.toVec(0L, 4)),

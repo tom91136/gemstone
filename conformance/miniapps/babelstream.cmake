@@ -43,6 +43,12 @@ function(miniapp_babelstream_patch model source)
     string(REGEX REPLACE "unsigned[ \\t]+int[ \\t]+memclock;" "uint32_t memclock = 0;" content "${content}")
     string(REGEX REPLACE "[^\n]*(mybus|nvmldev)[^\n]*\n" "" content "${content}")
     file(WRITE "${path}" "${content}")
+    if(CONFORMANCE_COMPILER STREQUAL "clang")
+      patch_exact("${source}/src/cuda/model.cmake"
+        [=["-forward-unknown-to-host-compiler" "-arch=${CUDA_ARCH}"]=]
+        [=["--cuda-gpu-arch=${CUDA_ARCH}"]=])
+      patch_exact("${source}/src/cuda/model.cmake" [=["--extended-lambda"]=] "")
+    endif()
   endif()
 endfunction()
 

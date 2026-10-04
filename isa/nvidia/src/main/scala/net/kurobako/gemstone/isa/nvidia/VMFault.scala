@@ -42,6 +42,12 @@ enum VMFault {
     case Deadlock(detail)                  => s"execution deadlocked: $detail"
   }
 
+  def inFunction(name: NonEmpty[String]): VMFault = this match {
+    case Memory(detail)       => Memory(s"$name: $detail")
+    case InvalidState(detail) => InvalidState(s"$name: $detail")
+    case other                => other
+  }
+
   def toFault: Fault = this match {
     case Memory(detail)         => Fault.Memory(detail)
     case BudgetExceeded(limit)  => Fault.BudgetExceeded(limit)

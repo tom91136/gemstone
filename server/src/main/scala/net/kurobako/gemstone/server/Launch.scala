@@ -2,6 +2,7 @@ package net.kurobako.gemstone.server
 
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import net.kurobako.gemstone.*
@@ -89,8 +90,39 @@ object Launch {
   }
 
   private class Registration(val endpoint: Endpoint) extends AutoCloseable {
-    val client: ClientId       = Control.register(endpoint)
-    override def close(): Unit = Control.release(endpoint, client)
+    val client: ClientId        = Control.register(endpoint)
+    private val released        = AtomicBoolean(false)
+    private val releaseFinished = CountDownLatch(1)
+    private def release(): Unit =
+      if (released.compareAndSet(false, true)) {
+        try Control.release(endpoint, client)
+        finally releaseFinished.countDown()
+      } else releaseFinished.await()
+
+    // A timed-out child must not strand execution workers in the shared server.
+    // Bound shutdown even when the remote server no longer responds.
+    private val shutdownHook = Thread(
+      () => {
+        val cleanup = Thread(
+          () =>
+            try release()
+            catch { case scala.util.control.NonFatal(_) => () },
+          "gemstone-client-release"
+        )
+        cleanup.setDaemon(true)
+        cleanup.start()
+        try cleanup.join(500L)
+        catch { case _: InterruptedException => Thread.currentThread().interrupt() }
+      },
+      "gemstone-client-cleanup"
+    )
+    sys.runtime.addShutdownHook(shutdownHook)
+
+    override def close(): Unit =
+      try release()
+      finally
+        try { val _ = sys.runtime.removeShutdownHook(shutdownHook) }
+        catch { case _: IllegalStateException => () }
   }
 
   def launch[A](

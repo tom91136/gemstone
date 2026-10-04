@@ -26,7 +26,7 @@ object Validation {
 
   def validate(instruction: Instruction, target: Target): ValidationOutcome[Issue] = {
     // Symbol resolution belongs to the assembler. Check the remaining operands using a representable displacement.
-    val branch = Metadata.encodingsFor(instruction.definition, target.isa).exists(encoding =>
+    val branch = Metadata.encodingsFor(instruction.definition, target).exists(encoding =>
       encoding.format == EncodingFormat.SOPP && encoding.operands.exists(_.kind == OperandKind.LABEL)
     )
     val operands = instruction.operands.map {

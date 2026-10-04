@@ -66,6 +66,8 @@ constexpr uint32_t QueueMaximum = 4096;
 constexpr uint64_t VirtualMemorySize = static_cast<uint64_t>(1) * 1024 * 1024 * 1024;
 constexpr uint32_t AllocationGranule = 4096;
 constexpr uint32_t TransferChunk = 64U * 1024U;
+// GCC stack spills form many short dirty intervals; bound extra reads between them.
+constexpr uint64_t DirtyReadMaximumGap = 256;
 
 struct Signal {
   uint64_t kind = 0;
@@ -93,6 +95,7 @@ using AllocationRef = std::shared_ptr<Allocation>;
 
 struct Reader {
   std::vector<uint8_t> bytes;
+  bool legacy = false;
 };
 
 struct Kernel {
@@ -560,15 +563,55 @@ int mirrorBack(RuntimeState &runtime) {
   std::vector<gemstone_hsa_dirty_range> ranges(count);
   if (count != 0 && gemstone_hsa_aql_runtime_take_dirty_ranges(runtime.aql, ranges.data(), count, &count) != 0) return -1;
   ranges.resize(count);
-  for (const auto &range : ranges) {
+  std::sort(ranges.begin(), ranges.end(), [](const auto &left, const auto &right) {
+    if (left.allocation_id != right.allocation_id) return left.allocation_id < right.allocation_id;
+    return left.offset < right.offset;
+  });
+  for (size_t begin = 0; begin < ranges.size();) {
+    size_t end = begin + 1;
+    while (end < ranges.size() && ranges[end].allocation_id == ranges[begin].allocation_id)
+      ++end;
     AllocationRef allocation;
     {
       std::lock_guard<std::mutex> guard(runtime.lock);
-      allocation = findAllocationById(runtime, range.allocation_id);
+      allocation = findAllocationById(runtime, ranges[begin].allocation_id);
     }
-    if (!allocation || range.offset > allocation->size || range.size > allocation->size - range.offset) return -1;
-    for (const auto live : liveTransferRanges(runtime, allocation, range.offset, range.size))
-      if (download(runtime, allocation, live.base - reinterpret_cast<uintptr_t>(allocation->base), live.size) != 0) return -1;
+    if (!allocation) return -1;
+    for (size_t index = begin; index < end; ++index) {
+      const auto &range = ranges[index];
+      if (range.offset > allocation->size || range.size > allocation->size - range.offset) return -1;
+    }
+    if (allocation->owned && allocation->pool == GpuPool) {
+      std::vector<DirtyRange> dirty;
+      dirty.reserve(end - begin);
+      for (size_t index = begin; index < end; ++index) {
+        const auto &range = ranges[index];
+        if (range.offset > INT64_MAX || range.size > INT32_MAX) return -1;
+        if (range.size != 0)
+          dirty.push_back(
+              {AllocationId{static_cast<int64_t>(allocation->id)}, static_cast<int64_t>(range.offset), static_cast<int32_t>(range.size)});
+      }
+      std::lock_guard transfer(allocation->transfer_lock);
+      if (allocation->retired) return -1;
+      if (!readDirtyRanges(
+              *runtime.client, dirty,
+              [&](const DirtyRange &range, const uint8_t *bytes) {
+                const auto offset = static_cast<size_t>(range.offset.value);
+                const auto size = static_cast<size_t>(range.size.value);
+                std::memcpy(static_cast<uint8_t *>(allocation->base) + offset, bytes, size);
+                restoreGlobalPointers(runtime, allocation, offset, size);
+                return true;
+              },
+              DirtyReadMaximumGap, TransferChunk))
+        return -1;
+    } else {
+      for (size_t index = begin; index < end; ++index) {
+        const auto &range = ranges[index];
+        for (const auto live : liveTransferRanges(runtime, allocation, range.offset, range.size))
+          if (download(runtime, allocation, live.base - reinterpret_cast<uintptr_t>(allocation->base), live.size) != 0) return -1;
+      }
+    }
+    begin = end;
   }
   return 0;
 }
@@ -1061,7 +1104,7 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
     // executable memory, so advertising the full profile would bypass registration.
     case HSA_AGENT_INFO_PROFILE: return copyStatus(value, HSA_PROFILE_BASE);
     case HSA_AGENT_INFO_DEFAULT_FLOAT_ROUNDING_MODE: return copyStatus(value, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR);
-    case HSA_AGENT_INFO_WAVEFRONT_SIZE: return copyStatus(value, uint32_t(gpu ? 64 : 1));
+    case HSA_AGENT_INFO_WAVEFRONT_SIZE: return copyStatus(value, uint32_t(gpu ? gemstone::hsa::waveSize() : 1));
     case HSA_AGENT_INFO_WORKGROUP_MAX_DIM: {
       const uint16_t dimensions[3] = {1024, 1024, 1024};
       std::memcpy(value, dimensions, sizeof(dimensions));
@@ -1195,8 +1238,8 @@ extern "C" hsa_status_t hsa_agent_iterate_regions(hsa_agent_t agent, hsa_status_
     if (!validAgent(agent)) return HSA_STATUS_ERROR_INVALID_AGENT;
     if (!callback) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-  const auto region = hsa_region_t{agent.handle == CpuAgent ? CpuRegion : GpuRegion};
-  const auto status = callback(region, data);
+  auto status = callback(hsa_region_t{CpuRegion}, data);
+  if (status == HSA_STATUS_SUCCESS && validGpu(agent)) status = callback(hsa_region_t{GpuRegion}, data);
   traceApiResult("hsa_agent_iterate_regions", status);
   return status;
 }
@@ -1207,7 +1250,8 @@ extern "C" hsa_status_t hsa_region_get_info(hsa_region_t region, hsa_region_info
   if (const auto status = requireInitialized(runtime); status != HSA_STATUS_SUCCESS) return status;
   if (!validRegion(region)) return HSA_STATUS_ERROR_INVALID_REGION;
   if (!value) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  const uint32_t flags = HSA_REGION_GLOBAL_FLAG_KERNARG | HSA_REGION_GLOBAL_FLAG_FINE_GRAINED;
+  const uint32_t flags = region.handle == CpuRegion ? HSA_REGION_GLOBAL_FLAG_KERNARG | HSA_REGION_GLOBAL_FLAG_FINE_GRAINED
+                                                    : HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED;
   switch (attribute) {
     case HSA_REGION_INFO_SEGMENT: return copyStatus(value, HSA_REGION_SEGMENT_GLOBAL);
     case HSA_REGION_INFO_GLOBAL_FLAGS: return copyStatus(value, flags);
@@ -1854,22 +1898,35 @@ extern "C" void hsa_queue_store_write_index_screlease(const hsa_queue_t *queue, 
   hsa_queue_store_write_index_relaxed(queue, value);
 }
 
-extern "C" hsa_status_t hsa_code_object_reader_create_from_memory(const void *object, size_t size, hsa_code_object_reader_t *result) {
+namespace {
+
+hsa_status_t createCodeObject(const void *object, size_t size, uint64_t *result, bool legacy) {
   auto &runtime = state();
   if (const auto status = requireInitialized(runtime); status != HSA_STATUS_SUCCESS) return status;
   if (!object || size == 0 || !result) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   try {
     auto reader = std::make_shared<Reader>();
+    reader->legacy = legacy;
     reader->bytes.assign(static_cast<const uint8_t *>(object), static_cast<const uint8_t *>(object) + size);
     std::lock_guard<std::mutex> guard(runtime.lock);
     const uint64_t handle = runtime.next_handle++;
     runtime.readers.emplace(handle, reader);
-    result->handle = handle;
+    *result = handle;
     traceLoader("reader", handle, size);
     return HSA_STATUS_SUCCESS;
   } catch (...) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
+}
+
+} // namespace
+
+extern "C" hsa_status_t hsa_code_object_reader_create_from_memory(const void *object, size_t size, hsa_code_object_reader_t *result) {
+  return createCodeObject(object, size, result ? &result->handle : nullptr, false);
+}
+
+extern "C" hsa_status_t hsa_code_object_deserialize(void *object, size_t size, const char *, hsa_code_object_t *result) {
+  return createCodeObject(object, size, result ? &result->handle : nullptr, true);
 }
 
 extern "C" hsa_status_t hsa_code_object_reader_create_from_file(hsa_file_t file, hsa_code_object_reader_t *result) {
@@ -1887,12 +1944,24 @@ extern "C" hsa_status_t hsa_code_object_reader_create_from_file(hsa_file_t file,
   return hsa_code_object_reader_create_from_memory(bytes.data(), bytes.size(), result);
 }
 
-extern "C" hsa_status_t hsa_code_object_reader_destroy(hsa_code_object_reader_t reader_handle) {
+namespace {
+
+hsa_status_t destroyCodeObject(uint64_t handle, bool legacy) {
   auto &runtime = state();
   if (const auto status = requireInitialized(runtime); status != HSA_STATUS_SUCCESS) return status;
   std::lock_guard<std::mutex> guard(runtime.lock);
-  return runtime.readers.erase(reader_handle.handle) == 1 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
+  const auto found = runtime.readers.find(handle);
+  if (found == runtime.readers.end() || found->second->legacy != legacy)
+    return legacy ? HSA_STATUS_ERROR_INVALID_CODE_OBJECT : HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
+  runtime.readers.erase(found);
+  return HSA_STATUS_SUCCESS;
 }
+
+} // namespace
+
+extern "C" hsa_status_t hsa_code_object_reader_destroy(hsa_code_object_reader_t handle) { return destroyCodeObject(handle.handle, false); }
+
+extern "C" hsa_status_t hsa_code_object_destroy(hsa_code_object_t handle) { return destroyCodeObject(handle.handle, true); }
 
 extern "C" hsa_status_t hsa_executable_create_alt(hsa_profile_t profile, hsa_default_float_rounding_mode_t, const char *,
                                                   hsa_executable_t *result) {
@@ -1918,9 +1987,10 @@ extern "C" hsa_status_t hsa_executable_create(hsa_profile_t profile, hsa_executa
   return hsa_executable_create_alt(profile, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR, options, result);
 }
 
-extern "C" hsa_status_t hsa_executable_load_agent_code_object(hsa_executable_t executable_handle, hsa_agent_t agent,
-                                                              hsa_code_object_reader_t reader_handle, const char *,
-                                                              hsa_loaded_code_object_t *loaded) {
+namespace {
+
+hsa_status_t loadCodeObject(hsa_executable_t executable_handle, hsa_agent_t agent, hsa_code_object_reader_t reader_handle,
+                            hsa_loaded_code_object_t *loaded, bool legacy) {
   auto &runtime = state();
   if (const auto status = requireInitialized(runtime); status != HSA_STATUS_SUCCESS) return status;
   if (!validGpu(agent)) return HSA_STATUS_ERROR_INVALID_AGENT;
@@ -1931,14 +2001,18 @@ extern "C" hsa_status_t hsa_executable_load_agent_code_object(hsa_executable_t e
     executable_value = executable(runtime, executable_handle);
     reader_value = reader(runtime, reader_handle);
     if (!executable_value) return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
-    if (!reader_value) return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
+    if (!reader_value || reader_value->legacy != legacy)
+      return legacy ? HSA_STATUS_ERROR_INVALID_CODE_OBJECT : HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
     if (executable_value->frozen) return HSA_STATUS_ERROR_FROZEN_EXECUTABLE;
   }
 
   traceLoader("load", executable_handle.handle, reader_value->bytes.size());
 
   auto loadedProgram = runtime.client->call(LoadProgram{"hsa-code-object", reader_value->bytes});
-  if (!loadedProgram) return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  if (!loadedProgram) {
+    if (traceLoaders()) std::fprintf(stderr, "Gemstone HSA module load failed: %s\n", loadedProgram.error().detail.c_str());
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
   const uint64_t program_id = static_cast<uint64_t>(loadedProgram.value().value);
   struct LoadedProgramGuard {
     Client *client;
@@ -1948,7 +2022,14 @@ extern "C" hsa_status_t hsa_executable_load_agent_code_object(hsa_executable_t e
     }
   } loaded_program{runtime.client.get(), program_id};
   auto described = runtime.client->call(DescribeProgram{ProgramId{static_cast<int64_t>(program_id)}});
-  if (!described || described.value().kernels.empty()) return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  if (!described) {
+    if (traceLoaders()) std::fprintf(stderr, "Gemstone HSA module description failed: %s\n", described.error().detail.c_str());
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  if (described.value().kernels.empty()) {
+    if (traceLoaders()) std::fprintf(stderr, "Gemstone HSA module has no kernels\n");
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
   std::vector<gemstone::hsa::ExecutableKernelMetadata> metadata;
   std::vector<CatalogGlobal> variables;
   try {
@@ -2146,6 +2227,19 @@ extern "C" hsa_status_t hsa_executable_load_agent_code_object(hsa_executable_t e
   return HSA_STATUS_SUCCESS;
 }
 
+} // namespace
+
+extern "C" hsa_status_t hsa_executable_load_agent_code_object(hsa_executable_t executable, hsa_agent_t agent,
+                                                              hsa_code_object_reader_t reader, const char *,
+                                                              hsa_loaded_code_object_t *loaded) {
+  return loadCodeObject(executable, agent, reader, loaded, false);
+}
+
+extern "C" hsa_status_t hsa_executable_load_code_object(hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_t object,
+                                                        const char *) {
+  return loadCodeObject(executable, agent, hsa_code_object_reader_t{object.handle}, nullptr, true);
+}
+
 extern "C" hsa_status_t hsa_executable_load_program_code_object(hsa_executable_t executable, hsa_code_object_reader_t reader,
                                                                 const char *options, hsa_loaded_code_object_t *loaded) {
   return hsa_executable_load_agent_code_object(executable, hsa_agent_t{GpuAgent}, reader, options, loaded);
@@ -2267,6 +2361,12 @@ extern "C" hsa_status_t hsa_executable_get_symbol_by_name(hsa_executable_t execu
 
   traceLoaderSymbol("missing", executable_handle.handle, name);
   return HSA_STATUS_ERROR_INVALID_SYMBOL_NAME;
+}
+
+extern "C" hsa_status_t hsa_executable_get_symbol(hsa_executable_t executable, const char *module, const char *name, hsa_agent_t agent,
+                                                  int32_t, hsa_executable_symbol_t *symbol) {
+  if (module) return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  return hsa_executable_get_symbol_by_name(executable, name, agent.handle == 0 ? nullptr : &agent, symbol);
 }
 
 extern "C" hsa_status_t hsa_executable_symbol_get_info(hsa_executable_symbol_t symbol_handle, hsa_executable_symbol_info_t attribute,

@@ -180,6 +180,99 @@ ENV PATH="/opt/cmake/bin:/usr/local/cuda/bin:${PATH}" \
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
 
+# CUDA's frontend and device assembler are separate choices. Each Clang image
+# carries a matching CCCL release instead of relying on the SDK's bundled headers.
+FROM cuda-sdk AS clang-cuda-headers
+ARG DEBIAN_FRONTEND=noninteractive
+ARG CUDA_PACKAGE_VERSION
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes libcurand-dev-${CUDA_PACKAGE_VERSION} \
+    && mkdir /clang-cuda-headers \
+    && cp /usr/local/cuda/include/curand*.h /clang-cuda-headers/ \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM toolchain-cuda AS toolchain-clang-cuda
+COPY --from=clang-cuda-headers /clang-cuda-headers/ /opt/cuda-clang-headers/
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LLVM_VERSION
+ARG CCCL_VERSION
+ARG CCCL_SHA256
+RUN apt-get update && apt-get install --no-install-recommends --yes gpg \
+    && curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+       | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main" \
+       > /etc/apt/sources.list.d/llvm.list \
+    && apt-get update && apt-get install --no-install-recommends --yes clang-${LLVM_VERSION} clang-tools-${LLVM_VERSION} \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/bin/clang-${LLVM_VERSION} /usr/local/bin/clang \
+    && ln -s /usr/bin/clang++-${LLVM_VERSION} /usr/local/bin/clang++
+RUN curl -fsSL "https://codeload.github.com/NVIDIA/cccl/tar.gz/refs/tags/v${CCCL_VERSION}" -o /tmp/cccl.tar.gz \
+    && echo "${CCCL_SHA256}  /tmp/cccl.tar.gz" | sha256sum --check --strict \
+    && mkdir /opt/cccl \
+    && tar -xzf /tmp/cccl.tar.gz --strip-components=1 -C /opt/cccl \
+    && rm /tmp/cccl.tar.gz
+ENV PATH=/usr/lib/llvm-${LLVM_VERSION}/bin:${PATH} \
+    CC=/usr/local/bin/clang CXX=/usr/local/bin/clang++ CUDACXX=/usr/local/bin/clang++ \
+    CPATH=/opt/cuda-clang-headers:/opt/cccl/thrust:/opt/cccl/cub:/opt/cccl/libcudacxx/include:/usr/local/cuda/targets/x86_64-linux/include
+
+# GCC 14 looks up launch ICVs using the unresolved default-device sentinel.
+# Rebuild only the host runtime; retain distribution offload plugins/device libraries.
+FROM ubuntu-build-base AS gcc-host-runtime
+ARG DEBIAN_FRONTEND=noninteractive
+ARG GCC_VERSION
+ARG GCC_RUNTIME_VERSION
+ARG GCC_RUNTIME_SHA256
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes gcc-${GCC_VERSION} curl xz-utils file \
+    && rm -rf /var/lib/apt/lists/* \
+    && test "$(gcc-${GCC_VERSION} -dumpfullversion)" = "${GCC_RUNTIME_VERSION}"
+COPY patches/libgomp-default-device.patch /tmp/libgomp-default-device.patch
+RUN curl -fsSL "https://gcc.gnu.org/pub/gcc/releases/gcc-${GCC_RUNTIME_VERSION}/gcc-${GCC_RUNTIME_VERSION}.tar.xz" -o /tmp/gcc.tar.xz \
+    && echo "${GCC_RUNTIME_SHA256}  /tmp/gcc.tar.xz" | sha256sum --check --strict \
+    && mkdir /tmp/gcc-src /tmp/libgomp-build \
+    && tar -xJf /tmp/gcc.tar.xz --strip-components=1 -C /tmp/gcc-src \
+       gcc-${GCC_RUNTIME_VERSION}/libgomp gcc-${GCC_RUNTIME_VERSION}/config gcc-${GCC_RUNTIME_VERSION}/include \
+       gcc-${GCC_RUNTIME_VERSION}/gcc/BASE-VER gcc-${GCC_RUNTIME_VERSION}/config.guess gcc-${GCC_RUNTIME_VERSION}/config.sub \
+       gcc-${GCC_RUNTIME_VERSION}/install-sh gcc-${GCC_RUNTIME_VERSION}/missing gcc-${GCC_RUNTIME_VERSION}/mkinstalldirs \
+       gcc-${GCC_RUNTIME_VERSION}/ltmain.sh gcc-${GCC_RUNTIME_VERSION}/libtool.m4 gcc-${GCC_RUNTIME_VERSION}/libtool-ldflags \
+       gcc-${GCC_RUNTIME_VERSION}/ltoptions.m4 gcc-${GCC_RUNTIME_VERSION}/ltsugar.m4 gcc-${GCC_RUNTIME_VERSION}/ltversion.m4 \
+       gcc-${GCC_RUNTIME_VERSION}/lt~obsolete.m4 gcc-${GCC_RUNTIME_VERSION}/depcomp gcc-${GCC_RUNTIME_VERSION}/multilib.am \
+       gcc-${GCC_RUNTIME_VERSION}/config-ml.in gcc-${GCC_RUNTIME_VERSION}/COPYING.RUNTIME gcc-${GCC_RUNTIME_VERSION}/COPYING3 \
+    && patch --batch --fuzz=0 -d /tmp/gcc-src -p1 < /tmp/libgomp-default-device.patch \
+    && cd /tmp/libgomp-build \
+    && CC=gcc-${GCC_VERSION} enable_offload_targets=nvptx-none,amdgcn-amdhsa enable_offload_defaulted=yes \
+       ../gcc-src/libgomp/configure --prefix=/usr --disable-multilib --disable-static \
+    && make -j2 libgomp.la \
+    && mkdir -p /runtime/lib /runtime/licenses \
+    && install -m755 .libs/libgomp.so.1.0.0 /runtime/lib/ \
+    && strip --strip-unneeded /runtime/lib/libgomp.so.1.0.0 \
+    && cp /tmp/gcc-src/COPYING3 /tmp/gcc-src/COPYING.RUNTIME /runtime/licenses/ \
+    && rm -rf /tmp/gcc.tar.xz /tmp/gcc-src /tmp/libgomp-build
+
+FROM toolchain-cuda AS toolchain-gcc-cuda
+ARG DEBIAN_FRONTEND=noninteractive
+ARG GCC_VERSION
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes g++-${GCC_VERSION} gcc-${GCC_VERSION}-offload-nvptx libgomp-plugin-nvptx1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=gcc-host-runtime /runtime/lib/ /usr/lib/x86_64-linux-gnu/
+COPY --from=gcc-host-runtime /runtime/licenses/ /usr/local/share/licenses/libgomp/
+RUN ldconfig
+ENV CC=/usr/bin/gcc-${GCC_VERSION} CXX=/usr/bin/g++-${GCC_VERSION}
+
+FROM ubuntu-build-base AS toolchain-gcc-hsa
+ARG DEBIAN_FRONTEND=noninteractive
+ARG GCC_VERSION
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes g++-${GCC_VERSION} gcc-${GCC_VERSION}-offload-amdgcn libgomp-plugin-amdgcn1 libhsa-runtime-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=gcc-host-runtime /runtime/lib/ /usr/lib/x86_64-linux-gnu/
+COPY --from=gcc-host-runtime /runtime/licenses/ /usr/local/share/licenses/libgomp/
+RUN ldconfig
+ENV CC=/usr/bin/gcc-${GCC_VERSION} CXX=/usr/bin/g++-${GCC_VERSION}
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING
+
 FROM ${SYCL_IMAGE} AS toolchain-sycl
 USER root
 ARG DEBIAN_FRONTEND=noninteractive

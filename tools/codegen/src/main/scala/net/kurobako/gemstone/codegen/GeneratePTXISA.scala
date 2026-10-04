@@ -79,11 +79,11 @@ object GeneratePTXISA {
   private val VersionNote: Regex   = raw"Introduced in PTX ISA version ([0-9]+)\.([0-9]+)".r
   private val TargetNote: Regex    = raw"sm_([0-9]+)[af]?\s+or\s+(?:higher|later)".r
   private val Definition: Regex    =
-    raw"(?s)\.([A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z][A-Za-z0-9_]*)*)\s*=\s*\{([^}]*)\}\s*;?".r
+    raw"(?s)(?:\.|::)([A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z0-9_]+)*)\s*=\s*\{([^}]*)\}\s*;?".r
   private val OpcodeDefinition: Regex = raw"(?s)(?:^|\n)\s*([A-Za-z][A-Za-z0-9_]*)\s*=\s*\{([^}]*)\}\s*;?".r
-  private val DefinitionStart: Regex  = raw"^\s*\.?[A-Za-z][A-Za-z0-9_:-]*\s*=".r
+  private val DefinitionStart: Regex  = raw"^\s*(?:\.|::)?[A-Za-z][A-Za-z0-9_:-]*\s*=".r
   private val TitleOpcode: Regex      = raw"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+".r
-  private val ModifierName: Regex     = "[A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z][A-Za-z0-9_]*)*".r
+  private val ModifierName: Regex     = "[A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z0-9_]+)*".r
   private val PackageRoot             = "net/kurobako/gemstone/isa/ptx"
 
   private def request(tests: Boolean): Opts[Request] = (
@@ -327,9 +327,10 @@ object GeneratePTXISA {
 
   private def normalizeForms(blocks: Vector[String]): Vector[Form] = blocks.flatMap { block =>
     val definitions = Definition.findAllMatchIn(block).flatMap { matched =>
-      val values = Text.splitWords(matched.group(2), Set(',', '|')).map(_.stripPrefix(".")).filter(value =>
-        ModifierName.matches(value)
-      ).toSet
+      val values =
+        Text.splitWords(matched.group(2), Set(',', '|')).map(_.stripPrefix(".").stripPrefix("::")).filter(value =>
+          ModifierName.matches(value)
+        ).toSet
       val lineStart = block.lastIndexOf('\n', matched.start) + 1
       val aliases   = block.substring(lineStart, matched.start).split('=').toVector.map(_.trim).collect {
         case s".$name" if ModifierName.matches(name) => name
@@ -426,8 +427,19 @@ object GeneratePTXISA {
         case '{' =>
           val end = source.indexOf('}', index + 1)
           if (end < 0) loop(source.length, required, optional, false)
-          else {
-            val names = raw"\.([A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z][A-Za-z0-9_]*)*)".r
+          else if (source.startsWith("::", index + 1) && required.nonEmpty) {
+            val suffixes = "::([A-Za-z][A-Za-z0-9_]*)".r
+              .findAllMatchIn(source.slice(index + 1, end)).flatMap { matched =>
+                val name = matched.group(1)
+                definitions.getOrElse(name, Set(name))
+              }.toSet
+            val qualified = for {
+              base   <- required.last
+              suffix <- suffixes
+            } yield s"$base::$suffix"
+            loop(end + 1, required.init :+ (required.last ++ qualified), optional, complete && suffixes.nonEmpty)
+          } else {
+            val names = raw"\.([A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z0-9_]+)*)".r
               .findAllMatchIn(source.slice(index + 1, end)).flatMap { matched =>
                 val name = matched.group(1)
                 definitions.getOrElse(name, Set(name))

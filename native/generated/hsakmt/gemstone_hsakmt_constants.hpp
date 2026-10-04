@@ -244,6 +244,7 @@ inline constexpr auto HSA_SVM_FLAG_HOST_ACCESS = 1;
 inline constexpr auto HSA_SVM_UNMAP_TRIGGER_MMU_NOTIFY = 0;
 inline constexpr auto HSA_SVM_UNMAP_TRIGGER_MMU_NOTIFY_MIGRATE = 1;
 inline constexpr auto HSA_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU = 2;
+
 }
 
 #endif

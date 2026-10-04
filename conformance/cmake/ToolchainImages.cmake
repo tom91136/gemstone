@@ -25,13 +25,50 @@ function(conformance_cuda_toolchain architecture image_output package_output sup
   set(${support_output} "${support}" PARENT_SCOPE)
 endfunction()
 
+# Compiler variants retain the runtime API backend and have independent artifacts.
+set(conformance_clang_version 22)
+set(conformance_gcc_version 14)
+set(conformance_gcc_runtime_version 14.2.0)
+set(conformance_gcc_runtime_sha256 a7b39bc69cbf9e25826c5a60ab26477001f7c08d85cec04bc0e29cabed6f3cc9)
+set(conformance_gcc_cuda_architectures sm_35 sm_70 sm_75 sm_80)
+set(conformance_gcc_hsa_architectures gfx900 gfx906 gfx908 gfx90a gfx90c gfx1030 gfx1036 gfx1100 gfx1103)
+
+function(conformance_compiler_supported backend architecture compiler output)
+  set(supported FALSE)
+  if(compiler STREQUAL "vendor")
+    set(supported TRUE)
+  elseif(compiler STREQUAL "clang" AND backend STREQUAL "cuda")
+    set(supported TRUE)
+  elseif(compiler STREQUAL "gcc" AND architecture IN_LIST conformance_gcc_${backend}_architectures)
+    set(supported TRUE)
+  endif()
+  set(${output} "${supported}" PARENT_SCOPE)
+endfunction()
+
 # Callers define CONFORMANCE_SOURCE_DIRECTORY, CONTAINER_EXECUTABLE, ROCM_VERSION,
 # and the container_build Ninja job pool before requesting a toolchain target.
 function(conformance_toolchain backend architecture image_output dependency_output support_output)
+  set(compiler vendor)
+  if(ARGC GREATER 5)
+    set(compiler "${ARGV5}")
+  endif()
+  conformance_compiler_supported("${backend}" "${architecture}" "${compiler}" supported)
+  if(NOT supported)
+    message(FATAL_ERROR "Unsupported compiler route: ${backend}/${architecture}/${compiler}")
+  endif()
+  set(stage "toolchain-${backend}")
+  if(NOT compiler STREQUAL "vendor")
+    set(stage "toolchain-${compiler}-${backend}")
+  endif()
   set(build_arguments)
   set(support "support")
   if(backend STREQUAL "cuda")
-    conformance_cuda_toolchain("${architecture}" cuda_image cuda_package support)
+    if(compiler STREQUAL "gcc")
+      # GNU generates PTX itself; this SDK supplies only the driver headers/probe.
+      conformance_cuda_toolchain(sm_70 cuda_image cuda_package support)
+    else()
+      conformance_cuda_toolchain("${architecture}" cuda_image cuda_package support)
+    endif()
     set(key "cuda-${cuda_package}")
     list(APPEND build_arguments
       --build-arg "CUDA_IMAGE=${cuda_image}"
@@ -43,32 +80,54 @@ function(conformance_toolchain backend architecture image_output dependency_outp
     endif()
   endif()
 
+  if(compiler STREQUAL "clang")
+    if(cuda_package STREQUAL "11-8")
+      set(cccl_version 2.8.2)
+      set(cccl_sha256 141801ddddf5b911f64f97be66a7c75f98374bebca60f275bedec75b8eeab345)
+    else()
+      set(cccl_version 3.4.3)
+      set(cccl_sha256 2b3eee7b044f528408b45ab85535ce6c7430b063d5bc939599a4e038da7cf6fb)
+    endif()
+    list(APPEND build_arguments --build-arg "LLVM_VERSION=${conformance_clang_version}"
+      --build-arg "CCCL_VERSION=${cccl_version}" --build-arg "CCCL_SHA256=${cccl_sha256}")
+  elseif(compiler STREQUAL "gcc")
+    list(APPEND build_arguments --build-arg "GCC_VERSION=${conformance_gcc_version}"
+      --build-arg "GCC_RUNTIME_VERSION=${conformance_gcc_runtime_version}"
+      --build-arg "GCC_RUNTIME_SHA256=${conformance_gcc_runtime_sha256}")
+  endif()
+  if(NOT compiler STREQUAL "vendor")
+    string(APPEND key "-${compiler}")
+  endif()
   string(SHA256 toolchain_namespace "${CONFORMANCE_SOURCE_DIRECTORY}")
   string(SUBSTRING "${toolchain_namespace}" 0 12 toolchain_namespace)
-  if(backend STREQUAL "cuda")
+  set(tag "localhost/conformance-${toolchain_namespace}-${key}:latest")
+  # Preserve vendor image names used by command/fixture consumers.
+  if(compiler STREQUAL "vendor" AND backend STREQUAL "cuda")
     set(tag "localhost/conformance-${toolchain_namespace}-cuda:${cuda_package}")
-  else()
-    set(tag "localhost/conformance-${toolchain_namespace}-${backend}:latest")
   endif()
-
   set(stamp_key "${key}")
-  if(backend STREQUAL "hip" OR backend STREQUAL "hsa")
-    set(stamp_key "${key}-${ROCM_VERSION}")
+  if(compiler STREQUAL "vendor" AND backend MATCHES "^(hip|hsa)$")
+    string(APPEND stamp_key "-${ROCM_VERSION}")
   endif()
   set(stamp "${CMAKE_BINARY_DIR}/toolchains/${stamp_key}")
   string(MAKE_C_IDENTIFIER "toolchain-${key}" target)
   if(NOT TARGET "${target}")
+    set(runtime_patches)
+    if(compiler STREQUAL "gcc")
+      list(APPEND runtime_patches "${CONFORMANCE_SOURCE_DIRECTORY}/patches/libgomp-default-device.patch")
+    endif()
     add_custom_command(
       OUTPUT "${stamp}"
       COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/toolchains"
       COMMAND "${CONTAINER_EXECUTABLE}" build
         --file "${CONFORMANCE_SOURCE_DIRECTORY}/Containerfile"
-        --target "toolchain-${backend}"
+        --target "${stage}"
         --tag "${tag}"
         ${build_arguments}
         "${CONFORMANCE_SOURCE_DIRECTORY}"
       COMMAND "${CMAKE_COMMAND}" -E touch "${stamp}"
-      DEPENDS "${CONFORMANCE_SOURCE_DIRECTORY}/Containerfile"
+      DEPENDS "${CONFORMANCE_SOURCE_DIRECTORY}/Containerfile" "${CONFORMANCE_SOURCE_DIRECTORY}/.dockerignore"
+        "${CMAKE_CURRENT_FUNCTION_LIST_FILE}" ${runtime_patches}
       COMMENT "Preparing ${backend} conformance toolchain"
       JOB_POOL container_build
       VERBATIM)

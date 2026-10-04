@@ -51,7 +51,33 @@ class CodeObjectMetadataSuite extends munit.FunSuite {
     assert(result.swap.toOption.get.message.contains("exceeds supported range"))
   }
 
-  private def codeObject(hidden: Boolean, blockSize: Option[Array[Byte]] = None): Array[Byte] = {
+  test("kernels without optional argument descriptions retain their raw argument block") {
+    val manifest =
+      CodeObjectMetadata.decode(Vec.from(codeObject(hidden = false, omitArguments = true))).toOption.get.head
+    assertEquals(manifest.metadata.argumentBlockSize.raw, 20)
+    assertEquals(manifest.metadata.parameters, Vec.empty[KernelMetadata.Parameter])
+    assertEquals(manifest.metadata.explicitParameterCount.raw, 0)
+    assertEquals(manifest.hiddenArguments, Vec.empty[CodeObjectMetadata.HiddenArgument])
+  }
+
+  test("large ELF note sections preserve metadata and reject a truncated trailing note") {
+    val image = Vec.from(codeObject(hidden = false))
+    val notes = ELF.notes(image).toOption.get
+    // Twelve zero bytes encode an empty note; vendor sections can contain thousands of these.
+    val padding = Vec.fill[Byte](120000)(0)
+    val padded  = padding ++ notes.head ++ padding
+    assertEquals(CodeObjectMetadata.decodeNotes(Vec(padded)), CodeObjectMetadata.decodeOptional(image))
+    val truncatedHeader = Vec.from(Array[Byte](4, 0, 0, 0, 8, 0, 0, 0, 32, 0, 0, 0))
+    val result          = CodeObjectMetadata.decodeNotes(Vec(padded ++ truncatedHeader))
+    assert(result.isLeft)
+    assertEquals(result.swap.toOption.get.message.raw, "truncated ELF note")
+  }
+
+  private def codeObject(
+      hidden: Boolean,
+      blockSize: Option[Array[Byte]] = None,
+      omitArguments: Boolean = false
+  ): Array[Byte] = {
     val arguments = Seq(
       argument(0, 8, "global_buffer"),
       argument(8, 8, "global_buffer"),
@@ -60,10 +86,9 @@ class CodeObjectMetadataSuite extends munit.FunSuite {
     val metadata = concat(
       Array(0x81.toByte),
       string("amdhsa.kernels"),
-      Array(0x91.toByte, 0x84.toByte),
-      string(".args"),
-      Array((0x90 | arguments.size).toByte),
-      concat(arguments*),
+      Array(0x91.toByte, (if (omitArguments) 0x83 else 0x84).toByte),
+      if (omitArguments) Array.emptyByteArray
+      else concat(string(".args"), Array((0x90 | arguments.size).toByte), concat(arguments*)),
       string(".kernarg_segment_size"),
       blockSize.getOrElse(unsigned(if (hidden) 24 else 20)),
       string(".name"),

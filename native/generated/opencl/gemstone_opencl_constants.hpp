@@ -4,6 +4,7 @@
 
 namespace gemstone::opencl::api {
 
+
 }
 
 #endif

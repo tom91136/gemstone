@@ -3170,7 +3170,8 @@ object Instruction {
   type OutmioPipe = OutmioPipeReg | OutmioPipeRegRegConst | OutmioPipeRegRegImm | OutmioPipeRegRegReg
   type P2r =
     P2rReg | P2rRegRegConst | P2rRegRegImm | P2rRegRegReg | P2rRegSymbol | P2rRegSymbolRegAddressImm | P2rRegSymbolRegConst | P2rRegSymbolRegImm | P2rRegSymbolRegReg
-  type P2rfxuPipe = P2rfxuPipeReg | P2rfxuPipeRegRegConst | P2rfxuPipeRegRegImm | P2rfxuPipeRegRegReg
+  type P2rfxuPipe =
+    P2rfxuPipeReg | P2rfxuPipeRegRegConst | P2rfxuPipeRegRegImm | P2rfxuPipeRegRegReg | P2rfxuPipeRegSymbol | P2rfxuPipeRegSymbolRegConst | P2rfxuPipeRegSymbolRegImm | P2rfxuPipeRegSymbolRegReg
   type P2rintPipe =
     P2rintPipeRegSymbol | P2rintPipeRegSymbolRegAddressImm | P2rintPipeRegSymbolRegConst | P2rintPipeRegSymbolRegImm | P2rintPipeRegSymbolRegReg
   type P2rxluPipe =
@@ -3240,7 +3241,8 @@ object Instruction {
   type R2bmioPipe = R2bmioPipeImmReg
   type R2p =
     R2pReg | R2pRegConst | R2pRegImm | R2pRegReg | R2pSymbolReg | R2pSymbolRegAddressImm | R2pSymbolRegConst | R2pSymbolRegImm | R2pSymbolRegReg
-  type R2pfxuPipe = R2pfxuPipeReg | R2pfxuPipeRegConst | R2pfxuPipeRegImm | R2pfxuPipeRegReg
+  type R2pfxuPipe =
+    R2pfxuPipeReg | R2pfxuPipeRegConst | R2pfxuPipeRegImm | R2pfxuPipeRegReg | R2pfxuPipeSymbolReg | R2pfxuPipeSymbolRegConst | R2pfxuPipeSymbolRegImm | R2pfxuPipeSymbolRegReg
   type R2pintPipe =
     R2pintPipeSymbolReg | R2pintPipeSymbolRegAddressImm | R2pintPipeSymbolRegConst | R2pintPipeSymbolRegImm | R2pintPipeSymbolRegReg
   type R2pxluPipe = R2pxluPipeSymbolReg | R2pxluPipeSymbolRegConst | R2pxluPipeSymbolRegImm | R2pxluPipeSymbolRegReg
@@ -6383,6 +6385,10 @@ object Instruction {
   inline def P2rfxuPipeRegRegConstDefinition: Definition = InstructionDefinitions9.P2rfxuPipeRegRegConst
   inline def P2rfxuPipeRegRegImmDefinition: Definition = InstructionDefinitions9.P2rfxuPipeRegRegImm
   inline def P2rfxuPipeRegRegRegDefinition: Definition = InstructionDefinitions9.P2rfxuPipeRegRegReg
+  inline def P2rfxuPipeRegSymbolDefinition: Definition = InstructionDefinitions9.P2rfxuPipeRegSymbol
+  inline def P2rfxuPipeRegSymbolRegConstDefinition: Definition = InstructionDefinitions9.P2rfxuPipeRegSymbolRegConst
+  inline def P2rfxuPipeRegSymbolRegImmDefinition: Definition = InstructionDefinitions9.P2rfxuPipeRegSymbolRegImm
+  inline def P2rfxuPipeRegSymbolRegRegDefinition: Definition = InstructionDefinitions9.P2rfxuPipeRegSymbolRegReg
   inline def P2rintPipeRegSymbolDefinition: Definition = InstructionDefinitions9.P2rintPipeRegSymbol
   inline def P2rintPipeRegSymbolRegAddressImmDefinition: Definition =
     InstructionDefinitions9.P2rintPipeRegSymbolRegAddressImm
@@ -6670,17 +6676,21 @@ object Instruction {
   inline def R2pfxuPipeRegConstDefinition: Definition = InstructionDefinitions9.R2pfxuPipeRegConst
   inline def R2pfxuPipeRegImmDefinition: Definition = InstructionDefinitions9.R2pfxuPipeRegImm
   inline def R2pfxuPipeRegRegDefinition: Definition = InstructionDefinitions9.R2pfxuPipeRegReg
+  inline def R2pfxuPipeSymbolRegDefinition: Definition = InstructionDefinitions9.R2pfxuPipeSymbolReg
+  inline def R2pfxuPipeSymbolRegConstDefinition: Definition = InstructionDefinitions9.R2pfxuPipeSymbolRegConst
+  inline def R2pfxuPipeSymbolRegImmDefinition: Definition = InstructionDefinitions9.R2pfxuPipeSymbolRegImm
+  inline def R2pfxuPipeSymbolRegRegDefinition: Definition = InstructionDefinitions9.R2pfxuPipeSymbolRegReg
   inline def R2pintPipeSymbolRegDefinition: Definition = InstructionDefinitions9.R2pintPipeSymbolReg
   inline def R2pintPipeSymbolRegAddressImmDefinition: Definition = InstructionDefinitions9.R2pintPipeSymbolRegAddressImm
   inline def R2pintPipeSymbolRegConstDefinition: Definition = InstructionDefinitions9.R2pintPipeSymbolRegConst
-  inline def R2pintPipeSymbolRegImmDefinition: Definition = InstructionDefinitions9.R2pintPipeSymbolRegImm
-  inline def R2pintPipeSymbolRegRegDefinition: Definition = InstructionDefinitions9.R2pintPipeSymbolRegReg
-  inline def R2pxluPipeSymbolRegDefinition: Definition = InstructionDefinitions9.R2pxluPipeSymbolReg
-  inline def R2pxluPipeSymbolRegConstDefinition: Definition = InstructionDefinitions9.R2pxluPipeSymbolRegConst
-  inline def R2pxluPipeSymbolRegImmDefinition: Definition = InstructionDefinitions9.R2pxluPipeSymbolRegImm
-  inline def R2pxluPipeSymbolRegRegDefinition: Definition = InstructionDefinitions9.R2pxluPipeSymbolRegReg
-  inline def R2urPredRegRegDefinition: Definition = InstructionDefinitions9.R2urPredRegReg
-  inline def R2urRegRegDefinition: Definition = InstructionDefinitions9.R2urRegReg
+  inline def R2pintPipeSymbolRegImmDefinition: Definition = InstructionDefinitions10.R2pintPipeSymbolRegImm
+  inline def R2pintPipeSymbolRegRegDefinition: Definition = InstructionDefinitions10.R2pintPipeSymbolRegReg
+  inline def R2pxluPipeSymbolRegDefinition: Definition = InstructionDefinitions10.R2pxluPipeSymbolReg
+  inline def R2pxluPipeSymbolRegConstDefinition: Definition = InstructionDefinitions10.R2pxluPipeSymbolRegConst
+  inline def R2pxluPipeSymbolRegImmDefinition: Definition = InstructionDefinitions10.R2pxluPipeSymbolRegImm
+  inline def R2pxluPipeSymbolRegRegDefinition: Definition = InstructionDefinitions10.R2pxluPipeSymbolRegReg
+  inline def R2urPredRegRegDefinition: Definition = InstructionDefinitions10.R2urPredRegReg
+  inline def R2urRegRegDefinition: Definition = InstructionDefinitions10.R2urRegReg
   inline def R2urudpPipePredRegRegDefinition: Definition = InstructionDefinitions10.R2urudpPipePredRegReg
   inline def R2urudpPipeRegRegDefinition: Definition = InstructionDefinitions10.R2urudpPipeRegReg
   inline def RamNoOperandsDefinition: Definition = InstructionDefinitions10.RamNoOperands
@@ -6963,14 +6973,14 @@ object Instruction {
   inline def SuldPredRegAddressImmImmDefinition: Definition = InstructionDefinitions10.SuldPredRegAddressImmImm
   inline def SuldPredRegAddressImmImmImmDefinition: Definition = InstructionDefinitions10.SuldPredRegAddressImmImmImm
   inline def SuldPredRegAddressRegDefinition: Definition = InstructionDefinitions10.SuldPredRegAddressReg
-  inline def SuldPredRegAddressRegImmDefinition: Definition = InstructionDefinitions10.SuldPredRegAddressRegImm
-  inline def SuldPredRegAddressRegRegDefinition: Definition = InstructionDefinitions10.SuldPredRegAddressRegReg
-  inline def SuldPredRegAddressRegRegImmDefinition: Definition = InstructionDefinitions10.SuldPredRegAddressRegRegImm
-  inline def SuldPredRegAddressRegRegRegDefinition: Definition = InstructionDefinitions10.SuldPredRegAddressRegRegReg
-  inline def SuldRegAddressImmDefinition: Definition = InstructionDefinitions10.SuldRegAddressImm
-  inline def SuldRegAddressImmImmDefinition: Definition = InstructionDefinitions10.SuldRegAddressImmImm
-  inline def SuldRegAddressImmImmImmDefinition: Definition = InstructionDefinitions10.SuldRegAddressImmImmImm
-  inline def SuldRegAddressRegDefinition: Definition = InstructionDefinitions10.SuldRegAddressReg
+  inline def SuldPredRegAddressRegImmDefinition: Definition = InstructionDefinitions11.SuldPredRegAddressRegImm
+  inline def SuldPredRegAddressRegRegDefinition: Definition = InstructionDefinitions11.SuldPredRegAddressRegReg
+  inline def SuldPredRegAddressRegRegImmDefinition: Definition = InstructionDefinitions11.SuldPredRegAddressRegRegImm
+  inline def SuldPredRegAddressRegRegRegDefinition: Definition = InstructionDefinitions11.SuldPredRegAddressRegRegReg
+  inline def SuldRegAddressImmDefinition: Definition = InstructionDefinitions11.SuldRegAddressImm
+  inline def SuldRegAddressImmImmDefinition: Definition = InstructionDefinitions11.SuldRegAddressImmImm
+  inline def SuldRegAddressImmImmImmDefinition: Definition = InstructionDefinitions11.SuldRegAddressImmImmImm
+  inline def SuldRegAddressRegDefinition: Definition = InstructionDefinitions11.SuldRegAddressReg
   inline def SuldRegAddressRegImmDefinition: Definition = InstructionDefinitions11.SuldRegAddressRegImm
   inline def SuldRegAddressRegRegDefinition: Definition = InstructionDefinitions11.SuldRegAddressRegReg
   inline def SuldRegAddressRegRegImmDefinition: Definition = InstructionDefinitions11.SuldRegAddressRegRegImm
@@ -7300,17 +7310,17 @@ object Instruction {
   inline def Tld4mioPipeRegRegRegRegRegRegDefinition: Definition =
     InstructionDefinitions11.Tld4mioPipeRegRegRegRegRegReg
   inline def Tld4mioPipeRegRegRegRegRegRegImmDefinition: Definition =
-    InstructionDefinitions11.Tld4mioPipeRegRegRegRegRegRegImm
+    InstructionDefinitions12.Tld4mioPipeRegRegRegRegRegRegImm
   inline def Tld4mioPipeRegRegRegRegRegRegImmImmDefinition: Definition =
-    InstructionDefinitions11.Tld4mioPipeRegRegRegRegRegRegImmImm
-  inline def Tld4texPipeRegRegRegImmImmDefinition: Definition = InstructionDefinitions11.Tld4texPipeRegRegRegImmImm
+    InstructionDefinitions12.Tld4mioPipeRegRegRegRegRegRegImmImm
+  inline def Tld4texPipeRegRegRegImmImmDefinition: Definition = InstructionDefinitions12.Tld4texPipeRegRegRegImmImm
   inline def Tld4texPipeRegRegRegImmImmImmDefinition: Definition =
-    InstructionDefinitions11.Tld4texPipeRegRegRegImmImmImm
-  inline def TldsRegRegRegRegImmDefinition: Definition = InstructionDefinitions11.TldsRegRegRegRegImm
-  inline def TldsmioPipeRegRegRegRegImmDefinition: Definition = InstructionDefinitions11.TldsmioPipeRegRegRegRegImm
-  inline def TldmioPipePredRegRegRegImmDefinition: Definition = InstructionDefinitions11.TldmioPipePredRegRegRegImm
+    InstructionDefinitions12.Tld4texPipeRegRegRegImmImmImm
+  inline def TldsRegRegRegRegImmDefinition: Definition = InstructionDefinitions12.TldsRegRegRegRegImm
+  inline def TldsmioPipeRegRegRegRegImmDefinition: Definition = InstructionDefinitions12.TldsmioPipeRegRegRegRegImm
+  inline def TldmioPipePredRegRegRegImmDefinition: Definition = InstructionDefinitions12.TldmioPipePredRegRegRegImm
   inline def TldmioPipePredRegRegRegImmImmDefinition: Definition =
-    InstructionDefinitions11.TldmioPipePredRegRegRegImmImm
+    InstructionDefinitions12.TldmioPipePredRegRegRegImmImm
   inline def TldmioPipePredRegRegRegRegDefinition: Definition = InstructionDefinitions12.TldmioPipePredRegRegRegReg
   inline def TldmioPipePredRegRegRegRegImmDefinition: Definition =
     InstructionDefinitions12.TldmioPipePredRegRegRegRegImm
@@ -7618,14 +7628,14 @@ object Instruction {
   inline def UfrndRegRegDefinition: Definition = InstructionDefinitions12.UfrndRegReg
   inline def UfrndudpPipeRegImmDefinition: Definition = InstructionDefinitions12.UfrndudpPipeRegImm
   inline def UfrndudpPipeRegRegDefinition: Definition = InstructionDefinitions12.UfrndudpPipeRegReg
-  inline def UfselRegRegImmPredDefinition: Definition = InstructionDefinitions12.UfselRegRegImmPred
-  inline def UfselRegRegRegPredDefinition: Definition = InstructionDefinitions12.UfselRegRegRegPred
-  inline def UfseludpPipeRegRegImmPredDefinition: Definition = InstructionDefinitions12.UfseludpPipeRegRegImmPred
-  inline def UfseludpPipeRegRegRegPredDefinition: Definition = InstructionDefinitions12.UfseludpPipeRegRegRegPred
-  inline def UfsetRegRegImmDefinition: Definition = InstructionDefinitions12.UfsetRegRegImm
-  inline def UfsetRegRegImmPredDefinition: Definition = InstructionDefinitions12.UfsetRegRegImmPred
-  inline def UfsetRegRegRegDefinition: Definition = InstructionDefinitions12.UfsetRegRegReg
-  inline def UfsetRegRegRegPredDefinition: Definition = InstructionDefinitions12.UfsetRegRegRegPred
+  inline def UfselRegRegImmPredDefinition: Definition = InstructionDefinitions13.UfselRegRegImmPred
+  inline def UfselRegRegRegPredDefinition: Definition = InstructionDefinitions13.UfselRegRegRegPred
+  inline def UfseludpPipeRegRegImmPredDefinition: Definition = InstructionDefinitions13.UfseludpPipeRegRegImmPred
+  inline def UfseludpPipeRegRegRegPredDefinition: Definition = InstructionDefinitions13.UfseludpPipeRegRegRegPred
+  inline def UfsetRegRegImmDefinition: Definition = InstructionDefinitions13.UfsetRegRegImm
+  inline def UfsetRegRegImmPredDefinition: Definition = InstructionDefinitions13.UfsetRegRegImmPred
+  inline def UfsetRegRegRegDefinition: Definition = InstructionDefinitions13.UfsetRegRegReg
+  inline def UfsetRegRegRegPredDefinition: Definition = InstructionDefinitions13.UfsetRegRegRegPred
   inline def UfsetpPredPredRegImmPredDefinition: Definition = InstructionDefinitions13.UfsetpPredPredRegImmPred
   inline def UfsetpPredPredRegRegPredDefinition: Definition = InstructionDefinitions13.UfsetpPredPredRegRegPred
   inline def UfsetpPredRegImmDefinition: Definition = InstructionDefinitions13.UfsetpPredRegImm
@@ -7935,21 +7945,21 @@ object Instruction {
   inline def Uplop3udpPipePredPredPredPredDefinition: Definition =
     InstructionDefinitions13.Uplop3udpPipePredPredPredPred
   inline def Uplop3udpPipePredPredPredPredImmDefinition: Definition =
-    InstructionDefinitions13.Uplop3udpPipePredPredPredPredImm
+    InstructionDefinitions14.Uplop3udpPipePredPredPredPredImm
   inline def Uplop3udpPipePredPredPredPredPredImmImmDefinition: Definition =
-    InstructionDefinitions13.Uplop3udpPipePredPredPredPredPredImmImm
+    InstructionDefinitions14.Uplop3udpPipePredPredPredPredPredImmImm
   inline def Uplop3udpPipePredPredPredRegPredImmImmDefinition: Definition =
-    InstructionDefinitions13.Uplop3udpPipePredPredPredRegPredImmImm
+    InstructionDefinitions14.Uplop3udpPipePredPredPredRegPredImmImm
   inline def Uplop3udpPipePredPredPredRegRegImmImmDefinition: Definition =
-    InstructionDefinitions13.Uplop3udpPipePredPredPredRegRegImmImm
+    InstructionDefinitions14.Uplop3udpPipePredPredPredRegRegImmImm
   inline def Uplop3udpPipePredPredRegPredImmDefinition: Definition =
-    InstructionDefinitions13.Uplop3udpPipePredPredRegPredImm
+    InstructionDefinitions14.Uplop3udpPipePredPredRegPredImm
   inline def Uplop3udpPipePredPredRegRegImmDefinition: Definition =
-    InstructionDefinitions13.Uplop3udpPipePredPredRegRegImm
+    InstructionDefinitions14.Uplop3udpPipePredPredRegRegImm
   inline def Uplop3udpPipePredPredRegRegRegImmImmDefinition: Definition =
-    InstructionDefinitions13.Uplop3udpPipePredPredRegRegRegImmImm
+    InstructionDefinitions14.Uplop3udpPipePredPredRegRegRegImmImm
   inline def Uplop3udpPipePredRegRegRegImmDefinition: Definition =
-    InstructionDefinitions13.Uplop3udpPipePredRegRegRegImm
+    InstructionDefinitions14.Uplop3udpPipePredRegRegRegImm
   inline def UpopcRegImmDefinition: Definition = InstructionDefinitions14.UpopcRegImm
   inline def UpopcRegRegDefinition: Definition = InstructionDefinitions14.UpopcRegReg
   inline def UpopcudpPipeRegImmDefinition: Definition = InstructionDefinitions14.UpopcudpPipeRegImm
@@ -8271,15 +8281,15 @@ object Instruction {
     InstructionDefinitions14.VimnmxRegPredPredRegAddressImmPred
   inline def VimnmxRegPredPredRegConstPredDefinition: Definition =
     InstructionDefinitions14.VimnmxRegPredPredRegConstPred
-  inline def VimnmxRegPredPredRegImmPredDefinition: Definition = InstructionDefinitions14.VimnmxRegPredPredRegImmPred
-  inline def VimnmxRegPredPredRegRegPredDefinition: Definition = InstructionDefinitions14.VimnmxRegPredPredRegRegPred
-  inline def VimnmxRegRegAddressImmPredDefinition: Definition = InstructionDefinitions14.VimnmxRegRegAddressImmPred
-  inline def VimnmxRegRegConstPredDefinition: Definition = InstructionDefinitions14.VimnmxRegRegConstPred
-  inline def VimnmxRegRegImmPredDefinition: Definition = InstructionDefinitions14.VimnmxRegRegImmPred
-  inline def VimnmxRegRegRegPredDefinition: Definition = InstructionDefinitions14.VimnmxRegRegRegPred
+  inline def VimnmxRegPredPredRegImmPredDefinition: Definition = InstructionDefinitions15.VimnmxRegPredPredRegImmPred
+  inline def VimnmxRegPredPredRegRegPredDefinition: Definition = InstructionDefinitions15.VimnmxRegPredPredRegRegPred
+  inline def VimnmxRegRegAddressImmPredDefinition: Definition = InstructionDefinitions15.VimnmxRegRegAddressImmPred
+  inline def VimnmxRegRegConstPredDefinition: Definition = InstructionDefinitions15.VimnmxRegRegConstPred
+  inline def VimnmxRegRegImmPredDefinition: Definition = InstructionDefinitions15.VimnmxRegRegImmPred
+  inline def VimnmxRegRegRegPredDefinition: Definition = InstructionDefinitions15.VimnmxRegRegRegPred
   inline def Vimnmx3RegRegAddressImmRegPredDefinition: Definition =
-    InstructionDefinitions14.Vimnmx3RegRegAddressImmRegPred
-  inline def Vimnmx3RegRegConstRegPredDefinition: Definition = InstructionDefinitions14.Vimnmx3RegRegConstRegPred
+    InstructionDefinitions15.Vimnmx3RegRegAddressImmRegPred
+  inline def Vimnmx3RegRegConstRegPredDefinition: Definition = InstructionDefinitions15.Vimnmx3RegRegConstRegPred
   inline def Vimnmx3RegRegImmRegPredDefinition: Definition = InstructionDefinitions15.Vimnmx3RegRegImmRegPred
   inline def Vimnmx3RegRegRegRegPredDefinition: Definition = InstructionDefinitions15.Vimnmx3RegRegRegRegPred
   inline def Vimnmx3intPipeRegRegAddressImmRegPredDefinition: Definition =
@@ -28711,6 +28721,36 @@ enum Instruction(
       mods: Vec[Modifier] = Vec.empty,
       pred: Option[Guard] = None
   ) extends Instruction(Instruction.P2rfxuPipeRegRegRegDefinition, mods, pred, dst, srcA, srcB)
+  case P2rfxuPipeRegSymbol(
+      dst: InstructionOperand.Register,
+      pr: InstructionOperand.Symbol,
+      mods: Vec[Modifier] = Vec.empty,
+      pred: Option[Guard] = None
+  ) extends Instruction(Instruction.P2rfxuPipeRegSymbolDefinition, mods, pred, dst, pr)
+  case P2rfxuPipeRegSymbolRegConst(
+      dst: InstructionOperand.Register,
+      pr: InstructionOperand.Symbol,
+      srcA: InstructionOperand.Register,
+      srcConst: InstructionOperand.ConstantBank,
+      mods: Vec[Modifier] = Vec.empty,
+      pred: Option[Guard] = None
+  ) extends Instruction(Instruction.P2rfxuPipeRegSymbolRegConstDefinition, mods, pred, dst, pr, srcA, srcConst)
+  case P2rfxuPipeRegSymbolRegImm(
+      dst: InstructionOperand.Register,
+      pr: InstructionOperand.Symbol,
+      srcA: InstructionOperand.Register,
+      uImm: InstructionOperand.Immediate,
+      mods: Vec[Modifier] = Vec.empty,
+      pred: Option[Guard] = None
+  ) extends Instruction(Instruction.P2rfxuPipeRegSymbolRegImmDefinition, mods, pred, dst, pr, srcA, uImm)
+  case P2rfxuPipeRegSymbolRegReg(
+      dst: InstructionOperand.Register,
+      pr: InstructionOperand.Symbol,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      mods: Vec[Modifier] = Vec.empty,
+      pred: Option[Guard] = None
+  ) extends Instruction(Instruction.P2rfxuPipeRegSymbolRegRegDefinition, mods, pred, dst, pr, srcA, srcB)
   case P2rintPipeRegSymbol(
       dst: InstructionOperand.Register,
       pr: InstructionOperand.Symbol,
@@ -31051,6 +31091,33 @@ enum Instruction(
       mods: Vec[Modifier] = Vec.empty,
       pred: Option[Guard] = None
   ) extends Instruction(Instruction.R2pfxuPipeRegRegDefinition, mods, pred, srcA, srcB)
+  case R2pfxuPipeSymbolReg(
+      pr: InstructionOperand.Symbol,
+      srcA: InstructionOperand.Register,
+      mods: Vec[Modifier] = Vec.empty,
+      pred: Option[Guard] = None
+  ) extends Instruction(Instruction.R2pfxuPipeSymbolRegDefinition, mods, pred, pr, srcA)
+  case R2pfxuPipeSymbolRegConst(
+      pr: InstructionOperand.Symbol,
+      srcA: InstructionOperand.Register,
+      srcConst: InstructionOperand.ConstantBank,
+      mods: Vec[Modifier] = Vec.empty,
+      pred: Option[Guard] = None
+  ) extends Instruction(Instruction.R2pfxuPipeSymbolRegConstDefinition, mods, pred, pr, srcA, srcConst)
+  case R2pfxuPipeSymbolRegImm(
+      pr: InstructionOperand.Symbol,
+      srcA: InstructionOperand.Register,
+      uImm: InstructionOperand.Immediate,
+      mods: Vec[Modifier] = Vec.empty,
+      pred: Option[Guard] = None
+  ) extends Instruction(Instruction.R2pfxuPipeSymbolRegImmDefinition, mods, pred, pr, srcA, uImm)
+  case R2pfxuPipeSymbolRegReg(
+      pr: InstructionOperand.Symbol,
+      srcA: InstructionOperand.Register,
+      srcB: InstructionOperand.Register,
+      mods: Vec[Modifier] = Vec.empty,
+      pred: Option[Guard] = None
+  ) extends Instruction(Instruction.R2pfxuPipeSymbolRegRegDefinition, mods, pred, pr, srcA, srcB)
   case R2pintPipeSymbolReg(
       pR: InstructionOperand.Symbol,
       srcA: InstructionOperand.Register,

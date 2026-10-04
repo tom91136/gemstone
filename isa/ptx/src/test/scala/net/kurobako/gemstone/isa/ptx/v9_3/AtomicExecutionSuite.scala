@@ -236,8 +236,8 @@ class AtomicExecutionSuite extends munit.FunSuite {
     groups <- Vec[Int > 0](1, 5)
   }
     test(s"unsigned atomic min $space/$width over $groups groups preserves high-bit ordering") {
-      val memory = ArrayCheckedMemory.allocate((groups * 2 + 1) * 8, GuestAddress(0x100000L))
-      val max    = if (width == 64) -1L else 0xffffffffL
+      val memory                  = ArrayCheckedMemory.allocate((groups * 2 + 1) * 8, GuestAddress(0x100000L))
+      val max                     = if (width == 64) -1L else 0xffffffffL
       val byteWidth: Int in 1 ~ 8 = if (width == 64) 8 else 4
       memory.writeLittleEndian(memory.allocation.start, max, byteWidth).toOption.get
       val init   = if (space == "shared") s"st.shared.u$width [scratch], $max;" else ""

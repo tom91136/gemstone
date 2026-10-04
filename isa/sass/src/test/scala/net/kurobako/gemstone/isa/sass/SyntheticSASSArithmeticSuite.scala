@@ -1,11 +1,406 @@
 package net.kurobako.gemstone.isa.sass
 
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.asm.*
 
 class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
+  Vec.nonEmpty(35, 50, 60).foreach { sm =>
+    test(s"ISCADD32I shifts and adds a negative literal on sm_$sm") {
+      executeSynthetic(
+        Vec.nonEmpty(
+          ("MOV", "R4,128", None),
+          ("ISCADD32I", "R4,R4,-0x3f800000,23", None),
+          ("LDC.64", "R2,c[0x0][0x160]", None),
+          ("STG.E", "[R2],R4", None),
+          ("EXIT", "", None)
+        ),
+        Vec.nonEmpty(0x00800000),
+        sm = sm
+      )
+    }
+  }
+
+  test("UFSEL selects a floating constant through a negated uniform predicate") {
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("UPLOP3.LUT", "UP0,UPT,UPT,UPT,UPT,0x80,0", None),
+        ("UMOV", "UR4,0", None),
+        ("UFSEL", "UR4,UR4,1,!UP0", None),
+        ("MOV", "R6,UR4", None),
+        ("LDC.64", "R2,c[0x0][0x160]", None),
+        ("STG.E", "[R2],R6", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(0x3f800000),
+      sm = 120
+    )
+  }
+
+  Vec.nonEmpty(35, 50, 60).foreach { sm =>
+    test(s"BRA.CC.EQ observes the legacy floating zero flag on sm_$sm") {
+      executeSynthetic(
+        Vec.nonEmpty(
+          ("MOV", "R4,0x7f800000", None),
+          ("FSET.NEU.FTZ.AND", "RZ.CC,|R4|,|R4|,PT", None),
+          ("BRA.CC.EQ", "0x50", None),
+          ("MOV", "R6,0", None),
+          ("BRA", "0x60", None),
+          ("MOV", "R6,1", None),
+          ("LDC.64", "R2,c[0x0][0x160]", None),
+          ("STG.E", "[R2],R6", None),
+          ("EXIT", "", None)
+        ),
+        Vec.nonEmpty(1),
+        sm = sm
+      )
+    }
+  }
+
+  test("integer conversion negates the absolute source before writing") {
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("MOV", "R4,-7", None),
+        ("I2I.S32.S32", "R4,-|R4|", None),
+        ("LDC.64", "R2,c[0x0][0x160]", None),
+        ("STG.E", "[R2],R4", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(-7),
+      sm = 50
+    )
+  }
+
+  Vec.nonEmpty(50, 60).foreach { sm =>
+    test(s"legacy LOP3.NZ produces the result predicate on sm_$sm") {
+      executeSynthetic(
+        Vec.nonEmpty(
+          ("S2R", "R0,SR_TID.X", None),
+          ("MOV", "R5,0", None),
+          ("LOP3.NZ", "P0,RZ,R0,R5,RZ,0xf8", None),
+          ("SEL", "R6,RZ,1,!P0", None),
+          ("LDC.64", "R2,c[0x0][0x160]", None),
+          ("IMAD.WIDE.U32", "R2,R0,4,R2", None),
+          ("STG.E", "[R2],R6", None),
+          ("EXIT", "", None)
+        ),
+        Vec.nonEmpty(0, 1, 1, 1),
+        sm = sm
+      )
+    }
+  }
+
+  test("UPLOP3 writes a uniform predicate from its LUT") {
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("UPLOP3.LUT", "UP0,UPT,UPT,UPT,UPT,0x80,0x8", None),
+        ("MOV", "R6,7", Some("@UP0")),
+        ("LDC.64", "R2,c[0x0][0x160]", None),
+        ("STG.E", "[R2],R6", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(7),
+      sm = 120
+    )
+  }
+
+  for {
+    unsigned <- Vec.nonEmpty(false, true)
+    minimum  <- Vec.nonEmpty(false, true)
+    input    <- Vec.nonEmpty(Int.MaxValue, -1)
+  } test(s"Hopper fused add/minmax preserves wrapping addition unsigned=$unsigned minimum=$minimum input=$input") {
+    val sum      = input + 1
+    val less     = if (unsigned) java.lang.Integer.compareUnsigned(sum, 1) < 0 else sum < 1
+    val expected = if (less == minimum) sum else 1
+    val suffix   = if (unsigned) ".U32" else ""
+    val choice   = if (minimum) "PT" else "!PT"
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("LDC.64", "R10,c[0x0][0x160]", None),
+        ("MOV", s"R4,0x${input.toHexString}", None),
+        ("MOV", "R5,1", None),
+        (s"VIADDMNMX$suffix", s"R4,R4,1,R5,$choice", None),
+        ("STG.E", "[R10],R4", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(expected),
+      sm = 90
+    )
+  }
+
+  for {
+    minimum <- Vec.nonEmpty(false, true)
+    values  <- Vec.nonEmpty(
+      (3.0, 2.0),
+      (-0.0, 0.0),
+      (Double.NaN, 2.0),
+      (2.0, Double.NaN),
+      (Double.NaN, Double.NaN),
+      (Double.PositiveInfinity, 2.0)
+    )
+  } test(s"double min/max preserves pairs and numeric NaN handling: $values minimum=$minimum") {
+    val (a, b)   = values
+    val expected = if (a.isNaN) b else if (b.isNaN) a else if (minimum) Math.min(a, b) else Math.max(a, b)
+    val result   = java.lang.Double.doubleToRawLongBits(expected)
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("LDC.64", "R10,c[0x0][0x160]", None),
+        ("MOV", s"R4,0x${java.lang.Double.doubleToRawLongBits(a).toInt.toHexString}", None),
+        ("MOV", s"R5,0x${(java.lang.Double.doubleToRawLongBits(a) >>> 32).toHexString}", None),
+        ("MOV", s"R6,0x${java.lang.Double.doubleToRawLongBits(b).toInt.toHexString}", None),
+        ("MOV", s"R7,0x${(java.lang.Double.doubleToRawLongBits(b) >>> 32).toHexString}", None),
+        ("DMNMX", s"R4,R4,R6,${if (minimum) "PT" else "!PT"}", None),
+        ("STG.E.64", "[R10],R4", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(result.toInt, (result >>> 32).toInt),
+      sm = 35
+    )
+  }
+
+  Vec.nonEmpty(35, 50, 60).foreach { sm =>
+    test(s"legacy FCHK.DIVIDE exponent boundaries on sm_$sm") {
+      Vec.nonEmpty(
+        (24, 127, 1),
+        (25, 127, 0),
+        (254, 128, 0),
+        (255, 127, 1),
+        (127, 1, 1),
+        (127, 2, 0),
+        (127, 251, 0),
+        (127, 252, 1),
+        (25, 150, 1),
+        (26, 150, 0),
+        (200, 74, 0),
+        (201, 74, 1)
+      ).foreach { (a, b, expected) =>
+        executeSynthetic(
+          Vec.nonEmpty(
+            ("MOV", s"R4,${a.toLong << 23}", None),
+            ("MOV", s"R5,${b.toLong << 23}", None),
+            ("FCHK.DIVIDE", "P0,R4,R5", None),
+            ("SEL", "R6,RZ,1,!P0", None),
+            ("LDC.64", "R2,c[0x0][0x160]", None),
+            ("STG.E", "[R2],R6", None),
+            ("EXIT", "", None)
+          ),
+          Vec.nonEmpty(expected),
+          sm = sm
+        )
+      }
+    }
+  }
+
+  for (value <- Vec.nonEmpty(Int.MinValue, -7, 0))
+    test(s"integer-to-float absolute source avoids signed overflow for $value") {
+      executeSynthetic(
+        Vec.nonEmpty(
+          ("LDC.64", "R10,c[0x0][0x160]", None),
+          ("MOV", s"R4,0x${value.toHexString}", None),
+          ("I2F.F32.S32", "R4,|R4|", None),
+          ("STG.E", "[R10],R4", None),
+          ("EXIT", "", None)
+        ),
+        Vec.nonEmpty(java.lang.Float.floatToRawIntBits(Math.abs(value.toLong).toFloat)),
+        sm = 50
+      )
+    }
+
+  for {
+    comparison <- Vec.nonEmpty("LT", "GEU")
+    condition  <- Vec.nonEmpty(-1.0f, 0.0f, Float.NaN)
+  } test(s"floating compare/select applies $comparison to the condition $condition") {
+    val selected = if (comparison == "LT") condition < 0.0f else condition >= 0.0f || condition.isNaN
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("LDC.64", "R10,c[0x0][0x160]", None),
+        ("MOV", s"R4,0x${java.lang.Float.floatToRawIntBits(condition).toHexString}", None),
+        ("MOV", "R5,0x40000000", None),
+        (s"FCMP.$comparison.FTZ", "R4,R5,1,R4", None),
+        ("STG.E", "[R10],R4", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(java.lang.Float.floatToRawIntBits(if (selected) 2.0f else 1.0f)),
+      sm = 35
+    )
+  }
+
+  for {
+    unsigned <- Vec.nonEmpty(false, true)
+    minimum  <- Vec.nonEmpty(false, true)
+  } test(s"64-bit integer min/max retains high words unsigned=$unsigned minimum=$minimum") {
+    val value = if (unsigned == minimum) 1L else Long.MinValue
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("LDC.64", "R10,c[0x0][0x160]", None),
+        ("MOV", "R4,0", None),
+        ("MOV", "R5,0x80000000", None),
+        ("MOV", "R6,1", None),
+        ("MOV", "R7,0", None),
+        (s"IMNMX.${if (unsigned) "U64" else "S64"}", s"R4,R4,R6,${if (minimum) "PT" else "!PT"},!PT", None),
+        ("STG.E.64", "[R10],R4", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(value.toInt, (value >>> 32).toInt),
+      sm = 120
+    )
+  }
+
+  for (value <- Vec.nonEmpty(Int.MinValue, -7, 0))
+    test(s"legacy signed absolute conversion preserves 32-bit wrapping: $value") {
+      executeSynthetic(
+        Vec.nonEmpty(
+          ("LDC.64", "R10,c[0x0][0x160]", None),
+          ("MOV", s"R4,0x${value.toHexString}", None),
+          ("I2I.S32.S32", "R4,|R4|", None),
+          ("STG.E", "[R10],R4", None),
+          ("EXIT", "", None)
+        ),
+        Vec.nonEmpty(Math.abs(value)),
+        sm = 50
+      )
+    }
+
+  test("uniform integer conversion stores both double-precision result words") {
+    val bits = java.lang.Double.doubleToRawLongBits(-7.0)
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("LDC.64", "R10,c[0x0][0x160]", None),
+        ("UMOV", "UR8,-7", None),
+        ("UI2F.F64.S32", "UR4,UR8", None),
+        ("MOV.64", "R4,UR4", None),
+        ("STG.E.64", "[R10],R4", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(bits.toInt, (bits >>> 32).toInt),
+      sm = 120
+    )
+  }
+
+  test("Kepler compressed float immediates retain their IEEE value") {
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("LDC.64", "R10,c[0x0][0x160]", None),
+        ("MOV", "R0,0x3fc00000", None),
+        ("FADD", "R4,R0,1", None),
+        ("STG.E", "[R10],R4", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(0x40200000),
+      sm = 35,
+      rewrite = instruction =>
+        instruction.operation match {
+          case _: Instruction.Fadd =>
+            val decoded = InstructionDecoder.decodeTyped(
+              instruction.address,
+              LittleEndian.toVec(0xc2c001fc001c0011L, 8).toArray,
+              "SM35"
+            ).fold(fail(_), identity)
+            assertEquals(decoded.operands.last, Operand.FloatingBits(FloatEncoding.F32Imm, 32, BigInt(0x3f800000)))
+            decoded
+          case _ => instruction
+        }
+    )
+  }
+
+  test("UISETP.U64 compares both halves of uniform register pairs") {
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("LDC.64", "R10,c[0x0][0x160]", None),
+        ("UMOV", "UR4,0", None),
+        ("UMOV", "UR5,1", None),
+        ("UISETP.GT.U64.AND", "UP0,UPT,UR4,512,UPT", None),
+        ("UMOV", "UR6,1", None),
+        ("USEL", "UR6,UR6,URZ,UP0", None),
+        ("UVIMNMX.U32", "UR6,UR6,URZ,!UPT", None),
+        ("MOV", "R4,UR6", None),
+        ("VIMNMX.S32", "R4,R4,-1,!PT", None),
+        ("STG.E", "[R10],R4", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(1),
+      sm = 120
+    )
+  }
+
+  test("UIADD3.64 reads aliased uniform pairs before storing its result") {
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("LDC.64", "R10,c[0x0][0x160]", None),
+        ("UMOV", "UR4,1", None),
+        ("UMOV", "UR5,2", None),
+        ("UMOV", "UR6,0", None),
+        ("UMOV", "UR7,4", None),
+        ("UIADD3.64", "UR6,-UR4,UR6,URZ", None),
+        ("MOV.64", "R4,UR6", None),
+        ("IADD.64", "R4,R4,UR4", None),
+        ("STG.E.64", "[R10],R4", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(0, 4),
+      sm = 120
+    )
+  }
+
+  test("IADD32I adds a negated register and a negative immediate with wrapping arithmetic") {
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("LDC.64", "R10,c[0x0][0x160]", None),
+        ("MOV", "R4,0x7fffffff", None),
+        ("IADD32I", "R4,-R4,-257", None),
+        ("STG.E", "[R10],R4", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(0x7fffff00),
+      sm = 50
+    )
+  }
+
+  test("decoded XMAD retains the unsigned first operand when the second operand is signed") {
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("LDC.64", "R10,c[0x0][0x160]", None),
+        ("MOV", "R0,0x8000", None),
+        ("MOV", "R3,0xfffe0000", None),
+        ("ISETP.EQ.AND", "P1,PT,RZ,RZ,PT", None),
+        ("XMAD.U16.S16", "R3,R0,R3.H1,RZ", Some("@P1")),
+        ("STG.E", "[R10],R3", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(-65536),
+      sm = 50,
+      rewrite = instruction =>
+        instruction.operation match {
+          case _: Instruction.Xmad =>
+            val bytes = LittleEndian.toVec(0x5b027f8800310003L, 8).toArray ++ Array[Byte](0xfd.toByte, 7, 0)
+            InstructionDecoder.decodeTyped(instruction.address, bytes, "SM50").fold(fail(_), identity)
+          case _ => instruction
+        }
+    )
+  }
+
+  test("Hopper VIADD wraps 32-bit sums with aliased sources and respects predicates") {
+    executeSynthetic(
+      Vec.nonEmpty(
+        ("LDC.64", "R2,c[0x0][0x160]", None),
+        ("MOV", "R4,0xffffff80", None),
+        ("VIADD", "R4,R4,0x100", None),
+        ("MOV", "R5,0x7fffffff", None),
+        ("VIADD", "R5,R4,R5", None),
+        ("VIADD", "R5,R5,-R4", None),
+        ("ISETP.EQ.AND", "P0,PT,RZ,1,PT", None),
+        ("VIADD", "R5,R5,1", Some("@P0")),
+        ("VIADD", "R5,R5,1", Some("@!P0")),
+        ("STG.E", "[R2.64],R5", None),
+        ("EXIT", "", None)
+      ),
+      Vec.nonEmpty(Int.MinValue),
+      sm = 90
+    )
+  }
+
   test("unsupported instructions preserve the kernel, architecture, offset and opcode in diagnostics") {
     val m      = CubinSuiteFixtures.module
     val result = ListingDecoder.parse("saxpy:\n/*0000*/ NOP;\n/*0010*/ NOP;\n/*0020*/ UNSUPPORTED;", "saxpy", m.sm.raw)
@@ -60,12 +455,21 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
   }
 
   test("sm35 FSET.GTU.CC drives CC.NEU for numeric, unordered, predicate-masked, and overwritten flags") {
-    def check(a: String, b: String, predicate: String, expected: Int, overwrite: Boolean = false): Unit = {
+    def check(
+        a: String,
+        b: String,
+        predicate: String,
+        expected: Int,
+        overwrite: Boolean = false,
+        immediateInfinity: Boolean = false,
+        sm: Int = 35,
+        operation: String = "FSET.GTU.AND"
+    ): Unit = {
       val prefix = Vec.nonEmpty(
         ("MOV", s"R0,$a", None),
         ("MOV", s"R1,$b", None),
         ("ISETP.EQ.AND", s"P0,PT,RZ,${if (predicate == "PT") "RZ" else "1"},PT", None),
-        ("FSET.GTU.AND", s"RZ.CC,|R0|,|R1|,$predicate", None)
+        (operation, s"RZ.CC,|R0|,|R1|,$predicate", None)
       ) ++
         (if (overwrite) Vec.nonEmpty(("FSET.GTU.AND", "RZ.CC,|R1|,|R0|,PT", None))
          else Vec.empty[(String, String, Option[String])])
@@ -81,8 +485,34 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
         ("STG.E", "[R4.64],R2", None),
         ("EXIT", "", None)
       )
-      executeSynthetic(body, Vec.nonEmpty(expected), sm = 35)
+      for (binary <- if (sm == 35) Vec.nonEmpty(false, true) else Vec.nonEmpty(false)) executeSynthetic(
+        body,
+        Vec.nonEmpty(expected),
+        sm = sm,
+        rewrite = instruction =>
+          if (binary && instruction.mnemonic.raw == "BRA" && instruction.operands.size == 2) {
+            val decoded = InstructionDecoder.decodeTyped(
+              instruction.address,
+              LittleEndian.toVec(0x1200000020200034L, 8).toArray,
+              "SM35"
+            ).fold(fail(_), identity)
+            decoded.rewrite(operands = Vec.nonEmpty(instruction.operands.last), guard = None)
+          } else if (immediateInfinity && instruction.mnemonic.raw == "FSET")
+            instruction.rewrite(operands =
+              instruction.operands.updated(
+                2,
+                Operand.FloatingBits(FloatEncoding.F32Imm, 32, BigInt(0x7f800000))
+              )
+            )
+          else instruction
+      )
     }
+    Vec.nonEmpty(35, 50, 60).foreach { sm =>
+      check("0x7fc00000", "0x7f800000", "PT", 1, immediateInfinity = true, sm = sm, operation = "FSET.NEU.FTZ.AND")
+      check("0x7f800000", "0x7f800000", "PT", 0, immediateInfinity = true, sm = sm, operation = "FSET.NEU.FTZ.AND")
+    }
+    check("0x7fc00000", "0x7f800000", "PT", 1, immediateInfinity = true)
+    check("0x7f800000", "0x7f800000", "PT", 0, immediateInfinity = true)
     check("0x40000000", "0x3f800000", "PT", 1)
     check("0x3f800000", "0x3f800000", "PT", 0)
     check("0x7fc00000", "0x3f800000", "PT", 1)
@@ -164,7 +594,7 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
         ("R2P", "PR,R4,0x7f", None),
         ("MOV", "R5,0xa50000ff", None),
         ("P2R.B1", "R5,R5,0x7f", None),
-        ("R2P", "PR,RZ,0x7f", None),
+        ("R2P.PR", "RZ,0x7f", None),
         ("R2P", "PR,R5.reuse.B1,0x7f", None),
         ("P2R", "R6,R5,0x7f", None),
         ("LDC.64", "R2,c[0x0][0x160]", None),
@@ -422,4 +852,47 @@ class SyntheticSASSArithmeticSuite extends SyntheticSASSExecutionSuiteBase {
       CubinSuiteFixtures.functions
     ).left.exists(_.contains("relocations")))
   }
+  for (condition <- Vec.nonEmpty(-1.0f, -0.0f, 0.0f, 1.0f, Float.NaN))
+    test(s"FCMP default GT compares $condition against zero") {
+      for (opcode <- Vec.nonEmpty("FCMP", "FCMP.FTZ")) executeSynthetic(
+        body = Vec.nonEmpty(
+          ("LDC.64", "R10,c[0x0][0x160]", None),
+          ("MOV", s"R4,0x${java.lang.Float.floatToRawIntBits(condition).toHexString}", None),
+          ("MOV", "R5,0x40000000", None),
+          (opcode, "R4,R5,1,R4", None),
+          ("STG.E", "[R10],R4", None),
+          ("EXIT", "", None)
+        ),
+        expected = Vec.nonEmpty(java.lang.Float.floatToRawIntBits(if (condition > 0.0f) 2.0f else 1.0f)),
+        sm = 35
+      )
+    }
+
+  for (
+    (opcode, bits, selected) <- Vec.nonEmpty(
+      ("UFSETP.GEU.AND", 0x7fc00000, true),
+      ("UFSETP.GEU.AND", 0xbf800000, false),
+      ("UFSETP.GEU.AND", 0x3f800000, true),
+      ("UFSETP.GT.FTZ.AND", 1, false)
+    )
+  ) test(s"$opcode uses uniform float operands and paired predicates for bits=$bits") {
+    executeSynthetic(
+      body = Vec.nonEmpty(
+        ("LDC.64", "R10,c[0x0][0x160]", None),
+        ("UMOV", s"UR4,0x${Integer.toUnsignedString(bits, 16)}", None),
+        (opcode, "UP0,UP1,UR4,URZ,UPT", None),
+        ("UMOV", "UR7,7", None),
+        ("USEL", "UR6,UR7,9,UP0", None),
+        ("USEL", "UR8,UR7,9,UP1", None),
+        ("MOV", "R4,UR6", None),
+        ("MOV", "R5,UR8", None),
+        ("STG.E", "[R10],R4", None),
+        ("STG.E", "[R10+4],R5", None),
+        ("EXIT", "", None)
+      ),
+      expected = if (selected) Vec.nonEmpty(7, 9) else Vec.nonEmpty(9, 7),
+      sm = 120
+    )
+  }
+
 }

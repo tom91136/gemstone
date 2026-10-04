@@ -9,6 +9,10 @@ import scala.collection.mutable
 import scala.util.control.NonFatal
 
 object WorkerPool {
+  trait Task extends Runnable {
+    def reject(error: Throwable): Unit
+  }
+
   case class Measurement(taskCount: Long >= 0, workers: Int, elapsedNanos: Long)
 }
 
@@ -26,7 +30,8 @@ class WorkerPool(
   private class Job(
       val count: Long >= 0,
       val grain: Int in 1 ~ 128,
-      val task: Long >= 0 => Either[Fault, Unit]
+      val task: Long >= 0 => Either[Fault, Unit],
+      val rejected: Option[Throwable => Unit]
   ) {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var next: Long >= 0 = 0L
@@ -45,7 +50,9 @@ class WorkerPool(
   private val inWorker    = ThreadLocal.withInitial[Boolean](() => false)
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   @volatile private var closed = false
-  private val threads          = Array.tabulate(parallelism.raw) { index =>
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  @volatile private var failure: Option[Throwable] = None
+  private val threads                              = Array.tabulate(parallelism.raw) { index =>
     val thread = Thread(() => workerLoop(), s"gemstone-worker-$index")
     thread.setDaemon(true)
     thread.start()
@@ -61,10 +68,11 @@ class WorkerPool(
 
   private def enqueue(
       count: Long >= 0,
-      task: Long >= 0 => Either[Fault, Unit]
+      task: Long >= 0 => Either[Fault, Unit],
+      rejected: Option[Throwable => Unit] = None
   ): Job = lock.withLock {
-    if (closed) throw java.util.concurrent.RejectedExecutionException("execution pool is closed")
-    val job = Job(count, grainFor(count), task)
+    if (closed) throw java.util.concurrent.RejectedExecutionException("execution pool is closed", failure.orNull)
+    val job = Job(count, grainFor(count), task, rejected)
     if (count.raw > 0L) {
       queue.append(job)
       workReady.signalAll()
@@ -108,6 +116,9 @@ class WorkerPool(
       case NonFatal(error) =>
         val detail = throwables.detail(error)
         outcome = Left(Fault.Backend(detail))
+      case error: Throwable =>
+        outcome = Left(Fault.Backend(s"execution worker failed: ${throwables.detail(error)}"))
+        throw error
     } finally {
       // A task may throw a fatal error such as InterruptedException; the job
       // still has to be accounted for or it never completes.
@@ -132,8 +143,34 @@ class WorkerPool(
     inWorker.set(true)
     // ThreadLocal membership is worker state rather than an AutoCloseable resource.
     try while (!closed) take(None).foreach(execute(_))
-    catch { case _: InterruptedException => Thread.currentThread().interrupt() }
-    finally inWorker.remove()
+    catch {
+      case _: InterruptedException if closed => Thread.currentThread().interrupt()
+      case error: Throwable                  =>
+        fail(error)
+        throw error
+    } finally inWorker.remove()
+  }
+
+  private def fail(error: Throwable): Unit = {
+    val rejected = lock.withLock {
+      failure = Some(error)
+      closed = true
+      val callbacks = queue.view.flatMap(_.rejected).toList
+      val fault     = Fault.Backend(s"execution worker failed: ${throwables.detail(error)}")
+      queue.foreach { job =>
+        job.failure = Some(fault)
+        job.finished = true
+      }
+      queue.clear()
+      workReady.signalAll()
+      jobComplete.signalAll()
+      callbacks
+    }
+    // Session cleanup can acquire other locks; never run it under the pool lock.
+    rejected.foreach { reject =>
+      try reject(error)
+      catch { case cleanup: Throwable if cleanup ne error => error.addSuppressed(cleanup) }
+    }
   }
 
   private def await(job: Job): Either[Fault, Unit] = {
@@ -142,7 +179,10 @@ class WorkerPool(
     } else lock.withLock {
       while (!job.finished && !closed) jobComplete.await()
     }
-    if (!job.finished) Left(Fault.Backend("execution pool closed before the job completed"))
+    if (!job.finished)
+      Left(Fault.Backend(failure.fold[NonEmpty[String]]("execution pool closed before the job completed")(error =>
+        s"execution worker failed: ${throwables.detail(error)}"
+      )))
     else job.failure.toLeft(())
   }
 
@@ -153,6 +193,10 @@ class WorkerPool(
         try runnable.run()
         catch { case NonFatal(error) => reportFailure(error) }
         Right(())
+      },
+      runnable match {
+        case task: WorkerPool.Task => Some(task.reject(_))
+        case _                     => None
       }
     )
   }

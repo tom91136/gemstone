@@ -28,11 +28,11 @@ object ImageTexelCodec {
     ImageFormats.normalized(format).exists(_.signed)
   def floating(format: Int): Boolean = floatComponents(format) != 0 ||
     ImageFormats.narrow(format).exists(_.encoding != NarrowEncoding.Unorm)
-  def floatComponents(format: Int): Int = ImageFormats.floatComponents(format)
-  private def bits(bytes: Array[Byte], offset: Int, count: Int in 1 ~ 8): Long =
-    (0 until count.raw).foldLeft(0L)((value, byte) =>
+  def floatComponents(format: Int): Int                                        = ImageFormats.floatComponents(format)
+  private def bits(bytes: Array[Byte], offset: Int, count: Int in 1 ~ 8): Long = (0 until count.raw).foldLeft(0L)(
+    (value, byte) =>
       value | ((bytes(offset + byte).toLong & 255L) << (8 * byte))
-    )
+  )
   private def put(bytes: Array[Byte], offset: Int, count: Int in 1 ~ 8, value: Long): Unit =
     (0 until count.raw).foreach(byte =>
       bytes(offset + byte) = (value >>> (8 * byte)).toByte

@@ -23,9 +23,9 @@ class ConstraintWidenSuite extends munit.FunSuite {
       aligned.toLong.widen[Long where (Between[-128, 127] & MultipleOf[8])]
     """)
     assertEquals(errors.map(_.message), Nil)
-    val largestByte: Byte >= 0 = 127
+    val largestByte: Byte >= 0   = 127
     val smallestShort: Short < 0 = -32768
-    val largestInt: Int >= 0 = Int.MaxValue
+    val largestInt: Int >= 0     = Int.MaxValue
     assertEquals(largestByte.toShort.toInt.toLong.widen[Long in 0L ~ 127L].raw, 127L)
     assertEquals(smallestShort.toLong.widen[Long in -32768L ~ -1L].raw, -32768L)
     assertEquals(largestInt.toLong.widen[Long in 0L ~ 2147483647L].raw, 2147483647L)
@@ -54,7 +54,7 @@ class ConstraintWidenSuite extends munit.FunSuite {
 
   test("target choices jointly cover intervals and stepped domains") {
     import constraint.auto.*
-    val interval: Int in 1 ~ 3 = 2
+    val interval: Int in 1 ~ 3               = 2
     val implicitChoices: Int in (3, 1, 2, 2) = interval
     assertEquals(implicitChoices.raw, 2)
     assertEquals(interval.widen[Long in (3L, 2L, 1L)].raw, 2L)

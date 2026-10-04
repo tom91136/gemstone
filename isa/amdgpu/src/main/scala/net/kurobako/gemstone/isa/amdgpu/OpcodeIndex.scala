@@ -26,8 +26,12 @@ private object OpcodeIndex {
     "v_subbrev_u32"          -> "v_subrev_co_ci_u32"
   )
 
-  private val gfx8Aliases =
-    Map("v_add_u32" -> "v_add_co_u32", "v_sub_u32" -> "v_sub_co_u32", "v_subrev_u32" -> "v_subrev_co_u32")
+  private val gfx8Aliases = Map(
+    "v_add_u32"    -> "v_add_co_u32",
+    "v_sub_u32"    -> "v_sub_co_u32",
+    "v_subrev_u32" -> "v_subrev_co_u32",
+    "v_mad_u16"    -> "v_mad_legacy_u16"
+  )
   private val gfx900Aliases = Vector("f32", "lo_f16", "hi_f16").map { suffix =>
     val fma = s"v_fma_mix${if (suffix == "f32") "_" else ""}$suffix"
     fma -> fma.replace("v_fma_", "v_mad_")
@@ -50,19 +54,25 @@ private object OpcodeIndex {
   }.groupMap(_._1)(_._2)
 
   def encodings(format: EncodingFormat, opcode: Int, target: Target): Vec[(Opcode, Metadata.Encoding)] =
-    entries.getOrElse((target.isa, format, opcode), Vec.empty)
+    entries.getOrElse(
+      (target.isa, format, opcode),
+      Vec.empty[(Opcode, Metadata.Encoding)]
+    ).filter(_._2.supports(target))
 
   private lazy val byEncoding = entries.toVector.flatMap { case ((isa, format, opcode), values) =>
     val formats = if (format.base == EncodingFormat.VOP3 && format != EncodingFormat.VOP3)
       Vec(format, EncodingFormat.VOP3)
+    else if (format == EncodingFormat.SOP2_INST_LITERAL) Vec(format, EncodingFormat.SOP2)
+    else if (format == EncodingFormat.SOPK_INST_LITERAL) Vec(format, EncodingFormat.SOPK)
     else if (format == EncodingFormat.VOP2_INST_LITERAL) Vec(format, EncodingFormat.VOP2)
     else if (format == EncodingFormat.FLAT_GLBL) Vec(format, EncodingFormat.GLOBAL, EncodingFormat.FLAT)
     else Vec(format)
-    formats.flatMap(format => values.map(value => (isa, format, opcode) -> value._1))
+    formats.flatMap(format => values.map(value => (isa, format, opcode) -> value))
   }.groupMap(_._1)(_._2).view.mapValues(values => Vec.from(values).distinct).toMap
 
   def definitions(format: EncodingFormat, opcode: Int, target: Target): Vec[Opcode] =
-    byEncoding.getOrElse((target.isa, format, opcode), Vec.empty)
+    byEncoding.getOrElse((target.isa, format, opcode), Vec.empty[(Opcode, Metadata.Encoding)])
+      .filter(_._2.supports(target)).map(_._1).distinct
 
   def canonical[A](values: Vec[A], target: Target)(definition: A => Opcode): Vec[A] =
     values.filterNot(value =>

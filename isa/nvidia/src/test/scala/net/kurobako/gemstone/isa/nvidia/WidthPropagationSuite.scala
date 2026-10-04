@@ -1,8 +1,8 @@
 package net.kurobako.gemstone.isa.nvidia
 
-import scala.compiletime.testing.typeCheckErrors
-import net.kurobako.gemstone.constraint.*
 import VMIR.*
+import net.kurobako.gemstone.constraint.*
+import scala.compiletime.testing.typeCheckErrors
 
 class WidthPropagationSuite extends munit.FunSuite {
   test("combined widths retain finite membership") {
@@ -11,11 +11,14 @@ class WidthPropagationSuite extends munit.FunSuite {
       assertEquals(whole.raw, expected)
       assertEquals(whole.widen[Int where (Between[8, 64] & MultipleOf[8])].byteCount.raw, expected / 8)
     }
-    assertEquals(typeCheckErrors("""
+    assertEquals(
+      typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       import VMIR.*
       val part: Int in (16, 32) = 16
       val whole: Int in (32, 64) = part.combined.widen[Int in (32, 64)]
-    """), Nil)
+    """),
+      Nil
+    )
   }
 }

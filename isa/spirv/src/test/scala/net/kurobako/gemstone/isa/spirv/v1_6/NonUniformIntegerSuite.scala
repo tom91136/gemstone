@@ -15,8 +15,8 @@ class NonUniformIntegerSuite extends munit.FunSuite {
   private def lit(n: Int): Operand = operand(OperandKind.LiteralInteger, n)
 
   for {
-    width     <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
-    rawWidth = width.raw
+    width <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
+    rawWidth  = width.raw
     byteWidth = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     lanes     <- Seq(1, 2, 4)
     kind      <- Seq("add", "multiply", "smin", "smax", "umin", "umax", "and", "or", "xor")

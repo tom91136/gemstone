@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -14,12 +14,12 @@ class FloatingRoundingSuite extends munit.FunSuite {
 
   for {
     (sourceWidth, width) <- Seq[(Int in (32, 64), Int in (16, 32))]((32, 16), (64, 16), (64, 32))
-    rawSourceWidth = sourceWidth.raw
-    rawWidth = width.raw
+    rawSourceWidth   = sourceWidth.raw
+    rawWidth         = width.raw
     sourceWidthBytes = sourceWidth.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
-    widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
-    mode                 <- 0 to 3
-    grouped              <- Seq(false, true)
+    widthBytes       = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
+    mode    <- 0 to 3
+    grouped <- Seq(false, true)
   } {
     val fraction = if (rawWidth == 16) 10 else 23
     val one      = if (rawWidth == 16) 0x3c00L else 0x3f800000L

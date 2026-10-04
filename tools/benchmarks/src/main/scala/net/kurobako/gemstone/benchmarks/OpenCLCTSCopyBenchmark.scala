@@ -7,6 +7,7 @@ import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.spirv.v1_6.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -88,25 +89,22 @@ object OpenCLCTSCopyBenchmark {
       else Left(Fault.InvalidTask("unknown benchmark allocation"))
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    def verify(groups: Int, localSize: Int, stride: Int): Long = {
-      val copied   = groups * localSize * 3
-      var checksum = 0L
-      var index    = 0
+    def verify(groups: Int, localSize: Int, stride: Int): Unit = {
+      val copied = groups * localSize * 3
+      var index  = 0
       while (index < output.length) {
         val expected = if (index / 4 % stride == 0 && index / 4 / stride < copied)
           input(index)
         else 0x5a.toByte
         if (output(index) != expected)
           throw IllegalStateException(s"async copy mismatch at byte $index: ${output(index)} != $expected")
-        checksum += output(index).toLong & 0xffL
         index += 1
       }
-      checksum
     }
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(arguments: Array[String]): Unit = {
+  def run(arguments: Array[String]): BenchmarkSample = {
     val parsed   = BenchmarkArguments.parse(name, arguments.toSeq, options)
     val elements = Math.multiplyExact(
       Math.multiplyExact(parsed.groups.raw, parsed.localSize.raw),
@@ -145,14 +143,8 @@ object OpenCLCTSCopyBenchmark {
           iteration += 1
         }
       }
-      val checksum = memory.verify(parsed.groups.raw, parsed.localSize.raw, parsed.stride.raw)
-      Console.out.println(
-        s"direction=${parsed.direction} groups=${parsed.groups} localSize=${parsed.localSize} " +
-          s"stride=${parsed.stride} iterations=${parsed.iterations} parallelism=${parsed.parallelism} " +
-          s"elements=${(parsed.groups * parsed.localSize) * 3} nsPerDispatch=${measurement.elapsedNanos.raw.toDouble /
-              parsed.iterations.raw} " +
-          s"bytesPerDispatch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)} checksum=$checksum"
-      )
+      memory.verify(parsed.groups.raw, parsed.localSize.raw, parsed.stride.raw)
+      measurement.sample(parsed.iterations.toLong)
     }
   }
 }

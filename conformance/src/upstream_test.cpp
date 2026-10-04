@@ -10,6 +10,10 @@
 
 #include "conformance_test_config.hpp"
 
+#if defined(CONFORMANCE_OPENMP_TARGET)
+  #include <omp.h>
+#endif
+
 #if defined(CONFORMANCE_SYCL_FP64_PROBE)
   #include <sycl/sycl.hpp>
 #endif
@@ -39,6 +43,15 @@ std::string expand_argument(std::string value) {
 
 TEST_CASE(conformance_test_identity, "[miniapp]") {
   (void)conformance::physical_device();
+#if defined(CONFORMANCE_OPENMP_TARGET)
+  // An embedded device image alone does not prove that libgomp/libomptarget
+  // executed it. Reject host fallback before the upstream benchmark starts.
+  REQUIRE(omp_get_num_devices() > 0);
+  int on_device = 0;
+  #pragma omp target map(from : on_device)
+  { on_device = !omp_is_initial_device(); }
+  REQUIRE(on_device == 1);
+#endif
 #if defined(CONFORMANCE_SYCL_FP64_PROBE)
   const sycl::queue queue(sycl::gpu_selector_v);
   if (!queue.get_device().has(sycl::aspect::fp64)) SKIP("device does not provide fp64");

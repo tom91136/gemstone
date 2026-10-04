@@ -50,7 +50,8 @@ private object VMLoader {
       * family spelling (for example, gfx1036 uses the gfx1030 enum).
       */
     private def archCandidates(targetName: String): Vec[String] = {
-      val target = targetName.drop(3).toUpperCaseRoot
+      // rocPRIM assigns gfx90a the decimal enum value 910 in mangled target_arch names.
+      val target = if (targetName == "gfx90a") "910" else targetName.drop(3).toUpperCaseRoot
       val family =
         if (
           target.length == 4 && target.forall(_.isDigit) &&
@@ -83,7 +84,7 @@ private object VMLoader {
           // first usable body rather than depending on Set iteration order: some
           // aliases are four-byte s_endpgm placeholders while the UINT_MAX
           // sentinel carries the actual implementation.
-          val generic = entries.find(name => archSuffix(name).isEmpty && usable(name))
+          lazy val generic = entries.find(name => archSuffix(name).isEmpty && usable(name))
           // A fat code object also carries compile-time verifier entries and
           // other deliberately unsupported kernels.  Their every variant can
           // be a stub; that must not make the entire module unloadable.  Keep a
@@ -110,7 +111,15 @@ private object VMLoader {
       symbols: ProgramSymbols
   )
 
-  def index(program: CodeObject): Either[Fault, IndexedProgram] = {
+  // Only immutable load data is cached. Each load receives a fresh ELF view with its own
+  // relocated globals and materialized kernels; LoadedProgram also owns its compiler and bindings.
+  private val indexCache = LRUCache[CodeObjectKey, Either[Fault, IndexedProgram]](capacity = 4)
+
+  def index(program: CodeObject): Either[Fault, IndexedProgram] =
+    indexCache.get(CodeObjectKey(program.image))(indexUncached(program))
+      .map(program => program.copy(index = program.index.fork()))
+
+  private def indexUncached(program: CodeObject): Either[Fault, IndexedProgram] = {
     val image = program.image
     for {
       indexed <- ELF.index(image)
@@ -122,10 +131,10 @@ private object VMLoader {
         indexed.kernelNames,
         indexed.target.name,
         name =>
-          indexed.kernel(name).exists { kernel =>
-            val code = Vec.toArray(kernel.code)
-            code.length != 4 || code(0) != 0x00.toByte || code(1) != 0x00.toByte ||
-            code(2) != 0x81.toByte || code(3) != 0xbf.toByte
+          indexed.kernelCodeSize(name).exists { size =>
+            size != 4 || indexed.kernelCode(name).exists { code =>
+              !VMCompiler.decodeInstruction(code, indexed.target).contains(VMIR.Instruction.End)
+            }
           },
         allowUnsupported = true
       ).leftMap(detail => Fault.InvalidTask(detail))

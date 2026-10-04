@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -22,8 +23,10 @@
     #include <cuda_runtime_api.h>
   #endif
 #elif defined(CONFORMANCE_DEVICE_HIP) || defined(CONFORMANCE_DEVICE_HSA)
-  #include <hip/hip_runtime_api.h>
-  #include <hip/hip_version.h>
+  #if defined(CONFORMANCE_DEVICE_HIP)
+    #include <hip/hip_runtime_api.h>
+    #include <hip/hip_version.h>
+  #endif
   #include <hsa/hsa.h>
   #include <hsa/hsa_ext_amd.h>
 #elif defined(CONFORMANCE_DEVICE_OPENCL)
@@ -59,6 +62,10 @@ bool targets_architecture(std::string_view architecture) {
     auto target = targets.substr(0, separator);
     target = target.substr(0, target.find(':'));
     if (target == architecture) return true;
+  #if defined(CONFORMANCE_DEVICE_CUDA_PTX_ONLY)
+    // PTX targets a minimum compute capability; the driver JITs it for newer GPUs.
+    if (std::stoi(std::string(architecture)) >= std::stoi(std::string(target))) return true;
+  #endif
     if (separator == std::string_view::npos) break;
     targets.remove_prefix(separator + 1);
   }
@@ -66,7 +73,7 @@ bool targets_architecture(std::string_view architecture) {
 }
 #endif
 
-#if defined(CONFORMANCE_DEVICE_HIP) || defined(CONFORMANCE_DEVICE_HSA)
+#if defined(CONFORMANCE_DEVICE_HIP)
 void validate_hip_runtime_version() {
   static_assert(HIP_VERSION_MAJOR == CONFORMANCE_ROCM_MAJOR && HIP_VERSION_MINOR == CONFORMANCE_ROCM_MINOR,
                 "ROCm headers do not match configured build release");
@@ -87,7 +94,9 @@ void validate_hip_runtime_version() {
 #if defined(CONFORMANCE_DEVICE_HIP) || defined(CONFORMANCE_DEVICE_HSA)
 struct HsaRuntime {
   HsaRuntime() {
+  #if defined(CONFORMANCE_DEVICE_HIP)
     validate_hip_runtime_version();
+  #endif
     if (hsa_init() != HSA_STATUS_SUCCESS) throw std::runtime_error("cannot initialize HSA device discovery");
   }
 };
@@ -190,7 +199,7 @@ static DeviceSelection discover_physical_device() {
   auto visible = std::string("GPU-");
   for (size_t byte = 0; byte < 16; ++byte) {
     if (byte == 4 || byte == 6 || byte == 8 || byte == 10) visible += '-';
-    visible += fmt::format("{:02x}", static_cast<unsigned>(uuid.bytes[byte]));
+    visible += fmt::format("{:02x}", static_cast<uint8_t>(uuid.bytes[byte]));
   }
   return {make_pci_device(selected.domain, static_cast<uint8_t>(selected.bus), static_cast<uint8_t>(selected.slot),
                           static_cast<uint8_t>(selected.function)),

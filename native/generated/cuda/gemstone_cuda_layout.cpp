@@ -115,6 +115,9 @@ static_assert(offsetof(gemstone::cuda::CudaMemcpy3DV1, dst_height) == offsetof(C
 static_assert(offsetof(gemstone::cuda::CudaMemcpy3DV1, width_in_bytes) == offsetof(CUDA_MEMCPY3D_v1, WidthInBytes), "CUDA_MEMCPY3D_v1.WidthInBytes offset drift");
 static_assert(offsetof(gemstone::cuda::CudaMemcpy3DV1, height) == offsetof(CUDA_MEMCPY3D_v1, Height), "CUDA_MEMCPY3D_v1.Height offset drift");
 static_assert(offsetof(gemstone::cuda::CudaMemcpy3DV1, depth) == offsetof(CUDA_MEMCPY3D_v1, Depth), "CUDA_MEMCPY3D_v1.Depth offset drift");
+static_assert(sizeof(gemstone::cuda::CudaLaunchAttribute) == sizeof(CUlaunchAttribute), "CUlaunchAttribute size drift");
+static_assert(offsetof(gemstone::cuda::CudaLaunchAttribute, id) == offsetof(CUlaunchAttribute, id), "CUlaunchAttribute.id offset drift");
+static_assert(offsetof(gemstone::cuda::CudaLaunchAttribute, value) == offsetof(CUlaunchAttribute, value), "CUlaunchAttribute.value offset drift");
 static_assert(sizeof(gemstone::cuda::CudaLaunchConfig) == sizeof(CUlaunchConfig), "CUlaunchConfig size drift");
 static_assert(offsetof(gemstone::cuda::CudaLaunchConfig, grid_x) == offsetof(CUlaunchConfig, gridDimX), "CUlaunchConfig.gridDimX offset drift");
 static_assert(offsetof(gemstone::cuda::CudaLaunchConfig, grid_y) == offsetof(CUlaunchConfig, gridDimY), "CUlaunchConfig.gridDimY offset drift");

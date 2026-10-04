@@ -26,8 +26,9 @@ private object VMOperand {
     case _                               => false
   }
 
+  // Normalize symbolic zero registers independently of each target's physical encoding.
   val Zero: Operand.Register        = Operand.Register(RegisterBank.R, 255)
-  val UniformZero: Operand.Register = Operand.Register(RegisterBank.UR, 63)
+  val UniformZero: Operand.Register = Operand.Register(RegisterBank.UR, 255)
   val True: Operand.Predicate       = Operand.Predicate(None, false, false)
 
   @annotation.tailrec

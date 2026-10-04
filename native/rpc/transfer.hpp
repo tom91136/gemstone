@@ -41,9 +41,10 @@ inline bool transferAllocation(Client &client, AllocationId allocation, uint64_t
 /** Batch nearby reads, but publish only the exact dirty intervals. Fetching a gap
  * must never overwrite host bytes which the dispatch did not write.
  */
-template <class Apply> bool readDirtyRanges(Client &client, const std::vector<DirtyRange> &ranges, Apply apply) {
-  constexpr uint64_t BatchBytes = 1024 * 1024;
-  constexpr uint64_t MaximumGap = 4096; // Bound read amplification across sparse pages.
+template <class Apply>
+bool readDirtyRanges(Client &client, const std::vector<DirtyRange> &ranges, Apply apply, uint64_t maximumGap = 4096,
+                     uint64_t batchBytes = 1024 * 1024) {
+  if (batchBytes == 0 || batchBytes > TransferChunk) return false;
   for (size_t begin = 0; begin < ranges.size();) {
     const auto &first = ranges[begin];
     const auto offset = static_cast<uint64_t>(first.offset.value);
@@ -57,15 +58,15 @@ template <class Apply> bool readDirtyRanges(Client &client, const std::vector<Di
         return false;
       const auto nextOffset = static_cast<uint64_t>(next.offset.value);
       const auto nextEnd = nextOffset + static_cast<uint64_t>(next.size.value);
-      if (next.allocation.value != first.allocation.value || nextOffset < endOffset || nextOffset - endOffset > MaximumGap
-          || nextEnd - offset > BatchBytes)
+      if (next.allocation.value != first.allocation.value || nextOffset < endOffset || nextOffset - endOffset > maximumGap
+          || nextEnd - offset > batchBytes)
         break;
       endOffset = nextEnd;
       ++end;
     }
     // Large single intervals still use bounded transfers.
     for (auto chunkOffset = offset; chunkOffset < endOffset;) {
-      const auto chunk = std::min<uint64_t>(BatchBytes, endOffset - chunkOffset);
+      const auto chunk = std::min<uint64_t>(batchBytes, endOffset - chunkOffset);
       auto bytes = client.call(ReadAllocation{first.allocation, static_cast<int64_t>(chunkOffset), static_cast<int32_t>(chunk)});
       if (!bytes || bytes.value().size() != chunk) return false;
       for (size_t index = begin; index < end; ++index) {

@@ -6,6 +6,14 @@ foreach(variable IN ITEMS BACKEND CONFORMANCE_OUTPUT)
   endif()
 endforeach()
 
+if(NOT DEFINED CONFORMANCE_COMPILER)
+  set(CONFORMANCE_COMPILER vendor)
+endif()
+set(artifact_base "${BACKEND}")
+if(NOT CONFORMANCE_COMPILER STREQUAL "vendor")
+  string(APPEND artifact_base "/${CONFORMANCE_COMPILER}")
+endif()
+
 set(supported_backends cuda hip hsa opencl sycl levelzero vulkan openacc)
 if(NOT BACKEND IN_LIST supported_backends)
   message(FATAL_ERROR "Unsupported conformance backend: ${BACKEND}")
@@ -31,15 +39,25 @@ if(NOT CONFORMANCE_SUPPORT_KEY MATCHES "^[A-Za-z0-9][A-Za-z0-9._-]*$")
   message(FATAL_ERROR "Invalid conformance support key: ${CONFORMANCE_SUPPORT_KEY}")
 endif()
 
-set(backend_cmake_arguments)
+set(backend_cmake_arguments "-DCONFORMANCE_COMPILER=${CONFORMANCE_COMPILER}")
+# Include toolchain selection in the persistent work signature.
+if(NOT "$ENV{CC}" STREQUAL "")
+  list(APPEND backend_cmake_arguments "-DCMAKE_C_COMPILER=$ENV{CC}")
+endif()
+if(NOT "$ENV{CXX}" STREQUAL "")
+  list(APPEND backend_cmake_arguments "-DCMAKE_CXX_COMPILER=$ENV{CXX}")
+endif()
 if(BACKEND STREQUAL "hip")
   list(APPEND backend_cmake_arguments -DCMAKE_HIP_PLATFORM=amd)
 elseif(BACKEND STREQUAL "cuda")
-  # Keep compiler selection in the work signature, including across image upgrades.
   list(APPEND backend_cmake_arguments
-    "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}"
-    "-DCMAKE_CXX_COMPILER=$ENV{CXX}"
-    "-DCMAKE_CUDA_HOST_COMPILER=$ENV{CUDAHOSTCXX}")
+    "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}")
+  if(CONFORMANCE_COMPILER STREQUAL "clang")
+    list(APPEND backend_cmake_arguments "-DCMAKE_CUDA_COMPILER=$ENV{CUDACXX}"
+      "-DCMAKE_CUDA_FLAGS=--cuda-path=$ENV{CUDAToolkit_ROOT} --cuda-gpu-arch=${CUDA_ARCHITECTURES}")
+  elseif(CONFORMANCE_COMPILER STREQUAL "vendor")
+    list(APPEND backend_cmake_arguments "-DCMAKE_CUDA_HOST_COMPILER=$ENV{CUDAHOSTCXX}")
+  endif()
 elseif(BACKEND STREQUAL "sycl")
   if(NOT DEFINED SYCL_CTS_ENABLE_FULL_CONFORMANCE)
     set(SYCL_CTS_ENABLE_FULL_CONFORMANCE OFF)
@@ -89,7 +107,7 @@ else()
   set(work "/tmp/conformance-${work_id}")
 endif()
 set(configuration_signature
-  "${BACKEND}|${architecture}|${BUILD_UNIFIED}|${BUILD_CTS}|${BUILD_MINIAPPS}|${HIP_ENABLE_ROCBLAS}|${MINIAPP_MODELS}|${cuda_architecture}|${amd_architecture}|${ROCM_VERSION}|${CONFORMANCE_SUPPORT_KEY}|${backend_cmake_arguments}")
+  "${BACKEND}|${CONFORMANCE_COMPILER}|${architecture}|${BUILD_UNIFIED}|${BUILD_CTS}|${BUILD_MINIAPPS}|${HIP_ENABLE_ROCBLAS}|${MINIAPP_MODELS}|${cuda_architecture}|${amd_architecture}|${ROCM_VERSION}|${CONFORMANCE_SUPPORT_KEY}|${backend_cmake_arguments}")
 conformance_artifact_prepare_work("${work}" "${configuration_signature}" work)
 set(build "${work}/build")
 set(ENV{HOME} "${work}/home")
@@ -138,6 +156,7 @@ execute_process(
 function(write_metadata destination support)
   file(WRITE "${destination}/artifact.toml"
     "backend = \"${BACKEND}\"\n"
+    "compiler = \"${CONFORMANCE_COMPILER}\"\n"
     "architecture = \"${architecture}\"\n"
     "support = \"${support}\"\n")
 endfunction()
@@ -170,8 +189,8 @@ if(architecture)
     message(FATAL_ERROR
       "Invalid architecture artifact output: ${CONFORMANCE_OUTPUT}")
   endif()
-  set(overlay "/output/${BACKEND}/${architecture}")
-  set(support "/output/${BACKEND}/${CONFORMANCE_SUPPORT_KEY}")
+  set(overlay "/output/${artifact_base}/${architecture}")
+  set(support "/output/${artifact_base}/${CONFORMANCE_SUPPORT_KEY}")
   file(REMOVE_RECURSE "${overlay}")
   execute_process(
     COMMAND "${CMAKE_COMMAND}" --install "${build}"
@@ -196,7 +215,7 @@ else()
   if(NOT CONFORMANCE_OUTPUT STREQUAL "artifact")
     message(FATAL_ERROR "Invalid generic artifact output: ${CONFORMANCE_OUTPUT}")
   endif()
-  set(artifact "/output/${BACKEND}")
+  set(artifact "/output/${artifact_base}")
   file(REMOVE_RECURSE "${artifact}")
   execute_process(
     COMMAND "${CMAKE_COMMAND}" --install "${build}"

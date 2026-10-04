@@ -24,12 +24,12 @@ class VMInstructionContext(
     // nevertheless carries a value for it, and CUDA reductions commonly use
     // such lanes only as inactive shuffle participants.  Use a deterministic
     // zero for that unspecified value so the active lane's identity is stable.
-    case Value.Register(name)       => Right(state.registers(lane.raw).get(name))
-    case Value.RegisterSlot(index)  => Right(state.registers(lane.raw).getSlot(index))
-    case Value.Predicate(name)      => Right(if (state.predicates(lane.raw).get(name).getOrElse(false)) 1L else 0L)
-    case Value.PredicateSlot(index) => Right(if (state.predicates(lane.raw).getSlot(index).getOrElse(false)) 1L else 0L)
+    case Value.Register(name)       => Right(state.registers(lane).get(name))
+    case Value.RegisterSlot(index)  => Right(state.registers(lane).getSlot(index))
+    case Value.Predicate(name)      => Right(if (state.predicates(lane).get(name).getOrElse(false)) 1L else 0L)
+    case Value.PredicateSlot(index) => Right(if (state.predicates(lane).getSlot(index).getOrElse(false)) 1L else 0L)
     case Value.Function(name)       =>
-      Left(VMFault.InvalidState(s"function symbol $name is not numeric"))
+      kernel.functionTable.address(name).toRight(VMFault.InvalidState(s"unknown function symbol $name"))
     case Value.Symbol(name) =>
       state.parameterAddresses.get(
         name
@@ -38,8 +38,10 @@ class VMInstructionContext(
       )
     case Value.Immediate(immediate)  => Right(immediate)
     case Value.Address(base, offset) => read(lane, base).map(_ + offset)
+    case Value.DynamicSharedBytes    => Right(kernel.dynamicSharedBytes.raw.toLong)
     case Value.LaneId                => Right((lane.raw & 31).toLong)
     case Value.ActiveMask            => Right(active.warpBits(lane.raw))
+    case Value.LiveMask              => Right(state.live.warpBits(lane.raw))
     case Value.LaneMaskGreaterEqual  => Right((0xffffffffL << (lane.raw & 31)) & 0xffffffffL)
     case Value.LaneMaskGreater       => Right((0xffffffffL << ((lane.raw & 31) + 1)) & 0xffffffffL)
     case Value.LaneMaskLessEqual     => Right((1L << ((lane.raw & 31) + 1)) - 1L)
@@ -55,15 +57,10 @@ class VMInstructionContext(
 
   def functionName(lane: WorkgroupLane, value: Value): Either[VMFault, NonEmpty[String]] = value match {
     case Value.Function(name) => Right(name)
-    case Value.Register(name) => state.functionRegisters(lane.raw).get(name).toRight(
-        VMFault.UndefinedRegister(name, pc, lane)
+    case other                => read(lane, other).flatMap(address =>
+        kernel.functionTable.name(address).toRight(
+          VMFault.InvalidState(s"invalid function address 0x${java.lang.Long.toUnsignedString(address, 16)}")
+        )
       )
-    case Value.RegisterSlot(index) =>
-      val name = VMRegisterFile.name(index.raw)
-      state.functionRegisters(lane.raw).get(name).toRight(
-        VMFault.UndefinedRegister(name, pc, lane)
-      )
-    case other =>
-      Left(VMFault.InvalidState(s"expected a function value, found $other"))
   }
 }

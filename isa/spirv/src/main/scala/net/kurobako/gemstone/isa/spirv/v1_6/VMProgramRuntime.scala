@@ -331,7 +331,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
         else Right(VMValue.Bits(typeId, lanes))
       } catch {
         case error: IllegalArgumentException => Left(Fault.InvalidTask(throwables.detail(error)))
-        case error: ArithmeticException => Left(Fault.InvalidTask(throwables.detail(error)))
+        case error: ArithmeticException      => Left(Fault.InvalidTask(throwables.detail(error)))
       }
     }
 
@@ -365,7 +365,13 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
       var lane  = laneStart
       var index = 0
       while (index < count.raw) {
-        lane = decodeBits(component, input, Math.addExact(byteStart, Math.multiplyExact(index, this.layout.typeSize(component).raw)), lanes, lane)
+        lane = decodeBits(
+          component,
+          input,
+          Math.addExact(byteStart, Math.multiplyExact(index, this.layout.typeSize(component).raw)),
+          lanes,
+          lane
+        )
         index += 1
       }
       lane
@@ -373,7 +379,13 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
       var lane  = laneStart
       var index = 0
       while (index < count.raw) {
-        lane = decodeBits(column, input, Math.addExact(byteStart, Math.multiplyExact(index, this.layout.typeSize(column).raw)), lanes, lane)
+        lane = decodeBits(
+          column,
+          input,
+          Math.addExact(byteStart, Math.multiplyExact(index, this.layout.typeSize(column).raw)),
+          lanes,
+          lane
+        )
         index += 1
       }
       lane
@@ -382,7 +394,13 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
       var lane   = laneStart
       var index  = 0L
       while (index < count.raw) {
-        lane = decodeBits(element, input, Math.addExact(byteStart, Math.toIntExact(Math.multiplyExact(index, stride.toLong))), lanes, lane)
+        lane = decodeBits(
+          element,
+          input,
+          Math.addExact(byteStart, Math.toIntExact(Math.multiplyExact(index, stride.toLong))),
+          lanes,
+          lane
+        )
         index += 1L
       }
       lane
@@ -428,7 +446,7 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
         else Right(bytes)
       } catch {
         case error: IllegalArgumentException => Left(Fault.InvalidTask(throwables.detail(error)))
-        case error: ArithmeticException => Left(Fault.InvalidTask(throwables.detail(error)))
+        case error: ArithmeticException      => Left(Fault.InvalidTask(throwables.detail(error)))
       }
     case VMValue.Address(_, pointer) =>
       Left(Fault.InvalidTask(s"cannot encode runtime pointer $pointer as process-neutral bytes"))
@@ -464,7 +482,13 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
       var lane  = laneStart
       var index = 0
       while (index < count.raw) {
-        lane = encodeBits(component, lanes, lane, output, Math.addExact(byteStart, Math.multiplyExact(index, this.layout.typeSize(component).raw)))
+        lane = encodeBits(
+          component,
+          lanes,
+          lane,
+          output,
+          Math.addExact(byteStart, Math.multiplyExact(index, this.layout.typeSize(component).raw))
+        )
         index += 1
       }
       lane
@@ -472,7 +496,13 @@ private class VMProgramRuntime(val ir: VMIR.Program) extends LoadedProgram {
       var lane  = laneStart
       var index = 0
       while (index < count.raw) {
-        lane = encodeBits(column, lanes, lane, output, Math.addExact(byteStart, Math.multiplyExact(index, this.layout.typeSize(column).raw)))
+        lane = encodeBits(
+          column,
+          lanes,
+          lane,
+          output,
+          Math.addExact(byteStart, Math.multiplyExact(index, this.layout.typeSize(column).raw))
+        )
         index += 1
       }
       lane

@@ -1,0 +1,173 @@
+package net.kurobako.gemstone.isa.ptx.v9_3
+
+import Program.*
+import cats.syntax.all.*
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
+
+/** Resolve translation-unit scope before lowering concatenated PTX linker inputs. */
+private object Linker {
+  def preferDefinition[A <: Statement.Data | Statement.Function | Statement.Entry](previous: A, next: A): A =
+    if (definitionPriority(next) > definitionPriority(previous)) next else previous
+
+  private def definitionPriority(value: Statement.Data | Statement.Function | Statement.Entry): Int = {
+    val (linkage, defined) = value match {
+      case data: Statement.Data =>
+        val linkage = Linkage.values.find(linkage =>
+          linkage != Linkage.Default && data.qualifiers.exists {
+            case DeclarationQualifier.Attribute(name) => name.raw == linkage.mnemonic
+            case _                                    => false
+          }
+        ).getOrElse(Linkage.Default)
+        (linkage, linkage != Linkage.Extern)
+      case function: Statement.Function => (function.linkage, function.body.nonEmpty)
+      case entry: Statement.Entry       => (entry.linkage, entry.body.nonEmpty)
+    }
+    if (!defined) 0 else if (linkage == Linkage.Weak) 1 else 2
+  }
+
+  def link(program: Program): Either[Fault, Program] = {
+    val units = modules(program.statements)
+    if (units.size <= 1) Right(program)
+    else {
+      val names  = program.statements.flatMap(declarationName(_)).toSet
+      val prefix = Iterator.from(0).map(index => s"$$gemstone$$$index$$").find(prefix =>
+        names.forall(name => !name.raw.startsWith(prefix))
+      ).get
+      units.zipWithIndex.traverse { case (statements, index) =>
+        val names = statements.collect {
+          case value: Statement.Data if !externallyVisible(value.qualifiers) => value.name
+          case Statement.Function(Linkage.Default, name, _, _, _, _)         => name
+          case Statement.Entry(Linkage.Default, name, _, _, _)               => name
+        }.map { name =>
+          val scoped: NonEmpty[String] = s"$prefix$index$$$name"
+          name -> scoped
+        }.toMap
+        Renaming(names).statements(statements, local = false)
+      }.map(statements => Program(statements.flatten))
+    }
+  }
+
+  private def externallyVisible(qualifiers: Vec[DeclarationQualifier]): Boolean =
+    qualifiers.exists {
+      case DeclarationQualifier.Attribute(name) =>
+        Linkage.values.exists(linkage => linkage != Linkage.Default && linkage.mnemonic == name.raw)
+      case _ => false
+    }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def modules(statements: Vec[Statement]): Vec[Vec[Statement]] = {
+    val result      = Vec.newBuilder[Vec[Statement]]
+    val current     = mutable.ArrayBuffer.empty[Statement]
+    var versionSeen = false
+    statements.foreach { statement =>
+      statement match {
+        case Statement.Directive(path, _, _, _) if path.raw == Vec("version") =>
+          if (versionSeen) {
+            result += Vec.from(current)
+            current.clear()
+          }
+          versionSeen = true
+        case _ => ()
+      }
+      current += statement
+    }
+    result += Vec.from(current)
+    result.result()
+  }
+
+  private def declarationName(statement: Statement): Option[NonEmpty[String]] = statement match {
+    case value: Statement.Data          => Some(value.name)
+    case value: Statement.Function      => Some(value.name)
+    case value: Statement.Entry         => Some(value.name)
+    case Statement.Label(name)          => Some(name)
+    case value: Statement.CallPrototype => Some(value.name)
+    case _                              => None
+  }
+
+  private class Renaming(names: Map[NonEmpty[String], NonEmpty[String]]) {
+    private def rename(name: NonEmpty[String]): NonEmpty[String] = names.getOrElse(name, name)
+
+    private def operand(value: Operand): Operand = value match {
+      case Operand.Symbol(name)                   => Operand.Symbol(rename(name))
+      case Operand.GenericAddress(symbol)         => Operand.GenericAddress(operand(symbol))
+      case Operand.VectorLiteral(items)           => Operand.VectorLiteral(items.map(operand(_)))
+      case Operand.Parenthesized(items)           => Operand.Parenthesized(items.map(operand(_)))
+      case Operand.Address(items)                 => Operand.Address(items.map(operand(_)))
+      case Operand.Qualified(base, qualifier)     => Operand.Qualified(operand(base), qualifier)
+      case Operand.Index(base, index)             => Operand.Index(operand(base), operand(index))
+      case Operand.Add(left, right)               => Operand.Add(operand(left), operand(right))
+      case Operand.Subtract(left, right)          => Operand.Subtract(operand(left), operand(right))
+      case Operand.WithPredicate(base, predicate) => Operand.WithPredicate(operand(base), operand(predicate))
+      case Operand.Negate(value)                  => Operand.Negate(operand(value))
+      case other                                  => other
+    }
+
+    private def predication(value: Predication): Predication = value.copy(operand = operand(value.operand))
+
+    private def directive(value: Statement.Directive): Statement.Directive = value.copy(
+      arguments = value.arguments.map(argument => argument.copy(operand = operand(argument.operand))),
+      initializer = value.initializer.map(operand(_))
+    )
+
+    private def declarationOperands(value: Operand): Vec[NonEmpty[String]] = value match {
+      case Operand.Symbol(name)         => Vec(name)
+      case Operand.Index(base, _)       => declarationOperands(base)
+      case Operand.VectorLiteral(items) => items.flatMap(declarationOperands(_))
+      case _                            => Vec.empty
+    }
+
+    def statements(values: Vec[Statement], local: Boolean): Either[Fault, Vec[Statement]] = {
+      val locals = if (!local) Set.empty[NonEmpty[String]]
+      else values.flatMap {
+        case Statement.Directive(path, arguments, _, _) if Set("reg", "local", "param").contains(path.raw.head.raw) =>
+          arguments.flatMap(argument => declarationOperands(argument.operand))
+        case statement => Vec.from(declarationName(statement))
+      }.toSet
+      val scoped = if (locals.isEmpty) this else Renaming(names -- locals)
+      values.traverse(scoped.statement(_))
+    }
+
+    private def statement(value: Statement): Either[Fault, Statement] = value match {
+      case data: Statement.Data =>
+        Right(data.copy(name = rename(data.name), initializer = data.initializer.map(operand(_))))
+      case value: Statement.Directive         => Right(directive(value))
+      case Statement.Instruction(instruction) =>
+        instruction.decoder(
+          instruction.operands.map(operand(_)),
+          instruction.mods,
+          instruction.pred.map(predication(_))
+        )
+          .leftMap(error => Fault.InvalidTask(s"PTX linker could not rewrite ${instruction.opcode}: $error"))
+          .map(Statement.Instruction(_))
+      case value: Statement.UnsupportedInstruction => Right(value.copy(
+          operands = value.operands.map(operand(_)),
+          pred = value.pred.map(predication(_))
+        ))
+      case Statement.Block(body)     => statements(body, local = true).map(Statement.Block(_))
+      case value: Statement.Function =>
+        val parameters = (value.parameters ++ value.returnParameters).map(_.name).toSet
+        val scope      = Renaming(names -- parameters)
+        value.body.traverse(scope.statements(_, local = true)).map(body =>
+          value.copy(
+            name = rename(value.name),
+            body = body,
+            directives = value.directives.map(scope.directive(_))
+          )
+        )
+      case value: Statement.Entry =>
+        val scope = Renaming(names -- value.parameters.map(_.name).toSet)
+        value.body.traverse(scope.statements(_, local = true)).map(body =>
+          value.copy(
+            name = rename(value.name),
+            body = body,
+            directives = value.directives.map(scope.directive(_))
+          )
+        )
+      case value: Statement.CallPrototype => Right(value.copy(directives = value.directives.map(directive(_))))
+      case other                          => Right(other)
+    }
+  }
+}

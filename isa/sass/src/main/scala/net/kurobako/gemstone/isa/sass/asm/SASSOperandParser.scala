@@ -115,7 +115,7 @@ object SASSOperandParser {
           value
         }
       val index   = if (cursor.consume('Z')) -1 else digits().toInt
-      val refined = (if (index < 0) { if (bank == "UR") 63 else 255 }
+      val refined = (if (index < 0) 255
                      else index)
         .unsafe[Int in 0 ~ 255]
       Operand.Register(RegisterBank.fromSpelling(bank), refined) -> dottedSuffixes()
@@ -243,7 +243,7 @@ object SASSOperandParser {
       val registerValue = tryRegister()
       registerValue match {
         case Some((reg, selectors)) =>
-          if (selectors.isEmpty) reg else Operand.Qualified(reg, selectors.map(OperandSelector.fromSpelling))
+          if (selectors.isEmpty) reg else Operand.Qualified(reg, OperandSelector.fromSpellings(selectors))
         case None =>
           val name          = identifier()
           val selectors     = dottedSuffixes()
@@ -257,7 +257,7 @@ object SASSOperandParser {
           if (selectors.isEmpty) base
           else if (name.startsWith("SR_") || name.startsWith("UR_TID") || name.startsWith("UR_CTAID"))
             Operand.SpecialRegister(SpecialRegister.fromSpelling((name +: selectors).mkString(".")))
-          else Operand.Qualified(base, selectors.map(OperandSelector.fromSpelling).toVec)
+          else Operand.Qualified(base, OperandSelector.fromSpellings(selectors))
       }
     }
 
@@ -285,7 +285,7 @@ object SASSOperandParser {
       expect(']')
       val value     = Operand.ConstantBank(bank, offset)
       val selectors = dottedSuffixes()
-      if (selectors.isEmpty) value else Operand.Qualified(value, selectors.map(OperandSelector.fromSpelling).toVec)
+      if (selectors.isEmpty) value else Operand.Qualified(value, OperandSelector.fromSpellings(selectors))
     }
 
     private def descriptorAddress(): Operand = {

@@ -1,23 +1,55 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import execution.*
+import java.util.concurrent.Callable
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.TimeUnit
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.spirv.v1_6 as spv
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 class ExecutionAtomicSuite extends munit.FunSuite {
 
+  test("concurrent first atomic access serializes updates to shared internal storage") {
+    val workers    = 4
+    val increments = 256
+    val bytes      = Array.ofDim[Byte](4)
+    val pointer    = VMMemory.Pointer(
+      VMMemory.Region.Internal(VMMemory.InternalMemory(bytes)),
+      0L,
+      0,
+      spv.StorageClass.Workgroup
+    )
+    val start = CyclicBarrier(workers)
+    scala.util.Using.resource(threads.Pool(workers)) { pool =>
+      val tasks = Vec.tabulate(workers) { _ =>
+        val task: Callable[Vec[Long]] = () => {
+          val memory = VMMemory.MemoryState(ArrayMemory(AllocationId(1), 0), Vec.empty, _ => Right(()))
+          val _      = start.await(5, TimeUnit.SECONDS)
+          Vec.tabulate(increments) { _ =>
+            memory.atomicModifyScalar(pointer, 4)(_ + 1L).fold(error => fail(error.message), identity)
+          }
+        }
+        pool.executor.submit(task)
+      }
+      val previous = tasks.flatMap(_.get(10, TimeUnit.SECONDS))
+      assertEquals(previous.sorted, Vec.tabulate(workers * increments)(_.toLong))
+      assertEquals(LittleEndian.decodeInt32(bytes, 0), workers * increments)
+    }
+  }
+
   test("repeated atomic flushes preserve fresh backing bytes and sparse cross-page stores") {
-    val allocation                     = AllocationId(201L)
-    val backing                        = ArrayMemory(allocation, 12288)
-    val memory                         = VMMemory.MemoryState(backing, Vec.empty, _ => Right(()))
-    val pointer                        = VMMemory.Pointer(VMMemory.Region.External(allocation), 0L, 0, 5)
+    val allocation          = AllocationId(201L)
+    val backing             = ArrayMemory(allocation, 12288)
+    val memory              = VMMemory.MemoryState(backing, Vec.empty, _ => Right(()))
+    val pointer             = VMMemory.Pointer(VMMemory.Region.External(allocation), 0L, 0, 5)
     val width: Int in 1 ~ 8 = 4
-    val expected                       = Array.ofDim[Byte](12288)
+    val expected            = Array.ofDim[Byte](12288)
     for {
       round  <- 1 to 3
       offset <- Seq(0L, 62L, 4094L, 8192L, 8L)
@@ -48,8 +80,8 @@ class ExecutionAtomicSuite extends munit.FunSuite {
         if (offset.raw == 4096L && reject.getAndSet(false)) Left(failure)
         else backing.write(id, offset, bytes)
     }
-    val memory                         = VMMemory.MemoryState(FailingStorage(), Vec.empty, _ => Right(()))
-    val pointer                        = VMMemory.Pointer(VMMemory.Region.External(allocation), 4094L, 0, 5)
+    val memory              = VMMemory.MemoryState(FailingStorage(), Vec.empty, _ => Right(()))
+    val pointer             = VMMemory.Pointer(VMMemory.Region.External(allocation), 4094L, 0, 5)
     val width: Int in 1 ~ 8 = 4
     assertEquals(memory.writeScalar(pointer, 0x12345678L, width), Right(()))
     assertEquals(memory.flush(), Left(failure))
@@ -68,9 +100,9 @@ class ExecutionAtomicSuite extends munit.FunSuite {
     width        <- Vec(32, 64)
   }
     test(s"$width-bit descriptor atomics preserve prior values in storage class $storageClass") {
-      def ref(value: Int): Operand             = operand(OperandKind.IdRef, value)
+      def ref(value: Int): Operand  = operand(OperandKind.IdRef, value)
       val scalarWidth: Int in 0 ~ 8 = if (width == 32) 4 else 8
-      val module                               = Module(
+      val module                    = Module(
         Header(ISA.version, Word(0), Word(64), Word(0)),
         Vec(
           Instruction.TypeVoid(ref(1)),

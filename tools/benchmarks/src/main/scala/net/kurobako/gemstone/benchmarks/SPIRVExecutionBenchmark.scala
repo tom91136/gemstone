@@ -9,14 +9,21 @@ import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.spirv.v1_6.*
+import net.kurobako.gemstone.isa.spirv.v1_6 as spv
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 /** Concurrent arithmetic dispatches representative of the SPIR-V interpreter's instruction loop. */
 object SPIRVExecutionBenchmark {
+  private enum Mode {
+    case Arithmetic, Calls
+  }
+
   private case class Options(
+      mode: Mode,
       iterations: Int > 0,
       groups: Int > 0,
       instructions: Int > 0,
@@ -24,7 +31,11 @@ object SPIRVExecutionBenchmark {
       recording: Option[Path]
   )
 
-  private object EmptyMemory extends Memory {
+  private val outputRegion = AllocationId(1)
+
+  private class OutputMemory(invocations: Int) extends Memory {
+    private val output = Array.fill[Byte](Math.multiplyExact(invocations, 4))(0xa5.toByte)
+
     override def read(
         region: AllocationId,
         offset: Long >= 0,
@@ -37,33 +48,60 @@ object SPIRVExecutionBenchmark {
         offset: Long >= 0,
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
-      Left(Fault.Unsupported("benchmark kernel attempted a memory write"))
+      if (region != outputRegion) Left(Fault.InvalidTask("unknown benchmark allocation"))
+      else if (!ByteRange.contains(output.length, offset.raw, bytes.length.toLong))
+        Left(Fault.InvalidTask("benchmark write outside allocation"))
+      else {
+        val _ = bytes.copyToArray(output, offset.raw.toInt, bytes.length)
+        Right(())
+      }
+
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    def verify(groups: Int > 0, instructions: Int > 0): Unit = {
+      var invocation = 0
+      while (invocation < invocations) {
+        val actual   = LittleEndian.decodeInt32(output, invocation * 4)
+        val expected = invocation % groups.raw + instructions.raw
+        if (actual != expected)
+          throw IllegalStateException(s"SPIR-V result mismatch at invocation $invocation: $actual != $expected")
+        invocation += 1
+      }
+    }
   }
 
   private val name    = BenchmarkName("spirv-execution")
   private val options = (
+    Opts.option[String]("mode", help = "Execution mode: arithmetic or calls").withDefault("arithmetic")
+      .validate("mode must be arithmetic or calls")(value => value == "arithmetic" || value == "calls")
+      .map(value => if (value == "calls") Mode.Calls else Mode.Arithmetic),
     Opts.option[Int]("iterations", help = "Measured dispatches").withDefault(20)
       .refined[Int > 0]("iterations must be positive"),
     Opts.option[Int]("groups", help = "Workgroups per dispatch").withDefault(256)
       .refined[Int > 0]("groups must be positive"),
-    Opts.option[Int]("instructions", help = "Integer additions per invocation").withDefault(64)
+    Opts.option[Int]("instructions", help = "Integer additions or function calls per invocation").withDefault(64)
       .refined[Int > 0]("instructions must be positive"),
     Opts.option[Int]("parallelism", help = "VMInterpreter worker count")
       .withDefault(sys.runtime.availableProcessors())
       .refined[Int > 0]("parallelism must be positive"),
     Opts.option[String]("recording", help = "JFR output path").map(Path.of(_)).orNone
-  ).mapN(Options(_, _, _, _, _))
+  ).mapN(Options(_, _, _, _, _, _))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(arguments: Array[String]): Unit = {
+  def run(arguments: Array[String]): BenchmarkSample = {
     val parsed = BenchmarkArguments.parse(name, arguments.toSeq, options)
-    val source = module(parsed.instructions)
-    val task   = KernelTask.validated(
-      kernelName = "arithmetic",
-      groupSize = LaunchGeometry.Dimensions.One,
-      groupCount = LaunchGeometry.Dimensions(parsed.groups, 1, 1),
-      arguments = Vec.empty
-    ).fold(error => throw IllegalArgumentException(error), value => value)
+    val source = module(parsed.instructions, parsed.mode)
+    val memory = OutputMemory(Math.multiplyExact(parsed.iterations.raw, parsed.groups.raw))
+    val tasks  = Vec.tabulate(parsed.iterations.raw) { iteration =>
+      KernelTask.validated(
+        kernelName = "arithmetic",
+        groupSize = LaunchGeometry.Dimensions.One,
+        groupCount = LaunchGeometry.Dimensions(parsed.groups, 1, 1),
+        arguments = Vec(KernelTask.Argument.Memory(
+          outputRegion,
+          (iteration.toLong * parsed.groups.raw * 4L).unsafe[Long >= 0]
+        ))
+      ).fold(error => throw IllegalArgumentException(error), identity)
+    }
 
     Using.resources(
       WorkerPool(parsed.parallelism, minGroups = 1L, minWorkItems = 1L),
@@ -77,17 +115,13 @@ object SPIRVExecutionBenchmark {
         var iteration = 0
         while (iteration < parsed.iterations.raw) {
           val control = TaskControl()
-          program.execute(task, EmptyMemory, control, workgroups)
+          program.execute(tasks(iteration), memory, control, workgroups)
             .fold(error => throw IllegalStateException(error.message), _ => ())
           iteration += 1
         }
       }
-      Console.out.println(
-        s"iterations=${parsed.iterations} groups=${parsed.groups} instructions=${parsed.instructions} " +
-          s"parallelism=${parsed.parallelism} nsPerDispatch=${measurement.elapsedNanos.raw.toDouble /
-              parsed.iterations.raw} " +
-          s"bytesPerDispatch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / parsed.iterations.raw)}"
-      )
+      memory.verify(parsed.groups, parsed.instructions)
+      measurement.sample(parsed.iterations.toLong)
     }
   }
 
@@ -111,26 +145,83 @@ object SPIRVExecutionBenchmark {
     )
   }
 
-  private def module(instructionCount: Int > 0): Module = {
+  private def module(instructionCount: Int > 0, mode: Mode): Module = {
     import Instruction.*
-    val arithmetic = Vector.tabulate(instructionCount.raw) { index =>
-      val destination = index + 7
-      val source      = if (index == 0) 4 else destination - 1
-      IAdd(id(2), id(destination), id(source), id(4))
+    val firstResult     = 16
+    val outputPointer   = Math.addExact(instructionCount.raw, firstResult)
+    val helperType      = Math.addExact(outputPointer, 1)
+    val helperFunction  = Math.addExact(outputPointer, 2)
+    val helperParameter = Math.addExact(outputPointer, 3)
+    val helperLabel     = Math.addExact(outputPointer, 4)
+    val helperResult    = Math.addExact(outputPointer, 5)
+    val arithmetic      = Vec.tabulate[Instruction](instructionCount.raw) { index =>
+      val destination = Math.addExact(index, firstResult)
+      val source      = if (index == 0) 14 else destination - 1
+      mode match {
+        case Mode.Arithmetic => IAdd(id(2), id(destination), id(source), id(4))
+        case Mode.Calls      => FunctionCall(id(2), id(destination), id(helperFunction), Vec(id(source)))
+      }
     }
     val instructions = Vec[Instruction](
-      Capability(operand(OperandKind.Capability, 6)),
-      MemoryModel(operand(OperandKind.AddressingModel, 2), operand(OperandKind.MemoryModel, 2)),
+      Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
+      Capability(operand(OperandKind.Capability, spv.Capability.Int64)),
+      Capability(operand(OperandKind.Capability, spv.Capability.Addresses)),
+      MemoryModel(
+        operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
+        operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
+      ),
+      EntryPoint(
+        operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
+        id(5),
+        literalString("arithmetic"),
+        Vec(id(10))
+      ),
+      Decorate(id(10), operand(OperandKind.Decoration, spv.Decoration.BuiltIn, spv.BuiltIn.GlobalInvocationId)),
       TypeVoid(id(1)),
       TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
-      TypeFunction(id(3), id(1), Vec.empty),
-      Constant(id(2), id(4), operand(OperandKind.LiteralContextDependentNumber, 1)),
-      EntryPoint(operand(OperandKind.ExecutionModel, 6), id(5), literalString("arithmetic"), Vec.empty),
-      Function(id(1), id(5), operand(OperandKind.FunctionControl, 0), id(3)),
-      Label(id(6))
-    ) ++ Vec.from(arithmetic) ++ Vec[Instruction](Return(), FunctionEnd())
+      TypeInt(id(7), operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
+      TypeVector(id(8), id(7), operand(OperandKind.LiteralInteger, 3)),
+      TypePointer(id(9), operand(OperandKind.StorageClass, spv.StorageClass.Input), id(8)),
+      TypePointer(id(11), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
+      TypeFunction(id(3), id(1), Vec(id(11)))
+    ) ++
+      (if (mode == Mode.Calls) Vec[Instruction](TypeFunction(id(helperType), id(2), Vec(id(2))))
+       else Vec.empty[Instruction]) ++ Vec[Instruction](
+        Constant(id(2), id(4), operand(OperandKind.LiteralContextDependentNumber, 1)),
+        Variable(id(9), id(10), operand(OperandKind.StorageClass, spv.StorageClass.Input), None),
+        Function(id(1), id(5), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(3)),
+        FunctionParameter(id(11), id(12)),
+        Label(id(6)),
+        Load(id(8), id(13), id(10), None),
+        CompositeExtract(id(7), id(15), id(13), Vec(operand(OperandKind.LiteralInteger, 0))),
+        UConvert(id(2), id(14), id(15))
+      ) ++ arithmetic ++ Vec[Instruction](
+        PtrAccessChain(id(11), id(outputPointer), id(12), id(15), Vec.empty),
+        Store(id(outputPointer), id(outputPointer - 1), None),
+        Return(),
+        FunctionEnd()
+      ) ++
+      (if (mode == Mode.Calls) Vec[Instruction](
+         Function(
+           id(2),
+           id(helperFunction),
+           operand(OperandKind.FunctionControl, spv.FunctionControl.None),
+           id(helperType)
+         ),
+         FunctionParameter(id(2), id(helperParameter)),
+         Label(id(helperLabel)),
+         IAdd(id(2), id(helperResult), id(helperParameter), id(4)),
+         ReturnValue(id(helperResult)),
+         FunctionEnd()
+       )
+       else Vec.empty[Instruction])
     Module(
-      Header(ISA.version, Word(0), Word(instructionCount.raw + 7), Word(0)),
+      Header(
+        ISA.version,
+        Word(0),
+        Word(Math.addExact(if (mode == Mode.Calls) helperResult else outputPointer, 1)),
+        Word(0)
+      ),
       instructions,
       Endianness.Little
     )

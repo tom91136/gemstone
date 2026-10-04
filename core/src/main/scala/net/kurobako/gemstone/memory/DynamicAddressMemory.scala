@@ -26,6 +26,11 @@ class DynamicAddressMemory(
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var nextAddress: Option[GuestAddress] = Some(initialAddress)
 
+  // Positive-address heaps grow upwards. Accesses entirely below them never need the allocation lock.
+  private def belowHeap(address: GuestAddress, size: Int >= 0): Boolean =
+    address.raw >= 0 && address.raw < initialAddress.raw &&
+      size.toLong.raw <= initialAddress.raw - address.raw
+
   override def allocate(size: Int > 0): Either[MemoryError, GuestAddress] = allocate(size, Vec.empty)
 
   def allocate(size: Int > 0, initial: Vec[Byte]): Either[MemoryError, GuestAddress] =
@@ -33,18 +38,18 @@ class DynamicAddressMemory(
       Left(MemoryError.AllocationInitializerTooLarge(size, initial.length))
     else lock.withLock {
       nextAddress match {
-        case None => Left(MemoryError.AddressSpaceExhausted(size))
+        case None        => Left(MemoryError.AddressSpaceExhausted(size))
         case Some(start) =>
           val byteCount = size.raw
-          val last = start.raw + byteCount.toLong - 1L
+          val last      = start.raw + byteCount.toLong - 1L
           if (java.lang.Long.compareUnsigned(last, start.raw) < 0)
             Left(MemoryError.AddressSpaceExhausted(size))
           else {
-            val span = (byteCount.toLong + 255L) & -256L
-            val next = start.raw + span
+            val span            = (byteCount.toLong + 255L) & -256L
+            val next            = start.raw + span
             val mutableContents = Array.ofDim[Byte](byteCount)
-            val _ = initial.copyToArray(mutableContents, 0, initial.length)
-            val _ = mutableAllocations.put(start.raw, mutableContents)
+            val _               = initial.copyToArray(mutableContents, 0, initial.length)
+            val _               = mutableAllocations.put(start.raw, mutableContents)
             // A final fitting allocation may consume the remaining address space, including alignment padding.
             nextAddress = Option.when(java.lang.Long.compareUnsigned(next, start.raw) > 0)(GuestAddress(next))
             Right(start)
@@ -58,42 +63,48 @@ class DynamicAddressMemory(
     found
   }
 
-  override def prepareReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[MemoryError, Unit] = {
-    val external = lock.withLock {
-      ranges.flatMap { case (address, size) =>
-        if (dynamicRange(address, size).nonEmpty) Vec.empty[(GuestAddress, Int >= 0)]
-        else if (!overlapsDynamic(address, size)) Vec((address, size))
-        else Vec.from((0 until size.raw).collect {
-          case offset if dynamicRange(address.offset(offset.toLong), 1).isEmpty =>
-            (address.offset(offset.toLong), 1: Int >= 0)
-        })
+  override def prepareReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[MemoryError, Unit] =
+    if (ranges.forall((address, size) => belowHeap(address, size))) delegate.prepareReads(ranges)
+    else {
+      val external = lock.withLock {
+        ranges.flatMap { case (address, size) =>
+          if (dynamicRange(address, size).nonEmpty) Vec.empty[(GuestAddress, Int >= 0)]
+          else if (!overlapsDynamic(address, size)) Vec((address, size))
+          else Vec.from((0 until size.raw).collect {
+            case offset if dynamicRange(address.offset(offset.toLong), 1).isEmpty =>
+              (address.offset(offset.toLong), 1: Int >= 0)
+          })
+        }
       }
+      delegate.prepareReads(external)
     }
-    delegate.prepareReads(external)
-  }
 
-  override def prepareSystemReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[MemoryError, Unit] = {
-    val external = lock.withLock {
-      ranges.flatMap { case (address, size) =>
-        if (dynamicRange(address, size).nonEmpty) Vec.empty[(GuestAddress, Int >= 0)]
-        else if (!overlapsDynamic(address, size)) Vec((address, size))
-        else Vec.from((0 until size.raw).collect {
-          case offset if dynamicRange(address.offset(offset.toLong), 1).isEmpty =>
-            (address.offset(offset.toLong), 1: Int >= 0)
-        })
+  override def prepareSystemReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[MemoryError, Unit] =
+    if (ranges.forall((address, size) => belowHeap(address, size))) delegate.prepareSystemReads(ranges)
+    else {
+      val external = lock.withLock {
+        ranges.flatMap { case (address, size) =>
+          if (dynamicRange(address, size).nonEmpty) Vec.empty[(GuestAddress, Int >= 0)]
+          else if (!overlapsDynamic(address, size)) Vec((address, size))
+          else Vec.from((0 until size.raw).collect {
+            case offset if dynamicRange(address.offset(offset.toLong), 1).isEmpty =>
+              (address.offset(offset.toLong), 1: Int >= 0)
+          })
+        }
       }
+      delegate.prepareSystemReads(external)
     }
-    delegate.prepareSystemReads(external)
-  }
 
-  override def validateRange(address: GuestAddress, size: Int >= 0): Either[MemoryError, Unit] = {
-    val local = lock.withLock {
-      if (dynamicRange(address, size).nonEmpty) Some(Right(()))
-      else if (overlapsDynamic(address, size)) Some(super.validateRange(address, size))
-      else None
+  override def validateRange(address: GuestAddress, size: Int >= 0): Either[MemoryError, Unit] =
+    if (belowHeap(address, size)) delegate.validateRange(address, size)
+    else {
+      val local = lock.withLock {
+        if (dynamicRange(address, size).nonEmpty) Some(Right(()))
+        else if (overlapsDynamic(address, size)) Some(super.validateRange(address, size))
+        else None
+      }
+      local.getOrElse(delegate.validateRange(address, size))
     }
-    local.getOrElse(delegate.validateRange(address, size))
-  }
 
   override def readInt8(address: GuestAddress): Either[MemoryError, Byte] =
     route(address, 1)((bytes, offset) => bytes(offset.raw), None, delegate.readInt8(address))
@@ -165,37 +176,39 @@ class DynamicAddressMemory(
 
   override def writeSystemBatch(
       writes: Vec[(GuestAddress, Long, Int in 1 ~ 8)]
-  ): Either[MemoryError, Unit] = {
-    val (overlay, external, mixed) = lock.withLock {
-      writes.foldLeft((
-        Vec.empty[(GuestAddress, Long, Int in 1 ~ 8)],
-        Vec.empty[(GuestAddress, Long, Int in 1 ~ 8)],
-        Vec.empty[(GuestAddress, Long, Int in 1 ~ 8)]
-      )) {
-        case ((local, delegated, straddled), write @ (address, _, size)) =>
-          if (dynamicRange(address, size).nonEmpty) (local :+ write, delegated, straddled)
-          else if (overlapsDynamic(address, size)) (local, delegated, straddled :+ write)
-          else (local, delegated :+ write, straddled)
+  ): Either[MemoryError, Unit] =
+    if (writes.forall((address, _, size) => belowHeap(address, size))) delegate.writeSystemBatch(writes)
+    else {
+      val (overlay, external, mixed) = lock.withLock {
+        writes.foldLeft((
+          Vec.empty[(GuestAddress, Long, Int in 1 ~ 8)],
+          Vec.empty[(GuestAddress, Long, Int in 1 ~ 8)],
+          Vec.empty[(GuestAddress, Long, Int in 1 ~ 8)]
+        )) {
+          case ((local, delegated, straddled), write @ (address, _, size)) =>
+            if (dynamicRange(address, size).nonEmpty) (local :+ write, delegated, straddled)
+            else if (overlapsDynamic(address, size)) (local, delegated, straddled :+ write)
+            else (local, delegated :+ write, straddled)
+        }
+      }
+      val stored = lock.withLock {
+        overlay.foldLeft[Either[MemoryError, Unit]](Right(())) { case (result, (address, value, size)) =>
+          result.flatMap(_ =>
+            dynamicRange(address, size) match {
+              case Some((bytes, offset)) =>
+                LittleEndian.write(value, bytes, offset.raw, size.scalarByteWidth)
+                Right(())
+              case None => Left(MemoryError.InvalidAddress(address, size.raw.self, "dynamic allocation disappeared"))
+            }
+          )
+        }
+      }
+      stored.flatMap(_ => delegate.writeSystemBatch(external)).flatMap { _ =>
+        mixed.foldLeft[Either[MemoryError, Unit]](Right(())) { case (result, (address, value, size)) =>
+          result.flatMap(_ => writeSystemStraddled(address, value, size))
+        }
       }
     }
-    val stored = lock.withLock {
-      overlay.foldLeft[Either[MemoryError, Unit]](Right(())) { case (result, (address, value, size)) =>
-        result.flatMap(_ =>
-          dynamicRange(address, size) match {
-            case Some((bytes, offset)) =>
-              LittleEndian.write(value, bytes, offset.raw, size.scalarByteWidth)
-              Right(())
-            case None => Left(MemoryError.InvalidAddress(address, size.raw.self, "dynamic allocation disappeared"))
-          }
-        )
-      }
-    }
-    stored.flatMap(_ => delegate.writeSystemBatch(external)).flatMap { _ =>
-      mixed.foldLeft[Either[MemoryError, Unit]](Right(())) { case (result, (address, value, size)) =>
-        result.flatMap(_ => writeSystemStraddled(address, value, size))
-      }
-    }
-  }
 
   override def atomicModifyLittleEndian(
       address: GuestAddress,
@@ -210,15 +223,16 @@ class DynamicAddressMemory(
   /** Routes a fixed-size access to the overlay, then to the delegate when the range is entirely external. A range that
     * straddles the overlay and the delegate is handled by `straddle`.
     */
-  private def route[A](
+  private inline def route[A](
       address: GuestAddress,
       size: Int >= 0
   )(
-      overlay: (Array[Byte], Int >= 0) => A,
-      straddle: => Option[Either[MemoryError, A]],
-      delegated: => Either[MemoryError, A]
+      inline overlay: (Array[Byte], Int >= 0) => A,
+      inline straddle: Option[Either[MemoryError, A]],
+      inline delegated: Either[MemoryError, A]
   ): Either[MemoryError, A] =
-    lock.withLock {
+    if (belowHeap(address, size)) delegated
+    else lock.withLock {
       dynamicRange(address, size) match {
         case Some((bytes, offset)) => Some(Right(overlay(bytes, offset)))
         case None                  => if (overlapsDynamic(address, size)) straddle else None

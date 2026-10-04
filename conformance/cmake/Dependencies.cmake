@@ -23,7 +23,7 @@ set(CONFORMANCE_DEPENDENCY_SOURCES
   "conformance_levelzero_headers|archive|https://codeload.github.com/oneapi-src/level-zero/tar.gz/934714b278f850d164627eeaaa043eee02785a9e|ec16e5f6a21443080494fe9ebeae5ea36de003124211d58ae3e3ae5eccfd1940"
   "conformance_babelstream|archive|https://codeload.github.com/UoB-HPC/BabelStream/tar.gz/17ab377b0e919e14fd3df2b67268761fdac8abb3|1600b92c6cefc09e0c61c1571da0f1807a0f5f2c96b47e52fbba0891c9b5da00"
   "conformance_minibude|archive|https://codeload.github.com/UoB-HPC/miniBUDE/tar.gz/570f66c1fd0c29b7f3ab6fa96fba87f4561aa44c|4c1d349785771c1fca818a7abd69dc789d6f5b77990c76ea29a94f1fdec5aa9e"
-  "conformance_cloverleaf|archive|https://codeload.github.com/UoB-HPC/CloverLeaf/tar.gz/3e10ff9268d3704a744e5a2a4ea3c62831078082|d914a1ee547dec35818851b4cac8f6aeeb2ba067168e5826266598019445f25f"
+  "conformance_cloverleaf|archive|https://codeload.github.com/UoB-HPC/CloverLeaf/tar.gz/97ede8243a23811c565289f61f256d6383028c3f|577b484a98e32629947eb66f90a68a4137543b6ff073f4e59aea5b0189a82b61"
   "conformance_tealeaf|archive|https://codeload.github.com/UoB-HPC/TeaLeaf/tar.gz/e70261c0be40537da75b258108ed2898f84f3c58|f454ab1cc89e750e0a6695bf65ce41cd3ebd64ba3e109a5109d02ae534bc6d16"
   "conformance_kokkos|archive|https://codeload.github.com/kokkos/kokkos/tar.gz/62d2b6c879b74b6ae7bd06eb3e5e80139c4708e6|2738406dba3a8edd57c9da845009807d9c5f6ce64d6c098d479470a39bbb3ff9"
   "conformance_vulkan_cts|archive|https://codeload.github.com/KhronosGroup/VK-GL-CTS/tar.gz/f6a29701220f34dd1407513bfe80d74ca7b392ce|d8741d45c2663193cc43b17d8f4e6fa230fa238f943bb4db3fa538ecb07503f3"

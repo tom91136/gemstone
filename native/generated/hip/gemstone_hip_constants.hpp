@@ -518,6 +518,7 @@ inline constexpr auto hipSyncPolicyBlockingSync = 4;
 inline constexpr auto hipSyncPolicySpin = 2;
 inline constexpr auto hipSyncPolicyYield = 3;
 inline constexpr auto hipUserObjectNoDestructorSync = 1;
+
 }
 
 #endif

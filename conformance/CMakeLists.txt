@@ -17,7 +17,7 @@ option(CONFORMANCE_OFFLINE "Use only cached dependencies; forbid network fetches
 # Keep compiler output independent of the checkout and build directory. This
 # also applies to the project-owned adapters compiled inside staged CTS and
 # miniapp source trees.
-foreach(_conformance_language IN ITEMS C CXX HIP)
+foreach(_conformance_language IN ITEMS C CXX HIP CUDA)
   add_compile_options(
     "$<$<COMPILE_LANG_AND_ID:${_conformance_language},GNU,Clang,AppleClang,IntelLLVM>:-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.>"
     "$<$<COMPILE_LANG_AND_ID:${_conformance_language},GNU,Clang,AppleClang,IntelLLVM>:-ffile-prefix-map=${CMAKE_BINARY_DIR}=.build>")
@@ -47,7 +47,19 @@ if(CONFORMANCE_BACKEND AND NOT CONFORMANCE_BACKEND MATCHES "^(cuda|hip|hsa|openc
   message(FATAL_ERROR "Unsupported CONFORMANCE_BACKEND: ${CONFORMANCE_BACKEND}")
 endif()
 
-if(CONFORMANCE_BACKEND MATCHES "^vulkan$")
+set(CONFORMANCE_COMPILER vendor CACHE STRING "Compiler variant: vendor, clang, or gcc")
+set_property(CACHE CONFORMANCE_COMPILER PROPERTY STRINGS vendor clang gcc)
+if(NOT CONFORMANCE_COMPILER MATCHES "^(vendor|clang|gcc)$")
+  message(FATAL_ERROR "Unknown conformance compiler: ${CONFORMANCE_COMPILER}")
+endif()
+if(CONFORMANCE_COMPILER STREQUAL "clang" AND NOT CONFORMANCE_BACKEND STREQUAL "cuda")
+  message(FATAL_ERROR "The clang variant requires the CUDA backend")
+endif()
+if(CONFORMANCE_COMPILER STREQUAL "gcc" AND NOT CONFORMANCE_BACKEND MATCHES "^(cuda|hsa)$")
+  message(FATAL_ERROR "The gcc OpenMP variant requires the CUDA or HSA backend")
+endif()
+
+if(CONFORMANCE_BACKEND MATCHES "^vulkan$" OR CONFORMANCE_COMPILER STREQUAL "gcc")
   set(conformance_unified_default OFF)
 else()
   set(conformance_unified_default ON)
@@ -60,6 +72,9 @@ if((CONFORMANCE_BUILD_UNIFIED OR CONFORMANCE_BUILD_CTS OR CONFORMANCE_BUILD_MINI
     AND NOT CONFORMANCE_BACKEND)
   message(FATAL_ERROR
     "CONFORMANCE_BACKEND is required when building conformance suites")
+endif()
+if(CONFORMANCE_COMPILER STREQUAL "gcc" AND CONFORMANCE_BUILD_UNIFIED)
+  message(FATAL_ERROR "GCC OpenMP currently provides miniapps; there is no unified OpenMP backend")
 endif()
 set(CMAKE_CUDA_ARCHITECTURES "75" CACHE STRING "CUDA architectures for unified and miniapps")
 option(CONFORMANCE_CUDA_CUBIN_ONLY "Compile CUDA kernels without an embedded PTX fallback" OFF)
@@ -107,7 +122,7 @@ endfunction()
 # their own targets to the build before the owning subtree stages them.
 function(conformance_fetch_url name output_variable)
   conformance_dependency_lookup("${CONFORMANCE_DEPENDENCY_SOURCES}" "${name}" url sha256 kind)
-  conformance_dependency_cache_apply("${CONFORMANCE_DEPENDENCY_CACHE}" "${name}" "${CONFORMANCE_OFFLINE}")
+  conformance_dependency_cache_apply("${CONFORMANCE_DEPENDENCY_CACHE}" "${name}" "${CONFORMANCE_OFFLINE}" "${sha256}")
   FetchContent_Declare(${name}
     URL "${url}" URL_HASH "SHA256=${sha256}"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
@@ -136,7 +151,7 @@ function(conformance_declare_dependencies)
 
   foreach(name IN ITEMS glaze magic_enum fire Catch2 fmt aspartame)
     conformance_dependency_lookup("${CONFORMANCE_DEPENDENCY_SOURCES}" "${name}" url sha256 kind)
-    conformance_dependency_cache_apply("${CONFORMANCE_DEPENDENCY_CACHE}" "${name}" "${CONFORMANCE_OFFLINE}")
+    conformance_dependency_cache_apply("${CONFORMANCE_DEPENDENCY_CACHE}" "${name}" "${CONFORMANCE_OFFLINE}" "${sha256}")
     if(kind STREQUAL "file")
       set(options DOWNLOAD_NO_EXTRACT YES)
     else()
@@ -203,6 +218,8 @@ endif()
 
 if(BUILD_TESTING)
   if(UNIX)
+    add_test(NAME conformance_dependency_cache
+      COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/DependencyCacheTest.cmake")
     add_test(NAME conformance_targets
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/TargetsTest.cmake")
     add_test(NAME conformance_jobserver
@@ -223,7 +240,8 @@ if(BUILD_TESTING)
   # Exercise the production image selector without a CUDA SDK or compiled kernels.
   set(cuda_test_images "${CMAKE_CURRENT_BINARY_DIR}/cuda-test-images")
   set(cuda_test_image_id 1)
-  foreach(image IN ITEMS memory atomic atomic_sass contended contended_sass fence fence_sass kernel_sass mma884_ptx mma884_sass)
+  foreach(image IN ITEMS memory atomic atomic_sass contended contended_sass exchange exchange_sass
+      fence fence_sass kernel_sass mma884_ptx mma884_sass)
     file(GENERATE OUTPUT "${cuda_test_images}/${image}_image.hpp"
       CONTENT "#pragma once\n#include <array>\ninline constexpr std::array<unsigned char, 2> ${image}_image{${cuda_test_image_id}, 255};\n")
     math(EXPR cuda_test_image_id "${cuda_test_image_id} + 1")
@@ -254,9 +272,13 @@ if(CONFORMANCE_BACKEND MATCHES "^(cuda|openacc)$")
     CONFORMANCE_DEVICE_CUDA=1 CONFORMANCE_DEVICE_TARGETS="${conformance_device_targets}")
   if(CONFORMANCE_BACKEND STREQUAL "cuda")
     find_package(CUDAToolkit REQUIRED)
-    get_target_property(conformance_cublas_library CUDA::cublas IMPORTED_LOCATION)
-    get_filename_component(conformance_cuda_runtime_directory
-      "${conformance_cublas_library}" DIRECTORY)
+    if(CONFORMANCE_COMPILER STREQUAL "gcc")
+      target_compile_definitions(conformance_device PRIVATE CONFORMANCE_DEVICE_CUDA_PTX_ONLY=1)
+    else()
+      get_target_property(conformance_cublas_library CUDA::cublas IMPORTED_LOCATION)
+      get_filename_component(conformance_cuda_runtime_directory
+        "${conformance_cublas_library}" DIRECTORY)
+    endif()
     target_compile_definitions(conformance_device PRIVATE CONFORMANCE_DEVICE_CUDA_DRIVER=1)
     target_link_libraries(conformance_device PUBLIC CUDA::cuda_driver)
   else()
@@ -272,25 +294,26 @@ if(CONFORMANCE_BACKEND MATCHES "^(cuda|openacc)$")
   endif()
 elseif(CONFORMANCE_BACKEND MATCHES "^(hip|hsa)$")
   string(REPLACE ";" "," conformance_device_targets "${CMAKE_HIP_ARCHITECTURES}")
-  if(NOT ROCM_VERSION)
-    message(FATAL_ERROR "ROCM_VERSION is required for the ${CONFORMANCE_BACKEND} backend; pass -DROCM_VERSION=<major.minor.patch>")
-  endif()
-  if(NOT ROCM_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
-    message(FATAL_ERROR "ROCM_VERSION must be major.minor.patch")
-  endif()
-  set(rocm_major "${CMAKE_MATCH_1}")
-  set(rocm_minor "${CMAKE_MATCH_2}")
-  find_path(CONFORMANCE_HIP_INCLUDE hip/hip_runtime_api.h PATHS /opt/rocm/include REQUIRED)
-  find_library(CONFORMANCE_HIP_RUNTIME amdhip64 PATHS /opt/rocm/lib /opt/rocm/lib64 REQUIRED)
   find_path(CONFORMANCE_HSA_INCLUDE hsa/hsa.h PATHS /opt/rocm/include REQUIRED)
   find_library(CONFORMANCE_HSA_RUNTIME hsa-runtime64 PATHS /opt/rocm/lib /opt/rocm/lib64 REQUIRED)
   string(TOUPPER "${CONFORMANCE_BACKEND}" device_backend)
   target_compile_definitions(conformance_device PRIVATE
-    CONFORMANCE_DEVICE_${device_backend}=1 CONFORMANCE_DEVICE_TARGETS="${conformance_device_targets}"
-    CONFORMANCE_ROCM_VERSION="${ROCM_VERSION}" CONFORMANCE_ROCM_MAJOR=${rocm_major} CONFORMANCE_ROCM_MINOR=${rocm_minor}
-    __HIP_PLATFORM_AMD__=1)
-  target_include_directories(conformance_device PRIVATE "${CONFORMANCE_HIP_INCLUDE}" "${CONFORMANCE_HSA_INCLUDE}")
-  target_link_libraries(conformance_device PUBLIC "${CONFORMANCE_HIP_RUNTIME}" "${CONFORMANCE_HSA_RUNTIME}")
+    CONFORMANCE_DEVICE_${device_backend}=1 CONFORMANCE_DEVICE_TARGETS="${conformance_device_targets}")
+  target_include_directories(conformance_device PRIVATE "${CONFORMANCE_HSA_INCLUDE}")
+  target_link_libraries(conformance_device PUBLIC "${CONFORMANCE_HSA_RUNTIME}")
+  if(CONFORMANCE_BACKEND STREQUAL "hip")
+    if(NOT ROCM_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+      message(FATAL_ERROR "ROCM_VERSION must be major.minor.patch")
+    endif()
+    set(rocm_major "${CMAKE_MATCH_1}")
+    set(rocm_minor "${CMAKE_MATCH_2}")
+    find_path(CONFORMANCE_HIP_INCLUDE hip/hip_runtime_api.h PATHS /opt/rocm/include REQUIRED)
+    find_library(CONFORMANCE_HIP_RUNTIME amdhip64 PATHS /opt/rocm/lib /opt/rocm/lib64 REQUIRED)
+    target_compile_definitions(conformance_device PRIVATE __HIP_PLATFORM_AMD__=1
+      CONFORMANCE_ROCM_VERSION="${ROCM_VERSION}" CONFORMANCE_ROCM_MAJOR=${rocm_major} CONFORMANCE_ROCM_MINOR=${rocm_minor})
+    target_include_directories(conformance_device PRIVATE "${CONFORMANCE_HIP_INCLUDE}")
+    target_link_libraries(conformance_device PUBLIC "${CONFORMANCE_HIP_RUNTIME}")
+  endif()
 elseif(CONFORMANCE_BACKEND STREQUAL "vulkan")
   find_package(Vulkan REQUIRED)
   target_compile_definitions(conformance_device PRIVATE CONFORMANCE_DEVICE_VULKAN=1)
@@ -333,7 +356,7 @@ endif()
 # Runtime closure is a property of the backend artifact, not of an individual
 # suite. Keep the plugin/search policy in one place so all suite combinations
 # produce the same relocatable runtime.
-if(CONFORMANCE_BACKEND STREQUAL "cuda")
+if(CONFORMANCE_BACKEND STREQUAL "cuda" AND NOT CONFORMANCE_COMPILER STREQUAL "gcc")
   conformance_runtime_search_directory("${conformance_cuda_runtime_directory}")
   conformance_runtime_plugins(
     "${conformance_cuda_runtime_directory}/libcublas.so*"
@@ -467,7 +490,7 @@ if(CONFORMANCE_BUILD_CTS AND CONFORMANCE_BACKEND MATCHES "^(opencl|sycl|levelzer
   list(APPEND conformance_artifact_targets conformance_cts_artifact)
 endif()
 if(CONFORMANCE_BUILD_MINIAPPS AND
-    CONFORMANCE_BACKEND MATCHES "^(cuda|hip|opencl|sycl|vulkan|openacc)$")
+    (CONFORMANCE_BACKEND MATCHES "^(cuda|hip|opencl|sycl|vulkan|openacc)$" OR CONFORMANCE_COMPILER STREQUAL "gcc"))
   add_subdirectory(miniapps)
   list(APPEND conformance_artifact_targets conformance_miniapps_artifact)
 endif()
@@ -491,6 +514,19 @@ if(TARGET conformance_unit_tests)
       --output-on-failure --label-regex unit
     DEPENDS conformance_unit_tests
     USES_TERMINAL VERBATIM)
+endif()
+
+if(CONFORMANCE_COMPILER STREQUAL "gcc")
+  execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -print-file-name=libgomp.so
+    OUTPUT_VARIABLE libgomp OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+  get_filename_component(libgomp "${libgomp}" REALPATH)
+  get_filename_component(libgomp_directory "${libgomp}" DIRECTORY)
+  conformance_runtime_search_directory("${libgomp_directory}")
+  if(CONFORMANCE_BACKEND STREQUAL "cuda")
+    conformance_runtime_plugins("${libgomp_directory}/libgomp-plugin-nvptx.so*")
+  else()
+    conformance_runtime_plugins("${libgomp_directory}/libgomp-plugin-gcn.so*")
+  endif()
 endif()
 
 get_property(conformance_runtime_search_directories GLOBAL

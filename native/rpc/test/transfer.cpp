@@ -105,3 +105,37 @@ TEST_CASE("sparse writeback batches reads and leaves host gaps untouched") {
   CHECK(host.front() == 42);
   CHECK(fixture.reads() == reads + 4);
 }
+
+TEST_CASE("bounded dirty reads respect gap and payload limits without publishing gaps") {
+  using namespace gemstone::execution;
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  auto client = Client::fromEnvironment();
+  REQUIRE(client);
+  constexpr int32_t BatchBytes = 64 * 1024;
+  const auto allocation = client->call(RegisterAllocation{AllocationKind::Device, BatchBytes + 1});
+  REQUIRE(allocation);
+  REQUIRE(client->call(WriteAllocation{allocation.value(), 0, std::vector<uint8_t>(BatchBytes + 1, 42)}));
+  std::vector<uint8_t> host(BatchBytes + 1, 99);
+  const auto apply = [&](const DirtyRange &range, const uint8_t *bytes) {
+    std::memcpy(host.data() + range.offset.value, bytes, range.size.value);
+    return true;
+  };
+  const std::vector<DirtyRange> sparse{{allocation.value(), 1, 2}, {allocation.value(), 259, 1}, {allocation.value(), 517, 1}};
+  REQUIRE(readDirtyRanges(*client, sparse, apply, 256, BatchBytes));
+  CHECK(fixture.reads() == 2); // The first gap is 256 bytes; the next is 257.
+  for (size_t index = 0; index < host.size(); ++index)
+    REQUIRE(host[index] == ((index == 1 || index == 2 || index == 259 || index == 517) ? 42 : 99));
+  std::fill(host.begin(), host.end(), 99);
+  std::vector<DirtyRange> spans;
+  for (int32_t offset = 0; offset <= BatchBytes; offset += 256)
+    spans.push_back({allocation.value(), offset, 1});
+  const auto reads = fixture.reads();
+  REQUIRE(readDirtyRanges(*client, spans, apply, 256, BatchBytes));
+  CHECK(fixture.reads() == reads + 2);
+  for (size_t index = 0; index < host.size(); ++index)
+    REQUIRE(host[index] == (index % 256 == 0 ? 42 : 99));
+  CHECK_FALSE(readDirtyRanges(*client, spans, apply, 256, 0));
+  CHECK_FALSE(readDirtyRanges(*client, spans, apply, 256, TransferChunk + 1));
+  CHECK(fixture.reads() == reads + 2);
+}

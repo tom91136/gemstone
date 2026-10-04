@@ -5,7 +5,10 @@
 #include <future>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
+
+#include <gemstone/test_support.hpp>
 
 #include <environment_keys.hpp>
 
@@ -40,7 +43,7 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
     return value;
   };
   REQUIRE((std::strcmp(reinterpret_cast<const char *>(properties.data()), "Gemstone gfx1036") == 0));
-  REQUIRE((word(276) == 64));      // warpSize in the unversioned HIP ABI
+  REQUIRE((word(276) == 32));      // warpSize in the unversioned HIP ABI
   REQUIRE((word(336) == 1));       // multiProcessorCount
   REQUIRE((word(392) == 1036));    // gcnArch
   REQUIRE((word(356) & (1 << 7))); // arch.hasDoubles
@@ -50,6 +53,10 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
   REQUIRE((word(784) == 1)); // pageableMemoryAccess in Polyregion's 792-byte ABI
   hipDeviceProp_tR0600 current{};
   REQUIRE((hipGetDevicePropertiesR0600(&current, 0) == hipSuccess));
+  REQUIRE((current.warpSize == 32));
+  int warpSize = 0;
+  REQUIRE((hipDeviceGetAttribute(&warpSize, hipDeviceAttributeWarpSize, 0) == hipSuccess));
+  REQUIRE((warpSize == 32));
   REQUIRE((current.pageableMemoryAccess == 1));
   REQUIRE((current.managedMemory == 1));
   REQUIRE((current.concurrentManagedAccess == 1));
@@ -60,6 +67,20 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
   REQUIRE((unsetenv(gemstone::environment::TargetArch) == 0));
 }
 #endif
+
+TEST_CASE("HIP wave size follows the selected processor", "[hip]") {
+  for (const auto &[target, expected] : std::array<std::pair<const char *, int>, 6>{
+           {{"gfx900", 64}, {"gfx90a", 64}, {"gfx1036", 32}, {"gfx1200", 32}, {"gfx1250", 32}, {"gfx1251", 32}}}) {
+    const gemstone_test::Environment selected(gemstone::environment::TargetArch, target);
+    INFO(target);
+    int width = 0;
+    REQUIRE((hipDeviceGetAttribute(&width, hipDeviceAttributeWarpSize, 0) == hipSuccess));
+    CHECK((width == expected));
+    hipDeviceProp_tR0600 properties{};
+    REQUIRE((hipGetDevicePropertiesR0600(&properties, 0) == hipSuccess));
+    CHECK((properties.warpSize == expected));
+  }
+}
 
 TEST_CASE("HIP primary context can be pushed", "[hip]") {
   gemstone_test::RpcFixture fixture;

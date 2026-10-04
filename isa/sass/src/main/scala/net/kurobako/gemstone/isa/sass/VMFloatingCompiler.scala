@@ -8,7 +8,7 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.Instruction.*
 import net.kurobako.gemstone.isa.sass.Instruction.*
 import net.kurobako.gemstone.isa.sass.Instruction as SASSInstruction
 
-/** Typed lowering for packed-half arithmetic and the associated SASS conversion forms. */
+/** Typed lowering for packed floating arithmetic and the associated SASS conversion forms. */
 private object VMFloatingCompiler {
   private val HalfMask = 0xffffL
 
@@ -18,6 +18,8 @@ private object VMFloatingCompiler {
     val modifiers   = instruction.modifiers
 
     instruction.operation match {
+      case _: SASSInstruction.Fadd2 => lowerFloatPairBinary(context, modifiers, operands, FloatOperation.Add)
+      case _: SASSInstruction.Fmul2 => lowerFloatPairBinary(context, modifiers, operands, FloatOperation.Multiply)
       case _: SASSInstruction.Hadd2
           if modifiers.isEmpty && operands.lift(1).exists(VMOperand.has(_, OperandSelector.`F32`)) =>
         lowerScalarToHalf(context, operands)
@@ -39,6 +41,104 @@ private object VMFloatingCompiler {
     }
   }
 
+  private def lowerFloatPairBinary(
+      context: VMCompilationContext,
+      modifiers: Vec[Modifier],
+      operands: Vec[Operand],
+      operation: FloatOperation
+  ): Boolean = {
+    if (!Set(100, 103)(context.sm)) unsupported("packed float32 requires sm_100 or sm_103")
+    if (!modifiers.forall(Set(Modifier.RN, Modifier.FTZ)))
+      unsupported("packed float32 supports RN rounding and optional FTZ")
+    requireSize(operands, 3, "packed float32 requires a register pair and two sources")
+    val destination = operands.head match {
+      case value @ Operand.Register(RegisterBank.R, _) => value
+      case _ => unsupported("packed float32 destination must be an aligned register pair or RZ")
+    }
+    validateFloatPairRegister(context, destination, 2)
+    val left   = floatPairOperand(context, operands(1))
+    val right  = floatPairOperand(context, operands(2))
+    val result = context.temp("wide")
+    context.emit(FloatBinaryPacked(
+      operation,
+      result.name,
+      left,
+      right,
+      PackedFloatFormat.F32x2,
+      FloatControl(flushSubnormal = modifiers.contains(Modifier.FTZ))
+    ))
+    context.store(destination, result, 64)
+    true
+  }
+
+  private def floatPairOperand(context: VMCompilationContext, operand: Operand): Value = operand match {
+    case Operand.Unary(inner, negative, false, absolute) =>
+      val input  = floatPairOperand(context, inner)
+      val result = context.temp("wide")
+      val signs  = 0x8000000080000000L
+      context.emit(IntegerBinary(
+        IntegerOperation.BitwiseAnd,
+        result.name,
+        input,
+        Value.Immediate(if (absolute) ~signs else -1L),
+        64
+      ))
+      if (negative)
+        context.emit(IntegerBinary(IntegerOperation.BitwiseXor, result.name, result, Value.Immediate(signs), 64))
+      result
+    case _: Operand.Unary => unsupported("packed float32 does not support bitwise source inversion")
+    case _                =>
+      val selected = operandSelectors(operand)
+      val base     = VMOperand.base(VMOperand.without(operand, OperandSelector.reuse))
+      val scalar   = selected == Vec(OperandSelector.F32)
+      base match {
+        case register @ Operand.Register(RegisterBank.R | RegisterBank.UR, _) =>
+          if (
+            !scalar && selected != Vec(OperandSelector.F32x2) &&
+            selected != Vec(OperandSelector.F32x2, OperandSelector.LO_HI)
+          )
+            unsupported("packed float32 source requires F32, F32x2 or F32x2.LO_HI")
+          validateFloatPairRegister(context, register, if (scalar) 1 else 2)
+          val value = context.source(base, if (scalar) 32 else 64)
+          if (scalar) {
+            val result = context.temp("wide")
+            context.emit(MoveCombine(result.name, Vec(value, value), 32))
+            result
+          } else if (selected.contains(OperandSelector.LO_HI)) {
+            val words = Vec(context.temp(), context.temp())
+            context.emit(MoveSplit(words.map(_.name), value, 32))
+            val result = context.temp("wide")
+            context.emit(MoveCombine(result.name, words.reverse, 32))
+            result
+          } else value
+        case _ if selected.isEmpty && !VMOperand.hasUnknownDomain(operand) =>
+          val scalar = context.floatSource(operand)
+          val result = context.temp("wide")
+          context.emit(MoveCombine(result.name, Vec(scalar, scalar), 32))
+          result
+        case _ => unsupported("unsupported packed float32 source")
+      }
+  }
+
+  private def validateFloatPairRegister(
+      context: VMCompilationContext,
+      register: Operand.Register,
+      words: Int in (1, 2)
+  ): Unit = {
+    val parameter = register.bank match {
+      case RegisterBank.R  => "MAX_REG_COUNT"
+      case RegisterBank.UR => "MAX_UNIFORM_REG_COUNT"
+      case _               => unsupported("packed float32 requires general or uniform registers")
+    }
+    val capacity = NVDisasm.forTarget(s"SM${context.sm}").flatMap(_.parameters.get(parameter))
+      .getOrElse(unsupported(s"missing packed float32 register limit $parameter"))
+    if (
+      !VMOperand.isZero(register) &&
+      (BigInt(register.index.raw) + words.raw > capacity || (words.raw == 2 && register.index.raw % 2 != 0))
+    )
+      unsupported("packed float32 source or destination exceeds its bank or is not an aligned register pair")
+  }
+
   private def lowerPackedBinary(
       context: VMCompilationContext,
       operands: Vec[Operand],
@@ -52,7 +152,7 @@ private object VMFloatingCompiler {
       result.name,
       packedOperand(context, operands(1), opcode),
       packedOperand(context, operands(2), opcode),
-      false
+      PackedFloatFormat.F16x2
     ))
     context.store(operands.head, canonicalizeNaNs(context, result))
     true
@@ -74,12 +174,12 @@ private object VMFloatingCompiler {
         sum.name,
         packedOperand(context, operands(1), "HFMA2.MMA"),
         packedOperand(context, operands(4), "HFMA2.MMA"),
-        false
+        PackedFloatFormat.F16x2
       ))
       context.store(operands.head, canonicalizeNaNs(context, sum))
       true
     } else if (
-      modifiers == Vec(Modifier.`MMA`) && operands.size == 5 &&
+      (modifiers.isEmpty || modifiers == Vec(Modifier.`MMA`)) && operands.size == 5 &&
       isNegativeZero(operands(1)) && VMOperand.isZero(operands(2))
     ) {
       val high = halfConstant(operands(3))
@@ -566,12 +666,12 @@ private object VMFloatingCompiler {
   private def predicateDestination(operand: Operand): Option[Value.Register] = operand match {
     case Operand.Predicate(None, false, false)        => None
     case Operand.Predicate(Some(index), false, false) =>
-      Some(Value.Register(s"%P$index"))
+      Some(Value.Register(VMRegisters.predicate(index = index.raw, uniform = false)))
     case _ => unsupported("HSETP2 result must be a predicate register or PT")
   }
 
   private def writePredicate(context: VMCompilationContext, destination: Value.Register, value: Value.Register): Unit =
-    context.emit(PredicateBinary(PredicateOperation.Or, destination.name, value.name, "%false"))
+    context.emit(PredicateBinary(PredicateOperation.Or, destination.name, value.name, VMRegisters.Predicate.False.name))
 
   private def supportedHalfSource(operand: Operand): Boolean =
     VMOperand.isRegister(operand, allowZero = true) ||

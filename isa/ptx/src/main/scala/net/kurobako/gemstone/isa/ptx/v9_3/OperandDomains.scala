@@ -46,25 +46,26 @@ object OperandDomains {
 
   object SpecialRegister {
     def fromSpelling(value: NonEmpty[String]): SpecialRegister = value.raw match {
-      case "%tid.x"       => SpecialRegister.TidX
-      case "%tid.y"       => SpecialRegister.TidY
-      case "%tid.z"       => SpecialRegister.TidZ
-      case "%ctaid.x"     => SpecialRegister.CtaidX
-      case "%ctaid.y"     => SpecialRegister.CtaidY
-      case "%ctaid.z"     => SpecialRegister.CtaidZ
-      case "%ntid.x"      => SpecialRegister.NtidX
-      case "%ntid.y"      => SpecialRegister.NtidY
-      case "%ntid.z"      => SpecialRegister.NtidZ
-      case "%nctaid.x"    => SpecialRegister.NctaidX
-      case "%nctaid.y"    => SpecialRegister.NctaidY
-      case "%nctaid.z"    => SpecialRegister.NctaidZ
-      case "%laneid"      => SpecialRegister.LaneId
-      case "%lanemask_ge" => SpecialRegister.LaneMaskGe
-      case "%lanemask_gt" => SpecialRegister.LaneMaskGt
-      case "%lanemask_le" => SpecialRegister.LaneMaskLe
-      case "%lanemask_lt" => SpecialRegister.LaneMaskLt
-      case "%lanemask_eq" => SpecialRegister.LaneMaskEq
-      case _              => SpecialRegister.Unknown(value)
+      case "%tid.x"             => SpecialRegister.TidX
+      case "%tid.y"             => SpecialRegister.TidY
+      case "%tid.z"             => SpecialRegister.TidZ
+      case "%ctaid.x"           => SpecialRegister.CtaidX
+      case "%ctaid.y"           => SpecialRegister.CtaidY
+      case "%ctaid.z"           => SpecialRegister.CtaidZ
+      case "%ntid.x"            => SpecialRegister.NtidX
+      case "%ntid.y"            => SpecialRegister.NtidY
+      case "%ntid.z"            => SpecialRegister.NtidZ
+      case "%nctaid.x"          => SpecialRegister.NctaidX
+      case "%nctaid.y"          => SpecialRegister.NctaidY
+      case "%nctaid.z"          => SpecialRegister.NctaidZ
+      case "%dynamic_smem_size" => SpecialRegister.DynamicSmemSize
+      case "%laneid"            => SpecialRegister.LaneId
+      case "%lanemask_ge"       => SpecialRegister.LaneMaskGe
+      case "%lanemask_gt"       => SpecialRegister.LaneMaskGt
+      case "%lanemask_le"       => SpecialRegister.LaneMaskLe
+      case "%lanemask_lt"       => SpecialRegister.LaneMaskLt
+      case "%lanemask_eq"       => SpecialRegister.LaneMaskEq
+      case _                    => SpecialRegister.Unknown(value)
     }
   }
 
@@ -81,6 +82,7 @@ object OperandDomains {
     case NctaidX                          extends SpecialRegister("%nctaid.x")
     case NctaidY                          extends SpecialRegister("%nctaid.y")
     case NctaidZ                          extends SpecialRegister("%nctaid.z")
+    case DynamicSmemSize                  extends SpecialRegister("%dynamic_smem_size")
     case LaneId                           extends SpecialRegister("%laneid")
     case LaneMaskGe                       extends SpecialRegister("%lanemask_ge")
     case LaneMaskGt                       extends SpecialRegister("%lanemask_gt")

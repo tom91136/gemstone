@@ -106,7 +106,7 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
       groupSegmentSize = 0,
       privateSegmentSize = 0,
       computePgmRsrc2 = 0x880,
-      kernelCodeProperties = 0,
+      kernelCodeProperties = EncodingConstants.KernelCodeProperty.ENABLE_WAVEFRONT_SIZE32,
       code = code
     )
     val dispatch = KernelTask.validated(
@@ -145,20 +145,51 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
       Vec.empty
     ).toOption.get
     assertEquals(executeKernel(compileKernel(kernel), dispatch, TestMemory()), Right(()))
-    assert(VMCompiler.compile(kernel.copy(code = unsupported, codeAddress = 0x1000L)).isLeft)
+    assert(VMCompiler().compile(kernel.copy(code = unsupported, codeAddress = 0x1000L)).isLeft)
     val truncated = Vec[Byte](1, 2)
-    assert(VMCompiler.compile(kernel.copy(
+    assert(VMCompiler().compile(kernel.copy(
       code = truncated,
       text = unsupported ++ truncated,
       functionSizes = Map(0x1000L -> 4, 0x1004L -> 2)
     )).left.exists(_.message.contains("byte 4")))
     // A direct branch leaving the entry must use linked decoding and preserve the target failure.
     val branch = Vec[Byte](0x00, 0x00, 0x82.toByte, 0xbf.toByte)
-    assert(VMCompiler.compile(kernel.copy(
+    assert(VMCompiler().compile(kernel.copy(
       code = branch,
       codeAddress = 0x1000L,
       text = branch ++ unsupported
     )).isLeft)
+  }
+
+  test("linked kernels share decoded text while retaining distinct entry points") {
+    // Two external branches: the first enters a trap, the second reaches endpgm.
+    val text = Vec[Long](0xbf820002L, 0xbf820000L, 0xbf810000L, 0xbf920002L)
+      .flatMap(word => LittleEndian.toVec(word, 4))
+    val source = CodeObjectKernel(
+      name = "trap_entry",
+      target = Target("gfx900"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
+      computePgmRsrc2 = 0,
+      kernelCodeProperties = 0,
+      code = text.take(4),
+      codeAddress = 0x1000L,
+      textAddress = 0x1000L,
+      text = text,
+      functionSizes = Map(0x1000L -> 4, 0x1004L -> 4, 0x1008L -> 4, 0x100cL -> 4)
+    )
+    val compiler = VMCompiler()
+    val first    = compiler.compile(source).toOption.get
+    val second   = compiler.compile(source.copy(name = "end_entry", code = text.slice(4, 8), codeAddress = 0x1004L))
+      .toOption.get
+    assert(first.instructions eq second.instructions)
+    assert(first.instructionIndices eq second.instructionIndices)
+    assertEquals(first.entryInstruction, 0)
+    assertEquals(second.entryInstruction, 1)
+    val dispatch = KernelTask.validated("entry", Dimensions.One, Dimensions.One, Vec.empty).toOption.get
+    assert(executeKernel(first, dispatch, TestMemory()).isLeft)
+    assertEquals(executeKernel(second, dispatch, TestMemory()), Right(()))
   }
 
   for (architecture <- List("gfx900", "gfx1030")) {
@@ -251,11 +282,11 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
     )
     assertEquals(executeKernel(compileKernel(crossing), dispatch, TestMemory()), Right(()))
     val aliased = words.updated(1, 0x812084ffL).flatMap(word => LittleEndian.toVec(word, 4))
-    assert(VMCompiler.compile(kernel.copy(code = aliased, text = unsupported ++ aliased)).isLeft)
+    assert(VMCompiler().compile(kernel.copy(code = aliased, text = unsupported ++ aliased)).isLeft)
 
     // Entry in the middle invalidates the proof even though the instruction bytes still match.
     val intoMiddle = LittleEndian.toVec(0xbf820005L, 4) ++ code
-    assert(VMCompiler.compile(kernel.copy(
+    assert(VMCompiler().compile(kernel.copy(
       code = intoMiddle,
       text = unsupported ++ intoMiddle,
       functionSizes = Map(0x1000L -> 4, 0x1004L -> intoMiddle.size)
@@ -264,7 +295,7 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
     val unknown = Vec[Long](0xbe802024L, 0xbf810000L).flatMap(word =>
       LittleEndian.toVec(word, 4)
     )
-    assert(VMCompiler.compile(kernel.copy(
+    assert(VMCompiler().compile(kernel.copy(
       code = unknown,
       text = unsupported ++ unknown,
       functionSizes = Map(0x1000L -> 4, 0x1004L -> unknown.size)
@@ -335,7 +366,7 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
       groupSegmentSize = 0,
       privateSegmentSize = 4752,
       computePgmRsrc2 = 0,
-      kernelCodeProperties = 1,
+      kernelCodeProperties = 1 | EncodingConstants.KernelCodeProperty.ENABLE_WAVEFRONT_SIZE32,
       code = words.flatMap(word => LittleEndian.toVec(word, 4))
     )
     val memory     = TestMemory()
@@ -493,7 +524,10 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
     assertEquals(executeKernel(compileKernel(kernel), dispatch, TestMemory()), Right(()))
   }
 
-  for (rawPointers <- List(false, true)) test(s"gfx900 vector copy batches external addresses: $rawPointers") {
+  for {
+    rawPointers <- List(false, true)
+    activeLanes <- List(1, 33, 64)
+  } test(s"gfx900 vector copy batches external addresses: raw=$rawPointers active=$activeLanes") {
     val words = Vec[Long](
       0xc0020242L, 0x00000004L, 0xc0020283L, 0x00000018L,
       0xc00a0003L, 0x00000000L, 0xbea10080L, 0xbf8cc07fL,
@@ -522,8 +556,8 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
     memory.allocate(input, 256)
     memory.allocate(output, 256)
     memory.allocate(unused, 256)
-    val expected = Array.tabulate(64)(index => index * 97 - 11)
-    expected.zipWithIndex.foreach { case (value, index) =>
+    val expected = Array.tabulate(64)(index => if (index < activeLanes) index * 97 - 11 else 0)
+    Array.tabulate(64)(index => index * 97 - 11).zipWithIndex.foreach { case (value, index) =>
       memory.putInt(input, (index * 4).unsafe[Int >= 0], value)
     }
 
@@ -565,20 +599,21 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
       zero
     )
     val dispatch = KernelTask.validated(
-      "vector_copy",
-      testDimensions(64, 1, 1),
-      Dimensions.One,
-      arguments
+      kernelName = "vector_copy",
+      groupSize = testDimensions(64, 1, 1),
+      groupCount = Dimensions.One,
+      arguments = arguments,
+      globalSize = Some(GlobalDimensions(activeLanes.toLong.unsafe[Long > 0], 1L, 1L))
     ).toOption.get
 
     assertEquals(executeKernel(compileKernel(kernel), dispatch, tracked), Right(()))
     if (rawPointers) {
       assertEquals(batches.size, 1)
-      assertEquals(batches.head.size, 64)
-      assertEquals(batches.head.map(_._2.raw).sum, 256)
+      assertEquals(batches.head.size, activeLanes)
+      assertEquals(batches.head.map(_._2.raw).sum, activeLanes * 4)
       assertEquals(
         batches.head.map(_._1.raw),
-        (0 until 64).map(i => memory.address(input, (i * 4L).unsafe[Long >= 0]).toOption.get.raw)
+        (0 until activeLanes).map(i => memory.address(input, (i * 4L).unsafe[Long >= 0]).toOption.get.raw)
       )
     }
     assertEquals(

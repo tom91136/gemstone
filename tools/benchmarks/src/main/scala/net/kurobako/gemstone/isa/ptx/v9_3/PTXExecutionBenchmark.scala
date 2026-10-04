@@ -11,7 +11,6 @@ import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Using
@@ -25,8 +24,6 @@ object PTXExecutionBenchmark {
   private case class Options(
       mode: GeometryMode,
       measured: Int > 0,
-      warmup: Int >= 0,
-      rounds: Int > 0,
       recording: Option[Path]
   )
 
@@ -36,12 +33,8 @@ object PTXExecutionBenchmark {
       .map(value => if (value == "tiny") GeometryMode.Tiny else GeometryMode.Vector),
     Opts.option[Int]("measured", help = "Launches per measured round").withDefault(100)
       .refined[Int > 0]("measured launches must be positive"),
-    Opts.option[Int]("warmup", help = "Warmup launches").withDefault(1000)
-      .refined[Int >= 0]("warmup launches must be non-negative"),
-    Opts.option[Int]("rounds", help = "Measured rounds").withDefault(5)
-      .refined[Int > 0]("measured rounds must be positive"),
     Opts.option[String]("recording", help = "JFR output path").map(Path.of(_)).orNone
-  ).mapN(Options(_, _, _, _, _))
+  ).mapN(Options(_, _, _))
   private val source = """.version 8.0
     .target sm_80
     .address_size 64
@@ -66,14 +59,12 @@ object PTXExecutionBenchmark {
       ret;
     }"""
 
-  // Setup, warmup and sample loops use counters so collection allocation is not part of the measurement.
+  // Setup and sample loops use counters so collection allocation is not part of the measurement.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(args: Array[String]): Unit = {
+  def run(args: Array[String]): BenchmarkSample = {
     val parsed          = BenchmarkArguments.parse(BenchmarkName("ptx-execution"), args.toSeq, options)
     val mode            = parsed.mode
     val measured        = parsed.measured
-    val warmup          = parsed.warmup
-    val rounds          = parsed.rounds
     val lanes: Int > 0  = if (mode == GeometryMode.Tiny) 1 else 256
     val groups: Int > 0 = if (mode == GeometryMode.Tiny) 1 else 16
     val size: Int > 0   = lanes * groups
@@ -110,23 +101,13 @@ object PTXExecutionBenchmark {
         n += 1
       }
     }
-    i = 0
-    while (i < warmup.raw) { execute(); i += 1 }
-    if (warmup.raw > 0) verify()
     Using.resource(PlatformMetrics.startRecording(parsed.recording)) { _ =>
-      var round = 0
-      while (round < rounds.raw) {
-        val measurement = Measurement {
-          i = 0
-          while (i < measured.raw) { execute(); i += 1 }
-        }
-        verify()
-        Console.out.println(
-          s"mode=${mode.toString.toLowerCaseRoot} round=$round launches=$measured nsPerLaunch=${measurement.elapsedNanos.raw.toDouble /
-              measured.raw} bytesPerLaunch=${measurement.allocatedBytes.fold(Double.NaN)(_.raw.toDouble / measured.raw)} verified=$size"
-        )
-        round += 1
+      val measurement = Measurement {
+        i = 0
+        while (i < measured.raw) { execute(); i += 1 }
       }
+      verify()
+      measurement.sample(measured.toLong)
     }
   }
 

@@ -10,7 +10,7 @@ class BinarySuite extends munit.FunSuite {
     val scalarBits: Int in (8, 16, 32, 64)                     = 32
     val scalarBytes: Int in (1, 2, 4, 8)                       = scalarBits.toMemoryValueByteWidth
     val roundTrip: Int in (8, 16, 32, 64)                      = scalarBytes.toMemoryValueBitWidth
-    val packedBytes: Int in 1 ~ 8                   = 3
+    val packedBytes: Int in 1 ~ 8                              = 3
     val packedBits: Int where (Between[8, 64] & MultipleOf[8]) = packedBytes.toBitWidth
     assertEquals(scalarBytes.raw, 4)
     assertEquals(roundTrip.raw, 32)
@@ -21,9 +21,9 @@ class BinarySuite extends munit.FunSuite {
   // Do not derive these from the encoder or the constants whose values these cases verify.
 
   test("little-endian scalars round-trip through arrays and runtime collections") {
-    val value                          = 0x8877665544332211L
+    val value               = 0x8877665544332211L
     val width: Int in 0 ~ 8 = 8
-    val bytes                          = LittleEndian.toArray(value, width)
+    val bytes               = LittleEndian.toArray(value, width)
 
     assertEquals(bytes.toSeq, Seq[Byte](0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88.toByte))
     assertEquals(LittleEndian.decode(bytes = bytes, offset = 0, size = width), value)

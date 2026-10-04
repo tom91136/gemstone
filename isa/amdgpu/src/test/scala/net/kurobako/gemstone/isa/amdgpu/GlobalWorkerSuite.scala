@@ -79,7 +79,7 @@ class GlobalWorkerSuite extends munit.FunSuite {
           Vec.empty
         ).toOption.get
         val policy   = if (parallel) workers else Workgroups.Sequential
-        val prepared = VMCompiler.compile(kernel).toOption.get
+        val prepared = VMCompiler().compile(kernel).toOption.get
         for (epoch <- Seq(17, 71)) {
           input.indices.foreach(i => input(i) = (i * 3 + epoch).toByte)
           java.util.Arrays.fill(output, 0x55.toByte)

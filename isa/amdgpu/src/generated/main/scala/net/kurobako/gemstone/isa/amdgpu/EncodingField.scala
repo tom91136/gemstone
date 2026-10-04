@@ -1,6 +1,7 @@
 // Generated from the pinned AMDGPU machine metadata. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.constraint.*
 import upickle.default.*
 
 object EncodingField {
@@ -231,7 +232,7 @@ enum EncodingField {
   case `WAIT_VM_VSRC`
   case `X2ENCODING`
   case `X3ENCODING`
-  def assemblyName: net.kurobako.gemstone.constraint.NonEmpty[String] = this match {
+  def assemblyName: NonEmpty[String] = this match {
     case `A16` => "a16"; case `ABID` => "abid"; case `ABS` => "abs"; case `ACC` => "acc"; case `ACC_CD` => "acc_cd";
     case `ADDR` => "addr"; case `ADDR64` => "addr64"; case `ATTR` => "attr"; case `ATTR_CHAN` => "attr_chan";
     case `BANK_MASK` => "bank_mask"; case `BITOP3` => "bitop3"; case `BLGP` => "blgp";

@@ -14,11 +14,22 @@ object Metadata {
       format: EncodingFormat,
       opcode: Int,
       operands: Vec[OperandInfo],
-      groups: Vec[InstructionGroup] = Vec.empty
-  )
+      groups: Vec[InstructionGroup] = Vec.empty,
+      processors: Vec[NonEmpty[String]] = Vec.empty
+  ) {
+    def supports(target: Target): Boolean = isa == target.isa &&
+      (processors.isEmpty || processors.contains(target.name))
+  }
 
   object Catalogue {
-    case class Row(isa: Int, format: Int, opcode: Int, schema: Int, groups: Vector[Int]) derives ReadWriter
+    case class Row(
+        isa: Int,
+        format: Int,
+        opcode: Int,
+        schema: Int,
+        groups: Vector[Int],
+        processors: Vector[Int] = Vector.empty
+    ) derives ReadWriter
 
     private lazy val values: Vec[Metadata] = {
       val stream = Option(getClass.getResourceAsStream("metadata.json"))
@@ -57,7 +68,8 @@ object Metadata {
           format = EncodingFormat.valueOf(strings(row.format)),
           opcode = row.opcode,
           operands = operands(row.schema),
-          groups = row.groups.map(id => InstructionGroup.valueOf(strings(id))).toVec
+          groups = row.groups.map(id => InstructionGroup.valueOf(strings(id))).toVec,
+          processors = row.processors.map(strings).toVec
         )
       }
       metadata.map { case (start, count) =>
@@ -66,8 +78,8 @@ object Metadata {
     }
   }
 
-  def encodingsFor(definition: Opcode, isa: ISA): Vec[Encoding] =
-    definition.meta.encodings.filter(_.isa == isa)
+  def encodingsFor(definition: Opcode, target: Target): Vec[Encoding] =
+    definition.meta.encodings.filter(_.supports(target))
 
 }
 

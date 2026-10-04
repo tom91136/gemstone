@@ -1,5 +1,5 @@
 .version 7.8
-.target sm_80
+.target sm_70
 .address_size 64
 .visible .entry probe(.param .u64 input, .param .u64 output, .param .u64 indices, .param .u32 mode) {
  .reg .u64 %p, %q, %offset, %old64; .reg .u32 %i, %group, %width, %m, %old; .reg .pred %pred;

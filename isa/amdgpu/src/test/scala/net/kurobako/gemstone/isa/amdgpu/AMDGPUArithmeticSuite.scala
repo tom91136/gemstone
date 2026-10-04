@@ -190,11 +190,18 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
         Target("gfx1036")
       ),
       Right(
-        Instruction.VBinary(
-          VectorBinaryOperation.MultiplyAccumulateF32,
+        Instruction.VMadF32(
+          VectorMadF32Operation.FusedMultiplyAdd,
           5,
           InstructionSource.VectorRegister(1),
           InstructionSource.VectorRegister(2),
+          InstructionSource.VectorRegister(5),
+          absA = false,
+          absB = false,
+          absC = false,
+          negateA = false,
+          negateB = false,
+          negateC = false,
           clamp = false
         )
       )
@@ -397,8 +404,9 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
     )
     assertEquals(
       ELF.selectFunctionTarget(Vec("first", "second")),
-      Left(CodeObjectError.Invalid("AMDGPU function aliases are ambiguous: first, second"))
+      Right("first")
     )
+    assertEquals(ELF.selectFunctionTarget(Vec("second", "first", "second")), Right("first"))
   }
 
   test("AMDGPU LDS capacity includes fixed and dynamic group segments") {
@@ -608,7 +616,7 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
       Target("gfx900")
     )
 
-    assertEquals(instruction, Right(Instruction.VMove(0, InstructionSource.Constant(0L))))
+    assertEquals(instruction, Right(Instruction.VMove(0, InstructionSource.Constant(VMAddressSpace.LocalBase))))
   }
 
   test("gfx900 VOP1 single-to-half conversion decodes") {
@@ -635,9 +643,14 @@ class AMDGPUArithmeticSuite extends munit.FunSuite {
     )
   }
 
-  test("unsigned f32 conversion feeds the magnitude used by signed i64 lowering") {
-    assertEquals(VMArithmetic.unsignedFloatToInt32(-3.0f), 3L)
+  test("unsigned f32 conversion truncates and saturates to the unsigned range") {
+    // AMD V_CVT_U32_F32 saturates out-of-range inputs; it does not take their magnitude.
+    assertEquals(VMArithmetic.unsignedFloatToInt32(-3.0f), 0L)
     assertEquals(VMArithmetic.unsignedFloatToInt32(5.75f), 5L)
+    assertEquals(VMArithmetic.unsignedFloatToInt32(Float.NaN), 0L)
+    assertEquals(VMArithmetic.unsignedFloatToInt32(Float.NegativeInfinity), 0L)
+    assertEquals(VMArithmetic.unsignedFloatToInt32(Float.PositiveInfinity), 0xffffffffL)
+    assertEquals(VMArithmetic.unsignedFloatToInt32(4294967296.0f), 0xffffffffL)
   }
 
   test("gfx900 VOP3 signed median of three decodes") {

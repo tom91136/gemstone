@@ -10,6 +10,8 @@ object VMPredicateFile {
     val index = indexRaw(name)
     if (index < 0) None else Some(index.unsafe[Slot])
   }
+  private val DefinedTrue  = Some(true)
+  private val DefinedFalse = Some(false)
 
   def index(name: NonEmpty[String]): Int = indexRaw(name)
 
@@ -28,12 +30,13 @@ class VMPredicateFile {
   private var bits: Array[Long] | Null                   = null
   private var named: mutable.Map[String, Boolean] | Null = null
 
-  def get(name: NonEmpty[String]): Option[Boolean] = predicateSlot(name) match {
-    case Some(index) => getSlotRaw(index)
-    case None        => named match {
-        case null   => None
-        case values => values.get(name)
-      }
+  def get(name: NonEmpty[String]): Option[Boolean] = {
+    val index = VMPredicateFile.indexRaw(name)
+    if (index >= 0) getSlotRaw(index)
+    else named match {
+      case null   => None
+      case values => values.get(name)
+    }
   }
 
   inline def getSlot(index: VMPredicateFile.Slot): Option[Boolean] = getSlotRaw(index.raw)
@@ -47,15 +50,16 @@ class VMPredicateFile {
     bits match {
       case null                                => None
       case values if (values(word) & bit) == 0 => None
-      case values                              => Some((values(word + 16) & bit) != 0L)
+      case values => if ((values(word + 16) & bit) != 0L) VMPredicateFile.DefinedTrue else VMPredicateFile.DefinedFalse
     }
   }
 
   def apply(name: NonEmpty[String]): Boolean = get(name).getOrElse(false)
 
-  def update(name: NonEmpty[String], value: Boolean): Unit = predicateSlot(name) match {
-    case Some(index) => updateSlotRaw(index, value)
-    case None        =>
+  def update(name: NonEmpty[String], value: Boolean): Unit = {
+    val index = VMPredicateFile.indexRaw(name)
+    if (index >= 0) updateSlotRaw(index, value)
+    else {
       val values = named match {
         case null =>
           val allocated = mutable.Map.empty[String, Boolean]
@@ -64,6 +68,7 @@ class VMPredicateFile {
         case existing => existing
       }
       values(name) = value
+    }
   }
 
   def updateSlotRaw(index: Int, value: Boolean): Unit = {
@@ -92,8 +97,4 @@ class VMPredicateFile {
     }
   }
 
-  private def predicateSlot(name: String): Option[Int] = {
-    val index = VMPredicateFile.indexRaw(name)
-    if (index < 0) None else Some(index)
-  }
 }

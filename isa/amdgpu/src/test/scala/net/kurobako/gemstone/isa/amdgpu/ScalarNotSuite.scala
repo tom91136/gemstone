@@ -64,7 +64,7 @@ class ScalarNotSuite extends munit.FunSuite {
       val memory = Memory()
       assertEquals(
         executeKernel(
-          VMCompiler.compile(kernel).toOption.get,
+          VMCompiler().compile(kernel).toOption.get,
           dispatch,
           memory,
           TaskControl()

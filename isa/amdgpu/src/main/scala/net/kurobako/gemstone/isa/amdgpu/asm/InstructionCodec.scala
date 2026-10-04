@@ -201,7 +201,7 @@ private object InstructionCodec {
 
   def encode(instruction: Instruction, target: Target, waveSize: Int in (32, 64)): Either[CodecError, Vec[Byte]] = {
     val candidates =
-      Metadata.encodingsFor(instruction.definition, target.isa).flatMap(value => layout(value).map(value -> _))
+      Metadata.encodingsFor(instruction.definition, target).flatMap(value => layout(value).map(value -> _))
         .sortBy(_._2.bits)
     candidates.view.flatMap { case (value, layout) => encode(instruction, target, value, layout, waveSize) }.headOption
       .toRight(CodecError.UnsupportedOperandSyntax(instruction.opcode, target, instruction.operands))

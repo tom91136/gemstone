@@ -23,8 +23,11 @@ object protocol {
 
   /** Reads exactly `size` bytes, failing with `failure` when the stream ends early. */
   def readExactly(input: DataInputStream, size: Int >= 0, failure: String => Throwable): Array[Byte] = {
-    val result = input.readNBytes(size.raw)
-    if (result.length != size.raw) throw failure(s"expected $size bytes, received ${result.length}")
+    // Frame lengths are bounded by the caller. Read straight into the final array instead of
+    // readNBytes(size)'s growing chunks and final concatenation for large module payloads.
+    val result   = Array.ofDim[Byte](size.raw)
+    val received = input.readNBytes(result, 0, size.raw)
+    if (received != size.raw) throw failure(s"expected $size bytes, received $received")
     result
   }
 

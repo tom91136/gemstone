@@ -49,6 +49,7 @@ extern "C" void *gemstoneCudaUnsupportedDriverSymbol(const char *symbol);
 namespace {
 
 int32_t ensureRuntimeContext();
+int32_t functionClusterAttribute(void *function, int32_t attribute, int32_t *value, bool write);
 std::atomic<bool> executionShuttingDown{false};
 
 gemstone::CommandQueue &commands();
@@ -1303,12 +1304,12 @@ extern "C" int32_t cuFuncGetAttribute(int32_t *value, int32_t attribute, void *f
     case CU_FUNC_ATTRIBUTE_CACHE_MODE_CA:
     case CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
     case CU_FUNC_ATTRIBUTE_CLUSTER_SIZE_MUST_BE_SET:
-    case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH:
-    case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT:
-    case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH:
     case CU_FUNC_ATTRIBUTE_NON_PORTABLE_CLUSTER_SIZE_ALLOWED:
     case CU_FUNC_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE:
     case CU_FUNC_ATTRIBUTE_DEVICE_NODE_UPDATE_SUPPORTED: *value = 0; return CUDA_SUCCESS;
+    case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH:
+    case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT:
+    case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH: return functionClusterAttribute(function, attribute, value, false);
     default: return CUDA_ERROR_INVALID_VALUE;
   }
 }
@@ -1324,13 +1325,19 @@ extern "C" int32_t cuKernelSetAttribute(int32_t attribute, int32_t value, void *
   return cuFuncSetAttribute(kernel, attribute, value);
 }
 
-/* Kernel tuning attributes are advisory for the interpreter.  Accept the
- * setters so vendor libraries can configure their generated kernels without
- * turning an otherwise executable launch into NOT_SUPPORTED. */
+// Cluster dimensions affect execution; cache and scheduling preferences are advisory.
 extern "C" int32_t cuFuncSetAttribute(void *function, int32_t attribute, int32_t value) {
-  (void)attribute;
-  (void)value;
-  return !function ? CUDA_ERROR_INVALID_VALUE : CUDA_SUCCESS;
+  if (!function) return CUDA_ERROR_INVALID_VALUE;
+  switch (attribute) {
+    case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH:
+    case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT:
+    case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH:
+      if (value < 0) return CUDA_ERROR_INVALID_VALUE;
+      if (value > 1) return CUDA_ERROR_NOT_SUPPORTED;
+      return functionClusterAttribute(function, attribute, &value, true);
+    default: break;
+  }
+  return CUDA_SUCCESS;
 }
 
 extern "C" int32_t cuFuncSetCacheConfig(void *function, int32_t config) {
@@ -1375,6 +1382,71 @@ extern "C" int32_t cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int32_t 
   return occupancyMaxBlocks(blocks, block_size);
 }
 
+extern "C" int32_t cuOccupancyAvailableDynamicSMemPerBlock(size_t *bytes, void *function, int32_t blocks, int32_t block_size) {
+  if (!bytes || !function || blocks <= 0 || blocks > device_limits::MaxBlocksPerMultiprocessor) return CUDA_ERROR_INVALID_VALUE;
+  int32_t maximum_blocks = 0;
+  const auto status = occupancyMaxBlocks(&maximum_blocks, block_size);
+  if (status != CUDA_SUCCESS || blocks > maximum_blocks) return CUDA_ERROR_INVALID_VALUE;
+  int32_t static_bytes = 0;
+  const auto attributes = cuFuncGetAttribute(&static_bytes, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, function);
+  if (attributes != CUDA_SUCCESS) return attributes;
+  const auto per_block = std::min(device_limits::MaxSharedMemoryPerBlockOptin, device_limits::MaxSharedMemoryPerMultiprocessor / blocks);
+  *bytes = static_cast<size_t>(std::max(0, per_block - static_bytes));
+  return CUDA_SUCCESS;
+}
+
+extern "C" int32_t cuOccupancyMaxActiveClusters(int32_t *clusters, void *function, const CudaLaunchConfig *config) {
+  if (!clusters || !config || (config->attribute_count != 0 && !config->attributes) || config->block_x == 0 || config->block_y == 0
+      || config->block_z == 0 || config->block_x > device_limits::MaxBlockDimX || config->block_y > device_limits::MaxBlockDimY
+      || config->block_z > device_limits::MaxBlockDimZ)
+    return CUDA_ERROR_INVALID_VALUE;
+  const auto threads = static_cast<uint64_t>(config->block_x) * config->block_y * config->block_z;
+  if (threads > device_limits::MaxThreadsPerBlock) return CUDA_ERROR_INVALID_VALUE;
+  std::array<uint32_t, 3> required{};
+  constexpr std::array attributes{CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT,
+                                  CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH};
+  for (size_t axis = 0; axis < required.size(); ++axis) {
+    int32_t dimension = 0;
+    const auto status = cuFuncGetAttribute(&dimension, attributes[axis], function);
+    if (status != CUDA_SUCCESS) return status;
+    required[axis] = static_cast<uint32_t>(dimension);
+  }
+  const bool has_required = std::any_of(required.begin(), required.end(), [](auto size) { return size != 0; });
+  std::optional<std::array<uint32_t, 3>> dimensions;
+  if (has_required) dimensions = required;
+  bool has_attribute = false;
+  for (uint32_t index = 0; index < config->attribute_count; ++index) {
+    const auto &attribute = config->attributes[index];
+    if (attribute.id != CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION) continue;
+    if (has_attribute) return CUDA_ERROR_INVALID_VALUE;
+    has_attribute = true;
+    std::array<uint32_t, 3> requested{};
+    for (size_t axis = 0; axis < requested.size(); ++axis)
+      requested[axis] = readNative<uint32_t>(attribute.value + axis * sizeof(uint32_t));
+    if (has_required && requested != required) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
+    dimensions = requested;
+  }
+  if (!dimensions) return CUDA_ERROR_INVALID_VALUE;
+  const std::array grid{config->grid_x, config->grid_y, config->grid_z};
+  for (size_t axis = 0; axis < grid.size(); ++axis)
+    if (grid[axis] == 0 || (*dimensions)[axis] == 0 || grid[axis] % (*dimensions)[axis] != 0) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
+  if (std::any_of(dimensions->begin(), dimensions->end(), [](auto size) { return size != 1; })) {
+    *clusters = 0; // No multi-CTA cluster can be scheduled by the independent-workgroup executor.
+    return CUDA_SUCCESS;
+  }
+  int32_t blocks = 0;
+  (void)occupancyMaxBlocks(&blocks, static_cast<int32_t>(threads));
+  blocks = std::min(blocks, device_limits::MaxBlocksPerMultiprocessor);
+  int32_t static_bytes = 0;
+  const auto status = cuFuncGetAttribute(&static_bytes, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, function);
+  if (status != CUDA_SUCCESS) return status;
+  const auto shared = static_cast<uint64_t>(config->shared_memory_bytes) + static_cast<uint32_t>(static_bytes);
+  if (shared > device_limits::MaxSharedMemoryPerBlockOptin) blocks = 0;
+  else if (shared != 0) blocks = std::min(blocks, static_cast<int32_t>(device_limits::MaxSharedMemoryPerMultiprocessor / shared));
+  *clusters = blocks * device_limits::MultiprocessorCount;
+  return CUDA_SUCCESS;
+}
+
 #if defined(_WIN32)
   #define GEMSTONE_CUDA_API __stdcall
 #else
@@ -1393,7 +1465,7 @@ extern "C" int32_t cuStreamAddCallback(void *stream, StreamCallback callback, vo
 extern "C" int32_t cuMemcpyDtoD_v2(uint64_t destination, uint64_t source, size_t size) noexcept;
 extern "C" int32_t cuMemsetD8_v2(uint64_t destination, uint8_t value, size_t count) noexcept;
 namespace {
-int32_t loadCudaModuleData(void **module, const void *image, bool allowMetadataOnly) noexcept;
+int32_t loadCudaModuleData(void **module, const void *image, bool allowMetadataOnly, bool allowCubinMetadata = false) noexcept;
 }
 extern "C" int32_t cuModuleLoadData(void **module, const void *image) noexcept;
 extern "C" int32_t cuModuleLoad(void **module, const char *filename);
@@ -1430,14 +1502,37 @@ extern "C" int32_t cuLaunchKernel_ptsz(void *function, uint32_t grid_x, uint32_t
   return cuLaunchKernel(function, grid_x, grid_y, grid_z, block_x, block_y, block_z, shared_memory_bytes, stream, kernel_params, extra);
 }
 
-/* CUDA 11.6 added an extensible launch entry point.  The runtime only uses
- * the fixed geometry fields for ordinary kernels; attributes are optional
- * hints that have no equivalent in the emulator.  Keep this declaration
- * private so the compatibility object does not depend on a particular CUDA
- * header revision; the generated implementation check supplies the pinned vendor
- * declaration at the ABI-validation boundary. */
 extern "C" int32_t cuLaunchKernelEx(const CudaLaunchConfig *config, void *function, void **kernel_params, void **extra) {
-  if (!config) return CUDA_ERROR_INVALID_VALUE;
+  if (!config || (config->attribute_count != 0 && !config->attributes)) return CUDA_ERROR_INVALID_VALUE;
+  for (uint32_t index = 0; index < config->attribute_count; ++index) {
+    const auto &attribute = config->attributes[index];
+    switch (attribute.id) {
+      case CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION:
+      case CU_LAUNCH_ATTRIBUTE_PREFERRED_CLUSTER_DIMENSION: {
+        const auto x = readNative<uint32_t>(attribute.value);
+        const auto y = readNative<uint32_t>(attribute.value + sizeof(uint32_t));
+        const auto z = readNative<uint32_t>(attribute.value + 2 * sizeof(uint32_t));
+        if (x == 0 || y == 0 || z == 0 || config->grid_x % x != 0 || config->grid_y % y != 0 || config->grid_z % z != 0)
+          return CUDA_ERROR_INVALID_VALUE;
+        if (x != 1 || y != 1 || z != 1) return CUDA_ERROR_NOT_SUPPORTED;
+        break;
+      }
+      case CU_LAUNCH_ATTRIBUTE_COOPERATIVE:
+        if (readNative<int32_t>(attribute.value) != 0) return CUDA_ERROR_NOT_SUPPORTED;
+        break;
+      case CU_LAUNCH_ATTRIBUTE_IGNORE:
+      case CU_LAUNCH_ATTRIBUTE_ACCESS_POLICY_WINDOW:
+      case CU_LAUNCH_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE:
+      case CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION:
+      case CU_LAUNCH_ATTRIBUTE_PRIORITY:
+      case CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN_MAP:
+      case CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN:
+      case CU_LAUNCH_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
+        // Scheduling and cache hints preserve the interpreter's serial stream ordering.
+        break;
+      default: return CUDA_ERROR_NOT_SUPPORTED;
+    }
+  }
   return cuLaunchKernel(function, config->grid_x, config->grid_y, config->grid_z, config->block_x, config->block_y, config->block_z,
                         config->shared_memory_bytes, config->stream, kernel_params, extra);
 }
@@ -1495,13 +1590,22 @@ extern "C" int32_t cuLinkCreate_v2(uint32_t option_count, int32_t *options, void
 
 extern "C" int32_t cuLinkAddData_v2(void *state_pointer, int32_t input_type, void *data, size_t size, const char *name,
                                     uint32_t option_count, int32_t *options, void **option_values) {
-  (void)input_type;
   (void)name;
   (void)option_count;
   (void)options;
   (void)option_values;
   if (!state_pointer || !data) return CUDA_ERROR_INVALID_VALUE;
   auto *state = static_cast<LinkState *>(state_pointer);
+  if (input_type == CU_JIT_INPUT_PTX) {
+    if (sassCodeRequired()) return CUDA_ERROR_NOT_SUPPORTED;
+    if (size == 0 || size > MaximumImageSize) return CUDA_ERROR_INVALID_VALUE;
+    const auto *source = static_cast<const char *>(data);
+    const auto *end = static_cast<const char *>(memchr(source, '\0', size));
+    const size_t sourceSize = end ? static_cast<size_t>(end - source) : size;
+    if (sourceSize == 0) return CUDA_ERROR_INVALID_VALUE;
+    if (!linkAppend(state, source, sourceSize)) return CUDA_ERROR_UNKNOWN;
+    return CUDA_SUCCESS;
+  }
   const char *ptx = findUncompressedPtx(data);
   if (ptx) {
     if (!linkAppend(state, ptx, strlen(ptx))) return CUDA_ERROR_UNKNOWN;
@@ -1513,6 +1617,15 @@ extern "C" int32_t cuLinkAddData_v2(void *state_pointer, int32_t input_type, voi
   if (size == 0 || size > MaximumImageSize) return CUDA_ERROR_NOT_SUPPORTED;
   if (!linkAppend(state, static_cast<const char *>(data), size)) return CUDA_ERROR_UNKNOWN;
   return CUDA_SUCCESS;
+}
+
+extern "C" int32_t cuLinkCreate(uint32_t option_count, int32_t *options, void **option_values, void **state_out) {
+  return cuLinkCreate_v2(option_count, options, option_values, state_out);
+}
+
+extern "C" int32_t cuLinkAddData(void *state_pointer, int32_t input_type, void *data, size_t size, const char *name, uint32_t option_count,
+                                 int32_t *options, void **option_values) {
+  return cuLinkAddData_v2(state_pointer, input_type, data, size, name, option_count, options, option_values);
 }
 
 extern "C" int32_t cuLinkComplete(void *state_pointer, void **image, size_t *size) {
@@ -1547,9 +1660,9 @@ int32_t libraryLoadData(void **library, const void *code, int32_t *jit_options, 
   if (!ptx) {
     const auto first = *static_cast<const unsigned char *>(code);
     const bool ptxText = first == '.' || first == '/' || first == ' ' || first == '\n' || first == '\t' || first == '\r';
-    if ((ptxCodeRequired() && !ptxText) || (sassCodeRequired() && ptxText)) return CUDA_ERROR_NOT_SUPPORTED;
+    if (sassCodeRequired() && ptxText) return CUDA_ERROR_NOT_SUPPORTED;
   }
-  return loadCudaModuleData(library, !ptx ? code : ptx, metadataOnly);
+  return loadCudaModuleData(library, !ptx ? code : ptx, metadataOnly, true);
 }
 
 int32_t libraryGetKernel(void **kernel, void *library, const char *name) { return cuModuleGetFunction(kernel, library, name); }
@@ -2483,6 +2596,14 @@ extern "C" int32_t cuMemSetMemPool(void *location, int32_t allocation_type, void
 
 extern "C" int32_t cuMemGetInfo_v2(size_t *freeBytes, size_t *totalBytes) { return memGetInfoV2(freeBytes, totalBytes); }
 
+extern "C" int32_t cuMemGetAddressRange_v2(uint64_t *base, size_t *size, uint64_t pointer) {
+  const auto allocation = pointerMetadata(pointer);
+  if (!allocation) return CUDA_ERROR_INVALID_VALUE;
+  if (base) *base = allocation->base;
+  if (size) *size = allocation->size;
+  return CUDA_SUCCESS;
+}
+
 extern "C" int32_t cuFlushGPUDirectRDMAWrites(int32_t target, int32_t scope) {
   (void)target;
   (void)scope;
@@ -3014,7 +3135,7 @@ int32_t cudartLoadModuleImage(void **module, const void *fatbin, int allow_empty
   if (runtimeFatbinValid && runtimeFatbinEntriesValid && runtimeFatbinHasIncompatibleExecutable && !runtimeFatbinHasCompatibleExecutable
       && !ptx)
     return CUDA_ERROR_NO_BINARY_FOR_GPU;
-  if (!ptx && !selectedCubin.empty() && !ptxCodeRequired()) return cuModuleLoadData(module, fatbin);
+  if (!ptx && !selectedCubin.empty()) return loadCudaModuleData(module, selectedCubin.data(), false, true);
   if (!ptx) {
     if (!allow_empty || !fatbinMetadataOnly) return CUDA_ERROR_NOT_SUPPORTED;
     const std::string empty = ".version 9.3\n.target sm_" + std::to_string(configuredPtxVersion().value_or(75)) + "\n.address_size 64\n";
@@ -3639,6 +3760,8 @@ extern "C" GEMSTONE_PUBLIC_API int32_t GEMSTONE_CUDA_API cuGetProcAddress_v2(con
   GEMSTONE_CUDA_PROC("cuMemAllocPitch_v2", cuMemAllocPitch_v2)
   GEMSTONE_CUDA_PROC("cuMemGetInfo", memGetInfoV2)
   GEMSTONE_CUDA_PROC("cuMemGetInfo_v2", memGetInfoV2)
+  GEMSTONE_CUDA_PROC("cuMemGetAddressRange", cuMemGetAddressRange_v2)
+  GEMSTONE_CUDA_PROC("cuMemGetAddressRange_v2", cuMemGetAddressRange_v2)
   GEMSTONE_CUDA_PROC("cuPointerGetAttribute", cuPointerGetAttribute)
   GEMSTONE_CUDA_PROC("cuPointerGetAttributes", cuPointerGetAttributes)
   GEMSTONE_CUDA_PROC("cuFlushGPUDirectRDMAWrites", cuFlushGPUDirectRDMAWrites)
@@ -3685,6 +3808,8 @@ extern "C" GEMSTONE_PUBLIC_API int32_t GEMSTONE_CUDA_API cuGetProcAddress_v2(con
   GEMSTONE_CUDA_PROC("cuFuncSetSharedMemConfig", cuFuncSetSharedMemConfig)
   GEMSTONE_CUDA_PROC("cuKernelGetAttribute", cuKernelGetAttribute)
   GEMSTONE_CUDA_PROC("cuKernelSetAttribute", cuKernelSetAttribute)
+  GEMSTONE_CUDA_PROC("cuOccupancyMaxActiveClusters", cuOccupancyMaxActiveClusters)
+  GEMSTONE_CUDA_PROC("cuOccupancyAvailableDynamicSMemPerBlock", cuOccupancyAvailableDynamicSMemPerBlock)
   GEMSTONE_CUDA_PROC("cuOccupancyMaxActiveBlocksPerMultiprocessor", cuOccupancyMaxActiveBlocksPerMultiprocessor)
   GEMSTONE_CUDA_PROC("cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags", cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)
   GEMSTONE_CUDA_PROC("cuMemcpyHtoDAsync", cuMemcpyHtoDAsync_v2)
@@ -3795,6 +3920,7 @@ struct Global {
 
 struct Module {
   uint64_t program{};
+  bool executable = true;
   void *context{};
   std::mutex mutex;
   std::vector<std::unique_ptr<Global>> globals;
@@ -3804,6 +3930,7 @@ struct Function {
   // PTX has virtual registers; use one synthetic allocation unit when no
   // physical register count is present. Cubins report their compiler metadata.
   int32_t register_count = 1;
+  std::array<int32_t, 3> cluster_dimensions{};
   Module *module{};
   std::string name;
   std::vector<Parameter> parameters;
@@ -3895,6 +4022,18 @@ Function *findFunction(void *handle) {
   const std::lock_guard lock(stateMutex);
   const auto entry = std::find_if(functions.begin(), functions.end(), [handle](const auto &function) { return function.get() == handle; });
   return entry == functions.end() ? nullptr : entry->get();
+}
+
+int32_t functionClusterAttribute(void *function, int32_t attribute, int32_t *value, bool write) {
+  const auto entry = findFunction(function);
+  if (!entry) return CUDA_ERROR_INVALID_HANDLE;
+  const size_t axis = attribute == CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH    ? 0
+                      : attribute == CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT ? 1
+                                                                               : 2;
+  const std::lock_guard lock(stateMutex);
+  if (write) entry->cluster_dimensions[axis] = *value;
+  else *value = entry->cluster_dimensions[axis];
+  return CUDA_SUCCESS;
 }
 
 int32_t functionRegisterCount(const void *function, int32_t *value) {
@@ -4140,7 +4279,7 @@ int32_t managedUnregisterRemote(uint64_t pointer) noexcept {
 } // namespace
 
 namespace {
-int32_t loadCudaModuleData(void **module, const void *image, bool allowMetadataOnly) noexcept {
+int32_t loadCudaModuleData(void **module, const void *image, bool allowMetadataOnly, bool allowCubinMetadata) noexcept {
   uint64_t loadedProgram = 0;
   bool hasLoadedProgram = false;
   try {
@@ -4153,13 +4292,13 @@ int32_t loadCudaModuleData(void **module, const void *image, bool allowMetadataO
     std::optional<size_t> binarySize;
     if (first != '.' && first != '/' && first != ' ' && first != '\n' && first != '\t' && first != '\r') {
       if (first == 0x7f) {
-        if (ptxCodeRequired()) return CUDA_ERROR_NOT_SUPPORTED;
+        if (ptxCodeRequired() && !allowCubinMetadata) return CUDA_ERROR_NOT_SUPPORTED;
         binarySize = cubinImageSize(image);
         if (!binarySize) return CUDA_ERROR_INVALID_IMAGE;
         encoding = "cuda-cubin";
       } else {
         image = findUncompressedPtx(image);
-        if (!image && !selectedCubin.empty() && !ptxCodeRequired()) {
+        if (!image && !selectedCubin.empty() && (!ptxCodeRequired() || allowCubinMetadata)) {
           image = selectedCubin.data();
           binarySize = selectedCubin.size();
           encoding = "cuda-cubin";
@@ -4179,6 +4318,9 @@ int32_t loadCudaModuleData(void **module, const void *image, bool allowMetadataO
 
     auto entry = std::make_unique<Module>();
     entry->context = context;
+    // cuBLAS registers catalogues that contain unused cubin-only kernels. Keep
+    // their metadata available without granting execution on a strict PTX route.
+    entry->executable = encoding != "cuda-cubin" || !ptxCodeRequired();
     const auto *imageBytes = reinterpret_cast<const uint8_t *>(imageText);
     auto loaded = client->call(LoadProgram{encoding, std::vector<uint8_t>(imageBytes, imageBytes + size)});
     if (!loaded) {
@@ -4232,6 +4374,7 @@ int32_t cuModuleGetFunction(void **function, void *module, const char *name) noe
     if (!function || !name) return CUDA_ERROR_INVALID_VALUE;
     Module *owner = findModule(module);
     if (!owner) return CUDA_ERROR_INVALID_CONTEXT;
+
     {
       const std::lock_guard lock(stateMutex);
       const auto existing = std::find_if(functions.begin(), functions.end(),
@@ -4388,7 +4531,7 @@ int32_t cuModuleUnload(void *module) noexcept {
 int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_t grid_z, uint32_t block_x, uint32_t block_y,
                        uint32_t block_z, uint32_t shared_memory_bytes, void *stream, void **kernel_params, void **extra) noexcept {
   try {
-    if (!function || grid_x == 0 || grid_y == 0 || grid_z == 0 || block_x == 0 || block_y == 0 || block_z == 0 || extra)
+    if (!function || grid_x == 0 || grid_y == 0 || grid_z == 0 || block_x == 0 || block_y == 0 || block_z == 0 || (extra && kernel_params))
       return CUDA_ERROR_INVALID_VALUE;
     (void)stream;
     const uint64_t global_x = static_cast<uint64_t>(grid_x) * block_x;
@@ -4402,7 +4545,37 @@ int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_
       return CUDA_ERROR_INVALID_VALUE;
 
     Function *entry = findFunction(function);
-    if (!entry || (!entry->parameters.empty() && !kernel_params)) return CUDA_ERROR_INVALID_VALUE;
+    if (!entry) return CUDA_ERROR_INVALID_VALUE;
+    std::vector<void *> packed_parameters;
+    if (extra) {
+      auto *buffer = static_cast<uint8_t *>(nullptr);
+      size_t size = 0;
+      bool has_buffer = false, has_size = false;
+      for (size_t index = 0; extra[index] != LaunchParamEnd; index += 2) {
+        if (extra[index] == LaunchParamBufferPointer && !has_buffer) {
+          buffer = static_cast<uint8_t *>(extra[index + 1]);
+          has_buffer = true;
+        } else if (extra[index] == LaunchParamBufferSize && !has_size && extra[index + 1]) {
+          std::memcpy(&size, extra[index + 1], sizeof(size));
+          has_size = true;
+        } else return CUDA_ERROR_INVALID_VALUE;
+      }
+      if (size != 0 && !buffer) return CUDA_ERROR_INVALID_VALUE;
+      packed_parameters.reserve(entry->parameters.size());
+      for (const auto &parameter : entry->parameters) {
+        const auto offset = static_cast<size_t>(parameter.offset.value);
+        const auto width = static_cast<size_t>(parameter.width.value);
+        if (!buffer || offset > size || width > size - offset) return CUDA_ERROR_INVALID_VALUE;
+        packed_parameters.push_back(buffer + offset);
+      }
+      kernel_params = packed_parameters.data();
+    }
+    if (!entry->parameters.empty() && !kernel_params) return CUDA_ERROR_INVALID_VALUE;
+    if (!entry->module->executable) {
+      if (gemstone::traceEnabled("cuda"))
+        std::fprintf(stderr, "Gemstone CUDA kernel %s has no executable image for the selected code mode\n", entry->name.c_str());
+      return CUDA_ERROR_NOT_SUPPORTED;
+    }
     int32_t status = CUDA_SUCCESS;
 
     std::vector<gemstone::execution::Argument> arguments;

@@ -3,9 +3,7 @@ package net.kurobako.gemstone.benchmarks
 import com.monovore.decline.Opts
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import java.nio.file.Path
-import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.recording.*
@@ -25,7 +23,7 @@ object JournalInspectionBenchmark {
     ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes.raw).putInt(ExecutionRPC.ResponseMagic)
       .putInt(0).putInt(0).array()
 
-  def run(arguments: Array[String]): Unit = {
+  def run(arguments: Array[String]): BenchmarkSample = {
     val file = BenchmarkArguments.parse(
       BenchmarkName("journal-inspection"),
       arguments.toSeq,
@@ -42,18 +40,10 @@ object JournalInspectionBenchmark {
         }
       }
     }
-    for (_ <- 0 until 2) Journal.inspect(file)
-    for (sample <- 0 until 5) {
-      val measurement = Measurement {
-        Journal.inspect(file)
-      }
-      val summary = measurement.value
-      if (summary.events.raw != 401 || summary.frames.raw != 400 || !summary.replayable)
-        throw IllegalStateException(s"unexpected journal summary: $summary")
-      Console.out.println(
-        s"INSPECT sample=$sample nanos=${measurement.elapsedNanos} allocated=${measurement.allocatedBytes.fold(-1L)(identity)} " +
-          s"events=${summary.events} frames=${summary.frames} archive=${Files.size(file)}"
-      )
-    }
+    val measurement = Measurement(Journal.inspect(file))
+    val summary     = measurement.value
+    if (summary.events.raw != 401 || summary.frames.raw != 400 || !summary.replayable)
+      throw IllegalStateException(s"unexpected journal summary: $summary")
+    measurement.sample(1L)
   }
 }

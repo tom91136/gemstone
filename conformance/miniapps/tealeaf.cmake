@@ -8,6 +8,11 @@ set(miniapp_tealeaf_openmp_definitions OMP_TARGET DIFFUSE_OVERLOAD)
 
 function(miniapp_tealeaf_patch model source)
   patch_exact("${source}/CMakeLists.txt" "elseif ()" "else ()")
+  if(model STREQUAL "cuda" AND CONFORMANCE_COMPILER STREQUAL "clang")
+    patch_exact("${source}/src/cuda/model.cmake"
+      [=[-forward-unknown-to-host-compiler -arch=${CUDA_ARCH} -use_fast_math -restrict -keep]=]
+      [=[--cuda-gpu-arch=${CUDA_ARCH}]=])
+  endif()
 endfunction()
 
 function(miniapp_tealeaf_test_arguments model output)

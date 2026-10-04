@@ -267,7 +267,7 @@ object SASSFormatParser {
         else None
       }
       value.orElse(parseRegister(NVDisasm.fieldKind(field.kind), token))
-        .orElse(parseImmediate(database, field, token, address, numeric))
+        .orElse(parseImmediate(database, form, field, token, address, numeric))
         .map(number => Vec("" -> number) ++ attributes.map { case (name, bit) => name -> BigInt(bit) })
     }
   }
@@ -280,12 +280,12 @@ object SASSFormatParser {
         NVDisasm.FieldKind.CbuState
       )(category)
     ) None
-    else SASSOperandParser.parse(token).toOption.collect { case Operand.Register(bank, index) =>
-      if (token.endsWith("Z")) BigInt(if (bank == RegisterBank.UR) 63 else 255) else BigInt(index.raw)
-    }
+    else if (token.endsWith("Z")) None // Zero-register encodings come from the architecture vocabulary.
+    else SASSOperandParser.parse(token).toOption.collect { case Operand.Register(_, index) => BigInt(index.raw) }
 
   private def parseImmediate(
       database: NVDisasm.Database,
+      form: NVDisasm.Form,
       field: NVDisasm.Syntax.Field,
       token: String,
       address: Int,
@@ -312,8 +312,9 @@ object SASSFormatParser {
             Some(if (delta < 0) (BigInt(1) << bits) + delta else delta)
           else None
         }
-      case NVDisasm.FieldKind.FloatingImmediate(format) => floatingBits(format, token)
-      case _                                            => None
+      case NVDisasm.FieldKind.FloatingImmediate(format) =>
+        floatingBits(format, token, SASSFormatBindings.floatingShift(database, form, field, format))
+      case _ => None
     }
   }
 
@@ -333,7 +334,7 @@ object SASSFormatParser {
       case _          => None
     })
 
-  private def floatingBits(kind: FloatEncoding, token: String): Option[BigInt] = {
+  private def floatingBits(kind: FloatEncoding, token: String, shift: Int): Option[BigInt] = {
     val expectedWidth = kind.width.map(_.raw).getOrElse(0)
     val rawBits       = token match {
       case s"bits<$format>:$bits(0x$hex)" if format == kind.spelling && bits.toIntOption.contains(expectedWidth) =>
@@ -362,12 +363,6 @@ object SASSFormatParser {
             ) => floatToRaw(kind, Double.NaN)
         case _ => None
       }
-    }
-    // F64 and E8M7 FORMAT values represent the high bits; their low payload bits are implicit zeroes.
-    val shift = kind match {
-      case FloatEncoding.F64Imm  => 32
-      case FloatEncoding.E8M7Imm => 16
-      case _                     => 0
     }
     parsed.filter(bits =>
       bits >= 0 && bits.bitLength <= expectedWidth &&

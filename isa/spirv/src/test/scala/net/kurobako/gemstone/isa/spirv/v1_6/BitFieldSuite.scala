@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.isa.spirv.v1_6.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -12,7 +12,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 class BitFieldSuite extends munit.FunSuite {
   for {
     width <- Seq[Int in (8, 16, 32, 64)](8, 16, 32, 64)
-    rawWidth = width.raw
+    rawWidth   = width.raw
     widthBytes = width.widen[Int in (8, 16, 32, 64)].toMemoryValueByteWidth
     count            <- Seq(1, 4)
     resultSigned     <- Seq(0, 1)
@@ -20,7 +20,16 @@ class BitFieldSuite extends munit.FunSuite {
     rightSigned      <- Seq(resultSigned)
     operation        <- Seq("uextract", "sextract", "insert", "reverse")
     (offset, length) <-
-      Seq((0, 0), (rawWidth, 0), (0, rawWidth), (rawWidth - 1, 1), (1, rawWidth - 2), (-1, 1), (rawWidth, 1), (0, rawWidth + 1))
+      Seq(
+        (0, 0),
+        (rawWidth, 0),
+        (0, rawWidth),
+        (rawWidth - 1, 1),
+        (1, rawWidth - 2),
+        (-1, 1),
+        (rawWidth, 1),
+        (0, rawWidth + 1)
+      )
     if operation != "reverse" || (offset == 0 && length == 0)
   } test(
     s"$operation: $rawWidth bits, $count lanes, signedness $resultSigned/$leftSigned/$rightSigned, offset $offset length $length"

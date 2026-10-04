@@ -125,7 +125,9 @@ private object VMIR {
         Some(RuntimeType.Event) => Right(1)
     case Some(RuntimeType.Pointer(_, _))                => Right(1)
     case Some(RuntimeType.VectorType(component, count)) =>
-      scalarLeafCount(types, component).flatMap(value => checkedLeafProduct(typeId, value, count.toLong.widen[Long >= 0]))
+      scalarLeafCount(types, component).flatMap(value =>
+        checkedLeafProduct(typeId, value, count.toLong.widen[Long >= 0])
+      )
     case Some(RuntimeType.MatrixType(column, count)) =>
       scalarLeafCount(types, column).flatMap(value => checkedLeafProduct(typeId, value, count.toLong.widen[Long >= 0]))
     case Some(RuntimeType.Array(element, count)) =>

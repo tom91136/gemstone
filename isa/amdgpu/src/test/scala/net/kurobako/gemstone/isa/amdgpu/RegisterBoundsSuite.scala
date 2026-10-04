@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import VMIR.*
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import scala.compiletime.testing.typeCheckErrors
 
@@ -26,16 +27,16 @@ class RegisterBoundsSuite extends munit.FunSuite {
       import net.kurobako.gemstone.constraint.*
       VMState.VectorRegisters(1)(256)
     """).nonEmpty)
-    val bank = VMState.VectorRegisters(1)
+    val bank                       = VMState.VectorRegisters(1)
     val first: VectorRegisterIndex = 254
     bank(first.offsetBy(1))(0) = 42L
     assertEquals(bank(255)(0), 42L)
   }
 
   test("decoder rejects scalar pairs that cross the 128-slot bank") {
-    val target = Target("gfx900")
-    val parsed = asm.Parser.parse("s_mov_b64 s[0:1], 0").toOption.get
-    val bytes = asm.Assembler.encode(parsed, target).toOption.get
+    val target   = Target("gfx900")
+    val parsed   = asm.Parser.parse("s_mov_b64 s[0:1], 0").toOption.get
+    val bytes    = asm.Assembler.encode(parsed, target).toOption.get
     val lastPair = bytes.updated(2, ((bytes(2) & 0x80) | 126).toByte)
     val crossing = bytes.updated(2, (bytes(2) | 127).toByte)
     assert(VMCompiler.decodeInstruction(lastPair, target).isRight)
@@ -46,13 +47,13 @@ class RegisterBoundsSuite extends munit.FunSuite {
   test("decoder rejects scalar loads crossing the bank boundary") {
     val target = Target("gfx900")
     val parsed = asm.Parser.parse("s_load_dwordx4 s[124:127], s[0:1], 0").toOption.get
-    val bytes = asm.Assembler.encode(parsed, target).toOption.get
+    val bytes  = asm.Assembler.encode(parsed, target).toOption.get
     assert(VMCompiler.decodeInstruction(bytes, target).isRight)
     val field = InstructionLayout.Catalogue.forFormat(target, EncodingFormat.SMEM).get.byName(EncodingField.SDATA)
-    val word = bytes.zipWithIndex.foldLeft(0L) { case (word, (byte, index)) =>
+    val word  = bytes.zipWithIndex.foldLeft(0L) { case (word, (byte, index)) =>
       word | ((byte.toLong & 0xffL) << (index * 8))
     }
-    val changed = (word & ~field.mask.toLong) | field.put(BigInt(125)).get.toLong
+    val changed  = (word & ~field.mask.toLong) | field.put(BigInt(125)).get.toLong
     val crossing = bytes.zipWithIndex.map { case (_, index) => (changed >>> (index * 8)).toByte }
     assert(VMCompiler.decodeInstruction(crossing, target).isLeft)
     assert(VMCompiler.validate(crossing, target).isLeft)
@@ -64,23 +65,44 @@ class RegisterBoundsSuite extends munit.FunSuite {
     assert(!valid(Instruction.SLoad(125, 4, 126, 0, None)))
     assert(!valid(Instruction.SLoad(0, 1, 127, 0, None)))
     assert(valid(Instruction.SMove(127, InstructionSource.Constant(0))))
-    assert(valid(Instruction.SMove64(0, InstructionSource.Scalar(127)))) // EXEC_HI is a scalar special source.
+    assert(valid(Instruction.SMove64(0, InstructionSource.Scalar(127))))   // EXEC_HI is a scalar special source.
     assert(valid(Instruction.SMove64(126, InstructionSource.Scalar(106)))) // EXEC and VCC pairs.
-    assert(valid(Instruction.VBinary64Modified(VectorBinary64Operation.Add, 254,
-      InstructionSource.Scalar(126), InstructionSource.VectorRegister(254), false, false, false, false)))
-    assert(valid(Instruction.VBinary64Modified(VectorBinary64Operation.Add, 0,
-      InstructionSource.Scalar(127), InstructionSource.VectorRegister(0), false, false, false, false)))
+    assert(valid(Instruction.VBinary64Modified(
+      VectorBinary64Operation.Add,
+      254,
+      InstructionSource.Scalar(126),
+      InstructionSource.VectorRegister(254),
+      false,
+      false,
+      false,
+      false
+    )))
+    assert(valid(Instruction.VBinary64Modified(
+      VectorBinary64Operation.Add,
+      0,
+      InstructionSource.Scalar(127),
+      InstructionSource.VectorRegister(0),
+      false,
+      false,
+      false,
+      false
+    )))
   }
 
   test("ldexp decodes a scalar exponent in the final vector register") {
     val target = Target("gfx900")
     val parsed = asm.Parser.parse("v_ldexp_f64 v[0:1], v[2:3], v255").toOption.get
-    val bytes = asm.Assembler.encode(parsed, target).toOption.get
+    val bytes  = asm.Assembler.encode(parsed, target).toOption.get
     assert(VMCompiler.decodeInstruction(bytes, target).isRight)
     val paired = Instruction.VBinary64Modified(
-      VectorBinary64Operation.Add, 0,
-      InstructionSource.VectorRegister(2), InstructionSource.VectorRegister(255),
-      false, false, false, false
+      VectorBinary64Operation.Add,
+      0,
+      InstructionSource.VectorRegister(2),
+      InstructionSource.VectorRegister(255),
+      false,
+      false,
+      false,
+      false
     )
     assert(VMRegisterBounds.validate(paired).isLeft)
   }
@@ -98,7 +120,7 @@ class RegisterBoundsSuite extends munit.FunSuite {
 
   test("scalar register offsets retain their bank bound") {
     val first: ScalarRegisterIndex = 126
-    val last: ScalarRegisterIndex = first.offsetBy(1)
+    val last: ScalarRegisterIndex  = first.offsetBy(1)
     assertEquals(last.raw, 127)
     val _ = intercept[IllegalArgumentException](last.offsetBy(1))
     val _ = intercept[IllegalArgumentException](first.offsetBy(Int.MaxValue))
@@ -108,8 +130,8 @@ class RegisterBoundsSuite extends munit.FunSuite {
     val first: VectorRegisterIndex = 254
     val last: VectorRegisterIndex  = first.offsetBy(1)
     assertEquals(last.raw, 255)
-    intercept[IllegalArgumentException](last.offsetBy(1))
-    intercept[IllegalArgumentException](first.offsetBy(Int.MaxValue))
+    val _ = intercept[IllegalArgumentException](last.offsetBy(1))
+    val _ = intercept[IllegalArgumentException](first.offsetBy(Int.MaxValue))
   }
 
   test("multiword instruction operands must fit before execution") {
@@ -147,8 +169,8 @@ class RegisterBoundsSuite extends munit.FunSuite {
     assert(full(63))
     assertEquals(full.count, 2)
     val partial = VMState.LaneBits(32, 1L)
-    intercept[IllegalArgumentException](partial(32))
-    intercept[IllegalArgumentException](partial.update(32, true))
+    val _       = intercept[IllegalArgumentException](partial(32))
+    val _       = intercept[IllegalArgumentException](partial.update(32, true))
     assertEquals(partial.bits, 1L)
     assertEquals(partial.count, 1)
     assert(typeCheckErrors("""
@@ -162,5 +184,28 @@ class RegisterBoundsSuite extends munit.FunSuite {
       import net.kurobako.gemstone.constraint.*
       VMIR.Instruction.GlobalAtomicAdd(0, 0, None, 0, 5, 0, true)
     """).exists(_.message.contains("does not satisfy")))
+  }
+  test("new packed and matrix instructions reject complete spans crossing either data bank") {
+    val zero                                                                 = InstructionSource.Constant(0)
+    def valid(instruction: Instruction, wave: Int in (32, 64) = 64): Boolean =
+      VMRegisterBounds.validate(instruction, wave).isRight
+    assert(valid(Instruction.VPackedMove32(254, zero, zero, false, false)))
+    assert(!valid(Instruction.VPackedMove32(255, zero, zero, false, false)))
+    assert(!valid(Instruction.VShiftLeftAdd64(0, InstructionSource.VectorRegister(255), zero, zero)))
+    // ACC and VGPR banks each have 256 entries; the mask changes the bank, never the span.
+    for (bank <- Vec[Int in 0 ~ 7](0, 7)) {
+      assert(valid(Instruction.VMatrixF32(240, zero, zero, zero, 32, 0, 0, bank, 0)))
+      assert(!valid(Instruction.VMatrixF32(241, zero, zero, zero, 32, 0, 0, bank, 0)))
+    }
+    assert(valid(Instruction.VWaveMatrixF16(248, 248, 248, zero, false, false, 0, 0), 32))
+    assert(!valid(Instruction.VWaveMatrixF16(249, 248, 248, zero, false, false, 0, 0), 32))
+    assert(!valid(Instruction.VWaveMatrixF16(252, 249, 248, zero, false, false, 0, 0), 64))
+  }
+  test("RDNA4 scalar reciprocal rejects vector-only destination slots as a decode error") {
+    // LLVM: v_s_rcp_f32 s4, s6. VOP3's eight-bit destination also encodes invalid SGPR slots.
+    val bytes = Vec(0x04, 0x00, 0x84, 0xd6, 0x06, 0x00, 0x00, 0x00).map(_.toByte)
+    assert(VMCompiler.decodeInstruction(bytes, Target("gfx1200")).isRight)
+    assert(VMCompiler.decodeInstruction(bytes.updated(0, 0x80.toByte), Target("gfx1200"))
+      .left.exists(_.contains("scalar destination")))
   }
 }

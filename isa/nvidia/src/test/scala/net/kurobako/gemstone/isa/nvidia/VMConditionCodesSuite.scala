@@ -39,4 +39,27 @@ class VMConditionCodesSuite extends munit.FunSuite {
     assertEquals(state.conditionCodes(0).read(VMConditionCodes.Flag.Zero), None)
     assertEquals(state.conditionCodes(0).readThreeInputCarry, None)
   }
+
+  test("flags independently retain false, true and undefined through overwrites") {
+    val codes = VMConditionCodes()
+    VMConditionCodes.Flag.values.foreach { flag =>
+      assertEquals(codes.read(flag), None)
+      codes.write(flag, Some(true))
+    }
+    codes.write(VMConditionCodes.Flag.Zero, Some(false))
+    codes.write(VMConditionCodes.Flag.Sign, None)
+    VMConditionCodes.Flag.values.foreach { flag =>
+      val expected = flag match {
+        case VMConditionCodes.Flag.Zero => Some(false)
+        case VMConditionCodes.Flag.Sign => None
+        case _                          => Some(true)
+      }
+      assertEquals(codes.read(flag), expected)
+    }
+    codes.clear()
+    VMConditionCodes.Flag.values.foreach(flag => assertEquals(codes.read(flag), None))
+    codes.write(VMConditionCodes.Flag.Sign, Some(false))
+    assertEquals(codes.read(VMConditionCodes.Flag.Sign), Some(false))
+  }
+
 }
