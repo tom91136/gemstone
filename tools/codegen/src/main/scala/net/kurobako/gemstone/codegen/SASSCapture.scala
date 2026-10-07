@@ -4,7 +4,6 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
-import net.kurobako.gemstone.collection.*
 import scala.collection.mutable
 
 /** Readers for the pinned nvdisasm capture hooks and their private compressed stream framing. */
@@ -181,78 +180,5 @@ object SASSCapture {
     }
     check(finished && written == rawLength, "LZ4 decompression size mismatch")
     output
-  }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def inspect(bytes: Array[Byte]): ujson.Obj = {
-    val text = byteText(bytes)
-    check(text.startsWith("ARCHITECTURE "), "table does not start with ARCHITECTURE")
-    check(
-      bytes.forall { byte =>
-        val value = byte & 255
-        value == 9 || value == 10 || value == 13 || (value >= 32 && value < 127)
-      },
-      "table contains NUL or non-ASCII/control bytes"
-    )
-    check(text.trim.endsWith(";"), "table footer is incomplete")
-    val lines                                                      = Vec.from(text.split('\n'))
-    def following(source: String, keyword: String): Option[String] =
-      Option.when(source.startsWith(keyword) && source.length > keyword.length && source(keyword.length).isWhitespace)(
-        source.drop(keyword.length).dropWhile(_.isWhitespace)
-      )
-    def afterKeyword(start: Int, keyword: String): Option[Int] = {
-      var end = start + keyword.length
-      if (!text.startsWith(keyword, start) || end >= text.length || !text(end).isWhitespace) None
-      else {
-        while (end < text.length && text(end).isWhitespace) end += 1
-        Some(end)
-      }
-    }
-    def className(start: Int): Option[String] = afterKeyword(start, "CLASS").flatMap { quoted =>
-      if (quoted >= text.length || text(quoted) != '"') None
-      else {
-        val end = text.indexOf('"', quoted + 1)
-        Option.when(end > quoted + 1)(text.substring(quoted + 1, end))
-      }
-    }
-    val uniqueClasses = mutable.HashSet.empty[String]
-    var classCount    = 0
-    var alternate     = 0
-    var processor     = Option.empty[String]
-    var offset        = 0
-    lines.foreach { line =>
-      val leading = line.takeWhile(_.isWhitespace).length
-      if (leading < line.length) {
-        val start = offset + leading
-        className(start).foreach { name =>
-          classCount += 1
-          val _ = uniqueClasses.add(name)
-        }
-        if (afterKeyword(start, "ALTERNATE").flatMap(className(_)).nonEmpty) alternate += 1
-        if (processor.isEmpty) afterKeyword(start, "PROCESSOR_ID").foreach { value =>
-          val end = text.indexOf(';', value)
-          if (end > value) processor = Some(text.substring(value, end))
-        }
-      }
-      offset += line.length + 1
-    }
-    val conditionals = ujson.Obj.from(Vec("IF", "ELSE", "ENDIF").map { name =>
-      name -> ujson.Num(lines.count { line =>
-        val value = line.trim
-        value == s"##$name" || following(value, s"##$name").nonEmpty
-      })
-    })
-    val architecture = text.drop("ARCHITECTURE".length).dropWhile(_.isWhitespace).takeWhile(_ != '\n')
-    ujson.Obj(
-      "bytes"                  -> bytes.length,
-      "class_count"            -> classCount,
-      "unique_class_count"     -> uniqueClasses.size,
-      "alternate_class_count"  -> alternate,
-      "conditional_directives" -> conditionals,
-      "architecture"           -> architecture,
-      "processor_id"           -> processor.fold[ujson.Value](ujson.Null)(ujson.Str(_)),
-      "opcode_directives"      -> lines.count(_.trim == "OPCODES"),
-      "encoding_directives"    -> lines.count(_.trim == "ENCODING")
-    )
   }
 }

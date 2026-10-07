@@ -12,11 +12,11 @@
 
 namespace cuda_tensor {
 
-void check_tensor(cudaError_t result) {
+void checkTensor(cudaError_t result) {
   if (result != cudaSuccess) throw std::runtime_error(std::string("CUDA tensor test: ") + cudaGetErrorString(result));
 }
 
-__global__ void tensor_gemm(const half *a, const half *b, float *c) {
+__global__ void tensorGemm(const half *a, const half *b, float *c) {
 #if __CUDA_ARCH__ >= 700
   using namespace nvcuda;
   const unsigned tile = blockIdx.x * 2 + threadIdx.x / 32;
@@ -35,29 +35,29 @@ __global__ void tensor_gemm(const half *a, const half *b, float *c) {
 
 TEST_CASE("runtime/cuda/tensor-wmma-gemm", "[unified][runtime][tensor][compact]") {
   cudaDeviceProp properties{};
-  check_tensor(cudaGetDeviceProperties(&properties, 0));
+  checkTensor(cudaGetDeviceProperties(&properties, 0));
   if (properties.major < 7) SKIP("WMMA requires compute capability 7.0");
 
   constexpr int tiles = 4;
   constexpr int stride = 32;
-  constexpr int tile_size = 16 * stride;
-  std::vector<half> a(tiles * tile_size, __float2half(0.0f));
-  std::vector<half> b(tiles * tile_size, __float2half(0.0f));
-  std::vector<float> c(tiles * tile_size, -1234.0f);
+  constexpr int tileSize = 16 * stride;
+  std::vector<half> a(tiles * tileSize, __float2half(0.0f));
+  std::vector<half> b(tiles * tileSize, __float2half(0.0f));
+  std::vector<float> c(tiles * tileSize, -1234.0f);
   for (int tile = 0; tile < tiles; ++tile)
     for (int row = 0; row < 16; ++row)
       for (int col = 0; col < 16; ++col) {
-        a[tile * tile_size + row * stride + col] = __float2half(static_cast<float>((row + 3 * col + tile) % 7 - 3));
-        b[tile * tile_size + col * stride + row] = __float2half(static_cast<float>((2 * row + col) % 5 - 2));
-        c[tile * tile_size + row * stride + col] = static_cast<float>(row - col);
+        a[tile * tileSize + row * stride + col] = __float2half(static_cast<float>((row + 3 * col + tile) % 7 - 3));
+        b[tile * tileSize + col * stride + row] = __float2half(static_cast<float>((2 * row + col) % 5 - 2));
+        c[tile * tileSize + row * stride + col] = static_cast<float>(row - col);
       }
   auto expected = c;
   for (int tile = 0; tile < tiles; ++tile)
     for (int row = 0; row < 16; ++row)
       for (int col = 0; col < 16; ++col) {
-        auto &result = expected[tile * tile_size + row * stride + col];
+        auto &result = expected[tile * tileSize + row * stride + col];
         for (int k = 0; k < 16; ++k)
-          result += __half2float(a[tile * tile_size + row * stride + k]) * __half2float(b[tile * tile_size + col * stride + k]);
+          result += __half2float(a[tile * tileSize + row * stride + k]) * __half2float(b[tile * tileSize + col * stride + k]);
         result *= 2.0f;
       }
 
@@ -65,19 +65,19 @@ TEST_CASE("runtime/cuda/tensor-wmma-gemm", "[unified][runtime][tensor][compact]"
   half *da = nullptr;
   half *db = nullptr;
   float *dc = nullptr;
-  check_tensor(cudaMalloc(reinterpret_cast<void **>(&da), a.size() * sizeof(half)));
+  checkTensor(cudaMalloc(reinterpret_cast<void **>(&da), a.size() * sizeof(half)));
   cleanup.add([=] { cudaFree(da); });
-  check_tensor(cudaMalloc(reinterpret_cast<void **>(&db), b.size() * sizeof(half)));
+  checkTensor(cudaMalloc(reinterpret_cast<void **>(&db), b.size() * sizeof(half)));
   cleanup.add([=] { cudaFree(db); });
-  check_tensor(cudaMalloc(reinterpret_cast<void **>(&dc), c.size() * sizeof(float)));
+  checkTensor(cudaMalloc(reinterpret_cast<void **>(&dc), c.size() * sizeof(float)));
   cleanup.add([=] { cudaFree(dc); });
-  check_tensor(cudaMemcpy(da, a.data(), a.size() * sizeof(half), cudaMemcpyHostToDevice));
-  check_tensor(cudaMemcpy(db, b.data(), b.size() * sizeof(half), cudaMemcpyHostToDevice));
-  check_tensor(cudaMemcpy(dc, c.data(), c.size() * sizeof(float), cudaMemcpyHostToDevice));
-  tensor_gemm<<<2, 64>>>(da, db, dc);
-  check_tensor(cudaGetLastError());
-  check_tensor(cudaDeviceSynchronize());
-  check_tensor(cudaMemcpy(c.data(), dc, c.size() * sizeof(float), cudaMemcpyDeviceToHost));
+  checkTensor(cudaMemcpy(da, a.data(), a.size() * sizeof(half), cudaMemcpyHostToDevice));
+  checkTensor(cudaMemcpy(db, b.data(), b.size() * sizeof(half), cudaMemcpyHostToDevice));
+  checkTensor(cudaMemcpy(dc, c.data(), c.size() * sizeof(float), cudaMemcpyHostToDevice));
+  tensorGemm<<<2, 64>>>(da, db, dc);
+  checkTensor(cudaGetLastError());
+  checkTensor(cudaDeviceSynchronize());
+  checkTensor(cudaMemcpy(c.data(), dc, c.size() * sizeof(float), cudaMemcpyDeviceToHost));
   REQUIRE(c == expected);
 }
 

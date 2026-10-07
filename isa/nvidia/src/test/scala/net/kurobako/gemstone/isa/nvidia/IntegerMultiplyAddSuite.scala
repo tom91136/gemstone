@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.nvidia
 
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
@@ -18,7 +19,7 @@ class IntegerMultiplyAddSuite extends munit.FunSuite {
     -1L
   )
 
-  private def unsigned(value: Long, width: Int where (Between[8, 64] & MultipleOf[8])): BigInt = {
+  private def unsigned(value: Long, width: ScalarBitWidth): BigInt = {
     val bits = BigInt(java.lang.Long.toUnsignedString(value))
     bits & ((BigInt(1) << width.raw) - 1)
   }
@@ -86,7 +87,7 @@ class IntegerMultiplyAddSuite extends munit.FunSuite {
         val addend  = values((index * 73 + 19) % values.size)
         val carryIn = (index & 1) != 0
         assertEquals(
-          VMSemantics.integerMultiplyAdd(left, right, addend, operation, carryIn),
+          VMArithmetic.integerMultiplyAdd(left, right, addend, operation, carryIn),
           reference(left, right, addend, operation, carryIn),
           s"operation=$operation left=$left right=$right addend=$addend carryIn=$carryIn"
         )

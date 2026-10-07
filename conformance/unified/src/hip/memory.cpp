@@ -9,8 +9,8 @@
 namespace {
 using namespace memory_patterns;
 // Prerequisites apply only to the selected allocation and operation.
-uint64_t prerequisites(const std::string &kind, bool atomic, bool wide) {
-  auto selected = conformance::device_selection().native_handle;
+void prerequisites(const std::string &kind, bool atomic) {
+  (void)conformance::deviceSelection();
   int ordinal{};
   check(hipGetDevice(&ordinal));
   hipDeviceProp_t properties{};
@@ -20,28 +20,16 @@ uint64_t prerequisites(const std::string &kind, bool atomic, bool wide) {
   if (kind != "managed" && !properties.canMapHostMemory) SKIP("mapped host allocations unavailable");
   if (atomic && (!properties.hostNativeAtomicSupported || (kind == "managed" && !properties.concurrentManagedAccess)))
     SKIP("allocation lacks concurrent host/device atomics");
-  return selected;
 }
 void execute(const char *kind, unsigned scenario) {
-  const bool wide = scenario >= 11;
-  const auto selected = prerequisites(kind, scenario >= 6, wide);
-  Backend backend(kind, selected);
+  prerequisites(kind, scenario >= 6);
+  Backend backend(kind);
   runScenario(backend, scenario);
 }
 } // namespace
 
-#define UNIFIED_MEMORY_ALLOCATION "managed"
-#define UNIFIED_MEMORY_TAGS ""
 #include "cases/memory.inl"
 
-#undef UNIFIED_MEMORY_ALLOCATION
-#undef UNIFIED_MEMORY_TAGS
-#define UNIFIED_MEMORY_ALLOCATION "host"
-#define UNIFIED_MEMORY_TAGS "[full-matrix]"
-#include "cases/memory.inl"
-
-#undef UNIFIED_MEMORY_ALLOCATION
-#undef UNIFIED_MEMORY_TAGS
-#define UNIFIED_MEMORY_ALLOCATION "registered"
-#define UNIFIED_MEMORY_TAGS "[full-matrix]"
-#include "cases/memory.inl"
+UNIFIED_MEMORY_CASES("managed", "")
+UNIFIED_MEMORY_CASES("host", "[full-matrix]")
+UNIFIED_MEMORY_CASES("registered", "[full-matrix]")

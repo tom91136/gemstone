@@ -67,7 +67,7 @@ TEST_CASE("Level Zero immediate sampler kernels require implemented image suppor
   checkSamplerCapability(true);
 }
 
-TEST_CASE("Level Zero kernel group sizes honor device limits and required dimensions", "[level-zero]") {
+TEST_CASE("Level Zero kernel group sizes honour device limits and required dimensions", "[level-zero]") {
   gemstone_test::RpcFixture server;
   const gemstone_test::RpcEnvironment environment(server);
   server.kernelMetadata(0, 0, {});
@@ -364,31 +364,31 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   contextDesc.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
   ze_context_handle_t context = nullptr;
   REQUIRE((zeContextCreate(driver, &contextDesc, &context) == ZE_RESULT_SUCCESS));
-  ze_context_handle_t extended_context = nullptr;
-  REQUIRE((zeContextCreateEx(driver, &contextDesc, 0, nullptr, &extended_context) == ZE_RESULT_SUCCESS));
+  ze_context_handle_t extendedContext = nullptr;
+  REQUIRE((zeContextCreateEx(driver, &contextDesc, 0, nullptr, &extendedContext) == ZE_RESULT_SUCCESS));
   ze_event_pool_desc_t retainedPoolDesc{};
   retainedPoolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
   retainedPoolDesc.count = 1;
   ze_event_pool_handle_t retainedPool = nullptr;
-  REQUIRE((zeEventPoolCreate(extended_context, &retainedPoolDesc, 0, nullptr, &retainedPool) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeContextDestroy(extended_context) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeEventPoolCreate(extendedContext, &retainedPoolDesc, 0, nullptr, &retainedPool) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeContextDestroy(extendedContext) == ZE_RESULT_SUCCESS));
   ze_event_desc_t staleEventDesc{};
   staleEventDesc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
   ze_event_handle_t staleEvent = nullptr;
   REQUIRE((zeEventCreate(retainedPool, &staleEventDesc, &staleEvent) == ZE_RESULT_SUCCESS));
-  ze_context_handle_t replacement_context = nullptr;
-  REQUIRE((zeContextCreate(driver, &contextDesc, &replacement_context) == ZE_RESULT_SUCCESS));
+  ze_context_handle_t replacementContext = nullptr;
+  REQUIRE((zeContextCreate(driver, &contextDesc, &replacementContext) == ZE_RESULT_SUCCESS));
   ze_command_list_desc_t staleListDesc{};
   staleListDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
   ze_command_list_handle_t staleList = nullptr;
-  REQUIRE((zeCommandListCreate(replacement_context, device, &staleListDesc, &staleList) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListCreate(replacementContext, device, &staleListDesc, &staleList) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandListAppendSignalEvent(staleList, staleEvent) == ZE_RESULT_ERROR_INVALID_ARGUMENT));
   REQUIRE((zeCommandListDestroy(staleList) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeContextDestroy(replacement_context) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeContextDestroy(replacementContext) == ZE_RESULT_SUCCESS));
   REQUIRE((zeEventDestroy(staleEvent) == ZE_RESULT_SUCCESS));
   REQUIRE((zeEventPoolDestroy(retainedPool) == ZE_RESULT_SUCCESS));
-  ze_context_handle_t other_context = nullptr;
-  REQUIRE((zeContextCreate(driver, &contextDesc, &other_context) == ZE_RESULT_SUCCESS));
+  ze_context_handle_t otherContext = nullptr;
+  REQUIRE((zeContextCreate(driver, &contextDesc, &otherContext) == ZE_RESULT_SUCCESS));
 
   ze_device_mem_alloc_desc_t allocationDesc{};
   allocationDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
@@ -434,10 +434,10 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   void *destination = nullptr;
   REQUIRE((zeMemAllocDevice(context, &allocationDesc, 64, 16, device, &source) == ZE_RESULT_SUCCESS));
   REQUIRE((zeMemAllocDevice(context, &allocationDesc, 64, 16, device, &destination) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeMemFree(other_context, source) == ZE_RESULT_ERROR_INVALID_ARGUMENT));
+  REQUIRE((zeMemFree(otherContext, source) == ZE_RESULT_ERROR_INVALID_ARGUMENT));
   ze_memory_allocation_properties_t foreignProperties{};
   foreignProperties.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
-  REQUIRE((zeMemGetAllocProperties(other_context, source, &foreignProperties, nullptr) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeMemGetAllocProperties(otherContext, source, &foreignProperties, nullptr) == ZE_RESULT_SUCCESS));
   REQUIRE((foreignProperties.type == ZE_MEMORY_TYPE_UNKNOWN));
   int nonUsm = 0;
   ze_memory_allocation_properties_t ordinaryProperties{};
@@ -454,19 +454,19 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   REQUIRE((zeCommandListCreateImmediate(context, device, &queueDesc, &list) == ZE_RESULT_SUCCESS));
   REQUIRE((zeContextDestroy(context) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE));
   void *foreignDestination = nullptr;
-  REQUIRE((zeMemAllocDevice(other_context, &allocationDesc, 64, 16, device, &foreignDestination) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeMemAllocDevice(otherContext, &allocationDesc, 64, 16, device, &foreignDestination) == ZE_RESULT_SUCCESS));
   // AppendMemoryCopyFromContext only requires the source context to be named and
   // both ranges to be accessible by the device, so a destination from another
   // context on the same driver is legal.
   REQUIRE(
       (zeCommandListAppendMemoryCopyFromContext(list, foreignDestination, context, source, 4, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeMemFree(other_context, foreignDestination) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeMemFree(otherContext, foreignDestination) == ZE_RESULT_SUCCESS));
   ze_command_queue_handle_t foreignQueue = nullptr;
   ze_command_list_handle_t foreignList = nullptr;
   ze_command_list_desc_t isolationListDesc{};
   isolationListDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
-  REQUIRE((zeCommandQueueCreate(other_context, device, &queueDesc, &foreignQueue) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeCommandListCreate(other_context, device, &isolationListDesc, &foreignList) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandQueueCreate(otherContext, device, &queueDesc, &foreignQueue) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListCreate(otherContext, device, &isolationListDesc, &foreignList) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandListClose(foreignList) == ZE_RESULT_SUCCESS));
   ze_command_list_handle_t wrongContextLists[] = {foreignList};
   ze_command_queue_handle_t ownerQueue = nullptr;
@@ -629,7 +629,7 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   REQUIRE((zeMemFreeExt(context, &freeDesc, destination) == ZE_RESULT_SUCCESS));
   REQUIRE((zeMemFree(context, source) == ZE_RESULT_SUCCESS));
   REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeContextDestroy(other_context) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeContextDestroy(otherContext) == ZE_RESULT_SUCCESS));
 }
 
 TEST_CASE("Level Zero asynchronous queue submits before host dependency resolves", "[level-zero]") {
@@ -778,7 +778,7 @@ TEST_CASE("Level Zero resetting completed lists makes their fence safe to destro
   CHECK(failedDestructions == 0);
 }
 
-TEST_CASE("Level Zero completed fences can be destroyed before queue synchronization", "[level-zero]") {
+TEST_CASE("Level Zero completed fences can be destroyed before queue synchronisation", "[level-zero]") {
   REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
   uint32_t count = 1;
   ze_driver_handle_t driver = nullptr;
@@ -821,7 +821,7 @@ TEST_CASE("Level Zero completed fences can be destroyed before queue synchroniza
     const auto destroyed = zeFenceDestroy(fence);
     if (destroyed != ZE_RESULT_SUCCESS) {
       ++failedDestructions;
-      // Clean up the old implementation before reporting the regression.
+      // Drain the queue so a rejected destroy does not leak the fence.
       REQUIRE((zeCommandQueueSynchronize(queue, 1'000'000'000ULL) == ZE_RESULT_SUCCESS));
       REQUIRE((zeFenceDestroy(fence) == ZE_RESULT_SUCCESS));
     }
@@ -896,7 +896,7 @@ TEST_CASE("Level Zero completed transfers release allocations before their event
         } while (completed == ZE_RESULT_NOT_READY && std::chrono::steady_clock::now() < deadline);
         const auto freed = completed == ZE_RESULT_SUCCESS ? zeMemFree(context, memory) : ZE_RESULT_NOT_READY;
         if (freed != ZE_RESULT_SUCCESS) ++failedFrees;
-        // Destroy only after trying the free: synchronizing the whole list first
+        // Destroy only after trying the free: synchronising the whole list first
         // would hide premature event publication. Cleanup also keeps reds safe.
         REQUIRE((zeCommandListDestroy(list) == ZE_RESULT_SUCCESS));
         if (freed != ZE_RESULT_SUCCESS) REQUIRE((zeMemFree(context, memory) == ZE_RESULT_SUCCESS));

@@ -7,7 +7,7 @@
 #include "test_support.hpp"
 
 TEST_CASE("byte reference values remain sorted", "[unit][unified]") {
-  const auto values = unified::support::sorted_values<int8_t>(4096, 3);
+  const auto values = unified::support::sortedValues<int8_t>(4096, 3);
   CHECK(std::is_sorted(values.begin(), values.end()));
 }
 
@@ -26,7 +26,7 @@ TEST_CASE("key permutation matcher rejects lost or repeated payloads", "[unit][u
 }
 
 TEST_CASE("BLAS dimensions reject integer overflow", "[unit][unified]") {
-  CHECK_THROWS_AS(unified::support::checked_add(SIZE_MAX, 1, "size"), std::invalid_argument);
-  CHECK_THROWS_AS(unified::support::checked_multiply(SIZE_MAX, 2, "size"), std::invalid_argument);
-  CHECK_THROWS_AS(unified::support::checked_int(static_cast<size_t>(INT_MAX) + 1, "size"), std::invalid_argument);
+  CHECK_THROWS_AS(unified::support::checkedAdd(SIZE_MAX, 1, "size"), std::invalid_argument);
+  CHECK_THROWS_AS(unified::support::checkedMultiply(SIZE_MAX, 2, "size"), std::invalid_argument);
+  CHECK_THROWS_AS(unified::support::checkedInt(static_cast<size_t>(INT_MAX) + 1, "size"), std::invalid_argument);
 }

@@ -7,7 +7,7 @@ if(NOT FIXTURE STREQUAL "opencl" AND "${ARCHITECTURE}" STREQUAL "")
   message(FATAL_ERROR "ARCHITECTURE must be set for ${FIXTURE}")
 endif()
 
-set(source /source/tools/benchmarks/src/main/resources)
+set(source /source/tools/benchmarks/fixtures)
 set(output /output)
 
 if(FIXTURE STREQUAL "cuda")

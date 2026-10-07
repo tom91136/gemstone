@@ -1,56 +1,64 @@
 package net.kurobako.gemstone.codegen
 
+import NativeAPIs.*
 import java.nio.file.Files
 import java.nio.file.Path
 import manifest.*
-import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.files.*
-import scala.concurrent.duration.*
 
 class GenerateNativeBindingsSuite extends munit.FunSuite {
-  private def generate(input: Path, output: Path): Unit =
-    GenerateNativeBindings.main(Array(output.toString, input.toString))
+  private val complete = NativeAPIs.platforms.map(_.copy(coverage = Coverage.Complete))
 
-  test("native signatures, constants and dispatch holes follow a small independent manifest") {
+  private def generate(input: Path, output: Path, platforms: Vector[Platform] = complete): Unit =
+    GenerateNativeBindings.generate(output, input, platforms)
+
+  private def partial(coverage: Coverage.Partial): Vector[Platform] =
+    complete.map(platform => if (platform.name == "cuda") platform.copy(coverage = coverage) else platform)
+
+  test("native signatures and dispatch holes follow a small independent manifest") {
     val input = manifest()
     surface(input, "cuda-driver")("functions") = ujson.Arr(
-      function(
-        "zeta",
-        "int",
-        "int (const char *, void (*)(int, int))",
-        "text"     -> "const char *",
-        "callback" -> "void (*)(int, int)"
-      ),
+      function("zeta", "int", "int (const char *, void (*)(int, int))", "const char *", "void (*)(int, int)"),
       function("alpha", "void", "void (void)")
     )
-    surface(input, "cuda-driver")("enumConstants") = ujson.Arr(ujson.Obj("name" -> "NEGATIVE", "value" -> "-7"))
     fixture(input) { (manifest, output) =>
       generate(manifest, output)
       val files  = snapshot(output)
       val header = files("cuda/gemstone_cuda_api.h")
       assert(header.contains("extern int zeta(const char *, void (*)(int, int)) GEMSTONE_PUBLIC_API;"), header)
       assert(header.indexOf("alpha(") < header.indexOf("zeta("))
-      assert(files("cuda/gemstone_cuda_constants.hpp").contains("inline constexpr auto NEGATIVE = -7;"))
-      for (
-        (name, macroName) <- Vector(
-          "LaunchParamEnd"           -> "CU_LAUNCH_PARAM_END",
-          "LaunchParamBufferPointer" -> "CU_LAUNCH_PARAM_BUFFER_POINTER",
-          "LaunchParamBufferSize"    -> "CU_LAUNCH_PARAM_BUFFER_SIZE"
-        )
-      ) {
-        assert(files("cuda/gemstone_cuda_constants.hpp").contains(s"extern const void *const $name;"))
-        assert(
-          files("cuda/gemstone_cuda_impl.cpp").contains(s"const void *const gemstone::cuda::api::$name = $macroName;")
-        )
-      }
+      assertEquals(
+        files.keySet.filter(_.startsWith("cuda/")),
+        Set("cuda/gemstone_cuda_api.h", "cuda/gemstone_cuda_impl.cpp")
+      )
       assert(files(
         "cuda/gemstone_cuda_impl.cpp"
-      ).contains("using signature_zeta = int (*)(const char *, void (*)(int, int));"))
+      ).contains("reinterpret_cast<void (*)()>(static_cast<int (*)(const char *, void (*)(int, int))>(&zeta)),"))
       val dispatch = files("opencl/gemstone_opencl_dispatch.hpp")
       assert(dispatch.contains("dispatch.clFixture = &clFixture;"))
       assert(dispatch.contains("dispatch.clAbsent = nullptr;"))
       generate(manifest, output)
       assertEquals(snapshot(output), files)
+    }
+  }
+
+  test("entry point revisions become a name-sorted history padded to the longest revision list") {
+    val input = manifest()
+    surface(input, "cuda-driver")("entryPoints") = ujson.Arr(
+      ujson.Obj("name" -> "cuZeta", "versions"  -> ujson.Arr(2000, 3020, 11040)),
+      ujson.Obj("name" -> "cuAlpha", "versions" -> ujson.Arr(8000))
+    )
+    fixture(input) { (manifest, output) =>
+      generate(manifest, output)
+      val history = snapshot(output)("cuda/gemstone_cuda_entry_points.hpp")
+      for (
+        expected <- Vector(
+          "namespace gemstone::cuda {",
+          "std::array<int, 3> revisions;",
+          "EntryPointHistory{\"cuAlpha\", {8000}},\n    EntryPointHistory{\"cuZeta\", {2000, 3020, 11040}},"
+        )
+      ) assert(history.contains(expected), history)
+      assert(!snapshot(output).keySet.exists(_.startsWith("hip/gemstone_hip_entry_points")))
     }
   }
 
@@ -66,8 +74,13 @@ class GenerateNativeBindingsSuite extends munit.FunSuite {
     }
   }
 
-  test("conflicting declarations cannot be silently discarded when surfaces are merged") {
+  test("merged surfaces declare identical functions once and reject conflicting ones") {
     val input = manifest()
+    surface(input, "cuda-runtime")("functions") = ujson.Arr(function("fixture", "int", "int (void)"))
+    fixture(input) { (manifest, output) =>
+      generate(manifest, output)
+      assertEquals("extern int fixture\\(".r.findAllIn(snapshot(output)("cuda/gemstone_cuda_api.h")).size, 1)
+    }
     surface(input, "cuda-runtime")("functions") = ujson.Arr(function("fixture", "void", "void (void)"))
     fixture(input) { (manifest, output) =>
       val error = intercept[IllegalArgumentException](generate(manifest, output))
@@ -76,90 +89,65 @@ class GenerateNativeBindingsSuite extends munit.FunSuite {
     }
   }
 
-  test("conflicting constants and malformed dispatch tables preserve existing output") {
+  test("late failures and a missing dispatch table preserve existing output") {
     val input = manifest()
     fixture(input) { (manifest, output) =>
       generate(manifest, output)
       val before = snapshot(output)
-      surface(input, "cuda-driver")("enumConstants") = ujson.Arr(ujson.Obj("name" -> "VALUE", "value" -> "1"))
-      surface(input, "cuda-runtime")("enumConstants") = ujson.Arr(ujson.Obj("name" -> "VALUE", "value" -> "2"))
-      Files.writeString(manifest, input.toString)
-      val _ = intercept[IllegalStateException](generate(manifest, output))
-      assertEquals(snapshot(output), before)
-      surface(input, "cuda-runtime")("enumConstants") = ujson.Arr()
-      surface(input, "opencl")("dispatchTables") = ujson.Arr()
+      surface(input, "vulkan")("functions") =
+        ujson.Arr(function("fixture", "int", "int (void)"), function("fixture", "void", "void (void)"))
       Files.writeString(manifest, input.toString)
       val _ = intercept[IllegalArgumentException](generate(manifest, output))
       assertEquals(snapshot(output), before)
+      surface(input, "vulkan")("functions") = ujson.Arr(function("fixture", "int", "int (void)"))
+      surface(input, "opencl")("dispatchTable") = ujson.Null
+      Files.writeString(manifest, input.toString)
+      val error = intercept[IllegalArgumentException](generate(manifest, output))
+      assert(error.getMessage.contains("_cl_icd_dispatch"), error.getMessage)
+      assertEquals(snapshot(output), before)
     }
   }
 
-  test("matching declarations merge even when parameter names differ") {
+  test("unimplemented functions alias a status stub or receive a default body") {
     val input = manifest()
-    surface(input, "cuda-driver")("functions") = ujson.Arr(function("fixture", "int", "int (int)", "first" -> "int"))
-    surface(input, "cuda-runtime")("functions") = ujson.Arr(function("fixture", "int", "int (int)", "second" -> "int"))
-    surface(input, "cuda-cublas")("functions") = ujson.Arr()
+    surface(input, "cuda-driver")("functions") = ujson.Arr(
+      function("cuDone", "CUresult", "CUresult (int)", "int"),
+      function("cuMissing", "CUresult", "CUresult (int)", "int"),
+      function("cuName", "const char *", "const char *(int)", "int"),
+      function("cuCreate", "CUhandle", "CUhandle (int, CUresult *)", "int", "CUresult *"),
+      function("cuNotify", "void", "void (void *)", "void *")
+    )
+    surface(input, "cuda-runtime")("functions") =
+      ujson.Arr(function("cudaMissing", "cudaError_t", "cudaError_t (void)"))
+    val statuses = Vector(Status("CUresult", "DRIVER", "driverStub"), Status("cudaError_t", "RUNTIME", "runtimeStub"))
     fixture(input) { (manifest, output) =>
-      generate(manifest, output)
-      val declarations = snapshot(output)("cuda/gemstone_cuda_api.h")
-      assertEquals("extern int fixture\\(".r.findAllIn(declarations).size, 1)
-    }
-  }
-
-  test("generated DDI clearing resets callbacks in both leaf and aggregate tables") {
-    val input = manifest()
-    val _     = surface(input, "level-zero-ddi")("dispatchTables").arr.addOne(ujson.Obj(
-      "name"   -> "_ze_dditable_t",
-      "fields" -> ujson.Arr(ujson.Obj("name" -> "core", "cType" -> "_ze_fixture_dditable_t"))
-    ))
-    fixture(input) { (manifest, output) =>
-      generate(manifest, output)
-      val root = manifest.getParent
-      val _    = write(
-        root,
-        "ze_ddi.h",
-        """
-struct _ze_fixture_dditable_t { void (*pfnFirst)(); void (*pfnSecond)(); };
-struct _ze_dditable_t { _ze_fixture_dditable_t core; };
-"""
+      generate(
+        manifest,
+        output,
+        partial(Coverage.Partial(statuses, Set("cuDone"), Vector("cuOld" -> "decltype(cuDone)")))
       )
-      val _      = write(root, "zes_ddi.h", "")
-      val _      = write(root, "zet_ddi.h", "")
-      val source = write(
-        root,
-        "clear.cpp",
-        """
-#include "gemstone_levelzero_ddi.hpp"
-void callback() {}
-int main() {
-  _ze_fixture_dditable_t leaf{callback, callback};
-  gemstone_levelzero_ddi::clear(&leaf);
-  if (leaf.pfnFirst || leaf.pfnSecond) return 1;
-  _ze_dditable_t aggregate{{callback, callback}};
-  gemstone_levelzero_ddi::clear(&aggregate);
-  return aggregate.core.pfnFirst || aggregate.core.pfnSecond ? 2 : 0;
-}
-"""
+      val source = snapshot(output)("cuda/gemstone_cuda_unsupported.cpp")
+      for (
+        expected <- Vector(
+          "GEMSTONE_INTERNAL_API CUresult driverStub() { return DRIVER; }",
+          "GEMSTONE_INTERNAL_API cudaError_t runtimeStub() { return RUNTIME; }",
+          "GEMSTONE_UNSUPPORTED(cuMissing, driverStub)",
+          "GEMSTONE_UNSUPPORTED(cudaMissing, runtimeStub)",
+          "GEMSTONE_UNSUPPORTED_AS(decltype(cuDone), cuOld, driverStub)",
+          "const char * cuName(int) { return \"unsupported\"; }",
+          "CUhandle cuCreate(int, CUresult *error) { if (error) *error = DRIVER; return {}; }",
+          "void cuNotify(void *) { }"
+        )
+      ) assert(source.contains(expected), source)
+      assert(!source.contains("cuDone,"), source)
+      generate(manifest, output, partial(Coverage.Partial(statuses, Set("cuDone"), erased = true)))
+      assert(snapshot(output)("cuda/gemstone_cuda_unsupported.cpp").contains(
+        "GEMSTONE_UNSUPPORTED_AS(CUresult(), cuMissing, driverStub)"
+      ))
+      val error = intercept[IllegalArgumentException](
+        generate(manifest, output, partial(Coverage.Partial(statuses, Set("cuDone", "cuRemoved"))))
       )
-      val executable = root.resolve("clear")
-      val compile    = process.run(
-        Seq(
-          sys.env.getOrElse("CXX", "clang++"),
-          "-std=c++17",
-          s"-I$root",
-          s"-I${output.resolve("levelzero")}",
-          source.toString,
-          "-o",
-          executable.toString
-        ),
-        root,
-        Map.empty,
-        Set.empty,
-        30.seconds
-      )
-      assertEquals(compile.exit, 0, compile.diagnostic)
-      val run = process.run(Seq(executable.toString), root, Map.empty, Set.empty, 5.seconds)
-      assertEquals(run.exit, 0, run.diagnostic)
+      assert(error.getMessage.contains("cuRemoved"), error.getMessage)
     }
   }
 }

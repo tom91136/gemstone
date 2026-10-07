@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu.asm
 
-import Program.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
@@ -27,6 +26,11 @@ private object LaneModifiers {
     Map(("row_mirror", DPP.ROW_MIRROR), ("row_half_mirror", DPP.ROW_HALF_MIRROR))
   private val Broadcast = Map(15 -> DPP.BCAST15, 31 -> DPP.BCAST31)
   private val Numeric   = Set("row_mask", "bank_mask", "bound_ctrl", "fi")
+
+  // row_newbcast reuses row_share's encoding, so the target decides the spelling.
+  private def rows(isa: ISA): Map[NonEmpty[String], Int] =
+    if (VMArithmetic.dppRowNewBroadcast(isa)) Rows - "row_share" + (("row_newbcast", DPP.ROW_NEWBCAST_FIRST))
+    else Rows
 
   def supports(format: EncodingFormat): Boolean       = format.isDpp || format.isSdwa
   def sdwa(layout: InstructionLayout): Boolean        = layout.format.isSdwa
@@ -68,8 +72,9 @@ private object LaneModifiers {
   def modifier(modifier: Modifier, layout: InstructionLayout): Option[Map[EncodingField, BigInt]] = {
     val name               = modifier.name
     val value              = modifier.value.map(_.raw)
-    def control(code: Int) =
-      Option.when(layout.byName.contains(EncodingField.DPP_CTRL))(Map(EncodingField.DPP_CTRL -> BigInt(code)))
+    def control(code: Int) = Option.when(
+      layout.byName.contains(EncodingField.DPP_CTRL) && VMArithmetic.dppControlValid(code, layout.isa)
+    )(Map(EncodingField.DPP_CTRL -> BigInt(code)))
     if (name == "dpp" || name == "sdwa")
       Option.when(value.isEmpty && supports(layout.format) && (name == "sdwa") == sdwa(layout))(Map.empty)
     else if (name == "dpp8") value.flatMap(list(_, 8, 8)).filter(_ => dpp8(layout)).map(values =>
@@ -78,12 +83,8 @@ private object LaneModifiers {
     else if (name == "quad_perm") value.flatMap(list(_, 4, 4)).flatMap(values =>
       control(values.zipWithIndex.map { case (lane, index) => lane << (index * 2) }.sum)
     )
-    else if (name == "row_newbcast")
-      value.flatMap(number(_)).filter(value => value >= 0 && value < 16).flatMap(value =>
-        control(DPP.ROW_NEWBCAST_FIRST | value)
-      )
-    else if (Rows.contains(name))
-      value.flatMap(number(_)).filter(value => value >= 0 && value < 16).flatMap(value => control(Rows(name) | value))
+    else if (rows(layout.isa).contains(name)) value.flatMap(number(_)).filter(value => value >= 0 && value < 16)
+      .flatMap(value => control(rows(layout.isa)(name) | value))
     else if (Waves.contains(name)) value.flatMap(number(_)).filter(_ == 1).flatMap(_ => control(Waves(name)))
     else if (Mirrors.contains(name))
       Option.when(value.isEmpty || value.contains("1"))(Mirrors(name)).flatMap(control(_))
@@ -106,8 +107,8 @@ private object LaneModifiers {
     else None
   }
 
-  def modifiers(word: BigInt, layout: InstructionLayout): Vec[Modifier] = {
-    def numeric(name: NonEmpty[String], value: BigInt): Modifier =
+  def modifiers(word: InstructionWord, layout: InstructionLayout): Vec[Modifier] = {
+    def numeric(name: NonEmpty[String], value: Long): Modifier =
       Modifier(name, Some(value.toString.unsafe[NonEmpty[String]]))
     def select(name: EncodingField, spelling: Int => Option[NonEmpty[String]]): Vec[Modifier] =
       layout.byName.get(name).flatMap(field =>
@@ -141,7 +142,8 @@ private object LaneModifiers {
         "quad_perm",
         Some((0 until 4).map(index => (code >> (2 * index)) & 3).mkString("[", ",", "]").unsafe[NonEmpty[String]])
       ))
-      else Rows.find { case (_, base) => (code & ~15) == base }.map { case (name, _) => numeric(name, code & 15) }
+      else rows(layout.isa).find { case (_, base) => (code & ~15) == base }
+        .map { case (name, _) => numeric(name, code & 15) }
         .orElse(Waves.find(_._2 == code).map { case (name, _) => numeric(name, 1) })
         .orElse(Mirrors.find(_._2 == code).map { case (name, _) => Modifier(name) })
         .orElse(Broadcast.find(_._2 == code).map { case (value, _) => numeric("row_bcast", value) })

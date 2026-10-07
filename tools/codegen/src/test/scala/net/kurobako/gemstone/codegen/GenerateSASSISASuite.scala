@@ -2,7 +2,6 @@ package net.kurobako.gemstone.codegen
 
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
-import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.zip.GZIPOutputStream
 import scala.concurrent.duration.*
@@ -11,198 +10,114 @@ import scala.util.Using
 class GenerateSASSISASuite extends munit.FunSuite {
   override val munitTimeout: Duration = 120.seconds
 
-  private def source(kind: String, fields: String): String =
+  private def mask(offset: Int): String = "." * offset + "XXXX" + "." * (124 - offset)
+  private val description               =
     s"""ARCHITECTURE "Volta"
+       |PARAMETERS
+       |  MAX_REG_COUNT = 255
+       |CONSTANTS
+       |  UNUSED = 1
+       |STRING_MAP
+       |FUNIT uC
+       |  ENCODING WIDTH 128;
+       |  Dest '${mask(0)}'
+       |  Src '${mask(4)}'
+       |  Op '${mask(8)}'
        |REGISTERS
-       |  Register R0, RZ;
+       |  Register R(0..14), RZ = 15;
+       |TABLES
        |CLASS "add_register"
-       |FORMAT Opcode $kind:Rd ',' Register:Ra $fields;
+       |FORMAT Opcode Register:Rd ',' Register:Ra ;
+       |CONDITIONS
+       |  ERROR Rd != `Register@RZ : "destination must be writable"
+       |  ERROR batch_t -> usched_info : "scheduling"
        |OPCODES
        | ADD = 0b0001;
+       | ADDint_pipe = 0b0001;
        |ENCODING
+       | Op = Opcode;
        | Dest = Rd;
        | Src = Ra;
        |""".stripMargin
 
-  private def table(text: String): GenerateSASSISA.Table =
-    GenerateSASSISA.Table("fixture", SASSDescription.parse(text).fold(e => fail(e.message), identity))
+  private def sha256(bytes: Array[Byte]): String =
+    MessageDigest.getInstance("SHA-256").digest(bytes).map(b => f"${b & 255}%02x").mkString
 
-  test("compatible binding layouts share types while target constraints remain in descriptions") {
-    val a       = table(source("Register", ""))
-    val b       = table(source("NonZeroRegister", ""))
-    val c       = table(source("Register", "',' Predicate:Pu"))
-    val schemas = GenerateSASSISA.instructionSchemas(Vector(a, b, c))
-    assertEquals(schemas.size, 2)
-    assertEquals(schemas.head.fields, Vector("Rd", "Ra"))
-    assertNotEquals(a.description.classes.head.fields, b.description.classes.head.fields)
-    assertEquals(GenerateSASSISA.instructionSchemas(Vector(c, b, a)), schemas)
-    val scala = SASSInstructionRenderer.render(SASSInstructionModel.shapes(a.description.classes))("Instruction.scala")
-    assert(scala.contains("case AddRegReg("))
-    assert(scala.contains("Instruction.AddRegRegDefinition"))
+  private def bundle(text: String, targets: Vector[String]): GenerateSASSISA.Bundle = generator.inDirectory {
+    directory =>
+      val bytes  = text.getBytes(UTF_8)
+      val digest = sha256(bytes)
+      val _      = Files.createDirectory(directory.resolve("tables"))
+      Using.resource(GZIPOutputStream(Files.newOutputStream(directory.resolve(s"tables/$digest.txt.gz"))))(
+        _.write(bytes)
+      )
+      val manifest = ujson.Obj("targets" -> ujson.Arr.from(targets.map(name =>
+        ujson.Obj("name" -> name, "tool" -> "modern", "table" -> digest)
+      )))
+      val _ = Files.writeString(directory.resolve("manifest.json"), ujson.write(manifest))
+      GenerateSASSISA.read(directory)
   }
 
-  test("reference reader verifies digest before interpreting a table") {
+  test("reader verifies digests and omits architecture-suffixed aliases") {
+    val read = bundle(description, Vector("SM90", "SM90a"))
+    assertEquals(read.targets.map(_._1), Vector("SM90"))
+    assertEquals(read.tables.size, 1)
     generator.inDirectory { directory =>
-      val bytes  = source("Register", "").getBytes(UTF_8)
-      val digest = MessageDigest.getInstance("SHA-256").digest(bytes).map(b => f"${b & 255}%02x").mkString
-      val file   = directory.resolve("table.gz")
-      Using.resource(GZIPOutputStream(Files.newOutputStream(file)))(_.write(bytes))
-      val manifest = ujson.Obj(
-        "format"  -> 1,
-        "targets" -> ujson.Arr(ujson.Obj("name" -> "SM89", "tool" -> "modern", "table" -> digest)),
-        "tables"  -> ujson.Arr(ujson.Obj("sha256" -> digest, "path" -> "table.gz", "classes" -> 1))
+      val _ = Files.createDirectory(directory.resolve("tables"))
+      Using.resource(GZIPOutputStream(Files.newOutputStream(directory.resolve(s"tables/${"0" * 64}.txt.gz"))))(
+        _.write(description.getBytes(UTF_8))
       )
-      val _ = Files.writeString(directory.resolve("manifest.json"), ujson.write(manifest))
-      assertEquals(GenerateSASSISA.read(directory).tables.size, 1)
-      Using.resource(GZIPOutputStream(Files.newOutputStream(file)))(_.write("corrupt".getBytes(UTF_8)))
-      val error = intercept[IllegalArgumentException](GenerateSASSISA.read(directory))
+      val manifest = ujson.Obj("targets" -> ujson.Arr(ujson.Obj("name" -> "SM89", "table" -> "0" * 64)))
+      val _        = Files.writeString(directory.resolve("manifest.json"), ujson.write(manifest))
+      val error    = intercept[IllegalArgumentException](GenerateSASSISA.read(directory))
       assert(error.getMessage.contains("digest mismatch"))
     }
   }
 
-  test("unresolved preprocessing fragments never become empty instruction types") {
-    val partial = table(source("Register", "").replace(
-      "FORMAT Opcode Register:Rd ',' Register:Ra ;",
-      "##IF DEFINED(ARCH_SEMANTICS)\nFORMAT Register:Rd;\n##ENDIF"
-    ))
-    assertEquals(GenerateSASSISA.instructionSchemas(Vector(partial)), Vector.empty)
-    assert(partial.description.classes.head.raw.contains("##IF"))
-  }
-
-  test("recovered descriptions and active preprocessing stay checked in the codegen cache") {
-    val bundle = GenerateSASSISA.read(Path.of("target/sass-codegen-references"))
-    assertEquals(bundle.manifest("targets").arr.size, 36)
-    assertEquals(bundle.tables.size, 16)
-    val schemas   = GenerateSASSISA.instructionSchemas(bundle.tables)
-    val schemaIds = schemas.zipWithIndex.toMap
-    bundle.tables.foreach { table =>
-      assertEquals(table.digest.length, 64)
-      assert(table.description.preamble.startsWith("ARCHITECTURE "))
-      table.description.classes.foreach { form =>
-        val unresolved = form.conditional || form.raw.linesIterator.exists(_.trim.startsWith("##"))
-        if (unresolved) assert(form.raw.linesIterator.exists(_.trim.startsWith("##")))
-        else {
-          form.opcodes.foreach(name => assert(name.nonEmpty))
-          val schema = GenerateSASSISA.Schema(form.name, form.fields.map(_.name).distinct)
-          assert(schemaIds.contains(schema), form.name)
-          assert(form.section("ENCODING").nonEmpty, form.name)
-          assert(form.opcodes.nonEmpty, form.name)
-        }
-      }
-    }
-    val sm35Digest = bundle.manifest("targets").arr.find(_("name").str == "SM35")
-      .map(_("table").str).getOrElse(fail("missing SM35 reference target"))
-    val sm35   = bundle.tables.find(_.digest == sm35Digest).getOrElse(fail("missing SM35 reference description"))
-    val raw    = sm35.description.classes
-    val active = sm35.encodingDescription.classes
-    assert(active.nonEmpty)
-    val rawTyped = raw.filterNot(form => form.conditional || form.raw.linesIterator.exists(_.trim.startsWith("##")))
-      .map(form => GenerateSASSISA.Schema(form.name, form.fields.map(_.name).distinct) -> form.opcodes)
-    val added = active.filterNot { form =>
-      val schema = GenerateSASSISA.Schema(form.name, form.fields.map(_.name).distinct)
-      schemaIds.get(schema).exists(id => rawTyped.contains(schemas(id) -> form.opcodes))
-    }
-    assert(added.nonEmpty, "expected preprocessed SM35 forms not present in raw forms")
-    added.foreach(form =>
-      assert(schemaIds.contains(GenerateSASSISA.Schema(form.name, form.fields.map(_.name).distinct)))
-    )
-  }
-
-  test("runtime metadata retains target keys and the schema bound") {
-    val manifest = ujson.Obj("targets" -> ujson.Arr(
-      ujson.Obj("name" -> "SM89", "tool" -> "modern", "table" -> "a" * 64),
-      ujson.Obj("name" -> "SM90", "tool" -> "modern", "table" -> "b" * 64)
-    ))
-    val bundle  = GenerateSASSISA.Bundle(manifest, Vector.empty)
-    val schemas = Vector(GenerateSASSISA.Schema("IADD3", Vector("Rd", "Ra", "Rb")))
-    val encoded = GenerateSASSISA.renderCatalogue(bundle, schemas)
-    assertEquals(encoded("format").num.toInt, 3)
-    val strings = encoded("strings").arr.map(_.str).toVector
-    assertEquals(strings.distinct.size, strings.size)
-    assertEquals(encoded("schemaCount").num.toInt, schemas.size)
-    assert(!encoded.obj.contains("schemas"))
-    assert(!strings.contains("IADD3"))
+  test("catalogue keeps legality conditions, drops pipe aliases and scheduling constraints, and shares records") {
+    val catalogue = GenerateSASSISA.renderCatalogue(bundle(description, Vector("SM89", "SM90")))
+    val strings   = catalogue.strings
+    assertEquals(strings.distinct, strings)
+    assertEquals(catalogue.databases.size, 1)
+    assertEquals(catalogue.targets.map((name, database) => strings(name) -> database), Vector("SM89" -> 0, "SM90" -> 0))
+    val form = catalogue.forms(catalogue.databases.head.forms.head)
+    assertEquals(form.opcodes.map((name, value) => strings(name) -> value), Vector("ADD" -> BigInt(1)))
     assertEquals(
-      encoded("targets").arr.map(row => strings(row("encodingKey").num.toInt)).toVector,
-      Vector("a" * 64, "b" * 64)
+      form.conditions.map(id => strings(catalogue.conditions(id).message)),
+      Vector("destination must be writable")
     )
-    assertEquals(encoded("targets").arr.size, 2)
+    assertEquals(catalogue.databases.head.parameters, Vector.empty)
+    assertEquals(catalogue.vocabularies.map(vocabulary => strings(vocabulary.name)), Vector("Register"))
+    val encoded = ujson.write(upickle.default.writeJs(catalogue))
+    assertEquals(ujson.write(upickle.default.writeJs(GenerateSASSISA.renderCatalogue(read(description)))), encoded)
   }
 
-  test("decoder serializer shares typed expression, syntax, condition and domain records deterministically") {
-    val expression = ujson.Obj("$type" -> "Reference", "name" -> "SrcA", "attribute" -> ujson.Null, "relaxed" -> false)
-    def database(name: String): ujson.Value = ujson.Obj(
-      "target"     -> name,
-      "sha256"     -> (if (name == "SM89") "a" * 64 else "b" * 64),
-      "width"      -> 128,
-      "parameters" -> ujson.Obj("PARAM" -> 1),
-      "constants"  -> ujson.Obj(),
-      "symbols"    -> ujson.Arr(
-        ujson.Obj(
-          "name"    -> "Registers",
-          "default" -> ujson.Arr(0),
-          "values"  -> ujson.Arr(ujson.Obj("name" -> "R0", "value" -> 0))
-        ),
-        ujson.Obj("name" -> "Modes", "values" -> ujson.Arr(ujson.Obj("name" -> "OFF", "value" -> 0)))
-      ),
-      "tables" -> ujson.Arr(ujson.Obj("name" -> "TABLE", "issues" -> ujson.Arr(), "rows" -> ujson.Arr())),
-      "forms"  -> ujson.Arr(ujson.Obj(
-        "formId"    -> 0,
-        "name"      -> "MOV",
-        "alternate" -> false,
-        "opcodes"   -> ujson.Arr(ujson.Obj("name" -> "MOV", "value" -> 1)),
-        "fields" -> ujson.Arr(ujson.Obj("name" -> "SrcA", "positions" -> ujson.Arr(1, 2), "expression" -> expression)),
-        "issues" -> ujson.Arr(),
-        "syntax" -> ujson.Arr(ujson.Obj(
-          "$type"     -> "Field",
-          "kind"      -> "Register",
-          "binding"   -> "SrcA",
-          "arguments" -> ujson.Null,
-          "default"   -> ujson.Null
-        )),
-        "conditions" -> ujson.Arr(ujson.Obj(
-          "category"   -> "ERROR",
-          "message"    -> "ok",
-          "expression" -> ujson.Obj("$type" -> "StringValue", "value" -> "literal")
-        ))
-      ))
-    )
-    val decoders = Vector("a" * 64 -> database("SM89"), "b" * 64 -> database("SM90"))
-    val encoded  = GenerateSASSISA.renderDecoderCatalogue(decoders)
-    assertEquals(ujson.write(GenerateSASSISA.renderDecoderCatalogue(decoders)), ujson.write(encoded))
-    assertEquals(encoded("format").num.toInt, 4)
-    assert(!encoded.obj.contains("nodes"))
-    assertEquals(encoded("expressions").arr.size, 1)
-    assertEquals(encoded("syntaxNodes").arr.size, 1)
-    assertEquals(encoded("formats").arr.size, 1)
-    assertEquals(encoded("conditionExpressions").arr.size, 1)
-    assertEquals(encoded("conditions").arr.size, 1)
-    assertEquals(encoded("assignments").arr.size, 1)
-    assertEquals(encoded("forms").arr.size, 1)
-    assertEquals(encoded("vocabularies").arr.size, 2)
-    val vocabularyRows = encoded("vocabularies").arr
-    assertEquals(vocabularyRows(0)("default"), ujson.Arr(0))
-    assertEquals(vocabularyRows(1)("default"), ujson.Arr())
-    assertEquals(encoded("lookups").arr.size, 1)
-    assertEquals(encoded("databases").arr.size, 2)
-  }
+  private def read(text: String): GenerateSASSISA.Bundle = bundle(text, Vector("SM89", "SM90"))
 
-  test("generated opcode cases disambiguate Scala identifiers deterministically") {
-    val source = SASSInstructionRenderer.render(Vector("F.ADD", "F_ADD", "MOV").map(opcode =>
+  test("case-colliding opcodes keep their word boundaries") {
+    val source = SASSInstructionRenderer.render(Vector("UCGABAR_ARV", "UCGABARARV", "MOV").map(opcode =>
       SASSInstructionModel.Shape(opcode, Vector.empty, Vector.empty)
     ))("Instruction.scala")
     assert(source.contains("case MovNoOperands("))
-    assertEquals(source.linesIterator.count(_.contains("case FAdd_")), 2)
+    assert(source.contains("case Ucgabar_ArvNoOperands("))
+    assert(source.contains("case UcgabararvNoOperands("))
   }
 
-  test("binary generated files retain timestamps when content has not changed") {
-    generator.inDirectory { directory =>
-      val path = directory.resolve("table.json.gz")
-      assert(GeneratedFiles.writeBytes(path, Array[Byte](1, 2, 3)))
-      val before = Files.getLastModifiedTime(path)
-      assert(!GeneratedFiles.writeBytes(path, Array[Byte](1, 2, 3)))
-      assertEquals(Files.getLastModifiedTime(path), before)
-      assert(GeneratedFiles.writeBytes(path, Array[Byte](1, 2, 4)))
+  test("recovered descriptions preprocess, compile and render a catalogue for every pinned target") {
+    val references = generator.sassReferences
+    val pinned     = ExtractSASS.expected.values.flatten.toMap
+    assertEquals(references.targets.toMap, pinned.filterNot((name, _) => name.last.isLetter))
+    assertEquals(references.tables.map(_.digest).toSet, pinned.values.toSet)
+    references.tables.foreach { table =>
+      assert(table.description.preamble.startsWith("ARCHITECTURE "), table.digest)
+      table.description.classes.foreach { form =>
+        assert(!form.conditional && !form.raw.linesIterator.exists(_.trim.startsWith("##")), form.name)
+        assert(form.opcodes.nonEmpty && Vector("ENCODING", "REMAP").exists(form.section(_).nonEmpty), form.name)
+      }
     }
+    val catalogue = GenerateSASSISA.renderCatalogue(references)
+    assertEquals(catalogue.databases.size, references.tables.size)
+    assertEquals(catalogue.targets.size, references.targets.size)
+    assert(catalogue.databases.forall(_.forms.nonEmpty))
   }
 }

@@ -1,35 +1,33 @@
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 
 #include "gemstone_vulkan_adapter.hpp"
 
 #include "state.hpp"
 
-namespace gemstone::vulkan::adapter {
-// All scheduling and synchronization state uses
-// stateMutex; execution releases it before running commands or calling RPC.
-
-void queueWorker(DeviceState *device, QueueState *queue) {
-  Execution execution{device, {}, 0, {}};
-  std::unique_lock lock(stateMutex);
-  for (;;) {
-    stateChanged.wait(lock, [&] { return device->stopping || device->lost || !queue->submissions.empty(); });
-    if (device->stopping || device->lost) break;
-    auto submission = std::move(queue->submissions.front());
-    queue->submissions.pop_front();
-    queue->active = true;
-    stateChanged.wait(lock, [&] {
-      return device->stopping || device->lost || std::ranges::all_of(submission.waits, [](const auto &point) {
-               return point.semaphore->type == VK_SEMAPHORE_TYPE_TIMELINE ? point.semaphore->value >= point.value
-                                                                          : point.semaphore->value != 0;
-             });
-    });
-    if (device->stopping || device->lost) break;
-    // A binary wait consumes the signal exactly once.
-    for (const auto &point : submission.waits)
-      if (point.semaphore->type == VK_SEMAPHORE_TYPE_BINARY) point.semaphore->value = 0;
-    lock.unlock();
+namespace gemstone::vulkan {
+// All scheduling and synchronisation state uses stateMutex; jobs release it before running commands or calling RPC.
+namespace {
+void run(QueueState &queue, DeviceState &device, std::vector<Submission> &submissions) {
+  auto &execution = queue.execution;
+  for (auto &submission : submissions) {
+    {
+      std::unique_lock lock(stateMutex);
+      // Every blocking wait may start a covering worker, so only waits that may block enter one.
+      if (!submission.waits.empty())
+        commandQueue().blocking([&] {
+          stateChanged.wait(lock, [&] {
+            return device.failed() || std::ranges::all_of(submission.waits, [](const auto &point) {
+                     return point.semaphore->type == VK_SEMAPHORE_TYPE_TIMELINE ? point.semaphore->value >= point.value
+                                                                                : point.semaphore->value != 0;
+                   });
+          });
+        });
+      if (device.failed()) return;
+      // A binary wait consumes the signal exactly once.
+      for (const auto &point : submission.waits)
+        if (point.semaphore->type == VK_SEMAPHORE_TYPE_BINARY) point.semaphore->value = 0;
+    }
     bool okay = true;
     try {
       execution.renderScope = {};
@@ -42,35 +40,65 @@ void queueWorker(DeviceState *device, QueueState *queue) {
       std::fprintf(stderr, "Gemstone Vulkan queue execution: %s\n", error.what());
       okay = false;
     }
-    lock.lock();
-    if (!okay) device->lost = true;
-    if (okay && !device->lost && !device->stopping) {
-      for (const auto &point : submission.signals) {
-        if (point.semaphore->type == VK_SEMAPHORE_TYPE_TIMELINE && point.value <= point.semaphore->value) {
-          device->lost = true;
-          break;
+    {
+      std::lock_guard lock(stateMutex);
+      if (!okay) device.lost = true;
+      if (!device.failed()) {
+        for (const auto &point : submission.signals) {
+          if (point.semaphore->type == VK_SEMAPHORE_TYPE_TIMELINE && point.value <= point.semaphore->value) {
+            device.lost = true;
+            break;
+          }
+          point.semaphore->value = point.semaphore->type == VK_SEMAPHORE_TYPE_TIMELINE ? point.value : 1;
         }
-        point.semaphore->value = point.semaphore->type == VK_SEMAPHORE_TYPE_TIMELINE ? point.value : 1;
+        if (submission.fence && !device.lost) submission.fence->signalled = true;
       }
-      if (submission.fence && !device->lost) submission.fence->signaled = true;
     }
-    queue->active = false;
     stateChanged.notify_all();
   }
-  queue->active = false;
-  queue->submissions.clear();
+}
+
+// Callers must not hold stateMutex.
+void waitIdle(const std::vector<std::shared_ptr<QueueState>> &targets) {
+  std::vector<CommandQueue::Ticket> pending;
+  {
+    host::Scope scope(nullptr);
+    for (const auto &queue : targets)
+      pending.push_back(commandQueue().snapshot(queue->handle));
+  }
+  for (const auto &ticket : pending)
+    commandQueue().wait(ticket);
+}
+} // namespace
+
+// Teardown of layered runtimes may call the driver after the workers stop, so the queue is never destroyed.
+CommandQueue &commandQueue() {
+  host::Scope scope(nullptr);
+  static auto *const queue = new CommandQueue(VK_ERROR_DEVICE_LOST);
+  return *queue;
+}
+void shutdownQueues() {
+  // Abandoned devices must not leave jobs waiting for signals that never arrive.
+  {
+    std::lock_guard lock(stateMutex);
+    for (const auto &[_, device] : devices)
+      device->stopping = true;
+  }
   stateChanged.notify_all();
+  host::Scope scope(nullptr);
+  commandQueue().shutdown();
 }
 void stopQueues(const std::shared_ptr<DeviceState> &device) {
   {
     std::lock_guard lock(stateMutex);
     device->stopping = true;
-    stateChanged.notify_all();
   }
+  stateChanged.notify_all();
+  waitIdle(device->queues);
+  host::Scope scope(nullptr);
   for (const auto &queue : device->queues)
-    if (queue->worker.joinable()) queue->worker.join();
+    commandQueue().forget(queue->handle);
 }
-// Ensure abandoned devices cannot leave joinable workers at library shutdown.
 VkResult createQueues(uint32_t count, VkDevice *handle) {
   auto device = std::make_shared<DeviceState>();
   VkDevice created = VK_NULL_HANDLE;
@@ -80,7 +108,9 @@ VkResult createQueues(uint32_t count, VkDevice *handle) {
       device->queues.push_back(queue);
       queue->handle = makeHandle<VkQueue>();
       queue->device = device;
-      queue->worker = std::thread(queueWorker, device.get(), queue.get());
+      queue->execution.device = device.get();
+      host::Scope scope(nullptr);
+      commandQueue().configure(queue->handle, true);
     }
     created = makeHandle<VkDevice>();
     std::lock_guard lock(stateMutex);
@@ -101,68 +131,61 @@ VkResult createQueues(uint32_t count, VkDevice *handle) {
     return VK_ERROR_OUT_OF_HOST_MEMORY;
   }
 }
-std::chrono::steady_clock::time_point waitDeadline(uint64_t timeout) {
-  const auto now = std::chrono::steady_clock::now();
-  const auto room = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::time_point::max() - now).count();
-  return timeout >= static_cast<uint64_t>(room) ? std::chrono::steady_clock::time_point::max() : now + std::chrono::nanoseconds(timeout);
-}
 bool deviceFailed(const std::weak_ptr<DeviceState> &reference) {
   const auto device = reference.lock();
-  return device && (device->lost || device->stopping);
+  return device && device->failed();
 }
-VkResult impl_vkCreateSemaphore(VkDevice device, const VkSemaphoreCreateInfo *info, const VkAllocationCallbacks *, VkSemaphore *semaphore) {
+VkResult implVkCreateSemaphore(VkDevice device, const VkSemaphoreCreateInfo *info, const VkAllocationCallbacks *, VkSemaphore *semaphore) {
   if (!info || !semaphore) return VK_ERROR_INITIALIZATION_FAILED;
   auto state = std::make_shared<SemaphoreState>();
-  for (auto *next = static_cast<const VkBaseInStructure *>(info->pNext); next; next = next->pNext)
-    if (next->sType == VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO) {
-      const auto *type = reinterpret_cast<const VkSemaphoreTypeCreateInfo *>(next);
-      if (type->semaphoreType != VK_SEMAPHORE_TYPE_BINARY && type->semaphoreType != VK_SEMAPHORE_TYPE_TIMELINE)
-        return VK_ERROR_FEATURE_NOT_PRESENT;
-      state->type = type->semaphoreType;
-      state->value = state->type == VK_SEMAPHORE_TYPE_TIMELINE ? type->initialValue : 0;
-    }
+  if (const auto *type = findChained<VkSemaphoreTypeCreateInfo>(info->pNext, VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO)) {
+    if (type->semaphoreType != VK_SEMAPHORE_TYPE_BINARY && type->semaphoreType != VK_SEMAPHORE_TYPE_TIMELINE)
+      return VK_ERROR_FEATURE_NOT_PRESENT;
+    state->type = type->semaphoreType;
+    state->value = state->type == VK_SEMAPHORE_TYPE_TIMELINE ? type->initialValue : 0;
+  }
   std::lock_guard lock(stateMutex);
   if (devices.contains(device)) state->device = devices.at(device);
   *semaphore = makeHandle<VkSemaphore>();
   semaphores.emplace(*semaphore, std::move(state));
   return VK_SUCCESS;
 }
-void impl_vkDestroySemaphore(VkDevice, VkSemaphore semaphore, const VkAllocationCallbacks *) {
+void implVkDestroySemaphore(VkDevice, VkSemaphore semaphore, const VkAllocationCallbacks *) {
   std::lock_guard lock(stateMutex);
   semaphores.erase(semaphore);
   deleteHandle(semaphore);
 }
-VkResult impl_vkCreateFence(VkDevice device, const VkFenceCreateInfo *info, const VkAllocationCallbacks *, VkFence *fence) {
+VkResult implVkCreateFence(VkDevice device, const VkFenceCreateInfo *info, const VkAllocationCallbacks *, VkFence *fence) {
   if (!info || !fence) return VK_ERROR_INITIALIZATION_FAILED;
   auto state = std::make_shared<FenceState>();
-  state->signaled = (info->flags & VK_FENCE_CREATE_SIGNALED_BIT) != 0;
+  state->signalled = (info->flags & VK_FENCE_CREATE_SIGNALED_BIT) != 0;
   std::lock_guard lock(stateMutex);
   if (devices.contains(device)) state->device = devices.at(device);
   *fence = makeHandle<VkFence>();
   fences.emplace(*fence, std::move(state));
   return VK_SUCCESS;
 }
-void impl_vkDestroyFence(VkDevice, VkFence fence, const VkAllocationCallbacks *) {
+void implVkDestroyFence(VkDevice, VkFence fence, const VkAllocationCallbacks *) {
   std::lock_guard lock(stateMutex);
   fences.erase(fence);
   deleteHandle(fence);
 }
-VkResult impl_vkGetFenceStatus(VkDevice, VkFence fence) {
+VkResult implVkGetFenceStatus(VkDevice, VkFence fence) {
   std::lock_guard lock(stateMutex);
   const auto found = fences.find(fence);
   if (found == fences.end() || deviceFailed(found->second->device)) return VK_ERROR_DEVICE_LOST;
-  return found->second->signaled ? VK_SUCCESS : VK_NOT_READY;
+  return found->second->signalled ? VK_SUCCESS : VK_NOT_READY;
 }
-VkResult impl_vkResetFences(VkDevice, uint32_t count, const VkFence *values) {
+VkResult implVkResetFences(VkDevice, uint32_t count, const VkFence *values) {
   std::lock_guard lock(stateMutex);
   for (uint32_t i = 0; i < count; ++i) {
     const auto found = fences.find(values[i]);
     if (found == fences.end()) return VK_ERROR_INITIALIZATION_FAILED;
-    found->second->signaled = false;
+    found->second->signalled = false;
   }
   return VK_SUCCESS;
 }
-VkResult impl_vkWaitForFences(VkDevice, uint32_t count, const VkFence *values, VkBool32 all, uint64_t timeout) {
+VkResult implVkWaitForFences(VkDevice, uint32_t count, const VkFence *values, VkBool32 all, uint64_t timeout) {
   std::unique_lock lock(stateMutex);
   std::vector<std::shared_ptr<FenceState>> waiting;
   for (uint32_t i = 0; i < count; ++i) {
@@ -173,26 +196,23 @@ VkResult impl_vkWaitForFences(VkDevice, uint32_t count, const VkFence *values, V
   const auto failed = [&] { return std::ranges::any_of(waiting, [](const auto &fence) { return deviceFailed(fence->device); }); };
   const auto ready = [&] {
     return failed()
-           || (all ? std::ranges::all_of(waiting, [](const auto &fence) { return fence->signaled; })
-                   : std::ranges::any_of(waiting, [](const auto &fence) { return fence->signaled; }));
+           || (all ? std::ranges::all_of(waiting, [](const auto &fence) { return fence->signalled; })
+                   : std::ranges::any_of(waiting, [](const auto &fence) { return fence->signalled; }));
   };
-  if (!stateChanged.wait_until(lock, waitDeadline(timeout), ready)) return VK_TIMEOUT;
+  if (!stateChanged.wait_until(lock, deadlineAfter(timeout), ready)) return VK_TIMEOUT;
   return failed() ? VK_ERROR_DEVICE_LOST : VK_SUCCESS;
 }
-VkResult impl_vkQueueSubmit(VkQueue handle, uint32_t count, const VkSubmitInfo *infos, VkFence fence) {
+VkResult implVkQueueSubmit(VkQueue handle, uint32_t count, const VkSubmitInfo *infos, VkFence fence) {
   std::lock_guard lock(stateMutex);
   const auto found = queues.find(handle);
   if (found == queues.end() || (count && !infos)) return VK_ERROR_INITIALIZATION_FAILED;
   const auto queue = found->second;
   const auto device = queue->device.lock();
-  if (!device || device->lost || device->stopping) return VK_ERROR_DEVICE_LOST;
+  if (!device || device->failed()) return VK_ERROR_DEVICE_LOST;
   std::vector<Submission> submissions(std::max(1u, count));
   for (uint32_t i = 0; i < count; ++i) {
     auto &submission = submissions[i];
-    const VkTimelineSemaphoreSubmitInfo *timeline = nullptr;
-    for (auto *next = static_cast<const VkBaseInStructure *>(infos[i].pNext); next; next = next->pNext)
-      if (next->sType == VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO)
-        timeline = reinterpret_cast<const VkTimelineSemaphoreSubmitInfo *>(next);
+    const auto *timeline = findChained<VkTimelineSemaphoreSubmitInfo>(infos[i].pNext, VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO);
     for (uint32_t j = 0; j < infos[i].waitSemaphoreCount; ++j) {
       const auto semaphore = semaphores.find(infos[i].pWaitSemaphores[j]);
       if (semaphore == semaphores.end()) return VK_ERROR_INITIALIZATION_FAILED;
@@ -225,41 +245,52 @@ VkResult impl_vkQueueSubmit(VkQueue handle, uint32_t count, const VkSubmitInfo *
     state->second->device = device;
     submissions.back().fence = state->second;
   }
-  const auto previous = queue->submissions.size();
-  try {
-    for (auto &submission : submissions)
-      queue->submissions.push_back(std::move(submission));
-  } catch (...) {
-    while (queue->submissions.size() > previous)
-      queue->submissions.pop_back();
-    throw;
-  }
-  stateChanged.notify_all();
+  host::Scope scope(nullptr);
+  commandQueue().submit(handle, [queue, device, submissions = std::move(submissions)]() mutable {
+    try {
+      run(*queue, *device, submissions);
+    } catch (...) {
+      // Fence and semaphore waits only observe the device, not the ticket status.
+      {
+        std::lock_guard lock(stateMutex);
+        device->lost = true;
+      }
+      stateChanged.notify_all();
+      return VK_ERROR_DEVICE_LOST;
+    }
+    return VK_SUCCESS;
+  });
   return VK_SUCCESS;
 }
-VkResult impl_vkQueueWaitIdle(VkQueue handle) {
-  std::unique_lock lock(stateMutex);
-  const auto found = queues.find(handle);
-  if (found == queues.end()) return VK_ERROR_INITIALIZATION_FAILED;
-  const auto queue = found->second;
-  const auto device = queue->device.lock();
-  if (!device) return VK_ERROR_DEVICE_LOST;
-  stateChanged.wait(lock, [&] { return device->lost || device->stopping || (!queue->active && queue->submissions.empty()); });
-  return device->lost || device->stopping ? VK_ERROR_DEVICE_LOST : VK_SUCCESS;
+VkResult implVkQueueWaitIdle(VkQueue handle) {
+  std::shared_ptr<QueueState> queue;
+  std::shared_ptr<DeviceState> device;
+  {
+    std::lock_guard lock(stateMutex);
+    const auto found = queues.find(handle);
+    if (found == queues.end()) return VK_ERROR_INITIALIZATION_FAILED;
+    queue = found->second;
+    device = queue->device.lock();
+    if (!device) return VK_ERROR_DEVICE_LOST;
+  }
+  waitIdle({queue});
+  std::lock_guard lock(stateMutex);
+  return device->failed() ? VK_ERROR_DEVICE_LOST : VK_SUCCESS;
 }
-VkResult impl_vkDeviceWaitIdle(VkDevice handle) {
-  std::unique_lock lock(stateMutex);
-  const auto found = devices.find(handle);
-  if (found == devices.end()) return VK_ERROR_INITIALIZATION_FAILED;
-  const auto device = found->second;
-  stateChanged.wait(lock, [&] {
-    return device->lost || device->stopping
-           || std::ranges::all_of(device->queues, [](const auto &queue) { return !queue->active && queue->submissions.empty(); });
-  });
-  return device->lost || device->stopping ? VK_ERROR_DEVICE_LOST : VK_SUCCESS;
+VkResult implVkDeviceWaitIdle(VkDevice handle) {
+  std::shared_ptr<DeviceState> device;
+  {
+    std::lock_guard lock(stateMutex);
+    const auto found = devices.find(handle);
+    if (found == devices.end()) return VK_ERROR_INITIALIZATION_FAILED;
+    device = found->second;
+  }
+  waitIdle(device->queues);
+  std::lock_guard lock(stateMutex);
+  return device->failed() ? VK_ERROR_DEVICE_LOST : VK_SUCCESS;
 }
 
-VkResult impl_vkGetSemaphoreCounterValue(VkDevice, VkSemaphore semaphore, uint64_t *value) {
+VkResult implVkGetSemaphoreCounterValue(VkDevice, VkSemaphore semaphore, uint64_t *value) {
   if (!value) return VK_ERROR_INITIALIZATION_FAILED;
   std::lock_guard lock(stateMutex);
   const auto found = semaphores.find(semaphore);
@@ -268,7 +299,7 @@ VkResult impl_vkGetSemaphoreCounterValue(VkDevice, VkSemaphore semaphore, uint64
   *value = found->second->value;
   return VK_SUCCESS;
 }
-VkResult impl_vkSignalSemaphore(VkDevice, const VkSemaphoreSignalInfo *info) {
+VkResult implVkSignalSemaphore(VkDevice, const VkSemaphoreSignalInfo *info) {
   if (!info) return VK_ERROR_INITIALIZATION_FAILED;
   std::lock_guard lock(stateMutex);
   const auto found = semaphores.find(info->semaphore);
@@ -279,7 +310,7 @@ VkResult impl_vkSignalSemaphore(VkDevice, const VkSemaphoreSignalInfo *info) {
   stateChanged.notify_all();
   return VK_SUCCESS;
 }
-VkResult impl_vkWaitSemaphores(VkDevice, const VkSemaphoreWaitInfo *info, uint64_t timeout) {
+VkResult implVkWaitSemaphores(VkDevice, const VkSemaphoreWaitInfo *info, uint64_t timeout) {
   if (!info) return VK_ERROR_INITIALIZATION_FAILED;
   std::unique_lock lock(stateMutex);
   std::vector<SemaphorePoint> waiting;
@@ -289,12 +320,13 @@ VkResult impl_vkWaitSemaphores(VkDevice, const VkSemaphoreWaitInfo *info, uint64
     waiting.push_back({found->second, info->pValues[i]});
   }
   const auto failed = [&] { return std::ranges::any_of(waiting, [](const auto &point) { return deviceFailed(point.semaphore->device); }); };
-  const auto signaled = [](const auto &point) { return point.semaphore->value >= point.value; };
+  const auto signalled = [](const auto &point) { return point.semaphore->value >= point.value; };
   const auto ready = [&] {
     return failed()
-           || ((info->flags & VK_SEMAPHORE_WAIT_ANY_BIT) ? std::ranges::any_of(waiting, signaled) : std::ranges::all_of(waiting, signaled));
+           || ((info->flags & VK_SEMAPHORE_WAIT_ANY_BIT) ? std::ranges::any_of(waiting, signalled)
+                                                         : std::ranges::all_of(waiting, signalled));
   };
-  if (!stateChanged.wait_until(lock, waitDeadline(timeout), ready)) return VK_TIMEOUT;
+  if (!stateChanged.wait_until(lock, deadlineAfter(timeout), ready)) return VK_TIMEOUT;
   return failed() ? VK_ERROR_DEVICE_LOST : VK_SUCCESS;
 }
-} // namespace gemstone::vulkan::adapter
+} // namespace gemstone::vulkan

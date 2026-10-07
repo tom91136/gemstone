@@ -23,6 +23,21 @@ inline std::optional<bool> boolean(std::string_view raw) {
   return std::nullopt;
 }
 
+/** Whether any comma-separated, blank-trimmed token of `name` satisfies `matches`. */
+template <class Matches> bool listed(const char *name, Matches matches) {
+  const char *raw = value(name);
+  if (!raw) return false;
+  for (std::string_view remaining(raw);;) {
+    const auto comma = remaining.find(',');
+    auto token = remaining.substr(0, comma);
+    const auto first = token.find_first_not_of(" \t");
+    token = first == std::string_view::npos ? std::string_view{} : token.substr(first, token.find_last_not_of(" \t") - first + 1);
+    if (matches(token)) return true;
+    if (comma == std::string_view::npos) return false;
+    remaining.remove_prefix(comma + 1);
+  }
+}
+
 inline bool enabled(const char *name, bool fallback = false) {
   const auto *raw = value(name);
   return raw ? boolean(raw).value_or(fallback) : fallback;

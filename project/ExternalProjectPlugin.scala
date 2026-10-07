@@ -2,7 +2,6 @@ import java.nio.file.Path
 import sbt.*
 import sbt.Keys.*
 
-/** A non-JVM project whose public surface is an external build tool. */
 object ExternalProjectPlugin extends AutoPlugin {
   object autoImport {
     val build  = inputKey[Path]("Build the external project.")

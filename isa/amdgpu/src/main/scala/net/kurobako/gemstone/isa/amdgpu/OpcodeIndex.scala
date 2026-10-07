@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.constraint.*
+import scala.collection.immutable.IntMap
 
-/** Immutable lookup from encoded instruction fields to generated instruction definitions. */
+/** Catalogue encodings by machine opcode, and the preferred spelling among aliases sharing one. */
 private object OpcodeIndex {
   private val aliases = Map(
     "v_dot4_i32_i8"          -> "v_dot4_i32_iu8",
@@ -38,7 +38,7 @@ private object OpcodeIndex {
   }.toMap
   private val gfx906Aliases = gfx900Aliases.map(_.swap)
 
-  def preferredName(opcode: String, target: Target): Option[String] = {
+  private def preferredName(opcode: String, target: Target): Option[String] = {
     val targetAliases = target.isa match {
       case ISA.GFX8 => gfx8Aliases
       case ISA.GFX9 => if (Set("gfx9", "gfx900")(target.name)) gfx900Aliases else gfx906Aliases
@@ -47,32 +47,14 @@ private object OpcodeIndex {
     targetAliases.get(opcode).orElse(aliases.get(opcode))
   }
 
-  private lazy val entries = Opcode.definitions.flatMap { definition =>
-    definition.meta.encodings.map(encoding =>
-      (encoding.isa, encoding.format, encoding.opcode) -> (definition, encoding)
-    )
-  }.groupMap(_._1)(_._2)
+  private lazy val entries: Map[(ISA, EncodingFormat), IntMap[Vec[(Opcode, Metadata.Encoding)]]] =
+    Opcode.definitions.flatMap(definition => definition.meta.encodings.map(definition -> _))
+      .groupBy { case (_, encoding) => (encoding.isa, encoding.format) }
+      .view.mapValues(values => IntMap.from(values.groupBy(_._2.opcode))).toMap
 
-  def encodings(format: EncodingFormat, opcode: Int, target: Target): Vec[(Opcode, Metadata.Encoding)] =
-    entries.getOrElse(
-      (target.isa, format, opcode),
-      Vec.empty[(Opcode, Metadata.Encoding)]
-    ).filter(_._2.supports(target))
-
-  private lazy val byEncoding = entries.toVector.flatMap { case ((isa, format, opcode), values) =>
-    val formats = if (format.base == EncodingFormat.VOP3 && format != EncodingFormat.VOP3)
-      Vec(format, EncodingFormat.VOP3)
-    else if (format == EncodingFormat.SOP2_INST_LITERAL) Vec(format, EncodingFormat.SOP2)
-    else if (format == EncodingFormat.SOPK_INST_LITERAL) Vec(format, EncodingFormat.SOPK)
-    else if (format == EncodingFormat.VOP2_INST_LITERAL) Vec(format, EncodingFormat.VOP2)
-    else if (format == EncodingFormat.FLAT_GLBL) Vec(format, EncodingFormat.GLOBAL, EncodingFormat.FLAT)
-    else Vec(format)
-    formats.flatMap(format => values.map(value => (isa, format, opcode) -> value))
-  }.groupMap(_._1)(_._2).view.mapValues(values => Vec.from(values).distinct).toMap
-
-  def definitions(format: EncodingFormat, opcode: Int, target: Target): Vec[Opcode] =
-    byEncoding.getOrElse((target.isa, format, opcode), Vec.empty[(Opcode, Metadata.Encoding)])
-      .filter(_._2.supports(target)).map(_._1).distinct
+  /** Catalogue encodings of one machine format, by opcode; callers filter by processor availability. */
+  def encodings(isa: ISA, format: EncodingFormat): IntMap[Vec[(Opcode, Metadata.Encoding)]] =
+    entries.getOrElse((isa, format), IntMap.empty)
 
   def canonical[A](values: Vec[A], target: Target)(definition: A => Opcode): Vec[A] =
     values.filterNot(value =>
@@ -80,18 +62,4 @@ private object OpcodeIndex {
         values.exists(value => definition(value).opcode == name)
       )
     )
-
-  def resolve(format: EncodingFormat, opcode: Int, target: Target): Either[NonEmpty[String], Opcode] = {
-    val available = definitions(format, opcode, target)
-    val selected  = format match {
-      case EncodingFormat.GLOBAL => available.filter(Opcode.GlobalOpcodes.contains)
-      case EncodingFormat.FLAT   => available.filter(Opcode.FlatOpcodes.contains)
-      case _                     => available
-    }
-    canonical(selected, target)(identity) match {
-      case Vec(value) => Right(value)
-      case Vec()      => Left(s"unknown $format opcode $opcode for ${target.name}")
-      case values     => Left(s"ambiguous $format opcode $opcode for ${target.name}: ${values.mkString(", ")}")
-    }
-  }
 }

@@ -10,7 +10,7 @@ namespace {
 using namespace memory_patterns;
 // Prerequisites apply only to the selected allocation and operation.
 uint64_t prerequisites(const std::string &kind, bool atomic, bool wide) {
-  auto selected = conformance::device_selection().native_handle;
+  const auto selected = conformance::deviceSelection().nativeHandle;
   ze_device_memory_access_properties_t properties{ZE_STRUCTURE_TYPE_DEVICE_MEMORY_ACCESS_PROPERTIES};
   check(zeDeviceGetMemoryAccessProperties(reinterpret_cast<ze_device_handle_t>(selected), &properties));
   if (wide) {
@@ -34,12 +34,7 @@ void execute(const char *kind, unsigned scenario) {
 }
 } // namespace
 
-#define UNIFIED_MEMORY_ALLOCATION "shared"
-#define UNIFIED_MEMORY_TAGS ""
 #include "cases/memory.inl"
 
-#undef UNIFIED_MEMORY_ALLOCATION
-#undef UNIFIED_MEMORY_TAGS
-#define UNIFIED_MEMORY_ALLOCATION "host"
-#define UNIFIED_MEMORY_TAGS "[full-matrix]"
-#include "cases/memory.inl"
+UNIFIED_MEMORY_CASES("shared", "")
+UNIFIED_MEMORY_CASES("host", "[full-matrix]")

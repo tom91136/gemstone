@@ -1,7 +1,6 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.isa.sass.asm.*
 
 class EncoderSuite extends munit.FunSuite {
@@ -13,13 +12,12 @@ class EncoderSuite extends munit.FunSuite {
   private val opcodeValue = NVDisasm.OpcodeValue("TEST", 0xa)
 
   private def database(form: NVDisasm.Form, tables: Vec[NVDisasm.LookupTable] = Vec.empty): NVDisasm.Database =
-    NVDisasm.Database("TEST", "", 16, Vec(form), tables)
+    NVDisasm.Database("", 64, Vec(form), tables)
 
   private def word(bytes: Array[Byte]): BigInt = BigInt(1, bytes.reverse)
 
   test("encoder writes independent opcode and operand fields and decodes them back") {
     val form = NVDisasm.Form(
-      Some(1),
       "TEST",
       alternate = false,
       Vec(opcodeValue),
@@ -34,11 +32,10 @@ class EncoderSuite extends munit.FunSuite {
             2
           )
         )
-      ),
-      Vec.empty
+      )
     )
     val bytes = Encoder.encode(database(form), form, "TEST", Map("A" -> BigInt(5), "B" -> BigInt(6))).toOption.get
-    assertEquals(bytes.toVec, Vec(0x5a.toByte, 0x03.toByte))
+    assertEquals(word(bytes), BigInt(0x035a))
     val candidate = FieldDecoder.candidates(database(form), word(bytes)).toOption.get.head
     assertEquals(candidate.bindings("A"), BigInt(5))
     assertEquals(candidate.bindings("B"), BigInt(6))
@@ -46,7 +43,6 @@ class EncoderSuite extends munit.FunSuite {
 
   test("preserved words supply only unassigned bits while assigned fields are recomputed") {
     val form = NVDisasm.Form(
-      Some(1),
       "TEST",
       alternate = false,
       Vec(opcodeValue),
@@ -61,8 +57,7 @@ class EncoderSuite extends munit.FunSuite {
             2
           )
         )
-      ),
-      Vec.empty
+      )
     )
     val encoded = Encoder.encode(
       database(form),
@@ -76,7 +71,6 @@ class EncoderSuite extends munit.FunSuite {
 
   test("forward evaluation handles multiply, identity, fixed-float, and float-convert expressions") {
     val form = NVDisasm.Form(
-      Some(4),
       "TRANSFORMS",
       alternate = false,
       Vec(opcodeValue),
@@ -116,11 +110,10 @@ class EncoderSuite extends munit.FunSuite {
             FloatEncoding.F32Imm
           )
         )
-      ),
-      Vec.empty
+      )
     )
     val encoded = Encoder.encode(
-      database(form).copy(width = 32),
+      database(form),
       form,
       "TEST",
       Map(
@@ -132,12 +125,11 @@ class EncoderSuite extends munit.FunSuite {
         "format"    -> BigInt(0)
       )
     ).toOption.get
-    assertEquals(encoded.toVec, Vec(0x6a.toByte, 0xb4.toByte, 0xda.toByte, 0x0c.toByte))
+    assertEquals(word(encoded), BigInt(0x0cdab46a))
   }
 
   test("encoder rejects values that overflow fields or cannot satisfy transforms") {
     val form = NVDisasm.Form(
-      Some(1),
       "TEST",
       alternate = false,
       Vec(opcodeValue),
@@ -152,8 +144,7 @@ class EncoderSuite extends munit.FunSuite {
             2
           )
         )
-      ),
-      Vec.empty
+      )
     )
     assert(Encoder.encode(database(form), form, "TEST", Map("A" -> BigInt(16), "B" -> BigInt(4))).isLeft)
     assert(Encoder.encode(database(form), form, "TEST", Map("A" -> BigInt(1), "B" -> BigInt(3))).isLeft)
@@ -162,7 +153,6 @@ class EncoderSuite extends munit.FunSuite {
 
   test("preserved lookup bits are accepted only when current inputs select that output") {
     val lookupForm = NVDisasm.Form(
-      Some(2),
       "LOOKUP",
       alternate = false,
       Vec(opcodeValue),
@@ -176,8 +166,7 @@ class EncoderSuite extends munit.FunSuite {
             Vec(NVDisasm.Expression.Reference("input", None, relaxed = false))
           )
         )
-      ),
-      Vec.empty
+      )
     )
     val table = NVDisasm.LookupTable(
       "ambiguous",
@@ -200,15 +189,13 @@ class EncoderSuite extends munit.FunSuite {
 
   test("relaxed constant fields preserve their original encoding") {
     val relaxed = NVDisasm.Form(
-      Some(5),
       "RELAXED",
       alternate = false,
       Vec(opcodeValue),
       Vec(
         opcodeField,
         NVDisasm.Assignment("reserved", Vec(4, 5, 6, 7), NVDisasm.Expression.Constant(BigInt(1), relaxed = true))
-      ),
-      Vec.empty
+      )
     )
     val encoded = Encoder.encode(database(relaxed), relaxed, "TEST", Map.empty, Some(BigInt("7a", 16))).toOption.get
     assertEquals(word(encoded), BigInt("7a", 16))
@@ -216,28 +203,24 @@ class EncoderSuite extends munit.FunSuite {
 
   test("conflicting overlapping field assignments are rejected") {
     val overlapping = NVDisasm.Form(
-      Some(3),
       "OVERLAP",
       alternate = false,
       Vec(opcodeValue),
       Vec(
         opcodeField,
         NVDisasm.Assignment("A", Vec(3, 4, 5, 6), NVDisasm.Expression.Reference("A", None, relaxed = false))
-      ),
-      Vec.empty
+      )
     )
     assert(Encoder.encode(database(overlapping), overlapping, "TEST", Map("A" -> BigInt(0))).isLeft)
   }
 
   test("invalid field positions are rejected before computing the assigned mask") {
-    Vec(Vec(-1), Vec(16), Vec(4, 4)).foreach { positions =>
+    Vec(Vec(-1), Vec(64), Vec(4, 4)).foreach { positions =>
       val form = NVDisasm.Form(
-        None,
         "INVALID",
         alternate = false,
         Vec(opcodeValue),
-        Vec(opcodeField, NVDisasm.Assignment("A", positions, NVDisasm.Expression.Constant(BigInt(0), false))),
-        Vec.empty
+        Vec(opcodeField, NVDisasm.Assignment("A", positions, NVDisasm.Expression.Constant(BigInt(0), false)))
       )
       assert(Encoder.encode(database(form), form, "TEST", Map.empty).isLeft)
     }

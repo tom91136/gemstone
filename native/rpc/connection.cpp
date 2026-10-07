@@ -140,27 +140,27 @@ uint32_t readU32(const uint8_t *data) { return (uint32_t{data[0]} << 24) | (uint
 } // namespace
 
 void Connection::poison() {
-  fd_ = FileDescriptor();
-  if (established_) poisoned_ = true;
+  fd = FileDescriptor();
+  if (established) poisoned = true;
 }
 bool Connection::connect() {
-  if (fd_.get() >= 0) return true;
-  if (poisoned_) {
-    error_ = "execution session was lost; create a fresh client and rebuild its state";
+  if (fd.get() >= 0) return true;
+  if (poisoned) {
+    error = "execution session was lost; create a fresh client and rebuild its state";
     return false;
   }
   const char *endpoint = environment::value(environment::RpcEndpoint);
   if (!endpoint || !*endpoint) {
-    error_ = std::string(environment::RpcEndpoint) + " is not set";
+    error = std::string(environment::RpcEndpoint) + " is not set";
     return false;
   }
-  timeoutMillis_ = socketTimeoutMillis();
-  fd_ = FileDescriptor(openEndpoint(endpoint, timeoutMillis_, error_));
-  if (fd_.get() < 0) {
-    if (error_.empty()) error_ = "cannot connect to the Gemstone RPC endpoint";
+  timeoutMillis = socketTimeoutMillis();
+  fd = FileDescriptor(openEndpoint(endpoint, timeoutMillis, error));
+  if (fd.get() < 0) {
+    if (error.empty()) error = "cannot connect to the Gemstone RPC endpoint";
     return false;
   }
-  established_ = true;
+  established = true;
   std::vector<uint8_t> hello;
   appendU32(hello, HelloMagic);
   appendU32(hello, static_cast<uint32_t>(Schema.size()));
@@ -169,17 +169,17 @@ bool Connection::connect() {
   if (Schema.size() > MaximumSchemaBytes || !send(hello) || !receive(reply) || readU32(reply.data()) != HelloResponseMagic
       || readU32(reply.data() + 4) != 0) {
     poison();
-    error_ = "execution RPC schema negotiation failed";
+    error = "execution RPC schema negotiation failed";
     return false;
   }
   return true;
 }
 bool Connection::send(std::span<const uint8_t> bytes) {
   while (!bytes.empty()) {
-    const auto count = ::send(fd_.get(), bytes.data(), bytes.size(), MSG_NOSIGNAL);
+    const auto count = ::send(fd.get(), bytes.data(), bytes.size(), MSG_NOSIGNAL);
     if (count < 0 && errno == EINTR) continue;
     if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-      if (ready(fd_.get(), POLLOUT, timeoutMillis_)) continue;
+      if (ready(fd.get(), POLLOUT, timeoutMillis)) continue;
       return false;
     }
     if (count <= 0) return false;
@@ -189,10 +189,10 @@ bool Connection::send(std::span<const uint8_t> bytes) {
 }
 bool Connection::receive(std::span<uint8_t> bytes) {
   while (!bytes.empty()) {
-    const auto count = ::recv(fd_.get(), bytes.data(), bytes.size(), 0);
+    const auto count = ::recv(fd.get(), bytes.data(), bytes.size(), 0);
     if (count < 0 && errno == EINTR) continue;
     if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-      if (ready(fd_.get(), POLLIN, timeoutMillis_)) continue;
+      if (ready(fd.get(), POLLIN, timeoutMillis)) continue;
       return false;
     }
     if (count <= 0) return false;
@@ -201,43 +201,43 @@ bool Connection::receive(std::span<uint8_t> bytes) {
   return true;
 }
 bool Connection::exchange(std::string_view operation, std::string_view payload, uint32_t &status, std::vector<uint8_t> &response) {
-  error_.clear();
+  error.clear();
   if (operation.empty() || operation.size() > MaximumTagBytes || payload.size() > MaximumPayload) {
-    error_ = "execution request exceeds frame bounds";
+    error = "execution request exceeds frame bounds";
     return false;
   }
   if (!connect()) return false;
   std::vector<uint8_t> header;
   header.reserve(RequestHeaderBytes + operation.size());
   appendU32(header, RequestMagic);
-  appendU64(header, client_);
-  appendU64(header, sessionHigh_);
-  appendU64(header, sessionLow_);
+  appendU64(header, client);
+  appendU64(header, sessionHigh);
+  appendU64(header, sessionLow);
   appendU32(header, static_cast<uint32_t>(operation.size()));
   appendU32(header, static_cast<uint32_t>(payload.size()));
   header.insert(header.end(), operation.begin(), operation.end());
   if (!send(header) || !send({reinterpret_cast<const uint8_t *>(payload.data()), payload.size()})) {
     poison();
-    error_ = "execution request transport failed";
+    error = "execution request transport failed";
     return false;
   }
   std::array<uint8_t, ResponseHeaderBytes> bytes{};
   if (!receive(bytes)) {
     poison();
-    error_ = "execution response transport failed";
+    error = "execution response transport failed";
     return false;
   }
   status = readU32(bytes.data() + ResponseStatusOffset);
   const uint32_t size = readU32(bytes.data() + ResponsePayloadSizeOffset);
   if (readU32(bytes.data()) != ResponseMagic || status > 1 || size > MaximumPayload) {
     poison();
-    error_ = "execution response header is invalid";
+    error = "execution response header is invalid";
     return false;
   }
   response.resize(size);
   if (!receive(response)) {
     poison();
-    error_ = "execution response body is truncated";
+    error = "execution response body is truncated";
     return false;
   }
   return true;

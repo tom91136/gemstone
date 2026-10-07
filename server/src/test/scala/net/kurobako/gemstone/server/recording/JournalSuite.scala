@@ -14,14 +14,13 @@ import scala.util.Using
 
 class JournalSuite extends munit.FunSuite {
   import journal.*
-  test("archive preserves sequenced frames and normalizes client identities") {
+  test("archive preserves sequenced frames and normalises client identities") {
     temporary { file =>
-      val owner = Object()
       capture(file) { writer =>
-        val generic = writer.connection(owner)
+        val generic = writer.connection(client)
         for (_ <- 0 until 2) { generic.request(execution()); generic.response(response()) }
         generic.close()
-        writer.clientClosed(owner)
+        writer.clientClosed(client)
       }
       Using.resource(Journal.open(file)) { reader =>
         assert(reader.summary.replayable)
@@ -34,7 +33,7 @@ class JournalSuite extends munit.FunSuite {
         val first = reader.frame(reader.events.head)
         assertEquals(
           first.toSeq,
-          Journal.Frames.normalized(
+          Journal.Frames.normalised(
             Journal.Kind.Request,
             execution(),
             Journal.FrameByteSize(4096)
@@ -43,49 +42,44 @@ class JournalSuite extends munit.FunSuite {
         first(0) = 0
         assertEquals(Frame.magic(reader.frame(reader.events.head)), ExecutionRPC.RequestMagic)
       }
-      val _ = intercept[IOException](Journal.Writer(file, Journal.Header(schema)))
+      val _ = intercept[IOException](Journal.Writer(file, Journal.Header(profile)))
     }
   }
-  test("client identities survive map storage and distinguish equal owners") {
-    case class Owner(value: Int)
+  test("distinct clients get distinct recorded ids and a reconnecting client keeps its id") {
     temporary { file =>
-      val first = Owner(1)
-      val equal = Owner(1)
+      val other = ClientId(9L)
       capture(file) { writer =>
-        writer.clientClosed(Owner(2))
-        for (owner <- List(first, first, equal)) {
+        writer.clientClosed(ClientId(7L))
+        for (owner <- List(client, client, other)) {
           val connection = writer.connection(owner)
-          connection.request(execution())
-          connection.response(response())
-          connection.close()
+          connection.request(execution()); connection.response(response()); connection.close()
         }
-        writer.clientClosed(first)
-        writer.clientClosed(equal)
+        writer.clientClosed(client)
+        writer.clientClosed(other)
       }
       Using.resource(Journal.open(file)) { reader =>
         assert(reader.summary.replayable)
         assertEquals(
-          reader.events.filter(_.kind == Journal.Kind.Request).map(_.client).toList,
-          List(Journal.RecordedClientId(1L), Journal.RecordedClientId(1L), Journal.RecordedClientId(2L))
+          reader.events.filter(_.kind == Journal.Kind.Request).map(_.client.raw).toList,
+          List(1L, 1L, 2L)
         )
-        assertEquals(reader.events.count(_.kind == Journal.Kind.ClientClose), 2)
+        assertEquals(reader.events.filter(_.kind == Journal.Kind.ClientClose).map(_.client.raw).toList, List(1L, 2L))
       }
     }
   }
 
   test("execution profile survives the archive and reaches the fresh endpoint factory") {
     temporary { file =>
-      val profile =
-        Journal.ExecutionProfile(2000000000L, 8)
-      val writer = Journal.Writer(file, Journal.Header(schema, executionProfile = Some(profile)))
+      val profile = Journal.ExecutionProfile(2000000000L, 8)
+      val writer  = Journal.Writer(file, Journal.Header(profile))
       writer.close()
       val observed = AtomicReference(Option.empty[Journal.ExecutionProfile])
       val closed   = AtomicBoolean(false)
       assertEquals(
         Replay.run(
-          Replay.Options(file, schema),
+          Replay.Options(file),
           header => {
-            observed.set(header.executionProfile);
+            observed.set(Some(header.executionProfile))
             Replay.Target(Endpoint.Tcp("127.0.0.1", Port(1)), () => closed.set(true))
           }
         ).events.raw,
@@ -98,7 +92,7 @@ class JournalSuite extends munit.FunSuite {
   test("truncated and corrupt archives fail instead of replaying a prefix") {
     temporary { file =>
       capture(file) { w =>
-        val c = w.connection(Object()); c.request(execution()); c.response(response()); c.close()
+        val c = w.connection(client); c.request(execution()); c.response(response()); c.close()
       }
       val original = Files.readAllBytes(file)
       Using.resource(RandomAccessFile(file.toFile, "rw"))(_.setLength(original.length - 1L))
@@ -113,27 +107,27 @@ class JournalSuite extends munit.FunSuite {
   test("unfinished exchanges and capture limits are explicitly unreplayable") {
     temporary { file =>
       capture(file) { w =>
-        val c = w.connection(Object()); c.request(execution()); c.close()
+        val c = w.connection(client); c.request(execution()); c.close()
       }
       val summary = Journal.inspect(file)
       assert(!summary.replayable)
       assert(summary.reason.exists(_.raw.contains("incomplete")))
       val started = AtomicBoolean(false)
       val _       = intercept[IOException](Replay.run(
-        Replay.Options(file, schema),
+        Replay.Options(file),
         _ => { started.set(true); Replay.Target(Endpoint.Tcp("127.0.0.1", Port(1)), () => ()) }
       ))
       assert(!started.get())
     }
     temporary { file =>
       val frame   = execution("Ping", Array.ofDim[Byte](5))
-      val maximum = Journal.FrameByteSize.either(frame.length - 1)
+      val maximum = (frame.length - 1).refine[Journal.FrameByteSize]
         .fold(message => fail(message), value => value)
       val writer = Journal.Writer(
         file,
-        Journal.Header(schema, Journal.Limits(maxFrameBytes = maximum))
+        Journal.Header(profile, Journal.Limits(maxFrameBytes = maximum))
       )
-      val connection = writer.connection(Object())
+      val connection = writer.connection(client)
       val _          = intercept[IOException](connection.request(frame))
       writer.close()
       assert(!Journal.inspect(file).replayable)
@@ -142,16 +136,16 @@ class JournalSuite extends munit.FunSuite {
   test("frame bounds include headers and lifecycle ordering is validated") {
     temporary { file =>
       val writer =
-        Journal.Writer(file, Journal.Header(schema, Journal.Limits(maxEvents = 2)))
-      val c = writer.connection(Object())
+        Journal.Writer(file, Journal.Header(profile, Journal.Limits(maxEvents = 2)))
+      val c = writer.connection(client)
       c.request(execution()); c.response(response())
       val _ = intercept[IOException](c.close())
       writer.close()
       assert(!Journal.inspect(file).replayable)
     }
     temporary { file =>
-      val writer = Journal.Writer(file, Journal.Header(schema))
-      val c      = writer.connection(Object())
+      val writer = Journal.Writer(file, Journal.Header(profile))
+      val c      = writer.connection(client)
       val _      = intercept[IOException](c.response(response()))
       writer.close()
       assert(!Journal.inspect(file).replayable)
@@ -159,13 +153,13 @@ class JournalSuite extends munit.FunSuite {
   }
   test("replay rejects a different stored schema before starting a server") {
     temporary { file =>
-      Using.resource(Journal.Writer(file, Journal.Header(schema, schema = ExecutionRPC.Schema.canonical + "changed")))(
+      Using.resource(Journal.Writer(file, Journal.Header(profile, schema = ExecutionRPC.Schema.canonical + "changed")))(
         _ => ()
       )
       val started = java.util.concurrent.atomic.AtomicBoolean(false)
       val _       = intercept[IOException] {
         Replay.run(
-          Replay.Options(file, schema),
+          Replay.Options(file),
           _ => {
             started.set(true)
             throw IllegalStateException("must not start")
@@ -178,63 +172,23 @@ class JournalSuite extends munit.FunSuite {
 
   test("the full schema counts against the archive byte budget before a file is published") {
     temporary { file =>
-      val header = Journal.Header(schema, Journal.Limits(maxArchiveBytes = Journal.ArchiveByteSize(5000L)))
+      val header = Journal.Header(profile, Journal.Limits(maxArchiveBytes = Journal.ArchiveByteSize(5000L)))
       val _      = intercept[IOException](Journal.Writer(file, header))
       assert(!Files.exists(file))
     }
   }
 
-  test("bounded prefixes validate full declared frame lengths without retaining payloads") {
+  test("stored requests must carry a normalised client field") {
     val maximum = Journal.Limits().maxFrameBytes
-    val frame   = Journal.Frames.normalized(
-      Journal.Kind.Request,
-      journal.execution("Ping", Array.fill[Byte](256 * 1024)(17)),
-      maximum
-    )
-    val prefix = frame.take(ExecutionRPC.RequestHeaderBytes.raw + "Ping".length)
-    Journal.Frames.validatePrefix(
-      kind = Journal.Kind.Request,
-      bytes = prefix,
-      frameSize = frame.length,
-      maximum = maximum,
-      normalized = true
-    )
-    val _ = intercept[java.io.IOException] {
-      Journal.Frames.validatePrefix(
-        kind = Journal.Kind.Request,
-        bytes = prefix,
-        frameSize = frame.length + 1,
-        maximum = maximum,
-        normalized = true
-      )
+    val frame   = Journal.Frames.normalised(Journal.Kind.Request, execution(), maximum)
+    Journal.Frames.validate(kind = Journal.Kind.Request, bytes = frame, maximum = maximum, normalised = true)
+    val _ = intercept[IOException] {
+      Journal.Frames.validate(kind = Journal.Kind.Response, bytes = frame, maximum = maximum, normalised = true)
     }
-    val _ = intercept[java.io.IOException] {
-      Journal.Frames.validatePrefix(
-        kind = Journal.Kind.Response,
-        bytes = prefix,
-        frameSize = frame.length,
-        maximum = maximum,
-        normalized = true
-      )
-    }
-    val _ = intercept[java.io.IOException] {
-      Journal.Frames.validatePrefix(
-        kind = Journal.Kind.Request,
-        bytes = prefix.take(ExecutionRPC.RequestHeaderBytes.raw - 1),
-        frameSize = frame.length,
-        maximum = maximum,
-        normalized = true
-      )
-    }
-    prefix(ExecutionRPC.RequestClientOffset.raw) = 1
-    intercept[java.io.IOException] {
-      Journal.Frames.validatePrefix(
-        kind = Journal.Kind.Request,
-        bytes = prefix,
-        frameSize = frame.length,
-        maximum = maximum,
-        normalized = true
-      )
+    frame(ExecutionRPC.RequestClientOffset.raw) = 1
+    Journal.Frames.validate(kind = Journal.Kind.Request, bytes = frame, maximum = maximum, normalised = false)
+    val _ = intercept[IOException] {
+      Journal.Frames.validate(kind = Journal.Kind.Request, bytes = frame, maximum = maximum, normalised = true)
     }
   }
 }

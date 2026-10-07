@@ -64,8 +64,8 @@ object Target extends Newtype[NonEmpty[String]] {
 
   private val classifications = entries[Processors].toMap
 
-  override protected def validate(value: NonEmpty[String]): Unit =
-    require(classifications.contains(value), s"unsupported AMDGPU processor target: $value")
+  override protected def violation(value: NonEmpty[String]): Option[NonEmpty[String]] =
+    Option.unless[NonEmpty[String]](classifications.contains(value))(s"unsupported AMDGPU processor target: $value")
 
   def apply[A <: String & Singleton](value: A)(using (A & Supported) =:= A): Target =
     apply((value: String).unsafe[NonEmpty[String]])

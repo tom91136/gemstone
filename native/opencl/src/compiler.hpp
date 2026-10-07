@@ -1,5 +1,4 @@
-#ifndef GEMSTONE_OPENCL_COMPILER_HPP
-#define GEMSTONE_OPENCL_COMPILER_HPP
+#pragma once
 
 #include <array>
 #include <string>
@@ -36,5 +35,3 @@ bool linkBitcode(const std::vector<std::vector<uint8_t>> &modules, std::vector<u
                  std::string &log);
 
 } // namespace gemstone::opencl
-
-#endif

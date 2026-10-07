@@ -24,16 +24,22 @@ object Launch {
 
   type Executable = Executable.Type
   object Executable extends Newtype[NonEmpty[String]] {
-    override protected def validate(value: NonEmpty[String]): Unit =
-      require(!value.contains('\u0000'), "executable must not contain a NUL character")
+    override protected def violation(value: NonEmpty[String]): Option[NonEmpty[String]] =
+      Option.when[NonEmpty[String]](value.contains('\u0000'))("executable must not contain a NUL character")
+  }
+
+  type Argument = Argument.Type
+  object Argument extends Newtype[String] {
+    override protected def violation(value: String): Option[NonEmpty[String]] =
+      Option.when[NonEmpty[String]](value.contains('\u0000'))("command argument contains a NUL character")
   }
 
   case class Options(
-      apis: Set[API],
+      apis: NonEmpty[Set[API]],
       serverEndpoint: Option[Endpoint],
       directory: Path,
       executable: Executable,
-      arguments: Vec[String]
+      arguments: Vec[Argument]
   )
 
   private class RunningProcess(val process: Process) extends AutoCloseable {
@@ -68,26 +74,17 @@ object Launch {
     process.exitValue()
   }
 
-  def validateArguments(arguments: Seq[String]): Either[String, Unit] =
-    arguments.zipWithIndex.collectFirst {
-      case (argument, index) if argument.contains('\u0000') =>
-        s"command argument ${index + 1} contains a NUL character"
-    }.toLeft(())
-
   def validate(options: Options): Either[String, Unit] =
-    validateArguments(options.arguments.toSeq).flatMap { _ =>
-      if (options.apis.isEmpty) Left("at least one API must be enabled")
-      else options.apis.toList.map(api => options.directory.resolve(api.lib)).find(path => !Files.isRegularFile(path))
-        .fold[Either[String, Unit]](Right(()))(path => Left(s"runtime provider is not a regular file: $path"))
-    }
+    options.apis.toList.map(api => options.directory.resolve(api.lib)).find(path => !Files.isRegularFile(path))
+      .toLeft(()).left.map(path => s"runtime provider is not a regular file: $path")
 
-  def run(options: Options): Either[String, Int] = validate(options).flatMap { _ =>
+  /** Run a process. Call `validate` first to report a missing runtime provider as a usage error. */
+  def run(options: Options): Either[String, Int] =
     launch(options.apis, options.directory, sys.env, options.serverEndpoint) { changes =>
-      val builder = ProcessBuilder((options.executable.raw +: options.arguments)*).inheritIO()
+      val builder = ProcessBuilder((options.executable.raw +: options.arguments.map(_.raw))*).inheritIO()
       changes.applyTo(builder.environment())
       Using.resource(RunningProcess(builder.start()))(running => waitForChild(running.process))
     }
-  }
 
   private class Registration(val endpoint: Endpoint) extends AutoCloseable {
     val client: ClientId        = Control.register(endpoint)
@@ -126,64 +123,61 @@ object Launch {
   }
 
   def launch[A](
-      apis: Set[API],
+      apis: NonEmpty[Set[API]],
       directory: Path,
       inherited: Map[String, String],
       serverEndpoint: Option[Endpoint] = None
   )(child: Launch.Environment => A): Either[String, A] =
     try
-      if (apis.isEmpty) Left("at least one API must be enabled")
-      else serverEndpoint match {
+      serverEndpoint match {
         case Some(endpoint) => Using.resource(Registration(endpoint)) { registration =>
-            prepareEnvironment(apis, directory, endpoint, registration.client, inherited).map(child)
+            Right(child(prepareEnvironment(apis, directory, endpoint, registration.client, inherited)))
           }
         case None => Server.Settings.fromEnvironment(inherited)
-            .left.map(message => s"invalid execution profile: $message").flatMap { settings =>
+            .left.map(message => s"invalid execution profile: $message").map { settings =>
               Using.resource(Server.start(settings)) { running =>
-                prepareEnvironment(apis, directory, running.endpoint, running.client, inherited).map(child)
+                child(prepareEnvironment(apis, directory, running.endpoint, running.client, inherited))
               }
             }
       }
     catch { case scala.util.control.NonFatal(error) => Left(throwables.detail(error)) }
 
   def prepareEnvironment(
-      apis: Set[API],
+      apis: NonEmpty[Set[API]],
       directory: Path,
       endpoint: Endpoint,
       client: ClientId,
       inherited: Map[String, String]
-  ): Either[String, Launch.Environment] =
-    if (apis.isEmpty) Left("at least one compute API must be enabled")
-    else {
-      val root    = directory.toAbsolutePath.normalize()
-      val preload = API.values.view.filter(apis).collect {
-        case api @ (API.CUDA | API.HIP | API.HSA | API.OpenCL) => root.resolve(api.lib)
-      }.toVector
-      val directories = (preload ++ Option.when(apis(API.Vulkan))(root.resolve(API.Vulkan.lib))).flatMap(path =>
-        Option(path.getParent)
-      ).distinct
-      val inheritedPreload     = inherited.get("LD_PRELOAD").filter(_.nonEmpty).toVector
-      val inheritedLibraryPath = inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty).toVector
-      val common               = Map[String, String](
-        env.RpcEndpoint -> endpoint.toString,
-        env.RpcClient   -> s"$client"
-      )
-      val dynamic = Map.newBuilder[String, String]
-      if (preload.nonEmpty) dynamic +=
-        "LD_PRELOAD" -> (preload.map(path => s"$path") ++ inheritedPreload).mkString(":")
-      if (directories.nonEmpty)
-        dynamic +=
-          "LD_LIBRARY_PATH" -> (directories.map(path => s"$path") ++ inheritedLibraryPath).mkString(":")
-      if (apis(API.OpenCL)) {
-        dynamic += "OCL_ICD_FILENAMES" -> s"${root.resolve(API.OpenCL.lib)}"
-        dynamic += "OCL_ICD_VENDORS"   -> s"${root.resolve(API.OpenCL.lib)}"
-      }
-      if (apis(API.LevelZero)) {
-        dynamic += "ZE_ENABLE_ALT_DRIVERS"        -> s"${root.resolve(API.LevelZero.lib)}"
-        dynamic += "ZE_ENABLE_LOADER_DEBUG_TRACE" -> "0"
-      }
-      Right(Launch.Environment(common ++ dynamic.result(), RemovedOverrides))
+  ): Launch.Environment = {
+    val root    = directory.toAbsolutePath.normalize()
+    val preload = API.values.view.filter(apis).collect {
+      case api @ (API.CUDA | API.HIP | API.HSA | API.OpenCL) => root.resolve(api.lib)
+    }.toVector
+    val directories = (preload ++ Option.when(apis(API.Vulkan))(root.resolve(API.Vulkan.lib))).flatMap(path =>
+      Option(path.getParent)
+    ).distinct
+    val inheritedPreload     = inherited.get("LD_PRELOAD").filter(_.nonEmpty).toVector
+    val inheritedLibraryPath = inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty).toVector
+    val common               = Map[String, String](
+      env.RpcEndpoint -> endpoint.toString,
+      env.RpcClient   -> s"$client"
+    )
+    val dynamic = Map.newBuilder[String, String]
+    if (preload.nonEmpty) dynamic +=
+      "LD_PRELOAD" -> (preload.map(path => s"$path") ++ inheritedPreload).mkString(":")
+    if (directories.nonEmpty)
+      dynamic +=
+        "LD_LIBRARY_PATH" -> (directories.map(path => s"$path") ++ inheritedLibraryPath).mkString(":")
+    if (apis(API.OpenCL)) {
+      dynamic += "OCL_ICD_FILENAMES" -> s"${root.resolve(API.OpenCL.lib)}"
+      dynamic += "OCL_ICD_VENDORS"   -> s"${root.resolve(API.OpenCL.lib)}"
     }
+    if (apis(API.LevelZero)) {
+      dynamic += "ZE_ENABLE_ALT_DRIVERS"        -> s"${root.resolve(API.LevelZero.lib)}"
+      dynamic += "ZE_ENABLE_LOADER_DEBUG_TRACE" -> "0"
+    }
+    Launch.Environment(common ++ dynamic.result(), RemovedOverrides)
+  }
 
   private val RemovedOverrides = Set(
     env.Record,

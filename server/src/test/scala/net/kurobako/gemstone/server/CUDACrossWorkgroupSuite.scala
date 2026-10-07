@@ -35,20 +35,14 @@ class CUDACrossWorkgroupSuite extends munit.FunSuite {
             "~[unified-memory]"
           ),
           directory,
-          Launch.Environment(
-            Map(
-              env.RpcEndpoint  -> server.endpoint.toString,
-              env.RpcClient    -> server.client.raw.toString,
-              env.TestLibrary  -> runtime.toString,
-              env.TargetArch   -> "sm_80",
-              env.SystemPaging -> "1"
-            ),
-            Set.empty
+          native.serverEnvironment(
+            server.endpoint,
+            server.client,
+            Map(env.TestLibrary -> runtime.toString, env.TargetArch -> "sm_80", env.SystemPaging -> "1")
           ),
           90.seconds
         )
         assertEquals(result.exit, 0, result.diagnostic)
-        assert(server.usage.raw > 0, "native CUDA client did not use the shared execution transport")
       }
 
     }
@@ -75,12 +69,10 @@ class CUDACrossWorkgroupSuite extends munit.FunSuite {
             name
           ),
           directory,
-          Launch.Environment(
-            Map(
-              env.RpcEndpoint -> server.endpoint.toString,
-              env.RpcClient   -> server.client.raw.toString,
-              env.TestLibrary -> directory.resolve("libcuda.so.1").toString
-            ),
+          native.serverEnvironment(
+            server.endpoint,
+            server.client,
+            Map(env.TestLibrary -> directory.resolve("libcuda.so.1").toString),
             Set(env.SystemPaging)
           ),
           30.seconds

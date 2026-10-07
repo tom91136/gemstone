@@ -1,11 +1,14 @@
-#include "gemstone/hsa/doorbell_monitor.h"
+#include "gemstone/hsa/doorbell_monitor.hpp"
 
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <fstream>
+#include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -14,6 +17,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 namespace {
+
+using gemstone::hsa::DoorbellMonitor;
+using gemstone::hsa::PacketResult;
 
 constexpr uint16_t Invalid = 1;
 constexpr uint16_t Dispatch = 2;
@@ -29,26 +35,24 @@ static_assert(sizeof(Packet) == 64);
 struct Captures {
   std::mutex lock;
   std::condition_variable changed;
-  std::vector<uint64_t> packet_ids;
+  std::vector<uint64_t> packetIds;
   std::vector<uint32_t> markers;
 };
 
-gemstone_hsa_packet_result capture(uint64_t, uint64_t packet_id, const void *raw, size_t size, void *user_data) {
-  REQUIRE((size == sizeof(Packet)));
+PacketResult capture(Captures &captures, uint64_t packetId, const void *raw) {
   const auto &packet = *static_cast<const Packet *>(raw);
-  auto &captures = *static_cast<Captures *>(user_data);
   {
     std::lock_guard<std::mutex> guard(captures.lock);
-    captures.packet_ids.push_back(packet_id);
+    captures.packetIds.push_back(packetId);
     captures.markers.push_back(packet.marker);
   }
   captures.changed.notify_all();
-  return GEMSTONE_HSA_PACKET_ACCEPTED;
+  return PacketResult::Accepted;
 }
 
 bool waitFor(Captures &captures, size_t count, std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
   std::unique_lock<std::mutex> guard(captures.lock);
-  return captures.changed.wait_for(guard, timeout, [&] { return captures.packet_ids.size() >= count; });
+  return captures.changed.wait_for(guard, timeout, [&] { return captures.packetIds.size() >= count; });
 }
 
 void publish(Packet &packet, uint32_t marker) {
@@ -57,131 +61,114 @@ void publish(Packet &packet, uint32_t marker) {
 }
 
 struct QueueFixture {
-  explicit QueueFixture(gemstone_hsa_doorbell_monitor *owner, uint64_t id, size_t size = 8) : monitor(owner), ring(size) {
+  explicit QueueFixture(DoorbellMonitor &monitor, size_t size = 8) : ring(size) {
     for (auto &packet : ring)
       packet.header = Invalid;
-    gemstone_hsa_queue_descriptor descriptor{};
-    descriptor.queue_id = id;
-    descriptor.ring_base = ring.data();
-    descriptor.ring_size_packets = ring.size();
-    descriptor.packet_size = sizeof(Packet);
-    descriptor.packet_header_offset = offsetof(Packet, header);
-    descriptor.packet_type_mask = 0xff;
-    descriptor.invalid_packet_type = Invalid;
-    descriptor.read_index = &read_index;
-    descriptor.write_index = &write_index;
-    descriptor.consume = capture;
-    descriptor.user_data = &captures;
-    registration = gemstone_hsa_doorbell_monitor_register(monitor, &descriptor, &doorbell);
-    REQUIRE((registration));
-    REQUIRE((doorbell));
+    queue = monitor.registerQueue(
+        ring.data(), ring.size(), [this](uint64_t, uint64_t packetId, const void *packet) { return capture(captures, packetId, packet); },
+        &readIndex, &writeIndex);
+    REQUIRE((queue));
   }
 
-  ~QueueFixture() {
-    if (registration) gemstone_hsa_doorbell_monitor_unregister(registration);
-  }
+  void ringDoorbell(uint64_t value) { __atomic_store_n(queue->doorbell(), value, __ATOMIC_RELEASE); }
+  void setWrite(uint64_t value) { __atomic_store_n(&writeIndex, value, __ATOMIC_RELEASE); }
 
-  void ring_doorbell(uint64_t value) { __atomic_store_n(doorbell, value, __ATOMIC_RELEASE); }
-  void set_write(uint64_t value) { __atomic_store_n(&write_index, value, __ATOMIC_RELEASE); }
-
-  gemstone_hsa_doorbell_monitor *monitor;
   std::vector<Packet> ring;
-  uint64_t read_index = 0;
-  uint64_t write_index = 0;
-  uint64_t *doorbell = nullptr;
-  gemstone_hsa_queue_registration *registration = nullptr;
+  uint64_t readIndex = 0;
+  uint64_t writeIndex = 0;
   Captures captures;
+  std::unique_ptr<gemstone::hsa::AqlQueue> queue;
 };
 
-void firstRingGatesDispatch(gemstone_hsa_doorbell_monitor *monitor) {
-  QueueFixture queue(monitor, 1);
+void firstRingGatesDispatch(DoorbellMonitor &monitor) {
+  QueueFixture queue(monitor);
   publish(queue.ring[0], 10);
-  queue.set_write(1);
+  queue.setWrite(1);
   REQUIRE((!waitFor(queue.captures, 1, std::chrono::milliseconds(10))));
-  queue.ring_doorbell(0);
+  queue.ringDoorbell(0);
   REQUIRE((waitFor(queue.captures, 1)));
 }
 
-void repeatedDoorbellValueDoesNotLoseWork(gemstone_hsa_doorbell_monitor *monitor) {
-  QueueFixture queue(monitor, 2);
+void repeatedDoorbellValueDoesNotLoseWork(DoorbellMonitor &monitor) {
+  QueueFixture queue(monitor);
   publish(queue.ring[0], 20);
-  queue.set_write(1);
-  queue.ring_doorbell(0);
+  queue.setWrite(1);
+  queue.ringDoorbell(0);
   REQUIRE((waitFor(queue.captures, 1)));
 
   publish(queue.ring[1], 21);
-  queue.set_write(2);
-  queue.ring_doorbell(0);
+  queue.setWrite(2);
+  queue.ringDoorbell(0);
   REQUIRE((waitFor(queue.captures, 2)));
   REQUIRE(((queue.captures.markers == std::vector<uint32_t>{20, 21})));
 }
 
-void invalidHoleBlocksLaterPacket(gemstone_hsa_doorbell_monitor *monitor) {
-  QueueFixture queue(monitor, 3);
+void invalidHoleBlocksLaterPacket(DoorbellMonitor &monitor) {
+  QueueFixture queue(monitor);
   publish(queue.ring[1], 31);
-  queue.set_write(2);
-  queue.ring_doorbell(1);
+  queue.setWrite(2);
+  queue.ringDoorbell(1);
   REQUIRE((!waitFor(queue.captures, 1, std::chrono::milliseconds(10))));
 
   publish(queue.ring[0], 30);
-  queue.ring_doorbell(1);
+  queue.ringDoorbell(1);
   REQUIRE((waitFor(queue.captures, 2)));
   REQUIRE(((queue.captures.markers == std::vector<uint32_t>{30, 31})));
 }
 
-void wraparoundCannotConsumeStaleHeader(gemstone_hsa_doorbell_monitor *monitor) {
-  QueueFixture queue(monitor, 4, 2);
+void wraparoundCannotConsumeStaleHeader(DoorbellMonitor &monitor) {
+  QueueFixture queue(monitor, 2);
   publish(queue.ring[0], 40);
   publish(queue.ring[1], 41);
-  queue.set_write(2);
-  queue.ring_doorbell(1);
+  queue.setWrite(2);
+  queue.ringDoorbell(1);
   REQUIRE((waitFor(queue.captures, 2)));
 
   // Reserve the wrapped slot without publishing it. Consuming the old header
   // here would duplicate marker 40.
-  queue.set_write(3);
-  queue.ring_doorbell(2);
+  queue.setWrite(3);
+  queue.ringDoorbell(2);
   REQUIRE((!waitFor(queue.captures, 3, std::chrono::milliseconds(10))));
   publish(queue.ring[0], 42);
   REQUIRE((waitFor(queue.captures, 3)));
   REQUIRE(((queue.captures.markers == std::vector<uint32_t>{40, 41, 42})));
 }
 
-void queuesShareWorkerAndUnregisterIsQuiescent(gemstone_hsa_doorbell_monitor *monitor) {
-  REQUIRE((gemstone_hsa_doorbell_monitor_thread_count(monitor) == 2));
-  QueueFixture first(monitor, 5);
-  QueueFixture second(monitor, 6);
+void queuesShareWorkerAndUnregisterIsQuiescent(DoorbellMonitor &monitor) {
+  QueueFixture first(monitor);
+  QueueFixture second(monitor);
   publish(first.ring[0], 50);
   publish(second.ring[0], 60);
-  first.set_write(1);
-  second.set_write(1);
-  first.ring_doorbell(0);
-  second.ring_doorbell(0);
+  first.setWrite(1);
+  second.setWrite(1);
+  first.ringDoorbell(0);
+  second.ringDoorbell(0);
   REQUIRE((waitFor(first.captures, 1)));
   REQUIRE((waitFor(second.captures, 1)));
 
-  gemstone_hsa_doorbell_monitor_unregister(first.registration);
-  first.registration = nullptr;
+  first.queue.reset();
   publish(first.ring[1], 51);
-  first.set_write(2);
+  first.setWrite(2);
   REQUIRE((!waitFor(first.captures, 2, std::chrono::milliseconds(10))));
+}
+
+unsigned threadCount() {
+  std::ifstream status("/proc/self/status");
+  for (std::string line; std::getline(status, line);)
+    if (line.starts_with("Threads:")) return static_cast<unsigned>(std::stoul(line.substr(8)));
+  return 0;
 }
 
 } // namespace
 
 TEST_CASE("HSA doorbell monitor scheduling", "[hsa][doorbell]") {
-  gemstone_hsa_doorbell_monitor_config config{};
-  config.max_queues = 16;
-  config.spin_passes = 8;
-  config.maximum_sleep_ns = 10000;
-  auto *monitor = gemstone_hsa_doorbell_monitor_create(&config);
-  REQUIRE((monitor));
-
+  const auto threads = threadCount();
+  DoorbellMonitor monitor;
+  REQUIRE((threads != 0 && threadCount() == threads + 2));
   firstRingGatesDispatch(monitor);
   repeatedDoorbellValueDoesNotLoseWork(monitor);
   invalidHoleBlocksLaterPacket(monitor);
   wraparoundCannotConsumeStaleHeader(monitor);
   queuesShareWorkerAndUnregisterIsQuiescent(monitor);
-
-  gemstone_hsa_doorbell_monitor_destroy(monitor);
+  REQUIRE((threadCount() == threads + 2));
 }

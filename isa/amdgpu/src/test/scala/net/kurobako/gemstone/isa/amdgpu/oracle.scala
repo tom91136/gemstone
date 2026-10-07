@@ -22,13 +22,8 @@ private object oracle {
       case invalid        => throw IllegalArgumentException(s"invalid LLVM oracle manifest line: $invalid")
     }.groupMap(_._1)(_._2)
 
-  val sourceFileCount: Int            = property("source-files")
-  val sourceEncodingCheckCount: Int   = property("source-encoding-checks")
-  val sourceDiagnosticCheckCount: Int = property("source-diagnostic-checks")
-  val sourceCaseCount: Int            = property("source-positive-cases")
-  val sourceDiagnosticCount: Int      = property("source-diagnostic-cases")
-  val selectedCaseCount: Int          = property("selected-positive-cases")
-  val selectedDiagnosticCount: Int    = property("selected-diagnostic-cases")
+  val selectedCaseCount: Int       = property("selected-positive-cases")
+  val selectedDiagnosticCount: Int = property("selected-diagnostic-cases")
 
   private lazy val loaded: Loaded =
     manifest.getOrElse("file", Vec.empty[String]).map(load(_))
@@ -48,7 +43,7 @@ private object oracle {
   private def load(name: String): Loaded = {
     val content = lines(name)
     val target  = content.collectFirst { case s"// TARGET: $value" =>
-      Target.either(value.toLowerCaseRoot).fold(
+      value.toLowerCaseRoot.refine[Target].fold(
         message => throw IllegalArgumentException(message),
         value => value
       )

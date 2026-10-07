@@ -17,18 +17,14 @@ object CodeObjectMetadata {
       hiddenArguments: Vec[HiddenArgument]
   )
 
-  private val MetadataNoteType        = 32
-  private val MaximumDepth            = 64
-  private val MaximumContainerEntries = 1 << 20
+  private val MetadataNoteType                 = 32
+  private val MaximumDepth                     = 64
+  private val MaximumContainerEntries: Int > 0 = 1048576
 
   def decode(image: Vec[Byte]): Either[CodeObjectError, Vec[KernelManifest]] =
-    decodeOptional(image).flatMap(_.toRight(CodeObjectError.Invalid("AMDGPU metadata note is absent")))
-
-  /** Decode kernel metadata when present. Metadata-free ELF code objects still have usable symbols, globals, and code;
-    * callers that only need those facilities must not reject the entire object.
-    */
-  def decodeOptional(image: Vec[Byte]): Either[CodeObjectError, Option[Vec[KernelManifest]]] =
-    ELF.notes(image).flatMap(decodeNotes(_))
+    ELF.notes(
+      image
+    ).flatMap(decodeNotes(_)).flatMap(_.toRight(CodeObjectError.Invalid("AMDGPU metadata note is absent")))
 
   def decodeNotes(notes: Vec[Vec[Byte]]): Either[CodeObjectError, Option[Vec[KernelManifest]]] =
     notes.foldLeft[Either[CodeObjectError, Option[Vec[KernelManifest]]]](Right(None)) { (result, note) =>
@@ -90,7 +86,7 @@ object CodeObjectMetadata {
 
   private def decodeParameter(reader: Reader): Either[CodeObjectError, (KernelMetadata.Parameter, Option[String])] =
     reader.mapSize.flatMap { count =>
-      (0 until count).foldLeft[Either[CodeObjectError, ParameterFields]](
+      (0 until count.raw).foldLeft[Either[CodeObjectError, ParameterFields]](
         Right(ParameterFields(None, None, None))
       ) { case (result, _) =>
         result.flatMap { fields =>
@@ -103,7 +99,7 @@ object CodeObjectMetadata {
         }
       }.flatMap { fields =>
         (fields.offset, fields.width, fields.valueKind) match {
-          case (Some(offset), Some(width), Some(valueKind)) if width.raw > 0 =>
+          case (Some(offset), Some(width), Some(valueKind)) =>
             val allocation = Set("global_buffer", "by_reference", "queue").contains(valueKind)
             for {
               refinedWidth <- width.raw.refine[Int > 0].left.map(_ =>
@@ -134,7 +130,7 @@ object CodeObjectMetadata {
 
   private def decodeKernel(reader: Reader): Either[CodeObjectError, KernelManifest] =
     reader.mapSize.flatMap { count =>
-      (0 until count).foldLeft[Either[CodeObjectError, KernelFields]](
+      (0 until count.raw).foldLeft[Either[CodeObjectError, KernelFields]](
         Right(KernelFields(None, None, None, None))
       ) { case (result, _) =>
         result.flatMap { fields =>
@@ -144,7 +140,7 @@ object CodeObjectMetadata {
             case ".kernarg_segment_size" => reader.uint32.map(value => fields.copy(argumentBlockSize = Some(value)))
             case ".args"                 =>
               reader.arraySize.flatMap { parameterCount =>
-                (0 until parameterCount).foldLeft[Either[CodeObjectError, Vec[(
+                (0 until parameterCount.raw).foldLeft[Either[CodeObjectError, Vec[(
                     KernelMetadata.Parameter,
                     Option[String]
                 )]]](
@@ -188,11 +184,11 @@ object CodeObjectMetadata {
 
   private def decodeMetadata(reader: Reader): Either[CodeObjectError, Vec[KernelManifest]] =
     reader.mapSize.flatMap { count =>
-      (0 until count).foldLeft[Either[CodeObjectError, Option[Vec[KernelManifest]]]](Right(None)) {
+      (0 until count.raw).foldLeft[Either[CodeObjectError, Option[Vec[KernelManifest]]]](Right(None)) {
         case (result, _) => result.flatMap { found =>
             reader.string.flatMap {
               case "amdhsa.kernels" => reader.arraySize.flatMap { kernelCount =>
-                  (0 until kernelCount).foldLeft[Either[CodeObjectError, Vec[KernelManifest]]](
+                  (0 until kernelCount.raw).foldLeft[Either[CodeObjectError, Vec[KernelManifest]]](
                     Right(Vec.empty)
                   )((kernels, _) => kernels.flatMap(values => decodeKernel(reader).map(values.appended)))
                     .map(Some(_))
@@ -210,19 +206,19 @@ object CodeObjectMetadata {
 
   private class Reader(bytes: Array[Byte], start: Int, size: Int) {
     private val input = msgpack.Reader(
-      bytes = bytes,
-      start = start,
-      size = size,
-      maximumElements = MaximumContainerEntries
+      bytes,
+      start,
+      size,
+      msgpack.Limits(MaximumContainerEntries, Int.MaxValue, Int.MaxValue)
     )
     private def checked[A](result: Either[String, A]): Either[CodeObjectError, A] =
       result.left.map(message => CodeObjectError.Invalid(message.unsafe[NonEmpty[String]]))
 
-    def finished: Boolean                         = input.remaining == 0
-    def string: Either[CodeObjectError, String]   = checked(input.readString(strict = true))
-    def uint32: Either[CodeObjectError, Int >= 0] = checked(input.readUnsignedInt()).map(_.unsafe[Int >= 0])
-    def mapSize: Either[CodeObjectError, Int]     = checked(input.readMapHeader())
-    def arraySize: Either[CodeObjectError, Int]   = checked(input.readArrayHeader())
-    def skip(): Either[CodeObjectError, Unit]     = checked(input.skip(MaximumDepth))
+    def finished: Boolean                            = input.remaining == 0
+    def string: Either[CodeObjectError, String]      = checked(input.readString(strict = true))
+    def uint32: Either[CodeObjectError, Int >= 0]    = checked(input.readUnsignedInt())
+    def mapSize: Either[CodeObjectError, Int >= 0]   = checked(input.readMapHeader())
+    def arraySize: Either[CodeObjectError, Int >= 0] = checked(input.readArrayHeader())
+    def skip(): Either[CodeObjectError, Unit]        = checked(input.skip(MaximumDepth))
   }
 }

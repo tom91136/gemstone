@@ -74,6 +74,21 @@ class StringSuite extends munit.FunSuite {
     ).foreach(value => assertEquals(parseBigIntLiteral(value), None))
   }
 
+  test("binary and octal literals and digit separators are accepted only when requested") {
+    assertEquals(parseBigIntLiteral("0b101"), None)
+    assertEquals(parseBigIntLiteral("-0B101", binary = true), Some(BigInt(-5)))
+    assertEquals(parseBigIntLiteral("017"), Some(BigInt(17)))
+    assertEquals(parseBigIntLiteral("017", octal = true), Some(BigInt(15)))
+    assertEquals(parseBigIntLiteral("0", octal = true), Some(BigInt(0)))
+    assertEquals(parseBigIntLiteral("019", octal = true), None)
+    assertEquals(parseBigIntLiteral("0x_ff_ff", separators = true), Some(BigInt(0xffff)))
+    assertEquals(parseBigIntLiteral("0b1_0", binary = true, separators = true), Some(BigInt(2)))
+    Seq("0b", "0b2", "0b_", "_", "0x_", "0b-1", "1__x").foreach(value =>
+      assertEquals(parseBigIntLiteral(value, binary = true, separators = true), None, value)
+    )
+    assert(isDigit('f', 16) && !isDigit('g', 16) && !isDigit('2', 2) && !isDigit('\u0663', 10))
+  }
+
   test("UTF-8 decoding preserves Unicode and rejects malformed input") {
     val text   = "kernel_λ_😀"
     val bytes  = text.getBytes(java.nio.charset.StandardCharsets.UTF_8)

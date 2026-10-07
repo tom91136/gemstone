@@ -107,14 +107,4 @@ object NumericCases {
     (0x7fc12345L, 0xffc54321L, false, true),
     (0x7f800000L, 0x7f800000L, true, false)
   )
-
-  // PTX permits NaN encodings to differ; preserve every non-NaN bit, including signed zero.
-  def canonicalHalf(bits: Long): Long =
-    if ((bits & 0x7c00L) == 0x7c00L && (bits & 0x03ffL) != 0) 0x7fffL else bits & 0xffffL
-
-  def canonicalPackedHalf(bits: Long): Long = canonicalHalf(bits) | (canonicalHalf(bits >>> 16) << 16)
-
-  def canonicalFloat(bits: Long): Long =
-    if ((bits & 0x7f800000L) == 0x7f800000L && (bits & 0x007fffffL) != 0) 0x7fffffffL
-    else bits & 0xffffffffL
 }

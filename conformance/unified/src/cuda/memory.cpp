@@ -10,11 +10,10 @@
 namespace {
 using namespace memory_patterns;
 // Prerequisites apply only to the selected allocation and operation.
-uint64_t prerequisites(const std::string &kind, bool atomic) {
-  auto selected = conformance::device_selection().native_handle;
+CUdevice prerequisites(const std::string &kind, bool atomic) {
+  (void)conformance::deviceSelection();
   CUdevice ordinal{};
   check(cuCtxGetDevice(&ordinal));
-  selected = ordinal;
   auto attribute = [&](CUdevice_attribute name) {
     int value{};
     check(cuDeviceGetAttribute(&value, name, ordinal));
@@ -31,12 +30,12 @@ uint64_t prerequisites(const std::string &kind, bool atomic) {
       && (!attribute(CU_DEVICE_ATTRIBUTE_HOST_NATIVE_ATOMIC_SUPPORTED)
           || (kind == "managed" && !attribute(CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS))))
     SKIP("allocation lacks concurrent host/device atomics");
-  return selected;
+  return ordinal;
 }
 void execute(const char *kind, unsigned scenario) {
-  const auto selected = prerequisites(kind, scenario >= 6);
+  const auto device = prerequisites(kind, scenario >= 6);
   const unsigned operation = scenario >= 7 ? (scenario - 7) % 4 : 4;
-  Backend backend(kind, selected,
+  Backend backend(kind, static_cast<uint64_t>(device),
                   scenario == 6    ? "exchange.ptx"
                   : operation == 1 ? "fence.ptx"
                   : operation == 2 ? "contended.ptx"
@@ -46,18 +45,8 @@ void execute(const char *kind, unsigned scenario) {
 }
 } // namespace
 
-#define UNIFIED_MEMORY_ALLOCATION "managed"
-#define UNIFIED_MEMORY_TAGS ""
 #include "cases/memory.inl"
 
-#undef UNIFIED_MEMORY_ALLOCATION
-#undef UNIFIED_MEMORY_TAGS
-#define UNIFIED_MEMORY_ALLOCATION "pinned"
-#define UNIFIED_MEMORY_TAGS "[full-matrix]"
-#include "cases/memory.inl"
-
-#undef UNIFIED_MEMORY_ALLOCATION
-#undef UNIFIED_MEMORY_TAGS
-#define UNIFIED_MEMORY_ALLOCATION "registered"
-#define UNIFIED_MEMORY_TAGS "[full-matrix]"
-#include "cases/memory.inl"
+UNIFIED_MEMORY_CASES("managed", "")
+UNIFIED_MEMORY_CASES("pinned", "[full-matrix]")
+UNIFIED_MEMORY_CASES("registered", "[full-matrix]")

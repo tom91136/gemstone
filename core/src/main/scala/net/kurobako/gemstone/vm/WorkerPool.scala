@@ -22,8 +22,10 @@ object WorkerPool {
   */
 class WorkerPool(
     val parallelism: Int > 0,
-    minGroups: Long >= 0 = 16L,
-    minWorkItems: Long >= 0 = 64L,
+    // Small groups can still contain long-running kernels. Do not raise the serial threshold
+    // with the machine core count: even two independent groups can keep another worker busy.
+    minGroups: Long >= 0 = 2L,
+    minWorkItems: Long >= 0 = 32L,
     reporter: Throwable => Unit = _.printStackTrace(),
     measurement: Option[WorkerPool.Measurement => Unit] = None
 ) extends Workgroups with scala.concurrent.ExecutionContext with AutoCloseable {
@@ -59,7 +61,7 @@ class WorkerPool(
     thread
   }
 
-  /** Bound each claim so a large dispatch cannot monopolize workers while another client waits. */
+  /** Bound each claim so a large dispatch cannot monopolise workers while another client waits. */
   private def grainFor(count: Long >= 0): Int in 1 ~ 128 = {
     val perWorker = parallelism.raw.toLong * 4L
     val grain     = if (count.raw <= perWorker) 1L else (count.raw - 1L) / perWorker + 1L

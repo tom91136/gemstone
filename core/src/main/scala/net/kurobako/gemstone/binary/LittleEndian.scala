@@ -34,7 +34,13 @@ object LittleEndian {
   def decodeInt64(bytes: Array[Byte], offset: Int): Long =
     decode(bytes, offset, 8)
 
+  def decodeInt64(bytes: Vec[Byte], offset: Int): Long =
+    decode(bytes, offset, 8)
+
   def decodeUInt16(bytes: Array[Byte], offset: Int): Int in 0 ~ 65535 =
+    Bits.low16Int(decode(bytes, offset, 2))
+
+  def decodeUInt16(bytes: Vec[Byte], offset: Int): Int in 0 ~ 65535 =
     Bits.low16Int(decode(bytes, offset, 2))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))

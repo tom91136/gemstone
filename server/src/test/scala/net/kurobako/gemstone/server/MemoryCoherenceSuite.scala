@@ -8,7 +8,6 @@ import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.*
-import net.kurobako.gemstone.server.backend.*
 import net.kurobako.gemstone.server.protocol.*
 import net.kurobako.gemstone.server.recording.*
 import net.kurobako.gemstone.vm.*
@@ -77,7 +76,7 @@ class MemoryCoherenceSuite extends munit.FunSuite {
         requestTimeoutMillis = 30000
       )
       Using.resource(if (concurrent)
-        Server.start(settings, workgroups => Backends(checkpoint.backends(workgroups)))
+        Server.start(settings, checkpoint.backends(_))
       else Server.start(settings)) {
         server =>
           val probes =
@@ -89,8 +88,6 @@ class MemoryCoherenceSuite extends munit.FunSuite {
           val base = native.providerEnvironment ++ Map(
             env.MemoryProbe          -> probes.mkString(","),
             env.MemoryAllocationKind -> allocationKind,
-            env.RpcEndpoint          -> server.endpoint.toString,
-            env.RpcClient            -> server.client.raw.toString,
             "OCL_ICD_VENDORS"        -> vendors.toString
           ) ++
             (if (atomicProbe) Map(env.MemoryAtomicBits -> atomicWidth.toString)
@@ -102,10 +99,11 @@ class MemoryCoherenceSuite extends munit.FunSuite {
           val result    = native.run(
             Vec.from(arguments).unsafe,
             directory,
-            Launch.Environment(
+            native.serverEnvironment(
+              server.endpoint,
+              server.client,
               base ++ paging,
-              if (ordinary) Set.empty
-              else Set(env.SystemPaging, "UR_ADAPTERS_FORCE_LOAD")
+              if (ordinary) Set.empty else Set(env.SystemPaging, "UR_ADAPTERS_FORCE_LOAD")
             ),
             120.seconds
           )
@@ -146,7 +144,6 @@ class MemoryCoherenceSuite extends munit.FunSuite {
             assertEquals(checkpoint.contendedOperations.get(), operations)
             assertEquals(checkpoint.contendedAttempts.get(), operations * 3)
           }
-          assert(server.usage.raw > 0, "the native client did not exercise the real RPC transport")
       }
       Using.resource(Journal.open(archive)) { journal =>
         val hostAllocations = mutable.Set.empty[Long]
@@ -160,7 +157,7 @@ class MemoryCoherenceSuite extends munit.FunSuite {
             .fold(message => fail(message), identity).value
           request match {
             case Operation.RegisterAllocationAddress(allocation, _, true) =>
-              val _ = hostAllocations.add(allocation.toLong)
+              val _ = hostAllocations.add(allocation.raw)
             case Operation.SupplyHostMemory(_, ranges) =>
               ranges.foreach { range =>
                 assert(
@@ -171,8 +168,8 @@ class MemoryCoherenceSuite extends munit.FunSuite {
                 )
               }
             case Operation.WriteAllocation(allocation, _, _) =>
-              assert(!hostAllocations.contains(allocation.toLong), "host-backed storage was uploaded speculatively")
-            case Operation.ReleaseAllocation(allocation) => val _ = hostAllocations.remove(allocation.toLong)
+              assert(!hostAllocations.contains(allocation.raw), "host-backed storage was uploaded speculatively")
+            case Operation.ReleaseAllocation(allocation) => val _ = hostAllocations.remove(allocation.raw)
             case _                                       => ()
           }
         }

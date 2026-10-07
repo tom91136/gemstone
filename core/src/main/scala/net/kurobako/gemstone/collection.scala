@@ -43,7 +43,7 @@ object collection {
       val from  = fromValue.value
       val until = untilValue.value
       if (from > until) throw IllegalArgumentException(s"invalid integer range [$from, $until)")
-      // Empty ranges have no elements whose refinement needs to be materialized.
+      // Empty ranges have no elements whose refinement needs to be materialised.
       inline if (scala.compiletime.constValue[From] >= scala.compiletime.constValue[Until])
         ArraySeq.empty[Int where (AtLeast[From] & LessThan[Until])](using tag)
       else {
@@ -106,7 +106,7 @@ object collection {
   type Vec[+A] = ArraySeq[A]
 
   object LRUCache {
-    @SuppressWarnings(Array("scalafix:GemstoneNoExplicitNew"))
+    @SuppressWarnings(Array("scalafix:BannedSyntax.explicit-new"))
     def apply[K, V](capacity: Int > 0): LRUCache[K, V] = new LRUCache(capacity)
   }
 

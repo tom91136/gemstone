@@ -1,12 +1,15 @@
 package net.kurobako.gemstone.codegen
 
+import cats.syntax.all.*
+import com.monovore.decline.Command
+import com.monovore.decline.Opts
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
 import java.nio.file.attribute.BasicFileAttributes
 
-/** One registry produces names for all language boundaries. Parsing behavior remains authored. */
+/** One registry produces names for all language boundaries. Parsing behaviour remains authored. */
 object GenerateEnvironment {
   case class Entry(name: String, default: Option[Long]) {
     def symbol: String = name.stripPrefix("GEMSTONE_").split('_').map { word =>
@@ -32,18 +35,63 @@ object GenerateEnvironment {
     entries.sortBy(_.name)
   }
 
+  lazy val table: Vector[Entry] = parse(Vector(
+    "GEMSTONE_CUDA_CODE"                    -> "",
+    "GEMSTONE_CUDA_11_8_89"                 -> "",
+    "GEMSTONE_CUDA_11_8_89_IMAGE"           -> "",
+    "GEMSTONE_CUDA_13_3_33"                 -> "",
+    "GEMSTONE_CUDA_13_3_33_IMAGE"           -> "",
+    "GEMSTONE_CUDA_13_3_73"                 -> "",
+    "GEMSTONE_CUDA_13_3_73_IMAGE"           -> "",
+    "GEMSTONE_OFFLINE"                      -> "",
+    "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS"   -> "",
+    "GEMSTONE_EXECUTION_PARALLELISM"        -> "",
+    "GEMSTONE_HSA_PAGING_TIMEOUT_SECONDS"   -> "",
+    "GEMSTONE_HSA_REJECTED_CODE_OBJECT"     -> "",
+    "GEMSTONE_NATIVE_DIRECTORY"             -> "",
+    "GEMSTONE_NVDISASM_11_8_86"             -> "",
+    "GEMSTONE_NVDISASM_13_2_78"             -> "",
+    "GEMSTONE_NVDISASM_13_3_73"             -> "",
+    "GEMSTONE_OPENCL_COMPILER"              -> "",
+    "GEMSTONE_OPENCL_LLVM_LINK"             -> "",
+    "GEMSTONE_OPENCL_LLVM_SPIRV"            -> "",
+    "GEMSTONE_OPENCL_LOCAL_MEM_SIZE"        -> "65536",
+    "GEMSTONE_OPENCL_MAX_MEM_ALLOC_SIZE"    -> "268435456",
+    "GEMSTONE_OPENCL_MAX_WORK_GROUP_SIZE"   -> "64",
+    "GEMSTONE_OPENCL_SCAN_BUFFER_POINTERS"  -> "",
+    "GEMSTONE_PROFILE"                      -> "",
+    "GEMSTONE_RECORD"                       -> "",
+    "GEMSTONE_RPC_CLIENT"                   -> "",
+    "GEMSTONE_RPC_ENDPOINT"                 -> "",
+    "GEMSTONE_RPC_TIMEOUT_SECONDS"          -> "300",
+    "GEMSTONE_SYSTEM_PAGING"                -> "",
+    "GEMSTONE_TARGET_ARCH"                  -> "",
+    "GEMSTONE_TRACE"                        -> "",
+    "GEMSTONE_VERIFY_FIXTURES"              -> "",
+    "GEMSTONE_VULKAN_API_VERSION"           -> "",
+    "GEMSTONE_VULKAN_VALIDATE_ALLOCATORS"   -> "",
+    "GEMSTONE_VULKAN_DUMP"                  -> "",
+    "GEMSTONE_MEMORY_ALLOCATION_KIND"       -> "",
+    "GEMSTONE_MEMORY_ATOMIC_BITS"           -> "",
+    "GEMSTONE_MEMORY_CONCURRENCY_DIRECTORY" -> "",
+    "GEMSTONE_MEMORY_PROBE"                 -> "",
+    "GEMSTONE_TEST_LIBRARY"                 -> ""
+  ).flatMap((name, default) => Vector(name, default)))
+
   private def outputs(root: Path, entries: Vector[Entry]): Vector[(Path, String)] = {
-    val banner    = "Generated from build.sbt: environmentVariables. Regenerate with: sbt codegen"
+    val source    = "by GenerateEnvironment.table"
     val scalaPath = root.resolve("core/src/generated/main/scala/net/kurobako/gemstone/environment.scala")
     val scala     =
-      s"// $banner\npackage net.kurobako.gemstone\n\nimport net.kurobako.gemstone.constraint.*\n\nobject environment {\n" +
+      GeneratedHeader.scala(source) + "package net.kurobako.gemstone\n\nimport net.kurobako.gemstone.constraint.*\n\n" +
+        "object environment {\n" +
         entries.map { entry =>
           s"  val ${entry.symbol}: String = \"${entry.name}\"\n" +
             entry.default.map(value =>
               s"  val ${entry.symbol}Default: Long ${if (value > 0) ">" else ">="} 0 = ${value}L\n"
             ).getOrElse("")
         }.mkString + "}\n"
-    val cpp = s"// $banner\n#pragma once\n\n#include <cstdint>\n\nnamespace gemstone::environment {\n" +
+    val cpp = GeneratedHeader.cpp(source) +
+      "#pragma once\n\n#include <cstdint>\n\nnamespace gemstone::environment {\n" +
       entries.map { entry =>
         s"inline constexpr char ${entry.symbol}[] = \"${entry.name}\";\n" +
           entry.default.map(value => s"inline constexpr uint64_t ${entry.symbol}Default = $value;\n").getOrElse("")
@@ -62,9 +110,7 @@ object GenerateEnvironment {
         s"stale environment output: $path; run codegen"
       )
     }
-    else files.foreach { (path, content) =>
-      val _ = GeneratedFiles.write(path, content)
-    }
+    else files.foreach(GeneratedFiles.write(_, _))
   }
 
   /** Reject stray owned names at actual environment accesses, without mistaking CMake/compiler definitions for them. */
@@ -101,15 +147,14 @@ object GenerateEnvironment {
     require(invalid.isEmpty, invalid.distinct.mkString("\n"))
   }
 
-  def main(arguments: Array[String]): Unit = {
-    require(
-      arguments.length >= 2 && Set("--write", "--check")(arguments(1)),
-      "usage: GenerateEnvironment repository --write|--check [name numeric-default-or-empty]..."
-    )
-    val root    = Path.of(arguments(0)).toAbsolutePath.normalize()
-    val entries = parse(arguments.drop(2).toVector)
-    val check   = arguments(1) == "--check"
-    generate(root, entries, check)
-    if (check) checkNames(root, entries)
+  private val command = Command("GenerateEnvironment", "Generate environment constants from the table")((
+    Opts.argument[String]("repository").map(Path.of(_).toAbsolutePath.normalize),
+    Opts.flag("write", "Write the generated outputs").as(false)
+      .orElse(Opts.flag("check", "Check output freshness and declared names").as(true))
+  ).tupled)
+
+  def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { (root, check) =>
+    generate(root, table, check)
+    if (check) checkNames(root, table)
   }
 }

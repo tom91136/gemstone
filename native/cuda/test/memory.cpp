@@ -93,6 +93,7 @@ struct MemoryClient {
                      memory_patterns::probeEnabled("multilane") ? "contended.ptx"
                      : memory_patterns::probeEnabled("fence")   ? "fence.ptx"
                      : memory_patterns::probeEnabled("atomic")  ? "atomic.ptx"
+                     : memory_patterns::probeEnabled("review")  ? "exchange.ptx"
                                                                 : "kernel.ptx") {
     this->raw = raw;
   }

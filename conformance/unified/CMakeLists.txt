@@ -12,7 +12,7 @@ if(NOT CONFORMANCE_BUILD_UNIFIED)
   return()
 endif()
 
-include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ToolchainImages.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/../artifacts/Toolchains.cmake")
 
 add_executable(unified src/main.cpp)
 target_include_directories(unified PRIVATE src)
@@ -25,12 +25,6 @@ set_target_properties(unified PROPERTIES
   CXX_STANDARD_REQUIRED YES
   CXX_EXTENSIONS NO
   OUTPUT_NAME unified)
-
-if(APPLE)
-  set_target_properties(unified PROPERTIES INSTALL_RPATH "@loader_path/lib")
-elseif(UNIX)
-  set_target_properties(unified PROPERTIES INSTALL_RPATH "$ORIGIN/lib")
-endif()
 
 if(CONFORMANCE_BACKEND STREQUAL "opencl")
   target_compile_definitions(unified PRIVATE UNIFIED_API_OPENCL=1)
@@ -52,7 +46,7 @@ elseif(CONFORMANCE_BACKEND STREQUAL "hsa")
     "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=." "-ffile-prefix-map=${CMAKE_BINARY_DIR}=.build")
   add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco"
     COMMAND ${dispatch_compile}
-    DEPENDS src/hsa/vector_copy.cl "${CMAKE_CURRENT_LIST_DIR}/../cmake/ToolchainImages.cmake" VERBATIM)
+    DEPENDS src/hsa/vector_copy.cl "${CMAKE_CURRENT_LIST_DIR}/../artifacts/Toolchains.cmake" VERBATIM)
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dispatch_image.hpp
     COMMAND ${CMAKE_COMMAND}
       -DINPUT=${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco
@@ -129,10 +123,10 @@ elseif(CONFORMANCE_BACKEND STREQUAL "hip")
     src/hip/algorithms_i64.hip
     src/hip/algorithms_f32.hip
     src/hip/algorithms_f64.hip
-    src/hip/rocthrust_semantic_0.hip
-    src/hip/rocthrust_semantic_1.hip
-    src/hip/rocthrust_semantic_2.hip
-    src/hip/rocthrust_semantic_3.hip
+    src/hip/rocthrust_algorithms.hip
+    src/hip/rocthrust_device.hip
+    src/hip/rocthrust_iterators.hip
+    src/hip/rocthrust_complex_async.hip
     src/hip/blas.hip
     src/hip/edge.hip
     src/hip/edge_stress_i8.hip
@@ -204,8 +198,7 @@ else()
   message(FATAL_ERROR "Unsupported unified backend: ${CONFORMANCE_BACKEND}")
 endif()
 
-# Embed memory kernels just like the HSA dispatch image above. SYCL embeds its
-# lambda kernels through the normal compiler pipeline.
+# SYCL embeds its lambda kernels through the normal compiler pipeline.
 if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
   set(memory_source "${CMAKE_CURRENT_SOURCE_DIR}/src")
   set(memory_output "${CMAKE_CURRENT_BINARY_DIR}/memory")
@@ -277,7 +270,7 @@ if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
     add_custom_command(OUTPUT "${memory_image}"
       ${memory_commands}
       BYPRODUCTS ${memory_byproducts}
-      DEPENDS "${memory_source}/memory_kernel.cl" "${CMAKE_CURRENT_LIST_DIR}/../cmake/ToolchainImages.cmake" VERBATIM)
+      DEPENDS "${memory_source}/memory_kernel.cl" "${CMAKE_CURRENT_LIST_DIR}/../artifacts/Toolchains.cmake" VERBATIM)
   endif()
   set(memory_images memory)
   if(CONFORMANCE_BACKEND STREQUAL "cuda")
@@ -292,7 +285,7 @@ if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
     add_custom_command(OUTPUT "${memory64_image}"
       COMMAND ${memory64_compile} COMMAND ${memory64_translate}
       BYPRODUCTS "${memory64_image}.bc"
-      DEPENDS "${memory_source}/memory_kernel.cl" "${CMAKE_CURRENT_LIST_DIR}/../cmake/ToolchainImages.cmake" VERBATIM)
+      DEPENDS "${memory_source}/memory_kernel.cl" "${CMAKE_CURRENT_LIST_DIR}/../artifacts/Toolchains.cmake" VERBATIM)
     list(APPEND memory_images memory64)
   endif()
   foreach(fixture IN LISTS memory_images)
@@ -309,6 +302,6 @@ endif()
 conformance_register_test_program(unified ${CONFORMANCE_TIMEOUT_UNIFIED})
 
 if(CONFORMANCE_BACKEND MATCHES "^(cuda|hip)$")
-  install(FILES licenses/gpuocelot.txt
-    DESTINATION licenses/unified COMPONENT support)
+  install(FILES licences/gpuocelot.txt
+    DESTINATION licences/unified COMPONENT support)
 endif()

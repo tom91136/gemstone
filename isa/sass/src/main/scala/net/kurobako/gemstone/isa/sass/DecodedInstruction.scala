@@ -4,10 +4,9 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 
 object DecodedInstruction {
-  case class Form(name: String, formId: Option[Int])
   case class Machine(
-      target: String,
-      form: Form,
+      target: Target,
+      form: String,
       opcode: String,
       bindings: Map[String, BigInt],
       fields: Map[String, BigInt]

@@ -29,7 +29,11 @@ object SASSDescription {
   ) {
     def section(name: String): Option[Section] = sections.find(_.name == name)
     def fields: Vector[FormatField]            = section("FORMAT").toVector.flatMap(_.fields)
-    def opcodes: Vector[String]                = section("OPCODES").toVector.flatMap(_.entries.map(_.name))
+
+    /** Scheduling-pipe aliases (`IADD3int_pipe`) repeat the value of the plain opcode they annotate. */
+    def opcodeEntries: Vector[Entry] =
+      section("OPCODES").toVector.flatMap(_.entries).filterNot(_.name.endsWith("_pipe"))
+    def opcodes: Vector[String] = opcodeEntries.map(_.name)
   }
 
   case class Section(name: String, body: String, raw: String, entries: Vector[Entry]) {

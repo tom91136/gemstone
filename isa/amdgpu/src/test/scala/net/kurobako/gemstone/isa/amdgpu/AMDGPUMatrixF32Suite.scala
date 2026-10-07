@@ -1,36 +1,31 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import ELF.*
 import VMIR.*
 import fixtures.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class AMDGPUMatrixF32Suite extends munit.FunSuite {
-  private def run(operations: Vec[Instruction], target: Target, memory: TestMemory, lanes: Int > 0): Unit = {
-    val offsets = Vec.tabulate(operations.size)(_ * 4)
-    val source  = CodeObjectKernel("matrix", target, 0, 0, 0, 0, 0, Vec.empty)
-    val kernel  = Kernel(source, operations, offsets.zipWithIndex.toMap, offsets, 0)
-    val task    = KernelTask.validated("matrix", Dimensions(lanes, 1, 1), Dimensions.One, Vec.empty).toOption.get
-    assertEquals(executeKernel(kernel, task, memory), Right(()))
+  private def run(operations: Vec[Instruction], target: Target, memory: RegionMemory, lanes: Int > 0): Unit = {
+    val task = KernelTask.validated("kernel", Dimensions(lanes, 1, 1), Dimensions.One, Vec.empty).value
+    assertEquals(runIR(operations, memory, codeKernel(target = target), task), Right(()))
   }
 
   for ((fused, opcode) <- Vec((false, 0x16), (true, 0x3b)))
     test(s"VOP3 MAC fused=$fused preserves its destination addend and input/clamp modifiers") {
       val target     = Target("gfx90a")
-      val memory     = TestMemory()
+      val memory     = RegionMemory()
       val allocation = AllocationId(1L)
       memory.allocate(allocation, 8)
-      val address = memory.address(allocation, 0L).toOption.get.raw
+      val address = memory.address(allocation, 0L).value.raw
       // LLVM: v_{f}mac_f32_e64 v3, -v1, |v2| clamp.
-      val instruction = VMCompiler.decodeInstruction(
-        Vec(3, 0x82, opcode, 0xd1, 1, 5, 2, 0x20).map(_.toByte),
-        target
-      ).fold(error => fail(error.raw), identity)
+      val instruction                        = decoded(target, 3, 0x82, opcode, 0xd1, 1, 5, 2, 0x20)
       def value(x: Float): InstructionSource = InstructionSource.Constant(java.lang.Float.floatToRawIntBits(x).toLong)
       run(
         Vec(
@@ -39,10 +34,10 @@ class AMDGPUMatrixF32Suite extends munit.FunSuite {
           Instruction.VMove(2, value(-0.5f)),
           Instruction.VMove(3, value(0.5f)),
           instruction,
-          Instruction.GlobalStore(0, Some(8), 3, 4, 0),
+          Instruction.Store(3, MemoryAddress.Global(0, Some(8), 0), 4, false),
           Instruction.VMove(3, value(1.0f)),
           instruction,
-          Instruction.GlobalStore(0, Some(8), 3, 4, 4),
+          Instruction.Store(3, MemoryAddress.Global(0, Some(8), 4), 4, false),
           Instruction.End
         ),
         target,
@@ -66,10 +61,10 @@ class AMDGPUMatrixF32Suite extends munit.FunSuite {
     s"$architecture ${dimension}x$dimension MFMA accumulator bank=$accumulators inputs=$inputAccumulators broadcast=$broadcast blocks=$blockBroadcast/$blockId"
   ) {
     val target     = Target(architecture.unsafe[NonEmpty[String]])
-    val memory     = TestMemory()
+    val memory     = RegionMemory()
     val allocation = AllocationId(1L)
     memory.allocate(allocation, 16384)
-    val address                      = memory.address(allocation, 0L).toOption.get.raw
+    val address                      = memory.address(allocation, 0L).value.raw
     val registers                    = if (dimension == 4) 4 else dimension * dimension / 64
     val depth                        = if (dimension == 4) 1 else 64 / dimension
     def a(row: Int, k: Int): Float   = (row - 2 * k + 1).toFloat / 4
@@ -104,8 +99,7 @@ class AMDGPUMatrixF32Suite extends munit.FunSuite {
       memory.putInt(allocation, (512 + register * 256 + lane * 4).unsafe[Int >= 0], floatBits(c(row, col)))
     }
     def decode(word: Long, second: Long): Instruction =
-      VMCompiler.decodeInstruction(LittleEndian.toVec(word, 4) ++ LittleEndian.toVec(second, 4), target)
-        .fold(error => fail(error.raw), identity)
+      decoded(target, LittleEndian.toVec(word, 4) ++ LittleEndian.toVec(second, 4))
     // LLVM encodings for A=v8, B=v9, overlapping C/D=[32:...].
     val word = (if (dimension == 4) 0xd3c20020L else if (dimension == 16) 0xd3c50020L else 0xd3c40020L) |
       (if (accumulators && architecture != "gfx908") 0x8000L else 0L) | (blockBroadcast.toLong << 8) |
@@ -120,8 +114,8 @@ class AMDGPUMatrixF32Suite extends munit.FunSuite {
         InstructionSource.VectorRegister(0),
         false
       ),
-      Instruction.GlobalLoad(8, 2, Some(8), 4, 0, false),
-      Instruction.GlobalLoad(9, 2, Some(8), 4, 256, false)
+      Instruction.Load(8, MemoryAddress.Global(2, Some(8), 0), 4, false, LoadPlacement.Full),
+      Instruction.Load(9, MemoryAddress.Global(2, Some(8), 256), 4, false, LoadPlacement.Full)
     ) ++
       (if (inputAccumulators) Vec(
          decode(0xd3d94008L, 0x18000108L),
@@ -132,7 +126,13 @@ class AMDGPUMatrixF32Suite extends munit.FunSuite {
        else Vec.empty[Instruction]) ++ Vec.from(Vec.indices(registers.unsafe[Int >= 0]).flatMap { index =>
         val register = index.raw
         val load     =
-          Instruction.GlobalLoad((32: VectorRegisterIndex).offsetBy(index), 2, Some(8), 4, 512 + register * 256, false)
+          Instruction.Load(
+            (32: VectorRegisterIndex).offsetBy(index),
+            MemoryAddress.Global(2, Some(8), 512 + register * 256),
+            4,
+            false,
+            LoadPlacement.Full
+          )
         if (accumulators) Vec(
           load,
           decode(0xd3d94000L | (32 + register), 0x18000120L + register),
@@ -148,13 +148,17 @@ class AMDGPUMatrixF32Suite extends munit.FunSuite {
         InstructionSource.VectorRegister((32: VectorRegisterIndex).offsetBy(index))
       ))
       copy ++
-        Vec(Instruction.GlobalStore(2, Some(8), (64: VectorRegisterIndex).offsetBy(index), 4, 8192 + register * 256)) ++
-        (if (accumulators) Vec(Instruction.GlobalStore(
-           2,
-           Some(8),
+        Vec(Instruction.Store(
+          (64: VectorRegisterIndex).offsetBy(index),
+          MemoryAddress.Global(2, Some(8), 8192 + register * 256),
+          4,
+          false
+        )) ++
+        (if (accumulators) Vec(Instruction.Store(
            (32: VectorRegisterIndex).offsetBy(index),
+           MemoryAddress.Global(2, Some(8), 12288 + register * 256),
            4,
-           12288 + register * 256
+           false
          ))
          else Vec.empty[Instruction])
     })

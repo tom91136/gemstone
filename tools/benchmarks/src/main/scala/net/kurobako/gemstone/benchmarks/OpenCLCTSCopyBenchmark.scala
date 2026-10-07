@@ -1,150 +1,84 @@
 package net.kurobako.gemstone.benchmarks
 
 import cats.syntax.all.*
-import com.monovore.decline.Opts
-import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
-import net.kurobako.gemstone.isa.spirv.v1_6.*
-import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.isa.spirv.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 /** Bounded OpenCL CTS async-copy paths, measured after SPIR-V loading. */
 object OpenCLCTSCopyBenchmark {
+  private enum Direction {
+    case GlobalToLocal, LocalToGlobal
+  }
+
   private case class Options(
-      direction: String,
+      direction: Direction,
       groups: Int > 0,
       localSize: Int > 0,
       stride: Int > 0,
       iterations: Int > 0,
-      parallelism: Int > 0
+      workers: Int > 0
   )
 
-  private val name    = BenchmarkName("opencl-cts-async-copy")
-  private val options = (
-    Opts.option[String]("direction", help = "global-to-local or local-to-global")
-      .withDefault("global-to-local")
-      .validate("direction must be global-to-local or local-to-global")(value =>
-        value == "global-to-local" || value == "local-to-global"
-      ),
-    Opts.option[Int]("groups", help = "Workgroups per dispatch").withDefault(16)
-      .refined[Int > 0]("groups must be positive"),
-    Opts.option[Int]("local-size", help = "Work items per group").withDefault(8)
-      .refined[Int > 0]("local-size must be positive"),
-    Opts.option[Int]("stride", help = "Element stride (1 is contiguous)").withDefault(2)
-      .refined[Int > 0]("stride must be positive"),
-    Opts.option[Int]("iterations", help = "Dispatches per sample").withDefault(3)
-      .refined[Int > 0]("iterations must be positive"),
-    Opts.option[Int]("parallelism", help = "VM worker count").withDefault(1)
-      .refined[Int > 0]("parallelism must be positive")
-  ).mapN(Options(_, _, _, _, _, _))
+  val benchmark: Case = (
+    choice("direction", "global-to-local" -> Direction.GlobalToLocal, "local-to-global" -> Direction.LocalToGlobal),
+    positive("groups", "Workgroups per dispatch", 16),
+    positive("local-size", "Work items per group", 8),
+    positive("stride", "Element stride (1 is contiguous)", 2),
+    iterations(3),
+    workers(1)
+  ).mapN(Options(_, _, _, _, _, _)).map(options => () => run(options))
 
-  private val inputRegion  = AllocationId(1)
-  private val outputRegion = AllocationId(2)
+  private val Unwritten = 0x5a.toByte
 
-  private class CopyMemory(elements: Int) extends Memory {
-    private val byteCount = Math.multiplyExact(elements, 4)
-    private val input     = Array.tabulate[Byte](byteCount)(index =>
-      (index * 37 + 11).toByte
-    )
-    private val output = Array.fill[Byte](byteCount)(0x5a.toByte)
-
-    override def read(
-        region: AllocationId,
-        offset: Long >= 0,
-        size: Int >= 0
-    ): Either[Fault, Vec[Byte]] =
-      bytes(region).flatMap { source =>
-        Either.cond(
-          ByteRange.contains(source.length, offset.raw, size.raw.toLong),
-          Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(
-            source,
-            offset.raw.toInt,
-            offset.raw.toInt + size.raw
-          )),
-          Fault.InvalidTask("benchmark read outside allocation")
-        )
-      }
-
-    override def write(
-        region: AllocationId,
-        offset: Long >= 0,
-        bytes: Vec[Byte]
-    ): Either[Fault, Unit] =
-      if (region != outputRegion) Left(Fault.InvalidTask("benchmark write to input"))
-      else if (!ByteRange.contains(output.length, offset.raw, bytes.length.toLong))
-        Left(Fault.InvalidTask("benchmark write outside allocation"))
-      else {
-        val _ = bytes.copyToArray(output, offset.raw.toInt, bytes.length)
-        Right(())
-      }
-
-    private def bytes(region: AllocationId): Either[Fault, Array[Byte]] =
-      if (region == inputRegion) Right(input)
-      else if (region == outputRegion) Right(output)
-      else Left(Fault.InvalidTask("unknown benchmark allocation"))
-
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    def verify(groups: Int, localSize: Int, stride: Int): Unit = {
-      val copied = groups * localSize * 3
-      var index  = 0
-      while (index < output.length) {
-        val expected = if (index / 4 % stride == 0 && index / 4 / stride < copied)
-          input(index)
-        else 0x5a.toByte
-        if (output(index) != expected)
-          throw IllegalStateException(s"async copy mismatch at byte $index: ${output(index)} != $expected")
-        index += 1
-      }
-    }
-  }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(arguments: Array[String]): BenchmarkSample = {
-    val parsed   = BenchmarkArguments.parse(name, arguments.toSeq, options)
-    val elements = Math.multiplyExact(
-      Math.multiplyExact(parsed.groups.raw, parsed.localSize.raw),
-      Math.multiplyExact(3, parsed.stride.raw)
-    )
-    val memory                   = CopyMemory(elements)
-    val kernel: NonEmpty[String] = (parsed.direction, parsed.stride.raw) match {
-      case ("global-to-local", 1) => "global_to_local_contiguous"
-      case ("local-to-global", 1) => "local_to_global_contiguous"
-      case ("global-to-local", _) => "global_to_local"
-      case _                      => "local_to_global"
+  private def run(options: Options): BenchmarkSample = {
+    val copied = Math.multiplyExact(Math.multiplyExact(options.groups.raw, options.localSize.raw), 3)
+    val bytes  = Math.multiplyExact(Math.multiplyExact(copied, options.stride.raw), 4)
+    val memory = BenchmarkMemory(bytes, bytes)
+    val input  = memory.ids(0)
+    val output = memory.ids(1)
+    val _      = Array.tabulate[Byte](bytes)(index => (index * 37 + 11).toByte).copyToArray(memory.array(input))
+    java.util.Arrays.fill(memory.array(output), Unwritten)
+    val kernel: NonEmpty[String] = (options.direction, options.stride.raw) match {
+      case (Direction.GlobalToLocal, 1) => "global_to_local_contiguous"
+      case (Direction.LocalToGlobal, 1) => "local_to_global_contiguous"
+      case (Direction.GlobalToLocal, _) => "global_to_local"
+      case (Direction.LocalToGlobal, _) => "local_to_global"
     }
     val task = KernelTask.validated(
       kernel,
-      LaunchGeometry.Dimensions(parsed.localSize, 1, 1),
-      LaunchGeometry.Dimensions(parsed.groups, 1, 1),
+      LaunchGeometry.Dimensions(options.localSize, 1, 1),
+      LaunchGeometry.Dimensions(options.groups, 1, 1),
       Vec(
-        KernelTask.Argument.Memory(inputRegion, 0L),
-        KernelTask.Argument.Memory(outputRegion, 0L),
-        KernelTask.Argument.Local(parsed.localSize.toLong.widen[Long > 0] * 3L * 4L),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(parsed.stride.raw.toLong, 4))
+        KernelTask.Argument.Memory(input, 0L),
+        KernelTask.Argument.Memory(output, 0L),
+        KernelTask.Argument.Local(options.localSize.toLong.widen[Long > 0] * 3L * 4L),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(options.stride.raw.toLong, 4).unsafe)
       )
     ).fold(error => throw IllegalArgumentException(error), identity)
-    val image  = BenchmarkResources.bytes("opencl-cts-async-copy.spv")
-    val module = ISA.decode(Vec.unsafeWrapArray(image))
-      .fold(error => throw IllegalArgumentException(error.message), identity)
-
-    Using.resource(WorkerPool(parsed.parallelism, minGroups = 1L, minWorkItems = 1L)) { workgroups =>
-      val program = LoadedProgram.load(module, Validation.Environment.OpenCLCompute)
+    val image  = Vec.unsafeWrapArray(BenchmarkResources.bytes("opencl-cts-async-copy.spv", "opencl"))
+    val sample = Using.resource(WorkerPool(options.workers, minGroups = 1L, minWorkItems = 1L)) { workgroups =>
+      val program = SPIRVBackend(Validation.Environment.OpenCLCompute, workgroups = workgroups).load(image)
         .fold(error => throw IllegalArgumentException(error.message), identity)
-      val measurement = Measurement {
-        var iteration = 0
-        while (iteration < parsed.iterations.raw) {
-          program.execute(task, memory, TaskControl(), workgroups)
-            .fold(error => throw IllegalStateException(error.message), _ => ())
-          iteration += 1
-        }
+      Measurement.repeat(options.iterations) {
+        program.execute(task, memory, TaskControl(), _ => Right(()))
+          .fold(error => throw IllegalStateException(error.message), _ => ())
       }
-      memory.verify(parsed.groups.raw, parsed.localSize.raw, parsed.stride.raw)
-      measurement.sample(parsed.iterations.toLong)
     }
+    val source      = memory.array(input)
+    val destination = memory.array(output)
+    destination.indices.foreach { index =>
+      val element  = index / 4
+      val expected = if (element % options.stride.raw == 0 && element / options.stride.raw < copied) source(index)
+      else Unwritten
+      if (destination(index) != expected)
+        throw IllegalStateException(s"async copy mismatch at byte $index: ${destination(index)} != $expected")
+    }
+    sample
   }
 }

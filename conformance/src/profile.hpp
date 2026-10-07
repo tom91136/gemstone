@@ -15,9 +15,6 @@ struct ProfileTarget {
   std::optional<std::string> device;
   std::map<std::string, std::string> environment;
   std::vector<std::string> skips;
-  bool deviceLock = true;
-  std::vector<std::string> routeSkips;
-  std::optional<std::string> skipReason;
   std::string compiler = "vendor";
 };
 
@@ -35,16 +32,13 @@ struct ResolvedTarget {
   std::string backend;
   std::optional<std::string> architecture;
   std::map<std::string, std::string> environment;
-  bool deviceLock = true;
-  std::vector<std::string> routeSkips;
-  std::optional<std::string> skipReason;
+  std::vector<std::string> skips;
   std::string compiler = "vendor";
 };
 
-std::string local_hostname();
-Profile resolve_profile(const std::filesystem::path &directory, const std::optional<std::string> &requested = std::nullopt,
-                        const std::optional<std::string> &hostname = std::nullopt);
-std::vector<ResolvedTarget> resolve_targets(const Profile &profile, const std::vector<std::string> &selectors);
-std::vector<ResolvedTarget> direct_targets(const std::vector<std::string> &routes);
-void validate_all(const std::filesystem::path &directory);
+Profile resolveProfile(const std::filesystem::path &directory, const std::optional<std::string> &requested = std::nullopt,
+                       const std::optional<std::string> &hostname = std::nullopt);
+std::vector<ResolvedTarget> resolveTargets(const Profile &profile, const std::vector<std::string> &selectors);
+std::vector<ResolvedTarget> directTargets(const std::vector<std::string> &routes);
+void validateAll(const std::filesystem::path &directory);
 } // namespace conformance::profile

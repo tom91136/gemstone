@@ -9,7 +9,7 @@ using namespace gemstone::execution;
 TEST_CASE("execution RPC reports session loss", "[rpc][integration]") {
   auto client = Client::fromEnvironment();
   REQUIRE((client));
-  auto allocation = client->call(RegisterAllocation{AllocationKind::Shared, 8});
+  auto allocation = client->call(RegisterAllocation{{8}});
   REQUIRE((allocation));
   REQUIRE((!client->call(WriteAllocation{allocation.value(), 0, {42}})));
   auto release = client->call(ReleaseAllocation{allocation.value()});

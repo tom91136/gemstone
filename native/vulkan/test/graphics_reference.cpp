@@ -1,4 +1,3 @@
-// Differential oracle for the Scala migration. These frozen codecs are never linked into the facade.
 #include <bit>
 #include <cstdio>
 #include <random>

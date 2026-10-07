@@ -36,7 +36,7 @@ class CLIProcessSuite extends munit.FunSuite {
     private val output  = Files.createTempFile(directory, "cli-", ".log")
     private val builder = ProcessBuilder((executable ++ arguments)*)
       .directory(directory.toFile).redirectErrorStream(true).redirectOutput(output.toFile)
-    // Child behavior should not depend on a developer's recording or worker settings.
+    // Child behaviour should not depend on a developer's recording or worker settings.
     builder.environment().keySet().removeIf(_.startsWith("GEMSTONE_"))
     environment.foreach((key, value) => builder.environment().put(key, value))
     private val process   = builder.start()
@@ -89,7 +89,7 @@ class CLIProcessSuite extends munit.FunSuite {
         server.awaitServing()
         val endpoint = ujson.read(Files.readString(endpointFile))
         val address  = Endpoint.parse(endpoint("endpoint").str).toOption.get
-        val client   = ClientId.either(endpoint("client").num.toLong).toOption.get
+        val client   = endpoint("client").num.toLong.refine[ClientId].toOption.get
         Seq(endpointFile).foreach { file =>
           if (Option(Files.getFileAttributeView(file, classOf[PosixFileAttributeView])).isDefined)
             assertEquals(Files.getPosixFilePermissions(file), PosixFilePermissions.fromString("rw-------"))
@@ -107,7 +107,7 @@ class CLIProcessSuite extends munit.FunSuite {
       assertEquals(summary.frames.raw, 2)
       Using.resource(Child(directory, Seq("inspect", archive.toString))) { inspect =>
         assertEquals(inspect.awaitExit(), 0, inspect.text)
-        assert(inspect.text.contains(ExecutionRPC.Identity))
+        assert(inspect.text.contains("ExecutionProfile"), inspect.text)
       }
       Using.resource(Child(directory, Seq("replay", archive.toString))) { replay =>
         assertEquals(replay.awaitExit(), 0, replay.text)
@@ -141,12 +141,12 @@ class CLIProcessSuite extends munit.FunSuite {
         val deadline   = monotonicNanos + TimeUnit.SECONDS.toNanos(10)
         while (!Files.exists(clientFile) && monotonicNanos < deadline) Thread.sleep(10)
         assert(Files.exists(clientFile), child.text)
-        val clientId   = ClientId.either(Files.readString(clientFile).toLong).toOption.get
+        val clientId   = Files.readString(clientFile).toLong.refine[ClientId].toOption.get
         val connection = use(connections.Client(server.endpoint, clientId))
         def launch(client: connections.Client, body: String): CompletionId = {
           val source  = s".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry kernel() { $body }"
           val program = client.call(ExecutionRPC.Operation.LoadProgram(
-            "ptx-text",
+            ProgramEncoding.PTXText,
             Vec.from(source.getBytes(java.nio.charset.StandardCharsets.UTF_8))
           )).toOption.get
           val one = LaunchGeometry.Dimensions.One
@@ -167,14 +167,14 @@ class CLIProcessSuite extends munit.FunSuite {
         val pending = launch(connection, "LOOP: bra LOOP;")
         assertEquals(
           connection.call(ExecutionRPC.Operation.QueryCompletion(pending)),
-          Right(ExecutionProtocol.CompletionStatus.Pending)
+          Right(ExecutionRPC.CompletionStatus.Pending)
         )
         child.terminate()
         assert(child.awaitExit() != 0, child.text)
         assert(connection.call(ExecutionRPC.Operation.Ping).isLeft, "terminated launcher's client remained live")
         val next       = use(connections.Client(server.endpoint, server.client))
         val completion = launch(next, "ret;")
-        assertEquals(next.call(ExecutionRPC.Operation.AwaitCompletion(completion)), Right(()))
+        assertEquals(next.awaitCompletion(completion), Right(ExecutionRPC.CompletionStatus.Succeeded))
       }.get
     }
   }
@@ -198,13 +198,10 @@ class CLIProcessSuite extends munit.FunSuite {
         val result          = native.run(
           Vec.nonEmpty(nativeDirectory.resolve("gemstone_memory_hsa").toString),
           directory,
-          Launch.Environment(
-            Map(
-              "LD_LIBRARY_PATH" -> nativeDirectory.toString,
-              env.RpcEndpoint   -> endpoint("endpoint").str,
-              env.RpcClient     -> endpoint("client").num.toLong.toString,
-              env.MemoryProbe   -> "rpc_only"
-            ),
+          native.serverEnvironment(
+            Endpoint.parse(endpoint("endpoint").str).fold(fail(_), identity),
+            endpoint("client").num.toLong.refine[ClientId].fold(fail(_), identity),
+            Map("LD_LIBRARY_PATH" -> nativeDirectory.toString, env.MemoryProbe -> "rpc_only"),
             Set(env.SystemPaging, env.MemoryConcurrencyDirectory, env.Record)
           ),
           20.seconds

@@ -21,18 +21,8 @@ class WidthPropagationSuite extends munit.FunSuite {
 
   test("floating bit widths retain finite membership") {
     for (width <- Seq[Int in (16, 32, 64)](16, 32, 64)) {
-      val bits: Int in (16, 32, 64) = width.bitWidth
-      val bytes: Int in (2, 4, 8)   = bits.scalarByteWidth
+      val bytes: Int in (2, 4, 8) = width.toFloatByteWidth
       assertEquals(bytes.raw * 8, width.raw)
     }
-    assertEquals(
-      typeCheckErrors("""
-      import net.kurobako.gemstone.constraint.*
-      import Widths.*
-      val width: Int in (16, 32, 64) = 32
-      val bits: Int in (16, 32, 64) = width.bitWidth.widen[Int in (16, 32, 64)]
-    """),
-      Nil
-    )
   }
 }

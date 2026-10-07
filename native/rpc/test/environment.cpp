@@ -7,19 +7,19 @@
 namespace {
 // Restore process state even when an assertion throws.
 class Override {
-  const char *name_;
-  std::optional<std::string> previous_;
+  const char *name;
+  std::optional<std::string> previous;
 
 public:
-  explicit Override(const char *name) : name_(name) {
-    if (const auto *value = std::getenv(name)) previous_ = value;
-    unsetenv(name_);
+  explicit Override(const char *name) : name(name) {
+    if (const auto *value = std::getenv(name)) previous = value;
+    unsetenv(name);
   }
   ~Override() {
-    if (previous_) setenv(name_, previous_->c_str(), 1);
-    else unsetenv(name_);
+    if (previous) setenv(name, previous->c_str(), 1);
+    else unsetenv(name);
   }
-  void set(const char *value) { REQUIRE(setenv(name_, value, 1) == 0); }
+  void set(const char *value) { REQUIRE(setenv(name, value, 1) == 0); }
 };
 } // namespace
 
@@ -38,7 +38,7 @@ TEST_CASE("environment integers reject overflow, signs and trailing text", "[rpc
   CHECK(unsignedValue(OpenclMaxMemAllocSize, 7, 19) == 7);
 }
 
-TEST_CASE("paging honors false and malformed values instead of presence", "[rpc]") {
+TEST_CASE("paging honours false and malformed values instead of presence", "[rpc]") {
   Override paging(SystemPaging);
   CHECK_FALSE(enabled(SystemPaging));
   for (const auto *raw : {"1", "true", "TRUE", "On"}) {

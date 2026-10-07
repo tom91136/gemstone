@@ -1,7 +1,8 @@
 package net.kurobako.gemstone.codegen
 
 import java.nio.file.Path
-import scala.util.Using
+import scala.sys.process.Process
+import scala.sys.process.ProcessLogger
 
 /** Evaluate TableGen inheritance and expressions before selecting records for generation. */
 object TableGen {
@@ -31,12 +32,9 @@ json.dump(result, sys.stdout, sort_keys=True)
   ): ujson.Value = {
     val command = Vector(python, "-B", "-c", Export, ujson.write(selection), executable.toString, "--dump-json") ++
       includes.flatMap(path => Vector("-I", path.toString)) :+ source.toString
-    val process = ProcessBuilder(command*).redirectError(ProcessBuilder.Redirect.INHERIT).start()
-    try {
-      val output = Using.resource(scala.io.Source.fromInputStream(process.getInputStream, "UTF-8"))(_.mkString)
-      val status = process.waitFor()
-      require(status == 0, s"TableGen export failed with exit code $status")
-      ujson.read(output)
-    } finally process.destroy()
+    val output = StringBuilder()
+    val status = Process(command).!(ProcessLogger(line => output.append(line), Console.err.println(_)))
+    require(status == 0, s"TableGen export failed with exit code $status")
+    ujson.read(output.result())
   }
 }

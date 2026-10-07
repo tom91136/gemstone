@@ -9,12 +9,13 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.testing.*
 import scala.util.Using
 
 class UnixTransportSuite extends munit.FunSuite {
-  private def withPair(timeout: Int = 5000)(body: (Channel, Channel) => Unit): Unit = files.temporary { directory =>
+  private def withPair(timeout: Int > 0 = 5000)(body: (Channel, Channel) => Unit): Unit = files.temporary { directory =>
     Using.Manager { use =>
       val path     = directory.resolve("transport.sock")
       val listener = use(UnixTransport.listen(path))

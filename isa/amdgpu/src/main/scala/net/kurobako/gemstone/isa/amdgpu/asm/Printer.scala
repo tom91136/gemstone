@@ -1,12 +1,11 @@
 package net.kurobako.gemstone.isa.amdgpu.asm
 
-import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
 
 /** Canonical AMDGPU assembly printer. */
-object Printer extends Printer[Program] {
-  override def render(program: Program): String = program.statements.map(renderStatement(_)).mkString("\n")
+object Printer {
+  def render(program: Program): String = program.statements.map(renderStatement(_)).mkString("\n")
 
   def render(instruction: Instruction): String = {
     val operands  = instruction.operands.map(renderOperand(_))

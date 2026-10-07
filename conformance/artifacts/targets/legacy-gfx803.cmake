@@ -1,6 +1,5 @@
 # ROCm still provides gfx803 code generation, but not the corresponding
-# rocBLAS kernel library. This boxed target set produces only the coverage
-# that remains viable.
+# rocBLAS kernel library, so this target set covers only what remains viable.
 if(NOT DEFINED CONFORMANCE_BACKENDS)
   set(CONFORMANCE_BACKENDS hip hsa)
 endif()

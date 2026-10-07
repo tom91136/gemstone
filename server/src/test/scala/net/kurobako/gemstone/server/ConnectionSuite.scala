@@ -10,12 +10,10 @@ import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.given
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.recording.*
 import net.kurobako.gemstone.testing.*
-import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 class ConnectionSuite extends munit.FunSuite {
@@ -28,22 +26,14 @@ class ConnectionSuite extends munit.FunSuite {
     output.writeInt(ExecutionRPC.HelloMagic)
     output.writeInt(schema.length)
     output.write(schema)
-    output.writeInt(ExecutionRPC.RequestMagic)
-    output.writeLong(1L)
-    output.writeLong(1L)
-    output.writeLong(1L)
-    val tag = operation.getBytes(java.nio.charset.StandardCharsets.UTF_8)
-    output.writeInt(tag.length)
-    output.writeInt(payload.length)
-    output.write(tag)
-    output.write(payload)
+    output.write(connections.requestFrame(1L, 1L, 1L, operation, payload))
     bytes.toByteArray
   }
 
   private class StreamsChannel(val input: InputStream, val output: OutputStream) extends Channel {
-    def readTimeout(value: Int): Unit = ()
-    def isClosed: Boolean             = false
-    def close(): Unit                 = ()
+    def readTimeout(value: Int >= 0): Unit = ()
+    def isClosed: Boolean                  = false
+    def close(): Unit                      = ()
   }
 
   for (recording <- List(false, true))
@@ -60,9 +50,9 @@ class ConnectionSuite extends munit.FunSuite {
       val output = FailingOutput()
       files.temporary { directory =>
         val archive = directory.resolve("capture.msgpack")
-        Using.resource(Journal.Writer(archive, Journal.Header(Journal.ProtocolIdentity(ExecutionRPC.Identity)))) {
+        Using.resource(Journal.Writer(archive, Journal.Header(Journal.ExecutionProfile(1000L, 1)))) {
           writer =>
-            Using.resource(Clients(() => ExecutionSession(Nil), owner => writer.clientClosed(owner))) { clients =>
+            Using.resource(Clients(() => ExecutionSession(Nil), client => writer.clientClosed(client))) { clients =>
               Connection.serve(
                 StreamsChannel(ByteArrayInputStream(frame), output),
                 clients,
@@ -99,7 +89,7 @@ class ConnectionSuite extends munit.FunSuite {
     files.temporary { directory =>
       val bind = if (unix) Bind.Unix(directory.resolve("socket")) else Bind.Tcp()
       Using.resource(Server.start(Server.Settings(parallelism = 1, requestTimeoutMillis = 100, bind = bind))) { server =>
-        Using.resource(SocketTransport.connect(server.endpoint, 5000)) { socket =>
+        Using.resource(Transport.connect(server.endpoint, 5000)) { socket =>
           Thread.sleep(200)
           socket.output.write(frame)
           socket.output.flush()
@@ -117,13 +107,51 @@ class ConnectionSuite extends munit.FunSuite {
     }
   }
 
+  test("the first accepted request binds identity even when its session construction fails") {
+    val (operation, payload) =
+      Wire.Protocol[Operation].encodePayload(Operation.EnableHostMemory, ExecutionRPC.Limits).toOption.get
+    val factories = AtomicInteger()
+    val output    = ByteArrayOutputStream()
+    Using.resource(Clients { () =>
+      if (factories.incrementAndGet() == 1) throw IllegalStateException("factory failed")
+      ExecutionSession(Nil)
+    }) { clients =>
+      Connection.serve(
+        StreamsChannel(
+          ByteArrayInputStream(frame ++ connections.requestFrame(1L, 2L, 1L, operation, payload)),
+          output
+        ),
+        clients,
+        1000,
+        None,
+        () => ()
+      )
+    }
+    val input = DataInputStream(ByteArrayInputStream(output.toByteArray))
+    assertEquals(input.readInt(), ExecutionRPC.HelloResponseMagic)
+    assertEquals(input.readInt(), 0)
+    val failures = List.fill(2) {
+      assertEquals(input.readInt(), ExecutionRPC.ResponseMagic)
+      assertEquals(input.readInt(), 1)
+      summon[Wire.Codec[ExecutionFailure]].decode(input.readNBytes(input.readInt()), ExecutionRPC.Limits)
+    }
+    assertEquals(
+      failures,
+      List(
+        Right(ExecutionFailure.Failed("factory failed")),
+        Right(ExecutionFailure.InvalidRequest("a connection cannot change client or process identity"))
+      )
+    )
+    assertEquals(factories.get(), 1)
+  }
+
   test("recording retains the request and response when session construction fails") {
     files.temporary { directory =>
       val archive = directory.resolve("capture.msgpack")
-      Using.resource(Journal.Writer(archive, Journal.Header(Journal.ProtocolIdentity(ExecutionRPC.Identity)))) { writer =>
+      Using.resource(Journal.Writer(archive, Journal.Header(Journal.ExecutionProfile(1000L, 1)))) { writer =>
         Using.resource(Clients(
           () => throw IllegalStateException("factory failed"),
-          owner => writer.clientClosed(owner)
+          client => writer.clientClosed(client)
         )) { clients =>
           Connection.serve(
             StreamsChannel(ByteArrayInputStream(frame), ByteArrayOutputStream()),
@@ -225,11 +253,11 @@ class ConnectionSuite extends munit.FunSuite {
     files.temporary { directory =>
       val archive = directory.resolve("capture.msgpack")
       val header  = Journal.Header(
-        Journal.ProtocolIdentity(ExecutionRPC.Identity),
+        Journal.ExecutionProfile(1000L, 1),
         Journal.Limits(maxFrameBytes = Journal.FrameByteSize(128))
       )
       Using.resource(Journal.Writer(archive, header)) { writer =>
-        Using.resource(Clients(() => ExecutionSession(Nil), owner => writer.clientClosed(owner))) { clients =>
+        Using.resource(Clients(() => ExecutionSession(Nil), client => writer.clientClosed(client))) { clients =>
           Connection.serve(
             StreamsChannel(ByteArrayInputStream(frame), ByteArrayOutputStream()),
             clients,

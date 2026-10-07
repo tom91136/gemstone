@@ -2,435 +2,314 @@ package net.kurobako.gemstone.isa.nvidia
 
 import VMExecution.*
 import VMIR.*
+import cats.syntax.all.*
 import java.util.concurrent.atomic.AtomicReference
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
-import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
+import scala.util.boundary
+import scala.util.boundary.break
 
 object VMInterpreter {
 
-  private class Frame(
-      val id: Int,
-      val kernel: Kernel,
-      val state: VMBlockState,
-      val arguments: Map[NonEmpty[String], Argument],
-      val continuation: Option[Continuation]
-  )
-  private case class Continuation(
-      caller: Frame,
-      pc: Pc,
-      parameters: Vec[(NonEmpty[String], NonEmpty[String])]
-  )
-  private case class Cohort(pc: Pc, lanes: VMLaneMask, frame: Frame)
+  private case class Cohort(pc: Pc, lanes: VMLaneMask, frame: VMFrame)
   private case class ClusterWaiting(cohort: Cohort, phase: Long, arrival: Boolean)
-  private case class BarrierReduction(
-      destination: NonEmpty[String],
-      predicate: NonEmpty[String],
-      operation: PredicateOperation,
-      pc: Pc
-  )
+
+  // Frames compare by identity, so warp-scoped keys never match across activations.
+  private enum BarrierKey {
+    case Workgroup(id: BarrierId)
+    case Warp(base: WorkgroupLane.WarpBase, pc: Pc, frame: VMFrame)
+    case Convergence(base: WorkgroupLane.WarpBase, token: Long, frame: VMFrame)
+
+    def describe: String = this match {
+      case Workgroup(id)                   => s"barrier $id"
+      case Warp(base, pc, frame)           => s"warp $base synchronisation at ${frame.routine.name} pc $pc"
+      case Convergence(base, token, frame) => s"warp $base convergence $token in ${frame.routine.name}"
+    }
+  }
+
   private case class Waiting(
       cohort: Cohort,
-      key: WaitKey,
+      key: BarrierKey,
       reduction: Option[BarrierReduction] = None,
       resumeOnArrival: Boolean = false
   )
 
-  // The dispatch loop exits immediately on execution faults.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
+  private class Block(val laneCount: Int in 1 ~ 1024) {
+    val workgroup: VMWorkgroup = VMWorkgroup(laneCount)
+    val lanes: VMLanes         = VMLanes(laneCount)
+    val effects: VMWriteBuffer = VMWriteBuffer()
+
+    def reset(): Unit = {
+      workgroup.reset()
+      lanes.clear()
+      effects.clear()
+    }
+  }
+
+  // Retain one idle block across dispatches. The single slot bounds retained memory and transfers ownership atomically
+  // when independent executions overlap.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private val idle = AtomicReference[Block | Null](null)
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private def borrow(laneCount: Int in 1 ~ 1024): Block = idle.getAndSet(null) match {
+    case block: Block if block.laneCount == laneCount =>
+      block.reset()
+      block
+    case _ => Block(laneCount)
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private def release(block: Block): Unit = {
+    val _ = idle.compareAndSet(null, block)
+  }
+
+  /** Lays out `arguments` in the entry's parameter block. A longer argument contributes only its leading bytes. */
+  def parameterBlock(entry: Entry, arguments: Map[NonEmpty[String], Argument]): Either[Fault, Array[Byte]] = {
+    val bytes = Array.ofDim[Byte](entry.blockSize.raw)
+    val _     = entry.parameterBlock.copyToArray(bytes)
+    entry.parameters.traverse_ { parameter =>
+      arguments.get(parameter.name).toRight(Fault.InvalidRequest(s"missing kernel argument ${parameter.name}")).map(
+        argument => argument.bytes.copyToArray(bytes, parameter.offset.raw, parameter.widthBytes.raw)
+      )
+    }.map(_ => bytes)
+  }
+
   def execute(
       kernel: Kernel,
       geometry: LaunchGeometry,
       arguments: Map[NonEmpty[String], Argument],
-      memory: AddressMemory,
+      memory: AddressSpace,
       control: TaskControl = TaskControl(),
       workgroups: Workgroups = Workgroups.Sequential,
-      initialParameterBuffers: Map[Long, Array[Byte]] = Map.empty,
-      blockIndices: Option[Vec[Int]] = None
-  ): Either[VMFault, Unit] = {
-    val laneCount = geometry.groupSize.volumeInt match {
-      case Left(message) => return Left(VMFault.InvalidState(message))
-      case Right(value)  => value
-    }
-    val groupCount = geometry.groupCount.volumeInt match {
-      case Left(message) => return Left(VMFault.InvalidState(message))
-      case Right(value)  => value
-    }
-    val allLanes = VMLaneMask.all(laneCount.raw) match {
-      case Left(fault)  => return Left(fault)
-      case Right(value) => value
-    }
-    val everyGroupFull =
-      geometry.globalExtent.x ==
-        (geometry.groupSize.x.toLong.widen[Long > 0] * geometry.groupCount.x.toLong.widen[Long > 0]) &&
-        geometry.globalExtent.y ==
-        (geometry.groupSize.y.toLong.widen[Long > 0] * geometry.groupCount.y.toLong.widen[Long > 0]) &&
-        geometry.globalExtent.z ==
-        (geometry.groupSize.z.toLong.widen[Long > 0] * geometry.groupCount.z.toLong.widen[Long > 0])
-    def liveLanes(group: Coordinates): Either[VMFault, VMLaneMask] =
-      if (everyGroupFull) Right(allLanes)
-      else geometry.activeGroupSize(group) match {
-        case Left(message) => Left(VMFault.InvalidState(s"${kernel.isaName} geometry failure: $message"))
-        case Right(activeSize) if activeSize == geometry.groupSize => Right(allLanes)
-        case Right(_)                                              =>
-          var live                    = VMLaneMask.Empty
-          var failure: Option[String] = None
-          allLanes.foreachLane { lane =>
-            if (failure.isEmpty)
-              geometry.localCoordinates(lane.raw) match {
-                case Left(message) => failure = Some(message)
-                case Right(local)  =>
-                  geometry.globalCoordinatesLong(group, local) match {
-                    case Left(message) => failure = Some(message)
-                    case Right(global) =>
-                      if (geometry.containsGlobal(global))
-                        live = live.union(VMLaneMask.ofLane(lane.raw))
-                  }
-              }
-          }
-          failure match {
-            case Some(message) =>
-              Left(VMFault.InvalidState(s"${kernel.isaName} geometry failure: $message"))
-            case None => Right(live)
-          }
-      }
-    def runBlock(block: Int): Either[VMFault, Unit] =
-      if (block < 0 || block >= groupCount.raw)
-        Left(VMFault.InvalidState(s"selected ${kernel.isaName} block is outside the launch: $block"))
-      else
-        geometry.groupCoordinates(block.toLong) match {
-          case Left(message) =>
-            Left(VMFault.InvalidState(s"${kernel.isaName} geometry failure: $message"))
-          case Right(group) =>
-            liveLanes(group) match {
-              case Left(error) => Left(error)
-              case Right(live) =>
-                executeBlock(
-                  kernel,
-                  block,
-                  group,
-                  geometry,
-                  live,
-                  arguments,
-                  memory,
-                  control,
-                  workgroups,
-                  initialParameterBuffers
-                ).map(_ => ())
-            }
+      dynamicSharedBytes: Int >= 0 = 0
+  ): Either[Fault, Unit] =
+    parameterBlock(kernel.entry, arguments).flatMap(block =>
+      launch(kernel, geometry, block, DeviceHeap(memory), control, workgroups, dynamicSharedBytes)
+    )
+
+  /** Runs every workgroup of one launch, including device-side launches sharing the parent's heap. */
+  def launch(
+      kernel: Kernel,
+      geometry: LaunchGeometry,
+      parameterBlock: Array[Byte],
+      memory: DeviceHeap,
+      control: TaskControl,
+      workgroups: Workgroups,
+      dynamicSharedBytes: Int >= 0
+  ): Either[Fault, Unit] =
+    geometry.groupVolume.raw.refine[Int in 1 ~ 1024]
+      .left.map(_ => Fault.Unsupported(s"workgroups are limited to 1024 lanes, found ${geometry.groupVolume}"))
+      .flatMap { laneCount =>
+        val allLanes = VMLaneMask.all(laneCount)
+        Dispatch.forEachGroup(geometry, workgroups) { (_, group) =>
+          val block = borrow(laneCount)
+          try
+            Execution(
+              kernel,
+              geometry,
+              group,
+              liveLanes(geometry, group, allLanes),
+              parameterBlock,
+              memory,
+              control,
+              workgroups,
+              dynamicSharedBytes,
+              block
+            ).run()
+          finally release(block)
         }
-    val selectedCount                  = blockIndices.fold[Int >= 0](groupCount)(_.nonNegativeSize)
-    def selectedBlock(index: Int): Int = blockIndices.fold(index)(_(index))
-    val selectedTasks                  = selectedCount.toLong
-    val workItems: Long >= 0           = laneCount.toLong
-    val parallelBlocks                 = workgroups.shouldParallel(selectedTasks, workItems)
-    val executionFailure               = AtomicReference(Option.empty[VMFault])
-    workgroups.forEach(selectedTasks, parallel = parallelBlocks) { index =>
-      runBlock(selectedBlock(index.raw.toInt)).left.map { error =>
-        val _ = executionFailure.compareAndSet(None, Some(error))
-        error.toFault
       }
-    } match {
-      case Left(error) => return Left(executionFailure.get().getOrElse(VMFault.fromControl(error)))
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def liveLanes(geometry: LaunchGeometry, group: Coordinates, allLanes: VMLaneMask): VMLaneMask =
+    if (geometry.isFull(group)) allLanes
+    else {
+      val live            = VMLaneMask.Builder()
+      var start: Int >= 0 = 0
+      while (start.raw < geometry.groupVolume.raw) {
+        val count = math.min(64, geometry.groupVolume.raw - start.raw).unsafe[Int in 1 ~ 64]
+        val bits  = geometry.liveLanes(group, start, count)
+        (0 until count.raw).foreach(bit =>
+          if (((bits >>> bit) & 1L) != 0L) live.add(WorkgroupLane.fromIndex(start.raw + bit))
+        )
+        start += 64
+      }
+      live.result()
+    }
+
+  private def warpMemberMask(instruction: Instruction): Option[Value] = instruction match {
+    case Instruction.Shuffle(_, _, _, _, _, _, memberMask, _) => Some(memberMask)
+    case Instruction.VoteBallot(_, _, memberMask, _)          => Some(memberMask)
+    case Instruction.Elect(_, _, memberMask)                  => Some(memberMask)
+    case Instruction.VotePredicate(_, _, memberMask, _, _)    => Some(memberMask)
+    case Instruction.WarpReduce(_, _, memberMask, _, _)       => Some(memberMask)
+    case _                                                    => None
+  }
+
+  private def inFunction(fault: Fault, name: NonEmpty[String]): Fault = fault match {
+    case Fault.Memory(detail)  => Fault.Memory(s"$name: $detail")
+    case Fault.Backend(detail) => Fault.Backend(s"$name: $detail")
+    case other                 => other
+  }
+
+  // Cohort and barrier state model the SIMT machine directly; the first fault ends the workgroup.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private class Execution(
+      kernel: Kernel,
+      geometry: LaunchGeometry,
+      group: Coordinates,
+      initialLive: VMLaneMask,
+      parameterBlock: Array[Byte],
+      memory: DeviceHeap,
+      control: TaskControl,
+      workgroups: Workgroups,
+      dynamicSharedBytes: Int >= 0,
+      block: Block
+  ) {
+    private val workgroup = block.workgroup
+    private val effects   = block.effects
+    private val root      = VMFrame(kernel.entry.routine, block.lanes, 0L, None, initialLive)
+    private val context   =
+      VMContext(kernel, geometry, group, workgroup, memory, control, workgroups, dynamicSharedBytes, root)
+    private var live         = initialLive
+    private val ready        = mutable.ArrayDeque.empty[Cohort]
+    private val waiting      = mutable.ArrayBuffer.empty[Waiting]
+    private val barrierMasks = mutable.Map.empty[BarrierKey, VMLaneMask]
+    private val operations   = mutable.Map.empty[BarrierKey, Option[PredicateOperation]]
+    private val counts       = mutable.Map.empty[BarrierKey, Int]
+    private val warpMembers  = mutable.Map.empty[BarrierKey, Long]
+
+    private lazy val clusterWaiting     = mutable.ArrayBuffer.empty[ClusterWaiting]
+    private lazy val clusterLanePhase   = Array.fill(workgroup.laneCount.raw)(-1L)
+    private lazy val clusterWaitedPhase = Array.fill(workgroup.laneCount.raw)(-1L)
+    private var clusterPhase            = 0L
+    private var clusterArrived          = VMLaneMask.Empty
+
+    private type Run = boundary.Label[Either[Fault, Unit]]
+
+    private def fail(fault: Fault)(using Run): Nothing = break(Left(fault))
+
+    private def check(result: Either[Fault, Unit])(using Run): Unit = result match {
+      case Left(fault) => fail(fault)
       case Right(())   => ()
     }
-    Right(())
-  }
 
-  // Retain one idle block state across dispatches. The single slot bounds retained memory and transfers ownership
-  // atomically when independent executions overlap.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-  private val blockState = AtomicReference[VMBlockState | Null](null)
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-  private def borrowState(
-      laneCount: Int > 0,
-      initialLive: VMLaneMask,
-      registerChunkCount: VMRegisterFile.ChunkCount
-  ): VMBlockState = {
-    val cached = blockState.getAndSet(null)
-    cached match {
-      case state: VMBlockState if state.laneCount == laneCount && state.registerChunkCount == registerChunkCount =>
-        state.reset(initialLive)
-        state
-      case _ => VMBlockState(laneCount, initialLive, registerChunkCount = registerChunkCount)
-    }
-  }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-  private def releaseState(state: VMBlockState): Unit = {
-    val _ = blockState.compareAndSet(null, state)
-  }
-
-  private def executeBlock(
-      kernel: Kernel,
-      block: Int,
-      group: Coordinates,
-      geometry: LaunchGeometry,
-      initialLive: VMLaneMask,
-      arguments: Map[NonEmpty[String], Argument],
-      memory: AddressMemory,
-      control: TaskControl,
-      workgroups: Workgroups,
-      initialParameterBuffers: Map[Long, Array[Byte]],
-      initialState: Option[VMBlockState] = None
-  ): Either[VMFault, VMBlockState] = {
-    val laneCount =
-      geometry.groupSize.volumeInt.fold(message => throw IllegalArgumentException(message), value => value)
-    val state    = initialState.getOrElse(borrowState(laneCount, initialLive, kernel.registerChunkCount))
-    val reusable = initialState.isEmpty
-    try
-      executeBlockWithState(
-        kernel,
-        block,
-        group,
-        geometry,
-        arguments,
-        memory,
-        control,
-        workgroups,
-        initialParameterBuffers,
-        state
-      )
-    finally if (reusable) releaseState(state)
-  }
-
-  // Cohort and barrier state model the SIMT machine directly; early exits preserve the first fault.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
-  private def executeBlockWithState(
-      kernel: Kernel,
-      block: Int,
-      group: Coordinates,
-      geometry: LaunchGeometry,
-      arguments: Map[NonEmpty[String], Argument],
-      memory: AddressMemory,
-      control: TaskControl,
-      workgroups: Workgroups,
-      initialParameterBuffers: Map[Long, Array[Byte]],
-      state: VMBlockState
-  ): Either[VMFault, VMBlockState] = {
-    import VMSemantics.*
-
-    state.importParameterBuffers(initialParameterBuffers)
-    kernel.parameterBank.foreach { bank =>
-      val bytes = bank.initial.toArray
-      bank.offsets.foreach { (name, offset) =>
-        arguments.get(name).foreach(argument =>
-          Array.copy(argument.bytes.toArray, 0, bytes, offset.raw, argument.bytes.size)
-        )
-      }
-      state.bindParameterBuffer(ParameterBank.Symbol, bytes)
-    }
-    kernel.parameters.foreach { parameter =>
-      arguments.get(parameter.name).foreach(argument =>
-        state.bindParameterBuffer(parameter.name, argument.bytes.toArray)
-      )
-    }
-    val rootFrame                     = Frame(0, kernel, state, arguments, None)
-    var nextFrame                     = 1
-    var live                          = state.live
-    val ready                         = mutable.ArrayBuffer.empty[Cohort]
-    val waiting                       = mutable.ArrayBuffer.empty[Waiting]
-    lazy val clusterWaiting           = mutable.ArrayBuffer.empty[ClusterWaiting]
-    lazy val clusterLanePhase         = Array.fill(state.laneCount.raw)(-1L)
-    lazy val clusterWaitedPhase       = Array.fill(state.laneCount.raw)(-1L)
-    var clusterPhase                  = 0L
-    var clusterArrived                = VMLaneMask.Empty
-    val barrierMasks                  = mutable.Map.empty[WaitKey, VMLaneMask]
-    val barrierOperations             = mutable.Map.empty[WaitKey, Option[PredicateOperation]]
-    val barrierCounts                 = mutable.Map.empty[WaitKey, Int]
-    val warpBarrierMasks              = mutable.Map.empty[WaitKey, Long]
-    val warpBarrierFrames             = mutable.Map.empty[WaitKey, Frame]
-    def enqueue(cohort: Cohort): Unit = {
+    private def enqueue(cohort: Cohort): Unit = {
       val lanes = cohort.lanes.intersect(live)
       if (lanes.nonEmpty) {
-        val existing = ready.indexWhere(value => value.pc == cohort.pc && value.frame == cohort.frame)
+        val existing = ready.indexWhere(value => value.pc == cohort.pc && (value.frame eq cohort.frame))
         if (existing < 0) ready += (if (lanes eq cohort.lanes) cohort else cohort.copy(lanes = lanes))
         else ready(existing) = ready(existing).copy(lanes = ready(existing).lanes.union(lanes))
       }
     }
 
-    enqueue(Cohort(Pc.Entry, state.live, rootFrame))
+    private def advance(cohort: Cohort, lanes: VMLaneMask)(using Run): Unit =
+      cohort.pc.next match {
+        case None       => fail(Fault.Backend("program counter overflow"))
+        case Some(next) => enqueue(cohort.copy(pc = next, lanes = lanes))
+      }
 
-    def enterCall(
+    private def enterCall(
         cohort: Cohort,
         call: DeviceCall,
-        parameters: Vec[NonEmpty[String]],
-        returnParameters: Vec[NonEmpty[String]]
-    ): Either[VMFault, Unit] = {
+        parameters: Vec[Parameter],
+        returnParameters: Vec[Parameter]
+    )(using Run): Unit = {
       val function = call.function
+      val caller   = cohort.frame
       if (parameters.size != function.parameters.size)
-        return Left(VMFault.InvalidState(
-          s"device function ${function.name} expects ${function.parameters.size} parameters, found ${parameters.size}"
+        fail(Fault.Backend(
+          s"device function ${function.routine.name} expects ${function.parameters.size} parameters, found ${parameters.size}"
         ))
       if (returnParameters.size != function.returnParameters.size)
-        return Left(VMFault.InvalidState(
-          s"device function ${function.name} returns ${function.returnParameters.size} parameters, found ${returnParameters.size}"
+        fail(Fault.Backend(
+          s"device function ${function.routine.name} returns ${function.returnParameters.size} parameters, found ${returnParameters.size}"
         ))
-      val caller      = cohort.frame
-      val calledState = VMBlockState(
-        laneCount = caller.state.laneCount,
-        initialLive = call.lanes,
-        shared = caller.state.shared,
-        registerChunkCount = caller.state.registerChunkCount,
-        memoryBarriers = caller.state.memoryBarriers
-      )
-      calledState.importParameterBuffers(caller.state.parameterBuffers)
-      calledState.parameterAddresses ++= caller.state.parameterAddresses
-      val parameterMapping = parameters.zip(function.parameters)
+      val lanes     = VMLanes(workgroup.laneCount)
+      val arguments = parameters.zip(function.parameters)
       call.lanes.foreachLane { lane =>
-        parameterMapping.foreach { (source, target) =>
-          calledState.parameters(lane)(target) = caller.state.parameters(lane).getOrElse(source, 0L)
-          caller.state.parameterBytes(lane).get(source).foreach(bytes =>
-            calledState.parameterBytes(lane)(target) = bytes.clone()
-          )
-        }
-      }
-      val calledKernel = caller.kernel.copy(
-        name = function.name,
-        parameters = Vec.empty,
-        program = function.program,
-        sharedSymbols = caller.kernel.sharedSymbols ++ function.sharedSymbols,
-        parameterBank = None,
-        localParameters = function.localParameters
-      )
-      val continuation = Continuation(caller, cohort.pc, returnParameters.zip(function.returnParameters))
-      val frame        = Frame(nextFrame, calledKernel, calledState, Map.empty, Some(continuation))
-      nextFrame = Math.incrementExact(nextFrame)
-      enqueue(Cohort(Pc.Entry, call.lanes, frame))
-      Right(())
-    }
-
-    def warpMemberMask(instruction: VMIR.Instruction): Option[Value] = instruction match {
-      case VMIR.Instruction.ShuffleDown(_, _, _, _, _, memberMask, _)  => Some(memberMask)
-      case VMIR.Instruction.ShuffleUp(_, _, _, _, _, memberMask, _)    => Some(memberMask)
-      case VMIR.Instruction.ShuffleIndex(_, _, _, _, _, memberMask, _) => Some(memberMask)
-      case VMIR.Instruction.ShuffleBfly(_, _, _, _, _, memberMask, _)  => Some(memberMask)
-      case VMIR.Instruction.VoteBallot(_, _, memberMask)               => Some(memberMask)
-      case VMIR.Instruction.Elect(_, _, memberMask)                    => Some(memberMask)
-      case VMIR.Instruction.VotePredicate(_, _, memberMask, _)         => Some(memberMask)
-      case VMIR.Instruction.WarpReduce(_, _, memberMask, _, _)         => Some(memberMask)
-      case _                                                           => None
-    }
-
-    def synchronizeWarpInstruction(
-        executable: PredicatedInstruction,
-        cohort: Cohort
-    ): Either[VMFault, (VMLaneMask, VMLaneMask)] = warpMemberMask(executable.instruction) match {
-      case None             => Right(cohort.lanes -> VMLaneMask.Empty)
-      case Some(memberMask) =>
-        val kernel    = cohort.frame.kernel
-        val state     = cohort.frame.state
-        val arguments = cohort.frame.arguments
-        val context   = VMInstructionContext(
-          kernel,
-          block,
-          group,
-          geometry,
-          state,
-          cohort.pc,
-          cohort.lanes,
-          arguments,
-          memory,
-          control,
-          workgroups
+        val source = caller.lanes(lane)
+        arguments.foreach((from, to) =>
+          source.parameterBytes(from).foreach(bytes => lanes(lane).setParameterBytes(to, bytes.clone()))
         )
-        var failure: Option[VMFault] = None
-        val runnable                 = cohort.lanes.filterLanes { lane =>
-          if (failure.nonEmpty) false
-          else context.read(lane, memberMask) match {
-            case Left(fault) =>
-              failure = Some(fault)
-              false
-            case Right(mask) =>
-              val expected = state.live.warpBits(lane.raw) & live.warpBits(lane.raw) & mask
-              (expected & ~cohort.lanes.warpBits(lane.raw)) == 0L
-          }
-        }
-        failure match {
-          case Some(fault) => Left(fault)
-          case None        => Right(runnable -> cohort.lanes.subtract(runnable))
-        }
-    }
-
-    def advance(cohort: Cohort, lanes: VMLaneMask): Either[VMFault, Unit] =
-      cohort.pc.next.toRight(VMFault.InvalidProgram("program counter overflow")).map(next =>
-        enqueue(cohort.copy(pc = next, lanes = lanes))
+      }
+      // Each frame has its own window, so pointers into a caller frame stay valid.
+      val localBase = caller.localBase + VMAddressSpace.LocalFrameSize +
+        ((caller.routine.localBytes.raw.toLong + 15L) & -16L)
+      if (
+        localBase + math.max(VMAddressSpace.LocalFrameSize, function.routine.localBytes.raw.toLong) >
+          VMAddressSpace.SharedBase
       )
-
-    def releaseCluster(): Either[VMFault, Unit] = {
-      if (clusterPhase == 0L && clusterArrived.isEmpty) return Right(())
-      if (clusterArrived.nonEmpty && clusterArrived.intersect(live) == live) {
-        clusterPhase += 1L
-        clusterArrived = VMLaneMask.Empty
-      }
-      val pending = clusterWaiting.toVector
-      clusterWaiting.clear()
-      var index = 0
-      while (index < pending.size) {
-        val entry        = pending(index)
-        val participants = if (entry.arrival) clusterArrived
-        else pending.filter(value => !value.arrival && value.phase == entry.phase)
-          .foldLeft(VMLaneMask.Empty)((mask, value) => mask.union(value.cohort.lanes))
-        val released = entry.cohort.lanes.intersect(live).filterLanes { lane =>
-          val warp = live.warpBits(lane.raw)
-          if (entry.arrival && entry.phase < clusterPhase) true
-          else (entry.arrival || entry.phase < clusterPhase) && (participants.warpBits(lane.raw) & warp) == warp
-        }
-        if (!entry.arrival) released.foreachLane(lane => clusterWaitedPhase(lane.raw) = entry.phase)
-        advance(entry.cohort, released) match {
-          case Left(fault) => return Left(fault)
-          case Right(())   => ()
-        }
-        val remaining = entry.cohort.lanes.intersect(live).subtract(released)
-        if (remaining.nonEmpty) clusterWaiting += entry.copy(cohort = entry.cohort.copy(lanes = remaining))
-        index += 1
-      }
-      Right(())
+        fail(Fault.Unsupported(s"call depth exceeds the local memory window at ${function.routine.name}"))
+      val frame = VMFrame(
+        function.routine,
+        lanes,
+        localBase,
+        Some(VMFrame.Continuation(caller, cohort.pc, returnParameters.zip(function.returnParameters))),
+        call.lanes
+      )
+      enqueue(Cohort(Pc.Entry, call.lanes, frame))
     }
 
-    def releaseBarrier(key: WaitKey): Either[VMFault, Unit] = {
-      val arrived                            = barrierMasks.getOrElse(key, VMLaneMask.Empty)
-      val barrierState                       = warpBarrierFrames.get(key).fold(state)(_.state)
-      def canResume(value: Waiting): Boolean =
-        value.key == key && value.resumeOnArrival && value.cohort.lanes.filterLanes { lane =>
-          val members = live.warpBits(lane.raw)
-          (arrived.warpBits(lane.raw) & members) != members
-        }.isEmpty
-      val resumed = Vec.from(waiting.filter(canResume(_)))
-      waiting.filterInPlace(value => !canResume(value))
-      var resumedIndex = 0
-      while (resumedIndex < resumed.size) {
-        val cohort = resumed(resumedIndex).cohort
-        advance(cohort, cohort.lanes) match {
-          case Left(fault) => return Left(fault)
-          case Right(())   => ()
+    private def synchroniseWarpInstruction(memberMask: Value, cohort: Cohort): (VMLaneMask, VMLaneMask) = {
+      context.frame = cohort.frame
+      context.active = cohort.lanes
+      val runnable = cohort.lanes.filterLanes { lane =>
+        val expected = cohort.frame.live.warpBits(lane.raw) & live.warpBits(lane.raw) & context.read(lane, memberMask)
+        (expected & ~cohort.lanes.warpBits(lane.raw)) == 0L
+      }
+      runnable -> cohort.lanes.subtract(runnable)
+    }
+
+    private def releaseCluster()(using Run): Unit =
+      if (clusterPhase != 0L || clusterArrived.nonEmpty) {
+        if (clusterArrived.nonEmpty && clusterArrived.intersect(live) == live) {
+          clusterPhase += 1L
+          clusterArrived = VMLaneMask.Empty
         }
-        resumedIndex += 1
-      }
-      val expected = key.scope match {
-        case WaitScope.Workgroup => live
-        case WaitScope.Warp      =>
-          val warpBase   = key.id.toInt
-          val memberMask = if (key.phase < 0) barrierState.convergence.getOrElse((warpBase, (-key.phase - 1).toInt), 0L)
-          else warpBarrierMasks.getOrElse(key, -1L)
-          barrierState.live.intersect(live).filterLanes { lane =>
-            (lane.raw & ~31) == warpBase &&
-            ((memberMask & 0xffffffffL) & (1L << (lane.raw & 31))) != 0L
+        val pending = clusterWaiting.toVector
+        clusterWaiting.clear()
+        pending.foreach { entry =>
+          val participants = if (entry.arrival) clusterArrived
+          else pending.filter(value => !value.arrival && value.phase == entry.phase)
+            .foldLeft(VMLaneMask.Empty)((mask, value) => mask.union(value.cohort.lanes))
+          val released = entry.cohort.lanes.intersect(live).filterLanes { lane =>
+            val warp = live.warpBits(lane.raw)
+            if (entry.arrival && entry.phase < clusterPhase) true
+            else (entry.arrival || entry.phase < clusterPhase) && (participants.warpBits(lane.raw) & warp) == warp
           }
-        case _ => live
+          if (!entry.arrival) released.foreachLane(lane => clusterWaitedPhase(lane.raw) = entry.phase)
+          advance(entry.cohort, released)
+          val remaining = entry.cohort.lanes.intersect(live).subtract(released)
+          if (remaining.nonEmpty) clusterWaiting += entry.copy(cohort = entry.cohort.copy(lanes = remaining))
+        }
       }
-      val count        = barrierCounts.getOrElse(key, 0)
-      val participants = if (key.scope == WaitScope.Workgroup && count > 0) {
+
+    private def expected(key: BarrierKey): VMLaneMask = {
+      def warp(base: WorkgroupLane.WarpBase, frame: VMFrame, members: Long): VMLaneMask =
+        frame.live.intersect(live).filterLanes(lane =>
+          (lane.raw & ~31) == base.raw && ((members & 0xffffffffL) & (1L << (lane.raw & 31))) != 0L
+        )
+      key match {
+        case BarrierKey.Workgroup(_)                    => live
+        case BarrierKey.Warp(base, _, frame)            => warp(base, frame, warpMembers.getOrElse(key, -1L))
+        case BarrierKey.Convergence(base, token, frame) =>
+          warp(base, frame, workgroup.convergenceMask(base, token))
+      }
+    }
+
+    private def participants(key: BarrierKey, arrived: VMLaneMask): Option[VMLaneMask] = {
+      val count = counts.getOrElse(key, 0)
+      if (count > 0) {
         var selected = VMLaneMask.Empty
         var threads  = 0
         var warp     = 0
-        while (warp < state.laneCount.raw && threads < count) {
+        while (warp < workgroup.laneCount.raw && threads < count) {
           val members = live.warpBits(warp)
           if (arrived.warpBits(warp) != 0L && (arrived.warpBits(warp) & members) == members) {
             selected = selected.union(arrived.filterLanes(lane => (lane.raw & ~31) == warp))
@@ -439,392 +318,266 @@ object VMInterpreter {
           warp += 32
         }
         Option.when(threads == count)(selected)
-      } else Option.when(arrived.intersect(expected) == expected)(arrived)
-      participants match {
-        case None               => ()
-        case Some(participants) =>
-          val released =
-            Vec.from(waiting.filter(value => value.key == key && value.cohort.lanes.intersect(participants).nonEmpty))
-          waiting.filterInPlace(value => value.key != key || value.cohort.lanes.intersect(participants).isEmpty)
-          val remaining = arrived.subtract(participants)
-          if (remaining.nonEmpty) barrierMasks(key) = remaining
-          else {
-            val _ = barrierMasks.remove(key)
-            val _ = barrierCounts.remove(key)
-            val _ = barrierOperations.remove(key)
-          }
-          val _ = warpBarrierMasks.remove(key)
-          val _ = warpBarrierFrames.remove(key)
-          // A completed convergence token is no longer live. In particular, a
-          // legacy target can be reached along a path that skipped the next SSY
-          // using this slot; it must not wait for the previous token's members.
-          if (key.scope == WaitScope.Warp && key.phase < 0) {
-            val _ = barrierState.convergence.remove((key.id.toInt, (-key.phase - 1).toInt))
-          }
-          released.view.flatMap(_.reduction).headOption match {
-            case None        => ()
-            case Some(first) =>
-              var reduced: Either[VMFault, Boolean] = Right(first.operation == PredicateOperation.And)
-              released.foreach { waiter =>
-                waiter.reduction.foreach { reduction =>
-                  waiter.cohort.lanes.foreachLane { lane =>
-                    reduced = reduced.flatMap { current =>
-                      waiter.cohort.frame.state.predicates(lane).get(reduction.predicate).toRight(
-                        VMFault.UndefinedRegister(reduction.predicate, reduction.pc, lane)
-                      ).map { value =>
-                        reduction.operation match {
-                          case PredicateOperation.And => current && value
-                          case PredicateOperation.Or  => current || value
-                          case PredicateOperation.Xor => current ^ value
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-              reduced match {
-                case Left(fault)  => return Left(fault)
-                case Right(value) =>
-                  released.foreach { waiter =>
-                    waiter.reduction.foreach { reduction =>
-                      waiter.cohort.lanes.foreachLane(lane =>
-                        waiter.cohort.frame.state.predicates(lane)(reduction.destination) = value
-                      )
-                    }
-                  }
-              }
-          }
-          var releasedIndex = 0
-          while (releasedIndex < released.size) {
-            val releasedCohort = released(releasedIndex).cohort
-            advance(releasedCohort, releasedCohort.lanes) match {
-              case Left(fault) => return Left(fault)
-              case Right(())   => ()
-            }
-            releasedIndex += 1
-          }
+      } else {
+        val required = expected(key)
+        Option.when(arrived.intersect(required) == required)(arrived)
       }
-      Right(())
     }
 
-    def arriveWorkgroup(
-        cohort: Cohort,
-        key: WaitKey,
-        count: Int,
-        reduction: Option[BarrierReduction],
-        resumeOnArrival: Boolean = false
-    ): Either[VMFault, Unit] = {
-      val operation = reduction.map(_.operation)
-      barrierCounts.get(key) match {
-        case Some(previous) if previous != count =>
-          Left(
-            VMFault.InvalidState(s"barrier ${key.id} thread count changed from $previous to $count before completion")
+    private def reduce(released: Vec[Waiting])(using Run): Unit =
+      released.view.flatMap(_.reduction).headOption.foreach { first =>
+        var reduced = first.operation == PredicateOperation.And
+        released.foreach { waiter =>
+          waiter.reduction.foreach { reduction =>
+            context.frame = waiter.cohort.frame
+            waiter.cohort.lanes.foreachLane { lane =>
+              context.predicate(lane, reduction.predicate) match {
+                case Left(fault) => fail(fault)
+                case Right(set)  =>
+                  val value = set != reduction.negated
+                  reduced = reduction.operation match {
+                    case PredicateOperation.And => reduced && value
+                    case PredicateOperation.Or  => reduced || value
+                    case PredicateOperation.Xor => reduced ^ value
+                  }
+              }
+            }
+          }
+        }
+        released.foreach(waiter =>
+          waiter.reduction.foreach(reduction =>
+            waiter.cohort.lanes.foreachLane(lane =>
+              waiter.cohort.frame.lanes(lane).setPredicate(reduction.destination, reduced)
+            )
           )
-        case _ if barrierOperations.get(key).exists(_ != operation) =>
-          Left(VMFault.InvalidState(s"barrier ${key.id} mixes incompatible reduction and synchronization operations"))
-        case _ if barrierMasks.getOrElse(key, VMLaneMask.Empty).intersect(cohort.lanes).nonEmpty =>
-          Left(VMFault.InvalidState(s"barrier ${key.id} receives a repeated arrival before completion"))
+        )
+      }
+
+    private def releaseBarrier(key: BarrierKey)(using Run): Unit = {
+      val arrived                            = barrierMasks.getOrElse(key, VMLaneMask.Empty)
+      def canResume(value: Waiting): Boolean =
+        value.key == key && value.resumeOnArrival && value.cohort.lanes.filterLanes { lane =>
+          val members = live.warpBits(lane.raw)
+          (arrived.warpBits(lane.raw) & members) != members
+        }.isEmpty
+      val resumed = Vec.from(waiting.filter(canResume(_)))
+      waiting.filterInPlace(value => !canResume(value))
+      resumed.foreach(value => advance(value.cohort, value.cohort.lanes))
+      participants(key, arrived).foreach { participants =>
+        val released =
+          Vec.from(waiting.filter(value => value.key == key && value.cohort.lanes.intersect(participants).nonEmpty))
+        waiting.filterInPlace(value => value.key != key || value.cohort.lanes.intersect(participants).isEmpty)
+        val remaining = arrived.subtract(participants)
+        if (remaining.nonEmpty) barrierMasks(key) = remaining
+        else {
+          val _ = barrierMasks.remove(key)
+          val _ = counts.remove(key)
+          val _ = operations.remove(key)
+        }
+        val _ = warpMembers.remove(key)
+        // A completed convergence token is no longer live. A legacy target can be reached along a path that skipped
+        // the next SSY using this slot; it must not wait for the previous token's members.
+        key match {
+          case BarrierKey.Convergence(base, token, _) =>
+            workgroup.completeConvergence(base, token)
+          case _ => ()
+        }
+        reduce(released)
+        released.foreach(value => advance(value.cohort, value.cohort.lanes))
+      }
+    }
+
+    private def releaseAll()(using Run): Unit = Vec.from(barrierMasks.keys).foreach(releaseBarrier(_))
+
+    private def arriveWorkgroup(
+        cohort: Cohort,
+        arrival: WorkgroupArrival,
+        reduction: Option[BarrierReduction],
+        resume: Boolean
+    )(
+        using Run
+    ): Unit = {
+      val key       = BarrierKey.Workgroup(arrival.id)
+      val operation = reduction.map(_.operation)
+      counts.get(key) match {
+        case Some(previous) if previous != arrival.count.raw =>
+          fail(Fault.Backend(
+            s"barrier ${arrival.id} thread count changed from $previous to ${arrival.count} before completion"
+          ))
+        case _ if operations.get(key).exists(_ != operation) =>
+          fail(Fault.Backend(s"barrier ${arrival.id} mixes incompatible reduction and synchronisation operations"))
+        case _ if barrierMasks.getOrElse(key, VMLaneMask.Empty).intersect(arrival.lanes).nonEmpty =>
+          fail(Fault.Backend(s"barrier ${arrival.id} receives a repeated arrival before completion"))
         case _ =>
-          barrierCounts(key) = count
-          barrierOperations(key) = operation
-          waiting += Waiting(cohort, key, reduction, resumeOnArrival)
-          barrierMasks(key) = barrierMasks.getOrElse(key, VMLaneMask.Empty).union(cohort.lanes)
+          counts(key) = arrival.count.raw
+          operations(key) = operation
+          waiting += Waiting(cohort.copy(lanes = arrival.lanes), key, reduction, resume)
+          barrierMasks(key) = barrierMasks.getOrElse(key, VMLaneMask.Empty).union(arrival.lanes)
           releaseBarrier(key)
       }
     }
 
-    while (live.nonEmpty) {
-      if (ready.isEmpty) {
-        val waits = waiting.map(value =>
-          s"${value.key.scope}:${value.key.id}@${value.key.phase}, ${value.cohort.frame.kernel.name} pc ${value.cohort.pc}"
-        ).distinct.sorted
-        val detail: NonEmpty[String] =
-          if (waits.nonEmpty) s"${rootFrame.kernel.name}: ${waits.mkString(", ")}"
-          else s"${rootFrame.kernel.name}: no runnable cohort"
-        return Left(VMFault.Deadlock(detail))
-      }
-      var cohort    = ready.remove(0)
-      val state     = cohort.frame.state
-      val kernel    = cohort.frame.kernel
-      val arguments = cohort.frame.arguments
-      val effects   = state.effects
-      state.live = state.live.intersect(live)
-      val surviving = cohort.lanes.intersect(live)
-      if (surviving ne cohort.lanes) cohort = cohort.copy(lanes = surviving)
-      val executable = kernel.program.at(cohort.pc) match {
-        case None =>
-          return Left(VMFault.InvalidProgram(
-            s"program counter ${cohort.pc} is outside a ${kernel.program.size}-instruction program"
-          ))
-        case Some(value) => value
-      }
-      if (warpMemberMask(executable.instruction).nonEmpty) {
-        var readyIndex = 0
-        while (readyIndex < ready.size)
-          if (ready(readyIndex).pc == cohort.pc && ready(readyIndex).frame == cohort.frame) {
-            cohort = cohort.copy(lanes = cohort.lanes.union(ready.remove(readyIndex).lanes))
-          } else readyIndex += 1
-        synchronizeWarpInstruction(executable, cohort) match {
-          case Left(fault)                => return Left(fault)
-          case Right((runnable, delayed)) =>
-            if (delayed.nonEmpty) enqueue(cohort.copy(lanes = delayed))
-            if (runnable ne cohort.lanes) cohort = cohort.copy(lanes = runnable)
-        }
-      }
-      val activeSize = cohort.lanes.positiveSize
-      if (activeSize.nonEmpty) {
-        control.checkpoint(activeSize.get.widen[Int > 0]) match {
-          case Left(fault) => return Left(VMFault.fromControl(fault))
-          case Right(())   => ()
-        }
-        var active                            = cohort.lanes
-        var predicateFailure: Option[VMFault] = None
-        val predicateIndex                    =
-          executable.predication.map(predicate => VMPredicateFile.index(predicate.name)).getOrElse(-1)
-        executable.predication.foreach { predicate =>
-          active = cohort.lanes.filterLanes { lane =>
-            val value = if (predicateIndex >= 0) state.predicates(lane).getSlotRaw(predicateIndex)
-            else
-              state.predicates(lane).get(predicate.name)
-            value match {
-              case Some(predicateValue) => predicateValue != predicate.negated
-              case None                 =>
-                predicateFailure = Some(
-                  VMFault.UndefinedRegister(predicate.name, cohort.pc, lane)
-                )
-                false
-            }
-          }
-        }
-        predicateFailure match {
-          case Some(fault) => return Left(fault)
-          case None        => ()
-        }
-        val skipped = if (executable.predication.isEmpty) VMLaneMask.Empty else cohort.lanes.subtract(active)
-        val context = VMInstructionContext(
-          kernel,
-          block,
-          group,
-          geometry,
-          state,
-          cohort.pc,
-          active,
-          arguments,
-          memory,
-          control,
-          workgroups
-        )
+    private def arriveWarp(cohort: Cohort, lanes: VMLaneMask, key: BarrierKey)(using Run): Unit = {
+      waiting += Waiting(cohort.copy(lanes = lanes), key)
+      barrierMasks(key) = barrierMasks.getOrElse(key, VMLaneMask.Empty).union(lanes)
+      releaseBarrier(key)
+    }
 
-        effects.clear()
-        val outcome =
-          if (active.isEmpty) Right(Step.Advance)
-          else executable.instruction.execute(context, effects)
-        outcome match {
-          case Left(fault) =>
-            return Left(fault.inFunction(kernel.name))
-          case Right(Step.Trap(fault)) => return Left(fault.inFunction(kernel.name))
-          case Right(control)          =>
-            effects.commit(state, memory, cohort.pc) match {
-              case Left(fault) =>
-                return Left(fault.inFunction(kernel.name))
-              case Right(()) => ()
-            }
-            control match {
-              case Step.Advance =>
-                advance(cohort, cohort.lanes) match {
-                  case Left(fault) => return Left(fault)
-                  case Right(())   => ()
-                }
-                if (
-                  executable.instruction match {
-                    case VMIR.Instruction.Convergence(_, VMIR.ConvergenceAction.Break) => true
-                    case _                                                             => false
-                  }
-                ) {
-                  val keys  = barrierMasks.keys.filter(_.phase < 0).toVec
-                  var index = 0
-                  while (index < keys.size) {
-                    releaseBarrier(keys(index)) match {
-                      case Left(fault) => return Left(fault)
-                      case Right(())   => ()
-                    }
-                    index += 1
-                  }
-                }
-              case Step.Jump(target) =>
-                enqueue(cohort.copy(pc = target, lanes = active))
-                advance(cohort, skipped) match {
-                  case Left(fault) => return Left(fault)
-                  case Right(())   => ()
-                }
-              case Step.Split(taken, target, fallthrough) =>
-                enqueue(cohort.copy(pc = target, lanes = taken))
-                advance(cohort, fallthrough) match {
-                  case Left(fault) => return Left(fault)
-                  case Right(())   => ()
-                }
-              case Step.ClusterBarrier(arrival) =>
-                advance(cohort, skipped) match {
-                  case Left(fault) => return Left(fault)
-                  case Right(())   => ()
-                }
-                var invalid = false
-                active.foreachLane { lane =>
-                  if (arrival) {
-                    if (clusterLanePhase(lane.raw) > clusterWaitedPhase(lane.raw)) invalid = true
-                    clusterLanePhase(lane.raw) = clusterPhase
-                  } else if (clusterLanePhase(lane.raw) < 0) invalid = true
-                }
-                if (invalid) return Left(VMFault.InvalidState("cluster barrier requires one arrival before each wait"))
-                if (arrival) clusterArrived = clusterArrived.union(active)
-                if (arrival) clusterWaiting += ClusterWaiting(cohort.copy(lanes = active), clusterPhase, true)
-                else {
-                  val phases = mutable.Map.empty[Long, VMLaneMask.Builder]
-                  active.foreachLane(lane =>
-                    phases.getOrElseUpdate(clusterLanePhase(lane.raw), VMLaneMask.Builder()).add(lane)
-                  )
-                  phases.foreach { (phase, lanes) =>
-                    clusterWaiting += ClusterWaiting(cohort.copy(lanes = lanes.result()), phase, false)
-                  }
-                }
-                releaseCluster() match {
-                  case Left(fault) => return Left(fault)
-                  case Right(())   => ()
-                }
-              case Step.WorkgroupBarrier(arrivals, blocking) =>
-                advance(cohort, skipped) match {
-                  case Left(fault) => return Left(fault)
-                  case Right(())   => ()
-                }
-                val reduction = executable.instruction match {
-                  case VMIR.Instruction.BarrierReduce(destination, _, predicate, operation, _) =>
-                    Some(BarrierReduction(destination, predicate, operation, cohort.pc))
-                  case _ => None
-                }
-                var index = 0
-                while (index < arrivals.size) {
-                  val arrival = arrivals(index)
-                  val key     = WaitKey(WaitScope.Workgroup, arrival.id.toLong, 0L)
-                  arriveWorkgroup(cohort.copy(lanes = arrival.lanes), key, arrival.count, reduction, !blocking) match {
-                    case Left(fault) => return Left(fault)
-                    case Right(())   => ()
-                  }
-                  index += 1
-                }
-              case Step.Suspend(key) =>
-                advance(cohort, skipped) match {
-                  case Left(fault) => return Left(fault)
-                  case Right(())   => ()
-                }
-                val reduction: Option[BarrierReduction] = None
-                key.scope match {
-                  case WaitScope.Warp =>
-                    val lanesByToken                    = mutable.Map.empty[(Int, Long), VMLaneMask.Builder]
-                    val tokenRegister: NonEmpty[String] = s"%B${(-key.phase - 1).toInt}"
-                    active.foreachLane { lane =>
-                      val phase = if (key.phase < 0) -state.registers(lane).get(tokenRegister) - 1L else key.phase
-                      val token = (lane.raw & ~31, phase)
-                      lanesByToken.getOrElseUpdate(token, VMLaneMask.Builder()).add(lane)
-                    }
-                    val warps     = Vec.from(lanesByToken).sortBy(_._1)
-                    var warpIndex = 0
-                    while (warpIndex < warps.size) {
-                      val ((warpBase, phase), builder) = warps(warpIndex)
-                      val warpLanes                    = builder.result()
-                      val warpKey = WaitKey(WaitScope.Warp, warpBase.toLong, phase, cohort.frame.id)
-                      waiting += Waiting(cohort.copy(lanes = warpLanes), warpKey, reduction)
-                      warpBarrierMasks(warpKey) = key.id
-                      warpBarrierFrames(warpKey) = cohort.frame
-                      barrierMasks(warpKey) = barrierMasks.getOrElse(warpKey, VMLaneMask.Empty).union(warpLanes)
-                      releaseBarrier(warpKey) match {
-                        case Left(fault) => return Left(fault)
-                        case Right(())   => ()
-                      }
-                      warpIndex += 1
-                    }
-                  case _ =>
-                    arriveWorkgroup(cohort.copy(lanes = active), key, 0, reduction) match {
-                      case Left(fault) => return Left(fault)
-                      case Right(())   => ()
-                    }
-                }
-              case Step.Call(calls, parameters, returnParameters, completed) =>
-                advance(cohort, skipped.union(completed)) match {
-                  case Left(fault) => return Left(fault)
-                  case Right(())   => ()
-                }
-                var callIndex = 0
-                while (callIndex < calls.size) {
-                  enterCall(cohort, calls(callIndex), parameters, returnParameters) match {
-                    case Left(fault) => return Left(fault)
-                    case Right(())   => ()
-                  }
-                  callIndex += 1
-                }
-              case Step.Return(mask) =>
-                state.live = state.live.subtract(mask)
-                cohort.frame.continuation match {
-                  case None               => live = live.subtract(mask)
-                  case Some(continuation) =>
-                    mask.foreachLane { lane =>
-                      continuation.parameters.foreach { (target, source) =>
-                        state.parameters(lane).get(source).foreach(value =>
-                          continuation.caller.state.parameters(lane)(target) = value
-                        )
-                        state.parameterBytes(lane).get(source).foreach(bytes =>
-                          continuation.caller.state.parameterBytes(lane)(target) = bytes.clone()
-                        )
-                      }
-                    }
-                    advance(Cohort(continuation.pc, mask, continuation.caller), mask) match {
-                      case Left(fault) => return Left(fault)
-                      case Right(())   => ()
-                    }
-                }
-                advance(cohort, skipped) match {
-                  case Left(fault) => return Left(fault)
-                  case Right(())   => ()
-                }
-                releaseCluster() match {
-                  case Left(fault) => return Left(fault)
-                  case Right(())   => ()
-                }
-                val keys     = Vec.from(barrierMasks.keys)
-                var keyIndex = 0
-                while (keyIndex < keys.size) {
-                  releaseBarrier(keys(keyIndex)) match {
-                    case Left(fault) => return Left(fault)
-                    case Right(())   => ()
-                  }
-                  keyIndex += 1
-                }
-              case Step.Exit(mask) =>
-                state.live = state.live.subtract(mask)
-                live = live.subtract(mask)
-                advance(cohort, skipped) match {
-                  case Left(fault) => return Left(fault)
-                  case Right(())   => ()
-                }
-                releaseCluster() match {
-                  case Left(fault) => return Left(fault)
-                  case Right(())   => ()
-                }
-                val keys     = Vec.from(barrierMasks.keys)
-                var keyIndex = 0
-                while (keyIndex < keys.size) {
-                  releaseBarrier(keys(keyIndex)) match {
-                    case Left(fault) => return Left(fault)
-                    case Right(())   => ()
-                  }
-                  keyIndex += 1
-                }
-              case Step.Trap(fault) => return Left(fault)
-            }
-        }
+    private def byWarp(lanes: VMLaneMask)(key: WorkgroupLane => Long)
+        : Vec[((WorkgroupLane.WarpBase, Long), VMLaneMask)] = {
+      val groups = mutable.Map.empty[(WorkgroupLane.WarpBase, Long), VMLaneMask.Builder]
+      lanes.foreachLane(lane =>
+        groups.getOrElseUpdate((WorkgroupLane.warpBases(lane.raw >>> 5), key(lane)), VMLaneMask.Builder()).add(lane)
+      )
+      Vec.from(groups).map((group, builder) => group -> builder.result()).sortBy((group, _) => (group._1.raw, group._2))
+    }
+
+    private def clusterBarrier(cohort: Cohort, active: VMLaneMask, arrival: Boolean)(using Run): Unit = {
+      var invalid = false
+      active.foreachLane { lane =>
+        if (arrival) {
+          if (clusterLanePhase(lane.raw) > clusterWaitedPhase(lane.raw)) invalid = true
+          clusterLanePhase(lane.raw) = clusterPhase
+        } else if (clusterLanePhase(lane.raw) < 0) invalid = true
+      }
+      if (invalid) fail(Fault.Backend("cluster barrier requires one arrival before each wait"))
+      if (arrival) {
+        clusterArrived = clusterArrived.union(active)
+        clusterWaiting += ClusterWaiting(cohort.copy(lanes = active), clusterPhase, true)
+      } else {
+        val phases = mutable.Map.empty[Long, VMLaneMask.Builder]
+        active.foreachLane(lane => phases.getOrElseUpdate(clusterLanePhase(lane.raw), VMLaneMask.Builder()).add(lane))
+        phases.foreach((phase, lanes) =>
+          clusterWaiting += ClusterWaiting(cohort.copy(lanes = lanes.result()), phase, false)
+        )
+      }
+      releaseCluster()
+    }
+
+    private def complete(cohort: Cohort, mask: VMLaneMask)(using Run): Unit = {
+      val frame = cohort.frame
+      frame.live = frame.live.subtract(mask)
+      frame.continuation match {
+        case None               => live = live.subtract(mask)
+        case Some(continuation) =>
+          mask.foreachLane { lane =>
+            val callee = frame.lanes(lane)
+            continuation.results.foreach((target, source) =>
+              callee.parameterBytes(source).foreach(bytes =>
+                continuation.caller.lanes(lane).setParameterBytes(target, bytes.clone())
+              )
+            )
+          }
+          advance(Cohort(continuation.pc, mask, continuation.caller), mask)
       }
     }
-    state.live = live
-    Right(state)
-  }
 
+    private def step(cohort: Cohort, instruction: PredicatedInstruction)(using Run): Unit = {
+      val frame = cohort.frame
+      cohort.lanes.positiveSize.foreach(size => check(control.checkpoint(size.widen[Int > 0])))
+      val active = instruction.predication.fold(cohort.lanes)(predication =>
+        cohort.lanes.filterLanes(lane =>
+          frame.lanes(lane).predicate(predication.predicate) match {
+            case Some(value) => value != predication.negated
+            case None        =>
+              fail(Fault.Backend(
+                s"lane $lane: undefined ${frame.routine.describe(predication.predicate)} at pc ${cohort.pc}"
+              ))
+          }
+        )
+      )
+      val skipped = if (instruction.predication.isEmpty) VMLaneMask.Empty else cohort.lanes.subtract(active)
+      context.frame = frame
+      context.pc = cohort.pc
+      context.active = active
+      effects.clear()
+      val outcome =
+        if (active.isEmpty) Right(Step.Advance) else VMSemantics.execute(instruction.instruction, context, effects)
+      val result = outcome.flatMap(step => effects.commit(frame.lanes, workgroup, memory, cohort.pc).map(_ => step))
+        .leftMap(inFunction(_, frame.routine.name))
+      result match {
+        case Left(fault)         => fail(fault)
+        case Right(Step.Advance) =>
+          advance(cohort, cohort.lanes)
+          instruction.instruction match {
+            case Instruction.Convergence(_, ConvergenceAction.Break) =>
+              Vec.from(barrierMasks.keys.collect { case key: BarrierKey.Convergence => key }).foreach(releaseBarrier(_))
+            case _ => ()
+          }
+        case Right(Step.Jump(target)) =>
+          enqueue(cohort.copy(pc = target, lanes = active))
+          advance(cohort, skipped)
+        case Right(Step.ClusterBarrier(arrival)) =>
+          advance(cohort, skipped)
+          clusterBarrier(cohort, active, arrival)
+        case Right(Step.WorkgroupBarrier(arrivals, blocking, reduction)) =>
+          advance(cohort, skipped)
+          arrivals.foreach(arriveWorkgroup(cohort, _, reduction, !blocking))
+        case Right(Step.WarpSync(memberMask)) =>
+          advance(cohort, skipped)
+          byWarp(active)(_ => 0L).foreach { case ((base, _), lanes) =>
+            val key = BarrierKey.Warp(base, cohort.pc, frame)
+            warpMembers(key) = memberMask
+            arriveWarp(cohort, lanes, key)
+          }
+        case Right(Step.ConvergenceSync(token)) =>
+          advance(cohort, skipped)
+          byWarp(active)(frame.lanes(_).register(token)).foreach { case ((base, value), lanes) =>
+            arriveWarp(cohort, lanes, BarrierKey.Convergence(base, value, frame))
+          }
+        case Right(Step.Call(calls, parameters, returnParameters)) =>
+          advance(cohort, skipped)
+          calls.foreach(enterCall(cohort, _, parameters, returnParameters))
+        case Right(Step.Return(mask)) =>
+          complete(cohort, mask)
+          advance(cohort, skipped)
+          releaseCluster()
+          releaseAll()
+        case Right(Step.Exit(mask)) =>
+          frame.live = frame.live.subtract(mask)
+          live = live.subtract(mask)
+          advance(cohort, skipped)
+          releaseCluster()
+          releaseAll()
+      }
+    }
+
+    def run(): Either[Fault, Unit] = boundary {
+      val _ = workgroup.allocateBuffer(parameterBlock.clone())
+      enqueue(Cohort(Pc.Entry, initialLive, root))
+      while (live.nonEmpty) {
+        if (ready.isEmpty) {
+          val waits =
+            waiting.map(value => s"${value.key.describe}, ${value.cohort.frame.routine.name} pc ${value.cohort.pc}")
+              .distinct.sorted
+          fail(Fault.Backend(
+            s"execution deadlocked: ${kernel.name}: ${
+                if (waits.nonEmpty) waits.mkString(", ") else "no runnable cohort"
+              }"
+          ))
+        }
+        var cohort = ready.removeHead()
+        val frame  = cohort.frame
+        frame.live = frame.live.intersect(live)
+        val surviving = cohort.lanes.intersect(live)
+        if (surviving ne cohort.lanes) cohort = cohort.copy(lanes = surviving)
+        val instructions = frame.routine.program.instructions
+        if (cohort.pc.toInt >= instructions.size)
+          fail(Fault.Backend(s"program counter ${cohort.pc} is outside a ${instructions.size}-instruction program"))
+        val instruction = instructions(cohort.pc.toInt)
+        warpMemberMask(instruction.instruction).foreach { memberMask =>
+          var index = 0
+          while (index < ready.size)
+            if (ready(index).pc == cohort.pc && (ready(index).frame eq frame))
+              cohort = cohort.copy(lanes = cohort.lanes.union(ready.remove(index).lanes))
+            else index += 1
+          val (runnable, delayed) = synchroniseWarpInstruction(memberMask, cohort)
+          if (delayed.nonEmpty) enqueue(cohort.copy(lanes = delayed))
+          if (runnable ne cohort.lanes) cohort = cohort.copy(lanes = runnable)
+        }
+        if (cohort.lanes.nonEmpty) step(cohort, instruction)
+      }
+      Right(())
+    }
+  }
 }

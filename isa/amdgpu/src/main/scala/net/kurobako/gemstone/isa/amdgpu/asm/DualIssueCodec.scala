@@ -2,11 +2,9 @@ package net.kurobako.gemstone.isa.amdgpu.asm
 
 import Program.*
 import cats.syntax.all.*
-import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.*
-import net.kurobako.gemstone.isa.amdgpu.EncodingConstants.*
 
 private object DualIssueCodec {
   private enum Side(val destination: EncodingField, val source: EncodingField, val opcode: EncodingField) {
@@ -23,14 +21,14 @@ private object DualIssueCodec {
     Metadata.encodingsFor(instruction, target).filter(value =>
       (if (format == EncodingFormat.VOPD3XY) value.format == format else value.format.base == EncodingFormat.VOPDXY) &&
         value.operands.exists(_.field.contains(side.destination))
-    )
-      .map(value =>
-        value.copy(operands = value.operands.filterNot(info => info.field.isEmpty && info.kind == OperandKind.VCC).map {
-          case info if info.field.contains(EncodingField.LITERAL) && info.kind == OperandKind.SRC =>
-            info.copy(field = Some(side.source))
-          case info => info
-        })
-      ).distinct
+    ).map(operands(_, side)).distinct
+
+  private def operands(value: Metadata.Encoding, side: Side): Metadata.Encoding =
+    value.copy(operands = value.operands.filterNot(info => info.field.isEmpty && info.kind == OperandKind.VCC).map {
+      case info if info.field.contains(EncodingField.LITERAL) && info.kind == OperandKind.SRC =>
+        info.copy(field = Some(side.source))
+      case info => info
+    })
 
   private def source(operand: Operand, target: Target, bits: Int): Option[(Int, Option[OperandCodec.Literal])] =
     operand match {
@@ -43,13 +41,6 @@ private object DualIssueCodec {
           target
         )
     }
-
-  def matches(bytes: Vec[Byte], offset: Int, target: Target): Boolean =
-    Vec(EncodingFormat.VOPDXY, EncodingFormat.VOPD3XY).flatMap(InstructionLayout.Catalogue.forFormat(target, _)).exists(
-      layout =>
-        bytes.size - offset >= 4 &&
-          (BigInt(LittleEndian.decode(bytes, offset, 4)) & layout.fixedMask) == layout.prefixes.head
-    )
 
   def encode(left: Instruction, right: Instruction, target: Target): Either[CodecError, Vec[Byte]] = {
     val result = Vec(EncodingFormat.VOPDXY, EncodingFormat.VOPD3XY).view.flatMap { format =>
@@ -69,7 +60,7 @@ private object DualIssueCodec {
           case (name, number) =>
             layout.byName.get(name).flatMap(_.put(number))
         }
-        word = parts.foldLeft(layout.prefixes.head)(_ | _)
+        word = parts.foldLeft(layout.fixedPrefix)(_ | _)
       } yield Vec.from((0 until layout.bits / 8).map(index => ((word >> (index * 8)) & 255).toByte)) ++
         literals.flatMap(_.bytes)
     }.headOption
@@ -114,64 +105,41 @@ private object DualIssueCodec {
       }
     }.headOption
 
-  def decode(bytes: Vec[Byte], offset: Int, target: Target): Either[CodecError, DecodedStatement] = {
-    val result = for {
-      layout <- Vec(
-        EncodingFormat.VOPDXY,
-        EncodingFormat.VOPD3XY
-      ).flatMap(InstructionLayout.Catalogue.forFormat(target, _)).find(layout =>
-        bytes.size - offset >= 4 && (BigInt(LittleEndian.decode(bytes, offset, 4)) & layout.fixedMask) ==
-          layout.prefixes.head
-      )
-      format = layout.format
-      if bytes.size - offset >= layout.bits / 8
-      word = (0 until layout.bits / 8).foldLeft(BigInt(0))((word, index) =>
-        word | (BigInt(bytes(offset + index) & 255) << (index * 8))
-      )
-      if (word & layout.fixedMask) == layout.prefixes.head
-      pairs = Vec(Side.X, Side.Y).map { side =>
-        Opcode.definitions.flatMap(definition =>
-          entries(
-            definition,
-            target,
-            side,
-            format
-          ).filter(_.opcode == layout.get(word, side.opcode).toInt).map(definition -> _)
-        )
-      }
-      x <- pairs(0).headOption
-      y <- pairs(1).headOption
-      hasLiteral = Vec(x, y).exists(_._2.operands.exists(_.field.contains(EncodingField.LITERAL))) ||
-        Vec(EncodingField.SRCX0, EncodingField.SRCY0).exists(layout.get(word, _) == Source.LITERAL_CONST)
-      size = layout.bits / 8 + (if (hasLiteral) 4 else 0)
-      if bytes.size - offset >= size
-      literal = Option.when(hasLiteral)(OperandCodec.Literal(LittleEndian.decode(bytes, offset + layout.bits / 8, 4)))
-      halves <- Vec(x, y).traverse { case (definition, entry) =>
-        entry.operands.filterNot(_.implicitOperand).traverse { info =>
-          info.field.flatMap { field =>
-            val raw = layout.get(word, field).toInt
-            if (field == EncodingField.LITERAL) literal.map(value => Operand.IntegerLiteral(BigInt(value.value), 16))
-            else if (field.isVectorDestination || field.isVectorSource) {
-              val value =
-                if (field == EncodingField.VDSTY && format != EncodingFormat.VOPD3XY) raw |
-                  ((layout.get(word, EncodingField.VDSTX).toInt & 1) ^ 1)
-                else raw
-              Some(Operand.Register(RegisterFile.VectorRegister, value, value + (info.bits.raw + 31) / 32 - 1))
-            } else if (raw >= 256)
-              Some(Operand.Register(RegisterFile.VectorRegister, raw - 256, raw - 256 + (info.bits.raw + 31) / 32 - 1))
-            else OperandCodec.decode(raw, info.copy(field = Some(EncodingField.SSRC0)), literal, target)
-          }
-        }.flatMap(args =>
-          Instruction.decode(
-            definition,
-            args,
-            if (format == EncodingFormat.VOPD3XY) Vec(Modifier("e96")) else Vec.empty[Modifier]
-          ).headOption
-        )
-      }
-      encoded <- encode(halves(0), halves(1), target).toOption
-      if encoded == bytes.slice(offset, offset + size)
-    } yield DecodedStatement(Statement.InstructionPair(halves(0), halves(1)), size.unsafe[Int > 0])
-    result.toRight(CodecError.InvalidEncoding(s"invalid or truncated dual-issue instruction at byte $offset"))
-  }
+  def decode(bytes: Array[Byte], offset: Int, target: Target): Option[Either[CodecError, DecodedStatement]] =
+    InstructionDecoder.dual(bytes, offset, target).map(_.left.map(CodecError.InvalidEncoding(_)).flatMap { dual =>
+      val format  = dual.layout.format
+      val literal = dual.literal.map(OperandCodec.Literal(_))
+      def half(side: Side, candidates: Vec[(Opcode, Metadata.Encoding)]): Option[Instruction] =
+        candidates.headOption.flatMap { case (definition, encoding) =>
+          operands(encoding, side).operands.filterNot(_.implicitOperand).traverse { info =>
+            info.field.flatMap { field =>
+              val raw = dual(field).toInt
+              if (field == EncodingField.LITERAL) literal.map(value => Operand.IntegerLiteral(BigInt(value.value), 16))
+              else if (field.isVectorDestination || field.isVectorSource) {
+                val value = if (field == EncodingField.VDSTY) dual.destinationY.toInt else raw
+                Some(Operand.Register(RegisterFile.VectorRegister, value, value + (info.bits.raw + 31) / 32 - 1))
+              } else if (raw >= 256)
+                Some(Operand.Register(
+                  RegisterFile.VectorRegister,
+                  raw - 256,
+                  raw - 256 + (info.bits.raw + 31) / 32 - 1
+                ))
+              else OperandCodec.decode(raw, info.copy(field = Some(EncodingField.SSRC0)), literal, target)
+            }
+          }.flatMap(args =>
+            Instruction.decode(
+              definition,
+              args,
+              if (format == EncodingFormat.VOPD3XY) Vec(Modifier("e96")) else Vec.empty[Modifier]
+            ).toOption
+          )
+        }
+      (for {
+        x       <- half(Side.X, dual.x)
+        y       <- half(Side.Y, dual.y)
+        encoded <- encode(x, y, target).toOption
+        if encoded == Vec.unsafeWrapArray(bytes.slice(offset, offset + dual.size.raw))
+      } yield DecodedStatement(Statement.InstructionPair(x, y), dual.size))
+        .toRight(CodecError.InvalidEncoding(s"invalid dual-issue instruction at byte $offset"))
+    })
 }

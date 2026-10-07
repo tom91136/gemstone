@@ -1,3 +1,0 @@
-# Bounded diagnostic selection from the same official mustpass inventory.
-vulkan_mustpass = "mustpass/vk-default.txt"
-vulkan_cases = ["dEQP-VK.info.*", "dEQP-VK.api.info.*"]

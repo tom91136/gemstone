@@ -1,4 +1,3 @@
-# Configure-only compatibility regression; do not compile against the synthetic headers.
 foreach(version IN ITEMS 12080 13020 13030 13040)
   set(directory "${TEST_DIRECTORY}/${version}")
   file(MAKE_DIRECTORY "${directory}/include")

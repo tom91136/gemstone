@@ -16,7 +16,7 @@ class GenerateSPIRVISASuite extends munit.FunSuite {
         {"kind":"IdRef","name":"Operands","quantifier":"*"}]},
       {"opname":"OpNop","opcode":0,"class":"Miscellaneous"}],
     "operand_kinds":[{"kind":"IdResult","category":"Id"},{"kind":"IdRef","category":"Id"},
-      {"kind":"FixtureMode","category":"ValueEnum","enumerants":[
+      {"kind":"Scope","category":"ValueEnum","enumerants":[
         {"enumerant":"Second","value":2},{"enumerant":"First","value":1}]}]
   }"""
   private val extended = """{"instructions":[{"opname":"fixture_op","opcode":17}]}"""
@@ -38,12 +38,11 @@ class GenerateSPIRVISASuite extends munit.FunSuite {
       input.toString,
       ext.toString,
       output.toString,
-      output.resolveSibling("native").toString,
-      "v1_6"
+      output.resolveSibling("native").toString
     ))
 
   private def source(output: Path, name: String): String =
-    Files.readString(output.resolve("net/kurobako/gemstone/isa/spirv/v1_6").resolve(name))
+    Files.readString(output.resolve("net/kurobako/gemstone/isa/spirv").resolve(name))
 
   test("small grammar preserves optional/repeated operands, disambiguates names, and orders opcodes") {
     fixture { (input, ext, output) =>
@@ -56,7 +55,7 @@ class GenerateSPIRVISASuite extends munit.FunSuite {
         instructions
       )
       assert(instructions.indexOf("case Nop()") < instructions.indexOf("case Fixture("))
-      val modes = source(output, "FixtureMode.scala").replaceAll("\\s+", " ")
+      val modes = source(output, "Scope.scala").replaceAll("\\s+", " ")
       assert(modes.contains("final val First: Int = 1"))
       assert(modes.contains("final val Second: Int = 2"))
       assert(modes.indexOf("First") < modes.indexOf("Second"))

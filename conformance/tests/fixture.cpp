@@ -1,18 +1,17 @@
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <thread>
+
+#include <unistd.h>
 
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
-#if !defined(_WIN32)
-  #include <csignal>
-
-  #include <unistd.h>
-#endif
 
 TEST_CASE("a comma, bracket[quoted] star* backslash\\ semi; quote\" unicode-π", "[fixture][pass]") {
   if (const auto *report = std::getenv("CONFORMANCE_REPORT_DIRECTORY"))
@@ -40,7 +39,32 @@ TEST_CASE("noisy failure", "[noisy]") {
   FAIL("expected noisy failure");
 }
 
+TEST_CASE("hung case", "[hang]") {
+  const auto child = fork();
+  if (child == 0) {
+    std::signal(SIGTERM, SIG_IGN);
+    for (;;)
+      pause();
+  }
+  REQUIRE(child > 0);
+  std::signal(SIGTERM, SIG_IGN);
+  const auto pids = std::filesystem::path(std::getenv("CONFORMANCE_REPORT_DIRECTORY")) / "hang.pids";
+  std::ofstream(pids.string() + ".partial") << getppid() << ' ' << getpid() << ' ' << child;
+  std::filesystem::rename(pids.string() + ".partial", pids);
+  for (;;)
+    pause();
+}
+
 int main(int argc, char **argv) {
+  if (argc > 2 && std::string_view(argv[1]).starts_with("--deqp-case=")) {
+    const auto identity = std::string(argv[1]).substr(std::string_view("--deqp-case=").size());
+    const auto log = std::string(argv[2]).substr(std::string_view("--deqp-log-filename=").size());
+    std::ofstream(log) << "#beginTestCaseResult " << identity << "\n<TestCaseResult CasePath=\"" << identity
+                       << "\" Version=\"0.3.4\"><Result StatusCode=\"" << (identity.ends_with(".fail") ? "Fail" : "Pass")
+                       << "\">fixture</Result></TestCaseResult>\n#endTestCaseResult\n";
+    std::cout << "fixture dEQP output\n";
+    return 0;
+  }
   if (argc > 1 && std::string_view(argv[1]) == "--large-inventory") {
     const std::string group = "GROUP: " + std::string(1024 - 8, 'x') + "\n";
     for (size_t i = 0; i < 129 * 1024; ++i)
@@ -49,7 +73,6 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (argc > 1 && std::string_view(argv[1]) == "--process-tree") {
-#if !defined(_WIN32)
     std::signal(SIGTERM, SIG_IGN);
     const auto child = fork();
     if (child == 0) {
@@ -61,15 +84,10 @@ int main(int argc, char **argv) {
     std::cout << child << std::endl;
     for (;;)
       pause();
-#else
-    return 0;
-#endif
   }
   if (std::filesystem::path(argv[0]).stem() == "conformance-device") {
     if (std::filesystem::exists("probe-barrier")) {
-#if !defined(_WIN32)
       std::ofstream("probe-pids") << getppid() << ' ' << getpid();
-#endif
       std::ofstream("probe-ready") << "ready";
       const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
       while (!std::filesystem::exists("probe-release")) {

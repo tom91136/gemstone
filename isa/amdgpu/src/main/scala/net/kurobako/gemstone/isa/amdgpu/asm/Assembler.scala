@@ -7,6 +7,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
+import net.kurobako.gemstone.string.*
 
 object Assembler {
   private enum Part {
@@ -27,9 +28,7 @@ object Assembler {
     else terms.traverse { term =>
       val name  = term.group(2)
       val value = if (name == ".") Some(BigInt(offset))
-      else if (name.startsWith("0x") || name.startsWith("0X")) Some(BigInt(name.drop(2), 16))
-      else if (name.head.isDigit) Some(BigInt(name))
-      else symbols.get(name)
+      else parseBigIntLiteral(name).orElse(symbols.get(name))
       value.toRight(CodecError.InvalidOperand(s"undefined symbol '$name'")).map(value =>
         if (term.group(1) == "-") -value else value
       )
@@ -37,9 +36,7 @@ object Assembler {
   }
 
   private def branch(instruction: Instruction, target: Target): Option[String] =
-    Option.when(Metadata.encodingsFor(instruction.definition, target).exists(value =>
-      value.format == EncodingFormat.SOPP && value.operands.exists(_.kind == OperandKind.LABEL)
-    ))(instruction.operands)
+    Option.when(Instruction.branchesRelative(instruction.definition, target))(instruction.operands)
       .flatMap {
         case Vec(Operand.Identifier(name)) => Some(name)
         case Vec(Operand.Expression(text)) => Some(text)
@@ -47,10 +44,9 @@ object Assembler {
       }
 
   private def withOffset(instruction: Instruction, value: BigInt): Either[CodecError, Instruction] =
-    Instruction.decode(instruction.definition, Vec(Operand.IntegerLiteral(value, 10)), instruction.mods) match {
-      case Vec(result) => Right(result)
-      case _           => Left(CodecError.InvalidOperand(s"invalid branch operands for ${instruction.opcode}"))
-    }
+    Instruction.decode(instruction.definition, Vec(Operand.IntegerLiteral(value, 10)), instruction.mods).left.map(_ =>
+      CodecError.InvalidOperand(s"invalid branch operands for ${instruction.opcode}")
+    )
 
   def encode(program: Program, target: Target, waveSize: Int in (32, 64) = 32): Either[CodecError, Vec[Byte]] = {
     val planned = program.statements.foldLeft[Either[CodecError, State]](Right(State(0, Map.empty, Vec.empty))) {
@@ -150,13 +146,12 @@ object Assembler {
       else fill match {
         case Some(value)                                 => Right(Vec.fill(count)(value.toByte))
         case None if name == ".zero" || name == ".space" => Right(Vec.fill(count)(0.toByte))
-        case None => Binary.encode(Instruction.SNop(Operand.IntegerLiteral(BigInt(0), 10), Vec.empty), target)
+        case None                                        =>
+          Instruction.decode(SOPPInstructionDefs.SNop, Vec(Operand.IntegerLiteral(BigInt(0), 10)), Vec.empty[Modifier])
+            .left.map(error => CodecError.InvalidOperand(s"invalid padding instruction: $error"))
+            .flatMap(Binary.encode(_, target))
             .map(nop => Vec.fill(count / 4)(nop).flatten ++ Vec.fill(count % 4)(0.toByte))
       }
     }
   }
-}
-
-class Assembler(target: Target, waveSize: Int in (32, 64) = 32) extends Encoder[Program, Vec[Byte], CodecError] {
-  override def encode(program: Program): Either[CodecError, Vec[Byte]] = Assembler.encode(program, target, waveSize)
 }

@@ -23,20 +23,12 @@ object PlatformMetrics {
       Try(bean.getThreadAllocatedBytes(Thread.currentThread().threadId()).unsafe[Long >= 0]).toOption
     )
 
-  def startRunRecording(name: BenchmarkName, enabled: Boolean): AutoCloseable = {
-    val destination = Option.when(enabled) {
-      val directory = Files.createDirectories(Path.of("target/benchmarks/jfr").toAbsolutePath)
-      Files.createTempDirectory(directory, s"${name.raw}-").resolve("benchmark.jfr")
-    }
-    startRecording(destination)
-  }
-
-  def startRecording(destination: Option[Path]): AutoCloseable = destination match {
-    case None       => () => ()
-    case Some(path) =>
+  def startRecording(name: String, enabled: Boolean): AutoCloseable =
+    if (!enabled) () => ()
+    else {
+      val directory   = Files.createDirectories(Path.of("target/benchmarks/jfr").toAbsolutePath)
+      val destination = Files.createTempDirectory(directory, s"$name-").resolve("benchmark.jfr")
       val recording   = Recording(Configuration.getConfiguration("profile"))
-      val destination = path.toAbsolutePath
-      Files.createDirectories(destination.getParent)
       recording.setDestination(destination)
       recording.setMaxSize(512L * 1024 * 1024)
       recording.setDumpOnExit(true)
@@ -47,5 +39,5 @@ object PlatformMetrics {
         finally recording.close()
         Console.err.println(s"Benchmark JFR written to: $destination")
       }
-  }
+    }
 }

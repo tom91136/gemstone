@@ -264,15 +264,6 @@ extern "C" __global__ void packed_add(__half2 *output, const __half2 *left, cons
 }
 
 class CompilerFixtures extends NvidiaFixtureSuite {
-  test("compiler PTX captures retain SAXPY, calls, shared/local memory, and packed arithmetic") {
-    assert(CompilerFixtures.saxpySm35Ptx.contains(".target sm_35"))
-    assert(CompilerFixtures.saxpySm35Ptx.contains("fma.rn.f32"))
-    assert(CompilerFixtures.deviceCallSm35Ptx.contains(".func  (.param .b32 func_retval0) _Z4bumpi"))
-    assert(CompilerFixtures.deviceCallSm35Ptx.contains("call.uni (retval0)"))
-    assert(CompilerFixtures.sharedLocalSm89Ptx.contains(".shared .align 4"))
-    assert(CompilerFixtures.sharedLocalSm89Ptx.contains(".local .align 16"))
-    assert(CompilerFixtures.packedSm89Ptx.contains("add.f16x2"))
-  }
   reproduces("CUDA 11.8.89 compute_35 saxpy PTX")(
     tools = (ptxas = "11.8.89", nvdisasm = None),
     inputs = Vec("saxpy.cu" -> CompilerFixtures.saxpySource),

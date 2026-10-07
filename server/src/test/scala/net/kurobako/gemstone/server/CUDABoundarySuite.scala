@@ -3,7 +3,6 @@ package net.kurobako.gemstone.server
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.environment as env
 import net.kurobako.gemstone.server.*
 import scala.concurrent.duration.*
 import scala.util.Using
@@ -16,14 +15,7 @@ class CUDABoundarySuite extends munit.FunSuite {
       val result = native.run(
         Vec.nonEmpty(directory.resolve("cuda_execution_unavailable_smoke").toString),
         directory,
-        Launch.Environment(
-          Map(
-            "LD_LIBRARY_PATH" -> directory.toString,
-            env.RpcEndpoint   -> server.endpoint.toString,
-            env.RpcClient     -> (server.client.raw + 1L).toString
-          ),
-          Set.empty
-        ),
+        native.serverEnvironment(server.endpoint, server.client.next, Map("LD_LIBRARY_PATH" -> directory.toString)),
         10.seconds
       )
       assertEquals(result.exit, 0, result.diagnostic)

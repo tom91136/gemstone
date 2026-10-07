@@ -1,10 +1,9 @@
-/* Generated from GenerateVulkanAdapter. Regenerate with: sbt codegen */
 /* Generated from GraphicsProtocol enums. Regenerate with: sbt codegen */
 #pragma once
 #include <stdexcept>
 #include <vulkan/vulkan.h>
 #include "../rpc/gemstone_execution_rpc.hpp"
-namespace gemstone::vulkan::adapter {
+namespace gemstone::vulkan {
 inline execution::GraphicsCompare graphicsCompare(VkCompareOp value) {
   switch (value) {
     case VK_COMPARE_OP_NEVER: return execution::GraphicsCompare::Never;
@@ -96,15 +95,15 @@ inline execution::GraphicsMipmapMode graphicsMipmapMode(VkSamplerMipmapMode valu
     default: throw std::invalid_argument("unsupported GraphicsMipmapMode");
   }
 }
-inline execution::GraphicsBorderColor graphicsBorderColor(VkBorderColor value) {
+inline execution::GraphicsBorderColour graphicsBorderColour(VkBorderColor value) {
   switch (value) {
-    case VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK: return execution::GraphicsBorderColor::FloatTransparentBlack;
-    case VK_BORDER_COLOR_INT_TRANSPARENT_BLACK: return execution::GraphicsBorderColor::IntTransparentBlack;
-    case VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK: return execution::GraphicsBorderColor::FloatOpaqueBlack;
-    case VK_BORDER_COLOR_INT_OPAQUE_BLACK: return execution::GraphicsBorderColor::IntOpaqueBlack;
-    case VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE: return execution::GraphicsBorderColor::FloatOpaqueWhite;
-    case VK_BORDER_COLOR_INT_OPAQUE_WHITE: return execution::GraphicsBorderColor::IntOpaqueWhite;
-    default: throw std::invalid_argument("unsupported GraphicsBorderColor");
+    case VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK: return execution::GraphicsBorderColour::FloatTransparentBlack;
+    case VK_BORDER_COLOR_INT_TRANSPARENT_BLACK: return execution::GraphicsBorderColour::IntTransparentBlack;
+    case VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK: return execution::GraphicsBorderColour::FloatOpaqueBlack;
+    case VK_BORDER_COLOR_INT_OPAQUE_BLACK: return execution::GraphicsBorderColour::IntOpaqueBlack;
+    case VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE: return execution::GraphicsBorderColour::FloatOpaqueWhite;
+    case VK_BORDER_COLOR_INT_OPAQUE_WHITE: return execution::GraphicsBorderColour::IntOpaqueWhite;
+    default: throw std::invalid_argument("unsupported GraphicsBorderColour");
   }
 }
 inline execution::GraphicsSwizzle graphicsSwizzle(VkComponentSwizzle value) {

@@ -1,6 +1,6 @@
 # Values the CMake driver always supplies (CUDA_IMAGE, CUDA_PACKAGE_VERSION,
-# ROCM_VERSION) carry no default here; their authority is ToolchainImages.cmake
-# or build.sbt, and a fallback would only let the two drift apart.
+# ROCM_VERSION) carry no default here; their authority is Toolchains.cmake or
+# build.sbt, and a fallback would only let the two drift apart.
 ARG UBUNTU_IMAGE=docker.io/library/ubuntu@sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d7bfa79316
 ARG CUDA_IMAGE
 ARG SYCL_IMAGE=docker.io/intel/oneapi-toolkit@sha256:e9db518398753434ee5aab9740a25f1d3134396a30be1569cfad8f8b0d90740c
@@ -34,8 +34,7 @@ RUN curl -fsSL https://codeload.github.com/ninja-build/ninja/tar.gz/refs/tags/v1
 
 # Source for the relocatable OpenCL compiler subset. The runtime needs an
 # OpenCL C to SPIR-V toolchain at execution time; bundling the same icpx the
-# SYCL toolchain uses keeps OpenCL artifacts self-contained instead of relying
-# on a compiler installed on the host.
+# SYCL toolchain uses keeps OpenCL artifacts self-contained.
 FROM ${SYCL_IMAGE} AS oneapi-opencl-compiler
 
 FROM ubuntu-build-base AS toolchain-vulkan

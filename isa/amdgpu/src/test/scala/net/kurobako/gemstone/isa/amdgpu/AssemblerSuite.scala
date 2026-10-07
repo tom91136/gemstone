@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import assembly.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 
@@ -12,27 +13,21 @@ class AssemblerSuite extends munit.FunSuite {
     val source =
       ".text\nentry:\ns_branch end\ns_mov_b32 s0, lit(0x12345678)\n.p2align 4\ns_branch entry\nend:\ns_endpgm"
     // SOPP branch offsets are signed words relative to the following instruction.
-    val expected = Vec(
-      0x04, 0x00, 0x82, 0xbf,
-      0xff, 0x03, 0x80, 0xbe, 0x78, 0x56, 0x34, 0x12,
-      0x00, 0x00, 0x80, 0xbf,
-      0xfb, 0xff, 0x82, 0xbf,
-      0x00, 0x00, 0x81, 0xbf
-    ).map(_.toByte)
+    val expected = hex("04 00 82 bf  ff 03 80 be 78 56 34 12  00 00 80 bf  fb ff 82 bf  00 00 81 bf")
     assertEquals(assemble(source), Right(expected))
   }
 
   test("data expressions use labels, the current position and explicit padding") {
     assertEquals(
       assemble("start:\n.long end-start\n.short -1\n.balign 8, 170\nend:\n.byte end-., 255"),
-      Right(Vec(8, 0, 0, 0, 255, 255, 170, 170, 0, 255).map(_.toByte))
+      Right(hex("08 00 00 00 ff ff aa aa 00 ff"))
     )
-    assertEquals(assemble(".equ length, 3\n.zero length\n.byte 7"), Right(Vec[Byte](0, 0, 0, 7)))
+    assertEquals(assemble(".equ length, 3\n.zero length\n.byte 7"), Right(hex("00 00 00 07")))
   }
 
   test("align uses byte alignment while p2align uses its exponent") {
     // LLVM MC gfx1030 emits a four-byte NOP to align the second instruction to byte 8.
-    val expected = Right(Vec(0, 0, 0x80, 0xbf, 0, 0, 0x80, 0xbf, 2).map(_.toByte))
+    val expected = Right(hex("00 00 80 bf 00 00 80 bf 02"))
     assertEquals(assemble("s_nop 0\n.align 8\n.byte 2"), expected)
     assertEquals(assemble("s_nop 0\n.p2align 3\n.byte 2"), expected)
   }

@@ -55,7 +55,7 @@ class ReplaySuite extends munit.FunSuite {
     )
     acceptor.start()
     def endpoint: Replay.Target = {
-      val port = Port.either(server.getLocalPort).fold(message => fail(message), value => value)
+      val port = server.getLocalPort.refine[Port].fold(message => fail(message), value => value)
       Replay.Target(Endpoint.Tcp("127.0.0.1", port), () => close())
     }
     private def serve(socket: Socket): Unit = {
@@ -109,15 +109,15 @@ class ReplaySuite extends munit.FunSuite {
   test("replay preserves multiple live connections, surrogate clients and response order") {
     temporary { file =>
       capture(file) { w =>
-        val a = w.connection(Object()); val b = w.connection(Object())
+        val a = w.connection(ClientId(1L)); val b = w.connection(ClientId(2L))
         a.request(execution(session = 77)); b.request(execution(session = 77))
         b.response(response()); a.response(response()); a.close(); b.close()
       }
       val arrivals = CountDownLatch(2)
       val peer     = Peer { (request, _, out) =>
         assertEquals(
-          Journal.Frames.normalized(Journal.Kind.Request, request, Journal.FrameByteSize(4096)).toSeq,
-          Journal.Frames.normalized(
+          Journal.Frames.normalised(Journal.Kind.Request, request, Journal.FrameByteSize(4096)).toSeq,
+          Journal.Frames.normalised(
             Journal.Kind.Request,
             execution(session = 77),
             Journal.FrameByteSize(4096)
@@ -126,7 +126,7 @@ class ReplaySuite extends munit.FunSuite {
         arrivals.countDown(); val arrived = arrivals.await(2, TimeUnit.SECONDS); assert(arrived); out.write(response())
       }
       Using.resource(peer) { peer =>
-        val result = Replay.run(Replay.Options(file, schema, 3000), _ => peer.endpoint)
+        val result = Replay.run(Replay.Options(file, 3000), _ => peer.endpoint)
         assertEquals(result.requests.raw, 2); assertEquals(peer.registered.get(), 2);
         assertEquals(peer.clients.size(), 2)
         peer.verify()
@@ -137,13 +137,13 @@ class ReplaySuite extends munit.FunSuite {
   test("completion timing permits earlier success and waits for recorded terminal results") {
     for (early <- Seq(false, true)) temporary { file =>
       capture(file) { w =>
-        val c = w.connection(Object()); c.request(query); c.response(completion(1)); c.request(query);
+        val c = w.connection(client); c.request(query); c.response(completion(1)); c.request(query);
         c.response(completion(2)); c.close()
       }
       val calls = AtomicInteger()
       val peer  = Peer((_, _, out) => out.write(completion(if (early || calls.incrementAndGet() >= 4) 2 else 1)))
       Using.resource(peer) { peer =>
-        val result = Replay.run(Replay.Options(file, schema, 3000), _ => peer.endpoint)
+        val result = Replay.run(Replay.Options(file, 3000), _ => peer.endpoint)
         assertEquals(result.extraCompletionPolls.raw, if (early) 0L else 2L)
         peer.verify()
       }
@@ -153,14 +153,14 @@ class ReplaySuite extends munit.FunSuite {
   test("pending timing does not hide failures and terminal waits are bounded") {
     for (failed <- Seq(false, true)) temporary { file =>
       capture(file) { w =>
-        val c = w.connection(Object())
+        val c = w.connection(client)
         c.request(query); c.response(completion(1))
         c.request(query); c.response(completion(2)); c.close()
       }
       val peer = Peer((_, _, out) => out.write(if (failed) completion(0) else completion(1)))
       Using.resource(peer) { peer =>
         val error = intercept[IOException](Replay.run(
-          Replay.Options(file, schema, 1000),
+          Replay.Options(file, 1000),
           _ => peer.endpoint
         ))
         assert(
@@ -175,12 +175,12 @@ class ReplaySuite extends munit.FunSuite {
   test("recorded terminal failures wait through pending replies and compare the actual status") {
     temporary { file =>
       capture(file) { w =>
-        val c = w.connection(Object()); c.request(query); c.response(completion(0)); c.close()
+        val c = w.connection(client); c.request(query); c.response(completion(0)); c.close()
       }
       val calls = AtomicInteger()
       val peer  = Peer((_, _, out) => out.write(if (calls.incrementAndGet() < 3) completion(1) else completion(0)))
       Using.resource(peer) { peer =>
-        val report = Replay.run(Replay.Options(file, schema, 3000), _ => peer.endpoint)
+        val report = Replay.run(Replay.Options(file, 3000), _ => peer.endpoint)
         assertEquals(report.extraCompletionPolls.raw, 2L)
         peer.verify()
       }
@@ -190,13 +190,13 @@ class ReplaySuite extends munit.FunSuite {
   test("response mismatches close the endpoint and preserve cleanup failures as suppressed") {
     temporary { file =>
       capture(file) { w =>
-        val c = w.connection(Object()); c.request(execution()); c.response(response()); c.close()
+        val c = w.connection(client); c.request(execution()); c.response(response()); c.close()
       }
       val closed = AtomicBoolean(false)
       val peer   = Peer((_, _, out) => out.write(response(1)))
       Using.resource(peer) { peer =>
         val e = intercept[IOException](Replay.run(
-          Replay.Options(file, schema, 3000),
+          Replay.Options(file, 3000),
           _ =>
             Replay.Target(
               peer.endpoint.endpoint,

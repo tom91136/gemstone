@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass.fixtures
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.testing.*
 
 object FixtureMutations {
   enum Change {
@@ -17,30 +18,74 @@ object FixtureMutations {
       expectedOutput: String
   )
 
-  def read(metadata: String): Vec[Probe] =
-    ujson.read(metadata)("probes").arr.toVec.map { probe =>
-      val expected = probe("expected")
-      val original = FixtureBytes.readHex(probe("base_instruction_hex").str).toVec
-      require(original.size == 16, s"${probe("id").str}: expected a 128-bit instruction")
-      val mutations = probe.obj.get("mutations").map(_.arr.toVec).getOrElse(Vec(probe("mutation")))
-      (
-        id = probe("id").str,
-        offset = probe("offset").num.toInt,
-        originalBytes = original,
-        mutations = mutations.map { change =>
-          change.obj.get("bit") match {
-            case Some(bit) => Change.Flip(bit.num.toInt)
-            case None      => Change.Field(
-                change("shift").num.toInt,
-                change("width").num.toInt,
-                BigInt(change("value").num.toLong)
-              )
-          }
-        },
-        expectedExitCode = expected("nvdisasm_exit_code").num.toInt,
-        expectedOutput = expected.obj.getOrElse("text", expected("diagnostic")).str
-      )
-    }
+  private def probe(
+      id: String,
+      offset: Int,
+      original: String,
+      mutations: Vec[Change],
+      expectedExitCode: Int,
+      expectedOutput: String
+  ): Probe = (
+    id = id,
+    offset = offset,
+    originalBytes = bytes.hex(original).toVec,
+    mutations = mutations,
+    expectedExitCode = expectedExitCode,
+    expectedOutput = expectedOutput
+  )
+
+  /** `nvdisasm` behaviour for edited instructions of the unoptimised sm_89 SAXPY cubin. */
+  val saxpy: Vec[Probe] = Vec(
+    probe("nop-unused-x-bit-127-set", 2848, "18790000000000000000000000c00f00", Vec(Change.Flip(127)), 0, "NOP;"),
+    probe(
+      "nop-src-rel-sb-zero",
+      2848,
+      "18790000000000000000000000c00f00",
+      Vec(Change.Field(113, 3, BigInt(0))),
+      0,
+      "NOP;"
+    ),
+    probe(
+      "nop-dst-wr-sb-zero",
+      2848,
+      "18790000000000000000000000c00f00",
+      Vec(Change.Field(110, 3, BigInt(0))),
+      0,
+      "NOP;"
+    ),
+    probe(
+      "exit-src-rel-sb-zero",
+      2816,
+      "4d790000000000000000800300de3f00",
+      Vec(Change.Field(113, 3, BigInt(0))),
+      1,
+      "Illegal instruction found"
+    ),
+    probe(
+      "exit-dst-wr-sb-zero",
+      2816,
+      "4d790000000000000000800300de3f00",
+      Vec(Change.Field(110, 3, BigInt(0))),
+      1,
+      "Illegal instruction found"
+    ),
+    probe(
+      "mov-const-bank-address",
+      1792,
+      "027a0100000a0000000f000000de3f00",
+      Vec(Change.Field(54, 5, BigInt(3)), Change.Field(40, 14, BigInt(291))),
+      0,
+      "MOV R1, c[0x3][0x48c]"
+    ),
+    probe(
+      "ldc-direct-byte-offset",
+      1856,
+      "827b020200580000000a0000001e3200",
+      Vec(Change.Field(38, 16, BigInt(4660))),
+      0,
+      "LDC.64 R2, c[0x0][R2+0x1234]"
+    )
+  )
 
   def word(probe: Probe): BigInt =
     probe.mutations.foldLeft(BigInt(1, probe.originalBytes.toArray.reverse)) { (word, change) =>

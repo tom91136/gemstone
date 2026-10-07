@@ -3,27 +3,29 @@
 #include <array>
 #include <condition_variable>
 #include <cstring>
-#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
-#include <thread>
+#include <type_traits>
 #include <unordered_set>
 #include <vector>
 
+#include <gemstone/command_queue.hpp>
+
 #include "commands.hpp"
-#include "execution.hpp"
 #include "handles.hpp"
 #include "physical_device.hpp"
 
-namespace gemstone::vulkan::adapter {
-
-using namespace gemstone::execution;
-using namespace gemstone::vulkan;
-
-namespace host = gemstone::vulkan::host;
+namespace gemstone::vulkan {
+template <typename T, typename Next> auto *findChained(Next *next, VkStructureType type) {
+  using Base = std::conditional_t<std::is_const_v<Next>, const VkBaseInStructure, VkBaseOutStructure>;
+  using Result = std::conditional_t<std::is_const_v<Next>, const T, T>;
+  for (auto *base = static_cast<Base *>(next); base; base = base->pNext)
+    if (base->sType == type) return reinterpret_cast<Result *>(base);
+  return static_cast<Result *>(nullptr);
+}
 
 struct BoundBuffer {
   VkDeviceMemory memory = VK_NULL_HANDLE;
@@ -33,41 +35,35 @@ struct BoundBuffer {
 
 struct Memory {
   struct Deleter {
-    void operator()(uint8_t *data) const { ::operator delete(data, std::align_val_t{memoryMapAlignment}); }
+    void operator()(uint8_t *data) const { ::operator delete(data, std::align_val_t{MemoryMapAlignment}); }
   };
   std::unique_ptr<uint8_t, Deleter> allocation;
   std::span<uint8_t> bytes;
 
   static uint8_t *allocateBacking(size_t size) {
     host::Scope deviceStorage(nullptr);
-    return static_cast<uint8_t *>(::operator new(size, std::align_val_t{memoryMapAlignment}));
+    return static_cast<uint8_t *>(::operator new(size, std::align_val_t{MemoryMapAlignment}));
   }
   explicit Memory(size_t size) : allocation(allocateBacking(size)), bytes(allocation.get(), size) {
     std::memset(bytes.data(), 0, bytes.size());
   }
 };
 
-namespace recorded = gemstone::vulkan::recorded;
-using recorded::Copy;
-using recorded::Dispatch;
-using recorded::Operation;
-struct Execution;
-bool execute(Execution &execution, const Operation &operation);
-
 struct Command {
-  gemstone::vulkan::GraphicsCommandState graphics;
+  GraphicsCommandState graphics;
   VkPipeline pipeline = VK_NULL_HANDLE;
   std::array<VkDescriptorSet, MaxBoundDescriptorSets> descriptors{};
-  std::vector<Operation> operations;
-  std::array<uint8_t, execution::GraphicsPushConstantBytes> pushConstants{};
-  std::map<GemstoneVulkanDescriptorSlot, uint32_t> dynamicOffsets{};
+  std::vector<recorded::Operation> operations;
+  std::array<uint8_t, gx::GraphicsPushConstantBytes> pushConstants{};
+  std::map<DescriptorSlot, uint32_t> dynamicOffsets{};
   bool recording = false;
   bool allocationFailed = false;
 };
 
 struct DeviceState;
+struct QueueState;
 struct FenceState {
-  bool signaled = false;
+  bool signalled = false;
   std::weak_ptr<DeviceState> device;
 };
 struct SemaphoreState {
@@ -80,20 +76,14 @@ struct SemaphorePoint {
   uint64_t value;
 };
 struct Submission {
-  std::vector<Operation> operations;
+  std::vector<recorded::Operation> operations;
   std::vector<SemaphorePoint> waits, signals;
   std::shared_ptr<FenceState> fence;
-};
-struct QueueState {
-  VkQueue handle = VK_NULL_HANDLE;
-  std::weak_ptr<DeviceState> device;
-  std::deque<Submission> submissions;
-  bool active = false;
-  std::thread worker;
 };
 struct DeviceState {
   bool stopping = false, lost = false;
   bool hostQueryResetExtension = false;
+  bool failed() const { return lost || stopping; }
   std::vector<std::shared_ptr<QueueState>> queues;
 };
 struct DescriptorPoolState {
@@ -107,20 +97,20 @@ struct CommandPoolState {
 
 extern std::mutex stateMutex;
 // Address registrations are temporary to one execution. Share the existing compute
-// serialization domain with graphics so overlapping native allocations cannot be
+// serialisation domain with graphics so overlapping native allocations cannot be
 // registered twice by different queues. No execution waits while holding this lock
 // may acquire stateMutex.
 extern std::mutex rpcExecutionMutex;
 struct DescriptorLayout : std::vector<VkDescriptorSetLayoutBinding> {
-  std::map<std::pair<uint32_t, uint32_t>, gemstone::execution::GraphicsSampler> immutableSamplers;
+  std::map<std::pair<uint32_t, uint32_t>, gx::GraphicsSampler> immutableSamplers;
 };
 extern std::map<VkDescriptorSetLayout, DescriptorLayout> descriptorLayouts;
 extern std::map<VkBuffer, BoundBuffer> buffers;
 extern std::map<VkDeviceMemory, std::unique_ptr<Memory>> memories;
-extern GemstoneVulkanDescriptorState descriptorSets;
+extern DescriptorState descriptorSets;
 extern std::map<VkDescriptorPool, DescriptorPoolState> descriptorPools;
 extern std::map<VkShaderModule, std::vector<uint8_t>> modules;
-extern std::map<VkPipeline, gemstone::execution::PreparedShader> pipelines;
+extern std::map<VkPipeline, gx::PreparedShader> pipelines;
 extern std::map<VkCommandBuffer, Command> commands;
 extern std::map<VkCommandPool, CommandPoolState> commandPools;
 extern std::map<VkFence, std::shared_ptr<FenceState>> fences;
@@ -129,11 +119,11 @@ extern std::map<VkQueue, std::shared_ptr<QueueState>> queues;
 extern std::map<VkSemaphore, std::shared_ptr<SemaphoreState>> semaphores;
 extern std::map<VkEvent, bool> events;
 extern std::condition_variable stateChanged;
-extern std::map<VkSampler, gemstone::execution::GraphicsSampler> samplers;
+extern std::map<VkSampler, gx::GraphicsSampler> samplers;
 extern std::map<VkInstance, bool> instanceProperties2;
 inline VkPhysicalDevice physicalDeviceHandle(VkInstance instance) { return reinterpret_cast<VkPhysicalDevice>(instance); }
 
-extern std::map<VkImage, gemstone::vulkan::Image> images;
+extern std::map<VkImage, Image> images;
 
 struct ImageSlice {
   VkImage image;
@@ -168,8 +158,50 @@ extern std::map<VkDescriptorUpdateTemplate, std::vector<VkDescriptorUpdateTempla
 extern std::map<VkImageView, ImageSlice> imageViews;
 extern std::map<VkBufferView, BufferView> bufferViews;
 
+struct RenderScope {
+  VkRenderPass pass = VK_NULL_HANDLE;
+  VkFramebuffer framebuffer = VK_NULL_HANDLE;
+  VkRect2D area{};
+  uint32_t subpass = 0;
+  std::vector<VkClearValue> clearValues;
+  std::vector<std::array<uint32_t, 3>> loaded;
+  // Attachments are bound to this execution of a render pass. Imageless
+  // framebuffers may be reused with different views, including on other queues.
+  std::vector<VkImageView> attachments;
+};
+struct ActiveOcclusion {
+  QueryPool *pool;
+  uint32_t query, count;
+  uint64_t firstSample;
+};
+struct Execution {
+  DeviceState *device;
+  RenderScope renderScope;
+  uint64_t occlusionSamples = 0;
+  std::optional<ActiveOcclusion> activeOcclusion;
+};
+bool execute(Execution &execution, const recorded::Operation &operation);
+
+struct QueueState {
+  VkQueue handle = VK_NULL_HANDLE;
+  std::weak_ptr<DeviceState> device;
+  // Submissions to one queue run in order, so their jobs share this state.
+  Execution execution{};
+};
+
+struct BufferRange {
+  VkDeviceMemory memory;
+  VkDeviceSize offset;
+  std::span<uint8_t> bytes;
+};
+// Called under stateMutex. VK_WHOLE_SIZE selects the remainder of the buffer.
+std::optional<BufferRange> bufferRange(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size);
+
+CommandQueue &commandQueue();
+/** Stops every device and joins the queue workers; later submissions run on the submitting thread. */
+void shutdownQueues();
 VkResult createQueues(uint32_t count, VkDevice *handle);
 void stopQueues(const std::shared_ptr<DeviceState> &device);
 bool resetQueryPool(VkQueryPool pool, uint32_t first, uint32_t count);
 bool deviceFailed(const std::weak_ptr<DeviceState> &reference);
-} // namespace gemstone::vulkan::adapter
+} // namespace gemstone::vulkan

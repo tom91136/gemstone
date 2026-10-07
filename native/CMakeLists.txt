@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(gemstone-native LANGUAGES C CXX)
 
-# The execution client and every facade that includes its generated header use
-# Glaze, which requires C++23.
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -24,11 +22,8 @@ if(GEMSTONE_ENABLE_CUDA OR GEMSTONE_ENABLE_HSA OR GEMSTONE_ENABLE_HIP OR
   include(cmake/Aspartame.cmake)
 endif()
 
-# The execution client is always built, so fmt is fetched unconditionally.
 include(cmake/Fmt.cmake)
-# The execution client uses Glaze for its MessagePack codecs.
 include(cmake/Glaze.cmake)
-# Keep Glaze headers on every target that includes the generated RPC header.
 include_directories(SYSTEM "${glaze_SOURCE_DIR}/include")
 
 if(GEMSTONE_ENABLE_CUDA OR GEMSTONE_ENABLE_HIP)
@@ -80,28 +75,22 @@ if(GEMSTONE_ENABLE_HIP AND NOT GEMSTONE_ENABLE_HSA)
   message(FATAL_ERROR "GEMSTONE_ENABLE_HIP requires GEMSTONE_ENABLE_HSA")
 endif()
 
-# Keep compiler output independent of the checkout and build directory. GCC's
-# and Clang's file-prefix map covers debug paths and file-name macros.
 foreach(_gemstone_language IN ITEMS CXX HIP)
   add_compile_options(
-    "$<$<COMPILE_LANG_AND_ID:${_gemstone_language},GNU,Clang,AppleClang,IntelLLVM>:-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.>"
-    "$<$<COMPILE_LANG_AND_ID:${_gemstone_language},GNU,Clang,AppleClang,IntelLLVM>:-ffile-prefix-map=${CMAKE_BINARY_DIR}=.build>")
+    "$<$<COMPILE_LANG_AND_ID:${_gemstone_language},GNU,Clang,IntelLLVM>:-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.>"
+    "$<$<COMPILE_LANG_AND_ID:${_gemstone_language},GNU,Clang,IntelLLVM>:-ffile-prefix-map=${CMAKE_BINARY_DIR}=.build>")
 endforeach()
 add_compile_options(
   "$<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Xcompiler=-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.>"
   "$<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Xcompiler=-ffile-prefix-map=${CMAKE_BINARY_DIR}=.build>")
-if(UNIX)
-  foreach(_gemstone_language IN ITEMS CXX CUDA HIP)
-    set(CMAKE_${_gemstone_language}_ARCHIVE_CREATE
-      "<CMAKE_AR> qcD <TARGET> <LINK_FLAGS> <OBJECTS>")
-    set(CMAKE_${_gemstone_language}_ARCHIVE_APPEND
-      "<CMAKE_AR> qD <TARGET> <LINK_FLAGS> <OBJECTS>")
-    set(CMAKE_${_gemstone_language}_ARCHIVE_FINISH "<CMAKE_RANLIB> -D <TARGET>")
-  endforeach()
-endif()
+foreach(_gemstone_language IN ITEMS CXX CUDA HIP)
+  set(CMAKE_${_gemstone_language}_ARCHIVE_CREATE
+    "<CMAKE_AR> qcD <TARGET> <LINK_FLAGS> <OBJECTS>")
+  set(CMAKE_${_gemstone_language}_ARCHIVE_APPEND
+    "<CMAKE_AR> qD <TARGET> <LINK_FLAGS> <OBJECTS>")
+  set(CMAKE_${_gemstone_language}_ARCHIVE_FINISH "<CMAKE_RANLIB> -D <TARGET>")
+endforeach()
 
-# Every facade shares one build directory; keep libraries and native test
-# executables at its root so sbt can expose one location to JVM server tests.
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -144,11 +133,7 @@ function(gemstone_require_abi_implementations)
 
   set(generated_directory "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/generated/${ARG_PLATFORM}")
   set(implementation_check "${generated_directory}/gemstone_${ARG_PLATFORM}_impl.cpp")
-  set(layout_check "${generated_directory}/gemstone_${ARG_PLATFORM}_layout.cpp")
   target_sources("${ARG_TARGET}" PRIVATE "${implementation_check}")
-  if(EXISTS "${layout_check}")
-    target_sources("${ARG_TARGET}" PRIVATE "${layout_check}")
-  endif()
   target_include_directories("${ARG_TARGET}" PRIVATE
     "${GEMSTONE_NATIVE_INCLUDE_DIRECTORY}"
     "${generated_directory}")
@@ -159,24 +144,15 @@ function(gemstone_require_abi_implementations)
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     set_source_files_properties("${implementation_check}" PROPERTIES
       COMPILE_OPTIONS "-Wno-deprecated-declarations")
-    if(EXISTS "${layout_check}")
-      set_source_files_properties("${layout_check}" PROPERTIES
-        COMPILE_OPTIONS "-Wno-deprecated-declarations")
-    endif()
   endif()
   if(ARG_FORCE_INCLUDE)
     set(public_header "${generated_directory}/gemstone_${ARG_PLATFORM}_api.h")
     target_compile_options("${ARG_TARGET}" PRIVATE
       "$<$<COMPILE_LANG_AND_ID:CXX,Clang,GNU>:SHELL:-include ${public_header}>")
   endif()
-  if(APPLE)
-    target_link_options("${ARG_TARGET}" PRIVATE "LINKER:-undefined,error")
-  elseif(UNIX)
-    target_link_options("${ARG_TARGET}" PRIVATE "LINKER:-z,defs" "LINKER:--exclude-libs,ALL")
-  endif()
+  target_link_options("${ARG_TARGET}" PRIVATE "LINKER:-z,defs" "LINKER:--exclude-libs,ALL")
 endfunction()
 
-# Consumers invoke the artifact builder; it owns fixture sources and toolchains.
 if(BUILD_TESTING)
   get_filename_component(REPOSITORY_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
   set(CONFORMANCE_ARTIFACT_PROJECT "${REPOSITORY_DIRECTORY}/conformance/artifacts" CACHE PATH
@@ -193,7 +169,7 @@ if(BUILD_TESTING)
     set(build "${CMAKE_BINARY_DIR}/artifact-builds/memory-${backend}")
     if(backend STREQUAL "cuda")
       set(outputs)
-      foreach(name IN ITEMS kernel atomic fence contended)
+      foreach(name IN ITEMS kernel exchange atomic fence contended)
         list(APPEND outputs "${GEMSTONE_MEMORY_FIXTURE_DIRECTORY}/${name}.ptx")
       endforeach()
     elseif(backend STREQUAL "hsa")
@@ -201,15 +177,13 @@ if(BUILD_TESTING)
     else()
       set(outputs "${GEMSTONE_MEMORY_FIXTURE_DIRECTORY}/kernel.spv")
     endif()
-    # Invoke the independent build every time so its own dependency graph sees
-    # changes to its inputs. Unchanged artifacts remain a Ninja no-op.
     add_custom_target(gemstone_memory_${backend}_image
-      COMMAND "${CMAKE_COMMAND}" -S "${CONFORMANCE_ARTIFACT_PROJECT}" -B "${build}" -G Ninja
+      COMMAND "${CMAKE_COMMAND}" -S "${CONFORMANCE_ARTIFACT_PROJECT}" -B "${build}" -G Ninja --log-level=WARNING
         -DCONFORMANCE_ARTIFACT_KIND=fixture -DCONFORMANCE_FIXTURE=memory
         "-DCONFORMANCE_BACKEND=${backend}" "-DCONFORMANCE_ARCHITECTURE=${architecture}"
         "-DCONFORMANCE_ARTIFACT_DIRECTORY=${GEMSTONE_MEMORY_FIXTURE_DIRECTORY}"
         "-DCONTAINER_EXECUTABLE=${CONTAINER_EXECUTABLE}" "-DROCM_VERSION=${ROCM_VERSION}"
-      COMMAND "${CMAKE_COMMAND}" --build "${build}" --target artifacts --parallel 1
+      COMMAND "${CMAKE_COMMAND}" --build "${build}" --target artifacts --parallel 1 -- --quiet
       BYPRODUCTS ${outputs} JOB_POOL container_build VERBATIM)
   endfunction()
 

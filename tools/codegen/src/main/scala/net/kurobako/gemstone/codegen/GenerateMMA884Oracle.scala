@@ -73,7 +73,7 @@ object GenerateMMA884Oracle {
     val values = variants.map { variant =>
       s"    Variant(Accumulator.${variant.accum.scala}, Layout.${variant.a.scala}, Layout.${variant.b.scala}, Mode.${variant.mode.scala}, ${scalaString(variant.name)}: NonEmpty[String])"
     }.mkString(",\n")
-    s"""package net.kurobako.gemstone.isa.ptx.v9_3
+    s"""package net.kurobako.gemstone.isa.ptx
        |
        |import net.kurobako.gemstone.collection.*
        |import net.kurobako.gemstone.constraint.*
@@ -98,7 +98,7 @@ object GenerateMMA884Oracle {
     val resourceRoot   = Path.of(arguments(1))
     val conformanceDir = Path.of(arguments(2))
     val fullPTX        = render(variants)
-    val scalaOutput    = sourceRoot.resolve("net/kurobako/gemstone/isa/ptx/v9_3/Mma884Oracle.scala")
+    val scalaOutput    = sourceRoot.resolve("net/kurobako/gemstone/isa/ptx/Mma884Oracle.scala")
     val _              = GeneratedFiles.write(scalaOutput, GeneratedScalaFormatter(scalaOutput, renderScala))
     val _              = GeneratedFiles.write(resourceRoot.resolve("mma884/oracle.ptx"), fullPTX)
     val _              = GeneratedFiles.write(conformanceDir.resolve("mma884.ptx"), fullPTX)

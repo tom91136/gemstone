@@ -7,14 +7,13 @@
 namespace memory_patterns {
 struct Backend {
   std::string kind;
-  std::string allocationKind() const { return kind; }
   void *library, *context{}, *module{}, *function{};
   template <class F> F symbol(const char *name) {
     auto *p = dlsym(library, name);
     require(p != nullptr, name);
     return reinterpret_cast<F>(p);
   }
-  explicit Backend(std::string kind = "managed", uint64_t selected = 0, const char *fixture = "kernel.ptx")
+  Backend(std::string kind, uint64_t selected, const char *fixture)
       : kind(std::move(kind)), library(dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL)) {
     require(library != nullptr, "CUDA library");
     check(symbol<int (*)(unsigned)>("cuInit")(0));
@@ -29,7 +28,6 @@ struct Backend {
     dlclose(library);
   }
   void *allocate(size_t size) {
-    const auto kind = allocationKind();
     if (kind == "registered") {
       auto *p = ordinary(size);
       check(symbol<int (*)(void *, size_t, unsigned)>("cuMemHostRegister_v2")(p, size, 2));
@@ -48,7 +46,6 @@ struct Backend {
     return reinterpret_cast<void *>(p);
   }
   void release(void *p) {
-    const auto kind = allocationKind();
     if (kind == "registered") {
       check(symbol<int (*)(void *)>("cuMemHostUnregister")(p));
       std::free(p);

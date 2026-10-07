@@ -1,5 +1,4 @@
-#ifndef GEMSTONE_EXECUTION_CLIENT_HPP
-#define GEMSTONE_EXECUTION_CLIENT_HPP
+#pragma once
 
 #include <memory>
 #include <mutex>
@@ -12,7 +11,7 @@
 
 namespace gemstone::execution {
 
-enum class ClientMode { Uninitialized, Disabled, Ready, Misconfigured };
+enum class ClientMode { Disabled, Ready, Misconfigured };
 
 /** Lazily connects one facade process to the execution service. The service
  * location comes from `GEMSTONE_RPC_CLIENT`/`GEMSTONE_RPC_ENDPOINT`; a `Ping`
@@ -22,67 +21,56 @@ class ClientManager {
 public:
   Client *client() {
     ensure();
-    return client_.get();
+    return instance.get();
   }
   ClientMode mode() {
     ensure();
-    return mode_;
+    return state;
   }
   bool ready() { return mode() == ClientMode::Ready; }
 
   std::string error() {
     ensure();
-    if (client_) {
-      const auto value = client_->error();
+    if (instance) {
+      const auto value = instance->error();
       if (!value.empty()) return value;
     }
-    return error_.empty() ? "Gemstone execution RPC failed" : error_;
-  }
-
-  /** The underlying client's most recent error, or empty when it has none. */
-  std::string lastError() {
-    ensure();
-    return client_ ? client_->error() : std::string{};
+    return failure.empty() ? "Gemstone execution RPC failed" : failure;
   }
 
 private:
   void ensure() {
-    std::call_once(initialized_, [this] {
+    std::call_once(initialised, [this] {
       const char *endpoint = environment::value(environment::RpcEndpoint);
       const char *client = environment::value(environment::RpcClient);
       const bool hasEndpoint = endpoint && endpoint[0] != '\0';
       const bool hasClient = client && client[0] != '\0';
-      if (!hasEndpoint && !hasClient) {
-        mode_ = ClientMode::Disabled;
-        return;
-      }
+      if (!hasEndpoint && !hasClient) return;
       if (!hasEndpoint || !hasClient) {
-        mode_ = ClientMode::Misconfigured;
-        error_ = std::string(environment::RpcEndpoint) + " and " + environment::RpcClient + " must be set together";
+        state = ClientMode::Misconfigured;
+        failure = std::string(environment::RpcEndpoint) + " and " + environment::RpcClient + " must be set together";
         return;
       }
-      client_ = Client::fromEnvironment();
-      if (!client_) {
-        mode_ = ClientMode::Misconfigured;
-        error_ = std::string(environment::RpcClient) + " must be a positive signed 64-bit integer";
+      instance = Client::fromEnvironment();
+      if (!instance) {
+        state = ClientMode::Misconfigured;
+        failure = std::string(environment::RpcClient) + " must be a positive signed 64-bit integer";
         return;
       }
-      if (!client_->call(Ping{})) {
-        error_ = client_->error();
-        client_.reset();
-        mode_ = ClientMode::Misconfigured;
+      if (!instance->call(Ping{})) {
+        failure = instance->error();
+        instance.reset();
+        state = ClientMode::Misconfigured;
         return;
       }
-      mode_ = ClientMode::Ready;
+      state = ClientMode::Ready;
     });
   }
 
-  std::once_flag initialized_;
-  std::unique_ptr<Client> client_;
-  ClientMode mode_ = ClientMode::Uninitialized;
-  std::string error_;
+  std::once_flag initialised;
+  std::unique_ptr<Client> instance;
+  ClientMode state = ClientMode::Disabled;
+  std::string failure;
 };
 
 } // namespace gemstone::execution
-
-#endif

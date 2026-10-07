@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
-import scala.util.Using
 import upickle.default.*
 
 private object OperandEncoding {
@@ -10,10 +10,8 @@ private object OperandEncoding {
   case class NamedField(field: InstructionLayout.Field, names: Map[String, String]) derives ReadWriter
 
   object Catalogue {
-    private lazy val entries = Using.resource(
-      Option(getClass.getResourceAsStream("operands.json"))
-        .getOrElse(throw IllegalStateException("missing AMDGPU operands.json"))
-    )(input => read[Vector[OperandEncoding]](input).map(value => (value.isa, value.kind) -> value).toMap)
+    private lazy val entries = resources.json[Vector[OperandEncoding]](getClass, "operands.json")
+      .map(value => (value.isa, value.kind) -> value).toMap
 
     def forKind(isa: ISA, kind: OperandKind): Option[OperandEncoding] = entries.get((isa, kind))
   }
@@ -22,7 +20,7 @@ private object OperandEncoding {
 private case class OperandEncoding(
     isa: ISA,
     kind: OperandKind,
-    fields: Vector[OperandEncoding.NamedField],
+    fields: Vector[OperandEncoding.NamedField] = Vector.empty,
     selectors: Map[String, Int] = Map.empty,
     integers: Map[Int, Long] = Map.empty,
     floating: Map[Int, Double] = Map.empty,

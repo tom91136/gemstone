@@ -1,7 +1,9 @@
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 
 #include <catch2/catch_test_macros.hpp>
@@ -47,7 +49,7 @@ TEST_CASE("Queued completion retains arguments and orders streams without blocki
   CHECK(queue.ready(second));
 }
 
-TEST_CASE("Queued failures reach synchronization and later work still completes", "[queue]") {
+TEST_CASE("Queued failures reach synchronisation and later work still completes", "[queue]") {
   gemstone::CommandQueue queue(999);
   queue.submit(nullptr, []() -> int32_t { throw std::runtime_error("execution failed"); });
   std::atomic_int completed{0};
@@ -91,4 +93,87 @@ TEST_CASE("Legacy stream dependencies leave nonblocking streams independently ru
   CHECK(concurrent);
   CHECK(pending);
   CHECK(sequence == 2);
+}
+
+TEST_CASE("Unordered work runs between barriers and host completions release dependants", "[queue]") {
+  gemstone::CommandQueue queue(999);
+  int stream{};
+  queue.configure(&stream, true);
+  const auto gate = queue.pending();
+  std::atomic_int sequence{0};
+  const auto blocked =
+      queue.submit(&stream, [&] { return sequence.fetch_add(1) == 1 ? 0 : 1; }, {gate}, gemstone::CommandQueue::Order::Unordered);
+  const auto free = queue.submit(&stream, [&] { return sequence.fetch_add(1) == 0 ? 0 : 1; }, {}, gemstone::CommandQueue::Order::Unordered);
+  CHECK(queue.waitFor(free, 2'000'000'000) == 0);
+  CHECK_FALSE(queue.ready(blocked));
+  CHECK_FALSE(queue.waitFor(queue.snapshot(&stream), 1'000'000).has_value());
+  const auto barrier = queue.submit(&stream, [&] { return sequence.load() == 2 ? 0 : 1; });
+  queue.complete(gate, 0);
+  CHECK(queue.wait(barrier) == 0);
+  CHECK(queue.ready(blocked));
+  CHECK(sequence == 2);
+}
+
+TEST_CASE("Blocking waits on a worker let later queued work run", "[queue]") {
+  gemstone::CommandQueue queue(999);
+  int first{}, second{}, third{};
+  std::mutex mutex;
+  std::condition_variable changed;
+  int signalled = 0;
+  const auto wait = [&] {
+    return queue.blocking([&] {
+      std::unique_lock lock(mutex);
+      return changed.wait_for(lock, std::chrono::seconds(5), [&] { return signalled != 0; }) ? 0 : 1;
+    });
+  };
+  const auto a = queue.submit(&first, wait);
+  const auto b = queue.submit(&second, wait);
+  queue.submit(&third, [&] {
+    {
+      std::lock_guard lock(mutex);
+      signalled = 1;
+    }
+    changed.notify_all();
+    return 0;
+  });
+  CHECK(queue.wait(a) == 0);
+  CHECK(queue.wait(b) == 0);
+}
+
+TEST_CASE("Streams and events created by the queue order work and reject unknown handles", "[queue]") {
+  gemstone::CommandQueue queue(999);
+  auto *stream = queue.createStream(true);
+  auto *event = queue.createEvent();
+  CHECK(queue.hasStream(stream));
+  CHECK(queue.hasStream(nullptr));
+  CHECK_FALSE(queue.hasStream(event));
+  CHECK(queue.eventTicket(event) == gemstone::CommandQueue::Ticket{});
+  std::promise<void> release;
+  auto gate = release.get_future().share();
+  queue.submit(stream, [gate] { return gate.wait_for(std::chrono::seconds(5)) == std::future_status::ready ? 0 : 1; });
+  REQUIRE(queue.recordEvent(event, stream));
+  int other{};
+  queue.configure(&other, true);
+  REQUIRE(queue.waitEvent(&other, event));
+  const auto after = queue.submit(&other, [] { return 0; });
+  CHECK_FALSE(queue.ready(*queue.eventTicket(event)));
+  CHECK_FALSE(queue.ready(after));
+  release.set_value();
+  CHECK(queue.wait(after) == 0);
+  CHECK(queue.ready(*queue.eventTicket(event)));
+  CHECK(queue.destroyEvent(event));
+  CHECK_FALSE(queue.destroyEvent(event));
+  CHECK_FALSE(queue.recordEvent(event, stream));
+  CHECK_FALSE(queue.waitEvent(stream, event));
+  CHECK_FALSE(queue.eventTicket(event));
+  CHECK(queue.destroyStream(stream));
+  CHECK_FALSE(queue.destroyStream(stream));
+  auto *survivor = queue.createStream(false);
+  auto *dropped = queue.createEvent();
+  queue.reset();
+  CHECK_FALSE(queue.hasStream(survivor));
+  CHECK_FALSE(queue.eventTicket(dropped));
+  CHECK(queue.hasStream(nullptr));
+  CHECK_FALSE(queue.destroyStream(nullptr));
+  CHECK_FALSE(queue.hasStream(stream));
 }

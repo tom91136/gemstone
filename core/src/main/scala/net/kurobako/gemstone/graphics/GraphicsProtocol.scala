@@ -4,7 +4,7 @@ import ShaderMetadata.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.given
+import net.kurobako.gemstone.rpc.ExecutionRPC.given
 import net.kurobako.gemstone.rpc.Wire.*
 import net.kurobako.gemstone.vm.KernelTask.*
 
@@ -26,10 +26,10 @@ object GraphicsProtocol {
       DstAlpha, OneMinusDstAlpha, ConstantColor, OneMinusConstantColor, ConstantAlpha, OneMinusConstantAlpha,
       SrcAlphaSaturate
   }
-  enum GraphicsFilter derives Codec      { case Nearest, Linear                                                       }
-  enum GraphicsAddressMode derives Codec { case Repeat, MirroredRepeat, ClampToEdge, ClampToBorder, MirrorClampToEdge }
-  enum GraphicsMipmapMode derives Codec  { case Nearest, Linear                                                       }
-  enum GraphicsBorderColor derives Codec {
+  enum GraphicsFilter derives Codec       { case Nearest, Linear                                                       }
+  enum GraphicsAddressMode derives Codec  { case Repeat, MirroredRepeat, ClampToEdge, ClampToBorder, MirrorClampToEdge }
+  enum GraphicsMipmapMode derives Codec   { case Nearest, Linear                                                       }
+  enum GraphicsBorderColour derives Codec {
     case FloatTransparentBlack, IntTransparentBlack, FloatOpaqueBlack, IntOpaqueBlack, FloatOpaqueWhite, IntOpaqueWhite
   }
   enum GraphicsSwizzle derives Codec { case Identity, Zero, One, R, G, B, A }
@@ -46,7 +46,7 @@ object GraphicsProtocol {
   case class GraphicsRect(x: Int, y: Int, width: Int >= 0, height: Int >= 0) derives Codec
   case class GraphicsViewport(x: Float, y: Float, width: Float, height: Float, minDepth: Float, maxDepth: Float)
       derives Codec
-  case class GraphicsColor(r: Float, g: Float, b: Float, a: Float) derives Codec
+  case class GraphicsColour(r: Float, g: Float, b: Float, a: Float) derives Codec
   case class GraphicsImageLevel(
       extent: GraphicsExtent,
       offset: Long >= 0,
@@ -68,7 +68,7 @@ object GraphicsProtocol {
       level: Int >= 0,
       baseLayer: Int >= 0,
       layers: Int > 0,
-      color: Boolean,
+      colour: Boolean,
       depth: Boolean,
       stencil: Boolean
   ) derives Codec
@@ -125,7 +125,7 @@ object GraphicsProtocol {
       unnormalized: Boolean,
       compareEnable: Boolean,
       compareOp: GraphicsCompare,
-      borderColor: GraphicsBorderColor,
+      borderColour: GraphicsBorderColour,
       mipLodBias: Float,
       minLod: Float,
       maxLod: Float,
@@ -170,9 +170,9 @@ object GraphicsProtocol {
   ) derives Codec
   case class GraphicsBlend(
       enabled: Boolean,
-      sourceColor: GraphicsBlendFactor,
-      destinationColor: GraphicsBlendFactor,
-      colorOp: GraphicsBlendOp,
+      sourceColour: GraphicsBlendFactor,
+      destinationColour: GraphicsBlendFactor,
+      colourOp: GraphicsBlendOp,
       sourceAlpha: GraphicsBlendFactor,
       destinationAlpha: GraphicsBlendFactor,
       alphaOp: GraphicsBlendOp,
@@ -229,16 +229,16 @@ object GraphicsProtocol {
       width: Int > 0,
       height: Int > 0,
       viewIndex: Int >= 0,
-      colors: Vec[Option[GraphicsImage]],
+      colours: Vec[Option[GraphicsImage]],
       depth: Option[GraphicsImage],
       blends: Vec[GraphicsBlend],
-      blendConstants: GraphicsColor,
+      blendConstants: GraphicsColour,
       depthStencil: GraphicsDepthStencil
   ) derives Codec
 
   enum GraphicsCommand derives Codec {
     case Draw(value: GraphicsDraw)
-    case ClearColor(image: GraphicsImage, area: GraphicsRect, bits: Vec[Int])
+    case ClearColour(image: GraphicsImage, area: GraphicsRect, bits: Vec[Int])
     case ClearDepthStencil(
         image: GraphicsImage,
         area: GraphicsRect,

@@ -8,8 +8,8 @@ import scala.compiletime.testing.typeCheckErrors
 class WireConstraintSuite extends munit.FunSuite {
   private object Count extends Newtype[Int >= 7]
   private object Label extends Newtype[NonEmpty[String]] {
-    override protected def validate(value: NonEmpty[String]): Unit =
-      require(value.startsWith("k"), "label must start with k")
+    override protected def violation(value: NonEmpty[String]): Option[NonEmpty[String]] =
+      Option.unless[NonEmpty[String]](value.startsWith("k"))("label must start with k")
   }
   private object Nested extends Newtype[Count.Type]
 

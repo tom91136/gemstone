@@ -1,11 +1,8 @@
-#ifndef GEMSTONE_OPENCL_OBJECTS_HPP
-#define GEMSTONE_OPENCL_OBJECTS_HPP
+#pragma once
 
 #include <array>
 #include <atomic>
 #include <condition_variable>
-#include <deque>
-#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -20,32 +17,33 @@
 
 #include <CL/cl_icd.h>
 
+#include <gemstone/command_queue.hpp>
+
 #include "compiler.hpp"
-#include "handles.hpp"
 
 enum class Kind : uint32_t { Platform, Device, Context, Queue, Memory, Program, Kernel, Event };
 
 struct Header {
-  explicit Header(Kind value) : kind(value) {}
-  uint64_t magic = gemstone::rpc::HandleMagic;
-  Kind kind;
   std::atomic_uint references{1};
 };
 
 struct _cl_platform_id {
   const cl_icd_dispatch *dispatch = nullptr;
-  Header header{Kind::Platform};
+  static constexpr Kind ObjectKind = Kind::Platform;
+  Header header;
 };
 
 struct _cl_device_id {
   const cl_icd_dispatch *dispatch = nullptr;
-  Header header{Kind::Device};
+  static constexpr Kind ObjectKind = Kind::Device;
+  Header header;
   _cl_platform_id *platform = nullptr;
 };
 
 struct _cl_context {
   const cl_icd_dispatch *dispatch = nullptr;
-  Header header{Kind::Context};
+  static constexpr Kind ObjectKind = Kind::Context;
+  Header header;
   uint64_t identity = 0;
   _cl_device_id *device = nullptr;
   std::vector<cl_context_properties> properties;
@@ -108,34 +106,22 @@ struct AllocationUses {
   }
 };
 
-struct PendingCommand {
-  std::vector<cl_event> dependencies;
-  cl_event completion = nullptr;
-  std::function<cl_int()> execute;
-  bool waitPrior = false;
-  bool fence = false;
-  std::function<void(cl_int)> finish;
-  std::shared_ptr<AllocationUses> uses;
-};
-
 struct _cl_command_queue {
   const cl_icd_dispatch *dispatch = nullptr;
-  Header header{Kind::Queue};
+  static constexpr Kind ObjectKind = Kind::Queue;
+  Header header;
   _cl_context *context = nullptr;
   _cl_device_id *device = nullptr;
   cl_command_queue_properties properties = 0;
   std::vector<cl_queue_properties> propertiesArray;
-  std::mutex pendingMutex;
-  std::condition_variable pendingCondition;
-  size_t pendingCommands = 0;
+  void *stream = nullptr;
   size_t unobservedFailures = 0;
-  bool workerRunning = false;
-  std::deque<PendingCommand> commands;
 };
 
 struct _cl_mem {
   const cl_icd_dispatch *dispatch = nullptr;
-  Header header{Kind::Memory};
+  static constexpr Kind ObjectKind = Kind::Memory;
+  Header header;
   _cl_context *context = nullptr;
   std::shared_ptr<Allocation> allocation;
   cl_mem_flags flags = 0;
@@ -150,7 +136,8 @@ struct _cl_mem {
 
 struct _cl_program {
   const cl_icd_dispatch *dispatch = nullptr;
-  Header header{Kind::Program};
+  static constexpr Kind ObjectKind = Kind::Program;
+  Header header;
   _cl_context *context = nullptr;
   std::string source;
   std::vector<uint8_t> il;
@@ -185,7 +172,8 @@ struct KernelParameterMetadata {
 
 struct _cl_kernel {
   const cl_icd_dispatch *dispatch = nullptr;
-  Header header{Kind::Kernel};
+  static constexpr Kind ObjectKind = Kind::Kernel;
+  Header header;
   _cl_program *program = nullptr;
   std::string name;
   size_t expectedArguments = 0;
@@ -203,12 +191,14 @@ struct _cl_kernel {
 
 struct _cl_event {
   const cl_icd_dispatch *dispatch = nullptr;
-  Header header{Kind::Event};
+  static constexpr Kind ObjectKind = Kind::Event;
+  Header header;
   _cl_command_queue *queue = nullptr;
   _cl_context *context = nullptr;
   cl_command_type command = CL_COMMAND_MARKER;
   cl_int status = CL_COMPLETE;
   bool failureObserved = false;
+  gemstone::CommandQueue::Ticket ticket;
   uint64_t queued = 0;
   uint64_t submitted = 0;
   uint64_t started = 0;
@@ -220,5 +210,3 @@ struct _cl_event {
   };
   std::vector<Callback> callbacks;
 };
-
-#endif

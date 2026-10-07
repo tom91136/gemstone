@@ -4,13 +4,7 @@ import net.kurobako.gemstone.collection.*
 
 class InstructionOperandSuite extends munit.FunSuite {
   private def wrapped(value: Operand): Operand =
-    Operand.Decorated(
-      Operand.Qualified(
-        Operand.Unary(value, negative = true, not = false, absolute = true),
-        Vec(OperandSelector.H0_H0)
-      ),
-      Map(OperandDecoration.fromSpelling("tag") -> Operand.Integer(9))
-    )
+    Operand.Qualified(Operand.Unary(value, negative = true, not = false, absolute = true), Vec(OperandSelector.H0_H0))
 
   test("refinements retain the complete wrapped value and accept their leaf kinds") {
     val register  = wrapped(Operand.Register(RegisterBank.UR, 17))

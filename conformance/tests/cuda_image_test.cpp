@@ -16,23 +16,17 @@ struct CodeMode {
   CodeMode() {
     if (const auto *value = std::getenv("CONFORMANCE_CUDA_CODE")) previous = value;
   }
-  static int set(const char *value) {
-#if defined(_WIN32)
-    return _putenv_s("CONFORMANCE_CUDA_CODE", value ? value : "");
-#else
-    return value ? setenv("CONFORMANCE_CUDA_CODE", value, 1) : unsetenv("CONFORMANCE_CUDA_CODE");
-#endif
-  }
+  static int set(const char *value) { return value ? setenv("CONFORMANCE_CUDA_CODE", value, 1) : unsetenv("CONFORMANCE_CUDA_CODE"); }
   ~CodeMode() { set(previous ? previous->c_str() : nullptr); }
 };
 } // namespace
 
-TEST_CASE("CUDA embedded images default to PTX and honor explicit code modes", "[cuda-images]") {
+TEST_CASE("CUDA embedded images default to PTX and honour explicit code modes", "[cuda-images]") {
   CodeMode restore;
-  for (const char *mode : std::array<const char *, 4>{nullptr, "ptx", "sass", "cubin"}) {
+  for (const char *mode : std::array<const char *, 3>{nullptr, "ptx", "sass"}) {
     CAPTURE(mode ? mode : "unset");
     REQUIRE(CodeMode::set(mode) == 0);
-    const bool sass = mode && (std::string_view(mode) == "sass" || std::string_view(mode) == "cubin");
+    const bool sass = mode && std::string_view(mode) == "sass";
     const auto expected = [sass](const auto &ptx, const auto &binary) {
       const auto &selected = sass ? binary : ptx;
       std::vector<char> bytes(selected.begin(), selected.end());

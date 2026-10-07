@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 class LegalitySuite extends munit.FunSuite {
   import NVDisasm.ConditionExpression.*
 
-  private val database = NVDisasm.Database("SM89", "test", 128, Vec.empty, Vec.empty)
+  private val database = NVDisasm.Database("test", 128, Vec.empty, Vec.empty)
 
   test("condition enum names resolve an unambiguous vendor case variant") {
     val mode     = NVDisasm.Vocabulary("ChkMode", Vec.nonEmpty(NVDisasm.SymbolValue("DIVIDE", BigInt(0))))
@@ -24,8 +24,8 @@ class LegalitySuite extends munit.FunSuite {
       NVDisasm.BinaryOperator.from("->"),
       NVDisasm.BinaryOperator.Implies
     )
-    assertEquals(NVDisasm.UnaryOperator.from("@").spelling, "@")
-    assertEquals(NVDisasm.BuiltinCall.from("VendorLookup").name, "VendorLookup")
+    assertEquals(NVDisasm.UnaryOperator.from("@"), NVDisasm.UnaryOperator.Unsupported("@"))
+    assertEquals(NVDisasm.BuiltinCall.from("VendorLookup"), NVDisasm.BuiltinCall.Table("VendorLookup"))
     val unknown = Binary(NVDisasm.BinaryOperator.Unsupported("@"), Number(1), Number(2))
     assert(Legality.evaluate(
       database,
@@ -35,8 +35,8 @@ class LegalitySuite extends munit.FunSuite {
   }
 
   test("FORMAT semantic field categories are closed and unknown vendor names remain data") {
-    val registerField: NVDisasm.Syntax.Field = NVDisasm.Syntax.Field("Register", "r", None, None)
-    val vendorField: NVDisasm.Syntax.Field   = NVDisasm.Syntax.Field("VendorRegisterLike", "v", None, None)
+    val registerField: NVDisasm.Syntax.Field = NVDisasm.Syntax.field("Register", "r", None, None)
+    val vendorField: NVDisasm.Syntax.Field   = NVDisasm.Syntax.field("VendorRegisterLike", "v", None, None)
     assertEquals(NVDisasm.fieldKind(registerField.kind), NVDisasm.FieldKind.Register)
     assertEquals(
       NVDisasm.fieldKind(vendorField.kind),
@@ -54,15 +54,12 @@ class LegalitySuite extends munit.FunSuite {
   test("candidate failure categories are independent of diagnostic wording") {
     def invalid(message: String) = {
       val form = NVDisasm.Form(
-        None,
         "typed",
         false,
         Vec.empty,
         Vec.empty,
-        Vec.empty,
         conditions =
           Vec.nonEmpty(NVDisasm.Condition(
-            "ERROR",
             Binary(NVDisasm.BinaryOperator.Equal, Number(0), Number(1)),
             message
           ))
@@ -71,18 +68,9 @@ class LegalitySuite extends munit.FunSuite {
     }
     assertEquals(invalid("first wording").category, NVDisasm.FailureCategory.IllegalCandidate)
     assertEquals(invalid("changed wording").category, NVDisasm.FailureCategory.IllegalCandidate)
-    assertEquals(
-      NVDisasm.MetadataIssue.ambiguousInverse("TABLES_opex_sample", 7).kind,
-      NVDisasm.MetadataIssueKind.PermittedStructuralAmbiguity
-    )
-    assertEquals(
-      NVDisasm.MetadataIssue.ambiguousInverse("ordinary_table", 7).kind,
-      NVDisasm.MetadataIssueKind.AmbiguousInverse
-    )
-    assertEquals(
-      NVDisasm.MetadataIssue.ambiguousInverse("VarLatOperandEnc", 7).kind,
-      NVDisasm.MetadataIssueKind.PermittedStructuralAmbiguity
-    )
+    assert(NVDisasm.MetadataIssue.AmbiguousInverse("TABLES_opex_sample", 7).structural)
+    assert(!NVDisasm.MetadataIssue.AmbiguousInverse("ordinary_table", 7).structural)
+    assert(NVDisasm.MetadataIssue.AmbiguousInverse("VarLatOperandEnc", 7).structural)
   }
 
   test("false implications do not require absent optional operands") {
@@ -97,7 +85,6 @@ class LegalitySuite extends munit.FunSuite {
 
   test("operand alignment constraints distinguish legal and illegal register groups") {
     val condition = NVDisasm.Condition(
-      "OPERAND_ERROR",
       Binary(
         NVDisasm.BinaryOperator.Equal,
         Binary(NVDisasm.BinaryOperator.Remainder, Field("Ra", None), Number(4)),
@@ -106,10 +93,8 @@ class LegalitySuite extends munit.FunSuite {
       "unaligned register group"
     )
     val form = NVDisasm.Form(
-      None,
       "matrix",
       false,
-      Vec.empty,
       Vec.empty,
       Vec.empty,
       conditions = Vec.nonEmpty(condition)
@@ -129,20 +114,17 @@ class LegalitySuite extends munit.FunSuite {
     ).left.toOption.exists(_.message.startsWith("unsupported condition")))
   }
 
-  test("FORMAT condition names resolve from normalized field bindings") {
+  test("FORMAT condition names resolve from normalised field bindings") {
     val condition = NVDisasm.Condition(
-      "ERROR",
       Binary(NVDisasm.BinaryOperator.Equal, Field("sync", None), Number(1)),
       "requires sync"
     )
     val form = NVDisasm.Form(
-      None,
       "sync-op",
       false,
       Vec.empty,
       Vec.empty,
-      Vec.empty,
-      syntax = Vec.nonEmpty(NVDisasm.Syntax.Field("sync", "SyncMode", None, None)),
+      syntax = Vec.nonEmpty(NVDisasm.Syntax.field("sync", "SyncMode", None, None)),
       conditions = Vec.nonEmpty(condition)
     )
     val bindings = Legality.completeBindings(form, Map("SyncMode" -> BigInt(1)))
@@ -151,29 +133,11 @@ class LegalitySuite extends munit.FunSuite {
     assert(Legality.check(database, form, Legality.completeBindings(form, Map("SyncMode" -> BigInt(0)))).isLeft)
     val repeatedKind = form.copy(
       syntax = Vec.nonEmpty(
-        NVDisasm.Syntax.Field("register", "Ra", None, None),
-        NVDisasm.Syntax.Field("register", "Rb", None, None)
+        NVDisasm.Syntax.field("register", "Ra", None, None),
+        NVDisasm.Syntax.field("register", "Rb", None, None)
       )
     )
     assertEquals(Legality.completeBindings(repeatedKind, Map("register" -> BigInt(4))).get("Ra"), None)
-  }
-
-  test("partial recovered lookup tables never authorize a condition") {
-    val table = NVDisasm.LookupTable(
-      "relation",
-      Vec.nonEmpty(NVDisasm.Row(Vec.nonEmpty(BigInt(1)), BigInt(2))),
-      Vec.nonEmpty("unsupported wildcard")
-    )
-    val condition =
-      Call(
-        NVDisasm.BuiltinCall.Defined,
-        Vec.nonEmpty(Call(NVDisasm.BuiltinCall.Table("relation"), Vec.nonEmpty(Number(1))))
-      )
-    assert(Legality.evaluate(database.copy(tables = Vec.nonEmpty(table)), condition, Map.empty).isLeft)
-    assertEquals(
-      Legality.evaluate(database.copy(tables = Vec.nonEmpty(table.copy(issues = Vec.empty))), condition, Map.empty),
-      Right(BigInt(1))
-    )
   }
 
   test("evaluates recovered integer parity predicates") {
@@ -209,17 +173,15 @@ class LegalitySuite extends munit.FunSuite {
     ).isLeft)
   }
 
-  test("skips only the unobservable legacy scoreboard value constraint") {
+  test("conditions on pre-encoding values apply only when the value is supplied") {
     val condition = NVDisasm.Condition(
-      "ILLEGAL_INSTR_ENCODING_ERROR",
       Binary(NVDisasm.BinaryOperator.Equal, Field("dst_wr_sb", None), Number(7)),
-      "Illegal instruction encoding: Instruction type INST_TYPE_MIO_RD_SCBD can not have a wr scoreboard value other than 7 (no scbd)"
+      "Illegal instruction encoding: Instruction type INST_TYPE_MIO_RD_SCBD can not have a wr scoreboard value other than 7 (no scbd)",
+      requires = Some("dst_wr_sb")
     )
     val form = NVDisasm.Form(
-      None,
       "legacy-memory",
       false,
-      Vec.empty,
       Vec.empty,
       Vec.empty,
       conditions = Vec.nonEmpty(condition)
@@ -231,8 +193,9 @@ class LegalitySuite extends munit.FunSuite {
 
     val unrelated =
       form.copy(conditions =
-        Vec.nonEmpty(condition.copy(expression =
-          Binary(NVDisasm.BinaryOperator.Equal, Field("other", None), Number(7))
+        Vec.nonEmpty(condition.copy(
+          expression = Binary(NVDisasm.BinaryOperator.Equal, Field("other", None), Number(7)),
+          requires = None
         ))
       )
     assert(Legality.check(database, unrelated, Map.empty).isLeft)

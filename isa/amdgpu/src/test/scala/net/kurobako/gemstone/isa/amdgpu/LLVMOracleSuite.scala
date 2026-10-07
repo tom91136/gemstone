@@ -2,14 +2,12 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
-import net.kurobako.gemstone.isa.{Printer as _, *}
 
 class LLVMOracleSuite extends munit.FunSuite {
   test("LLVM selection covers every ISA and includes instruction pairs") {
-    assertEquals(oracle.sourceFileCount, 770)
-    assertEquals(oracle.sourceCaseCount, 379589)
     assertEquals(oracle.cases.size, oracle.selectedCaseCount)
     assert(oracle.cases.size >= 4154)
     assertEquals((oracle.targets ++ oracle.diagnosticTargets).distinct.size, 46)
@@ -62,7 +60,6 @@ class LLVMOracleSuite extends munit.FunSuite {
   }
 
   test("LLVM diagnostics never pass conservative target validation") {
-    assertEquals(oracle.sourceDiagnosticCount, 98714)
     assertEquals(oracle.diagnostics.size, oracle.selectedDiagnosticCount)
     assert(oracle.diagnostics.size >= 300)
     oracle.diagnostics.foreach { diagnostic =>

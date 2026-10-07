@@ -25,8 +25,8 @@ foreach(target_set IN ITEMS default complete legacy-gfx803)
   foreach(route IN LISTS routes)
     # CUDA code modes share one artifact containing both PTX and SASS.
     string(REGEX REPLACE "^cuda-(ptx|sass)/" "cuda/" artifact_route "${route}")
-    string(REGEX REPLACE "^([^/]+)/([^/]+)/(clang|gcc)$" "\\1/\\3/\\2" artifact_route "${artifact_route}")
     # Compiler variants have independent artifact and runtime directories.
+    string(REGEX REPLACE "^([^/]+)/([^/]+)/(clang|gcc)$" "\\1/\\3/\\2" artifact_route "${artifact_route}")
     string(FIND "${graph}" "build output/${artifact_route}/artifact.toml " rule)
     if(rule EQUAL -1)
       message(FATAL_ERROR "Exported route ${route} has no matching artifact output")

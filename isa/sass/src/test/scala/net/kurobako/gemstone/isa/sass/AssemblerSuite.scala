@@ -3,13 +3,13 @@ package net.kurobako.gemstone.isa.sass
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.either.*
 
 class AssemblerSuite extends munit.FunSuite {
-  private lazy val code = SASSOracleWords.read(
-    CopyAddFixtures.copyAdd
-  ).flatMap(_._2).toArray
+  private lazy val code = Listing.words(Fixture.listing("copyAddSm89"), "copy_add", 89).value.flatMap(_._2).toArray
 
   test("parsing creates generated cases and printing preserves typed operands") {
     val parsed = Parser.parse("@!P0 MOV R1, 0x7;").fold(fail(_), identity)
@@ -18,48 +18,48 @@ class AssemblerSuite extends munit.FunSuite {
   }
 
   test("compiler-produced instructions re-encode and printed assembly assembles byte exactly") {
-    SASSCodeWords.words(code, 89).fold(fail(_), identity).foreach { (address, bytes) =>
-      val decoded = Disassembler.decode(bytes, "SM89", address.raw).fold(fail(_), identity)
+    codeWords(code, 89).fold(fail(_), identity).foreach { (address, bytes) =>
+      val decoded = disassemble(bytes, 89, address).fold(fail(_), identity)
       assertEquals(Assembler.encode(decoded).fold(fail(_), _.toVec), bytes.toVec, clues(address, decoded))
       val text = Printer.print(decoded).fold(fail(_), identity)
-      assertEquals(Assembler.assemble(text, "SM89", address.raw).fold(fail(_), _.toVec), bytes.toVec, clues(text))
+      assertEquals(Assembler.assemble(text, target(89), address).fold(fail(_), _.toVec), bytes.toVec, clues(text))
     }
   }
 
   test("assembler constructs new machine instructions without a prior encoding") {
     val source  = "MOV R3, R7;"
-    val encoded = Assembler.assemble(source, "SM89").fold(fail(_), identity)
-    val decoded = Disassembler.decode(encoded, "SM89").fold(fail(_), identity)
+    val encoded = Assembler.assemble(source, target(89)).fold(fail(_), identity)
+    val decoded = disassemble(encoded, 89).fold(fail(_), identity)
     assertEquals(decoded.operation, Parser.parse(source).fold(fail(_), identity))
     assert(decoded.operation match { case _: Instruction.Mov => true; case _ => false })
   }
 
   Vec.nonEmpty(
-    "SM35" -> "MOV R3, R7;",
-    "SM35" -> "IADD R3, R7, R8;",
-    "SM50" -> "MOV R3, R7;",
-    "SM50" -> "IADD R3, R7, R8;",
-    "SM89" -> "NOP;",
-    "SM89" -> "EXIT;",
-    "SM89" -> "@P0 MOV R3, R7;",
-    "SM89" -> "IADD3 R3, R7, R8, RZ;",
-    "SM89" -> "FADD R3, R7, R8;",
-    "SM89" -> "IMAD R3, R7, R8, R9;"
-  ).foreach { (target, source) =>
-    test(s"plain assembly: $target $source") {
-      val bytes   = Assembler.assemble(source, target).fold(error => fail(s"$target $source: $error"), identity)
-      val decoded = Disassembler.decode(bytes, target).fold(fail(_), identity)
+    35 -> "MOV R3, R7;",
+    35 -> "IADD R3, R7, R8;",
+    50 -> "MOV R3, R7;",
+    50 -> "IADD R3, R7, R8;",
+    89 -> "NOP;",
+    89 -> "EXIT;",
+    89 -> "@P0 MOV R3, R7;",
+    89 -> "IADD3 R3, R7, R8, RZ;",
+    89 -> "FADD R3, R7, R8;",
+    89 -> "IMAD R3, R7, R8, R9;"
+  ).foreach { (sm, source) =>
+    test(s"plain assembly: SM$sm $source") {
+      val bytes   = Assembler.assemble(source, target(sm)).fold(error => fail(s"SM$sm $source: $error"), identity)
+      val decoded = disassemble(bytes, sm).fold(fail(_), identity)
       assertEquals(Printer.print(decoded.operation), Printer.print(Parser.parse(source).fold(fail(_), identity)))
     }
   }
 
   test("ordinary signed integer and floating immediates preserve their numeric meaning") {
     Vec.nonEmpty(
-      ("SM35", "IADD R3, R7, -1;"),
-      ("SM50", "IADD R3, R7, -1;")
-    ).foreach { (target, source) =>
-      val bytes   = Assembler.assemble(source, target).fold(error => fail(s"$target $source: $error"), identity)
-      val decoded = Disassembler.decode(bytes, target).fold(fail(_), identity)
+      (35, "IADD R3, R7, -1;"),
+      (50, "IADD R3, R7, -1;")
+    ).foreach { (sm, source) =>
+      val bytes   = Assembler.assemble(source, target(sm)).fold(error => fail(s"SM$sm $source: $error"), identity)
+      val decoded = disassemble(bytes, sm).fold(fail(_), identity)
       assert(decoded.operands.last match {
         case Operand.Unary(Operand.Bits(value, _), true, false, false) => value == 1
         case _                                                         => false
@@ -70,9 +70,9 @@ class AssemblerSuite extends munit.FunSuite {
       "1.0"  -> BigInt("3f800000", 16),
       "-1.0" -> BigInt("bf800000", 16)
     ).foreach { (literal, expectedBits) =>
-      for (target <- Vec.nonEmpty("SM35", "SM50", "SM89")) {
-        val floating = Assembler.assemble(s"FADD R3, R7, $literal;", target).fold(fail(_), identity)
-        val decoded  = Disassembler.decode(floating, target).fold(fail(_), identity)
+      for (sm <- Vec.nonEmpty(35, 50, 89)) {
+        val floating = Assembler.assemble(s"FADD R3, R7, $literal;", target(sm)).fold(fail(_), identity)
+        val decoded  = disassemble(floating, sm).fold(fail(_), identity)
         assert(decoded.operands.last match {
           case Operand.FloatingBits(FloatEncoding.F32Imm, width, bits) => width.raw == 32 && bits == expectedBits
           case _                                                       => false
@@ -82,32 +82,32 @@ class AssemblerSuite extends munit.FunSuite {
   }
 
   test("double immediates encode their stored high bits and reject lost payload bits") {
-    val bytes   = Assembler.assemble("DADD R2, R4, 1.0;", "SM89").fold(fail(_), identity)
-    val decoded = Disassembler.decode(bytes, "SM89").fold(fail(_), identity)
+    val bytes   = Assembler.assemble("DADD R2, R4, 1.0;", target(89)).fold(fail(_), identity)
+    val decoded = disassemble(bytes, 89).fold(fail(_), identity)
     assert(decoded.operands.last match {
       case Operand.FloatingBits(FloatEncoding.F64Imm, width, bits) => width.raw == 64 &&
         bits == BigInt("3ff0000000000000", 16)
       case _ => false
     })
-    assert(Assembler.assemble("DADD R2, R4, bits<F64Imm>:64(0x3ff0000000000001);", "SM89").isLeft)
+    assert(Assembler.assemble("DADD R2, R4, bits<F64Imm>:64(0x3ff0000000000001);", target(89)).isLeft)
   }
 
   test("explicit always-true PT guard is equivalent to the unguarded binary form") {
-    val bytes   = Assembler.assemble("@PT MOV R3, R7;", "SM89").fold(fail(_), identity)
-    val decoded = Disassembler.decode(bytes, "SM89").fold(fail(_), identity)
+    val bytes   = Assembler.assemble("@PT MOV R3, R7;", target(89)).fold(fail(_), identity)
+    val decoded = disassemble(bytes, 89).fold(fail(_), identity)
     assertEquals(decoded.guard, None)
   }
 
   test("annotations cannot silently override edits or target and address context") {
-    val decoded = Disassembler.decode(code.take(16), "SM89").fold(fail(_), identity)
+    val decoded = disassemble(code.take(16), 89).fold(fail(_), identity)
     val printed = Printer.print(decoded).fold(fail(_), identity)
-    assert(Assembler.assemble(printed, "SM80").isLeft)
-    assert(Assembler.assemble(printed, "SM89", 16).isLeft)
+    assert(Assembler.assemble(printed, target(80)).isLeft)
+    assert(Assembler.assemble(printed, target(89), 16).isLeft)
     val altered = printed match {
       case s"$_// encoding: $data" => s"NOP; // encoding: $data"
       case _                       => fail("missing annotation")
     }
-    assert(Assembler.assemble(altered, "SM89").isLeft)
+    assert(Assembler.assemble(altered, target(89)).isLeft)
   }
 
   test("empty opcode qualifiers are rejected") {
@@ -115,13 +115,8 @@ class AssemblerSuite extends munit.FunSuite {
     assert(Parser.parse("MOV..U32 R1, R2;").isLeft)
   }
 
-  test("negative addresses and unknown targets are rejected") {
-    assert(Assembler.assemble("NOP;", "SM89", -1).isLeft)
-    assert(Assembler.assemble("NOP;", "SM999").isLeft)
+  test("targets without recovered tables are rejected") {
+    assert(Target.parse("SM999").isLeft)
+    assert(Target.parse("sm_90a").isLeft)
   }
-  test("public machine-code APIs reject negative addresses before decoding") {
-    assert(Disassembler.decode(Array.emptyByteArray, "SM89", -1).isLeft)
-    assert(Assembler.assemble("NOP;", "SM89", -1).isLeft)
-  }
-
 }

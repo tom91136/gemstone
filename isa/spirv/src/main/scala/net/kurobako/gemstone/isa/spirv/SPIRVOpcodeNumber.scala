@@ -1,0 +1,9 @@
+package net.kurobako.gemstone.isa.spirv
+
+import net.kurobako.gemstone.constraint.*
+
+/** A SPIR-V opcode number, from zero to 65535. */
+type SPIRVOpcodeNumber = SPIRVOpcodeNumber.Type
+object SPIRVOpcodeNumber extends Newtype[Int in 0 ~ 65535] {
+  extension (value: SPIRVOpcodeNumber) def toInt: Int = value.raw
+}

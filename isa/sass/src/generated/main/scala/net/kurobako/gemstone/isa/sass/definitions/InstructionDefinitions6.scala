@@ -6,17 +6,252 @@ import net.kurobako.gemstone.constraint.*
 import Instruction.*
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 object InstructionDefinitions6 {
-  object ImulfmalighterPipeRegRegRegImm extends Definition(
-        "ImulfmalighterPipeRegRegRegImm",
-        "IMULfmalighter_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("sc", OperandKind.Immediate)
-        ),
-        Vec("imul_lo_xor__RRsI_RRI")
+  object UviaddRegRegImm extends Definition("UviaddRegRegImm", "UVIADD", Vec("uviadd__URuIUR_URIR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sb)
+            ) => Some(Instruction.UviaddRegRegImm(dst, srcA, sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object UviaddRegRegReg extends Definition("UviaddRegRegReg", "UVIADD", Vec("uviadd__URURUR_UUU")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB)
+            ) => Some(Instruction.UviaddRegRegReg(dst, srcA, srcB, modifiers, guard))
+        case _ => None
+      }
+  }
+  object UvimnmxRegRegImmPred extends Definition("UvimnmxRegRegImmPred", "UVIMNMX", Vec("uvimnmx__URIR_URsIUR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sb),
+              InstructionOperand.Predicate(uPp)
+            ) => Some(Instruction.UvimnmxRegRegImmPred(dst, srcA, sb, uPp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object UvimnmxRegRegRegPred extends Definition("UvimnmxRegRegRegPred", "UVIMNMX", Vec("uvimnmx__UUU_URURUR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Predicate(uPp)
+            ) => Some(Instruction.UvimnmxRegRegRegPred(dst, srcA, srcB, uPp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object UvirtcountImm
+      extends Definition("UvirtcountImm", "UVIRTCOUNT", Vec("uvirtcount__imm", "uvirtcount_one__imm")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Immediate(sa)) => Some(Instruction.UvirtcountImm(sa, modifiers, guard))
+        case _ => None
+      }
+  }
+  object UvirtcountReg extends Definition("UvirtcountReg", "UVIRTCOUNT", Vec("uvirtcount__UR", "uvirtcount_one__UR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Register(srcA)) => Some(Instruction.UvirtcountReg(srcA, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegPredRegAddressImmReg
+      extends Definition("VabsdiffRegPredRegAddressImmReg", "VABSDIFF", Vec("vabsdiff__RCxR_RCxR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Address(srcB),
+              InstructionOperand.Immediate(sb_offset),
+              InstructionOperand.Register(srcC)
+            ) =>
+          Some(Instruction.VabsdiffRegPredRegAddressImmReg(dst, pu, srcA, srcB, sb_offset, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegPredRegConstReg
+      extends Definition("VabsdiffRegPredRegConstReg", "VABSDIFF", Vec("vabsdiff__RCR_RCR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.ConstantBank(sb),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VabsdiffRegPredRegConstReg(dst, pu, srcA, sb, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegPredRegImmReg
+      extends Definition("VabsdiffRegPredRegImmReg", "VABSDIFF", Vec("vabsdiff__RuIR_RIR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sb),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VabsdiffRegPredRegImmReg(dst, pu, srcA, sb, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegPredRegRegAddressImm
+      extends Definition("VabsdiffRegPredRegRegAddressImm", "VABSDIFF", Vec("vabsdiff__RRCx_RRCx")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Address(srcC),
+              InstructionOperand.Immediate(sc_offset)
+            ) =>
+          Some(Instruction.VabsdiffRegPredRegRegAddressImm(dst, pu, srcA, srcB, srcC, sc_offset, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegPredRegRegConst
+      extends Definition("VabsdiffRegPredRegRegConst", "VABSDIFF", Vec("vabsdiff__RRC_RRC")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.ConstantBank(sc)
+            ) => Some(Instruction.VabsdiffRegPredRegRegConst(dst, pu, srcA, srcB, sc, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegPredRegRegImm
+      extends Definition("VabsdiffRegPredRegRegImm", "VABSDIFF", Vec("vabsdiff__RRuI_RRI")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Immediate(sc)
+            ) => Some(Instruction.VabsdiffRegPredRegRegImm(dst, pu, srcA, srcB, sc, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegPredRegRegReg extends Definition(
+        "VabsdiffRegPredRegRegReg",
+        "VABSDIFF",
+        Vec("vabsdiff__RRR_RRR", "vabsdiff__RRU_RRU", "vabsdiff__RUR_RUR")
       ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VabsdiffRegPredRegRegReg(dst, pu, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegRegAddressImmReg
+      extends Definition("VabsdiffRegRegAddressImmReg", "VABSDIFF", Vec("vabsdiff__RCxR_RCxR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Address(srcB),
+              InstructionOperand.Immediate(sb_offset),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VabsdiffRegRegAddressImmReg(dst, srcA, srcB, sb_offset, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegRegConstReg extends Definition("VabsdiffRegRegConstReg", "VABSDIFF", Vec("vabsdiff__RCR_RCR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.ConstantBank(sb),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VabsdiffRegRegConstReg(dst, srcA, sb, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegRegImmReg extends Definition(
+        "VabsdiffRegRegImmReg",
+        "VABSDIFF",
+        Vec(
+          "Imm VABSDIFF",
+          "Imm_VABSDIFF",
+          "SImm_VABSDIFF",
+          "a32 Imm VABSDIFF",
+          "a32_Imm_VABSDIFF",
+          "a32_SImm_VABSDIFF",
+          "a8 Imm VABSDIFF",
+          "a8_Imm_VABSDIFF",
+          "a8_SImm_VABSDIFF",
+          "vabsdiff__RuIR_RIR"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sb),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VabsdiffRegRegImmReg(dst, srcA, sb, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegRegRegAddressImm
+      extends Definition("VabsdiffRegRegRegAddressImm", "VABSDIFF", Vec("vabsdiff__RRCx_RRCx")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Address(srcC),
+              InstructionOperand.Immediate(sc_offset)
+            ) => Some(Instruction.VabsdiffRegRegRegAddressImm(dst, srcA, srcB, srcC, sc_offset, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegRegRegConst extends Definition("VabsdiffRegRegRegConst", "VABSDIFF", Vec("vabsdiff__RRC_RRC")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.ConstantBank(sc)
+            ) => Some(Instruction.VabsdiffRegRegRegConst(dst, srcA, srcB, sc, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VabsdiffRegRegRegImm extends Definition("VabsdiffRegRegRegImm", "VABSDIFF", Vec("vabsdiff__RRuI_RRI")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
@@ -24,26 +259,34 @@ object InstructionDefinitions6 {
               InstructionOperand.Register(srcA),
               InstructionOperand.Register(srcB),
               InstructionOperand.Immediate(sc)
-            ) => Some(Instruction.ImulfmalighterPipeRegRegRegImm(dst, srcA, srcB, sc, modifiers, guard))
+            ) => Some(Instruction.VabsdiffRegRegRegImm(dst, srcA, srcB, sc, modifiers, guard))
         case _ => None
       }
   }
-  object ImulfmalighterPipeRegRegRegReg extends Definition(
-        "ImulfmalighterPipeRegRegRegReg",
-        "IMULfmalighter_pipe",
+  object VabsdiffRegRegRegReg extends Definition(
+        "VabsdiffRegRegRegReg",
+        "VABSDIFF",
         Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcC", OperandKind.Register)
-        ),
-        Vec(
-          "imul_lo_xor__RRR_RRR",
-          "imul_lo_xor__RRU_RRU",
-          "imul_lo_xor__RUR_RUR",
-          "imul_wide_xor__RRR_RRR",
-          "imul_wide_xor__RRU_RRU",
-          "imul_wide_xor__RUR_RUR"
+          "VABSDIFF",
+          "a32 VABSDIFF",
+          "a32 b32 VABSDIFF",
+          "a32 b8 VABSDIFF",
+          "a32_VABSDIFF",
+          "a32_b32_VABSDIFF",
+          "a32_b8_VABSDIFF",
+          "a8 VABSDIFF",
+          "a8 b32 VABSDIFF",
+          "a8 b8 VABSDIFF",
+          "a8_VABSDIFF",
+          "a8_b32_VABSDIFF",
+          "a8_b8_VABSDIFF",
+          "b32 VABSDIFF",
+          "b32_VABSDIFF",
+          "b8 VABSDIFF",
+          "b8_VABSDIFF",
+          "vabsdiff__RRR_RRR",
+          "vabsdiff__RRU_RRU",
+          "vabsdiff__RUR_RUR"
         )
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
@@ -53,860 +296,11 @@ object InstructionDefinitions6 {
               InstructionOperand.Register(srcA),
               InstructionOperand.Register(srcB),
               InstructionOperand.Register(srcC)
-            ) => Some(Instruction.ImulfmalighterPipeRegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+            ) => Some(Instruction.VabsdiffRegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object ImulmioPipeRegRegConst extends Definition(
-        "ImulmioPipeRegRegConst",
-        "IMULmio_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("Const_IMUL")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.ImulmioPipeRegRegConst(dst, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object ImulmioPipeRegRegImm extends Definition(
-        "ImulmioPipeRegRegImm",
-        "IMULmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("uImm", OperandKind.Immediate)),
-        Vec("Imm_IMUL")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.ImulmioPipeRegRegImm(dst, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object ImulmioPipeRegRegReg extends Definition(
-        "ImulmioPipeRegRegReg",
-        "IMULmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("srcB", OperandKind.Register)),
-        Vec("IMUL")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.ImulmioPipeRegRegReg(dst, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegAddress extends Definition(
-        "IpaRegAddress",
-        "IPA",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address)),
-        Vec("I IPA 2", "IPA 2", "ipa_ur_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(dst), InstructionOperand.Address(srcA)) =>
-          Some(Instruction.IpaRegAddress(dst, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegAddressImm extends Definition(
-        "IpaRegAddressImm",
-        "IPA",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address), Slot("sb", OperandKind.Immediate)),
-        Vec("ipa_ur_offset__IPA_URa_Ib")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Immediate(sb)
-            ) => Some(Instruction.IpaRegAddressImm(dst, srcA, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegAddressPred extends Definition(
-        "IpaRegAddressPred",
-        "IPA",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address), Slot("ps", OperandKind.Predicate)),
-        Vec("IPA_2")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Predicate(ps)
-            ) => Some(Instruction.IpaRegAddressPred(dst, srcA, ps, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegAddressReg extends Definition(
-        "IpaRegAddressReg",
-        "IPA",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address), Slot("srcB", OperandKind.Register)),
-        Vec("ipa_ur_offset__IPA_URa_Rb")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IpaRegAddressReg(dst, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegAddressRegReg extends Definition(
-        "IpaRegAddressRegReg",
-        "IPA",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Address),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcC", OperandKind.Register)
-        ),
-        Vec("I IPA 1", "IPA 1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Register(srcC)
-            ) => Some(Instruction.IpaRegAddressRegReg(dst, srcA, srcB, srcC, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegAddressRegRegPred extends Definition(
-        "IpaRegAddressRegRegPred",
-        "IPA",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Address),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcC", OperandKind.Register),
-          Slot("ps", OperandKind.Predicate)
-        ),
-        Vec("IPA_1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Register(srcC),
-              InstructionOperand.Predicate(ps)
-            ) => Some(Instruction.IpaRegAddressRegRegPred(dst, srcA, srcB, srcC, ps, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegImm extends Definition(
-        "IpaRegImm",
-        "IPA",
-        Vec(Slot("dst", OperandKind.Register), Slot("attr", OperandKind.Immediate)),
-        Vec("I_IPA_2", "ipa_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(dst), InstructionOperand.Immediate(attr)) =>
-          Some(Instruction.IpaRegImm(dst, attr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegImmConst extends Definition(
-        "IpaRegImmConst",
-        "IPA",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("attr", OperandKind.Immediate),
-          Slot("sb", OperandKind.ConstantBank)
-        ),
-        Vec("ipa_offset__IPA_C")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(attr),
-              InstructionOperand.ConstantBank(sb)
-            ) => Some(Instruction.IpaRegImmConst(dst, attr, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegImmImm extends Definition(
-        "IpaRegImmImm",
-        "IPA",
-        Vec(Slot("dst", OperandKind.Register), Slot("attr", OperandKind.Immediate), Slot("sb", OperandKind.Immediate)),
-        Vec("ipa_offset__IPA_Ib", "ipa_offset__IPA_Imm")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(attr),
-              InstructionOperand.Immediate(sb)
-            ) => Some(Instruction.IpaRegImmImm(dst, attr, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegImmPred extends Definition(
-        "IpaRegImmPred",
-        "IPA",
-        Vec(Slot("dst", OperandKind.Register), Slot("uImm", OperandKind.Immediate), Slot("ps", OperandKind.Predicate)),
-        Vec("I_IPA_2")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Predicate(ps)
-            ) => Some(Instruction.IpaRegImmPred(dst, uImm, ps, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegImmReg extends Definition(
-        "IpaRegImmReg",
-        "IPA",
-        Vec(Slot("dst", OperandKind.Register), Slot("attr", OperandKind.Immediate), Slot("srcB", OperandKind.Register)),
-        Vec("ipa_offset__IPA_Rb")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(attr),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IpaRegImmReg(dst, attr, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegImmRegReg extends Definition(
-        "IpaRegImmRegReg",
-        "IPA",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcC", OperandKind.Register)
-        ),
-        Vec("I_IPA_1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Register(srcC)
-            ) => Some(Instruction.IpaRegImmRegReg(dst, uImm, srcB, srcC, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegImmRegRegPred extends Definition(
-        "IpaRegImmRegRegPred",
-        "IPA",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcC", OperandKind.Register),
-          Slot("ps", OperandKind.Predicate)
-        ),
-        Vec("I_IPA_1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Register(srcC),
-              InstructionOperand.Predicate(ps)
-            ) => Some(Instruction.IpaRegImmRegRegPred(dst, uImm, srcB, srcC, ps, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegPredAddress extends Definition(
-        "IpaRegPredAddress",
-        "IPA",
-        Vec(Slot("dst", OperandKind.Register), Slot("pu", OperandKind.Predicate), Slot("srcA", OperandKind.Address)),
-        Vec("ipa_ur_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Address(srcA)
-            ) => Some(Instruction.IpaRegPredAddress(dst, pu, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegPredAddressImm extends Definition(
-        "IpaRegPredAddressImm",
-        "IPA",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Address),
-          Slot("sb", OperandKind.Immediate)
-        ),
-        Vec("ipa_ur_offset__IPA_URa_Ib")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Immediate(sb)
-            ) => Some(Instruction.IpaRegPredAddressImm(dst, pu, srcA, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegPredAddressReg extends Definition(
-        "IpaRegPredAddressReg",
-        "IPA",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Address),
-          Slot("srcB", OperandKind.Register)
-        ),
-        Vec("ipa_ur_offset__IPA_URa_Rb")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IpaRegPredAddressReg(dst, pu, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegPredImm extends Definition(
-        "IpaRegPredImm",
-        "IPA",
-        Vec(Slot("dst", OperandKind.Register), Slot("pu", OperandKind.Predicate), Slot("attr", OperandKind.Immediate)),
-        Vec("ipa_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Immediate(attr)
-            ) => Some(Instruction.IpaRegPredImm(dst, pu, attr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegPredImmConst extends Definition(
-        "IpaRegPredImmConst",
-        "IPA",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("attr", OperandKind.Immediate),
-          Slot("sb", OperandKind.ConstantBank)
-        ),
-        Vec("ipa_offset__IPA_C")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Immediate(attr),
-              InstructionOperand.ConstantBank(sb)
-            ) => Some(Instruction.IpaRegPredImmConst(dst, pu, attr, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegPredImmImm extends Definition(
-        "IpaRegPredImmImm",
-        "IPA",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("attr", OperandKind.Immediate),
-          Slot("sb", OperandKind.Immediate)
-        ),
-        Vec("ipa_offset__IPA_Ib", "ipa_offset__IPA_Imm")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Immediate(attr),
-              InstructionOperand.Immediate(sb)
-            ) => Some(Instruction.IpaRegPredImmImm(dst, pu, attr, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpaRegPredImmReg extends Definition(
-        "IpaRegPredImmReg",
-        "IPA",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("attr", OperandKind.Immediate),
-          Slot("srcB", OperandKind.Register)
-        ),
-        Vec("ipa_offset__IPA_Rb")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Immediate(attr),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IpaRegPredImmReg(dst, pu, attr, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegAddress extends Definition(
-        "IpamioPipeRegAddress",
-        "IPAmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address)),
-        Vec("ipa_ur_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(dst), InstructionOperand.Address(srcA)) =>
-          Some(Instruction.IpamioPipeRegAddress(dst, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegAddressImm extends Definition(
-        "IpamioPipeRegAddressImm",
-        "IPAmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address), Slot("sb", OperandKind.Immediate)),
-        Vec("ipa_ur_offset__IPA_URa_Ib")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Immediate(sb)
-            ) => Some(Instruction.IpamioPipeRegAddressImm(dst, srcA, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegAddressPred extends Definition(
-        "IpamioPipeRegAddressPred",
-        "IPAmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address), Slot("ps", OperandKind.Predicate)),
-        Vec("IPA_2")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Predicate(ps)
-            ) => Some(Instruction.IpamioPipeRegAddressPred(dst, srcA, ps, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegAddressReg extends Definition(
-        "IpamioPipeRegAddressReg",
-        "IPAmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address), Slot("srcB", OperandKind.Register)),
-        Vec("ipa_ur_offset__IPA_URa_Rb")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IpamioPipeRegAddressReg(dst, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegAddressRegRegPred extends Definition(
-        "IpamioPipeRegAddressRegRegPred",
-        "IPAmio_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Address),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcC", OperandKind.Register),
-          Slot("ps", OperandKind.Predicate)
-        ),
-        Vec("IPA_1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Register(srcC),
-              InstructionOperand.Predicate(ps)
-            ) => Some(Instruction.IpamioPipeRegAddressRegRegPred(dst, srcA, srcB, srcC, ps, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegImm extends Definition(
-        "IpamioPipeRegImm",
-        "IPAmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("attr", OperandKind.Immediate)),
-        Vec("I_IPA_2", "ipa_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(dst), InstructionOperand.Immediate(attr)) =>
-          Some(Instruction.IpamioPipeRegImm(dst, attr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegImmConst extends Definition(
-        "IpamioPipeRegImmConst",
-        "IPAmio_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("attr", OperandKind.Immediate),
-          Slot("sb", OperandKind.ConstantBank)
-        ),
-        Vec("ipa_offset__IPA_C")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(attr),
-              InstructionOperand.ConstantBank(sb)
-            ) => Some(Instruction.IpamioPipeRegImmConst(dst, attr, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegImmImm extends Definition(
-        "IpamioPipeRegImmImm",
-        "IPAmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("attr", OperandKind.Immediate), Slot("sb", OperandKind.Immediate)),
-        Vec("ipa_offset__IPA_Ib", "ipa_offset__IPA_Imm")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(attr),
-              InstructionOperand.Immediate(sb)
-            ) => Some(Instruction.IpamioPipeRegImmImm(dst, attr, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegImmPred extends Definition(
-        "IpamioPipeRegImmPred",
-        "IPAmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("uImm", OperandKind.Immediate), Slot("ps", OperandKind.Predicate)),
-        Vec("I_IPA_2")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Predicate(ps)
-            ) => Some(Instruction.IpamioPipeRegImmPred(dst, uImm, ps, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegImmReg extends Definition(
-        "IpamioPipeRegImmReg",
-        "IPAmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("attr", OperandKind.Immediate), Slot("srcB", OperandKind.Register)),
-        Vec("ipa_offset__IPA_Rb")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(attr),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IpamioPipeRegImmReg(dst, attr, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegImmRegReg extends Definition(
-        "IpamioPipeRegImmRegReg",
-        "IPAmio_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcC", OperandKind.Register)
-        ),
-        Vec("I_IPA_1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Register(srcC)
-            ) => Some(Instruction.IpamioPipeRegImmRegReg(dst, uImm, srcB, srcC, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegImmRegRegPred extends Definition(
-        "IpamioPipeRegImmRegRegPred",
-        "IPAmio_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcC", OperandKind.Register),
-          Slot("ps", OperandKind.Predicate)
-        ),
-        Vec("I_IPA_1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Register(srcC),
-              InstructionOperand.Predicate(ps)
-            ) => Some(Instruction.IpamioPipeRegImmRegRegPred(dst, uImm, srcB, srcC, ps, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegPredAddress extends Definition(
-        "IpamioPipeRegPredAddress",
-        "IPAmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("pu", OperandKind.Predicate), Slot("srcA", OperandKind.Address)),
-        Vec("ipa_ur_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Address(srcA)
-            ) => Some(Instruction.IpamioPipeRegPredAddress(dst, pu, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegPredAddressImm extends Definition(
-        "IpamioPipeRegPredAddressImm",
-        "IPAmio_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Address),
-          Slot("sb", OperandKind.Immediate)
-        ),
-        Vec("ipa_ur_offset__IPA_URa_Ib")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Immediate(sb)
-            ) => Some(Instruction.IpamioPipeRegPredAddressImm(dst, pu, srcA, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegPredAddressReg extends Definition(
-        "IpamioPipeRegPredAddressReg",
-        "IPAmio_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Address),
-          Slot("srcB", OperandKind.Register)
-        ),
-        Vec("ipa_ur_offset__IPA_URa_Rb")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IpamioPipeRegPredAddressReg(dst, pu, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegPredImm extends Definition(
-        "IpamioPipeRegPredImm",
-        "IPAmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("pu", OperandKind.Predicate), Slot("attr", OperandKind.Immediate)),
-        Vec("ipa_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Immediate(attr)
-            ) => Some(Instruction.IpamioPipeRegPredImm(dst, pu, attr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegPredImmConst extends Definition(
-        "IpamioPipeRegPredImmConst",
-        "IPAmio_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("attr", OperandKind.Immediate),
-          Slot("sb", OperandKind.ConstantBank)
-        ),
-        Vec("ipa_offset__IPA_C")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Immediate(attr),
-              InstructionOperand.ConstantBank(sb)
-            ) => Some(Instruction.IpamioPipeRegPredImmConst(dst, pu, attr, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegPredImmImm extends Definition(
-        "IpamioPipeRegPredImmImm",
-        "IPAmio_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("attr", OperandKind.Immediate),
-          Slot("sb", OperandKind.Immediate)
-        ),
-        Vec("ipa_offset__IPA_Ib", "ipa_offset__IPA_Imm")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Immediate(attr),
-              InstructionOperand.Immediate(sb)
-            ) => Some(Instruction.IpamioPipeRegPredImmImm(dst, pu, attr, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpamioPipeRegPredImmReg extends Definition(
-        "IpamioPipeRegPredImmReg",
-        "IPAmio_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("attr", OperandKind.Immediate),
-          Slot("srcB", OperandKind.Register)
-        ),
-        Vec("ipa_offset__IPA_Rb")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Immediate(attr),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IpamioPipeRegPredImmReg(dst, pu, attr, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpasuPipeRegAddress extends Definition(
-        "IpasuPipeRegAddress",
-        "IPAsu_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address)),
-        Vec("I IPA 2", "IPA 2")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(dst), InstructionOperand.Address(srcA)) =>
-          Some(Instruction.IpasuPipeRegAddress(dst, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IpasuPipeRegAddressRegReg extends Definition(
-        "IpasuPipeRegAddressRegReg",
-        "IPAsu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Address),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcC", OperandKind.Register)
-        ),
-        Vec("I IPA 1", "IPA 1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Register(srcC)
-            ) => Some(Instruction.IpasuPipeRegAddressRegReg(dst, srcA, srcB, srcC, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsadRegRegConstReg extends Definition(
-        "IsadRegRegConstReg",
-        "ISAD",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("srcC", OperandKind.Register)
-        ),
-        Vec("Const ISAD")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Register(srcC)
-            ) => Some(Instruction.IsadRegRegConstReg(dst, srcA, srcConst, srcC, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsadRegRegImmReg extends Definition(
-        "IsadRegRegImmReg",
-        "ISAD",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("srcC", OperandKind.Register)
-        ),
-        Vec("Imm ISAD")
-      ) {
+  object Vabsdiff2RegRegImmReg extends Definition("Vabsdiff2RegRegImmReg", "VABSDIFF2", Vec("Imm VABSDIFF2")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
@@ -914,43 +308,11 @@ object InstructionDefinitions6 {
               InstructionOperand.Register(srcA),
               InstructionOperand.Immediate(uImm),
               InstructionOperand.Register(srcC)
-            ) => Some(Instruction.IsadRegRegImmReg(dst, srcA, uImm, srcC, modifiers, guard))
+            ) => Some(Instruction.Vabsdiff2RegRegImmReg(dst, srcA, uImm, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object IsadRegRegRegConst extends Definition(
-        "IsadRegRegRegConst",
-        "ISAD",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("Const1 ISAD")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsadRegRegRegConst(dst, srcA, srcB, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsadRegRegRegReg extends Definition(
-        "IsadRegRegRegReg",
-        "ISAD",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcC", OperandKind.Register)
-        ),
-        Vec("ISAD")
-      ) {
+  object Vabsdiff2RegRegRegReg extends Definition("Vabsdiff2RegRegRegReg", "VABSDIFF2", Vec("VABSDIFF2")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
@@ -958,163 +320,12 @@ object InstructionDefinitions6 {
               InstructionOperand.Register(srcA),
               InstructionOperand.Register(srcB),
               InstructionOperand.Register(srcC)
-            ) => Some(Instruction.IsadRegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+            ) => Some(Instruction.Vabsdiff2RegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object IsadxluPipeRegRegConstReg extends Definition(
-        "IsadxluPipeRegRegConstReg",
-        "ISADxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("srcC", OperandKind.Register)
-        ),
-        Vec("Const ISAD")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Register(srcC)
-            ) => Some(Instruction.IsadxluPipeRegRegConstReg(dst, srcA, srcConst, srcC, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsadxluPipeRegRegImmReg extends Definition(
-        "IsadxluPipeRegRegImmReg",
-        "ISADxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("srcC", OperandKind.Register)
-        ),
-        Vec("Imm ISAD")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Register(srcC)
-            ) => Some(Instruction.IsadxluPipeRegRegImmReg(dst, srcA, uImm, srcC, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsadxluPipeRegRegRegConst extends Definition(
-        "IsadxluPipeRegRegRegConst",
-        "ISADxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("Const1 ISAD")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsadxluPipeRegRegRegConst(dst, srcA, srcB, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsadxluPipeRegRegRegReg extends Definition(
-        "IsadxluPipeRegRegRegReg",
-        "ISADxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("srcC", OperandKind.Register)
-        ),
-        Vec("ISAD")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Register(srcC)
-            ) => Some(Instruction.IsadxluPipeRegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsberdRegAddress extends Definition(
-        "IsberdRegAddress",
-        "ISBERD",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address)),
-        Vec("ISBERD", "isberd_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(dst), InstructionOperand.Address(srcA)) =>
-          Some(Instruction.IsberdRegAddress(dst, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsberdmioPipeRegAddress extends Definition(
-        "IsberdmioPipeRegAddress",
-        "ISBERDmio_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address)),
-        Vec("ISBERD", "isberd_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(dst), InstructionOperand.Address(srcA)) =>
-          Some(Instruction.IsberdmioPipeRegAddress(dst, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsbewrAddressReg extends Definition(
-        "IsbewrAddressReg",
-        "ISBEWR",
-        Vec(Slot("srcA", OperandKind.Address), Slot("srcB", OperandKind.Register)),
-        Vec("isbewr_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Address(srcA), InstructionOperand.Register(srcB)) =>
-          Some(Instruction.IsbewrAddressReg(srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsbewrmioPipeAddressReg extends Definition(
-        "IsbewrmioPipeAddressReg",
-        "ISBEWRmio_pipe",
-        Vec(Slot("srcA", OperandKind.Address), Slot("srcB", OperandKind.Register)),
-        Vec("isbewr_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Address(srcA), InstructionOperand.Register(srcB)) =>
-          Some(Instruction.IsbewrmioPipeAddressReg(srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IscaddRegPredRegAddressImmImm extends Definition(
-        "IscaddRegPredRegAddressImmImm",
-        "ISCADD",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Address),
-          Slot("sb_offset", OperandKind.Immediate),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_noimm__RCxR_RCxR")
-      ) {
+  object Vabsdiff4RegPredRegAddressImmReg
+      extends Definition("Vabsdiff4RegPredRegAddressImmReg", "VABSDIFF4", Vec("vabsdiff4__RCxR_RCxR")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
@@ -1123,24 +334,14 @@ object InstructionDefinitions6 {
               InstructionOperand.Register(srcA),
               InstructionOperand.Address(srcB),
               InstructionOperand.Immediate(sb_offset),
-              InstructionOperand.Immediate(scaleU5)
+              InstructionOperand.Register(srcC)
             ) =>
-          Some(Instruction.IscaddRegPredRegAddressImmImm(dst, pu, srcA, srcB, sb_offset, scaleU5, modifiers, guard))
+          Some(Instruction.Vabsdiff4RegPredRegAddressImmReg(dst, pu, srcA, srcB, sb_offset, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddRegPredRegConstImm extends Definition(
-        "IscaddRegPredRegConstImm",
-        "ISCADD",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.ConstantBank),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_noimm__RCR_RCR")
-      ) {
+  object Vabsdiff4RegPredRegConstReg
+      extends Definition("Vabsdiff4RegPredRegConstReg", "VABSDIFF4", Vec("vabsdiff4__RCR_RCR")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
@@ -1148,23 +349,13 @@ object InstructionDefinitions6 {
               InstructionOperand.Predicate(pu),
               InstructionOperand.Register(srcA),
               InstructionOperand.ConstantBank(sb),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddRegPredRegConstImm(dst, pu, srcA, sb, scaleU5, modifiers, guard))
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vabsdiff4RegPredRegConstReg(dst, pu, srcA, sb, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddRegPredRegImmImm extends Definition(
-        "IscaddRegPredRegImmImm",
-        "ISCADD",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_imm__RIR_RIR")
-      ) {
+  object Vabsdiff4RegPredRegImmReg
+      extends Definition("Vabsdiff4RegPredRegImmReg", "VABSDIFF4", Vec("vabsdiff4__RuIR_RIR")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
@@ -1172,22 +363,59 @@ object InstructionDefinitions6 {
               InstructionOperand.Predicate(pu),
               InstructionOperand.Register(srcA),
               InstructionOperand.Immediate(sb),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddRegPredRegImmImm(dst, pu, srcA, sb, scaleU5, modifiers, guard))
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vabsdiff4RegPredRegImmReg(dst, pu, srcA, sb, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddRegPredRegRegImm extends Definition(
-        "IscaddRegPredRegRegImm",
-        "ISCADD",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_noimm__RRR_RRR", "iscadd_noimm__RUR_RUR")
+  object Vabsdiff4RegPredRegRegAddressImm
+      extends Definition("Vabsdiff4RegPredRegRegAddressImm", "VABSDIFF4", Vec("vabsdiff4__RRCx_RRCx")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Address(srcC),
+              InstructionOperand.Immediate(sc_offset)
+            ) =>
+          Some(Instruction.Vabsdiff4RegPredRegRegAddressImm(dst, pu, srcA, srcB, srcC, sc_offset, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vabsdiff4RegPredRegRegConst
+      extends Definition("Vabsdiff4RegPredRegRegConst", "VABSDIFF4", Vec("vabsdiff4__RRC_RRC")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.ConstantBank(sc)
+            ) => Some(Instruction.Vabsdiff4RegPredRegRegConst(dst, pu, srcA, srcB, sc, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vabsdiff4RegPredRegRegImm
+      extends Definition("Vabsdiff4RegPredRegRegImm", "VABSDIFF4", Vec("vabsdiff4__RRuI_RRI")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Immediate(sc)
+            ) => Some(Instruction.Vabsdiff4RegPredRegRegImm(dst, pu, srcA, srcB, sc, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vabsdiff4RegPredRegRegReg extends Definition(
+        "Vabsdiff4RegPredRegRegReg",
+        "VABSDIFF4",
+        Vec("vabsdiff4__RRR_RRR", "vabsdiff4__RRU_RRU", "vabsdiff4__RUR_RUR")
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
@@ -1196,23 +424,13 @@ object InstructionDefinitions6 {
               InstructionOperand.Predicate(pu),
               InstructionOperand.Register(srcA),
               InstructionOperand.Register(srcB),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddRegPredRegRegImm(dst, pu, srcA, srcB, scaleU5, modifiers, guard))
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vabsdiff4RegPredRegRegReg(dst, pu, srcA, srcB, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddRegRegAddressImmImm extends Definition(
-        "IscaddRegRegAddressImmImm",
-        "ISCADD",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Address),
-          Slot("sb_offset", OperandKind.Immediate),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_noimm__RCxR_RCxR")
-      ) {
+  object Vabsdiff4RegRegAddressImmReg
+      extends Definition("Vabsdiff4RegRegAddressImmReg", "VABSDIFF4", Vec("vabsdiff4__RCxR_RCxR")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
@@ -1220,43 +438,27 @@ object InstructionDefinitions6 {
               InstructionOperand.Register(srcA),
               InstructionOperand.Address(srcB),
               InstructionOperand.Immediate(sb_offset),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddRegRegAddressImmImm(dst, srcA, srcB, sb_offset, scaleU5, modifiers, guard))
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vabsdiff4RegRegAddressImmReg(dst, srcA, srcB, sb_offset, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddRegRegConstImm extends Definition(
-        "IscaddRegRegConstImm",
-        "ISCADD",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.ConstantBank),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("Const ISCADD", "Const_ISCADD", "iscadd_noimm__RCR_RCR")
-      ) {
+  object Vabsdiff4RegRegConstReg extends Definition("Vabsdiff4RegRegConstReg", "VABSDIFF4", Vec("vabsdiff4__RCR_RCR")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
               InstructionOperand.Register(dst),
               InstructionOperand.Register(srcA),
               InstructionOperand.ConstantBank(sb),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddRegRegConstImm(dst, srcA, sb, scaleU5, modifiers, guard))
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vabsdiff4RegRegConstReg(dst, srcA, sb, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddRegRegImmImm extends Definition(
-        "IscaddRegRegImmImm",
-        "ISCADD",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("Imm ISCADD", "Imm_ISCADD", "iscadd_imm__RIR_RIR")
+  object Vabsdiff4RegRegImmReg extends Definition(
+        "Vabsdiff4RegRegImmReg",
+        "VABSDIFF4",
+        Vec("Imm VABSDIFF4", "Imm_VABSDIFF4", "SImm_VABSDIFF4", "vabsdiff4__RuIR_RIR")
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
@@ -1264,21 +466,53 @@ object InstructionDefinitions6 {
               InstructionOperand.Register(dst),
               InstructionOperand.Register(srcA),
               InstructionOperand.Immediate(sb),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddRegRegImmImm(dst, srcA, sb, scaleU5, modifiers, guard))
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vabsdiff4RegRegImmReg(dst, srcA, sb, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddRegRegRegImm extends Definition(
-        "IscaddRegRegRegImm",
-        "ISCADD",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("ISCADD", "iscadd_noimm__RRR_RRR", "iscadd_noimm__RUR_RUR")
+  object Vabsdiff4RegRegRegAddressImm
+      extends Definition("Vabsdiff4RegRegRegAddressImm", "VABSDIFF4", Vec("vabsdiff4__RRCx_RRCx")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Address(srcC),
+              InstructionOperand.Immediate(sc_offset)
+            ) => Some(Instruction.Vabsdiff4RegRegRegAddressImm(dst, srcA, srcB, srcC, sc_offset, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vabsdiff4RegRegRegConst extends Definition("Vabsdiff4RegRegRegConst", "VABSDIFF4", Vec("vabsdiff4__RRC_RRC")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.ConstantBank(sc)
+            ) => Some(Instruction.Vabsdiff4RegRegRegConst(dst, srcA, srcB, sc, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vabsdiff4RegRegRegImm extends Definition("Vabsdiff4RegRegRegImm", "VABSDIFF4", Vec("vabsdiff4__RRuI_RRI")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Immediate(sc)
+            ) => Some(Instruction.Vabsdiff4RegRegRegImm(dst, srcA, srcB, sc, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vabsdiff4RegRegRegReg extends Definition(
+        "Vabsdiff4RegRegRegReg",
+        "VABSDIFF4",
+        Vec("VABSDIFF4", "vabsdiff4__RRR_RRR", "vabsdiff4__RRU_RRU", "vabsdiff4__RUR_RUR")
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
@@ -1286,67 +520,590 @@ object InstructionDefinitions6 {
               InstructionOperand.Register(dst),
               InstructionOperand.Register(srcA),
               InstructionOperand.Register(srcB),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddRegRegRegImm(dst, srcA, srcB, scaleU5, modifiers, guard))
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vabsdiff4RegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object Iscadd32iRegPredRegImmImm extends Definition(
-        "Iscadd32iRegPredRegImmImm",
-        "ISCADD32I",
+  object VaddRegRegReg extends Definition(
+        "VaddRegRegReg",
+        "VADD",
         Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd32i__RIR_RIR")
+          "Imm VADD",
+          "Imm_VADD",
+          "SImm_VADD",
+          "a32 Imm VADD",
+          "a32_Imm_VADD",
+          "a32_SImm_VADD",
+          "a8 Imm VADD",
+          "a8_Imm_VADD",
+          "a8_SImm_VADD"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VaddRegRegReg(dst, srcA, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VaddRegRegRegReg extends Definition(
+        "VaddRegRegRegReg",
+        "VADD",
+        Vec(
+          "VADD",
+          "a32 VADD",
+          "a32 b32 VADD",
+          "a32 b8 VADD",
+          "a32_VADD",
+          "a32_b32_VADD",
+          "a32_b8_VADD",
+          "a8 VADD",
+          "a8 b32 VADD",
+          "a8 b8 VADD",
+          "a8_VADD",
+          "a8_b32_VADD",
+          "a8_b8_VADD",
+          "b32 VADD",
+          "b32_VADD",
+          "b8 VADD",
+          "b8_VADD"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VaddRegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vadd2RegRegReg extends Definition("Vadd2RegRegReg", "VADD2", Vec("Imm VADD2")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vadd2RegRegReg(dst, srcA, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vadd2RegRegRegReg extends Definition("Vadd2RegRegRegReg", "VADD2", Vec("VADD2")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vadd2RegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vadd4RegRegReg extends Definition("Vadd4RegRegReg", "VADD4", Vec("Imm VADD4")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vadd4RegRegReg(dst, srcA, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vadd4RegRegRegReg extends Definition("Vadd4RegRegRegReg", "VADD4", Vec("VADD4")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vadd4RegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VhmnmxRegRegAddressImmRegPred
+      extends Definition("VhmnmxRegRegAddressImmRegPred", "VHMNMX", Vec("vhmnmx__RCxR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Address(srcB),
+              InstructionOperand.Immediate(sb_offset),
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VhmnmxRegRegAddressImmRegPred(dst, srcA, srcB, sb_offset, srcC, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VhmnmxRegRegConstRegPred extends Definition("VhmnmxRegRegConstRegPred", "VHMNMX", Vec("vhmnmx__RCR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.ConstantBank(sb),
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VhmnmxRegRegConstRegPred(dst, srcA, sb, srcC, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VhmnmxRegRegImmImmRegPred extends Definition("VhmnmxRegRegImmImmRegPred", "VHMNMX", Vec("vhmnmx__RIR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sb),
+              InstructionOperand.Immediate(sb1),
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VhmnmxRegRegImmImmRegPred(dst, srcA, sb, sb1, srcC, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VhmnmxRegRegRegRegPred
+      extends Definition("VhmnmxRegRegRegRegPred", "VHMNMX", Vec("vhmnmx__RRR", "vhmnmx__RUR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VhmnmxRegRegRegRegPred(dst, srcA, srcB, srcC, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object ViaddRegRegAddressImm extends Definition("ViaddRegRegAddressImm", "VIADD", Vec("viadd__RCxR_RCxR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Address(srcB),
+              InstructionOperand.Immediate(sb_offset)
+            ) => Some(Instruction.ViaddRegRegAddressImm(dst, srcA, srcB, sb_offset, modifiers, guard))
+        case _ => None
+      }
+  }
+  object ViaddRegRegConst extends Definition("ViaddRegRegConst", "VIADD", Vec("viadd__RCR_RCR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.ConstantBank(sb)
+            ) => Some(Instruction.ViaddRegRegConst(dst, srcA, sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object ViaddRegRegImm extends Definition("ViaddRegRegImm", "VIADD", Vec("viadd__RuIR_RIR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sb)
+            ) => Some(Instruction.ViaddRegRegImm(dst, srcA, sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object ViaddRegRegReg extends Definition("ViaddRegRegReg", "VIADD", Vec("viadd__RRR_RRR", "viadd__RUR_RUR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB)
+            ) => Some(Instruction.ViaddRegRegReg(dst, srcA, srcB, modifiers, guard))
+        case _ => None
+      }
+  }
+  object ViaddmnmxRegRegAddressImmRegPred
+      extends Definition("ViaddmnmxRegRegAddressImmRegPred", "VIADDMNMX", Vec("viaddmnmx__RCxR_RCxR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Address(srcB),
+              InstructionOperand.Immediate(sb_offset),
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(pp)
+            ) =>
+          Some(Instruction.ViaddmnmxRegRegAddressImmRegPred(dst, srcA, srcB, sb_offset, srcC, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object ViaddmnmxRegRegConstRegPred
+      extends Definition("ViaddmnmxRegRegConstRegPred", "VIADDMNMX", Vec("viaddmnmx__RCR_RCR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.ConstantBank(sb),
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.ViaddmnmxRegRegConstRegPred(dst, srcA, sb, srcC, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object ViaddmnmxRegRegImmRegPred
+      extends Definition("ViaddmnmxRegRegImmRegPred", "VIADDMNMX", Vec("viaddmnmx__RuIR_RIR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sb),
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.ViaddmnmxRegRegImmRegPred(dst, srcA, sb, srcC, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object ViaddmnmxRegRegRegAddressImmPred
+      extends Definition("ViaddmnmxRegRegRegAddressImmPred", "VIADDMNMX", Vec("viaddmnmx__RRCx_RRCx")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Address(srcC),
+              InstructionOperand.Immediate(sc_offset),
+              InstructionOperand.Predicate(pp)
+            ) =>
+          Some(Instruction.ViaddmnmxRegRegRegAddressImmPred(dst, srcA, srcB, srcC, sc_offset, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object ViaddmnmxRegRegRegConstPred
+      extends Definition("ViaddmnmxRegRegRegConstPred", "VIADDMNMX", Vec("viaddmnmx__RRC_RRC")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.ConstantBank(sc),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.ViaddmnmxRegRegRegConstPred(dst, srcA, srcB, sc, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object ViaddmnmxRegRegRegImmPred
+      extends Definition("ViaddmnmxRegRegRegImmPred", "VIADDMNMX", Vec("viaddmnmx__RRuI_RRI")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Immediate(sc),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.ViaddmnmxRegRegRegImmPred(dst, srcA, srcB, sc, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object ViaddmnmxRegRegRegRegPred extends Definition(
+        "ViaddmnmxRegRegRegRegPred",
+        "VIADDMNMX",
+        Vec("viaddmnmx__RRR_RRR", "viaddmnmx__RRU_RRU", "viaddmnmx__RUR_RUR")
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.ViaddmnmxRegRegRegRegPred(dst, srcA, srcB, srcC, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VildRegAddress extends Definition("VildRegAddress", "VILD", Vec("I VILD", "VILD")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Register(dst), InstructionOperand.Address(srcA)) =>
+          Some(Instruction.VildRegAddress(dst, srcA, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VimnmxRegPredPredRegAddressImmPred
+      extends Definition("VimnmxRegPredPredRegAddressImmPred", "VIMNMX", Vec("vimnmx_pred__RCxR_RCxR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Predicate(pv),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Address(srcB),
+              InstructionOperand.Immediate(sb_offset),
+              InstructionOperand.Predicate(pp)
+            ) =>
+          Some(Instruction.VimnmxRegPredPredRegAddressImmPred(dst, pu, pv, srcA, srcB, sb_offset, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VimnmxRegPredPredRegConstPred
+      extends Definition("VimnmxRegPredPredRegConstPred", "VIMNMX", Vec("vimnmx_pred__RCR_RCR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Predicate(pv),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.ConstantBank(sb),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VimnmxRegPredPredRegConstPred(dst, pu, pv, srcA, sb, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VimnmxRegPredPredRegImmPred
+      extends Definition("VimnmxRegPredPredRegImmPred", "VIMNMX", Vec("vimnmx__RIR_RsIR", "vimnmx_pred__RIR_RsIR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Predicate(pv),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sb),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VimnmxRegPredPredRegImmPred(dst, pu, pv, srcA, sb, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VimnmxRegPredPredRegRegPred extends Definition(
+        "VimnmxRegPredPredRegRegPred",
+        "VIMNMX",
+        Vec("vimnmx__RRR_RRR", "vimnmx__RUR_RUR", "vimnmx_pred__RRR_RRR", "vimnmx_pred__RUR_RUR")
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
               InstructionOperand.Register(dst),
               InstructionOperand.Predicate(pu),
+              InstructionOperand.Predicate(pv),
               InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sb),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.Iscadd32iRegPredRegImmImm(dst, pu, srcA, sb, scaleU5, modifiers, guard))
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VimnmxRegPredPredRegRegPred(dst, pu, pv, srcA, srcB, pp, modifiers, guard))
         case _ => None
       }
   }
-  object Iscadd32iRegRegImmImm extends Definition(
-        "Iscadd32iRegRegImmImm",
-        "ISCADD32I",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("ISCADD32I", "iscadd32i__RIR_RIR")
-      ) {
+  object VimnmxRegRegAddressImmPred
+      extends Definition("VimnmxRegRegAddressImmPred", "VIMNMX", Vec("vimnmx__RCxR_RCxR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Address(srcB),
+              InstructionOperand.Immediate(sb_offset),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VimnmxRegRegAddressImmPred(dst, srcA, srcB, sb_offset, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VimnmxRegRegConstPred extends Definition("VimnmxRegRegConstPred", "VIMNMX", Vec("vimnmx__RCR_RCR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.ConstantBank(sb),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VimnmxRegRegConstPred(dst, srcA, sb, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VimnmxRegRegImmPred
+      extends Definition("VimnmxRegRegImmPred", "VIMNMX", Vec("vimnmx__RIR_RsIR", "vimnmx_nopred__RIR_RsIR")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
               InstructionOperand.Register(dst),
               InstructionOperand.Register(srcA),
               InstructionOperand.Immediate(sb),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.Iscadd32iRegRegImmImm(dst, srcA, sb, scaleU5, modifiers, guard))
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VimnmxRegRegImmPred(dst, srcA, sb, pp, modifiers, guard))
         case _ => None
       }
   }
-  object Iscadd32ifxuPipeRegRegImmImm extends Definition(
-        "Iscadd32ifxuPipeRegRegImmImm",
-        "ISCADD32Ifxu_pipe",
+  object VimnmxRegRegRegPred extends Definition(
+        "VimnmxRegRegRegPred",
+        "VIMNMX",
+        Vec("vimnmx__RRR_RRR", "vimnmx__RUR_RUR", "vimnmx_nopred__RRR_RRR", "vimnmx_nopred__RUR_RUR")
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VimnmxRegRegRegPred(dst, srcA, srcB, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vimnmx3RegRegAddressImmRegPred
+      extends Definition("Vimnmx3RegRegAddressImmRegPred", "VIMNMX3", Vec("vimnmx3__RCxR_RCxR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Address(srcB),
+              InstructionOperand.Immediate(sb_offset),
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(pp)
+            ) =>
+          Some(Instruction.Vimnmx3RegRegAddressImmRegPred(dst, srcA, srcB, sb_offset, srcC, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vimnmx3RegRegConstRegPred extends Definition("Vimnmx3RegRegConstRegPred", "VIMNMX3", Vec("vimnmx3__RCR_RCR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.ConstantBank(sb),
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.Vimnmx3RegRegConstRegPred(dst, srcA, sb, srcC, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vimnmx3RegRegImmRegPred extends Definition("Vimnmx3RegRegImmRegPred", "VIMNMX3", Vec("vimnmx3__RuIR_RIR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sb),
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.Vimnmx3RegRegImmRegPred(dst, srcA, sb, srcC, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vimnmx3RegRegRegRegPred
+      extends Definition("Vimnmx3RegRegRegRegPred", "VIMNMX3", Vec("vimnmx3__RRR_RRR", "vimnmx3__RUR_RUR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.Vimnmx3RegRegRegRegPred(dst, srcA, srcB, srcC, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VmadRegRegImmReg extends Definition("VmadRegRegImmReg", "VMAD", Vec("Imm_VMAD")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(uImm),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VmadRegRegImmReg(dst, srcA, uImm, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VmadRegRegReg extends Definition(
+        "VmadRegRegReg",
+        "VMAD",
         Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("sImm", OperandKind.Immediate),
-          Slot("shift", OperandKind.Immediate)
-        ),
-        Vec("ISCADD32I")
+          "Imm VMAD",
+          "SImm_VMAD",
+          "a32 Imm VMAD",
+          "a32_Imm_VMAD",
+          "a32_SImm_VMAD",
+          "a8 Imm VMAD",
+          "a8_Imm_VMAD",
+          "a8_SImm_VMAD"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VmadRegRegReg(dst, srcA, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VmadRegRegRegReg extends Definition(
+        "VmadRegRegRegReg",
+        "VMAD",
+        Vec(
+          "VMAD",
+          "a32 VMAD",
+          "a32 b32 VMAD",
+          "a32 b8 VMAD",
+          "a32_VMAD",
+          "a32_b32_VMAD",
+          "a32_b8_VMAD",
+          "a8 VMAD",
+          "a8 b32 VMAD",
+          "a8 b8 VMAD",
+          "a8_VMAD",
+          "a8_b32_VMAD",
+          "a8_b8_VMAD",
+          "b32 VMAD",
+          "b32_VMAD",
+          "b8 VMAD",
+          "b8_VMAD"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VmadRegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VmnmxRegRegImmReg extends Definition(
+        "VmnmxRegRegImmReg",
+        "VMNMX",
+        Vec(
+          "Imm VMNMX",
+          "Imm_VMNMX",
+          "SImm_VMNMX",
+          "a32 Imm VMNMX",
+          "a32_Imm_VMNMX",
+          "a32_SImm_VMNMX",
+          "a8 Imm VMNMX",
+          "a8_Imm_VMNMX",
+          "a8_SImm_VMNMX"
+        )
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
@@ -1354,67 +1111,219 @@ object InstructionDefinitions6 {
               InstructionOperand.Register(dst),
               InstructionOperand.Register(srcA),
               InstructionOperand.Immediate(sImm),
-              InstructionOperand.Immediate(shift)
-            ) => Some(Instruction.Iscadd32ifxuPipeRegRegImmImm(dst, srcA, sImm, shift, modifiers, guard))
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VmnmxRegRegImmReg(dst, srcA, sImm, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object Iscadd32iintPipeRegPredRegImmImm extends Definition(
-        "Iscadd32iintPipeRegPredRegImmImm",
-        "ISCADD32Iint_pipe",
+  object VmnmxRegRegRegReg extends Definition(
+        "VmnmxRegRegRegReg",
+        "VMNMX",
         Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd32i__RIR_RIR")
+          "VMNMX",
+          "a32 VMNMX",
+          "a32 b32 VMNMX",
+          "a32 b8 VMNMX",
+          "a32_VMNMX",
+          "a32_b32_VMNMX",
+          "a32_b8_VMNMX",
+          "a8 VMNMX",
+          "a8 b32 VMNMX",
+          "a8 b8 VMNMX",
+          "a8_VMNMX",
+          "a8_b32_VMNMX",
+          "a8_b8_VMNMX",
+          "b32 VMNMX",
+          "b32_VMNMX",
+          "b8 VMNMX",
+          "b8_VMNMX"
+        )
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
               InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VmnmxRegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vmnmx2RegRegImmReg extends Definition("Vmnmx2RegRegImmReg", "VMNMX2", Vec("Imm VMNMX2")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(uImm),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vmnmx2RegRegImmReg(dst, srcA, uImm, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vmnmx2RegRegRegReg extends Definition("Vmnmx2RegRegRegReg", "VMNMX2", Vec("VMNMX2")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vmnmx2RegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vmnmx4RegRegImmReg extends Definition("Vmnmx4RegRegImmReg", "VMNMX4", Vec("Imm VMNMX4")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(uImm),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vmnmx4RegRegImmReg(dst, srcA, uImm, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vmnmx4RegRegRegReg extends Definition("Vmnmx4RegRegRegReg", "VMNMX4", Vec("VMNMX4")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vmnmx4RegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VoteImm extends Definition("VoteImm", "VOTE", Vec("VOTE.VTG")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Immediate(uImm)) => Some(Instruction.VoteImm(uImm, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VotePredPred extends Definition("VotePredPred", "VOTE", Vec("VOTE")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Predicate(dstPredicate), InstructionOperand.Predicate(pa)) =>
+          Some(Instruction.VotePredPred(dstPredicate, pa, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VoteRegPredPred extends Definition("VoteRegPredPred", "VOTE", Vec("VOTE", "vote_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(dstPredicate),
+              InstructionOperand.Predicate(pa)
+            ) => Some(Instruction.VoteRegPredPred(dst, dstPredicate, pa, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VoteuRegPredPred extends Definition("VoteuRegPredPred", "VOTEU", Vec("voteu_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Predicate(uPu),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VoteuRegPredPred(dst, uPu, pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VoteVtgImm extends Definition("VoteVtgImm", "VOTE_VTG", Vec("vote_vtg_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Immediate(sa)) => Some(Instruction.VoteVtgImm(sa, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VoteVtgPredImm extends Definition("VoteVtgPredImm", "VOTE_VTG", Vec("vote_vtg_cmp_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Predicate(pu), InstructionOperand.Immediate(sa)) =>
+          Some(Instruction.VoteVtgPredImm(pu, sa, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VoteVtgPredPredImmPred extends Definition("VoteVtgPredPredImmPred", "VOTE_VTG", Vec("vote_vtg_bop_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
               InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sb),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.Iscadd32iintPipeRegPredRegImmImm(dst, pu, srcA, sb, scaleU5, modifiers, guard))
+              InstructionOperand.Predicate(pv),
+              InstructionOperand.Immediate(sa),
+              InstructionOperand.Predicate(pp)
+            ) => Some(Instruction.VoteVtgPredPredImmPred(pu, pv, sa, pp, modifiers, guard))
         case _ => None
       }
   }
-  object Iscadd32iintPipeRegRegImmImm extends Definition(
-        "Iscadd32iintPipeRegRegImmImm",
-        "ISCADD32Iint_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd32i__RIR_RIR")
-      ) {
+  object Vsel2RegRegImmPred extends Definition("Vsel2RegRegImmPred", "VSEL2", Vec("Imm VSEL2")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
               InstructionOperand.Register(dst),
               InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sb),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.Iscadd32iintPipeRegRegImmImm(dst, srcA, sb, scaleU5, modifiers, guard))
+              InstructionOperand.Immediate(uImm),
+              InstructionOperand.Predicate(pa)
+            ) => Some(Instruction.Vsel2RegRegImmPred(dst, srcA, uImm, pa, modifiers, guard))
         case _ => None
       }
   }
-  object Iscadd32ixluPipeRegRegImmImm extends Definition(
-        "Iscadd32ixluPipeRegRegImmImm",
-        "ISCADD32Ixlu_pipe",
+  object Vsel2RegRegRegPred extends Definition("Vsel2RegRegRegPred", "VSEL2", Vec("VSEL2")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Predicate(pa)
+            ) => Some(Instruction.Vsel2RegRegRegPred(dst, srcA, srcB, pa, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vsel4RegRegImmPred extends Definition("Vsel4RegRegImmPred", "VSEL4", Vec("Imm VSEL4")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(uImm),
+              InstructionOperand.Predicate(pa)
+            ) => Some(Instruction.Vsel4RegRegImmPred(dst, srcA, uImm, pa, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vsel4RegRegRegPred extends Definition("Vsel4RegRegRegPred", "VSEL4", Vec("VSEL4")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Predicate(pa)
+            ) => Some(Instruction.Vsel4RegRegRegPred(dst, srcA, srcB, pa, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VsetRegRegImmReg extends Definition(
+        "VsetRegRegImmReg",
+        "VSET",
         Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("sImm", OperandKind.Immediate),
-          Slot("shift", OperandKind.Immediate)
-        ),
-        Vec("ISCADD32I")
+          "Imm VSET",
+          "Imm_VSET",
+          "SImm_VSET",
+          "a32 Imm VSET",
+          "a32_Imm_VSET",
+          "a32_SImm_VSET",
+          "a8 Imm VSET",
+          "a8_Imm_VSET",
+          "a8_SImm_VSET"
+        )
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
@@ -1422,65 +1331,33 @@ object InstructionDefinitions6 {
               InstructionOperand.Register(dst),
               InstructionOperand.Register(srcA),
               InstructionOperand.Immediate(sImm),
-              InstructionOperand.Immediate(shift)
-            ) => Some(Instruction.Iscadd32ixluPipeRegRegImmImm(dst, srcA, sImm, shift, modifiers, guard))
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VsetRegRegImmReg(dst, srcA, sImm, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddfxuPipeRegRegConstImm extends Definition(
-        "IscaddfxuPipeRegRegConstImm",
-        "ISCADDfxu_pipe",
+  object VsetRegRegRegReg extends Definition(
+        "VsetRegRegRegReg",
+        "VSET",
         Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("shift", OperandKind.Immediate)
-        ),
-        Vec("Const_ISCADD")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Immediate(shift)
-            ) => Some(Instruction.IscaddfxuPipeRegRegConstImm(dst, srcA, srcConst, shift, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IscaddfxuPipeRegRegImmImm extends Definition(
-        "IscaddfxuPipeRegRegImmImm",
-        "ISCADDfxu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("shift", OperandKind.Immediate)
-        ),
-        Vec("Imm_ISCADD")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Immediate(shift)
-            ) => Some(Instruction.IscaddfxuPipeRegRegImmImm(dst, srcA, uImm, shift, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IscaddfxuPipeRegRegRegImm extends Definition(
-        "IscaddfxuPipeRegRegRegImm",
-        "ISCADDfxu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("shift", OperandKind.Immediate)
-        ),
-        Vec("ISCADD")
+          "VSET",
+          "a32 VSET",
+          "a32 b32 VSET",
+          "a32 b8 VSET",
+          "a32_VSET",
+          "a32_b32_VSET",
+          "a32_b8_VSET",
+          "a8 VSET",
+          "a8 b32 VSET",
+          "a8 b8 VSET",
+          "a8_VSET",
+          "a8_b32_VSET",
+          "a8_b8_VSET",
+          "b32 VSET",
+          "b32_VSET",
+          "b8 VSET",
+          "b8_VSET"
+        )
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
@@ -1488,3776 +1365,947 @@ object InstructionDefinitions6 {
               InstructionOperand.Register(dst),
               InstructionOperand.Register(srcA),
               InstructionOperand.Register(srcB),
-              InstructionOperand.Immediate(shift)
-            ) => Some(Instruction.IscaddfxuPipeRegRegRegImm(dst, srcA, srcB, shift, modifiers, guard))
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VsetRegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddintPipeRegPredRegAddressImmImm extends Definition(
-        "IscaddintPipeRegPredRegAddressImmImm",
-        "ISCADDint_pipe",
+  object Vset2RegRegImmReg extends Definition("Vset2RegRegImmReg", "VSET2", Vec("Imm VSET2")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(uImm),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vset2RegRegImmReg(dst, srcA, uImm, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vset2RegRegRegReg extends Definition("Vset2RegRegRegReg", "VSET2", Vec("VSET2")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vset2RegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vset4RegRegImmReg extends Definition("Vset4RegRegImmReg", "VSET4", Vec("Imm VSET4")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(uImm),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vset4RegRegImmReg(dst, srcA, uImm, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Vset4RegRegRegReg extends Definition("Vset4RegRegRegReg", "VSET4", Vec("VSET4")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Vset4RegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VsetpPredPredRegImmPred extends Definition(
+        "VsetpPredPredRegImmPred",
+        "VSETP",
         Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Address),
-          Slot("sb_offset", OperandKind.Immediate),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_noimm__RCxR_RCxR")
+          "Imm VSETP",
+          "Imm_VSETP_bop",
+          "SImm_VSETP_bop",
+          "a32 Imm VSETP",
+          "a32_Imm_VSETP_bop",
+          "a32_SImm_VSETP_bop",
+          "a8 Imm VSETP",
+          "a8_Imm_VSETP_bop",
+          "a8_SImm_VSETP_bop"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Predicate(dstPredicate),
+              InstructionOperand.Predicate(nPd),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sImm),
+              InstructionOperand.Predicate(pa)
+            ) => Some(Instruction.VsetpPredPredRegImmPred(dstPredicate, nPd, srcA, sImm, pa, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VsetpPredPredRegRegPred extends Definition(
+        "VsetpPredPredRegRegPred",
+        "VSETP",
+        Vec(
+          "VSETP",
+          "VSETP_bop",
+          "a32 VSETP",
+          "a32 b32 VSETP",
+          "a32 b8 VSETP",
+          "a32_VSETP_bop",
+          "a32_b32_VSETP_bop",
+          "a32_b8_VSETP_bop",
+          "a8 VSETP",
+          "a8 b32 VSETP",
+          "a8 b8 VSETP",
+          "a8_VSETP_bop",
+          "a8_b32_VSETP_bop",
+          "a8_b8_VSETP_bop",
+          "b32 VSETP",
+          "b32_VSETP_bop",
+          "b8 VSETP",
+          "b8_VSETP_bop"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Predicate(dstPredicate),
+              InstructionOperand.Predicate(nPd),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Predicate(pa)
+            ) => Some(Instruction.VsetpPredPredRegRegPred(dstPredicate, nPd, srcA, srcB, pa, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VsetpPredRegImm extends Definition(
+        "VsetpPredRegImm",
+        "VSETP",
+        Vec(
+          "Imm_VSETP",
+          "NoBop Imm VSETP",
+          "NoBop a32 Imm VSETP",
+          "NoBop a8 Imm VSETP",
+          "SImm_VSETP",
+          "a32_Imm_VSETP",
+          "a32_SImm_VSETP",
+          "a8_Imm_VSETP",
+          "a8_SImm_VSETP"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Predicate(dstPredicate),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sImm)
+            ) => Some(Instruction.VsetpPredRegImm(dstPredicate, srcA, sImm, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VsetpPredRegReg extends Definition(
+        "VsetpPredRegReg",
+        "VSETP",
+        Vec(
+          "NoBop VSETP",
+          "NoBop a32 VSETP",
+          "NoBop a32 b32 VSETP",
+          "NoBop a32 b8 VSETP",
+          "NoBop a8 VSETP",
+          "NoBop a8 b32 VSETP",
+          "NoBop a8 b8 VSETP",
+          "NoBop b32 VSETP",
+          "NoBop b8 VSETP",
+          "VSETP",
+          "a32_VSETP",
+          "a32_b32_VSETP",
+          "a32_b8_VSETP",
+          "a8_VSETP",
+          "a8_b32_VSETP",
+          "a8_b8_VSETP",
+          "b32_VSETP",
+          "b8_VSETP"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Predicate(dstPredicate),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB)
+            ) => Some(Instruction.VsetpPredRegReg(dstPredicate, srcA, srcB, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VshlRegRegImmReg extends Definition(
+        "VshlRegRegImmReg",
+        "VSHL",
+        Vec(
+          "Imm VSHL",
+          "Imm_VSHL",
+          "SImm_VSHL",
+          "a32 Imm VSHL",
+          "a32_Imm_VSHL",
+          "a32_SImm_VSHL",
+          "a8 Imm VSHL",
+          "a8_Imm_VSHL",
+          "a8_SImm_VSHL"
+        )
       ) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
               InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
               InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sImm),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VshlRegRegImmReg(dst, srcA, sImm, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VshlRegRegRegReg extends Definition(
+        "VshlRegRegRegReg",
+        "VSHL",
+        Vec(
+          "VSHL",
+          "a32 VSHL",
+          "a32 b32 VSHL",
+          "a32 b8 VSHL",
+          "a32_VSHL",
+          "a32_b32_VSHL",
+          "a32_b8_VSHL",
+          "a8 VSHL",
+          "a8 b32 VSHL",
+          "a8 b8 VSHL",
+          "a8_VSHL",
+          "a8_b32_VSHL",
+          "a8_b8_VSHL",
+          "b32 VSHL",
+          "b32_VSHL",
+          "b8 VSHL",
+          "b8_VSHL"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VshlRegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VshrRegRegImmReg extends Definition(
+        "VshrRegRegImmReg",
+        "VSHR",
+        Vec(
+          "Imm VSHL",
+          "Imm_VSHR",
+          "SImm_VSHR",
+          "a32 Imm VSHL",
+          "a32_Imm_VSHR",
+          "a32_SImm_VSHR",
+          "a8 Imm VSHL",
+          "a8_Imm_VSHR",
+          "a8_SImm_VSHR"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sImm),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VshrRegRegImmReg(dst, srcA, sImm, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object VshrRegRegRegReg extends Definition(
+        "VshrRegRegRegReg",
+        "VSHR",
+        Vec(
+          "VSHL",
+          "VSHR",
+          "a32 VSHL",
+          "a32 b32 VSHL",
+          "a32 b8 VSHL",
+          "a32_VSHR",
+          "a32_b32_VSHR",
+          "a32_b8_VSHR",
+          "a8 VSHL",
+          "a8 b32 VSHL",
+          "a8 b8 VSHL",
+          "a8_VSHR",
+          "a8_b32_VSHR",
+          "a8_b8_VSHR",
+          "b32 VSHL",
+          "b32_VSHR",
+          "b8 VSHL",
+          "b8_VSHR"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.VshrRegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpgroupNoOperands
+      extends Definition("WarpgroupNoOperands", "WARPGROUP", Vec("warpgroup_arrive_", "warpgroup_wait_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec() => Some(Instruction.WarpgroupNoOperands(modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpgroupImm extends Definition("WarpgroupImm", "WARPGROUP", Vec("warpgroup_depbar_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Immediate(gsbcnt)) => Some(Instruction.WarpgroupImm(gsbcnt, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpgroupsetReg
+      extends Definition("WarpgroupsetReg", "WARPGROUPSET", Vec("warpgroupset__AC", "warpgroupset__SB")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Register(srcB)) => Some(Instruction.WarpgroupsetReg(srcB, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpsyncNoOperands extends Definition("WarpsyncNoOperands", "WARPSYNC", Vec("warpsync__RIR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec() => Some(Instruction.WarpsyncNoOperands(modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpsyncAddressImm extends Definition("WarpsyncAddressImm", "WARPSYNC", Vec("warpsync__RCXR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Address(srcB), InstructionOperand.Immediate(sb_offset)) =>
+          Some(Instruction.WarpsyncAddressImm(srcB, sb_offset, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpsyncConst extends Definition("WarpsyncConst", "WARPSYNC", Vec("warpsync__RCR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.ConstantBank(sb)) => Some(Instruction.WarpsyncConst(sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpsyncImm extends Definition(
+        "WarpsyncImm",
+        "WARPSYNC",
+        Vec("warpsync__RIR", "warpsync_collective__RIR", "warpsync_rel__RIR")
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Immediate(sb)) => Some(Instruction.WarpsyncImm(sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpsyncPred extends Definition("WarpsyncPred", "WARPSYNC", Vec("warpsync__RIR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Predicate(pp)) => Some(Instruction.WarpsyncPred(pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpsyncPredAddressImm extends Definition("WarpsyncPredAddressImm", "WARPSYNC", Vec("warpsync__RCXR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Predicate(pp),
               InstructionOperand.Address(srcB),
-              InstructionOperand.Immediate(sb_offset),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddintPipeRegPredRegAddressImmImm(
-            dst,
-            pu,
+              InstructionOperand.Immediate(sb_offset)
+            ) => Some(Instruction.WarpsyncPredAddressImm(pp, srcB, sb_offset, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpsyncPredConst extends Definition("WarpsyncPredConst", "WARPSYNC", Vec("warpsync__RCR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.ConstantBank(sb)) =>
+          Some(Instruction.WarpsyncPredConst(pp, sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpsyncPredImm extends Definition(
+        "WarpsyncPredImm",
+        "WARPSYNC",
+        Vec("warpsync__RIR", "warpsync_collective__RIR", "warpsync_rel__RIR")
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.Immediate(sb)) =>
+          Some(Instruction.WarpsyncPredImm(pp, sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpsyncPredReg extends Definition("WarpsyncPredReg", "WARPSYNC", Vec("warpsync__RRR", "warpsync__RUR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.Register(srcA)) =>
+          Some(Instruction.WarpsyncPredReg(pp, srcA, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpsyncPredRegImm
+      extends Definition("WarpsyncPredRegImm", "WARPSYNC", Vec("warpsync_collective__RRR", "warpsync_rel__RRR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Predicate(pp),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(sImm)
+            ) => Some(Instruction.WarpsyncPredRegImm(pp, srcA, sImm, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpsyncReg extends Definition("WarpsyncReg", "WARPSYNC", Vec("warpsync__RRR", "warpsync__RUR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Register(srcA)) => Some(Instruction.WarpsyncReg(srcA, modifiers, guard))
+        case _ => None
+      }
+  }
+  object WarpsyncRegImm
+      extends Definition("WarpsyncRegImm", "WARPSYNC", Vec("warpsync_collective__RRR", "warpsync_rel__RRR")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Register(srcA), InstructionOperand.Immediate(sImm)) =>
+          Some(Instruction.WarpsyncRegImm(srcA, sImm, modifiers, guard))
+        case _ => None
+      }
+  }
+  object XmadRegRegConstReg extends Definition("XmadRegRegConstReg", "XMAD", Vec("ConstB_XMAD")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.ConstantBank(srcConst),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.XmadRegRegConstReg(dst, srcA, srcConst, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object XmadRegRegImmReg extends Definition("XmadRegRegImmReg", "XMAD", Vec("ImmB_XMAD", "SImmB_XMAD")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Immediate(uImm),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.XmadRegRegImmReg(dst, srcA, uImm, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object XmadRegRegRegConst extends Definition("XmadRegRegRegConst", "XMAD", Vec("ConstC_XMAD")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.ConstantBank(srcConst)
+            ) => Some(Instruction.XmadRegRegRegConst(dst, srcA, srcB, srcConst, modifiers, guard))
+        case _ => None
+      }
+  }
+  object XmadRegRegRegReg extends Definition("XmadRegRegRegReg", "XMAD", Vec("XMAD")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(dst),
+              InstructionOperand.Register(srcA),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.XmadRegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object YieldNoOperands extends Definition("YieldNoOperands", "YIELD", Vec("yield_inst_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec() => Some(Instruction.YieldNoOperands(modifiers, guard))
+        case _ => None
+      }
+  }
+  object YieldPred extends Definition("YieldPred", "YIELD", Vec("yield_inst_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Predicate(pp)) => Some(Instruction.YieldPred(pp, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x002NoOperands extends Definition("Hir0x002NoOperands", "__HIR0X002", Vec("ttucctl_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec() => Some(Instruction.Hir0x002NoOperands(modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x003NoOperands extends Definition("Hir0x003NoOperands", "__HIR0X003", Vec("ttuclose_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec() => Some(Instruction.Hir0x003NoOperands(modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x003Pred extends Definition("Hir0x003Pred", "__HIR0X003", Vec("ttuclose_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Predicate(pu)) => Some(Instruction.Hir0x003Pred(pu, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x004NoOperands extends Definition("Hir0x004NoOperands", "__HIR0X004", Vec("ttugo_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec() => Some(Instruction.Hir0x004NoOperands(modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x005PredRegRegImm
+      extends Definition("Hir0x005PredRegRegImm", "__HIR0X005", Vec("ttuld_", "ttuld__close", "ttuld__no_close")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Predicate(pu),
+              InstructionOperand.Register(rd2),
+              InstructionOperand.Register(dst),
+              InstructionOperand.Immediate(immU16)
+            ) => Some(Instruction.Hir0x005PredRegRegImm(pu, rd2, dst, immU16, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x005RegRegImm
+      extends Definition("Hir0x005RegRegImm", "__HIR0X005", Vec("ttuld_", "ttuld__close", "ttuld__no_close")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Register(rd2),
+              InstructionOperand.Register(dst),
+              InstructionOperand.Immediate(immU16)
+            ) => Some(Instruction.Hir0x005RegRegImm(rd2, dst, immU16, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x006Imm extends Definition("Hir0x006Imm", "__HIR0X006", Vec("ttumacrofuse_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Immediate(sb)) => Some(Instruction.Hir0x006Imm(sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x007NoOperands extends Definition("Hir0x007NoOperands", "__HIR0X007", Vec("ttuopen_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec() => Some(Instruction.Hir0x007NoOperands(modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x008ImmRegReg extends Definition("Hir0x008ImmRegReg", "__HIR0X008", Vec("ttust_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Immediate(immU16),
+              InstructionOperand.Register(srcB),
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Hir0x008ImmRegReg(immU16, srcB, srcC, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x020NoOperands extends Definition("Hir0x020NoOperands", "__HIR0X020", Vec("ide_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec() => Some(Instruction.Hir0x020NoOperands(modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x020Imm extends Definition("Hir0x020Imm", "__HIR0X020", Vec("ide_")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Immediate(sb)) => Some(Instruction.Hir0x020Imm(sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x120AddressImm extends Definition("Hir0x120AddressImm", "__HIR0X120", Vec("nanotrap__CX")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Address(srcB), InstructionOperand.Immediate(sb_offset)) =>
+          Some(Instruction.Hir0x120AddressImm(srcB, sb_offset, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x120Const extends Definition("Hir0x120Const", "__HIR0X120", Vec("nanotrap__C")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.ConstantBank(sb)) => Some(Instruction.Hir0x120Const(sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x120Imm extends Definition("Hir0x120Imm", "__HIR0X120", Vec("nanotrap__I")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Immediate(sb)) => Some(Instruction.Hir0x120Imm(sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x120PredAddressImm extends Definition("Hir0x120PredAddressImm", "__HIR0X120", Vec("nanotrap__CX")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Predicate(pp),
+              InstructionOperand.Address(srcB),
+              InstructionOperand.Immediate(sb_offset)
+            ) => Some(Instruction.Hir0x120PredAddressImm(pp, srcB, sb_offset, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x120PredConst extends Definition("Hir0x120PredConst", "__HIR0X120", Vec("nanotrap__C")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.ConstantBank(sb)) =>
+          Some(Instruction.Hir0x120PredConst(pp, sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x120PredImm extends Definition("Hir0x120PredImm", "__HIR0X120", Vec("nanotrap__I")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.Immediate(sb)) =>
+          Some(Instruction.Hir0x120PredImm(pp, sb, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x120PredReg extends Definition("Hir0x120PredReg", "__HIR0X120", Vec("nanotrap__R", "nanotrap__U")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.Register(srcB)) =>
+          Some(Instruction.Hir0x120PredReg(pp, srcB, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x120Reg extends Definition("Hir0x120Reg", "__HIR0X120", Vec("nanotrap__R", "nanotrap__U")) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(InstructionOperand.Register(srcB)) => Some(Instruction.Hir0x120Reg(srcB, modifiers, guard))
+        case _ => None
+      }
+  }
+  object Hir0x130AddressAddressAddressAddressAddressAddressPred extends Definition(
+        "Hir0x130AddressAddressAddressAddressAddressAddressPred",
+        "__HIR0X130",
+        Vec(
+          "utcmxqmma_1cta_scale__A_gdesc",
+          "utcmxqmma_1cta_scale__A_tmem",
+          "utcmxqmma_1cta_scale_one__A_gdesc",
+          "utcmxqmma_1cta_scale_one__A_tmem",
+          "utcmxqmma_2cta_scale__A_gdesc",
+          "utcmxqmma_2cta_scale__A_tmem",
+          "utcmxqmma_2cta_scale_one__A_gdesc",
+          "utcmxqmma_2cta_scale_one__A_tmem"
+        )
+      ) {
+    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
+      operands match {
+        case Vec(
+              InstructionOperand.Address(srcA),
+              InstructionOperand.Address(srcB),
+              InstructionOperand.Address(srcC),
+              InstructionOperand.Address(uRe),
+              InstructionOperand.Address(uRh),
+              InstructionOperand.Address(uRi),
+              InstructionOperand.Predicate(uPp)
+            ) => Some(Instruction.Hir0x130AddressAddressAddressAddressAddressAddressPred(
             srcA,
             srcB,
-            sb_offset,
-            scaleU5,
+            srcC,
+            uRe,
+            uRh,
+            uRi,
+            uPp,
             modifiers,
             guard
           ))
         case _ => None
       }
   }
-  object IscaddintPipeRegPredRegConstImm extends Definition(
-        "IscaddintPipeRegPredRegConstImm",
-        "ISCADDint_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.ConstantBank),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_noimm__RCR_RCR")
-      ) {
+  object Hir0x150RegRegRegRegPredRegRegReg
+      extends Definition("Hir0x150RegRegRegRegPredRegRegReg", "__HIR0X150", Vec("mxqmma_scale_")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
               InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(sb),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddintPipeRegPredRegConstImm(dst, pu, srcA, sb, scaleU5, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IscaddintPipeRegPredRegImmImm extends Definition(
-        "IscaddintPipeRegPredRegImmImm",
-        "ISCADDint_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_imm__RIR_RIR")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sb),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddintPipeRegPredRegImmImm(dst, pu, srcA, sb, scaleU5, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IscaddintPipeRegPredRegRegImm extends Definition(
-        "IscaddintPipeRegPredRegRegImm",
-        "ISCADDint_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_noimm__RRR_RRR", "iscadd_noimm__RUR_RUR")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Predicate(pu),
               InstructionOperand.Register(srcA),
               InstructionOperand.Register(srcB),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddintPipeRegPredRegRegImm(dst, pu, srcA, srcB, scaleU5, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IscaddintPipeRegRegAddressImmImm extends Definition(
-        "IscaddintPipeRegRegAddressImmImm",
-        "ISCADDint_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Address),
-          Slot("sb_offset", OperandKind.Immediate),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_noimm__RCxR_RCxR")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Address(srcB),
-              InstructionOperand.Immediate(sb_offset),
-              InstructionOperand.Immediate(scaleU5)
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Predicate(uPp),
+              InstructionOperand.Register(re),
+              InstructionOperand.Register(rh),
+              InstructionOperand.Register(uRi)
             ) =>
-          Some(Instruction.IscaddintPipeRegRegAddressImmImm(dst, srcA, srcB, sb_offset, scaleU5, modifiers, guard))
+          Some(Instruction.Hir0x150RegRegRegRegPredRegRegReg(dst, srcA, srcB, srcC, uPp, re, rh, uRi, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddintPipeRegRegConstImm extends Definition(
-        "IscaddintPipeRegRegConstImm",
-        "ISCADDint_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.ConstantBank),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_noimm__RCR_RCR")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(sb),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddintPipeRegRegConstImm(dst, srcA, sb, scaleU5, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IscaddintPipeRegRegImmImm extends Definition(
-        "IscaddintPipeRegRegImmImm",
-        "ISCADDint_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_imm__RIR_RIR")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sb),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddintPipeRegRegImmImm(dst, srcA, sb, scaleU5, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IscaddintPipeRegRegRegImm extends Definition(
-        "IscaddintPipeRegRegRegImm",
-        "ISCADDint_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("scaleU5", OperandKind.Immediate)
-        ),
-        Vec("iscadd_noimm__RRR_RRR", "iscadd_noimm__RUR_RUR")
-      ) {
+  object Hir0x150RegRegRegRegRegRegReg
+      extends Definition("Hir0x150RegRegRegRegRegRegReg", "__HIR0X150", Vec("mxqmma_scale_")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
               InstructionOperand.Register(dst),
               InstructionOperand.Register(srcA),
               InstructionOperand.Register(srcB),
-              InstructionOperand.Immediate(scaleU5)
-            ) => Some(Instruction.IscaddintPipeRegRegRegImm(dst, srcA, srcB, scaleU5, modifiers, guard))
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Register(re),
+              InstructionOperand.Register(rh),
+              InstructionOperand.Register(uRi)
+            ) => Some(Instruction.Hir0x150RegRegRegRegRegRegReg(dst, srcA, srcB, srcC, re, rh, uRi, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddxluPipeRegRegConstImm extends Definition(
-        "IscaddxluPipeRegRegConstImm",
-        "ISCADDxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("shift", OperandKind.Immediate)
-        ),
-        Vec("Const ISCADD")
-      ) {
+  object Hir0x160Reg extends Definition("Hir0x160Reg", "__HIR0X160", Vec("utcstsws_", "utcstsws_one_")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Immediate(shift)
-            ) => Some(Instruction.IscaddxluPipeRegRegConstImm(dst, srcA, srcConst, shift, modifiers, guard))
+        case Vec(InstructionOperand.Register(srcB)) => Some(Instruction.Hir0x160Reg(srcB, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddxluPipeRegRegImmImm extends Definition(
-        "IscaddxluPipeRegRegImmImm",
-        "ISCADDxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("shift", OperandKind.Immediate)
-        ),
-        Vec("Imm ISCADD")
-      ) {
+  object Hir0x170Reg extends Definition("Hir0x170Reg", "__HIR0X170", Vec("utcldsws_", "utcldsws_one_")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Immediate(shift)
-            ) => Some(Instruction.IscaddxluPipeRegRegImmImm(dst, srcA, uImm, shift, modifiers, guard))
+        case Vec(InstructionOperand.Register(dst)) => Some(Instruction.Hir0x170Reg(dst, modifiers, guard))
         case _ => None
       }
   }
-  object IscaddxluPipeRegRegRegImm extends Definition(
-        "IscaddxluPipeRegRegRegImm",
-        "ISCADDxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("shift", OperandKind.Immediate)
-        ),
-        Vec("ISCADD")
-      ) {
+  object Hir0x1a0RegRegRegRegImmImm
+      extends Definition("Hir0x1a0RegRegRegRegImmImm", "__HIR0X1A0", Vec("genmetadata_")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
               InstructionOperand.Register(dst),
               InstructionOperand.Register(srcA),
               InstructionOperand.Register(srcB),
-              InstructionOperand.Immediate(shift)
-            ) => Some(Instruction.IscaddxluPipeRegRegRegImm(dst, srcA, srcB, shift, modifiers, guard))
+              InstructionOperand.Register(srcC),
+              InstructionOperand.Immediate(vecidx2),
+              InstructionOperand.Immediate(mdidx)
+            ) => Some(Instruction.Hir0x1a0RegRegRegRegImmImm(dst, srcA, srcB, srcC, vecidx2, mdidx, modifiers, guard))
         case _ => None
       }
   }
-  object IsetRegRegConst extends Definition(
-        "IsetRegRegConst",
-        "ISET",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("NoBop Const ISET", "NoBop Const ISET U", "NoBop_Const_ISET", "NoBop_Const_ISET_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsetRegRegConst(dst, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetRegRegConstPred extends Definition(
-        "IsetRegRegConstPred",
-        "ISET",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Const ISET", "Const ISET U", "Const_ISET", "Const_ISET_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetRegRegConstPred(dst, srcA, srcConst, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetRegRegImm extends Definition(
-        "IsetRegRegImm",
-        "ISET",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("uImm", OperandKind.Immediate)),
-        Vec("NoBop Imm ISET", "NoBop Imm ISET U", "NoBop_Imm_ISET", "NoBop_Imm_ISET_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.IsetRegRegImm(dst, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetRegRegImmPred extends Definition(
-        "IsetRegRegImmPred",
-        "ISET",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Imm ISET", "Imm ISET U", "Imm_ISET", "Imm_ISET_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetRegRegImmPred(dst, srcA, uImm, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetRegRegReg extends Definition(
-        "IsetRegRegReg",
-        "ISET",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("srcB", OperandKind.Register)),
-        Vec("NoBop ISET", "NoBop ISET U", "NoBop_ISET", "NoBop_ISET_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IsetRegRegReg(dst, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetRegRegRegPred extends Definition(
-        "IsetRegRegRegPred",
-        "ISET",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("ISET", "ISET U", "ISET_U")
-      ) {
+  object Hir0x1b0RegRegRegReg extends Definition("Hir0x1b0RegRegRegReg", "__HIR0X1B0", Vec("gather_bitextract_")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
         case Vec(
               InstructionOperand.Register(dst),
               InstructionOperand.Register(srcA),
               InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetRegRegRegPred(dst, srcA, srcB, pa, modifiers, guard))
+              InstructionOperand.Register(srcC)
+            ) => Some(Instruction.Hir0x1b0RegRegRegReg(dst, srcA, srcB, srcC, modifiers, guard))
         case _ => None
       }
   }
-  object IsetpPredPredRegAddressImmPred extends Definition(
-        "IsetpPredPredRegAddressImmPred",
-        "ISETP",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Address),
-          Slot("sb_offset", OperandKind.Immediate),
-          Slot("pp", OperandKind.Predicate)
-        ),
-        Vec("isetp__RCxR_RCxR", "isetp__RCxR_RCxR_noEX")
-      ) {
+  object Hir0x1e0NoOperands extends Definition("Hir0x1e0NoOperands", "__HIR0X1E0", Vec("rtt_")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Address(srcB),
-              InstructionOperand.Immediate(sb_offset),
-              InstructionOperand.Predicate(pp)
-            ) => Some(Instruction.IsetpPredPredRegAddressImmPred(pu, pv, srcA, srcB, sb_offset, pp, modifiers, guard))
+        case Vec() => Some(Instruction.Hir0x1e0NoOperands(modifiers, guard))
         case _ => None
       }
   }
-  object IsetpPredPredRegAddressImmPredPred extends Definition(
-        "IsetpPredPredRegAddressImmPredPred",
-        "ISETP",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Address),
-          Slot("sb_offset", OperandKind.Immediate),
-          Slot("pp", OperandKind.Predicate),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec("isetp__RCxR_RCxR", "isetp__RCxR_RCxR_EX")
-      ) {
+  object Hir0x1f0ImmReg extends Definition("Hir0x1f0ImmReg", "__HIR0X1F0", Vec("r2b_")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Address(srcB),
-              InstructionOperand.Immediate(sb_offset),
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Predicate(pr)
-            ) =>
-          Some(Instruction.IsetpPredPredRegAddressImmPredPred(pu, pv, srcA, srcB, sb_offset, pp, pr, modifiers, guard))
+        case Vec(InstructionOperand.Immediate(barname), InstructionOperand.Register(srcB)) =>
+          Some(Instruction.Hir0x1f0ImmReg(barname, srcB, modifiers, guard))
         case _ => None
       }
   }
-  object IsetpPredPredRegConstPred extends Definition(
-        "IsetpPredPredRegConstPred",
-        "ISETP",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("nPd", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec(
-          "Const ISETP",
-          "Const ISETP U",
-          "Const_ISETP",
-          "Const_ISETP_U",
-          "isetp__RCR_RC",
-          "isetp__RCR_RCR",
-          "isetp__RCR_RCR_noEX"
-        )
-      ) {
+  object Hir0x1f2Reg extends Definition("Hir0x1f2Reg", "__HIR0X1F2", Vec("ucgabar_get_")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Predicate(nPd),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetpPredPredRegConstPred(dstPredicate, nPd, srcA, srcConst, pa, modifiers, guard))
+        case Vec(InstructionOperand.Register(dst)) => Some(Instruction.Hir0x1f2Reg(dst, modifiers, guard))
         case _ => None
       }
   }
-  object IsetpPredPredRegConstPredPred extends Definition(
-        "IsetpPredPredRegConstPredPred",
-        "ISETP",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.ConstantBank),
-          Slot("pp", OperandKind.Predicate),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec("isetp__RCR_RC", "isetp__RCR_RCR", "isetp__RCR_RCR_EX")
-      ) {
+  object Hir0x1f3Reg extends Definition("Hir0x1f3Reg", "__HIR0X1F3", Vec("ucgabar_set_")) {
     def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
       operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(sb),
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpPredPredRegConstPredPred(pu, pv, srcA, sb, pp, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpPredPredRegImmPred extends Definition(
-        "IsetpPredPredRegImmPred",
-        "ISETP",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("nPd", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec(
-          "Imm ISETP",
-          "Imm ISETP U",
-          "Imm_ISETP",
-          "Imm_ISETP_U",
-          "isetp_64__RsIR_RIR_noEX",
-          "isetp__RsIR_RI",
-          "isetp__RsIR_RIR",
-          "isetp__RsIR_RIR_noEX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Predicate(nPd),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetpPredPredRegImmPred(dstPredicate, nPd, srcA, uImm, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpPredPredRegImmPredPred extends Definition(
-        "IsetpPredPredRegImmPredPred",
-        "ISETP",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("pp", OperandKind.Predicate),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec("isetp_64__RsIR_RIR_EX", "isetp__RsIR_RI", "isetp__RsIR_RIR", "isetp__RsIR_RIR_EX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sb),
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpPredPredRegImmPredPred(pu, pv, srcA, sb, pp, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpPredPredRegRegPred extends Definition(
-        "IsetpPredPredRegRegPred",
-        "ISETP",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("nPd", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec(
-          "ISETP",
-          "ISETP U",
-          "ISETP_U",
-          "isetp_64__RRR_RRR_noEX",
-          "isetp_64__RUR_RUR_noEX",
-          "isetp__RRR_RR",
-          "isetp__RRR_RRR",
-          "isetp__RRR_RRR_noEX",
-          "isetp__RUR_RUR",
-          "isetp__RUR_RUR_noEX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Predicate(nPd),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetpPredPredRegRegPred(dstPredicate, nPd, srcA, srcB, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpPredPredRegRegPredPred extends Definition(
-        "IsetpPredPredRegRegPredPred",
-        "ISETP",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pp", OperandKind.Predicate),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec(
-          "isetp_64__RRR_RRR_EX",
-          "isetp_64__RUR_RUR_EX",
-          "isetp__RRR_RR",
-          "isetp__RRR_RRR",
-          "isetp__RRR_RRR_EX",
-          "isetp__RUR_RUR",
-          "isetp__RUR_RUR_EX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpPredPredRegRegPredPred(pu, pv, srcA, srcB, pp, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpPredRegAddressImm extends Definition(
-        "IsetpPredRegAddressImm",
-        "ISETP",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Address),
-          Slot("sb_offset", OperandKind.Immediate)
-        ),
-        Vec("isetp_simple__RCxR_RCxR", "isetp_simple__RCxR_RCxR_noEX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Address(srcB),
-              InstructionOperand.Immediate(sb_offset)
-            ) => Some(Instruction.IsetpPredRegAddressImm(pu, srcA, srcB, sb_offset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpPredRegAddressImmPred extends Definition(
-        "IsetpPredRegAddressImmPred",
-        "ISETP",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Address),
-          Slot("sb_offset", OperandKind.Immediate),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec("isetp_simple__RCxR_RCxR", "isetp_simple__RCxR_RCxR_EX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Address(srcB),
-              InstructionOperand.Immediate(sb_offset),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpPredRegAddressImmPred(pu, srcA, srcB, sb_offset, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpPredRegConst extends Definition(
-        "IsetpPredRegConst",
-        "ISETP",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec(
-          "NoBop Const ISETP",
-          "NoBop Const ISETP U",
-          "NoBop_Const_ISETP",
-          "NoBop_Const_ISETP_U",
-          "isetp_simple__RCR_RC",
-          "isetp_simple__RCR_RCR",
-          "isetp_simple__RCR_RCR_noEX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsetpPredRegConst(dstPredicate, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpPredRegConstPred extends Definition(
-        "IsetpPredRegConstPred",
-        "ISETP",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.ConstantBank),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec("isetp_simple__RCR_RC", "isetp_simple__RCR_RCR", "isetp_simple__RCR_RCR_EX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(sb),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpPredRegConstPred(pu, srcA, sb, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpPredRegImm extends Definition(
-        "IsetpPredRegImm",
-        "ISETP",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate)
-        ),
-        Vec(
-          "NoBop Imm ISETP",
-          "NoBop Imm ISETP U",
-          "NoBop_Imm_ISETP",
-          "NoBop_Imm_ISETP_U",
-          "isetp_64_simple__RsIR_RIR_noEX",
-          "isetp_simple__RsIR_RI",
-          "isetp_simple__RsIR_RIR",
-          "isetp_simple__RsIR_RIR_noEX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.IsetpPredRegImm(dstPredicate, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpPredRegImmPred extends Definition(
-        "IsetpPredRegImmPred",
-        "ISETP",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec(
-          "isetp_64_simple__RsIR_RIR_EX",
-          "isetp_simple__RsIR_RI",
-          "isetp_simple__RsIR_RIR",
-          "isetp_simple__RsIR_RIR_EX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sb),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpPredRegImmPred(pu, srcA, sb, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpPredRegReg extends Definition(
-        "IsetpPredRegReg",
-        "ISETP",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register)
-        ),
-        Vec(
-          "NoBop ISETP",
-          "NoBop ISETP U",
-          "NoBop_ISETP",
-          "NoBop_ISETP_U",
-          "isetp_64_simple__RRR_RRR_noEX",
-          "isetp_64_simple__RUR_RUR_noEX",
-          "isetp_simple__RRR_RR",
-          "isetp_simple__RRR_RRR",
-          "isetp_simple__RRR_RRR_noEX",
-          "isetp_simple__RUR_RUR",
-          "isetp_simple__RUR_RUR_noEX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IsetpPredRegReg(dstPredicate, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpPredRegRegPred extends Definition(
-        "IsetpPredRegRegPred",
-        "ISETP",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec(
-          "isetp_64_simple__RRR_RRR_EX",
-          "isetp_64_simple__RUR_RUR_EX",
-          "isetp_simple__RRR_RR",
-          "isetp_simple__RRR_RRR",
-          "isetp_simple__RRR_RRR_EX",
-          "isetp_simple__RUR_RUR",
-          "isetp_simple__RUR_RUR_EX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpPredRegRegPred(pu, srcA, srcB, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpfauPipePredPredRegConstPred extends Definition(
-        "IsetpfauPipePredPredRegConstPred",
-        "ISETPfau_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("nPd", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Const ISETP", "Const ISETP U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Predicate(nPd),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Predicate(pa)
-            ) =>
-          Some(Instruction.IsetpfauPipePredPredRegConstPred(dstPredicate, nPd, srcA, srcConst, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpfauPipePredPredRegImmPred extends Definition(
-        "IsetpfauPipePredPredRegImmPred",
-        "ISETPfau_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("nPd", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Imm ISETP", "Imm ISETP U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Predicate(nPd),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetpfauPipePredPredRegImmPred(dstPredicate, nPd, srcA, uImm, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpfauPipePredPredRegRegPred extends Definition(
-        "IsetpfauPipePredPredRegRegPred",
-        "ISETPfau_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("nPd", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("ISETP", "ISETP U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Predicate(nPd),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetpfauPipePredPredRegRegPred(dstPredicate, nPd, srcA, srcB, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpfauPipePredRegConst extends Definition(
-        "IsetpfauPipePredRegConst",
-        "ISETPfau_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("NoBop Const ISETP", "NoBop Const ISETP U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsetpfauPipePredRegConst(dstPredicate, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpfauPipePredRegImm extends Definition(
-        "IsetpfauPipePredRegImm",
-        "ISETPfau_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate)
-        ),
-        Vec("NoBop Imm ISETP", "NoBop Imm ISETP U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.IsetpfauPipePredRegImm(dstPredicate, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpfauPipePredRegReg extends Definition(
-        "IsetpfauPipePredRegReg",
-        "ISETPfau_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register)
-        ),
-        Vec("NoBop ISETP", "NoBop ISETP U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IsetpfauPipePredRegReg(dstPredicate, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpfxuPipePredPredRegConstPred extends Definition(
-        "IsetpfxuPipePredPredRegConstPred",
-        "ISETPfxu_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("nPd", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Const_ISETP", "Const_ISETP_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Predicate(nPd),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Predicate(pa)
-            ) =>
-          Some(Instruction.IsetpfxuPipePredPredRegConstPred(dstPredicate, nPd, srcA, srcConst, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpfxuPipePredPredRegImmPred extends Definition(
-        "IsetpfxuPipePredPredRegImmPred",
-        "ISETPfxu_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("nPd", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Imm_ISETP", "Imm_ISETP_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Predicate(nPd),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetpfxuPipePredPredRegImmPred(dstPredicate, nPd, srcA, uImm, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpfxuPipePredPredRegRegPred extends Definition(
-        "IsetpfxuPipePredPredRegRegPred",
-        "ISETPfxu_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("nPd", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("ISETP", "ISETP_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Predicate(nPd),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetpfxuPipePredPredRegRegPred(dstPredicate, nPd, srcA, srcB, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpfxuPipePredRegConst extends Definition(
-        "IsetpfxuPipePredRegConst",
-        "ISETPfxu_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("NoBop_Const_ISETP", "NoBop_Const_ISETP_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsetpfxuPipePredRegConst(dstPredicate, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpfxuPipePredRegImm extends Definition(
-        "IsetpfxuPipePredRegImm",
-        "ISETPfxu_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate)
-        ),
-        Vec("NoBop_Imm_ISETP", "NoBop_Imm_ISETP_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.IsetpfxuPipePredRegImm(dstPredicate, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpfxuPipePredRegReg extends Definition(
-        "IsetpfxuPipePredRegReg",
-        "ISETPfxu_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register)
-        ),
-        Vec("NoBop_ISETP", "NoBop_ISETP_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IsetpfxuPipePredRegReg(dstPredicate, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredPredRegAddressImmPred extends Definition(
-        "IsetpintPipePredPredRegAddressImmPred",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Address),
-          Slot("sb_offset", OperandKind.Immediate),
-          Slot("pp", OperandKind.Predicate)
-        ),
-        Vec("isetp__RCxR_RCxR", "isetp__RCxR_RCxR_noEX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Address(srcB),
-              InstructionOperand.Immediate(sb_offset),
-              InstructionOperand.Predicate(pp)
-            ) =>
-          Some(Instruction.IsetpintPipePredPredRegAddressImmPred(pu, pv, srcA, srcB, sb_offset, pp, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredPredRegAddressImmPredPred extends Definition(
-        "IsetpintPipePredPredRegAddressImmPredPred",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Address),
-          Slot("sb_offset", OperandKind.Immediate),
-          Slot("pp", OperandKind.Predicate),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec("isetp__RCxR_RCxR", "isetp__RCxR_RCxR_EX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Address(srcB),
-              InstructionOperand.Immediate(sb_offset),
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpintPipePredPredRegAddressImmPredPred(
-            pu,
-            pv,
-            srcA,
-            srcB,
-            sb_offset,
-            pp,
-            pr,
-            modifiers,
-            guard
-          ))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredPredRegConstPred extends Definition(
-        "IsetpintPipePredPredRegConstPred",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.ConstantBank),
-          Slot("pp", OperandKind.Predicate)
-        ),
-        Vec("isetp__RCR_RC", "isetp__RCR_RCR", "isetp__RCR_RCR_noEX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(sb),
-              InstructionOperand.Predicate(pp)
-            ) => Some(Instruction.IsetpintPipePredPredRegConstPred(pu, pv, srcA, sb, pp, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredPredRegConstPredPred extends Definition(
-        "IsetpintPipePredPredRegConstPredPred",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.ConstantBank),
-          Slot("pp", OperandKind.Predicate),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec("isetp__RCR_RC", "isetp__RCR_RCR", "isetp__RCR_RCR_EX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(sb),
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpintPipePredPredRegConstPredPred(pu, pv, srcA, sb, pp, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredPredRegImmPred extends Definition(
-        "IsetpintPipePredPredRegImmPred",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("pp", OperandKind.Predicate)
-        ),
-        Vec("isetp_64__RsIR_RIR_noEX", "isetp__RsIR_RI", "isetp__RsIR_RIR", "isetp__RsIR_RIR_noEX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sb),
-              InstructionOperand.Predicate(pp)
-            ) => Some(Instruction.IsetpintPipePredPredRegImmPred(pu, pv, srcA, sb, pp, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredPredRegImmPredPred extends Definition(
-        "IsetpintPipePredPredRegImmPredPred",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("pp", OperandKind.Predicate),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec("isetp_64__RsIR_RIR_EX", "isetp__RsIR_RI", "isetp__RsIR_RIR", "isetp__RsIR_RIR_EX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sb),
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpintPipePredPredRegImmPredPred(pu, pv, srcA, sb, pp, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredPredRegRegPred extends Definition(
-        "IsetpintPipePredPredRegRegPred",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pp", OperandKind.Predicate)
-        ),
-        Vec(
-          "isetp_64__RRR_RRR_noEX",
-          "isetp_64__RUR_RUR_noEX",
-          "isetp__RRR_RR",
-          "isetp__RRR_RRR",
-          "isetp__RRR_RRR_noEX",
-          "isetp__RUR_RUR",
-          "isetp__RUR_RUR_noEX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pp)
-            ) => Some(Instruction.IsetpintPipePredPredRegRegPred(pu, pv, srcA, srcB, pp, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredPredRegRegPredPred extends Definition(
-        "IsetpintPipePredPredRegRegPredPred",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("pv", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pp", OperandKind.Predicate),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec(
-          "isetp_64__RRR_RRR_EX",
-          "isetp_64__RUR_RUR_EX",
-          "isetp__RRR_RR",
-          "isetp__RRR_RRR",
-          "isetp__RRR_RRR_EX",
-          "isetp__RUR_RUR",
-          "isetp__RUR_RUR_EX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Predicate(pv),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpintPipePredPredRegRegPredPred(pu, pv, srcA, srcB, pp, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredRegAddressImm extends Definition(
-        "IsetpintPipePredRegAddressImm",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Address),
-          Slot("sb_offset", OperandKind.Immediate)
-        ),
-        Vec("isetp_simple__RCxR_RCxR", "isetp_simple__RCxR_RCxR_noEX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Address(srcB),
-              InstructionOperand.Immediate(sb_offset)
-            ) => Some(Instruction.IsetpintPipePredRegAddressImm(pu, srcA, srcB, sb_offset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredRegAddressImmPred extends Definition(
-        "IsetpintPipePredRegAddressImmPred",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Address),
-          Slot("sb_offset", OperandKind.Immediate),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec("isetp_simple__RCxR_RCxR", "isetp_simple__RCxR_RCxR_EX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Address(srcB),
-              InstructionOperand.Immediate(sb_offset),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpintPipePredRegAddressImmPred(pu, srcA, srcB, sb_offset, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredRegConst extends Definition(
-        "IsetpintPipePredRegConst",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.ConstantBank)
-        ),
-        Vec("isetp_simple__RCR_RC", "isetp_simple__RCR_RCR", "isetp_simple__RCR_RCR_noEX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(sb)
-            ) => Some(Instruction.IsetpintPipePredRegConst(pu, srcA, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredRegConstPred extends Definition(
-        "IsetpintPipePredRegConstPred",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.ConstantBank),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec("isetp_simple__RCR_RC", "isetp_simple__RCR_RCR", "isetp_simple__RCR_RCR_EX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(sb),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpintPipePredRegConstPred(pu, srcA, sb, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredRegImm extends Definition(
-        "IsetpintPipePredRegImm",
-        "ISETPint_pipe",
-        Vec(Slot("pu", OperandKind.Predicate), Slot("srcA", OperandKind.Register), Slot("sb", OperandKind.Immediate)),
-        Vec(
-          "isetp_64_simple__RsIR_RIR_noEX",
-          "isetp_simple__RsIR_RI",
-          "isetp_simple__RsIR_RIR",
-          "isetp_simple__RsIR_RIR_noEX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sb)
-            ) => Some(Instruction.IsetpintPipePredRegImm(pu, srcA, sb, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredRegImmPred extends Definition(
-        "IsetpintPipePredRegImmPred",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("sb", OperandKind.Immediate),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec(
-          "isetp_64_simple__RsIR_RIR_EX",
-          "isetp_simple__RsIR_RI",
-          "isetp_simple__RsIR_RIR",
-          "isetp_simple__RsIR_RIR_EX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sb),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpintPipePredRegImmPred(pu, srcA, sb, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredRegReg extends Definition(
-        "IsetpintPipePredRegReg",
-        "ISETPint_pipe",
-        Vec(Slot("pu", OperandKind.Predicate), Slot("srcA", OperandKind.Register), Slot("srcB", OperandKind.Register)),
-        Vec(
-          "isetp_64_simple__RRR_RRR_noEX",
-          "isetp_64_simple__RUR_RUR_noEX",
-          "isetp_simple__RRR_RR",
-          "isetp_simple__RRR_RRR",
-          "isetp_simple__RRR_RRR_noEX",
-          "isetp_simple__RUR_RUR",
-          "isetp_simple__RUR_RUR_noEX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IsetpintPipePredRegReg(pu, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpintPipePredRegRegPred extends Definition(
-        "IsetpintPipePredRegRegPred",
-        "ISETPint_pipe",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pr", OperandKind.Predicate)
-        ),
-        Vec(
-          "isetp_64_simple__RRR_RRR_EX",
-          "isetp_64_simple__RUR_RUR_EX",
-          "isetp_simple__RRR_RR",
-          "isetp_simple__RRR_RRR",
-          "isetp_simple__RRR_RRR_EX",
-          "isetp_simple__RUR_RUR",
-          "isetp_simple__RUR_RUR_EX"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pr)
-            ) => Some(Instruction.IsetpintPipePredRegRegPred(pu, srcA, srcB, pr, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpxluPipePredPredRegConstPred extends Definition(
-        "IsetpxluPipePredPredRegConstPred",
-        "ISETPxlu_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("nPd", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Const ISETP", "Const ISETP U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Predicate(nPd),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Predicate(pa)
-            ) =>
-          Some(Instruction.IsetpxluPipePredPredRegConstPred(dstPredicate, nPd, srcA, srcConst, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpxluPipePredPredRegImmPred extends Definition(
-        "IsetpxluPipePredPredRegImmPred",
-        "ISETPxlu_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("nPd", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Imm ISETP", "Imm ISETP U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Predicate(nPd),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetpxluPipePredPredRegImmPred(dstPredicate, nPd, srcA, uImm, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpxluPipePredPredRegRegPred extends Definition(
-        "IsetpxluPipePredPredRegRegPred",
-        "ISETPxlu_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("nPd", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("ISETP", "ISETP U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Predicate(nPd),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetpxluPipePredPredRegRegPred(dstPredicate, nPd, srcA, srcB, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpxluPipePredRegConst extends Definition(
-        "IsetpxluPipePredRegConst",
-        "ISETPxlu_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("NoBop Const ISETP", "NoBop Const ISETP U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsetpxluPipePredRegConst(dstPredicate, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpxluPipePredRegImm extends Definition(
-        "IsetpxluPipePredRegImm",
-        "ISETPxlu_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate)
-        ),
-        Vec("NoBop Imm ISETP", "NoBop Imm ISETP U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.IsetpxluPipePredRegImm(dstPredicate, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetpxluPipePredRegReg extends Definition(
-        "IsetpxluPipePredRegReg",
-        "ISETPxlu_pipe",
-        Vec(
-          Slot("dstPredicate", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register)
-        ),
-        Vec("NoBop ISETP", "NoBop ISETP U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(dstPredicate),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IsetpxluPipePredRegReg(dstPredicate, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetfauPipeRegRegConst extends Definition(
-        "IsetfauPipeRegRegConst",
-        "ISETfau_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("NoBop Const ISET", "NoBop Const ISET U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsetfauPipeRegRegConst(dst, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetfauPipeRegRegConstPred extends Definition(
-        "IsetfauPipeRegRegConstPred",
-        "ISETfau_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Const ISET", "Const ISET U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetfauPipeRegRegConstPred(dst, srcA, srcConst, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetfauPipeRegRegImm extends Definition(
-        "IsetfauPipeRegRegImm",
-        "ISETfau_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("uImm", OperandKind.Immediate)),
-        Vec("NoBop Imm ISET", "NoBop Imm ISET U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.IsetfauPipeRegRegImm(dst, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetfauPipeRegRegImmPred extends Definition(
-        "IsetfauPipeRegRegImmPred",
-        "ISETfau_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Imm ISET", "Imm ISET U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetfauPipeRegRegImmPred(dst, srcA, uImm, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetfauPipeRegRegReg extends Definition(
-        "IsetfauPipeRegRegReg",
-        "ISETfau_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("srcB", OperandKind.Register)),
-        Vec("NoBop ISET", "NoBop ISET U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IsetfauPipeRegRegReg(dst, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetfauPipeRegRegRegPred extends Definition(
-        "IsetfauPipeRegRegRegPred",
-        "ISETfau_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("ISET", "ISET U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetfauPipeRegRegRegPred(dst, srcA, srcB, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetfxuPipeRegRegConst extends Definition(
-        "IsetfxuPipeRegRegConst",
-        "ISETfxu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("NoBop_Const_ISET", "NoBop_Const_ISET_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsetfxuPipeRegRegConst(dst, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetfxuPipeRegRegConstPred extends Definition(
-        "IsetfxuPipeRegRegConstPred",
-        "ISETfxu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Const_ISET", "Const_ISET_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetfxuPipeRegRegConstPred(dst, srcA, srcConst, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetfxuPipeRegRegImm extends Definition(
-        "IsetfxuPipeRegRegImm",
-        "ISETfxu_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("uImm", OperandKind.Immediate)),
-        Vec("NoBop_Imm_ISET", "NoBop_Imm_ISET_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.IsetfxuPipeRegRegImm(dst, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetfxuPipeRegRegImmPred extends Definition(
-        "IsetfxuPipeRegRegImmPred",
-        "ISETfxu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Imm_ISET", "Imm_ISET_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetfxuPipeRegRegImmPred(dst, srcA, uImm, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetfxuPipeRegRegReg extends Definition(
-        "IsetfxuPipeRegRegReg",
-        "ISETfxu_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("srcB", OperandKind.Register)),
-        Vec("NoBop_ISET", "NoBop_ISET_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IsetfxuPipeRegRegReg(dst, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetfxuPipeRegRegRegPred extends Definition(
-        "IsetfxuPipeRegRegRegPred",
-        "ISETfxu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("ISET", "ISET_U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetfxuPipeRegRegRegPred(dst, srcA, srcB, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetxluPipeRegRegConst extends Definition(
-        "IsetxluPipeRegRegConst",
-        "ISETxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("NoBop Const ISET", "NoBop Const ISET U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsetxluPipeRegRegConst(dst, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetxluPipeRegRegConstPred extends Definition(
-        "IsetxluPipeRegRegConstPred",
-        "ISETxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Const ISET", "Const ISET U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetxluPipeRegRegConstPred(dst, srcA, srcConst, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetxluPipeRegRegImm extends Definition(
-        "IsetxluPipeRegRegImm",
-        "ISETxlu_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("uImm", OperandKind.Immediate)),
-        Vec("NoBop Imm ISET", "NoBop Imm ISET U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.IsetxluPipeRegRegImm(dst, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetxluPipeRegRegImmPred extends Definition(
-        "IsetxluPipeRegRegImmPred",
-        "ISETxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("uImm", OperandKind.Immediate),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("Imm ISET", "Imm ISET U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetxluPipeRegRegImmPred(dst, srcA, uImm, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetxluPipeRegRegReg extends Definition(
-        "IsetxluPipeRegRegReg",
-        "ISETxlu_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("srcB", OperandKind.Register)),
-        Vec("NoBop ISET", "NoBop ISET U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IsetxluPipeRegRegReg(dst, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsetxluPipeRegRegRegPred extends Definition(
-        "IsetxluPipeRegRegRegPred",
-        "ISETxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcB", OperandKind.Register),
-          Slot("pa", OperandKind.Predicate)
-        ),
-        Vec("ISET", "ISET U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Predicate(pa)
-            ) => Some(Instruction.IsetxluPipeRegRegRegPred(dst, srcA, srcB, pa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubRegConstReg extends Definition(
-        "IsubRegConstReg",
-        "ISUB",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("srcA", OperandKind.Register)
-        ),
-        Vec("Const ISUB1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Register(srcA)
-            ) => Some(Instruction.IsubRegConstReg(dst, srcConst, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubRegImmReg extends Definition(
-        "IsubRegImmReg",
-        "ISUB",
-        Vec(Slot("dst", OperandKind.Register), Slot("uImm", OperandKind.Immediate), Slot("srcA", OperandKind.Register)),
-        Vec("Imm ISUB1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Register(srcA)
-            ) => Some(Instruction.IsubRegImmReg(dst, uImm, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubRegRegConst extends Definition(
-        "IsubRegRegConst",
-        "ISUB",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("Const ISUB")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsubRegRegConst(dst, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubRegRegImm extends Definition(
-        "IsubRegRegImm",
-        "ISUB",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("uImm", OperandKind.Immediate)),
-        Vec("Imm ISUB")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.IsubRegRegImm(dst, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubRegRegReg extends Definition(
-        "IsubRegRegReg",
-        "ISUB",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("srcB", OperandKind.Register)),
-        Vec("ISUB")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IsubRegRegReg(dst, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubfauPipeRegConstReg extends Definition(
-        "IsubfauPipeRegConstReg",
-        "ISUBfau_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("srcA", OperandKind.Register)
-        ),
-        Vec("Const ISUB1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Register(srcA)
-            ) => Some(Instruction.IsubfauPipeRegConstReg(dst, srcConst, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubfauPipeRegImmReg extends Definition(
-        "IsubfauPipeRegImmReg",
-        "ISUBfau_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("uImm", OperandKind.Immediate), Slot("srcA", OperandKind.Register)),
-        Vec("Imm ISUB1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Register(srcA)
-            ) => Some(Instruction.IsubfauPipeRegImmReg(dst, uImm, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubfauPipeRegRegConst extends Definition(
-        "IsubfauPipeRegRegConst",
-        "ISUBfau_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("Const ISUB")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsubfauPipeRegRegConst(dst, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubfauPipeRegRegImm extends Definition(
-        "IsubfauPipeRegRegImm",
-        "ISUBfau_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("uImm", OperandKind.Immediate)),
-        Vec("Imm ISUB")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.IsubfauPipeRegRegImm(dst, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubfauPipeRegRegReg extends Definition(
-        "IsubfauPipeRegRegReg",
-        "ISUBfau_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("srcB", OperandKind.Register)),
-        Vec("ISUB")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IsubfauPipeRegRegReg(dst, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubxluPipeRegConstReg extends Definition(
-        "IsubxluPipeRegConstReg",
-        "ISUBxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank),
-          Slot("srcA", OperandKind.Register)
-        ),
-        Vec("Const ISUB1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.ConstantBank(srcConst),
-              InstructionOperand.Register(srcA)
-            ) => Some(Instruction.IsubxluPipeRegConstReg(dst, srcConst, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubxluPipeRegImmReg extends Definition(
-        "IsubxluPipeRegImmReg",
-        "ISUBxlu_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("uImm", OperandKind.Immediate), Slot("srcA", OperandKind.Register)),
-        Vec("Imm ISUB1")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Immediate(uImm),
-              InstructionOperand.Register(srcA)
-            ) => Some(Instruction.IsubxluPipeRegImmReg(dst, uImm, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubxluPipeRegRegConst extends Definition(
-        "IsubxluPipeRegRegConst",
-        "ISUBxlu_pipe",
-        Vec(
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Register),
-          Slot("srcConst", OperandKind.ConstantBank)
-        ),
-        Vec("Const ISUB")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.ConstantBank(srcConst)
-            ) => Some(Instruction.IsubxluPipeRegRegConst(dst, srcA, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubxluPipeRegRegImm extends Definition(
-        "IsubxluPipeRegRegImm",
-        "ISUBxlu_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("uImm", OperandKind.Immediate)),
-        Vec("Imm ISUB")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uImm)
-            ) => Some(Instruction.IsubxluPipeRegRegImm(dst, srcA, uImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object IsubxluPipeRegRegReg extends Definition(
-        "IsubxluPipeRegRegReg",
-        "ISUBxlu_pipe",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Register), Slot("srcB", OperandKind.Register)),
-        Vec("ISUB")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Register(srcB)
-            ) => Some(Instruction.IsubxluPipeRegRegReg(dst, srcA, srcB, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JcalConst extends Definition(
-        "JcalConst",
-        "JCAL",
-        Vec(Slot("srcConst", OperandKind.ConstantBank)),
-        Vec("JCAL c", "JCAL_c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.ConstantBank(srcConst)) => Some(Instruction.JcalConst(srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JcalImm extends Definition("JcalImm", "JCAL", Vec(Slot("sImm", OperandKind.Immediate)), Vec("JCAL")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Immediate(sImm)) => Some(Instruction.JcalImm(sImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JcalbruPipeConst extends Definition(
-        "JcalbruPipeConst",
-        "JCALbru_pipe",
-        Vec(Slot("srcConst", OperandKind.ConstantBank)),
-        Vec("JCAL c", "JCAL_c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.ConstantBank(srcConst)) =>
-          Some(Instruction.JcalbruPipeConst(srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JcalbruPipeImm
-      extends Definition("JcalbruPipeImm", "JCALbru_pipe", Vec(Slot("sImm", OperandKind.Immediate)), Vec("JCAL")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Immediate(sImm)) => Some(Instruction.JcalbruPipeImm(sImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpConst extends Definition(
-        "JmpConst",
-        "JMP",
-        Vec(Slot("sa", OperandKind.ConstantBank)),
-        Vec("JMP_c", "jmp_const_", "jmp_const__CONV_DIV", "jmp_const__U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.ConstantBank(sa)) => Some(Instruction.JmpConst(sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpImm extends Definition(
-        "JmpImm",
-        "JMP",
-        Vec(Slot("sa", OperandKind.Immediate)),
-        Vec(
-          "JMP",
-          "jmp_imm_",
-          "jmp_imm__CONV_DIV",
-          "jmp_imm__U",
-          "jmp_imm_rel_",
-          "jmp_imm_rel__CONV_DIV",
-          "jmp_imm_rel__U"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Immediate(sa)) => Some(Instruction.JmpImm(sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpPredConst extends Definition(
-        "JmpPredConst",
-        "JMP",
-        Vec(Slot("pp", OperandKind.Predicate), Slot("sa", OperandKind.ConstantBank)),
-        Vec("jmp_const_", "jmp_const__CONV_DIV", "jmp_const__U", "jmp_const_uniform_pred_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.ConstantBank(sa)) =>
-          Some(Instruction.JmpPredConst(pp, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpPredImm extends Definition(
-        "JmpPredImm",
-        "JMP",
-        Vec(Slot("pp", OperandKind.Predicate), Slot("sa", OperandKind.Immediate)),
-        Vec(
-          "jmp_imm_",
-          "jmp_imm__CONV_DIV",
-          "jmp_imm__U",
-          "jmp_imm_rel_",
-          "jmp_imm_rel__CONV_DIV",
-          "jmp_imm_rel__U",
-          "jmp_imm_uniform_pred_",
-          "jmp_imm_uniform_pred_rel_"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.Immediate(sa)) =>
-          Some(Instruction.JmpPredImm(pp, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpPredPredConst extends Definition(
-        "JmpPredPredConst",
-        "JMP",
-        Vec(
-          Slot("pp", OperandKind.Predicate),
-          Slot("uPq", OperandKind.Predicate),
-          Slot("sa", OperandKind.ConstantBank)
-        ),
-        Vec("jmp_const_uniform_pred_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Predicate(uPq),
-              InstructionOperand.ConstantBank(sa)
-            ) => Some(Instruction.JmpPredPredConst(pp, uPq, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpPredPredImm extends Definition(
-        "JmpPredPredImm",
-        "JMP",
-        Vec(Slot("pp", OperandKind.Predicate), Slot("uPq", OperandKind.Predicate), Slot("sa", OperandKind.Immediate)),
-        Vec("jmp_imm_uniform_pred_", "jmp_imm_uniform_pred_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Predicate(uPq),
-              InstructionOperand.Immediate(sa)
-            ) => Some(Instruction.JmpPredPredImm(pp, uPq, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpPredRegConst extends Definition(
-        "JmpPredRegConst",
-        "JMP",
-        Vec(
-          Slot("pp", OperandKind.Predicate),
-          Slot("srcB", OperandKind.Register),
-          Slot("sa", OperandKind.ConstantBank)
-        ),
-        Vec("jmp_const_uniform_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.ConstantBank(sa)
-            ) => Some(Instruction.JmpPredRegConst(pp, srcB, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpPredRegImm extends Definition(
-        "JmpPredRegImm",
-        "JMP",
-        Vec(Slot("pp", OperandKind.Predicate), Slot("srcB", OperandKind.Register), Slot("sa", OperandKind.Immediate)),
-        Vec("jmp_imm_uniform_", "jmp_imm_uniform_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Immediate(sa)
-            ) => Some(Instruction.JmpPredRegImm(pp, srcB, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpRegConst extends Definition(
-        "JmpRegConst",
-        "JMP",
-        Vec(Slot("srcB", OperandKind.Register), Slot("sa", OperandKind.ConstantBank)),
-        Vec("jmp_const_uniform_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcB), InstructionOperand.ConstantBank(sa)) =>
-          Some(Instruction.JmpRegConst(srcB, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpRegImm extends Definition(
-        "JmpRegImm",
-        "JMP",
-        Vec(Slot("srcB", OperandKind.Register), Slot("sa", OperandKind.Immediate)),
-        Vec("jmp_imm_uniform_", "jmp_imm_uniform_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcB), InstructionOperand.Immediate(sa)) =>
-          Some(Instruction.JmpRegImm(srcB, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpSymbolConst extends Definition(
-        "JmpSymbolConst",
-        "JMP",
-        Vec(Slot("testCC", OperandKind.Symbol), Slot("srcConst", OperandKind.ConstantBank)),
-        Vec("JMP_c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(testCC), InstructionOperand.ConstantBank(srcConst)) =>
-          Some(Instruction.JmpSymbolConst(testCC, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpSymbolImm extends Definition(
-        "JmpSymbolImm",
-        "JMP",
-        Vec(Slot("testCC", OperandKind.Symbol), Slot("sImm", OperandKind.Immediate)),
-        Vec("JMP")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(testCC), InstructionOperand.Immediate(sImm)) =>
-          Some(Instruction.JmpSymbolImm(testCC, sImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpSymbolImmImm extends Definition(
-        "JmpSymbolImmImm",
-        "JMP",
-        Vec(
-          Slot("srcConst", OperandKind.Symbol),
-          Slot("constBank", OperandKind.Immediate),
-          Slot("immConstOffset", OperandKind.Immediate)
-        ),
-        Vec("JMP c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(srcConst),
-              InstructionOperand.Immediate(constBank),
-              InstructionOperand.Immediate(immConstOffset)
-            ) => Some(Instruction.JmpSymbolImmImm(srcConst, constBank, immConstOffset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpSymbolSymbolImmImm extends Definition(
-        "JmpSymbolSymbolImmImm",
-        "JMP",
-        Vec(
-          Slot("testCC", OperandKind.Symbol),
-          Slot("srcConst", OperandKind.Symbol),
-          Slot("constBank", OperandKind.Immediate),
-          Slot("immConstOffset", OperandKind.Immediate)
-        ),
-        Vec("JMP c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(testCC),
-              InstructionOperand.Symbol(srcConst),
-              InstructionOperand.Immediate(constBank),
-              InstructionOperand.Immediate(immConstOffset)
-            ) => Some(Instruction.JmpSymbolSymbolImmImm(testCC, srcConst, constBank, immConstOffset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpbruPipeConst extends Definition(
-        "JmpbruPipeConst",
-        "JMPbru_pipe",
-        Vec(Slot("srcConst", OperandKind.ConstantBank)),
-        Vec("JMP_c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.ConstantBank(srcConst)) =>
-          Some(Instruction.JmpbruPipeConst(srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpbruPipeImm
-      extends Definition("JmpbruPipeImm", "JMPbru_pipe", Vec(Slot("sImm", OperandKind.Immediate)), Vec("JMP")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Immediate(sImm)) => Some(Instruction.JmpbruPipeImm(sImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpbruPipeSymbolConst extends Definition(
-        "JmpbruPipeSymbolConst",
-        "JMPbru_pipe",
-        Vec(Slot("testCC", OperandKind.Symbol), Slot("srcConst", OperandKind.ConstantBank)),
-        Vec("JMP_c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(testCC), InstructionOperand.ConstantBank(srcConst)) =>
-          Some(Instruction.JmpbruPipeSymbolConst(testCC, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpbruPipeSymbolImm extends Definition(
-        "JmpbruPipeSymbolImm",
-        "JMPbru_pipe",
-        Vec(Slot("testCC", OperandKind.Symbol), Slot("sImm", OperandKind.Immediate)),
-        Vec("JMP")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(testCC), InstructionOperand.Immediate(sImm)) =>
-          Some(Instruction.JmpbruPipeSymbolImm(testCC, sImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpbruPipeSymbolImmImm extends Definition(
-        "JmpbruPipeSymbolImmImm",
-        "JMPbru_pipe",
-        Vec(
-          Slot("srcConst", OperandKind.Symbol),
-          Slot("constBank", OperandKind.Immediate),
-          Slot("immConstOffset", OperandKind.Immediate)
-        ),
-        Vec("JMP c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(srcConst),
-              InstructionOperand.Immediate(constBank),
-              InstructionOperand.Immediate(immConstOffset)
-            ) => Some(Instruction.JmpbruPipeSymbolImmImm(srcConst, constBank, immConstOffset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpbruPipeSymbolSymbolImmImm extends Definition(
-        "JmpbruPipeSymbolSymbolImmImm",
-        "JMPbru_pipe",
-        Vec(
-          Slot("testCC", OperandKind.Symbol),
-          Slot("srcConst", OperandKind.Symbol),
-          Slot("constBank", OperandKind.Immediate),
-          Slot("immConstOffset", OperandKind.Immediate)
-        ),
-        Vec("JMP c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(testCC),
-              InstructionOperand.Symbol(srcConst),
-              InstructionOperand.Immediate(constBank),
-              InstructionOperand.Immediate(immConstOffset)
-            ) =>
-          Some(Instruction.JmpbruPipeSymbolSymbolImmImm(testCC, srcConst, constBank, immConstOffset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpcbuPipeConst extends Definition(
-        "JmpcbuPipeConst",
-        "JMPcbu_pipe",
-        Vec(Slot("sa", OperandKind.ConstantBank)),
-        Vec("jmp_const_", "jmp_const__CONV_DIV", "jmp_const__U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.ConstantBank(sa)) => Some(Instruction.JmpcbuPipeConst(sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpcbuPipeImm extends Definition(
-        "JmpcbuPipeImm",
-        "JMPcbu_pipe",
-        Vec(Slot("sa", OperandKind.Immediate)),
-        Vec("jmp_imm_", "jmp_imm__CONV_DIV", "jmp_imm__U", "jmp_imm_rel_", "jmp_imm_rel__CONV_DIV", "jmp_imm_rel__U")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Immediate(sa)) => Some(Instruction.JmpcbuPipeImm(sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpcbuPipePredConst extends Definition(
-        "JmpcbuPipePredConst",
-        "JMPcbu_pipe",
-        Vec(Slot("pp", OperandKind.Predicate), Slot("sa", OperandKind.ConstantBank)),
-        Vec("jmp_const_", "jmp_const__CONV_DIV", "jmp_const__U", "jmp_const_uniform_pred_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.ConstantBank(sa)) =>
-          Some(Instruction.JmpcbuPipePredConst(pp, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpcbuPipePredImm extends Definition(
-        "JmpcbuPipePredImm",
-        "JMPcbu_pipe",
-        Vec(Slot("pp", OperandKind.Predicate), Slot("sa", OperandKind.Immediate)),
-        Vec(
-          "jmp_imm_",
-          "jmp_imm__CONV_DIV",
-          "jmp_imm__U",
-          "jmp_imm_rel_",
-          "jmp_imm_rel__CONV_DIV",
-          "jmp_imm_rel__U",
-          "jmp_imm_uniform_pred_",
-          "jmp_imm_uniform_pred_rel_"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.Immediate(sa)) =>
-          Some(Instruction.JmpcbuPipePredImm(pp, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpcbuPipePredPredConst extends Definition(
-        "JmpcbuPipePredPredConst",
-        "JMPcbu_pipe",
-        Vec(
-          Slot("pp", OperandKind.Predicate),
-          Slot("uPq", OperandKind.Predicate),
-          Slot("sa", OperandKind.ConstantBank)
-        ),
-        Vec("jmp_const_uniform_pred_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Predicate(uPq),
-              InstructionOperand.ConstantBank(sa)
-            ) => Some(Instruction.JmpcbuPipePredPredConst(pp, uPq, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpcbuPipePredPredImm extends Definition(
-        "JmpcbuPipePredPredImm",
-        "JMPcbu_pipe",
-        Vec(Slot("pp", OperandKind.Predicate), Slot("uPq", OperandKind.Predicate), Slot("sa", OperandKind.Immediate)),
-        Vec("jmp_imm_uniform_pred_", "jmp_imm_uniform_pred_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Predicate(uPq),
-              InstructionOperand.Immediate(sa)
-            ) => Some(Instruction.JmpcbuPipePredPredImm(pp, uPq, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpcbuPipePredRegConst extends Definition(
-        "JmpcbuPipePredRegConst",
-        "JMPcbu_pipe",
-        Vec(
-          Slot("pp", OperandKind.Predicate),
-          Slot("srcB", OperandKind.Register),
-          Slot("sa", OperandKind.ConstantBank)
-        ),
-        Vec("jmp_const_uniform_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.ConstantBank(sa)
-            ) => Some(Instruction.JmpcbuPipePredRegConst(pp, srcB, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpcbuPipePredRegImm extends Definition(
-        "JmpcbuPipePredRegImm",
-        "JMPcbu_pipe",
-        Vec(Slot("pp", OperandKind.Predicate), Slot("srcB", OperandKind.Register), Slot("sa", OperandKind.Immediate)),
-        Vec("jmp_imm_uniform_", "jmp_imm_uniform_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Register(srcB),
-              InstructionOperand.Immediate(sa)
-            ) => Some(Instruction.JmpcbuPipePredRegImm(pp, srcB, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpcbuPipeRegConst extends Definition(
-        "JmpcbuPipeRegConst",
-        "JMPcbu_pipe",
-        Vec(Slot("srcB", OperandKind.Register), Slot("sa", OperandKind.ConstantBank)),
-        Vec("jmp_const_uniform_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcB), InstructionOperand.ConstantBank(sa)) =>
-          Some(Instruction.JmpcbuPipeRegConst(srcB, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmpcbuPipeRegImm extends Definition(
-        "JmpcbuPipeRegImm",
-        "JMPcbu_pipe",
-        Vec(Slot("srcB", OperandKind.Register), Slot("sa", OperandKind.Immediate)),
-        Vec("jmp_imm_uniform_", "jmp_imm_uniform_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcB), InstructionOperand.Immediate(sa)) =>
-          Some(Instruction.JmpcbuPipeRegImm(srcB, sa, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxConst extends Definition("JmxConst", "JMX", Vec(Slot("srcConst", OperandKind.ConstantBank)), Vec("JMX_c")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.ConstantBank(srcConst)) => Some(Instruction.JmxConst(srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxPredReg extends Definition(
-        "JmxPredReg",
-        "JMX",
-        Vec(Slot("pp", OperandKind.Predicate), Slot("srcA", OperandKind.Register)),
-        Vec("jmx_", "jmx_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.Register(srcA)) =>
-          Some(Instruction.JmxPredReg(pp, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxPredRegImm extends Definition(
-        "JmxPredRegImm",
-        "JMX",
-        Vec(
-          Slot("pp", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("ra_offset", OperandKind.Immediate)
-        ),
-        Vec("jmx_", "jmx_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(ra_offset)
-            ) => Some(Instruction.JmxPredRegImm(pp, srcA, ra_offset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxReg
-      extends Definition("JmxReg", "JMX", Vec(Slot("srcA", OperandKind.Register)), Vec("JMX", "jmx_", "jmx_rel_")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcA)) => Some(Instruction.JmxReg(srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxRegImm extends Definition(
-        "JmxRegImm",
-        "JMX",
-        Vec(Slot("srcA", OperandKind.Register), Slot("ra_offset", OperandKind.Immediate)),
-        Vec("JMX", "jmx_", "jmx_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcA), InstructionOperand.Immediate(ra_offset)) =>
-          Some(Instruction.JmxRegImm(srcA, ra_offset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxSymbolConst extends Definition(
-        "JmxSymbolConst",
-        "JMX",
-        Vec(Slot("testCC", OperandKind.Symbol), Slot("srcConst", OperandKind.ConstantBank)),
-        Vec("JMX_c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(testCC), InstructionOperand.ConstantBank(srcConst)) =>
-          Some(Instruction.JmxSymbolConst(testCC, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxSymbolImmAddress extends Definition(
-        "JmxSymbolImmAddress",
-        "JMX",
-        Vec(
-          Slot("srcConst", OperandKind.Symbol),
-          Slot("constBank", OperandKind.Immediate),
-          Slot("srcA", OperandKind.Address)
-        ),
-        Vec("JMX c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(srcConst),
-              InstructionOperand.Immediate(constBank),
-              InstructionOperand.Address(srcA)
-            ) => Some(Instruction.JmxSymbolImmAddress(srcConst, constBank, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxSymbolReg extends Definition(
-        "JmxSymbolReg",
-        "JMX",
-        Vec(Slot("testCC", OperandKind.Symbol), Slot("srcA", OperandKind.Register)),
-        Vec("JMX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(testCC), InstructionOperand.Register(srcA)) =>
-          Some(Instruction.JmxSymbolReg(testCC, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxSymbolRegImm extends Definition(
-        "JmxSymbolRegImm",
-        "JMX",
-        Vec(
-          Slot("testCC", OperandKind.Symbol),
-          Slot("srcA", OperandKind.Register),
-          Slot("sImm", OperandKind.Immediate)
-        ),
-        Vec("JMX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(testCC),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sImm)
-            ) => Some(Instruction.JmxSymbolRegImm(testCC, srcA, sImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxSymbolSymbolImmAddress extends Definition(
-        "JmxSymbolSymbolImmAddress",
-        "JMX",
-        Vec(
-          Slot("testCC", OperandKind.Symbol),
-          Slot("srcConst", OperandKind.Symbol),
-          Slot("constBank", OperandKind.Immediate),
-          Slot("srcA", OperandKind.Address)
-        ),
-        Vec("JMX c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(testCC),
-              InstructionOperand.Symbol(srcConst),
-              InstructionOperand.Immediate(constBank),
-              InstructionOperand.Address(srcA)
-            ) => Some(Instruction.JmxSymbolSymbolImmAddress(testCC, srcConst, constBank, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxuPredReg extends Definition(
-        "JmxuPredReg",
-        "JMXU",
-        Vec(Slot("pp", OperandKind.Predicate), Slot("srcA", OperandKind.Register)),
-        Vec("jmxu_", "jmxu_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.Register(srcA)) =>
-          Some(Instruction.JmxuPredReg(pp, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxuPredRegImm extends Definition(
-        "JmxuPredRegImm",
-        "JMXU",
-        Vec(
-          Slot("pp", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("uR_offset", OperandKind.Immediate)
-        ),
-        Vec("jmxu_", "jmxu_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uR_offset)
-            ) => Some(Instruction.JmxuPredRegImm(pp, srcA, uR_offset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxuReg
-      extends Definition("JmxuReg", "JMXU", Vec(Slot("srcA", OperandKind.Register)), Vec("jmxu_", "jmxu_rel_")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcA)) => Some(Instruction.JmxuReg(srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxuRegImm extends Definition(
-        "JmxuRegImm",
-        "JMXU",
-        Vec(Slot("srcA", OperandKind.Register), Slot("uR_offset", OperandKind.Immediate)),
-        Vec("jmxu_", "jmxu_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcA), InstructionOperand.Immediate(uR_offset)) =>
-          Some(Instruction.JmxuRegImm(srcA, uR_offset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxucbuPipePredReg extends Definition(
-        "JmxucbuPipePredReg",
-        "JMXUcbu_pipe",
-        Vec(Slot("pp", OperandKind.Predicate), Slot("srcA", OperandKind.Register)),
-        Vec("jmxu_", "jmxu_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.Register(srcA)) =>
-          Some(Instruction.JmxucbuPipePredReg(pp, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxucbuPipePredRegImm extends Definition(
-        "JmxucbuPipePredRegImm",
-        "JMXUcbu_pipe",
-        Vec(
-          Slot("pp", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("uR_offset", OperandKind.Immediate)
-        ),
-        Vec("jmxu_", "jmxu_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(uR_offset)
-            ) => Some(Instruction.JmxucbuPipePredRegImm(pp, srcA, uR_offset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxucbuPipeReg extends Definition(
-        "JmxucbuPipeReg",
-        "JMXUcbu_pipe",
-        Vec(Slot("srcA", OperandKind.Register)),
-        Vec("jmxu_", "jmxu_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcA)) => Some(Instruction.JmxucbuPipeReg(srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxucbuPipeRegImm extends Definition(
-        "JmxucbuPipeRegImm",
-        "JMXUcbu_pipe",
-        Vec(Slot("srcA", OperandKind.Register), Slot("uR_offset", OperandKind.Immediate)),
-        Vec("jmxu_", "jmxu_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcA), InstructionOperand.Immediate(uR_offset)) =>
-          Some(Instruction.JmxucbuPipeRegImm(srcA, uR_offset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxaduPipeReg
-      extends Definition("JmxaduPipeReg", "JMXadu_pipe", Vec(Slot("srcA", OperandKind.Register)), Vec("JMX")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcA)) => Some(Instruction.JmxaduPipeReg(srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxaduPipeRegImm extends Definition(
-        "JmxaduPipeRegImm",
-        "JMXadu_pipe",
-        Vec(Slot("srcA", OperandKind.Register), Slot("sImm", OperandKind.Immediate)),
-        Vec("JMX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcA), InstructionOperand.Immediate(sImm)) =>
-          Some(Instruction.JmxaduPipeRegImm(srcA, sImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxaduPipeSymbolImmAddress extends Definition(
-        "JmxaduPipeSymbolImmAddress",
-        "JMXadu_pipe",
-        Vec(
-          Slot("srcConst", OperandKind.Symbol),
-          Slot("constBank", OperandKind.Immediate),
-          Slot("srcA", OperandKind.Address)
-        ),
-        Vec("JMX c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(srcConst),
-              InstructionOperand.Immediate(constBank),
-              InstructionOperand.Address(srcA)
-            ) => Some(Instruction.JmxaduPipeSymbolImmAddress(srcConst, constBank, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxaduPipeSymbolReg extends Definition(
-        "JmxaduPipeSymbolReg",
-        "JMXadu_pipe",
-        Vec(Slot("testCC", OperandKind.Symbol), Slot("srcA", OperandKind.Register)),
-        Vec("JMX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(testCC), InstructionOperand.Register(srcA)) =>
-          Some(Instruction.JmxaduPipeSymbolReg(testCC, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxaduPipeSymbolRegImm extends Definition(
-        "JmxaduPipeSymbolRegImm",
-        "JMXadu_pipe",
-        Vec(
-          Slot("testCC", OperandKind.Symbol),
-          Slot("srcA", OperandKind.Register),
-          Slot("sImm", OperandKind.Immediate)
-        ),
-        Vec("JMX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(testCC),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sImm)
-            ) => Some(Instruction.JmxaduPipeSymbolRegImm(testCC, srcA, sImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxaduPipeSymbolSymbolImmAddress extends Definition(
-        "JmxaduPipeSymbolSymbolImmAddress",
-        "JMXadu_pipe",
-        Vec(
-          Slot("testCC", OperandKind.Symbol),
-          Slot("srcConst", OperandKind.Symbol),
-          Slot("constBank", OperandKind.Immediate),
-          Slot("srcA", OperandKind.Address)
-        ),
-        Vec("JMX c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(testCC),
-              InstructionOperand.Symbol(srcConst),
-              InstructionOperand.Immediate(constBank),
-              InstructionOperand.Address(srcA)
-            ) => Some(Instruction.JmxaduPipeSymbolSymbolImmAddress(testCC, srcConst, constBank, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxbruPipeConst extends Definition(
-        "JmxbruPipeConst",
-        "JMXbru_pipe",
-        Vec(Slot("srcConst", OperandKind.ConstantBank)),
-        Vec("JMX_c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.ConstantBank(srcConst)) =>
-          Some(Instruction.JmxbruPipeConst(srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxbruPipeReg
-      extends Definition("JmxbruPipeReg", "JMXbru_pipe", Vec(Slot("srcA", OperandKind.Register)), Vec("JMX")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcA)) => Some(Instruction.JmxbruPipeReg(srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxbruPipeRegImm extends Definition(
-        "JmxbruPipeRegImm",
-        "JMXbru_pipe",
-        Vec(Slot("srcA", OperandKind.Register), Slot("sImm", OperandKind.Immediate)),
-        Vec("JMX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcA), InstructionOperand.Immediate(sImm)) =>
-          Some(Instruction.JmxbruPipeRegImm(srcA, sImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxbruPipeSymbolConst extends Definition(
-        "JmxbruPipeSymbolConst",
-        "JMXbru_pipe",
-        Vec(Slot("testCC", OperandKind.Symbol), Slot("srcConst", OperandKind.ConstantBank)),
-        Vec("JMX_c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(testCC), InstructionOperand.ConstantBank(srcConst)) =>
-          Some(Instruction.JmxbruPipeSymbolConst(testCC, srcConst, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxbruPipeSymbolImmAddress extends Definition(
-        "JmxbruPipeSymbolImmAddress",
-        "JMXbru_pipe",
-        Vec(
-          Slot("srcConst", OperandKind.Symbol),
-          Slot("constBank", OperandKind.Immediate),
-          Slot("srcA", OperandKind.Address)
-        ),
-        Vec("JMX c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(srcConst),
-              InstructionOperand.Immediate(constBank),
-              InstructionOperand.Address(srcA)
-            ) => Some(Instruction.JmxbruPipeSymbolImmAddress(srcConst, constBank, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxbruPipeSymbolReg extends Definition(
-        "JmxbruPipeSymbolReg",
-        "JMXbru_pipe",
-        Vec(Slot("testCC", OperandKind.Symbol), Slot("srcA", OperandKind.Register)),
-        Vec("JMX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Symbol(testCC), InstructionOperand.Register(srcA)) =>
-          Some(Instruction.JmxbruPipeSymbolReg(testCC, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxbruPipeSymbolRegImm extends Definition(
-        "JmxbruPipeSymbolRegImm",
-        "JMXbru_pipe",
-        Vec(
-          Slot("testCC", OperandKind.Symbol),
-          Slot("srcA", OperandKind.Register),
-          Slot("sImm", OperandKind.Immediate)
-        ),
-        Vec("JMX")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(testCC),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(sImm)
-            ) => Some(Instruction.JmxbruPipeSymbolRegImm(testCC, srcA, sImm, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxbruPipeSymbolSymbolImmAddress extends Definition(
-        "JmxbruPipeSymbolSymbolImmAddress",
-        "JMXbru_pipe",
-        Vec(
-          Slot("testCC", OperandKind.Symbol),
-          Slot("srcConst", OperandKind.Symbol),
-          Slot("constBank", OperandKind.Immediate),
-          Slot("srcA", OperandKind.Address)
-        ),
-        Vec("JMX c")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Symbol(testCC),
-              InstructionOperand.Symbol(srcConst),
-              InstructionOperand.Immediate(constBank),
-              InstructionOperand.Address(srcA)
-            ) => Some(Instruction.JmxbruPipeSymbolSymbolImmAddress(testCC, srcConst, constBank, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxcbuPipePredReg extends Definition(
-        "JmxcbuPipePredReg",
-        "JMXcbu_pipe",
-        Vec(Slot("pp", OperandKind.Predicate), Slot("srcA", OperandKind.Register)),
-        Vec("jmx_", "jmx_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Predicate(pp), InstructionOperand.Register(srcA)) =>
-          Some(Instruction.JmxcbuPipePredReg(pp, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxcbuPipePredRegImm extends Definition(
-        "JmxcbuPipePredRegImm",
-        "JMXcbu_pipe",
-        Vec(
-          Slot("pp", OperandKind.Predicate),
-          Slot("srcA", OperandKind.Register),
-          Slot("ra_offset", OperandKind.Immediate)
-        ),
-        Vec("jmx_", "jmx_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pp),
-              InstructionOperand.Register(srcA),
-              InstructionOperand.Immediate(ra_offset)
-            ) => Some(Instruction.JmxcbuPipePredRegImm(pp, srcA, ra_offset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxcbuPipeReg extends Definition(
-        "JmxcbuPipeReg",
-        "JMXcbu_pipe",
-        Vec(Slot("srcA", OperandKind.Register)),
-        Vec("jmx_", "jmx_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcA)) => Some(Instruction.JmxcbuPipeReg(srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object JmxcbuPipeRegImm extends Definition(
-        "JmxcbuPipeRegImm",
-        "JMXcbu_pipe",
-        Vec(Slot("srcA", OperandKind.Register), Slot("ra_offset", OperandKind.Immediate)),
-        Vec("jmx_", "jmx_rel_")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(srcA), InstructionOperand.Immediate(ra_offset)) =>
-          Some(Instruction.JmxcbuPipeRegImm(srcA, ra_offset, modifiers, guard))
-        case _ => None
-      }
-  }
-  object KilNoOperands extends Definition("KilNoOperands", "KIL", Vec(), Vec("BRK", "KIL")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec() => Some(Instruction.KilNoOperands(modifiers, guard))
-        case _ => None
-      }
-  }
-  object KillNoOperands extends Definition("KillNoOperands", "KILL", Vec(), Vec("kill_")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec() => Some(Instruction.KillNoOperands(modifiers, guard))
-        case _ => None
-      }
-  }
-  object KillPred extends Definition("KillPred", "KILL", Vec(Slot("pp", OperandKind.Predicate)), Vec("kill_")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Predicate(pp)) => Some(Instruction.KillPred(pp, modifiers, guard))
-        case _ => None
-      }
-  }
-  object KillcbuPipeNoOperands extends Definition("KillcbuPipeNoOperands", "KILLcbu_pipe", Vec(), Vec("kill_")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec() => Some(Instruction.KillcbuPipeNoOperands(modifiers, guard))
-        case _ => None
-      }
-  }
-  object KillcbuPipePred
-      extends Definition("KillcbuPipePred", "KILLcbu_pipe", Vec(Slot("pp", OperandKind.Predicate)), Vec("kill_")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Predicate(pp)) => Some(Instruction.KillcbuPipePred(pp, modifiers, guard))
-        case _ => None
-      }
-  }
-  object KilbruPipeNoOperands extends Definition("KilbruPipeNoOperands", "KILbru_pipe", Vec(), Vec("BRK", "KIL")) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec() => Some(Instruction.KilbruPipeNoOperands(modifiers, guard))
-        case _ => None
-      }
-  }
-  object LdPredRegAddress extends Definition(
-        "LdPredRegAddress",
-        "LD",
-        Vec(Slot("pu", OperandKind.Predicate), Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address)),
-        Vec(
-          "ld_weakonly_zd__sImmOffset",
-          "ld_weakonly_zd__uImmOffset",
-          "ld_weakonly_zd_uniform__Ra32",
-          "ld_weakonly_zd_uniform__Ra64",
-          "ld_weakonly_zd_uniform__RaRZ",
-          "ld_zd__sImmOffset",
-          "ld_zd__uImmOffset",
-          "ld_zd_uniform__Ra32",
-          "ld_zd_uniform__Ra64",
-          "ld_zd_uniform__RaRZ"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA)
-            ) => Some(Instruction.LdPredRegAddress(pu, dst, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object LdPredRegAddressPred extends Definition(
-        "LdPredRegAddressPred",
-        "LD",
-        Vec(
-          Slot("pu", OperandKind.Predicate),
-          Slot("dst", OperandKind.Register),
-          Slot("srcA", OperandKind.Address),
-          Slot("pnz", OperandKind.Predicate)
-        ),
-        Vec(
-          "ld_weakonly_zd__sImmOffset",
-          "ld_weakonly_zd__uImmOffset",
-          "ld_weakonly_zd_uniform__Ra32",
-          "ld_weakonly_zd_uniform__Ra64",
-          "ld_weakonly_zd_uniform__RaRZ",
-          "ld_zd__sImmOffset",
-          "ld_zd__uImmOffset",
-          "ld_zd_uniform__Ra32",
-          "ld_zd_uniform__Ra64",
-          "ld_zd_uniform__RaRZ"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Predicate(pu),
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Predicate(pnz)
-            ) => Some(Instruction.LdPredRegAddressPred(pu, dst, srcA, pnz, modifiers, guard))
-        case _ => None
-      }
-  }
-  object LdRegAddress extends Definition(
-        "LdRegAddress",
-        "LD",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address)),
-        Vec(
-          "I LD",
-          "I_LD",
-          "LD",
-          "ld__sImmOffset",
-          "ld__uImmOffset",
-          "ld_memdesc__Ra64",
-          "ld_uniform__Ra32",
-          "ld_uniform__Ra64",
-          "ld_uniform__RaRZ",
-          "ld_weakonly__sImmOffset",
-          "ld_weakonly__uImmOffset",
-          "ld_weakonly_uniform__Ra32",
-          "ld_weakonly_uniform__Ra64",
-          "ld_weakonly_uniform__RaRZ"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(InstructionOperand.Register(dst), InstructionOperand.Address(srcA)) =>
-          Some(Instruction.LdRegAddress(dst, srcA, modifiers, guard))
-        case _ => None
-      }
-  }
-  object LdRegAddressPred extends Definition(
-        "LdRegAddressPred",
-        "LD",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address), Slot("pnz", OperandKind.Predicate)),
-        Vec(
-          "I_LD",
-          "LD",
-          "ld__sImmOffset",
-          "ld__uImmOffset",
-          "ld_memdesc__Ra64",
-          "ld_uniform__Ra32",
-          "ld_uniform__Ra64",
-          "ld_uniform__RaRZ",
-          "ld_weakonly__sImmOffset",
-          "ld_weakonly__uImmOffset",
-          "ld_weakonly_uniform__Ra32",
-          "ld_weakonly_uniform__Ra64",
-          "ld_weakonly_uniform__RaRZ"
-        )
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Predicate(pnz)
-            ) => Some(Instruction.LdRegAddressPred(dst, srcA, pnz, modifiers, guard))
-        case _ => None
-      }
-  }
-  object LdcRegAddressAddress extends Definition(
-        "LdcRegAddressAddress",
-        "LDC",
-        Vec(Slot("dst", OperandKind.Register), Slot("srcA", OperandKind.Address), Slot("srcB", OperandKind.Address)),
-        Vec("ldc_ur__URRzI", "ldc_ur__URnonRzI")
-      ) {
-    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] =
-      operands match {
-        case Vec(
-              InstructionOperand.Register(dst),
-              InstructionOperand.Address(srcA),
-              InstructionOperand.Address(srcB)
-            ) => Some(Instruction.LdcRegAddressAddress(dst, srcA, srcB, modifiers, guard))
+        case Vec(InstructionOperand.Register(srcB)) => Some(Instruction.Hir0x1f3Reg(srcB, modifiers, guard))
         case _ => None
       }
   }
   val definitions: Vec[Definition] = Vec(
-    ImulfmalighterPipeRegRegRegImm,
-    ImulfmalighterPipeRegRegRegReg,
-    ImulmioPipeRegRegConst,
-    ImulmioPipeRegRegImm,
-    ImulmioPipeRegRegReg,
-    IpaRegAddress,
-    IpaRegAddressImm,
-    IpaRegAddressPred,
-    IpaRegAddressReg,
-    IpaRegAddressRegReg,
-    IpaRegAddressRegRegPred,
-    IpaRegImm,
-    IpaRegImmConst,
-    IpaRegImmImm,
-    IpaRegImmPred,
-    IpaRegImmReg,
-    IpaRegImmRegReg,
-    IpaRegImmRegRegPred,
-    IpaRegPredAddress,
-    IpaRegPredAddressImm,
-    IpaRegPredAddressReg,
-    IpaRegPredImm,
-    IpaRegPredImmConst,
-    IpaRegPredImmImm,
-    IpaRegPredImmReg,
-    IpamioPipeRegAddress,
-    IpamioPipeRegAddressImm,
-    IpamioPipeRegAddressPred,
-    IpamioPipeRegAddressReg,
-    IpamioPipeRegAddressRegRegPred,
-    IpamioPipeRegImm,
-    IpamioPipeRegImmConst,
-    IpamioPipeRegImmImm,
-    IpamioPipeRegImmPred,
-    IpamioPipeRegImmReg,
-    IpamioPipeRegImmRegReg,
-    IpamioPipeRegImmRegRegPred,
-    IpamioPipeRegPredAddress,
-    IpamioPipeRegPredAddressImm,
-    IpamioPipeRegPredAddressReg,
-    IpamioPipeRegPredImm,
-    IpamioPipeRegPredImmConst,
-    IpamioPipeRegPredImmImm,
-    IpamioPipeRegPredImmReg,
-    IpasuPipeRegAddress,
-    IpasuPipeRegAddressRegReg,
-    IsadRegRegConstReg,
-    IsadRegRegImmReg,
-    IsadRegRegRegConst,
-    IsadRegRegRegReg,
-    IsadxluPipeRegRegConstReg,
-    IsadxluPipeRegRegImmReg,
-    IsadxluPipeRegRegRegConst,
-    IsadxluPipeRegRegRegReg,
-    IsberdRegAddress,
-    IsberdmioPipeRegAddress,
-    IsbewrAddressReg,
-    IsbewrmioPipeAddressReg,
-    IscaddRegPredRegAddressImmImm,
-    IscaddRegPredRegConstImm,
-    IscaddRegPredRegImmImm,
-    IscaddRegPredRegRegImm,
-    IscaddRegRegAddressImmImm,
-    IscaddRegRegConstImm,
-    IscaddRegRegImmImm,
-    IscaddRegRegRegImm,
-    Iscadd32iRegPredRegImmImm,
-    Iscadd32iRegRegImmImm,
-    Iscadd32ifxuPipeRegRegImmImm,
-    Iscadd32iintPipeRegPredRegImmImm,
-    Iscadd32iintPipeRegRegImmImm,
-    Iscadd32ixluPipeRegRegImmImm,
-    IscaddfxuPipeRegRegConstImm,
-    IscaddfxuPipeRegRegImmImm,
-    IscaddfxuPipeRegRegRegImm,
-    IscaddintPipeRegPredRegAddressImmImm,
-    IscaddintPipeRegPredRegConstImm,
-    IscaddintPipeRegPredRegImmImm,
-    IscaddintPipeRegPredRegRegImm,
-    IscaddintPipeRegRegAddressImmImm,
-    IscaddintPipeRegRegConstImm,
-    IscaddintPipeRegRegImmImm,
-    IscaddintPipeRegRegRegImm,
-    IscaddxluPipeRegRegConstImm,
-    IscaddxluPipeRegRegImmImm,
-    IscaddxluPipeRegRegRegImm,
-    IsetRegRegConst,
-    IsetRegRegConstPred,
-    IsetRegRegImm,
-    IsetRegRegImmPred,
-    IsetRegRegReg,
-    IsetRegRegRegPred,
-    IsetpPredPredRegAddressImmPred,
-    IsetpPredPredRegAddressImmPredPred,
-    IsetpPredPredRegConstPred,
-    IsetpPredPredRegConstPredPred,
-    IsetpPredPredRegImmPred,
-    IsetpPredPredRegImmPredPred,
-    IsetpPredPredRegRegPred,
-    IsetpPredPredRegRegPredPred,
-    IsetpPredRegAddressImm,
-    IsetpPredRegAddressImmPred,
-    IsetpPredRegConst,
-    IsetpPredRegConstPred,
-    IsetpPredRegImm,
-    IsetpPredRegImmPred,
-    IsetpPredRegReg,
-    IsetpPredRegRegPred,
-    IsetpfauPipePredPredRegConstPred,
-    IsetpfauPipePredPredRegImmPred,
-    IsetpfauPipePredPredRegRegPred,
-    IsetpfauPipePredRegConst,
-    IsetpfauPipePredRegImm,
-    IsetpfauPipePredRegReg,
-    IsetpfxuPipePredPredRegConstPred,
-    IsetpfxuPipePredPredRegImmPred,
-    IsetpfxuPipePredPredRegRegPred,
-    IsetpfxuPipePredRegConst,
-    IsetpfxuPipePredRegImm,
-    IsetpfxuPipePredRegReg,
-    IsetpintPipePredPredRegAddressImmPred,
-    IsetpintPipePredPredRegAddressImmPredPred,
-    IsetpintPipePredPredRegConstPred,
-    IsetpintPipePredPredRegConstPredPred,
-    IsetpintPipePredPredRegImmPred,
-    IsetpintPipePredPredRegImmPredPred,
-    IsetpintPipePredPredRegRegPred,
-    IsetpintPipePredPredRegRegPredPred,
-    IsetpintPipePredRegAddressImm,
-    IsetpintPipePredRegAddressImmPred,
-    IsetpintPipePredRegConst,
-    IsetpintPipePredRegConstPred,
-    IsetpintPipePredRegImm,
-    IsetpintPipePredRegImmPred,
-    IsetpintPipePredRegReg,
-    IsetpintPipePredRegRegPred,
-    IsetpxluPipePredPredRegConstPred,
-    IsetpxluPipePredPredRegImmPred,
-    IsetpxluPipePredPredRegRegPred,
-    IsetpxluPipePredRegConst,
-    IsetpxluPipePredRegImm,
-    IsetpxluPipePredRegReg,
-    IsetfauPipeRegRegConst,
-    IsetfauPipeRegRegConstPred,
-    IsetfauPipeRegRegImm,
-    IsetfauPipeRegRegImmPred,
-    IsetfauPipeRegRegReg,
-    IsetfauPipeRegRegRegPred,
-    IsetfxuPipeRegRegConst,
-    IsetfxuPipeRegRegConstPred,
-    IsetfxuPipeRegRegImm,
-    IsetfxuPipeRegRegImmPred,
-    IsetfxuPipeRegRegReg,
-    IsetfxuPipeRegRegRegPred,
-    IsetxluPipeRegRegConst,
-    IsetxluPipeRegRegConstPred,
-    IsetxluPipeRegRegImm,
-    IsetxluPipeRegRegImmPred,
-    IsetxluPipeRegRegReg,
-    IsetxluPipeRegRegRegPred,
-    IsubRegConstReg,
-    IsubRegImmReg,
-    IsubRegRegConst,
-    IsubRegRegImm,
-    IsubRegRegReg,
-    IsubfauPipeRegConstReg,
-    IsubfauPipeRegImmReg,
-    IsubfauPipeRegRegConst,
-    IsubfauPipeRegRegImm,
-    IsubfauPipeRegRegReg,
-    IsubxluPipeRegConstReg,
-    IsubxluPipeRegImmReg,
-    IsubxluPipeRegRegConst,
-    IsubxluPipeRegRegImm,
-    IsubxluPipeRegRegReg,
-    JcalConst,
-    JcalImm,
-    JcalbruPipeConst,
-    JcalbruPipeImm,
-    JmpConst,
-    JmpImm,
-    JmpPredConst,
-    JmpPredImm,
-    JmpPredPredConst,
-    JmpPredPredImm,
-    JmpPredRegConst,
-    JmpPredRegImm,
-    JmpRegConst,
-    JmpRegImm,
-    JmpSymbolConst,
-    JmpSymbolImm,
-    JmpSymbolImmImm,
-    JmpSymbolSymbolImmImm,
-    JmpbruPipeConst,
-    JmpbruPipeImm,
-    JmpbruPipeSymbolConst,
-    JmpbruPipeSymbolImm,
-    JmpbruPipeSymbolImmImm,
-    JmpbruPipeSymbolSymbolImmImm,
-    JmpcbuPipeConst,
-    JmpcbuPipeImm,
-    JmpcbuPipePredConst,
-    JmpcbuPipePredImm,
-    JmpcbuPipePredPredConst,
-    JmpcbuPipePredPredImm,
-    JmpcbuPipePredRegConst,
-    JmpcbuPipePredRegImm,
-    JmpcbuPipeRegConst,
-    JmpcbuPipeRegImm,
-    JmxConst,
-    JmxPredReg,
-    JmxPredRegImm,
-    JmxReg,
-    JmxRegImm,
-    JmxSymbolConst,
-    JmxSymbolImmAddress,
-    JmxSymbolReg,
-    JmxSymbolRegImm,
-    JmxSymbolSymbolImmAddress,
-    JmxuPredReg,
-    JmxuPredRegImm,
-    JmxuReg,
-    JmxuRegImm,
-    JmxucbuPipePredReg,
-    JmxucbuPipePredRegImm,
-    JmxucbuPipeReg,
-    JmxucbuPipeRegImm,
-    JmxaduPipeReg,
-    JmxaduPipeRegImm,
-    JmxaduPipeSymbolImmAddress,
-    JmxaduPipeSymbolReg,
-    JmxaduPipeSymbolRegImm,
-    JmxaduPipeSymbolSymbolImmAddress,
-    JmxbruPipeConst,
-    JmxbruPipeReg,
-    JmxbruPipeRegImm,
-    JmxbruPipeSymbolConst,
-    JmxbruPipeSymbolImmAddress,
-    JmxbruPipeSymbolReg,
-    JmxbruPipeSymbolRegImm,
-    JmxbruPipeSymbolSymbolImmAddress,
-    JmxcbuPipePredReg,
-    JmxcbuPipePredRegImm,
-    JmxcbuPipeReg,
-    JmxcbuPipeRegImm,
-    KilNoOperands,
-    KillNoOperands,
-    KillPred,
-    KillcbuPipeNoOperands,
-    KillcbuPipePred,
-    KilbruPipeNoOperands,
-    LdPredRegAddress,
-    LdPredRegAddressPred,
-    LdRegAddress,
-    LdRegAddressPred,
-    LdcRegAddressAddress
+    UviaddRegRegImm,
+    UviaddRegRegReg,
+    UvimnmxRegRegImmPred,
+    UvimnmxRegRegRegPred,
+    UvirtcountImm,
+    UvirtcountReg,
+    VabsdiffRegPredRegAddressImmReg,
+    VabsdiffRegPredRegConstReg,
+    VabsdiffRegPredRegImmReg,
+    VabsdiffRegPredRegRegAddressImm,
+    VabsdiffRegPredRegRegConst,
+    VabsdiffRegPredRegRegImm,
+    VabsdiffRegPredRegRegReg,
+    VabsdiffRegRegAddressImmReg,
+    VabsdiffRegRegConstReg,
+    VabsdiffRegRegImmReg,
+    VabsdiffRegRegRegAddressImm,
+    VabsdiffRegRegRegConst,
+    VabsdiffRegRegRegImm,
+    VabsdiffRegRegRegReg,
+    Vabsdiff2RegRegImmReg,
+    Vabsdiff2RegRegRegReg,
+    Vabsdiff4RegPredRegAddressImmReg,
+    Vabsdiff4RegPredRegConstReg,
+    Vabsdiff4RegPredRegImmReg,
+    Vabsdiff4RegPredRegRegAddressImm,
+    Vabsdiff4RegPredRegRegConst,
+    Vabsdiff4RegPredRegRegImm,
+    Vabsdiff4RegPredRegRegReg,
+    Vabsdiff4RegRegAddressImmReg,
+    Vabsdiff4RegRegConstReg,
+    Vabsdiff4RegRegImmReg,
+    Vabsdiff4RegRegRegAddressImm,
+    Vabsdiff4RegRegRegConst,
+    Vabsdiff4RegRegRegImm,
+    Vabsdiff4RegRegRegReg,
+    VaddRegRegReg,
+    VaddRegRegRegReg,
+    Vadd2RegRegReg,
+    Vadd2RegRegRegReg,
+    Vadd4RegRegReg,
+    Vadd4RegRegRegReg,
+    VhmnmxRegRegAddressImmRegPred,
+    VhmnmxRegRegConstRegPred,
+    VhmnmxRegRegImmImmRegPred,
+    VhmnmxRegRegRegRegPred,
+    ViaddRegRegAddressImm,
+    ViaddRegRegConst,
+    ViaddRegRegImm,
+    ViaddRegRegReg,
+    ViaddmnmxRegRegAddressImmRegPred,
+    ViaddmnmxRegRegConstRegPred,
+    ViaddmnmxRegRegImmRegPred,
+    ViaddmnmxRegRegRegAddressImmPred,
+    ViaddmnmxRegRegRegConstPred,
+    ViaddmnmxRegRegRegImmPred,
+    ViaddmnmxRegRegRegRegPred,
+    VildRegAddress,
+    VimnmxRegPredPredRegAddressImmPred,
+    VimnmxRegPredPredRegConstPred,
+    VimnmxRegPredPredRegImmPred,
+    VimnmxRegPredPredRegRegPred,
+    VimnmxRegRegAddressImmPred,
+    VimnmxRegRegConstPred,
+    VimnmxRegRegImmPred,
+    VimnmxRegRegRegPred,
+    Vimnmx3RegRegAddressImmRegPred,
+    Vimnmx3RegRegConstRegPred,
+    Vimnmx3RegRegImmRegPred,
+    Vimnmx3RegRegRegRegPred,
+    VmadRegRegImmReg,
+    VmadRegRegReg,
+    VmadRegRegRegReg,
+    VmnmxRegRegImmReg,
+    VmnmxRegRegRegReg,
+    Vmnmx2RegRegImmReg,
+    Vmnmx2RegRegRegReg,
+    Vmnmx4RegRegImmReg,
+    Vmnmx4RegRegRegReg,
+    VoteImm,
+    VotePredPred,
+    VoteRegPredPred,
+    VoteuRegPredPred,
+    VoteVtgImm,
+    VoteVtgPredImm,
+    VoteVtgPredPredImmPred,
+    Vsel2RegRegImmPred,
+    Vsel2RegRegRegPred,
+    Vsel4RegRegImmPred,
+    Vsel4RegRegRegPred,
+    VsetRegRegImmReg,
+    VsetRegRegRegReg,
+    Vset2RegRegImmReg,
+    Vset2RegRegRegReg,
+    Vset4RegRegImmReg,
+    Vset4RegRegRegReg,
+    VsetpPredPredRegImmPred,
+    VsetpPredPredRegRegPred,
+    VsetpPredRegImm,
+    VsetpPredRegReg,
+    VshlRegRegImmReg,
+    VshlRegRegRegReg,
+    VshrRegRegImmReg,
+    VshrRegRegRegReg,
+    WarpgroupNoOperands,
+    WarpgroupImm,
+    WarpgroupsetReg,
+    WarpsyncNoOperands,
+    WarpsyncAddressImm,
+    WarpsyncConst,
+    WarpsyncImm,
+    WarpsyncPred,
+    WarpsyncPredAddressImm,
+    WarpsyncPredConst,
+    WarpsyncPredImm,
+    WarpsyncPredReg,
+    WarpsyncPredRegImm,
+    WarpsyncReg,
+    WarpsyncRegImm,
+    XmadRegRegConstReg,
+    XmadRegRegImmReg,
+    XmadRegRegRegConst,
+    XmadRegRegRegReg,
+    YieldNoOperands,
+    YieldPred,
+    Hir0x002NoOperands,
+    Hir0x003NoOperands,
+    Hir0x003Pred,
+    Hir0x004NoOperands,
+    Hir0x005PredRegRegImm,
+    Hir0x005RegRegImm,
+    Hir0x006Imm,
+    Hir0x007NoOperands,
+    Hir0x008ImmRegReg,
+    Hir0x020NoOperands,
+    Hir0x020Imm,
+    Hir0x120AddressImm,
+    Hir0x120Const,
+    Hir0x120Imm,
+    Hir0x120PredAddressImm,
+    Hir0x120PredConst,
+    Hir0x120PredImm,
+    Hir0x120PredReg,
+    Hir0x120Reg,
+    Hir0x130AddressAddressAddressAddressAddressAddressPred,
+    Hir0x150RegRegRegRegPredRegRegReg,
+    Hir0x150RegRegRegRegRegRegReg,
+    Hir0x160Reg,
+    Hir0x170Reg,
+    Hir0x1a0RegRegRegRegImmImm,
+    Hir0x1b0RegRegRegReg,
+    Hir0x1e0NoOperands,
+    Hir0x1f0ImmReg,
+    Hir0x1f2Reg,
+    Hir0x1f3Reg
   )
 }

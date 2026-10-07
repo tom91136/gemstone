@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 if(NOT DEFINED CONFORMANCE_TARGET_SET)
-  set(CONFORMANCE_TARGET_SET complete)
+  set(CONFORMANCE_TARGET_SET default)
 endif()
 
 if(NOT CONFORMANCE_TARGET_SET MATCHES "^[A-Za-z0-9_-]+$")
@@ -16,7 +16,7 @@ include("${target_set}")
 if(NOT DEFINED CONFORMANCE_COMPILERS)
   set(CONFORMANCE_COMPILERS vendor clang gcc)
 endif()
-include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ToolchainImages.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/Toolchains.cmake")
 foreach(variable IN ITEMS CONFORMANCE_BACKENDS CUDA_ARCHITECTURES AMDGPU_ARCHITECTURES CONFORMANCE_COMPILERS)
   string(REPLACE "," ";" "${variable}" "${${variable}}")
   list(REMOVE_DUPLICATES "${variable}")
@@ -55,7 +55,6 @@ if("hip" IN_LIST CONFORMANCE_BACKENDS OR "hsa" IN_LIST CONFORMANCE_BACKENDS)
   endif()
 endif()
 
-# This matrix drives both artifact builds and execution discovery.
 set(conformance_routes)
 foreach(backend IN LISTS CONFORMANCE_BACKENDS)
   if(backend MATCHES "^(cuda|openacc)$")
@@ -63,7 +62,7 @@ foreach(backend IN LISTS CONFORMANCE_BACKENDS)
   elseif(backend MATCHES "^(hip|hsa)$")
     set(architectures ${AMDGPU_ARCHITECTURES})
     if(backend STREQUAL "hip" AND "gfx908" IN_LIST architectures)
-      # The shared HIP closure must include rocBLAS, unavailable on gfx803.
+      # The first route builds the shared HIP closure, which must include rocBLAS, unavailable on gfx803.
       list(REMOVE_ITEM architectures gfx908)
       list(PREPEND architectures gfx908)
     endif()

@@ -1,9 +1,6 @@
-# Treat a dependency target's public headers as system headers, so compilers
-# suppress diagnostics originating in third-party code while still reporting
-# them for project sources.
 include_guard(GLOBAL)
 
-function(conformance_mark_system_includes target)
+function(mark_system_includes target)
   if(NOT TARGET "${target}")
     return()
   endif()

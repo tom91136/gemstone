@@ -1,9 +1,4 @@
 # Generated from pinned LLVM MC/AMDGPU checks. Regenerate with: sbt codegen
-source-files=770
-source-encoding-checks=379260
-source-diagnostic-checks=114008
-source-positive-cases=379589
-source-diagnostic-cases=98714
 selected-positive-cases=4154
 selected-diagnostic-cases=1066
 file=bonaire.s

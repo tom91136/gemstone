@@ -8,7 +8,7 @@
 #include "resources.hpp"
 #include "state.hpp"
 
-namespace gemstone::vulkan::adapter {
+namespace gemstone::vulkan {
 
 template <typename T> VkResult enumerateOne(uint32_t *count, T *values, const T &value) {
   if (!count) return VK_ERROR_INITIALIZATION_FAILED;
@@ -22,13 +22,13 @@ template <typename T> VkResult enumerateOne(uint32_t *count, T *values, const T 
   return VK_SUCCESS;
 }
 
-constexpr std::array<VkExtensionProperties, 3> supportedDeviceExtensions{{
+constexpr std::array<VkExtensionProperties, 3> SupportedDeviceExtensions{{
     {VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME, VK_EXT_HOST_QUERY_RESET_SPEC_VERSION},
     {VK_KHR_16BIT_STORAGE_EXTENSION_NAME, VK_KHR_16BIT_STORAGE_SPEC_VERSION},
     {VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME, VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION},
 }};
 
-VkResult impl_vkEnumerateInstanceVersion(uint32_t *version) {
+VkResult implVkEnumerateInstanceVersion(uint32_t *version) {
   if (!version) return VK_ERROR_INITIALIZATION_FAILED;
   const auto supported = configuredApiVersion();
   if (!supported) return VK_ERROR_INITIALIZATION_FAILED;
@@ -36,20 +36,20 @@ VkResult impl_vkEnumerateInstanceVersion(uint32_t *version) {
   return VK_SUCCESS;
 }
 
-VkResult impl_vkEnumerateInstanceExtensionProperties(const char *, uint32_t *count, VkExtensionProperties *properties) {
+VkResult implVkEnumerateInstanceExtensionProperties(const char *, uint32_t *count, VkExtensionProperties *properties) {
   VkExtensionProperties property{};
   std::snprintf(property.extensionName, sizeof(property.extensionName), "%s", VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
   property.specVersion = VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_SPEC_VERSION;
   return enumerateOne(count, properties, property);
 }
 
-VkResult impl_vkEnumerateInstanceLayerProperties(uint32_t *count, VkLayerProperties *) {
+VkResult implVkEnumerateInstanceLayerProperties(uint32_t *count, VkLayerProperties *) {
   if (!count) return VK_ERROR_INITIALIZATION_FAILED;
   *count = 0;
   return VK_SUCCESS;
 }
 
-VkResult impl_vkCreateInstance(const VkInstanceCreateInfo *info, const VkAllocationCallbacks *, VkInstance *instance) {
+VkResult implVkCreateInstance(const VkInstanceCreateInfo *info, const VkAllocationCallbacks *, VkInstance *instance) {
   if (!info || info->sType != VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO || !instance) return VK_ERROR_INITIALIZATION_FAILED;
   const auto supported = configuredApiVersion();
   if (!supported) return VK_ERROR_INITIALIZATION_FAILED;
@@ -67,7 +67,7 @@ VkResult impl_vkCreateInstance(const VkInstanceCreateInfo *info, const VkAllocat
   return VK_SUCCESS;
 }
 
-void impl_vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks *) {
+void implVkDestroyInstance(VkInstance instance, const VkAllocationCallbacks *) {
   {
     std::lock_guard lock(stateMutex);
     instanceProperties2.erase(instance);
@@ -75,36 +75,36 @@ void impl_vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks *) 
   deleteHandle(instance);
 }
 
-VkResult impl_vkEnumeratePhysicalDevices(VkInstance instance, uint32_t *count, VkPhysicalDevice *devices) {
+VkResult implVkEnumeratePhysicalDevices(VkInstance instance, uint32_t *count, VkPhysicalDevice *devices) {
   if (!instance) return VK_ERROR_INITIALIZATION_FAILED;
   return enumerateOne(count, devices, physicalDeviceHandle(instance));
 }
 
-void impl_vkGetPhysicalDeviceProperties(VkPhysicalDevice, VkPhysicalDeviceProperties *properties) { fillProperties(properties); }
+void implVkGetPhysicalDeviceProperties(VkPhysicalDevice, VkPhysicalDeviceProperties *properties) { fillProperties(properties); }
 
-void impl_vkGetPhysicalDeviceProperties2(VkPhysicalDevice, VkPhysicalDeviceProperties2 *properties) {
+void implVkGetPhysicalDeviceProperties2(VkPhysicalDevice, VkPhysicalDeviceProperties2 *properties) {
   if (!properties) return;
   fillProperties(&properties->properties);
   fillPropertyChain(properties->pNext);
 }
 
-void impl_vkGetPhysicalDeviceFeatures(VkPhysicalDevice, VkPhysicalDeviceFeatures *features) { fillFeatures(features); }
+void implVkGetPhysicalDeviceFeatures(VkPhysicalDevice, VkPhysicalDeviceFeatures *features) { fillFeatures(features); }
 
-void impl_vkGetPhysicalDeviceFeatures2(VkPhysicalDevice, VkPhysicalDeviceFeatures2 *features) {
+void implVkGetPhysicalDeviceFeatures2(VkPhysicalDevice, VkPhysicalDeviceFeatures2 *features) {
   if (!features) return;
   fillFeatures(&features->features);
   fillFeatureChain(features->pNext);
 }
 
-void impl_vkGetPhysicalDeviceMemoryProperties(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties *properties) {
+void implVkGetPhysicalDeviceMemoryProperties(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties *properties) {
   fillMemoryProperties(properties);
 }
 
-void impl_vkGetPhysicalDeviceMemoryProperties2(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties2 *properties) {
+void implVkGetPhysicalDeviceMemoryProperties2(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties2 *properties) {
   if (properties) fillMemoryProperties(&properties->memoryProperties);
 }
 
-void impl_vkGetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice, uint32_t *count, VkQueueFamilyProperties *properties) {
+void implVkGetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice, uint32_t *count, VkQueueFamilyProperties *properties) {
   if (!count) return;
   if (!properties) {
     *count = 1;
@@ -120,33 +120,33 @@ void impl_vkGetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice, uint32_t *c
   }
 }
 
-VkResult impl_vkEnumerateDeviceExtensionProperties(VkPhysicalDevice, const char *, uint32_t *count, VkExtensionProperties *properties) {
+VkResult implVkEnumerateDeviceExtensionProperties(VkPhysicalDevice, const char *, uint32_t *count, VkExtensionProperties *properties) {
   if (!count) return VK_ERROR_INITIALIZATION_FAILED;
-  const auto available = static_cast<uint32_t>(supportedDeviceExtensions.size());
+  const auto available = static_cast<uint32_t>(SupportedDeviceExtensions.size());
   if (!properties) {
     *count = available;
     return VK_SUCCESS;
   }
   const auto copied = std::min(*count, available);
-  std::copy_n(supportedDeviceExtensions.begin(), copied, properties);
+  std::copy_n(SupportedDeviceExtensions.begin(), copied, properties);
   *count = copied;
   return copied == available ? VK_SUCCESS : VK_INCOMPLETE;
 }
 
-VkResult impl_vkEnumerateDeviceLayerProperties(VkPhysicalDevice, uint32_t *count, VkLayerProperties *) {
+VkResult implVkEnumerateDeviceLayerProperties(VkPhysicalDevice, uint32_t *count, VkLayerProperties *) {
   if (!count) return VK_ERROR_INITIALIZATION_FAILED;
   *count = 0;
   return VK_SUCCESS;
 }
 
-VkResult impl_vkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo *info, const VkAllocationCallbacks *,
-                             VkDevice *device) {
+VkResult implVkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo *info, const VkAllocationCallbacks *,
+                            VkDevice *device) {
   if (!physicalDevice || !handleArena(physicalDevice) || !info || !device || info->queueCreateInfoCount == 0)
     return VK_ERROR_INITIALIZATION_FAILED;
   bool hostQueryResetExtension = false;
   for (uint32_t i = 0; i < info->enabledExtensionCount; ++i) {
     const auto *name = info->ppEnabledExtensionNames[i];
-    if (std::none_of(supportedDeviceExtensions.begin(), supportedDeviceExtensions.end(),
+    if (std::none_of(SupportedDeviceExtensions.begin(), SupportedDeviceExtensions.end(),
                      [=](const auto &extension) { return std::strcmp(name, extension.extensionName) == 0; }))
       return VK_ERROR_EXTENSION_NOT_PRESENT;
     hostQueryResetExtension |= std::strcmp(name, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME) == 0;
@@ -154,10 +154,8 @@ VkResult impl_vkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCrea
   if (!featureChainSupported(info->pNext)) return VK_ERROR_FEATURE_NOT_PRESENT;
   VkPhysicalDeviceFeatures supported{};
   fillFeatures(&supported);
-  const VkPhysicalDeviceFeatures *requested = info->pEnabledFeatures;
-  for (auto *base = static_cast<const VkBaseInStructure *>(info->pNext); base; base = base->pNext)
-    if (base->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
-      requested = &reinterpret_cast<const VkPhysicalDeviceFeatures2 *>(base)->features;
+  const auto *chained = findChained<VkPhysicalDeviceFeatures2>(info->pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
+  const auto *requested = chained ? &chained->features : info->pEnabledFeatures;
   if (requested) {
     std::array<VkBool32, sizeof(VkPhysicalDeviceFeatures) / sizeof(VkBool32)> wanted{}, available{};
     std::memcpy(wanted.data(), requested, sizeof(*requested));
@@ -176,7 +174,7 @@ VkResult impl_vkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCrea
   return result;
 }
 
-void impl_vkDestroyDevice(VkDevice device, const VkAllocationCallbacks *) {
+void implVkDestroyDevice(VkDevice device, const VkAllocationCallbacks *) {
   std::shared_ptr<DeviceState> state;
   {
     std::lock_guard lock(stateMutex);
@@ -192,51 +190,51 @@ void impl_vkDestroyDevice(VkDevice device, const VkAllocationCallbacks *) {
     deleteHandle(queue->handle);
   deleteHandle(device);
 }
-void impl_vkGetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue *queue) {
+void implVkGetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue *queue) {
   if (!queue) return;
   std::lock_guard lock(stateMutex);
   const auto found = devices.find(device);
   *queue =
       family == 0 && found != devices.end() && index < found->second->queues.size() ? found->second->queues[index]->handle : VK_NULL_HANDLE;
 }
-void impl_vkGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2 *info, VkQueue *queue) {
+void implVkGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2 *info, VkQueue *queue) {
   if (info && !info->flags) vkGetDeviceQueue(device, info->queueFamilyIndex, info->queueIndex, queue);
   else if (queue) *queue = VK_NULL_HANDLE;
 }
 
 // Sparse residency is not advertised. The core capability queries still exist
 // and return an empty list without touching the caller's output storage.
-void impl_vkGetPhysicalDeviceSparseImageFormatProperties(VkPhysicalDevice, VkFormat, VkImageType, VkSampleCountFlagBits, VkImageUsageFlags,
-                                                         VkImageTiling, uint32_t *count, VkSparseImageFormatProperties *) {
+void implVkGetPhysicalDeviceSparseImageFormatProperties(VkPhysicalDevice, VkFormat, VkImageType, VkSampleCountFlagBits, VkImageUsageFlags,
+                                                        VkImageTiling, uint32_t *count, VkSparseImageFormatProperties *) {
   if (count) *count = 0;
 }
-void impl_vkGetPhysicalDeviceSparseImageFormatProperties2(VkPhysicalDevice, const VkPhysicalDeviceSparseImageFormatInfo2 *, uint32_t *count,
-                                                          VkSparseImageFormatProperties2 *) {
+void implVkGetPhysicalDeviceSparseImageFormatProperties2(VkPhysicalDevice, const VkPhysicalDeviceSparseImageFormatInfo2 *, uint32_t *count,
+                                                         VkSparseImageFormatProperties2 *) {
   if (count) *count = 0;
 }
 // Every supported image is non-sparse, so it has no sparse memory requirements.
-void impl_vkGetImageSparseMemoryRequirements(VkDevice, VkImage, uint32_t *count, VkSparseImageMemoryRequirements *) {
+void implVkGetImageSparseMemoryRequirements(VkDevice, VkImage, uint32_t *count, VkSparseImageMemoryRequirements *) {
   if (count) *count = 0;
 }
-void impl_vkGetImageSparseMemoryRequirements2(VkDevice, const VkImageSparseMemoryRequirementsInfo2 *, uint32_t *count,
-                                              VkSparseImageMemoryRequirements2 *) {
+void implVkGetImageSparseMemoryRequirements2(VkDevice, const VkImageSparseMemoryRequirementsInfo2 *, uint32_t *count,
+                                             VkSparseImageMemoryRequirements2 *) {
   if (count) *count = 0;
 }
-void impl_vkGetPhysicalDeviceQueueFamilyProperties2(VkPhysicalDevice device, uint32_t *count, VkQueueFamilyProperties2 *properties) {
+void implVkGetPhysicalDeviceQueueFamilyProperties2(VkPhysicalDevice device, uint32_t *count, VkQueueFamilyProperties2 *properties) {
   if (!properties) {
     vkGetPhysicalDeviceQueueFamilyProperties(device, count, nullptr);
     return;
   }
   if (count && *count) vkGetPhysicalDeviceQueueFamilyProperties(device, count, &properties[0].queueFamilyProperties);
 }
-VkResult impl_vkCreateEvent(VkDevice, const VkEventCreateInfo *, const VkAllocationCallbacks *, VkEvent *event) {
+VkResult implVkCreateEvent(VkDevice, const VkEventCreateInfo *, const VkAllocationCallbacks *, VkEvent *event) {
   if (!event) return VK_ERROR_INITIALIZATION_FAILED;
   *event = makeHandle<VkEvent>();
   std::lock_guard lock(stateMutex);
   events[*event] = false;
   return VK_SUCCESS;
 }
-void impl_vkDestroyEvent(VkDevice, VkEvent event, const VkAllocationCallbacks *) {
+void implVkDestroyEvent(VkDevice, VkEvent event, const VkAllocationCallbacks *) {
   {
     std::lock_guard lock(stateMutex);
     events.erase(event);
@@ -244,12 +242,12 @@ void impl_vkDestroyEvent(VkDevice, VkEvent event, const VkAllocationCallbacks *)
   }
   deleteHandle(event);
 }
-VkResult impl_vkGetEventStatus(VkDevice, VkEvent event) {
+VkResult implVkGetEventStatus(VkDevice, VkEvent event) {
   std::lock_guard lock(stateMutex);
   const auto found = events.find(event);
   return found == events.end() ? VK_ERROR_DEVICE_LOST : found->second ? VK_EVENT_SET : VK_EVENT_RESET;
 }
-VkResult impl_vkSetEvent(VkDevice, VkEvent event) {
+VkResult implVkSetEvent(VkDevice, VkEvent event) {
   std::lock_guard lock(stateMutex);
   const auto found = events.find(event);
   if (found == events.end()) return VK_ERROR_DEVICE_LOST;
@@ -257,7 +255,7 @@ VkResult impl_vkSetEvent(VkDevice, VkEvent event) {
   stateChanged.notify_all();
   return VK_SUCCESS;
 }
-VkResult impl_vkResetEvent(VkDevice, VkEvent event) {
+VkResult implVkResetEvent(VkDevice, VkEvent event) {
   std::lock_guard lock(stateMutex);
   const auto found = events.find(event);
   if (found == events.end()) return VK_ERROR_DEVICE_LOST;
@@ -265,15 +263,12 @@ VkResult impl_vkResetEvent(VkDevice, VkEvent event) {
   return VK_SUCCESS;
 }
 
-VkResult impl_vkCreateSampler(VkDevice, const VkSamplerCreateInfo *info, const VkAllocationCallbacks *, VkSampler *sampler) {
+VkResult implVkCreateSampler(VkDevice, const VkSamplerCreateInfo *info, const VkAllocationCallbacks *, VkSampler *sampler) {
   if (!info || !sampler) return VK_ERROR_INITIALIZATION_FAILED;
   if (info->anisotropyEnable || info->flags) return VK_ERROR_FEATURE_NOT_PRESENT;
-  for (auto next = static_cast<const VkBaseInStructure *>(info->pNext); next; next = next->pNext) {
-    if (next->sType == VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO
-        && reinterpret_cast<const VkSamplerReductionModeCreateInfo *>(next)->reductionMode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE)
-      return VK_ERROR_FEATURE_NOT_PRESENT;
-  }
-  gemstone::execution::GraphicsSampler value;
+  const auto *reduction = findChained<VkSamplerReductionModeCreateInfo>(info->pNext, VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO);
+  if (reduction && reduction->reductionMode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE) return VK_ERROR_FEATURE_NOT_PRESENT;
+  gx::GraphicsSampler value;
   try {
     value = {graphicsFilter(info->minFilter),
              graphicsFilter(info->magFilter),
@@ -283,7 +278,7 @@ VkResult impl_vkCreateSampler(VkDevice, const VkSamplerCreateInfo *info, const V
              bool(info->unnormalizedCoordinates),
              bool(info->compareEnable),
              graphicsCompare(info->compareOp),
-             graphicsBorderColor(info->borderColor),
+             graphicsBorderColour(info->borderColor),
              info->mipLodBias,
              info->minLod,
              info->maxLod,
@@ -296,13 +291,13 @@ VkResult impl_vkCreateSampler(VkDevice, const VkSamplerCreateInfo *info, const V
   samplers.emplace(*sampler, value);
   return VK_SUCCESS;
 }
-void impl_vkDestroySampler(VkDevice, VkSampler sampler, const VkAllocationCallbacks *) {
+void implVkDestroySampler(VkDevice, VkSampler sampler, const VkAllocationCallbacks *) {
   std::lock_guard lock(stateMutex);
   samplers.erase(sampler);
   deleteHandle(sampler);
 }
 
-VkResult impl_vkEnumeratePhysicalDeviceGroups(VkInstance instance, uint32_t *count, VkPhysicalDeviceGroupProperties *groups) {
+VkResult implVkEnumeratePhysicalDeviceGroups(VkInstance instance, uint32_t *count, VkPhysicalDeviceGroupProperties *groups) {
   if (!instance || !count) return VK_ERROR_INITIALIZATION_FAILED;
   if (!groups) {
     *count = 1;
@@ -315,4 +310,4 @@ VkResult impl_vkEnumeratePhysicalDeviceGroups(VkInstance instance, uint32_t *cou
   *count = 1;
   return VK_SUCCESS;
 }
-} // namespace gemstone::vulkan::adapter
+} // namespace gemstone::vulkan

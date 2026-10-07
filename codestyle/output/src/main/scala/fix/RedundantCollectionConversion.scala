@@ -15,7 +15,7 @@ class RedundantCollectionConversion extends munit.FunSuite {
   val snapshot = buffer.toSeq
   val arraySnapshot = Array(1, 2).toSeq
   val selectedArray = Vector(Array(1, 2))(0).toVector
-  val materialized = list.view.toSeq
+  val materialised = list.view.toSeq
   val conversion = list.toVector
   val widening = list.toSeq
   def choose(values: List[Int]): String = "list"

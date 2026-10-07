@@ -10,7 +10,7 @@ private object InstructionSyntax {
     val text                                                         = source.trim.stripSuffix(";").trim
     val (prefix, tail)                                               = text.span(!_.isWhitespace)
     val guarded: Either[String, (Option[Instruction.Guard], String)] = if (prefix.startsWith("@")) {
-      SASSOperandParser.parse(prefix.drop(1)).flatMap {
+      OperandParser.parse(prefix.drop(1)).flatMap {
         case predicate: Operand.Predicate => Right(Some(Instruction.Guard(predicate)) -> tail.trim)
         case _                            => Left(s"invalid instruction guard $prefix")
       }
@@ -25,7 +25,7 @@ private object InstructionSyntax {
           s"empty SASS opcode qualifier $qualified"
         )
         mnemonic    <- parts.headOption.toRight(s"unknown SASS opcode $qualified")
-        operands    <- SASSOperandParser.parseMany(operandsText.trim)
+        operands    <- OperandParser.parseMany(operandsText.trim)
         instruction <- Instruction.decode(
           mnemonic,
           parts.drop(1).map(Instruction.Modifier(_)),
@@ -36,9 +36,12 @@ private object InstructionSyntax {
     }
   }
 
-  def print(instruction: Instruction): Either[String, String] = for {
-    operands <- instruction.operands.traverse(OperandPrinter.print(_))
-    guard    <- instruction.guard.traverse(value => OperandPrinter.print(value.predicate))
+  /** `labels` replaces the operands at the given positions with symbolic destinations. */
+  def print(instruction: Instruction, labels: Map[Int, String] = Map.empty): Either[String, String] = for {
+    operands <- instruction.operands.zipWithIndex.traverse((operand, index) =>
+      labels.get(index).fold(OperandPrinter.print(operand))(Right(_))
+    )
+    guard <- instruction.guard.traverse(value => OperandPrinter.print(value.predicate))
   } yield {
     val opcode = (instruction.mnemonic.raw +: instruction.modifiers.map(_.name)).mkString(".")
     guard.fold("")(value => s"@$value ") + opcode +

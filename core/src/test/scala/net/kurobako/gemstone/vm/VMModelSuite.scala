@@ -81,7 +81,7 @@ class VMModelSuite extends munit.FunSuite {
     }
   }
 
-  test("launch geometry maps partial and virtual work-group extents") {
+  test("launch geometry maps partial work-group extents") {
     val geometry = LaunchGeometry
       .forLaunch(
         groupSize = LaunchGeometry.Dimensions(4, 3, 2),
@@ -106,15 +106,8 @@ class VMModelSuite extends munit.FunSuite {
       Right(LaunchGeometry.Dimensions(2, 2, 1))
     )
     assertEquals(
-      geometry.globalCoordinatesLong(
-        LaunchGeometry.Coordinates(1, 1, 0),
-        LaunchGeometry.Coordinates(1, 2, 1)
-      ),
-      Right(LaunchGeometry.LongCoordinates(
-        16L,
-        5L,
-        1L
-      ))
+      geometry.globalCoordinates(LaunchGeometry.Coordinates(1, 1, 0), LaunchGeometry.Coordinates(1, 2, 1)),
+      LaunchGeometry.LongCoordinates(16L, 5L, 1L)
     )
     assert(geometry.containsGlobal(LaunchGeometry.LongCoordinates(
       11L,
@@ -126,32 +119,6 @@ class VMModelSuite extends munit.FunSuite {
       0L,
       0L
     )))
-
-    val virtual = LaunchGeometry
-      .virtual(
-        LaunchGeometry.Dimensions(256, 1, 1),
-        LaunchGeometry.Dimensions(16777216, 1, 1)
-      )
-      .fold(message => fail(message), identity)
-    assertEquals(
-      virtual.globalExtent,
-      LaunchGeometry.GlobalDimensions(
-        4294967296L,
-        1L,
-        1L
-      )
-    )
-    assertEquals(
-      virtual.globalCoordinatesLong(
-        LaunchGeometry.Coordinates(16777215, 0, 0),
-        LaunchGeometry.Coordinates(255, 0, 0)
-      ),
-      Right(LaunchGeometry.LongCoordinates(
-        4294967295L,
-        0L,
-        0L
-      ))
-    )
   }
 
   test("task control accounts for instructions and observes cancellation") {

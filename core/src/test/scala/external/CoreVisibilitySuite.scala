@@ -2,6 +2,7 @@ package external
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.msgpack.*
 import net.kurobako.gemstone.rpc.*
 import scala.compiletime.testing.typeCheckErrors
 
@@ -14,7 +15,7 @@ class CoreVisibilitySuite extends munit.FunSuite {
     assertEquals(positive(3).raw, 3)
     val _       = intercept[IllegalArgumentException](positive(0))
     val codec   = summon[Wire.Codec[Payload]]
-    val limits  = Wire.Limits(256, 4096, 1024)
+    val limits  = Limits(256, 4096, 1024)
     val decoded = codec.encode(Payload(7), limits).flatMap(codec.decode(_, limits))
     assertEquals(decoded, Right(Payload(7)))
   }
@@ -30,10 +31,11 @@ class CoreVisibilitySuite extends munit.FunSuite {
     assertEquals(cache.get("key")(2), 1)
   }
 
-  test("wire storage remains internal") {
-    assert(typeCheckErrors(
-      "net.kurobako.gemstone.rpc.Wire.Reader(Array.emptyByteArray, net.kurobako.gemstone.rpc.Wire.Limits(256, 4096, 1024))"
-    ).nonEmpty)
+  test("codec storage access remains internal") {
     assert(typeCheckErrors("net.kurobako.gemstone.rpc.Wire.Codec[Int].erased").nonEmpty)
+    assert(typeCheckErrors("net.kurobako.gemstone.rpc.Wire.Codec[Int].nullary").nonEmpty)
+    assert(typeCheckErrors(
+      "net.kurobako.gemstone.rpc.Wire.Codec.instance[Int](null, (_, _) => (), _ => Left(\"\"))"
+    ).nonEmpty)
   }
 }

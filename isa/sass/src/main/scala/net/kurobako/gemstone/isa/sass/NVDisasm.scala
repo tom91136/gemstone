@@ -1,13 +1,15 @@
 package net.kurobako.gemstone.isa.sass
 
 import cats.Eval
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
-import net.kurobako.gemstone.isa.sass.*
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.string.*
+import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
-import scala.util.Using
+import scala.reflect.ClassTag
 import upickle.default.ReadWriter
-import upickle.default.read
 
 /** Recovered NVIDIA disassembler descriptions: instruction forms, bit assignments, syntax and legality constraints. */
 object NVDisasm {
@@ -31,10 +33,18 @@ object NVDisasm {
       case FloatingImmediate(_) => true
       case _                    => false
     }
+
+    /** Fields that carry an instruction operand rather than a modifier. */
+    def isOperand: Boolean = isRegister || isPredicateOperand || isFloatingImmediate ||
+      (this match {
+        case BarrierRegister | CbuState | Scoreboard | ConstantBank | DescriptorRegister | SpecialRegister | Immediate |
+            SignedImmediate | RelativeImmediate | ConditionRegisterBank | PredicateRegister => true
+        case _ => false
+      })
   }
 
-  /** Resolve a vendor FORMAT field spelling once at ingestion. Exact names take precedence; vocabulary names remain
-    * payloads and are never promoted to semantics merely because they happen to contain a familiar word.
+  /** Exact names take precedence; vocabulary names remain payloads and are never promoted to semantics merely because
+    * they happen to contain a familiar word.
     */
   def fieldKind(name: String): FieldKind = name match {
     case "Opcode"                                 => FieldKind.Opcode
@@ -70,7 +80,6 @@ object NVDisasm {
     case value                                                       => FieldKind.Vocabulary(value)
   }
 
-  /** Float spellings in the compact resource stay strings on disk and are checked at resource ingestion. */
   object UnaryOperator {
     def from(spelling: String): UnaryOperator = spelling match {
       case "!"   => UnaryOperator.LogicalNot
@@ -83,12 +92,6 @@ object NVDisasm {
   enum UnaryOperator {
     case LogicalNot, Negate, BitwiseNot
     case Unsupported(vendorSpelling: String)
-    def spelling: String = this match {
-      case LogicalNot         => "!"
-      case Negate             => "-"
-      case BitwiseNot         => "~"
-      case Unsupported(value) => value
-    }
   }
 
   object BinaryOperator {
@@ -120,31 +123,9 @@ object NVDisasm {
     case LogicalAnd, LogicalOr, Implies, Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual
     case Add, Subtract, Multiply, Divide, Remainder, BitwiseAnd, BitwiseOr, BitwiseXor, ShiftLeft, ShiftRight
     case Unsupported(vendorSpelling: String)
-    def spelling: String = this match {
-      case LogicalAnd         => "&&"
-      case LogicalOr          => "||"
-      case Implies            => "->"
-      case Equal              => "=="
-      case NotEqual           => "!="
-      case Less               => "<"
-      case LessEqual          => "<="
-      case Greater            => ">"
-      case GreaterEqual       => ">="
-      case Add                => "+"
-      case Subtract           => "-"
-      case Multiply           => "*"
-      case Divide             => "/"
-      case Remainder          => "%"
-      case BitwiseAnd         => "&"
-      case BitwiseOr          => "|"
-      case BitwiseXor         => "^"
-      case ShiftLeft          => "<<"
-      case ShiftRight         => ">>"
-      case Unsupported(value) => value
-    }
   }
 
-  /** Known helper calls are closed; table lookup names and unknown vendor builtins remain explicit data. */
+  /** Known helper calls are closed; table lookup names remain explicit data. */
   object BuiltinCall {
     def from(name: String): BuiltinCall = name match {
       case "DEFINED" => BuiltinCall.Defined
@@ -157,55 +138,51 @@ object NVDisasm {
   enum BuiltinCall {
     case Defined, IsEven, IsOdd
     case Table(tableName: String)
-    def name: String = this match {
-      case Defined      => "DEFINED"
-      case IsEven       => "IsEven"
-      case IsOdd        => "IsOdd"
-      case Table(value) => value
-    }
   }
 
   enum FailureCategory { case IllegalCandidate, Unsupported, MissingMetadata }
   case class CandidateFailure(category: FailureCategory, message: String)
 
-  enum MetadataIssueKind { case PermittedStructuralAmbiguity, AmbiguousInverse, MissingMetadata, Unsupported }
-  object MetadataIssue   {
+  enum MetadataIssue {
+    case UnresolvedSelector(name: String)
+    case AmbiguousInverse(table: String, value: BigInt)
 
-    /** Resource diagnostics retain their legacy serialized text. Classify them once when loading each form. */
-    def fromResource(message: String): MetadataIssue =
-      if (message.contains("VarLatOperandEnc") || message.startsWith("non-unique inverse of TABLES_opex_"))
-        MetadataIssue(MetadataIssueKind.PermittedStructuralAmbiguity, message)
-      else MetadataIssue(MetadataIssueKind.Unsupported, message)
-
-    def unresolvedSelector(name: String): MetadataIssue =
-      MetadataIssue(MetadataIssueKind.Unsupported, s"unresolved floating selector $name")
-    def missingLookup(name: String): MetadataIssue =
-      MetadataIssue(MetadataIssueKind.MissingMetadata, s"missing encoding lookup $name")
-    def unsupportedLookup(name: String, issues: Vec[String]): MetadataIssue =
-      MetadataIssue(MetadataIssueKind.Unsupported, s"unsupported lookup $name: ${issues.mkString("; ")}")
-    def ambiguousInverse(name: String, value: BigInt): MetadataIssue = {
-      val kind = if (name == "VarLatOperandEnc" || name.startsWith("TABLES_opex_"))
-        MetadataIssueKind.PermittedStructuralAmbiguity
-      else MetadataIssueKind.AmbiguousInverse
-      MetadataIssue(kind, s"non-unique inverse of $name for $value")
+    def message: String = this match {
+      case UnresolvedSelector(name)       => s"unresolved floating selector $name"
+      case AmbiguousInverse(table, value) => s"non-unique inverse of $table for $value"
     }
-    def unresolvedExpression(source: String): MetadataIssue =
-      MetadataIssue(MetadataIssueKind.Unsupported, s"unresolved encoding expression: $source")
+
+    /** VarLatOperandEnc and the opex tables encode scheduling fields whose aliases do not change the instruction. */
+    def structural: Boolean = this match {
+      case AmbiguousInverse(table, _) => table == "VarLatOperandEnc" || table.startsWith("TABLES_opex_")
+      case _                          => false
+    }
   }
 
-  case class MetadataIssue(kind: MetadataIssueKind, message: String) {
-    def permittedForStructuralRoundTrip: Boolean = kind == MetadataIssueKind.PermittedStructuralAmbiguity
+  def number(spelling: String): Option[BigInt] = parseBigIntLiteral(spelling.stripSuffix("*"), binary = true)
+
+  object Syntax {
+    def field(kind: String, binding: String, arguments: Option[String], default: Option[String]): Field =
+      Field(kind, binding, arguments, default, fieldKind(kind))
+
+    def fields(nodes: Vec[Syntax], includeMarkedOptionals: Boolean = false): Vec[Field] =
+      nodes.flatMap {
+        case field: Field                                          => Vec(field)
+        case Group(_, _, children)                                 => fields(children, includeMarkedOptionals)
+        case Optional(None, children)                              => fields(children, includeMarkedOptionals)
+        case Optional(Some(_), children) if includeMarkedOptionals => fields(children, includeMarkedOptionals)
+        case _                                                     => Vec.empty
+      }
+
+    def kindBindings(fields: Vec[Field]): Map[String, String] = fields.groupBy(_.kind).collect {
+      case (kind, values) if values.map(_.binding).distinct.size == 1 => kind -> values.head.binding
+    }
   }
 
   enum Syntax {
     case Text(raw: String)
     case Literal(value: String)
-    case Field(
-        kind: String,
-        binding: String,
-        arguments: Option[String],
-        default: Option[String]
-    )
+    case Field(kind: String, binding: String, arguments: Option[String], default: Option[String], category: FieldKind)
     case Group(open: String, close: String, children: Vec[Syntax])
     case Optional(marker: Option[String], children: Vec[Syntax])
   }
@@ -221,48 +198,11 @@ object NVDisasm {
     case Call(name: BuiltinCall, arguments: Vec[ConditionExpression])
     case Conditional(condition: ConditionExpression, whenTrue: ConditionExpression, whenFalse: ConditionExpression)
   }
-  enum ConditionException { case None, UnobservableScoreboardEncoding }
-  object Condition        {
-    private def scheduling(expression: NVDisasm.ConditionExpression): Boolean = expression match {
-      case NVDisasm.ConditionExpression.Call(
-            NVDisasm.BuiltinCall.Defined,
-            Vec(NVDisasm.ConditionExpression.Call(NVDisasm.BuiltinCall.Table(name), _))
-          ) =>
-        name.startsWith("TABLES_opex_")
-      case NVDisasm.ConditionExpression.Binary(NVDisasm.BinaryOperator.Implies, _, right) =>
-        references(right).nonEmpty &&
-        references(right).subsetOf(Set("usched_info", "batch_t"))
-      case _ => false
-    }
 
-    private def references(expression: NVDisasm.ConditionExpression): Set[String] = expression match {
-      case NVDisasm.ConditionExpression.Field(name, _)         => Set(name)
-      case NVDisasm.ConditionExpression.Unary(_, value)        => references(value)
-      case NVDisasm.ConditionExpression.Binary(_, left, right) => references(left) ++ references(right)
-      case NVDisasm.ConditionExpression.Conditional(condition, whenTrue, whenFalse) => references(condition) ++
-          references(whenTrue) ++ references(whenFalse)
-      case NVDisasm.ConditionExpression.Call(_, arguments) => arguments.flatMap(references(_)).toSet
-      case _                                               => Set.empty
-    }
-  }
-  case class Condition(category: String, expression: ConditionExpression, message: String) {
-    val isError: Boolean      = category == "ERROR" || category.endsWith("_ERROR")
-    val isScheduling: Boolean = Condition.scheduling(expression)
+  /** `requires` names a pre-encoding value the condition constrains; without it the condition cannot be observed. */
+  case class Condition(expression: ConditionExpression, message: String, requires: Option[String] = None)
 
-    /** Legacy resource wording is classified once with the condition, never consulted by runtime policy. */
-    lazy val exception: ConditionException =
-      if (
-        category == "ILLEGAL_INSTR_ENCODING_ERROR" &&
-        message.startsWith("Illegal instruction encoding: Instruction type INST_TYPE_MIO_RD_SCBD") &&
-        expression == ConditionExpression.Binary(
-          BinaryOperator.Equal,
-          ConditionExpression.Field("dst_wr_sb", None),
-          ConditionExpression.Number(7)
-        )
-      ) ConditionException.UnobservableScoreboardEncoding
-      else ConditionException.None
-  }
-  enum Expression {
+  enum Expression derives ReadWriter {
     case Constant(value: BigInt, relaxed: Boolean)
     case Reference(name: String, attribute: Option[String], relaxed: Boolean)
     case Scale(value: Expression, factor: BigInt)
@@ -277,80 +217,111 @@ object NVDisasm {
         fallback: FloatEncoding
     )
     case Lookup(name: String, arguments: Vec[Expression])
-    case Unsupported(source: String)
+
+    /** Bindings this expression reads; an attribute reference also names its base binding when `bases` is set. */
+    def references(bases: Boolean): Set[String] = this match {
+      case Reference(name, attribute, _) =>
+        attribute.fold(Set(name))(suffix => Set(s"$name@$suffix") ++ Option.when(bases)(name))
+      case FixedFloat(value, _)                => value.references(bases)
+      case Relaxed(value)                      => value.references(bases)
+      case Scale(value, _)                     => value.references(bases)
+      case Multiply(value, _)                  => value.references(bases)
+      case Identity(first, second)             => first.references(bases) ++ second.references(bases)
+      case FloatConvert(value, selector, _, _) => value.references(bases) + selector
+      case Lookup(_, arguments)                => arguments.flatMap(_.references(bases)).toSet
+      case Constant(_, _)                      => Set.empty
+    }
   }
   case class SymbolValue(name: String, value: BigInt)
   case class Vocabulary(name: String, values: Vec[SymbolValue], default: Option[BigInt] = None)
   case class Assignment(name: String, positions: Vec[Int], expression: Expression)
   case class OpcodeValue(name: String, value: BigInt)
+
+  /** One instruction form. Its FORMAT and binding analysis is computed once, on first use. */
   case class Form(
-      formId: Option[Int],
       name: String,
       alternate: Boolean,
       opcodes: Vec[OpcodeValue],
       fields: Vec[Assignment],
-      issues: Vec[String],
       syntax: Vec[Syntax] = Vec.empty,
       conditions: Vec[Condition] = Vec.empty
   ) {
-    lazy val typedIssues: Vec[MetadataIssue] = issues.map(MetadataIssue.fromResource(_))
-    lazy val assignedMask: BigInt            = fields.foldLeft(BigInt(0)) { (mask, field) =>
+    lazy val assignedMask: BigInt = fields.foldLeft(BigInt(0)) { (mask, field) =>
       field.positions.foldLeft(mask)(_.setBit(_))
     }
+    lazy val declared: Vec[Syntax.Field]       = Syntax.fields(syntax)
+    lazy val kindBindings: Map[String, String] = Syntax.kindBindings(declared)
+    lazy val encodedNames: Set[String]         = fields.flatMap(_.expression.references(bases = true)).toSet
+    lazy val encodedReferences: Set[String]    = fields.flatMap(_.expression.references(bases = false)).toSet
+    lazy val opcodeFields: Vec[Assignment]     = fields.filter(_.expression match {
+      case Expression.Reference("Opcode", None, _) => true
+      case _                                       => false
+    })
+
+    /** Float formats depend on selectors bound by the other fields. */
+    lazy val orderedFields: Vec[Assignment] = fields.sortBy(_.expression match {
+      case Expression.FloatConvert(_, _, _, _) => 1
+      case _                                   => 0
+    })
+
+    /** The binding a FORMAT field is encoded under: its own, or its kind when conditions refer to the kind. */
+    def encodedBinding(field: Syntax.Field): String =
+      if (encodedNames(field.binding) || !kindBindings.get(field.kind).contains(field.binding)) field.binding
+      else if (encodedNames(field.kind)) field.kind
+      else field.binding
   }
   case class Row(inputs: Vec[BigInt], output: BigInt) derives ReadWriter
-  case class LookupTable(name: String, rows: Vec[Row], issues: Vec[String] = Vec.empty) {
+  case class LookupTable(name: String, rows: Vec[Row]) {
     lazy val byOutput: Map[BigInt, Vec[Row]] = rows.groupBy(_.output)
+
+    /** The distinct outputs of the rows with exactly these inputs. */
+    def lookup(inputs: Vec[BigInt]): Vec[BigInt] = rows.filter(_.inputs == inputs).map(_.output).distinct
   }
+
+  /** The binding name of an attribute reference such as `Ra@negate`. */
+  def bindingKey(name: String, attribute: Option[String]): String = attribute.fold(name)(suffix => s"$name@$suffix")
   case class Database(
-      target: String,
-      sha256: String,
-      width: Int,
+      digest: String,
+      width: Int in (64, 88, 128),
       forms: Vec[Form],
       tables: Vec[LookupTable],
       symbols: Vec[Vocabulary] = Vec.empty,
       parameters: Map[String, BigInt] = Map.empty,
       constants: Map[String, BigInt] = Map.empty
   ) {
-    lazy val byForm: Map[(String, Option[Int]), Form] = forms.map(form => (form.name -> form.formId) -> form).toMap
-    lazy val byVocabulary: Map[String, Vocabulary]    = symbols.map(vocabulary => vocabulary.name -> vocabulary).toMap
-    lazy val byTable: Map[String, LookupTable]        = tables.map(table => table.name -> table).toMap
+    lazy val byForm: Map[String, Form]             = forms.map(form => form.name -> form).toMap
+    lazy val byVocabulary: Map[String, Vocabulary] = symbols.map(vocabulary => vocabulary.name -> vocabulary).toMap
+    lazy val byTable: Map[String, LookupTable]     = tables.map(table => table.name -> table).toMap
 
     lazy val opcodeGroups: Vec[(Vec[Int], Map[BigInt, Vec[Form]])] = forms.flatMap { form =>
-      form.fields.collectFirst {
-        case Assignment(_, positions, Expression.Reference("Opcode", None, _)) => positions -> form
-      }
+      form.opcodeFields.headOption.map(_.positions -> form)
     }.groupMap(_._1)(_._2).toVec.map { case (positions, group) =>
       positions -> group.flatMap(form => form.opcodes.map(_.value).distinct.map(_ -> form)).groupMap(_._1)(_._2)
     }
+
+    def vocabulary(field: Syntax.Field): Vec[SymbolValue] =
+      byVocabulary.get(field.kind).fold(Vec.empty[SymbolValue])(_.values)
+
+    private val defaults = TrieMap.empty[Syntax.Field, Vec[BigInt]]
+
+    /** A field's display default, resolved through its vocabulary when it names a symbol. */
+    def defaultValues(field: Syntax.Field): Vec[BigInt] = defaults.getOrElseUpdate(
+      field,
+      field.default.toVec.flatMap { spelling =>
+        val aliases = vocabulary(field).filter(_.name == spelling).map(_.value)
+        if (aliases.nonEmpty) aliases else number(spelling).toVec
+      }.distinct
+    )
   }
 
-  private case class AssignmentRow(name: Int, positions: Vec[Int], expression: Int) derives ReadWriter
-  private enum ExpressionRow derives ReadWriter {
-    case Constant(value: BigInt, relaxed: Boolean)
-    case Reference(name: String, attribute: Option[String], relaxed: Boolean)
-    case Scale(value: ExpressionRow, factor: BigInt)
-    case Multiply(value: ExpressionRow, factor: BigInt)
-    case Identity(first: ExpressionRow, second: ExpressionRow)
-    case FixedFloat(value: ExpressionRow, format: String)
-    case Relaxed(value: ExpressionRow)
-    case FloatConvert(
-        value: ExpressionRow,
-        selector: String,
-        cases: Vec[(Vec[BigInt], String)],
-        fallback: String
-    )
-    case Lookup(name: String, arguments: Vec[ExpressionRow])
-    case Unsupported(source: String)
-  }
-  private enum SyntaxNodeRow derives ReadWriter {
+  private enum SyntaxNode derives ReadWriter {
     case Text(raw: Int)
     case Literal(value: Int)
     case Field(kind: Int, binding: Int, arguments: Option[Int], default: Option[Int])
     case Group(open: Int, close: Int, children: Vec[Int])
     case Optional(marker: Option[Int], children: Vec[Int])
   }
-  private enum ConditionExpressionRow derives ReadWriter {
+  private enum ConditionNode derives ReadWriter {
     case Number(value: BigInt)
     case StringValue(value: Int)
     case Field(name: Int, attribute: Option[Int])
@@ -362,208 +333,135 @@ object NVDisasm {
     case Call(name: Int, arguments: Vec[Int])
     case Conditional(condition: Int, whenTrue: Int, whenFalse: Int)
   }
-  private case class ConditionRow(category: Int, expression: Int, message: Int) derives ReadWriter
+  private case class ConditionRow(expression: Int, message: Int, requires: Option[Int]) derives ReadWriter
+  private case class AssignmentRow(name: Int, positions: Vec[Int], expression: Int) derives ReadWriter
   private case class FormRow(
-      formId: Option[Int],
       name: Int,
       alternate: Boolean,
       opcodes: Vec[(Int, BigInt)],
       fields: Vec[Int],
-      issues: Vec[Int],
-      syntax: Option[Int],
+      syntax: Vec[Int],
       conditions: Vec[Int]
   ) derives ReadWriter
-  private case class VocabularyRow(name: Int, values: Vec[(Int, BigInt)], default: Option[BigInt] = None)
-      derives ReadWriter
-  private case class LookupRow(name: Int, rows: Vec[Row], issues: Vec[Int]) derives ReadWriter
+  private case class VocabularyRow(name: Int, values: Vec[(Int, BigInt)], default: Option[BigInt]) derives ReadWriter
+  private case class LookupRow(name: Int, rows: Vec[Row]) derives ReadWriter
   private case class DatabaseRow(
-      target: Int,
       digest: Int,
       width: Int,
       parameters: Vec[(Int, BigInt)],
       constants: Vec[(Int, BigInt)],
       forms: Vec[Int],
-      tables: Vec[Int],
-      symbols: Vec[Int]
+      lookups: Vec[Int],
+      vocabularies: Vec[Int]
   ) derives ReadWriter
+
+  /** Rows shared across targets stay shared in memory; only databases used by a requested target are decoded. */
   private case class Catalogue(
-      format: Int,
       strings: Vec[String],
-      expressions: Vec[ExpressionRow],
-      syntaxNodes: Vec[SyntaxNodeRow],
-      formats: Vec[Vec[Int]],
-      conditionExpressions: Vec[ConditionExpressionRow],
+      expressions: Vec[Expression],
+      syntaxNodes: Vec[SyntaxNode],
+      conditionNodes: Vec[ConditionNode],
       conditions: Vec[ConditionRow],
       assignments: Vec[AssignmentRow],
       forms: Vec[FormRow],
       vocabularies: Vec[VocabularyRow],
       lookups: Vec[LookupRow],
-      databases: Vec[DatabaseRow]
+      databases: Vec[DatabaseRow],
+      targets: Vec[(Int, Int)]
   ) derives ReadWriter {
-    // Keep the resource's shared rows shared in memory, decoding only rows used by a requested target.
-    private lazy val decodedExpressions: Vec[Eval[Expression]] = expressions.map(row => Eval.later(expression(row)))
-    private lazy val decodedAssignments: Vec[Eval[Assignment]] = assignments.map(row =>
-      Eval.later(Assignment(strings(row.name), row.positions, decodedExpressions(row.expression).value))
-    )
+    private def sequential[A, B: ClassTag](rows: Vec[A])(decode: (A, Int => B) => B): Vec[B] = {
+      val decoded = mutable.ArrayBuffer.empty[B]
+      rows.foreach(row => decoded += decode(row, decoded))
+      Vec.from(decoded)
+    }
 
-    private def expression(row: ExpressionRow): Expression = row match {
-      case ExpressionRow.Constant(value, relaxed)            => Expression.Constant(value, relaxed)
-      case ExpressionRow.Reference(name, attribute, relaxed) => Expression.Reference(name, attribute, relaxed)
-      case ExpressionRow.Scale(value, factor)                => Expression.Scale(expression(value), factor)
-      case ExpressionRow.Multiply(value, factor)             => Expression.Multiply(expression(value), factor)
-      case ExpressionRow.Identity(first, second)   => Expression.Identity(expression(first), expression(second))
-      case ExpressionRow.FixedFloat(value, format) =>
-        Expression.FixedFloat(expression(value), FloatEncoding.fromSpelling(format))
-      case ExpressionRow.Relaxed(value)                                 => Expression.Relaxed(expression(value))
-      case ExpressionRow.FloatConvert(value, selector, cases, fallback) =>
-        Expression.FloatConvert(
-          expression(value),
-          selector,
-          cases.map { case (values, format) => values -> FloatEncoding.fromSpelling(format) },
-          FloatEncoding.fromSpelling(fallback)
-        )
-      case ExpressionRow.Lookup(name, arguments) => Expression.Lookup(name, arguments.map(expression(_)))
-      case ExpressionRow.Unsupported(source)     => Expression.Unsupported(source)
-    }
-    private lazy val decodedSyntax: Vec[Syntax] = {
-      val previous = mutable.ArrayBuffer.empty[Syntax]
-      syntaxNodes.foreach { node =>
-        val value = node match {
-          case SyntaxNodeRow.Text(raw)                                => Syntax.Text(strings(raw))
-          case SyntaxNodeRow.Literal(value)                           => Syntax.Literal(strings(value))
-          case SyntaxNodeRow.Field(kind, binding, arguments, default) =>
-            Syntax.Field(strings(kind), strings(binding), arguments.map(strings(_)), default.map(strings(_)))
-          case SyntaxNodeRow.Group(open, close, children) =>
-            Syntax.Group(strings(open), strings(close), children.map(previous(_)))
-          case SyntaxNodeRow.Optional(marker, children) =>
-            Syntax.Optional(marker.map(strings(_)), children.map(previous(_)))
-        }
-        previous += value
+    private lazy val decodedSyntax: Vec[Syntax] = sequential[SyntaxNode, Syntax](syntaxNodes) { (node, previous) =>
+      node match {
+        case SyntaxNode.Text(raw)                                => Syntax.Text(strings(raw))
+        case SyntaxNode.Literal(value)                           => Syntax.Literal(strings(value))
+        case SyntaxNode.Field(kind, binding, arguments, default) =>
+          Syntax.field(strings(kind), strings(binding), arguments.map(strings(_)), default.map(strings(_)))
+        case SyntaxNode.Group(open, close, children) =>
+          Syntax.Group(strings(open), strings(close), children.map(previous))
+        case SyntaxNode.Optional(marker, children) => Syntax.Optional(marker.map(strings(_)), children.map(previous))
       }
-      previous.toVec
     }
-    private lazy val decodedConditionExpressions: Vec[ConditionExpression] = {
-      val previous = mutable.ArrayBuffer.empty[ConditionExpression]
-      conditionExpressions.foreach { row =>
-        val value = row match {
-          case ConditionExpressionRow.Number(value)          => ConditionExpression.Number(value)
-          case ConditionExpressionRow.StringValue(value)     => ConditionExpression.StringValue(strings(value))
-          case ConditionExpressionRow.Field(name, attribute) =>
+
+    private lazy val decodedConditions: Vec[ConditionExpression] =
+      sequential[ConditionNode, ConditionExpression](conditionNodes) { (node, previous) =>
+        node match {
+          case ConditionNode.Number(value)          => ConditionExpression.Number(value)
+          case ConditionNode.StringValue(value)     => ConditionExpression.StringValue(strings(value))
+          case ConditionNode.Field(name, attribute) =>
             ConditionExpression.Field(strings(name), attribute.map(strings(_)))
-          case ConditionExpressionRow.Parameter(name)       => ConditionExpression.Parameter(strings(name))
-          case ConditionExpressionRow.Constant(name)        => ConditionExpression.Constant(strings(name))
-          case ConditionExpressionRow.EnumValue(kind, name) =>
-            ConditionExpression.EnumValue(strings(kind), strings(name))
-          case ConditionExpressionRow.Unary(operator, value) =>
+          case ConditionNode.Parameter(name)        => ConditionExpression.Parameter(strings(name))
+          case ConditionNode.Constant(name)         => ConditionExpression.Constant(strings(name))
+          case ConditionNode.EnumValue(kind, name)  => ConditionExpression.EnumValue(strings(kind), strings(name))
+          case ConditionNode.Unary(operator, value) =>
             ConditionExpression.Unary(UnaryOperator.from(strings(operator)), previous(value))
-          case ConditionExpressionRow.Binary(operator, left, right) =>
+          case ConditionNode.Binary(operator, left, right) =>
             ConditionExpression.Binary(BinaryOperator.from(strings(operator)), previous(left), previous(right))
-          case ConditionExpressionRow.Call(name, arguments) =>
-            ConditionExpression.Call(BuiltinCall.from(strings(name)), arguments.map(previous(_)))
-          case ConditionExpressionRow.Conditional(condition, whenTrue, whenFalse) =>
+          case ConditionNode.Call(name, arguments) =>
+            ConditionExpression.Call(BuiltinCall.from(strings(name)), arguments.map(previous))
+          case ConditionNode.Conditional(condition, whenTrue, whenFalse) =>
             ConditionExpression.Conditional(previous(condition), previous(whenTrue), previous(whenFalse))
         }
-        previous += value
       }
-      previous.toVec
-    }
 
-    def database(row: DatabaseRow): Database = {
-      val decodedForms = row.forms.map { id =>
-        val encoded = forms(id)
-        val form    = Form(
-          encoded.formId,
-          strings(encoded.name),
-          encoded.alternate,
-          encoded.opcodes.map { case (name, value) => OpcodeValue(strings(name), value) },
-          encoded.fields.map(fieldId => decodedAssignments(fieldId).value),
-          encoded.issues.map(strings(_)),
-          encoded.syntax.map(formats(_)).getOrElse(Vec.empty[Int]).map(decodedSyntax),
-          encoded.conditions.map { conditionId =>
-            val condition = conditions(conditionId)
-            Condition(
-              strings(condition.category),
-              decodedConditionExpressions(condition.expression),
-              strings(condition.message)
-            )
-          }
-        )
-        val _ = form.typedIssues // force legacy resource issue classification while materializing the form
-        form
-      }
-      Database(
-        strings(row.target),
+    private lazy val decodedAssignments: Vec[Eval[Assignment]] = assignments.map(row =>
+      Eval.later(Assignment(strings(row.name), row.positions, expressions(row.expression)))
+    )
+
+    private lazy val decodedForms: Vec[Eval[Form]] = forms.map(row =>
+      Eval.later(Form(
+        strings(row.name),
+        row.alternate,
+        row.opcodes.map((name, value) => OpcodeValue(strings(name), value)),
+        row.fields.map(decodedAssignments(_).value),
+        row.syntax.map(decodedSyntax),
+        row.conditions.map { id =>
+          val condition = conditions(id)
+          Condition(
+            decodedConditions(condition.expression),
+            strings(condition.message),
+            condition.requires.map(strings(_))
+          )
+        }
+      ))
+    )
+
+    private def named(rows: Vec[(Int, BigInt)]): Map[String, BigInt] =
+      rows.map((name, value) => strings(name) -> value).toMap
+
+    private lazy val decodedDatabases: Vec[Eval[Database]] = databases.map(row =>
+      Eval.later(Database(
         strings(row.digest),
-        row.width,
-        decodedForms,
-        row.tables.map { id =>
-          val table = lookups(id)
-          LookupTable(strings(table.name), table.rows, table.issues.map(strings(_)))
+        row.width.refine[Int in (64, 88, 128)].fold(error => throw IllegalStateException(error.raw), identity),
+        row.forms.map(decodedForms(_).value),
+        row.lookups.map { id =>
+          val lookup = lookups(id)
+          LookupTable(strings(lookup.name), lookup.rows)
         },
-        row.symbols.map { id =>
+        row.vocabularies.map { id =>
           val vocabulary = vocabularies(id)
           Vocabulary(
             strings(vocabulary.name),
-            vocabulary.values.map { case (name, value) =>
-              SymbolValue(strings(name), value)
-            },
+            vocabulary.values.map((name, value) => SymbolValue(strings(name), value)),
             vocabulary.default
           )
         },
-        row.parameters.map { case (name, value) => strings(name) -> value }.toMap,
-        row.constants.map { case (name, value) => strings(name) -> value }.toMap
-      )
-    }
-  }
-
-  private lazy val decoderCatalogue: Catalogue = {
-    val stream = Option(getClass.getResourceAsStream("/net/kurobako/gemstone/isa/sass/decoders.json"))
-      .getOrElse(throw IllegalStateException("missing compact SASS decoder resource"))
-    Using.resource(stream) { input =>
-      val catalogue = read[Catalogue](input)
-      require(catalogue.format == 4, "unsupported SASS decoder catalogue format")
-      val digests = catalogue.databases.map(row => catalogue.strings(row.digest))
-      require(digests.distinct.size == digests.size, "duplicate SASS decoder digest")
-      require(
-        digests.forall(digest =>
-          digest.length == 64 && digest.forall(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
-        ),
-        "invalid SASS decoder digest"
-      )
-      catalogue
-    }
-  }
-
-  private lazy val databaseLoaders: Map[String, () => Database] = decoderCatalogue.databases.map { row =>
-    val digest       = decoderCatalogue.strings(row.digest)
-    lazy val decoded = {
-      val value = decoderCatalogue.database(row)
-      require(value.sha256 == digest, "SASS decoder provenance mismatch")
-      require(Set(64, 88, 128)(value.width), "invalid SASS decoder width")
-      require(
-        value.forms.forall(_.formId.forall(formId => formId >= 0 && formId < Metadata.catalogue.schemaCount)),
-        "SASS decoder references an unknown instruction schema"
-      )
-      require(
-        value.forms.forall(_.fields.forall(_.positions.forall(position => position >= 0 && position < value.width))),
-        "SASS decoder field position is outside its instruction word"
-      )
-      require(value.symbols.map(_.name).distinct.size == value.symbols.size, "duplicate SASS decoder vocabulary")
-      require(value.tables.map(_.name).distinct.size == value.tables.size, "duplicate SASS decoder lookup table")
-      value.forms.flatMap(_.conditions).foreach(_.exception)
-      value
-    }
-    digest -> (() => decoded)
-  }.toMap
-
-  private lazy val targets: Map[String, () => Database] = Metadata.catalogue.targets.map { target =>
-    val load = databaseLoaders.getOrElse(
-      target.encodingKey,
-      throw IllegalStateException(s"missing decoder data for SASS target ${target.name}")
+        named(row.parameters),
+        named(row.constants)
+      ))
     )
-    lazy val database = load().copy(target = target.name)
-    target.name -> (() => database)
-  }.toMap
 
-  def forTarget(target: String): Option[Database] = targets.get(target).map(_())
+    lazy val byTarget: Map[String, Eval[Database]] =
+      targets.map((name, database) => strings(name) -> decodedDatabases(database)).toMap
+  }
+
+  private lazy val catalogue: Catalogue = resources.json[Catalogue](getClass, "decoders.json")
+
+  def supports(name: String): Boolean = catalogue.byTarget.contains(name)
+
+  def database(name: String): Database = catalogue.byTarget(name).value
 }

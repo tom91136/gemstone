@@ -23,14 +23,13 @@
 #include <aspartame/vector.hpp>
 
 #include <gemstone/environment.hpp>
+#include <gemstone/process.hpp>
 
-#include "process.hpp"
 #include <environment_keys.hpp>
 
 namespace gemstone::opencl {
 
 using namespace aspartame;
-using namespace gemstone::rpc;
 
 namespace {
 
@@ -316,25 +315,6 @@ bool hasVectorComponentSwizzle(std::string_view source) {
   return false;
 }
 
-bool writeBytes(const std::string &path, const uint8_t *bytes, size_t size) {
-  FileDescriptor descriptor(open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600));
-  if (descriptor.get() == -1) return false;
-  size_t offset = 0;
-  while (offset < size) {
-    const ssize_t count = write(descriptor.get(), bytes + offset, size - offset);
-    if (count <= 0) {
-      unlink(path.c_str());
-      return false;
-    }
-    offset += static_cast<size_t>(count);
-  }
-  return close(descriptor.release()) == 0;
-}
-
-bool writeFile(const std::string &path, const std::string &contents) {
-  return writeBytes(path, reinterpret_cast<const uint8_t *>(contents.data()), contents.size());
-}
-
 bool readBytes(const std::string &path, std::vector<uint8_t> *bytes) {
   std::ifstream stream(path, std::ios::binary);
   if (!stream) return false;
@@ -374,7 +354,7 @@ bool compileSourceToBitcode(const std::string &source, const std::string &option
                                 || (source ^ contains_slice(".odd")) || hasVectorComponentSwizzle(source);
   const bool usesEnqueuedLocalSize = source ^ contains_slice("get_enqueued_local_size");
   const std::string compilerSource = hasVectorSwizzle ? makeGlobalMemoryVolatile(source) : source;
-  bool success = writeFile(input, compilerSource);
+  bool success = writeFile(input, compilerSource.data(), compilerSource.size());
   std::string diagnostic;
   if (success) {
     // LLVM's SLP pass can pack four scalar boolean comparisons into i4,
@@ -446,7 +426,7 @@ bool compileSource(const std::string &source, const std::string &options, std::v
   const auto convert = [&](const std::vector<uint8_t> &candidate, const std::string &suffix) {
     const std::string input = directory.file("source" + suffix + ".bc");
     const std::string output = directory.file("source" + suffix + ".spv");
-    if (!writeBytes(input, candidate.data(), candidate.size())) {
+    if (!writeFile(input, candidate.data(), candidate.size())) {
       diagnostic = "cannot write generated LLVM bitcode";
       return false;
     }
@@ -464,16 +444,16 @@ bool compileSource(const std::string &source, const std::string &options, std::v
   };
   bool success = convert(bitcode, "");
   if (!success && diagnostic.find("InvalidBitWidth:") != std::string::npos) {
-    // Optimized LLVM IR can contain unusual integer widths (for example i33
+    // Optimised LLVM IR can contain unusual integer widths (for example i33
     // from a closed-form loop sum) that the converter rejects. Preserve the
-    // optimized path for ordinary programs and retry this converter failure.
+    // optimised path for ordinary programs and retry this converter failure.
     const std::string firstDiagnostic = diagnostic;
-    std::vector<uint8_t> unoptimized;
+    std::vector<uint8_t> unoptimised;
     std::string fallbackLog;
-    if (compileSourceToBitcode(source, options + " -O0", unoptimized, fallbackLog)) {
-      success = convert(unoptimized, "-o0");
+    if (compileSourceToBitcode(source, options + " -O0", unoptimised, fallbackLog)) {
+      success = convert(unoptimised, "-o0");
       if (success) {
-        bitcode = std::move(unoptimized);
+        bitcode = std::move(unoptimised);
         diagnostic.clear();
       } else {
         diagnostic = firstDiagnostic + "\n-O0 fallback: " + diagnostic;
@@ -499,7 +479,7 @@ bool reverseSpirv(const std::vector<uint8_t> &il, std::vector<uint8_t> &bitcode,
     log = "linking SPIR-V modules requires llvm-spirv for reverse translation";
     return false;
   }
-  bool success = writeBytes(input, il.data(), il.size());
+  bool success = writeFile(input, il.data(), il.size());
   std::string diagnostic;
   if (success) {
     const ProcessResult conversion = runProcess({spirvConverterPath(), "-r", input, "-o", output});
@@ -533,7 +513,7 @@ bool linkBitcode(const std::vector<std::vector<uint8_t>> &modules, std::vector<u
   bool success = true;
   for (size_t index = 0; index < modules.size(); ++index) {
     const std::string path = directory.file("input" + std::to_string(index) + ".bc");
-    if (!writeBytes(path, modules[index].data(), modules[index].size())) {
+    if (!writeFile(path, modules[index].data(), modules[index].size())) {
       success = false;
       break;
     }

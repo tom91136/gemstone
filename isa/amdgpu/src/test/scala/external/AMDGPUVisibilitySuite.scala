@@ -9,8 +9,7 @@ class AMDGPUVisibilitySuite extends munit.FunSuite {
     assertEquals(
       typeCheckErrors("""
       import net.kurobako.gemstone.isa.amdgpu.*
-      import net.kurobako.gemstone.vm.*
-      def load(program: CodeObject): Either[Fault, LoadedProgram] = LoadedProgram.load(program)
+      def load(program: CodeObject): LoadedProgram = LoadedProgram.load(program)
     """),
       Nil
     )

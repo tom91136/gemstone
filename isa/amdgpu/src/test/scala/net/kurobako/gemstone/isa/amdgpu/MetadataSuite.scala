@@ -31,7 +31,10 @@ class MetadataSuite extends munit.FunSuite {
     assertEquals(SourceOperand.literalSize(254, ISA.CDNA1), None)
     assertEquals(SourceOperand.literalSize(254, ISA.CDNA5).map(_.raw), Some(8))
     assertEquals(SourceOperand.decode(248, ISA.GFX6), None)
-    assertEquals(SourceOperand.decode(248, ISA.GFX8), Some(SourceOperand.Floating(0.15915494)))
+    assertEquals(
+      SourceOperand.decode(248, ISA.GFX8),
+      Some(SourceOperand.Floating(java.lang.Double.longBitsToDouble(0x3fc45f306dc9c882L)))
+    )
     assertEquals(SourceOperand.decode(193, ISA.CDNA1), Some(SourceOperand.Integer(-1)))
     assertEquals(SourceOperand.decode(-1, ISA.CDNA1), None)
     assertEquals(SourceOperand.decode(512, ISA.CDNA1), None)

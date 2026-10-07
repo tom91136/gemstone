@@ -4,14 +4,14 @@ name = "cuda-ptx"
 backend = "cuda"
 architecture = "sm_89"
 device = "*RTX 4060 Ti*"
-environment = { CONFORMANCE_CUDA_CODE = "ptx", GEMSTONE_CUDA_CODE = "ptx", CUDA_FORCE_PTX_JIT = "1", CUDA_DISABLE_PTX_JIT = "0" }
+environment = { CONFORMANCE_CUDA_CODE = "ptx" }
 
 [[targets]]
 name = "cuda-sass"
 backend = "cuda"
 architecture = "sm_89"
 device = "*RTX 4060 Ti*"
-environment = { CONFORMANCE_CUDA_CODE = "sass", GEMSTONE_CUDA_CODE = "sass", CUDA_FORCE_PTX_JIT = "0", CUDA_DISABLE_PTX_JIT = "1" }
+environment = { CONFORMANCE_CUDA_CODE = "sass" }
 
 [[targets]]
 name = "amd-hsa"
@@ -25,7 +25,9 @@ name = "amd-hip"
 backend = "hip"
 architecture = "gfx1030"
 device = "*gfx1030*"
-environment = { HSA_OVERRIDE_GFX_VERSION = "10.3.0" }
+# Deferred code object loading on this APU drops the result of the first rocThrust reduction (find_if, any_of,
+# mismatch...) when a second code object loads between its kernels.
+environment = { HSA_OVERRIDE_GFX_VERSION = "10.3.0", HIP_ENABLE_DEFERRED_LOADING = "0" }
 # These variants bypass the HIP runtime's ISA-compatibility path: OpenMP
 # offload rejects the overridden gfx1030 image, while Kokkos executes it with
 # incorrect results. The native HIP variants cover the same miniapps.
@@ -70,6 +72,8 @@ skips = [
   "cts/opencl/printf/mixed_format_random",
   "cts/opencl/printf/string",
   "cts/opencl/printf/vector",
+  # Rejects unsetting exec-info SVM pointers (size 0, NULL) with CL_INVALID_VALUE.
+  "cts/opencl/svm/svm_set_kernel_exec_info_svm_ptrs",
 ]
 
 [[targets]]

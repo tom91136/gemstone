@@ -1,7 +1,7 @@
 # SASS execution
 
 SASS is a separate ISA frontend. Production code depends on `core` and `isa/nvidia`, with no PTX frontend
-dependency; tests use PTX as a cross-frontend oracle.
+dependency; tests use PTX only to validate the checked-in and fixture-recipe PTX modules.
 
 ```mermaid
 flowchart LR
@@ -15,16 +15,18 @@ flowchart LR
 ```
 
 `Cubin` reads CUDA ELF sections, kernel parameters, symbols and constant-bank aliases.
-`SASSCodeWords` extracts the architecture's instruction and control words; `FieldDecoder` and
+`CodeWords` extracts the architecture's instruction and control words; `FieldDecoder` and
 `InstructionDecoder` interpret the encoding, vocabulary and legality data in `NVDisasm`. The decoded
 instruction carries a generated `Instruction` case containing typed registers, predicates, constants, addresses
 and modifiers. The same cases are used by text parsing and handwritten semantic dispatch. Binary decoding
-constructs these operands directly from the generated FORMAT description. Assembly text uses a handwritten recursive-descent parser, sharing cursor and numeric parsing utilities with PTX,
-to produce the same representation. Runtime decoding uses checked-in metadata and requires no NVIDIA tools.
+constructs these operands directly from the generated FORMAT description. Assembly text uses a handwritten recursive-descent parser, sharing core's `text` cursor and numeric parsing
+utilities with PTX, to produce the same representation. Runtime decoding uses checked-in metadata and requires no NVIDIA tools.
 
-`NVDisasm.Database` contains the instruction `Form` records and lookup tables recovered from a SASS description.
-A target's `encodingKey` is the SHA-256 of that description, used to select shared generated data. Runtime metadata
-retains the schema count for validating IDs; schema names and field lists remain in codegen.
+`NVDisasm.Database` contains the instruction `Form` records and lookup tables recovered from a SASS description,
+identified by the description's SHA-256 `digest`; targets with the same description share one database. A `Target`
+names an architecture with recovered tables. Architecture-suffixed variants (`SM90a`, `SM100f`) share their base
+target's description and are not separate targets. `Generation` (Kepler, Maxwell, Modern) gives the instruction word
+and bundle layout.
 
 Binary decoding and its metadata live directly in `sass`. The `asm` package owns parsing, printing, assembly and
 disassembly through its four public codecs. Runtime compilation and execution work with `asm` absent.
@@ -41,28 +43,31 @@ selectors, address modes, floating formats and special registers have separate t
 vendor spellings can be retained for decoding and printing but have no implicit execution semantics.
 Control-flow and predicate-lifetime analysis dispatch on the generated instruction types.
 
-Each case points to a shared `Instruction.Definition`. Definitions expose the mnemonic, named slots and
-references to encoding forms; `Definition.forMnemonic` and `Definition.forEncoding` work before any
-instruction exists. Sixteen generated definition files, with up to 256 definitions each, hold the checked constructors and metadata;
-companion accessors expose them from `Instruction`. Encoding expressions and lookup tables stay in
-the shared JSON resources rather than being copied into Scala initializers.
+Each case points to a shared `Instruction.Definition`. Definitions expose the mnemonic and the names of the
+encoding forms that produce it; `Definition.forMnemonic` works before any instruction exists. Generated
+definition files, with up to 256 definitions each, hold the checked constructors; companion accessors expose them
+from `Instruction`. Encoding expressions and lookup tables stay in the shared JSON resource rather than being
+copied into Scala initialisers. Scheduling-pipe opcode aliases (`IADD3int_pipe`) repeat the plain opcode's value and
+are not generated.
 
-The forwarding accessors are inline; metadata chunks are public so expansion needs no access bridges.
-Resource loading resolves executable schema operators and field categories. Candidate failure categories
-are separate from diagnostic messages, so message wording does not select a decoding result.
+Resource loading resolves condition operators and FORMAT field categories once; each form's binding analysis is
+computed on first use, so a decoded cubin pays only for the forms it contains. Candidate failure categories are
+separate from diagnostic messages, so message wording does not select a decoding result.
 
 `Printer` renders the same typed instructions produced by binary decoding and text parsing.
 Decoded instructions retain their selected form, raw field values and resolved bindings so the
 encoder can preserve scheduling and non-unique machine encodings.
 
-`VMCompiler` handles control flow, common instruction forms and physical register aliases. Integer, floating,
-tensor and address compiler families share a typed compilation context and construct NVIDIA VMIR
-instructions directly and emit symbolic branches. Scalar and vector memory operations share
+`VMCompiler` lowers whole functions: legacy control-stack tokens, call and return targets, and the guard around
+each instruction. Each instruction is lowered by one of the floating, integer, predicate, tensor, memory and control
+families. Each family's `lower` matches the generated cases it owns, reports whether it lowered the instruction,
+and uses `VMCompilationContext` and its emission helpers to construct NVIDIA VMIR directly with symbolic branches. `LegacyAddressRewrite` and `LegacyRangeReduction`
+recognise verified CUDA 11.8 sm_50/sm_60 idioms before lowering. Scalar and vector memory operations share
 four VMIR nodes carrying a typed memory access; both frontends use `VMKernelLaunch` for argument
 validation, pointer relocation and interpreter invocation. Condition flags and three-input carry are explicit per-lane machine
 state, so consumers follow executed control flow and predication rather than static instruction pairing. `VMAssembler` resolves branch labels into program counters.
-No PTX source is emitted or parsed. `LoadedProgram` prepares arguments and invokes the shared execution
-engine. The server's cubin backend provides lazy kernel compilation and global binding.
+No PTX source is emitted or parsed. `LoadedProgram` is the loaded cubin: it compiles kernels lazily, binds
+globals and constant banks, and invokes the shared execution engine. `CubinBackend` loads it from an image.
 
 `isa/nvidia` owns the execution IR, lane and warp state, convergence tokens, memory operations and
 numerical semantics used by both SASS and PTX. Architecture-specific decoding and ABI handling stay
@@ -82,9 +87,9 @@ widths and address scales carry numeric constraints in the operand model. Decodi
 values before constructing these operands; architecture-specific restrictions remain in the compiler.
 The shared tensor model carries positive dimensions and constrained element widths.
 
-Generated resources contain the target catalogue and decoder data as plain JSON. Typed catalogue rows
-share strings, encoding expressions, forms and lookup tables across architectures.
-The runtime reads these records directly and resolves their indices, following the AMDGPU catalogue pattern.
+The generated resource `decoders.json` holds the target table and decoder data as plain JSON. Typed rows share
+strings, encoding expressions, FORMAT trees, conditions, forms and lookup tables across architectures. The runtime
+reads these records directly and resolves their indices.
 The original recovered NVIDIA descriptions remain in the code generation reference cache, outside
 packaged runtime resources.
 
@@ -102,13 +107,13 @@ The build fetches and verifies the pinned CUDA 11.8 and 13.3 packages and execut
 are codegen resources; the latter pins every extracted table. Extraction checks the executable and table
 pins, captures each target twice, and writes deterministic, content-addressed gzip tables and a manifest.
 Updating pins requires reviewing package provenance and the generated table changes. Cached reference
-bundles are verified before reuse. The generator also participates in `codegen` and `checkGeneratedSources`.
+bundles are verified by digest before reuse. The generator also participates in `codegen` and `checkGeneratedSources`.
 
 Extraction requires Linux x86_64, `gcc`, and the pinned `nvdisasm` executables. The hooks depend on those
 specific executable layouts and glibc interfaces. Capture parsing and LZ4 decompression run in Scala;
 neither Python nor `liblz4` is required. Temporary capture files are removed after extraction. Original
-table descriptions stay in the reference cache for provenance and validation; packaged runtime JSON
-contains the shared schemas, decoding metadata and lookup tables.
+table descriptions stay in the reference cache for provenance; packaged runtime JSON contains the decoding
+metadata and lookup tables.
 
 Capture and extraction regression tests run without CUDA hardware:
 
@@ -117,14 +122,13 @@ sbt 'codegen/testOnly *SASSCaptureSuite *ExtractSASSSuite'
 ```
 
 ISA unit suites live under `isa/sass/src/test`: compiler, decoder, and execution tests use Scala cubin
-metadata with captured text or independent machine-word fixtures. Shared fixture objects in
-`src/test/scala/net/kurobako/gemstone/isa/sass/fixtures` group named, triple-quoted source and SASS
-values by instruction family. Their comments record recovered compiler/disassembler commands,
-tool versions, extraction and patch details, and limitations in the evidence. Source-equivalent
-hardware checks are distinguished from direct execution of the captured instruction. Missing
-provenance is explicit. Expected encodings and results remain independent of Gemstone's assembler. The server tests retain only backend lifecycle and binding coverage plus one small
-embedded ELF end-to-end case. Ordinary Scala tests need no CUDA toolkit, `nvdisasm`, GPU, or checked-in
-cubin files. Hardware execution and broader frontend comparison belong to conformance, not unit tests.
+metadata with captured listings or independent machine-word fixtures. Suites are grouped by instruction family;
+`Harness` lowers listings or instruction text and runs them on the NVIDIA interpreter, and `Listing` parses
+normalised `nvdisasm` listings into instructions and their machine words. Fixtures are Scala objects in the
+`fixtures` package, one per suite family, holding producer sources and listings behind `fixtures.Fixture`.
+Expected encodings and results remain independent of Gemstone's assembler. `CubinBackend` lifecycle and binding
+tests, including one small embedded ELF end-to-end case, live with these suites. Ordinary Scala tests need no CUDA
+toolkit, `nvdisasm`, GPU, or checked-in cubin files. Hardware execution and broader frontend comparison belong to conformance, not unit tests.
 The `cuda-ptx` and `cuda-sass` conformance routes exercise compiled programs through their respective
 frontends. Decoder availability does not imply complete instruction execution coverage; unsupported
 operations and operand forms fail explicitly.
@@ -141,11 +145,10 @@ inconsistent annotation is an error. Plain assembly without an annotation select
 from the target tables and fails explicitly when no unique supported encoding exists.
 
 `asm.Disassembler` and `asm.Assembler` round-trip whole code sections through `asm.Program`, including
-instruction fields, legacy bundle control words and the Maxwell/Pascal reserved control bit. `SASSCodeWords.split`/`join` expose
+instruction fields, legacy bundle control words and the Maxwell/Pascal reserved control bit. `CodeWords.split`/`join` expose
 the physical layout separately. These APIs do not construct a CUDA ELF container.
 
-Keep substantial fixtures with their producer source and executable reproduction recipe in the same Scala file.
-Recipes specify the tool version, target, commands, and any Scala patching steps. `NvidiaFixtureSuite` checks the
-embedded result when `GEMSTONE_VERIFY_FIXTURES=1`; ordinary tests consume the embedded values without NVIDIA tools.
-Small instruction snippets need no recipe. Reuse named fixtures directly, and keep whole kernels where control flow,
-physical registers or ABI setup matter.
+Substantial fixtures keep their producer source, and `fixtures.Recipes` records how each was produced: tool
+version, target, commands and any patching steps. Setting `GEMSTONE_VERIFY_FIXTURES=1` reproduces the recipes with
+the pinned NVIDIA tools and compares the results; ordinary tests use the stored values without NVIDIA tools. Small
+instruction snippets need no recipe. Keep whole kernels where control flow, physical registers or ABI setup matter.

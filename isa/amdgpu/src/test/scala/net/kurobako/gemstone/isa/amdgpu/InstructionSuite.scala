@@ -1,55 +1,49 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
-import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
 import net.kurobako.gemstone.string.*
 
 class InstructionSuite extends munit.FunSuite {
-  test("every generated form descriptor decodes directly to its parameterized enum case") {
-    val opcodes = Opcode.definitions.map(_.opcode).distinct.sorted
-    assertEquals(opcodes.size, 2467)
+  test("every opcode accepts exactly its operand counts") {
+    assertEquals(Opcode.definitions.map(_.opcode).distinct.size, 2467)
+    assertEquals(Opcode.definitions.map(Instruction.operandCounts(_).size).sum, 2952)
     Opcode.definitions.foreach { definition =>
-      Instruction.operandCounts(definition).foreach { operandCount =>
-        val operands = operandsFor(operandCount)
+      val counts = Instruction.operandCounts(definition)
+      (0 to counts.max + 1).foreach { count =>
+        val operands = Vec.tabulate(count)(index => Operand.IntegerLiteral(BigInt(index + 1), 10))
         val modifier = Modifier("test", Some("value"))
-        val decoded  = Instruction.decode(definition, operands, Vec(modifier))
-        assertEquals(decoded.size, 1, s"${definition.toString}: ambiguous or missing form")
-        val instruction = decoded.head
-        assertEquals(instruction.definition, definition)
-        assertEquals(instruction.opcode, definition.opcode)
-        assertEquals(instruction.meta, definition.meta)
-        assertEquals(instruction.operands, operands)
-        assertEquals(instruction.mods, Seq(modifier))
+        Instruction.decode(definition, operands, Vec(modifier)) match {
+          case Right(instruction) =>
+            assert(counts.contains(count), definition.toString)
+            assertEquals(instruction.definition, definition)
+            assertEquals(instruction.operands, operands)
+            assertEquals(instruction.mods, Vec(modifier))
+          case Left(error) =>
+            assert(!counts.contains(count), definition.toString)
+            assertEquals(error, Instruction.DecodeError.InvalidOperandCount(definition.opcode, counts, count))
+        }
       }
     }
   }
 
-  test("generated runtime class names are portable to case-insensitive filesystems") {
-    val classNames = Opcode.definitions.flatMap { definition =>
-      Instruction.operandCounts(definition).flatMap { operandCount =>
-        Instruction.decode(
-          definition,
-          operandsFor(operandCount),
-          Vec.empty[Modifier]
-        ).map(_.getClass.getName.toLowerCaseRoot)
-      }
-    }
+  test("opcode objects are portable to case-insensitive filesystems") {
+    val classNames = Opcode.definitions.map(_.getClass.getName.toLowerCaseRoot)
     assertEquals(classNames.distinct.size, classNames.size)
   }
 
-  test("unknown opcodes and bad operand counts cannot inhabit the AST") {
+  test("unknown opcodes and bad operand counts are rejected by name") {
     assertEquals(
       Instruction.decode("gemstone_unknown", Vec.empty),
       Left(Instruction.DecodeError.UnknownOpcode("gemstone_unknown"))
     )
-    Instruction.decode("s_branch", Vec.empty) match {
-      case Left(Instruction.DecodeError.InvalidOperandCount("s_branch", Vec(1), 0)) => ()
-      case other => fail(s"expected an exact arity error, found $other")
-    }
+    assertEquals(
+      Instruction.decode("s_branch", Vec.empty),
+      Left(Instruction.DecodeError.InvalidOperandCount("s_branch", Vec(1), 0))
+    )
+    assertEquals(
+      Instruction.decode("v_mov_b32_e64", Vec.empty).left.map(_.toString),
+      Left(Instruction.DecodeError.InvalidOperandCount("v_mov_b32", Vec(2), 0).toString)
+    )
   }
-
-  private def operandsFor(operandCount: Int): Vec[Operand] =
-    Vec.tabulate(operandCount)(index => Operand.IntegerLiteral(BigInt(index + 1), 10))
 }

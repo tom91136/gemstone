@@ -2,28 +2,24 @@ package net.kurobako.gemstone
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.vm.*
 import scala.compiletime.testing.typeCheckErrors
 
+/** Runtime validation, nonempty values and newtypes. */
 class ConstraintSuite extends munit.FunSuite {
-  private object Small     extends Newtype[Int in 1 ~ 8]
-  private object Name      extends Newtype[NonEmpty[String]]
-  private object OtherName extends Newtype[NonEmpty[String]]
-
-  test("newtypes wrap validated values with inferred refinement targets") {
-    val small = Small(8.unsafe)
-    val name  = Name("kernel".unsafe)
-    assertEquals(small.raw, 8)
-    assertEquals(name.raw, "kernel")
-    assertEquals(AllocationId(1L.unsafe).next.raw, 2L)
-    assertEquals(summon[Ordering[Small.Type]].compare(Small(1.unsafe), small), -1)
-    assertEquals(OtherName("kernel".unsafe).raw, name.raw)
+  private object Small       extends Newtype[Int in 1 ~ 8]
+  private object Name        extends Newtype[NonEmpty[String]]
+  private object OtherName   extends Newtype[NonEmpty[String]]
+  private object Lane        extends Newtype[Byte in 0 ~ 31]
+  private object NestedLane  extends Newtype[Lane.Type]
+  private object Nested      extends Newtype[Small.Type]
+  private object Names       extends Newtype[NonEmpty[Vec[Name.Type]]]
+  private object NonzeroPair extends Newtype[(Long, Long)] {
+    override protected def violation(value: (Long, Long)): Option[NonEmpty[String]] =
+      Option.when[NonEmpty[String]](value == (0L, 0L))("zero pair")
   }
-
-  private object Nested extends Newtype[Small.Type]
-  private object Names  extends Newtype[NonEmpty[Vec[Name.Type]]]
   private object Foreign {
     opaque type Type = Int
     def apply(value: Int): Type = value
@@ -31,59 +27,136 @@ class ConstraintSuite extends munit.FunSuite {
   }
   private object ForeignName extends Newtype[Foreign.Type]
 
-  test("unwrap retains the carrier while raw removes nested wrapper layers") {
-    val small                         = Small(8)
-    val nested                        = Nested(small)
-    val carrier: Int in 1 ~ 8         = small.unwrap
-    val inner: Small.Type             = nested.unwrap
-    val primitive: Int                = nested.raw
-    val text: String                  = Name("kernel").raw
-    val refinedText: NonEmpty[String] = Name("kernel").unwrap
-    val identifier: Long              = AllocationId(3L).raw
-    assertEquals(carrier.raw, 8)
-    assertEquals(inner, small)
-    assertEquals(primitive, 8)
-    assertEquals(text, refinedText)
-    assertEquals(identifier, 3L)
+  test("refine reports failures as values, unsafe throws them, and both evaluate their input once") {
+    val evaluations = java.util.concurrent.atomic.AtomicInteger()
+    def input: Int  = evaluations.incrementAndGet()
+    assertEquals(input.refine[Int > 0].map(_.raw), Right(1))
+    assertEquals(input.unsafe[Int in 1 ~ 8].raw, 2)
+    assertEquals(evaluations.get(), 2)
+    assert(0.refine[Int > 0].left.exists(message => message.contains("GreaterThan[0]") && message.endsWith(": 0")))
+    val _          = intercept[IllegalArgumentException](0.unsafe[Int > 0])
+    val _          = intercept[IllegalArgumentException]((-1L).unsafe[Long >= 0])
+    val byte: Byte = 17
+    assertEquals(byte.refine[Byte in 0 ~ 31].map(_.raw), Right(byte))
+    assert((1024: Short).refine[Short in 0 ~ 1023].isLeft)
+    assert((-1).toByte.refine[Byte >= 0].isLeft)
+    val limit = java.lang.Long.parseLong("12")
+    case class BudgetExceeded(limit: Long > 0)
+    assertEquals(BudgetExceeded(limit.unsafe).limit.raw, 12L)
   }
 
-  test("raw preserves collection elements and unrelated opaque types") {
-    val names                             = Vec(Name("kernel"))
-    val nonempty                          = names.unsafe[NonEmpty[Vec[Name.Type]]]
-    val collection: Vec[Name.Type]        = Names(nonempty).raw
-    val refinedCollection: Vec[Name.Type] = nonempty.raw
-    val foreign: Foreign.Type             = ForeignName(Foreign(7)).raw
-    assertEquals(collection, names)
-    assertEquals(refinedCollection, names)
-    assertEquals(Foreign.read(foreign), 7)
+  test("runtime validation requires the exact carrier and a complete target") {
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
-      object Foreign {
-        opaque type Type = Int
-        def apply(value: Int): Type = value
-      }
-      object Named extends Newtype[Foreign.Type]
-      val primitive: Int = Named(Foreign(7)).raw
+      1.unsafe[Long > 0]
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      1L.unsafe[Int > 0]
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      "1".unsafe[Int > 0]
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      1.unsafe[String]
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      val value: Int = 17
+      value.refine[Byte in 0 ~ 31]
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      val value: Byte = 17
+      value.refine[Short > 0]
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      1.unsafe[Int where (LessThan[0] | GreaterThan[0])]
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      1.unsafe[Int where MultipleOf[0]]
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      1.unsafe[Int in (Int, 2)]
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      1.unsafe[Int in (1, "two")]
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      1.0.unsafe[Double where GreaterThan[0]]
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      def refine[P](value: Int) = value.unsafe[Int where P]
+    """).nonEmpty)
+    assertEquals(1.toLong.unsafe[Long > 0].raw, 1L)
+  }
+
+  test("strings and immutable collections are checked at runtime; NUL is permitted") {
+    assertEquals("kernel".unsafe[NonEmpty[String]].raw, "kernel")
+    assertEquals("a\u0000b".unsafe[NonEmpty[String]].raw, "a\u0000b")
+    assertEquals(List(1, 2).unsafe[NonEmpty[List[Int]]].raw, List(1, 2))
+    assert("".refine[NonEmpty[String]].isLeft)
+    assertEquals("kernel".refine[NonEmpty[String]].map(value => value: String), Right("kernel"))
+    val _ = intercept[IllegalArgumentException]("".unsafe[NonEmpty[String]])
+    val _ = intercept[IllegalArgumentException](List.empty[Int].unsafe[NonEmpty[List[Int]]])
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      scala.collection.mutable.ArrayBuffer(1).unsafe[NonEmpty[scala.collection.mutable.ArrayBuffer[Int]]]
     """).nonEmpty)
   }
 
-  test("raw evaluates its receiver once") {
+  test("newtypes validate the carrier refinement and their own rules before wrapping") {
+    assertEquals(4.unsafe[Small.Type].raw, 4)
+    assertEquals(4.refine[Small.Type].map(_.raw), Right(4))
+    assert(0.refine[Small.Type].isLeft)
+    val _ = intercept[IllegalArgumentException](0.unsafe[Small.Type])
+    assert("".refine[Name.Type].isLeft)
+    assert("a\u0000b".refine[Name.Type].isRight)
+    assertEquals((17: Byte).refine[Lane.Type].map(_.unwrap.raw), Right(17.toByte))
+    assertEquals((0L, 0L).refine[NonzeroPair.Type].left.map(_.raw), Left("zero pair"))
+    val _ = intercept[IllegalArgumentException](NonzeroPair((0L, 0L)))
+    assertEquals((1L, 0L).unsafe[NonzeroPair.Type].raw, (1L, 0L))
+    assert(0L.refine[AllocationId].isLeft)
+    assert((-1L).refine[ProgramId].isLeft)
+    assertEquals(Long.MaxValue.refine[AllocationId].map(_.raw: Long), Right(Long.MaxValue))
+    val _ = intercept[ArithmeticException](AllocationId(Long.MaxValue).next)
+    val _ = intercept[ArithmeticException](CompletionId(Long.MaxValue).next)
+    assertEquals(summon[Ordering[Small.Type]].compare(Small(1), Small(8)), -1)
+  }
+
+  test("unwrap retains the carrier while raw removes nested wrappers, once, and only ours") {
+    val small                         = Small(8)
+    val carrier: Int in 1 ~ 8         = small.unwrap
+    val inner: Small.Type             = Nested(small).unwrap
+    val primitive: Int                = Nested(small).raw
+    val lane: Byte                    = NestedLane(Lane(17)).raw
+    val refinedText: NonEmpty[String] = Name("kernel").unwrap
+    val names                         = Vec(Name("kernel"))
+    val collection: Vec[Name.Type]    = Names(names.unsafe[NonEmpty[Vec[Name.Type]]]).raw
+    val foreign: Foreign.Type         = ForeignName(Foreign(7)).raw
+    assertEquals(carrier.raw, 8)
+    assertEquals(inner, small)
+    assertEquals(primitive, 8)
+    assertEquals(lane, 17.toByte)
+    assertEquals(Name("kernel").raw, refinedText: String)
+    assertEquals(OtherName("kernel").raw, refinedText: String)
+    assertEquals(collection, names)
+    assertEquals(Foreign.read(foreign), 7)
     val calls                  = java.util.concurrent.atomic.AtomicInteger(0)
-    def produce(): Nested.Type = {
-      val _ = calls.incrementAndGet()
-      Nested(Small(8))
-    }
+    def produce(): Nested.Type = { val _ = calls.incrementAndGet(); Nested(Small(8)) }
     assertEquals(produce().raw, 8)
     assertEquals(calls.get(), 1)
   }
 
-  test("unwrapped identifier arithmetic retains overflow checks") {
-    val _ = intercept[ArithmeticException](AllocationId(Long.MaxValue).next)
-    val _ = intercept[ArithmeticException](ProgramId(Long.MaxValue).next)
-    val _ = intercept[ArithmeticException](CompletionId(Long.MaxValue).next)
-  }
-
-  test("runtime values cannot enter refinements or nominal types implicitly") {
+  test("runtime values cannot enter refinements or nominal types implicitly, and names stay distinct") {
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       import net.kurobako.gemstone.constraint.auto.*
@@ -94,21 +167,16 @@ class ConstraintSuite extends munit.FunSuite {
       def refine(value: String): NonEmpty[String] = value
     """).nonEmpty)
     assert(typeCheckErrors("""
-      import net.kurobako.gemstone.memory.*
-      def refine(value: Long) = AllocationId(value)
+      import net.kurobako.gemstone.constraint.*
+      def refine(value: Long) = net.kurobako.gemstone.memory.AllocationId(value)
     """).nonEmpty)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
-      import net.kurobako.gemstone.memory.*
-      1.unsafe[AllocationId]
+      1.unsafe[net.kurobako.gemstone.memory.AllocationId]
     """).nonEmpty)
-  }
-
-  test("newtypes with identical representations remain distinct") {
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
-      import net.kurobako.gemstone.rpc.*
-      val id: ProgramId = AllocationId(1L.unsafe)
+      val id: net.kurobako.gemstone.vm.ProgramId = net.kurobako.gemstone.memory.AllocationId(1L.unsafe)
     """).nonEmpty)
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
@@ -116,30 +184,6 @@ class ConstraintSuite extends munit.FunSuite {
       object Second extends Newtype[NonEmpty[String]]
       val name: Second.Type = First("kernel".unsafe)
     """).nonEmpty)
-  }
-
-  test("domain decoders retain recoverable validation failures") {
-    assert(AllocationId.either(0L).isLeft)
-    assert(ProgramId.either(-1L).isLeft)
-    assert(CompletionId.either(Long.MinValue).isLeft)
-    assertEquals(AllocationId.either(Long.MaxValue).map(_.raw: Long), Right(Long.MaxValue))
-  }
-
-  test("unsafe checks strings and immutable collections at runtime") {
-    assertEquals("kernel".unsafe[NonEmpty[String]].toString, "kernel")
-    assertEquals("kernel".unsafe[NonEmpty[String]].raw, "kernel")
-    assertEquals("x".unsafe[NonEmpty[String]].raw, "x")
-    assertEquals(List(1, 2).unsafe[NonEmpty[List[Int]]].raw, List(1, 2))
-    val _ = intercept[IllegalArgumentException]("".unsafe[NonEmpty[String]])
-    assertEquals("a\u0000b".unsafe[NonEmpty[String]].raw, "a\u0000b")
-    val _ = intercept[IllegalArgumentException](List.empty[Int].unsafe[NonEmpty[List[Int]]])
-    assert(typeCheckErrors("""
-      import net.kurobako.gemstone.constraint.*
-      scala.collection.mutable.ArrayBuffer(1).unsafe[NonEmpty[scala.collection.mutable.ArrayBuffer[Int]]]
-    """).nonEmpty)
-  }
-
-  test("alternate public refinement factories are unavailable") {
     assert(typeCheckErrors("""
       import net.kurobako.gemstone.constraint.*
       where.checked[Int, GreaterThan[0]](1)
@@ -152,15 +196,19 @@ class ConstraintSuite extends munit.FunSuite {
       import net.kurobako.gemstone.constraint.*
       NonEmpty[String]("kernel")
     """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      object Count extends Newtype[Int > 0]
+      1L.unsafe[Count.Type]
+    """).nonEmpty)
+    assert(typeCheckErrors("""
+      import net.kurobako.gemstone.constraint.*
+      object Foreign {
+        opaque type Type = Int
+        def apply(value: Int): Type = value
+      }
+      object Named extends Newtype[Foreign.Type]
+      val primitive: Int = Named(Foreign(7)).raw
+    """).nonEmpty)
   }
-  test("recoverable refinement validates once and retains domain failures") {
-    val evaluations = java.util.concurrent.atomic.AtomicInteger()
-    def input: Int  = evaluations.incrementAndGet()
-    assertEquals(input.refine[Int > 0].map(_.raw), Right(1))
-    assertEquals(evaluations.get(), 1)
-    assert(0.refine[Int > 0].isLeft)
-    assert("".refine[NonEmpty[String]].isLeft)
-    assertEquals("kernel".refine[NonEmpty[String]].map(value => value: String), Right("kernel"))
-  }
-
 }

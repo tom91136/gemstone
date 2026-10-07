@@ -50,10 +50,16 @@ object WireCodecMacros {
       Quotes
   ): Expr[Codec[NonEmpty[A]]] = {
     import quotes.reflect.*
-    val name = Expr(if (TypeRepr.of[A] =:= TypeRepr.of[String]) "String" else s"NonEmpty${Type.show[A]}")
+    def short(tpe: TypeRepr): String = tpe.show(using Printer.TypeReprShortCode).filter(_.isLetterOrDigit)
+    val name                         = Expr(TypeRepr.of[A].dealias match {
+      case string if string =:= TypeRepr.of[String]                       => "String"
+      case AppliedType(_, List(element)) if element =:= TypeRepr.of[Byte] => "NonEmptyBytes"
+      case AppliedType(_, List(element))                                  => s"NonEmpty${short(element)}s"
+      case other                                                          => s"NonEmpty${short(other)}"
+    })
     '{
       Codec.domain[NonEmpty[A], A]($name, $base, Vector(Constraint.MinimumLength(1)))(
-        value => scala.util.Try(NonEmpty.validate[A](value)(using $elements)).toEither.left.map(_.getMessage),
+        value => NonEmpty.check[A](value)(using $elements),
         value => value
       )
     }

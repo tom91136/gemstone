@@ -25,6 +25,12 @@ object ExtractSASS {
   private val ResourceRoot            = "/net/kurobako/gemstone/codegen/sass/"
   private val MaximumDescriptionBytes = 64 * 1024 * 1024
 
+  def readTable(path: Path): Array[Byte] = {
+    val bytes = Using.resource(GZIPInputStream(Files.newInputStream(path)))(_.readNBytes(MaximumDescriptionBytes + 1))
+    require(bytes.length <= MaximumDescriptionBytes, s"table $path exceeds $MaximumDescriptionBytes bytes")
+    bytes
+  }
+
   private def resource(name: String): java.io.InputStream =
     Option(getClass.getResourceAsStream(ResourceRoot + name))
       .getOrElse(throw IllegalArgumentException(s"missing SASS extraction resource $name"))
@@ -42,12 +48,11 @@ object ExtractSASS {
     Opts.option[String]("legacy-sha", "Expected legacy executable SHA-256"),
     Opts.option[String]("modern", "Pinned modern nvdisasm executable").map(Path.of(_)),
     Opts.option[String]("modern-sha", "Expected modern executable SHA-256"),
-    Opts.option[String]("output", "Description bundle directory").map(Path.of(_)),
-    Opts.flag("verify", "Verify an existing description bundle without executing tools").orFalse
+    Opts.option[String]("output", "Description bundle directory").map(Path.of(_))
   ).tupled)
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) {
-    case (bundle, legacy, legacyDigest, modern, modernDigest, output, verifyOnly) =>
+    case (bundle, legacy, legacyDigest, modern, modernDigest, output) =>
       val tools = Vec(("legacy", legacy, legacyDigest), ("modern", modern, modernDigest)).map {
         (name, binary, digest) =>
           val entries = Files.readString(bundle).linesIterator.toVec.map(_.split('\t').toVec).collect {
@@ -57,8 +62,7 @@ object ExtractSASS {
           require(entries.size == 1, s"expected one $name nvdisasm package in $bundle")
           Tool(name, binary.toAbsolutePath.normalize, digest, entries.head)
       }
-      if (verifyOnly) verify(output, tools)
-      else extract(output, tools)
+      extract(output, tools)
   }
 
   private def sha256(bytes: Array[Byte]): String =
@@ -66,70 +70,27 @@ object ExtractSASS {
 
   private def packages(tools: Vec[Tool]): ujson.Obj = ujson.Obj.from(tools.map(tool => tool.name -> tool.packageInfo))
 
-  def verify(
-      output: Path,
-      tools: Vec[Tool],
-      pins: Map[String, Map[String, String]] = expected
-  ): Unit = {
-    require(
-      tools.map(_.name).distinct.size == tools.size && tools.map(_.name).toSet == pins.keySet,
-      "tool set does not match description pins"
-    )
+  /** Checks that the manifest records the given tools, maps every pinned target to its pinned table, and that each
+    * table matches its digest.
+    */
+  def verify(output: Path, tools: Vec[Tool], pins: Map[String, Map[String, String]] = expected): Unit = {
     val root     = output.toAbsolutePath.normalize
     val manifest = ujson.read(Files.readString(root.resolve("manifest.json")))
-    require(manifest("format").num == 1, "unsupported manifest format")
     require(
-      manifest("platform").str == "ubuntu2204/x86_64" && manifest("packages") == packages(tools),
-      "package provenance does not match pinned package metadata"
+      manifest("platform").str == "ubuntu2204/x86_64" && manifest("packages") == packages(tools) &&
+        tools.forall(tool => manifest("tools")(tool.name)("sha256").str == tool.digest),
+      "manifest provenance does not match the pinned tools"
     )
-    val targets = manifest("targets").arr.toVec
-    val names   = targets.map(_("name").str)
+    val targets =
+      manifest("targets").arr.toVec.map(target => (target("tool").str, target("name").str, target("table").str))
     require(
-      names.distinct.size == names.size && names.toSet == pins.values.flatMap(_.keys).toSet,
-      "manifest target set does not match the pinned matrix"
+      targets.size == pins.values.map(_.size).sum && targets.map(_._2).distinct.size == targets.size &&
+        targets.forall((tool, name, digest) => pins.get(tool).flatMap(_.get(name)).contains(digest)),
+      "manifest targets do not match the pinned matrix"
     )
-    val rows = manifest("tables").arr.toVec
-    require(rows.map(_("sha256").str).distinct.size == rows.size, "manifest contains duplicate table entries")
-    val tables = rows.map(row => row("sha256").str -> row).toMap
-    tools.foreach(tool =>
-      require(manifest("tools")(tool.name)("sha256").str == tool.digest, s"${tool.name} tool pin mismatch in manifest")
-    )
-    targets.foreach { target =>
-      val mode   = target("tool").str
-      val name   = target("name").str
-      val digest = target("table").str
-      require(
-        pins.get(mode).flatMap(_.get(name)).contains(digest) && tables.contains(digest),
-        s"unexpected target/table mapping for $name"
-      )
-    }
-    val digests = pins.values.flatMap(_.values).toSet
-    require(
-      tables.keySet == digests && manifest("unique_descriptions").num == digests.size,
-      "unexpected description table set"
-    )
-    rows.foreach { row =>
-      val relative = Path.of(row("path").str)
-      require(
-        !relative.isAbsolute && !(0 until relative.getNameCount).exists(i => relative.getName(i).toString == ".."),
-        "unsafe table path"
-      )
-      val path = root.resolve(relative).normalize
-      require(
-        path.startsWith(root) && path.toRealPath().startsWith(root.toRealPath()),
-        "table path escapes reference bundle"
-      )
-      val bytes = Using.resource(GZIPInputStream(Files.newInputStream(path)))(_.readNBytes(MaximumDescriptionBytes + 1))
-      require(bytes.length <= MaximumDescriptionBytes, "description exceeds size limit")
-      require(sha256(bytes) == row("sha256").str, "table failed content verification")
-      val metadata = SASSCapture.inspect(bytes)
-      require(
-        metadata("class_count") == row("classes") &&
-          metadata("unique_class_count") == row("unique_classes") &&
-          metadata("alternate_class_count") == row("alternate_classes") &&
-          metadata("conditional_directives") == row("conditional_directives"),
-        "table failed metadata verification"
-      )
+    pins.values.flatMap(_.values).toSet.foreach { digest =>
+      val bytes = readTable(root.resolve(s"tables/$digest.txt.gz"))
+      require(sha256(bytes) == digest, s"table $digest failed content verification")
     }
   }
 
@@ -181,11 +142,10 @@ object ExtractSASS {
       require(tables.toRealPath().startsWith(root.toRealPath()), "table directory escapes reference bundle")
       val scratch = Files.createTempDirectory(root.getParent, "sass-extract-")
       try {
-        val zero         = scratch.resolve("zero-input.bin")
-        val _            = Files.write(zero, Array.ofDim[Byte](4096))
-        val targets      = Vec.newBuilder[ujson.Value]
-        val descriptions = scala.collection.mutable.Map.empty[String, ujson.Value]
-        val versions     = ujson.Obj()
+        val zero     = scratch.resolve("zero-input.bin")
+        val _        = Files.write(zero, Array.ofDim[Byte](4096))
+        val targets  = Vec.newBuilder[ujson.Value]
+        val versions = ujson.Obj()
         tools.foreach { tool =>
           val source = scratch.resolve(s"capture_${tool.name}.c")
           val _      = Using.resource(resource(source.getFileName.toString))(input =>
@@ -216,44 +176,31 @@ object ExtractSASS {
               } else SASSCapture.modern(result.stderr)
               // The modern free hook can provoke a diagnostic after capturing a complete, digest-verified stream.
               require(sha256(capture.bytes) == digest, s"$target unexpected table SHA256")
-              val metadata = SASSCapture.inspect(capture.bytes)
-              val detail   = ujson.Obj.from(Vec("run" -> ujson.Num(number), "sha256" -> ujson.Str(digest)) ++
-                metadata.obj.toVec ++ capture.detail.obj.toVec)
-              (capture.bytes, metadata, detail)
+              val detail = ujson.Obj.from(Vec("run" -> ujson.Num(number), "sha256" -> ujson.Str(digest)) ++
+                capture.detail.obj.toVec)
+              (capture.bytes, detail)
             }
             require(java.util.Arrays.equals(captures(0)._1, captures(1)._1), s"$target repeated captures differ")
-            val (bytes, metadata, _) = captures.head
-            val relative             = s"tables/$digest.txt.gz"
-            val _                    = GeneratedFiles.writeBytes(root.resolve(relative), gzip(bytes))
-            descriptions(digest) = ujson.Obj(
-              "sha256"                 -> digest,
-              "path"                   -> relative,
-              "classes"                -> metadata("class_count"),
-              "unique_classes"         -> metadata("unique_class_count"),
-              "alternate_classes"      -> metadata("alternate_class_count"),
-              "conditional_directives" -> metadata("conditional_directives")
-            )
+            val bytes = captures.head._1
+            GeneratedFiles.writeBytes(root.resolve(s"tables/$digest.txt.gz"), gzip(bytes))
             targets += ujson.Obj(
               "name"                       -> target,
               "tool"                       -> tool.name,
               "table"                      -> digest,
-              "captures"                   -> ujson.Arr.from(captures.map(_._3)),
+              "captures"                   -> ujson.Arr.from(captures.map(_._2)),
               "repeated_capture_identical" -> true
             )
             println(s"$target: $digest (${bytes.length} bytes)")
           }
         }
         val manifest = ujson.Obj(
-          "format"              -> 1,
-          "description"         -> "Pinned nvdisasm machine description reference tables",
-          "platform"            -> "ubuntu2204/x86_64",
-          "packages"            -> packages(tools),
-          "tools"               -> versions,
-          "targets"             -> ujson.Arr.from(targets.result()),
-          "tables"              -> ujson.Arr.from(descriptions.toVec.sortBy(_._1).map(_._2)),
-          "unique_descriptions" -> descriptions.size
+          "description" -> "Pinned nvdisasm machine description reference tables",
+          "platform"    -> "ubuntu2204/x86_64",
+          "packages"    -> packages(tools),
+          "tools"       -> versions,
+          "targets"     -> ujson.Arr.from(targets.result())
         )
-        val _ = GeneratedFiles.write(root.resolve("manifest.json"), ujson.write(manifest, indent = 2) + "\n")
+        GeneratedFiles.write(root.resolve("manifest.json"), ujson.write(manifest, indent = 2) + "\n")
         verify(root, tools)
       } finally
         Using.resource(Files.walk(scratch)) { paths =>

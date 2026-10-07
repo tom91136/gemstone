@@ -7,7 +7,7 @@ import net.kurobako.gemstone.isa.sass.asm.*
 class OperandPrinterSuite extends munit.FunSuite {
   private def roundTrip(value: Operand): String = {
     val text = OperandPrinter.print(value).fold(fail(_), identity)
-    assertEquals(SASSOperandParser.parse(text), Right(value))
+    assertEquals(OperandParser.parse(text), Right(value))
     text
   }
 
@@ -52,7 +52,7 @@ class OperandPrinterSuite extends munit.FunSuite {
     assertEquals(OperandPrinter.print(negativeZero), Right("-0.0"))
     assertEquals(OperandPrinter.print(Operand.Integer(-3)), Right("-3"))
     assertEquals(
-      SASSOperandParser.parse(OperandPrinter.print(Operand.Integer(-3)).toOption.get),
+      OperandParser.parse(OperandPrinter.print(Operand.Integer(-3)).toOption.get),
       Right(Operand.Unary(Operand.Integer(3), negative = true, not = false, absolute = false))
     )
     assertEquals(
@@ -104,13 +104,13 @@ class OperandPrinterSuite extends munit.FunSuite {
     assert(OperandPrinter.print(Operand.FloatingBits(FloatEncoding.F32Imm, 16, 1)).isLeft)
   }
 
-  test("signed normalization composes through nested operands without losing floating payloads") {
+  test("signed normalisation composes through nested operands without losing floating payloads") {
     val negative = Operand.Integer(-3)
     val group    = Operand.Group(Vec.nonEmpty(
       negative,
       Operand.Group(Vec.nonEmpty(
         Operand.Floating(BigDecimal(0), "0.0", negativeZero = true),
-        Operand.FloatingSymbol(FloatingConstant.`-INF`),
+        Operand.Unary(Operand.FloatingSymbol(FloatingConstant.INF), negative = true, not = false, absolute = false),
         Operand.FloatingBits(FloatEncoding.F32Imm, 32, BigInt("7fc12345", 16))
       ))
     ))
@@ -121,15 +121,32 @@ class OperandPrinterSuite extends munit.FunSuite {
       Operand.Unary(negative, negative = false, not = false, absolute = true)                -> "|-3|"
     ).foreach { (value, text) =>
       assertEquals(OperandPrinter.print(value), Right(text))
-      val parsed = SASSOperandParser.parse(text).fold(fail(_), identity(_))
+      val parsed = OperandParser.parse(text).fold(fail(_), identity(_))
       assertEquals(OperandPrinter.print(parsed), Right(text))
     }
   }
 
-  test("composite normalization still rejects changed operand kinds and invalid payloads") {
+  test("composite normalisation still rejects changed operand kinds and invalid payloads") {
     assert(OperandPrinter.print(Operand.Group(Vec.nonEmpty(Operand.Symbol("R0")))).isLeft)
     assert(OperandPrinter.print(Operand.ConstantBank(0, Operand.Symbol("R0"))).isLeft)
     assert(OperandPrinter.print(Operand.Group(Vec.nonEmpty(Operand.FloatingBits(FloatEncoding.F32Imm, 16, 1)))).isLeft)
     assert(OperandPrinter.print(Operand.Group(Vec.nonEmpty(Operand.Bits(256, 8)))).isLeft)
+  }
+
+  for (
+    (format, width, bits) <- Vec(
+      ("F16Imm", 16, BigInt(0x3c00)),
+      ("F16Imm", 16, BigInt(0)),
+      ("F16Imm", 16, BigInt(0x8000)),
+      ("F32Imm", 32, BigInt("ffc01234", 16)),
+      ("F64Imm", 64, BigInt("fff8123400000000", 16)),
+      ("E8M7Imm", 32, BigInt(0x7fc0)),
+      ("E8M7Imm", 32, BigInt(0xffc0)),
+      ("E8M7Imm", 32, BigInt(0x7f81)),
+      ("E8M7Imm", 32, BigInt(0xff81))
+    )
+  ) test(s"typed printer retains $format payload 0x${bits.toString(16)}") {
+    val source = s"MOV R0, bits<$format>:$width(0x${bits.toString(16)});"
+    assertEquals(Parser.parse(source).flatMap(Printer.print), Right(source))
   }
 }

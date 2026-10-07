@@ -4,10 +4,11 @@ import cats.parse.Parser
 import cats.parse.Parser0
 import net.kurobako.gemstone.constraint.*
 import scala.annotation.tailrec
+import upickle.default.ReadWriter
 
 /** Compiles the bit-layout and simple value expressions in an extracted SASS description. */
 object SASSEncoding {
-  enum Expr {
+  enum Expr derives ReadWriter {
     case Constant(value: BigInt, relaxed: Boolean)
     case Reference(name: String, attribute: Option[String], relaxed: Boolean)
     case Scale(value: Expr, factor: BigInt)
@@ -256,10 +257,6 @@ object SASSEncoding {
     val rawWidth = parseWidth(description.preamble).getOrElse {
       throw IllegalArgumentException("FUNIT ENCODING WIDTH is missing")
     }
-    // The pinned descriptions cover the legacy 64-bit instruction format, the
-    // 88-bit format used by several intermediate architectures, and modern
-    // 128-bit instructions. Derive masks from the declared width; don't force
-    // legacy descriptions through the current SM89 layout.
     val width = rawWidth.refine[Int in (64, 88, 128)].fold(
       _ => throw IllegalArgumentException(s"unsupported SASS encoding width: $rawWidth (expected 64, 88, or 128)"),
       identity
@@ -275,7 +272,7 @@ object SASSEncoding {
     val tableNames = tables.map(_.name).toSet
     val forms      = description.classes.map { instruction =>
       val issues  = Vector.newBuilder[String]
-      val opcodes = instruction.section("OPCODES").toVector.flatMap(_.entries).flatMap { entry =>
+      val opcodes = instruction.opcodeEntries.flatMap { entry =>
         parseInteger(entry.value).map(entry.name -> _).orElse {
           issues += s"opcode ${entry.name} has unsupported value ${entry.value}"
           None

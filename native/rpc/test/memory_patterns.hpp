@@ -1,28 +1,81 @@
 #pragma once
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <future>
+#include <iostream>
+#include <iterator>
+#include <stdexcept>
+#include <string>
 #include <string_view>
+#include <thread>
+#include <vector>
 
 #include <gemstone/environment.hpp>
 
-#include "memory_test.hpp"
 #include <environment_keys.hpp>
 
 namespace memory_patterns {
+constexpr unsigned Count = 4096;
+struct Node {
+  Node *next;
+  uint32_t value;
+  uint32_t padding[13];
+};
+static_assert(sizeof(Node) == 64);
+inline void require(bool ok, const char *message) {
+  if (!ok) throw std::runtime_error(message);
+}
+inline void check(int status) {
+  if (status != 0) throw std::runtime_error("API status " + std::to_string(status));
+}
+inline void *ordinary(size_t size) {
+  auto *p = std::aligned_alloc(64, (size + 63) / 64 * 64);
+  if (!p) throw std::bad_alloc();
+  return p;
+}
+
+// Release partially constructed cases on assertion/API failure as well as success.
+template <class Backend> struct AllocationScope {
+  Backend &backend;
+  std::vector<void *> pointers;
+  explicit AllocationScope(Backend &backend) : backend(backend) {}
+  void *allocate(size_t size) {
+    auto *p = backend.allocate(size);
+    pointers.push_back(p);
+    return p;
+  }
+  void release(void *p) {
+    backend.release(p);
+    pointers.erase(std::find(pointers.begin(), pointers.end(), p));
+  }
+  ~AllocationScope() {
+    for (auto *p : pointers) {
+      try {
+        backend.release(p);
+      } catch (...) {
+      }
+    }
+  }
+};
+
+inline std::vector<char> image(const std::filesystem::path &directory, const char *name) {
+  std::ifstream input(directory / name, std::ios::binary);
+  require(input.good(), "cannot open native memory fixture");
+  std::vector<char> bytes((std::istreambuf_iterator<char>(input)), {});
+  bytes.push_back(0);
+  return bytes;
+}
+
 // GEMSTONE_MEMORY_PROBE is a comma-separated list of test probe names; "all" selects every probe.
 inline bool probeEnabled(std::string_view name) {
-  const char *value = gemstone::environment::value(gemstone::environment::MemoryProbe);
-  if (!value) return false;
-  std::string_view remaining(value);
-  while (true) {
-    const auto comma = remaining.find(',');
-    auto token = remaining.substr(0, comma);
-    while (!token.empty() && (token.front() == ' ' || token.front() == '\t'))
-      token.remove_prefix(1);
-    while (!token.empty() && (token.back() == ' ' || token.back() == '\t'))
-      token.remove_suffix(1);
-    if (token == name || token == "all") return true;
-    if (comma == std::string_view::npos) return false;
-    remaining.remove_prefix(comma + 1);
-  }
+  return gemstone::environment::listed(gemstone::environment::MemoryProbe,
+                                       [&](std::string_view token) { return token == name || token == "all"; });
 }
 inline bool concurrencyMode() { return gemstone::environment::present(gemstone::environment::MemoryConcurrencyDirectory); }
 inline std::string allocationKind(const char *fallback) {
@@ -124,7 +177,7 @@ template <class Backend> int compareTraffic(Backend &backend) {
   std::cout << "verified failed compare-exchange bits=" << sizeof(Word) * 8 << " rounds=32 atomic-locations=2" << std::endl;
   return 0;
 }
-// File rendezvous with a test-only RuntimeBackend wrapper. No timing-based races.
+// File rendezvous with a test-only Backend wrapper. No timing-based races.
 inline void checkpoint(const std::filesystem::path &directory, unsigned launch, const char *phase, const auto &action) {
   const auto suffix = std::to_string(launch) + "-" + phase;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -173,24 +226,24 @@ template <class Word, class Backend> void multiLaneAtomicCase(Backend &backend, 
   const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::MemoryConcurrencyDirectory));
   constexpr Word step = 4097;
   AllocationScope allocations(backend);
-  constexpr unsigned Lanes = 128;
+  constexpr unsigned lanes = 128;
   auto *input = static_cast<Word *>(allocations.allocate(128));
-  auto *output = static_cast<Word *>(allocations.allocate(Lanes * sizeof(Word)));
+  auto *output = static_cast<Word *>(allocations.allocate(lanes * sizeof(Word)));
   std::fill_n(input, 128 / sizeof(Word), Word{});
-  std::fill_n(output, Lanes, Word{});
+  std::fill_n(output, lanes, Word{});
   std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << std::endl;
   auto host = std::async(std::launch::async, [&] {
     publishCounter(directory, launch, input);
     checkpoint(directory, launch, "before", [] {});
-    for (unsigned operation = 0; operation < Lanes; ++operation)
+    for (unsigned operation = 0; operation < lanes; ++operation)
       forceCollisions(directory, launch, operation, input[2]);
     checkpoint(directory, launch, "after", [] {});
   });
-  backend.launch(input, reinterpret_cast<uint32_t *>(output), reinterpret_cast<uint32_t *>(input), sizeof(Word) == 4 ? 9 : 10, Lanes);
+  backend.launch(input, reinterpret_cast<uint32_t *>(output), reinterpret_cast<uint32_t *>(input), sizeof(Word) == 4 ? 9 : 10, lanes);
   host.get();
-  require(input[2] == Word(Lanes) * step, "multi-workgroup RMW lost an update");
-  std::sort(output, output + Lanes);
-  for (unsigned lane = 0; lane < Lanes; ++lane)
+  require(input[2] == Word(lanes) * step, "multi-workgroup RMW lost an update");
+  std::sort(output, output + lanes);
+  for (unsigned lane = 0; lane < lanes; ++lane)
     require(output[lane] == Word(lane) * step + step - 1, "multi-workgroup atomic returned a stale or duplicate old value");
   allocations.release(output);
   allocations.release(input);
@@ -356,7 +409,7 @@ template <class Word, class Backend> int submission(Backend &backend) {
   return 0;
 }
 // Hold the first kernel in a host handshake while a second queue must run.
-// Rescue the first after two seconds so serialization produces a bounded red.
+// Rescue the first after two seconds so serialisation produces a bounded red.
 template <class Word, class Backend> int overlap(Backend &backend) {
   require(backend.concurrentCapabilities(), "overlap probe requires concurrent host storage");
   Word *input[2], *output[2];
@@ -403,8 +456,8 @@ template <class Word, class Backend> int overlap(Backend &backend) {
     std::this_thread::yield();
   }
   secondProgress.store(true, std::memory_order_release);
-  const bool serialized = rescue.get();
-  if (!serialized) {
+  const bool serialised = rescue.get();
+  if (!serialised) {
     require(output[0][1] == 74 && input[0][1] == 148, "consumer retained a stale payload after producer release");
     for (unsigned n = 2; n < 32; ++n)
       round(0, n);
@@ -416,7 +469,7 @@ template <class Word, class Backend> int overlap(Backend &backend) {
     backend.release(output[i]);
     backend.release(input[i]);
   }
-  require(!serialized, "second queue only progressed after the first kernel completed");
+  require(!serialised, "second queue only progressed after the first kernel completed");
   std::cout << "verified overlapping queues bits=" << sizeof(Word) * 8 << " rounds=32 kernel-publication=1" << std::endl;
   return 0;
 }
@@ -475,8 +528,8 @@ template <class Backend> int reviewCases(Backend &backend) {
   backend.release(second);
   backend.release(first);
   backend.release(control);
-  require(deviceCorrect, "synchronized device pointer replacement was cached or replayed");
-  std::cout << "verified synchronized device pointer replacement" << std::endl;
+  require(deviceCorrect, "synchronised device pointer replacement was cached or replayed");
+  std::cout << "verified synchronised device pointer replacement" << std::endl;
   return 0;
 }
 

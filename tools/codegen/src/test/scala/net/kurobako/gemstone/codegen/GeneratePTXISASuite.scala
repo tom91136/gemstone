@@ -6,10 +6,18 @@ import java.nio.file.Path
 import net.kurobako.gemstone.testing.files.*
 
 class GeneratePTXISASuite extends munit.FunSuite {
-  private def section(id: String, syntax: String, examples: String, notes: String = ""): String =
-    s"""<section id="$id"><h3>9.1. Arithmetic Instructions: add</h3>
+  private def section(
+      id: String,
+      syntax: String,
+      examples: String,
+      notes: String = "",
+      targets: String = "",
+      title: String = "add"
+  ): String =
+    s"""<section id="$id"><h3>9.1. Arithmetic Instructions: $title</h3>
        |<p>Syntax</p><div><pre>$syntax</pre></div>
        |<p>PTX ISA Notes</p><p>$notes</p>
+       |<p>Target ISA Notes</p><p>$targets</p>
        |<p>Examples</p><div><pre>$examples</pre></div></section>""".stripMargin
 
   // The CLI rejects truncated documents. Repeat one simple section to meet its pinned-document sanity checks.
@@ -24,9 +32,9 @@ class GeneratePTXISASuite extends munit.FunSuite {
   )
 
   private def generate(mode: String, input: Path, output: Path): Unit =
-    GeneratePTXISA.main(Array(mode, input.toString, output.toString, "9.3", "v9_3"))
+    GeneratePTXISA.main(Array(mode, input.toString, output.toString, "9.3"))
   private def source(output: Path, name: String): String =
-    Files.readString(output.resolve(s"net/kurobako/gemstone/isa/ptx/v9_3/$name.scala")).replaceAll("\\s+", " ")
+    Files.readString(output.resolve(s"net/kurobako/gemstone/isa/ptx/$name.scala")).replaceAll("\\s+", " ")
 
   test("HTML syntax produces typed operands, modifier choices and target/version metadata") {
     inDirectory { root =>
@@ -45,9 +53,8 @@ class GeneratePTXISASuite extends munit.FunSuite {
       assert(actual.contains("ModifierGroup(Modifier.S32, Modifier.U32)"))
       assert(actual.contains("Set(Modifier.Sat)"))
       assert(modifiers.contains("case U32 extends Modifier(\"u32\")"))
-      assert(modifiers.contains("case Unrecognized(spelling: NonEmpty[String])"))
+      assert(modifiers.contains("case Unrecognised(spelling: NonEmpty[String])"))
       assert(opcodes.contains("case Add extends Opcode(\"add\")"))
-      assert(actual.contains("val version: Version = Version(9, 3)"))
       val before = snapshot(output)
       generate("instructions", input, output)
       assertEquals(snapshot(output), before)
@@ -127,6 +134,72 @@ class GeneratePTXISASuite extends munit.FunSuite {
       val modifiers = source(output, "Modifier")
       for (axis <- List("x", "y", "z"))
         assert(modifiers.contains(s"extends Modifier(\"get_first_ctaid::$axis\")"))
+    }
+  }
+
+  test("syntax braces, nested domains and target notes produce precise forms and modifier targets") {
+    inDirectory { root =>
+      val input = write(
+        root,
+        "ptx.html",
+        section(
+          "load",
+          "ld{.ss}.type d, [a]{.unified}{, cache_policy};\n.ss = { .global, .param{::entry, ::func} };\n.type = { .b32, .bf16 };",
+          "ld.global.b32 %r0, [%rd0];",
+          targets =
+            "Requires sm_20 or higher. ld.{bf16/b32}.param::func requires sm_90 or higher. .unified requires sm_80 or higher."
+        ) + padding
+      )
+      val output = root.resolve("output")
+      generate("instructions", input, output)
+      val actual                 = source(output, "Instruction")
+      val compact                = actual.filterNot(_.isWhitespace)
+      def contains(text: String) = compact.contains(text.filterNot(_.isWhitespace))
+      assert(contains("case Ld(dest: Operand, address: Operand, cachePolicy: Option[Operand]"), actual.take(800))
+      assert(contains("Modifier.Param, Modifier.ParamEntry, Modifier.ParamFunc"), actual.takeRight(2500))
+      assert(contains("InstructionForm(Vec(OperandConstraint.Register, OperandConstraint.Address), "))
+      assert(contains(
+        "InstructionForm(Vec(OperandConstraint.Register, OperandConstraint.Address, OperandConstraint.Value), "
+      ))
+      assert(!actual.contains("OperandConstraint.Unknown"))
+      for (kind <- List("B32", "Bf16"))
+        assert(contains(s"Set(Modifier.$kind, Modifier.ParamFunc) -> Target(90)"), actual.takeRight(2500))
+    }
+  }
+
+  test("nested optional spellings, unordered qualifiers, numeric domains and leading optionals produce form metadata") {
+    inDirectory { root =>
+      val input = write(
+        root,
+        "ptx.html",
+        section(
+          "ldmatrix",
+          "ldmatrix.sync.aligned.shape.num{.trans}{.ss}.type r, [p];\n.shape = { .m8n8 };\n.num = { .x1, .x2, .x4 };\n.ss = { .shared{::cta} };\n.type = { .b16 };",
+          "ldmatrix.sync.aligned.m8n8.x1.b16 %r0, [%rd0];",
+          title = "ldmatrix"
+        ) + section(
+          "tensor",
+          "tensor.dim.type d, a;\n.dim = { .1d, .2d };\n.type = { .b32 };",
+          "tensor.1d.b32 %r0, %r1;",
+          title = "tensor"
+        ) + section("mad", "mad.type d, a, b, c;\n.type = { .u32 };", "mad.u32 %r0, %r1, %r2, %r3;", title = "mad") +
+          section(
+            "madcc",
+            "mad{.hi,.lo}.cc.type d, a, b, c;\n.type = { .u32 };",
+            "mad.lo.cc.u32 %r0, %r1, %r2, %r3;",
+            title = "mad.cc"
+          ) + padding
+      )
+      val output = root.resolve("output")
+      generate("instructions", input, output)
+      val compact                = source(output, "Instruction").filterNot(_.isWhitespace)
+      val modifiers              = source(output, "Modifier")
+      def contains(text: String) = compact.contains(text.filterNot(_.isWhitespace))
+      assert(contains("Set(Modifier.Shared, Modifier.SharedCta, Modifier.Trans)"), compact.take(500))
+      assert(contains("Set(Modifier.M8n8, Modifier.Trans, Modifier.X1, Modifier.X2, Modifier.X4)"))
+      assert(modifiers.contains("case N2d extends Modifier(\"2d\")"))
+      assert(contains("ModifierGroup(Modifier.N1d, Modifier.N2d)"))
+      assert(contains("ModifierGroup(Modifier.Cc), ModifierGroup(Modifier.U32)"))
     }
   }
 

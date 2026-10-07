@@ -1,4 +1,4 @@
-#include "runtime.hpp"
+#include "descriptor.hpp"
 
 extern "C" VKAPI_ATTR void VKAPI_CALL vkCmdSetDeviceMask(VkCommandBuffer, uint32_t) {
   // The sole valid mask for our single-device group is 1; no state changes.

@@ -9,11 +9,9 @@ class BinarySuite extends munit.FunSuite {
   test("width conversions preserve finite scalar choices and allow general whole-byte widths") {
     val scalarBits: Int in (8, 16, 32, 64)                     = 32
     val scalarBytes: Int in (1, 2, 4, 8)                       = scalarBits.toMemoryValueByteWidth
-    val roundTrip: Int in (8, 16, 32, 64)                      = scalarBytes.toMemoryValueBitWidth
     val packedBytes: Int in 1 ~ 8                              = 3
     val packedBits: Int where (Between[8, 64] & MultipleOf[8]) = packedBytes.toBitWidth
     assertEquals(scalarBytes.raw, 4)
-    assertEquals(roundTrip.raw, 32)
     assertEquals(packedBits.raw, 24)
   }
 
@@ -70,7 +68,6 @@ class BinarySuite extends munit.FunSuite {
 
   test("32-bit words slice and join without sign extension") {
     assertEquals(Bits.unsigned32(-1).toLong, Bits.Mask32)
-    assertEquals(Bits.low8(0x12345L), 0x45L)
     assertEquals(Bits.low8Int(0x12345L).raw, 0x45)
     assertEquals(Bits.low16(0x12345L).toLong, 0x2345L)
     assertEquals(Bits.low16Int(0x12345L).raw, 0x2345)

@@ -1,4 +1,4 @@
-/* Generated from GenerateVulkanAdapter. Regenerate with: sbt codegen */
+/* Generated from the official API manifest format 6. Regenerate with: sbt codegen */
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkAllocateCommandBuffers") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkAllocateCommandBuffers);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkAllocateDescriptorSets") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkAllocateDescriptorSets);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkAllocateMemory") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkAllocateMemory);

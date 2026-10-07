@@ -1,23 +1,11 @@
-set(OPENCL_INCLUDE_DIR "" CACHE PATH "Directory containing the Khronos OpenCL headers")
 if(NOT EXISTS "${OPENCL_INCLUDE_DIR}/CL/cl.h" OR NOT EXISTS "${OPENCL_INCLUDE_DIR}/CL/cl_icd.h")
-  include(FetchContent)
-  if(NOT OPENCL_HEADERS_SOURCE_URL OR NOT OPENCL_HEADERS_SOURCE_SHA256)
-    message(FATAL_ERROR "OPENCL_HEADERS_SOURCE_URL and OPENCL_HEADERS_SOURCE_SHA256 must be supplied by the build")
-  endif()
-  FetchContent_Declare(opencl_headers
-    URL "${OPENCL_HEADERS_SOURCE_URL}"
-    URL_HASH "SHA256=${OPENCL_HEADERS_SOURCE_SHA256}"
-    SOURCE_SUBDIR gemstone-no-cmake-project
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-  )
-  FetchContent_MakeAvailable(opencl_headers)
-  set(OPENCL_INCLUDE_DIR "${opencl_headers_SOURCE_DIR}")
+  message(FATAL_ERROR "OPENCL_INCLUDE_DIR must point at the pinned OpenCL headers")
 endif()
 
 add_library(gemstone_opencl SHARED
   src/compiler.cpp
   src/icd.cpp
-  src/unsupported.cpp)
+  ../generated/opencl/gemstone_opencl_unsupported.cpp)
 target_include_directories(gemstone_opencl PRIVATE
   "${OPENCL_INCLUDE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../generated/opencl"
@@ -57,4 +45,12 @@ if(BUILD_TESTING)
 
   gemstone_opencl_test(gemstone_opencl_deferred test/deferred.cpp)
   gemstone_discover_tests(gemstone_opencl_deferred TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 8)
+
+  add_executable(gemstone_opencl_process_exit test/process_exit.cpp)
+  target_include_directories(gemstone_opencl_process_exit PRIVATE "${OPENCL_INCLUDE_DIR}")
+  target_compile_definitions(gemstone_opencl_process_exit PRIVATE CL_TARGET_OPENCL_VERSION=300)
+  target_compile_features(gemstone_opencl_process_exit PRIVATE cxx_std_20)
+  target_link_libraries(gemstone_opencl_process_exit PRIVATE gemstone_opencl)
+  add_test(NAME opencl/process-exit COMMAND gemstone_opencl_process_exit)
+  set_tests_properties(opencl/process-exit PROPERTIES TIMEOUT 10)
 endif()

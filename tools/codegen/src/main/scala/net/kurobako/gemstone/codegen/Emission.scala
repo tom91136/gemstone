@@ -15,7 +15,4 @@ object Emission {
   }
 
   def literal(value: String): String = "\"" + escape(value) + "\""
-
-  def nonEmptyVector(values: Vector[String]): String =
-    values.map(literal(_)).mkString("Vec.nonEmpty[NonEmpty[java.lang.String]](", ", ", ")")
 }

@@ -8,7 +8,6 @@ import java.nio.file.Path
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.Transport.*
@@ -23,7 +22,6 @@ object Replay {
   }
   case class Options(
       archive: Path,
-      protocolIdentity: Journal.ProtocolIdentity,
       timeoutMillis: Int > 0 = 300000,
       limits: Journal.Limits = Journal.Limits()
   )
@@ -34,7 +32,7 @@ object Replay {
   )
 
   private def connect(target: Target, timeoutMillis: Int > 0): ReplayConnection = {
-    val channel = SocketTransport.connect(target.endpoint, timeoutMillis)
+    val channel = Transport.connect(target.endpoint, timeoutMillis)
     try {
       val input  = DataInputStream(channel.input)
       val output = DataOutputStream(channel.output)
@@ -84,7 +82,7 @@ object Replay {
     }
     private def identified(frame: Array[Byte], client: Journal.RecordedClientId): Array[Byte] = {
       val result = frame.clone()
-      ByteBuffer.wrap(result).putLong(ExecutionRPC.RequestClientOffset.raw, assignedClient(client).toLong)
+      ByteBuffer.wrap(result).putLong(ExecutionRPC.RequestClientOffset.raw, assignedClient(client).raw)
       result
     }
     private def isQuery(frame: Array[Byte]): Boolean = {
@@ -108,7 +106,7 @@ object Replay {
       }.flatten
     private def compare(event: Journal.Event, expected: Array[Byte], active: Active): Unit = {
       @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-      var actual = Frame.readResponse(active.wire.input, options.limits.maxFrameBytes.toInt)
+      var actual = Frame.readResponse(active.wire.input, options.limits.maxFrameBytes.raw)
       if (event.kind == Journal.Kind.Response && isQuery(active.request)) {
         if (!completion(expected).contains(CompletionStatus.Pending)) {
           val deadline = platform.monotonicNanos + options.timeoutMillis.raw.toLong * 1000000L
@@ -117,7 +115,7 @@ object Replay {
               throw IOException(s"RPC replay: completion remained pending at event ${event.sequence}")
             Thread.sleep(1L)
             active.wire.send(identified(active.request, active.client))
-            actual = Frame.readResponse(active.wire.input, options.limits.maxFrameBytes.toInt)
+            actual = Frame.readResponse(active.wire.input, options.limits.maxFrameBytes.raw)
             polls += 1
           }
         }
@@ -179,8 +177,6 @@ object Replay {
         throw IOException(
           s"RPC replay: archive is not replayable: ${reader.summary.reason.getOrElse("unknown reason")}"
         )
-      if (reader.summary.header.protocolIdentity != options.protocolIdentity)
-        throw IOException("RPC replay: execution protocol identity differs")
       if (reader.summary.header.schema != ExecutionRPC.Schema.canonical)
         throw IOException("RPC replay: execution schema differs")
       val target = use(startServer(reader.summary.header))

@@ -2,21 +2,17 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <map>
 #include <string>
 #include <string_view>
-
-// Supplied by CMake from conformance/cmake/TestTimeouts.cmake.
-#ifndef CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS
-  #define CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS "600"
-#endif
 
 namespace conformance::driver {
 
 // Audited payload gaps in the pinned vendor packages. New versions and untested
 // shapes run normally: a failed launch must never become a capability skip.
-inline std::string_view suite_blas_skip(std::string_view backend, std::string_view architecture, std::string_view code,
-                                        std::string_view library, std::string_view program, std::string_view identity) {
+inline std::string_view suiteBlasSkip(std::string_view backend, std::string_view architecture, std::string_view code,
+                                      std::string_view library, std::string_view program, std::string_view identity) {
   if (program != "unified") return {};
   const auto operation =
       identity.starts_with("blas/f32/compact/") ? identity.substr(std::string_view("blas/f32/compact/").size()) : std::string_view{};
@@ -45,18 +41,18 @@ inline std::string_view suite_blas_skip(std::string_view backend, std::string_vi
   return {};
 }
 
-inline bool suite_uses_catch_sharding(std::string_view program) { return !program.starts_with("opencl_cts_"); }
+inline bool suiteUsesCatchSharding(std::string_view program) { return !program.starts_with("opencl_cts_"); }
 
-inline std::string_view suite_timeout_environment(std::string_view program) {
+inline std::string_view suiteTimeoutEnvironment(std::string_view program) {
   if (program == "vulkan_cts") return "CONFORMANCE_VULKAN_CTS_TIMEOUT";
   return program.starts_with("opencl_cts_") ? std::string_view("CONFORMANCE_OPENCL_CTS_TIMEOUT") : std::string_view{};
 }
 
-inline uint32_t suite_timeout(std::string_view program, uint32_t seconds, bool isolated) {
+inline uint32_t suiteTimeout(std::string_view program, uint32_t seconds, bool isolated) {
   return isolated && program == "sycl_cts_handler" ? std::max(seconds, uint32_t{CONFORMANCE_SYCL_HANDLER_TIMEOUT_SECONDS}) : seconds;
 }
 
-inline void apply_suite_isolated_environment(std::map<std::string, std::string> &environment, std::string_view backend) {
+inline void applySuiteIsolatedEnvironment(std::map<std::string, std::string> &environment, std::string_view backend) {
   if (backend == "vulkan") {
     environment.try_emplace("CONFORMANCE_VULKAN_CTS_TIMEOUT", "600");
     return;
@@ -67,10 +63,13 @@ inline void apply_suite_isolated_environment(std::map<std::string, std::string> 
   environment.try_emplace("CONFORMANCE_OPENCL_CTS_TIMEOUT", CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS);
 }
 
-inline bool suite_environment_key(std::string_view key) {
-  return key == "CONFORMANCE_VULKAN_CTS_TIMEOUT" || key == "CONFORMANCE_OPENCL_CTS_ELEMENTS" || key == "CONFORMANCE_OPENCL_CTS_TIMEOUT"
-         || key == "CONFORMANCE_OPENCL_CTS_WIMPY" || key == "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS"
-         || key == "CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS";
+// Suite knobs a machine profile or the invoking environment may set.
+inline constexpr std::string_view SuiteEnvironmentKeys[]{
+    "CONFORMANCE_VULKAN_CTS_TIMEOUT", "CONFORMANCE_OPENCL_CTS_ELEMENTS",          "CONFORMANCE_OPENCL_CTS_TIMEOUT",
+    "CONFORMANCE_OPENCL_CTS_WIMPY",   "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS", "CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS"};
+
+inline bool suiteEnvironmentKey(std::string_view key) {
+  return std::find(std::begin(SuiteEnvironmentKeys), std::end(SuiteEnvironmentKeys), key) != std::end(SuiteEnvironmentKeys);
 }
 
 } // namespace conformance::driver

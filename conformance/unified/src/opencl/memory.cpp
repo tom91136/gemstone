@@ -10,7 +10,7 @@ namespace {
 using namespace memory_patterns;
 // Prerequisites apply only to the selected allocation and operation.
 uint64_t prerequisites(const std::string &kind, bool atomic, bool wide) {
-  auto selected = conformance::device_selection().native_handle;
+  const auto selected = conformance::deviceSelection().nativeHandle;
   auto device = reinterpret_cast<cl_device_id>(selected);
   size_t size{};
   check(clGetDeviceInfo(device, CL_DEVICE_IL_VERSION, 0, nullptr, &size));
@@ -52,18 +52,8 @@ void execute(const char *kind, unsigned scenario) {
 }
 } // namespace
 
-#define UNIFIED_MEMORY_ALLOCATION "svm"
-#define UNIFIED_MEMORY_TAGS ""
 #include "cases/memory.inl"
 
-#undef UNIFIED_MEMORY_ALLOCATION
-#undef UNIFIED_MEMORY_TAGS
-#define UNIFIED_MEMORY_ALLOCATION "usm_host"
-#define UNIFIED_MEMORY_TAGS "[full-matrix]"
-#include "cases/memory.inl"
-
-#undef UNIFIED_MEMORY_ALLOCATION
-#undef UNIFIED_MEMORY_TAGS
-#define UNIFIED_MEMORY_ALLOCATION "usm_shared"
-#define UNIFIED_MEMORY_TAGS "[full-matrix]"
-#include "cases/memory.inl"
+UNIFIED_MEMORY_CASES("svm", "")
+UNIFIED_MEMORY_CASES("usm_host", "[full-matrix]")
+UNIFIED_MEMORY_CASES("usm_shared", "[full-matrix]")

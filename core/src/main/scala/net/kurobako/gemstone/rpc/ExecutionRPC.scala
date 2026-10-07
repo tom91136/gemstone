@@ -1,18 +1,17 @@
 package net.kurobako.gemstone.rpc
 
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.graphics.ShaderMetadata.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.{*, given}
 import net.kurobako.gemstone.rpc.Wire.*
 import net.kurobako.gemstone.vm.*
 
 object ExecutionRPC {
   val Name: NonEmpty[String]      = "gemstone.execution"
-  val Identity: NonEmpty[String]  = "gemstone.execution/3"
   val RequestMagic: Int           = 0x474d4533
   val ResponseMagic: Int          = 0x474d4633
   val HelloMagic: Int             = 0x474d4833
@@ -22,7 +21,7 @@ object ExecutionRPC {
   val MaximumPayload: Int > 0     = 134217728
   val MaximumElements: Int > 0    = 16384
   val MaximumTextBytes: Int > 0   = 8192
-  val Limits: Wire.Limits         = Wire.Limits(MaximumElements, MaximumPayload, MaximumTextBytes)
+  val Limits: msgpack.Limits      = msgpack.Limits(MaximumElements, MaximumPayload, MaximumTextBytes)
 
   // Fixed prefix, followed by the UTF-8 operation tag and then the MessagePack payload.
   val RequestClientOffset: Int > 0       = 4
@@ -35,14 +34,161 @@ object ExecutionRPC {
   val ResponsePayloadSizeOffset: Int > 0 = 8
   val ResponseHeaderBytes: Int > 0       = 12
 
+  // Refined text in this protocol names native symbols. Keep the C-string restriction
+  // here; ordinary nonempty strings and their codecs permit embedded NUL characters.
+  given nativeName: Codec[NonEmpty[String]] = Codec.domain(
+    "String",
+    Codec[String],
+    Vector(Wire.Constraint.MinimumLength(1), Wire.Constraint.NotContains("\u0000"))
+  )(
+    value =>
+      value.refine[NonEmpty[String]]
+        .filterOrElse(!_.contains('\u0000'), "native symbol name must not contain a NUL character"),
+    identity
+  )
+
+  given Codec[ProgramEncoding] = Codec.derived
+
+  given Codec[LaunchGeometry.Dimensions]       = Codec.derived
+  given Codec[LaunchGeometry.Coordinates]      = Codec.derived
+  given Codec[LaunchGeometry.GlobalDimensions] = Codec.derived
+  given Codec[KernelTask.Argument]             = Codec.derived
+  given Codec[KernelTask.ArgumentBuffer]       = Codec.derived
+  given Codec[KernelTask.RelocationSource]     = Codec.derived
+  given Codec[KernelTask.PointerRelocation]    = Codec.derived
+
+  case class HostMemoryRange(address: GuestAddress, size: Int > 0) derives Codec
+  case class HostMemoryBytes(address: GuestAddress, bytes: Vec[Byte], atomicWidth: Int in (0, 1, 2, 4, 8) = 0)
+      derives Codec
+  enum HostMemoryAtomicOperation derives Codec {
+    case CompareExchange
+    case Load
+    case Store
+  }
+  case class HostMemoryAtomic(
+      address: GuestAddress,
+      size: Int in (1, 2, 4, 8),
+      expected: Long,
+      desired: Long,
+      operation: HostMemoryAtomicOperation = HostMemoryAtomicOperation.CompareExchange
+  ) derives Codec
+  case class HostMemorySync(
+      ticket: Long,
+      atomic: Option[HostMemoryAtomic],
+      publish: Vec[HostMemoryRange] = Vec.empty,
+      atomicStores: Vec[HostMemoryAtomic] = Vec.empty,
+      relaxed: Boolean = false
+  ) derives Codec
+  case class HostMemoryBatch(
+      reads: Vec[HostMemoryRange],
+      writes: Vec[HostMemoryBytes],
+      completed: Boolean,
+      sync: Option[HostMemorySync] = None
+  ) derives Codec
+
+  /** Details name no native symbols, but the client reads them as bounded C strings. */
+  enum ExecutionFailure(val message: NonEmpty[String]) {
+    case InvalidRequest(detail: NonEmpty[String]) extends ExecutionFailure(detail)
+    case NotFound(detail: NonEmpty[String])       extends ExecutionFailure(detail)
+    case Unsupported(detail: NonEmpty[String])    extends ExecutionFailure(detail)
+    case Failed(detail: NonEmpty[String])         extends ExecutionFailure(detail)
+  }
+
+  // Encoding fits every detail to the wire, so failures nested in replies cannot make a response unencodable.
+  given Codec[ExecutionFailure] = {
+    val derived = Codec.derived[ExecutionFailure]
+    Codec.mapped(derived.shape, derived)(Right(_), bounded(_))
+  }
+
+  private def bounded(error: ExecutionFailure): ExecutionFailure = {
+    val detail = truncateUtf8(error.message.replace('\u0000', '?'), MaximumTextBytes.raw)
+      .refine[NonEmpty[String]].getOrElse[NonEmpty[String]]("execution failed")
+    error match {
+      case _: ExecutionFailure.InvalidRequest => ExecutionFailure.InvalidRequest(detail)
+      case _: ExecutionFailure.NotFound       => ExecutionFailure.NotFound(detail)
+      case _: ExecutionFailure.Unsupported    => ExecutionFailure.Unsupported(detail)
+      case _: ExecutionFailure.Failed         => ExecutionFailure.Failed(detail)
+    }
+  }
+
+  private def truncateUtf8(value: String, maximumBytes: Int): String =
+    if (value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= maximumBytes) value
+    else {
+      val result = StringBuilder()
+      @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+      var index = 0
+      @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+      var bytes = 0
+      while (index < value.length) {
+        val codePoint = value.codePointAt(index)
+        val width     =
+          if (codePoint <= 0x7f) 1
+          else if (codePoint <= 0x7ff) 2
+          else if (codePoint <= 0xffff) 3
+          else 4
+        if (bytes + width > maximumBytes) index = value.length
+        else {
+          result.appendAll(Character.toChars(codePoint))
+          bytes += width
+          index += Character.charCount(codePoint)
+        }
+      }
+      result.result()
+    }
+
+  enum CompletionStatus derives Codec {
+    case Pending
+    case Succeeded
+    case Failed(error: ExecutionFailure)
+  }
+
+  case class DirtyRange(
+      allocation: AllocationId,
+      offset: Long >= 0,
+      size: Int > 0
+  ) derives Codec
+
+  given Codec[KernelMetadata.ParameterKind] = Codec.derived
+  given Codec[KernelMetadata.Parameter]     = Codec.derived
+
+  given Codec[KernelMetadata] = Codec.validated(Codec.derived[KernelMetadata])(value =>
+    KernelMetadata.validated(
+      value.argumentBlockSize,
+      value.explicitParameterCount,
+      value.parameters,
+      value.requiredWorkGroupSize,
+      value.workGroupSizeHint,
+      value.bindingIndices,
+      value.entryPointId,
+      value.registerCount
+    )
+  )
+
+  given Codec[KernelSymbol] = Codec.derived
+
+  given Codec[GlobalSymbol] = Codec.validated(Codec.derived[GlobalSymbol])(value =>
+    GlobalSymbol.validated(value.name, value.virtualAddress, value.size, value.pointerOffsets)
+  )
+
+  given Codec[ProgramSymbols] = Codec.derived
+
+  given Codec[SpecializationConstant] = Codec.derived
+
+  given Codec[SpecializationInfo] = Codec.derived
+
+  given Codec[ProgramGlobalAlias] = Codec.derived
+
+  given Codec[ProgramGlobal] = Codec.validated(Codec.derived[ProgramGlobal])(value =>
+    ProgramGlobal.validated(value.size, value.initial, value.alias)
+  )
+
   enum Operation[Reply](using val replyCodec: Codec[Reply]) derives Wire.Protocol {
     case Ping                                                                     extends Operation[Unit]
     case EnableHostMemory                                                         extends Operation[Unit]
     case PollHostMemory(completion: CompletionId)                                 extends Operation[HostMemoryBatch]
     case SupplyHostMemory(completion: CompletionId, ranges: Vec[HostMemoryBytes]) extends Operation[Unit]
-    case RegisterAllocation(kind: AllocationKind, size: Long > 0)
-        extends Operation[AllocationId]
-    case SupplyHostSync(completion: CompletionId, ticket: Long, observed: Long) extends Operation[Unit]
+    case RegisterAllocation(size: Long in 1L ~ 2147483647L)                       extends Operation[AllocationId]
+    case SupplyHostSync(completion: CompletionId, ticket: Long, observed: Long)   extends Operation[Unit]
     case RegisterAllocationAddress(allocation: AllocationId, nativeBase: GuestAddress, hostBacked: Boolean = false)
         extends Operation[Unit]
     case ReleaseAllocation(allocation: AllocationId)
@@ -51,7 +197,7 @@ object ExecutionRPC {
         extends Operation[Unit]
     case ReadAllocation(allocation: AllocationId, offset: Long >= 0, size: Int >= 0)
         extends Operation[Vec[Byte]]
-    case LoadProgram(encoding: String, image: Vec[Byte])
+    case LoadProgram(encoding: ProgramEncoding, image: Vec[Byte])
         extends Operation[ProgramId]
     case DescribeSpecialization(image: Vec[Byte])
         extends Operation[Vec[SpecializationInfo]]
@@ -71,10 +217,10 @@ object ExecutionRPC {
         extends Operation[ProgramSymbols]
     case DescribeKernel(program: ProgramId, name: NonEmpty[String])
         extends Operation[KernelMetadata]
-    case DescribeImage(encoding: String, image: Vec[Byte], name: NonEmpty[String])
+    case DescribeImage(encoding: ProgramEncoding, image: Vec[Byte], name: NonEmpty[String])
         extends Operation[KernelMetadata]
     case DescribeGlobal(program: ProgramId, name: NonEmpty[String])
-        extends Operation[GlobalImage]
+        extends Operation[ProgramGlobal]
     case BindProgramGlobal(
         program: ProgramId,
         name: NonEmpty[String],
@@ -101,8 +247,6 @@ object ExecutionRPC {
     ) extends Operation[CompletionId]
     case QueryCompletion(completion: CompletionId)
         extends Operation[CompletionStatus]
-    case AwaitCompletion(completion: CompletionId)
-        extends Operation[Unit]
     // Stable pages of at most MaximumElements records; a short page ends the result.
     case CompletionDirtyRanges(completion: CompletionId, offset: Int >= 0)
         extends Operation[Vec[DirtyRange]]

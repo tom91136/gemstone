@@ -15,13 +15,16 @@
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 
-#include "../include/gemstone/cuda/abi_layout.hpp"
-
-static_assert(sizeof(cudaPointerAttributes) == sizeof(gemstone::cuda::CudaPointerAttributes));
-static_assert(offsetof(cudaPointerAttributes, devicePointer) == offsetof(gemstone::cuda::CudaPointerAttributesPrefix, device_pointer));
-static_assert(offsetof(cudaPointerAttributes, hostPointer) == offsetof(gemstone::cuda::CudaPointerAttributesPrefix, host_pointer));
-static_assert(offsetof(cudaPointerAttributes, reserved) == offsetof(gemstone::cuda::CudaPointerAttributes, reserved));
-static_assert(sizeof(gemstone::cuda::CudaPointerAttributesPrefix) == 24);
+// CUDA 11.8 callers allocate only these leading fields of cudaPointerAttributes.
+struct LegacyPointerAttributes {
+  cudaMemoryType type;
+  int device;
+  void *devicePointer;
+  void *hostPointer;
+};
+static_assert(offsetof(cudaPointerAttributes, devicePointer) == offsetof(LegacyPointerAttributes, devicePointer));
+static_assert(offsetof(cudaPointerAttributes, hostPointer) == offsetof(LegacyPointerAttributes, hostPointer));
+static_assert(sizeof(LegacyPointerAttributes) == 24);
 
 #include "../../rpc/test/queued_lifetime.hpp"
 #include <environment_keys.hpp>
@@ -30,7 +33,7 @@ namespace {
 
 // Standalone native Driver API client; MUnit supplies the emulator endpoint and client identity.
 constexpr char Source[] = ".version 8.0\n"
-                          ".target sm_80\n"
+                          ".target sm_90\n"
                           ".address_size 64\n"
                           ".global .align 4 .u32 metadata_probe[4];\n"
                           ".global .align 4 .b8 switch_table[4] = {42, 0, 0, 0};\n"
@@ -129,23 +132,23 @@ constexpr char Source[] = ".version 8.0\n"
 
 class SharedLibrary {
 public:
-  explicit SharedLibrary(const char *path) : handle_(dlopen(path, RTLD_NOW | RTLD_LOCAL)) {
-    if (!handle_) throw std::runtime_error(dlerror());
+  explicit SharedLibrary(const char *path) : handle(dlopen(path, RTLD_NOW | RTLD_LOCAL)) {
+    if (!handle) throw std::runtime_error(dlerror());
   }
 
   SharedLibrary(const SharedLibrary &) = delete;
   SharedLibrary &operator=(const SharedLibrary &) = delete;
-  ~SharedLibrary() { dlclose(handle_); }
+  ~SharedLibrary() { dlclose(handle); }
 
   template <typename Function> Function load(const char *name) const {
     dlerror();
-    void *symbol = dlsym(handle_, name);
+    void *symbol = dlsym(handle, name);
     if (const char *error = dlerror(); error) throw std::runtime_error(std::string("cannot load ") + name + ": " + error);
     return reinterpret_cast<Function>(symbol);
   }
 
 private:
-  void *handle_;
+  void *handle;
 };
 
 void check(CUresult status) {
@@ -230,7 +233,7 @@ void run() {
   REQUIRE((runtimeAttributes.devicePointer == reinterpret_cast<void *>(memory)));
   REQUIRE((runtimeAttributes.hostPointer == nullptr));
   struct GuardedLegacyAttributes {
-    gemstone::cuda::CudaPointerAttributesPrefix value{};
+    LegacyPointerAttributes value{};
     uint64_t guard = 0x7a6b5c4d3e2f1908;
   } guardedLegacyAttributes;
   REQUIRE((runtimePointerAttributes(&guardedLegacyAttributes.value, reinterpret_cast<const void *>(memory)) == cudaSuccess));
@@ -402,7 +405,7 @@ void run() {
 }
 
 void runStreamCallbacks() {
-  // Synchronization publishes callback effects to the calling thread.
+  // Synchronisation publishes callback effects to the calling thread.
   const char *configuredPath = std::getenv(gemstone::environment::TestLibrary);
   const SharedLibrary library{configuredPath ? configuredPath : "libcuda.so.1"};
   const auto init = library.load<CUresult (*)(unsigned)>("cuInit");
@@ -410,7 +413,7 @@ void runStreamCallbacks() {
   const auto contextDestroy = library.load<CUresult (*)(CUcontext)>("cuCtxDestroy_v2");
   const auto streamCreate = library.load<CUresult (*)(CUstream *, unsigned)>("cuStreamCreate");
   const auto streamDestroy = library.load<CUresult (*)(CUstream)>("cuStreamDestroy_v2");
-  const auto streamSynchronize = library.load<CUresult (*)(CUstream)>("cuStreamSynchronize");
+  const auto streamSynchronise = library.load<CUresult (*)(CUstream)>("cuStreamSynchronize");
   const auto streamAddCallback = library.load<CUresult (*)(CUstream, CUstreamCallback, void *, unsigned)>("cuStreamAddCallback");
 
   check(init(0));
@@ -483,8 +486,8 @@ void runStreamCallbacks() {
         value.valid = value.valid && stream == value.expected && status == CUDA_SUCCESS;
       },
       &observed, 0));
-  check(streamSynchronize(second));
-  check(streamSynchronize(first));
+  check(streamSynchronise(second));
+  check(streamSynchronise(first));
   REQUIRE((observed.calls == 1));
   REQUIRE(observed.valid);
   check(streamDestroy(second));
@@ -572,7 +575,7 @@ void runManagedRuntime() {
   const auto malloc = library.load<int32_t (*)(void **, size_t)>("cudaMalloc");
   const auto free = library.load<int32_t (*)(void *)>("cudaFree");
   const auto copy = library.load<int32_t (*)(void *, const void *, size_t, int32_t)>("cudaMemcpy");
-  const auto deviceSynchronize = library.load<int32_t (*)()>("cudaDeviceSynchronize");
+  const auto deviceSynchronise = library.load<int32_t (*)()>("cudaDeviceSynchronize");
 
   constexpr int32_t success = 0;
   constexpr int32_t hostToDevice = 1;
@@ -601,7 +604,7 @@ void runManagedRuntime() {
   for (unsigned index = 0; index < replacement.size(); ++index)
     REQUIRE((words[index] == replacement[index]));
 
-  REQUIRE((deviceSynchronize() == success));
+  REQUIRE((deviceSynchronise() == success));
   REQUIRE((copy(managed, device, bytes, deviceToHost) == success));
   for (unsigned index = 0; index < replacement.size(); ++index)
     REQUIRE((words[index] == replacement[index]));
@@ -615,7 +618,7 @@ void runManagedRuntime() {
 
 TEST_CASE("CUDA cross-workgroup execution", "[cuda][integration]") { run(); }
 
-TEST_CASE("CUDA callbacks complete once before stream synchronization", "[cuda][integration]") { runStreamCallbacks(); }
+TEST_CASE("CUDA callbacks complete once before stream synchronisation", "[cuda][integration]") { runStreamCallbacks(); }
 
 TEST_CASE("CUDA system paging reaches a plain host pointer", "[cuda][integration]") { runSystemPaging(); }
 
@@ -658,37 +661,38 @@ TEST_CASE("CUDA accepts metadata-only cubins but rejects malformed executable im
   REQUIRE(library.load<CUresult (*)(CUfunction *, CUmodule, const char *)>("cuModuleGetFunction")(&function, module, "absent")
           == CUDA_ERROR_NOT_FOUND);
   check(unload(module));
-  // CUDA 11.8 uses the runtime export table to register a header-only catalog.
+  // CUDA 11.8 uses the runtime export table to register a header-only catalogue.
   const std::array<unsigned char, 16> runtimeId{0x6b, 0xd5, 0xfb, 0x6c, 0x5b, 0xf4, 0xe7, 0x4a,
                                                 0x89, 0x87, 0xd9, 0x39, 0x12, 0xfd, 0x9d, 0xf9};
   const void *runtimeTable = nullptr;
   check(library.load<CUresult (*)(const void **, const void *)>("cuGetExportTable")(&runtimeTable, runtimeId.data()));
   const auto entries = static_cast<const void *const *>(runtimeTable);
-  const auto loadCatalog = reinterpret_cast<CUresult (*)(void **, const void *, void *, void *, uint32_t)>(const_cast<void *>(entries[6]));
+  const auto loadCatalogue =
+      reinterpret_cast<CUresult (*)(void **, const void *, void *, void *, uint32_t)>(const_cast<void *>(entries[6]));
   put(8, 0, 8);
-  void *catalog = nullptr;
-  check(loadCatalog(&catalog, image.data(), nullptr, nullptr, 0));
-  check(unload(static_cast<CUmodule>(catalog)));
+  void *catalogue = nullptr;
+  check(loadCatalogue(&catalogue, image.data(), nullptr, nullptr, 0));
+  check(unload(static_cast<CUmodule>(catalogue)));
   put(8, image.size() - 16, 8);
   // A runtime may register cubin records for architectures newer than the
   // configured target. Report the ordinary no-binary result instead of
   // sending an incompatible executable image to the backend.
   put(44, 999, 4);
   put(elf + 128 + 8, 6, 8);
-  catalog = nullptr;
-  REQUIRE(loadCatalog(&catalog, image.data(), nullptr, nullptr, 0) == CUDA_ERROR_NO_BINARY_FOR_GPU);
-  REQUIRE(catalog == nullptr);
+  catalogue = nullptr;
+  REQUIRE(loadCatalogue(&catalogue, image.data(), nullptr, nullptr, 0) == CUDA_ERROR_NO_BINARY_FOR_GPU);
+  REQUIRE(catalogue == nullptr);
   put(44, 80, 4);
   put(elf + 128 + 8, 0, 8);
   put(0, 0x12345678, 4);
-  REQUIRE(loadCatalog(&catalog, image.data(), nullptr, nullptr, 0) == CUDA_ERROR_NOT_SUPPORTED);
+  REQUIRE(loadCatalogue(&catalogue, image.data(), nullptr, nullptr, 0) == CUDA_ERROR_NOT_SUPPORTED);
   put(0, 0xba55ed50, 4);
   put(elf + 40, 1000, 8);
-  REQUIRE(loadCatalog(&catalog, image.data(), nullptr, nullptr, 0) == CUDA_ERROR_NOT_SUPPORTED);
+  REQUIRE(loadCatalogue(&catalogue, image.data(), nullptr, nullptr, 0) == CUDA_ERROR_NOT_SUPPORTED);
   put(elf + 40, 64, 8);
   put(24, 64, 4);
   put(8, 128, 8);
-  REQUIRE(loadCatalog(&catalog, image.data(), nullptr, nullptr, 0) == CUDA_ERROR_NOT_SUPPORTED);
+  REQUIRE(loadCatalogue(&catalogue, image.data(), nullptr, nullptr, 0) == CUDA_ERROR_NOT_SUPPORTED);
   put(24, 200, 4);
   put(8, image.size() - 16, 8);
   for (const uint64_t flags : {2u, 4u, 6u}) {
@@ -702,7 +706,7 @@ TEST_CASE("CUDA accepts metadata-only cubins but rejects malformed executable im
 }
 
 namespace {
-// Exercise actual PTX execution and synchronization through the existing server.
+// Exercise actual PTX execution and synchronisation through the existing server.
 struct UnifiedMemoryClient {
   SharedLibrary library{std::getenv(gemstone::environment::TestLibrary) ? std::getenv(gemstone::environment::TestLibrary) : "libcuda.so.1"};
   CUcontext context = nullptr;
@@ -716,7 +720,7 @@ struct UnifiedMemoryClient {
   decltype(&cuMemHostGetDevicePointer) hostDevicePointer =
       library.load<decltype(&cuMemHostGetDevicePointer)>("cuMemHostGetDevicePointer_v2");
   decltype(&cuLaunchKernel) launch = library.load<decltype(&cuLaunchKernel)>("cuLaunchKernel");
-  decltype(&cuCtxSynchronize) synchronize = library.load<decltype(&cuCtxSynchronize)>("cuCtxSynchronize");
+  decltype(&cuCtxSynchronize) synchronise = library.load<decltype(&cuCtxSynchronize)>("cuCtxSynchronize");
   decltype(&cuModuleGetFunction) function = library.load<decltype(&cuModuleGetFunction)>("cuModuleGetFunction");
   UnifiedMemoryClient() {
     check(library.load<CUresult (*)(unsigned)>("cuInit")(0));
@@ -745,7 +749,7 @@ struct UnifiedMemoryClient {
     check(function(&kernel, module, "alias_increment"));
     void *args[] = {&address, &address};
     check(launch(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr));
-    check(synchronize());
+    check(synchronise());
   }
 };
 } // namespace
@@ -827,7 +831,7 @@ TEST_CASE("CUDA managed pointer graph preserves interior targets and pointer byt
     *reinterpret_cast<CUdeviceptr *>(table) = allocation + offset * sizeof(uint32_t);
     void *args[] = {&table};
     check(api.launch(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr));
-    check(api.synchronize());
+    check(api.synchronise());
     CHECK((host[offset] == 42));
     CHECK((*reinterpret_cast<CUdeviceptr *>(table) == allocation + offset * sizeof(uint32_t)));
     CHECK((host[offset - 1] == 41 && host[offset + 1] == 41));
@@ -848,7 +852,7 @@ TEST_CASE("CUDA managed device pointer publication preserves host addresses", "[
     CUdeviceptr target = allocation + offset * sizeof(uint32_t);
     void *args[] = {&table, &target};
     check(api.launch(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr));
-    check(api.synchronize());
+    check(api.synchronise());
     CHECK((*reinterpret_cast<CUdeviceptr *>(table) == target));
   }
   check(api.free(table));
@@ -932,13 +936,13 @@ TEST_CASE("CUDA driver lookup exposes known unsupported APIs and ordinary stream
   const auto entries = static_cast<const void *const *>(table);
   const auto streamHandle = reinterpret_cast<CUresult (*)(void *, void *, void **, int)>(const_cast<void *>(entries[51]));
   const auto streamId = reinterpret_cast<CUresult (*)(void *, void *, uint64_t *)>(const_cast<void *>(entries[39]));
-  void *normalized = canary;
-  check(streamHandle(context, reinterpret_cast<void *>(uintptr_t{1}), &normalized, 0));
-  REQUIRE(normalized == nullptr);
+  void *normalised = canary;
+  check(streamHandle(context, reinterpret_cast<void *>(uintptr_t{1}), &normalised, 0));
+  REQUIRE(normalised == nullptr);
   uint64_t legacyId = 1, threadId = 0;
-  check(streamId(context, normalized, &legacyId));
-  check(streamHandle(context, nullptr, &normalized, 1));
-  check(streamId(context, normalized, &threadId));
+  check(streamId(context, normalised, &legacyId));
+  check(streamHandle(context, nullptr, &normalised, 1));
+  check(streamId(context, normalised, &threadId));
   REQUIRE(legacyId == 0);
   REQUIRE(threadId != legacyId);
   check(library.load<CUresult (*)(CUcontext)>("cuCtxDestroy_v2")(context));

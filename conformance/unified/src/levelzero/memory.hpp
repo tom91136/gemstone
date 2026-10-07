@@ -11,7 +11,6 @@
 namespace memory_patterns {
 struct Backend {
   std::string kind;
-  std::string allocationKind() const { return kind; }
   ze_driver_handle_t driver{};
   ze_context_handle_t context{};
   ze_device_handle_t device{};
@@ -24,7 +23,7 @@ struct Backend {
     if (driver) (void)zeDriverGetLastErrorDescription(driver, &detail);
     throw std::runtime_error("Level Zero status " + std::to_string(status) + (detail ? std::string(": ") + detail : ""));
   }
-  explicit Backend(std::string kind = "shared", uint64_t selected = 0, const char *fixture = "kernel.spv") : kind(std::move(kind)) {
+  Backend(std::string kind, uint64_t selected, const char *fixture) : kind(std::move(kind)) {
     check(zeInit(0));
     uint32_t count = 0;
     check(zeDriverGet(&count, nullptr));
@@ -69,7 +68,7 @@ struct Backend {
     void *p{};
     ze_device_mem_alloc_desc_t dd{ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC};
     ze_host_mem_alloc_desc_t hd{ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC};
-    if (allocationKind() == "host") check(zeMemAllocHost(context, &hd, size, 64, &p));
+    if (kind == "host") check(zeMemAllocHost(context, &hd, size, 64, &p));
     else check(zeMemAllocShared(context, &dd, &hd, size, 64, device, &p));
     return p;
   }

@@ -5,11 +5,11 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.isa.*
-import net.kurobako.gemstone.isa.spirv.v1_6.*
+import net.kurobako.gemstone.isa.spirv.*
+import net.kurobako.gemstone.isa.spirv.graphics.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
-import net.kurobako.gemstone.server.backend.*
+import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
@@ -19,10 +19,10 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
   private def right[A](value: Either[ExecutionFailure, A]): A = value.fold(error => fail(error.message), identity)
 
   test("ordered image commands preserve aliases, view bounds and completion ownership") {
-    Using.resource(ExecutionSession(Nil, graphics = Some(Graphics()))) { service =>
-      val unrelated = right(service.registerAllocation(8L, AllocationKind.Device))
+    Using.resource(ExecutionSession(Nil, graphics = Some(GraphicsRuntime()))) { service =>
+      val unrelated = right(service.registerAllocation(8))
       right(service.registerAllocationAddress(unrelated, GuestAddress(0x1000L)))
-      val id = right(service.registerAllocation(32L, AllocationKind.Device))
+      val id = right(service.registerAllocation(32))
       right(service.write(id, 0L, Vec.fill(32)(0x55.toByte)))
       val image = GraphicsImage(
         memory = GraphicsRange(id, 8L, 8L),
@@ -42,7 +42,7 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
         image.extent
       )
       val completion = right(service.submitGraphics(GraphicsSubmission(Vec(
-        GraphicsCommand.ClearColor(image, area, Vec(0x3f800000, 0, 0, 0x3f800000)),
+        GraphicsCommand.ClearColour(image, area, Vec(0x3f800000, 0, 0, 0x3f800000)),
         GraphicsCommand.CopyBufferImage(
           GraphicsRange(id, 16L, 8L),
           image,
@@ -64,9 +64,9 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
   }
 
   test("explicit mip and array pitches preserve padding and other subresources") {
-    Using.resource(ExecutionSession(Nil, graphics = Some(Graphics()))) { service =>
+    Using.resource(ExecutionSession(Nil, graphics = Some(GraphicsRuntime()))) { service =>
       // Two array layers: padded 2x2 mip at 0, padded 1x1 mip at 80; readback at 96.
-      val id       = right(service.registerAllocation(128L, AllocationKind.Device))
+      val id       = right(service.registerAllocation(128))
       val expected = Array.fill[Byte](128)(0x55.toByte)
       val first    = Vec[Byte](1, 2, 3, 4)
       val second   = Vec[Byte](5, 6, 7, 8)
@@ -99,12 +99,12 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
         bufferOffset = 0L,
         rowLength = 0,
         imageHeight = 0,
-        image = GraphicsLayers(level = 1, baseLayer = 0, layers = 2, color = true, depth = false, stencil = false),
+        image = GraphicsLayers(level = 1, baseLayer = 0, layers = 2, colour = true, depth = false, stencil = false),
         offset = GraphicsOffset(0, 0, 0),
         extent = GraphicsExtent(1, 1, 1)
       )
       val completion = right(service.submitGraphics(GraphicsSubmission(Vec(
-        GraphicsCommand.ClearColor(image, GraphicsRect(0, 0, 2, 2), Vec(0x3f800000, 0, 0, 0x3f800000)),
+        GraphicsCommand.ClearColour(image, GraphicsRect(0, 0, 2, 2), Vec(0x3f800000, 0, 0, 0x3f800000)),
         GraphicsCommand.CopyBufferImage(
           buffer = GraphicsRange(id, 96L, 8L),
           image = image,
@@ -129,7 +129,7 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
           image.copy(levels = Vec.nonEmpty(base, mip.copy(layerPitch = Long.MaxValue)))
         )
       )
-        assert(service.submitGraphics(GraphicsSubmission(Vec(GraphicsCommand.ClearColor(
+        assert(service.submitGraphics(GraphicsSubmission(Vec(GraphicsCommand.ClearColour(
           invalid,
           area,
           Vec(0, 0, 0, 0)
@@ -140,8 +140,8 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
   }
 
   test("invalid image footprints fail before reserving a completion or changing storage") {
-    Using.resource(ExecutionSession(Nil, graphics = Some(Graphics()))) { service =>
-      val id    = right(service.registerAllocation(8L, AllocationKind.Device))
+    Using.resource(ExecutionSession(Nil, graphics = Some(GraphicsRuntime()))) { service =>
+      val id    = right(service.registerAllocation(8))
       val image = GraphicsImage(
         memory = GraphicsRange(id, 0L, 8L),
         levels = Vec.nonEmpty(GraphicsImageLevel(GraphicsExtent(3, 1, 1), 0L, 12L, 12L, 12L)),
@@ -150,7 +150,7 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
         format = format,
         volume = false
       )
-      assert(service.submitGraphics(GraphicsSubmission(Vec(GraphicsCommand.ClearColor(
+      assert(service.submitGraphics(GraphicsSubmission(Vec(GraphicsCommand.ClearColour(
         image,
         area,
         Vec(0, 0, 0, 0)
@@ -162,25 +162,25 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
 
   test("compute descriptor preparation retains sources and releases scratch on success and failure") {
     val queued   = scala.collection.mutable.Queue.empty[Runnable]
-    val captured = scala.collection.mutable.ArrayBuffer.empty[(Memory, AllocationId)]
+    val captured = scala.collection.mutable.ArrayBuffer.empty[(AddressSpace, AllocationId)]
     object context extends scala.concurrent.ExecutionContext {
       override def execute(runnable: Runnable): Unit     = queued.enqueue(runnable)
       override def reportFailure(error: Throwable): Unit = throw error
     }
-    class Consumer(reject: Boolean, standalone: Boolean) extends RuntimeBackend.Program {
-      override def symbols: Either[ExecutionFailure, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
-      override def kernel(name: NonEmpty[String]): Either[ExecutionFailure, KernelMetadata] = KernelMetadata.validated(
+    class Consumer(reject: Boolean, standalone: Boolean) extends Backend.Program {
+      override def symbols: Either[Fault, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
+      override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] = KernelMetadata.validated(
         8,
         1,
         Vec(KernelMetadata.Parameter(8, 0, KernelMetadata.ParameterKind.Allocation, false))
       )
-        .left.map(ExecutionFailure.InvalidRequest(_))
+        .left.map(Fault.InvalidRequest(_))
       override def execute(
           task: KernelTask,
-          memory: Memory,
+          memory: AddressSpace,
           control: TaskControl,
           handler: Event => Either[Fault, Unit]
-      ): Either[ExecutionFailure, Unit] = {
+      ): Either[Fault, Unit] = {
         val region = task.arguments.head match {
           case KernelTask.Argument.Memory(region, _, _) => region
           case _                                        => fail("prepared argument is not memory")
@@ -198,12 +198,12 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
           val red = memory.readValue(texels.target, 0L, 4).toOption.get.toInt
           assertEqualsFloat(java.lang.Float.intBitsToFloat(red), 2f / 255f, 0.000001f)
         }
-        if (reject) Left(ExecutionFailure.Failed("consumer rejected execution")) else Right(())
+        if (reject) Left(Fault.Backend("consumer rejected execution")) else Right(())
       }
     }
-    class ConsumerBackend(reject: Boolean, standalone: Boolean) extends RuntimeBackend {
-      override val encoding                                                                 = "test-sampled-image"
-      override def load(image: Vec[Byte]): Either[ExecutionFailure, RuntimeBackend.Program] =
+    class ConsumerBackend(reject: Boolean, standalone: Boolean) extends Backend {
+      override val encoding                                               = ProgramEncoding.SPIRVVulkanGraphics
+      override def load(image: Vec[Byte]): Either[Fault, Backend.Program] =
         Right(Consumer(reject, standalone))
     }
     for {
@@ -211,16 +211,16 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
       standalone <- Vector(false, true)
     } {
       val backend = ConsumerBackend(reject, standalone)
-      Using.resource(ExecutionSession(List(backend), executionContext = context, graphics = Some(Graphics()))) {
+      Using.resource(ExecutionSession(List(backend), executionContext = context, graphics = Some(GraphicsRuntime()))) {
         service =>
-          val source      = right(service.registerAllocation(8L, AllocationKind.Device))
-          val placeholder = right(service.registerAllocation(8L, AllocationKind.Device))
+          val source      = right(service.registerAllocation(8))
+          val placeholder = right(service.registerAllocation(8))
           val program     = right(service.load(backend.encoding, Vec.empty))
           val task        = KernelTask.validated(
             "sample",
             LaunchGeometry.Dimensions.One,
             LaunchGeometry.Dimensions.One,
-            Vec(if (standalone) KernelTask.Argument.Scalar(Vec.empty)
+            Vec(if (standalone) KernelTask.Argument.Descriptor
             else KernelTask.Argument.Memory(placeholder, 0L, Some(8L)))
           ).toOption.get
           val imageBinding = DescriptorBinding(
@@ -254,7 +254,7 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
               unnormalized = false,
               compareEnable = false,
               compareOp = GraphicsCompare.Never,
-              borderColor = GraphicsBorderColor.FloatTransparentBlack,
+              borderColour = GraphicsBorderColour.FloatTransparentBlack,
               mipLodBias = -0.75f,
               minLod = 0f,
               maxLod = 4f,

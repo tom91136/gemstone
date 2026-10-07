@@ -5,7 +5,7 @@
 
 #include "host_allocator.hpp"
 
-namespace gemstone::vulkan::adapter {
+namespace gemstone::vulkan {
 uintptr_t createHandle();
 void destroyHandle(uintptr_t address);
 host::Arena *findHandleArena(uintptr_t address);
@@ -21,4 +21,4 @@ template <typename Handle> Handle makeHandle() {
   else return static_cast<Handle>(address);
 }
 template <typename Handle> void deleteHandle(Handle handle) { destroyHandle(handleAddress(handle)); }
-} // namespace gemstone::vulkan::adapter
+} // namespace gemstone::vulkan

@@ -1,7 +1,9 @@
 package net.kurobako.gemstone.rpc
 
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.rpc.Wire.*
 import net.kurobako.gemstone.vm.*
 
@@ -11,7 +13,7 @@ class WireSuite extends munit.FunSuite {
 
   private case class Pair(number: Int, flag: Boolean) derives Codec
 
-  private val limits = Limits(16, 1024, 256)
+  private val limits = msgpack.Limits(16, 1024, 256)
 
   private def bytes(values: Int*): Array[Byte] = values.map(_.toByte).toArray
 
@@ -114,7 +116,7 @@ class WireSuite extends munit.FunSuite {
   }
 
   test("text and element limits allow equality and reject one additional byte or element") {
-    val small = Limits(2, 16, 2)
+    val small = msgpack.Limits(2, 16, 2)
     assertEquals(Codec[String].decode(bytes(0xa2, 0xc3, 0xa9), small), Right("é"))
     assert(Codec[String].decode(bytes(0xa3, 0xc3, 0xa9, 0x78), small).isLeft)
     assertEquals(Codec[String].encode("é", small).map(_.toSeq), Right(bytes(0xa2, 0xc3, 0xa9).toSeq))
@@ -126,7 +128,7 @@ class WireSuite extends munit.FunSuite {
   }
 
   test("total byte limits include headers and apply to codec and protocol decoding") {
-    val small = Limits(16, 3, 256)
+    val small = msgpack.Limits(16, 3, 256)
     assertEquals(Codec[String].decode(bytes(0xa2, 0x61, 0x62), small), Right("ab"))
     assertEquals(Codec[String].encode("ab", small).map(_.toSeq), Right(bytes(0xa2, 0x61, 0x62).toSeq))
     assert(Codec[String].encode("abc", small).isLeft)
@@ -138,7 +140,7 @@ class WireSuite extends munit.FunSuite {
     assert(Codec[Vec[Int]].decode(bytes(0x93, 1, 2, 3), small).isLeft)
 
     val protocol      = Protocol[ExecutionRPC.Operation]
-    val operation     = ExecutionRPC.Operation.LoadProgram("x", Vec.empty)
+    val operation     = ExecutionRPC.Operation.LoadProgram(ProgramEncoding.PTXText, Vec.empty)
     val (id, encoded) = protocol.encodePayload(operation, limits).fold(fail(_), identity)
     val exact         = limits.copy(maximumBytes = encoded.length.unsafe[Int > 0])
     assertEquals(protocol.decodePayload(id, encoded, exact).map(_.value), Right(operation))
@@ -149,7 +151,7 @@ class WireSuite extends munit.FunSuite {
   }
 
   test("collection headers preserve their length across MessagePack width transitions") {
-    val large   = Limits(65536, 131072, 65536)
+    val large   = msgpack.Limits(65536, 131072, 65536)
     val strings = Seq(
       0     -> bytes(0xa0),
       31    -> bytes(0xbf),
@@ -196,7 +198,7 @@ class WireSuite extends munit.FunSuite {
   }
 
   test("derived products and sums reject wrong arity, unknown tags, and invalid ordinals") {
-    import net.kurobako.gemstone.rpc.ExecutionProtocol.given
+    import net.kurobako.gemstone.rpc.ExecutionRPC.given
     assertEquals(decode[Pair](0x92, 7, 0xc3), Right(Pair(7, true)))
     assert(decode[Pair](0x91, 7, 0xc3).isLeft)
     assert(decode[Pair](0x93, 7, 0xc3).isLeft)

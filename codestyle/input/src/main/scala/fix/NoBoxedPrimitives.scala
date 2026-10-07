@@ -1,45 +1,45 @@
 /*
-rule = GemstoneNoBoxedPrimitives
+rule = NoBoxedPrimitives
  */
 package fix
 
 import java.lang.{Integer => JInt}
 
 object NoBoxedPrimitives {
-  val boolean: java.lang.Boolean = ??? // assert: GemstoneNoBoxedPrimitives.boxed-type
-  val byte: java.lang.Byte = ??? // assert: GemstoneNoBoxedPrimitives.boxed-type
-  val short: java.lang.Short = ??? // assert: GemstoneNoBoxedPrimitives.boxed-type
-  val integer: Integer = ??? // assert: GemstoneNoBoxedPrimitives.boxed-type
-  val long: java.lang.Long = ??? // assert: GemstoneNoBoxedPrimitives.boxed-type
-  val float: java.lang.Float = ??? // assert: GemstoneNoBoxedPrimitives.boxed-type
-  val double: java.lang.Double = ??? // assert: GemstoneNoBoxedPrimitives.boxed-type
-  val character: Character = ??? // assert: GemstoneNoBoxedPrimitives.boxed-type
-  val void: java.lang.Void = ??? // assert: GemstoneNoBoxedPrimitives.boxed-type
-  type Alias = JInt // assert: GemstoneNoBoxedPrimitives.boxed-type
-  val nested: List[JInt] = Nil // assert: GemstoneNoBoxedPrimitives.boxed-type
-  val constructed = new JInt(1) // assert: GemstoneNoBoxedPrimitives.boxed-type
-  val constructedWithoutNew = JInt(1) // assert: GemstoneNoBoxedPrimitives.boxing
-  val boxed = JInt.valueOf(1) // assert: GemstoneNoBoxedPrimitives.boxing
-  val qualifiedBox = java.lang.Integer.valueOf(2) // assert: GemstoneNoBoxedPrimitives.boxing
-  val decoded = JInt.decode("0x10") // assert: GemstoneNoBoxedPrimitives.boxing
-  val boxedTrue = java.lang.Boolean.TRUE // assert: GemstoneNoBoxedPrimitives.boxing
-  val boxedFalse = java.lang.Boolean.FALSE // assert: GemstoneNoBoxedPrimitives.boxing
-  val classToken = classOf[JInt] // assert: GemstoneNoBoxedPrimitives.boxed-type
+  val boolean: java.lang.Boolean = ??? // assert: NoBoxedPrimitives.boxed-type
+  val byte: java.lang.Byte = ??? // assert: NoBoxedPrimitives.boxed-type
+  val short: java.lang.Short = ??? // assert: NoBoxedPrimitives.boxed-type
+  val integer: Integer = ??? // assert: NoBoxedPrimitives.boxed-type
+  val long: java.lang.Long = ??? // assert: NoBoxedPrimitives.boxed-type
+  val float: java.lang.Float = ??? // assert: NoBoxedPrimitives.boxed-type
+  val double: java.lang.Double = ??? // assert: NoBoxedPrimitives.boxed-type
+  val character: Character = ??? // assert: NoBoxedPrimitives.boxed-type
+  val void: java.lang.Void = ??? // assert: NoBoxedPrimitives.boxed-type
+  type Alias = JInt // assert: NoBoxedPrimitives.boxed-type
+  val nested: List[JInt] = Nil // assert: NoBoxedPrimitives.boxed-type
+  val constructed = new JInt(1) // assert: NoBoxedPrimitives.boxed-type
+  val constructedWithoutNew = JInt(1) // assert: NoBoxedPrimitives.boxing
+  val boxed = JInt.valueOf(1) // assert: NoBoxedPrimitives.boxing
+  val qualifiedBox = java.lang.Integer.valueOf(2) // assert: NoBoxedPrimitives.boxing
+  val decoded = JInt.decode("0x10") // assert: NoBoxedPrimitives.boxing
+  val boxedTrue = java.lang.Boolean.TRUE // assert: NoBoxedPrimitives.boxing
+  val boxedFalse = java.lang.Boolean.FALSE // assert: NoBoxedPrimitives.boxing
+  val classToken = classOf[JInt] // assert: NoBoxedPrimitives.boxed-type
 
-  val a = boolean.booleanValue() // assert: GemstoneNoBoxedPrimitives.unboxing
-  val b = byte.byteValue() // assert: GemstoneNoBoxedPrimitives.unboxing
-  val c = short.shortValue() // assert: GemstoneNoBoxedPrimitives.unboxing
-  val d = integer.intValue() // assert: GemstoneNoBoxedPrimitives.unboxing
-  val e = long.longValue() // assert: GemstoneNoBoxedPrimitives.unboxing
-  val f = float.floatValue() // assert: GemstoneNoBoxedPrimitives.unboxing
-  val g = double.doubleValue() // assert: GemstoneNoBoxedPrimitives.unboxing
-  val h = character.charValue() // assert: GemstoneNoBoxedPrimitives.unboxing
-  def number(value: Number): Long = value.longValue() // assert: GemstoneNoBoxedPrimitives.unboxing
-  val scalaBigInt = BigInt(1).longValue // assert: GemstoneNoBoxedPrimitives.unboxing
-  val scalaBigDecimal = BigDecimal(1).intValue // assert: GemstoneNoBoxedPrimitives.unboxing
-  def javaBigInt(value: java.math.BigInteger): Double = value.doubleValue() // assert: GemstoneNoBoxedPrimitives.unboxing
-  def javaBigDecimal(value: java.math.BigDecimal): Int = value.intValue() // assert: GemstoneNoBoxedPrimitives.unboxing
-  val eta: () => Int = integer.intValue // assert: GemstoneNoBoxedPrimitives.unboxing
+  val a = boolean.booleanValue() // assert: NoBoxedPrimitives.unboxing
+  val b = byte.byteValue() // assert: NoBoxedPrimitives.unboxing
+  val c = short.shortValue() // assert: NoBoxedPrimitives.unboxing
+  val d = integer.intValue() // assert: NoBoxedPrimitives.unboxing
+  val e = long.longValue() // assert: NoBoxedPrimitives.unboxing
+  val f = float.floatValue() // assert: NoBoxedPrimitives.unboxing
+  val g = double.doubleValue() // assert: NoBoxedPrimitives.unboxing
+  val h = character.charValue() // assert: NoBoxedPrimitives.unboxing
+  def number(value: Number): Long = value.longValue() // assert: NoBoxedPrimitives.unboxing
+  val scalaBigInt = BigInt(1).longValue // assert: NoBoxedPrimitives.unboxing
+  val scalaBigDecimal = BigDecimal(1).intValue // assert: NoBoxedPrimitives.unboxing
+  def javaBigInt(value: java.math.BigInteger): Double = value.doubleValue() // assert: NoBoxedPrimitives.unboxing
+  def javaBigDecimal(value: java.math.BigDecimal): Int = value.intValue() // assert: NoBoxedPrimitives.unboxing
+  val eta: () => Int = integer.intValue // assert: NoBoxedPrimitives.unboxing
 
   val primitive: Int = 1
   val parsed = JInt.parseInt("12")
@@ -62,6 +62,6 @@ object NoBoxedPrimitives {
     val factory = Integer.valueOf(1)
   }
 
-  @SuppressWarnings(Array("scalafix:GemstoneNoBoxedPrimitives"))
+  @SuppressWarnings(Array("scalafix:NoBoxedPrimitives"))
   def javaBoundary(value: JInt): Int = value.intValue()
 }

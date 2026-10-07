@@ -1,6 +1,6 @@
-#ifndef GEMSTONE_EXECUTION_COMPLETION_HPP
-#define GEMSTONE_EXECUTION_COMPLETION_HPP
+#pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -9,23 +9,40 @@
 namespace gemstone::execution {
 
 struct CompletionResult {
-  std::vector<DirtyRange> dirty_ranges;
-  std::vector<PointerRelocation> pointer_relocations;
+  std::vector<DirtyRange> dirtyRanges;
+  std::vector<PointerRelocation> pointerRelocations;
 };
 
-/** Reads all dirty-range pages without releasing the completion (also used by the HSA executor). */
-bool completion_dirty_ranges(Client &client, CompletionId completion, std::vector<DirtyRange> &ranges, std::string &error);
+/** Reads all dirty-range pages without releasing the completion. */
+bool completionDirtyRanges(Client &client, CompletionId completion, std::vector<DirtyRange> &ranges, std::string &error);
 
-/** Waits, servicing host-memory requests when required; the caller retains the completion. */
-bool await_completion(Client &client, CompletionId completion, std::string &error, bool hostMemory = false);
+/** Waits while servicing host-memory requests; the caller retains the completion. */
+bool awaitCompletion(Client &client, CompletionId completion, std::string &error);
 
-/** Waits once, copies stable result records and optional graphics statistics, then releases the completion.
+/** Waits, copies stable result records and optional graphics statistics, then releases the completion.
  * The first transport/execution error is preserved even when release also
  * fails. Facades remain responsible for applying records to native memory.
  */
-bool collect_completion(Client &client, CompletionId completion, CompletionResult &result, std::string &error, bool hostMemory = false,
-                        GraphicsStatistics *graphics = nullptr);
+bool collectCompletion(Client &client, CompletionId completion, CompletionResult &result, std::string &error,
+                       GraphicsStatistics *graphics = nullptr);
+
+/** Launches and collects on a dedicated connection, so callers' shared clients stay usable while the dispatch
+ * services host-memory requests. `launched` runs once the service accepts the launch.
+ */
+template <class Launched = decltype([] {})>
+bool launchAndCollect(Launch launch, CompletionResult &result, std::string &error, Launched launched = {}) {
+  const auto client = Client::fromEnvironment();
+  if (!client) {
+    error = "Gemstone execution RPC client is not configured";
+    return false;
+  }
+  auto completion = client->call(launch);
+  if (!completion) {
+    error = completion.error().detail;
+    return false;
+  }
+  launched();
+  return collectCompletion(*client, completion.value(), result, error);
+}
 
 } // namespace gemstone::execution
-
-#endif

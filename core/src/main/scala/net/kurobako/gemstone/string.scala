@@ -70,23 +70,40 @@ object string {
     else scala.util.Try(Integer.parseInt(if (negative) s"-$digits" else digits, radix)).toOption
   }
 
-  /** Signed decimal or hexadecimal text; whitespace and suffixes belong to the caller's grammar. */
-  def parseBigIntLiteral(text: String): Option[BigInt] = {
-    def unsigned(num: String): Option[BigInt] = {
-      val (digits, radix) = num match {
-        case s"0x$value" => (value, 16)
-        case s"0X$value" => (value, 16)
-        case _           => (num, 10)
-      }
-      Option.when(digits.nonEmpty && digits.forall(c =>
-        (c >= '0' && c <= '9') ||
-          (radix == 16 && ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
-      ))(BigInt(digits, radix))
+  /** ASCII digit of `radix`, independent of Unicode digit categories. */
+  def isDigit(character: Char, radix: Int in 2 ~ 36): Boolean = {
+    val value =
+      if (character >= '0' && character <= '9') character - '0'
+      else if (character >= 'a' && character <= 'z') character - 'a' + 10
+      else if (character >= 'A' && character <= 'Z') character - 'A' + 10
+      else radix.raw
+    value < radix.raw
+  }
+
+  /** Signed decimal or 0x hexadecimal text, with 0b binary, leading-zero octal and `_` digit separators when the
+    * grammar allows them. Whitespace and suffixes belong to the caller's grammar.
+    */
+  def parseBigIntLiteral(
+      text: String,
+      binary: Boolean = false,
+      separators: Boolean = false,
+      octal: Boolean = false
+  ): Option[BigInt] = {
+    val negative                         = text.startsWith("-")
+    val unsigned                         = if (negative || text.startsWith("+")) text.drop(1) else text
+    val literal: (String, Int in 2 ~ 36) = unsigned match {
+      case s"0x$value"                           => (value, 16)
+      case s"0X$value"                           => (value, 16)
+      case s"0b$value" if binary                 => (value, 2)
+      case s"0B$value" if binary                 => (value, 2)
+      case s"0$value" if octal && value.nonEmpty => (value, 8)
+      case _                                     => (unsigned, 10)
     }
-    text match {
-      case s"+$num" => unsigned(num)
-      case s"-$num" => unsigned(num).map(-_)
-      case _        => unsigned(text)
+    val (body, radix) = literal
+    val digits        = if (separators) body.filterNot(_ == '_') else body
+    Option.when(digits.nonEmpty && digits.forall(isDigit(_, radix))) {
+      val value = BigInt(digits, radix.raw)
+      if (negative) -value else value
     }
   }
 

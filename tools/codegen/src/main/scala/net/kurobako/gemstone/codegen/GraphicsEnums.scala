@@ -5,48 +5,20 @@ import net.kurobako.gemstone.string.*
 
 /** Vulkan translations for the supported execution enums; values come from the shared Scala types. */
 object GraphicsEnums {
-  private case class Mapping(name: String, vulkan: String, prefix: String, cases: Vector[String])
+  private case class Mapping(name: String, vulkan: String, prefix: String, values: Array[? <: AnyRef]) {
+    def cases: Vector[String] = values.toVector.map(_.toString)
+  }
   private val mappings = Vector(
-    Mapping("GraphicsCompare", "VkCompareOp", "VK_COMPARE_OP_", GraphicsCompare.values.toVector.map(_.toString)),
-    Mapping("GraphicsStencilOp", "VkStencilOp", "VK_STENCIL_OP_", GraphicsStencilOp.values.toVector.map(_.toString)),
-    Mapping("GraphicsBlendOp", "VkBlendOp", "VK_BLEND_OP_", GraphicsBlendOp.values.toVector.map(_.toString)),
-    Mapping(
-      "GraphicsBlendFactor",
-      "VkBlendFactor",
-      "VK_BLEND_FACTOR_",
-      GraphicsBlendFactor.values.toVector.map(_.toString)
-    ),
-    Mapping(
-      "GraphicsTopology",
-      "VkPrimitiveTopology",
-      "VK_PRIMITIVE_TOPOLOGY_",
-      GraphicsTopology.values.toVector.map(_.toString)
-    ),
-    Mapping("GraphicsFilter", "VkFilter", "VK_FILTER_", GraphicsFilter.values.toVector.map(_.toString)),
-    Mapping(
-      "GraphicsAddressMode",
-      "VkSamplerAddressMode",
-      "VK_SAMPLER_ADDRESS_MODE_",
-      GraphicsAddressMode.values.toVector.map(_.toString)
-    ),
-    Mapping(
-      "GraphicsMipmapMode",
-      "VkSamplerMipmapMode",
-      "VK_SAMPLER_MIPMAP_MODE_",
-      GraphicsMipmapMode.values.toVector.map(_.toString)
-    ),
-    Mapping(
-      "GraphicsBorderColor",
-      "VkBorderColor",
-      "VK_BORDER_COLOR_",
-      GraphicsBorderColor.values.toVector.map(_.toString)
-    ),
-    Mapping(
-      "GraphicsSwizzle",
-      "VkComponentSwizzle",
-      "VK_COMPONENT_SWIZZLE_",
-      GraphicsSwizzle.values.toVector.map(_.toString)
-    )
+    Mapping("GraphicsCompare", "VkCompareOp", "VK_COMPARE_OP_", GraphicsCompare.values),
+    Mapping("GraphicsStencilOp", "VkStencilOp", "VK_STENCIL_OP_", GraphicsStencilOp.values),
+    Mapping("GraphicsBlendOp", "VkBlendOp", "VK_BLEND_OP_", GraphicsBlendOp.values),
+    Mapping("GraphicsBlendFactor", "VkBlendFactor", "VK_BLEND_FACTOR_", GraphicsBlendFactor.values),
+    Mapping("GraphicsTopology", "VkPrimitiveTopology", "VK_PRIMITIVE_TOPOLOGY_", GraphicsTopology.values),
+    Mapping("GraphicsFilter", "VkFilter", "VK_FILTER_", GraphicsFilter.values),
+    Mapping("GraphicsAddressMode", "VkSamplerAddressMode", "VK_SAMPLER_ADDRESS_MODE_", GraphicsAddressMode.values),
+    Mapping("GraphicsMipmapMode", "VkSamplerMipmapMode", "VK_SAMPLER_MIPMAP_MODE_", GraphicsMipmapMode.values),
+    Mapping("GraphicsBorderColour", "VkBorderColor", "VK_BORDER_COLOR_", GraphicsBorderColour.values),
+    Mapping("GraphicsSwizzle", "VkComponentSwizzle", "VK_COMPONENT_SWIZZLE_", GraphicsSwizzle.values)
   )
   val descriptorGroups: Vector[(String, String, Vector[(String, Long)])] = mappings.filter(mapping =>
     Set(
@@ -54,7 +26,7 @@ object GraphicsEnums {
       "GraphicsFilter",
       "GraphicsAddressMode",
       "GraphicsMipmapMode",
-      "GraphicsBorderColor",
+      "GraphicsBorderColour",
       "GraphicsSwizzle"
     ).contains(mapping.name)
   ).map { mapping =>
@@ -75,7 +47,6 @@ object GraphicsEnums {
          |  }
          |}""".stripMargin
     }.mkString("\n")
-    GeneratedHeader.cpp("from GraphicsProtocol enums") +
-      s"#pragma once\n#include <stdexcept>\n#include <vulkan/vulkan.h>\n#include \"../rpc/gemstone_execution_rpc.hpp\"\nnamespace gemstone::vulkan::adapter {\n$functions\n}\n"
+    s"#pragma once\n#include <stdexcept>\n#include <vulkan/vulkan.h>\n#include \"../rpc/gemstone_execution_rpc.hpp\"\nnamespace gemstone::vulkan {\n$functions\n}\n"
   }
 }

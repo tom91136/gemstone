@@ -4,8 +4,10 @@ import com.monovore.decline.Opts
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.server.protocol.*
 import net.kurobako.gemstone.server.recording.*
 import scala.util.Using
 
@@ -23,16 +25,11 @@ object JournalInspectionBenchmark {
     ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes.raw).putInt(ExecutionRPC.ResponseMagic)
       .putInt(0).putInt(0).array()
 
-  def run(arguments: Array[String]): BenchmarkSample = {
-    val file = BenchmarkArguments.parse(
-      BenchmarkName("journal-inspection"),
-      arguments.toSeq,
-      Opts.argument[String]("journal").map(Path.of(_))
-    )
-    val protocolIdentity = Journal.ProtocolIdentity.either(ExecutionRPC.Identity)
-      .fold(error => throw IllegalArgumentException(error), value => value)
-    Using.resource(Journal.Writer(file, Journal.Header(protocolIdentity))) { writer =>
-      Using.resource(writer.connection(Object())) { connection =>
+  val benchmark: Case = Opts.argument[String]("journal").map(Path.of(_)).map(file => () => run(file))
+
+  private def run(file: Path): BenchmarkSample = {
+    Using.resource(Journal.Writer(file, Journal.Header(Journal.ExecutionProfile(1000L, 1)))) { writer =>
+      Using.resource(writer.connection(ClientId(1L))) { connection =>
         val request = execution("WriteAllocation", Array.fill[Byte](256 * 1024)(17))
         for (_ <- 0 until 200) {
           connection.request(request)

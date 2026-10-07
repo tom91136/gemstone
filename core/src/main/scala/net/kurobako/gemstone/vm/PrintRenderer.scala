@@ -272,7 +272,7 @@ object PrintRenderer {
   }
 
   // Java Formatter's Object varargs require a boxed argument at this boundary.
-  @SuppressWarnings(Array("scalafix:GemstoneNoBoxedPrimitives"))
+  @SuppressWarnings(Array("scalafix:NoBoxedPrimitives"))
   private def formatted(specifier: String, conversion: Char, value: Int): Either[String, String] =
     formatValue(specifier, conversion, java.lang.Integer.valueOf(value))
 

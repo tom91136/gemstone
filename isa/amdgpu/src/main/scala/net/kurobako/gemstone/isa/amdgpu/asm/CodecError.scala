@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu.asm
 
-import Program.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.*

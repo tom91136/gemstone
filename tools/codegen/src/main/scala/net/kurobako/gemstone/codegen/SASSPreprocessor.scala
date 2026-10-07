@@ -8,8 +8,10 @@ object SASSPreprocessor {
 
   private case class Branch(parentActive: Boolean, condition: Boolean, sawElse: Boolean)
 
-  /** Selects ARCH_SEMANTICS branches and blanks directives/inactive lines without shifting source offsets. */
-  def preprocess(source: String, architectureSemantics: Boolean): Either[ParseError, String] = {
+  /** Selects the branches active without ARCH_SEMANTICS and blanks directives and inactive lines without shifting
+    * source offsets.
+    */
+  def preprocess(source: String): Either[ParseError, String] = {
     val lines = source.split("\n", -1).toVector
 
     def blank(line: String): String = line.map {
@@ -36,11 +38,9 @@ object SASSPreprocessor {
           Right((if (active) line else blank(line), branches, active))
         } else trimmed match {
           case "##IF DEFINED(ARCH_SEMANTICS)" =>
-            val condition = architectureSemantics
-            Right((blank(line), branches :+ Branch(active, condition, false), active && condition))
+            Right((blank(line), branches :+ Branch(active, false, false), false))
           case "##IF !DEFINED(ARCH_SEMANTICS)" =>
-            val condition = !architectureSemantics
-            Right((blank(line), branches :+ Branch(active, condition, false), active && condition))
+            Right((blank(line), branches :+ Branch(active, true, false), active))
           case "##ELSE" => branches.lastOption match {
               case None                           => Left(ParseError("unmatched ##ELSE", trimOffset))
               case Some(branch) if branch.sawElse => Left(ParseError("duplicate ##ELSE", trimOffset))

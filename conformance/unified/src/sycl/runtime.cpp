@@ -30,7 +30,7 @@ TEST_CASE("edge-cases/runtime/sycl/accessor-local-barrier/i32/n128", "[unified][
   } // Buffer destruction must publish the result into host storage.
   for (size_t i = 0; i < size; ++i) {
     INFO(fmt::format("SYCL accessor/local barrier mismatch at {}", i));
-    REQUIRE((output[i] == values[(i / local) * local + (i + 1) % local] + static_cast<int32_t>(i / local)));
+    REQUIRE(output[i] == values[(i / local) * local + (i + 1) % local] + static_cast<int32_t>(i / local));
   }
 }
 
@@ -40,7 +40,7 @@ TEST_CASE("edge-cases/runtime/sycl/usm-event-offset/i32/n33", "[unified][runtime
   auto *memory = sycl::malloc_device<int32_t>(35, queue);
   {
     INFO("device USM allocation failed");
-    REQUIRE((memory != nullptr));
+    REQUIRE(memory != nullptr);
   }
   cleanup.add([&] { sycl::free(memory, queue); });
   std::vector<int32_t> values(35, -12345);
@@ -63,6 +63,6 @@ TEST_CASE("edge-cases/runtime/sycl/usm-event-offset/i32/n33", "[unified][runtime
   }
   for (size_t i = 0; i < 33; ++i) {
     INFO("USM event/offset mismatch");
-    REQUIRE((values[i + 1] == 3 * (static_cast<int32_t>(i) - 16)));
+    REQUIRE(values[i + 1] == 3 * (static_cast<int32_t>(i) - 16));
   }
 }

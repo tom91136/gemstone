@@ -1,5 +1,0 @@
-# Polyregion's Darwin emulator profile, limited to supported conformance backends.
-[[targets]]
-name = "portable-opencl"
-backend = "opencl"
-device = "*Portable*"

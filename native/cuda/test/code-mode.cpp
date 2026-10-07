@@ -34,6 +34,7 @@ std::vector<uint8_t> minimalCubin() {
   constexpr uint8_t magic[]{0x7f, 'E', 'L', 'F', 2, 1};
   std::copy(std::begin(magic), std::end(magic), image.begin());
   store16(image, 18, 190);
+  store16(image, 52, 64);
   store64(image, 40, 64);
   store16(image, 58, 64);
   store16(image, 60, 1);
@@ -100,22 +101,25 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   REQUIRE(setenv(gemstone::environment::RpcClient, "42", 1) == 0);
   REQUIRE(setenv(gemstone::environment::TargetArch, "compute_89", 1) == 0);
 
+  setCodeMode("cubin");
+  CHECK((cuInit(0) == CUDA_ERROR_NOT_INITIALIZED));
+  REQUIRE(unsetenv(gemstone::environment::CudaCode) == 0);
   REQUIRE((cuInit(0) == CUDA_SUCCESS));
   CUcontext context = nullptr;
   REQUIRE((cuCtxCreate_v2(&context, 0, 0) == CUDA_SUCCESS));
 
   CUdeviceptr allocation = 0;
-  constexpr size_t Bytes = 37;
-  REQUIRE(cuMemAlloc_v2(&allocation, Bytes) == CUDA_SUCCESS);
+  constexpr size_t bytes = 37;
+  REQUIRE(cuMemAlloc_v2(&allocation, bytes) == CUDA_SUCCESS);
   CUdeviceptr base = 0;
   size_t size = 0;
-  REQUIRE(cuMemGetAddressRange_v2(&base, &size, allocation + Bytes - 1) == CUDA_SUCCESS);
+  REQUIRE(cuMemGetAddressRange_v2(&base, &size, allocation + bytes - 1) == CUDA_SUCCESS);
   CHECK(base == allocation);
-  CHECK(size == Bytes);
+  CHECK(size == bytes);
   CHECK(cuMemGetAddressRange_v2(nullptr, &size, allocation) == CUDA_SUCCESS);
   CHECK(cuMemGetAddressRange_v2(&base, nullptr, allocation) == CUDA_SUCCESS);
   CHECK(cuMemGetAddressRange_v2(nullptr, nullptr, allocation) == CUDA_SUCCESS);
-  CHECK(cuMemGetAddressRange_v2(&base, &size, allocation + Bytes) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMemGetAddressRange_v2(&base, &size, allocation + bytes) == CUDA_ERROR_INVALID_VALUE);
   REQUIRE(cuMemFree_v2(allocation) == CUDA_SUCCESS);
   CHECK(cuMemGetAddressRange_v2(&base, &size, allocation) == CUDA_ERROR_INVALID_VALUE);
 
@@ -123,19 +127,19 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   const auto fatbin = mixedFatbin(cubin);
   const auto metadataOnlyFatbin = metadataFatbin(cubin);
   std::string ptx(Ptx);
-  const auto loadsBefore = fixture.programLoads();
+  const auto loadsBefore = fixture.programLoads.load();
 
   setCodeMode("sass");
   CUmodule module = nullptr;
   CHECK((cuModuleLoadData(&module, ptx.c_str()) == CUDA_ERROR_NOT_SUPPORTED));
   CHECK((module == nullptr));
-  CHECK(fixture.programLoads() == loadsBefore);
+  CHECK(fixture.programLoads.load() == loadsBefore);
 
   setCodeMode("ptx");
   module = nullptr;
   CHECK((cuModuleLoadData(&module, cubin.data()) == CUDA_ERROR_NOT_SUPPORTED));
   CHECK((module == nullptr));
-  CHECK(fixture.programLoads() == loadsBefore);
+  CHECK(fixture.programLoads.load() == loadsBefore);
 
   module = nullptr;
   REQUIRE((cuModuleLoadData(&module, ptx.c_str()) == CUDA_SUCCESS));
@@ -143,18 +147,16 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   CHECK(fixture.lastProgramImage().front() == static_cast<uint8_t>('.'));
   REQUIRE((cuModuleUnload(module) == CUDA_SUCCESS));
 
-  for (const char *mode : {"sass", "cubin"}) {
-    setCodeMode(mode);
-    module = nullptr;
-    REQUIRE((cuModuleLoadData(&module, cubin.data()) == CUDA_SUCCESS));
-    CHECK((module != nullptr));
-    CHECK(fixture.lastProgramImage().front() == 0x7f);
-    REQUIRE((cuModuleUnload(module) == CUDA_SUCCESS));
+  setCodeMode("sass");
+  module = nullptr;
+  REQUIRE((cuModuleLoadData(&module, cubin.data()) == CUDA_SUCCESS));
+  CHECK((module != nullptr));
+  CHECK(fixture.lastProgramImage().front() == 0x7f);
+  REQUIRE((cuModuleUnload(module) == CUDA_SUCCESS));
 
-    module = nullptr;
-    CHECK((cuModuleLoadData(&module, ptx.c_str()) == CUDA_ERROR_NOT_SUPPORTED));
-    CHECK((module == nullptr));
-  }
+  module = nullptr;
+  CHECK((cuModuleLoadData(&module, ptx.c_str()) == CUDA_ERROR_NOT_SUPPORTED));
+  CHECK((module == nullptr));
 
   setCodeMode("ptx");
   module = nullptr;
@@ -170,7 +172,7 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   CHECK(fixture.lastProgramImage().front() == 0x7f);
   REQUIRE((cuModuleUnload(module) == CUDA_SUCCESS));
 
-  const auto loadsBeforeMetadata = fixture.programLoads();
+  const auto loadsBeforeMetadata = fixture.programLoads.load();
   module = nullptr;
   REQUIRE((cuModuleLoadFatBinary(&module, metadataOnlyFatbin.data()) == CUDA_SUCCESS));
   CHECK((module != nullptr));
@@ -181,7 +183,7 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   module = nullptr;
   CHECK((cuModuleLoadData(&module, ptx.c_str()) == CUDA_ERROR_NOT_SUPPORTED));
   CHECK((module == nullptr));
-  CHECK(fixture.programLoads() == loadsBeforeMetadata + 1);
+  CHECK(fixture.programLoads.load() == loadsBeforeMetadata + 1);
 
   CUlibrary metadataLibrary = nullptr;
   REQUIRE((cuLibraryLoadData(&metadataLibrary, metadataOnlyFatbin.data(), nullptr, nullptr, 0, nullptr, nullptr, 0) == CUDA_SUCCESS));
@@ -294,21 +296,21 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   fixture.expectAllocationArguments({{0, 0}, {0, 4}});
   REQUIRE(cuModuleLoadData(&module, ptx.c_str()) == CUDA_SUCCESS);
   REQUIRE(cuModuleGetFunction(&function, module, "probe") == CUDA_SUCCESS);
-  REQUIRE(cuMemAlloc_v2(&allocation, Bytes) == CUDA_SUCCESS);
+  REQUIRE(cuMemAlloc_v2(&allocation, bytes) == CUDA_SUCCESS);
   std::vector<uint8_t> packed(24, 0xff);
   store64(packed, 0, allocation);
   store64(packed, 16, allocation + 4);
-  size_t packed_size = packed.size();
-  void *extra[]{CU_LAUNCH_PARAM_BUFFER_SIZE, &packed_size, CU_LAUNCH_PARAM_BUFFER_POINTER, packed.data(), CU_LAUNCH_PARAM_END};
-  const auto launches = fixture.launches();
+  size_t packedSize = packed.size();
+  void *extra[]{CU_LAUNCH_PARAM_BUFFER_SIZE, &packedSize, CU_LAUNCH_PARAM_BUFFER_POINTER, packed.data(), CU_LAUNCH_PARAM_END};
+  const auto launches = fixture.launches.load();
   CHECK(cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, extra) == CUDA_ERROR_INVALID_VALUE);
-  --packed_size;
+  --packedSize;
   CHECK(cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, extra) == CUDA_ERROR_INVALID_VALUE);
-  CHECK(fixture.launches() == launches);
-  ++packed_size;
+  CHECK(fixture.launches.load() == launches);
+  ++packedSize;
   REQUIRE(cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, extra) == CUDA_SUCCESS);
   REQUIRE(cuCtxSynchronize() == CUDA_SUCCESS);
-  CHECK(fixture.launches() == launches + 1);
+  CHECK(fixture.launches.load() == launches + 1);
   REQUIRE(cuMemFree_v2(allocation) == CUDA_SUCCESS);
   REQUIRE(cuModuleUnload(module) == CUDA_SUCCESS);
 

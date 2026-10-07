@@ -1,5 +1,5 @@
 /*
-rule = GemstoneSimplifyMatch
+rule = SimplifyMatch
  */
 // format: off
 package fix
@@ -7,7 +7,7 @@ package fix
 object SimplifyMatch {
   val xs = List(1, 2, 3)
 
-  val rejected = xs.map(x => x match {// assert: GemstoneSimplifyMatch.simplify-match
+  val rejected = xs.map(x => x match {// assert: SimplifyMatch.simplify-match
     case 1 => "one"
     case _ => "other"
   })

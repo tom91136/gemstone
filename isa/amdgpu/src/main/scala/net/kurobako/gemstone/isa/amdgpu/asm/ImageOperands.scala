@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu.asm
 
-import Program.*
 import cats.syntax.all.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
@@ -54,7 +53,7 @@ private object ImageOperands {
       }
     }
 
-  def modifiers(word: BigInt, layout: InstructionLayout): Vec[Modifier] = {
+  def modifiers(word: InstructionWord, layout: InstructionLayout): Vec[Modifier] = {
     val dimension = Option.when(supports(layout) && layout.byName.contains(EncodingField.DIM))(
       Modifier(
         "dim",
@@ -189,10 +188,10 @@ private object ImageOperands {
     }
   }
 
-  def decode(definition: Opcode, word: BigInt, layout: InstructionLayout): Option[Vec[Operand]] =
+  def decode(definition: Opcode, word: InstructionWord, layout: InstructionLayout): Option[Vec[Operand]] =
     if (!ImageMetadata.forOpcode(definition).nonEmpty) None
     else {
-      val fields = layout.fields.map(field => field.name -> field.get(word)).toMap
+      val fields = layout.fields.map(field => field.name -> BigInt(field.get(word))).toMap
       val count  = addressCount(definition, layout, fields)
       def register(file: RegisterFile, first: Int, size: Int): Operand = Operand.Register(file, first, first + size - 1)
       val data                                                         =

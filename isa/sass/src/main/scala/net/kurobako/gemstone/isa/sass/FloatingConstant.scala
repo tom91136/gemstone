@@ -5,28 +5,18 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 
 object FloatingConstant {
-  private val known = Vec(INF, QNAN, SNAN, NAN, `+INF`, `-INF`, `+QNAN`, `-QNAN`, `+SNAN`, `-SNAN`, `-NAN`)
+  private val known                                 = Vec(INF, QNAN, SNAN, NAN)
   def fromSpelling(value: String): FloatingConstant =
     known.find(_.spelling == value).getOrElse(Unknown(nonEmpty(value)))
-  def isNaN(value: FloatingConstant): Boolean = value match {
-    case QNAN | SNAN | NAN | `+QNAN` | `-QNAN` | `+SNAN` | `-SNAN` | `-NAN` => true
-    case _                                                                  => false
-  }
 }
 
+/** Symbolic floating immediates; a sign is a `Unary` negation of the operand. */
 enum FloatingConstant(val spellingValue: NonEmpty[String]) {
   inline def spelling: String = spellingValue
-  def isNaN: Boolean          = FloatingConstant.isNaN(this)
+  def isNaN: Boolean          = this == QNAN || this == SNAN || this == NAN
   case INF                                       extends FloatingConstant("INF")
   case QNAN                                      extends FloatingConstant("QNAN")
   case SNAN                                      extends FloatingConstant("SNAN")
   case NAN                                       extends FloatingConstant("NAN")
-  case `+INF`                                    extends FloatingConstant("+INF")
-  case `-INF`                                    extends FloatingConstant("-INF")
-  case `+QNAN`                                   extends FloatingConstant("+QNAN")
-  case `-QNAN`                                   extends FloatingConstant("-QNAN")
-  case `+SNAN`                                   extends FloatingConstant("+SNAN")
-  case `-SNAN`                                   extends FloatingConstant("-SNAN")
-  case `-NAN`                                    extends FloatingConstant("-NAN")
   case Unknown(vendorSpelling: NonEmpty[String]) extends FloatingConstant(vendorSpelling)
 }

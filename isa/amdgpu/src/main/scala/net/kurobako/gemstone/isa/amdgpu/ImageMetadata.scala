@@ -1,18 +1,13 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import scala.util.Using
+import net.kurobako.gemstone.*
 import upickle.default.*
 
 object ImageMetadata {
-  private lazy val instructions: Map[Opcode, ImageMetadata] = Using.resource(
-    Option(
-      getClass.getResourceAsStream("images.json")
-    ).getOrElse(throw IllegalStateException("missing AMDGPU images.json"))
-  ) { input =>
-    read[Map[String, ImageMetadata]](input).flatMap { case (name, properties) =>
+  private lazy val instructions: Map[Opcode, ImageMetadata] =
+    resources.json[Map[String, ImageMetadata]](getClass, "images.json").flatMap { case (name, properties) =>
       Opcode.forOpcode(name).map(_ -> properties)
     }
-  }
 
   def forOpcode(opcode: Opcode): Option[ImageMetadata] = instructions.get(opcode)
 }

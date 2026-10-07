@@ -13,20 +13,7 @@ object InstructionGroup {
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 enum InstructionGroup {
   case `ATOMIC`
-  case `BUFFER`
-  case `BVH`
-  case `DATA_SHARE`
-  case `FLAT`
-  case `FLOATING_POINT`
-  case `LOAD`
-  case `MFMA`
-  case `NOT_ASSIGNED`
-  case `SAMPLE`
-  case `STATIC`
-  case `STORE`
   case `SWMMAC`
-  case `TEXTURE`
-  case `TRANSCENDENTAL`
   case `WMMA`
 
 }

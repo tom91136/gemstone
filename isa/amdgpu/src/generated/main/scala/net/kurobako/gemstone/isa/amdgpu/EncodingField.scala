@@ -297,8 +297,6 @@ enum EncodingField {
     this match { case `VSRC0` => Some(`SRC0_NEG`); case `VSRC1` => Some(`SRC1_NEG`); case _ => None }
   def extensionModifier: Option[EncodingField] =
     this match { case `VSRC0` => Some(`SRC0_SEXT`); case `VSRC1` => Some(`SRC1_SEXT`); case _ => None }
-  def scalarSelector: Option[EncodingField] =
-    this match { case `VSRC0` => Some(`S0`); case `VSRC1` => Some(`S1`); case _ => None }
   def isVectorDestination: Boolean = this match { case `VDST` | `VDSTX` | `VDSTY` => true; case _ => false }
   def isScale: Boolean = this match {
     case `SCALE_CLAMP` | `SCALE_FMT` | `SCALE_NEG` | `SCALE_NEG_HI` | `SCALE_OFFSET` | `SCALE_OP_SEL` | `SCALE_OP_SEL_HI` | `SCALE_SRC0` | `SCALE_SRC1` | `SCALE_SRC2` =>

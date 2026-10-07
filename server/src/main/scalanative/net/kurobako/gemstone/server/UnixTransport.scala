@@ -7,6 +7,7 @@ import java.net.SocketTimeoutException
 import java.nio.file.Path
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.concurrent.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.server.Transport.*
 import scala.scalanative.unsafe.*
 
@@ -54,12 +55,9 @@ private object UnixTransport {
   private def open(path: Path, listener: Boolean, timeout: Int): Descriptor = Zone {
     Descriptor(checked(Bindings.open(toCString(path.toString), if (listener) 1 else 0, timeout)))
   }
-  def connect(path: Path, timeout: Int): Channel = UnixChannel(open(path, false, timeout), timeout)
-  def listen(path: Path): Listener               = {
-    val fd = open(path, true, 0)
-    UnixListener(fd, path)
-  }
-  private class UnixListener(fd: Descriptor, path: Path) extends Listener {
+  def connect(path: Path, timeout: Int > 0): Channel = UnixChannel(open(path, false, timeout.raw), timeout)
+  def listen(path: Path): Listener                   = UnixSocketListener(open(path, true, 0), path)
+  private class UnixSocketListener(fd: Descriptor, path: Path) extends Listener {
     val endpoint: Endpoint = Endpoint.Unix(path)
     def isClosed: Boolean  = fd.isClosed
     def close(): Unit      = fd.close()
@@ -72,16 +70,16 @@ private object UnixTransport {
         result = fd.use(Bindings.accept(_))
         waiting = Bindings.timedOut(result) != 0
       }
-      UnixChannel(Descriptor(checked(result)), 300000)
+      UnixChannel(Descriptor(checked(result)), WriteTimeoutMillis)
     }
   }
 
-  private class UnixChannel(fd: Descriptor, writeTimeout: Int) extends Channel {
+  private class UnixChannel(fd: Descriptor, writeTimeout: Int > 0) extends Channel {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    @volatile private var timeout            = writeTimeout
-    def isClosed: Boolean                    = fd.isClosed
-    def close(): Unit                        = fd.close()
-    def readTimeout(milliseconds: Int): Unit = { require(milliseconds >= 0); timeout = milliseconds }
+    @volatile private var timeout                 = writeTimeout.raw
+    def isClosed: Boolean                         = fd.isClosed
+    def close(): Unit                             = fd.close()
+    def readTimeout(milliseconds: Int >= 0): Unit = timeout = milliseconds.raw
     private class ChannelInput extends InputStream {
       override def read(): Int = {
         val byte = Array.ofDim[Byte](1)
@@ -105,7 +103,7 @@ private object UnixTransport {
           @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
           var written = 0
           while (written < length) {
-            val count = checked(Bindings.write(socket, bytes.at(offset + written), length - written, writeTimeout))
+            val count = checked(Bindings.write(socket, bytes.at(offset + written), length - written, writeTimeout.raw))
             if (count == 0) throw IOException("Unix socket write made no progress")
             written += count
           }

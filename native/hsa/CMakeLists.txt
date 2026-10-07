@@ -1,34 +1,11 @@
-set(HSAKMT_INCLUDE_DIR "" CACHE PATH "Directory containing hsakmt/hsakmt.h")
-if(NOT EXISTS "${HSAKMT_INCLUDE_DIR}/hsakmt/hsakmt.h")
-  include(FetchContent)
-  if(NOT ROCR_HEADERS_SOURCE_URL OR NOT ROCR_HEADERS_SOURCE_SHA256)
-    message(FATAL_ERROR "ROCR_HEADERS_SOURCE_URL and ROCR_HEADERS_SOURCE_SHA256 must be supplied by the build")
-  endif()
-  FetchContent_Declare(rocr_headers
-    URL "${ROCR_HEADERS_SOURCE_URL}"
-    URL_HASH "SHA256=${ROCR_HEADERS_SOURCE_SHA256}"
-    SOURCE_SUBDIR gemstone-no-cmake-project
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-  )
-  FetchContent_MakeAvailable(rocr_headers)
-  set(HSAKMT_INCLUDE_DIR "${rocr_headers_SOURCE_DIR}/libhsakmt/include" CACHE PATH "Directory containing hsakmt/hsakmt.h" FORCE)
-endif()
-
-set(HSA_INCLUDE_DIR "" CACHE PATH "Directory containing the public HSA headers")
-if(NOT EXISTS "${HSA_INCLUDE_DIR}/hsa.h")
-  if(EXISTS "${rocr_headers_SOURCE_DIR}/runtime/hsa-runtime/inc/hsa.h")
-    set(HSA_INCLUDE_DIR "${rocr_headers_SOURCE_DIR}/runtime/hsa-runtime/inc" CACHE PATH "Directory containing the public HSA headers" FORCE)
-  else()
-    message(FATAL_ERROR "Unable to locate the public HSA headers; set HSA_INCLUDE_DIR")
-  endif()
+if(NOT EXISTS "${HSAKMT_INCLUDE_DIR}/hsakmt/hsakmt.h" OR NOT EXISTS "${HSA_INCLUDE_DIR}/hsa.h")
+  message(FATAL_ERROR "HSAKMT_INCLUDE_DIR and HSA_INCLUDE_DIR must point at the pinned ROCR headers")
 endif()
 
 add_library(gemstone_hsa_core STATIC
   src/aql.cpp
   src/aql_execution.cpp
   src/doorbell_monitor.cpp
-  src/execution_rpc_executor.cpp
-  src/virtual_kfd.cpp
 )
 set_target_properties(gemstone_hsa_core PROPERTIES
   POSITION_INDEPENDENT_CODE ON
@@ -37,11 +14,9 @@ set_target_properties(gemstone_hsa_core PROPERTIES
 target_include_directories(gemstone_hsa_core PUBLIC include ../generated/amdgpu PRIVATE ${GEMSTONE_NATIVE_INCLUDE_DIRECTORY})
 target_compile_features(gemstone_hsa_core PUBLIC cxx_std_17)
 target_compile_options(gemstone_hsa_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
-target_link_libraries(gemstone_hsa_core PRIVATE gemstone_execution_client Aspartame::Aspartame)
+target_link_libraries(gemstone_hsa_core PUBLIC gemstone_execution_client PRIVATE Aspartame::Aspartame)
 
-# HIP must carry a private HSA provider to avoid binding its internal calls to
-# a vendor libhsa-runtime64 with the same SONAME.  HSA owns that embedded build;
-# the public HSA DSO below compiles a separately exported variant.
+# HIP's private HSA provider: a shared dependency would bind to a vendor libhsa-runtime64 with the same SONAME.
 add_library(gemstone_hsa_runtime_embedded OBJECT src/runtime.cpp)
 set_target_properties(gemstone_hsa_runtime_embedded PROPERTIES
   POSITION_INDEPENDENT_CODE ON
@@ -57,11 +32,10 @@ target_link_libraries(gemstone_hsa_runtime_embedded PRIVATE gemstone_hsa_core ge
 
 add_library(gemstone_hsakmt SHARED
   src/hsakmt.cpp
-  src/hsakmt_unsupported.cpp
+  ../generated/hsakmt/gemstone_hsakmt_unsupported.cpp
 )
 target_include_directories(gemstone_hsakmt PUBLIC include ${HSAKMT_INCLUDE_DIR})
 target_compile_features(gemstone_hsakmt PUBLIC cxx_std_17)
-# The official hsakmt ABI header deliberately uses GNU anonymous structs.
 target_compile_options(gemstone_hsakmt PRIVATE -Wall -Wextra -Werror -Wno-pedantic)
 target_link_libraries(gemstone_hsakmt PRIVATE gemstone_hsa_core gemstone_execution_client Aspartame::Aspartame)
 gemstone_require_abi_implementations(
@@ -71,7 +45,7 @@ gemstone_require_abi_implementations(
 
 add_library(gemstone_hsa_runtime SHARED
   src/runtime.cpp
-  src/unsupported.cpp
+  ../generated/hsa/gemstone_hsa_unsupported.cpp
 )
 set_target_properties(gemstone_hsa_runtime PROPERTIES OUTPUT_NAME "hsa-runtime64" SOVERSION 1)
 target_include_directories(gemstone_hsa_runtime PUBLIC include ${HSA_INCLUDE_DIR})
@@ -102,7 +76,7 @@ if(BUILD_TESTING)
   add_executable(gemstone_hsakmt_test
     test/hsakmt_test.cpp
     src/hsakmt.cpp
-    src/hsakmt_unsupported.cpp)
+    ../generated/hsakmt/gemstone_hsakmt_unsupported.cpp)
   target_include_directories(gemstone_hsakmt_test PRIVATE
     include
     ${HSAKMT_INCLUDE_DIR}
@@ -112,7 +86,6 @@ if(BUILD_TESTING)
   target_link_libraries(gemstone_hsakmt_test PRIVATE gemstone_hsa_core gemstone_execution_client Aspartame::Aspartame)
   gemstone_test_target(gemstone_hsakmt_test)
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    # The official ROCr ABI headers deliberately use GNU anonymous structs and flexible arrays.
     target_compile_options(gemstone_hsa_runtime_test PRIVATE -Wno-pedantic)
     target_compile_options(gemstone_hsakmt_test PRIVATE -Wno-pedantic)
   endif()

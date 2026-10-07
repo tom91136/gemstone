@@ -1,14 +1,4 @@
-set(miniapp_babelstream_models cuda hip omp-target kokkos ocl sycl acc)
-set(miniapp_babelstream_license LICENSE)
-set(miniapp_babelstream_license_name BabelStream.txt)
-set(miniapp_babelstream_main src/main.cpp)
-set(miniapp_babelstream_executable [=[add_executable(${EXE_NAME} ${IMPL_SOURCES} src/main.cpp)]=])
-set(miniapp_babelstream_catch_executable
-  [=[add_executable(${EXE_NAME} ${IMPL_SOURCES} src/main.cpp conformance_test.cpp)]=])
-set(miniapp_babelstream_omp_target_upstream_model omp)
-set(miniapp_babelstream_openmp_definitions OMP_TARGET_GPU)
-
-function(miniapp_babelstream_patch model source)
+function(babelstream_adapt model source)
   if(CONFORMANCE_BACKEND STREQUAL "opencl" AND model STREQUAL "ocl")
     patch_exact("${source}/src/ocl/OCLStream.cpp"
       [=[    dot_wgsize     = device.getInfo<CL_DEVICE_NATIVE_VECTOR_WIDTH_DOUBLE>() * 2;]=]
@@ -50,18 +40,16 @@ function(miniapp_babelstream_patch model source)
       patch_exact("${source}/src/cuda/model.cmake" [=["--extended-lambda"]=] "")
     endif()
   endif()
-endfunction()
-
-function(miniapp_babelstream_configure model)
+  if(model MATCHES "^(ocl|sycl)$")
+    set(arguments ${arguments} --float PARENT_SCOPE)
+  endif()
   set(BUILD_NATIVE OFF CACHE BOOL "" FORCE)
 endfunction()
 
-function(miniapp_babelstream_test_arguments model output)
-  set(arguments -s 4096 -n 2)
-  if(model MATCHES "^(ocl|sycl)$")
-    list(APPEND arguments --float)
-  endif()
-  set(${output} "${arguments}" PARENT_SCOPE)
-endfunction()
-
-conformance_register_miniapp(babelstream)
+conformance_miniapp(babelstream
+  MODELS cuda hip omp-target=omp kokkos ocl sycl acc
+  MAIN src/main.cpp
+  LICENCE_FILE LICENSE BabelStream.txt
+  OPENMP_DEFINITIONS OMP_TARGET_GPU
+  ARGUMENTS -s 4096 -n 2
+  ADAPT babelstream_adapt)

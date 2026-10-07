@@ -12,9 +12,9 @@ object Program {
     case Operation(
         instruction: Instruction,
         preserved: Option[DecodedInstruction] = None,
-        references: Vec[LabelReference] = Vec.empty
+        reference: Option[LabelReference] = None
     )
-    case Bundle(control: SASSCodeWords.BundleControl)
+    case Bundle(control: CodeWords.BundleControl)
   }
 }
 

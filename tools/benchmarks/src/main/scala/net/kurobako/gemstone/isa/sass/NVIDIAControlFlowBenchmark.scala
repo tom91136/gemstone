@@ -1,7 +1,6 @@
 package net.kurobako.gemstone.isa.sass
 
 import cats.syntax.all.*
-import com.monovore.decline.Opts
 import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
@@ -11,9 +10,8 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
-import net.kurobako.gemstone.isa.ptx.v9_3 as PTX
+import net.kurobako.gemstone.isa.ptx as PTX
 import net.kurobako.gemstone.isa.sass.asm.*
-import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Using
@@ -21,30 +19,19 @@ import scala.util.Using
 /** Equivalent PTX and encoded SASS kernels exercise divergent branches, predicate guards, loops and memory. */
 object NVIDIAControlFlowBenchmark {
   private enum ISA { case PTX, SASS }
-  private case class Options(
-      isa: ISA,
-      iterations: Int > 0,
-      rounds: Int > 0,
-      lanes: Int in 1 ~ 1024,
-      groups: Int > 0,
-      workers: Int > 0
+
+  val benchmark: Case = (
+    choice("isa", "ptx" -> ISA.PTX, "sass" -> ISA.SASS),
+    iterations(5),
+    positive("rounds", "Predicate and memory rounds per lane", 16),
+    positive("lanes", "Lanes per group, at most 1024", 128).mapValidated(
+      _.raw.refine[Int in 1 ~ 1024].leftMap(_ => "lanes must be at most 1024").toValidatedNel
+    ),
+    positive("groups", "Workgroups per dispatch", 16),
+    workers(1)
+  ).mapN((isa, iterations, rounds, lanes, groups, workers) =>
+    () => run(isa, iterations, rounds, lanes, groups, workers)
   )
-  private val name    = BenchmarkName("nvidia-control-flow")
-  private val options = (
-    Opts.option[String]("isa", help = "ptx or sass").withDefault("ptx")
-      .validate("isa must be ptx or sass")(value => value == "ptx" || value == "sass")
-      .map(value => if (value == "ptx") ISA.PTX else ISA.SASS),
-    Opts.option[Int]("iterations", help = "Dispatches per sample").withDefault(5)
-      .refined[Int > 0]("iterations must be positive"),
-    Opts.option[Int]("rounds", help = "Predicate and memory rounds per lane").withDefault(16)
-      .refined[Int > 0]("rounds must be positive"),
-    Opts.option[Int]("lanes", help = "Lanes per group, at most 1024").withDefault(128)
-      .refined[Int in 1 ~ 1024]("lanes must be between 1 and 1024"),
-    Opts.option[Int]("groups", help = "Workgroups per dispatch").withDefault(16)
-      .refined[Int > 0]("groups must be positive"),
-    Opts.option[Int]("workers", help = "Host execution workers").withDefault(1)
-      .refined[Int > 0]("workers must be positive")
-  ).mapN(Options(_, _, _, _, _, _))
 
   // The SM80 launch parameter bank starts at 0x160: pointer, rounds, then lane count.
   private val parameterBase: Int >= 0 = 0x160
@@ -85,7 +72,7 @@ object NVIDIAControlFlowBenchmark {
     val bytes   =
       Assembler(target).encode(program).fold(error => throw IllegalArgumentException(error.toString), identity)
     val decoded =
-      CodeSection.decode(bytes.toArray, target.sm.raw).fold(error => throw IllegalArgumentException(error), identity)
+      CodeSection.decode(bytes.toArray, target).fold(error => throw IllegalArgumentException(error), identity)
     val entry = Cubin.Kernel(
       name = "control",
       section = 0,
@@ -121,54 +108,54 @@ object NVIDIAControlFlowBenchmark {
       .fold(error => throw IllegalArgumentException(error), identity)
   }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(arguments: Array[String]): BenchmarkSample = {
-    val parsed = BenchmarkArguments.parse(name, arguments.toSeq, options)
-    val kernel = parsed.isa match {
+  private def run(
+      isa: ISA,
+      iterations: Int > 0,
+      rounds: Int > 0,
+      lanes: Int in 1 ~ 1024,
+      groups: Int > 0,
+      workers: Int > 0
+  )
+      : BenchmarkSample = {
+    val kernel = isa match {
       case ISA.PTX  => PTX.PTXControlFlowFixture.compile()
       case ISA.SASS => sassKernel()
     }
-    val geometry = LaunchGeometry.forLaunch(Dimensions(parsed.lanes, 1, 1), Dimensions(parsed.groups, 1, 1))
+    val geometry = LaunchGeometry.forLaunch(Dimensions(lanes, 1, 1), Dimensions(groups, 1, 1))
       .fold(error => throw IllegalArgumentException(error), identity)
-    val count: Int > 0 = parsed.lanes * parsed.groups
-    val memory         = ArrayCheckedMemory.allocate((count + 1) * 4)
-    val parameters     = parsed.isa match {
+    val count      = Math.multiplyExact(lanes.raw, groups.raw)
+    val memory     = BenchmarkMemory((count + 1) * 4)
+    val output     = memory.ids(0)
+    val parameters = isa match {
       case ISA.PTX => Map(
-          ("output": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw),
-          ("rounds": NonEmpty[String]) -> Argument.fromLong(parsed.rounds.raw.toLong)
+          ("output": NonEmpty[String]) -> Argument.fromLong(memory.base(output).raw),
+          ("rounds": NonEmpty[String]) -> Argument.fromLong(rounds.raw.toLong)
         )
       case ISA.SASS => Map(
-          ("param0": NonEmpty[String]) -> Argument.fromLong(memory.allocation.start.raw),
-          ("param1": NonEmpty[String]) -> Argument(LittleEndian.toVec(parsed.rounds.raw.toLong, 4).unsafe),
-          ("param2": NonEmpty[String]) -> Argument(LittleEndian.toVec(parsed.lanes.raw.toLong, 4).unsafe)
+          ("param0": NonEmpty[String]) -> Argument.fromLong(memory.base(output).raw),
+          ("param1": NonEmpty[String]) -> Argument(LittleEndian.toVec(rounds.raw.toLong, 4).unsafe),
+          ("param2": NonEmpty[String]) -> Argument(LittleEndian.toVec(lanes.raw.toLong, 4).unsafe)
         )
     }
-    Using.resource(WorkerPool(parallelism = parsed.workers, minGroups = 1, minWorkItems = 1)) { workers =>
-      val sample = Measurement.sample(parsed.iterations.toLong) {
-        var iteration = 0
-        while (iteration < parsed.iterations.raw) {
-          VMInterpreter.execute(
-            kernel = kernel,
-            geometry = geometry,
-            arguments = parameters,
-            memory = memory,
-            workgroups = workers
-          )
-            .fold(error => throw IllegalStateException(error.message), _ => ())
-          iteration += 1
-        }
+    val sample = Using.resource(WorkerPool(parallelism = workers, minGroups = 1, minWorkItems = 1)) { pool =>
+      Measurement.repeat(iterations) {
+        VMInterpreter.execute(
+          kernel = kernel,
+          geometry = geometry,
+          arguments = parameters,
+          memory = memory,
+          workgroups = pool
+        )
+          .fold(error => throw IllegalStateException(error.message), _ => ())
       }
-      var lane = 0
-      while (lane < count.raw) {
-        val actual = memory.readInt32(memory.allocation.start.offset((lane.toLong + 1) * 4))
-          .fold(error => throw IllegalStateException(error.toString), identity)
-        val increment = if ((lane % parsed.lanes.raw & 1) == 0) 1 else 2
-        val expected  = lane + parsed.rounds.raw * (increment + 1) - 1
-        require(actual == expected, s"lane $lane: expected $expected, got $actual")
-        lane += 1
-      }
-      require(memory.readInt32(memory.allocation.start).contains(0), "leading guard word was overwritten")
-      sample
     }
+    (0 until count).foreach { lane =>
+      val actual    = memory.getInt(output, (lane + 1) * 4)
+      val increment = if ((lane % lanes.raw & 1) == 0) 1 else 2
+      val expected  = lane + rounds.raw * (increment + 1) - 1
+      require(actual == expected, s"lane $lane: expected $expected, got $actual")
+    }
+    require(memory.getInt(output, 0) == 0, "leading guard word was overwritten")
+    sample
   }
 }

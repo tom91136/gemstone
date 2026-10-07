@@ -1,83 +1,56 @@
 package net.kurobako.gemstone.isa.sass
 
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import net.kurobako.gemstone.*
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 class CubinParserSuite extends munit.FunSuite {
-  private def metadataElf(abi: Int, sm: Int): Array[Byte] = {
-    val bytes = Array.ofDim[Byte](193)
-    bytes(0) = 0x7f.toByte
-    bytes(1) = 'E'.toByte
-    bytes(2) = 'L'.toByte
-    bytes(3) = 'F'.toByte
-    bytes(4) = 2
-    bytes(5) = 1
-    bytes(8) = abi.toByte
-    val header = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-    header.putShort(16, 1)
-    header.putShort(18, 190)
-    header.putLong(40, 64L)
-    header.putInt(48, if (abi >= 8) sm << 8 else sm)
-    header.putShort(58, 64.toShort)
-    header.putShort(60, 2.toShort)
-    header.putShort(62, 1.toShort)
-    header.putInt(64 + 64 + 4, 3)
-    header.putLong(64 + 64 + 24, 192L)
-    header.putLong(64 + 64 + 32, 1L)
-    bytes
-  }
+  private def metadataElf(abi: Int, sm: Int, sections: Seq[elfImage.Section] = Seq.empty): Array[Byte] =
+    elfImage.write(190, sections, imageType = 1, abiVersion = abi, flags = if (abi >= 8) sm << 8 else sm)
 
-  private def clusterElf(x: Int, explicit: Boolean): Array[Byte] = {
-    val names   = "\u0000.text.probe\u0000.nv.info.probe\u0000".getBytes(java.nio.charset.StandardCharsets.US_ASCII)
-    val payload = 320 + names.length
-    val bytes   = java.util.Arrays.copyOf(metadataElf(8, 90), payload + 20)
-    val buffer  = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-    buffer.putShort(60, 4.toShort)
-    buffer.putLong(152, 320L)
-    buffer.putLong(160, names.length.toLong)
-    Array.copy(names, 0, bytes, 320, names.length)
-    buffer.putInt(192, 1)
-    buffer.putInt(196, 1)
-    buffer.putInt(256, 13)
-    buffer.putInt(260, 1)
-    buffer.putLong(280, payload.toLong)
-    buffer.putLong(288, if (explicit) 20L else 16L)
-    // ptxas EIATTR_CTA_PER_CLUSTER: format 4, attribute 0x3d, three u32 dimensions.
-    buffer.putInt(payload, 0x000c3d04)
-    buffer.putInt(payload + 4, x)
-    buffer.putInt(payload + 8, 1)
-    buffer.putInt(payload + 12, 1)
-    // EIATTR_EXPLICIT_CLUSTER has no payload.
-    buffer.putInt(payload + 16, 0x00003e01)
-    bytes
-  }
+  // ptxas EIATTR_CTA_PER_CLUSTER (format 4, attribute 0x3d, three u32 dimensions) and the payload-free
+  // EIATTR_EXPLICIT_CLUSTER.
+  private def clusterElf(x: Int, explicit: Boolean): Array[Byte] = metadataElf(
+    8,
+    90,
+    Seq(
+      elfImage.Section(".text.probe", 1),
+      elfImage.Section(
+        ".nv.info.probe",
+        1,
+        bytes.words(0x000c3d04, x, 1, 1) ++ (if (explicit) bytes.words(0x00003e01) else Array.emptyByteArray)
+      )
+    )
+  )
 
   test("cubin preserves per-kernel cluster requirements and rejects malformed dimensions") {
-    val clustered = Cubin.decode(clusterElf(2, explicit = true)).fold(fail(_), identity).kernels.head
+    val clustered = Cubin.decode(Vec.unsafeWrapArray(clusterElf(2, explicit = true))).value.kernels.head
     assertEquals(clustered.requiredCluster, LaunchGeometry.Dimensions(2, 1, 1))
     assert(clustered.explicitCluster)
-    val ordinary = Cubin.decode(clusterElf(1, explicit = false)).fold(fail(_), identity).kernels.head
+    val ordinary = Cubin.decode(Vec.unsafeWrapArray(clusterElf(1, explicit = false))).value.kernels.head
     assertEquals(ordinary.requiredCluster, LaunchGeometry.Dimensions.One)
     assert(!ordinary.explicitCluster)
-    assert(Cubin.decode(clusterElf(0, explicit = false)).isLeft)
+    assert(Cubin.decode(Vec.unsafeWrapArray(clusterElf(0, explicit = false))).isLeft)
   }
 
   test("CUDA ELF ABI 7 reads the architecture from the low flags byte") {
-    assertEquals(Cubin.decode(metadataElf(7, 35)).map(_.sm.raw), Right(35))
+    assertEquals(Cubin.decode(Vec.unsafeWrapArray(metadataElf(7, 35))).map(_.sm.raw), Right(35))
   }
 
   test("truncated and corrupt ELF metadata fails without throwing") {
     val image = metadataElf(8, 89)
-    for (size <- Vec.nonEmpty(0, 6, 63, 100, 192)) assert(Cubin.decode(image.take(size)).isLeft)
+    for (size <- Vec.nonEmpty(0, 6, 63, 100, 192)) assert(Cubin.decode(Vec.unsafeWrapArray(image.take(size))).isLeft)
     val invalid = image.clone()
-    ByteBuffer.wrap(invalid).order(ByteOrder.LITTLE_ENDIAN).putLong(64 + 64 + 24, Long.MaxValue)
-    assert(Cubin.decode(invalid).isLeft)
+    LittleEndian.write(Long.MaxValue, invalid, LittleEndian.decodeInt64(invalid, 40).toInt + 64 + 24, 8)
+    assert(Cubin.decode(Vec.unsafeWrapArray(invalid)).isLeft)
     val invalidAbi = image.clone()
     invalidAbi(8) = 6
-    assert(Cubin.decode(invalidAbi).isLeft)
+    assert(Cubin.decode(Vec.unsafeWrapArray(invalidAbi)).isLeft)
   }
   test("cubin metadata rejects empty kernel names and invalid parameter sizes at construction") {
     assert(scala.compiletime.testing.typeCheckErrors("""
@@ -96,4 +69,76 @@ import net.kurobako.gemstone.constraint.*
     """).nonEmpty)
   }
 
+  private def copyAdd: Array[Byte] = Fixture.copyAddCubin.toArray
+
+  test("embedded CUDA ELF ABI 8 exposes the kernel parameter layout") {
+    val image  = copyAdd
+    val module = Cubin.decode(Vec.unsafeWrapArray(image)).value
+    assertEquals(module.sm, 89: Int >= 35)
+    assertEquals(module.kernels.map(_.name), Vec("copy_add"))
+    assertEquals(module.kernels.head.parameters.map(p => p.offset -> p.size), Vec[(Int >= 0, Int > 0)]((0, 8), (8, 8)))
+    val program = CubinBackend().load(Vec.from(image)).value
+    try {
+      val metadata = program.kernel("copy_add").value
+      assertEquals(metadata.argumentBlockSize.raw, 16)
+      assert(metadata.registerCount.exists(_.raw > 0))
+    } finally program.close()
+  }
+
+  test("kernel register counts use NVIDIA metadata when section-header counts are absent") {
+    val image    = copyAdd
+    val sections = elf.Image.parse(Vec.unsafeWrapArray(image)).value.sections
+    val module   = Cubin.decode(Vec.unsafeWrapArray(image)).value
+    val kernel   = module.kernels.head
+    val buffer   = java.nio.ByteBuffer.wrap(image).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    // CUDA libraries can leave SHI_REGISTERS unset, retaining EIATTR_REGCOUNT in .nv.info.
+    val sectionTable = buffer.getLong(40).toInt
+    buffer.putInt(sectionTable + kernel.section.raw * 64 + 44, module.sections(kernel.section.raw).info & 0x00ffffff)
+    val info   = module.sections.find(_.name == ".nv.info").get
+    val record = sections(info.index.raw).offset.raw
+    assertEquals(buffer.getShort(record) & 0xffff, 0x2f04)
+    buffer.putInt(record + 8, 14)
+    val program = CubinBackend().load(Vec.from(image)).value
+    try assertEquals(program.kernel("copy_add").value.registerCount.map(_.raw), Some(14))
+    finally program.close()
+    buffer.putInt(record + 8, -1)
+    assert(Cubin.decode(Vec.unsafeWrapArray(image)).isLeft)
+  }
+
+  test("stale CUDA metadata links resolve only uniquely matching kernel symbols") {
+    val image        = copyAdd
+    val module       = Cubin.decode(Vec.unsafeWrapArray(image)).value
+    val headers      = elf.Image.parse(Vec.unsafeWrapArray(image)).value.sections
+    val kernel       = module.kernels.head
+    val info         = module.sections.find(_.name == ".nv.info").get
+    val table        = module.sections.find(_.kind == 2).get
+    val buffer       = java.nio.ByteBuffer.wrap(image).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    val sectionTable = buffer.getLong(40).toInt
+    // cuBLAS CUTLASS images retain matching old links in .nv.info and .text after stripping sections.
+    Vec(info.index.raw, kernel.section.raw).foreach(index =>
+      buffer.putInt(sectionTable + index * 64 + 40, info.index.raw)
+    )
+    val symbol = module.sections(kernel.section.raw).info & 0x00ffffff
+    buffer.putInt(sectionTable + kernel.section.raw * 64 + 44, symbol)
+    val record = headers(info.index.raw).offset.raw
+    buffer.putInt(record + 8, 14)
+    assertEquals(Cubin.decode(Vec.unsafeWrapArray(image)).value.kernels.head.registerCount.raw, 14)
+
+    val symbolOffset = headers(table.index.raw).offset.raw + symbol * 24
+    val originalName = buffer.getInt(symbolOffset)
+    buffer.putInt(symbolOffset, originalName + 1)
+    assert(Cubin.decode(Vec.unsafeWrapArray(image)).isLeft, "symbol name must match its text section")
+    buffer.putInt(symbolOffset, originalName)
+
+    buffer.putInt(sectionTable + kernel.section.raw * 64 + 44, symbol - 1)
+    assert(Cubin.decode(Vec.unsafeWrapArray(image)).isLeft, "text section must refer to the same symbol index")
+    buffer.putInt(sectionTable + kernel.section.raw * 64 + 44, symbol)
+
+    val other = module.sections.find(_.name == ".debug_frame").get
+    Array.copy(image, sectionTable + table.index.raw * 64, image, sectionTable + other.index.raw * 64, 64)
+    assert(
+      Cubin.decode(Vec.unsafeWrapArray(image)).isLeft,
+      "a stale link must not choose between multiple symbol tables"
+    )
+  }
 }

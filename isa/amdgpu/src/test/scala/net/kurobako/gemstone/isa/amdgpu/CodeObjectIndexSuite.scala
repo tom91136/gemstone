@@ -8,6 +8,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.either.*
 import scala.util.Using
 
 class CodeObjectIndexSuite extends munit.FunSuite {
@@ -21,14 +22,14 @@ class CodeObjectIndexSuite extends munit.FunSuite {
     val descriptors     = LittleEndian.decodeInt64(image, table + 5 * 64 + 24).toInt
     val descriptorBytes = LittleEndian.decodeInt64(image, table + 5 * 64 + 32).toInt
     java.util.Arrays.fill(image, descriptors, descriptors + descriptorBytes, 0.toByte)
-    val code = CodeObject.decode(Vec.from(image)).flatMap(_.executableSections).toOption.get
+    val code = CodeObject.decode(Vec.from(image)).flatMap(_.executableSections).value
     assertEquals(code.map(_.name), Vec(".text"))
     assertEquals(code.head.address, 0x1000L)
     assertEquals(code.head.bytes, Vec(0x00, 0x00, 0x81, 0xbf).map(_.toByte))
     assertEquals(code.head.symbols, Vec(ExecutableSection.Symbol("kernel", 0, 4)))
     // Remove the symbol table: inspection of executable bytes must still work.
     LittleEndian.write(0L, image, table + 3 * 64 + 4, 4)
-    val stripped = CodeObject.decode(Vec.from(image)).flatMap(_.executableSections).toOption.get
+    val stripped = CodeObject.decode(Vec.from(image)).flatMap(_.executableSections).value
     assertEquals(stripped.head.bytes, code.head.bytes)
     assertEquals(stripped.head.symbols, Vec.empty[ExecutableSection.Symbol])
   }
@@ -61,7 +62,7 @@ class CodeObjectIndexSuite extends munit.FunSuite {
     assert(extract(invalidStrings).isLeft)
   }
 
-  test("text relocations resolve local and supplied external symbols without mutating the ELF") {
+  test("text relocations resolve local symbols, reject undefined ones, and leave the ELF unchanged") {
     val image   = minimalCodeObject(globalPointer = true)
     val table   = LittleEndian.decodeInt64(image, 40).toInt
     val records = LittleEndian.decodeInt64(image, table + 8 * 64 + 24).toInt
@@ -73,22 +74,17 @@ class CodeObjectIndexSuite extends munit.FunSuite {
     LittleEndian.write((1L << 32) | EncodingConstants.R_AMDGPU_REL32, image, records + 8, 8)
     LittleEndian.write(12L, image, records + 16, 8)
     val original   = Vec.from(image)
-    val objectFile = CodeObject.decode(original).toOption.get
+    val objectFile = CodeObject.decode(original).value
     assertEquals(objectFile.executableSections.map(_.head.bytes), Right(Vec[Byte](12, 0, 0, 0)))
     assertEquals(Vec.from(image), original)
     LittleEndian.write(0L, image, symbols + 24 + 6, 2) // SHN_UNDEF
     LittleEndian.write((1L << 32) | EncodingConstants.R_AMDGPU_ABS32, image, records + 8, 8)
     LittleEndian.write(0L, image, records + 16, 8)
-    val external = CodeObject.decode(Vec.from(image)).toOption.get
+    val external = CodeObject.decode(Vec.from(image)).value
     assert(external.executableSections.left.exists {
       case CodeObjectError.Unsupported(message) => message.contains("kernel")
       case _                                    => false
     })
-    assertEquals(
-      external.relocatedSections(Map("kernel" -> 0xbf810000L), Map.empty).map(_.head.bytes),
-      Right(Vec(0x00, 0x00, 0x81, 0xbf).map(_.toByte))
-    )
-    assert(external.relocatedSections(Map("kernel" -> 0x100000000L), Map.empty).isLeft)
     // ELF symbol zero supplies S=0, so this ABS32 relocation is just its addend.
     LittleEndian.write(EncodingConstants.R_AMDGPU_ABS32.toLong, image, records + 8, 8)
     LittleEndian.write(12L, image, records + 16, 8)
@@ -107,9 +103,9 @@ class CodeObjectIndexSuite extends munit.FunSuite {
       offset =>
         Array.copy(replacement, 0, image, offset, replacement.length)
     }
-    val indexed = ELF.index(Vec.from(image)).toOption.get
-    assertEquals(indexed.kernelNames, Set("kérnl"))
-    assertEquals(indexed.kernel("kérnl").toOption.get.name, "kérnl")
+    val indexed = ELF.index(Vec.from(image)).value
+    assertEquals(indexed.kernelNames.toSet[String], Set("kérnl"))
+    assertEquals[String, String](indexed.kernel("kérnl").value.name, "kérnl")
     assertEquals(indexed.target, Target("gfx900"))
   }
 
@@ -159,27 +155,42 @@ class CodeObjectIndexSuite extends munit.FunSuite {
     LittleEndian.write(4L, image, symbols + 3 * 24 + 16, 8)
     LittleEndian.write(6L, image, table + 4 * 64 + 8, 8) // SHF_ALLOC | SHF_EXECINSTR
     val bytes   = Vec.from(image)
-    val section = CodeObject.decode(bytes).flatMap(_.executableSections).toOption.get.head
+    val section = CodeObject.decode(bytes).flatMap(_.executableSections).value.head
     assertEquals(
       section.symbols.toSet,
       Set(ExecutableSection.Symbol("kernel", 0, 4), ExecutableSection.Symbol("device_global", 0, 4))
     )
-    val indexed = ELF.index(bytes).toOption.get
-    assertEquals(indexed.kernelNames, Set("kernel"))
-    assertEquals(indexed.kernel("kernel").toOption.get.functionTargets.get(0x1000L), Some("device_global"))
+    val indexed = ELF.index(bytes).value
+    assertEquals(indexed.kernelNames.toSet[String], Set("kernel"))
+    assertEquals(indexed.kernel("kernel").value.functionTargets.get(0x1000L), Some("device_global"))
   }
 
-  test("relative dynamic relocations initialize global pointers from their ELF address addend") {
-    val image      = minimalCodeObject(globalPointer = true)
+  test("absolute and relative dynamic relocations initialise global pointers") {
+    val image = minimalCodeObject(globalPointer = true)
+    // HIP reaches a device global through a .got slot filled by an absolute 64-bit relocation.
+    assertEquals(
+      ELF.index(
+        Vec.from(image)
+      ).flatMap(_.kernel("kernel")).value.globalMemory.find(_._1 == 0x4000L).map(_._2.take(8).toSeq),
+      Some(LittleEndian.toVec(0x3000L, 8).toSeq)
+    )
     val table      = LittleEndian.decodeInt64(image, 40).toInt
     val relocation = LittleEndian.decodeInt64(image, table + 8 * 64 + 24).toInt
     LittleEndian.write(EncodingConstants.R_AMDGPU_RELATIVE64.toLong, image, relocation + 8, 8)
     LittleEndian.write(0x3008L, image, relocation + 16, 8)
-    val kernel = ELF.index(Vec.from(image)).flatMap(_.kernel("kernel")).toOption.get
+    val kernel = ELF.index(Vec.from(image)).flatMap(_.kernel("kernel")).value
     assertEquals(
       kernel.globalMemory.find(_._1 == 0x4000L).map(_._2.take(8).toSeq),
       Some(LittleEndian.toVec(0x3008L, 8).toSeq)
     )
+  }
+
+  test("kernel descriptors supply COMPUTE_PGM_RSRC1") {
+    val image      = minimalCodeObject()
+    val sizes      = LittleEndian.toVec(16L, 4) ++ LittleEndian.toVec(8L, 4) ++ LittleEndian.toVec(24L, 4)
+    val descriptor = image.indices.find(offset => image.slice(offset, offset + 12).sameElements(sizes)).get
+    LittleEndian.write(0x00af0000L, image, descriptor + 48, 4)
+    assertEquals(ELF.index(Vec.from(image)).flatMap(_.kernel("kernel")).value.computePgmRsrc1, 0x00af0000)
   }
 
   test("ELF symbol names reject malformed UTF-8 instead of replacing bytes") {
@@ -189,15 +200,15 @@ class CodeObjectIndexSuite extends munit.FunSuite {
     image(offset) = 0xff.toByte
     assertEquals(
       ELF.index(Vec.from(image)).left.map(_.message),
-      Left[NonEmpty[String], ELF.Index]("ELF string is not valid UTF-8")
+      Left[NonEmpty[String], ELF.Index]("invalid UTF-8 at byte offset 0")
     )
   }
 
-  test("a real ELF index validates descriptors and materializes one shared kernel lazily") {
+  test("a real ELF index validates descriptors and materialises one shared kernel lazily") {
     val image   = minimalCodeObject()
-    val indexed = ELF.index(Vec.from(image)).toOption.get
+    val indexed = ELF.index(Vec.from(image)).value
     assertEquals(indexed.target, Target("gfx900"))
-    assertEquals(indexed.kernelNames, Set("kernel"))
+    assertEquals(indexed.kernelNames.toSet[String], Set("kernel"))
     assertEquals(
       indexed.global("device_global").map { (address, size) =>
         val rawAddress: Long = address.raw
@@ -209,21 +220,25 @@ class CodeObjectIndexSuite extends munit.FunSuite {
     assertEquals(indexed.writeGlobal("device_global", 4L, Vec[Byte](9, 8, 7, 6)), Right(()))
 
     // The immutable input owns a copy of the mutable source. Changing that source
-    // must not affect later lazy kernel materialization.
+    // must not affect later lazy kernel materialisation.
     java.util.Arrays.fill(image, 0.toByte)
     Using.resource(threads.Pool(4)) { pool =>
-      val pending = Vec.fill(16)(pool.executor.submit(() => indexed.kernel("kernel").toOption.get))
+      val pending = Vec.fill(16)(pool.executor.submit(() => indexed.kernel("kernel").value))
       val kernels = pending.map(_.get(5, TimeUnit.SECONDS))
       val kernel  = kernels.head
-      assert(kernels.forall(_ eq kernel), "concurrent materialization returned distinct kernels")
-      assertEquals(kernel.name, "kernel")
+      assert(kernels.forall(_ eq kernel), "concurrent materialisation returned distinct kernels")
+      assertEquals[String, String](kernel.name, "kernel")
       assertEquals(kernel.target, Target("gfx900"))
-      assertEquals(kernel.kernargSize, 24)
-      assertEquals(kernel.groupSegmentSize, 16)
-      assertEquals(kernel.privateSegmentSize, 8)
+      assertEquals(kernel.kernargSize.raw, 24)
+      assertEquals(kernel.groupSegmentSize.raw, 16)
+      assertEquals(kernel.privateSegmentSize.raw, 8)
       assertEquals(kernel.computePgmRsrc2, 0x80)
       assertEquals(kernel.kernelCodeProperties, 0x0a)
-      assertEquals(kernel.code, LittleEndian.toVec(0xbf810000L, 4))
+      assertEquals(kernel.entrySize.raw, 4)
+      assertEquals(
+        kernel.text.drop((kernel.entry - kernel.textAddress).toInt).take(4),
+        LittleEndian.toVec(0xbf810000L, 4)
+      )
       assertEquals(kernel.readOnlyAddress, 0x2000L)
       assert(kernel.readOnly.length > 64)
       assertEquals(
@@ -233,31 +248,21 @@ class CodeObjectIndexSuite extends munit.FunSuite {
     }
   }
 
-  test("identical ELF indexes isolate mutable globals across cached views") {
-    val first  = ELF.index(Vec.unsafeWrapArray(minimalCodeObject())).toOption.get
-    val second = ELF.index(Vec.unsafeWrapArray(minimalCodeObject())).toOption.get
-    assertEquals(first.writeGlobal("device_global", 4L, Vec[Byte](9, 8, 7, 6)), Right(()))
-    assertEquals(
-      second.kernel("kernel").toOption.get.globalMemory.find(_._1 == 0x3000L).map { case (_, bytes) =>
-        bytes.slice(4, 8).toSeq
-      },
-      Some(Seq[Byte](0, 0, 0, 0))
-    )
-  }
-
-  test("code inspection preserves explicit sizes and trims inferred padding like materialization") {
+  test("code inspection preserves explicit sizes and trims inferred padding like materialisation") {
     Seq(0L, 4L, 8L).foreach { symbolSize =>
       val image   = minimalCodeObject()
       val table   = LittleEndian.decodeInt64(image, 40).toInt
       val symbols = LittleEndian.decodeInt64(image, table + 3 * 64 + 24).toInt
       LittleEndian.write(8L, image, table + 4 * 64 + 32, 8)
       LittleEndian.write(symbolSize, image, symbols + 24 + 16, 8)
-      val indexed = ELF.index(Vec.unsafeWrapArray(image)).toOption.get
-      val code    = indexed.kernelCode("kernel").toOption.get
+      val indexed = ELF.index(Vec.unsafeWrapArray(image)).value
+      val code    = indexed.kernelCode("kernel").value
       assertEquals(code.size, if (symbolSize == 8L) 8 else 4)
       assertEquals(indexed.kernelCodeSize("kernel"), Some(code.size))
       assertEquals(indexed.kernelCodeSize("missing"), None)
-      assertEquals(code, indexed.kernel("kernel").toOption.get.code)
+      val kernel = indexed.kernel("kernel").value
+      val entry  = (kernel.entry - kernel.textAddress).toInt
+      assertEquals(code, kernel.text.slice(entry, entry + kernel.entrySize.raw))
       assertEquals(
         indexed.kernelCode("missing").swap.toOption.map(_.message),
         indexed.kernel("missing").swap.toOption.map(_.message)
@@ -265,27 +270,50 @@ class CodeObjectIndexSuite extends munit.FunSuite {
     }
   }
 
-  test("linked code objects infer zero-sized kernel symbols from the next function") {
-    assertEquals(ELF.inferredFunctionSize(0x1000L, 0x1400L, Seq(0x1000L, 0x1180L, 0x1300L)), Some(0x180))
-    assertEquals(ELF.inferredFunctionSize(0x1300L, 0x1400L, Seq(0x1000L, 0x1180L, 0x1300L)), Some(0x100))
-    assertEquals(ELF.inferredFunctionSize(0x1400L, 0x1400L, Seq.empty), None)
+  test("zero-sized function symbols end at the next function and are dropped at the section end") {
+    val image = elfImage.amdgpu(
+      bytes.words(0xbf810000, 0xbf810000, 0xbf810000, 0xbf810000),
+      kernargSize = 0,
+      kernelCodeProperties = 0x0a,
+      extraSymbols = Seq(elfImage.Symbol("helper", 2, 4, 0x1008L, 0L), elfImage.Symbol("tail", 2, 4, 0x1010L, 0L))
+    )
+    val table   = LittleEndian.decodeInt64(image, 40).toInt
+    val symbols = LittleEndian.decodeInt64(image, table + 3 * 64 + 24).toInt
+    LittleEndian.write(0L, image, symbols + 24 + 16, 8)
+    val kernel = ELF.index(Vec.unsafeWrapArray(image)).value.kernel("kernel").value
+    assertEquals(kernel.entrySize.raw, 8)
+    assertEquals(kernel.functionSizes, Map(0x1000L -> 8, 0x1008L -> 8))
   }
 
-  test("inferred linked functions discard alignment padding after their final end-program") {
-    val code = Array[Byte](
-      0x00,
-      0x00,
-      0x81.toByte,
-      0xbf.toByte,
-      0x00,
-      0x00,
-      0x00,
-      0x00
+  test("function aliases resolve deterministically and reject conflicting call semantics") {
+    assertEquals(
+      ELF.selectFunctionTarget(Vec("alias", "_Z5logIfv")),
+      Right("_Z5logIfv")
     )
     assertEquals(
-      ELF.trimTrailingKernelPadding(code).toSeq,
-      code.take(4).toSeq
+      ELF.selectFunctionTarget(Vec("_Z9aliasLogIfv", "_Z5logIfv")),
+      Right("_Z5logIfv")
     )
+    assertEquals(
+      ELF.selectFunctionTarget(Vec("_Z5logIfv", "_Z5expIfv")),
+      Left(CodeObjectError.Invalid("AMDGPU function aliases have conflicting call semantics: _Z5expIfv, _Z5logIfv"))
+    )
+    assertEquals(ELF.selectFunctionTarget(Vec("second", "first", "second")), Right("first"))
   }
 
+  test("code-object keys compare content and keep CRC collisions apart in the cache") {
+    val first = CodeObjectKey(Vec[Byte](1, 2, 3))
+    assertEquals(first, CodeObjectKey(Vec[Byte](1, 2, 3)))
+    assertEquals(first.hashCode(), CodeObjectKey(Vec[Byte](1, 2, 3)).hashCode())
+    assertNotEquals(first, CodeObjectKey(Vec[Byte](1, 2, 4)))
+    // Distinct eight-byte images with the same CRC32, generated independently of CodeObjectKey.
+    val left  = CodeObjectKey(Vec.unsafeWrapArray(bytes.hex("58fbb7a9b2680392")))
+    val right = CodeObjectKey(Vec.unsafeWrapArray(bytes.hex("69176c4aa471a321")))
+    assertEquals(left.hashCode(), right.hashCode())
+    assertNotEquals(left, right)
+    val cache = LRUCache[CodeObjectKey, String](2)
+    assertEquals(cache.get(left)("left"), "left")
+    assertEquals(cache.get(right)("right"), "right")
+    assertEquals(cache.get(left)(fail("collision displaced the first image")), "left")
+  }
 }

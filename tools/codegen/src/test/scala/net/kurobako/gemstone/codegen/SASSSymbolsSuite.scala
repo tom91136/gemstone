@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.codegen
 
-import java.nio.file.Path
 import scala.concurrent.duration.*
 
 class SASSSymbolsSuite extends munit.FunSuite {
@@ -50,14 +49,12 @@ class SASSSymbolsSuite extends munit.FunSuite {
     assertEquals(compile(0).find(_.name == "C").flatMap(_.default), Some(BigInt(0)))
     assertEquals(compile(1).find(_.name == "C").flatMap(_.default), None)
   }
-  test("all modern recovered vocabularies compile, including named unions") {
-    val bundle = GenerateSASSISA.read(Path.of("target/sass-codegen-references"))
-    val modern = bundle.manifest("targets").arr.filter(_("tool").str == "modern").map(_("table").str).toSet
-    bundle.tables.filter(table => modern(table.digest))
-      .foreach { table =>
-        val vocabularies = SASSSymbols.compile(table.description)
-        assert(vocabularies.find(_.name == "Register").exists(_.values.exists(_.name == "RZ")), table.digest)
-      }
-  }
 
+  test("all modern recovered vocabularies compile, including named unions") {
+    val modern = ExtractSASS.expected("modern").values.toSet
+    generator.sassReferences.tables.filter(table => modern(table.digest)).foreach { table =>
+      val vocabularies = SASSSymbols.compile(table.description)
+      assert(vocabularies.find(_.name == "Register").exists(_.values.exists(_.name == "RZ")), table.digest)
+    }
+  }
 }

@@ -13,27 +13,25 @@ private object MachineSyntax {
       target: String,
       address: Int,
       form: String,
-      formId: Option[Int],
       opcode: String,
       bindings: Map[String, BigInt],
       fields: Map[String, BigInt],
       residual: BigInt
   ) derives ReadWriter
 
+  private case class Resolved(target: Target, address: Int >= 0, database: NVDisasm.Database, form: NVDisasm.Form)
+
   def print(instruction: DecodedInstruction, machine: DecodedInstruction.Machine): Either[String, String] =
     describe(instruction, machine).map(write(_))
 
   def describe(instruction: DecodedInstruction, machine: DecodedInstruction.Machine): Either[String, Annotation] =
     for {
-      database <- NVDisasm.forTarget(machine.target).toRight(s"unknown SASS target ${machine.target}")
-      form     <- database.byForm.get(machine.form.name -> machine.form.formId)
-        .toRight(s"unknown SASS form ${machine.form.name}")
+      form <- machine.target.database.byForm.get(machine.form).toRight(s"unknown SASS form ${machine.form}")
       word <- instruction.encodingWord.toRight("lossless assembly requires encoding information")
     } yield Annotation(
-      machine.target,
+      machine.target.name,
       instruction.address.raw,
       form.name,
-      form.formId,
       machine.opcode,
       machine.bindings,
       machine.fields,
@@ -43,47 +41,49 @@ private object MachineSyntax {
   def parse(text: String): Either[String, Annotation] =
     Try(read[Annotation](text)).toEither.left.map(error => s"invalid encoding annotation: ${error.getMessage}")
 
+  private def resolve(annotation: Annotation): Either[String, Resolved] = for {
+    target  <- Target.parse(annotation.target)
+    address <- annotation.address.refine[Int >= 0].left.map(_.raw)
+    database = target.database
+    form <- database.byForm.get(annotation.form).toRight(s"unknown SASS form ${annotation.form}")
+  } yield Resolved(target, address, database, form)
+
   def decode(
       source: String,
       annotation: Annotation
   ): Either[String, (bytes: Array[Byte], instruction: DecodedInstruction)] = for {
     expected     <- InstructionSyntax.parse(source)
-    bytes        <- encode(annotation)
-    address      <- annotation.address.refine[Int >= 0].left.map(_.raw)
-    actual       <- InstructionDecoder.decodeTyped(address, bytes, annotation.target)
+    resolved     <- resolve(annotation)
+    bytes        <- encode(annotation, resolved)
+    actual       <- InstructionDecoder.decode(resolved.address, bytes, resolved.target)
     expectedText <- InstructionSyntax.print(expected)
     actualText   <- InstructionSyntax.print(actual.operation)
-    _            <- Either.cond(
-      expectedText == actualText,
-      (),
-      "encoding annotation does not describe the printed instruction"
-    )
+    _ <- Either.cond(expectedText == actualText, (), "encoding annotation does not describe the printed instruction")
   } yield (bytes, actual)
 
-  def encode(annotation: Annotation): Either[String, Array[Byte]] = for {
-    database <- NVDisasm.forTarget(annotation.target).toRight(s"unknown SASS target ${annotation.target}")
-    form <- database.byForm.get(annotation.form -> annotation.formId).toRight(s"unknown SASS form ${annotation.form}")
-    _    <- Either.cond(annotation.address >= 0, (), "negative instruction address")
-    mask = form.assignedMask
-    _ <- Either.cond(
-      annotation.residual >= 0 && annotation.residual.bitLength <= database.width &&
-        (annotation.residual & mask) == 0,
-      (),
-      "invalid residual instruction bits"
-    )
-    preserved <- form.fields.foldLeft[Either[String, BigInt]](Right(annotation.residual)) { (result, field) =>
-      for {
-        word  <- result
-        value <- annotation.fields.get(field.name).toRight(s"missing preserved field ${field.name}")
-        _     <- Either.cond(
-          value >= 0 && value.bitLength <= field.positions.size,
-          (),
-          s"invalid preserved field ${field.name}"
-        )
-      } yield field.positions.zipWithIndex.foldLeft(word) { case (bits, (physical, logical)) =>
-        if (value.testBit(logical)) bits.setBit(physical) else bits
+  def encode(annotation: Annotation): Either[String, Array[Byte]] = resolve(annotation).flatMap(encode(annotation, _))
+
+  private def encode(annotation: Annotation, resolved: Resolved): Either[String, Array[Byte]] = {
+    val form = resolved.form
+    for {
+      _ <- Either.cond(
+        annotation.residual >= 0 && annotation.residual.bitLength <= resolved.database.width.raw &&
+          (annotation.residual & form.assignedMask) == 0,
+        (),
+        "invalid residual instruction bits"
+      )
+      preserved <- form.fields.foldLeft[Either[String, BigInt]](Right(annotation.residual)) { (result, field) =>
+        for {
+          word  <- result
+          value <- annotation.fields.get(field.name).toRight(s"missing preserved field ${field.name}")
+          _     <- Either.cond(
+            value >= 0 && value.bitLength <= field.positions.size,
+            (),
+            s"invalid preserved field ${field.name}"
+          )
+        } yield FieldDecoder.deposit(word, field.positions, value)
       }
-    }
-    encoded <- Encoder.encode(database, form, annotation.opcode, annotation.bindings, Some(preserved))
-  } yield encoded
+      encoded <- Encoder.encode(resolved.database, form, annotation.opcode, annotation.bindings, Some(preserved))
+    } yield encoded
+  }
 }

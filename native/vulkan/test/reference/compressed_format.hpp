@@ -1,4 +1,3 @@
-// Frozen pre-migration reference, used only by differential tests.
 #pragma once
 
 #include <algorithm>
@@ -10,7 +9,7 @@
 #include "gemstone_spirv_constants.hpp"
 
 #include "../../third_party/swiftshader/ETC_Decoder.hpp"
-#include "normalized_format.hpp"
+#include "normalised_format.hpp"
 #include <vulkan/vulkan.h>
 
 namespace gemstone::vulkan {
@@ -43,7 +42,7 @@ inline std::optional<CompressedImageFormat> compressedImageFormat(VkFormat forma
   }
 }
 
-// Output is linear RGBA, with exact 11-bit EAC normalization and default absent channels.
+// Output is linear RGBA, with exact 11-bit EAC normalisation and default absent channels.
 inline std::array<float, 64> decodeCompressedBlock(const CompressedImageFormat &format, const uint8_t *source) {
   std::array<float, 64> result{};
   for (unsigned pixel = 0; pixel < 16; ++pixel)
@@ -51,7 +50,7 @@ inline std::array<float, 64> decodeCompressedBlock(const CompressedImageFormat &
   if (!format.eac) {
     std::array<uint8_t, 64> bgra{};
     ETC_Decoder::Decode(source, bgra.data(), 4, 4, 16, 4, format.input);
-    const NormalizedImageFormat layout{4, 0, false, format.srgb, true};
+    const NormalisedImageFormat layout{4, 0, false, format.srgb, true};
     for (unsigned pixel = 0; pixel < 16; ++pixel)
       for (unsigned lane = 0; lane < format.components; ++lane)
         result[pixel * 4 + lane] = static_cast<float>(layout.read(bgra.data() + pixel * 4, lane));

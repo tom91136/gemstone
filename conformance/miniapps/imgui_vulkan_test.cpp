@@ -75,9 +75,9 @@ int main(int argc, char **argv) {
     if (argc != 2) throw std::runtime_error("usage: imgui_reference <output-directory>");
     const std::filesystem::path directory(argv[1]);
     std::filesystem::create_directories(directory);
-    write(directory / "primitives.ppm", imgui_scene::render(Scene::primitives, true));
-    write(directory / "layout.ppm", imgui_scene::render(Scene::layout, true));
-    write(directory / "resize.ppm", imgui_scene::render(Scene::resize, true));
+    write(directory / "primitives.ppm", imgui_scene::render(Scene::Primitives, true));
+    write(directory / "layout.ppm", imgui_scene::render(Scene::Layout, true));
+    write(directory / "resize.ppm", imgui_scene::render(Scene::Resize, true));
     return 0;
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
@@ -87,14 +87,14 @@ int main(int argc, char **argv) {
 #else
 
 TEST_CASE("miniapps/imgui/vulkan/primitives", "[gpu-conformance][miniapps][vulkan][requires-execution]") {
-  check(Scene::primitives, "primitives");
+  check(Scene::Primitives, "primitives");
 }
 
 TEST_CASE("miniapps/imgui/vulkan/layout", "[gpu-conformance][miniapps][vulkan][requires-execution][regression]") {
-  check(Scene::layout, "layout");
+  check(Scene::Layout, "layout");
 }
 
 TEST_CASE("miniapps/imgui/vulkan/resize", "[gpu-conformance][miniapps][vulkan][requires-execution][regression]") {
-  check(Scene::resize, "resize");
+  check(Scene::Resize, "resize");
 }
 #endif

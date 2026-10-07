@@ -2,14 +2,15 @@ package net.kurobako.gemstone.isa.nvidia
 
 import VMExecution.*
 import VMIR.*
+import VMIR.Matrix.*
 import cats.syntax.all.*
-import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.*
 
 /** Warp-level tensor operations. Sources are read before any staged writes commit. WMMA has an intentionally
   * unspecified fragment layout: use a stable cyclic distribution, with replicated elements where the specified register
@@ -19,130 +20,7 @@ import net.kurobako.gemstone.memory.*
 object VMTensor {
   private val halfwords = Vec.range[0, 2]
 
-  enum Element(val bits: Int in (8, 16, 32, 64), val packed: Int > 0) {
-    case F16  extends Element(16, 2)
-    case BF16 extends Element(16, 2)
-    case TF32 extends Element(32, 1)
-    case F32  extends Element(32, 1)
-    case F64  extends Element(64, 1)
-    case S8   extends Element(8, 4)
-    case U8   extends Element(8, 4)
-    case S32  extends Element(32, 1)
-
-    def decode(value: Long): Double = this match {
-      case F16        => IEEE754.binary16ToFloat(Binary16.low(value)).toDouble
-      case BF16       => java.lang.Float.intBitsToFloat((value.toInt & 0xffff) << 16).toDouble
-      case TF32 | F32 => java.lang.Float.intBitsToFloat(value.toInt).toDouble
-      case F64        => java.lang.Double.longBitsToDouble(value)
-      case S8         => value.toByte.toDouble
-      case U8         => (value & 255L).toDouble
-      case S32        => value.toInt.toDouble
-    }
-    def encode(value: Double): Long = this match {
-      case F16        => IEEE754.doubleToBinary16(value).raw
-      case F32 | TF32 => java.lang.Float.floatToRawIntBits(value.toFloat).toLong & 0xffffffffL
-      case F64        => java.lang.Double.doubleToRawLongBits(value)
-      case BF16       => (java.lang.Float.floatToRawIntBits(value.toFloat) >>> 16).toLong
-      case S8 | U8    => value.toLong & 255L
-      case S32        => value.toLong & 0xffffffffL
-    }
-  }
-  case class Shape(m: Int > 0, n: Int > 0, k: Int > 0)
-  enum Space { case Generic, Global, Shared }
-  enum Role  { case A, B, C                 }
-  case class Fragment(
-      shape: Shape,
-      role: Role,
-      element: Element,
-      wmma: Boolean,
-      columnMajor: Boolean = false
-  ) {
-    def rows: Int > 0                       = if (role == Role.B) shape.k else shape.m
-    def columns: Int > 0                    = if (role == Role.A) shape.k else shape.n
-    private def mma884F16: Boolean          = !wmma && shape == Shape(8, 8, 4) && element != Element.F64
-    def partitions: Int in (1, 4)           = if (mma884F16) 4 else 1
-    def partition(lane: WarpLane): Int >= 0 = if (mma884F16) (lane.widen[Int >= 0] % 16) / 4 else 0
-    def registers: Int >= 0                 = if (mma884F16) {
-      role match {
-        case Role.A | Role.B                  => 2
-        case Role.C if element == Element.F32 => 8
-        case Role.C                           => 4
-      }
-    } else if (wmma && element == Element.F16 && role != Role.C) 8
-    else (rows * columns).widen[Int >= 0] / (element.packed * 32)
-
-    // Return the logical matrix element held by a lane's unpacked fragment element.
-    def coordinate(lane: WarpLane, index: Int >= 0): (Int >= 0, Int >= 0) = {
-      val laneIndex: Int >= 0 = lane
-      if (mma884F16) {
-        val thread         = laneIndex % 4
-        val high: Int >= 0 = if (lane.raw < 16) 0 else 4
-        role match {
-          case Role.A if columnMajor            => ((index % 4) + high, thread)
-          case Role.A                           => (thread + high, index)
-          case Role.B if columnMajor            => (index, thread + high)
-          case Role.B                           => (thread, index + high)
-          case Role.C if element == Element.F32 =>
-            (
-              (laneIndex   % 2) + ((index / 2)         % 2) * 2 + high,
-              ((index / 4) % 2) * 4 + ((laneIndex / 2) % 2) * 2 + (index % 2)
-            )
-          case Role.C => (thread + high, index)
-        }
-      } else if (wmma) {
-        val linear = (index * 32 + laneIndex) % (rows * columns)
-        (linear / columns, linear % columns)
-      } else {
-        val group  = laneIndex / 4
-        val thread = laneIndex % 4
-        role match {
-          case Role.C => (group + (index / 2) * 8, thread * 2 + index % 2)
-          case Role.A =>
-            val chunk: Int > 0 = if (element.bits.raw < 32) element.packed else 1
-            (
-              group + ((index / chunk) % 2) * 8,
-              thread * chunk + index   % chunk + (index / (chunk * 2)) * (chunk * 4)
-            )
-          case Role.B =>
-            val chunk: Int > 0 = if (element.bits.raw < 32) element.packed else 1
-            (thread * chunk + index % chunk + (index / chunk) * (chunk * 4), group)
-        }
-      }
-    }
-  }
-  enum Operation {
-    case Load(
-        fragment: Fragment,
-        destinations: Vec[NonEmpty[String]],
-        address: Value,
-        stride: Value,
-        columnMajor: Boolean,
-        space: Space
-    )
-    case Store(
-        fragment: Fragment,
-        sources: Vec[Value],
-        address: Value,
-        stride: Value,
-        columnMajor: Boolean,
-        space: Space
-    )
-    case Multiply(
-        a: Fragment,
-        b: Fragment,
-        c: Fragment,
-        d: Fragment,
-        destinations: Vec[NonEmpty[String]],
-        left: Vec[Value],
-        right: Vec[Value],
-        addend: Vec[Value],
-        saturate: Boolean
-    )
-    case LoadMatrix(destinations: Vec[NonEmpty[String]], address: Value, transpose: Boolean, space: Space)
-    case StoreMatrix(sources: Vec[Value], address: Value, transpose: Boolean, space: Space)
-  }
-
-  private def invalid(detail: NonEmpty[String]): VMFault = VMFault.InvalidState(detail)
+  private def invalid(detail: NonEmpty[String]): Fault = Fault.Backend(detail)
   private def memoryIndex(
       fragment: Fragment,
       lane: WarpLane,
@@ -153,55 +31,50 @@ object VMTensor {
     val (row, col) = fragment.coordinate(lane, index)
     if (column) col.toLong.raw * stride + row.raw else row.toLong.raw * stride + col.raw
   }
-  private def shared(space: Space, address: Long): Boolean =
-    space == Space.Shared || (space == Space.Generic && VMAddressSpace.isShared(address))
+  private def shared(space: MemorySpace, address: Long): Boolean =
+    space == MemorySpace.Shared || (space == MemorySpace.Generic && VMAddressSpace.isShared(address))
 
   private def readMemory(
-      context: VMInstructionContext,
-      space: Space,
+      context: VMContext,
+      space: MemorySpace,
       address: Long,
       bits: Int in (8, 16, 32, 64)
-  ): Either[VMFault, Long] =
-    if (shared(space, address))
-      Right(context.state.readShared(address, bits))
-    else context.memory.readLittleEndian(GuestAddress(address), bits.byteCount)
-      .left.map(VMFault.fromMemory(_))
+  ): Either[Fault, Long] =
+    if (shared(space, address)) Right(context.workgroup.readShared(address, bits))
+    else context.memory.readValue(GuestAddress(address), bits.toScalarByteWidth)
 
   private def writeMemory(
-      effects: VMBlockState.WriteBuffer,
+      effects: VMWriteBuffer,
       lane: WorkgroupLane,
-      space: Space,
+      space: MemorySpace,
       address: Long,
       bits: Int in (8, 16, 32, 64),
       value: Long
   ): Unit =
-    if (shared(space, address))
-      effects.stage(VMWrite.Shared(lane, address, bits, value))
-    else effects.stage(VMWrite.Memory(
-      lane,
-      GuestAddress(address),
-      bits,
-      value
-    ))
+    if (shared(space, address)) effects.stage(VMWrite.Shared(address, bits, value))
+    else effects.stage(VMWrite.Memory(lane, GuestAddress(address), bits, value, false))
 
   private def uniform(
-      context: VMInstructionContext,
+      context: VMContext,
       base: WorkgroupLane.WarpBase,
       value: Value
-  ): Either[VMFault, Long] =
-    WarpLane.values.traverse(i => context.read(WorkgroupLane.inWarp(base, i), value)).flatMap { values =>
-      if (values.distinct.size == 1) Right(values.head)
-      else Left(invalid("WMMA address and stride must be uniform within each warp"))
-    }
+  ): Either[Fault, Long] = {
+    val values = WarpLane.values.map(lane => context.read(WorkgroupLane.inWarp(base, lane), value))
+    Either.cond(
+      values.distinct.size == 1,
+      values.head,
+      invalid("WMMA address and stride must be uniform within each warp")
+    )
+  }
 
   private def parameters(
-      context: VMInstructionContext,
+      context: VMContext,
       base: WorkgroupLane.WarpBase,
       address: Value,
       stride: Value,
       fragment: Fragment,
       column: Boolean
-  ): Either[VMFault, (Long, Long)] =
+  ): Either[Fault, (Long, Long)] =
     for {
       pointer <- uniform(context, base, address)
       leading <- uniform(context, base, stride)
@@ -220,15 +93,15 @@ object VMTensor {
 
   def execute(
       operation: Operation,
-      context: VMInstructionContext,
-      effects: VMBlockState.WriteBuffer
-  ): Either[VMFault, Step] = {
+      context: VMContext,
+      effects: VMWriteBuffer
+  ): Either[Fault, Step] = {
     val warps = WorkgroupLane.warpBases.filter(base =>
-      base.raw < context.state.laneCount.raw && context.active.warpBits(base.raw) != 0
+      base.raw < context.workgroup.laneCount.raw && context.active.warpBits(base.raw) != 0
     )
     if (
       warps.exists(base =>
-        base.raw + 32 > context.state.laneCount.raw || context.active.warpBits(base.raw) != 0xffffffffL
+        base.raw + 32 > context.workgroup.laneCount.raw || context.active.warpBits(base.raw) != 0xffffffffL
       )
     )
       Left(invalid("tensor .sync.aligned instruction requires all 32 lanes of each participating warp"))
@@ -238,9 +111,9 @@ object VMTensor {
   private def executeWarp(
       operation: Operation,
       base: WorkgroupLane.WarpBase,
-      context: VMInstructionContext,
-      effects: VMBlockState.WriteBuffer
-  ): Either[VMFault, Unit] = operation match {
+      context: VMContext,
+      effects: VMWriteBuffer
+  ): Either[Fault, Unit] = operation match {
     case Operation.Load(fragment, destinations, address, stride, column, space) =>
       parameters(context, base, address, stride, fragment, column).flatMap { (pointer, leading) =>
         val registerDestinations = destinations.zip(Vec.indices(destinations.nonNegativeSize))
@@ -258,33 +131,31 @@ object VMTensor {
         }
       }
     case Operation.Store(fragment, sources, address, stride, column, space) =>
-      parameters(context, base, address, stride, fragment, column).flatMap { (pointer, leading) =>
+      parameters(context, base, address, stride, fragment, column).map { (pointer, leading) =>
         val sourceRegisters = sources.zip(Vec.indices(sources.nonNegativeSize))
         val parts           = Vec.indices(fragment.element.packed)
-        WarpLane.values.traverse_ { lane =>
-          sourceRegisters.traverse_ { (source, register) =>
-            context.read(WorkgroupLane.inWarp(base, lane), source).map { value =>
-              parts.foreach { part =>
-                val offset = memoryIndex(fragment, lane, register * fragment.element.packed + part, leading, column)
-                writeMemory(
-                  effects,
-                  WorkgroupLane.inWarp(base, lane),
-                  space,
-                  pointer + offset * (fragment.element.bits.raw / 8),
-                  fragment.element.bits,
-                  value >>> (part.raw * fragment.element.bits.raw)
-                )
-              }
+        WarpLane.values.foreach { lane =>
+          sourceRegisters.foreach { (source, register) =>
+            val value = context.read(WorkgroupLane.inWarp(base, lane), source)
+            parts.foreach { part =>
+              val offset = memoryIndex(fragment, lane, register * fragment.element.packed + part, leading, column)
+              writeMemory(
+                effects,
+                WorkgroupLane.inWarp(base, lane),
+                space,
+                pointer + offset * (fragment.element.bits.raw / 8),
+                fragment.element.bits,
+                value >>> (part.raw * fragment.element.bits.raw)
+              )
             }
           }
         }
       }
     case Operation.Multiply(a, b, c, d, destinations, left, right, addend, saturate) =>
-      for {
-        av <- matrix(a, left, base, context)
-        bv <- matrix(b, right, base, context)
-        cv <- matrix(c, addend, base, context)
-      } yield {
+      val av = matrix(a, left, base, context)
+      val bv = matrix(b, right, base, context)
+      val cv = matrix(c, addend, base, context)
+      Right {
         val destinationRegisters = destinations.zip(Vec.indices(destinations.nonNegativeSize))
         val parts                = Vec.indices(d.element.packed)
         val area                 = d.rows.raw * d.columns.raw
@@ -326,28 +197,22 @@ object VMTensor {
             val bits = halfwords.foldLeft(0L) { (bits, part) =>
               val row = if (transpose) lane.raw % 4 * 2 + part.raw else lane.raw / 4
               val col = if (transpose) lane.raw / 4 else lane.raw % 4 * 2 + part.raw
-              bits | (context.state.readShared(addresses(matrix.raw * 8 + row) + col * 2L, 16) << (part.raw * 16))
+              bits | (context.workgroup.readShared(addresses(matrix.raw * 8 + row) + col * 2L, 16) << (part.raw * 16))
             }
             effects.stageRegister(WorkgroupLane.inWarp(base, lane), destination, bits)
           }
         }
       }
     case Operation.StoreMatrix(sources, address, transpose, space) =>
-      matrixAddresses(context, base, address, sources.nonNegativeSize, space).flatMap { addresses =>
+      matrixAddresses(context, base, address, sources.nonNegativeSize, space).map { addresses =>
         val sourceMatrices = sources.zip(Vec.indices(sources.nonNegativeSize))
-        WarpLane.values.traverse_ { lane =>
-          sourceMatrices.traverse_ { (source, matrix) =>
-            context.read(WorkgroupLane.inWarp(base, lane), source).map { bits =>
-              halfwords.foreach { part =>
-                val row = if (transpose) lane.raw % 4 * 2 + part.raw else lane.raw / 4
-                val col = if (transpose) lane.raw / 4 else lane.raw % 4 * 2 + part.raw
-                effects.stage(VMWrite.Shared(
-                  WorkgroupLane.inWarp(base, lane),
-                  addresses(matrix.raw * 8 + row) + col * 2L,
-                  16,
-                  bits >>> (part.raw * 16)
-                ))
-              }
+        WarpLane.values.foreach { lane =>
+          sourceMatrices.foreach { (source, matrix) =>
+            val bits = context.read(WorkgroupLane.inWarp(base, lane), source)
+            halfwords.foreach { part =>
+              val row = if (transpose) lane.raw % 4 * 2 + part.raw else lane.raw / 4
+              val col = if (transpose) lane.raw / 4 else lane.raw % 4 * 2 + part.raw
+              effects.stage(VMWrite.Shared(addresses(matrix.raw * 8 + row) + col * 2L, 16, bits >>> (part.raw * 16)))
             }
           }
         }
@@ -355,41 +220,40 @@ object VMTensor {
   }
 
   private def matrixAddresses(
-      context: VMInstructionContext,
+      context: VMContext,
       base: WorkgroupLane.WarpBase,
       address: Value,
       count: Int >= 0,
-      space: Space
-  ): Either[VMFault, Vec[Long]] = Vec.indices(count * 8).traverse { lane =>
-    context.read(WorkgroupLane.fromIndex(base.raw + lane.raw), address).flatMap { pointer =>
-      Either.cond(
-        pointer % 16 == 0 && shared(space, pointer),
-        pointer,
-        invalid("matrix row addresses must be 16-byte aligned shared addresses")
-      )
-    }
+      space: MemorySpace
+  ): Either[Fault, Vec[Long]] = Vec.indices(count * 8).traverse { lane =>
+    val pointer = context.read(WorkgroupLane.fromIndex(base.raw + lane.raw), address)
+    Either.cond(
+      pointer % 16 == 0 && shared(space, pointer),
+      pointer,
+      invalid("matrix row addresses must be 16-byte aligned shared addresses")
+    )
   }
 
   private def matrix(
       fragment: Fragment,
       values: Vec[Value],
       base: WorkgroupLane.WarpBase,
-      context: VMInstructionContext
-  ): Either[VMFault, Array[Double]] = {
+      context: VMContext
+  ): Array[Double] = {
     val area           = fragment.rows * fragment.columns
     val result         = Array.ofDim[Double]((area * fragment.partitions).raw)
     val valueRegisters = values.zip(Vec.indices(values.nonNegativeSize))
     val parts          = Vec.indices(fragment.element.packed)
-    WarpLane.values.traverse_ { lane =>
-      valueRegisters.traverse_ { (value, register) =>
-        context.read(WorkgroupLane.inWarp(base, lane), value).map { bits =>
-          parts.foreach { part =>
-            val (row, col)  = fragment.coordinate(lane, register * fragment.element.packed + part)
-            val resultIndex = fragment.partition(lane) * area + row * fragment.columns + col
-            result(resultIndex.raw) = fragment.element.decode(bits >>> (part.raw * fragment.element.bits.raw))
-          }
+    WarpLane.values.foreach { lane =>
+      valueRegisters.foreach { (value, register) =>
+        val bits = context.read(WorkgroupLane.inWarp(base, lane), value)
+        parts.foreach { part =>
+          val (row, col)  = fragment.coordinate(lane, register * fragment.element.packed + part)
+          val resultIndex = fragment.partition(lane) * area + row * fragment.columns + col
+          result(resultIndex.raw) = fragment.element.decode(bits >>> (part.raw * fragment.element.bits.raw))
         }
       }
-    }.map(_ => result)
+    }
+    result
   }
 }

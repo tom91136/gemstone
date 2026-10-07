@@ -28,16 +28,11 @@ object Encoder {
         case _                                   => Right(bindings.updated("Opcode", value))
       }
     }
+    val width = database.width.raw
     for {
-      _ <- Either.cond(
-        database.width > 0 && database.width % 8 == 0,
-        (),
-        s"invalid instruction width ${database.width}"
-      )
-      wordLimit = BigInt(1) << database.width
       original <- preserved match {
-        case Some(value) if value < 0 || value >= wordLimit => Left(s"preserved word exceeds ${database.width} bits")
-        case value                                          => Right(value.getOrElse(BigInt(0)))
+        case Some(value) if value < 0 || value.bitLength > width => Left(s"preserved word exceeds $width bits")
+        case value                                               => Right(value.getOrElse(BigInt(0)))
       }
       values        <- withOpcode
       _             <- Legality.check(database, form, Legality.completeBindings(form, values)).left.map(_.message)
@@ -53,8 +48,8 @@ object Encoder {
         }
         encoded.map(value => field -> value)
       }
-      encodedWord <- assign(database.width, form, encodedFields, original)
-    } yield Array.tabulate(database.width / 8) { byteIndex =>
+      encodedWord <- assign(width, form, encodedFields, original)
+    } yield Array.tabulate(width / 8) { byteIndex =>
       ((encodedWord >> (byteIndex * 8)) & 0xff).toByte
     }
   }
@@ -65,7 +60,7 @@ object Encoder {
         val positions = field.positions
         if (positions.distinct.size != positions.size)
           Left(s"${form.name}.${field.name} assigns a bit more than once")
-        else if (positions.exists(position => position < 0 || position >= database.width))
+        else if (positions.exists(position => position < 0 || position >= database.width.raw))
           Left(s"${form.name}.${field.name} has a position outside the ${database.width}-bit word")
         else Right(())
       }
@@ -112,7 +107,7 @@ object Encoder {
   ): Either[String, BigInt] = expression match {
     case NVDisasm.Expression.Constant(value, _)            => Right(value)
     case NVDisasm.Expression.Reference(name, attribute, _) =>
-      val key = attribute.fold(name)(suffix => s"$name@$suffix")
+      val key = NVDisasm.bindingKey(name, attribute)
       bindings.get(key).toRight(s"missing encoding binding $key")
     case NVDisasm.Expression.Scale(inner, factor) =>
       if (factor == 0) Left("zero encoding scale")
@@ -132,17 +127,14 @@ object Encoder {
     case NVDisasm.Expression.FloatConvert(inner, _, _, _) => evaluate(database, inner, bindings)
     case NVDisasm.Expression.Lookup(name, arguments)      =>
       database.byTable.get(name).toRight(s"missing encoding lookup $name").flatMap { table =>
-        if (table.issues.nonEmpty) Left(s"unsupported encoding lookup $name: ${table.issues.mkString("; ")}")
-        else arguments.traverse(evaluate(database, _, bindings)).flatMap { inputs =>
-          val outputs = table.rows.filter(_.inputs == inputs).map(_.output).distinct
-          outputs match {
+        arguments.traverse(evaluate(database, _, bindings)).flatMap { inputs =>
+          table.lookup(inputs) match {
             case Vec(value)               => Right(value)
             case values if values.isEmpty => Left(s"no encoding lookup row for $name($inputs)")
             case values                   => Left(s"ambiguous encoding lookup $name($inputs): ${values.mkString(", ")}")
           }
         }
       }
-    case NVDisasm.Expression.Unsupported(source) => Left(s"unsupported encoding expression: $source")
   }
 
 }

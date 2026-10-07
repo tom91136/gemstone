@@ -6,11 +6,10 @@
 namespace memory_patterns {
 struct Backend {
   std::string kind;
-  std::string allocationKind() const { return kind; }
-  explicit Backend(std::string kind = "shared", uint64_t = 0) : kind(std::move(kind)) {}
+  explicit Backend(std::string kind) : kind(std::move(kind)) {}
   sycl::queue queue{sycl::gpu_selector_v};
   void *allocate(size_t size) {
-    auto *p = (allocationKind() == "host") ? sycl::aligned_alloc_host(64, size, queue) : sycl::aligned_alloc_shared(64, size, queue);
+    auto *p = (kind == "host") ? sycl::aligned_alloc_host(64, size, queue) : sycl::aligned_alloc_shared(64, size, queue);
     require(p, "SYCL shared allocation");
     return p;
   }

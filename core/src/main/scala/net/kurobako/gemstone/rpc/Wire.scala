@@ -3,7 +3,9 @@ package net.kurobako.gemstone.rpc
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.msgpack.*
 import scala.annotation.publicInBinary
 import scala.compiletime.constValue
 import scala.compiletime.erasedValue
@@ -14,14 +16,6 @@ import scala.reflect.ClassTag
 import scala.util.NotGiven
 
 object Wire {
-  private val InitialCapacity = 256
-
-  case class Limits(
-      maximumElements: Int > 0,
-      maximumBytes: Int > 0,
-      maximumTextBytes: Int > 0
-  )
-
   enum Constraint {
     case Positive
     case Positive0
@@ -53,182 +47,26 @@ object Wire {
   case class Field(name: String, shape: Shape)
   case class Alternative(name: String, shape: Shape)
 
-  private class Writer(val limits: Limits) {
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private var mutableBytes = Array.ofDim[Byte](math.min(InitialCapacity, limits.maximumBytes.raw))
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private var length = 0
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private var failure = Option.empty[String]
-
-    private def emit(value: Int): Unit = {
-      mutableBytes(length) = value.toByte
-      length += 1
-    }
-
-    private def reserve(additional: Int): Boolean =
-      if (failure.nonEmpty) false
-      else if (additional < 0 || additional > limits.maximumBytes.raw - length) {
-        reject(s"wire value exceeds the ${limits.maximumBytes}-byte limit")
-        false
-      } else {
-        val required = length + additional
-        if (required > mutableBytes.length) {
-          val doubled = math.min(limits.maximumBytes.raw.toLong, math.max(1L, mutableBytes.length.toLong * 2L)).toInt
-          mutableBytes = java.util.Arrays.copyOf(mutableBytes, math.max(required, doubled))
-        }
-        true
-      }
-
-    private def writeRawByte(value: Int): Unit =
-      if (reserve(1)) emit(value)
-
-    private def writeRawInt(value: Int): Unit =
-      if (reserve(4)) {
-        emit(value >>> 24)
-        emit(value >>> 16)
-        emit(value >>> 8)
-        emit(value)
-      }
-
-    private def writeRawLong(value: Long): Unit = {
-      writeRawInt((value >>> 32).toInt)
-      writeRawInt(value.toInt)
-    }
-
-    private def writeRawBytes(value: Array[Byte]): Unit =
-      if (reserve(value.length)) {
-        Array.copy(value, 0, mutableBytes, length, value.length)
-        length += value.length
-      }
-
-    def writeNil(): Unit = writeRawByte(0xc0)
-
-    def writeBoolean(value: Boolean): Unit = writeRawByte(if (value) 0xc3 else 0xc2)
-
-    def writeInt(value: Int): Unit =
-      if (value >= 0 && value <= 0x7f) writeRawByte(value)
-      else if (value < 0 && value >= -32) writeRawByte(value & 0xff)
-      else if (value >= Byte.MinValue && value <= Byte.MaxValue) {
-        writeRawByte(0xd0)
-        writeRawByte(value)
-      } else if (value >= Short.MinValue && value <= Short.MaxValue) {
-        writeRawByte(0xd1)
-        writeRawByte(value >>> 8)
-        writeRawByte(value)
-      } else {
-        writeRawByte(0xd2)
-        writeRawInt(value)
-      }
-
-    def writeFloat(value: Float): Unit = {
-      writeRawByte(0xca)
-      writeRawInt(java.lang.Float.floatToRawIntBits(value))
-    }
-    def writeDouble(value: Double): Unit = {
-      writeRawByte(0xcb)
-      writeRawLong(java.lang.Double.doubleToRawLongBits(value))
-    }
-
-    def writeLong(value: Long): Unit =
-      if (value >= Int.MinValue && value <= Int.MaxValue) writeInt(value.toInt)
-      else {
-        writeRawByte(0xd3)
-        writeRawLong(value)
-      }
-
-    private def writeStringHeader(size: Int): Unit =
-      if (size <= 31) writeRawByte(0xa0 | size)
-      else if (size <= 0xff) {
-        writeRawByte(0xd9)
-        writeRawByte(size)
-      } else if (size <= 0xffff) {
-        writeRawByte(0xda)
-        writeRawByte(size >>> 8)
-        writeRawByte(size)
-      } else {
-        writeRawByte(0xdb)
-        writeRawInt(size)
-      }
-
-    private def writeBinHeader(size: Int): Unit =
-      if (size <= 0xff) {
-        writeRawByte(0xc4)
-        writeRawByte(size)
-      } else if (size <= 0xffff) {
-        writeRawByte(0xc5)
-        writeRawByte(size >>> 8)
-        writeRawByte(size)
-      } else {
-        writeRawByte(0xc6)
-        writeRawInt(size)
-      }
-
-    def writeArrayHeader(size: Int): Unit =
-      if (size < 0) reject(s"negative array size: $size")
-      else if (size <= 15) writeRawByte(0x90 | size)
-      else if (size <= 0xffff) {
-        writeRawByte(0xdc)
-        writeRawByte(size >>> 8)
-        writeRawByte(size)
-      } else {
-        writeRawByte(0xdd)
-        writeRawInt(size)
-      }
-
-    def writeString(value: String): Unit = {
-      val bytes = value.getBytes(StandardCharsets.UTF_8)
-      if (bytes.length > limits.maximumTextBytes.raw)
-        reject(s"UTF-8 value exceeds the ${limits.maximumTextBytes}-byte text limit")
-      else {
-        writeStringHeader(bytes.length)
-        writeRawBytes(bytes)
+  private def decodeAll[A](bytes: Array[Byte], limits: Limits)(read: Reader => Either[String, A]): Either[String, A] =
+    if (bytes.length > limits.maximumBytes.raw) Left(s"wire value exceeds the ${limits.maximumBytes}-byte limit")
+    else {
+      val reader = Reader(bytes, 0, bytes.length, limits)
+      read(reader).flatMap { value =>
+        Either.cond(reader.remaining == 0, value, s"wire value has ${reader.remaining} trailing bytes")
       }
     }
-
-    def writeBytes(value: Array[Byte]): Unit =
-      if (value.length > limits.maximumBytes.raw)
-        reject(s"byte collection exceeds the ${limits.maximumBytes}-byte limit")
-      else {
-        writeBinHeader(value.length)
-        writeRawBytes(value)
-      }
-
-    def reject(message: String): Unit = if (failure.isEmpty) failure = Some(message)
-
-    def result(): Either[String, Array[Byte]] =
-      failure.toLeft(java.util.Arrays.copyOf(mutableBytes, length))
-  }
-
-  private object Reader {
-    def decode[A](bytes: Array[Byte], limits: Limits)(read: Reader => Either[String, A]): Either[String, A] =
-      if (bytes.length > limits.maximumBytes.raw) Left(s"wire value exceeds the ${limits.maximumBytes}-byte limit")
-      else {
-        val reader = Reader(bytes, limits)
-        read(reader).flatMap { value =>
-          Either.cond(reader.remaining == 0, value, s"wire value has ${reader.remaining} trailing bytes")
-        }
-      }
-  }
-
-  private class Reader(bytes: Array[Byte], val limits: Limits)
-      extends msgpack.Reader(
-        bytes = bytes,
-        start = 0,
-        size = bytes.length,
-        maximumTextBytes = limits.maximumTextBytes.raw,
-        maximumBytes = limits.maximumBytes.raw
-      )
 
   object Codec {
     private class CodecImpl[A](
         valueShape: Shape,
         writeValue: (Writer, A) => Unit,
-        readValue: Reader => Either[String, A]
+        readValue: Reader => Either[String, A],
+        nullaryValue: Option[A]
     ) extends Codec[A] {
       override val shape: Shape                                          = valueShape
       override private[Wire] def write(writer: Writer, value: A): Unit   = writeValue(writer, value)
       override private[Wire] def read(reader: Reader): Either[String, A] = readValue(reader)
+      override private[Wire] def nullary: Option[A]                      = nullaryValue
     }
 
     def apply[A](using codec: Codec[A]): Codec[A] = codec
@@ -237,28 +75,19 @@ object Wire {
     private[Wire] def instance[A](
         valueShape: Shape,
         writeValue: (Writer, A) => Unit,
-        readValue: Reader => Either[String, A]
-    ): Codec[A] = CodecImpl(valueShape, writeValue, readValue)
+        readValue: Reader => Either[String, A],
+        nullary: Option[A] = None
+    ): Codec[A] = CodecImpl(valueShape, writeValue, readValue, nullary)
 
-    def validated[A](underlying: Codec[A])(
-        validate: A => Either[String, A]
-    ): Codec[A] =
-      instance(
-        underlying.shape,
-        (writer, value) =>
-          validate(value) match {
-            case Left(error)    => writer.reject(error)
-            case Right(checked) => underlying.write(writer, checked)
-          },
-        reader => underlying.read(reader).flatMap(value => validate(value))
-      )
+    def validated[A](underlying: Codec[A])(validate: A => Either[String, A]): Codec[A] =
+      mapped(underlying.shape, underlying)(validate, identity)
 
     given Codec[Unit] = instance(
       Shape.UnitValue,
       (writer, _) => writer.writeArrayHeader(0),
       reader =>
         reader.readArrayHeader().flatMap { count =>
-          Either.cond(count == 0, (), s"expected unit array of size 0, got $count")
+          Either.cond(count.raw == 0, (), s"expected unit array of size 0, got $count")
         }
     )
 
@@ -329,34 +158,24 @@ object Wire {
 
     given [A: ClassTag](using element: Codec[A], notByte: NotGiven[A =:= Byte]): Codec[Vec[A]] = instance(
       Shape.Sequence(element.shape),
-      (writer, values) =>
-        if (values.length > writer.limits.maximumElements.raw)
-          writer.reject(
-            s"collection exceeds the ${writer.limits.maximumElements}-element limit"
-          )
-        else {
-          writer.writeArrayHeader(values.length)
-          values.foreach(element.write(writer, _))
-        },
+      (writer, values) => {
+        writer.writeArrayHeader(values.nonNegativeSize)
+        values.foreach(element.write(writer, _))
+      },
       reader =>
         reader.readArrayHeader().flatMap { count =>
-          if (count > reader.limits.maximumElements.raw) Left(
-            s"collection exceeds the ${reader.limits.maximumElements}-element limit: $count"
-          )
-          else {
-            val mutableBuilder = Vec.newBuilder[A]
-            @scala.annotation.tailrec
-            def read(index: Int): Either[String, Vec[A]] =
-              if (index == count) Right(mutableBuilder.result())
-              else
-                element.read(reader) match {
-                  case Left(error)  => Left(error)
-                  case Right(value) =>
-                    val _ = mutableBuilder += value
-                    read(index + 1)
-                }
-            read(0)
-          }
+          val mutableBuilder = Vec.newBuilder[A]
+          @scala.annotation.tailrec
+          def read(index: Int): Either[String, Vec[A]] =
+            if (index == count.raw) Right(mutableBuilder.result())
+            else
+              element.read(reader) match {
+                case Left(error)  => Left(error)
+                case Right(value) =>
+                  val _ = mutableBuilder += value
+                  read(index + 1)
+              }
+          read(0)
         }
     )
 
@@ -381,10 +200,6 @@ object Wire {
       case sum: Mirror.SumOf[A]         => sumCodec(sum)
     }
 
-    /** Derive a product while keeping its stable wire name independent of its Scala name. */
-    inline def product[A](name: String)(using mirror: Mirror.ProductOf[A]): Codec[A] =
-      productCodecRuntime(name, labelsOf[mirror.MirroredElemLabels], codecsOf[mirror.MirroredElemTypes], mirror)
-
     private inline def productCodec[A](mirror: Mirror.ProductOf[A]): Codec[A] = {
       val labels = labelsOf[mirror.MirroredElemLabels]
       val codecs = codecsOf[mirror.MirroredElemTypes]
@@ -393,20 +208,21 @@ object Wire {
     }
 
     // Generic derivation pairs each product field with its statically derived codec.
-    @SuppressWarnings(Array("scalafix:GemstoneNoProductTraversal"))
+    @SuppressWarnings(Array("scalafix:BannedSyntax.product-traversal"))
     @publicInBinary
     private[Codec] def productCodecRuntime[A](
         name: String,
         labels: Vector[String],
         codecs: Vector[Codec[?]],
         mirror: Mirror.ProductOf[A]
-    ): Codec[A] =
+    ): Codec[A] = {
+      val arity = labels.size.unsafe[Int >= 0]
       instance(
         Shape.Product(name, labels.zip(codecs.map(_.shape)).map { case (label, codec) => Field(label, codec) }),
         (writer, value) =>
           value match {
             case product: Product =>
-              writer.writeArrayHeader(labels.length)
+              writer.writeArrayHeader(arity)
               codecs.indices.foreach { index =>
                 codecs(index).erased.write(writer, product.productElement(index))
               }
@@ -414,7 +230,7 @@ object Wire {
           },
         reader =>
           reader.readArrayHeader().flatMap { count =>
-            if (count != labels.length) Left(s"expected $name product array of size ${labels.length}, got $count")
+            if (count.raw != arity.raw) Left(s"expected $name product array of size $arity, got $count")
             else {
               val mutableValues = Array.ofDim[Any](codecs.length)
               @scala.annotation.tailrec
@@ -429,8 +245,10 @@ object Wire {
                   }
               loop(0)
             }
-          }
+          },
+        Option.when(labels.isEmpty)(mirror.fromProduct(EmptyTuple))
       )
+    }
 
     private inline def sumCodec[A](mirror: Mirror.SumOf[A]): Codec[A] = {
       val name  = constValue[mirror.MirroredLabel]
@@ -444,12 +262,8 @@ object Wire {
         cases: Vector[(String, Codec[Any])],
         ordinal: A => Int
     ): Codec[A] = {
-      val allNullary = cases.forall { case (_, codec) =>
-        codec.shape match {
-          case Shape.Product(_, fields) => fields.isEmpty
-          case _                        => false
-        }
-      }
+      val singletons = cases.flatMap(_._2.nullary)
+      val allNullary = singletons.length == cases.length
       instance(
         Shape.Sum(name, cases.map(value => Alternative(value._1, value._2.shape))),
         (writer, value) =>
@@ -463,14 +277,11 @@ object Wire {
         reader =>
           if (allNullary)
             reader.readInt().flatMap { index =>
-              if (index < 0 || index >= cases.length) Left(s"unknown $name ordinal: $index")
-              else cases(index)._2.read(Reader(Array(0x90.toByte), NullaryLimits)).map { case value: A @unchecked =>
-                value
-              }
+              singletons.lift(index).toRight(s"unknown $name ordinal: $index").map { case value: A @unchecked => value }
             }
           else
             reader.readArrayHeader().flatMap { count =>
-              if (count != 2) Left(s"expected $name sum array of size 2, got $count")
+              if (count.raw != 2) Left(s"expected $name sum array of size 2, got $count")
               else
                 reader.readString().flatMap { tag =>
                   cases.find(_._1 == tag)
@@ -480,8 +291,6 @@ object Wire {
             }
       )
     }
-
-    private val NullaryLimits: Limits = Limits(1, 1, 1)
 
     private inline def labelsOf[Labels <: Tuple]: Vector[String] = inline erasedValue[Labels] match {
       case _: EmptyTuple        => Vector.empty
@@ -549,7 +358,7 @@ object Wire {
                 (writer, _) => writer.writeArrayHeader(0),
                 reader =>
                   reader.readArrayHeader().flatMap { count =>
-                    if (count == 0) Right($value) else Left(s"expected empty operation array, got $count")
+                    if (count.raw == 0) Right($value) else Left(s"expected empty operation array, got $count")
                   }
               )
             }
@@ -612,7 +421,7 @@ object Wire {
           tag: String,
           bytes: Array[Byte],
           limits: Limits
-      ): Either[String, Decoded[F]] = Reader.decode(bytes, limits)(reader => readCase(tag, reader))
+      ): Either[String, Decoded[F]] = decodeAll(bytes, limits)(reader => readCase(tag, reader))
 
       private def readCase(tag: String, reader: Reader): Either[String, Decoded[F]] =
         cases.find(_.name == tag)
@@ -670,6 +479,7 @@ object Wire {
     def shape: Shape
     private[Wire] def write(writer: Writer, value: A): Unit
     private[Wire] def read(reader: Reader): Either[String, A]
+    private[Wire] def nullary: Option[A]
 
     final def encode(value: A, limits: Limits): Either[String, Array[Byte]] = {
       val writer = Writer(limits)
@@ -677,7 +487,7 @@ object Wire {
       writer.result()
     }
 
-    final def decode(bytes: Array[Byte], limits: Limits): Either[String, A] = Reader.decode(bytes, limits)(read(_))
+    final def decode(bytes: Array[Byte], limits: Limits): Either[String, A] = decodeAll(bytes, limits)(read(_))
 
     /** Existential adapter for heterogeneous derived-codec tables. */
     @publicInBinary
@@ -689,7 +499,8 @@ object Wire {
           value match {
             case typed: A @unchecked => underlying.write(writer, typed)
           },
-        reader => underlying.read(reader)
+        reader => underlying.read(reader),
+        underlying.nullary
       )
     }
 

@@ -19,11 +19,12 @@ import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.concurrent.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.server.Transport.*
 import scala.util.control.NonFatal
 
 private object UnixTransport {
-  def connect(path: Path, timeoutMillis: Int): Channel = {
+  def connect(path: Path, timeoutMillis: Int > 0): Channel = {
     val socket  = SocketChannel.open(StandardProtocolFamily.UNIX)
     val channel = UnixChannel(socket, timeoutMillis)
     try {
@@ -42,29 +43,29 @@ private object UnixTransport {
     val socket = ServerSocketChannel.open(StandardProtocolFamily.UNIX)
     try {
       socket.bind(UnixDomainSocketAddress.of(path))
-      UnixListener(socket, path)
+      UnixSocketListener(socket, path)
     } catch { case NonFatal(error) => socket.close(); throw error }
   }
 
-  private class UnixListener(socket: ServerSocketChannel, path: Path) extends Listener {
+  private class UnixSocketListener(socket: ServerSocketChannel, path: Path) extends Listener {
     val endpoint: Endpoint = Endpoint.Unix(path)
     def isClosed: Boolean  = !socket.isOpen
     def accept(): Channel  = {
       val accepted = socket.accept()
-      try { accepted.configureBlocking(false); UnixChannel(accepted, 300000) }
+      try { accepted.configureBlocking(false); UnixChannel(accepted, WriteTimeoutMillis) }
       catch { case NonFatal(error) => accepted.close(); throw error }
     }
     def close(): Unit = socket.close()
   }
 
-  private class UnixChannel(socket: SocketChannel, writeTimeout: Int) extends Channel {
+  private class UnixChannel(socket: SocketChannel, writeTimeout: Int > 0) extends Channel {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    @volatile private var timeout = writeTimeout
+    @volatile private var timeout = writeTimeout.raw
     private val readable          = Readiness()
     private val writable          = Readiness()
 
-    def isClosed: Boolean                    = !socket.isOpen
-    def readTimeout(milliseconds: Int): Unit = { require(milliseconds >= 0); timeout = milliseconds }
+    def isClosed: Boolean                         = !socket.isOpen
+    def readTimeout(milliseconds: Int >= 0): Unit = timeout = milliseconds.raw
     def close(): Unit = throwables.closeAll(Vec(() => socket.close(), () => readable.close(), () => writable.close()))
 
     // Read and write wait independently; close never needs either operation lock.
@@ -120,9 +121,9 @@ private object UnixTransport {
       }
     }
 
-    def connect(milliseconds: Int): Unit = writable.operationLock.withLock {
-      val deadline = platform.monotonicNanos + milliseconds.toLong * 1000000L
-      while (!socket.finishConnect()) writable.await(SelectionKey.OP_CONNECT, milliseconds, deadline)
+    def connect(milliseconds: Int > 0): Unit = writable.operationLock.withLock {
+      val deadline = platform.monotonicNanos + milliseconds.raw.toLong * 1000000L
+      while (!socket.finishConnect()) writable.await(SelectionKey.OP_CONNECT, milliseconds.raw, deadline)
     }
 
     private class ChannelInput extends InputStream {
@@ -150,10 +151,10 @@ private object UnixTransport {
     private class ChannelOutput extends OutputStream {
       override def write(value: Int): Unit                                   = write(Array(value.toByte), 0, 1)
       override def write(bytes: Array[Byte], offset: Int, length: Int): Unit = writable.operationLock.withLock {
-        val deadline = platform.monotonicNanos + writeTimeout.toLong * 1000000L
+        val deadline = platform.monotonicNanos + writeTimeout.raw.toLong * 1000000L
         val buffer   = ByteBuffer.wrap(bytes, offset, length)
         while (buffer.hasRemaining)
-          if (socket.write(buffer) == 0) writable.await(SelectionKey.OP_WRITE, writeTimeout, deadline)
+          if (socket.write(buffer) == 0) writable.await(SelectionKey.OP_WRITE, writeTimeout.raw, deadline)
       }
       override def close(): Unit = UnixChannel.this.close()
     }

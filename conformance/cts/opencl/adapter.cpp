@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include <unistd.h>
+
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/interfaces/catch_interfaces_test_invoker.hpp>
@@ -17,18 +19,12 @@
 
 #include "conformance/device.hpp"
 
-#if defined(_WIN32)
-  #include <io.h>
-#else
-  #include <unistd.h>
-#endif
-
 int conformance_upstream_main(int argc, const char **argv);
 extern int gTestsPassed;
 
 namespace {
 
-int invoke_upstream(std::vector<std::string> arguments) {
+int invokeUpstream(std::vector<std::string> arguments) {
   std::vector<const char *> forwarded;
   forwarded.reserve(arguments.size() + 1);
   for (auto &argument : arguments)
@@ -37,40 +33,28 @@ int invoke_upstream(std::vector<std::string> arguments) {
   return conformance_upstream_main(static_cast<int>(arguments.size()), forwarded.data());
 }
 
-#if defined(_WIN32)
-int duplicate_fd(int descriptor) { return _dup(descriptor); }
-int replace_fd(int source, int destination) { return _dup2(source, destination); }
-int file_descriptor(FILE *file) { return _fileno(file); }
-void close_fd(int descriptor) { _close(descriptor); }
-#else
-int duplicate_fd(int descriptor) { return dup(descriptor); }
-int replace_fd(int source, int destination) { return dup2(source, destination); }
-int file_descriptor(FILE *file) { return fileno(file); }
-void close_fd(int descriptor) { close(descriptor); }
-#endif
-
 class StdoutCapture {
 public:
-  StdoutCapture() : temporary_(std::tmpfile()), output_(file_descriptor(stdout)) {
-    if (!temporary_) throw std::runtime_error("cannot create OpenCL CTS listing buffer");
+  StdoutCapture() : temporary(std::tmpfile()), output(::fileno(stdout)) {
+    if (!temporary) throw std::runtime_error("cannot create OpenCL CTS listing buffer");
     std::cout.flush();
     std::fflush(stdout);
-    saved_ = duplicate_fd(output_);
-    if (saved_ < 0 || replace_fd(file_descriptor(temporary_), output_) < 0) {
-      if (saved_ >= 0) close_fd(saved_);
-      std::fclose(temporary_);
-      temporary_ = nullptr;
+    saved = ::dup(output);
+    if (saved < 0 || ::dup2(::fileno(temporary), output) < 0) {
+      if (saved >= 0) ::close(saved);
+      std::fclose(temporary);
+      temporary = nullptr;
       throw std::runtime_error("cannot redirect OpenCL CTS listing");
     }
   }
 
   ~StdoutCapture() {
-    if (saved_ >= 0) {
+    if (saved >= 0) {
       std::fflush(stdout);
-      replace_fd(saved_, output_);
-      close_fd(saved_);
+      ::dup2(saved, output);
+      ::close(saved);
     }
-    if (temporary_) std::fclose(temporary_);
+    if (temporary) std::fclose(temporary);
   }
 
   StdoutCapture(const StdoutCapture &) = delete;
@@ -79,29 +63,29 @@ public:
   std::string finish() {
     std::cout.flush();
     std::fflush(stdout);
-    const auto restore_status = replace_fd(saved_, output_);
-    close_fd(saved_);
-    saved_ = -1;
-    if (restore_status < 0) throw std::runtime_error("cannot restore OpenCL CTS output");
-    std::rewind(temporary_);
+    const auto restoreStatus = ::dup2(saved, output);
+    ::close(saved);
+    saved = -1;
+    if (restoreStatus < 0) throw std::runtime_error("cannot restore OpenCL CTS output");
+    std::rewind(temporary);
     std::string result;
     char buffer[4096];
-    while (const auto count = std::fread(buffer, 1, sizeof(buffer), temporary_))
+    while (const auto count = std::fread(buffer, 1, sizeof(buffer), temporary))
       result.append(buffer, count);
-    std::fclose(temporary_);
-    temporary_ = nullptr;
+    std::fclose(temporary);
+    temporary = nullptr;
     return result;
   }
 
 private:
-  FILE *temporary_;
-  int output_;
-  int saved_ = -1;
+  FILE *temporary;
+  int output;
+  int saved = -1;
 };
 
 std::string listing() {
   StdoutCapture capture;
-  const auto status = invoke_upstream({"opencl_cts_" CONFORMANCE_CTS_CATEGORY, "--list"});
+  const auto status = invokeUpstream({"opencl_cts_" CONFORMANCE_CTS_CATEGORY, "--list"});
   auto result = capture.finish();
   if (status != 0) throw std::runtime_error("OpenCL CTS listing failed");
   return result;
@@ -129,10 +113,10 @@ std::vector<std::string> cases() {
 
 class CaseInvoker final : public Catch::ITestInvoker {
 public:
-  explicit CaseInvoker(std::string name) : name_(std::move(name)) {}
+  explicit CaseInvoker(std::string name) : name(std::move(name)) {}
   void invoke() const override {
-    (void)conformance::physical_device();
-    std::vector<std::string> arguments{"opencl_cts_" CONFORMANCE_CTS_CATEGORY, name_};
+    (void)conformance::deviceSelection();
+    std::vector<std::string> arguments{"opencl_cts_" CONFORMANCE_CTS_CATEGORY, name};
     const auto *wimpy = std::getenv("CONFORMANCE_OPENCL_CTS_WIMPY");
     const bool reduced = wimpy && std::string_view(wimpy) == "1";
     if (reduced) arguments.emplace_back("--wimpy");
@@ -167,16 +151,16 @@ public:
         }
       }
     }
-    const auto passed_before = gTestsPassed;
-    REQUIRE(invoke_upstream(std::move(arguments)) == 0);
-    if (gTestsPassed == passed_before) SKIP("OpenCL CTS skipped this test for the selected device");
+    const auto passedBefore = gTestsPassed;
+    REQUIRE(invokeUpstream(std::move(arguments)) == 0);
+    if (gTestsPassed == passedBefore) SKIP("OpenCL CTS skipped this test for the selected device");
   }
 
 private:
-  std::string name_;
+  std::string name;
 };
 
-void register_cases() {
+void registerCases() {
   for (auto &name : cases()) {
     const auto identity = "cts/opencl/" CONFORMANCE_CTS_CATEGORY "/" + name;
     Catch::AutoReg(Catch::Detail::make_unique<CaseInvoker>(std::move(name)), CATCH_INTERNAL_LINEINFO, Catch::StringRef(),
@@ -190,6 +174,6 @@ void register_cases() {
   #undef main
 #endif
 int main(int argc, char **argv) {
-  register_cases();
+  registerCases();
   return Catch::Session().run(argc, argv);
 }

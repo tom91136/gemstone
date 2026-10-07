@@ -10,8 +10,8 @@ struct Dispatch {
   std::array<VkDescriptorSet, MaxBoundDescriptorSets> descriptors{};
   uint32_t x = 1, y = 1, z = 1;
   std::array<uint32_t, 3> base{};
-  std::array<uint8_t, execution::GraphicsPushConstantBytes> pushConstants{};
-  std::map<GemstoneVulkanDescriptorSlot, uint32_t> dynamicOffsets{};
+  std::array<uint8_t, gx::GraphicsPushConstantBytes> pushConstants{};
+  std::map<DescriptorSlot, uint32_t> dynamicOffsets{};
 };
 
 struct Copy {
@@ -23,12 +23,12 @@ struct Copy {
 struct Resolve {
   VkImage source;
   VkImage destination;
-  std::vector<execution::GraphicsImageCopy> copies;
+  std::vector<gx::GraphicsImageCopy> copies;
 };
 struct Blit {
   VkImage source;
   VkImage destination;
-  std::vector<execution::GraphicsBlit> copies;
+  std::vector<gx::GraphicsBlit> copies;
   VkFilter filter;
 };
 struct ResetQuery {
@@ -86,14 +86,14 @@ struct DrawIndirect {
 struct CopyBufferImage {
   VkBuffer bufferHandle;
   VkImage imageHandle;
-  std::vector<execution::GraphicsBufferImageCopy> copies;
+  std::vector<gx::GraphicsBufferImageCopy> copies;
   bool toImage;
 };
 struct ClearAttachments {
   std::vector<VkClearAttachment> clears;
   std::vector<VkClearRect> rects;
 };
-struct ClearColor {
+struct ClearColour {
   VkImage handle;
   VkClearColorValue value;
   std::vector<VkImageSubresourceRange> regions;
@@ -106,7 +106,7 @@ struct ClearDepthStencil {
 struct CopyImage {
   VkImage source;
   VkImage destination;
-  std::vector<execution::GraphicsImageCopy> copies;
+  std::vector<gx::GraphicsImageCopy> copies;
 };
 struct Invalid {};
 struct SetEvent {
@@ -136,6 +136,6 @@ struct FillBuffer {
 };
 using Operation =
     std::variant<Dispatch, Copy, FillBuffer, ResetEvent, DispatchIndirect, UpdateBuffer, WaitEvents, SetEvent, Invalid, CopyImage,
-                 ClearDepthStencil, ClearColor, ClearAttachments, CopyBufferImage, DrawIndirect, Draw, EndRenderPass, NextSubpass,
+                 ClearDepthStencil, ClearColour, ClearAttachments, CopyBufferImage, DrawIndirect, Draw, EndRenderPass, NextSubpass,
                  BeginRenderPass, CopyQueryResults, WriteTimestamp, EndQuery, BeginQuery, ResetQuery, Blit, Resolve>;
 } // namespace gemstone::vulkan::recorded

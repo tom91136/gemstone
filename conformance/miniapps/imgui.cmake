@@ -1,20 +1,19 @@
-set(miniapp_imgui_models vulkan)
-conformance_select_miniapp_models(imgui "vulkan" imgui_models)
+conformance_miniapp_models(imgui imgui_models vulkan)
 if(NOT imgui_models)
   return()
 endif()
-conformance_fetch_url(conformance_imgui imgui_source)
+FetchContent_MakeAvailable(imgui)
 find_program(imgui_glslc glslc REQUIRED)
 find_file(imgui_lavapipe NAMES lvp_icd.x86_64.json lvp_icd.json
   PATHS /usr/share/vulkan/icd.d REQUIRED)
 
 add_library(miniapp_imgui STATIC
-  "${imgui_source}/imgui.cpp"
-  "${imgui_source}/imgui_draw.cpp"
-  "${imgui_source}/imgui_tables.cpp"
-  "${imgui_source}/imgui_widgets.cpp"
-  "${imgui_source}/backends/imgui_impl_vulkan.cpp")
-target_include_directories(miniapp_imgui SYSTEM PUBLIC "${imgui_source}" "${imgui_source}/backends")
+  "${imgui_SOURCE_DIR}/imgui.cpp"
+  "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+  "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+  "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+  "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp")
+target_include_directories(miniapp_imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
 target_link_libraries(miniapp_imgui PUBLIC Vulkan::Vulkan)
 target_compile_features(miniapp_imgui PUBLIC cxx_std_17)
 
@@ -23,8 +22,8 @@ foreach(stage vert frag)
   set(shader "${CMAKE_CURRENT_BINARY_DIR}/imgui_${stage}.hpp")
   add_custom_command(OUTPUT "${shader}"
     COMMAND "${imgui_glslc}" --target-env=vulkan1.1 -mfmt=c
-      "${imgui_source}/backends/vulkan/glsl_shader.${stage}" -o "${shader}"
-    DEPENDS "${imgui_source}/backends/vulkan/glsl_shader.${stage}" VERBATIM)
+      "${imgui_SOURCE_DIR}/backends/vulkan/glsl_shader.${stage}" -o "${shader}"
+    DEPENDS "${imgui_SOURCE_DIR}/backends/vulkan/glsl_shader.${stage}" VERBATIM)
   list(APPEND imgui_shaders "${shader}")
 endforeach()
 add_library(miniapp_imgui_scene STATIC imgui_scene.cpp ${imgui_shaders})
@@ -51,4 +50,4 @@ add_dependencies(miniapp_imgui_vulkan imgui_reference_images)
 conformance_register_test_program(miniapp_imgui_vulkan 300)
 list(APPEND miniapp_targets miniapp_imgui_vulkan)
 install(FILES ${imgui_references} DESTINATION imgui COMPONENT support)
-install(FILES "${imgui_source}/LICENSE.txt" DESTINATION licenses RENAME imgui.txt COMPONENT support)
+install(FILES "${imgui_SOURCE_DIR}/LICENSE.txt" DESTINATION licences RENAME imgui.txt COMPONENT support)

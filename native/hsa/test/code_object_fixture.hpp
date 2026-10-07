@@ -1,5 +1,4 @@
-#ifndef GEMSTONE_HSA_TESTS_CODE_OBJECT_FIXTURE_HPP
-#define GEMSTONE_HSA_TESTS_CODE_OBJECT_FIXTURE_HPP
+#pragma once
 
 #include <cstring>
 #include <string_view>
@@ -75,13 +74,13 @@ inline std::vector<uint8_t> codeObjectFixture(uint32_t metadataNoteCount = 1, bo
   appendString(metadata, ".symbol");
   appendString(metadata, "add.kd");
 
-  constexpr size_t note_offset = sizeof(Elf64_Ehdr);
-  const size_t name_size = 7;
-  const size_t padded_name = 8;
-  const size_t padded_description = (metadata.size() + 3) & ~size_t{3};
-  const size_t note_size = 12 + padded_name + padded_description;
-  const size_t section_offset = note_offset + note_size * metadataNoteCount;
-  std::vector<uint8_t> image(section_offset + 2 * sizeof(Elf64_Shdr));
+  constexpr size_t noteOffset = sizeof(Elf64_Ehdr);
+  const size_t nameSize = 7;
+  const size_t paddedName = 8;
+  const size_t paddedDescription = (metadata.size() + 3) & ~size_t{3};
+  const size_t noteSize = 12 + paddedName + paddedDescription;
+  const size_t sectionOffset = noteOffset + noteSize * metadataNoteCount;
+  std::vector<uint8_t> image(sectionOffset + 2 * sizeof(Elf64_Shdr));
 
   Elf64_Ehdr header{};
   std::memcpy(header.e_ident, ELFMAG, SELFMAG);
@@ -93,37 +92,37 @@ inline std::vector<uint8_t> codeObjectFixture(uint32_t metadataNoteCount = 1, bo
   header.e_version = EV_CURRENT;
   header.e_ehsize = sizeof(header);
   header.e_phentsize = sizeof(Elf64_Phdr);
-  header.e_shoff = section_offset;
+  header.e_shoff = sectionOffset;
   header.e_shentsize = sizeof(Elf64_Shdr);
   header.e_shnum = 2;
   std::memcpy(image.data(), &header, sizeof(header));
 
-  const uint32_t note_header[] = {static_cast<uint32_t>(name_size), static_cast<uint32_t>(metadata.size()), 32};
+  const uint32_t noteHeader[] = {static_cast<uint32_t>(nameSize), static_cast<uint32_t>(metadata.size()), 32};
   for (uint32_t index = 0; index < metadataNoteCount; ++index) {
-    const size_t current = note_offset + static_cast<size_t>(index) * note_size;
-    std::memcpy(image.data() + current, note_header, sizeof(note_header));
-    std::memcpy(image.data() + current + 12, "AMDGPU\0", name_size);
-    std::memcpy(image.data() + current + 12 + padded_name, metadata.data(), metadata.size());
+    const size_t current = noteOffset + static_cast<size_t>(index) * noteSize;
+    std::memcpy(image.data() + current, noteHeader, sizeof(noteHeader));
+    std::memcpy(image.data() + current + 12, "AMDGPU\0", nameSize);
+    std::memcpy(image.data() + current + 12 + paddedName, metadata.data(), metadata.size());
   }
 
   Elf64_Shdr note{};
   note.sh_type = SHT_NOTE;
-  note.sh_offset = note_offset;
-  note.sh_size = note_size * metadataNoteCount;
-  std::memcpy(image.data() + section_offset + sizeof(Elf64_Shdr), &note, sizeof(note));
+  note.sh_offset = noteOffset;
+  note.sh_size = noteSize * metadataNoteCount;
+  std::memcpy(image.data() + sectionOffset + sizeof(Elf64_Shdr), &note, sizeof(note));
   return image;
 }
 
-// ELF-only variable fixture: initialized data, zero-filled BSS, an alias,
+// ELF-only variable fixture: initialised data, zero-filled BSS, an alias,
 // a zero-sized definition and an undefined declaration. Both symbol tables
 // contain the same definitions, as a linked DSO normally does.
 inline std::vector<uint8_t> variableObjectFixture() {
   constexpr char names[] = "\0arbitrary_data\0arbitrary_bss\0data_alias\0zero_global\0undefined_global\0";
   constexpr size_t count = 6;
-  constexpr size_t strings_offset = sizeof(Elf64_Ehdr) + count * sizeof(Elf64_Shdr);
-  constexpr size_t symbols_offset = strings_offset + sizeof(names);
-  constexpr size_t data_offset = symbols_offset + 6 * sizeof(Elf64_Sym);
-  std::vector<uint8_t> bytes(data_offset + 16, 0);
+  constexpr size_t stringsOffset = sizeof(Elf64_Ehdr) + count * sizeof(Elf64_Shdr);
+  constexpr size_t symbolsOffset = stringsOffset + sizeof(names);
+  constexpr size_t dataOffset = symbolsOffset + 6 * sizeof(Elf64_Sym);
+  std::vector<uint8_t> bytes(dataOffset + 16, 0);
   Elf64_Ehdr header{};
   std::memcpy(header.e_ident, ELFMAG, SELFMAG);
   header.e_ident[EI_CLASS] = ELFCLASS64;
@@ -136,17 +135,17 @@ inline std::vector<uint8_t> variableObjectFixture() {
   std::memcpy(bytes.data(), &header, sizeof(header));
   Elf64_Shdr sections[count]{};
   sections[1].sh_type = SHT_STRTAB;
-  sections[1].sh_offset = strings_offset;
+  sections[1].sh_offset = stringsOffset;
   sections[1].sh_size = sizeof(names);
   sections[2].sh_type = SHT_SYMTAB;
-  sections[2].sh_offset = symbols_offset;
+  sections[2].sh_offset = symbolsOffset;
   sections[2].sh_size = 6 * sizeof(Elf64_Sym);
   sections[2].sh_entsize = sizeof(Elf64_Sym);
   sections[2].sh_link = 1;
   sections[3].sh_type = SHT_PROGBITS;
   sections[3].sh_flags = SHF_ALLOC | SHF_WRITE;
   sections[3].sh_addr = 0x1000;
-  sections[3].sh_offset = data_offset;
+  sections[3].sh_offset = dataOffset;
   sections[3].sh_size = 16;
   sections[4].sh_type = SHT_NOBITS;
   sections[4].sh_flags = SHF_ALLOC | SHF_WRITE;
@@ -155,7 +154,7 @@ inline std::vector<uint8_t> variableObjectFixture() {
   sections[5] = sections[2];
   sections[5].sh_type = SHT_DYNSYM;
   std::memcpy(bytes.data() + sizeof(header), sections, sizeof(sections));
-  std::memcpy(bytes.data() + strings_offset, names, sizeof(names));
+  std::memcpy(bytes.data() + stringsOffset, names, sizeof(names));
   Elf64_Sym symbols[6]{};
   constexpr uint32_t offsets[] = {1, 16, 30, 41, 53};
   for (size_t index = 1; index < 6; ++index) {
@@ -175,25 +174,25 @@ inline std::vector<uint8_t> variableObjectFixture() {
   symbols[4].st_value = 0x2020;
   symbols[4].st_size = 0;
   symbols[5].st_shndx = SHN_UNDEF;
-  std::memcpy(bytes.data() + symbols_offset, symbols, sizeof(symbols));
+  std::memcpy(bytes.data() + symbolsOffset, symbols, sizeof(symbols));
   for (uint8_t index = 0; index < 16; ++index)
-    bytes[data_offset + index] = index + 1;
+    bytes[dataOffset + index] = index + 1;
   return bytes;
 }
 
 inline std::vector<uint8_t> variableKernelObjectFixture() {
   auto bytes = variableObjectFixture();
   const auto kernel = codeObjectFixture(1, true);
-  Elf64_Ehdr kernel_header{};
-  std::memcpy(&kernel_header, kernel.data(), sizeof(kernel_header));
+  Elf64_Ehdr kernelHeader{};
+  std::memcpy(&kernelHeader, kernel.data(), sizeof(kernelHeader));
   Elf64_Shdr note{};
-  for (uint16_t index = 0; index < kernel_header.e_shnum; ++index) {
-    std::memcpy(&note, kernel.data() + kernel_header.e_shoff + index * sizeof(note), sizeof(note));
+  for (uint16_t index = 0; index < kernelHeader.e_shnum; ++index) {
+    std::memcpy(&note, kernel.data() + kernelHeader.e_shoff + index * sizeof(note), sizeof(note));
     if (note.sh_type == SHT_NOTE) break;
   }
-  const auto note_offset = bytes.size();
+  const auto noteOffset = bytes.size();
   bytes.insert(bytes.end(), kernel.begin() + note.sh_offset, kernel.begin() + note.sh_offset + note.sh_size);
-  note.sh_offset = note_offset;
+  note.sh_offset = noteOffset;
   Elf64_Ehdr header{};
   std::memcpy(&header, bytes.data(), sizeof(header));
   std::vector<Elf64_Shdr> sections(header.e_shnum);
@@ -208,5 +207,3 @@ inline std::vector<uint8_t> variableKernelObjectFixture() {
 }
 
 } // namespace gemstone::hsa::test
-
-#endif

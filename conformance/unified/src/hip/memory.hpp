@@ -10,10 +10,9 @@
 namespace memory_patterns {
 struct Backend {
   std::string kind;
-  std::string allocationKind() const { return kind; }
   hipModule_t module{};
   hipFunction_t function{};
-  explicit Backend(std::string kind = "managed", uint64_t selected = 0) : kind(std::move(kind)) {
+  explicit Backend(std::string kind) : kind(std::move(kind)) {
     check(hipInit(0));
     auto code = image("kernel.hsaco");
     check(hipModuleLoadData(&module, code.data()));
@@ -22,7 +21,6 @@ struct Backend {
   ~Backend() { (void)hipModuleUnload(module); }
   void *allocate(size_t size) {
     void *p{};
-    const auto kind = allocationKind();
     if (kind == "registered") {
       p = ordinary(size);
       check(hipHostRegister(p, size, hipHostRegisterMapped));
@@ -42,10 +40,10 @@ struct Backend {
     return p;
   }
   void release(void *p) {
-    if (allocationKind() == "registered") {
+    if (kind == "registered") {
       check(hipHostUnregister(p));
       std::free(p);
-    } else if (allocationKind() == "host") check(hipHostFree(p));
+    } else if (kind == "host") check(hipHostFree(p));
     else check(hipFree(p));
   }
   void enqueue(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count, hipStream_t stream) {

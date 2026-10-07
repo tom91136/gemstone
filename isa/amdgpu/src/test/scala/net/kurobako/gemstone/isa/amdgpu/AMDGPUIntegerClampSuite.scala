@@ -1,13 +1,12 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import ELF.*
 import VMIR.*
 import fixtures.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.*
+import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.either.*
 
 class AMDGPUIntegerClampSuite extends munit.FunSuite {
   // Fixed LLVM gfx803 VOP3 encodings: v2, s[8:9], v3, v4, optionally s[10:11].
@@ -31,11 +30,11 @@ class AMDGPUIntegerClampSuite extends munit.FunSuite {
     test(s"gfx803 $name clamp=$clamp retains the carry mask") {
       import InstructionSource.*
       val bytes = Vec(2, if (clamp) 0x88 else 8, opcode, 0xd1, 3, 9, if (opcode >= 0x1c) 0x2a else 2, 0).map(_.toByte)
-      val operation  = VMCompiler.decodeInstruction(bytes, Target("gfx803")).fold(error => fail(error.raw), identity)
-      val memory     = TestMemory()
+      val operation  = decoded(Target("gfx803"), bytes)
+      val memory     = RegionMemory()
       val allocation = AllocationId(1)
       memory.allocate(allocation, 8)
-      val address    = memory.address(allocation, 0L).toOption.get.raw
+      val address    = memory.address(allocation, 0L).value.raw
       val operations = Vec(
         Instruction.SMove64(6, Constant(address)),
         Instruction.SMove64(10, Constant(input.toLong)),
@@ -43,14 +42,10 @@ class AMDGPUIntegerClampSuite extends munit.FunSuite {
         Instruction.VMove(4, Constant(right)),
         operation,
         Instruction.VMove(3, Scalar(8)),
-        Instruction.GlobalStore(0, Some(6), 2, 8, 0),
+        Instruction.Store(2, MemoryAddress.Global(0, Some(6), 0), 8, false),
         Instruction.End
       )
-      val offsets = Vec.tabulate(operations.size)(_ * 4)
-      val source  = CodeObjectKernel("clamp", Target("gfx803"), 0, 0, 0, 0, 0, Vec.empty)
-      val kernel  = Kernel(source, operations, offsets.zipWithIndex.toMap, offsets, 0)
-      val task    = KernelTask.validated("clamp", Dimensions.One, Dimensions.One, Vec.empty).toOption.get
-      assertEquals(executeKernel(kernel, task, memory), Right(()))
+      assertEquals(runIR(operations, memory, codeKernel(target = Target("gfx803"))), Right(()))
       assertEquals(memory.getInt(allocation, 0), (if (clamp) saturated else wrapped).toInt)
       assertEquals(memory.getInt(allocation, 4), carry)
     }

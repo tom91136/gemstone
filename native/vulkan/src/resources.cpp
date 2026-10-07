@@ -11,8 +11,7 @@
 
 #include "submission.hpp"
 
-namespace gemstone::vulkan::adapter {
-namespace gx = gemstone::execution;
+namespace gemstone::vulkan {
 bool depthStencilFormat(VkFormat format) { return depthFormat(format) || stencilFormat(format); }
 VkImageAspectFlags imageAspect(VkFormat format) {
   return depthStencilFormat(format)
@@ -21,17 +20,17 @@ VkImageAspectFlags imageAspect(VkFormat format) {
 }
 bool validAspects(VkFormat format, VkImageAspectFlags aspects) { return aspects && !(aspects & ~imageAspect(format)); }
 
-VkExtent3D mipExtent(const gemstone::vulkan::Image &image, uint32_t level) {
+VkExtent3D mipExtent(const Image &image, uint32_t level) {
   return {std::max(1u, image.extent.width >> level), std::max(1u, image.extent.height >> level), std::max(1u, image.extent.depth >> level)};
 }
-ImageLayout imageLayoutOf(const gemstone::vulkan::Image &image) {
+ImageLayout imageLayoutOf(const Image &image) {
   ImageLayout result;
   for (uint32_t level = 0; level < image.mipLevels; ++level) {
     const auto extent = mipExtent(image, level);
     auto storage = extent;
-    if (gemstone::vulkan::compressedImageFormat(image.format)) {
-      storage.width = gemstone::vulkan::CompressedImageFormat::blocks(storage.width);
-      storage.height = gemstone::vulkan::CompressedImageFormat::blocks(storage.height);
+    if (compressedImageFormat(image.format)) {
+      storage.width = CompressedImageFormat::blocks(storage.width);
+      storage.height = CompressedImageFormat::blocks(storage.height);
     }
     const uint64_t row = static_cast<uint64_t>(storage.width) * texelSize(image.format) * image.samples;
     const uint64_t slice = row * storage.height;
@@ -45,8 +44,8 @@ ImageLayout imageLayoutOf(const gemstone::vulkan::Image &image) {
   }
   return result;
 }
-uint64_t imageSize(const gemstone::vulkan::Image &image) { return imageLayoutOf(image).size; }
-gemstone::vulkan::Image imageSlice(ImageSlice slice) {
+uint64_t imageSize(const Image &image) { return imageLayoutOf(image).size; }
+Image imageSlice(ImageSlice slice) {
   auto image = images.at(slice.image);
   const auto level = imageLayoutOf(image).levels.at(slice.level);
   image.offset += level.offset.value + (slice.depthSlices ? level.slicePitch.value : level.layerPitch.value) * slice.baseLayer;
@@ -60,21 +59,33 @@ gemstone::vulkan::Image imageSlice(ImageSlice slice) {
   if (slice.format != VK_FORMAT_UNDEFINED) image.format = slice.format;
   return image;
 }
-static uint8_t *imageData(const gemstone::vulkan::Image &image, uint64_t size) {
+static uint8_t *imageData(const Image &image, uint64_t size) {
   const auto memory = memories.find(image.memory);
   if (memory == memories.end() || image.offset > memory->second->bytes.size() || size > memory->second->bytes.size() - image.offset)
     return nullptr;
   return memory->second->bytes.data() + image.offset;
 }
 
-uint8_t *imageData(const gemstone::vulkan::Image &image) { return imageData(image, imageSize(image)); }
+uint8_t *imageData(const Image &image) { return imageData(image, imageSize(image)); }
+
+std::optional<BufferRange> bufferRange(VkBuffer handle, VkDeviceSize offset, VkDeviceSize size) {
+  const auto buffer = buffers.find(handle);
+  if (buffer == buffers.end()) return std::nullopt;
+  const auto memory = memories.find(buffer->second.memory);
+  const auto length = rangeLength(buffer->second.size, offset, size);
+  if (memory == memories.end() || !length) return std::nullopt;
+  const auto begin = buffer->second.offset + offset;
+  const auto bytes = memory->second->bytes;
+  if (begin > bytes.size() || *length > bytes.size() - begin) return std::nullopt;
+  return BufferRange{buffer->second.memory, begin, bytes.subspan(begin, *length)};
+}
 
 struct ImageDescriptor {
   VkDescriptorType type;
   VkImageView view;
   std::optional<gx::GraphicsSampler> sampler;
 };
-std::optional<ImageDescriptor> imageDescriptor(VkDescriptorSet set, GemstoneVulkanDescriptorSlot slot) {
+std::optional<ImageDescriptor> imageDescriptor(VkDescriptorSet set, DescriptorSlot slot) {
   const auto layout = descriptorSets.sets.find(set);
   if (layout == descriptorSets.sets.end()) return std::nullopt;
   const auto binding = layout->second.layout.find(slot.binding);
@@ -97,20 +108,19 @@ std::optional<ImageDescriptor> imageDescriptor(VkDescriptorSet set, GemstoneVulk
 }
 // Called under stateMutex. Merge overlapping descriptor ranges so shader aliases share storage,
 // while preserving each argument's individual offset and bounds.
-std::optional<gemstone::vulkan::StageResources> descriptorResources(const std::vector<gemstone::execution::ShaderDescriptor> &bindings,
-                                                                    const std::array<VkDescriptorSet, MaxBoundDescriptorSets> &sets,
-                                                                    const std::map<GemstoneVulkanDescriptorSlot, uint32_t> &dynamicOffsets,
-                                                                    uint32_t inputView) {
-  std::vector<GemstoneVulkanDescriptorRange> ranges;
+std::optional<StageResources> descriptorResources(const std::vector<gx::ShaderDescriptor> &bindings,
+                                                  const std::array<VkDescriptorSet, MaxBoundDescriptorSets> &sets,
+                                                  const std::map<DescriptorSlot, uint32_t> &dynamicOffsets, uint32_t inputView) {
+  std::vector<DescriptorRange> ranges;
   std::vector<size_t> bufferArguments;
   std::map<size_t, VkFormat> texelFormats;
   std::map<VkImage, size_t> imageAllocations;
-  gemstone::vulkan::StageResources result;
+  StageResources result;
   result.arguments.resize(bindings.size());
   for (size_t index = 0; index < bindings.size(); ++index) {
     const auto &binding = bindings[index];
-    const GemstoneVulkanDescriptorSlot slot{static_cast<uint32_t>(binding.set.value), static_cast<uint32_t>(binding.binding.value),
-                                            static_cast<uint32_t>(binding.element.value), binding.resource};
+    const DescriptorSlot slot{static_cast<uint32_t>(binding.set.value), static_cast<uint32_t>(binding.binding.value),
+                              static_cast<uint32_t>(binding.element.value), binding.resource};
     const auto set = sets.at(slot.set);
     const auto *descriptor = descriptorSets.get(set, slot.binding, slot.element);
     VkDescriptorBufferInfo texelRange{};
@@ -154,7 +164,7 @@ std::optional<gemstone::vulkan::StageResources> descriptorResources(const std::v
               && descriptor->type != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE && descriptor->type != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER))
         return std::nullopt;
       // Sampler-only variables do not consume image storage or trigger decoding.
-      if (descriptor->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && slot.resourceType == ShaderResourceKind::Sampler) {
+      if (descriptor->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && slot.resourceType == gx::ShaderResourceKind::Sampler) {
         result.descriptorBindings.push_back({static_cast<int32_t>(index), gx::GraphicsDescriptorSampler{*descriptor->sampler}});
         continue;
       }
@@ -166,7 +176,7 @@ std::optional<gemstone::vulkan::StageResources> descriptorResources(const std::v
         allocation = imageAllocations.emplace(slice.image, result.allocations.size()).first;
         result.allocations.push_back({data, layout.size, {}, image.memory, image.offset});
       }
-      if (gemstone::vulkan::compressedImageFormat(viewFormat) && descriptor->type != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+      if (compressedImageFormat(viewFormat) && descriptor->type != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
           && descriptor->type != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
         return std::nullopt;
       std::vector<gx::GraphicsImageLevel> levels;
@@ -188,30 +198,24 @@ std::optional<gemstone::vulkan::StageResources> descriptorResources(const std::v
       const gx::GraphicsComponents components{graphicsSwizzle(slice.components[0]), graphicsSwizzle(slice.components[1]),
                                               graphicsSwizzle(slice.components[2]), graphicsSwizzle(slice.components[3])};
       gx::DescriptorBinding binding{static_cast<int32_t>(index), gx::GraphicsDescriptorImage{source, components}};
-      if (descriptor->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && slot.resourceType != ShaderResourceKind::Image)
+      if (descriptor->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && slot.resourceType != gx::ShaderResourceKind::Image)
         binding.descriptor = gx::GraphicsDescriptorCombined{source, components, *descriptor->sampler};
       result.descriptorBindings.push_back(std::move(binding));
       // The source range retains its storage until execution replaces the argument with a descriptor.
       result.arguments[index] = StageResources::Argument{allocation->second, 0, layout.size};
       continue;
     }
-    const auto buffer = buffers.find(descriptor->buffer);
-    if (buffer == buffers.end()) return std::nullopt;
     auto offset = descriptor->offset;
     if (const auto dynamic = dynamicOffsets.find(slot); dynamic != dynamicOffsets.end()) {
       if (offset > UINT64_MAX - dynamic->second) return std::nullopt;
       offset += dynamic->second;
     }
-    const auto length = gemstoneVulkanDescriptorLength(buffer->second.size, offset, descriptor->range);
-    if (!length || buffer->second.offset > UINT64_MAX - offset) return std::nullopt;
-    const auto memory = memories.find(buffer->second.memory);
-    const auto begin = buffer->second.offset + offset;
-    if (memory == memories.end() || begin > memory->second->bytes.size() || *length > memory->second->bytes.size() - begin)
-      return std::nullopt;
-    ranges.push_back({buffer->second.memory, begin, *length});
+    const auto range = bufferRange(descriptor->buffer, offset, descriptor->range);
+    if (!range) return std::nullopt;
+    ranges.push_back({range->memory, range->offset, range->bytes.size()});
     bufferArguments.push_back(index);
   }
-  const auto allocationLayout = gemstoneVulkanDescriptorAllocationLayout(ranges);
+  const auto allocationLayout = descriptorAllocationLayout(ranges);
   const auto imageCount = result.allocations.size();
   for (const auto &allocation : allocationLayout.allocations)
     result.allocations.push_back(
@@ -233,11 +237,11 @@ std::optional<gemstone::vulkan::StageResources> descriptorResources(const std::v
   return result;
 }
 
-bool run(const Dispatch &dispatch) {
+bool execute(Execution &, const recorded::Dispatch &dispatch) {
   // Vulkan permits zero workgroups in any axis; this performs no work.
   if (!dispatch.x || !dispatch.y || !dispatch.z) return true;
-  gemstone::execution::PreparedShader pipeline;
-  gemstone::vulkan::StageResources resources;
+  gx::PreparedShader pipeline;
+  StageResources resources;
   {
     std::lock_guard lock(stateMutex);
     const auto pipe = pipelines.find(dispatch.pipeline);
@@ -253,7 +257,7 @@ bool run(const Dispatch &dispatch) {
     }
     resources = std::move(*packed);
   }
-  const auto size = pipeline.workgroup.value_or(gemstone::execution::ShaderWorkgroup{1, 1, 1});
+  const auto size = pipeline.workgroup.value_or(gx::ShaderWorkgroup{1, 1, 1});
   const std::array<uint32_t, 3> local{static_cast<uint32_t>(size.x.value), static_cast<uint32_t>(size.y.value),
                                       static_cast<uint32_t>(size.z.value)};
   for (size_t axis = 0; axis < 3; ++axis)
@@ -262,7 +266,7 @@ bool run(const Dispatch &dispatch) {
   if (trace)
     std::fprintf(stderr, "Gemstone Vulkan dispatch: %s bindings=%zu groups=%u,%u,%u local=%u,%u,%u\n", pipeline.entry.value.c_str(),
                  pipeline.descriptors.size(), dispatch.x, dispatch.y, dispatch.z, local[0], local[1], local[2]);
-  gemstone::vulkan::SubmissionResources submission(rpcExecutionMutex);
+  SubmissionResources submission(rpcExecutionMutex);
   auto *client = submission.get();
   if (!client) return false;
   const auto program = submission.load(pipeline.image);
@@ -270,10 +274,10 @@ bool run(const Dispatch &dispatch) {
   auto bound = bindStageResources(
       resources, [&](const StageResources::Allocation &allocation) { return submission.memory(allocation.data, allocation.size, true); });
   if (!bound || !submission.get()) return false;
-  std::vector<Argument> arguments;
+  std::vector<gx::Argument> arguments;
   for (const auto &view : bound->arguments) {
-    if (view) arguments.emplace_back(ArgumentMemory{view->allocation, view->offset, LongPositive{view->size.value}});
-    else arguments.emplace_back(ArgumentScalar{}); // Filled by descriptor preparation before shader execution.
+    if (view) arguments.emplace_back(gx::ArgumentMemory{view->allocation, view->offset, gx::LongPositive{view->size.value}});
+    else arguments.emplace_back(gx::ArgumentDescriptor{});
   }
   const auto failed = [&] {
     std::fprintf(stderr, "Gemstone Vulkan: dispatch failed: %s\n", client->error().c_str());
@@ -283,30 +287,30 @@ bool run(const Dispatch &dispatch) {
   if (pipeline.pushConstants) {
     const auto range = submission.memory(pushConstants.data(), pushConstants.size(), true);
     if (!submission.get()) return failed();
-    arguments.emplace_back(ArgumentMemory{range.allocation, range.offset.value, LongPositive{range.size.value}});
+    arguments.emplace_back(gx::ArgumentMemory{range.allocation, range.offset.value, gx::LongPositive{range.size.value}});
   }
 
-  const Dimensions groupSize{static_cast<int32_t>(local[0]), static_cast<int32_t>(local[1]), static_cast<int32_t>(local[2])};
-  const Dimensions groupCount{static_cast<int32_t>(dispatch.x), static_cast<int32_t>(dispatch.y), static_cast<int32_t>(dispatch.z)};
-  const GlobalDimensions globalSize{static_cast<int64_t>(local[0]) * dispatch.x, static_cast<int64_t>(local[1]) * dispatch.y,
-                                    static_cast<int64_t>(local[2]) * dispatch.z};
+  const gx::Dimensions groupSize{static_cast<int32_t>(local[0]), static_cast<int32_t>(local[1]), static_cast<int32_t>(local[2])};
+  const gx::Dimensions groupCount{static_cast<int32_t>(dispatch.x), static_cast<int32_t>(dispatch.y), static_cast<int32_t>(dispatch.z)};
+  const gx::GlobalDimensions globalSize{static_cast<int64_t>(local[0]) * dispatch.x, static_cast<int64_t>(local[1]) * dispatch.y,
+                                        static_cast<int64_t>(local[2]) * dispatch.z};
   const std::array<uint64_t, 3> offset{static_cast<uint64_t>(dispatch.base[0]) * local[0],
                                        static_cast<uint64_t>(dispatch.base[1]) * local[1],
                                        static_cast<uint64_t>(dispatch.base[2]) * local[2]};
-  const Coordinates base{static_cast<int32_t>(offset[0]), static_cast<int32_t>(offset[1]), static_cast<int32_t>(offset[2])};
-  auto launched = client->call(Launch{*program,
-                                      pipeline.entry.value,
-                                      groupSize,
-                                      groupCount,
-                                      globalSize,
-                                      3,
-                                      base,
-                                      0,
-                                      0,
-                                      std::move(arguments),
-                                      {},
-                                      false,
-                                      std::move(bound->descriptorBindings)});
+  const gx::Coordinates base{static_cast<int32_t>(offset[0]), static_cast<int32_t>(offset[1]), static_cast<int32_t>(offset[2])};
+  auto launched = client->call(gx::Launch{*program,
+                                          pipeline.entry.value,
+                                          groupSize,
+                                          groupCount,
+                                          globalSize,
+                                          3,
+                                          base,
+                                          0,
+                                          0,
+                                          std::move(arguments),
+                                          {},
+                                          false,
+                                          std::move(bound->descriptorBindings)});
   if (!launched) {
     std::fprintf(stderr, "Gemstone Vulkan: launch request failed: %s\n", launched.error().detail.c_str());
     return failed();
@@ -314,26 +318,4 @@ bool run(const Dispatch &dispatch) {
   if (!submission.complete(launched.value())) return failed();
   return true;
 }
-
-bool copyBuffers(const Copy &copy) {
-  std::lock_guard lock(stateMutex);
-  const auto src = buffers.find(copy.source);
-  const auto dst = buffers.find(copy.destination);
-  if (src == buffers.end() || dst == buffers.end()) return false;
-  const auto srcMem = memories.find(src->second.memory);
-  const auto dstMem = memories.find(dst->second.memory);
-  if (srcMem == memories.end() || dstMem == memories.end()) return false;
-  for (const auto &region : copy.regions) {
-    const auto srcOffset = src->second.offset + region.srcOffset;
-    const auto dstOffset = dst->second.offset + region.dstOffset;
-    if (region.srcOffset > src->second.size || region.size > src->second.size - region.srcOffset || region.dstOffset > dst->second.size
-        || region.size > dst->second.size - region.dstOffset || srcOffset > srcMem->second->bytes.size()
-        || region.size > srcMem->second->bytes.size() - srcOffset || dstOffset > dstMem->second->bytes.size()
-        || region.size > dstMem->second->bytes.size() - dstOffset)
-      return false;
-    std::memmove(dstMem->second->bytes.data() + dstOffset, srcMem->second->bytes.data() + srcOffset, static_cast<size_t>(region.size));
-  }
-  return true;
-}
-
-} // namespace gemstone::vulkan::adapter
+} // namespace gemstone::vulkan

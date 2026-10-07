@@ -3,20 +3,51 @@ cmake_minimum_required(VERSION 3.25)
 project(gpu_conformance VERSION 0.1.0 LANGUAGES C CXX)
 
 include(CTest)
-include(FetchContent)
 
 include(cmake/DependencyCache.cmake)
-include(cmake/Dependencies.cmake)
+include(cmake/SourceStaging.cmake)
 include(cmake/SystemIncludes.cmake)
-include(cmake/TestTimeouts.cmake)
 
 set(CONFORMANCE_DEPENDENCY_CACHE "${CONFORMANCE_DEPENDENCY_CACHE}" CACHE PATH
     "Shared source cache for conformance dependencies")
 option(CONFORMANCE_OFFLINE "Use only cached dependencies; forbid network fetches" OFF)
+set(DEPENDENCY_CACHE "${CONFORMANCE_DEPENDENCY_CACHE}")
+set(DEPENDENCY_OFFLINE "${CONFORMANCE_OFFLINE}")
+include(dependencies.cmake)
+set(glaze_INSTALL OFF CACHE BOOL "" FORCE)
+set(MAGIC_ENUM_OPT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(MAGIC_ENUM_OPT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(MAGIC_ENUM_OPT_INSTALL OFF CACHE BOOL "" FORCE)
+set(FMT_TEST OFF CACHE BOOL "" FORCE)
+set(FMT_DOC OFF CACHE BOOL "" FORCE)
+set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
+set(CATCH_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CATCH_BUILD_EXTRA_TESTS OFF CACHE BOOL "" FORCE)
+set(CATCH_ENABLE_REPRODUCIBLE_BUILD ON CACHE BOOL "" FORCE)
+set(CATCH_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
+set(CATCH_INSTALL_EXTRAS OFF CACHE BOOL "" FORCE)
+set(ASPARTAME_ENABLE_TEST OFF CACHE BOOL "" FORCE)
+set(ASPARTAME_ENABLE_BENCHMARK OFF CACHE BOOL "" FORCE)
 
-# Keep compiler output independent of the checkout and build directory. This
-# also applies to the project-owned adapters compiled inside staged CTS and
-# miniapp source trees.
+# Test program timeouts in seconds. The emulator is far slower than hardware, so
+# cubic GEMM, the step-heavy miniapps, and a few OpenCL CTS categories get longer
+# budgets. The isolated launcher also applies the OpenCL CTS override per case.
+set(CONFORMANCE_TIMEOUT_UNIFIED 600)
+set(CONFORMANCE_TIMEOUT_MINIAPP 900)
+set(CONFORMANCE_TIMEOUT_CTS 240)
+# Full SYCL type matrices can put hundreds of variants in one Catch case.
+set(CONFORMANCE_TIMEOUT_SYCL_FULL 600)
+set(CONFORMANCE_TIMEOUT_SYCL_FULL_HANDLER 3600)
+set(CONFORMANCE_TIMEOUT_OPENCL_DEFAULT ${CONFORMANCE_TIMEOUT_CTS})
+set(CONFORMANCE_TIMEOUT_OPENCL_MULTIPLES 600)
+set(CONFORMANCE_TIMEOUT_OPENCL_THREAD_DIMENSIONS 1800)
+set(CONFORMANCE_TIMEOUT_OPENCL_ISOLATED 600)
+# The handler copy matrix passes alone in ~42s but exceeds 120s when sharing
+# emulator workers with the other compact workloads.
+set(CONFORMANCE_TIMEOUT_SYCL_HANDLER_ISOLATED 300)
+
+# Keep compiler output independent of the checkout and build directory, including
+# project-owned adapters compiled inside staged CTS and miniapp source trees.
 foreach(_conformance_language IN ITEMS C CXX HIP CUDA)
   add_compile_options(
     "$<$<COMPILE_LANG_AND_ID:${_conformance_language},GNU,Clang,AppleClang,IntelLLVM>:-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.>"
@@ -34,11 +65,6 @@ if(UNIX)
     set(CMAKE_${_conformance_language}_ARCHIVE_FINISH "<CMAKE_RANLIB> -D <TARGET>")
   endforeach()
 endif()
-
-# Toolchain drivers add SDK directories to build RPATHs (notably ROCm's
-# OpenMP offload driver). Installed artifacts carry their runtime closure, so
-# retaining those host-specific paths would make the bundle non-relocatable.
-set(CMAKE_INSTALL_REMOVE_ENVIRONMENT_RPATH TRUE)
 
 set(CONFORMANCE_BACKEND "" CACHE STRING
     "Backend artifact to build (cuda, hip, hsa, opencl, sycl, levelzero, vulkan, or openacc)")
@@ -108,7 +134,7 @@ endfunction()
 function(conformance_runtime_plugins)
   foreach(pattern IN LISTS ARGN)
     file(GLOB matches "${pattern}")
-    list(FILTER matches INCLUDE REGEX "\\.(dll|dylib|so)(\\.[0-9]+)*$")
+    list(FILTER matches INCLUDE REGEX "\\.so(\\.[0-9]+)*$")
     set_property(GLOBAL APPEND PROPERTY CONFORMANCE_RUNTIME_PLUGINS ${matches})
   endforeach()
 endfunction()
@@ -118,83 +144,33 @@ function(conformance_runtime_prefer filename path_regex)
     "${filename}|${path_regex}")
 endfunction()
 
-# Fetch immutable source archives without letting source-only dependencies add
-# their own targets to the build before the owning subtree stages them.
-function(conformance_fetch_url name output_variable)
-  conformance_dependency_lookup("${CONFORMANCE_DEPENDENCY_SOURCES}" "${name}" url sha256 kind)
-  conformance_dependency_cache_apply("${CONFORMANCE_DEPENDENCY_CACHE}" "${name}" "${CONFORMANCE_OFFLINE}" "${sha256}")
-  FetchContent_Declare(${name}
-    URL "${url}" URL_HASH "SHA256=${sha256}"
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    SOURCE_SUBDIR .conformance-source-only)
-  FetchContent_MakeAvailable(${name})
-  set(${output_variable} "${${name}_SOURCE_DIR}" PARENT_SCOPE)
-endfunction()
-
-# Dependencies the root project builds or installs, and the FetchContent policy
-# for each. Kept here because it is project policy, not a generic helper.
-function(conformance_declare_dependencies)
-  set(glaze_INSTALL OFF CACHE BOOL "" FORCE)
-  set(MAGIC_ENUM_OPT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(MAGIC_ENUM_OPT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  set(MAGIC_ENUM_OPT_INSTALL OFF CACHE BOOL "" FORCE)
-  set(FMT_TEST OFF CACHE BOOL "" FORCE)
-  set(FMT_DOC OFF CACHE BOOL "" FORCE)
-  set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
-  set(CATCH_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(CATCH_BUILD_EXTRA_TESTS OFF CACHE BOOL "" FORCE)
-  set(CATCH_ENABLE_REPRODUCIBLE_BUILD ON CACHE BOOL "" FORCE)
-  set(CATCH_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
-  set(CATCH_INSTALL_EXTRAS OFF CACHE BOOL "" FORCE)
-  set(ASPARTAME_ENABLE_TEST OFF CACHE BOOL "" FORCE)
-  set(ASPARTAME_ENABLE_BENCHMARK OFF CACHE BOOL "" FORCE)
-
-  foreach(name IN ITEMS glaze magic_enum fire Catch2 fmt aspartame)
-    conformance_dependency_lookup("${CONFORMANCE_DEPENDENCY_SOURCES}" "${name}" url sha256 kind)
-    conformance_dependency_cache_apply("${CONFORMANCE_DEPENDENCY_CACHE}" "${name}" "${CONFORMANCE_OFFLINE}" "${sha256}")
-    if(kind STREQUAL "file")
-      set(options DOWNLOAD_NO_EXTRACT YES)
-    else()
-      set(options DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-    endif()
-    if(name STREQUAL "Catch2")
-      list(APPEND options SOURCE_SUBDIR .conformance-source-only)
-    endif()
-    FetchContent_Declare(${name} URL "${url}" URL_HASH "SHA256=${sha256}" ${options})
-  endforeach()
-endfunction()
-
 set(conformance_artifact_targets)
 
-conformance_declare_dependencies()
-
 FetchContent_MakeAvailable(glaze)
-conformance_mark_system_includes(glaze::glaze)
+mark_system_includes(glaze::glaze)
 
 FetchContent_MakeAvailable(magic_enum)
-conformance_mark_system_includes(magic_enum)
-conformance_mark_system_includes(magic_enum::magic_enum)
+mark_system_includes(magic_enum)
+mark_system_includes(magic_enum::magic_enum)
 install(FILES "${magic_enum_SOURCE_DIR}/LICENSE"
-  DESTINATION licenses RENAME magic_enum.txt COMPONENT support)
+  DESTINATION licences RENAME magic_enum.txt COMPONENT support)
 
 FetchContent_MakeAvailable(fmt)
-conformance_mark_system_includes(fmt)
-conformance_mark_system_includes(fmt::fmt)
-conformance_mark_system_includes(fmt::fmt-header-only)
+mark_system_includes(fmt)
+mark_system_includes(fmt::fmt)
+mark_system_includes(fmt::fmt-header-only)
 install(FILES "${fmt_SOURCE_DIR}/LICENSE"
-  DESTINATION licenses RENAME fmt.txt COMPONENT support)
+  DESTINATION licences RENAME fmt.txt COMPONENT support)
 
 if(NOT CONFORMANCE_BACKEND OR BUILD_TESTING)
-  FetchContent_MakeAvailable(fire)
-  FetchContent_MakeAvailable(aspartame)
-  conformance_mark_system_includes(aspartame)
-  conformance_mark_system_includes(Aspartame::Aspartame)
+  FetchContent_MakeAvailable(fire aspartame)
+  mark_system_includes(aspartame)
+  mark_system_includes(Aspartame::Aspartame)
   add_library(conformance_driver STATIC src/driver.cpp src/profile.cpp src/environment.cpp src/process.cpp)
   target_compile_features(conformance_driver PUBLIC cxx_std_23)
   target_include_directories(conformance_driver PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" PRIVATE src)
   target_link_libraries(conformance_driver PUBLIC glaze::glaze magic_enum::magic_enum Aspartame::Aspartame fmt::fmt-header-only)
   target_compile_definitions(conformance_driver PUBLIC
-    CONFORMANCE_CTS_TIMEOUT_SECONDS=${CONFORMANCE_TIMEOUT_CTS}
     CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS="${CONFORMANCE_TIMEOUT_OPENCL_ISOLATED}"
     CONFORMANCE_SYCL_HANDLER_TIMEOUT_SECONDS=${CONFORMANCE_TIMEOUT_SYCL_HANDLER_ISOLATED})
   add_executable(conformance src/main.cpp)
@@ -208,11 +184,11 @@ if(BUILD_TESTING OR CONFORMANCE_BUILD_UNIFIED OR CONFORMANCE_BUILD_CTS OR
     CONFORMANCE_BUILD_MINIAPPS)
   FetchContent_MakeAvailable(Catch2)
   add_subdirectory("${catch2_SOURCE_DIR}" "${catch2_BINARY_DIR}" EXCLUDE_FROM_ALL)
-  conformance_mark_system_includes(Catch2)
-  conformance_mark_system_includes(Catch2WithMain)
+  mark_system_includes(Catch2)
+  mark_system_includes(Catch2WithMain)
 
   install(FILES "${catch2_SOURCE_DIR}/LICENSE.txt"
-    DESTINATION licenses RENAME Catch2.txt COMPONENT support)
+    DESTINATION licences RENAME Catch2.txt COMPONENT support)
 
 endif()
 
@@ -231,7 +207,6 @@ if(BUILD_TESTING)
   target_link_libraries(conformance_fixture PRIVATE Catch2::Catch2)
   add_executable(conformance_unit_tests
     tests/cuda_image_test.cpp
-    tests/device_lock_test.cpp
     tests/driver_test.cpp
     tests/profile_test.cpp)
   target_compile_features(conformance_unit_tests PRIVATE cxx_std_23)
@@ -257,8 +232,8 @@ if(BUILD_TESTING)
 endif()
 
 # Every configure produces one coherent artifact. GPU compiler drivers and SDKs
-# are intentionally never mixed in the same CMake build tree. Each test program
-# and its device probe are built against that artifact's single SDK ABI.
+# are never mixed in one build tree, so each test program and its device probe
+# share the artifact's single SDK ABI.
 if(CONFORMANCE_BACKEND)
   add_library(conformance_device STATIC src/device_runtime.cpp)
   set_target_properties(conformance_device PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -327,10 +302,10 @@ elseif(CONFORMANCE_BACKEND STREQUAL "sycl")
   target_compile_options(conformance_device PRIVATE -fsycl)
   target_link_options(conformance_device PUBLIC -fsycl)
 elseif(CONFORMANCE_BACKEND STREQUAL "levelzero")
-  conformance_fetch_url(conformance_levelzero_headers levelzero_headers)
+  FetchContent_MakeAvailable(levelzero_headers)
   set(conformance_levelzero_include "${CMAKE_BINARY_DIR}/levelzero-sdk/include")
   file(MAKE_DIRECTORY "${conformance_levelzero_include}/level_zero")
-  file(COPY "${levelzero_headers}/include/"
+  file(COPY "${levelzero_headers_SOURCE_DIR}/include/"
     DESTINATION "${conformance_levelzero_include}/level_zero")
   find_library(CONFORMANCE_LEVELZERO_LOADER ze_loader REQUIRED)
   add_library(conformance_levelzero INTERFACE)
@@ -344,18 +319,12 @@ if(CONFORMANCE_BACKEND)
   add_executable(conformance-device src/device_main.cpp)
   target_compile_features(conformance-device PRIVATE cxx_std_23)
   target_link_libraries(conformance-device PRIVATE conformance_device glaze::glaze)
-  if(APPLE)
-    set_property(TARGET conformance-device PROPERTY INSTALL_RPATH "@loader_path/lib")
-  elseif(UNIX)
-    set_property(TARGET conformance-device PROPERTY INSTALL_RPATH "$ORIGIN/lib")
-  endif()
   install(TARGETS conformance-device RUNTIME DESTINATION . COMPONENT architecture)
   list(APPEND conformance_artifact_targets conformance-device)
 endif()
 
 # Runtime closure is a property of the backend artifact, not of an individual
-# suite. Keep the plugin/search policy in one place so all suite combinations
-# produce the same relocatable runtime.
+# suite, so every suite combination produces the same relocatable runtime.
 if(CONFORMANCE_BACKEND STREQUAL "cuda" AND NOT CONFORMANCE_COMPILER STREQUAL "gcc")
   conformance_runtime_search_directory("${conformance_cuda_runtime_directory}")
   conformance_runtime_plugins(
@@ -383,8 +352,7 @@ elseif(CONFORMANCE_BACKEND STREQUAL "opencl")
   conformance_runtime_search_directory("${conformance_opencl_runtime_directory}")
   conformance_runtime_plugins("${conformance_opencl_runtime_directory}/libOpenCL.so*")
   # The runtime compiles OpenCL C to SPIR-V at execution time. Bundle the
-  # compiler subset so the artifact stays relocatable instead of depending on a
-  # toolchain installed on the host.
+  # compiler subset so the artifact does not depend on a host toolchain.
   set(conformance_opencl_toolchain "/opt/intel/oneapi/compiler/latest")
   if(EXISTS "${conformance_opencl_toolchain}/bin/icpx")
     install(PROGRAMS "${conformance_opencl_toolchain}/bin/icpx"
@@ -464,11 +432,6 @@ function(conformance_register_test_program target timeout)
   endif()
   set_target_properties("${target}" PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/programs/${CONFORMANCE_BACKEND}")
-  if(APPLE)
-    set_property(TARGET "${target}" PROPERTY INSTALL_RPATH "@loader_path/lib")
-  elseif(UNIX)
-    set_property(TARGET "${target}" PROPERTY INSTALL_RPATH "$ORIGIN/lib")
-  endif()
   get_target_property(imported "${target}" IMPORTED)
   if(NOT imported)
     install(TARGETS "${target}" RUNTIME DESTINATION . COMPONENT architecture)
@@ -536,16 +499,7 @@ get_property(conformance_runtime_plugins GLOBAL PROPERTY CONFORMANCE_RUNTIME_PLU
 get_property(conformance_runtime_preferences GLOBAL PROPERTY CONFORMANCE_RUNTIME_PREFERENCES)
 list(REMOVE_DUPLICATES conformance_runtime_plugins)
 list(REMOVE_DUPLICATES conformance_runtime_preferences)
-if(WIN32)
-  set(conformance_runtime_excludes
-    "api-ms-win-.*" "ext-ms-.*" "kernel32.dll" "user32.dll" "advapi32.dll"
-    "nvcuda.dll" "nvapi.*\\.dll" "ze_intel_gpu.*\\.dll")
-else()
-  set(conformance_runtime_excludes
-    "ld-linux.*" "libc\\.so.*" "libm\\.so.*" "libpthread\\.so.*"
-    "libdl\\.so.*" "librt\\.so.*" "libgcc_s\\.so.*" "libstdc\\+\\+\\.so.*"
-    "libcuda\\.so.*" "libnvidia-.*" "libze_intel_gpu\\.so.*")
-endif()
+set(conformance_runtime_excludes "libcuda\\.so.*" "libnvidia-.*" "libze_intel_gpu\\.so.*")
 
 function(conformance_install_arguments variable output)
   set(arguments)
@@ -580,7 +534,7 @@ string(CONCAT runtime_install_code
   "bundle_runtime_dependencies(\n"
   "  DESTINATION \"\${runtime_root}/lib\"\n"
   "  EXECUTABLE_PATTERNS${runtime_executable_arguments}\n"
-  "  LIBRARY_PATTERNS \"\${runtime_input}/*.dll\" \"\${runtime_input}/*.dylib\" \"\${runtime_input}/*.so*\"\n"
+  "  LIBRARY_PATTERNS \"\${runtime_input}/*.so*\"\n"
   "  SEARCH_DIRECTORIES${runtime_search_arguments}\n"
   "  PLUGINS${runtime_plugin_arguments}\n"
   "  PREFERENCES${runtime_preference_arguments}\n"

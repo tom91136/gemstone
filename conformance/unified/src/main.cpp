@@ -11,7 +11,7 @@ int main(int argc, char **argv) {
     if (const auto status = session.applyCommandLine(argc, argv)) return status;
     const auto &config = session.configData();
     if (!config.listTests && !config.listTags && !config.listReporters && !config.listListeners && !config.showHelp && !config.libIdentify)
-      (void)conformance::physical_device();
+      (void)conformance::deviceSelection();
     return session.run();
   } catch (const std::exception &error) {
     std::cerr << "unified: " << error.what() << '\n';

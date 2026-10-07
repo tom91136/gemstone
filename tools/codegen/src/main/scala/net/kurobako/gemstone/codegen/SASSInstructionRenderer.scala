@@ -1,7 +1,5 @@
 package net.kurobako.gemstone.codegen
 
-import java.nio.charset.StandardCharsets.UTF_8
-import java.security.MessageDigest
 import net.kurobako.gemstone.string.*
 
 /** Typed logical forms and small constructor/metadata chunks; bit layouts remain in the swizzled resources. */
@@ -15,9 +13,9 @@ object SASSInstructionRenderer {
       forms: Vector[String]
   )
 
-  private def identifier(value: String): String = {
+  private def identifier(value: String, separator: String = ""): String = {
     val words  = value.split(Array('.', '_', '-', ' ')).filter(_.nonEmpty)
-    val result = words.map(word => word.head.toUpper.toString + word.tail.toLowerCaseRoot).mkString
+    val result = words.map(word => word.head.toUpper.toString + word.tail.toLowerCaseRoot).mkString(separator)
     if (result.headOption.exists(_.isLetter)) result else s"Form$result"
   }
 
@@ -30,6 +28,10 @@ object SASSInstructionRenderer {
     case other             => other
   }
 
+  // members of the generated enum and Scala soft keywords
+  private val reserved =
+    Set("mods", "pred", "definition", "operands", "modifiers", "guard", "end", "extension", "infix", "as", "macro")
+
   private def fieldName(value: String): String = value match {
     case "Rd" | "URd" => "dst"
     case "Ra" | "URa" => "srcA"
@@ -39,52 +41,21 @@ object SASSInstructionRenderer {
     case other        =>
       val clean = other.filter(c => c.isLetterOrDigit || c == '_')
       val base  = if (clean.headOption.exists(_.isLetter)) clean.head.toLower.toString + clean.tail else s"value$clean"
-      if (
-        Set(
-          "then",
-          "end",
-          "using",
-          "extension",
-          "opaque",
-          "open",
-          "infix",
-          "as",
-          "macro",
-          "this",
-          "super",
-          "type",
-          "val",
-          "var",
-          "def",
-          "given",
-          "inline",
-          "match",
-          "case",
-          "object",
-          "enum",
-          "yield",
-          "export",
-          "import",
-          "mods",
-          "pred",
-          "definition",
-          "operands",
-          "modifiers",
-          "guard"
-        )(base)
-      ) s"${base}Value"
-      else base
+      if (ScalaKeywords(base) || reserved(base)) s"${base}Value" else base
   }
 
   def cases(shapes: Vector[SASSInstructionModel.Shape]): Vector[Case] = {
     val opcodes    = shapes.map(_.opcode).distinct.sorted
     val collisions = opcodes.groupBy(value => identifier(value).toLowerCaseRoot).filter(_._2.size > 1).keySet
-    val families   = opcodes.map { opcode =>
+    // Names that differ only in case collide on case-insensitive file systems; keep their word boundaries.
+    val families = opcodes.map { opcode =>
       val base = identifier(opcode)
-      val hash =
-        MessageDigest.getInstance("SHA-256").digest(opcode.getBytes(UTF_8)).take(6).map(b => f"${b & 255}%02x").mkString
-      opcode -> (if (collisions(base.toLowerCaseRoot)) s"${base}_$hash" else base)
+      opcode -> (if (collisions(base.toLowerCaseRoot)) identifier(opcode, "_") else base)
     }.toMap
+    require(
+      families.values.groupBy(_.toLowerCaseRoot).forall(_._2.size == 1),
+      "SASS opcode names collide without case"
+    )
     // An omitted default is a distinct logical arity. Deduplication by operand kinds gives text and binary
     // decoding the same canonical case even when architectures use different binding names or defaults.
     val expanded = shapes.flatMap { shape =>
@@ -169,8 +140,6 @@ object SASSInstructionRenderer {
        |    case Vendor(value: NonEmpty[String]) extends Modifier(value)
        |  }
        |  case class Guard(predicate: Operand.Predicate)
-       |  enum OperandKind { case Register, Predicate, Immediate, Address, ConstantBank, SpecialRegister, Group, Symbol }
-       |  case class Slot(name: NonEmpty[String], kind: OperandKind)
        |
        |  object Definition {
        |    lazy val all: Vec[Definition] = Vec($chunks).flatten
@@ -180,7 +149,6 @@ object SASSInstructionRenderer {
        |  abstract class Definition(
        |      val name: NonEmpty[String],
        |      val mnemonic: NonEmpty[String],
-       |      val slots: Vec[Slot],
        |      val forms: Vec[String]
        |  ) {
        |    def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction]
@@ -211,13 +179,12 @@ object SASSInstructionRenderer {
 
   private def renderDefinitions(model: Vector[Case], index: Int): String = {
     val definitions = model.map { entry =>
-      val slots   = entry.slots.map(slot => s"Slot(${ujson.write(slot.name)}, OperandKind.${slot.kind})").mkString(", ")
       val forms   = entry.forms.map(ujson.write(_)).mkString(", ")
       val pattern = entry.slots.map(slot => s"InstructionOperand.${slot.kind}(${slot.name})").mkString(", ")
       val values  = (entry.slots.map(_.name) ++ Vector("modifiers", "guard")).mkString(", ")
       s"""object ${entry.name} extends Definition(${ujson.write(entry.name)}, ${ujson.write(
           entry.mnemonic
-        )}, Vec($slots), Vec($forms)) {
+        )}, Vec($forms)) {
          |  def decode(modifiers: Vec[Modifier], operands: Vec[Operand], guard: Option[Guard]): Option[Instruction] = operands match {
          |    case Vec($pattern) => Some(Instruction.${entry.name}($values))
          |    case _ => None

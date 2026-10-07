@@ -1,12 +1,111 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import VMIR.*
+import fixtures.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.vm.*
 
 class AMDGPUMemorySuite extends munit.FunSuite {
   // Machine bytes are fixed ISA fixtures: deriving them from our encoder would hide decoder errors.
+
+  for (
+    (name, target, bytes, expected) <- Seq[(String, Target, Vec[Int], Instruction)](
+      // ROCm's atomic probe emits buffer_inv sc0 sc1 and buffer_wbl2 sc0 sc1.
+      (
+        "cache invalidation with scope flags",
+        Target("gfx942"),
+        Vec(0, 0xc0, 0xa4, 0xe0, 0, 0, 0, 0),
+        Instruction.CacheInvalidate
+      ),
+      ("cache writeback with scope flags", Target("gfx942"), Vec(0, 0xc0, 0xa0, 0xe0, 0, 0, 0, 0), Instruction.Wait),
+      (
+        "MUBUF byte store",
+        Target("gfx1030"),
+        Vec(0x07, 0x00, 0x60, 0xe0, 0x00, 0x02, 0x00, 0x80),
+        Instruction.Store(2, MemoryAddress.Buffer(None, 0, None, 7), 1, false)
+      ),
+      (
+        "MUBUF unsigned byte load",
+        Target("gfx1030"),
+        Vec(0x07, 0x00, 0x20, 0xe0, 0x00, 0x02, 0x00, 0x80),
+        Instruction.Load(2, MemoryAddress.Buffer(None, 0, None, 7), 1, false, LoadPlacement.Full)
+      ),
+      (
+        "MUBUF offen load",
+        Target("gfx900"),
+        Vec(0x00, 0x10, 0x50, 0xe0, 0x01, 0x07, 0x00, 0x80),
+        Instruction.Load(7, MemoryAddress.Buffer(Some(1), 0, None, 0), 4, false, LoadPlacement.Full)
+      ),
+      (
+        "MUBUF load with a scalar resource descriptor",
+        Target("gfx900"),
+        Vec(0x00, 0x10, 0x50, 0xe0, 0x12, 0x13, 0x05, 0x80),
+        Instruction.Load(19, MemoryAddress.Buffer(Some(18), 20, None, 0), 4, false, LoadPlacement.Full)
+      ),
+      (
+        "MUBUF short D16 low half",
+        Target("gfx900"),
+        Vec(0x10, 0x10, 0x90, 0xe0, 0x03, 0x07, 0x05, 0x80),
+        Instruction.Load(7, MemoryAddress.Buffer(Some(3), 20, None, 16), 2, false, LoadPlacement.Low)
+      ),
+      (
+        "MUBUF short D16 high half",
+        Target("gfx900"),
+        Vec(0x10, 0x10, 0x94, 0xe0, 0x03, 0x07, 0x05, 0x80),
+        Instruction.Load(7, MemoryAddress.Buffer(Some(3), 20, None, 16), 2, false, LoadPlacement.High)
+      ),
+      (
+        "DS load with an offset above the opcode bits",
+        Target("gfx900"),
+        Vec(0x00, 0x90, 0x6c, 0xd8, 0x00, 0x00, 0x00, 0x00),
+        Instruction.Load(0, MemoryAddress.Local(0, 36864), 4, false, LoadPlacement.Full)
+      ),
+      (
+        "DS store with the full 16-bit offset",
+        Target("gfx900"),
+        Vec(0xff, 0xff, 0xbe, 0xd9, 0x00, 0x01, 0x00, 0x00),
+        Instruction.Store(1, MemoryAddress.Local(0, 65535), 16, false)
+      ),
+      (
+        "DS permute",
+        Target("gfx1036"),
+        Vec(0x00, 0x00, 0xc8, 0xda, 0x01, 0x02, 0x00, 0x05),
+        Instruction.DSPermute(5, 1, 2, 0)
+      )
+    )
+  ) test(s"$target decodes $name") {
+    assertEquals(VMCompiler.decodeInstruction(bytes.map(_.toByte), target), Right(expected))
+  }
+
+  for (
+    (name, bytes) <- Seq(
+      "MUBUF cache invalidation" -> Vec(0x00, 0x00, 0xfc, 0xe0, 0x00, 0x00, 0x00, 0x00),
+      "stride-64 DS pairs"       -> Vec(0x00, 0x14, 0x1e, 0xd8, 0x05, 0x02, 0x01, 0x00),
+      "DS bpermute"              -> Vec(0x00, 0x00, 0x7e, 0xd8, 0x04, 0x05, 0x00, 0x06)
+    )
+  ) test(s"gfx900 accepts $name") {
+    assert(VMCompiler.decodeInstruction(bytes.map(_.toByte), Target("gfx900")).isRight)
+  }
+
+  test("DS lane permutes select lanes from byte addresses") {
+    assertEquals(VMArithmetic.bpermuteSourceLane(0L, 0L).raw, 0)
+    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 37L, 0L).raw, 37)
+    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 69L, 0L).raw, 5)
+    assertEquals(VMArithmetic.bpermuteSourceLane(0L, 124L).raw, 31)
+    assertEquals(VMArithmetic.bpermuteSourceLane(4L * 37L, 124L).raw, 4)
+    assertEquals(VMArithmetic.permuteDestinationLane(0L, 0L, 32).raw, 0)
+    assertEquals(VMArithmetic.permuteDestinationLane(4L * 29L, 0L, 32).raw, 29)
+    assertEquals(VMArithmetic.permuteDestinationLane(0L, 124L, 32).raw, 31)
+    assertEquals(VMArithmetic.permuteDestinationLane(4L * 37L, 124L, 32).raw, 4)
+  }
+
+  test("DS operations strip the local address-space tag") {
+    assertEquals(VMInterpreter.ldsOffset(0x18000018L), 0x18L)
+    assertEquals(VMInterpreter.ldsOffset(0x00000018L), 0x18L)
+    assertEquals(VMInterpreter.ldsOffset(0x00010018L), 0x18L)
+  }
 
   test("legacy flat memory uses unsigned offsets through the top encoded bit") {
     // Fixed LLVM MC encodings. GFX9/11 have 12-bit flat offsets; GFX10 has 11-bit offsets.
@@ -21,24 +120,24 @@ class AMDGPUMemorySuite extends munit.FunSuite {
       val bytes = Vec(offset & 255, offset >>> 8, opcode, 0xdc, 0, 0, scalar, 6).map(_.toByte)
       assertEquals(
         VMCompiler.decodeInstruction(bytes, target),
-        Right(Instruction.FlatLoad(6, 0, 4, offset, false)),
+        Right(Instruction.Load(6, MemoryAddress.Flat(0, offset), 4, false, LoadPlacement.Full)),
         clues(target, offset)
       )
     }
     assertEquals(
       VMCompiler.decodeInstruction(Vec(0xff, 0x0f, 0x70, 0xdc, 0, 6, 0, 0).map(_.toByte), Target("gfx90a")),
-      Right(Instruction.FlatStore(0, 6, 4, 4095))
+      Right(Instruction.Store(6, MemoryAddress.Flat(0, 4095), 4, false))
     )
     assertEquals(
       VMCompiler.decodeInstruction(Vec(0xff, 0x0f, 0x09, 0xdd, 0, 6, 0, 2).map(_.toByte), Target("gfx90a")),
-      Right(Instruction.GlobalAtomicBinary(AtomicBinaryOperation.Add, 2, 0, None, 6, 4, 4095, true))
+      Right(Instruction.Atomic(AtomicOperation.Add, 2, MemoryAddress.Flat(0, 4095), 6, 4, true))
     )
   }
 
   test("global scratch and RDNA4 flat offsets retain their signed interpretation") {
     assertEquals(
       VMCompiler.decodeInstruction(Vec(0xff, 0x9f, 0x50, 0xdc, 0, 0, 0x7f, 6).map(_.toByte), Target("gfx90a")),
-      Right(Instruction.GlobalLoad(6, 0, None, 4, -1, false))
+      Right(Instruction.Load(6, MemoryAddress.Global(0, None, -1), 4, false, LoadPlacement.Full))
     )
     val scratch = VMCompiler.decodeInstruction(
       Vec(0xff, 0x5f, 0x50, 0xdc, 0, 0, 0x7f, 6).map(_.toByte),
@@ -46,8 +145,8 @@ class AMDGPUMemorySuite extends munit.FunSuite {
     )
     assertEquals(
       scratch.map {
-        case Instruction.ScratchLoad(_, _, _, _, offset, _) => offset
-        case other                                          => fail(s"expected scratch load, found $other")
+        case Instruction.Load(_, MemoryAddress.Scratch(_, _, offset), _, _, _, _, _) => offset
+        case other => fail(s"expected scratch load, found $other")
       },
       Right(-1)
     )
@@ -56,44 +155,8 @@ class AMDGPUMemorySuite extends munit.FunSuite {
         Vec(0x7c, 0, 5, 0xec, 1, 0, 0, 0, 0, 0xc0, 0xff, 0xff).map(_.toByte),
         Target("gfx1200")
       ),
-      Right(Instruction.FlatLoad(1, 0, 4, -64, false))
+      Right(Instruction.Load(1, MemoryAddress.Flat(0, -64), 4, false, LoadPlacement.Full))
     )
-  }
-
-  test("RDNA3 flat 64-bit compare exchange retains comparison pair and return destination") {
-    // llvm-mc: flat_atomic_cmpswap_b64 v[8:9], v[2:3], v[4:7] glc.
-    val bytes = Vec[Byte](0, 0x40, 8, 0xdd.toByte, 2, 4, 0x7c, 8)
-    for (target <- Vec(Target("gfx1100"), Target("gfx1103")))
-      assertEquals(
-        VMCompiler.decodeInstruction(bytes, target),
-        Right(Instruction.GlobalAtomicCompareSwap(8, 2, None, 6, 4, 8, 0, true))
-      )
-  }
-
-  test("CDNA2 VMEM preserves its accumulator bank without changing its vector address") {
-    // llvm-mc: {flat,global}_{load,store}_dwordx2 a[0:1], v[16:17] (store operands reversed).
-    for {
-      global <- Vec(false, true)
-      store  <- Vec(false, true)
-    } {
-      val bytes = Vec[Byte](
-        0,
-        if (global) 0x80.toByte else 0,
-        if (store) 0x74 else 0x54,
-        0xdc.toByte,
-        16,
-        0,
-        if (global) 0xff.toByte else 0x80.toByte,
-        0
-      )
-      val expected = (global, store) match {
-        case (false, false) => Instruction.FlatLoad(0, 16, 8, 0, false, RegisterBank.Accumulator)
-        case (false, true)  => Instruction.FlatStore(16, 0, 8, 0, RegisterBank.Accumulator)
-        case (true, false)  => Instruction.GlobalLoad(0, 16, None, 8, 0, false, RegisterBank.Accumulator)
-        case (true, true)   => Instruction.GlobalStore(16, None, 0, 8, 0, RegisterBank.Accumulator)
-      }
-      assertEquals(VMCompiler.decodeInstruction(bytes, Target("gfx90a")), Right(expected))
-    }
   }
 
   test("RDNA4 cache maintenance retains its invalidation and writeback semantics") {
@@ -116,21 +179,21 @@ class AMDGPUMemorySuite extends munit.FunSuite {
     assertEquals(
       VMCompiler.decodeInstruction(load, target),
       Right(
-        Instruction.GlobalLoad(1, 0, None, 4, -64, false)
+        Instruction.Load(1, MemoryAddress.Global(0, None, -64), 4, false, LoadPlacement.Full)
       )
     )
     val scalar = Vec[Byte](2, 0, 5, 0xee.toByte, 1, 0, 0, 0, 3, 0xff.toByte, 7, 0)
     assertEquals(
       VMCompiler.decodeInstruction(scalar, target),
       Right(
-        Instruction.GlobalLoad(1, 3, Some(2), 4, 2047, false)
+        Instruction.Load(1, MemoryAddress.Global(3, Some(2), 2047), 4, false, LoadPlacement.Full)
       )
     )
     val atomic = Vec[Byte](0x7c, 0x40, 0x0d, 0xee.toByte, 1, 0, 0x10, 1, 0, 0xc0.toByte, 0xff.toByte, 0xff.toByte)
     assertEquals(
       VMCompiler.decodeInstruction(atomic, target),
       Right(
-        Instruction.GlobalAtomicAdd(1, 0, None, 2, 4, -64, true)
+        Instruction.Atomic(AtomicOperation.Add, 1, MemoryAddress.Global(0, None, -64), 2, 4, true)
       )
     )
     assert(VMCompiler.decodeInstruction(load.take(8), target).left.exists(_.raw.contains("truncated")))
@@ -140,11 +203,11 @@ class AMDGPUMemorySuite extends munit.FunSuite {
     for (target <- Seq(Target("gfx1100"), Target("gfx1200"))) {
       assertEquals(
         VMCompiler.decodeInstruction(Vec[Byte](3, 7, 0x34, 0xd8.toByte, 1, 2, 0, 0), target),
-        Right(Instruction.DSWrite(1, 2, None, 4, 1795, None))
+        Right(Instruction.Store(2, MemoryAddress.Local(1, 1795), 4, false))
       )
       assertEquals(
         VMCompiler.decodeInstruction(Vec[Byte](3, 7, 0xd8.toByte, 0xd8.toByte, 1, 0, 0, 8), target),
-        Right(Instruction.DSRead(8, 1, 4, 1795, None))
+        Right(Instruction.Load(8, MemoryAddress.Local(1, 1795), 4, false, LoadPlacement.Full))
       )
     }
 
@@ -154,21 +217,21 @@ class AMDGPUMemorySuite extends munit.FunSuite {
     // LLVM fixtures: ds_{load,store}_2addr[_stride64]_b{32,64}, with offset0:3 offset1:7.
     for {
       (opcode, stride) <- Seq((0x38, 1), (0x3c, 64))
-      (high, width)    <- Seq[(Int, Int where Between[1, 16])]((0xd8, 4), (0xd9, 8))
+      (high, width)    <- Seq[(Int, Int in (4, 8))]((0xd8, 4), (0xd9, 8))
     } {
       assertEquals(
         VMCompiler.decodeInstruction(
           Vec[Byte](3, 7, opcode.toByte, high.toByte, 1, 2, 4, 0),
           Target("gfx1100")
         ),
-        Right(Instruction.DSWrite(1, 2, Some(4), width, 3 * stride * width.raw, Some(7 * stride * width.raw)))
+        Right(Instruction.StorePair(1, 2, 4, width, 3 * stride * width.raw, 7 * stride * width.raw))
       )
       assertEquals(
         VMCompiler.decodeInstruction(
           Vec[Byte](3, 7, (opcode + 0xa4).toByte, high.toByte, 1, 0, 0, 8),
           Target("gfx1100")
         ),
-        Right(Instruction.DSRead(8, 1, width, 3 * stride * width.raw, Some(7 * stride * width.raw)))
+        Right(Instruction.LoadPair(8, 1, width, 3 * stride * width.raw, 7 * stride * width.raw))
       )
     }
   }
@@ -198,7 +261,13 @@ class AMDGPUMemorySuite extends munit.FunSuite {
             ),
             target
           ),
-          Right(Instruction.GlobalLoad(2, 0, Option.when(scalar == 4)(4), 4, 0, coherent = false))
+          Right(Instruction.Load(
+            2,
+            MemoryAddress.Global(0, Option.when(scalar == 4)(4), 0),
+            4,
+            false,
+            LoadPlacement.Full
+          ))
         )
       assertEquals(
         VMCompiler.decodeInstruction(
@@ -214,20 +283,20 @@ class AMDGPUMemorySuite extends munit.FunSuite {
           ),
           target
         ),
-        Right(Instruction.FlatLoad(2, 0, 4, 0))
+        Right(Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full))
       )
     }
     assertEquals(
       VMCompiler.decodeInstruction(Vec[Byte](0x10, 0x40, 0x52, 0xdc.toByte, 0, 0, 0x7c, 2), Target("gfx1100")),
-      Right(Instruction.GlobalLoad(2, 0, None, 4, 16, coherent = true))
+      Right(Instruction.Load(2, MemoryAddress.Global(0, None, 16), 4, false, LoadPlacement.Full, coherent = true))
     )
     assertEquals(
       VMCompiler.decodeInstruction(Vec[Byte](0x10, 0, 0x6a, 0xdc.toByte, 0, 2, 0x7c, 0), Target("gfx1100")),
-      Right(Instruction.GlobalStore(0, None, 2, 4, 16))
+      Right(Instruction.Store(2, MemoryAddress.Global(0, None, 16), 4, false))
     )
     assertEquals(
       VMCompiler.decodeInstruction(Vec[Byte](0x10, 0, 0x68, 0xdc.toByte, 0, 2, 0x7c, 0), Target("gfx1100")),
-      Right(Instruction.FlatStore(0, 2, 4, 16))
+      Right(Instruction.Store(2, MemoryAddress.Flat(0, 16), 4, false))
     )
   }
 
@@ -256,98 +325,15 @@ class AMDGPUMemorySuite extends munit.FunSuite {
       )
       (second, third, count) <- encodings
       (last, scalarOffset)   <- Seq(0xf8 -> None, 0x0c -> Some(6))
-    } {
-      val decoded = VMCompiler.decodeInstruction(
-        Vec[Byte](0x02, second.toByte, third.toByte, 0xf4.toByte, 0x10, 0x00, 0x00, last.toByte),
-        target
-      ).fold(error => fail(error.raw), identity)
-      decoded match {
+    }
+      decoded(target, 0x02, second, third, 0xf4, 0x10, 0x00, 0x00, last) match {
         case Instruction.SLoad(destination, words, base, offset, registerOffset, _) =>
           assertEquals(
             (destination.raw, words.raw, base.raw, offset, registerOffset.map(_.raw)),
-            (8, count, 4, 16, scalarOffset)
+            (8, count, 4, 16L, scalarOffset)
           )
         case other => fail(s"unexpected instruction: $other")
       }
-    }
-  }
-
-  test("gfx942 cache operations accept their scope flags") {
-    // ROCm's atomic probe emits buffer_inv sc0 sc1 and buffer_wbl2 sc0 sc1.
-    assertEquals(
-      VMCompiler.decodeInstruction(
-        Vec[Byte](0x00, 0xc0.toByte, 0xa4.toByte, 0xe0.toByte, 0x00, 0x00, 0x00, 0x00),
-        Target("gfx942")
-      ),
-      Right(Instruction.CacheInvalidate)
-    )
-    assertEquals(
-      VMCompiler.decodeInstruction(
-        Vec[Byte](0x00, 0xc0.toByte, 0xa0.toByte, 0xe0.toByte, 0x00, 0x00, 0x00, 0x00),
-        Target("gfx942")
-      ),
-      Right(Instruction.Wait)
-    )
-  }
-
-  test("gfx1030 MUBUF byte store decodes its resource and offset") {
-    assertEquals(
-      VMCompiler.decodeInstruction(
-        Vec[Byte](0x07, 0x00, 0x60, 0xe0.toByte, 0x00, 0x02, 0x00, 0x80.toByte),
-        Target("gfx1030")
-      ),
-      Right(Instruction.BufferStore(None, 0, None, 2, 1, 7))
-    )
-  }
-
-  test("gfx1030 MUBUF unsigned byte load decodes its resource and offset") {
-    assertEquals(
-      VMCompiler.decodeInstruction(
-        Vec[Byte](0x07, 0x00, 0x20, 0xe0.toByte, 0x00, 0x02, 0x00, 0x80.toByte),
-        Target("gfx1030")
-      ),
-      Right(Instruction.BufferLoad(2, None, 0, None, 1, 7))
-    )
-  }
-
-  test("gfx900 DS decoding keeps the opcode separate from the full 16-bit offset") {
-    assertEquals(
-      VMCompiler.decodeInstruction(
-        Vec[Byte](0x00, 0x90.toByte, 0x6c, 0xd8.toByte, 0x00, 0x00, 0x00, 0x00),
-        Target("gfx900")
-      ),
-      Right(Instruction.DSRead(0, 0, 4, 36864, None))
-    )
-    assertEquals(
-      VMCompiler.decodeInstruction(
-        Vec[Byte](0xff.toByte, 0xff.toByte, 0xbe.toByte, 0xd9.toByte, 0x00, 0x01, 0x00, 0x00),
-        Target("gfx900")
-      ),
-      Right(Instruction.DSWrite(0, 1, None, 16, 65535, None))
-    )
-  }
-
-  test("gfx900 MUBUF cache invalidation instructions validate") {
-    assertEquals(
-      VMCompiler.validate(
-        Vec[Byte](
-          0x00,
-          0x00,
-          0xfc.toByte,
-          0xe0.toByte,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x81.toByte,
-          0xbf.toByte
-        ),
-        Target("gfx900")
-      ),
-      Right(())
-    )
   }
 
   test("RDNA3 buffer offsets use the generated OFFEN field independently of cache policy") {
@@ -356,63 +342,11 @@ class AMDGPUMemorySuite extends munit.FunSuite {
       val bytes = Vec(0x0c, cacheBits, 0x50, 0xe0, 1, 7, 0x45, 3).map(_.toByte)
       assertEquals(
         VMCompiler.decodeInstruction(bytes, Target("gfx1100")),
-        Right(Instruction.BufferLoad(7, Some(1), 20, Some(3), 4, 12))
+        Right(Instruction.Load(7, MemoryAddress.Buffer(Some(1), 20, Some(3), 12), 4, false, LoadPlacement.Full))
       )
     }
     val indexed = Vec(0, 0, 0x50, 0xe0, 1, 7, 0x85, 3).map(_.toByte)
     assert(VMCompiler.decodeInstruction(indexed, Target("gfx1100")).isLeft)
-  }
-
-  test("gfx900 MUBUF offen load decodes register and offset fields") {
-    assertEquals(
-      VMCompiler.decodeInstruction(
-        Vec[Byte](
-          0x00,
-          0x10,
-          0x50,
-          0xe0.toByte,
-          0x01,
-          0x07,
-          0x00,
-          0x80.toByte
-        ),
-        Target("gfx900")
-      ),
-      Right(Instruction.BufferLoad(7, Some(1), 0, None, 4, 0))
-    )
-  }
-
-  test("gfx900 MUBUF load retains its scalar resource descriptor") {
-    assertEquals(
-      VMCompiler.decodeInstruction(
-        Vec[Byte](0x00, 0x10, 0x50, 0xe0.toByte, 0x12, 0x13, 0x05, 0x80.toByte),
-        Target("gfx900")
-      ),
-      Right(Instruction.BufferLoad(19, Some(18), 20, None, 4, 0))
-    )
-  }
-
-  test("gfx900 MUBUF short D16 decoding preserves resource and half selection") {
-    assertEquals(
-      VMCompiler.decodeInstruction(
-        Vec[Byte](0x10, 0x10, 0x90.toByte, 0xe0.toByte, 0x03, 0x07, 0x05, 0x80.toByte),
-        Target("gfx900")
-      ),
-      Right(Instruction.BufferLoadD16(7, Some(3), 20, None, 2, 16, high = false))
-    )
-    assertEquals(
-      VMCompiler.decodeInstruction(
-        Vec[Byte](0x10, 0x10, 0x94.toByte, 0xe0.toByte, 0x03, 0x07, 0x05, 0x80.toByte),
-        Target("gfx900")
-      ),
-      Right(Instruction.BufferLoadD16(7, Some(3), 20, None, 2, 16, high = true))
-    )
-  }
-
-  test("gfx900 MUBUF short D16 loads replace only the selected half") {
-    assertEquals(VMArithmetic.mergeD16(0x11223344L, 0xaabbL, high = false), 0x1122aabbL)
-    assertEquals(VMArithmetic.mergeD16(0x11223344L, 0xaabbL, high = true), 0xaabb3344L)
-    assertEquals(VMArithmetic.mergeD16(0xfeed11223344L, 0xffffaabbL, high = false), 0x1122aabbL)
   }
 
 }

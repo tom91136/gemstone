@@ -13,7 +13,7 @@
 namespace gemstone::execution {
 namespace {
 
-template <typename Function> decltype(auto) visit_atomic_width(size_t width, Function &&function) {
+template <typename Function> decltype(auto) visitAtomicWidth(size_t width, Function &&function) {
   if (width == 1) return function.template operator()<uint8_t>();
   if (width == 2) return function.template operator()<uint16_t>();
   if (width == 4) return function.template operator()<uint32_t>();
@@ -21,7 +21,7 @@ template <typename Function> decltype(auto) visit_atomic_width(size_t width, Fun
 }
 
 template <typename T>
-uint64_t apply_atomic_request(uintptr_t address, HostMemoryAtomicOperation operation, uint64_t expected, uint64_t desired) {
+uint64_t applyAtomicRequest(uintptr_t address, HostMemoryAtomicOperation operation, uint64_t expected, uint64_t desired) {
   auto &cell = *reinterpret_cast<T *>(address);
   auto reference = std::atomic_ref<T>(cell);
   if (operation == HostMemoryAtomicOperation::Load) return reference.load(std::memory_order_relaxed);
@@ -34,14 +34,11 @@ uint64_t apply_atomic_request(uintptr_t address, HostMemoryAtomicOperation opera
   return observed;
 }
 
-template <typename T> void atomic_store(uintptr_t address, uint64_t value, std::memory_order order) {
+template <typename T> void atomicStore(uintptr_t address, uint64_t value, std::memory_order order) {
   auto &cell = *reinterpret_cast<T *>(address);
   std::atomic_ref<T>(cell).store(static_cast<T>(value), order);
 }
 
-} // namespace
-
-namespace {
 // Completion records are immutable until ReleaseCompletion, so offsets can be retried safely.
 template <class Request, class Record>
 bool collectPages(Client &client, CompletionId completion, std::vector<Record> &records, std::string &error) {
@@ -63,12 +60,7 @@ bool collectPages(Client &client, CompletionId completion, std::vector<Record> &
 
 } // namespace
 
-bool await_completion(Client &client, CompletionId completion, std::string &error, bool hostMemory) {
-  if (!hostMemory) {
-    const auto result = client.call(AwaitCompletion{completion});
-    if (!result) error = result.error().detail;
-    return static_cast<bool>(result);
-  }
+bool awaitCompletion(Client &client, CompletionId completion, std::string &error) {
   for (;;) {
     auto batch = client.call(PollHostMemory{completion});
     if (!batch) {
@@ -100,10 +92,10 @@ bool await_completion(Client &client, CompletionId completion, std::string &erro
           return false;
         }
         for (size_t offset = 0; offset < range.bytes.size(); offset += width) {
-          visit_atomic_width(width, [&]<typename T>() {
+          visitAtomicWidth(width, [&]<typename T>() {
             T value;
             std::memcpy(&value, range.bytes.data() + offset, sizeof(value));
-            atomic_store<T>(address + offset, value, std::memory_order_seq_cst);
+            atomicStore<T>(address + offset, value, std::memory_order_seq_cst);
           });
         }
       } else std::memcpy(reinterpret_cast<void *>(address), range.bytes.data(), range.bytes.size());
@@ -120,8 +112,8 @@ bool await_completion(Client &client, CompletionId completion, std::string &erro
           error = "invalid host atomic range";
           return false;
         }
-        observed = visit_atomic_width(
-            width, [&]<typename T>() { return apply_atomic_request<T>(address, request.operation, observed, request.desired); });
+        observed = visitAtomicWidth(
+            width, [&]<typename T>() { return applyAtomicRequest<T>(address, request.operation, observed, request.desired); });
       }
       for (const auto &request : sync.atomicStores) {
         const auto address = static_cast<uintptr_t>(request.address.value);
@@ -130,7 +122,7 @@ bool await_completion(Client &client, CompletionId completion, std::string &erro
           error = "invalid host atomic store range";
           return false;
         }
-        visit_atomic_width(width, [&]<typename T>() { atomic_store<T>(address, request.desired, std::memory_order_relaxed); });
+        visitAtomicWidth(width, [&]<typename T>() { atomicStore<T>(address, request.desired, std::memory_order_relaxed); });
       }
       if (!sync.relaxed && !sync.atomic && sync.publish.empty()) std::atomic_thread_fence(std::memory_order_seq_cst);
       auto supplied = client.call(SupplyHostSync{completion, sync.ticket, static_cast<int64_t>(observed)});
@@ -149,28 +141,28 @@ bool await_completion(Client &client, CompletionId completion, std::string &erro
   }
 }
 
-bool completion_dirty_ranges(Client &client, CompletionId completion, std::vector<DirtyRange> &ranges, std::string &error) {
+bool completionDirtyRanges(Client &client, CompletionId completion, std::vector<DirtyRange> &ranges, std::string &error) {
   ranges.clear();
   error.clear();
   return collectPages<CompletionDirtyRanges>(client, completion, ranges, error);
 }
 
-bool collect_completion(Client &client, CompletionId completion, CompletionResult &result, std::string &error, bool hostMemory,
-                        GraphicsStatistics *graphics) {
+bool collectCompletion(Client &client, CompletionId completion, CompletionResult &result, std::string &error,
+                       GraphicsStatistics *graphics) {
   if (graphics) *graphics = {};
-  result.dirty_ranges.clear();
-  result.pointer_relocations.clear();
+  result.dirtyRanges.clear();
+  result.pointerRelocations.clear();
   error.clear();
 
-  bool succeeded = await_completion(client, completion, error, hostMemory);
+  bool succeeded = awaitCompletion(client, completion, error);
   if (succeeded && graphics) {
     const auto statistics = client.call(ReadGraphicsStatistics{completion});
     succeeded = bool(statistics);
     if (succeeded) *graphics = statistics.value();
     else error = statistics.error().detail;
   }
-  if (succeeded) succeeded = completion_dirty_ranges(client, completion, result.dirty_ranges, error);
-  if (succeeded) succeeded = collectPages<CompletionPointerRelocations>(client, completion, result.pointer_relocations, error);
+  if (succeeded) succeeded = completionDirtyRanges(client, completion, result.dirtyRanges, error);
+  if (succeeded) succeeded = collectPages<CompletionPointerRelocations>(client, completion, result.pointerRelocations, error);
   if (succeeded) {
     auto prints = client.call(CompletionPrints{completion});
     succeeded = static_cast<bool>(prints);

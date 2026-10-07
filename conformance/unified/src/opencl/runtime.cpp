@@ -19,12 +19,12 @@ namespace {
 void check(cl_int status, const char *operation) {
   {
     INFO(fmt::format("{} returned {}", operation, status));
-    REQUIRE((status == CL_SUCCESS));
+    REQUIRE(status == CL_SUCCESS);
   }
 }
-void execute(bool binary_roundtrip) {
+void execute(bool binaryRoundtrip) {
   unified::test_runtime::Cleanup cleanup;
-  const auto device = reinterpret_cast<cl_device_id>(static_cast<uintptr_t>(conformance::device_selection().native_handle));
+  const auto device = reinterpret_cast<cl_device_id>(static_cast<uintptr_t>(conformance::deviceSelection().nativeHandle));
   cl_int status = 0;
   auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &status);
   check(status, "context");
@@ -53,22 +53,22 @@ void execute(bool binary_roundtrip) {
     }
   };
   build(program);
-  if (binary_roundtrip) {
+  if (binaryRoundtrip) {
     size_t size = 0;
     check(clGetProgramInfo(program, CL_PROGRAM_BINARY_SIZES, sizeof(size), &size, nullptr), "binary size");
     {
       INFO("empty OpenCL binary");
-      REQUIRE((size > 0));
+      REQUIRE(size > 0);
     }
     std::vector<uint8_t> bytes(size);
     auto *data = bytes.data();
     check(clGetProgramInfo(program, CL_PROGRAM_BINARIES, sizeof(data), &data, nullptr), "binary export");
     const uint8_t *image = data;
-    cl_int binary_status = 0;
-    program = clCreateProgramWithBinary(context, 1, &device, &size, &image, &binary_status, &status);
+    cl_int binaryStatus = 0;
+    program = clCreateProgramWithBinary(context, 1, &device, &size, &image, &binaryStatus, &status);
     check(status, "binary import");
     cleanup.add([=] { clReleaseProgram(program); });
-    check(binary_status, "binary status");
+    check(binaryStatus, "binary status");
     build(program);
   }
   auto kernel = clCreateKernel(program, "stencil", &status);
@@ -77,16 +77,16 @@ void execute(bool binary_roundtrip) {
   constexpr size_t size = 128, local = 32;
   auto values = unified::test_runtime::input(size);
   std::vector<int32_t> output(size, 0);
-  auto source_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY, size * sizeof(int32_t), nullptr, &status);
+  auto sourceBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, size * sizeof(int32_t), nullptr, &status);
   check(status, "input buffer");
-  cleanup.add([=] { clReleaseMemObject(source_buffer); });
+  cleanup.add([=] { clReleaseMemObject(sourceBuffer); });
   auto destination = clCreateBuffer(context, CL_MEM_WRITE_ONLY, size * sizeof(int32_t), nullptr, &status);
   check(status, "output buffer");
   cleanup.add([=] { clReleaseMemObject(destination); });
   cl_event uploaded{}, executed{}, downloaded{};
-  check(clEnqueueWriteBuffer(queue, source_buffer, CL_FALSE, 0, size * sizeof(int32_t), values.data(), 0, nullptr, &uploaded), "upload");
+  check(clEnqueueWriteBuffer(queue, sourceBuffer, CL_FALSE, 0, size * sizeof(int32_t), values.data(), 0, nullptr, &uploaded), "upload");
   cleanup.add([=] { clReleaseEvent(uploaded); });
-  check(clSetKernelArg(kernel, 0, sizeof(source_buffer), &source_buffer), "input argument");
+  check(clSetKernelArg(kernel, 0, sizeof(sourceBuffer), &sourceBuffer), "input argument");
   check(clSetKernelArg(kernel, 1, sizeof(destination), &destination), "output argument");
   check(clSetKernelArg(kernel, 2, local * sizeof(int32_t), nullptr), "local argument");
   check(clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &size, &local, 1, &uploaded, &executed), "dispatch");
@@ -96,7 +96,7 @@ void execute(bool binary_roundtrip) {
   check(clWaitForEvents(1, &downloaded), "completion");
   for (size_t i = 0; i < size; ++i) {
     INFO(fmt::format("local-memory/barrier result mismatch at {}", i));
-    REQUIRE((output[i] == values[(i / local) * local + (i + 1) % local] + static_cast<int32_t>(i / local)));
+    REQUIRE(output[i] == values[(i / local) * local + (i + 1) % local] + static_cast<int32_t>(i / local));
   }
 }
 } // namespace

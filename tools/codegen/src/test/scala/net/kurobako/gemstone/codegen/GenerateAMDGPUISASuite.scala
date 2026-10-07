@@ -91,17 +91,10 @@ class GenerateAMDGPUISASuite extends munit.FunSuite {
     ))
   }
 
-  test("metadata catalog JSON interns strings and schemas with stable offsets") {
+  test("metadata catalogue JSON interns strings and schemas with stable offsets") {
     import GenerateAMDGPUISA.*
-    val operands = Vector(Operand(
-      "vdst",
-      "VGPR",
-      input = false,
-      output = true,
-      implicitOperand = false,
-      bits = 32,
-      dataFormat = "NUM_F32"
-    ))
+    val operands =
+      Vector(Operand("vdst", "VGPR", input = false, output = true, implicitOperand = false, bits = 32))
     val metadata = Vector(
       Vector(Instruction("v_add_f32", "GFX6", "VOP2", 17, operands, Vector("VALU"))),
       Vector(Instruction("v_add_f32", "RDNA3", "VOP2", 17, operands, Vector("VALU", "ARITHMETIC"), Vector("gfx1100")))
@@ -111,22 +104,15 @@ class GenerateAMDGPUISASuite extends munit.FunSuite {
     assertEquals(strings, strings.sorted)
     assertEquals(
       strings.toSet,
-      Set("RDNA3", "GFX6", "VOP2", "VGPR", "vdst", "NUM_F32", "VALU", "ARITHMETIC", "gfx1100")
+      Set("RDNA3", "GFX6", "VOP2", "VGPR", "vdst", "VALU", "ARITHMETIC", "gfx1100")
     )
     val schemas = json("schemas").arr.map(_.arr.map { operand =>
       val values = operand.arr
-      (
-        values(0).num.toInt,
-        values(1).num.toInt,
-        values(2).bool,
-        values(3).num.toInt,
-        values(4).num.toInt,
-        values(5).bool
-      )
+      (values(0).num.toInt, values(1).num.toInt, values(2).bool, values(3).num.toInt, values(4).bool)
     }.toVector).toVector
     assertEquals(
       schemas,
-      Vector(Vector((strings.indexOf("vdst"), strings.indexOf("VGPR"), false, 32, strings.indexOf("NUM_F32"), true)))
+      Vector(Vector((strings.indexOf("vdst"), strings.indexOf("VGPR"), false, 32, true)))
     )
     assertEquals(json("encodings").arr.size, 2)
     assertEquals(json("encodings").arr.map(row => strings(row("isa").num.toInt)).toVector, Vector("GFX6", "RDNA3"))

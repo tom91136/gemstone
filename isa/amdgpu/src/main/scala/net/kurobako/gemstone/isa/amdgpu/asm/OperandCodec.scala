@@ -1,12 +1,12 @@
 package net.kurobako.gemstone.isa.amdgpu.asm
 
-import Program.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.EncodingConstants.*
+import net.kurobako.gemstone.string.*
 
 private object OperandCodec {
   case class Literal(value: Long, size: Int in (4, 8) = 4) {
@@ -82,17 +82,11 @@ private object OperandCodec {
         }
       case Operand.Expression(ForcedWideLiteral(value))
           if isSource && encoding.selectors.contains("src_literal64") && info.bits.raw >= 64 =>
-        val number = if (value.startsWith("0x") || value.startsWith("0X")) BigInt(value.drop(2), 16) else BigInt(value)
-        Option.when(number >= Long.MinValue && number < (BigInt(1) << 64))((
-          Source.LITERAL64_CONST,
-          Some(Literal(number.toLong, 8))
-        ))
+        parseBigIntLiteral(value).filter(number => number >= Long.MinValue && number < (BigInt(1) << 64))
+          .map(number => (Source.LITERAL64_CONST, Some(Literal(number.toLong, 8))))
       case Operand.Expression(ForcedLiteral(value)) if isSource =>
-        val number = if (value.startsWith("0x") || value.startsWith("0X")) BigInt(value.drop(2), 16) else BigInt(value)
-        Option.when(number >= Int.MinValue && number <= BigInt("ffffffff", 16))((
-          Source.LITERAL_CONST,
-          Some(Literal(number.toLong & 0xffffffffL))
-        ))
+        parseBigIntLiteral(value).filter(number => number >= Int.MinValue && number <= BigInt("ffffffff", 16))
+          .map(number => (Source.LITERAL_CONST, Some(Literal(number.toLong & 0xffffffffL))))
       case _ => None
     }
   }

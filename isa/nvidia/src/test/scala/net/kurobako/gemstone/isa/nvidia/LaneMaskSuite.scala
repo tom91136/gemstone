@@ -7,7 +7,7 @@ class LaneMaskSuite extends munit.FunSuite {
     val lanes = Set(0, 31, 32, 63, 64, 127, 511, 512, VMLaneMask.MaximumLanes - 1)
     val sets  = Vector(Set.empty[Int], lanes, lanes.filter(_ % 2 == 0), lanes.filter(_ >= 64)) ++
       lanes.toVector.sorted.map(Set(_))
-    val full                                 = VMLaneMask.all(VMLaneMask.MaximumLanes).toOption.get
+    val full                                 = VMLaneMask.all(1024)
     def contents(mask: VMLaneMask): Set[Int] = {
       val result = Set.newBuilder[Int]
       mask.foreachLane { lane =>

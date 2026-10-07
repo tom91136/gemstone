@@ -3,49 +3,50 @@ package net.kurobako.gemstone.rpc
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 
-/** Immutable address snapshot, published with the allocation map. Readers need neither locks nor map iterators. */
-private class AllocationAddressIndex(entries: Array[(AllocationId, GuestAddress, Int > 0)]) {
-  private val sorted = entries.sortWith((left, right) =>
-    java.lang.Long.compareUnsigned(left._2.raw, right._2.raw) < 0
-  )
-  // Client aliases may overlap synthetic addresses. Preserve the original map's precedence in that unusual case,
-  // including zero-width lookups at touching boundaries and ranges that wrap the unsigned address space.
-  private val overlapping = sorted.indices.exists { index =>
-    val (_, base, size) = sorted(index)
-    val end             = base.raw + size.toLong.raw
-    java.lang.Long.compareUnsigned(end, base.raw) < 0 ||
-    (index + 1 < sorted.length && java.lang.Long.compareUnsigned(sorted(index + 1)._2.raw, end) <= 0)
+private object AllocationAddressIndex {
+  private case class Entry(id: AllocationId, base: GuestAddress, size: Int > 0)
+
+  private def sorted(entries: Iterable[Entry]): Array[Entry] =
+    entries.toArray.sortWith((left, right) => java.lang.Long.compareUnsigned(left.base.raw, right.base.raw) < 0)
+}
+
+/** Immutable address snapshot, published with the allocation map. Readers need neither locks nor map iterators. Client
+  * aliases are disjoint and so are synthetic ranges, but an alias may overlap a synthetic range (CUDA device addresses
+  * start at the synthetic base); an alias then takes precedence.
+  */
+private class AllocationAddressIndex(allocations: Map[AllocationId, StoredAllocation]) {
+  import AllocationAddressIndex.*
+
+  private val (aliases, synthetic) = {
+    val (aliased, unaliased)                                   = allocations.partition(_._2.aliased)
+    def entries(selected: Map[AllocationId, StoredAllocation]) =
+      sorted(selected.map((id, allocation) => Entry(id, allocation.base, allocation.size)))
+    (entries(aliased), entries(unaliased))
   }
 
-  private def contains(entry: (AllocationId, GuestAddress, Int > 0), address: GuestAddress, size: Int >= 0): Boolean = {
-    val relative = address.raw - entry._2.raw
-    java.lang.Long.compareUnsigned(address.raw, entry._2.raw) >= 0 && relative >= 0L &&
-    size.raw <= entry._3.raw && relative <= entry._3.toLong.raw - size.raw.toLong
-  }
+  def find(address: GuestAddress, size: Int >= 0): Option[(AllocationId, Long >= 0)] =
+    findAlias(address, size).orElse(search(synthetic, address, size))
 
+  def findAlias(address: GuestAddress, size: Int >= 0): Option[(AllocationId, Long >= 0)] =
+    search(aliases, address, size)
+
+  // Among disjoint ranges the last base at or below the address is the candidate, so a zero-width lookup at a shared
+  // boundary resolves to the range that starts there.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def find(address: GuestAddress, size: Int >= 0): Option[(AllocationId, Long >= 0)] = {
-    var candidate = -1
-    if (overlapping) {
-      var index = 0
-      while (index < entries.length && candidate < 0) {
-        if (contains(entries(index), address, size)) candidate = index
-        index += 1
-      }
-    } else {
-      var low  = 0
-      var high = sorted.length
-      while (low < high) {
-        val middle = low + (high - low) / 2
-        if (java.lang.Long.compareUnsigned(sorted(middle)._2.raw, address.raw) <= 0) low = middle + 1
-        else high = middle
-      }
-      if (low > 0 && contains(sorted(low - 1), address, size)) candidate = low - 1
+  private def search(
+      entries: Array[Entry],
+      address: GuestAddress,
+      size: Int >= 0
+  ): Option[(AllocationId, Long >= 0)] = {
+    var low  = 0
+    var high = entries.length
+    while (low < high) {
+      val middle = low + (high - low) / 2
+      if (java.lang.Long.compareUnsigned(entries(middle).base.raw, address.raw) <= 0) low = middle + 1
+      else high = middle
     }
-    if (candidate < 0) None
-    else {
-      val entry = if (overlapping) entries(candidate) else sorted(candidate)
-      Some(entry._1 -> (address.raw - entry._2.raw).unsafe[Long >= 0])
-    }
+    Option.when(low > 0)(entries(low - 1))
+      .filter(entry => AddressRanges.containsUnsigned(entry.base.raw, entry.size.raw, address.raw, size.raw))
+      .map(entry => entry.id -> (address.raw - entry.base.raw).unsafe[Long >= 0])
   }
 }

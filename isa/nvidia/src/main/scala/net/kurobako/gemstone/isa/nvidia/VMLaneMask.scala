@@ -8,31 +8,15 @@ object VMLaneMask {
   val Empty: VMLaneMask = VMLaneMask(Array.fill(WordCount)(0L), 0, 0)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def all(laneCount: Int): Either[VMFault, VMLaneMask] =
-    if (laneCount < 1 || laneCount > MaximumLanes)
-      Left(VMFault.InvalidProgram(
-        s"lane count must be between 1 and $MaximumLanes, found $laneCount"
-      ))
-    else {
-      val words = Array.fill(WordCount)(0L)
-      var lane  = 0
-      while (lane < laneCount) {
-        words(lane >>> 6) |= 1L << (lane & 63)
-        lane += 1
-      }
-      Right(VMLaneMask(words, laneCount.unsafe[Int in 0 ~ 1024], (laneCount + 63) >>> 6))
+  def all(laneCount: Int in 1 ~ 1024): VMLaneMask = {
+    val words = Array.fill(WordCount)(0L)
+    var lane  = 0
+    while (lane < laneCount.raw) {
+      words(lane >>> 6) |= 1L << (lane & 63)
+      lane += 1
     }
-
-  def one(lane: Int): Either[VMFault, VMLaneMask] =
-    if (lane < 0 || lane >= MaximumLanes)
-      Left(VMFault.InvalidProgram(
-        s"lane index must be between 0 and ${MaximumLanes - 1}, found $lane"
-      ))
-    else {
-      val words = Array.fill(WordCount)(0L)
-      words(lane >>> 6) = 1L << (lane & 63)
-      Right(VMLaneMask(words, 1, (lane >>> 6) + 1))
-    }
+    VMLaneMask(words, laneCount.widen, (laneCount.raw + 63) >>> 6)
+  }
 
   /** Collect lane groups without allocating an immutable mask for each arrival. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -54,9 +38,6 @@ object VMLaneMask {
     def result(): VMLaneMask =
       if (count == 0) Empty else VMLaneMask(words.clone(), count.unsafe[Int in 0 ~ 1024], limit)
   }
-
-  /** The single-lane mask, or `Empty` when the lane is out of range. */
-  def ofLane(lane: Int): VMLaneMask = one(lane).getOrElse(Empty)
 
 }
 

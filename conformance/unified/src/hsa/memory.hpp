@@ -15,7 +15,6 @@
 namespace memory_patterns {
 struct Backend {
   std::string kind;
-  std::string allocationKind() const { return kind; }
   hsa_agent_t cpu{}, gpu{};
   hsa_region_t region{};
   hsa_amd_memory_pool_t pool{};
@@ -26,7 +25,7 @@ struct Backend {
   uint64_t kernel{};
   uint32_t argumentSize{}, groupSize{}, privateSize{};
   void *arguments{};
-  explicit Backend(std::string kind = "region", uint64_t selected = 0) : kind(std::move(kind)) {
+  Backend(std::string kind, uint64_t selected) : kind(std::move(kind)) {
     check(hsa_init());
     check(hsa_iterate_agents(
         [](hsa_agent_t agent, void *data) {
@@ -92,8 +91,8 @@ struct Backend {
   }
   void *allocate(size_t size) {
     void *p{};
-    if (allocationKind() == "pool") check(hsa_amd_memory_pool_allocate(pool, size, 0, &p));
-    else if (allocationKind() == "locked") {
+    if (kind == "pool") check(hsa_amd_memory_pool_allocate(pool, size, 0, &p));
+    else if (kind == "locked") {
       p = ordinary(size);
       void *alias{};
       check(hsa_amd_memory_lock(p, size, &gpu, 1, &alias));
@@ -103,14 +102,14 @@ struct Backend {
         throw Unsupported("locked host pointer graphs require identical host/device addresses");
       }
     } else check(hsa_memory_allocate(region, size, &p));
-    if (allocationKind() == "pool") check(hsa_amd_agents_allow_access(1, &gpu, nullptr, p));
+    if (kind == "pool") check(hsa_amd_agents_allow_access(1, &gpu, nullptr, p));
     return p;
   }
   void release(void *p) {
-    if (allocationKind() == "locked") {
+    if (kind == "locked") {
       check(hsa_amd_memory_unlock(p));
       std::free(p);
-    } else if (allocationKind() == "pool") check(hsa_amd_memory_pool_free(p));
+    } else if (kind == "pool") check(hsa_amd_memory_pool_free(p));
     else check(hsa_memory_free(p));
   }
   void enqueue(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count, void *args, hsa_queue_t *target,

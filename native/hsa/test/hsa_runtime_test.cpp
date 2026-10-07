@@ -16,7 +16,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "gemstone/hsa/global.h"
+#include "gemstone/hsa/global.hpp"
 #include <gemstone/test_support.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
@@ -95,19 +95,19 @@ TEST_CASE("HSA system paging ISA feature", "[hsa]") {
   std::string name(length, '\0');
   REQUIRE((hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, name.data()) == HSA_STATUS_SUCCESS));
   REQUIRE((name.find("xnack+") != std::string::npos));
-  std::array<uint32_t, 2> host_values{41, 43};
-  void *agent_pointer = nullptr;
-  REQUIRE((hsa_amd_memory_lock(host_values.data(), sizeof(host_values), nullptr, 0, &agent_pointer) == HSA_STATUS_SUCCESS));
-  REQUIRE((agent_pointer == host_values.data()));
-  void *second_agent_pointer = nullptr;
-  REQUIRE((hsa_amd_memory_lock(host_values.data(), sizeof(host_values), nullptr, 0, &second_agent_pointer) == HSA_STATUS_SUCCESS));
-  REQUIRE((second_agent_pointer == host_values.data()));
+  std::array<uint32_t, 2> hostValues{41, 43};
+  void *agentPointer = nullptr;
+  REQUIRE((hsa_amd_memory_lock(hostValues.data(), sizeof(hostValues), nullptr, 0, &agentPointer) == HSA_STATUS_SUCCESS));
+  REQUIRE((agentPointer == hostValues.data()));
+  void *secondAgentPointer = nullptr;
+  REQUIRE((hsa_amd_memory_lock(hostValues.data(), sizeof(hostValues), nullptr, 0, &secondAgentPointer) == HSA_STATUS_SUCCESS));
+  REQUIRE((secondAgentPointer == hostValues.data()));
   hsa_amd_pointer_info_t info{};
   info.size = sizeof(info);
-  REQUIRE((hsa_amd_pointer_info(host_values.data(), &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_pointer_info(hostValues.data(), &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS));
   REQUIRE((info.type == HSA_EXT_POINTER_TYPE_LOCKED));
-  REQUIRE((hsa_amd_memory_unlock(host_values.data()) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_amd_memory_unlock(host_values.data()) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_unlock(hostValues.data()) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_unlock(hostValues.data()) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_shut_down() == HSA_STATUS_SUCCESS));
   unsetenv(gemstone::environment::SystemPaging);
 }
@@ -122,13 +122,17 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
 
   const char *message = nullptr;
   REQUIRE((hsa_status_string(HSA_STATUS_ERROR_NOT_INITIALIZED, &message) == HSA_STATUS_SUCCESS));
-  REQUIRE((message && std::strcmp(message, "runtime not initialized") == 0));
-  uint16_t version_major = 0;
-  REQUIRE((hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &version_major) == HSA_STATUS_ERROR_NOT_INITIALIZED));
+  REQUIRE(
+      (message
+       && std::strcmp(message, "HSA_STATUS_ERROR_NOT_INITIALIZED: An API other than hsa_init has been invoked while the reference count "
+                               "of the HSA runtime is zero.")
+              == 0));
+  uint16_t versionMajor = 0;
+  REQUIRE((hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &versionMajor) == HSA_STATUS_ERROR_NOT_INITIALIZED));
   uint32_t validation = 0;
   REQUIRE((hsa_executable_validate(hsa_executable_t{1}, &validation) == HSA_STATUS_ERROR_NOT_INITIALIZED));
-  volatile hsa_signal_value_t *signal_value = nullptr;
-  REQUIRE((hsa_amd_signal_value_pointer(hsa_signal_t{1}, &signal_value) == HSA_STATUS_ERROR_NOT_INITIALIZED));
+  volatile hsa_signal_value_t *signalValue = nullptr;
+  REQUIRE((hsa_amd_signal_value_pointer(hsa_signal_t{1}, &signalValue) == HSA_STATUS_ERROR_NOT_INITIALIZED));
   REQUIRE(
       (hsa_amd_signal_async_handler(hsa_signal_t{1}, HSA_SIGNAL_CONDITION_EQ, 0, nullptr, nullptr) == HSA_STATUS_ERROR_NOT_INITIALIZED));
   REQUIRE((hsa_amd_memory_lock(nullptr, 1, nullptr, 0, nullptr) == HSA_STATUS_ERROR_NOT_INITIALIZED));
@@ -150,7 +154,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   // A kernel with no explicit or implicit arguments has no kernarg allocation.
   REQUIRE((hsa_memory_free(nullptr) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_shut_down() == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &version_major) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &versionMajor) == HSA_STATUS_SUCCESS));
   REQUIRE(
       (hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, table.size(), table.data()) == HSA_STATUS_ERROR_INVALID_ARGUMENT));
   REQUIRE((hsa_system_get_major_extension_table(UINT16_MAX, 1, 0, nullptr) == HSA_STATUS_ERROR_INVALID_ARGUMENT));
@@ -171,11 +175,10 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
     if (type == HSA_DEVICE_TYPE_GPU) gpu = agent;
   }
   REQUIRE((gpu.handle != 0));
-  hsa_queue_t *single_queue = nullptr;
-  REQUIRE(
-      (hsa_queue_create(gpu, 64, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, UINT32_MAX, UINT32_MAX, &single_queue) == HSA_STATUS_SUCCESS));
-  REQUIRE((single_queue->type == HSA_QUEUE_TYPE_SINGLE));
-  REQUIRE((hsa_queue_destroy(single_queue) == HSA_STATUS_SUCCESS));
+  hsa_queue_t *singleQueue = nullptr;
+  REQUIRE((hsa_queue_create(gpu, 64, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, UINT32_MAX, UINT32_MAX, &singleQueue) == HSA_STATUS_SUCCESS));
+  REQUIRE((singleQueue->type == HSA_QUEUE_TYPE_SINGLE));
+  REQUIRE((hsa_queue_destroy(singleQueue) == HSA_STATUS_SUCCESS));
   std::vector<hsa_region_t> regions;
   REQUIRE((hsa_agent_iterate_regions(
                gpu,
@@ -204,7 +207,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE((kernarg.handle != coarse.handle));
   for (const auto status : {HSA_STATUS_INFO_BREAK, HSA_STATUS_ERROR}) {
     size_t callbacks = 0;
-    std::pair<size_t *, hsa_status_t> callback_state{&callbacks, status};
+    std::pair<size_t *, hsa_status_t> callbackState{&callbacks, status};
     REQUIRE((hsa_agent_iterate_regions(
                  gpu,
                  [](hsa_region_t, void *data) {
@@ -212,20 +215,20 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
                    ++*state.first;
                    return state.second;
                  },
-                 &callback_state)
+                 &callbackState)
              == status));
     REQUIRE((callbacks == 1));
   }
-  std::array<uint32_t, 3> payload{19, 23, 29}, region_copy{};
-  void *kernarg_memory = nullptr, *device_memory = nullptr;
-  REQUIRE((hsa_memory_allocate(kernarg, sizeof(payload), &kernarg_memory) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_memory_allocate(coarse, sizeof(payload), &device_memory) == HSA_STATUS_SUCCESS));
-  std::memcpy(kernarg_memory, payload.data(), sizeof(payload));
-  REQUIRE((hsa_memory_copy(device_memory, kernarg_memory, sizeof(payload)) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_memory_copy(region_copy.data(), device_memory, sizeof(region_copy)) == HSA_STATUS_SUCCESS));
-  REQUIRE((region_copy == payload));
-  REQUIRE((hsa_memory_free(device_memory) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_memory_free(kernarg_memory) == HSA_STATUS_SUCCESS));
+  std::array<uint32_t, 3> payload{19, 23, 29}, regionCopy{};
+  void *kernargMemory = nullptr, *deviceMemory = nullptr;
+  REQUIRE((hsa_memory_allocate(kernarg, sizeof(payload), &kernargMemory) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_allocate(coarse, sizeof(payload), &deviceMemory) == HSA_STATUS_SUCCESS));
+  std::memcpy(kernargMemory, payload.data(), sizeof(payload));
+  REQUIRE((hsa_memory_copy(deviceMemory, kernargMemory, sizeof(payload)) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_copy(regionCopy.data(), deviceMemory, sizeof(regionCopy)) == HSA_STATUS_SUCCESS));
+  REQUIRE((regionCopy == payload));
+  REQUIRE((hsa_memory_free(deviceMemory) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_free(kernargMemory) == HSA_STATUS_SUCCESS));
   hsa_profile_t profile{};
   REQUIRE((hsa_agent_get_info(gpu, HSA_AGENT_INFO_PROFILE, &profile) == HSA_STATUS_SUCCESS));
   REQUIRE((profile == HSA_PROFILE_BASE));
@@ -246,13 +249,13 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   // RDNA applications size WGP dispatches from half the advertised CU count.
   for (const auto *target : {"gfx906", "gfx1030", "gfx1100"}) {
     REQUIRE((setenv(gemstone::environment::TargetArch, target, 1) == 0));
-    uint32_t compute_units = 0, cooperative_units = 0;
-    REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), &compute_units)
+    uint32_t computeUnits = 0, cooperativeUnits = 0;
+    REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), &computeUnits)
              == HSA_STATUS_SUCCESS));
-    REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COOPERATIVE_COMPUTE_UNIT_COUNT), &cooperative_units)
+    REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COOPERATIVE_COMPUTE_UNIT_COUNT), &cooperativeUnits)
              == HSA_STATUS_SUCCESS));
-    REQUIRE((compute_units == (std::strcmp(target, "gfx906") == 0 ? 1 : 2)));
-    REQUIRE((cooperative_units == compute_units));
+    REQUIRE((computeUnits == (std::strcmp(target, "gfx906") == 0 ? 1 : 2)));
+    REQUIRE((cooperativeUnits == computeUnits));
   }
   hsa_amd_hdp_flush_t hdp{};
   REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HDP_FLUSH), &hdp) == HSA_STATUS_SUCCESS));
@@ -293,9 +296,9 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
       REQUIRE((hsa_amd_memory_pool_allocate(pool, 64, 0, &allocation) == HSA_STATUS_ERROR_INVALID_ALLOCATION));
     } else {
       REQUIRE((segment == HSA_AMD_SEGMENT_GLOBAL));
-      bool accessible_by_all = true;
-      REQUIRE((hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL, &accessible_by_all) == HSA_STATUS_SUCCESS));
-      REQUIRE((!accessible_by_all));
+      bool accessibleByAll = true;
+      REQUIRE((hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL, &accessibleByAll) == HSA_STATUS_SUCCESS));
+      REQUIRE((!accessibleByAll));
       REQUIRE(
           (hsa_amd_memory_pool_allocate(pool, 64, HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG, &allocation) == HSA_STATUS_ERROR_INVALID_ARGUMENT));
       REQUIRE((hsa_amd_memory_pool_allocate(pool, 64, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &allocation) == HSA_STATUS_SUCCESS));
@@ -313,7 +316,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE((hsa_amd_memory_copy_engine_status(hsa_agent_t{}, agents.front(), &engines) == HSA_STATUS_ERROR_INVALID_AGENT));
   hsa_signal_t signal{};
   REQUIRE((hsa_signal_create(1, 0, nullptr, &signal) == HSA_STATUS_SUCCESS));
-  const size_t threads_before = gemstone_test::processThreadCount();
+  const size_t threadsBefore = gemstone_test::processThreadCount();
   std::atomic_uint callbacks{0};
   for (size_t index = 0; index < 64; ++index)
     REQUIRE((hsa_amd_signal_async_handler(
@@ -325,10 +328,10 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
                  &callbacks)
              == HSA_STATUS_SUCCESS));
   std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  REQUIRE((gemstone_test::processThreadCount() <= threads_before + 5));
+  REQUIRE((gemstone_test::processThreadCount() <= threadsBefore + 5));
   hsa_signal_silent_store_relaxed(signal, 7);
-  const auto callbacks_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-  while (callbacks.load() != 64 && std::chrono::steady_clock::now() < callbacks_deadline)
+  const auto callbacksDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (callbacks.load() != 64 && std::chrono::steady_clock::now() < callbacksDeadline)
     std::this_thread::yield();
   REQUIRE((callbacks.load() == 64));
   REQUIRE((hsa_signal_load_relaxed(signal) == 7));
@@ -358,25 +361,25 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   // packet's device writes must already be visible in those mirrors.
   const auto image = gemstone::hsa::test::codeObjectFixture(1, true);
   hsa_code_object_reader_t reader{};
-  hsa_code_object_t legacy_object{};
+  hsa_code_object_t legacyObject{};
   hsa_executable_t executable{};
-  auto serialized = image;
-  REQUIRE((hsa_code_object_deserialize(nullptr, serialized.size(), nullptr, &legacy_object) == HSA_STATUS_ERROR_INVALID_ARGUMENT));
-  REQUIRE((hsa_code_object_deserialize(serialized.data(), serialized.size(), nullptr, &legacy_object) == HSA_STATUS_SUCCESS));
-  std::fill(serialized.begin(), serialized.end(), 0);
-  REQUIRE((hsa_code_object_reader_destroy(hsa_code_object_reader_t{legacy_object.handle}) == HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER));
+  auto serialised = image;
+  REQUIRE((hsa_code_object_deserialize(nullptr, serialised.size(), nullptr, &legacyObject) == HSA_STATUS_ERROR_INVALID_ARGUMENT));
+  REQUIRE((hsa_code_object_deserialize(serialised.data(), serialised.size(), nullptr, &legacyObject) == HSA_STATUS_SUCCESS));
+  std::fill(serialised.begin(), serialised.end(), 0);
+  REQUIRE((hsa_code_object_reader_destroy(hsa_code_object_reader_t{legacyObject.handle}) == HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER));
   REQUIRE((hsa_executable_create_alt(HSA_PROFILE_BASE, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR, nullptr, &executable) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_load_code_object(executable, gpu, hsa_code_object_t{}, nullptr) == HSA_STATUS_ERROR_INVALID_CODE_OBJECT));
-  REQUIRE((hsa_executable_load_code_object(executable, gpu, legacy_object, nullptr) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_executable_load_code_object(executable, gpu, legacyObject, nullptr) == HSA_STATUS_SUCCESS));
   REQUIRE(fixture.lastProgramImage() == image);
   REQUIRE((hsa_executable_freeze(executable, nullptr) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_executable_load_code_object(executable, gpu, legacy_object, nullptr) == HSA_STATUS_ERROR_FROZEN_EXECUTABLE));
+  REQUIRE((hsa_executable_load_code_object(executable, gpu, legacyObject, nullptr) == HSA_STATUS_ERROR_FROZEN_EXECUTABLE));
   hsa_executable_symbol_t kernel{};
   uint64_t object = 0;
   REQUIRE((hsa_executable_get_symbol(executable, nullptr, "add.kd", gpu, 0, &kernel) == HSA_STATUS_SUCCESS));
-  hsa_executable_symbol_t modern_kernel{};
-  REQUIRE((hsa_executable_get_symbol_by_name(executable, "add", &gpu, &modern_kernel) == HSA_STATUS_SUCCESS));
-  REQUIRE(kernel.handle == modern_kernel.handle);
+  hsa_executable_symbol_t modernKernel{};
+  REQUIRE((hsa_executable_get_symbol_by_name(executable, "add", &gpu, &modernKernel) == HSA_STATUS_SUCCESS));
+  REQUIRE(kernel.handle == modernKernel.handle);
   REQUIRE((hsa_executable_symbol_get_info(kernel, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) == HSA_STATUS_SUCCESS));
   hsa_queue_t *queue = nullptr;
   REQUIRE((hsa_queue_create(gpu, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, UINT32_MAX, UINT32_MAX, &queue) == HSA_STATUS_SUCCESS));
@@ -389,9 +392,9 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
     void *output;
     uint32_t seed;
   };
-  void *argument_memory = nullptr;
-  REQUIRE((hsa_memory_allocate(kernarg, sizeof(Arguments), &argument_memory) == HSA_STATUS_SUCCESS));
-  auto *arguments = static_cast<Arguments *>(argument_memory);
+  void *argumentMemory = nullptr;
+  REQUIRE((hsa_memory_allocate(kernarg, sizeof(Arguments), &argumentMemory) == HSA_STATUS_SUCCESS));
+  auto *arguments = static_cast<Arguments *>(argumentMemory);
   *arguments = Arguments{output, 37};
   fixture.expect({1, outputCount, outputCount, 0, arguments->seed});
   auto *packet = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address);
@@ -405,7 +408,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   packet->kernarg_address = arguments;
   REQUIRE((packet->completion_signal.handle == 0));
   __atomic_store_n(&packet->header, uint16_t(HSA_PACKET_TYPE_KERNEL_DISPATCH), __ATOMIC_RELEASE);
-  const auto reads_before_dispatch = fixture.reads();
+  const auto readsBeforeDispatch = fixture.reads.load();
   hsa_queue_store_write_index_screlease(queue, 1);
   hsa_signal_store_screlease(queue->doorbell_signal, 0);
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -416,7 +419,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   for (uint32_t index = 0; index < outputCount; ++index)
     REQUIRE((static_cast<uint32_t *>(output)[index] == 37 + index));
   // Exact dirty words share bounded 64KiB reads, including the final partial batch.
-  CHECK(fixture.reads() - reads_before_dispatch == (outputCount * sizeof(uint32_t) + 65535) / 65536);
+  CHECK(fixture.reads.load() - readsBeforeDispatch == (outputCount * sizeof(uint32_t) + 65535) / 65536);
   // A device-to-host copy submitted while a dispatch is still running must
   // observe that dispatch's writes. The mock server pauses completion so the
   // ordering is deterministic even on a fast machine.
@@ -435,39 +438,39 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   __atomic_store_n(&packet->header, uint16_t(HSA_PACKET_TYPE_KERNEL_DISPATCH), __ATOMIC_RELEASE);
   hsa_queue_store_write_index_screlease(queue, 2);
   hsa_signal_store_screlease(queue->doorbell_signal, 1);
-  const auto entered_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (!fixture.completionEntered() && std::chrono::steady_clock::now() < entered_deadline)
+  const auto enteredDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!fixture.completionEntered.load() && std::chrono::steady_clock::now() < enteredDeadline)
     std::this_thread::yield();
-  REQUIRE((fixture.completionEntered()));
+  REQUIRE((fixture.completionEntered.load()));
   std::array<uint32_t, 12> copied{};
-  hsa_signal_t copy_signal{};
-  REQUIRE((hsa_signal_create(1, 0, nullptr, &copy_signal) == HSA_STATUS_SUCCESS));
-  std::atomic_bool copy_finished{false};
-  hsa_status_t copy_status = HSA_STATUS_ERROR;
+  hsa_signal_t copySignal{};
+  REQUIRE((hsa_signal_create(1, 0, nullptr, &copySignal) == HSA_STATUS_SUCCESS));
+  std::atomic_bool copyFinished{false};
+  hsa_status_t copyStatus = HSA_STATUS_ERROR;
   std::thread copying([&] {
-    copy_status = hsa_amd_memory_async_copy(copied.data(), agents.front(), output, gpu, sizeof(copied), 0, nullptr, copy_signal);
-    copy_finished = true;
+    copyStatus = hsa_amd_memory_async_copy(copied.data(), agents.front(), output, gpu, sizeof(copied), 0, nullptr, copySignal);
+    copyFinished = true;
   });
   std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  const bool copied_before_dispatch = copy_finished.load();
+  const bool copiedBeforeDispatch = copyFinished.load();
   fixture.releasePausedCompletion();
   copying.join();
-  REQUIRE((!copied_before_dispatch));
-  REQUIRE((copy_status == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_signal_load_scacquire(copy_signal) == 0));
+  REQUIRE((!copiedBeforeDispatch));
+  REQUIRE((copyStatus == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_load_scacquire(copySignal) == 0));
   for (uint32_t index = 0; index < copied.size(); ++index)
     REQUIRE((copied[index] == 73 + index));
-  REQUIRE((hsa_signal_destroy(copy_signal) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(copySignal) == HSA_STATUS_SUCCESS));
   fixture.check();
   REQUIRE((setenv(gemstone::environment::SystemPaging, "1", 1) == 0));
   for (uint32_t seed = 1; seed <= 16; ++seed) {
-    std::array<uint32_t, 12> pageable_output{};
+    std::array<uint32_t, 12> pageableOutput{};
     if (seed == 1) fixture.pauseNextCompletion();
-    *arguments = Arguments{pageable_output.data(), seed};
+    *arguments = Arguments{pageableOutput.data(), seed};
     hsa_signal_t completion{};
     REQUIRE((hsa_signal_create(1, 0, nullptr, &completion) == HSA_STATUS_SUCCESS));
     fixture.expect({4, 3, 12, 0, seed});
-    const auto reads_before_host_dispatch = fixture.reads();
+    const auto readsBeforeHostDispatch = fixture.reads.load();
     const uint64_t index = hsa_queue_load_write_index_relaxed(queue);
     packet = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) + (index & (queue->size - 1));
     std::memset(packet, 0, sizeof(*packet));
@@ -483,44 +486,44 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
     hsa_queue_store_write_index_screlease(queue, index + 1);
     hsa_signal_store_screlease(queue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
     if (seed == 1) {
-      const auto release_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-      while (!fixture.completionEntered() && std::chrono::steady_clock::now() < release_deadline)
+      const auto releaseDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+      while (!fixture.completionEntered.load() && std::chrono::steady_clock::now() < releaseDeadline)
         std::this_thread::yield();
-      REQUIRE((fixture.completionEntered()));
+      REQUIRE((fixture.completionEntered.load()));
       REQUIRE((hsa_signal_load_scacquire(completion) == 1));
       fixture.releasePausedCompletion();
     }
     REQUIRE((hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) == 0));
-    for (uint32_t output_index = 0; output_index < pageable_output.size(); ++output_index)
-      REQUIRE((pageable_output[output_index] == seed + output_index));
-    CHECK(fixture.reads() == reads_before_host_dispatch);
-    fixture.checkAllocationContainingAddress(pageable_output.data(), false);
+    for (uint32_t outputIndex = 0; outputIndex < pageableOutput.size(); ++outputIndex)
+      REQUIRE((pageableOutput[outputIndex] == seed + outputIndex));
+    CHECK(fixture.reads.load() == readsBeforeHostDispatch);
+    fixture.checkAllocationContainingAddress(pageableOutput.data(), false);
     REQUIRE((hsa_signal_destroy(completion) == HSA_STATUS_SUCCESS));
     fixture.check();
   }
   REQUIRE((unsetenv(gemstone::environment::SystemPaging) == 0));
   REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_amd_memory_pool_free(output) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_memory_free(argument_memory) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_free(argumentMemory) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_destroy(executable) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_code_object_destroy(legacy_object) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_code_object_destroy(legacy_object) == HSA_STATUS_ERROR_INVALID_CODE_OBJECT));
-  // Generic ELF variables, including initialized data, BSS and aliases, use
+  REQUIRE((hsa_code_object_destroy(legacyObject) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_code_object_destroy(legacyObject) == HSA_STATUS_ERROR_INVALID_CODE_OBJECT));
+  // Generic ELF variables, including initialised data, BSS and aliases, use
   // the same allocation store as ordinary pointer arguments and host copies.
-  const auto globals_image = gemstone::hsa::test::variableKernelObjectFixture();
-  fixture.programCatalog({{"add", "add.kd"}}, {{"arbitrary_data", 0x1004, 8, {}},
-                                               {"data_alias", 0x1004, 8, {}},
-                                               {"arbitrary_bss", 0x2000, 32, {}},
-                                               {"zero_global", 0x2020, 0, {}}});
+  const auto globalsImage = gemstone::hsa::test::variableKernelObjectFixture();
+  fixture.programCatalogue({{"add", "add.kd"}}, {{"arbitrary_data", 0x1004, 8, {}},
+                                                 {"data_alias", 0x1004, 8, {}},
+                                                 {"arbitrary_bss", 0x2000, 32, {}},
+                                                 {"zero_global", 0x2020, 0, {}}});
   fixture.expectGlobalBinding("arbitrary_data", 0, {5, 6, 7, 8, 9, 10, 11, 12});
   fixture.expectGlobalBinding("data_alias", 0, {5, 6, 7, 8, 9, 10, 11, 12});
   fixture.expectGlobalBinding("arbitrary_bss", 0, std::vector<uint8_t>(32));
-  REQUIRE((hsa_code_object_reader_create_from_memory(globals_image.data(), globals_image.size(), &reader) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_code_object_reader_create_from_memory(globalsImage.data(), globalsImage.size(), &reader) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_create_alt(HSA_PROFILE_BASE, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR, nullptr, &executable) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_freeze(executable, nullptr) == HSA_STATUS_SUCCESS));
   fixture.checkGlobalBindings();
-  const auto global_address = [&](const char *name, uint32_t expected_size) {
+  const auto globalAddress = [&](const char *name, uint32_t expectedSize) {
     hsa_executable_symbol_t symbol{};
     uint64_t address = 0;
     uint32_t size = UINT32_MAX;
@@ -529,18 +532,18 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
     REQUIRE((hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &type) == HSA_STATUS_SUCCESS));
     REQUIRE((type == HSA_SYMBOL_KIND_VARIABLE));
     REQUIRE((hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &size) == HSA_STATUS_SUCCESS));
-    REQUIRE((size == expected_size));
+    REQUIRE((size == expectedSize));
     REQUIRE((hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &address) == HSA_STATUS_SUCCESS));
     return reinterpret_cast<void *>(address);
   };
-  auto *data = static_cast<uint8_t *>(global_address("arbitrary_data", 8));
-  REQUIRE((data == global_address("data_alias", 8)));
+  auto *data = static_cast<uint8_t *>(globalAddress("arbitrary_data", 8));
+  REQUIRE((data == globalAddress("data_alias", 8)));
   for (uint8_t index = 0; index < 8; ++index)
     REQUIRE((data[index] == index + 5));
-  auto *bss = static_cast<uint32_t *>(global_address("arbitrary_bss", 32));
+  auto *bss = static_cast<uint32_t *>(globalAddress("arbitrary_bss", 32));
   for (uint32_t index = 0; index < 8; ++index)
     REQUIRE((bss[index] == 0));
-  REQUIRE((global_address("zero_global", 0) == nullptr));
+  REQUIRE((globalAddress("zero_global", 0) == nullptr));
   hsa_executable_symbol_t absent{};
   REQUIRE((hsa_executable_get_symbol_by_name(executable, "undefined_global", &gpu, &absent) == HSA_STATUS_ERROR_INVALID_SYMBOL_NAME));
   REQUIRE((hsa_executable_get_symbol_by_name(executable, "__omp_rtl_device_memory_pool", &gpu, &absent)
@@ -548,37 +551,37 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE((hsa_amd_memory_pool_free(data) == HSA_STATUS_ERROR_INVALID_ALLOCATION));
   uint32_t replacement = 0x12345678, observed = 0;
   REQUIRE((hsa_memory_copy(data + 4, &replacement, 4) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_memory_copy(&observed, static_cast<uint8_t *>(global_address("data_alias", 8)) + 4, 4) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_copy(&observed, static_cast<uint8_t *>(globalAddress("data_alias", 8)) + 4, 4) == HSA_STATUS_SUCCESS));
   REQUIRE((observed == replacement));
-  uint64_t fresh_host_value = 0;
-  REQUIRE((hsa_memory_register(&fresh_host_value, sizeof(fresh_host_value)) == HSA_STATUS_SUCCESS));
-  fixture.checkAllocationAddress(&fresh_host_value);
-  fresh_host_value = 0x1122334455667788;
-  REQUIRE((gemstone_hsa_executable_write_global(executable, "arbitrary_data", &fresh_host_value, sizeof(fresh_host_value), 0)
+  uint64_t freshHostValue = 0;
+  REQUIRE((hsa_memory_register(&freshHostValue, sizeof(freshHostValue)) == HSA_STATUS_SUCCESS));
+  fixture.checkAllocationAddress(&freshHostValue);
+  freshHostValue = 0x1122334455667788;
+  REQUIRE((gemstone_hsa_executable_write_global(executable, "arbitrary_data", &freshHostValue, sizeof(freshHostValue), 0)
            == HSA_STATUS_SUCCESS));
-  uint64_t copied_host_value = 0;
-  REQUIRE((hsa_memory_copy(&copied_host_value, data, sizeof(copied_host_value)) == HSA_STATUS_SUCCESS));
-  REQUIRE((copied_host_value == fresh_host_value));
+  uint64_t copiedHostValue = 0;
+  REQUIRE((hsa_memory_copy(&copiedHostValue, data, sizeof(copiedHostValue)) == HSA_STATUS_SUCCESS));
+  REQUIRE((copiedHostValue == freshHostValue));
   // A pointer stored in a program global must match the native address used by typed aliased arguments.
-  void *ordinary_pointer = &fresh_host_value;
-  REQUIRE((hsa_memory_copy(data, &ordinary_pointer, sizeof(ordinary_pointer)) == HSA_STATUS_SUCCESS));
-  fixture.checkAllocationWord(data, 0, reinterpret_cast<uint64_t>(ordinary_pointer));
-  REQUIRE((hsa_memory_deregister(&fresh_host_value, sizeof(fresh_host_value)) == HSA_STATUS_SUCCESS));
-  fixture.checkAllocationAddress(&fresh_host_value, false);
-  void *pointer_value = bss, *pointer_result = nullptr;
-  REQUIRE((hsa_memory_copy(data, &pointer_value, sizeof(pointer_value)) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_memory_copy(&pointer_result, global_address("data_alias", 8), sizeof(pointer_result)) == HSA_STATUS_SUCCESS));
-  REQUIRE((pointer_result == bss));
-  // An ordinary scalar equal to an ELF address is not a pointer initializer.
-  uint64_t scalar_address = 0x1004, scalar_result = 0;
-  REQUIRE((hsa_memory_copy(bss, &scalar_address, sizeof(scalar_address)) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_memory_copy(&scalar_result, bss, sizeof(scalar_result)) == HSA_STATUS_SUCCESS));
-  REQUIRE((scalar_result == scalar_address));
+  void *ordinaryPointer = &freshHostValue;
+  REQUIRE((hsa_memory_copy(data, &ordinaryPointer, sizeof(ordinaryPointer)) == HSA_STATUS_SUCCESS));
+  fixture.checkAllocationWord(data, 0, reinterpret_cast<uint64_t>(ordinaryPointer));
+  REQUIRE((hsa_memory_deregister(&freshHostValue, sizeof(freshHostValue)) == HSA_STATUS_SUCCESS));
+  fixture.checkAllocationAddress(&freshHostValue, false);
+  void *pointerValue = bss, *pointerResult = nullptr;
+  REQUIRE((hsa_memory_copy(data, &pointerValue, sizeof(pointerValue)) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_copy(&pointerResult, globalAddress("data_alias", 8), sizeof(pointerResult)) == HSA_STATUS_SUCCESS));
+  REQUIRE((pointerResult == bss));
+  // An ordinary scalar equal to an ELF address is not a pointer initialiser.
+  uint64_t scalarAddress = 0x1004, scalarResult = 0;
+  REQUIRE((hsa_memory_copy(bss, &scalarAddress, sizeof(scalarAddress)) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_copy(&scalarResult, bss, sizeof(scalarResult)) == HSA_STATUS_SUCCESS));
+  REQUIRE((scalarResult == scalarAddress));
   REQUIRE((hsa_executable_get_symbol_by_name(executable, "add", &gpu, &kernel) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_symbol_get_info(kernel, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_queue_create(gpu, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, UINT32_MAX, UINT32_MAX, &queue) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_memory_allocate(kernarg, sizeof(Arguments), &argument_memory) == HSA_STATUS_SUCCESS));
-  arguments = static_cast<Arguments *>(argument_memory);
+  REQUIRE((hsa_memory_allocate(kernarg, sizeof(Arguments), &argumentMemory) == HSA_STATUS_SUCCESS));
+  arguments = static_cast<Arguments *>(argumentMemory);
   *arguments = Arguments{bss, 81};
   fixture.expect({4, 2, 8, 0, 81});
   packet = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address);
@@ -593,15 +596,15 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   __atomic_store_n(&packet->header, uint16_t(HSA_PACKET_TYPE_KERNEL_DISPATCH), __ATOMIC_RELEASE);
   hsa_queue_store_write_index_screlease(queue, 1);
   hsa_signal_store_screlease(queue->doorbell_signal, 0);
-  const auto global_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (hsa_queue_load_read_index_scacquire(queue) != 1 && std::chrono::steady_clock::now() < global_deadline)
+  const auto globalDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (hsa_queue_load_read_index_scacquire(queue) != 1 && std::chrono::steady_clock::now() < globalDeadline)
     std::this_thread::yield();
   REQUIRE((hsa_queue_load_read_index_scacquire(queue) == 1));
   for (uint32_t index = 0; index < 8; ++index)
     REQUIRE((bss[index] == 81 + index));
   fixture.check();
   REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_memory_free(argument_memory) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_free(argumentMemory) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_destroy(executable) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_amd_memory_pool_free(data) == HSA_STATUS_ERROR_INVALID_ALLOCATION));
   REQUIRE((hsa_code_object_reader_destroy(reader) == HSA_STATUS_SUCCESS));
@@ -611,12 +614,12 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   child[0] = 1;
   child[17000] = 37;
   REQUIRE((hsa_memory_register(child.data(), child.size() * sizeof(uint32_t)) == HSA_STATUS_SUCCESS));
-  void *table_memory = nullptr, *device_only = nullptr;
-  REQUIRE((hsa_amd_memory_pool_allocate(pools.front(), 32, 0, &table_memory) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_amd_memory_pool_allocate(pools.front(), 128 * 1024, 0, &device_only) == HSA_STATUS_SUCCESS));
-  std::memset(device_only, 0x5a, 128 * 1024);
-  REQUIRE((hsa_memory_allocate(kernarg, sizeof(Arguments), &argument_memory) == HSA_STATUS_SUCCESS));
-  arguments = static_cast<Arguments *>(argument_memory);
+  void *tableMemory = nullptr, *deviceOnly = nullptr;
+  REQUIRE((hsa_amd_memory_pool_allocate(pools.front(), 32, 0, &tableMemory) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_pool_allocate(pools.front(), 128 * 1024, 0, &deviceOnly) == HSA_STATUS_SUCCESS));
+  std::memset(deviceOnly, 0x5a, 128 * 1024);
+  REQUIRE((hsa_memory_allocate(kernarg, sizeof(Arguments), &argumentMemory) == HSA_STATUS_SUCCESS));
+  arguments = static_cast<Arguments *>(argumentMemory);
   REQUIRE((hsa_code_object_reader_create_from_memory(image.data(), image.size(), &reader) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_create_alt(HSA_PROFILE_BASE, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR, nullptr, &executable) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr) == HSA_STATUS_SUCCESS));
@@ -629,14 +632,14 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
     if (iteration == 2) child[17000] = 73;
     if (iteration == 5) child[0] = 101;
     const uint32_t expected = iteration < 2 ? 37 : iteration < 4 ? 73 : iteration == 4 ? 91 : 111;
-    void *output_memory = iteration < 4 ? table_memory : child.data();
+    void *outputMemory = iteration < 4 ? tableMemory : child.data();
     auto *nested = &child[17000];
     // table_memory belongs to the device pool: publish its pointer field through
     // the copy API instead of relying on dispatch-time uploads of shadow bytes.
-    REQUIRE((hsa_memory_copy(table_memory, &nested, sizeof(nested)) == HSA_STATUS_SUCCESS));
-    *arguments = Arguments{output_memory, expected};
+    REQUIRE((hsa_memory_copy(tableMemory, &nested, sizeof(nested)) == HSA_STATUS_SUCCESS));
+    *arguments = Arguments{outputMemory, expected};
     fixture.expect({4, 2, 8, 0, expected});
-    if (iteration < 4) fixture.expectIndirectInput(table_memory, expected, iteration == 0 ? std::optional<uint32_t>(55) : std::nullopt);
+    if (iteration < 4) fixture.expectIndirectInput(tableMemory, expected, iteration == 0 ? std::optional<uint32_t>(55) : std::nullopt);
     packet = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) + iteration;
     std::memset(packet, 0, sizeof(*packet));
     packet->setup = 1;
@@ -654,19 +657,19 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
       std::this_thread::yield();
     REQUIRE((hsa_queue_load_read_index_scacquire(queue) == iteration + 1));
     for (uint32_t index = 0; index < 8; ++index)
-      REQUIRE((static_cast<uint32_t *>(output_memory)[index] == expected + index));
+      REQUIRE((static_cast<uint32_t *>(outputMemory)[index] == expected + index));
     REQUIRE((child[17000] == (iteration == 0 ? 55 : iteration == 1 ? 37 : 73)));
     fixture.check();
     REQUIRE((fixture.writtenBytes(child.data()) == 0));
-    REQUIRE((fixture.writtenBytes(device_only) == 0));
+    REQUIRE((fixture.writtenBytes(deviceOnly) == 0));
   }
   REQUIRE((hsa_shut_down() == HSA_STATUS_ERROR_INVALID_RUNTIME_STATE));
   REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_executable_destroy(executable) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_code_object_reader_destroy(reader) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_amd_memory_pool_free(table_memory) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_amd_memory_pool_free(device_only) == HSA_STATUS_SUCCESS));
-  REQUIRE((hsa_memory_free(argument_memory) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_pool_free(tableMemory) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_pool_free(deviceOnly) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_free(argumentMemory) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_memory_deregister(child.data(), child.size() * sizeof(uint32_t)) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_shut_down() == HSA_STATUS_SUCCESS));
 }
@@ -682,8 +685,9 @@ struct MemoryLockSession {
 };
 } // namespace
 
-TEST_CASE("HSA failed dispatch notifies the queue callback", "[hsa][queue-error]") {
-  MemoryLockSession session;
+namespace {
+
+hsa_agent_t gpuAgent() {
   hsa_agent_t gpu{};
   REQUIRE((hsa_iterate_agents(
                [](hsa_agent_t agent, void *data) {
@@ -694,6 +698,81 @@ TEST_CASE("HSA failed dispatch notifies the queue callback", "[hsa][queue-error]
                },
                &gpu)
            == HSA_STATUS_SUCCESS));
+  return gpu;
+}
+
+struct QueueErrors {
+  std::atomic<unsigned> calls{0};
+  std::atomic<hsa_status_t> status{HSA_STATUS_SUCCESS};
+  std::atomic<hsa_queue_t *> queue{nullptr};
+
+  static void record(hsa_status_t status, hsa_queue_t *queue, void *data) {
+    auto &errors = *static_cast<QueueErrors *>(data);
+    errors.status = status;
+    errors.queue = queue;
+    errors.calls.fetch_add(1, std::memory_order_release);
+  }
+  bool await(unsigned count = 1) const {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (calls.load(std::memory_order_acquire) < count && std::chrono::steady_clock::now() < deadline)
+      std::this_thread::yield();
+    return calls.load(std::memory_order_acquire) >= count;
+  }
+};
+
+hsa_queue_t *createQueue(hsa_agent_t gpu, QueueErrors *errors) {
+  hsa_queue_t *queue = nullptr;
+  REQUIRE((hsa_queue_create(gpu, 64, HSA_QUEUE_TYPE_MULTI, errors ? QueueErrors::record : nullptr, errors, UINT32_MAX, UINT32_MAX, &queue)
+           == HSA_STATUS_SUCCESS));
+  return queue;
+}
+
+hsa_signal_t createSignal(hsa_signal_value_t value = 1) {
+  hsa_signal_t signal{};
+  REQUIRE((hsa_signal_create(value, 0, nullptr, &signal) == HSA_STATUS_SUCCESS));
+  return signal;
+}
+
+hsa_kernel_dispatch_packet_t *dispatchPacket(hsa_queue_t *queue, uint64_t index, uint64_t kernel, hsa_signal_t completion) {
+  auto *packet = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) + index;
+  *packet = {};
+  packet->setup = 1;
+  packet->workgroup_size_x = packet->workgroup_size_y = packet->workgroup_size_z = 1;
+  packet->grid_size_x = packet->grid_size_y = packet->grid_size_z = 1;
+  packet->kernel_object = kernel;
+  packet->completion_signal = completion;
+  return packet;
+}
+
+void publish(hsa_queue_t *queue, hsa_kernel_dispatch_packet_t *packet, uint64_t count) {
+  __atomic_store_n(&packet->header, uint16_t(HSA_PACKET_TYPE_KERNEL_DISPATCH), __ATOMIC_RELEASE);
+  hsa_queue_store_write_index_screlease(queue, count);
+  hsa_signal_store_screlease(queue->doorbell_signal, count - 1);
+}
+
+void publishBarrier(hsa_queue_t *queue, uint64_t index, hsa_signal_t completion) {
+  auto *barrier = static_cast<hsa_barrier_and_packet_t *>(queue->base_address) + index;
+  *barrier = {};
+  barrier->completion_signal = completion;
+  __atomic_store_n(&barrier->header, uint16_t(HSA_PACKET_TYPE_BARRIER_AND), __ATOMIC_RELEASE);
+  hsa_queue_store_write_index_screlease(queue, index + 1);
+  hsa_signal_store_screlease(queue->doorbell_signal, index);
+}
+
+bool settles(hsa_signal_t signal, hsa_signal_value_t value) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (hsa_signal_load_scacquire(signal) != value) return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  return true;
+}
+
+} // namespace
+
+TEST_CASE("HSA failed dispatch notifies the queue callback", "[hsa][queue-error]") {
+  MemoryLockSession session;
+  const auto gpu = gpuAgent();
   struct Notification {
     std::atomic<unsigned> calls{0};
     hsa_status_t status = HSA_STATUS_SUCCESS;
@@ -716,31 +795,272 @@ TEST_CASE("HSA failed dispatch notifies the queue callback", "[hsa][queue-error]
                },
                &notification, UINT32_MAX, UINT32_MAX, &queue)
            == HSA_STATUS_SUCCESS));
-  hsa_signal_t completion{};
-  REQUIRE((hsa_signal_create(1, 0, nullptr, &completion) == HSA_STATUS_SUCCESS));
-  auto *packet = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address);
-  *packet = {};
-  packet->setup = 1;
-  packet->workgroup_size_x = packet->workgroup_size_y = packet->workgroup_size_z = 1;
-  packet->grid_size_x = packet->grid_size_y = packet->grid_size_z = 1;
-  packet->kernel_object = 0xbad; // Unknown kernel: fail without executing RPC work.
-  packet->completion_signal = completion;
-  __atomic_store_n(&packet->header, uint16_t(HSA_PACKET_TYPE_KERNEL_DISPATCH), __ATOMIC_RELEASE);
-  hsa_queue_store_write_index_screlease(queue, 1);
-  hsa_signal_store_screlease(queue->doorbell_signal, 0);
+  const auto completion = createSignal();
+  publish(queue, dispatchPacket(queue, 0, 0xbad, completion), 1); // unknown kernel: fails without executing RPC work
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
   while (notification.calls.load(std::memory_order_acquire) == 0 && std::chrono::steady_clock::now() < deadline)
     std::this_thread::yield();
   CHECK((notification.calls.load(std::memory_order_acquire) == 1));
   if (notification.calls.load(std::memory_order_acquire) != 0) {
-    CHECK((notification.status != HSA_STATUS_SUCCESS));
+    CHECK((notification.status == HSA_STATUS_ERROR_INVALID_CODE_OBJECT));
     CHECK((notification.queue == queue));
     CHECK(notification.reentered);
     CHECK((notification.destroyed == HSA_STATUS_SUCCESS));
   }
-  CHECK((hsa_signal_load_scacquire(completion) < 0));
+  CHECK((hsa_signal_load_scacquire(completion) == 1));
   if (notification.calls.load(std::memory_order_acquire) == 0) REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_signal_destroy(completion) == HSA_STATUS_SUCCESS));
+}
+
+TEST_CASE("HSA queue error leaves the completion signal and stops the queue", "[hsa][queue-error]") {
+  MemoryLockSession session;
+  const auto gpu = gpuAgent();
+
+  QueueErrors healthyErrors;
+  auto *healthy = createQueue(gpu, &healthyErrors);
+  const auto healthyCompletion = createSignal();
+  publishBarrier(healthy, 0, healthyCompletion);
+  hsa_signal_wait_scacquire(healthyCompletion, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  CHECK((healthyErrors.calls.load() == 0));
+  REQUIRE((hsa_queue_destroy(healthy) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(healthyCompletion) == HSA_STATUS_SUCCESS));
+
+  QueueErrors errors;
+  auto *queue = createQueue(gpu, &errors);
+  const auto failing = createSignal();
+  const auto following = createSignal();
+  const auto later = createSignal();
+  auto *bad = dispatchPacket(queue, 0, 0xbad, failing);
+  auto *barrier = static_cast<hsa_barrier_and_packet_t *>(queue->base_address) + 1;
+  *barrier = {};
+  barrier->completion_signal = following;
+  __atomic_store_n(&barrier->header, uint16_t(HSA_PACKET_TYPE_BARRIER_AND), __ATOMIC_RELEASE);
+  publish(queue, bad, 2);
+  REQUIRE(errors.await());
+  CHECK((errors.status.load() == HSA_STATUS_ERROR_INVALID_CODE_OBJECT));
+  CHECK((errors.queue.load() == queue));
+  CHECK(settles(failing, 1));
+  CHECK(settles(following, 1));
+
+  publishBarrier(queue, 2, later);
+  CHECK(settles(later, 1));
+  CHECK((errors.calls.load() == 1));
+  REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(failing) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(following) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(later) == HSA_STATUS_SUCCESS));
+}
+
+TEST_CASE("HSA malformed packets report the matching queue status", "[hsa][queue-error]") {
+  MemoryLockSession session;
+  const auto gpu = gpuAgent();
+  struct Case {
+    const char *name;
+    hsa_status_t expected;
+    void (*corrupt)(hsa_kernel_dispatch_packet_t &);
+    bool completion;
+  };
+  const Case cases[] = {
+      {"dimensions", HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS, [](auto &packet) { packet.workgroup_size_y = 4; }, true},
+      {"grid smaller than workgroup", HSA_STATUS_ERROR_INVALID_ARGUMENT, [](auto &packet) { packet.workgroup_size_x = 4; }, true},
+      {"reserved setup bits", HSA_STATUS_ERROR_INVALID_PACKET_FORMAT, [](auto &packet) { packet.reserved0 = 1; }, true},
+      {"unknown kernel without completion", HSA_STATUS_ERROR_INVALID_CODE_OBJECT, [](auto &) {}, false},
+  };
+  for (const auto &entry : cases) {
+    INFO(entry.name);
+    QueueErrors errors;
+    auto *queue = createQueue(gpu, &errors);
+    const auto completion = createSignal();
+    auto *packet = dispatchPacket(queue, 0, 0xbad, entry.completion ? completion : hsa_signal_t{});
+    entry.corrupt(*packet);
+    publish(queue, packet, 1);
+    REQUIRE(errors.await());
+    CHECK((errors.status.load() == entry.expected));
+    CHECK(settles(completion, 1));
+    REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
+    REQUIRE((hsa_signal_destroy(completion) == HSA_STATUS_SUCCESS));
+  }
+}
+
+TEST_CASE("HSA rejected launch reports an exception and leaves the completion signal", "[hsa][queue-error]") {
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  REQUIRE((hsa_init() == HSA_STATUS_SUCCESS));
+  const auto gpu = gpuAgent();
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true);
+  hsa_code_object_reader_t reader{};
+  hsa_executable_t executable{};
+  hsa_executable_symbol_t symbol{};
+  uint64_t object = 0;
+  REQUIRE((hsa_code_object_reader_create_from_memory(image.data(), image.size(), &reader) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_executable_create_alt(HSA_PROFILE_BASE, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR, nullptr, &executable) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_executable_freeze(executable, nullptr) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_executable_get_symbol_by_name(executable, "add", &gpu, &symbol) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) == HSA_STATUS_SUCCESS));
+
+  hsa_region_t kernarg{};
+  REQUIRE((hsa_agent_iterate_regions(
+               gpu,
+               [](hsa_region_t region, void *data) {
+                 uint32_t flags = 0;
+                 if (hsa_region_get_info(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags) == HSA_STATUS_SUCCESS
+                     && (flags & HSA_REGION_GLOBAL_FLAG_KERNARG))
+                   *static_cast<hsa_region_t *>(data) = region;
+                 return HSA_STATUS_SUCCESS;
+               },
+               &kernarg)
+           == HSA_STATUS_SUCCESS));
+  void *arguments = nullptr;
+  REQUIRE((hsa_memory_allocate(kernarg, 16, &arguments) == HSA_STATUS_SUCCESS));
+  std::memset(arguments, 0, 16);
+
+  QueueErrors errors;
+  auto *queue = createQueue(gpu, &errors);
+  const auto completion = createSignal();
+  const auto following = createSignal();
+  fixture.rejectNext(gemstone::execution::operation::Launch);
+  auto *packet = dispatchPacket(queue, 0, object, completion);
+  packet->kernarg_address = arguments;
+  auto *barrier = static_cast<hsa_barrier_and_packet_t *>(queue->base_address) + 1;
+  *barrier = {};
+  barrier->completion_signal = following;
+  __atomic_store_n(&barrier->header, uint16_t(HSA_PACKET_TYPE_BARRIER_AND), __ATOMIC_RELEASE);
+  publish(queue, packet, 2);
+  REQUIRE(errors.await());
+  CHECK((errors.status.load() == HSA_STATUS_ERROR_EXCEPTION));
+  CHECK(settles(completion, 1));
+  CHECK(settles(following, 1));
+  REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(completion) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(following) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_free(arguments) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_executable_destroy(executable) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_code_object_reader_destroy(reader) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_shut_down() == HSA_STATUS_SUCCESS));
+}
+
+TEST_CASE("HSA queue without an error callback stops quietly when queue fault messages are disabled", "[hsa][queue-error]") {
+  MemoryLockSession session;
+  const gemstone_test::Environment quiet("HSA_ENABLE_QUEUE_FAULT_MESSAGE", "0");
+  const auto gpu = gpuAgent();
+  auto *queue = createQueue(gpu, nullptr);
+  const auto failing = createSignal();
+  const auto following = createSignal();
+  publish(queue, dispatchPacket(queue, 0, 0xbad, failing), 1);
+  CHECK(settles(failing, 1));
+  publishBarrier(queue, 1, following);
+  CHECK(settles(following, 1));
+  REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(failing) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(following) == HSA_STATUS_SUCCESS));
+}
+
+TEST_CASE("HSA halted queue does not stall device-to-host copies", "[hsa][queue-error]") {
+  const gemstone_test::Environment timeout(gemstone::environment::HsaPagingTimeoutSeconds, "1");
+  MemoryLockSession session;
+  const auto gpu = gpuAgent();
+  QueueErrors errors;
+  auto *queue = createQueue(gpu, &errors);
+  const auto failing = createSignal();
+  publish(queue, dispatchPacket(queue, 0, 0xbad, failing), 1);
+  REQUIRE(errors.await());
+
+  hsa_region_t coarse{};
+  REQUIRE((hsa_agent_iterate_regions(
+               gpu,
+               [](hsa_region_t region, void *data) {
+                 uint32_t flags = 0;
+                 if (hsa_region_get_info(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags) == HSA_STATUS_SUCCESS
+                     && (flags & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED))
+                   *static_cast<hsa_region_t *>(data) = region;
+                 return HSA_STATUS_SUCCESS;
+               },
+               &coarse)
+           == HSA_STATUS_SUCCESS));
+  void *device = nullptr;
+  REQUIRE((hsa_memory_allocate(coarse, 16, &device) == HSA_STATUS_SUCCESS));
+  const std::array<uint32_t, 4> expected{1, 2, 3, 4};
+  REQUIRE((hsa_memory_copy(device, expected.data(), sizeof(expected)) == HSA_STATUS_SUCCESS));
+  hsa_agent_t cpu{};
+  REQUIRE((hsa_iterate_agents(
+               [](hsa_agent_t agent, void *data) {
+                 hsa_device_type_t type{};
+                 if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+                 if (type == HSA_DEVICE_TYPE_CPU) *static_cast<hsa_agent_t *>(data) = agent;
+                 return HSA_STATUS_SUCCESS;
+               },
+               &cpu)
+           == HSA_STATUS_SUCCESS));
+  const auto copied = createSignal();
+  std::array<uint32_t, 4> observed{};
+  CHECK((hsa_amd_memory_async_copy(observed.data(), cpu, device, gpu, sizeof(observed), 0, nullptr, copied) == HSA_STATUS_SUCCESS));
+  CHECK((hsa_signal_load_scacquire(copied) == 0));
+  CHECK((observed == expected));
+  REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_memory_free(device) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(failing) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(copied) == HSA_STATUS_SUCCESS));
+}
+
+TEST_CASE("HSA queue error callbacks may destroy each other's queues", "[hsa][queue-error]") {
+  MemoryLockSession session;
+  const auto gpu = gpuAgent();
+  struct Pair {
+    std::atomic<hsa_queue_t *> queues[2]{};
+    std::atomic<unsigned> entered{0};
+    std::atomic<unsigned> finished{0};
+    hsa_status_t destroyed[2]{HSA_STATUS_ERROR, HSA_STATUS_ERROR};
+  } pair;
+  struct Side {
+    Pair *pair;
+    unsigned index;
+  } sides[2]{{&pair, 0}, {&pair, 1}};
+  const auto destroyOther = [](hsa_status_t, hsa_queue_t *, void *data) {
+    auto &[pair, index] = *static_cast<Side *>(data);
+    pair->entered.fetch_add(1, std::memory_order_acq_rel);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (pair->entered.load(std::memory_order_acquire) < 2 && std::chrono::steady_clock::now() < deadline)
+      std::this_thread::yield();
+    pair->destroyed[1 - index] = hsa_queue_destroy(pair->queues[1 - index].load());
+    pair->finished.fetch_add(1, std::memory_order_release);
+  };
+  const auto failing = createSignal();
+  for (unsigned index = 0; index < 2; ++index) {
+    hsa_queue_t *queue = nullptr;
+    REQUIRE((hsa_queue_create(gpu, 64, HSA_QUEUE_TYPE_MULTI, destroyOther, &sides[index], UINT32_MAX, UINT32_MAX, &queue)
+             == HSA_STATUS_SUCCESS));
+    pair.queues[index] = queue;
+  }
+  for (const auto &queue : pair.queues)
+    publish(queue.load(), dispatchPacket(queue.load(), 0, 0xbad, failing), 1);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (pair.finished.load(std::memory_order_acquire) < 2 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  REQUIRE((pair.finished.load(std::memory_order_acquire) == 2));
+  CHECK((pair.entered.load() == 2));
+  CHECK((pair.destroyed[0] == HSA_STATUS_SUCCESS));
+  CHECK((pair.destroyed[1] == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(failing) == HSA_STATUS_SUCCESS));
+}
+
+TEST_CASE("HSA inactivated queue ignores later packets", "[hsa][queue-error]") {
+  MemoryLockSession session;
+  const auto gpu = gpuAgent();
+  QueueErrors errors;
+  auto *queue = createQueue(gpu, &errors);
+  const auto first = createSignal();
+  const auto second = createSignal();
+  publishBarrier(queue, 0, first);
+  hsa_signal_wait_scacquire(first, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  REQUIRE((hsa_queue_inactivate(queue) == HSA_STATUS_SUCCESS));
+  publishBarrier(queue, 1, second);
+  CHECK(settles(second, 1));
+  CHECK((hsa_queue_load_read_index_scacquire(queue) == 1));
+  CHECK((errors.calls.load() == 0));
+  REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(first) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_destroy(second) == HSA_STATUS_SUCCESS));
 }
 
 TEST_CASE("HSA locked interior view addresses the requested bytes", "[hsa][unified-memory]") {

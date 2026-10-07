@@ -7,7 +7,7 @@ import scala.language.implicitConversions
 /** Numeric predicates and nonempty values. Import `constraint.*`; add `constraint.auto.*` for proven implicit widening.
   * Numeric representations stay opaque so primitive methods cannot discard predicates. Validate runtime inputs at their
   * first domain boundary and retain the refined type in fields and helper parameters. Empty numeric domains fail at
-  * compile time when validation, proofs or codecs are materialized; a type alias alone does not run these checks.
+  * compile time when validation, proofs or codecs are materialised; a type alias alone does not run these checks.
   */
 object constraint {
   sealed trait GreaterThan[N <: Int | Long]
@@ -43,12 +43,18 @@ object constraint {
       value
     }
 
-    // Quoted by ConstraintMacros; publicInBinary requires qualified visibility.
-    @SuppressWarnings(Array("scalafix:GemstoneNoPackagePrivate"))
+    // Quoted by macros; publicInBinary requires qualified visibility.
+    @SuppressWarnings(Array("scalafix:NoPackagePrivate"))
     @publicInBinary
     private[gemstone] inline def validate[A, P](value: A): A where P =
-      if (accepts[A, P](value)) value
-      else throw IllegalArgumentException(s"${description[A, P]}: $value")
+      if (accepts[A, P](value)) value else throw IllegalArgumentException(failure[A, P](value))
+
+    @SuppressWarnings(Array("scalafix:NoPackagePrivate"))
+    @publicInBinary
+    private[gemstone] inline def check[A, P](value: A): Either[NonEmpty[String], A where P] =
+      if (accepts[A, P](value)) Right(value) else Left(failure[A, P](value))
+
+    private inline def failure[A, P](value: A): String = s"${description[A, P]}: $value"
   }
 
   extension [A](value: A) {
@@ -59,53 +65,23 @@ object constraint {
       */
     transparent inline def unsafe[R]: R = ${ macros.unsafe[A, R]('value) }
 
-    /** The same validation as `.unsafe`, returning a recoverable error. */
-    inline def refine[R]: Either[NonEmpty[String], R] =
-      try Right(value.unsafe[R])
-      catch {
-        case error: IllegalArgumentException =>
-          Left(NonEmpty.validate(Option(error.getMessage).filter(_.nonEmpty).getOrElse("invalid refined value")))
-      }
+    /** The same validation as `.unsafe`, returning the failure instead of throwing it. */
+    inline def refine[R]: Either[NonEmpty[String], R] = ${ macros.refine[A, R]('value) }
   }
 
   infix opaque type where[A, P] = A
 
-  /** Only proven implications are implicit. Runtime values and narrowing stay explicit. */
+  /** Only proven implications are implicit. Runtime values and narrowing stay explicit. One conversion per carrier pair
+    * keeps narrowing inapplicable, so overload resolution still prefers the narrower carrier.
+    */
   object auto {
-    implicit inline def implication[A, P, Q](value: A where P): A where Q = {
-      prove[A, P, A, Q]
-      value
-    }
-
-    implicit inline def byteToShort[P, Q](value: Byte where P): Short where Q = {
-      prove[Byte, P, Short, Q]
-      value.toShort
-    }
-
-    implicit inline def byteToInt[P, Q](value: Byte where P): Int where Q = {
-      prove[Byte, P, Int, Q]
-      value.toInt
-    }
-
-    implicit inline def byteToLong[P, Q](value: Byte where P): Long where Q = {
-      prove[Byte, P, Long, Q]
-      value.toLong
-    }
-
-    implicit inline def shortToInt[P, Q](value: Short where P): Int where Q = {
-      prove[Short, P, Int, Q]
-      value.toInt
-    }
-
-    implicit inline def shortToLong[P, Q](value: Short where P): Long where Q = {
-      prove[Short, P, Long, Q]
-      value.toLong
-    }
-
-    implicit inline def intToLong[P, Q](value: Int where P): Long where Q = {
-      prove[Int, P, Long, Q]
-      value.toLong
-    }
+    implicit inline def implication[A, P, Q](value: A where P): A where Q     = convert[A, P, A, Q](value)
+    implicit inline def byteToShort[P, Q](value: Byte where P): Short where Q = convert[Byte, P, Short, Q](value)
+    implicit inline def byteToInt[P, Q](value: Byte where P): Int where Q     = convert[Byte, P, Int, Q](value)
+    implicit inline def byteToLong[P, Q](value: Byte where P): Long where Q   = convert[Byte, P, Long, Q](value)
+    implicit inline def shortToInt[P, Q](value: Short where P): Int where Q   = convert[Short, P, Int, Q](value)
+    implicit inline def shortToLong[P, Q](value: Short where P): Long where Q = convert[Short, P, Long, Q](value)
+    implicit inline def intToLong[P, Q](value: Int where P): Long where Q     = convert[Int, P, Long, Q](value)
   }
 
   extension [A, P](value: A where P) {
@@ -121,51 +97,31 @@ object constraint {
   // Lossless conversions retain the source carrier bounds as well as the explicit predicate.
   extension [P](value: Byte where P) {
     @targetName("byteToShortRefined")
-    inline def toShort: Short where (P & Between[-128, 127]) = {
-      prove[Byte, P, Short, P & Between[-128, 127]]
-      value.toShort
-    }
+    inline def toShort: Short where (P & Between[-128, 127]) = convert[Byte, P, Short, P & Between[-128, 127]](value)
     @targetName("byteToIntRefined")
-    inline def toInt: Int where (P & Between[-128, 127]) = {
-      prove[Byte, P, Int, P & Between[-128, 127]]
-      value.toInt
-    }
+    inline def toInt: Int where (P & Between[-128, 127]) = convert[Byte, P, Int, P & Between[-128, 127]](value)
     @targetName("byteToLongRefined")
-    inline def toLong: Long where (P & Between[-128, 127]) = {
-      prove[Byte, P, Long, P & Between[-128, 127]]
-      value.toLong
-    }
+    inline def toLong: Long where (P & Between[-128, 127]) = convert[Byte, P, Long, P & Between[-128, 127]](value)
   }
 
   extension [P](value: Short where P) {
     @targetName("shortToIntRefined")
-    inline def toInt: Int where (P & Between[-32768, 32767]) = {
-      prove[Short, P, Int, P & Between[-32768, 32767]]
-      value.toInt
-    }
+    inline def toInt: Int where (P & Between[-32768, 32767]) =
+      convert[Short, P, Int, P & Between[-32768, 32767]](value)
     @targetName("shortToLongRefined")
-    inline def toLong: Long where (P & Between[-32768, 32767]) = {
-      prove[Short, P, Long, P & Between[-32768, 32767]]
-      value.toLong
-    }
+    inline def toLong: Long where (P & Between[-32768, 32767]) =
+      convert[Short, P, Long, P & Between[-32768, 32767]](value)
   }
 
   extension [P](value: Int where P) {
 
     /** Narrow without truncation, retaining the predicate because the numeric value does not change. */
-    def toByteExact: Byte where P = {
-      if (value < Byte.MinValue || value > Byte.MaxValue) throw ArithmeticException("Byte overflow")
-      value.toByte
-    }
     def toShortExact: Short where P = {
       if (value < Short.MinValue || value > Short.MaxValue) throw ArithmeticException("Short overflow")
       value.toShort
     }
-
-    inline def toLong: Long where (P & Between[-2147483648, 2147483647]) = {
-      prove[Int, P, Long, P & Between[-2147483648, 2147483647]]
-      value.toLong
-    }
+    inline def toLong: Long where (P & Between[-2147483648, 2147483647]) =
+      convert[Int, P, Long, P & Between[-2147483648, 2147483647]](value)
     def <[Q](other: Int where Q): Boolean  = value < other
     def <=[Q](other: Int where Q): Boolean = value <= other
     def >[Q](other: Int where Q): Boolean  = value > other
@@ -177,16 +133,12 @@ object constraint {
     /** Narrow exactly, retaining the predicates because the numeric value does not change. */
     def toIntExact: Int where P = Math.toIntExact(value)
     @targetName("lessLong")
-
     def <[Q](other: Long where Q): Boolean = value < other
     @targetName("lessEqualLong")
-
     def <=[Q](other: Long where Q): Boolean = value <= other
     @targetName("greaterLong")
-
     def >[Q](other: Long where Q): Boolean = value > other
     @targetName("greaterEqualLong")
-
     def >=[Q](other: Long where Q): Boolean = value >= other
   }
 
@@ -197,20 +149,14 @@ object constraint {
     @targetName("remainderNonnegativeInt")
     def %(other: Int > 0): Int >= 0 = value % other
     @targetName("addNonnegativeInt")
-
     def +(other: Int >= 0): Int >= 0 = Math.addExact(value, other)
     @targetName("multiplyNonnegativeInt")
-
-    def *(other: Int >= 0): Int >= 0 =
-      Math.multiplyExact(value, other)
+    def *(other: Int >= 0): Int >= 0 = Math.multiplyExact(value, other)
     @targetName("minNonnegativeInt")
-
     def min(other: Int >= 0): Int >= 0 = math.min(value, other)
     @targetName("maxNonnegativeInt")
-
     def max(other: Int >= 0): Int >= 0 = math.max(value, other)
     @targetName("subtractNonnegativeInt")
-
     def -(other: Int >= 0): Int >= 0 = {
       require(value >= other, s"negative difference: $value - $other")
       value - other
@@ -223,20 +169,13 @@ object constraint {
     @targetName("ceilDividePositiveInt")
     def ceilDiv(other: Int > 0): Int > 0 = (value - 1) / other + 1
     @targetName("addPositiveInt")
-
     def +(other: Int >= 0): Int > 0 = Math.addExact(value, other)
     @targetName("multiplyPositiveInt")
-
-    def *(other: Int > 0): Int > 0 =
-      Math.multiplyExact(value, other)
+    def *(other: Int > 0): Int > 0 = Math.multiplyExact(value, other)
     @targetName("minPositiveInt")
-
-    def min(other: Int > 0): Int > 0 =
-      math.min(value, other)
+    def min(other: Int > 0): Int > 0 = math.min(value, other)
     @targetName("maxPositiveInt")
-
-    def max(other: Int >= 0): Int > 0 =
-      math.max(value, other)
+    def max(other: Int >= 0): Int > 0 = math.max(value, other)
   }
 
   extension (value: Long >= 0) {
@@ -245,22 +184,14 @@ object constraint {
     @targetName("remainderNonnegativeLong")
     def %(other: Long > 0): Long >= 0 = value % other
     @targetName("addNonnegativeLong")
-
     def +(other: Long >= 0): Long >= 0 = Math.addExact(value, other)
     @targetName("multiplyNonnegativeLong")
-
-    def *(other: Long >= 0): Long >= 0 =
-      Math.multiplyExact(value, other)
+    def *(other: Long >= 0): Long >= 0 = Math.multiplyExact(value, other)
     @targetName("minNonnegativeLong")
-
-    def min(other: Long >= 0): Long >= 0 =
-      math.min(value, other)
+    def min(other: Long >= 0): Long >= 0 = math.min(value, other)
     @targetName("maxNonnegativeLong")
-
-    def max(other: Long >= 0): Long >= 0 =
-      math.max(value, other)
+    def max(other: Long >= 0): Long >= 0 = math.max(value, other)
     @targetName("subtractNonnegativeLong")
-
     def -(other: Long >= 0): Long >= 0 = {
       require(value >= other, s"negative difference: $value - $other")
       value - other
@@ -271,20 +202,13 @@ object constraint {
     @targetName("ceilDividePositiveLong")
     def ceilDiv(other: Long > 0): Long > 0 = (value - 1L) / other + 1L
     @targetName("addPositiveLong")
-
     def +(other: Long >= 0): Long > 0 = Math.addExact(value, other)
     @targetName("multiplyPositiveLong")
-
-    def *(other: Long > 0): Long > 0 =
-      Math.multiplyExact(value, other)
+    def *(other: Long > 0): Long > 0 = Math.multiplyExact(value, other)
     @targetName("minPositiveLong")
-
-    def min(other: Long > 0): Long > 0 =
-      math.min(value, other)
+    def min(other: Long > 0): Long > 0 = math.min(value, other)
     @targetName("maxPositiveLong")
-
-    def max(other: Long >= 0): Long > 0 =
-      math.max(value, other)
+    def max(other: Long >= 0): Long > 0 = math.max(value, other)
   }
 
   private inline def checkNumericLiteral[A, P](inline value: A): Unit =
@@ -294,7 +218,12 @@ object constraint {
 
   private inline def accepts[A, P](value: A): Boolean = ${ macros.accepts[A, P]('value) }
   private inline def description[A, P]: String        = ${ macros.description[A, P] }
-  private inline def prove[A, P, B, Q]: Unit          = ${ macros.prove[A, P, B, Q] }
+
+  // Quoted by macros; publicInBinary requires qualified visibility.
+  @SuppressWarnings(Array("scalafix:NoPackagePrivate"))
+  @publicInBinary
+  private[gemstone] inline def convert[A, P, B, Q](value: A where P): B where Q =
+    ${ macros.convert[A, P, B, Q]('value) }
 
   object HasElements {
     given HasElements[String] with {
@@ -320,12 +249,16 @@ object constraint {
       value
     }
 
-    // Quoted by ConstraintMacros; publicInBinary requires qualified visibility.
-    @SuppressWarnings(Array("scalafix:GemstoneNoPackagePrivate"))
+    // Quoted by macros; publicInBinary requires qualified visibility.
+    @SuppressWarnings(Array("scalafix:NoPackagePrivate"))
     @publicInBinary
     private[gemstone] def validate[A](value: A)(using HasElements[A]): NonEmpty[A] =
-      if (summon[HasElements[A]].nonEmpty(value)) value
-      else throw IllegalArgumentException("value must not be empty")
+      check(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    @SuppressWarnings(Array("scalafix:NoPackagePrivate"))
+    @publicInBinary
+    private[gemstone] def check[A](value: A)(using elements: HasElements[A]): Either[NonEmpty[String], NonEmpty[A]] =
+      Either.cond(elements.nonEmpty(value), value, "value must not be empty")
 
     extension [A](value: NonEmpty[A]) transparent inline def raw = rawValue[A](value)
   }
@@ -335,19 +268,17 @@ object constraint {
 
   private transparent inline def rawValue[A](value: A): Any = ${ macros.raw[A]('value) }
 
-  private inline def newtypeValue[A, C](value: A): C = ${ macros.newtypeValue[A, C]('value) }
-
   object Newtype {
 
-    /** A validated representation bridge for generic serializers. */
+    /** A validated representation bridge for generic serialisers. */
     trait Representation[A, C] {
       def wrap(value: C): Either[NonEmpty[String], A]
       def unwrap(value: A): C
     }
   }
 
-  /** A distinct name for a value of C; any refinement is checked before wrapping. All constructors also call validate
-    * for additional domain rules. Declare `type Name = Name.Type` before `object Name extends Newtype[C]`.
+  /** A distinct name for a value of C; any refinement is checked before wrapping, and every constructor rejects values
+    * with a violation. Declare `type Name = Name.Type` before `object Name extends Newtype[C]`.
     */
   trait Newtype[C] {
     opaque type Type = C
@@ -359,19 +290,18 @@ object constraint {
       def unwrap(value: Type): C                         = value
     }
 
-    protected def validate(value: C): Unit = ()
+    /** Additional domain rules beyond the carrier refinement. */
+    protected def violation(value: C): Option[NonEmpty[String]] = None
 
-    inline def apply(value: C): Type = {
-      validate(value)
-      value
+    inline def apply(value: C): Type = violation(value) match {
+      case Some(message) => throw IllegalArgumentException(message)
+      case None          => value
     }
 
-    private def attempt(value: => C): Either[NonEmpty[String], Type] =
-      try Right(apply(value))
-      catch { case error: IllegalArgumentException => Left(s"invalid value: ${error.getMessage}") }
-
-    inline def either[A](value: A): Either[NonEmpty[String], Type] =
-      attempt(newtypeValue[A, C](value))
+    // Quoted by macros; publicInBinary requires qualified visibility.
+    @SuppressWarnings(Array("scalafix:NoPackagePrivate"))
+    @publicInBinary
+    private[gemstone] def attempt(value: C): Either[NonEmpty[String], Type] = violation(value).toLeft(value)
 
     extension (value: Type) {
 

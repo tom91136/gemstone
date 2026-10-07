@@ -17,7 +17,6 @@ import sbt.Keys.*
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
-/** Runs ordinary JVM tests with temporary agent settings and publishes only complete reports. */
 object Coverage {
   case class Entry(project: String, measure: Boolean = true, tests: Boolean = true, generated: Seq[File] = Nil)
   case class Module(name: String, classes: File, sources: Seq[File], generated: Seq[File])
@@ -79,8 +78,6 @@ object Coverage {
           ref / Test / javaOptions += (ref / Test / agentOptions).value
         )).toSeq.flatten
     }
-    // Keep session customizations, and return the original state on completion. Failures likewise
-    // leave the caller's state untouched: instrumentation never becomes a session setting.
     var state = Project.extract(original).appendWithSession(settings, original)
     subjects.foreach { entry =>
       state = Project.extract(state).runTask(ProjectRef(build, entry.project) / Compile / compile, state)._1
@@ -128,8 +125,6 @@ object Coverage {
       visitor.visitInfo(execution.getSessionInfoStore.getInfos, execution.getExecutionDataStore.getContents)
       val root = visitor.visitGroup(title)
       modules.foreach { module =>
-        // Match debug source names against source paths, independently of Scala package syntax.
-        // Nonstandard directory layouts can use a unique filename; ambiguous mappings fail visibly.
         def source(packageName: String, fileName: String): Option[File] = {
           val named      = module.sources.filter(_.getName == fileName)
           val suffix     = s"$packageName/$fileName"
@@ -147,14 +142,14 @@ object Coverage {
         new Analyzer(execution.getExecutionDataStore, classes).analyzeAll(module.classes)
         require(classes.getNoMatchClasses.isEmpty, s"class files changed after coverage ran: ${module.name}")
         val group       = root.visitGroup(module.name)
-        val categorized = classes.getClasses.asScala.toSeq.groupBy { entry =>
+        val categorised = classes.getClasses.asScala.toSeq.groupBy { entry =>
           source(entry.getPackageName, entry.getSourceFileName) match {
             case None                                                                               => "unmapped"
             case Some(file) if module.generated.exists(root => file.toPath.startsWith(root.toPath)) => "generated"
             case _                                                                                  => "authored"
           }
         }
-        categorized.toSeq.sortBy(_._1).foreach { (name, entries) =>
+        categorised.toSeq.sortBy(_._1).foreach { (name, entries) =>
           val bundle = new CoverageBuilder()
           entries.foreach(bundle.visitCoverage(_))
           group.visitBundle(bundle.getBundle(name), locator)

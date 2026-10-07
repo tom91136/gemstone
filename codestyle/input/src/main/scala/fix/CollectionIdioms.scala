@@ -1,5 +1,5 @@
 /*
-rule = GemstoneCollectionIdioms
+rule = CollectionIdioms
  */
 // format: off
 package fix
@@ -8,12 +8,12 @@ object CollectionIdioms {
   val list = List(1, 2, 3)
   val map  = Map("a" -> 1)
 
-  val ex1 = list.exists(_ == 2)// assert: GemstoneCollectionIdioms.exists-to-contains
-  val ex2 = list.exists(x => x == 2)// assert: GemstoneCollectionIdioms.exists-to-contains
-  val fa1 = list.forall(_ != 2)// assert: GemstoneCollectionIdioms.forall-to-not-contains
-  val fa2 = list.forall(x => x != 2)// assert: GemstoneCollectionIdioms.forall-to-not-contains
-  val gg1 = map.get("a").getOrElse(0)// assert: GemstoneCollectionIdioms.get-get-or-else
-  val dt1 = list.drop(1).take(2)// assert: GemstoneCollectionIdioms.drop-take-to-slice
+  val ex1 = list.exists(_ == 2)// assert: CollectionIdioms.exists-to-contains
+  val ex2 = list.exists(x => x == 2)// assert: CollectionIdioms.exists-to-contains
+  val fa1 = list.forall(_ != 2)// assert: CollectionIdioms.forall-to-not-contains
+  val fa2 = list.forall(x => x != 2)// assert: CollectionIdioms.forall-to-not-contains
+  val gg1 = map.get("a").getOrElse(0)// assert: CollectionIdioms.get-get-or-else
+  val dt1 = list.drop(1).take(2)// assert: CollectionIdioms.drop-take-to-slice
 
   val ok1 = list.contains(2)
   val ok2 = !list.contains(2)

@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import ELF.*
 import VMIR.*
 import fixtures.*
 import net.kurobako.gemstone.binary.*
@@ -8,16 +7,18 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class AMDGPUWaveMatrixSuite extends munit.FunSuite {
   for ((halfResult, high) <- Seq((true, false), (true, true), (false, false)))
     test(s"RDNA3 WMMA half=$halfResult high=$high multiplies asymmetric matrices with overlapping destinations") {
-      val memory     = TestMemory()
+      val memory     = RegionMemory()
       val allocation = AllocationId(1L)
       memory.allocate(allocation, 4096)
-      val address                         = memory.address(allocation, 0L).toOption.get.raw
+      val address                         = memory.address(allocation, 0L).value.raw
       def half(value: Float): Int         = IEEE754.floatToBinary16(value).toInt
       def a(row: Int, k: Int): Float      = if (k == (row + 3) % 16) (row + 1).toFloat else 0.0f
       def b(k: Int, column: Int): Float   = (k - column).toFloat / 16.0f
@@ -42,7 +43,7 @@ class AMDGPUWaveMatrixSuite extends munit.FunSuite {
       // LLVM encodings, with RDNA3's unpacked C/D layout and packed A/B fragments.
       val bytes =
         Vec(0x20, if (high) 0x60 else 0x40, if (halfResult) 0x42 else 0x40, 0xcc, 0x20, 0x61, 2, 0x1d).map(_.toByte)
-      val matrix     = VMCompiler.decodeInstruction(bytes, Target("gfx1100")).fold(error => fail(error.raw), identity)
+      val matrix     = decoded(Target("gfx1100"), bytes)
       val operations = Vec(
         Instruction.SMove64(8, InstructionSource.Constant(address)),
         Instruction.VBinary(
@@ -54,48 +55,42 @@ class AMDGPUWaveMatrixSuite extends munit.FunSuite {
         )
       ) ++ Vec.range[0, 8].flatMap(register =>
         Vec(
-          Instruction.GlobalLoad(
+          Instruction.Load(
             (32: VectorRegisterIndex).offsetBy(register),
-            30,
-            Some(8),
+            MemoryAddress.Global(30, Some(8), register.raw * 128),
             4,
-            register.raw * 128,
-            false
+            false,
+            LoadPlacement.Full
           ),
-          Instruction.GlobalLoad(
+          Instruction.Load(
             (48: VectorRegisterIndex).offsetBy(register),
-            30,
-            Some(8),
+            MemoryAddress.Global(30, Some(8), 1024 + register.raw * 128),
             4,
-            1024 + register.raw * 128,
-            false
+            false,
+            LoadPlacement.Full
           ),
-          Instruction.GlobalLoad(
+          Instruction.Load(
             (64: VectorRegisterIndex).offsetBy(register),
-            30,
-            Some(8),
+            MemoryAddress.Global(30, Some(8), 2048 + register.raw * 128),
             4,
-            2048 + register.raw * 128,
-            false
+            false,
+            LoadPlacement.Full
           )
         )
       ) ++ Vec(matrix) ++ Vec.range[0, 8].map(register =>
-        Instruction.GlobalStore(30, Some(8), (32: VectorRegisterIndex).offsetBy(register), 4, 3072 + register.raw * 128)
+        Instruction.Store(
+          (32: VectorRegisterIndex).offsetBy(register),
+          MemoryAddress.Global(30, Some(8), 3072 + register.raw * 128),
+          4,
+          false
+        )
       ) ++ Vec(Instruction.End)
-      val offsets = Vec.tabulate(operations.size)(_ * 4)
-      val source  = CodeObjectKernel(
-        name = "matrix",
+      val source = codeKernel(
         target = Target("gfx1100"),
-        kernargSize = 0,
-        groupSegmentSize = 0,
-        privateSegmentSize = 0,
-        computePgmRsrc2 = 0,
-        kernelCodeProperties = EncodingConstants.KernelCodeProperty.ENABLE_WAVEFRONT_SIZE32,
-        code = Vec.empty
+        kernelCodeProperties = EncodingConstants.KernelCodeProperty.ENABLE_WAVEFRONT_SIZE32
       )
-      val kernel = Kernel(source, operations, offsets.zipWithIndex.toMap, offsets, 0)
-      val task   = KernelTask.validated("matrix", Dimensions(32, 1, 1), Dimensions.One, Vec.empty).toOption.get
-      assertEquals(executeKernel(kernel, task, memory), Right(()))
+      val task = KernelTask.validated("kernel", Dimensions(32, 1, 1), Dimensions.One, Vec.empty).value
+      assertEquals(runIR(operations, memory, source, task), Right(()))
       for {
         row    <- 0 until 16
         column <- 0 until 16

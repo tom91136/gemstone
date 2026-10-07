@@ -1,21 +1,24 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import assembly.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.isa.amdgpu.asm.Program.*
+import net.kurobako.gemstone.testing.either.*
+import net.kurobako.gemstone.text.*
 
 class ParserSuite extends munit.FunSuite {
   private def roundTrip(source: String): Unit = {
-    val first = Parser.parseInstruction(source).fold(error => fail(error.toString), value => value)
+    val first = parse(source)
     val text  = Printer.render(first)
-    val next  = Parser.parseInstruction(text).fold(error => fail(error.toString), value => value)
+    val next  = parse(text)
     assertEquals(Printer.render(next), text)
   }
 
   test("parse and canonically print typed operands") {
     val instruction =
-      Parser.parseInstruction("V_ADD_F32_e32 v0, |v1|, -v2 clamp").fold(error => fail(error.toString), value => value)
+      parse("V_ADD_F32_e32 v0, |v1|, -v2 clamp")
     assertEquals(instruction.opcode, "v_add_f32")
     assertEquals(instruction.operands.size, 3)
     assertEquals(
@@ -42,10 +45,10 @@ class ParserSuite extends munit.FunSuite {
 
   test("program comments survive canonical printing") {
     val source = ".text\nentry:\n  s_nop 0 // delay\n  s_endpgm"
-    val parsed = Parser.parse(source).fold(error => fail(error.toString), value => value)
+    val parsed = Parser.parse(source).value
     assertEquals(Printer.render(parsed), ".text\nentry:\ns_nop 0\n// delay\ns_endpgm")
     assertEquals(Parser.parse(Printer.render(parsed)), Right(parsed))
-    val quoted = Parser.parse(".ascii \"http://gpu#source\" # retained").fold(error => fail(error.toString), identity)
+    val quoted = Parser.parse(".ascii \"http://gpu#source\" # retained").value
     assertEquals(
       quoted.statements,
       Vec(Statement.Directive(".ascii", "\"http://gpu#source\""), Statement.Comment("# retained"))
@@ -74,15 +77,14 @@ class ParserSuite extends munit.FunSuite {
       "(lo:hi)"       -> Operand.Expression("(lo:hi)")
     )
     cases.foreach { (source, expected) =>
-      val instruction = Parser.parseInstruction(s"s_mov_b32 s0, $source").fold(error => fail(error.toString), identity)
+      val instruction = parse(s"s_mov_b32 s0, $source")
       assertEquals(instruction.operands, Vec(Operand.Register(RegisterFile.Scalar, 0, 0), expected), clues(source))
       assertEquals(instruction.mods, Vec.empty[Modifier], clues(source))
     }
   }
 
   test("named and flag modifiers stay distinct from operands") {
-    val instruction = Parser.parseInstruction("v_mov_b32 v0, v1 QUAD_PERM:[0,1,2,3] CLAMP CuStOm Opaque(MySymbol)")
-      .fold(error => fail(error.toString), identity)
+    val instruction = parse("v_mov_b32 v0, v1 QUAD_PERM:[0,1,2,3] CLAMP CuStOm Opaque(MySymbol)")
     assertEquals(
       instruction.operands,
       Vec(
@@ -108,27 +110,28 @@ class ParserSuite extends munit.FunSuite {
       "|-v1|" -> Operand.Absolute(Operand.Negated(register)),
       "--v1"  -> Operand.Negated(Operand.Negated(register))
     ).foreach { (source, expected) =>
-      val instruction = Parser.parseInstruction(s"v_mov_b32 v0, $source").fold(error => fail(error.toString), identity)
+      val instruction = parse(s"v_mov_b32 v0, $source")
       assertEquals(instruction.operands, Vec(Operand.Register(RegisterFile.VectorRegister, 0, 0), expected))
       assertEquals(instruction.mods, Vec.empty[Modifier])
     }
   }
 
-  test("uninterpreted expressions remain intact instead of becoming partial numbers or register ranges") {
-    Seq("0x", "0x1G", "v[+1:2]", "v[1:+2]", "|v1", "v1|", "||", "-").foreach { source =>
-      val instruction = Parser.parseInstruction(s"s_mov_b32 s0, $source").fold(error => fail(error.toString), identity)
-      assertEquals(
-        instruction.operands,
-        Vec(Operand.Register(RegisterFile.Scalar, 0, 0), Operand.Expression(source)),
-        clues(source)
-      )
-      assertEquals(instruction.mods, Vec.empty[Modifier], clues(source))
-    }
-  }
-
-  test("colons nested in parentheses or brackets remain operand text") {
-    Seq("[lo:hi]", "(lo:hi)", "[base + (hi:lo)]", "(base + [hi:lo])").foreach { source =>
-      val instruction = Parser.parseInstruction(s"s_mov_b32 s0, $source").fold(error => fail(error.toString), identity)
+  test("uninterpreted text and colons nested in delimiters remain whole expression operands") {
+    Seq(
+      "0x",
+      "0x1G",
+      "v[+1:2]",
+      "v[1:+2]",
+      "|v1",
+      "v1|",
+      "||",
+      "-",
+      "[lo:hi]",
+      "(lo:hi)",
+      "[base + (hi:lo)]",
+      "(base + [hi:lo])"
+    ).foreach { source =>
+      val instruction = parse(s"s_mov_b32 s0, $source")
       assertEquals(
         instruction.operands,
         Vec(Operand.Register(RegisterFile.Scalar, 0, 0), Operand.Expression(source)),
@@ -141,8 +144,8 @@ class ParserSuite extends munit.FunSuite {
   test("programs preserve directives, labels, instruction pairs, and whole comments") {
     val source =
       "# comment # again\n// comment // again\n\n.text\n.p2align 8\nentry:\ns_nop 0 :: s_endpgm // stop # ignored"
-    val nop = Parser.parseInstruction("s_nop 0").fold(error => fail(error.toString), identity)
-    val end = Parser.parseInstruction("s_endpgm").fold(error => fail(error.toString), identity)
+    val nop = parse("s_nop 0")
+    val end = parse("s_endpgm")
     assertEquals(
       Parser.parse(source),
       Right(Program(Vec(
@@ -155,25 +158,19 @@ class ParserSuite extends munit.FunSuite {
         Statement.Comment("// stop # ignored")
       )))
     )
-    assert(Parser.parseInstruction("").isLeft)
-    assert(Parser.parseInstruction("s_nop 0\ns_endpgm").isLeft)
-    assert(Parser.parseInstruction("s_nop").isLeft)
+    assert(parseInstruction("").isLeft)
+    assert(parseInstruction("s_nop 0\ns_endpgm").isLeft)
+    assert(parseInstruction("s_nop").isLeft)
     assert(Parser.parse("1bad:").isLeft)
     assert(Parser.parse(".1bad").isLeft)
   }
 
   test("reject every unmatched, unclosed, or crossed delimiter and trailing empty operand") {
     Seq("v0)", "v0]", "(v0", "[v0", "([v0)]", "v0,").foreach { operand =>
-      assert(Parser.parseInstruction(s"s_mov_b32 s0, $operand").isLeft, clues(operand))
+      assert(parseInstruction(s"s_mov_b32 s0, $operand").isLeft, clues(operand))
     }
-    assert(Parser.parseInstruction("s_mov_b32 s0, ([target + 4])").isRight)
-  }
-
-  test("reject malformed delimiters and empty operands") {
-    assert(Parser.parseInstruction("v_add_f32 v0,, v1").isLeft)
-    assert(Parser.parseInstruction("v_add_f32 v[0:1, v1").isLeft)
-    assert(Parser.parseInstruction("1bad v0").isLeft)
-    assert(Parser.parseInstruction("gemstone_unknown v0").isLeft)
+    assert(parseInstruction("s_mov_b32 s0, ([target + 4])").isRight)
+    assert(parseInstruction("gemstone_unknown v0").isLeft)
   }
 
   test("do not throw on register numbers that do not fit the register index") {
@@ -182,20 +179,21 @@ class ParserSuite extends munit.FunSuite {
       "v_mov_b32 v[0:999999999999], v0"
     )
     sources.foreach { source =>
-      try Parser.parseInstruction(source)
+      try parseInstruction(source)
       catch case error: NumberFormatException => fail(s"parser overflowed while reading '$source': $error")
     }
   }
   test("errors retain line and column through operand splitting") {
     val cases = Seq(
-      ("v_add_f32 v0,, v1", 4, "empty operand"),
-      ("v_add_f32 v0], v1", 3, "unmatched closing delimiter"),
-      ("v_add_f32 v[0:1, v1", 9, "unclosed delimiter")
+      ("v_add_f32 v0,, v1", 14, "empty operand"),
+      ("v_add_f32 v0], v1", 13, "unmatched closing delimiter"),
+      ("v_add_f32 v[0:1, v1", 12, "unclosed delimiter"),
+      ("  1bad v0", 3, "invalid AMDGPU opcode '1bad'"),
+      ("s_nop 0 :: 1bad v0", 12, "invalid AMDGPU opcode '1bad'")
     )
     cases.foreach { (instruction, column, detail) =>
-      val error = Parser.parse(s".text\ns_nop 0\n$instruction").swap.toOption.get
-      assertEquals(error.line.raw, 3)
-      assertEquals(error.column.raw, column)
+      val error = Parser.parse(s".text\ns_nop 0\n$instruction").leftValue
+      assertEquals(error.position, SourcePosition(3, column.unsafe[Int > 0]), instruction)
       assertEquals(error.message, detail)
     }
   }

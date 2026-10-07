@@ -1,7 +1,0 @@
-# Headless reference target for the corresponding Vulkan mustpass workload.
-# Select the implementation and API version in the external launcher's environment.
-[[targets]]
-name = "lavapipe-vulkan10"
-backend = "vulkan"
-device = "*llvmpipe*"
-environment = { VK_LOADER_DRIVERS_SELECT = "*lvp*", CONFORMANCE_VULKAN_CTS_TIMEOUT = "7200" }

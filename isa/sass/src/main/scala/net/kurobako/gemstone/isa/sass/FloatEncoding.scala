@@ -3,10 +3,13 @@ package net.kurobako.gemstone.isa.sass
 import OperandDomains.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import upickle.default.ReadWriter
+import upickle.default.readwriter
 
 object FloatEncoding {
   private val known                              = Vec(F16Imm, F32Imm, F64Imm, E8M7Imm, E6M9Imm, TF32Imm, BF16Imm)
   def fromSpelling(value: String): FloatEncoding = known.find(_.spelling == value).getOrElse(Unknown(nonEmpty(value)))
+  given ReadWriter[FloatEncoding]                = readwriter[String].bimap(_.spelling, fromSpelling(_))
 }
 
 enum FloatEncoding(val spellingValue: NonEmpty[String], val width: Option[Int in (16, 32, 64)]) {

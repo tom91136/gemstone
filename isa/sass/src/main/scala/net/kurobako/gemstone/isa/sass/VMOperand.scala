@@ -2,9 +2,12 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import scala.reflect.TypeTest
 
 /** Structural operand queries shared by the SASS compiler families. */
 private object VMOperand {
+  def is[A <: Instruction](instruction: Instruction)(using test: TypeTest[Instruction, A]): Boolean =
+    test.unapply(instruction).isDefined
 
   /** Vendor extensions can be preserved by the decoder and printer without acquiring execution semantics. */
   def hasUnknownDomain(value: Operand): Boolean = value match {
@@ -17,16 +20,13 @@ private object VMOperand {
       mode.exists { case AddressMode.Unknown(_) => true; case _ => false } || descriptor.exists(hasUnknownDomain(_))
     case Operand.Qualified(inner, selectors) =>
       selectors.exists { case OperandSelector.Unknown(_) => true; case _ => false } || hasUnknownDomain(inner)
-    case Operand.Decorated(inner, attributes) =>
-      attributes.keys.exists { case OperandDecoration.Unknown(_) => true; case _ => false } ||
-      attributes.values.exists(hasUnknownDomain(_)) || hasUnknownDomain(inner)
     case Operand.Unary(inner, _, _, _)   => hasUnknownDomain(inner)
     case Operand.ConstantBank(_, offset) => hasUnknownDomain(offset)
     case Operand.Group(values)           => values.exists(hasUnknownDomain(_))
     case _                               => false
   }
 
-  // Normalize symbolic zero registers independently of each target's physical encoding.
+  // Normalise symbolic zero registers independently of each target's physical encoding.
   val Zero: Operand.Register        = Operand.Register(RegisterBank.R, 255)
   val UniformZero: Operand.Register = Operand.Register(RegisterBank.UR, 255)
   val True: Operand.Predicate       = Operand.Predicate(None, false, false)
@@ -41,6 +41,9 @@ private object VMOperand {
     case Operand.Qualified(inner, suffixes) => selectors(inner) ++ suffixes
     case _                                  => Vec.empty
   }
+
+  /** Selectors other than the register-reuse hint. */
+  def qualifiers(value: Operand): Vec[OperandSelector] = selectors(without(value, OperandSelector.reuse))
 
   def without(value: Operand, selector: OperandSelector): Operand = value match {
     case Operand.Qualified(inner, suffixes) =>

@@ -25,7 +25,7 @@ object GenerateExecutionRPC {
       request.output.resolve("gemstone_execution_rpc.hpp") -> header(protocol),
       request.output.resolve("gemstone_execution_rpc.cpp") -> source(protocol)
     )
-    files.foreach { case (path, content) => val _ = GeneratedFiles.write(path, content) }
+    files.foreach(GeneratedFiles.write(_, _))
     GeneratedFiles.removeUnexpected(request.output, files.map(_._1).toSet, _ => true)
     Console.out.println(s"generated ${files.size} execution RPC files")
   }
@@ -202,7 +202,7 @@ object GenerateExecutionRPC {
       val request = identifier(operation.request.name)
       val reply   = model.cppType(operation.reply)
       s"""Result<$reply> Client::call(const $request &request) {
-         |  return implementation_->call<$reply>(operation::$request, request);
+         |  return implementation->call<$reply>(operation::$request, request);
          |}""".stripMargin
     case other => throw IllegalArgumentException(s"operation ${operation.request.name} is not a product: $other")
   }
@@ -353,15 +353,15 @@ object GenerateExecutionRPC {
        | public:
        |  static Result success(T value) { return Result(std::move(value)); }
        |  static Result failure(Error error) { return Result(std::move(error)); }
-       |  explicit operator bool() const { return std::holds_alternative<T>(value_); }
-       |  T &value() { return std::get<T>(value_); }
-       |  const T &value() const { return std::get<T>(value_); }
-       |  const Error &error() const { return std::get<Error>(value_); }
+       |  explicit operator bool() const { return std::holds_alternative<T>(outcome); }
+       |  T &value() { return std::get<T>(outcome); }
+       |  const T &value() const { return std::get<T>(outcome); }
+       |  const Error &error() const { return std::get<Error>(outcome); }
        |
        | private:
-       |  explicit Result(T value) : value_(std::move(value)) {}
-       |  explicit Result(Error error) : value_(std::move(error)) {}
-       |  std::variant<T, Error> value_;
+       |  explicit Result(T value) : outcome(std::move(value)) {}
+       |  explicit Result(Error error) : outcome(std::move(error)) {}
+       |  std::variant<T, Error> outcome;
        |};
        |
        |class Client {
@@ -376,7 +376,7 @@ object GenerateExecutionRPC {
        | private:
        |  class Impl;
        |  explicit Client(std::unique_ptr<Impl> implementation);
-       |  std::unique_ptr<Impl> implementation_;
+       |  std::unique_ptr<Impl> implementation;
        |};
        |
        |} // namespace gemstone::execution
@@ -410,40 +410,40 @@ object GenerateExecutionRPC {
        |};
        |
        |std::string failureDetail(const ExecutionFailure &failure) {
-       |  return std::visit([](const auto &value) { return value.detail; }, failure);
+       |  return std::visit([](const auto &value) { return value.detail.value; }, failure);
        |}
        |
        |} // namespace
        |
        |class Client::Impl {
        | public:
-       |  Impl(uint64_t client, uint64_t high, uint64_t low) : connection_(client, high, low) {}
-       |  std::string error() const { std::lock_guard<std::mutex> guard(mutex_); return error_; }
+       |  Impl(uint64_t client, uint64_t high, uint64_t low) : connection(client, high, low) {}
+       |  std::string error() const { std::lock_guard<std::mutex> guard(mutex); return lastError; }
        |
        |  template <class T, class Request> Result<T> call(std::string_view operation, const Request &request) {
-       |    std::lock_guard<std::mutex> guard(mutex_); error_.clear();
+       |    std::lock_guard<std::mutex> guard(mutex); lastError.clear();
        |    if (!wire::valid(request)) return failed<T>("execution request violates wire constraints or encoding limits");
        |    std::string payload;
        |    if (glz::write<GlazeOptions{}>(request, payload)) return failed<T>("execution request encoding failed");
        |    if (payload.size() > MaximumPayload) return failed<T>("execution request exceeds the encoding limits");
        |    std::vector<uint8_t> response; uint32_t status = 0;
-       |    if (!connection_.exchange(operation, payload, status, response)) return failed<T>(connection_.error());
+       |    if (!connection.exchange(operation, payload, status, response)) return failed<T>(connection.error);
        |    const std::string_view body(reinterpret_cast<const char *>(response.data()), response.size());
        |    if (status == 1) {
        |      ExecutionFailure failure{};
-       |      if (glz::read<GlazeOptions{}>(failure, body) || !wire::valid(failure)) { connection_.poison(); return failed<T>("execution failure response is invalid"); }
-       |      error_ = failureDetail(failure); return Result<T>::failure(Error{error_});
+       |      if (glz::read<GlazeOptions{}>(failure, body) || !wire::valid(failure)) { connection.poison(); return failed<T>("execution failure response is invalid"); }
+       |      lastError = failureDetail(failure); return Result<T>::failure(Error{lastError});
        |    }
        |    T value{};
-       |    if (glz::read<GlazeOptions{}>(value, body) || !wire::valid(value)) { connection_.poison(); return failed<T>("execution response payload is invalid"); }
+       |    if (glz::read<GlazeOptions{}>(value, body) || !wire::valid(value)) { connection.poison(); return failed<T>("execution response payload is invalid"); }
        |    return Result<T>::success(std::move(value));
        |  }
        |
        | private:
-       |  template <class T> Result<T> failed(std::string detail) { error_ = std::move(detail); return Result<T>::failure(Error{error_}); }
-       |  mutable std::mutex mutex_;
-       |  Connection connection_;
-       |  std::string error_;
+       |  template <class T> Result<T> failed(std::string detail) { lastError = std::move(detail); return Result<T>::failure(Error{lastError}); }
+       |  mutable std::mutex mutex;
+       |  Connection connection;
+       |  std::string lastError;
        |};
        |
        |std::unique_ptr<Client> Client::fromEnvironment() {
@@ -452,9 +452,9 @@ object GenerateExecutionRPC {
        |  const auto incarnation = processIncarnation(); if (incarnation == 0) return nullptr;
        |  return std::unique_ptr<Client>(new Client(std::make_unique<Impl>(client, static_cast<uint32_t>(::getpid()), incarnation)));
        |}
-       |Client::Client(std::unique_ptr<Impl> implementation) : implementation_(std::move(implementation)) {}
+       |Client::Client(std::unique_ptr<Impl> implementation) : implementation(std::move(implementation)) {}
        |Client::~Client() = default;
-       |std::string Client::error() const { return implementation_->error(); }
+       |std::string Client::error() const { return implementation->error(); }
        |
        |$calls
        |

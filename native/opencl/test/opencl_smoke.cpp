@@ -141,7 +141,7 @@ TEST_CASE("concurrent OpenCL buffer ownership keeps RPC state and bytes intact",
 
 TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   gemstone_test::RpcFixture server;
-  server.programCatalog({{"groups", "groups"}}, {});
+  server.programCatalogue({{"groups", "groups"}}, {});
   const gemstone_test::RpcEnvironment environment(server);
 
   cl_platform_id platform = nullptr;
@@ -312,11 +312,11 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   for (size_t index = 24; index < 64; ++index)
     REQUIRE((svm[index] == 0));
 
-  cl_program program = clCreateProgramWithIL(context, server.spirv, sizeof(server.spirv), &error);
+  cl_program program = clCreateProgramWithIL(context, server.Spirv, sizeof(server.Spirv), &error);
   REQUIRE((program && error == CL_SUCCESS));
-  REQUIRE((server.programLoads() == 0));
+  REQUIRE((server.programLoads.load() == 0));
   REQUIRE((clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
-  REQUIRE((server.programLoads() == 1));
+  REQUIRE((server.programLoads.load() == 1));
   cl_kernel kernel = clCreateKernel(program, "groups", &error);
   REQUIRE((kernel && error == CL_SUCCESS));
   constexpr size_t capacity = 9 * 33 + 2;
@@ -359,7 +359,7 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   clSVMFree(context, memory);
 
   // Exercise the full unsigned ID range through both directions of RPC.
-  constexpr cl_uint UnsignedSpecId = 0xffffffffU;
+  constexpr cl_uint unsignedSpecId = 0xffffffffU;
   const std::array<uint32_t, 26> specializationWords = {0x07230203,
                                                         0x00010600,
                                                         0,
@@ -368,7 +368,7 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
                                                         (4U << 16) | 71U,
                                                         3,
                                                         1,
-                                                        UnsignedSpecId,
+                                                        unsignedSpecId,
                                                         (4U << 16) | 71U,
                                                         5,
                                                         1,
@@ -388,25 +388,25 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
                                                         5};
   cl_program specialized = clCreateProgramWithIL(context, specializationWords.data(), sizeof(specializationWords), &error);
   REQUIRE((specialized && error == CL_SUCCESS));
-  server.specializationTable({{UnsignedSpecId, 4}, {102, 1}});
+  server.specializationTable({{unsignedSpecId, 4}, {102, 1}});
   cl_uint constantValue = 42;
   cl_uchar boolValue = 2;
   REQUIRE((clSetProgramSpecializationConstant(specialized, 999, sizeof(constantValue), &constantValue) == CL_INVALID_SPEC_ID));
-  REQUIRE((clSetProgramSpecializationConstant(specialized, UnsignedSpecId, 1, &constantValue) == CL_INVALID_VALUE));
-  REQUIRE((clSetProgramSpecializationConstant(specialized, UnsignedSpecId, sizeof(constantValue), nullptr) == CL_INVALID_VALUE));
-  REQUIRE((clSetProgramSpecializationConstant(specialized, UnsignedSpecId, sizeof(constantValue), &constantValue) == CL_SUCCESS));
+  REQUIRE((clSetProgramSpecializationConstant(specialized, unsignedSpecId, 1, &constantValue) == CL_INVALID_VALUE));
+  REQUIRE((clSetProgramSpecializationConstant(specialized, unsignedSpecId, sizeof(constantValue), nullptr) == CL_INVALID_VALUE));
+  REQUIRE((clSetProgramSpecializationConstant(specialized, unsignedSpecId, sizeof(constantValue), &constantValue) == CL_SUCCESS));
   REQUIRE((clSetProgramSpecializationConstant(specialized, 102, sizeof(boolValue), &boolValue) == CL_SUCCESS));
   constantValue = 99;
   boolValue = 0;
-  const unsigned loadsBeforeSpecialization = server.programLoads();
+  const unsigned loadsBeforeSpecialization = server.programLoads.load();
   REQUIRE((clBuildProgram(specialized, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
-  REQUIRE((server.programLoads() == loadsBeforeSpecialization + 1));
+  REQUIRE((server.programLoads.load() == loadsBeforeSpecialization + 1));
   auto forwarded = server.lastSpecialization();
   auto forwardedValue = [&](uint32_t id) -> const std::vector<uint8_t> * {
     const auto found = std::find_if(forwarded.begin(), forwarded.end(), [&](const auto &entry) { return entry.first == id; });
     return found == forwarded.end() ? nullptr : &found->second;
   };
-  const auto *constantBytes = forwardedValue(UnsignedSpecId);
+  const auto *constantBytes = forwardedValue(unsignedSpecId);
   REQUIRE((constantBytes && constantBytes->size() == sizeof(constantValue)));
   cl_uint forwardedConstant = 0;
   std::memcpy(&forwardedConstant, constantBytes->data(), sizeof(forwardedConstant));
@@ -451,7 +451,7 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   clSVMFree(context, svm);
   REQUIRE((clReleaseCommandQueue(queue) == CL_SUCCESS));
   REQUIRE((clReleaseContext(context) == CL_SUCCESS));
-  REQUIRE((server.launches() == 40));
+  REQUIRE((server.launches.load() == 40));
   server.check();
 }
 
@@ -580,7 +580,7 @@ TEST_CASE("Intel blocking free waits for queued allocation uses", "[opencl][unif
 
 TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declarations", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  fixture.programCatalog({{"groups", "groups"}}, {});
+  fixture.programCatalogue({{"groups", "groups"}}, {});
   const gemstone_test::RpcEnvironment environment(fixture);
   cl_platform_id platform{};
   cl_device_id device{};
@@ -591,7 +591,7 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
   REQUIRE((context && error == CL_SUCCESS));
   auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
   REQUIRE((queue && error == CL_SUCCESS));
-  auto program = clCreateProgramWithIL(context, fixture.spirv, sizeof(fixture.spirv), &error);
+  auto program = clCreateProgramWithIL(context, fixture.Spirv, sizeof(fixture.Spirv), &error);
   REQUIRE((program && error == CL_SUCCESS));
   REQUIRE((clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
   auto *other = clSVMAlloc(context, CL_MEM_READ_WRITE, 64, 0);
@@ -654,7 +654,7 @@ TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declar
 
 TEST_CASE("OpenCL queued buffer uses reclaim storage after the last handle is released", "[opencl][unified-memory]") {
   gemstone_test::RpcFixture fixture;
-  fixture.programCatalog({{"groups", "groups"}}, {});
+  fixture.programCatalogue({{"groups", "groups"}}, {});
   const gemstone_test::RpcEnvironment environment(fixture);
   cl_platform_id platform{};
   cl_device_id device{};
@@ -665,7 +665,7 @@ TEST_CASE("OpenCL queued buffer uses reclaim storage after the last handle is re
   REQUIRE((context && error == CL_SUCCESS));
   auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
   REQUIRE((queue && error == CL_SUCCESS));
-  auto program = clCreateProgramWithIL(context, fixture.spirv, sizeof(fixture.spirv), &error);
+  auto program = clCreateProgramWithIL(context, fixture.Spirv, sizeof(fixture.Spirv), &error);
   REQUIRE((program && error == CL_SUCCESS));
   REQUIRE((clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
   for (bool failed : {false, true}) {
@@ -715,5 +715,61 @@ TEST_CASE("OpenCL queued buffer uses reclaim storage after the last handle is re
   }
   REQUIRE((clReleaseProgram(program) == CL_SUCCESS));
   REQUIRE((clReleaseCommandQueue(queue) == CL_SUCCESS));
+  REQUIRE((clReleaseContext(context) == CL_SUCCESS));
+}
+
+TEST_CASE("OpenCL event waits reject empty lists", "[opencl]") {
+  cl_event event = nullptr;
+  CHECK((clWaitForEvents(0, nullptr) == CL_INVALID_VALUE));
+  CHECK((clWaitForEvents(1, nullptr) == CL_INVALID_VALUE));
+  CHECK((clWaitForEvents(0, &event) == CL_INVALID_VALUE));
+}
+
+TEST_CASE("OpenCL finish from an event callback waits for the queue", "[opencl]") {
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  cl_platform_id platform{};
+  cl_device_id device{};
+  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
+  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_int error{};
+  auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  REQUIRE((context && error == CL_SUCCESS));
+  auto source = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+  REQUIRE((source && error == CL_SUCCESS));
+  auto target = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+  REQUIRE((target && error == CL_SUCCESS));
+  auto start = clCreateUserEvent(context, &error);
+  REQUIRE((start && error == CL_SUCCESS));
+  auto gate = clCreateUserEvent(context, &error);
+  REQUIRE((gate && error == CL_SUCCESS));
+  cl_event pending{}, marker{};
+  REQUIRE((clEnqueueMarkerWithWaitList(target, 1, &gate, &pending) == CL_SUCCESS));
+  REQUIRE((clEnqueueMarkerWithWaitList(source, 1, &start, &marker) == CL_SUCCESS));
+  struct Finish {
+    cl_command_queue queue;
+    std::promise<cl_int> result;
+  } finish{target, {}};
+  auto finished = finish.result.get_future();
+  // The callback runs on a queue worker.
+  REQUIRE((clSetEventCallback(
+               marker, CL_COMPLETE,
+               [](cl_event, cl_int, void *data) {
+                 auto &state = *static_cast<Finish *>(data);
+                 state.result.set_value(clFinish(state.queue));
+               },
+               &finish)
+           == CL_SUCCESS));
+  REQUIRE((clSetUserEventStatus(start, CL_COMPLETE) == CL_SUCCESS));
+  CHECK((finished.wait_for(std::chrono::milliseconds(200)) == std::future_status::timeout));
+  REQUIRE((clSetUserEventStatus(gate, -1) == CL_SUCCESS));
+  REQUIRE((finished.wait_for(std::chrono::seconds(3)) == std::future_status::ready));
+  CHECK((finished.get() == CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST));
+  REQUIRE((clReleaseEvent(marker) == CL_SUCCESS));
+  REQUIRE((clReleaseEvent(pending) == CL_SUCCESS));
+  REQUIRE((clReleaseEvent(gate) == CL_SUCCESS));
+  REQUIRE((clReleaseEvent(start) == CL_SUCCESS));
+  REQUIRE((clReleaseCommandQueue(target) == CL_SUCCESS));
+  REQUIRE((clReleaseCommandQueue(source) == CL_SUCCESS));
   REQUIRE((clReleaseContext(context) == CL_SUCCESS));
 }

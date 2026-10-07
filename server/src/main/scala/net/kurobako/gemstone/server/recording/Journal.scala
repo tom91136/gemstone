@@ -7,14 +7,14 @@ import java.nio.ByteBuffer
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.attribute.PosixFileAttributeView
-import java.nio.file.attribute.PosixFilePermissions
 import java.util.concurrent.locks.ReentrantLock
 import java.util.zip.CRC32
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.server.*
 import net.kurobako.gemstone.server.protocol.*
 import scala.collection.mutable
 import scala.util.Using
@@ -24,12 +24,12 @@ import upickle.default.readBinary
 import upickle.default.writeBinary
 import upickle.implicits.key
 
-/** Bounded MessagePack RPC archives. Client identities are normalized; application payloads remain sensitive data.
+/** Bounded MessagePack RPC archives. Client identities are normalised; application payloads remain sensitive data.
   * Record checksums detect accidental corruption; they are not security boundaries.
   */
 object Journal {
   private val Format                 = "gemstone-rpc-journal"
-  val Version                        = 3
+  private val Version                = 4
   private val RecordFramingBytes     = 8L
   private val RecordOverheadBytes    = 4096
   private val MetadataRecordLimit    = 4096
@@ -40,48 +40,30 @@ object Journal {
   inline val MaximumFrameBytes   = 2147479551
   inline val MinimumArchiveBytes = 4104L
 
-  type ProtocolIdentity = ProtocolIdentity.Type
-  object ProtocolIdentity extends Newtype[String] {
-    override protected def validate(value: String): Unit =
-      require(value.matches("[!-~]{1,128}"), "protocol identity must be 1 to 128 printable ASCII characters")
-  }
-
   type RecordedClientId = RecordedClientId.Type
-  object RecordedClientId extends Newtype[Long > 0] {
-    extension (id: RecordedClientId) def toLong: Long           = id.raw
-    extension (id: RecordedClientId) def next: RecordedClientId = apply(id.unwrap + 1L)
-  }
+  object RecordedClientId extends PositiveId
 
   type RecordedConnectionId = RecordedConnectionId.Type
-  object RecordedConnectionId extends Newtype[Long > 0] {
-    extension (id: RecordedConnectionId) def toLong: Long               = id.raw
-    extension (id: RecordedConnectionId) def next: RecordedConnectionId = apply(id.unwrap + 1L)
-  }
+  object RecordedConnectionId extends PositiveId
 
   type EventId = EventId.Type
   object EventId extends Newtype[Long >= 0] {
-    extension (id: EventId) def toLong: Long  = id.raw
     extension (id: EventId) def next: EventId = apply(id.unwrap + 1L)
   }
 
   type FailureReason = FailureReason.Type
   object FailureReason extends Newtype[String] {
-    override protected def validate(value: String): Unit =
-      require(
-        value.nonEmpty && value.length <= FailureReasonMaxLength && !value.contains('\u0000'),
-        "failure reason must be nonempty, NUL-free and at most 512 characters"
-      )
+    override protected def violation(value: String): Option[NonEmpty[String]] =
+      Option.unless[NonEmpty[String]](
+        value.nonEmpty && value.length <= FailureReasonMaxLength && !value.contains('\u0000')
+      )("failure reason must be nonempty, NUL-free and at most 512 characters")
   }
 
   type FrameByteSize = FrameByteSize.Type
-  object FrameByteSize extends Newtype[Int in 1 ~ MaximumFrameBytes.type] {
-    extension (value: FrameByteSize) def toInt: Int = value.raw
-  }
+  object FrameByteSize extends Newtype[Int in 1 ~ MaximumFrameBytes.type]
 
   type ArchiveByteSize = ArchiveByteSize.Type
-  object ArchiveByteSize extends Newtype[Long > MinimumArchiveBytes.type] {
-    extension (value: ArchiveByteSize) def toLong: Long = value.raw
-  }
+  object ArchiveByteSize extends Newtype[Long > MinimumArchiveBytes.type]
 
   case class Limits(
       maxFrameBytes: FrameByteSize = FrameByteSize(134221824),
@@ -93,16 +75,15 @@ object Journal {
       parallelism: Int > 0
   )
   case class Header(
-      protocolIdentity: ProtocolIdentity,
+      executionProfile: ExecutionProfile,
       limits: Limits = Limits(),
-      executionProfile: Option[ExecutionProfile] = None,
       schema: String = ExecutionRPC.Schema.canonical
   )
   enum Kind(val code: Int, val hasFrame: Boolean) {
     case Request         extends Kind(1, true)
     case Response        extends Kind(2, true)
-    case ConnectionClose extends Kind(5, false)
-    case ClientClose     extends Kind(6, false)
+    case ConnectionClose extends Kind(3, false)
+    case ClientClose     extends Kind(4, false)
   }
   case class Event(
       sequence: EventId,
@@ -120,12 +101,12 @@ object Journal {
   )
 
   object Frames {
-    def normalized(
+    def normalised(
         kind: Kind,
         bytes: Array[Byte],
         maximum: FrameByteSize
     ): Array[Byte] = {
-      validate(kind = kind, bytes = bytes, maximum = maximum, normalized = false)
+      validate(kind = kind, bytes = bytes, maximum = maximum, normalised = false)
       if (kind != Kind.Request) bytes
       else {
         val result = bytes.clone()
@@ -134,32 +115,18 @@ object Journal {
       }
     }
 
-    def validate(
-        kind: Kind,
-        bytes: Array[Byte],
-        maximum: FrameByteSize,
-        normalized: Boolean
-    ): Unit =
-      validatePrefix(kind = kind, bytes = bytes, frameSize = bytes.length, maximum = maximum, normalized = normalized)
-
-    def validatePrefix(
-        kind: Kind,
-        bytes: Array[Byte],
-        frameSize: Int,
-        maximum: FrameByteSize,
-        normalized: Boolean
-    ): Unit = {
-      if (frameSize > maximum.toInt) throw IOException("RPC journal: frame exceeds archive bounds")
-      Frame.validatePrefix(bytes, frameSize.toLong)
+    def validate(kind: Kind, bytes: Array[Byte], maximum: FrameByteSize, normalised: Boolean): Unit = {
+      if (bytes.length > maximum.raw) throw IOException("RPC journal: frame exceeds archive bounds")
+      Frame.validatePrefix(bytes, bytes.length.toLong)
       val expectedMagic = kind match {
         case Kind.Request  => ExecutionRPC.RequestMagic
         case Kind.Response => ExecutionRPC.ResponseMagic
         case _             => throw IOException("RPC journal: event has no frame")
       }
       if (Frame.magic(bytes) != expectedMagic) throw IOException("RPC journal: frame kind/magic differ")
-      if (normalized && kind == Kind.Request) {
+      if (normalised && kind == Kind.Request) {
         if (ByteBuffer.wrap(bytes).getLong(ExecutionRPC.RequestClientOffset.raw) != 0L)
-          throw IOException("RPC journal: request client is not normalized")
+          throw IOException("RPC journal: request client is not normalised")
       }
     }
   }
@@ -169,12 +136,11 @@ object Journal {
   private case class HeaderRecord(
       format: String,
       version: Int,
-      protocolIdentity: String,
       schema: String,
       maxFrameBytes: Int,
       maxArchiveBytes: Long,
       maxEvents: Int,
-      executionProfile: Option[ExecutionProfileRecord]
+      executionProfile: ExecutionProfileRecord
   ) extends Record derives ReadWriter
   private case class ExecutionProfileRecord(maxInstructions: Long, parallelism: Int) derives ReadWriter
   @key("event")
@@ -215,11 +181,6 @@ object Journal {
     try readBinary[Record](bytes)
     catch { case NonFatal(error) => throw IOException("RPC journal: invalid MessagePack record", error) }
 
-  private def restrictToOwner(file: Path): Unit =
-    Option(Files.getFileAttributeView(file, classOf[PosixFileAttributeView])).foreach { view =>
-      view.setPermissions(PosixFilePermissions.fromString("rw-------"))
-    }
-
   private def writeRecord(output: DataOutputStream, bytes: Array[Byte]): Long = {
     output.writeInt(bytes.length)
     output.write(bytes)
@@ -248,14 +209,14 @@ object Journal {
   }
 
   object Writer {
-    @SuppressWarnings(Array("scalafix:GemstoneNoExplicitNew"))
+    @SuppressWarnings(Array("scalafix:BannedSyntax.explicit-new"))
     def apply(file: Path, header: Header): Writer = {
       Option(file.getParent).foreach(Files.createDirectories(_))
       try Files.createFile(file)
       catch { case _: FileAlreadyExistsException => invalid(s"capture already exists: ${file.getFileName}") }
       // Ownership transfers to Writer on success, so a lexical Using scope cannot close this stream here.
       val output = try {
-        restrictToOwner(file)
+        PrivateFile.restrict(file)
         DataOutputStream(Files.newOutputStream(file))
       } catch {
         case NonFatal(error) =>
@@ -277,9 +238,9 @@ object Journal {
 
   /** Tracks protocol exchange shape, not backend thread scheduling or instruction-level execution. */
   private class Order {
-    private val connections                            = mutable.Map.empty[RecordedConnectionId, ConnectionState]
-    private val closedClients                          = mutable.Set.empty[RecordedClientId]
-    def accept(event: Event, frame: Array[Byte]): Unit =
+    private val connections        = mutable.Map.empty[RecordedConnectionId, ConnectionState]
+    private val closedClients      = mutable.Set.empty[RecordedClientId]
+    def accept(event: Event): Unit =
       if (event.kind == Kind.ClientClose) {
         ensure(event.connection.isEmpty && !closedClients(event.client), "duplicate or malformed client close")
         closedClients += event.client
@@ -296,10 +257,6 @@ object Journal {
             previous.copy(requestPending = true)
           case Kind.Response =>
             ensure(previous.requestPending, "response has no request")
-            ensure(
-              Frame.magic(frame) == ExecutionRPC.ResponseMagic,
-              "response protocol differs from its request"
-            )
             previous.copy(requestPending = false)
           case Kind.ConnectionClose => previous.copy(closed = true)
           case Kind.ClientClose     => previous
@@ -311,10 +268,8 @@ object Journal {
 
   // Archive state advances monotonically behind Writer's lock.
   class Writer private (val header: Header, output: DataOutputStream) extends AutoCloseable {
-    private val lock = ReentrantLock()
-    // Recording owners are capabilities: equal objects must remain distinct clients. Scala's AnyRefMap uses
-    // value equality, so IdentityHashMap is intentional here.
-    private val clients = java.util.IdentityHashMap[AnyRef, RecordedClientId]()
+    private val lock    = ReentrantLock()
+    private val clients = mutable.Map.empty[ClientId, RecordedClientId]
     private val order   = Order()
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var nextClient = RecordedClientId(1L)
@@ -334,53 +289,40 @@ object Journal {
     private val encodedHeader = encode(HeaderRecord(
       Format,
       Version,
-      header.protocolIdentity.raw,
       header.schema,
-      header.limits.maxFrameBytes.toInt,
-      header.limits.maxArchiveBytes.toLong,
+      header.limits.maxFrameBytes.raw,
+      header.limits.maxArchiveBytes.raw,
       header.limits.maxEvents.raw,
-      header.executionProfile.map(profile =>
-        ExecutionProfileRecord(
-          profile.maxInstructions.raw,
-          profile.parallelism.raw
-        )
-      )
+      ExecutionProfileRecord(header.executionProfile.maxInstructions.raw, header.executionProfile.parallelism.raw)
     ))
     ensure(encodedHeader.length <= HeaderRecordLimit, "archive header exceeds its byte limit")
     ensure(
-      encodedHeader.length.toLong + RecordFramingBytes + FooterReserve <= header.limits.maxArchiveBytes.toLong,
+      encodedHeader.length.toLong + RecordFramingBytes + FooterReserve <= header.limits.maxArchiveBytes.raw,
       "archive byte limit cannot hold its header and footer"
     )
     written = Math.addExact(written, writeRecord(output, encodedHeader))
 
-    private def clientId(client: AnyRef): RecordedClientId =
-      if (clients.containsKey(client)) clients.get(client)
-      else {
+    private def recorded(client: ClientId): RecordedClientId = clients.getOrElseUpdate(
+      client, {
         val id = nextClient
         nextClient = nextClient.next
-        clients.put(client, id)
         id
       }
-    def connection(client: AnyRef): Connection = lock.withLock {
+    )
+    def connection(client: ClientId): Connection = lock.withLock {
       ensure(!closed, "capture is closed")
       val id = nextConnection
       nextConnection = nextConnection.next
-      Connection(this, clientId(client), id)
+      Connection(this, recorded(client), id)
     }
-    def clientClosed(client: AnyRef): Unit = lock.withLock {
-      if (clients.containsKey(client))
-        append(
-          Kind.ClientClose,
-          clients.get(client),
-          None,
-          Array.emptyByteArray
-        )
+    def clientClosed(client: ClientId): Unit = lock.withLock {
+      clients.get(client).foreach(append(Kind.ClientClose, _, None, Array.emptyByteArray))
     }
     def markUnreplayable(reason: String): Unit = lock.withLock {
       if (failure.isEmpty) {
-        val sanitized = reason.filterNot(_ == '\u0000').take(FailureReasonMaxLength)
-        val detail    = Option.when(sanitized.nonEmpty)(sanitized).getOrElse("unspecified recording failure")
-        failure = Some(FailureReason.either(detail)
+        val sanitised = reason.filterNot(_ == '\u0000').take(FailureReasonMaxLength)
+        val detail    = Option.when(sanitised.nonEmpty)(sanitised).getOrElse("unspecified recording failure")
+        failure = Some(detail.refine[FailureReason]
           .fold(message => invalid(s"invalid failure reason: $message"), value => value))
       }
     }
@@ -393,23 +335,23 @@ object Journal {
       lock.withLock {
         ensure(!closed, "capture is closed")
         try {
-          ensure(sequence.toLong < header.limits.maxEvents.raw, "event limit exceeded")
-          val frame   = Option.when(kind.hasFrame)(Journal.Frames.normalized(kind, bytes, header.limits.maxFrameBytes))
+          ensure(sequence.raw < header.limits.maxEvents.raw, "event limit exceeded")
+          val frame   = Option.when(kind.hasFrame)(Journal.Frames.normalised(kind, bytes, header.limits.maxFrameBytes))
           val eventId = sequence
           val record  = encode(EventRecord(
-            eventId.toLong,
+            eventId.raw,
             kind.code,
-            client.toLong,
-            connection.fold(0L)(_.toLong),
+            client.raw,
+            connection.fold(0L)(_.raw),
             frame
           ))
           val encodedBytes = record.length.toLong + RecordFramingBytes
           ensure(
-            encodedBytes <= header.limits.maxArchiveBytes.toLong - written - FooterReserve,
+            encodedBytes <= header.limits.maxArchiveBytes.raw - written - FooterReserve,
             "archive byte limit exceeded"
           )
           val event = Event(eventId, kind, client, connection)
-          order.accept(event, frame.getOrElse(Array.emptyByteArray))
+          order.accept(event)
           written = Math.addExact(written, writeRecord(output, record))
           if (kind.hasFrame) frames += 1
           sequence = sequence.next
@@ -425,10 +367,11 @@ object Journal {
         if (!order.complete && failure.isEmpty)
           failure = Some(FailureReason("capture ended with an open or incomplete exchange"))
         Using.resource(output) { output =>
-          val footer = encode(FooterRecord(sequence.toLong.toInt, frames.raw, failure.isEmpty, failure.map(_.raw)))
+          val footer =
+            encode(FooterRecord(Math.toIntExact(sequence.raw), frames.raw, failure.isEmpty, failure.map(_.raw)))
           ensure(footer.length <= MetadataRecordLimit, "archive footer exceeds its byte limit")
           ensure(
-            footer.length.toLong + RecordFramingBytes <= header.limits.maxArchiveBytes.toLong - written,
+            footer.length.toLong + RecordFramingBytes <= header.limits.maxArchiveBytes.raw - written,
             "archive byte limit exceeded by footer"
           )
           written = Math.addExact(written, writeRecord(output, footer))
@@ -438,26 +381,23 @@ object Journal {
     }
   }
 
-  // A connection records its two-step request/close lifecycle in place.
+  /** One connection's request/response/close lifecycle, driven by its connection thread. */
   class Connection private[Journal] (
       writer: Writer,
       val client: RecordedClientId,
       val id: RecordedConnectionId
   ) extends AutoCloseable {
-    private val lock = ReentrantLock()
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var started = false
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private var closed                    = false
-    def request(frame: Array[Byte]): Unit =
-      lock.withLock { writer.append(Kind.Request, client, Some(id), frame); started = true }
+    private var closed                     = false
+    def request(frame: Array[Byte]): Unit  = { writer.append(Kind.Request, client, Some(id), frame); started = true }
     def response(frame: Array[Byte]): Unit = writer.append(Kind.Response, client, Some(id), frame)
-    override def close(): Unit             = lock.withLock {
+    override def close(): Unit             =
       if (!closed) {
         closed = true
         if (started) writer.append(Kind.ConnectionClose, client, Some(id), Array.emptyByteArray)
       }
-    }
   }
 
   class Reader private[Journal] (
@@ -473,19 +413,19 @@ object Journal {
       input.seek(location.offset)
       readRecord(
         input,
-        summary.header.limits.maxFrameBytes.toInt + RecordOverheadBytes
+        summary.header.limits.maxFrameBytes.raw + RecordOverheadBytes
       ) match {
         case Some((_, EventRecord(sequence, kind, client, connection, Some(frame)))) =>
           ensure(
-            sequence == event.sequence.toLong && kind == event.kind.code && client == event.client.toLong &&
-              connection == event.connection.fold(0L)(_.toLong),
+            sequence == event.sequence.raw && kind == event.kind.code && client == event.client.raw &&
+              connection == event.connection.fold(0L)(_.raw),
             "event changed after archive verification"
           )
           Journal.Frames.validate(
             kind = event.kind,
             bytes = frame,
             maximum = summary.header.limits.maxFrameBytes,
-            normalized = true
+            normalised = true
           )
           frame
         case _ => invalid("frame record changed after archive verification")
@@ -499,7 +439,7 @@ object Journal {
     val input = RandomAccessFile(file.toFile, "r")
     // Ownership transfers to Reader after validation; failures close the not-yet-transferred handle below.
     try {
-      ensure(input.length() <= limits.maxArchiveBytes.toLong, "archive exceeds reader byte limit")
+      ensure(input.length() <= limits.maxArchiveBytes.raw, "archive exceeds reader byte limit")
       val (header, declared)           = readHeader(input, limits)
       val (events, locations, summary) = readEvents(input, header, declared)
       Reader(input, summary, events, locations)
@@ -519,30 +459,25 @@ object Journal {
       case _                              => invalid("archive does not start with a header")
     }
     ensure(headerRecord.format == Format && headerRecord.version == Version, "unknown archive format/version")
-    val maxFrameBytes = FrameByteSize.either(headerRecord.maxFrameBytes)
+    val maxFrameBytes = headerRecord.maxFrameBytes.refine[FrameByteSize]
       .fold(message => invalid(s"invalid frame byte limit: $message"), value => value)
-    val maxArchiveBytes = ArchiveByteSize.either(headerRecord.maxArchiveBytes)
+    val maxArchiveBytes = headerRecord.maxArchiveBytes.refine[ArchiveByteSize]
       .fold(message => invalid(s"invalid archive byte limit: $message"), value => value)
     val maxEvents = headerRecord.maxEvents.refine[Int > 0]
       .fold(message => invalid(s"invalid event limit: $message"), value => value)
     val declared = Limits(maxFrameBytes, maxArchiveBytes, maxEvents)
     ensure(
-      declared.maxFrameBytes.toInt <= limits.maxFrameBytes.toInt &&
-        declared.maxArchiveBytes.toLong <= limits.maxArchiveBytes.toLong &&
+      declared.maxFrameBytes.raw <= limits.maxFrameBytes.raw &&
+        declared.maxArchiveBytes.raw <= limits.maxArchiveBytes.raw &&
         declared.maxEvents <= limits.maxEvents,
       "archive limits exceed reader limits"
     )
-    ensure(input.length() <= declared.maxArchiveBytes.toLong, "archive exceeds its declared byte limit")
-    val profile = headerRecord.executionProfile.map { profile =>
-      val maxInstructions = profile.maxInstructions.refine[Long > 0]
-        .fold(message => invalid(s"invalid maximum instruction count: $message"), value => value)
-      val parallelism = profile.parallelism.refine[Int > 0]
-        .fold(message => invalid(s"invalid execution parallelism: $message"), value => value)
-      ExecutionProfile(maxInstructions, parallelism)
-    }
-    val protocolIdentity = ProtocolIdentity.either(headerRecord.protocolIdentity)
-      .fold(message => invalid(s"invalid protocol identity: $message"), value => value)
-    Header(protocolIdentity, declared, profile, headerRecord.schema) -> declared
+    ensure(input.length() <= declared.maxArchiveBytes.raw, "archive exceeds its declared byte limit")
+    val maxInstructions = headerRecord.executionProfile.maxInstructions.refine[Long > 0]
+      .fold(message => invalid(s"invalid maximum instruction count: $message"), value => value)
+    val parallelism = headerRecord.executionProfile.parallelism.refine[Int > 0]
+      .fold(message => invalid(s"invalid execution parallelism: $message"), value => value)
+    Header(ExecutionProfile(maxInstructions, parallelism), declared, headerRecord.schema) -> declared
   }
 
   private def readEvents(
@@ -553,7 +488,7 @@ object Journal {
     val events      = Vec.newBuilder[Event]
     val locations   = mutable.Map.empty[EventId, RecordLocation]
     val order       = Order()
-    val recordLimit = declared.maxFrameBytes.toInt + RecordOverheadBytes
+    val recordLimit = declared.maxFrameBytes.raw + RecordOverheadBytes
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var count: Int >= 0 = 0
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -568,19 +503,19 @@ object Journal {
           ensure(sequence == count.toLong.raw, "event sequence is not contiguous")
           ensure(frame.nonEmpty == kind.hasFrame, "event frame does not match its kind")
           frame.foreach(bytes =>
-            Journal.Frames.validate(kind = kind, bytes = bytes, maximum = declared.maxFrameBytes, normalized = true)
+            Journal.Frames.validate(kind = kind, bytes = bytes, maximum = declared.maxFrameBytes, normalised = true)
           )
-          val eventId = EventId.either(sequence)
+          val eventId = sequence.refine[EventId]
             .fold(message => invalid(s"invalid event identity: $message"), value => value)
-          val clientId = RecordedClientId.either(client)
+          val clientId = client.refine[RecordedClientId]
             .fold(message => invalid(s"invalid client identity: $message"), value => value)
           val connectionId = if (kind == Kind.ClientClose) {
             ensure(connection == 0L, "client close has a connection identity")
             None
-          } else Some(RecordedConnectionId.either(connection)
+          } else Some(connection.refine[RecordedConnectionId]
             .fold(message => invalid(s"invalid connection identity: $message"), value => value))
           val event = Event(eventId, kind, clientId, connectionId)
-          order.accept(event, frame.getOrElse(Array.emptyByteArray))
+          order.accept(event)
           if (kind.hasFrame) { frames += 1; locations.update(eventId, location) }
           events += event
           count += 1
@@ -588,7 +523,7 @@ object Journal {
           ensure(location.payloadBytes <= MetadataRecordLimit, "archive footer exceeds its byte limit")
           ensure(expectedEvents == count.raw && expectedFrames == frames.raw, "footer totals differ")
           val failure: Option[FailureReason] = reason.map(raw =>
-            FailureReason.either(raw)
+            raw.refine[FailureReason]
               .fold(message => invalid(s"invalid failure reason: $message"), value => value)
           )
           ensure(replayable == failure.isEmpty, "footer status and reason differ")

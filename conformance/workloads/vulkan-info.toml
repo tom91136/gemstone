@@ -1,0 +1,4 @@
+# Required-feature, property, limit, and driver-identity diagnostics from the official mustpass inventory.
+include_programs = ['vulkan_cts']
+vulkan_mustpass = "mustpass/vk-default.txt"
+vulkan_cases = ["dEQP-VK.info.*", "dEQP-VK.api.info.*", "dEQP-VK.api.driver_properties.*"]

@@ -1,110 +1,28 @@
 package net.kurobako.gemstone.isa.nvidia
 
-import VMIR.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 
+/** An effect staged by one instruction and applied once every lane has read its operands. */
 enum VMWrite {
-  case Register(lane: WorkgroupLane, name: NonEmpty[String], value: Long)
-  case Carry(lane: WorkgroupLane, value: Boolean)
+  case Register(lane: WorkgroupLane, register: VMIR.Register, value: Long)
+  case Predicate(lane: WorkgroupLane, predicate: VMIR.Predicate, value: Boolean)
   case ConditionFlag(lane: WorkgroupLane, flag: VMConditionCodes.Flag, value: Option[Boolean])
-  case AddThreeCarry(lane: WorkgroupLane, value: Option[Int])
-  case Predicate(lane: WorkgroupLane, name: NonEmpty[String], value: Boolean)
-  case Parameter(lane: WorkgroupLane, name: NonEmpty[String], value: Long)
-  case ParameterBytes(
+  case AddThreeCarry(lane: WorkgroupLane, value: Option[Int in 0 ~ 2])
+  case Parameter(lane: WorkgroupLane, parameter: VMIR.Parameter, offset: Int >= 0, width: ScalarBitWidth, value: Long)
+  case ParameterBuffer(address: Long, width: ScalarBitWidth, value: Long)
+  case Shared(address: Long, width: ScalarBitWidth, value: Long)
+  case Local(lane: WorkgroupLane, address: Long, width: ScalarBitWidth, value: Long)
+  case Memory(lane: WorkgroupLane, address: GuestAddress, width: ScalarBitWidth, value: Long, system: Boolean)
+  case MemoryBytes(lane: WorkgroupLane, address: GuestAddress, bytes: Vec[Byte])
+  case Atomic(
       lane: WorkgroupLane,
-      name: NonEmpty[String],
-      offset: Int >= 0,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      value: Long
-  )
-  case ParameterBuffer(address: Long, width: Int where (Between[8, 64] & MultipleOf[8]), value: Long)
-  case Shared(lane: WorkgroupLane, address: Long, width: Int where (Between[8, 64] & MultipleOf[8]), value: Long)
-  case Local(lane: WorkgroupLane, address: Long, width: Int where (Between[8, 64] & MultipleOf[8]), value: Long)
-  case Memory(
-      lane: WorkgroupLane,
-      address: GuestAddress,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      value: Long
-  )
-  case SystemMemory(
-      lane: WorkgroupLane,
-      address: GuestAddress,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      value: Long
-  )
-  case MemoryVector(
-      lane: WorkgroupLane,
-      address: GuestAddress,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      values: Vec[Long]
-  )
-  case AtomicSharedAdd(
-      lane: WorkgroupLane,
-      destination: NonEmpty[String],
+      destination: Option[VMIR.Register],
       address: Long,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      value: Long
-  )
-  case AtomicSharedCompareExchange(
-      lane: WorkgroupLane,
-      destination: NonEmpty[String],
-      address: Long,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      comparator: Long,
-      value: Long
-  )
-  case AtomicMemoryCompareExchange(
-      lane: WorkgroupLane,
-      destination: NonEmpty[String],
-      address: GuestAddress,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      comparator: Long,
-      value: Long
-  )
-  case AtomicSharedExchange(
-      lane: WorkgroupLane,
-      destination: NonEmpty[String],
-      address: Long,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      value: Long
-  )
-  case AtomicSharedBinary(
-      lane: WorkgroupLane,
-      destination: NonEmpty[String],
-      address: Long,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      value: Long,
-      operation: IntegerOperation
-  )
-  case AtomicMemoryAdd(
-      lane: WorkgroupLane,
-      destination: NonEmpty[String],
-      address: GuestAddress,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      value: Long
-  )
-  case AtomicMemoryExchange(
-      lane: WorkgroupLane,
-      destination: NonEmpty[String],
-      address: GuestAddress,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      value: Long
-  )
-  case AtomicMemoryBinary(
-      lane: WorkgroupLane,
-      destination: NonEmpty[String],
-      address: GuestAddress,
-      width: Int where (Between[8, 64] & MultipleOf[8]),
-      value: Long,
-      operation: IntegerOperation
-  )
-  case AtomicMemoryAddFloat(
-      lane: WorkgroupLane,
-      destination: NonEmpty[String],
-      address: GuestAddress,
-      width: Int in (16, 32, 64),
-      value: Long
+      width: ScalarBitWidth,
+      shared: Boolean,
+      update: AtomicUpdate
   )
 }

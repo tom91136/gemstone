@@ -34,13 +34,10 @@ class MemoryPublicationSuite extends munit.FunSuite {
           val result = native.run(
             Vec.nonEmpty(client.toString),
             directory,
-            Launch.Environment(
-              native.providerEnvironment ++ Map(
-                env.MemoryProbe   -> "review",
-                env.RpcEndpoint   -> server.endpoint.toString,
-                env.RpcClient     -> server.client.raw.toString,
-                "OCL_ICD_VENDORS" -> vendors.toString
-              ),
+            native.serverEnvironment(
+              server.endpoint,
+              server.client,
+              native.providerEnvironment ++ Map(env.MemoryProbe -> "review", "OCL_ICD_VENDORS" -> vendors.toString),
               Set(env.SystemPaging, "UR_ADAPTERS_FORCE_LOAD")
             ),
             120.seconds
@@ -51,7 +48,7 @@ class MemoryPublicationSuite extends munit.FunSuite {
             List(
               "verified disjoint device writes",
               "verified mixed backing publication",
-              "verified synchronized device pointer replacement"
+              "verified synchronised device pointer replacement"
             ),
             result.diagnostic
           )

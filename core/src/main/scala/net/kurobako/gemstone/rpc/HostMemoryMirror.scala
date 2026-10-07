@@ -4,18 +4,18 @@ import java.util.BitSet
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import scala.collection.mutable
 import scala.collection.mutable.LongMap
 
 /** Sparse host bytes shared by aliases within one dispatch. The execution session owns locking. Missing bytes are
   * requested exactly; a page is never assumed readable because one byte is readable.
   */
-private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges: Int = 1024) {
-  require(maxBatchBytes >= 8, "a batch must fit the largest atomic word")
-  require(maxBatchRanges > 0, "a batch must allow at least one range")
-
+private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges: Int > 0 = 1024) {
   private val pageSize = 4096
+
+  private def number(address: Long): Long = address >>> 12
+  private def offset(address: Long): Int  = (address & 4095L).toInt
 
   // Pages are storage only: validity remains byte-exact, including allocation
   // boundaries and holes. No host access is widened to the containing page.
@@ -38,7 +38,7 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
   private class Addresses {
     val pages: LongMap[BitSet]                  = mutable.LongMap.empty[java.util.BitSet]
     def nonEmpty: Boolean                       = pages.nonEmpty
-    def contains(address: Long): Boolean        = pages.get(address >>> 12).exists(_.get((address & 4095L).toInt))
+    def contains(address: Long): Boolean        = pages.get(number(address)).exists(_.get(offset(address)))
     def add(address: Long, size: Int = 1): Unit = spans(address, size) { (number, offset, length, _) =>
       pages.getOrElseUpdate(number, java.util.BitSet(pageSize)).set(offset, offset + length)
     }
@@ -48,7 +48,7 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
         if (bits.isEmpty) { val _ = pages.remove(number) }
       }
     }
-    @SuppressWarnings(Array("scalafix:GemstoneNoIterator.no-iterator"))
+    @SuppressWarnings(Array("scalafix:BannedSyntax.no-iterator"))
     def iterator: Iterator[Long] = pages.view.toArray.sortBy(_._1).iterator.flatMap { (number, bits) =>
       Iterator.unfold(bits.nextSetBit(0)) { offset =>
         if (offset < 0) None else Some(((number << 12) + offset.toLong, bits.nextSetBit(offset + 1)))
@@ -61,9 +61,8 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
     var consumed = 0
     while (consumed < size) {
       val current = address + consumed.toLong
-      val offset  = (current & 4095L).toInt
-      val length  = math.min(pageSize - offset, size - consumed)
-      f(current >>> 12, offset, length, consumed)
+      val length  = math.min(pageSize - offset(current), size - consumed)
+      f(number(current), offset(current), length, consumed)
       consumed += length
     }
   }
@@ -73,10 +72,11 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
   private val issued                                             = Addresses()
   private val changed                                            = Addresses()
   private def atomicWidth(address: Long): Int in (0, 1, 2, 4, 8) =
-    pages.get(address >>> 12).fold[Int in (0, 1, 2, 4, 8)](0)(_.atomicWidth((address & 4095L).toInt))
-  private def contains(address: Long): Boolean =
-    pages.get(address >>> 12).exists(_.valid.get((address & 4095L).toInt))
-  private def byte(address: Long): Byte = pages(address >>> 12).bytes((address & 4095L).toInt)
+    pages.get(number(address)).fold[Int in (0, 1, 2, 4, 8)](0)(_.atomicWidth(offset(address)))
+  private def contains(address: Long): Boolean = pages.get(number(address)).exists(_.valid.get(offset(address)))
+  private def byte(address: Long): Byte        = pages(number(address)).bytes(offset(address))
+  private def bytes(address: Long, size: Int): Vec[Byte] =
+    Vec.from((0 until size).map(index => byte(address + index.toLong)))
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def selectedDirty(selected: Vec[HostMemoryRange]): Addresses = {
@@ -116,19 +116,20 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def read(address: Long, size: Int): Option[Vec[Byte]] = {
+  def read(address: GuestAddress, size: Int >= 0): Option[Vec[Byte]] = {
     var absent = false
-    for (offset <- 0 until size) {
-      val target = address + offset.toLong
+    for (index <- 0 until size.raw) {
+      val target = address.raw + index.toLong
       if (!contains(target)) {
         missing.add(target)
         absent = true
       }
     }
-    if (absent) None else Some(Vec.from((0 until size).map(index => byte(address + index.toLong))))
+    if (absent) None else Some(bytes(address.raw, size.raw))
   }
 
-  def write(address: Long, values: Vec[Byte], atomicWidth: Int in (0, 1, 2, 4, 8) = 0): Unit = {
+  def write(at: GuestAddress, values: Vec[Byte], atomicWidth: Int in (0, 1, 2, 4, 8) = 0): Unit = {
+    val address = at.raw
     // Preserve the width of naturally aligned stores when publishing a batch.
     // Mixed-width overlapping accesses do not have a cross-agent atomicity guarantee.
     spans(address, values.size) { (number, offset, length, consumed) =>
@@ -141,33 +142,33 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
       page.valid.set(offset, offset + length)
     }
     if (atomicWidth.raw != 0 && values.nonEmpty && address % atomicWidth.raw == 0) {
-      val page   = pages(address >>> 12)
-      val offset = (address & 4095L).toInt
-      if (atomicWidth.raw == 8) page.words8.set(offset / 8)
-      else if (atomicWidth.raw == 4) page.words4.set(offset / 4)
-      else if (atomicWidth.raw == 2) page.words2.set(offset / 2)
-      else page.words1.set(offset)
+      val page  = pages(number(address))
+      val index = offset(address)
+      if (atomicWidth.raw == 8) page.words8.set(index / 8)
+      else if (atomicWidth.raw == 4) page.words4.set(index / 4)
+      else if (atomicWidth.raw == 2) page.words2.set(index / 2)
+      else page.words1.set(index)
     }
     changed.add(address, values.size)
     missing.remove(address, values.size)
   }
 
   private def storeIfAbsent(address: Long, value: Byte): Unit = {
-    val page   = pages.getOrElseUpdate(address >>> 12, Page())
-    val offset = (address & 4095L).toInt
-    if (!page.valid.get(offset)) {
-      page.bytes(offset) = value
-      page.valid.set(offset)
+    val page  = pages.getOrElseUpdate(number(address), Page())
+    val index = offset(address)
+    if (!page.valid.get(index)) {
+      page.bytes(index) = value
+      page.valid.set(index)
     }
   }
 
   /** Record a value returned by a native atomic operation without making it dirty for publication. */
-  def observeAtomic(address: Long, values: Vec[Byte]): Unit =
-    values.zipWithIndex.foreach { case (value, offset) =>
-      val target = address + offset.toLong
+  def observeAtomic(address: GuestAddress, values: Vec[Byte]): Unit =
+    values.zipWithIndex.foreach { case (value, position) =>
+      val target = address.raw + position.toLong
       if (!changed.contains(target)) {
-        val page  = pages.getOrElseUpdate(target >>> 12, Page())
-        val index = (target & 4095L).toInt
+        val page  = pages.getOrElseUpdate(number(target), Page())
+        val index = offset(target)
         page.bytes(index) = value
         page.valid.set(index)
         val _ = missing.remove(target)
@@ -175,14 +176,14 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
       }
     }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:GemstoneNoIterator.no-iterator"))
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:BannedSyntax.no-iterator"))
   private def ranges(addresses: Addresses, stores: Boolean = false): Vec[HostMemoryRange] = {
     val chunks    = mutable.ArrayBuffer.empty[HostMemoryRange]
     val source    = addresses.iterator.buffered
-    var remaining = maxBatchBytes
+    var remaining = maxBatchBytes.raw
     while (
       source.hasNext && remaining >= (if (stores) math.max(1, atomicWidth(source.head).raw) else 1) &&
-      chunks.size < maxBatchRanges
+      chunks.size < maxBatchRanges.raw
     ) {
       val base     = source.next()
       val width    = if (stores) math.max(1, atomicWidth(base).raw) else 1
@@ -212,7 +213,7 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
     result
   }
 
-  def supply(values: Vec[HostMemoryBytes]): Either[String, Unit] = {
+  def supply(values: Vec[HostMemoryBytes]): Either[NonEmpty[String], Unit] = {
     val valid = values.forall(value =>
       value.bytes.indices.forall { index =>
         val address = value.address.raw + index.toLong
@@ -234,33 +235,17 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
     }
   }
 
-  def dirty: Vec[HostMemoryBytes] =
-    ranges(changed, stores = true).map {
-      range =>
-        HostMemoryBytes(
-          range.address,
-          Vec.from((0 until range.size.raw).map(index => byte(range.address.raw + index.toLong))),
-          atomicWidth(range.address.raw)
-        )
+  private def take(addresses: Addresses): Vec[HostMemoryBytes] = {
+    val result = ranges(addresses, stores = true).map { range =>
+      HostMemoryBytes(range.address, bytes(range.address.raw, range.size.raw), atomicWidth(range.address.raw))
     }
-  def takeDirty(): Vec[HostMemoryBytes] = {
-    val result = dirty
     result.foreach(range => changed.remove(range.address.raw, range.bytes.size))
     result
   }
 
-  def takeDirty(selected: Vec[HostMemoryRange]): Vec[HostMemoryBytes] = {
-    val addresses = selectedDirty(selected)
-    val result    = ranges(addresses, stores = true).map { range =>
-      HostMemoryBytes(
-        range.address,
-        Vec.from((0 until range.size.raw).map(index => byte(range.address.raw + index.toLong))),
-        atomicWidth(range.address.raw)
-      )
-    }
-    result.foreach(range => changed.remove(range.address.raw, range.bytes.size))
-    result
-  }
+  def takeDirty(): Vec[HostMemoryBytes] = take(changed)
+
+  def takeDirty(selected: Vec[HostMemoryRange]): Vec[HostMemoryBytes] = take(selectedDirty(selected))
 
   /** Acquire discards stale host reads, retaining writes other lanes have not yet published. */
   def invalidateClean(): Unit =
@@ -270,27 +255,4 @@ private class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024, maxBatchRanges:
       page.valid.and(dirty)
       !page.valid.isEmpty
     }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def invalidateClean(selected: Vec[HostMemoryRange]): Unit =
-    pages.foreach { (number, page) =>
-      val base = number << 12
-      selected.foreach { range =>
-        val start = math.max(base, range.address.raw)
-        val end   = math.min(base + pageSize, range.address.raw + range.size.raw.toLong)
-        if (start < end) {
-          var offset = page.valid.nextSetBit((start - base).toInt)
-          while (offset >= 0 && offset < end - base) {
-            val address = base + offset.toLong
-            if (!changed.contains(address)) {
-              page.valid.clear(offset)
-              missing.add(address)
-              issued.remove(address)
-            }
-            offset = page.valid.nextSetBit(offset + 1)
-          }
-        }
-      }
-    }
-
 }

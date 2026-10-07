@@ -3,7 +3,7 @@
 #include <array>
 #include <mutex>
 
-namespace gemstone::vulkan::adapter {
+namespace gemstone::vulkan {
 namespace {
 struct Handle {
   host::Arena *arena;
@@ -42,4 +42,4 @@ void destroyHandle(uintptr_t address) {
   }
   delete handle;
 }
-} // namespace gemstone::vulkan::adapter
+} // namespace gemstone::vulkan

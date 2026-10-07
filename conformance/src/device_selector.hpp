@@ -12,7 +12,7 @@
 
 namespace conformance {
 
-inline bool glob_matches(const char *pattern, const char *value) {
+inline bool globMatches(const char *pattern, const char *value) {
   const char *star = nullptr;
   const char *retry = nullptr;
   while (*value) {
@@ -34,13 +34,13 @@ inline bool glob_matches(const char *pattern, const char *value) {
   return *pattern == '\0';
 }
 
-inline size_t select_device(const std::vector<std::string> &descriptions) {
+inline size_t selectDevice(const std::vector<std::string> &descriptions) {
   if (descriptions.empty()) throw std::runtime_error("no GPU devices were discovered");
   const char *configured = std::getenv("CONFORMANCE_DEVICE");
   if (!configured || !*configured) return 0;
   std::vector<size_t> matches;
   for (size_t index = 0; index < descriptions.size(); ++index)
-    if (glob_matches(configured, descriptions[index].c_str())) matches.push_back(index);
+    if (globMatches(configured, descriptions[index].c_str())) matches.push_back(index);
   if (matches.size() == 1) return matches.front();
   if (matches.empty())
     throw std::runtime_error(
@@ -52,7 +52,7 @@ inline size_t select_device(const std::vector<std::string> &descriptions) {
   throw std::runtime_error(fmt::format("device selector '{}' is ambiguous; matched: {}", configured, fmt::join(matched, ", ")));
 }
 
-inline std::string pci_description(uint32_t domain, uint32_t bus, uint32_t device, uint32_t function) {
+inline std::string pciDescription(uint32_t domain, uint32_t bus, uint32_t device, uint32_t function) {
   return fmt::format("{:04x}:{:02x}:{:02x}.{:x}", domain, bus, device, function);
 }
 

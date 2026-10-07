@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "runtime.hpp"
+#include "descriptor.hpp"
 
 namespace gemstone::vulkan {
 
@@ -25,18 +25,18 @@ struct StageResources {
   struct Argument {
     size_t allocation, offset, size;
   };
-  std::vector<execution::DescriptorBinding> descriptorBindings;
+  std::vector<gx::DescriptorBinding> descriptorBindings;
   std::vector<Allocation> allocations;
   std::vector<std::optional<Argument>> arguments;
 };
 struct BoundStageResources {
-  std::vector<execution::DescriptorBinding> descriptorBindings;
-  std::vector<std::optional<execution::GraphicsRange>> arguments;
+  std::vector<gx::DescriptorBinding> descriptorBindings;
+  std::vector<std::optional<gx::GraphicsRange>> arguments;
 };
 // Registration and ownership stay with the caller. Image bindings retain the same
 // bounded storage ranges as ordinary arguments for both compute and graphics.
 template <typename Register> std::optional<BoundStageResources> bindStageResources(const StageResources &stage, Register registerMemory) {
-  std::vector<execution::GraphicsRange> allocations;
+  std::vector<gx::GraphicsRange> allocations;
   for (const auto &allocation : stage.allocations) {
     if (!allocation.data || !allocation.size || allocation.size > INT32_MAX) return std::nullopt;
     const auto range = registerMemory(allocation);
@@ -49,7 +49,7 @@ template <typename Register> std::optional<BoundStageResources> bindStageResourc
       const auto index = result.arguments.size();
       if (!std::any_of(stage.descriptorBindings.begin(), stage.descriptorBindings.end(), [&](const auto &binding) {
             return binding.argument.value == static_cast<int32_t>(index)
-                   && std::holds_alternative<execution::GraphicsDescriptorSampler>(binding.descriptor);
+                   && std::holds_alternative<gx::GraphicsDescriptorSampler>(binding.descriptor);
           }))
         return std::nullopt;
       result.arguments.emplace_back(std::nullopt);
@@ -81,7 +81,7 @@ template <typename Register> std::optional<BoundStageResources> bindStageResourc
   }
   return result;
 }
-std::optional<execution::PreparedShader> prepareShader(const std::vector<uint8_t> &image, const char *entry,
-                                                       execution::ShaderStageKind stage, const VkSpecializationInfo *specialization);
+std::optional<gx::PreparedShader> prepareShader(const std::vector<uint8_t> &image, const char *entry, gx::ShaderStageKind stage,
+                                                const VkSpecializationInfo *specialization);
 
 } // namespace gemstone::vulkan

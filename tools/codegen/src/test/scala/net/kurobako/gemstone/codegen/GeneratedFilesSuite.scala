@@ -7,11 +7,11 @@ class GeneratedFilesSuite extends munit.FunSuite {
   test("generated writes replace complete files and preserve current timestamps") {
     generator.inDirectory { directory =>
       val output = directory.resolve("Instruction.scala")
-      assert(GeneratedFiles.write(output, "first\n"))
+      GeneratedFiles.write(output, "first\n")
       val timestamp = Files.getLastModifiedTime(output)
-      assert(!GeneratedFiles.write(output, "first\n"))
+      GeneratedFiles.write(output, "first\n")
       assertEquals(Files.getLastModifiedTime(output), timestamp)
-      assert(GeneratedFiles.write(output, "second\n"))
+      GeneratedFiles.write(output, "second\n")
       assertEquals(Files.readString(output), "second\n")
       Using.resource(Files.list(directory)) { entries =>
         assertEquals(entries.toArray.map(_.toString).toSeq, Seq(output.toString))

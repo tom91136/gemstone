@@ -8,13 +8,10 @@ type Binary16 = Binary16.Type
 object Binary16 extends Newtype[Long in 0L ~ 65535L] {
   inline val Mask = 0xffffL
 
-  def fromLow(value: Type): Type = value
-
   def low(value: Long): Type = apply((value & Mask).unsafe[Long in 0L ~ 65535L])
 
   extension (value: Type) {
     def toLong: Long      = value.raw
     inline def toInt: Int = value.toLong.toInt
-    def toBigInt: BigInt  = BigInt(value.toLong)
   }
 }

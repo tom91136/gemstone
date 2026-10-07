@@ -1,93 +1,106 @@
 package net.kurobako.gemstone
 
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.either.*
 
 class ElfSuite extends munit.FunSuite {
-  // ELF64 header/section offsets are fixtures from the ELF file format, independent of the reader.
-  private def image(order: ByteOrder): Array[Byte] = {
-    val buffer = ByteBuffer.allocate(128).order(order)
-    buffer.put(Array[Byte](0x7f, 'E', 'L', 'F', 2, if (order == ByteOrder.LITTLE_ENDIAN) 1 else 2))
-    buffer.putLong(40, 64)
-    buffer.putShort(58, 64.toShort)
-    buffer.putShort(60, 1.toShort)
-    buffer.putInt(64, 7)
-    buffer.putInt(68, 1)
-    buffer.putLong(72, 6)
-    buffer.putLong(80, 0x12345678L)
-    buffer.putLong(88, 128)
-    buffer.array()
+  private val (symbolNames, symbolTable) = elfImage.symbols(
+    Seq(elfImage.Symbol("kernel", 2, 3, 0x1010L, 4L), elfImage.Symbol("global", 1, 4, 8L, 8L))
+  )
+  private def image(imageType: Int = 3): Array[Byte] = elfImage.write(
+    190,
+    Seq(
+      elfImage.Section(".strtab", 3, symbolNames),
+      elfImage.Section(".symtab", 2, symbolTable, link = 1, entrySize = 24),
+      elfImage.Section(
+        ".text",
+        1,
+        bytes.words(0x01234567, 0x7f, 0x11, 0x22, 0x33, 0x44),
+        address = 0x1000L,
+        flags = 6L
+      ),
+      elfImage.Section(".bss", 8, address = 0x2000L, noBitsSize = 4096)
+    ),
+    imageType = imageType,
+    abiVersion = 8,
+    flags = 89 << 8
+  )
+
+  private def parse(bytes: Array[Byte]) = elf.Image.parse(Vec.unsafeWrapArray(bytes))
+
+  test("ELF64 images expose named sections, symbols, and section contents") {
+    val parsed = parse(image()).value
+    assertEquals(parsed.header.machine.raw, 190)
+    assertEquals(parsed.header.abiVersion.raw, 8)
+    assertEquals(parsed.header.flags, 89 << 8)
+    assertEquals(parsed.sections.map(_.name), Vec("", ".strtab", ".symtab", ".text", ".bss", ".shstrtab"))
+    val text = parsed.section(".text").get
+    assertEquals(text.address, 0x1000L)
+    assertEquals(parsed.contents(text).take(4), Vec[Byte](0x67, 0x45, 0x23, 0x01))
+    assertEquals(parsed.contents(parsed.section(".bss").get), Vec.empty[Byte])
+    val symbols = parsed.symbols.get
+    assertEquals(symbols.head.name, None)
+    assertEquals(symbols.flatMap(_.name), Vec[String]("kernel", "global"))
+    assertEquals(parsed.symbolBytes(symbols(1)).value, Vec[Byte](0x33, 0, 0, 0))
   }
 
-  test("ELF64 section headers respect both byte orders") {
-    for (order <- Seq(ByteOrder.LITTLE_ENDIAN, ByteOrder.BIG_ENDIAN)) {
-      val sections = elf.sections64(image(order)).fold(message => fail(message), identity)
-      assertEquals(sections.size, 1)
-      val section = sections.head
-      assertEquals(section.nameOffset, 7)
-      assertEquals(section.sectionType, 1)
-      assertEquals(section.flags, 6L)
-      assertEquals(section.address, 0x12345678L)
-      assertEquals(section.offset.raw, 128)
-      assertEquals(section.size.raw, 0)
-    }
+  test("symbol offsets are addresses in executables and section offsets in relocatable images") {
+    val executable = parse(image()).value
+    assertEquals(executable.symbolOffset(executable.symbols.get(1)).value._2.raw, 0x10)
+    val relocatable = parse(image(imageType = 1)).value
+    assert(relocatable.symbolOffset(relocatable.symbols.get(1)).isLeft)
+    assertEquals(relocatable.symbolOffset(relocatable.symbols.get(2)).value._2.raw, 8)
   }
 
   test("an ELF image may have no section table") {
-    val bytes  = image(ByteOrder.LITTLE_ENDIAN)
-    val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-    buffer.putLong(40, 0)
-    buffer.putShort(58, 0.toShort)
-    buffer.putShort(60, 0.toShort)
-    assertEquals(elf.sections64(bytes).map(_.size), Right(0))
+    val header = image().take(64)
+    val _      = bytes.longs(0L).copyToArray(header, 40)
+    val _      = bytes.shorts(0, 0).copyToArray(header, 58)
+    assertEquals(parse(header).map(_.sections.size), Right(0))
   }
 
-  test("ELF64 rejects truncated tables and out-of-image sections while allowing NOBITS") {
-    val bytes = image(ByteOrder.LITTLE_ENDIAN)
-    assert(elf.sections64(bytes.take(63)).isLeft)
-    assert(elf.sections64(bytes.take(127)).isLeft)
-    val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-    buffer.putLong(96, 4096)
-    assert(elf.sections64(bytes).isLeft)
-    buffer.putInt(68, 8) // SHT_NOBITS occupies memory without file contents.
-    assertEquals(elf.sections64(bytes).map(_.head.size.raw), Right(4096))
-    buffer.putLong(40, Long.MaxValue)
-    assert(elf.sections64(bytes).isLeft)
+  test("ELF64 rejects big-endian, truncated tables, and out-of-image sections while allowing NOBITS") {
+    val valid = image()
+    assert(parse(valid.take(63)).isLeft)
+    assert(parse(valid.dropRight(1)).isLeft)
+    val bigEndian = valid.clone()
+    bigEndian(5) = 2
+    assert(parse(bigEndian).isLeft)
+    val sections  = LittleEndian.decodeInt64(valid, 40).toInt
+    val oversized = valid.clone()
+    val _         = bytes.longs(1L << 20).copyToArray(oversized, sections + 3 * 64 + 32)
+    assert(parse(oversized).isLeft)
+    val noBits = oversized.clone()
+    val _      = bytes.words(8).copyToArray(noBits, sections + 3 * 64 + 4)
+    assertEquals(parse(noBits).map(_.sections(3).size.raw), Right(1 << 20))
+    val unnamed = valid.clone()
+    val _       = bytes.words(8).copyToArray(unnamed, sections + 5 * 64 + 4)
+    assert(parse(unnamed).isLeft, "the section-name table must be a string table")
   }
-  test("ELF headers and symbol entries preserve endianness and extended strides") {
-    Vec(ByteOrder.LITTLE_ENDIAN, ByteOrder.BIG_ENDIAN).foreach { order =>
-      val bytes  = image(order)
-      val header = ByteBuffer.wrap(bytes).order(order)
-      header.putShort(16, 2.toShort).putShort(18, 190.toShort).put(8, 8.toByte).putInt(48, 89 << 8)
-      val decoded = elf.header64(bytes).toOption.get
-      assertEquals(decoded.machine, 190)
-      assertEquals(decoded.abiVersion, 8)
-      assertEquals(decoded.flags, 89 << 8)
-      val symbols = ByteBuffer.allocate(32).order(order)
-      symbols.putInt(0, 3).put(4, 0x11.toByte).putShort(6, 2.toShort).putLong(8, 42).putLong(16, 8)
-      assertEquals(elf.symbols64(Vec.from(symbols.array()), order, 32), Right(Vec(elf.Symbol64(3, 1, 2, 42, 8))))
-      assert(elf.symbols64(Vec.from(symbols.array()), order).isLeft)
-      assert(elf.symbols64(Vec.empty, order, 0).isLeft)
-    }
+
+  test("ELF64 symbol tables accept extended strides and reject partial entries") {
+    val names  = Vec[Byte](0, 'k', 0)
+    val padded = Vec.unsafeWrapArray(bytes.words(1, 0x00020011, 42, 0, 8, 0, 0, 0))
+    assertEquals(
+      elf.symbols(padded, names, 32),
+      Right(Vec(elf.Symbol(Some("k"), 1, 2, 42L, 8)))
+    )
+    assert(elf.symbols(padded, names, 0).isLeft)
+    assert(elf.symbols(padded.take(24), names, 16).isLeft)
   }
 
   test("ELF64 REL and RELA entries preserve unsigned symbol IDs and signed explicit addends") {
-    for {
-      order    <- Vec(ByteOrder.LITTLE_ENDIAN, ByteOrder.BIG_ENDIAN)
-      explicit <- Vec(false, true)
-    } {
-      val buffer = ByteBuffer.allocate(if (explicit) 24 else 16).order(order)
-      buffer.putLong(0, 0x100000008L).putLong(8, 0xfedcba98abcdef01L)
-      if (explicit) buffer.putLong(16, -17L)
-      val bytes      = Vec.from(buffer.array())
-      val relocation = elf.relocations64(bytes, order, explicit).toOption.get.head
+    for (explicit <- Vec(false, true)) {
+      val entry      = bytes.longs((Seq(0x100000008L, 0xfedcba98abcdef01L) ++ Option.when(explicit)(-17L))*)
+      val relocation = elf.relocations(Vec.unsafeWrapArray(entry), explicit, 0).value.head
       assertEquals(relocation.offset, 0x100000008L)
       assertEquals(relocation.symbol.raw, 0xfedcba98L)
       assertEquals(relocation.kind.raw, 0xabcdef01L)
       assertEquals(relocation.addend, Option.when(explicit)(-17L))
-      assert(elf.relocations64(bytes.dropRight(1), order, explicit).isLeft)
-      assertEquals(elf.relocations64(Vec.empty, order, explicit), Right(Vec.empty[elf.Relocation64]))
+      assert(elf.relocations(Vec.unsafeWrapArray(entry.dropRight(1)), explicit, 0).isLeft)
+      assertEquals(elf.relocations(Vec.empty, explicit, 0), Right(Vec.empty[elf.Relocation]))
     }
   }
 
@@ -98,12 +111,5 @@ class ElfSuite extends munit.FunSuite {
     assert(elf.stringAt(names, 3).isLeft)
     assert(elf.stringAt(Vec[Byte]('k'.toByte), 0).isLeft)
     assert(elf.stringAt(Vec[Byte](0xc3.toByte, 0x28.toByte, 0), 0).isLeft)
-    val section = elf.sections64(image(ByteOrder.LITTLE_ENDIAN)).toOption.get.head
-    assertEquals(
-      elf.sectionBytes(image(ByteOrder.LITTLE_ENDIAN), section.copy(sectionType = 8, size = 4096)),
-      Right(Vec.empty[Byte])
-    )
-    assert(elf.sectionBytes(image(ByteOrder.LITTLE_ENDIAN), section.copy(size = 1)).isLeft)
   }
-
 }

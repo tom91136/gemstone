@@ -22,7 +22,7 @@ void fillProperties(VkPhysicalDeviceProperties *properties) {
   *properties = {};
   properties->apiVersion = configuredApiVersion().value_or(VK_API_VERSION_1_0);
   properties->driverVersion = VK_MAKE_VERSION(1, 0, 0);
-  properties->vendorID = 0; // Unassigned development identity; obtain a vendor ID before submission.
+  properties->vendorID = 0;
   properties->deviceID = 1;
   properties->deviceType = VK_PHYSICAL_DEVICE_TYPE_CPU;
   const char *name = "Gemstone Vulkan Compute Device";
@@ -55,7 +55,7 @@ void fillProperties(VkPhysicalDeviceProperties *properties) {
   limits.storageImageSampleCounts = VK_SAMPLE_COUNT_1_BIT;
   limits.maxFramebufferWidth = limits.maxFramebufferHeight = 16384;
   limits.maxFramebufferLayers = 2048;
-  limits.maxColorAttachments = gemstone::vulkan::maxColorAttachments;
+  limits.maxColorAttachments = MaxColorAttachments;
   limits.maxDrawIndexedIndexValue = 0x00ffffffu;
   limits.maxDrawIndirectCount = 65535;
   limits.maxViewports = 1;
@@ -70,7 +70,7 @@ void fillProperties(VkPhysicalDeviceProperties *properties) {
   limits.maxVertexInputAttributeOffset = 2047;
   limits.maxVertexInputBindingStride = 2048;
   limits.maxVertexOutputComponents = limits.maxFragmentInputComponents = 64;
-  limits.maxFragmentOutputAttachments = gemstone::vulkan::maxColorAttachments;
+  limits.maxFragmentOutputAttachments = MaxColorAttachments;
   limits.maxFragmentCombinedOutputResources = 128;
   limits.framebufferNoAttachmentsSampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT;
   limits.pointSizeRange[0] = limits.pointSizeRange[1] = 1;
@@ -86,8 +86,8 @@ void fillProperties(VkPhysicalDeviceProperties *properties) {
   limits.maxUniformBufferRange = 65536;
   limits.maxStorageBufferRange = std::numeric_limits<uint32_t>::max();
   limits.maxMemoryAllocationCount = 4096;
-  limits.maxBoundDescriptorSets = gemstone::vulkan::MaxBoundDescriptorSets;
-  limits.maxPushConstantsSize = execution::GraphicsPushConstantBytes;
+  limits.maxBoundDescriptorSets = MaxBoundDescriptorSets;
+  limits.maxPushConstantsSize = gx::GraphicsPushConstantBytes;
   limits.maxPerStageDescriptorStorageBuffers = 1024;
   limits.maxPerStageDescriptorSamplers = limits.maxPerStageDescriptorSampledImages = 1024;
   limits.maxDescriptorSetSamplers = limits.maxDescriptorSetSampledImages = 1024;
@@ -113,7 +113,7 @@ void fillProperties(VkPhysicalDeviceProperties *properties) {
   limits.maxTexelGatherOffset = 7;
   limits.discreteQueuePriorities = 2;
   limits.minTexelBufferOffsetAlignment = 1;
-  limits.minMemoryMapAlignment = memoryMapAlignment;
+  limits.minMemoryMapAlignment = MemoryMapAlignment;
   limits.minUniformBufferOffsetAlignment = 16;
   limits.minStorageBufferOffsetAlignment = 16;
   limits.nonCoherentAtomSize = 1;
@@ -151,7 +151,7 @@ void fillMemoryProperties(VkPhysicalDeviceMemoryProperties *properties) {
 }
 
 // Output query structures retain the caller's chain, but every known payload
-// field must be initialized even when the associated feature is unsupported.
+// field must be initialised even when the associated feature is unsupported.
 template <typename T> void resetQueryPayload(VkBaseOutStructure *base) {
   const auto type = base->sType;
   auto *next = base->pNext;
@@ -198,7 +198,6 @@ void fillPropertyChain(void *next) {
         std::snprintf(value->driverName, sizeof(value->driverName), "%s", "Gemstone");
         std::snprintf(value->driverInfo, sizeof(value->driverInfo), "%s", "Portable SPIR-V interpreter");
         // Matches the pinned CTS suite, not the supported Vulkan API version.
-        // This development candidate still requires full validation before release.
         value->conformanceVersion = {1, 4, 6, 2};
         // Stable, unregistered local ID ("GEMS"); not a Khronos allocation.
         value->driverID = static_cast<VkDriverId>(0x47454d53);
@@ -263,7 +262,7 @@ void fillPropertyChain(void *next) {
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES: {
         auto *value = reinterpret_cast<VkPhysicalDeviceMaintenance3Properties *>(base);
         value->maxPerSetDescriptors = MaxDescriptorsPerSet;
-        value->maxMemoryAllocationSize = maxAllocationSize;
+        value->maxMemoryAllocationSize = MaxAllocationSize;
         break;
       }
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES: {

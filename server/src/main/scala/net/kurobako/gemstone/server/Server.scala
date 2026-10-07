@@ -33,11 +33,11 @@ object Server {
       }
       for {
         instructions <- positive(env.ExecutionMaxInstructions, TaskControl.Limits.Default.maxInstructions)
-        parallelism  <- positive(env.ExecutionParallelism, defaultParallelism.toLong, Int.MaxValue.toLong)
-        _            <- Either.cond(
-          parallelism.raw <= hostBound,
-          (),
-          s"requirement failed: ${env.ExecutionParallelism}=$parallelism exceeds host bound $hostBound"
+        parallelism  <- positive(
+          name = env.ExecutionParallelism,
+          default = defaultParallelism.toLong,
+          maximum = hostBound,
+          expected = s"a positive integer at most the host bound $hostBound"
         )
         timeout <- positive(
           name = env.RpcTimeoutSeconds,
@@ -45,7 +45,8 @@ object Server {
           maximum = Int.MaxValue / 1000,
           expected = "positive seconds fitting an Int millisecond timeout"
         )
-        record <- scala.util.Try(values.get(env.Record).map(Path.of(_))).toEither.left.map(throwables.detail(_))
+        record <- values.get(env.Record)
+          .fold[Either[String, Option[Path]]](Right(None))(configuration.path(env.Record, _).map(Some(_)))
       } yield Settings(
         limits = TaskControl.Limits(instructions),
         parallelism = parallelism.toIntExact,
@@ -54,6 +55,14 @@ object Server {
         tracePerformance = values.get(env.Trace).exists(configuration.traceEnabled(_, "perf"))
       )
     }
+
+    /** A recorded profile goes through the same validation, so a capture from a wider host is rejected. */
+    def replay(values: Map[String, String], profile: Journal.ExecutionProfile): Either[String, Settings] =
+      fromEnvironment(
+        (values - env.Record)
+          .updated(env.ExecutionMaxInstructions, profile.maxInstructions.raw.toString)
+          .updated(env.ExecutionParallelism, profile.parallelism.raw.toString)
+      )
   }
 
   case class Settings(
@@ -66,11 +75,7 @@ object Server {
   )
 
   /** Explicit settings keep startup independent of the process environment. */
-  def start(
-      settings: Settings = Settings(),
-      backends: Workgroups => Backends = Backends.default(_),
-      listen: Bind => Listener = SocketTransport.listen(_)
-  ): Server = {
+  def start(settings: Settings = Settings(), backends: Workgroups => Backends = Backends.default(_)): Server = {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var rollback                                = List.empty[() => Unit]
     def own[A <: AutoCloseable](resource: A): A = {
@@ -80,10 +85,6 @@ object Server {
     try {
       val pool = own(WorkerPool(
         parallelism = settings.parallelism,
-        // Small groups can still contain long-running kernels. Do not raise the serial threshold
-        // with the machine core count: even two independent groups can keep another worker busy.
-        minGroups = 2L,
-        minWorkItems = 32L,
         reporter = error => scribe.error(error),
         measurement = Option.when(settings.tracePerformance) { measured =>
           scribe.info(
@@ -94,10 +95,7 @@ object Server {
       val journal = settings.record.map { path =>
         own(Journal.Writer(
           path,
-          Journal.Header(
-            protocolIdentity = Journal.ProtocolIdentity(ExecutionRPC.Identity),
-            executionProfile = Some(Journal.ExecutionProfile(settings.limits.maxInstructions, pool.parallelism))
-          )
+          Journal.Header(Journal.ExecutionProfile(settings.limits.maxInstructions, pool.parallelism))
         ))
       }
       rollback = (() => journal.foreach(_.markUnreplayable("server startup failed"))) :: rollback
@@ -112,9 +110,9 @@ object Server {
             specialization = capabilities.specialization,
             graphics = capabilities.graphics
           ),
-        owner => journal.foreach(_.clientClosed(owner))
+        client => journal.foreach(_.clientClosed(client))
       ))
-      val listener = own(listen(settings.bind))
+      val listener = own(Transport.listen(settings.bind))
       val server   =
         Server(listener, pool, clients, journal, settings.requestTimeoutMillis)
       server.acceptThread.start()
@@ -142,8 +140,7 @@ class Server private (
   private val acceptThread = Thread(() => accept(), "gemstone-rpc-accept")
   acceptThread.setDaemon(true)
 
-  def await(): Unit    = acceptThread.join()
-  def usage: Long >= 0 = clients.usage(client)
+  def await(): Unit = acceptThread.join()
 
   private def accept(): Unit =
     try

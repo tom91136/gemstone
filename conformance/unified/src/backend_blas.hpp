@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string_view>
+
 #include "blas_cases.hpp"
 #include "test_support.hpp"
 #include <fmt/format.h>
@@ -22,17 +24,14 @@ struct CudaBufferMemory {
 };
 
 template <ScalarType> struct CublasNative;
-template <> struct CublasNative<ScalarType::f16> {
+template <> struct CublasNative<ScalarType::F16> {
   using type = __half;
 };
-template <> struct CublasNative<ScalarType::f32> {
+template <> struct CublasNative<ScalarType::F32> {
   using type = float;
 };
-template <> struct CublasNative<ScalarType::f64> {
+template <> struct CublasNative<ScalarType::F64> {
   using type = double;
-};
-template <> struct CublasNative<ScalarType::i8> {
-  using type = int8_t;
 };
 
 template <ScalarType Kind> class Cublas {
@@ -41,208 +40,185 @@ public:
   using Buffer = blas_detail::DeviceBuffer<Scalar, CudaBufferMemory>;
 
   Cublas() {
-    check(cublasCreate(&handle_), "cublasCreate");
+    check(cublasCreate(&handle), "cublasCreate");
     try {
-      check(cublasSetPointerMode(handle_, CUBLAS_POINTER_MODE_HOST), "cublasSetPointerMode");
+      check(cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_HOST), "cublasSetPointerMode");
     } catch (...) {
-      (void)cublasDestroy(handle_);
-      handle_ = nullptr;
+      (void)cublasDestroy(handle);
+      handle = nullptr;
       throw;
     }
   }
   Cublas(const Cublas &) = delete;
   Cublas &operator=(const Cublas &) = delete;
   ~Cublas() {
-    if (handle_) (void)cublasDestroy(handle_);
+    if (handle) (void)cublasDestroy(handle);
   }
 
-  bool supports_axpy() const { return Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_scal() const { return Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_copy() const { return Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_dot() const { return Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_nrm2() const { return Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_asum() const { return Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_gemv() const { return Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_gemm() const {
-    if constexpr (Kind == ScalarType::f16) {
+  bool supports(std::string_view operation) const {
+    if constexpr (Kind == ScalarType::F16) {
       int device = 0;
       cudaDeviceProp properties{};
-      return cudaGetDevice(&device) == cudaSuccess && cudaGetDeviceProperties(&properties, device) == cudaSuccess
+      return (operation == "gemm" || operation == "gemm_strided_batched") && cudaGetDevice(&device) == cudaSuccess
+             && cudaGetDeviceProperties(&properties, device) == cudaSuccess
              && (properties.major > 5 || (properties.major == 5 && properties.minor >= 3));
     }
-    return Kind == ScalarType::f32 || Kind == ScalarType::f64;
-  }
-
-  bool supports_gemm_strided_batched() const {
-    if constexpr (Kind == ScalarType::f16) {
-      int device = 0;
-      cudaDeviceProp properties{};
-      return cudaGetDevice(&device) == cudaSuccess && cudaGetDeviceProperties(&properties, device) == cudaSuccess
-             && (properties.major > 5 || (properties.major == 5 && properties.minor >= 3));
-    }
-    return Kind == ScalarType::f32 || Kind == ScalarType::f64;
+    return true;
   }
 
   Buffer allocate(size_t size) {
     Scalar *data = nullptr;
-    check_cuda(cudaMalloc(reinterpret_cast<void **>(&data),
-                          unified::support::checked_multiply(std::max<size_t>(size, 1), sizeof(Scalar), "cuBLAS allocation")),
-               "cudaMalloc");
+    checkCuda(cudaMalloc(reinterpret_cast<void **>(&data),
+                         unified::support::checkedMultiply(std::max<size_t>(size, 1), sizeof(Scalar), "cuBLAS allocation")),
+              "cudaMalloc");
     return Buffer(data, size);
   }
 
   void upload(Buffer &buffer, const std::vector<long double> &host) {
-    require_size(buffer, host.size());
+    requireSize(buffer, host.size());
     std::vector<Scalar> converted(host.size());
     for (size_t index = 0; index < host.size(); ++index)
-      converted[index] = from_host(host[index]);
+      converted[index] = fromHost(host[index]);
     if (!converted.empty())
-      check_cuda(cudaMemcpy(buffer.data(), converted.data(), converted.size() * sizeof(Scalar), cudaMemcpyHostToDevice), "cudaMemcpy H2D");
+      checkCuda(cudaMemcpy(buffer.data(), converted.data(), converted.size() * sizeof(Scalar), cudaMemcpyHostToDevice), "cudaMemcpy H2D");
   }
 
   std::vector<long double> download(const Buffer &buffer, size_t size) {
-    require_size(buffer, size);
+    requireSize(buffer, size);
     std::vector<Scalar> converted(size);
     if (!converted.empty())
-      check_cuda(cudaMemcpy(converted.data(), buffer.data(), converted.size() * sizeof(Scalar), cudaMemcpyDeviceToHost), "cudaMemcpy D2H");
+      checkCuda(cudaMemcpy(converted.data(), buffer.data(), converted.size() * sizeof(Scalar), cudaMemcpyDeviceToHost), "cudaMemcpy D2H");
     std::vector<long double> result(size);
     for (size_t index = 0; index < size; ++index)
-      result[index] = to_host(converted[index]);
+      result[index] = toHost(converted[index]);
     return result;
   }
 
   void axpy(int n, long double alpha, Buffer &x, int incx, Buffer &y, int incy) {
-    if constexpr (Kind == ScalarType::f32) {
+    if constexpr (Kind == ScalarType::F32) {
       const float value = static_cast<float>(alpha);
-      check(cublasSaxpy(handle_, n, &value, x.data(), incx, y.data(), incy), "cublasSaxpy");
-    } else if constexpr (Kind == ScalarType::f64) {
+      check(cublasSaxpy(handle, n, &value, x.data(), incx, y.data(), incy), "cublasSaxpy");
+    } else if constexpr (Kind == ScalarType::F64) {
       const double value = static_cast<double>(alpha);
-      check(cublasDaxpy(handle_, n, &value, x.data(), incx, y.data(), incy), "cublasDaxpy");
+      check(cublasDaxpy(handle, n, &value, x.data(), incx, y.data(), incy), "cublasDaxpy");
     } else unsupported("axpy");
-    synchronize();
+    synchronise();
   }
 
   void scal(int n, long double alpha, Buffer &x, int incx) {
-    if constexpr (Kind == ScalarType::f32) {
+    if constexpr (Kind == ScalarType::F32) {
       const float value = static_cast<float>(alpha);
-      check(cublasSscal(handle_, n, &value, x.data(), incx), "cublasSscal");
-    } else if constexpr (Kind == ScalarType::f64) {
+      check(cublasSscal(handle, n, &value, x.data(), incx), "cublasSscal");
+    } else if constexpr (Kind == ScalarType::F64) {
       const double value = static_cast<double>(alpha);
-      check(cublasDscal(handle_, n, &value, x.data(), incx), "cublasDscal");
+      check(cublasDscal(handle, n, &value, x.data(), incx), "cublasDscal");
     } else unsupported("scal");
-    synchronize();
+    synchronise();
   }
 
   void copy(int n, Buffer &x, int incx, Buffer &y, int incy) {
-    if constexpr (Kind == ScalarType::f32) check(cublasScopy(handle_, n, x.data(), incx, y.data(), incy), "cublasScopy");
-    else if constexpr (Kind == ScalarType::f64) check(cublasDcopy(handle_, n, x.data(), incx, y.data(), incy), "cublasDcopy");
+    if constexpr (Kind == ScalarType::F32) check(cublasScopy(handle, n, x.data(), incx, y.data(), incy), "cublasScopy");
+    else if constexpr (Kind == ScalarType::F64) check(cublasDcopy(handle, n, x.data(), incx, y.data(), incy), "cublasDcopy");
     else unsupported("copy");
-    synchronize();
+    synchronise();
   }
 
   long double dot(int n, Buffer &x, int incx, Buffer &y, int incy) {
-    Scalar result = from_host(0.0L);
-    if constexpr (Kind == ScalarType::f32) check(cublasSdot(handle_, n, x.data(), incx, y.data(), incy, &result), "cublasSdot");
-    else if constexpr (Kind == ScalarType::f64) check(cublasDdot(handle_, n, x.data(), incx, y.data(), incy, &result), "cublasDdot");
+    Scalar result = fromHost(0.0L);
+    if constexpr (Kind == ScalarType::F32) check(cublasSdot(handle, n, x.data(), incx, y.data(), incy, &result), "cublasSdot");
+    else if constexpr (Kind == ScalarType::F64) check(cublasDdot(handle, n, x.data(), incx, y.data(), incy, &result), "cublasDdot");
     else unsupported("dot");
-    synchronize();
-    return to_host(result);
+    synchronise();
+    return toHost(result);
   }
 
   long double nrm2(int n, Buffer &x, int incx) {
-    Scalar result = from_host(0.0L);
-    if constexpr (Kind == ScalarType::f32) check(cublasSnrm2(handle_, n, x.data(), incx, &result), "cublasSnrm2");
-    else if constexpr (Kind == ScalarType::f64) check(cublasDnrm2(handle_, n, x.data(), incx, &result), "cublasDnrm2");
+    Scalar result = fromHost(0.0L);
+    if constexpr (Kind == ScalarType::F32) check(cublasSnrm2(handle, n, x.data(), incx, &result), "cublasSnrm2");
+    else if constexpr (Kind == ScalarType::F64) check(cublasDnrm2(handle, n, x.data(), incx, &result), "cublasDnrm2");
     else unsupported("nrm2");
-    synchronize();
-    return to_host(result);
+    synchronise();
+    return toHost(result);
   }
 
   long double asum(int n, Buffer &x, int incx) {
-    Scalar result = from_host(0.0L);
-    if constexpr (Kind == ScalarType::f32) check(cublasSasum(handle_, n, x.data(), incx, &result), "cublasSasum");
-    else if constexpr (Kind == ScalarType::f64) check(cublasDasum(handle_, n, x.data(), incx, &result), "cublasDasum");
+    Scalar result = fromHost(0.0L);
+    if constexpr (Kind == ScalarType::F32) check(cublasSasum(handle, n, x.data(), incx, &result), "cublasSasum");
+    else if constexpr (Kind == ScalarType::F64) check(cublasDasum(handle, n, x.data(), incx, &result), "cublasDasum");
     else unsupported("asum");
-    synchronize();
-    return to_host(result);
+    synchronise();
+    return toHost(result);
   }
 
   void gemv(blas::Transpose transpose, int m, int n, long double alpha, Buffer &a, int lda, Buffer &x, int incx, long double beta,
             Buffer &y, int incy) {
-    if constexpr (Kind == ScalarType::f32) {
+    if constexpr (Kind == ScalarType::F32) {
       const float av = static_cast<float>(alpha), bv = static_cast<float>(beta);
-      check(cublasSgemv(handle_, native(transpose), m, n, &av, a.data(), lda, x.data(), incx, &bv, y.data(), incy), "cublasSgemv");
-    } else if constexpr (Kind == ScalarType::f64) {
+      check(cublasSgemv(handle, native(transpose), m, n, &av, a.data(), lda, x.data(), incx, &bv, y.data(), incy), "cublasSgemv");
+    } else if constexpr (Kind == ScalarType::F64) {
       const double av = static_cast<double>(alpha), bv = static_cast<double>(beta);
-      check(cublasDgemv(handle_, native(transpose), m, n, &av, a.data(), lda, x.data(), incx, &bv, y.data(), incy), "cublasDgemv");
+      check(cublasDgemv(handle, native(transpose), m, n, &av, a.data(), lda, x.data(), incx, &bv, y.data(), incy), "cublasDgemv");
     } else unsupported("gemv");
-    synchronize();
+    synchronise();
   }
 
-  void gemm(blas::Transpose transpose_a, blas::Transpose transpose_b, int m, int n, int k, long double alpha, Buffer &a, int lda, Buffer &b,
+  void gemm(blas::Transpose transposeA, blas::Transpose transposeB, int m, int n, int k, long double alpha, Buffer &a, int lda, Buffer &b,
             int ldb, long double beta, Buffer &c, int ldc) {
-    if constexpr (Kind == ScalarType::f16) {
-      const auto av = from_host(alpha), bv = from_host(beta);
-      check(cublasHgemm(handle_, native(transpose_a), native(transpose_b), m, n, k, &av, a.data(), lda, b.data(), ldb, &bv, c.data(), ldc),
+    if constexpr (Kind == ScalarType::F16) {
+      const auto av = fromHost(alpha), bv = fromHost(beta);
+      check(cublasHgemm(handle, native(transposeA), native(transposeB), m, n, k, &av, a.data(), lda, b.data(), ldb, &bv, c.data(), ldc),
             "cublasHgemm");
-    } else if constexpr (Kind == ScalarType::f32) {
+    } else if constexpr (Kind == ScalarType::F32) {
       const float av = static_cast<float>(alpha), bv = static_cast<float>(beta);
-      check(cublasSgemm(handle_, native(transpose_a), native(transpose_b), m, n, k, &av, a.data(), lda, b.data(), ldb, &bv, c.data(), ldc),
+      check(cublasSgemm(handle, native(transposeA), native(transposeB), m, n, k, &av, a.data(), lda, b.data(), ldb, &bv, c.data(), ldc),
             "cublasSgemm");
-    } else if constexpr (Kind == ScalarType::f64) {
+    } else if constexpr (Kind == ScalarType::F64) {
       const double av = static_cast<double>(alpha), bv = static_cast<double>(beta);
-      check(cublasDgemm(handle_, native(transpose_a), native(transpose_b), m, n, k, &av, a.data(), lda, b.data(), ldb, &bv, c.data(), ldc),
+      check(cublasDgemm(handle, native(transposeA), native(transposeB), m, n, k, &av, a.data(), lda, b.data(), ldb, &bv, c.data(), ldc),
             "cublasDgemm");
     } else unsupported("gemm");
-    synchronize();
+    synchronise();
   }
 
-  void gemm_strided_batched(blas::Transpose transpose_a, blas::Transpose transpose_b, int m, int n, int k, long double alpha, Buffer &a,
-                            int lda, size_t stride_a, Buffer &b, int ldb, size_t stride_b, long double beta, Buffer &c, int ldc,
-                            size_t stride_c, int batch_count) {
-    const auto sa = static_cast<int64_t>(stride_a);
-    const auto sb = static_cast<int64_t>(stride_b);
-    const auto sc = static_cast<int64_t>(stride_c);
-    if constexpr (Kind == ScalarType::f16) {
-      const auto av = from_host(alpha), bv = from_host(beta);
-      check(cublasHgemmStridedBatched(handle_, native(transpose_a), native(transpose_b), m, n, k, &av, a.data(), lda, sa, b.data(), ldb, sb,
-                                      &bv, c.data(), ldc, sc, batch_count),
+  void gemmStridedBatched(blas::Transpose transposeA, blas::Transpose transposeB, int m, int n, int k, long double alpha, Buffer &a,
+                          int lda, size_t strideA, Buffer &b, int ldb, size_t strideB, long double beta, Buffer &c, int ldc, size_t strideC,
+                          int batchCount) {
+    const auto sa = static_cast<int64_t>(strideA);
+    const auto sb = static_cast<int64_t>(strideB);
+    const auto sc = static_cast<int64_t>(strideC);
+    if constexpr (Kind == ScalarType::F16) {
+      const auto av = fromHost(alpha), bv = fromHost(beta);
+      check(cublasHgemmStridedBatched(handle, native(transposeA), native(transposeB), m, n, k, &av, a.data(), lda, sa, b.data(), ldb, sb,
+                                      &bv, c.data(), ldc, sc, batchCount),
             "cublasHgemmStridedBatched");
-    } else if constexpr (Kind == ScalarType::f32) {
+    } else if constexpr (Kind == ScalarType::F32) {
       const float av = static_cast<float>(alpha), bv = static_cast<float>(beta);
-      check(cublasSgemmStridedBatched(handle_, native(transpose_a), native(transpose_b), m, n, k, &av, a.data(), lda, sa, b.data(), ldb, sb,
-                                      &bv, c.data(), ldc, sc, batch_count),
+      check(cublasSgemmStridedBatched(handle, native(transposeA), native(transposeB), m, n, k, &av, a.data(), lda, sa, b.data(), ldb, sb,
+                                      &bv, c.data(), ldc, sc, batchCount),
             "cublasSgemmStridedBatched");
-    } else if constexpr (Kind == ScalarType::f64) {
+    } else if constexpr (Kind == ScalarType::F64) {
       const double av = static_cast<double>(alpha), bv = static_cast<double>(beta);
-      check(cublasDgemmStridedBatched(handle_, native(transpose_a), native(transpose_b), m, n, k, &av, a.data(), lda, sa, b.data(), ldb, sb,
-                                      &bv, c.data(), ldc, sc, batch_count),
+      check(cublasDgemmStridedBatched(handle, native(transposeA), native(transposeB), m, n, k, &av, a.data(), lda, sa, b.data(), ldb, sb,
+                                      &bv, c.data(), ldc, sc, batchCount),
             "cublasDgemmStridedBatched");
     } else unsupported("gemm-strided-batched");
-    synchronize();
+    synchronise();
   }
 
 private:
-  cublasHandle_t handle_{};
+  cublasHandle_t handle{};
 
-  static cublasOperation_t native(blas::Transpose transpose) { return transpose == blas::Transpose::none ? CUBLAS_OP_N : CUBLAS_OP_T; }
+  static cublasOperation_t native(blas::Transpose transpose) { return transpose == blas::Transpose::None ? CUBLAS_OP_N : CUBLAS_OP_T; }
 
-  static Scalar from_host(long double value) {
-    if constexpr (Kind == ScalarType::f16) return __float2half(static_cast<float>(value));
+  static Scalar fromHost(long double value) {
+    if constexpr (Kind == ScalarType::F16) return __float2half(static_cast<float>(value));
     else return static_cast<Scalar>(value);
   }
-  static long double to_host(Scalar value) {
-    if constexpr (Kind == ScalarType::f16) return static_cast<long double>(__half2float(value));
+  static long double toHost(Scalar value) {
+    if constexpr (Kind == ScalarType::F16) return static_cast<long double>(__half2float(value));
     else return static_cast<long double>(value);
   }
-  static void require_size(const Buffer &buffer, size_t size) {
+  static void requireSize(const Buffer &buffer, size_t size) {
     if (buffer.size() < size) throw std::runtime_error("buffer is smaller than transfer");
   }
   [[noreturn]] static void unsupported(const char *operation) { SKIP(std::string(operation) + " is unsupported by cuBLAS for this type"); }
@@ -252,10 +228,10 @@ private:
     if (status != CUBLAS_STATUS_SUCCESS)
       throw std::runtime_error(fmt::format("{} failed with status {}", operation, static_cast<int>(status)));
   }
-  static void check_cuda(cudaError_t status, const char *operation) {
+  static void checkCuda(cudaError_t status, const char *operation) {
     if (status != cudaSuccess) throw std::runtime_error(std::string(operation) + ": " + cudaGetErrorString(status));
   }
-  static void synchronize() { check_cuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize"); }
+  static void synchronise() { checkCuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize"); }
 };
 
 template <ScalarType Kind> using Blas = Cublas<Kind>;
@@ -272,17 +248,14 @@ struct HipBufferMemory {
 };
 
 template <ScalarType> struct RocblasNative;
-template <> struct RocblasNative<ScalarType::f16> {
+template <> struct RocblasNative<ScalarType::F16> {
   using type = rocblas_half;
 };
-template <> struct RocblasNative<ScalarType::f32> {
+template <> struct RocblasNative<ScalarType::F32> {
   using type = float;
 };
-template <> struct RocblasNative<ScalarType::f64> {
+template <> struct RocblasNative<ScalarType::F64> {
   using type = double;
-};
-template <> struct RocblasNative<ScalarType::i8> {
-  using type = int8_t;
 };
 
 template <ScalarType Kind> class Rocblas {
@@ -290,221 +263,199 @@ public:
   using Scalar = typename RocblasNative<Kind>::type;
   using Buffer = blas_detail::DeviceBuffer<Scalar, HipBufferMemory>;
 
-  Rocblas() { check(rocblas_create_handle(&handle_), "rocblas_create_handle"); }
+  Rocblas() { check(rocblas_create_handle(&handle), "rocblas_create_handle"); }
   Rocblas(const Rocblas &) = delete;
   Rocblas &operator=(const Rocblas &) = delete;
   ~Rocblas() {
-    if (handle_) (void)rocblas_destroy_handle(handle_);
+    if (handle) (void)rocblas_destroy_handle(handle);
   }
 
-  bool supports_axpy() const { return Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_scal() const { return Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_copy() const { return Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_dot() const { return Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_nrm2() const { return Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_asum() const { return Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_gemv() const { return Kind == ScalarType::f32 || Kind == ScalarType::f64; }
-
-  bool supports_gemm() const {
+  bool supports(std::string_view operation) const {
+    if (operation == "gemm" || operation == "gemm_strided_batched") {
   #if defined(CONFORMANCE_HIP_HAS_TENSILE)
-    return Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64;
+      return true;
   #else
-    return false;
+      return false;
   #endif
-  }
-
-  bool supports_gemm_strided_batched() const {
-  #if defined(CONFORMANCE_HIP_HAS_TENSILE)
-    return Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64;
-  #else
-    return false;
-  #endif
+    }
+    return Kind != ScalarType::F16 || operation == "axpy" || operation == "dot";
   }
 
   Buffer allocate(size_t size) {
     Scalar *data = nullptr;
-    check_hip(hipMalloc(reinterpret_cast<void **>(&data),
-                        unified::support::checked_multiply(std::max<size_t>(size, 1), sizeof(Scalar), "rocBLAS allocation")),
-              "hipMalloc");
+    checkHip(hipMalloc(reinterpret_cast<void **>(&data),
+                       unified::support::checkedMultiply(std::max<size_t>(size, 1), sizeof(Scalar), "rocBLAS allocation")),
+             "hipMalloc");
     return Buffer(data, size);
   }
 
   void upload(Buffer &buffer, const std::vector<long double> &host) {
-    require_size(buffer, host.size());
+    requireSize(buffer, host.size());
     std::vector<Scalar> converted(host.size());
     for (size_t index = 0; index < host.size(); ++index)
-      converted[index] = from_host(host[index]);
+      converted[index] = fromHost(host[index]);
     if (!converted.empty())
-      check_hip(hipMemcpy(buffer.data(), converted.data(), converted.size() * sizeof(Scalar), hipMemcpyHostToDevice), "hipMemcpy H2D");
+      checkHip(hipMemcpy(buffer.data(), converted.data(), converted.size() * sizeof(Scalar), hipMemcpyHostToDevice), "hipMemcpy H2D");
   }
 
   std::vector<long double> download(const Buffer &buffer, size_t size) {
-    require_size(buffer, size);
+    requireSize(buffer, size);
     std::vector<Scalar> converted(size);
     if (!converted.empty())
-      check_hip(hipMemcpy(converted.data(), buffer.data(), converted.size() * sizeof(Scalar), hipMemcpyDeviceToHost), "hipMemcpy D2H");
+      checkHip(hipMemcpy(converted.data(), buffer.data(), converted.size() * sizeof(Scalar), hipMemcpyDeviceToHost), "hipMemcpy D2H");
     std::vector<long double> result(size);
     for (size_t index = 0; index < size; ++index)
-      result[index] = to_host(converted[index]);
+      result[index] = toHost(converted[index]);
     return result;
   }
 
   void axpy(int n, long double alpha, Buffer &x, int incx, Buffer &y, int incy) {
-    if constexpr (Kind == ScalarType::f16) {
-      const auto value = from_host(alpha);
-      check(rocblas_haxpy(handle_, n, &value, x.data(), incx, y.data(), incy), "rocblas_haxpy");
-    } else if constexpr (Kind == ScalarType::f32) {
+    if constexpr (Kind == ScalarType::F16) {
+      const auto value = fromHost(alpha);
+      check(rocblas_haxpy(handle, n, &value, x.data(), incx, y.data(), incy), "rocblas_haxpy");
+    } else if constexpr (Kind == ScalarType::F32) {
       const float value = static_cast<float>(alpha);
-      check(rocblas_saxpy(handle_, n, &value, x.data(), incx, y.data(), incy), "rocblas_saxpy");
-    } else if constexpr (Kind == ScalarType::f64) {
+      check(rocblas_saxpy(handle, n, &value, x.data(), incx, y.data(), incy), "rocblas_saxpy");
+    } else if constexpr (Kind == ScalarType::F64) {
       const double value = static_cast<double>(alpha);
-      check(rocblas_daxpy(handle_, n, &value, x.data(), incx, y.data(), incy), "rocblas_daxpy");
+      check(rocblas_daxpy(handle, n, &value, x.data(), incx, y.data(), incy), "rocblas_daxpy");
     } else unsupported("axpy");
-    synchronize();
+    synchronise();
   }
 
   void scal(int n, long double alpha, Buffer &x, int incx) {
-    if constexpr (Kind == ScalarType::f32) {
+    if constexpr (Kind == ScalarType::F32) {
       const float value = static_cast<float>(alpha);
-      check(rocblas_sscal(handle_, n, &value, x.data(), incx), "rocblas_sscal");
-    } else if constexpr (Kind == ScalarType::f64) {
+      check(rocblas_sscal(handle, n, &value, x.data(), incx), "rocblas_sscal");
+    } else if constexpr (Kind == ScalarType::F64) {
       const double value = static_cast<double>(alpha);
-      check(rocblas_dscal(handle_, n, &value, x.data(), incx), "rocblas_dscal");
+      check(rocblas_dscal(handle, n, &value, x.data(), incx), "rocblas_dscal");
     } else unsupported("scal");
-    synchronize();
+    synchronise();
   }
 
   void copy(int n, Buffer &x, int incx, Buffer &y, int incy) {
-    if constexpr (Kind == ScalarType::f32) check(rocblas_scopy(handle_, n, x.data(), incx, y.data(), incy), "rocblas_scopy");
-    else if constexpr (Kind == ScalarType::f64) check(rocblas_dcopy(handle_, n, x.data(), incx, y.data(), incy), "rocblas_dcopy");
+    if constexpr (Kind == ScalarType::F32) check(rocblas_scopy(handle, n, x.data(), incx, y.data(), incy), "rocblas_scopy");
+    else if constexpr (Kind == ScalarType::F64) check(rocblas_dcopy(handle, n, x.data(), incx, y.data(), incy), "rocblas_dcopy");
     else unsupported("copy");
-    synchronize();
+    synchronise();
   }
 
   long double dot(int n, Buffer &x, int incx, Buffer &y, int incy) {
-    Scalar result = from_host(0.0L);
-    if constexpr (Kind == ScalarType::f16) check(rocblas_hdot(handle_, n, x.data(), incx, y.data(), incy, &result), "rocblas_hdot");
-    else if constexpr (Kind == ScalarType::f32) check(rocblas_sdot(handle_, n, x.data(), incx, y.data(), incy, &result), "rocblas_sdot");
-    else if constexpr (Kind == ScalarType::f64) check(rocblas_ddot(handle_, n, x.data(), incx, y.data(), incy, &result), "rocblas_ddot");
+    Scalar result = fromHost(0.0L);
+    if constexpr (Kind == ScalarType::F16) check(rocblas_hdot(handle, n, x.data(), incx, y.data(), incy, &result), "rocblas_hdot");
+    else if constexpr (Kind == ScalarType::F32) check(rocblas_sdot(handle, n, x.data(), incx, y.data(), incy, &result), "rocblas_sdot");
+    else if constexpr (Kind == ScalarType::F64) check(rocblas_ddot(handle, n, x.data(), incx, y.data(), incy, &result), "rocblas_ddot");
     else unsupported("dot");
-    synchronize();
-    return to_host(result);
+    synchronise();
+    return toHost(result);
   }
 
   long double nrm2(int n, Buffer &x, int incx) {
-    Scalar result = from_host(0.0L);
-    if constexpr (Kind == ScalarType::f32) check(rocblas_snrm2(handle_, n, x.data(), incx, &result), "rocblas_snrm2");
-    else if constexpr (Kind == ScalarType::f64) check(rocblas_dnrm2(handle_, n, x.data(), incx, &result), "rocblas_dnrm2");
+    Scalar result = fromHost(0.0L);
+    if constexpr (Kind == ScalarType::F32) check(rocblas_snrm2(handle, n, x.data(), incx, &result), "rocblas_snrm2");
+    else if constexpr (Kind == ScalarType::F64) check(rocblas_dnrm2(handle, n, x.data(), incx, &result), "rocblas_dnrm2");
     else unsupported("nrm2");
-    synchronize();
-    return to_host(result);
+    synchronise();
+    return toHost(result);
   }
 
   long double asum(int n, Buffer &x, int incx) {
-    Scalar result = from_host(0.0L);
-    if constexpr (Kind == ScalarType::f32) check(rocblas_sasum(handle_, n, x.data(), incx, &result), "rocblas_sasum");
-    else if constexpr (Kind == ScalarType::f64) check(rocblas_dasum(handle_, n, x.data(), incx, &result), "rocblas_dasum");
+    Scalar result = fromHost(0.0L);
+    if constexpr (Kind == ScalarType::F32) check(rocblas_sasum(handle, n, x.data(), incx, &result), "rocblas_sasum");
+    else if constexpr (Kind == ScalarType::F64) check(rocblas_dasum(handle, n, x.data(), incx, &result), "rocblas_dasum");
     else unsupported("asum");
-    synchronize();
-    return to_host(result);
+    synchronise();
+    return toHost(result);
   }
 
   void gemv(blas::Transpose transpose, int m, int n, long double alpha, Buffer &a, int lda, Buffer &x, int incx, long double beta,
             Buffer &y, int incy) {
-    if constexpr (Kind == ScalarType::f32) {
+    if constexpr (Kind == ScalarType::F32) {
       const float av = static_cast<float>(alpha), bv = static_cast<float>(beta);
-      check(rocblas_sgemv(handle_, native(transpose), m, n, &av, a.data(), lda, x.data(), incx, &bv, y.data(), incy), "rocblas_sgemv");
-    } else if constexpr (Kind == ScalarType::f64) {
+      check(rocblas_sgemv(handle, native(transpose), m, n, &av, a.data(), lda, x.data(), incx, &bv, y.data(), incy), "rocblas_sgemv");
+    } else if constexpr (Kind == ScalarType::F64) {
       const double av = static_cast<double>(alpha), bv = static_cast<double>(beta);
-      check(rocblas_dgemv(handle_, native(transpose), m, n, &av, a.data(), lda, x.data(), incx, &bv, y.data(), incy), "rocblas_dgemv");
+      check(rocblas_dgemv(handle, native(transpose), m, n, &av, a.data(), lda, x.data(), incx, &bv, y.data(), incy), "rocblas_dgemv");
     } else unsupported("gemv");
-    synchronize();
+    synchronise();
   }
 
-  void gemm(blas::Transpose transpose_a, blas::Transpose transpose_b, int m, int n, int k, long double alpha, Buffer &a, int lda, Buffer &b,
+  void gemm(blas::Transpose transposeA, blas::Transpose transposeB, int m, int n, int k, long double alpha, Buffer &a, int lda, Buffer &b,
             int ldb, long double beta, Buffer &c, int ldc) {
-    if constexpr (Kind == ScalarType::f16) {
-      const auto av = from_host(alpha), bv = from_host(beta);
-      check(
-          rocblas_hgemm(handle_, native(transpose_a), native(transpose_b), m, n, k, &av, a.data(), lda, b.data(), ldb, &bv, c.data(), ldc),
-          "rocblas_hgemm");
-    } else if constexpr (Kind == ScalarType::f32) {
+    if constexpr (Kind == ScalarType::F16) {
+      const auto av = fromHost(alpha), bv = fromHost(beta);
+      check(rocblas_hgemm(handle, native(transposeA), native(transposeB), m, n, k, &av, a.data(), lda, b.data(), ldb, &bv, c.data(), ldc),
+            "rocblas_hgemm");
+    } else if constexpr (Kind == ScalarType::F32) {
       const float av = static_cast<float>(alpha), bv = static_cast<float>(beta);
-      check(
-          rocblas_sgemm(handle_, native(transpose_a), native(transpose_b), m, n, k, &av, a.data(), lda, b.data(), ldb, &bv, c.data(), ldc),
-          "rocblas_sgemm");
-    } else if constexpr (Kind == ScalarType::f64) {
+      check(rocblas_sgemm(handle, native(transposeA), native(transposeB), m, n, k, &av, a.data(), lda, b.data(), ldb, &bv, c.data(), ldc),
+            "rocblas_sgemm");
+    } else if constexpr (Kind == ScalarType::F64) {
       const double av = static_cast<double>(alpha), bv = static_cast<double>(beta);
-      check(
-          rocblas_dgemm(handle_, native(transpose_a), native(transpose_b), m, n, k, &av, a.data(), lda, b.data(), ldb, &bv, c.data(), ldc),
-          "rocblas_dgemm");
+      check(rocblas_dgemm(handle, native(transposeA), native(transposeB), m, n, k, &av, a.data(), lda, b.data(), ldb, &bv, c.data(), ldc),
+            "rocblas_dgemm");
     } else unsupported("gemm");
-    synchronize();
+    synchronise();
   }
 
-  void gemm_strided_batched(blas::Transpose transpose_a, blas::Transpose transpose_b, int m, int n, int k, long double alpha, Buffer &a,
-                            int lda, size_t stride_a, Buffer &b, int ldb, size_t stride_b, long double beta, Buffer &c, int ldc,
-                            size_t stride_c, int batch_count) {
-    if constexpr (Kind == ScalarType::f16) {
-      const auto av = from_host(alpha), bv = from_host(beta);
-      check(rocblas_hgemm_strided_batched(handle_, native(transpose_a), native(transpose_b), m, n, k, &av, a.data(), lda,
-                                          static_cast<rocblas_stride>(stride_a), b.data(), ldb, static_cast<rocblas_stride>(stride_b), &bv,
-                                          c.data(), ldc, static_cast<rocblas_stride>(stride_c), batch_count),
+  void gemmStridedBatched(blas::Transpose transposeA, blas::Transpose transposeB, int m, int n, int k, long double alpha, Buffer &a,
+                          int lda, size_t strideA, Buffer &b, int ldb, size_t strideB, long double beta, Buffer &c, int ldc, size_t strideC,
+                          int batchCount) {
+    if constexpr (Kind == ScalarType::F16) {
+      const auto av = fromHost(alpha), bv = fromHost(beta);
+      check(rocblas_hgemm_strided_batched(handle, native(transposeA), native(transposeB), m, n, k, &av, a.data(), lda,
+                                          static_cast<rocblas_stride>(strideA), b.data(), ldb, static_cast<rocblas_stride>(strideB), &bv,
+                                          c.data(), ldc, static_cast<rocblas_stride>(strideC), batchCount),
             "rocblas_hgemm_strided_batched");
-    } else if constexpr (Kind == ScalarType::f32) {
+    } else if constexpr (Kind == ScalarType::F32) {
       const float av = static_cast<float>(alpha), bv = static_cast<float>(beta);
-      check(rocblas_sgemm_strided_batched(handle_, native(transpose_a), native(transpose_b), m, n, k, &av, a.data(), lda,
-                                          static_cast<rocblas_stride>(stride_a), b.data(), ldb, static_cast<rocblas_stride>(stride_b), &bv,
-                                          c.data(), ldc, static_cast<rocblas_stride>(stride_c), batch_count),
+      check(rocblas_sgemm_strided_batched(handle, native(transposeA), native(transposeB), m, n, k, &av, a.data(), lda,
+                                          static_cast<rocblas_stride>(strideA), b.data(), ldb, static_cast<rocblas_stride>(strideB), &bv,
+                                          c.data(), ldc, static_cast<rocblas_stride>(strideC), batchCount),
             "rocblas_sgemm_strided_batched");
-    } else if constexpr (Kind == ScalarType::f64) {
+    } else if constexpr (Kind == ScalarType::F64) {
       const double av = static_cast<double>(alpha), bv = static_cast<double>(beta);
-      check(rocblas_dgemm_strided_batched(handle_, native(transpose_a), native(transpose_b), m, n, k, &av, a.data(), lda,
-                                          static_cast<rocblas_stride>(stride_a), b.data(), ldb, static_cast<rocblas_stride>(stride_b), &bv,
-                                          c.data(), ldc, static_cast<rocblas_stride>(stride_c), batch_count),
+      check(rocblas_dgemm_strided_batched(handle, native(transposeA), native(transposeB), m, n, k, &av, a.data(), lda,
+                                          static_cast<rocblas_stride>(strideA), b.data(), ldb, static_cast<rocblas_stride>(strideB), &bv,
+                                          c.data(), ldc, static_cast<rocblas_stride>(strideC), batchCount),
             "rocblas_dgemm_strided_batched");
     } else unsupported("gemm-strided-batched");
-    synchronize();
+    synchronise();
   }
 
 private:
-  rocblas_handle handle_{};
+  rocblas_handle handle{};
 
   static rocblas_operation native(blas::Transpose transpose) {
-    return transpose == blas::Transpose::none ? rocblas_operation_none : rocblas_operation_transpose;
+    return transpose == blas::Transpose::None ? rocblas_operation_none : rocblas_operation_transpose;
   }
 
-  static Scalar from_host(long double value) {
-    if constexpr (Kind == ScalarType::f16) {
+  static Scalar fromHost(long double value) {
+    if constexpr (Kind == ScalarType::F16) {
   #if defined(ROCM_USE_FLOAT16)
       return static_cast<Scalar>(static_cast<float>(value));
   #else
       Scalar result{};
-      result.data = blas::float_to_half_bits(static_cast<float>(value));
+      result.data = blas::floatToHalfBits(static_cast<float>(value));
       return result;
   #endif
     } else return static_cast<Scalar>(value);
   }
-  static long double to_host(const Scalar &value) {
-    if constexpr (Kind == ScalarType::f16) {
+  static long double toHost(const Scalar &value) {
+    if constexpr (Kind == ScalarType::F16) {
   #if defined(ROCM_USE_FLOAT16)
       return static_cast<long double>(static_cast<float>(value));
   #else
-      return static_cast<long double>(blas::half_bits_to_float(value.data));
+      return static_cast<long double>(blas::halfBitsToFloat(value.data));
   #endif
     } else return static_cast<long double>(value);
   }
-  static void require_size(const Buffer &buffer, size_t size) {
+  static void requireSize(const Buffer &buffer, size_t size) {
     if (buffer.size() < size) throw std::runtime_error("buffer is smaller than transfer");
   }
   [[noreturn]] static void unsupported(const char *operation) { SKIP(std::string(operation) + " is unsupported by rocBLAS for this type"); }
-  static void check_hip(hipError_t status, const char *operation) {
+  static void checkHip(hipError_t status, const char *operation) {
     if (status != hipSuccess) throw std::runtime_error(std::string(operation) + ": " + hipGetErrorString(status));
   }
   static void check(rocblas_status status, const char *operation) {
@@ -513,7 +464,7 @@ private:
     if (status != rocblas_status_success)
       throw std::runtime_error(fmt::format("{} failed with status {}", operation, static_cast<int>(status)));
   }
-  static void synchronize() { check_hip(hipDeviceSynchronize(), "hipDeviceSynchronize"); }
+  static void synchronise() { checkHip(hipDeviceSynchronize(), "hipDeviceSynchronize"); }
 };
 
 template <ScalarType Kind> using Blas = Rocblas<Kind>;
@@ -529,17 +480,14 @@ template <ScalarType Kind> using Blas = Rocblas<Kind>;
 
 namespace unified::backend {
 template <ScalarType> struct OneMklNative;
-template <> struct OneMklNative<ScalarType::f16> {
+template <> struct OneMklNative<ScalarType::F16> {
   using type = sycl::half;
 };
-template <> struct OneMklNative<ScalarType::f32> {
+template <> struct OneMklNative<ScalarType::F32> {
   using type = float;
 };
-template <> struct OneMklNative<ScalarType::f64> {
+template <> struct OneMklNative<ScalarType::F64> {
   using type = double;
-};
-template <> struct OneMklNative<ScalarType::i8> {
-  using type = int8_t;
 };
 
 template <ScalarType Kind> class OneMkl {
@@ -549,203 +497,129 @@ public:
   class Buffer {
   public:
     Buffer() = default;
-    Buffer(sycl::queue *queue, Scalar *data, size_t size) : queue_(queue), data_(data), size_(size) {}
+    Buffer(sycl::queue *queue, Scalar *data, size_t size) : queue(queue), storage(data), length(size) {}
     Buffer(const Buffer &) = delete;
     Buffer &operator=(const Buffer &) = delete;
     Buffer(Buffer &&other) noexcept
-        : queue_(std::exchange(other.queue_, nullptr)), data_(std::exchange(other.data_, nullptr)), size_(other.size_) {}
+        : queue(std::exchange(other.queue, nullptr)), storage(std::exchange(other.storage, nullptr)), length(other.length) {}
     Buffer &operator=(Buffer &&other) noexcept {
       if (this != &other) {
         release();
-        queue_ = std::exchange(other.queue_, nullptr);
-        data_ = std::exchange(other.data_, nullptr);
-        size_ = other.size_;
+        queue = std::exchange(other.queue, nullptr);
+        storage = std::exchange(other.storage, nullptr);
+        length = other.length;
       }
       return *this;
     }
     ~Buffer() { release(); }
-    Scalar *data() { return data_; }
-    const Scalar *data() const { return data_; }
-    size_t size() const { return size_; }
+    Scalar *data() { return storage; }
+    const Scalar *data() const { return storage; }
+    size_t size() const { return length; }
 
   private:
-    sycl::queue *queue_{};
-    Scalar *data_{};
-    size_t size_{};
+    sycl::queue *queue{};
+    Scalar *storage{};
+    size_t length{};
     void release() {
-      if (data_) sycl::free(data_, *queue_);
-      data_ = nullptr;
-      queue_ = nullptr;
+      if (storage) sycl::free(storage, *queue);
+      storage = nullptr;
+      queue = nullptr;
     }
   };
 
-  OneMkl() : queue_(sycl::gpu_selector_v, sycl::property::queue::in_order{}) {}
+  OneMkl() : queue(sycl::gpu_selector_v, sycl::property::queue::in_order{}) {}
 
-  bool supports_axpy() const {
-    if constexpr (Kind == ScalarType::f16)
-      if (!queue_.get_device().has(sycl::aspect::fp16)) return false;
-    if constexpr (Kind == ScalarType::f64)
-      if (!sycl_support::supports_fp64(queue_.get_device())) return false;
-    if constexpr (Kind == ScalarType::i8) return false;
-    return Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64;
-  }
-
-  bool supports_scal() const {
-    if constexpr (Kind == ScalarType::f16)
-      if (!queue_.get_device().has(sycl::aspect::fp16)) return false;
-    if constexpr (Kind == ScalarType::f64)
-      if (!sycl_support::supports_fp64(queue_.get_device())) return false;
-    if constexpr (Kind == ScalarType::i8) return false;
-    return Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64;
-  }
-
-  bool supports_copy() const {
-    if constexpr (Kind == ScalarType::f16)
-      if (!queue_.get_device().has(sycl::aspect::fp16)) return false;
-    if constexpr (Kind == ScalarType::f64)
-      if (!sycl_support::supports_fp64(queue_.get_device())) return false;
-    if constexpr (Kind == ScalarType::i8) return false;
-    return Kind == ScalarType::f32 || Kind == ScalarType::f64;
-  }
-
-  bool supports_dot() const {
-    if constexpr (Kind == ScalarType::f16)
-      if (!queue_.get_device().has(sycl::aspect::fp16)) return false;
-    if constexpr (Kind == ScalarType::f64)
-      if (!sycl_support::supports_fp64(queue_.get_device())) return false;
-    if constexpr (Kind == ScalarType::i8) return false;
-    return Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64;
-  }
-
-  bool supports_nrm2() const {
-    if constexpr (Kind == ScalarType::f16)
-      if (!queue_.get_device().has(sycl::aspect::fp16)) return false;
-    if constexpr (Kind == ScalarType::f64)
-      if (!sycl_support::supports_fp64(queue_.get_device())) return false;
-    if constexpr (Kind == ScalarType::i8) return false;
-    return Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64;
-  }
-
-  bool supports_asum() const {
-    if constexpr (Kind == ScalarType::f16)
-      if (!queue_.get_device().has(sycl::aspect::fp16)) return false;
-    if constexpr (Kind == ScalarType::f64)
-      if (!sycl_support::supports_fp64(queue_.get_device())) return false;
-    if constexpr (Kind == ScalarType::i8) return false;
-    return Kind == ScalarType::f32 || Kind == ScalarType::f64;
-  }
-
-  bool supports_gemv() const {
-    if constexpr (Kind == ScalarType::f16)
-      if (!queue_.get_device().has(sycl::aspect::fp16)) return false;
-    if constexpr (Kind == ScalarType::f64)
-      if (!sycl_support::supports_fp64(queue_.get_device())) return false;
-    if constexpr (Kind == ScalarType::i8) return false;
-    return Kind == ScalarType::f32 || Kind == ScalarType::f64;
-  }
-
-  bool supports_gemm() const {
-    if constexpr (Kind == ScalarType::f16)
-      if (!queue_.get_device().has(sycl::aspect::fp16)) return false;
-    if constexpr (Kind == ScalarType::f64)
-      if (!sycl_support::supports_fp64(queue_.get_device())) return false;
-    if constexpr (Kind == ScalarType::i8) return false;
-    return Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64;
-  }
-
-  bool supports_gemm_strided_batched() const {
-    if constexpr (Kind == ScalarType::f16)
-      if (!queue_.get_device().has(sycl::aspect::fp16)) return false;
-    if constexpr (Kind == ScalarType::f64)
-      if (!sycl_support::supports_fp64(queue_.get_device())) return false;
-    if constexpr (Kind == ScalarType::i8) return false;
-    return Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64;
+  bool supports(std::string_view operation) const {
+    if constexpr (Kind == ScalarType::F16)
+      return queue.get_device().has(sycl::aspect::fp16) && operation != "copy" && operation != "asum" && operation != "gemv";
+    if constexpr (Kind == ScalarType::F64) return sycl_support::supportsFp64(queue.get_device());
+    return true;
   }
 
   Buffer allocate(size_t size) {
     const auto count = std::max<size_t>(size, 1);
-    (void)unified::support::checked_multiply(count, sizeof(Scalar), "oneMKL allocation");
-    auto *data = sycl::malloc_device<Scalar>(count, queue_);
+    (void)unified::support::checkedMultiply(count, sizeof(Scalar), "oneMKL allocation");
+    auto *data = sycl::malloc_device<Scalar>(count, queue);
     if (!data) throw std::bad_alloc();
-    return Buffer(&queue_, data, size);
+    return Buffer(&queue, data, size);
   }
 
   void upload(Buffer &buffer, const std::vector<long double> &host) {
-    require_size(buffer, host.size());
+    requireSize(buffer, host.size());
     std::vector<Scalar> converted(host.size());
     for (size_t index = 0; index < host.size(); ++index)
-      converted[index] = from_host(host[index]);
-    if (!converted.empty()) queue_.memcpy(buffer.data(), converted.data(), converted.size() * sizeof(Scalar)).wait_and_throw();
+      converted[index] = fromHost(host[index]);
+    if (!converted.empty()) queue.memcpy(buffer.data(), converted.data(), converted.size() * sizeof(Scalar)).wait_and_throw();
   }
 
   std::vector<long double> download(const Buffer &buffer, size_t size) {
-    require_size(buffer, size);
+    requireSize(buffer, size);
     std::vector<Scalar> converted(size);
-    if (!converted.empty()) queue_.memcpy(converted.data(), buffer.data(), converted.size() * sizeof(Scalar)).wait_and_throw();
+    if (!converted.empty()) queue.memcpy(converted.data(), buffer.data(), converted.size() * sizeof(Scalar)).wait_and_throw();
     std::vector<long double> result(size);
     for (size_t index = 0; index < size; ++index)
-      result[index] = to_host(converted[index]);
+      result[index] = toHost(converted[index]);
     return result;
   }
 
   void axpy(int n, long double alpha, Buffer &x, int incx, Buffer &y, int incy) {
-    if constexpr (Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64)
-      wait(oneapi::mkl::blas::column_major::axpy(queue_, n, from_host(alpha), x.data(), incx, y.data(), incy), "oneMKL axpy");
+    if constexpr (Kind == ScalarType::F16 || Kind == ScalarType::F32 || Kind == ScalarType::F64)
+      wait(oneapi::mkl::blas::column_major::axpy(queue, n, fromHost(alpha), x.data(), incx, y.data(), incy), "oneMKL axpy");
     else unsupported("axpy");
   }
 
   void scal(int n, long double alpha, Buffer &x, int incx) {
-    if constexpr (Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64)
-      wait(oneapi::mkl::blas::column_major::scal(queue_, n, from_host(alpha), x.data(), incx), "oneMKL scal");
+    if constexpr (Kind == ScalarType::F16 || Kind == ScalarType::F32 || Kind == ScalarType::F64)
+      wait(oneapi::mkl::blas::column_major::scal(queue, n, fromHost(alpha), x.data(), incx), "oneMKL scal");
     else unsupported("scal");
   }
 
   void copy(int n, Buffer &x, int incx, Buffer &y, int incy) {
-    if constexpr (Kind == ScalarType::f32 || Kind == ScalarType::f64)
-      wait(oneapi::mkl::blas::column_major::copy(queue_, n, x.data(), incx, y.data(), incy), "oneMKL copy");
+    if constexpr (Kind == ScalarType::F32 || Kind == ScalarType::F64)
+      wait(oneapi::mkl::blas::column_major::copy(queue, n, x.data(), incx, y.data(), incy), "oneMKL copy");
     else unsupported("copy");
   }
 
   long double dot(int n, Buffer &x, int incx, Buffer &y, int incy) {
-    if constexpr (Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64) {
-      auto *result = device_result();
+    if constexpr (Kind == ScalarType::F16 || Kind == ScalarType::F32 || Kind == ScalarType::F64) {
+      auto *result = deviceResult();
       try {
-        wait(oneapi::mkl::blas::column_major::dot(queue_, n, x.data(), incx, y.data(), incy, result), "oneMKL dot");
-        const auto value = download_result(result);
-        sycl::free(result, queue_);
+        wait(oneapi::mkl::blas::column_major::dot(queue, n, x.data(), incx, y.data(), incy, result), "oneMKL dot");
+        const auto value = downloadResult(result);
+        sycl::free(result, queue);
         return value;
       } catch (...) {
-        sycl::free(result, queue_);
+        sycl::free(result, queue);
         throw;
       }
     } else unsupported("dot");
   }
 
   long double nrm2(int n, Buffer &x, int incx) {
-    if constexpr (Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64) {
-      auto *result = device_result();
+    if constexpr (Kind == ScalarType::F16 || Kind == ScalarType::F32 || Kind == ScalarType::F64) {
+      auto *result = deviceResult();
       try {
-        wait(oneapi::mkl::blas::column_major::nrm2(queue_, n, x.data(), incx, result), "oneMKL nrm2");
-        const auto value = download_result(result);
-        sycl::free(result, queue_);
+        wait(oneapi::mkl::blas::column_major::nrm2(queue, n, x.data(), incx, result), "oneMKL nrm2");
+        const auto value = downloadResult(result);
+        sycl::free(result, queue);
         return value;
       } catch (...) {
-        sycl::free(result, queue_);
+        sycl::free(result, queue);
         throw;
       }
     } else unsupported("nrm2");
   }
 
   long double asum(int n, Buffer &x, int incx) {
-    if constexpr (Kind == ScalarType::f32 || Kind == ScalarType::f64) {
-      auto *result = device_result();
+    if constexpr (Kind == ScalarType::F32 || Kind == ScalarType::F64) {
+      auto *result = deviceResult();
       try {
-        wait(oneapi::mkl::blas::column_major::asum(queue_, n, x.data(), incx, result), "oneMKL asum");
-        const auto value = download_result(result);
-        sycl::free(result, queue_);
+        wait(oneapi::mkl::blas::column_major::asum(queue, n, x.data(), incx, result), "oneMKL asum");
+        const auto value = downloadResult(result);
+        sycl::free(result, queue);
         return value;
       } catch (...) {
-        sycl::free(result, queue_);
+        sycl::free(result, queue);
         throw;
       }
     } else unsupported("asum");
@@ -753,56 +627,56 @@ public:
 
   void gemv(blas::Transpose transpose, int m, int n, long double alpha, Buffer &a, int lda, Buffer &x, int incx, long double beta,
             Buffer &y, int incy) {
-    if constexpr (Kind == ScalarType::f32 || Kind == ScalarType::f64)
-      wait(oneapi::mkl::blas::column_major::gemv(queue_, native(transpose), m, n, from_host(alpha), a.data(), lda, x.data(), incx,
-                                                 from_host(beta), y.data(), incy),
+    if constexpr (Kind == ScalarType::F32 || Kind == ScalarType::F64)
+      wait(oneapi::mkl::blas::column_major::gemv(queue, native(transpose), m, n, fromHost(alpha), a.data(), lda, x.data(), incx,
+                                                 fromHost(beta), y.data(), incy),
            "oneMKL gemv");
     else unsupported("gemv");
   }
 
-  void gemm(blas::Transpose transpose_a, blas::Transpose transpose_b, int m, int n, int k, long double alpha, Buffer &a, int lda, Buffer &b,
+  void gemm(blas::Transpose transposeA, blas::Transpose transposeB, int m, int n, int k, long double alpha, Buffer &a, int lda, Buffer &b,
             int ldb, long double beta, Buffer &c, int ldc) {
-    if constexpr (Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64)
-      wait(oneapi::mkl::blas::column_major::gemm(queue_, native(transpose_a), native(transpose_b), m, n, k, from_host(alpha), a.data(), lda,
-                                                 b.data(), ldb, from_host(beta), c.data(), ldc),
+    if constexpr (Kind == ScalarType::F16 || Kind == ScalarType::F32 || Kind == ScalarType::F64)
+      wait(oneapi::mkl::blas::column_major::gemm(queue, native(transposeA), native(transposeB), m, n, k, fromHost(alpha), a.data(), lda,
+                                                 b.data(), ldb, fromHost(beta), c.data(), ldc),
            "oneMKL gemm");
     else unsupported("gemm");
   }
 
-  void gemm_strided_batched(blas::Transpose transpose_a, blas::Transpose transpose_b, int m, int n, int k, long double alpha, Buffer &a,
-                            int lda, size_t stride_a, Buffer &b, int ldb, size_t stride_b, long double beta, Buffer &c, int ldc,
-                            size_t stride_c, int batch_count) {
-    if constexpr (Kind == ScalarType::f16 || Kind == ScalarType::f32 || Kind == ScalarType::f64)
-      wait(oneapi::mkl::blas::column_major::gemm_batch(
-               queue_, native(transpose_a), native(transpose_b), m, n, k, from_host(alpha), a.data(), lda, static_cast<int64_t>(stride_a),
-               b.data(), ldb, static_cast<int64_t>(stride_b), from_host(beta), c.data(), ldc, static_cast<int64_t>(stride_c), batch_count),
+  void gemmStridedBatched(blas::Transpose transposeA, blas::Transpose transposeB, int m, int n, int k, long double alpha, Buffer &a,
+                          int lda, size_t strideA, Buffer &b, int ldb, size_t strideB, long double beta, Buffer &c, int ldc, size_t strideC,
+                          int batchCount) {
+    if constexpr (Kind == ScalarType::F16 || Kind == ScalarType::F32 || Kind == ScalarType::F64)
+      wait(oneapi::mkl::blas::column_major::gemm_batch(queue, native(transposeA), native(transposeB), m, n, k, fromHost(alpha), a.data(),
+                                                       lda, static_cast<int64_t>(strideA), b.data(), ldb, static_cast<int64_t>(strideB),
+                                                       fromHost(beta), c.data(), ldc, static_cast<int64_t>(strideC), batchCount),
            "oneMKL gemm_batch");
     else unsupported("gemm-strided-batched");
   }
 
 private:
-  sycl::queue queue_;
+  sycl::queue queue;
 
   static oneapi::mkl::transpose native(blas::Transpose transpose) {
-    return transpose == blas::Transpose::none ? oneapi::mkl::transpose::nontrans : oneapi::mkl::transpose::trans;
+    return transpose == blas::Transpose::None ? oneapi::mkl::transpose::nontrans : oneapi::mkl::transpose::trans;
   }
 
-  static Scalar from_host(long double value) { return static_cast<Scalar>(value); }
-  static long double to_host(const Scalar &value) {
-    if constexpr (Kind == ScalarType::f16) return static_cast<long double>(static_cast<float>(value));
+  static Scalar fromHost(long double value) { return static_cast<Scalar>(value); }
+  static long double toHost(const Scalar &value) {
+    if constexpr (Kind == ScalarType::F16) return static_cast<long double>(static_cast<float>(value));
     else return static_cast<long double>(value);
   }
-  Scalar *device_result() {
-    auto *result = sycl::malloc_device<Scalar>(1, queue_);
+  Scalar *deviceResult() {
+    auto *result = sycl::malloc_device<Scalar>(1, queue);
     if (!result) throw std::bad_alloc();
     return result;
   }
-  long double download_result(const Scalar *result) {
+  long double downloadResult(const Scalar *result) {
     Scalar value{};
-    queue_.memcpy(&value, result, sizeof(value)).wait_and_throw();
-    return to_host(value);
+    queue.memcpy(&value, result, sizeof(value)).wait_and_throw();
+    return toHost(value);
   }
-  static void require_size(const Buffer &buffer, size_t size) {
+  static void requireSize(const Buffer &buffer, size_t size) {
     if (buffer.size() < size) throw std::runtime_error("buffer is smaller than transfer");
   }
   [[noreturn]] static void unsupported(const char *operation) { SKIP(std::string(operation) + " is unsupported by oneMKL for this type"); }

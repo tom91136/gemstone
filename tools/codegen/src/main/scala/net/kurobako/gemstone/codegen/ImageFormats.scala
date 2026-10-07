@@ -10,7 +10,7 @@ object ImageFormats {
   private enum Layout   {
     case Floating(components: Int)
     case Integer(components: Int, componentBytes: Int, signed: Boolean, packed: Boolean)
-    case Normalized(components: Int, signed: Boolean, srgb: Boolean, bgra: Boolean)
+    case Normalised(components: Int, bits: Int, signed: Boolean, srgb: Boolean, bgra: Boolean)
     case Narrow(components: Int, bytes: Int, encoding: Encoding, widths: Vector[Int], shifts: Vector[Int])
   }
   private case class Row(vulkan: Vector[String], shader: String, layout: Layout)
@@ -116,46 +116,80 @@ object ImageFormats {
       "ImageFormat.Rgba32i",
       Integer(components = 4, componentBytes = 4, signed = true, packed = false)
     ),
-    Row(Vector("R8_UNORM"), "ImageFormat.R8", Normalized(components = 1, signed = false, srgb = false, bgra = false)),
+    Row(
+      Vector("R8_UNORM"),
+      "ImageFormat.R8",
+      Normalised(components = 1, bits = 8, signed = false, srgb = false, bgra = false)
+    ),
     Row(
       Vector("R8_SNORM"),
       "ImageFormat.R8Snorm",
-      Normalized(components = 1, signed = true, srgb = false, bgra = false)
+      Normalised(components = 1, bits = 8, signed = true, srgb = false, bgra = false)
     ),
     Row(
       Vector("R8G8_UNORM"),
       "ImageFormat.Rg8",
-      Normalized(components = 2, signed = false, srgb = false, bgra = false)
+      Normalised(components = 2, bits = 8, signed = false, srgb = false, bgra = false)
     ),
     Row(
       Vector("R8G8_SNORM"),
       "ImageFormat.Rg8Snorm",
-      Normalized(components = 2, signed = true, srgb = false, bgra = false)
+      Normalised(components = 2, bits = 8, signed = true, srgb = false, bgra = false)
     ),
     Row(
       Vector("R8G8B8A8_UNORM", "A8B8G8R8_UNORM_PACK32"),
       "ImageFormat.Rgba8",
-      Normalized(components = 4, signed = false, srgb = false, bgra = false)
+      Normalised(components = 4, bits = 8, signed = false, srgb = false, bgra = false)
     ),
     Row(
       Vector("R8G8B8A8_SNORM", "A8B8G8R8_SNORM_PACK32"),
       "ImageFormat.Rgba8Snorm",
-      Normalized(components = 4, signed = true, srgb = false, bgra = false)
+      Normalised(components = 4, bits = 8, signed = true, srgb = false, bgra = false)
     ),
     Row(
       Vector("R8G8B8A8_SRGB", "A8B8G8R8_SRGB_PACK32"),
       "ImageDescriptor.Format.Rgba8Srgb",
-      Normalized(components = 4, signed = false, srgb = true, bgra = false)
+      Normalised(components = 4, bits = 8, signed = false, srgb = true, bgra = false)
     ),
     Row(
       Vector("B8G8R8A8_UNORM"),
       "ImageDescriptor.Format.Bgra8Unorm",
-      Normalized(components = 4, signed = false, srgb = false, bgra = true)
+      Normalised(components = 4, bits = 8, signed = false, srgb = false, bgra = true)
     ),
     Row(
       Vector("B8G8R8A8_SRGB"),
       "ImageDescriptor.Format.Bgra8Srgb",
-      Normalized(components = 4, signed = false, srgb = true, bgra = true)
+      Normalised(components = 4, bits = 8, signed = false, srgb = true, bgra = true)
+    ),
+    Row(
+      Vector("R16_UNORM"),
+      "ImageFormat.R16",
+      Normalised(components = 1, bits = 16, signed = false, srgb = false, bgra = false)
+    ),
+    Row(
+      Vector("R16_SNORM"),
+      "ImageFormat.R16Snorm",
+      Normalised(components = 1, bits = 16, signed = true, srgb = false, bgra = false)
+    ),
+    Row(
+      Vector("R16G16_UNORM"),
+      "ImageFormat.Rg16",
+      Normalised(components = 2, bits = 16, signed = false, srgb = false, bgra = false)
+    ),
+    Row(
+      Vector("R16G16_SNORM"),
+      "ImageFormat.Rg16Snorm",
+      Normalised(components = 2, bits = 16, signed = true, srgb = false, bgra = false)
+    ),
+    Row(
+      Vector("R16G16B16A16_UNORM"),
+      "ImageFormat.Rgba16",
+      Normalised(components = 4, bits = 16, signed = false, srgb = false, bgra = false)
+    ),
+    Row(
+      Vector("R16G16B16A16_SNORM"),
+      "ImageFormat.Rgba16Snorm",
+      Normalised(components = 4, bits = 16, signed = true, srgb = false, bgra = false)
     ),
     Row(
       Vector("B4G4R4A4_UNORM_PACK16"),
@@ -247,28 +281,30 @@ object ImageFormats {
           widths.zip(shifts).forall((width, shift) => width > 0 && shift >= 0 && width + shift <= bytes * 8),
           "packed component exceeds its texel"
         )
+      case Normalised(_, bits, _, srgb, bgra) =>
+        require(bits == 8 || (bits == 16 && !srgb && !bgra), "normalised channels are 8-bit, or 16-bit linear RGBA")
       case _ => ()
     }
   }
 
-  def narrowEncodingSource(version: ScalaPackageVersion): String =
+  def narrowEncodingSource: String =
     GeneratedHeader.scala("from ImageFormats") +
-      s"package net.kurobako.gemstone.isa.spirv.${version.raw}\n\n${GeneratedHeader.annotation()}private enum NarrowEncoding { case ${Encoding.values.mkString(", ")} }\n"
+      s"package net.kurobako.gemstone.isa.spirv\n\n${GeneratedHeader.annotation()}private enum NarrowEncoding { case ${Encoding.values.mkString(", ")} }\n"
 
-  def scalaSource(version: ScalaPackageVersion): String = {
+  def scalaSource: String = {
     def layout(row: Row): (String, String) = row.layout match {
       case Floating(components)                       => ("Floating", components.toString)
       case Integer(components, bytes, signed, packed) =>
         ("Integer", s"$components, $bytes, $signed, $packed")
-      case Normalized(components, signed, srgb, bgra) =>
-        ("Normalized", s"$components, $signed, $srgb, $bgra")
+      case Normalised(components, bits, signed, srgb, bgra) =>
+        ("Normalised", s"$components, $bits, $signed, $srgb, $bgra")
       case Narrow(components, bytes, encoding, widths, shifts) =>
         (
           "Narrow",
           s"$components, $bytes, NarrowEncoding.$encoding, Vector(${widths.mkString(", ")}), Vector(${shifts.mkString(", ")})"
         )
     }
-    val groups = Vector("Integer", "Normalized", "Narrow").map { family =>
+    val groups = Vector("Integer", "Normalised", "Narrow").map { family =>
       val selected = rows.filter(row => layout(row)._1 == family)
       val values   = selected.zipWithIndex.map { (row, index) =>
         s"  private val ${family.toLowerCaseRoot}$index = Some(${family}ImageFormat.Layout(${layout(row)._2}))"
@@ -281,13 +317,20 @@ object ImageFormats {
     val floatCases = rows.collect { case Row(_, shader, Floating(components)) =>
       s"    case $shader => $components"
     }.mkString("\n")
-    val floats      = s"  def floatComponents(format: Int): Int = format match {\n$floatCases\n    case _ => 0\n  }"
+    val floats  = s"  def floatComponents(format: Int): Int = format match {\n$floatCases\n    case _ => 0\n  }"
+    val storage = rows.collect {
+      case Row(_, shader, Floating(_) | Normalised(_, _, _, _, _) | Narrow(_, _, _, _, _))
+          if shader.startsWith("ImageFormat.") =>
+        shader
+    }
+    val floatingStorage =
+      s"  def floatingStorage(format: Int): Boolean = format match {\n    case ${storage.mkString(" | ")} => true\n    case _ => false\n  }"
     val shaderCases =
       shaders.map(shader => s"    case GraphicsShaderFormat.${shaderName(shader)} => $shader").mkString("\n")
     val shaderCodes =
       s"  extension (format: GraphicsShaderFormat) { def code: Int = format match {\n$shaderCases\n  } }"
     GeneratedHeader.scala("from ImageFormats") +
-      s"package net.kurobako.gemstone.isa.spirv.${version.raw}\n\nimport net.kurobako.gemstone.graphics.GraphicsFormats.*\n\n${GeneratedHeader.annotation()}private object ImageFormats {\n$groups\n$floats\n$shaderCodes\n}\n"
+      s"package net.kurobako.gemstone.isa.spirv\n\nimport net.kurobako.gemstone.graphics.GraphicsFormats.*\n\n${GeneratedHeader.annotation()}private object ImageFormats {\n$groups\n$floats\n$floatingStorage\n$shaderCodes\n}\n"
   }
 
   private case class Vertex(
@@ -303,7 +346,7 @@ object ImageFormats {
       encodings.map { (suffix, encoding) =>
         Vertex(s"${prefix}_$suffix", encoding, Vector.fill(4)(bits), components, bits / 8 * components, bgra)
       }
-    val normalized = Vector(
+    val normalised = Vector(
       "UNORM"   -> "Unorm",
       "SNORM"   -> "Snorm",
       "UINT"    -> "Uint",
@@ -322,18 +365,18 @@ object ImageFormats {
         bits,
         components,
         false,
-        if (bits == 32) words else normalized ++ (if (bits == 16) Vector("SFLOAT" -> "Float") else Vector.empty)
+        if (bits == 32) words else normalised ++ (if (bits == 16) Vector("SFLOAT" -> "Float") else Vector.empty)
       )
     } yield row
     val bgra = Vector("B8G8R8" -> 3, "B8G8R8A8" -> 4).flatMap { (prefix, components) =>
-      uniform(prefix, 8, components, true, normalized)
+      uniform(prefix, 8, components, true, normalised)
     }
     val packed = for {
       (prefix, bgra)     <- Vector("A2B10G10R10" -> false, "A2R10G10B10" -> true)
-      (suffix, encoding) <- normalized
+      (suffix, encoding) <- normalised
     } yield Vertex(s"${prefix}_${suffix}_PACK32", encoding, Vector(10, 10, 10, 2), 4, 4, bgra)
     plain ++ bgra ++ packed ++
-      uniform("A8B8G8R8", 8, 4, false, normalized.map((suffix, encoding) => s"${suffix}_PACK32" -> encoding)) :+
+      uniform("A8B8G8R8", 8, 4, false, normalised.map((suffix, encoding) => s"${suffix}_PACK32" -> encoding)) :+
       Vertex("B10G11R11_UFLOAT_PACK32", "Ufloat", Vector(11, 11, 10, 0), 3, 4)
   }
   private case class Compressed(
@@ -380,12 +423,12 @@ object ImageFormats {
     val bytes = row.layout match {
       case Floating(components)                  => components * 4
       case Integer(components, bytes, _, packed) => if (packed) 4 else components * bytes
-      case Normalized(components, _, _, _)       => components
+      case Normalised(components, bits, _, _, _) => components * bits / 8
       case Narrow(_, bytes, _, _, _)             => bytes
     }
     val srgb = row.layout match {
-      case Normalized(_, _, srgb, _) => srgb
-      case _                         => false
+      case Normalised(_, _, _, srgb, _) => srgb
+      case _                            => false
     }
     Storage(name = shaderName(row.shader), vulkan = row.vulkan, shader = row.shader, bytes = bytes, srgb = srgb)
   } ++ Vector(
@@ -498,23 +541,23 @@ $decoded
       s"inline bool $name(VkFormat format) {\n  switch (format) {\n$labels return true;\n    default: return false;\n  }\n}"
     }
     val capabilities = Vector(
-      capability("colorFormat")(_ => true),
-      capability("integerColorFormat")(_.layout match {
+      capability("colourFormat")(_ => true),
+      capability("integerColourFormat")(_.layout match {
         case Integer(_, _, _, _) => true
         case _                   => false
       }),
-      capability("colorAttachmentFormat")(_.layout match {
+      capability("colourAttachmentFormat")(_.layout match {
         case Narrow(_, _, Encoding.SharedExponent, _, _) => false
         case _                                           => true
       }),
-      capability("blendColorFormat")(_.layout match {
+      capability("blendColourFormat")(_.layout match {
         case Floating(_) => true
         // SNORM blending stays unadvertised; the CTS reference uses unclamped one-minus factors.
-        case Normalized(_, signed, _, _)  => !signed
-        case Narrow(_, _, encoding, _, _) => encoding != Encoding.SharedExponent
-        case _                            => false
+        case Normalised(_, _, signed, _, _) => !signed
+        case Narrow(_, _, encoding, _, _)   => encoding != Encoding.SharedExponent
+        case _                              => false
       }),
-      capability("storageColorFormat")(row => row.shader.startsWith("ImageFormat."))
+      capability("storageColourFormat")(row => row.shader.startsWith("ImageFormat."))
     ).mkString("\n")
     val vertexCases = vertices.map { row =>
       s"    case VK_FORMAT_${row.vulkan}: return VertexFormat{VertexEncoding::${row.encoding}, {${row.widths.mkString(", ")}}, ${row.components}, ${row.bytes}, ${row.bgra}};"

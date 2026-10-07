@@ -1,11 +1,11 @@
 /*
-rule = GemstoneRedundantCaseClassVal
+rule = RedundantCaseClassVal
 */
 // format: off
 package fix
 
 object RedundantCaseClassVal {
-  case class Plain(val value: Int)// assert: GemstoneRedundantCaseClassVal.redundant-case-class-val
+  case class Plain(val value: Int)// assert: RedundantCaseClassVal.redundant-case-class-val
   case class Curried(value: Int)(val extra: Int)
   case class Hidden(private val value: Int)
   case class Mutable(var value: Int)

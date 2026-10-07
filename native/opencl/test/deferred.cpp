@@ -12,7 +12,7 @@
 
 void deferred(const std::string &command) {
   gemstone_test::RpcFixture server;
-  server.programCatalog({{"groups", "groups"}}, {});
+  server.programCatalogue({{"groups", "groups"}}, {});
   const gemstone_test::RpcEnvironment environment(server);
   cl_platform_id platform = nullptr;
   cl_device_id device = nullptr;
@@ -26,7 +26,7 @@ void deferred(const std::string &command) {
   const cl_queue_properties properties[] = {CL_QUEUE_PROPERTIES, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, 0};
   auto queue = clCreateCommandQueueWithProperties(context, device, outOfOrder ? properties : nullptr, &error);
   REQUIRE((queue && error == CL_SUCCESS));
-  auto program = clCreateProgramWithIL(context, server.spirv, sizeof(server.spirv), &error);
+  auto program = clCreateProgramWithIL(context, server.Spirv, sizeof(server.Spirv), &error);
   REQUIRE((program && error == CL_SUCCESS));
   REQUIRE((clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
   auto kernel = clCreateKernel(program, "groups", &error);
@@ -73,7 +73,7 @@ void deferred(const std::string &command) {
     REQUIRE((clReleaseCommandQueue(queue) == CL_SUCCESS));
     queue = nullptr;
   }
-  REQUIRE((server.launches() == 0));
+  REQUIRE((server.launches.load() == 0));
   const bool snapshot = command == "snapshot";
   const bool consecutive = command == "consecutive" || command == "out-of-order";
   const bool transfer = command == "transfer";
@@ -103,12 +103,12 @@ void deferred(const std::string &command) {
         if (secondStatus == CL_COMPLETE) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       } while (std::chrono::steady_clock::now() < until);
-      REQUIRE((secondStatus == CL_COMPLETE && server.launches() == 1));
-    } else REQUIRE((server.launches() == 0));
+      REQUIRE((secondStatus == CL_COMPLETE && server.launches.load() == 1));
+    } else REQUIRE((server.launches.load() == 0));
   }
   if (transfer) {
     REQUIRE((clEnqueueReadBuffer(queue, memory, CL_FALSE, 0, 4, &readback, 0, nullptr, &second) == CL_SUCCESS));
-    REQUIRE((readback == 0 && server.launches() == 0));
+    REQUIRE((readback == 0 && server.launches.load() == 0));
   }
   size_t origin[3]{0, 0, 0}, region[3]{4, 1, 1};
   uint32_t pattern = 13, input = 17;
@@ -153,11 +153,11 @@ void deferred(const std::string &command) {
     // blocked predecessor on an out-of-order queue.
     REQUIRE(
         (clEnqueueReadBufferRect(queue, other, CL_TRUE, origin, origin, region, 0, 0, 0, 0, &readback, 0, nullptr, &second) == CL_SUCCESS));
-    REQUIRE((readback == 0 && server.launches() == 0));
+    REQUIRE((readback == 0 && server.launches.load() == 0));
   }
   if (command == "command-blocking-svm-ooo") {
     REQUIRE((clEnqueueSVMMemcpy(queue, CL_TRUE, replacement, original, 4, 0, nullptr, &second) == CL_SUCCESS));
-    REQUIRE((*replacement == 0 && server.launches() == 0));
+    REQUIRE((*replacement == 0 && server.launches.load() == 0));
   }
   if (command == "command-intel-copy") {
     using Copy = cl_int(CL_API_CALL *)(cl_command_queue, cl_bool, void *, const void *, size_t, cl_uint, const cl_event *, cl_event *);
@@ -193,7 +193,7 @@ void deferred(const std::string &command) {
     }
   }
   if (command.starts_with("command-")) {
-    REQUIRE((second && server.launches() == 0 && *replacement == 0 && readback == 0));
+    REQUIRE((second && server.launches.load() == 0 && *replacement == 0 && readback == 0));
     // The API consumes these parameter values at enqueue, not at execution.
     region[0] = 1000;
     origin[0] = 1000;
@@ -213,7 +213,7 @@ void deferred(const std::string &command) {
   if (queue)
     REQUIRE((clFinish(queue)
              == ((failure && !waitedFailure) || remoteFailure || noEvent ? CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST : CL_SUCCESS)));
-  REQUIRE((server.launches() == (failure ? 0U : consecutive ? 2U : 1U)));
+  REQUIRE((server.launches.load() == (failure ? 0U : consecutive ? 2U : 1U)));
   REQUIRE((*original == (failure || remoteFailure || noEvent ? 0U : 7U)));
   const uint32_t expectedReplacement = command == "command-copy" || command == "command-copy-release" || command == "command-copy-rect"
                                                || command == "command-svm-copy" || command == "command-intel-copy"

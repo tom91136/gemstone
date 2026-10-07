@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-foreach(variable IN ITEMS BACKEND CONFORMANCE_OUTPUT)
+foreach(variable IN ITEMS BACKEND CONFORMANCE_OUTPUT CONFORMANCE_WORK_DIRECTORY)
   if(NOT DEFINED ${variable} OR "${${variable}}" STREQUAL "")
     message(FATAL_ERROR "${variable} is required")
   endif()
@@ -12,11 +12,6 @@ endif()
 set(artifact_base "${BACKEND}")
 if(NOT CONFORMANCE_COMPILER STREQUAL "vendor")
   string(APPEND artifact_base "/${CONFORMANCE_COMPILER}")
-endif()
-
-set(supported_backends cuda hip hsa opencl sycl levelzero vulkan openacc)
-if(NOT BACKEND IN_LIST supported_backends)
-  message(FATAL_ERROR "Unsupported conformance backend: ${BACKEND}")
 endif()
 
 foreach(variable IN ITEMS
@@ -39,8 +34,8 @@ if(NOT CONFORMANCE_SUPPORT_KEY MATCHES "^[A-Za-z0-9][A-Za-z0-9._-]*$")
   message(FATAL_ERROR "Invalid conformance support key: ${CONFORMANCE_SUPPORT_KEY}")
 endif()
 
-set(backend_cmake_arguments "-DCONFORMANCE_COMPILER=${CONFORMANCE_COMPILER}")
 # Include toolchain selection in the persistent work signature.
+set(backend_cmake_arguments "-DCONFORMANCE_COMPILER=${CONFORMANCE_COMPILER}")
 if(NOT "$ENV{CC}" STREQUAL "")
   list(APPEND backend_cmake_arguments "-DCMAKE_C_COMPILER=$ENV{CC}")
 endif()
@@ -94,34 +89,22 @@ endif()
 if(NOT DEFINED CONFORMANCE_OFFLINE)
   set(CONFORMANCE_OFFLINE OFF)
 endif()
+if(NOT DEFINED CONFORMANCE_KEEP_WORK)
+  set(CONFORMANCE_KEEP_WORK ON)
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ArtifactWork.cmake")
 
-# The caller mounts a persistent directory at /work; without one, use a
-# disposable location. The build tree is reused only while the configuration
-# signature is unchanged.
-if(CONFORMANCE_WORK_DIRECTORY)
-  set(work "${CONFORMANCE_WORK_DIRECTORY}")
-else()
-  string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef work_id)
-  set(work "/tmp/conformance-${work_id}")
-endif()
+set(work "${CONFORMANCE_WORK_DIRECTORY}")
+file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/../dependencies.cmake" dependencies_digest)
 set(configuration_signature
-  "${BACKEND}|${CONFORMANCE_COMPILER}|${architecture}|${BUILD_UNIFIED}|${BUILD_CTS}|${BUILD_MINIAPPS}|${HIP_ENABLE_ROCBLAS}|${MINIAPP_MODELS}|${cuda_architecture}|${amd_architecture}|${ROCM_VERSION}|${CONFORMANCE_SUPPORT_KEY}|${backend_cmake_arguments}")
-conformance_artifact_prepare_work("${work}" "${configuration_signature}" work)
+  "${dependencies_digest}|${BACKEND}|${CONFORMANCE_COMPILER}|${architecture}|${BUILD_UNIFIED}|${BUILD_CTS}|${BUILD_MINIAPPS}|${HIP_ENABLE_ROCBLAS}|${MINIAPP_MODELS}|${cuda_architecture}|${amd_architecture}|${ROCM_VERSION}|${CONFORMANCE_SUPPORT_KEY}|${backend_cmake_arguments}")
+prepare_work_directory("${work}" "${configuration_signature}")
 set(build "${work}/build")
 set(ENV{HOME} "${work}/home")
 file(MAKE_DIRECTORY "$ENV{HOME}")
 
 find_program(artifact_ninja NAMES ninja REQUIRED)
-# Refuse silent oversubscription if an old image receives a shared jobserver.
-if("$ENV{MAKEFLAGS}" MATCHES "--jobserver-auth=fifo:")
-  execute_process(COMMAND "${artifact_ninja}" --version OUTPUT_VARIABLE ninja_version
-    OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-  if(ninja_version VERSION_LESS "1.13")
-    message(FATAL_ERROR "Shared artifact builds require Ninja >= 1.13; rebuild the toolchain image")
-  endif()
-endif()
 set(rocm_argument)
 if(BACKEND MATCHES "^(hip|hsa)$")
   set(rocm_argument "-DROCM_VERSION=${ROCM_VERSION}")
@@ -132,6 +115,7 @@ execute_process(
     -S /source/conformance
     -B "${build}"
     -G Ninja
+    --log-level=WARNING
     "-DCMAKE_MAKE_PROGRAM=${artifact_ninja}"
     -DCMAKE_BUILD_TYPE=Release
     -DCONFORMANCE_BACKEND=${BACKEND}
@@ -190,14 +174,15 @@ if(architecture)
       "Invalid architecture artifact output: ${CONFORMANCE_OUTPUT}")
   endif()
   set(overlay "/output/${artifact_base}/${architecture}")
-  set(support "/output/${artifact_base}/${CONFORMANCE_SUPPORT_KEY}")
+  set(support "/output/${BACKEND}/${CONFORMANCE_SUPPORT_KEY}")
   file(REMOVE_RECURSE "${overlay}")
   execute_process(
     COMMAND "${CMAKE_COMMAND}" --install "${build}"
       --component architecture --prefix "${overlay}" --strip
     COMMAND_ERROR_IS_FATAL ANY)
   write_metadata("${overlay}" "${CONFORMANCE_SUPPORT_KEY}")
-  set_program_rpath("${overlay}" "$ORIGIN/../${CONFORMANCE_SUPPORT_KEY}/lib")
+  file(RELATIVE_PATH support_relative "${overlay}" "${support}")
+  set_program_rpath("${overlay}" "$ORIGIN/${support_relative}/lib")
   if(CONFORMANCE_OUTPUT STREQUAL "both")
     file(REMOVE_RECURSE "${support}")
     execute_process(
@@ -232,4 +217,8 @@ else()
     COMMAND "${CMAKE_COMMAND}" -DARTIFACT=${artifact}
       -P /source/conformance/artifacts/Verify.cmake
     COMMAND_ERROR_IS_FATAL ANY)
+endif()
+
+if(NOT CONFORMANCE_KEEP_WORK)
+  file(REMOVE_RECURSE "${build}" "$ENV{HOME}")
 endif()

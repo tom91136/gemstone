@@ -1,115 +1,78 @@
-#include "gemstone/hsa/aql.h"
-
-#include <cstring>
-#include <type_traits>
+#include "gemstone/hsa/aql.hpp"
 
 #include <gemstone/bytes.hpp>
 
-namespace {
+namespace gemstone::hsa {
 
-using gemstone::readNative;
-
-gemstone_hsa_aql_header decodeHeader(uint16_t raw) {
-  gemstone_hsa_aql_header result{};
-  result.type = static_cast<gemstone_hsa_aql_packet_type>(raw & 0xffU);
-  result.barrier = static_cast<uint8_t>((raw >> 8) & 1U);
-  result.acquire_fence_scope = static_cast<uint8_t>((raw >> 9) & 3U);
-  result.release_fence_scope = static_cast<uint8_t>((raw >> 11) & 3U);
-  return result;
-}
-
-} // namespace
-
-extern "C" gemstone_hsa_aql_decode_error gemstone_hsa_decode_aql_packet(const void *packet, size_t packet_size,
-                                                                        gemstone_hsa_aql_packet *decoded) {
-  if (!packet || !decoded || packet_size < GEMSTONE_HSA_AQL_PACKET_SIZE) return GEMSTONE_HSA_AQL_DECODE_TRUNCATED;
+DecodeStatus decodeAqlPacket(const void *packet, size_t size, AqlPacket &decoded) {
+  if (!packet || size < AqlPacketSize) return DecodeStatus::Truncated;
   const auto *bytes = static_cast<const unsigned char *>(packet);
-  const uint16_t raw_header = readNative<uint16_t>(bytes, 0);
-  if ((raw_header & 0xe000U) != 0) return GEMSTONE_HSA_AQL_DECODE_RESERVED_BITS;
-  const auto header = decodeHeader(raw_header);
-  if (header.acquire_fence_scope > 2 || header.release_fence_scope > 2) return GEMSTONE_HSA_AQL_DECODE_RESERVED_BITS;
-  decoded->type = header.type;
+  const auto header = readNative<uint16_t>(bytes, 0);
+  if ((header & 0xe000U) != 0 || ((header >> 9) & 3U) > 2 || ((header >> 11) & 3U) > 2) return DecodeStatus::ReservedBits;
+  const auto type = static_cast<PacketType>(header & 0xffU);
+  decoded.type = type;
+  const bool signalled = type == PacketType::KernelDispatch || type == PacketType::BarrierAnd || type == PacketType::BarrierOr
+                         || type == PacketType::VendorSpecific;
+  if (signalled) decoded.completionSignal = readNative<uint64_t>(bytes, 56);
 
-  // Preserve the completion signal before validating the packet body. The
-  // queue consumer can then report a malformed packet to its producer instead
-  // of permanently stranding a waiter on a packet that can never execute.
-  if (header.type == GEMSTONE_HSA_AQL_KERNEL_DISPATCH) decoded->value.kernel_dispatch.completion_signal = readNative<uint64_t>(bytes, 56);
-  else if (header.type == GEMSTONE_HSA_AQL_BARRIER_AND || header.type == GEMSTONE_HSA_AQL_BARRIER_OR)
-    decoded->value.barrier.completion_signal = readNative<uint64_t>(bytes, 56);
-  else if (header.type == GEMSTONE_HSA_AQL_VENDOR_SPECIFIC) decoded->value.pm4_ib.completion_signal = readNative<uint64_t>(bytes, 56);
-
-  if (header.type == GEMSTONE_HSA_AQL_VENDOR_SPECIFIC) {
+  if (type == PacketType::VendorSpecific) {
     // ROCr gfx9+ AqlQueue::ExecutePM4 publishes format 1 as a 64-byte AQL
     // packet. Gemstone has no physical GPU cache to invalidate, but retaining
     // and completing this exact packet preserves its queue/fence semantics.
-    if (readNative<uint16_t>(bytes, 2) != 1 || readNative<uint32_t>(bytes, 20) != 0x0a) return GEMSTONE_HSA_AQL_DECODE_UNSUPPORTED_TYPE;
+    if (readNative<uint16_t>(bytes, 2) != 1 || readNative<uint32_t>(bytes, 20) != 0x0a) return DecodeStatus::UnsupportedType;
     for (size_t offset = 24; offset < 56; offset += sizeof(uint64_t))
-      if (readNative<uint64_t>(bytes, offset) != 0) return GEMSTONE_HSA_AQL_DECODE_RESERVED_BITS;
-    auto &result = decoded->value.pm4_ib;
-    result.header = header;
+      if (readNative<uint64_t>(bytes, offset) != 0) return DecodeStatus::ReservedBits;
     for (size_t index = 0; index < 4; ++index)
-      result.indirect_buffer_commands[index] = readNative<uint32_t>(bytes, 4 + index * 4);
-    result.completion_signal = readNative<uint64_t>(bytes, 56);
-    return GEMSTONE_HSA_AQL_DECODE_SUCCESS;
+      decoded.indirectBufferCommands[index] = readNative<uint32_t>(bytes, 4 + index * 4);
+    return DecodeStatus::Success;
   }
 
-  if (header.type == GEMSTONE_HSA_AQL_KERNEL_DISPATCH) {
-    const uint16_t setup = readNative<uint16_t>(bytes, 2);
-    const uint8_t dimensions = static_cast<uint8_t>(setup & 3U);
-    if ((setup & 0xfffcU) != 0 || dimensions == 0) return GEMSTONE_HSA_AQL_DECODE_INVALID_DIMENSIONS;
-    const uint16_t workgroup_x = readNative<uint16_t>(bytes, 4);
-    const uint16_t workgroup_y = readNative<uint16_t>(bytes, 6);
-    const uint16_t workgroup_z = readNative<uint16_t>(bytes, 8);
-    const uint32_t grid_x = readNative<uint32_t>(bytes, 12);
-    const uint32_t grid_y = readNative<uint32_t>(bytes, 16);
-    const uint32_t grid_z = readNative<uint32_t>(bytes, 20);
-    if (readNative<uint16_t>(bytes, 10) != 0 || readNative<uint64_t>(bytes, 48) != 0) return GEMSTONE_HSA_AQL_DECODE_RESERVED_BITS;
-    if (workgroup_x == 0 || workgroup_y == 0 || workgroup_z == 0 || (dimensions == 1 && (workgroup_y != 1 || workgroup_z != 1))
-        || (dimensions == 2 && workgroup_z != 1))
-      return GEMSTONE_HSA_AQL_DECODE_INVALID_DIMENSIONS;
-    if (grid_x < workgroup_x || grid_y < workgroup_y || grid_z < workgroup_z || (dimensions == 1 && (grid_y != 1 || grid_z != 1))
-        || (dimensions == 2 && grid_z != 1))
-      return GEMSTONE_HSA_AQL_DECODE_INVALID_GRID;
-
-    auto &result = decoded->value.kernel_dispatch;
-    result.header = header;
-    result.dimensions = dimensions;
-    result.workgroup_size_x = workgroup_x;
-    result.workgroup_size_y = workgroup_y;
-    result.workgroup_size_z = workgroup_z;
-    result.grid_size_x = grid_x;
-    result.grid_size_y = grid_y;
-    result.grid_size_z = grid_z;
-    result.private_segment_size = readNative<uint32_t>(bytes, 24);
-    result.group_segment_size = readNative<uint32_t>(bytes, 28);
-    result.kernel_object = readNative<uint64_t>(bytes, 32);
-    result.kernarg_address = readNative<uint64_t>(bytes, 40);
-    result.completion_signal = readNative<uint64_t>(bytes, 56);
-    return GEMSTONE_HSA_AQL_DECODE_SUCCESS;
+  if (type == PacketType::KernelDispatch) {
+    const auto setup = readNative<uint16_t>(bytes, 2);
+    const auto dimensions = static_cast<uint8_t>(setup & 3U);
+    if ((setup & 0xfffcU) != 0 || dimensions == 0) return DecodeStatus::InvalidDimensions;
+    const std::array<uint16_t, 3> workgroup{readNative<uint16_t>(bytes, 4), readNative<uint16_t>(bytes, 6), readNative<uint16_t>(bytes, 8)};
+    const std::array<uint32_t, 3> grid{readNative<uint32_t>(bytes, 12), readNative<uint32_t>(bytes, 16), readNative<uint32_t>(bytes, 20)};
+    if (readNative<uint16_t>(bytes, 10) != 0 || readNative<uint64_t>(bytes, 48) != 0) return DecodeStatus::ReservedBits;
+    for (size_t axis = 0; axis < 3; ++axis) {
+      const bool unused = axis >= dimensions;
+      if (workgroup[axis] == 0 || (unused && workgroup[axis] != 1)) return DecodeStatus::InvalidDimensions;
+    }
+    for (size_t axis = 0; axis < 3; ++axis) {
+      const bool unused = axis >= dimensions;
+      if (grid[axis] < workgroup[axis] || (unused && grid[axis] != 1)) return DecodeStatus::InvalidGrid;
+    }
+    decoded.dispatch = KernelDispatch{dimensions,
+                                      workgroup,
+                                      grid,
+                                      readNative<uint32_t>(bytes, 24),
+                                      readNative<uint32_t>(bytes, 28),
+                                      readNative<uint64_t>(bytes, 32),
+                                      readNative<uint64_t>(bytes, 40)};
+    return DecodeStatus::Success;
   }
 
-  if (header.type == GEMSTONE_HSA_AQL_BARRIER_AND || header.type == GEMSTONE_HSA_AQL_BARRIER_OR) {
+  if (type == PacketType::BarrierAnd || type == PacketType::BarrierOr) {
     if (readNative<uint16_t>(bytes, 2) != 0 || readNative<uint32_t>(bytes, 4) != 0 || readNative<uint64_t>(bytes, 48) != 0)
-      return GEMSTONE_HSA_AQL_DECODE_RESERVED_BITS;
-    auto &result = decoded->value.barrier;
-    result.header = header;
+      return DecodeStatus::ReservedBits;
     for (size_t index = 0; index < 5; ++index)
-      result.dependency_signals[index] = readNative<uint64_t>(bytes, 8 + index * 8);
-    result.completion_signal = readNative<uint64_t>(bytes, 56);
-    return GEMSTONE_HSA_AQL_DECODE_SUCCESS;
+      decoded.dependencySignals[index] = readNative<uint64_t>(bytes, 8 + index * 8);
+    return DecodeStatus::Success;
   }
 
-  return GEMSTONE_HSA_AQL_DECODE_UNSUPPORTED_TYPE;
+  return DecodeStatus::UnsupportedType;
 }
 
-extern "C" const char *gemstone_hsa_aql_decode_error_string(gemstone_hsa_aql_decode_error error) {
-  switch (error) {
-    case GEMSTONE_HSA_AQL_DECODE_SUCCESS: return "success";
-    case GEMSTONE_HSA_AQL_DECODE_TRUNCATED: return "packet is shorter than 64 bytes";
-    case GEMSTONE_HSA_AQL_DECODE_UNSUPPORTED_TYPE: return "packet type is unsupported";
-    case GEMSTONE_HSA_AQL_DECODE_RESERVED_BITS: return "reserved packet field is non-zero";
-    case GEMSTONE_HSA_AQL_DECODE_INVALID_DIMENSIONS: return "dispatch dimensions are invalid";
-    case GEMSTONE_HSA_AQL_DECODE_INVALID_GRID: return "dispatch grid is invalid";
+const char *describe(DecodeStatus status) {
+  switch (status) {
+    case DecodeStatus::Success: return "success";
+    case DecodeStatus::Truncated: return "packet is shorter than 64 bytes";
+    case DecodeStatus::UnsupportedType: return "packet type is unsupported";
+    case DecodeStatus::ReservedBits: return "reserved packet field is non-zero";
+    case DecodeStatus::InvalidDimensions: return "dispatch dimensions are invalid";
+    case DecodeStatus::InvalidGrid: return "dispatch grid is invalid";
   }
   return "unknown AQL decode error";
 }
+
+} // namespace gemstone::hsa

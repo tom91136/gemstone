@@ -1,31 +1,22 @@
-set(miniapp_tealeaf_models cuda hip omp-target kokkos sycl-usm sycl-acc)
-set(miniapp_tealeaf_main driver/main.cpp)
-set(miniapp_tealeaf_executable [=[add_executable(${EXE_NAME} ${IMPL_SOURCES})]=])
-set(miniapp_tealeaf_catch_executable
-  [=[add_executable(${EXE_NAME} ${IMPL_SOURCES} conformance_test.cpp)]=])
-set(miniapp_tealeaf_omp_target_upstream_model omp)
-set(miniapp_tealeaf_openmp_definitions OMP_TARGET DIFFUSE_OVERLOAD)
-
-function(miniapp_tealeaf_patch model source)
+function(tealeaf_adapt model source)
   patch_exact("${source}/CMakeLists.txt" "elseif ()" "else ()")
-  if(model STREQUAL "cuda" AND CONFORMANCE_COMPILER STREQUAL "clang")
+  if(model STREQUAL "cuda")
+    set(flags [=[-forward-unknown-to-host-compiler -arch=${CUDA_ARCH} -use_fast_math -restrict]=])
+    if(CONFORMANCE_COMPILER STREQUAL "clang")
+      set(flags [=[--cuda-gpu-arch=${CUDA_ARCH}]=])
+    endif()
     patch_exact("${source}/src/cuda/model.cmake"
-      [=[-forward-unknown-to-host-compiler -arch=${CUDA_ARCH} -use_fast_math -restrict -keep]=]
-      [=[--cuda-gpu-arch=${CUDA_ARCH}]=])
+      [=[-forward-unknown-to-host-compiler -arch=${CUDA_ARCH} -use_fast_math -restrict -keep]=] "${flags}")
   endif()
 endfunction()
 
-function(miniapp_tealeaf_test_arguments model output)
-  set(arguments --file [=[${CONFORMANCE_SUPPORT_ROOT}/data/decks/tealeaf.in]=]
+conformance_miniapp(tealeaf
+  MODELS cuda hip omp-target=omp kokkos sycl-usm sycl-acc
+  MAIN driver/main.cpp
+  OPENMP_DEFINITIONS OMP_TARGET DIFFUSE_OVERLOAD
+  DATA tea.problems
+  DECKS decks/tealeaf.in
+  ARGUMENTS --file [=[${CONFORMANCE_SUPPORT_ROOT}/data/decks/tealeaf.in]=]
     --problems [=[${CONFORMANCE_SUPPORT_ROOT}/data/miniapps/tealeaf/tea.problems]=]
-    --out [=[${CONFORMANCE_REPORT_DIRECTORY}/tea.out]=])
-  set(${output} "${arguments}" PARENT_SCOPE)
-endfunction()
-
-conformance_register_miniapp(tealeaf)
-if(miniapp_tealeaf_enabled)
-  install(FILES "${miniapp_tealeaf_source}/tea.problems"
-    DESTINATION data/miniapps/tealeaf COMPONENT support)
-  install(FILES "${CMAKE_CURRENT_LIST_DIR}/decks/tealeaf.in"
-    DESTINATION data/decks COMPONENT support)
-endif()
+    --out [=[${CONFORMANCE_REPORT_DIRECTORY}/tea.out]=]
+  ADAPT tealeaf_adapt)

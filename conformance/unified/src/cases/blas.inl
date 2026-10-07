@@ -1,445 +1,92 @@
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators_adapters.hpp>
-#include <catch2/generators/catch_generators_range.hpp>
+#pragma once
 
-#include "backend_blas.hpp"
+#include <cstdint>
+#include <utility>
 
-#define DECLARE_BLAS_F32_COMPACT_LEVEL1(name, check)                                                                                       \
-  TEST_CASE("blas/f32/compact/" name, "[unified][compact-matrix][blas][f32]") {                                                            \
-    constexpr auto kind = unified::ScalarType::f32;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto size = GENERATE(Catch::Generators::from_range(unified::compact_blas_sizes));                                                \
+#include "blas_cases.hpp"
+#include "cases/grid.inl"
+
+// Shared by the device backends and the host reference: PREFIX and TAGS name the cases, BACKEND is a template over
+// ScalarType, SIZES and SHAPES are the level 1 and matrix generators.
+#define UNIFIED_BLAS_LEVEL1(PREFIX, TAGS, KIND, BACKEND, SIZES, SHAPES, name)                                                              \
+  TEST_CASE(PREFIX #name, TAGS) {                                                                                                          \
+    constexpr auto kind = unified::ScalarType::KIND;                                                                                       \
+    BACKEND<kind> backend;                                                                                                                 \
+    const auto size = GENERATE(Catch::Generators::from_range(SIZES));                                                                      \
     CAPTURE(size);                                                                                                                         \
-    SECTION("strided") { check<kind>(backend, size); }                                                                                     \
-    SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                              \
-    SECTION("zero size status") { check<kind>(backend, unified::blas::level1_status_size, 1, 1, "status"); }                               \
+    SECTION("strided") { unified::blas::name<kind>(backend, size); }                                                                       \
+    SECTION("contiguous") { unified::blas::name<kind>(backend, size, 1, 1, "contiguous"); }                                                \
+    SECTION("zero size status") { unified::blas::name<kind>(backend, unified::blas::Level1StatusSize, 1, 1, "status"); }                   \
   }
 
-#define DECLARE_BLAS_F32_COMPACT_SIGNED_LEVEL1(name, check)                                                                                \
-  TEST_CASE("blas/f32/compact/" name, "[unified][compact-matrix][blas][f32]") {                                                            \
-    constexpr auto kind = unified::ScalarType::f32;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto size = GENERATE(Catch::Generators::from_range(unified::compact_blas_sizes));                                                \
+#define UNIFIED_BLAS_SIGNED_LEVEL1(PREFIX, TAGS, KIND, BACKEND, SIZES, SHAPES, name)                                                       \
+  TEST_CASE(PREFIX #name, TAGS) {                                                                                                          \
+    constexpr auto kind = unified::ScalarType::KIND;                                                                                       \
+    BACKEND<kind> backend;                                                                                                                 \
+    const auto size = GENERATE(Catch::Generators::from_range(SIZES));                                                                      \
     CAPTURE(size);                                                                                                                         \
-    SECTION("strided") { check<kind>(backend, size); }                                                                                     \
-    SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                              \
+    SECTION("strided") { unified::blas::name<kind>(backend, size); }                                                                       \
+    SECTION("contiguous") { unified::blas::name<kind>(backend, size, 1, 1, "contiguous"); }                                                \
     /* Only the two-vector routines share the negative-increment rule. */                                                                  \
     const auto increments =                                                                                                                \
         GENERATE(std::pair<int32_t, int32_t>{-2, -3}, std::pair<int32_t, int32_t>{-2, 3}, std::pair<int32_t, int32_t>{2, -3});             \
     CAPTURE(increments.first, increments.second);                                                                                          \
-    SECTION("negative increments") { check<kind>(backend, size, increments.first, increments.second, "negative stride"); }                 \
-    SECTION("zero size status") { check<kind>(backend, unified::blas::level1_status_size, 1, 1, "status"); }                               \
+    SECTION("negative increments") { unified::blas::name<kind>(backend, size, increments.first, increments.second, "negative stride"); }   \
+    SECTION("zero size status") { unified::blas::name<kind>(backend, unified::blas::Level1StatusSize, 1, 1, "status"); }                   \
   }
 
-#define DECLARE_BLAS_F32_COMPACT_GEMV(name, check, padded_check)                                                                           \
-  TEST_CASE("blas/f32/compact/" name, "[unified][compact-matrix][blas][f32]") {                                                            \
-    constexpr auto kind = unified::ScalarType::f32;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::compact_matrix_shapes));                                            \
+#define UNIFIED_BLAS_GEMV(PREFIX, TAGS, KIND, BACKEND, SIZES, SHAPES, name, TRANSPOSE)                                                     \
+  TEST_CASE(PREFIX name, TAGS) {                                                                                                           \
+    constexpr auto kind = unified::ScalarType::KIND;                                                                                       \
+    BACKEND<kind> backend;                                                                                                                 \
+    const auto shape = GENERATE(Catch::Generators::from_range(SHAPES));                                                                    \
     CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { check<kind>(backend, shape); }                                                                                     \
-    SECTION("padded") { padded_check<kind>(backend, shape); }                                                                              \
+    SECTION("matrix") { unified::blas::gemv<kind>(backend, shape, unified::blas::Transpose::TRANSPOSE); }                                  \
+    SECTION("padded") { unified::blas::gemvPadded<kind>(backend, shape, unified::blas::Transpose::TRANSPOSE); }                            \
   }
 
-#define DECLARE_BLAS_F32_COMPACT_GEMM(name, check, padded_check, transpose_a, transpose_b)                                                 \
-  TEST_CASE("blas/f32/compact/" name, "[unified][compact-matrix][blas][f32]") {                                                            \
-    constexpr auto kind = unified::ScalarType::f32;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::compact_matrix_shapes));                                            \
+#define UNIFIED_BLAS_GEMM(PREFIX, TAGS, KIND, BACKEND, SIZES, SHAPES, name, TRANSPOSE_A, TRANSPOSE_B)                                      \
+  TEST_CASE(PREFIX name, TAGS) {                                                                                                           \
+    constexpr auto kind = unified::ScalarType::KIND;                                                                                       \
+    BACKEND<kind> backend;                                                                                                                 \
+    const auto shape = GENERATE(Catch::Generators::from_range(SHAPES));                                                                    \
     CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { check<kind>(backend, shape); }                                                                                     \
+    SECTION("matrix") {                                                                                                                    \
+      unified::blas::gemm<kind>(backend, shape, unified::blas::Transpose::TRANSPOSE_A, unified::blas::Transpose::TRANSPOSE_B);             \
+    }                                                                                                                                      \
     SECTION("padded") {                                                                                                                    \
-      CAPTURE(std::string(magic_enum::enum_name(transpose_a)), std::string(magic_enum::enum_name(transpose_b)));                           \
-      padded_check<kind>(backend, shape);                                                                                                  \
+      unified::blas::gemmPadded<kind>(backend, shape, unified::blas::Transpose::TRANSPOSE_A, unified::blas::Transpose::TRANSPOSE_B);       \
     }                                                                                                                                      \
   }
 
-#define DECLARE_BLAS_F32_COMPACT_BATCHED_GEMM(name)                                                                                        \
-  TEST_CASE("blas/f32/compact/" name, "[unified][compact-matrix][blas][f32]") {                                                            \
-    constexpr auto kind = unified::ScalarType::f32;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::compact_matrix_shapes));                                            \
+#define UNIFIED_BLAS_GEMM_STRIDED_BATCHED(PREFIX, TAGS, KIND, BACKEND, SIZES, SHAPES)                                                      \
+  TEST_CASE(PREFIX "gemm_strided_batched", TAGS) {                                                                                         \
+    constexpr auto kind = unified::ScalarType::KIND;                                                                                       \
+    BACKEND<kind> backend;                                                                                                                 \
+    const auto shape = GENERATE(Catch::Generators::from_range(SHAPES));                                                                    \
     CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { unified::blas::gemm_strided_batched<kind>(backend, shape); }                                                       \
+    SECTION("matrix") { unified::blas::gemmStridedBatched<kind>(backend, shape); }                                                         \
     SECTION("padded") {                                                                                                                    \
-      const auto transposes = GENERATE(Catch::Generators::from_range(unified::blas::gemm_transpose_variants));                             \
-      CAPTURE(std::string(magic_enum::enum_name(transposes.first)), std::string(magic_enum::enum_name(transposes.second)));                \
-      unified::blas::gemm_strided_batched_padded<kind>(backend, shape, transposes.first, transposes.second);                               \
+      const auto transposes = GENERATE(Catch::Generators::from_range(unified::blas::GemmTransposeVariants));                               \
+      unified::blas::gemmStridedBatchedPadded<kind>(backend, shape, transposes.first, transposes.second);                                  \
     }                                                                                                                                      \
   }
 
-DECLARE_BLAS_F32_COMPACT_SIGNED_LEVEL1("axpy", unified::blas::axpy)
-DECLARE_BLAS_F32_COMPACT_LEVEL1("scal", unified::blas::scal)
-DECLARE_BLAS_F32_COMPACT_SIGNED_LEVEL1("copy", unified::blas::copy)
-DECLARE_BLAS_F32_COMPACT_SIGNED_LEVEL1("dot", unified::blas::dot)
-DECLARE_BLAS_F32_COMPACT_LEVEL1("nrm2", unified::blas::nrm2)
-DECLARE_BLAS_F32_COMPACT_LEVEL1("asum", unified::blas::asum)
-DECLARE_BLAS_F32_COMPACT_GEMV("gemv", unified::blas::gemv, unified::blas::gemv_padded)
-DECLARE_BLAS_F32_COMPACT_GEMV("gemv_transpose", unified::blas::gemv_transpose, unified::blas::gemv_transpose_padded)
-DECLARE_BLAS_F32_COMPACT_GEMM("gemm", unified::blas::gemm, unified::blas::gemm_padded, unified::blas::Transpose::none,
-                              unified::blas::Transpose::none)
-DECLARE_BLAS_F32_COMPACT_GEMM("gemm_nt", unified::blas::gemm_nt, unified::blas::gemm_nt_padded, unified::blas::Transpose::none,
-                              unified::blas::Transpose::transpose)
-DECLARE_BLAS_F32_COMPACT_GEMM("gemm_tn", unified::blas::gemm_tn, unified::blas::gemm_tn_padded, unified::blas::Transpose::transpose,
-                              unified::blas::Transpose::none)
-DECLARE_BLAS_F32_COMPACT_GEMM("gemm_tt", unified::blas::gemm_tt, unified::blas::gemm_tt_padded, unified::blas::Transpose::transpose,
-                              unified::blas::Transpose::transpose)
-DECLARE_BLAS_F32_COMPACT_BATCHED_GEMM("gemm_strided_batched")
+#define UNIFIED_BLAS_CASES(...)                                                                                                            \
+  UNIFIED_BLAS_SIGNED_LEVEL1(__VA_ARGS__, axpy)                                                                                            \
+  UNIFIED_BLAS_LEVEL1(__VA_ARGS__, scal)                                                                                                   \
+  UNIFIED_BLAS_SIGNED_LEVEL1(__VA_ARGS__, copy)                                                                                            \
+  UNIFIED_BLAS_SIGNED_LEVEL1(__VA_ARGS__, dot)                                                                                             \
+  UNIFIED_BLAS_LEVEL1(__VA_ARGS__, nrm2)                                                                                                   \
+  UNIFIED_BLAS_LEVEL1(__VA_ARGS__, asum)                                                                                                   \
+  UNIFIED_BLAS_GEMV(__VA_ARGS__, "gemv", None)                                                                                             \
+  UNIFIED_BLAS_GEMV(__VA_ARGS__, "gemv_transpose", Transposed)                                                                             \
+  UNIFIED_BLAS_GEMM(__VA_ARGS__, "gemm", None, None)                                                                                       \
+  UNIFIED_BLAS_GEMM(__VA_ARGS__, "gemm_nt", None, Transposed)                                                                              \
+  UNIFIED_BLAS_GEMM(__VA_ARGS__, "gemm_tn", Transposed, None)                                                                              \
+  UNIFIED_BLAS_GEMM(__VA_ARGS__, "gemm_tt", Transposed, Transposed)                                                                        \
+  UNIFIED_BLAS_GEMM_STRIDED_BATCHED(__VA_ARGS__)
 
-#undef DECLARE_BLAS_F32_COMPACT_LEVEL1
-#undef DECLARE_BLAS_F32_COMPACT_SIGNED_LEVEL1
-#undef DECLARE_BLAS_F32_COMPACT_GEMV
-#undef DECLARE_BLAS_F32_COMPACT_GEMM
-#undef DECLARE_BLAS_F32_COMPACT_BATCHED_GEMM
-
-#define DECLARE_BLAS_F32_FULL_LEVEL1(name, check)                                                                                          \
-  TEST_CASE("blas/f32/full/" name, "[unified][full-matrix][blas][f32]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f32;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto size = GENERATE(Catch::Generators::from_range(unified::blas_sizes));                                                        \
-    CAPTURE(size);                                                                                                                         \
-    SECTION("strided") { check<kind>(backend, size); }                                                                                     \
-    SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                              \
-    SECTION("zero size status") { check<kind>(backend, unified::blas::level1_status_size, 1, 1, "status"); }                               \
-  }
-
-#define DECLARE_BLAS_F32_FULL_SIGNED_LEVEL1(name, check)                                                                                   \
-  TEST_CASE("blas/f32/full/" name, "[unified][full-matrix][blas][f32]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f32;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto size = GENERATE(Catch::Generators::from_range(unified::blas_sizes));                                                        \
-    CAPTURE(size);                                                                                                                         \
-    SECTION("strided") { check<kind>(backend, size); }                                                                                     \
-    SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                              \
-    /* Only the two-vector routines share the negative-increment rule. */                                                                  \
-    const auto increments =                                                                                                                \
-        GENERATE(std::pair<int32_t, int32_t>{-2, -3}, std::pair<int32_t, int32_t>{-2, 3}, std::pair<int32_t, int32_t>{2, -3});             \
-    CAPTURE(increments.first, increments.second);                                                                                          \
-    SECTION("negative increments") { check<kind>(backend, size, increments.first, increments.second, "negative stride"); }                 \
-    SECTION("zero size status") { check<kind>(backend, unified::blas::level1_status_size, 1, 1, "status"); }                               \
-  }
-
-#define DECLARE_BLAS_F32_FULL_GEMV(name, check, padded_check)                                                                              \
-  TEST_CASE("blas/f32/full/" name, "[unified][full-matrix][blas][f32]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f32;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::matrix_shapes));                                                    \
-    CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { check<kind>(backend, shape); }                                                                                     \
-    SECTION("padded") { padded_check<kind>(backend, shape); }                                                                              \
-  }
-
-#define DECLARE_BLAS_F32_FULL_GEMM(name, check, padded_check, transpose_a, transpose_b)                                                    \
-  TEST_CASE("blas/f32/full/" name, "[unified][full-matrix][blas][f32]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f32;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::matrix_shapes));                                                    \
-    CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { check<kind>(backend, shape); }                                                                                     \
-    SECTION("padded") {                                                                                                                    \
-      CAPTURE(std::string(magic_enum::enum_name(transpose_a)), std::string(magic_enum::enum_name(transpose_b)));                           \
-      padded_check<kind>(backend, shape);                                                                                                  \
-    }                                                                                                                                      \
-  }
-
-#define DECLARE_BLAS_F32_FULL_BATCHED_GEMM(name)                                                                                           \
-  TEST_CASE("blas/f32/full/" name, "[unified][full-matrix][blas][f32]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f32;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::matrix_shapes));                                                    \
-    CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { unified::blas::gemm_strided_batched<kind>(backend, shape); }                                                       \
-    SECTION("padded") {                                                                                                                    \
-      const auto transposes = GENERATE(Catch::Generators::from_range(unified::blas::gemm_transpose_variants));                             \
-      CAPTURE(std::string(magic_enum::enum_name(transposes.first)), std::string(magic_enum::enum_name(transposes.second)));                \
-      unified::blas::gemm_strided_batched_padded<kind>(backend, shape, transposes.first, transposes.second);                               \
-    }                                                                                                                                      \
-  }
-
-DECLARE_BLAS_F32_FULL_SIGNED_LEVEL1("axpy", unified::blas::axpy)
-DECLARE_BLAS_F32_FULL_LEVEL1("scal", unified::blas::scal)
-DECLARE_BLAS_F32_FULL_SIGNED_LEVEL1("copy", unified::blas::copy)
-DECLARE_BLAS_F32_FULL_SIGNED_LEVEL1("dot", unified::blas::dot)
-DECLARE_BLAS_F32_FULL_LEVEL1("nrm2", unified::blas::nrm2)
-DECLARE_BLAS_F32_FULL_LEVEL1("asum", unified::blas::asum)
-DECLARE_BLAS_F32_FULL_GEMV("gemv", unified::blas::gemv, unified::blas::gemv_padded)
-DECLARE_BLAS_F32_FULL_GEMV("gemv_transpose", unified::blas::gemv_transpose, unified::blas::gemv_transpose_padded)
-DECLARE_BLAS_F32_FULL_GEMM("gemm", unified::blas::gemm, unified::blas::gemm_padded, unified::blas::Transpose::none,
-                           unified::blas::Transpose::none)
-DECLARE_BLAS_F32_FULL_GEMM("gemm_nt", unified::blas::gemm_nt, unified::blas::gemm_nt_padded, unified::blas::Transpose::none,
-                           unified::blas::Transpose::transpose)
-DECLARE_BLAS_F32_FULL_GEMM("gemm_tn", unified::blas::gemm_tn, unified::blas::gemm_tn_padded, unified::blas::Transpose::transpose,
-                           unified::blas::Transpose::none)
-DECLARE_BLAS_F32_FULL_GEMM("gemm_tt", unified::blas::gemm_tt, unified::blas::gemm_tt_padded, unified::blas::Transpose::transpose,
-                           unified::blas::Transpose::transpose)
-DECLARE_BLAS_F32_FULL_BATCHED_GEMM("gemm_strided_batched")
-
-#undef DECLARE_BLAS_F32_FULL_LEVEL1
-#undef DECLARE_BLAS_F32_FULL_SIGNED_LEVEL1
-#undef DECLARE_BLAS_F32_FULL_GEMV
-#undef DECLARE_BLAS_F32_FULL_GEMM
-#undef DECLARE_BLAS_F32_FULL_BATCHED_GEMM
-
-#define DECLARE_BLAS_F64_FULL_LEVEL1(name, check)                                                                                          \
-  TEST_CASE("blas/f64/full/" name, "[unified][full-matrix][blas][f64]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f64;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto size = GENERATE(Catch::Generators::from_range(unified::blas_sizes));                                                        \
-    CAPTURE(size);                                                                                                                         \
-    SECTION("strided") { check<kind>(backend, size); }                                                                                     \
-    SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                              \
-    SECTION("zero size status") { check<kind>(backend, unified::blas::level1_status_size, 1, 1, "status"); }                               \
-  }
-
-#define DECLARE_BLAS_F64_FULL_SIGNED_LEVEL1(name, check)                                                                                   \
-  TEST_CASE("blas/f64/full/" name, "[unified][full-matrix][blas][f64]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f64;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto size = GENERATE(Catch::Generators::from_range(unified::blas_sizes));                                                        \
-    CAPTURE(size);                                                                                                                         \
-    SECTION("strided") { check<kind>(backend, size); }                                                                                     \
-    SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                              \
-    /* Only the two-vector routines share the negative-increment rule. */                                                                  \
-    const auto increments =                                                                                                                \
-        GENERATE(std::pair<int32_t, int32_t>{-2, -3}, std::pair<int32_t, int32_t>{-2, 3}, std::pair<int32_t, int32_t>{2, -3});             \
-    CAPTURE(increments.first, increments.second);                                                                                          \
-    SECTION("negative increments") { check<kind>(backend, size, increments.first, increments.second, "negative stride"); }                 \
-    SECTION("zero size status") { check<kind>(backend, unified::blas::level1_status_size, 1, 1, "status"); }                               \
-  }
-
-#define DECLARE_BLAS_F64_FULL_GEMV(name, check, padded_check)                                                                              \
-  TEST_CASE("blas/f64/full/" name, "[unified][full-matrix][blas][f64]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f64;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::matrix_shapes));                                                    \
-    CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { check<kind>(backend, shape); }                                                                                     \
-    SECTION("padded") { padded_check<kind>(backend, shape); }                                                                              \
-  }
-
-#define DECLARE_BLAS_F64_FULL_GEMM(name, check, padded_check, transpose_a, transpose_b)                                                    \
-  TEST_CASE("blas/f64/full/" name, "[unified][full-matrix][blas][f64]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f64;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::matrix_shapes));                                                    \
-    CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { check<kind>(backend, shape); }                                                                                     \
-    SECTION("padded") {                                                                                                                    \
-      CAPTURE(std::string(magic_enum::enum_name(transpose_a)), std::string(magic_enum::enum_name(transpose_b)));                           \
-      padded_check<kind>(backend, shape);                                                                                                  \
-    }                                                                                                                                      \
-  }
-
-#define DECLARE_BLAS_F64_FULL_BATCHED_GEMM(name)                                                                                           \
-  TEST_CASE("blas/f64/full/" name, "[unified][full-matrix][blas][f64]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f64;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::matrix_shapes));                                                    \
-    CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { unified::blas::gemm_strided_batched<kind>(backend, shape); }                                                       \
-    SECTION("padded") {                                                                                                                    \
-      const auto transposes = GENERATE(Catch::Generators::from_range(unified::blas::gemm_transpose_variants));                             \
-      CAPTURE(std::string(magic_enum::enum_name(transposes.first)), std::string(magic_enum::enum_name(transposes.second)));                \
-      unified::blas::gemm_strided_batched_padded<kind>(backend, shape, transposes.first, transposes.second);                               \
-    }                                                                                                                                      \
-  }
-
-DECLARE_BLAS_F64_FULL_SIGNED_LEVEL1("axpy", unified::blas::axpy)
-DECLARE_BLAS_F64_FULL_LEVEL1("scal", unified::blas::scal)
-DECLARE_BLAS_F64_FULL_SIGNED_LEVEL1("copy", unified::blas::copy)
-DECLARE_BLAS_F64_FULL_SIGNED_LEVEL1("dot", unified::blas::dot)
-DECLARE_BLAS_F64_FULL_LEVEL1("nrm2", unified::blas::nrm2)
-DECLARE_BLAS_F64_FULL_LEVEL1("asum", unified::blas::asum)
-DECLARE_BLAS_F64_FULL_GEMV("gemv", unified::blas::gemv, unified::blas::gemv_padded)
-DECLARE_BLAS_F64_FULL_GEMV("gemv_transpose", unified::blas::gemv_transpose, unified::blas::gemv_transpose_padded)
-DECLARE_BLAS_F64_FULL_GEMM("gemm", unified::blas::gemm, unified::blas::gemm_padded, unified::blas::Transpose::none,
-                           unified::blas::Transpose::none)
-DECLARE_BLAS_F64_FULL_GEMM("gemm_nt", unified::blas::gemm_nt, unified::blas::gemm_nt_padded, unified::blas::Transpose::none,
-                           unified::blas::Transpose::transpose)
-DECLARE_BLAS_F64_FULL_GEMM("gemm_tn", unified::blas::gemm_tn, unified::blas::gemm_tn_padded, unified::blas::Transpose::transpose,
-                           unified::blas::Transpose::none)
-DECLARE_BLAS_F64_FULL_GEMM("gemm_tt", unified::blas::gemm_tt, unified::blas::gemm_tt_padded, unified::blas::Transpose::transpose,
-                           unified::blas::Transpose::transpose)
-DECLARE_BLAS_F64_FULL_BATCHED_GEMM("gemm_strided_batched")
-
-#undef DECLARE_BLAS_F64_FULL_LEVEL1
-#undef DECLARE_BLAS_F64_FULL_SIGNED_LEVEL1
-#undef DECLARE_BLAS_F64_FULL_GEMV
-#undef DECLARE_BLAS_F64_FULL_GEMM
-#undef DECLARE_BLAS_F64_FULL_BATCHED_GEMM
-
-#define DECLARE_BLAS_F16_FULL_LEVEL1(name, check)                                                                                          \
-  TEST_CASE("blas/f16/full/" name, "[unified][full-matrix][blas][f16]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f16;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto size = GENERATE(Catch::Generators::from_range(unified::blas_sizes));                                                        \
-    CAPTURE(size);                                                                                                                         \
-    SECTION("strided") { check<kind>(backend, size); }                                                                                     \
-    SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                              \
-    SECTION("zero size status") { check<kind>(backend, unified::blas::level1_status_size, 1, 1, "status"); }                               \
-  }
-
-#define DECLARE_BLAS_F16_FULL_SIGNED_LEVEL1(name, check)                                                                                   \
-  TEST_CASE("blas/f16/full/" name, "[unified][full-matrix][blas][f16]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f16;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto size = GENERATE(Catch::Generators::from_range(unified::blas_sizes));                                                        \
-    CAPTURE(size);                                                                                                                         \
-    SECTION("strided") { check<kind>(backend, size); }                                                                                     \
-    SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                              \
-    /* Only the two-vector routines share the negative-increment rule. */                                                                  \
-    const auto increments =                                                                                                                \
-        GENERATE(std::pair<int32_t, int32_t>{-2, -3}, std::pair<int32_t, int32_t>{-2, 3}, std::pair<int32_t, int32_t>{2, -3});             \
-    CAPTURE(increments.first, increments.second);                                                                                          \
-    SECTION("negative increments") { check<kind>(backend, size, increments.first, increments.second, "negative stride"); }                 \
-    SECTION("zero size status") { check<kind>(backend, unified::blas::level1_status_size, 1, 1, "status"); }                               \
-  }
-
-#define DECLARE_BLAS_F16_FULL_GEMV(name, check, padded_check)                                                                              \
-  TEST_CASE("blas/f16/full/" name, "[unified][full-matrix][blas][f16]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f16;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::matrix_shapes));                                                    \
-    CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { check<kind>(backend, shape); }                                                                                     \
-    SECTION("padded") { padded_check<kind>(backend, shape); }                                                                              \
-  }
-
-#define DECLARE_BLAS_F16_FULL_GEMM(name, check, padded_check, transpose_a, transpose_b)                                                    \
-  TEST_CASE("blas/f16/full/" name, "[unified][full-matrix][blas][f16]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f16;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::matrix_shapes));                                                    \
-    CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { check<kind>(backend, shape); }                                                                                     \
-    SECTION("padded") {                                                                                                                    \
-      CAPTURE(std::string(magic_enum::enum_name(transpose_a)), std::string(magic_enum::enum_name(transpose_b)));                           \
-      padded_check<kind>(backend, shape);                                                                                                  \
-    }                                                                                                                                      \
-  }
-
-#define DECLARE_BLAS_F16_FULL_BATCHED_GEMM(name)                                                                                           \
-  TEST_CASE("blas/f16/full/" name, "[unified][full-matrix][blas][f16]") {                                                                  \
-    constexpr auto kind = unified::ScalarType::f16;                                                                                        \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::matrix_shapes));                                                    \
-    CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { unified::blas::gemm_strided_batched<kind>(backend, shape); }                                                       \
-    SECTION("padded") {                                                                                                                    \
-      const auto transposes = GENERATE(Catch::Generators::from_range(unified::blas::gemm_transpose_variants));                             \
-      CAPTURE(std::string(magic_enum::enum_name(transposes.first)), std::string(magic_enum::enum_name(transposes.second)));                \
-      unified::blas::gemm_strided_batched_padded<kind>(backend, shape, transposes.first, transposes.second);                               \
-    }                                                                                                                                      \
-  }
-
-DECLARE_BLAS_F16_FULL_SIGNED_LEVEL1("axpy", unified::blas::axpy)
-DECLARE_BLAS_F16_FULL_LEVEL1("scal", unified::blas::scal)
-DECLARE_BLAS_F16_FULL_SIGNED_LEVEL1("copy", unified::blas::copy)
-DECLARE_BLAS_F16_FULL_SIGNED_LEVEL1("dot", unified::blas::dot)
-DECLARE_BLAS_F16_FULL_LEVEL1("nrm2", unified::blas::nrm2)
-DECLARE_BLAS_F16_FULL_LEVEL1("asum", unified::blas::asum)
-DECLARE_BLAS_F16_FULL_GEMV("gemv", unified::blas::gemv, unified::blas::gemv_padded)
-DECLARE_BLAS_F16_FULL_GEMV("gemv_transpose", unified::blas::gemv_transpose, unified::blas::gemv_transpose_padded)
-DECLARE_BLAS_F16_FULL_GEMM("gemm", unified::blas::gemm, unified::blas::gemm_padded, unified::blas::Transpose::none,
-                           unified::blas::Transpose::none)
-DECLARE_BLAS_F16_FULL_GEMM("gemm_nt", unified::blas::gemm_nt, unified::blas::gemm_nt_padded, unified::blas::Transpose::none,
-                           unified::blas::Transpose::transpose)
-DECLARE_BLAS_F16_FULL_GEMM("gemm_tn", unified::blas::gemm_tn, unified::blas::gemm_tn_padded, unified::blas::Transpose::transpose,
-                           unified::blas::Transpose::none)
-DECLARE_BLAS_F16_FULL_GEMM("gemm_tt", unified::blas::gemm_tt, unified::blas::gemm_tt_padded, unified::blas::Transpose::transpose,
-                           unified::blas::Transpose::transpose)
-DECLARE_BLAS_F16_FULL_BATCHED_GEMM("gemm_strided_batched")
-
-#undef DECLARE_BLAS_F16_FULL_LEVEL1
-#undef DECLARE_BLAS_F16_FULL_SIGNED_LEVEL1
-#undef DECLARE_BLAS_F16_FULL_GEMV
-#undef DECLARE_BLAS_F16_FULL_GEMM
-#undef DECLARE_BLAS_F16_FULL_BATCHED_GEMM
-
-#define DECLARE_BLAS_I8_FULL_LEVEL1(name, check)                                                                                           \
-  TEST_CASE("blas/i8/full/" name, "[unified][full-matrix][blas][i8]") {                                                                    \
-    constexpr auto kind = unified::ScalarType::i8;                                                                                         \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto size = GENERATE(Catch::Generators::from_range(unified::blas_sizes));                                                        \
-    CAPTURE(size);                                                                                                                         \
-    SECTION("strided") { check<kind>(backend, size); }                                                                                     \
-    SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                              \
-    SECTION("zero size status") { check<kind>(backend, unified::blas::level1_status_size, 1, 1, "status"); }                               \
-  }
-
-#define DECLARE_BLAS_I8_FULL_SIGNED_LEVEL1(name, check)                                                                                    \
-  TEST_CASE("blas/i8/full/" name, "[unified][full-matrix][blas][i8]") {                                                                    \
-    constexpr auto kind = unified::ScalarType::i8;                                                                                         \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto size = GENERATE(Catch::Generators::from_range(unified::blas_sizes));                                                        \
-    CAPTURE(size);                                                                                                                         \
-    SECTION("strided") { check<kind>(backend, size); }                                                                                     \
-    SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                              \
-    /* Only the two-vector routines share the negative-increment rule. */                                                                  \
-    const auto increments =                                                                                                                \
-        GENERATE(std::pair<int32_t, int32_t>{-2, -3}, std::pair<int32_t, int32_t>{-2, 3}, std::pair<int32_t, int32_t>{2, -3});             \
-    CAPTURE(increments.first, increments.second);                                                                                          \
-    SECTION("negative increments") { check<kind>(backend, size, increments.first, increments.second, "negative stride"); }                 \
-    SECTION("zero size status") { check<kind>(backend, unified::blas::level1_status_size, 1, 1, "status"); }                               \
-  }
-
-#define DECLARE_BLAS_I8_FULL_GEMV(name, check, padded_check)                                                                               \
-  TEST_CASE("blas/i8/full/" name, "[unified][full-matrix][blas][i8]") {                                                                    \
-    constexpr auto kind = unified::ScalarType::i8;                                                                                         \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::matrix_shapes));                                                    \
-    CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { check<kind>(backend, shape); }                                                                                     \
-    SECTION("padded") { padded_check<kind>(backend, shape); }                                                                              \
-  }
-
-#define DECLARE_BLAS_I8_FULL_GEMM(name, check, padded_check, transpose_a, transpose_b)                                                     \
-  TEST_CASE("blas/i8/full/" name, "[unified][full-matrix][blas][i8]") {                                                                    \
-    constexpr auto kind = unified::ScalarType::i8;                                                                                         \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::matrix_shapes));                                                    \
-    CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { check<kind>(backend, shape); }                                                                                     \
-    SECTION("padded") {                                                                                                                    \
-      CAPTURE(std::string(magic_enum::enum_name(transpose_a)), std::string(magic_enum::enum_name(transpose_b)));                           \
-      padded_check<kind>(backend, shape);                                                                                                  \
-    }                                                                                                                                      \
-  }
-
-#define DECLARE_BLAS_I8_FULL_BATCHED_GEMM(name)                                                                                            \
-  TEST_CASE("blas/i8/full/" name, "[unified][full-matrix][blas][i8]") {                                                                    \
-    constexpr auto kind = unified::ScalarType::i8;                                                                                         \
-    unified::backend::Blas<kind> backend;                                                                                                  \
-    const auto shape = GENERATE(Catch::Generators::from_range(unified::matrix_shapes));                                                    \
-    CAPTURE(shape.m, shape.n, shape.k);                                                                                                    \
-    SECTION("matrix") { unified::blas::gemm_strided_batched<kind>(backend, shape); }                                                       \
-    SECTION("padded") {                                                                                                                    \
-      const auto transposes = GENERATE(Catch::Generators::from_range(unified::blas::gemm_transpose_variants));                             \
-      CAPTURE(std::string(magic_enum::enum_name(transposes.first)), std::string(magic_enum::enum_name(transposes.second)));                \
-      unified::blas::gemm_strided_batched_padded<kind>(backend, shape, transposes.first, transposes.second);                               \
-    }                                                                                                                                      \
-  }
-
-DECLARE_BLAS_I8_FULL_SIGNED_LEVEL1("axpy", unified::blas::axpy)
-DECLARE_BLAS_I8_FULL_LEVEL1("scal", unified::blas::scal)
-DECLARE_BLAS_I8_FULL_SIGNED_LEVEL1("copy", unified::blas::copy)
-DECLARE_BLAS_I8_FULL_SIGNED_LEVEL1("dot", unified::blas::dot)
-DECLARE_BLAS_I8_FULL_LEVEL1("nrm2", unified::blas::nrm2)
-DECLARE_BLAS_I8_FULL_LEVEL1("asum", unified::blas::asum)
-DECLARE_BLAS_I8_FULL_GEMV("gemv", unified::blas::gemv, unified::blas::gemv_padded)
-DECLARE_BLAS_I8_FULL_GEMV("gemv_transpose", unified::blas::gemv_transpose, unified::blas::gemv_transpose_padded)
-DECLARE_BLAS_I8_FULL_GEMM("gemm", unified::blas::gemm, unified::blas::gemm_padded, unified::blas::Transpose::none,
-                          unified::blas::Transpose::none)
-DECLARE_BLAS_I8_FULL_GEMM("gemm_nt", unified::blas::gemm_nt, unified::blas::gemm_nt_padded, unified::blas::Transpose::none,
-                          unified::blas::Transpose::transpose)
-DECLARE_BLAS_I8_FULL_GEMM("gemm_tn", unified::blas::gemm_tn, unified::blas::gemm_tn_padded, unified::blas::Transpose::transpose,
-                          unified::blas::Transpose::none)
-DECLARE_BLAS_I8_FULL_GEMM("gemm_tt", unified::blas::gemm_tt, unified::blas::gemm_tt_padded, unified::blas::Transpose::transpose,
-                          unified::blas::Transpose::transpose)
-DECLARE_BLAS_I8_FULL_BATCHED_GEMM("gemm_strided_batched")
-
-#undef DECLARE_BLAS_I8_FULL_LEVEL1
-#undef DECLARE_BLAS_I8_FULL_SIGNED_LEVEL1
-#undef DECLARE_BLAS_I8_FULL_GEMV
-#undef DECLARE_BLAS_I8_FULL_GEMM
-#undef DECLARE_BLAS_I8_FULL_BATCHED_GEMM
+#define UNIFIED_BLAS(KIND, TYPE, MATRIX)                                                                                                   \
+  UNIFIED_BLAS_CASES("blas/" #TYPE "/" #MATRIX "/", "[unified][" #MATRIX "-matrix][blas][" #TYPE "]", KIND, unified::backend::Blas,        \
+                     unified::MATRIX::BlasSizes, unified::MATRIX::MatrixShapes)

@@ -100,7 +100,7 @@ class SASSInstructionModelSuite extends munit.FunSuite {
     val same = form("P2", "Opcode Predicate:Rd, PR:PR, Register:Ra, Register:Rb", "P2R")
     assertEquals(SASSInstructionModel.shapes(Vector(row, same)).head.forms.map(_.form), Vector("P", "P2"))
   }
-  test("condition-register bank forms preserve CC and the normalized P2R predicate-bank layout") {
+  test("condition-register bank forms preserve CC and the normalised P2R predicate-bank layout") {
     val read   = form("Imm_P2R", "Opcode Register:Rd, CCPR:Pr, Register:Ra, SImm(20):uImm", "P2R")
     val write  = form("Imm_R2P", "Opcode CCPR:Pr, Register:Ra, UImm(20):uImm", "R2P")
     val shapes = SASSInstructionModel.shapes(Vector(read, write))

@@ -39,33 +39,4 @@ private object DependencyGraph {
     }
     result.result().sortBy(_.head)
   }
-
-  def reachability(graph: Map[String, Set[String]]): Map[String, Int] = {
-    val groups     = components(graph)
-    val owner      = groups.zipWithIndex.flatMap((members, index) => members.map(_ -> index)).toMap
-    val successors = groups.indices.map { index =>
-      groups(index).flatMap(graph).map(owner).filter(_ != index).toSet
-    }.toVector
-    val remaining    = successors.map(_.size).toArray
-    val predecessors = Array.fill(groups.size)(mutable.ArrayBuffer.empty[Int])
-    for {
-      from <- successors.indices
-      to   <- successors(from)
-    } predecessors(to) += from
-    val reachable = Array.fill(groups.size)(mutable.BitSet.empty)
-    val ready     = mutable.Queue.from(groups.indices.filter(remaining(_) == 0))
-    while (ready.nonEmpty) {
-      val index = ready.dequeue()
-      for (parent <- predecessors(index)) {
-        reachable(parent) ++= reachable(index)
-        reachable(parent) += index
-        remaining(parent) -= 1
-        if (remaining(parent) == 0) ready.enqueue(parent)
-      }
-    }
-    groups.indices.flatMap { index =>
-      val count = groups(index).size - 1 + reachable(index).iterator.map(groups(_).size).sum
-      groups(index).map(_ -> count)
-    }.toMap
-  }
 }

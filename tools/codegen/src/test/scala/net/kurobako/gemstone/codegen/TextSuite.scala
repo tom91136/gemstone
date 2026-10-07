@@ -1,8 +1,8 @@
 package net.kurobako.gemstone.codegen
 
 class TextSuite extends munit.FunSuite {
-  test("text helpers tokenize fixed generator formats without regex") {
-    assertEquals(Text.normalizeWhitespace("  alpha\t beta\n"), "alpha beta")
+  test("text helpers tokenise fixed generator formats without regex") {
+    assertEquals(Text.normaliseWhitespace("  alpha\t beta\n"), "alpha beta")
     assertEquals(Text.stripLineComment("value // note"), "value")
     assertEquals(Text.stripLeadingSignGroup("{!}predicate"), "predicate")
     assertEquals(Text.splitWords("alpha, beta|gamma", Set(',', '|')), Vector("alpha", "beta", "gamma"))

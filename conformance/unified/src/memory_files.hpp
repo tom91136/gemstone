@@ -25,8 +25,7 @@ inline std::vector<char> image(const char *name) {
   auto select = [&]() -> std::vector<char> {
 #if defined(UNIFIED_API_CUDA)
     const char *code = std::getenv("CONFORMANCE_CUDA_CODE");
-    const bool sass = code && (std::string_view(code) == "sass" || std::string_view(code) == "cubin");
-    if (sass) {
+    if (code && std::string_view(code) == "sass") {
       if (std::string(name) == "mma884.ptx") return {mma884_sass_image.begin(), mma884_sass_image.end()};
       if (std::string(name) == "exchange.ptx") return {exchange_sass_image.begin(), exchange_sass_image.end()};
       if (std::string(name) == "atomic.ptx") return {atomic_sass_image.begin(), atomic_sass_image.end()};

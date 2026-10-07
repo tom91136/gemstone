@@ -2,17 +2,155 @@ package net.kurobako.gemstone
 
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.string.*
 
 object msgpack {
-  class Reader(
-      bytes: Array[Byte],
-      start: Int,
-      size: Int,
-      maximumTextBytes: Int = Int.MaxValue,
-      maximumBytes: Int = Int.MaxValue,
-      maximumElements: Int = Int.MaxValue
-  ) {
+  private val InitialCapacity = 256
+
+  object Limits {
+    val Unbounded: Limits = Limits(Int.MaxValue, Int.MaxValue, Int.MaxValue)
+  }
+
+  case class Limits(maximumElements: Int > 0, maximumBytes: Int > 0, maximumTextBytes: Int > 0)
+
+  /** Accumulates the first failure; later writes are ignored. */
+  class Writer(val limits: Limits) {
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    private var mutableBytes = Array.ofDim[Byte](math.min(InitialCapacity, limits.maximumBytes.raw))
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    private var length = 0
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    private var failure = Option.empty[String]
+
+    private def emit(value: Int): Unit = {
+      mutableBytes(length) = value.toByte
+      length += 1
+    }
+
+    private def reserve(additional: Int): Boolean =
+      if (failure.nonEmpty) false
+      else if (additional < 0 || additional > limits.maximumBytes.raw - length) {
+        reject(s"wire value exceeds the ${limits.maximumBytes}-byte limit")
+        false
+      } else {
+        val required = length + additional
+        if (required > mutableBytes.length) {
+          val doubled = math.min(limits.maximumBytes.raw.toLong, math.max(1L, mutableBytes.length.toLong * 2L)).toInt
+          mutableBytes = java.util.Arrays.copyOf(mutableBytes, math.max(required, doubled))
+        }
+        true
+      }
+
+    private def writeRawByte(value: Int): Unit =
+      if (reserve(1)) emit(value)
+
+    private def writeRawShort(value: Int): Unit =
+      if (reserve(2)) {
+        emit(value >>> 8)
+        emit(value)
+      }
+
+    private def writeRawInt(value: Int): Unit =
+      if (reserve(4)) {
+        emit(value >>> 24)
+        emit(value >>> 16)
+        emit(value >>> 8)
+        emit(value)
+      }
+
+    private def writeRawLong(value: Long): Unit = {
+      writeRawInt((value >>> 32).toInt)
+      writeRawInt(value.toInt)
+    }
+
+    private def writeRawBytes(value: Array[Byte]): Unit =
+      if (reserve(value.length)) {
+        Array.copy(value, 0, mutableBytes, length, value.length)
+        length += value.length
+      }
+
+    def writeNil(): Unit = writeRawByte(0xc0)
+
+    def writeBoolean(value: Boolean): Unit = writeRawByte(if (value) 0xc3 else 0xc2)
+
+    def writeInt(value: Int): Unit =
+      if (value >= 0 && value <= 0x7f) writeRawByte(value)
+      else if (value < 0 && value >= -32) writeRawByte(value & 0xff)
+      else if (value >= Byte.MinValue && value <= Byte.MaxValue) {
+        writeRawByte(0xd0)
+        writeRawByte(value)
+      } else if (value >= Short.MinValue && value <= Short.MaxValue) {
+        writeRawByte(0xd1)
+        writeRawShort(value)
+      } else {
+        writeRawByte(0xd2)
+        writeRawInt(value)
+      }
+
+    def writeLong(value: Long): Unit =
+      if (value >= Int.MinValue && value <= Int.MaxValue) writeInt(value.toInt)
+      else {
+        writeRawByte(0xd3)
+        writeRawLong(value)
+      }
+
+    def writeFloat(value: Float): Unit = {
+      writeRawByte(0xca)
+      writeRawInt(java.lang.Float.floatToRawIntBits(value))
+    }
+
+    def writeDouble(value: Double): Unit = {
+      writeRawByte(0xcb)
+      writeRawLong(java.lang.Double.doubleToRawLongBits(value))
+    }
+
+    private def writeSized(size: Int, marker16: Int, marker32: Int): Unit =
+      if (size <= 0xffff) {
+        writeRawByte(marker16)
+        writeRawShort(size)
+      } else {
+        writeRawByte(marker32)
+        writeRawInt(size)
+      }
+
+    private def writeSized8(size: Int, marker8: Int, marker16: Int, marker32: Int): Unit =
+      if (size <= 0xff) {
+        writeRawByte(marker8)
+        writeRawByte(size)
+      } else writeSized(size, marker16, marker32)
+
+    def writeArrayHeader(size: Int >= 0): Unit =
+      if (size.raw > limits.maximumElements.raw)
+        reject(s"collection exceeds the ${limits.maximumElements}-element limit")
+      else if (size.raw <= 15) writeRawByte(0x90 | size.raw)
+      else writeSized(size.raw, 0xdc, 0xdd)
+
+    def writeString(value: String): Unit = {
+      val bytes = value.getBytes(StandardCharsets.UTF_8)
+      if (bytes.length > limits.maximumTextBytes.raw)
+        reject(s"UTF-8 value exceeds the ${limits.maximumTextBytes}-byte text limit")
+      else {
+        if (bytes.length <= 31) writeRawByte(0xa0 | bytes.length) else writeSized8(bytes.length, 0xd9, 0xda, 0xdb)
+        writeRawBytes(bytes)
+      }
+    }
+
+    def writeBytes(value: Array[Byte]): Unit =
+      if (value.length > limits.maximumBytes.raw)
+        reject(s"byte collection exceeds the ${limits.maximumBytes}-byte limit")
+      else {
+        writeSized8(value.length, 0xc4, 0xc5, 0xc6)
+        writeRawBytes(value)
+      }
+
+    def reject(message: String): Unit = if (failure.isEmpty) failure = Some(message)
+
+    def result(): Either[String, Array[Byte]] =
+      failure.toLeft(java.util.Arrays.copyOf(mutableBytes, length))
+  }
+
+  class Reader(bytes: Array[Byte], start: Int, size: Int, limits: Limits = Limits.Unbounded) {
     require(ByteRange.contains(bytes.length, start.toLong, size.toLong), "invalid MessagePack input range")
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var mutableCursor = start
@@ -102,8 +240,8 @@ object msgpack {
     }
 
     private def readStringBody(size: Int, strict: Boolean): Either[String, String] =
-      if (size < 0 || size > maximumTextBytes)
-        Left(s"UTF-8 value exceeds the $maximumTextBytes-byte text limit: $size")
+      if (size < 0 || size > limits.maximumTextBytes.raw)
+        Left(s"UTF-8 value exceeds the ${limits.maximumTextBytes}-byte text limit: $size")
       else take(size).flatMap(offset =>
         if (strict) decodeUtf8(bytes, offset, size).left.map(_ => "MessagePack string is not valid UTF-8")
         else Right(String(bytes, offset, size, StandardCharsets.UTF_8))
@@ -117,24 +255,26 @@ object msgpack {
     }
 
     private def readBytesBody(size: Int): Either[String, Array[Byte]] =
-      if (size < 0 || size > maximumBytes)
-        Left(s"binary value exceeds the $maximumBytes-byte limit: $size")
+      if (size < 0 || size > limits.maximumBytes.raw)
+        Left(s"binary value exceeds the ${limits.maximumBytes}-byte limit: $size")
       else take(size).map(offset => java.util.Arrays.copyOfRange(bytes, offset, offset + size))
 
-    def readArrayHeader(): Either[String, Int] = containerHeader(array = true)
-    def readMapHeader(): Either[String, Int]   = containerHeader(array = false)
+    def readArrayHeader(): Either[String, Int >= 0] = containerHeader(array = true)
+    def readMapHeader(): Either[String, Int >= 0]   = containerHeader(array = false)
 
-    private def containerHeader(array: Boolean): Either[String, Int] = readRawByte().flatMap {
+    private def containerHeader(array: Boolean): Either[String, Int >= 0] = readRawByte().flatMap {
       case tag if (tag & 0xf0) == (if (array) 0x90 else 0x80) => Right(tag & 0x0f)
       case tag if tag == (if (array) 0xdc else 0xde)          => readRawShort()
       case tag if tag == (if (array) 0xdd else 0xdf)          => readRawInt()
       case other => Left(f"expected ${if (array) "array" else "map"}, found 0x$other%02x")
-    }.flatMap(count =>
-      Either.cond(count >= 0 && count <= maximumElements, count, "MessagePack container exceeds supported range")
-    )
+    }.flatMap { count =>
+      if (count > limits.maximumElements.raw)
+        Left(s"collection exceeds the ${limits.maximumElements}-element limit: $count")
+      else count.refine[Int >= 0].left.map(_ => s"MessagePack container size is out of range: $count")
+    }
 
     /** Read a nonnegative Int using unsigned MessagePack encodings. */
-    def readUnsignedInt(): Either[String, Int] = readRawByte().flatMap {
+    def readUnsignedInt(): Either[String, Int >= 0] = readRawByte().flatMap {
       case tag if tag <= 0x7f => Right(tag.toLong)
       case 0xcc               => readRawByte().map(_.toLong)
       case 0xcd               => readRawShort().map(_.toLong)
@@ -142,7 +282,9 @@ object msgpack {
       case 0xcf               => readRawLong()
       case other              => Left(f"expected unsigned integer, found 0x$other%02x")
     }.flatMap(value =>
-      Either.cond(value >= 0 && value <= Int.MaxValue, value.toInt, "MessagePack integer exceeds supported range")
+      value.refine[Long in 0L ~ 2147483647L].map(_.toIntExact.widen[Int >= 0]).left.map(_ =>
+        "MessagePack integer exceeds supported range"
+      )
     )
 
     def skip(maximumDepth: Int): Either[String, Unit] = {
@@ -152,10 +294,11 @@ object msgpack {
       def value(depth: Int): Either[String, Unit] =
         if (depth > maximumDepth) Left("MessagePack nesting is too deep")
         else if ((peek() & 0xf0) == 0x90 || peek() == 0xdc || peek() == 0xdd)
-          readArrayHeader().flatMap(count => children(count, depth + 1))
+          readArrayHeader().flatMap(count => children(count.raw, depth + 1))
         else if ((peek() & 0xf0) == 0x80 || peek() == 0xde || peek() == 0xdf)
           readMapHeader().flatMap { count =>
-            if (count > Int.MaxValue / 2) Left("MessagePack map is too large") else children(count * 2, depth + 1)
+            if (count.raw > Int.MaxValue / 2) Left("MessagePack map is too large")
+            else children(count.raw * 2, depth + 1)
           }
         else readRawByte().flatMap { tag =>
           val length = tag match {

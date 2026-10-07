@@ -1,7 +1,5 @@
 package net.kurobako.gemstone.server
 
-import java.io.DataInputStream
-import java.io.DataOutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CyclicBarrier
@@ -11,28 +9,15 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.*
-import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
 import net.kurobako.gemstone.testing.*
-import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 /** Socket-level isolation coverage shared by both server implementations. */
 class SharedServerSuite extends munit.FunSuite {
 
-  private def control[A](
-      endpoint: Endpoint,
-      operation: Int,
-      client: Option[ClientId] = None
-  )(read: DataInputStream => A): A =
-    Using.resource(SocketTransport.connect(endpoint, 10000)) { socket =>
-      val output = DataOutputStream(socket.output)
-      Control.writeRequest(output, operation, client)
-      val bytes = Control.readResponse(DataInputStream(socket.input), operation)
-      read(DataInputStream(java.io.ByteArrayInputStream(bytes)))
-    }
-  private def register(client: connections.Client, size: Long > 0): AllocationId =
-    client.call(Operation.RegisterAllocation(AllocationKind.Shared, size)).fold(
+  private def register(client: connections.Client, size: Long in 1L ~ 2147483647L): AllocationId =
+    client.call(Operation.RegisterAllocation(size)).fold(
       error => fail(error.message),
       value => value
     )
@@ -41,12 +26,8 @@ class SharedServerSuite extends munit.FunSuite {
   test("shared clients cannot access each other's allocations or identify as each other") {
     Using.Manager { use =>
       val server = use(Server.start(Server.Settings(parallelism = 2)))
-      val a      = control(server.endpoint, protocol.Control.RegisterClient)(input =>
-        ClientId.either(input.readLong()).fold(message => fail(message), value => value)
-      )
-      val b = control(server.endpoint, protocol.Control.RegisterClient)(input =>
-        ClientId.either(input.readLong()).fold(message => fail(message), value => value)
-      )
+      val a      = Control.register(server.endpoint)
+      val b      = Control.register(server.endpoint)
       val first  = use(connections.Client(server.endpoint, a))
       val second = use(connections.Client(server.endpoint, b))
       assert(a != b)
@@ -67,7 +48,7 @@ class SharedServerSuite extends munit.FunSuite {
         0L,
         4
       )).isRight)
-      assertEquals(control(server.endpoint, protocol.Control.ReleaseClient, Some(a))(_.readInt()), 0)
+      Control.release(server.endpoint, a)
       assertEquals(
         first.call(Operation.ReadAllocation(firstAllocation, 0L, 4)),
         Left(ExecutionFailure.NotFound("client session was closed"))
@@ -87,9 +68,7 @@ class SharedServerSuite extends munit.FunSuite {
         val clients = Vector.fill(count.raw)(
           use(connections.Client(
             server.endpoint,
-            control(server.endpoint, protocol.Control.RegisterClient)(input =>
-              ClientId.either(input.readLong()).fold(message => fail(message), value => value)
-            )
+            Control.register(server.endpoint)
           ))
         )
         val executor = use(threads.Pool(count.raw)).executor
@@ -99,7 +78,7 @@ class SharedServerSuite extends munit.FunSuite {
         clients.zipWithIndex.foreach { case (client, index) =>
           results += CompletableFuture.supplyAsync(
             () =>
-              client.call(Operation.RegisterAllocation(AllocationKind.Shared, 4L)) match {
+              client.call(Operation.RegisterAllocation(4L)) match {
                 case Left(error)       => Left(error)
                 case Right(allocation) => Right(Vector.tabulate(3) { round =>
                     val expected = index * 97 + round
@@ -133,10 +112,8 @@ class SharedServerSuite extends munit.FunSuite {
 
   test("process incarnation separates reused PIDs while same-process connections share state") {
     scala.util.Using.Manager { use =>
-      val server = use(Server.start(Server.Settings(parallelism = 2)))
-      val client = control(server.endpoint, protocol.Control.RegisterClient)(input =>
-        ClientId.either(input.readLong()).fold(message => fail(message), value => value)
-      )
+      val server     = use(Server.start(Server.Settings(parallelism = 2)))
+      val client     = Control.register(server.endpoint)
       val first      = use(connections.Client(server.endpoint, client, 42L, 17L))
       val same       = use(connections.Client(server.endpoint, client, 42L, 17L))
       val reused     = use(connections.Client(server.endpoint, client, 42L, 18L))

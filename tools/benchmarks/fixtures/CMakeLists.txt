@@ -25,23 +25,22 @@ function(add_benchmark_fixture name toolchain architecture source filename)
     set(artifact_directory "${build}/output")
     set(arguments -DCONFORMANCE_ARTIFACT_KIND=fixture -DCONFORMANCE_FIXTURE=vector-copy)
     set(copy COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-      "${artifact_directory}/vector-copy.hsaco"
-      "${BENCHMARK_FIXTURE_OUTPUT_DIRECTORY}/${filename}")
+      "${artifact_directory}/vector-copy.hsaco" "${BENCHMARK_FIXTURE_OUTPUT_DIRECTORY}/${filename}")
   else()
     set(arguments -DCONFORMANCE_ARTIFACT_KIND=command
       "-DCONFORMANCE_COMMAND_SOURCE=${REPOSITORY_DIRECTORY}"
       "-DCONFORMANCE_COMMAND_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/Generate.cmake"
       "-DCONFORMANCE_COMMAND_ARGUMENTS=-DFIXTURE=${name}\;-DARCHITECTURE=${architecture}"
-      "-DCONFORMANCE_COMMAND_INPUTS=tools/benchmarks/src/main/resources/${source}"
+      "-DCONFORMANCE_COMMAND_INPUTS=tools/benchmarks/fixtures/${source}"
       "-DCONFORMANCE_COMMAND_OUTPUTS=${filename}")
     set(copy)
   endif()
   add_custom_target(${name}
-    COMMAND "${CMAKE_COMMAND}" -S "${CONFORMANCE_ARTIFACT_PROJECT}" -B "${build}" -G Ninja
+    COMMAND "${CMAKE_COMMAND}" -S "${CONFORMANCE_ARTIFACT_PROJECT}" -B "${build}" -G Ninja --log-level=WARNING
       ${arguments} "-DCONFORMANCE_BACKEND=${toolchain}" "-DCONFORMANCE_ARCHITECTURE=${architecture}"
       "-DCONFORMANCE_ARTIFACT_DIRECTORY=${artifact_directory}"
       "-DCONTAINER_EXECUTABLE=${CONTAINER_EXECUTABLE}" "-DROCM_VERSION=${ROCM_VERSION}"
-    COMMAND "${CMAKE_COMMAND}" --build "${build}" --target artifacts --parallel 1
+    COMMAND "${CMAKE_COMMAND}" --build "${build}" --target artifacts --parallel 1 -- --quiet
     ${copy}
     BYPRODUCTS "${BENCHMARK_FIXTURE_OUTPUT_DIRECTORY}/${filename}"
     JOB_POOL container_build VERBATIM)

@@ -1,21 +1,10 @@
-# Generic OCI container command construction for conformance and benchmark builds.
 include_guard(GLOBAL)
 
-# conformance_container_command(<out>
-#   EXECUTABLE <container-exe> IMAGE <image>
-#   [SOURCE <dir>] [SOURCE_TARGET <container-dir>] [ARTIFACTS <dir>]
-#   [DEPENDENCIES <dir>] [WORK <dir>]
-#   [NETWORK <mode>] [CPU_SHARES <n>] [IDENTITY <flags>]
-#   COMMAND <argv...>)
-# Produces the argv list for `run --rm` with the stable mount layout used by
-# the artifact scripts: source at /source/conformance by default, output at
-# /output, the dependency cache at /conformance-deps, and the persistent build
-# tree at /work.
-function(conformance_container_command output)
+function(container_command output)
   cmake_parse_arguments(ARG "" "EXECUTABLE;IMAGE;SOURCE;SOURCE_TARGET;ARTIFACTS;DEPENDENCIES;WORK;NETWORK;CPU_SHARES;IDENTITY"
     "COMMAND" ${ARGN})
   if(NOT ARG_EXECUTABLE OR NOT ARG_IMAGE)
-    message(FATAL_ERROR "conformance_container_command requires EXECUTABLE and IMAGE")
+    message(FATAL_ERROR "container_command requires EXECUTABLE and IMAGE")
   endif()
   set(command "${ARG_EXECUTABLE}" run --rm --security-opt label=disable)
   if(ARG_NETWORK)
@@ -47,5 +36,69 @@ function(conformance_container_command output)
   endif()
   list(APPEND command "${ARG_IMAGE}")
   list(APPEND command ${ARG_COMMAND})
-  set(${output} "${CMAKE_COMMAND};-P;${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../artifacts/Jobserver.cmake;--;container;${command}" PARENT_SCOPE)
+  set(${output} "${CMAKE_COMMAND};-P;${CMAKE_CURRENT_FUNCTION_LIST_DIR}/Jobserver.cmake;--;container;${command}" PARENT_SCOPE)
+endfunction()
+
+function(container_identity output executable)
+  execute_process(COMMAND id -u OUTPUT_VARIABLE uid OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+  execute_process(COMMAND id -g OUTPUT_VARIABLE gid OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+  if(executable MATCHES "(^|/)podman$")
+    set(${output} "--userns keep-id --user ${uid}:${gid}" PARENT_SCOPE)
+  else()
+    set(${output} "--user ${uid}:${gid}" PARENT_SCOPE)
+  endif()
+endfunction()
+
+function(container_image output_tag output_stamp)
+  cmake_parse_arguments(PARSE_ARGV 2 ARG "" "EXECUTABLE;REPOSITORY;FILE;CONTEXT;STAGE;JOB_POOL"
+    "BUILD_ARGUMENTS;INPUTS")
+  set(definition "${ARG_STAGE};${ARG_BUILD_ARGUMENTS}")
+  foreach(input IN ITEMS "${ARG_FILE}" ${ARG_INPUTS})
+    file(SHA256 "${input}" digest)
+    string(APPEND definition ";${digest}")
+  endforeach()
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ARG_FILE}" ${ARG_INPUTS})
+  string(SHA256 digest "${definition}")
+  string(SUBSTRING "${digest}" 0 16 digest)
+  set(tag "${ARG_REPOSITORY}:${digest}")
+  string(REGEX REPLACE "[^A-Za-z0-9_.-]" "_" stamp "${tag}")
+  file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/images")
+  set(stamp "${CMAKE_BINARY_DIR}/images/${stamp}")
+  set(stage)
+  if(ARG_STAGE)
+    set(stage --target "${ARG_STAGE}")
+  endif()
+  set(pool)
+  if(ARG_JOB_POOL)
+    set(pool JOB_POOL "${ARG_JOB_POOL}")
+  endif()
+  get_property(images GLOBAL PROPERTY CONTAINER_IMAGES)
+  if(NOT tag IN_LIST images)
+    add_custom_command(
+      OUTPUT "${stamp}"
+      COMMAND sh -c [=[exe=$1 tag=$2; shift 2; "$exe" image inspect "$tag" >/dev/null 2>&1 || exec "$exe" build --tag "$tag" "$@"]=]
+        sh "${ARG_EXECUTABLE}" "${tag}" --file "${ARG_FILE}" ${stage} ${ARG_BUILD_ARGUMENTS} "${ARG_CONTEXT}"
+      COMMAND "${CMAKE_COMMAND}" -E touch "${stamp}"
+      COMMENT "Preparing container image ${tag}"
+      ${pool}
+      VERBATIM)
+    set_property(GLOBAL APPEND PROPERTY CONTAINER_IMAGES "${tag}")
+  endif()
+  set(${output_tag} "${tag}" PARENT_SCOPE)
+  set(${output_stamp} "${stamp}" PARENT_SCOPE)
+endfunction()
+
+function(container_prune_target target)
+  cmake_parse_arguments(PARSE_ARGV 1 ARG "" "EXECUTABLE" "")
+  get_property(images GLOBAL PROPERTY CONTAINER_IMAGES)
+  set(commands)
+  foreach(image IN LISTS images)
+    string(REGEX REPLACE ":[^:/]+$" "" repository "${image}")
+    list(APPEND commands COMMAND sh -c
+      [=["$0" images --format '{{.Repository}}:{{.Tag}}' --filter "reference=$1" | grep -F "$1:" | grep -vxF "$2" | xargs -r "$0" rmi]=]
+      "${ARG_EXECUTABLE}" "${repository}" "${image}")
+  endforeach()
+  add_custom_target("${target}" ${commands}
+    COMMAND "${ARG_EXECUTABLE}" image prune --force
+    COMMENT "Removing superseded container images" VERBATIM)
 endfunction()

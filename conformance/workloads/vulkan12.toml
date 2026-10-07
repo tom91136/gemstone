@@ -1,3 +1,0 @@
-# Complete pinned official inventory, including optional/newer feature cases.
-# Use the vulkan12.linux profile to exercise the Vulkan 1.2 implementation.
-vulkan_mustpass = "mustpass/vk-default.txt"

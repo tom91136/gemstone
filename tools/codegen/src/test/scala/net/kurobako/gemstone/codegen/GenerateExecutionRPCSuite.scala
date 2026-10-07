@@ -28,7 +28,7 @@ class GenerateExecutionRPCSuite extends munit.FunSuite {
       ).contains(Emission.literal(ExecutionRPC.Schema.canonical)))
       val source = files("gemstone_execution_rpc.cpp").replaceAll("\\s+", " ")
       assert(source.contains(
-        "Result<std::vector<uint8_t>> Client::call(const ReadAllocation &request) { return implementation_->call<std::vector<uint8_t>>(operation::ReadAllocation, request); }"
+        "Result<std::vector<uint8_t>> Client::call(const ReadAllocation &request) { return implementation->call<std::vector<uint8_t>>(operation::ReadAllocation, request); }"
       ))
       GenerateExecutionRPC.main(Array(output.toString))
       assertEquals(snapshot(output), files)
@@ -39,7 +39,9 @@ class GenerateExecutionRPCSuite extends munit.FunSuite {
     inDirectory { output =>
       GenerateExecutionRPC.main(Array(output.toString))
       val header = snapshot(output)("gemstone_execution_rpc.hpp").replaceAll("\\s+", " ")
-      assert(header.contains("enum class AllocationKind : uint8_t { Device = 0, Managed = 1, Shared = 2, Host = 3 };"))
+      assert(header.contains(
+        "enum class ProgramEncoding : uint8_t { PTXText = 0, CUDACubin = 1, HSACodeObject = 2, SPIRVOpenCLCompute = 3, SPIRVVulkanCompute = 4, SPIRVVulkanGraphics = 5 };"
+      ))
       assert(header.contains(
         "using CompletionStatus = std::variant<CompletionStatusPending, CompletionStatusSucceeded, CompletionStatusFailed>;"
       ))

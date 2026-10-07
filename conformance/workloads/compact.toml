@@ -1,8 +1,8 @@
-# Fast cross-backend iteration: compact unified matrices, bounded CTS and small miniapps.
+# Fast cross-backend iteration: compact unified matrices, bounded CTS and all miniapps.
 # Vulkan has one regression example per semantic family; full adds parameter variants.
-# Defer measured long OpenCL copies/shuffles, SYCL copies/wide types and fluid miniapps
-# to full. Upstream case sizes and pass/fail criteria remain unchanged.
-specs = ['~"cts/opencl/basic/imagedim_*"~"range_api"~[full-matrix]~[regression]~"cts/opencl/vectors/vec_align_struct*"~"cts/opencl/vectors/vec_align_packed_struct*"~"cts/opencl/integer_ops/quick_*"~"cts/opencl/integer_ops/char_*"~"cts/opencl/integer_ops/uchar_*"~"cts/opencl/integer_ops/short_*"~"cts/opencl/integer_ops/ushort_*"~"cts/opencl/integer_ops/int_*"~"cts/opencl/integer_ops/uint_*"~"cts/opencl/integer_ops/long_*"~"cts/opencl/integer_ops/ulong_*"~"cts/opencl/half/vstore*"~"cts/opencl/basic/async_*"~"cts/opencl/basic/prefetch"~"cts/opencl/basic/astype"~"cts/opencl/basic/hiloeo"~"cts/opencl/basic/explicit_s2v"~"cts/opencl/relationals/shuffle_*"~"Tests the API for sycl::handler::copy*"~"group_async_work_group_copy_core"~"*WideTypes*"~"miniapps/cloverleaf/*"~"miniapps/tealeaf/*"']
+# Defer measured long OpenCL copies/shuffles and SYCL copies/wide types to full.
+# Upstream case sizes and pass/fail criteria remain unchanged.
+specs = ['~"cts/opencl/basic/imagedim_*"~"range_api"~[full-matrix]~[regression]~"cts/opencl/vectors/vec_align_struct*"~"cts/opencl/vectors/vec_align_packed_struct*"~"cts/opencl/integer_ops/quick_*"~"cts/opencl/integer_ops/char_*"~"cts/opencl/integer_ops/uchar_*"~"cts/opencl/integer_ops/short_*"~"cts/opencl/integer_ops/ushort_*"~"cts/opencl/integer_ops/int_*"~"cts/opencl/integer_ops/uint_*"~"cts/opencl/integer_ops/long_*"~"cts/opencl/integer_ops/ulong_*"~"cts/opencl/half/vstore*"~"cts/opencl/basic/async_*"~"cts/opencl/basic/prefetch"~"cts/opencl/basic/astype"~"cts/opencl/basic/hiloeo"~"cts/opencl/basic/explicit_s2v"~"cts/opencl/relationals/shuffle_*"~"Tests the API for sycl::handler::copy*"~"group_async_work_group_copy_core"~"*WideTypes*"']
 exclude_programs = [
   "opencl_cts_buffers",
   "opencl_cts_c11_atomics",
@@ -35,16 +35,6 @@ exclude_programs = [
   "sycl_cts_platform",
   "sycl_cts_pointers",
   "sycl_cts_property",
-  "babelstream_omp_target",
-  "babelstream_kokkos",
-  "minibude_omp_target",
-  "minibude_kokkos",
-  "cloverleaf_omp_target",
-  "cloverleaf_kokkos",
-  "cloverleaf_sycl_acc",
-  "tealeaf_omp_target",
-  "tealeaf_kokkos",
-  "tealeaf_sycl_acc",
 ]
 levelzero_cases = [
   # Shared/system memory transfers across page boundaries (bounded kernel sizes).
@@ -114,7 +104,7 @@ levelzero_cases = [
   "zeHostSystemMemoryDeviceTests.GivenHostSystemAllocationWhenAccessingMemoryOnDeviceOnImmediateCmdListThenCorrectDataIsRead",
   "zeMemFreeExtTests.AllocateDeviceMemoryAndThenFreeWithBlockingFreePolicy",
   "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.GivenSharedSystemMemoryAllocationsAsKernelArgumentsWhenKernelExecutesThenValuesAreCorrect/svm_to_usm_non_atomic_regular_128B",
-  # These exercise SPIR-V compilation, specialization and kernel arguments.
+  # These exercise SPIR-V compilation, specialisation and kernel arguments.
   "zeKernelCreateTests.GivenValidFunctionWhenSettingGroupSizeThenReturnSuccessful",
   "zeKernelCreateTests.GivenValidFunctionWhenGettingPropertiesThenReturnSuccessfulAndPropertiesAreValid",
   "zeKernelGetNameTests.*",

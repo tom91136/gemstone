@@ -6,7 +6,7 @@ function(conformance_verify_relocation artifact support)
   set(roots "${artifact}" "${support}")
   list(REMOVE_DUPLICATES roots)
   foreach(root IN LISTS roots)
-    if(EXISTS "${root}/conformance${CMAKE_EXECUTABLE_SUFFIX}")
+    if(EXISTS "${root}/conformance")
       message(FATAL_ERROR "backend artifact must not contain the root driver: ${root}")
     endif()
   endforeach()
@@ -30,52 +30,33 @@ function(conformance_verify_relocation artifact support)
       endif()
     endforeach()
 
-    if(UNIX AND NOT APPLE)
-      find_program(readelf readelf REQUIRED)
-      file(GLOB_RECURSE dynamic_objects LIST_DIRECTORIES FALSE
-        "${root}/*" "${root}/lib/*.so*")
-      foreach(path IN LISTS dynamic_objects)
-        execute_process(COMMAND "${readelf}" -d "${path}"
-          RESULT_VARIABLE status OUTPUT_VARIABLE dynamic_metadata ERROR_QUIET)
-        if(NOT status EQUAL 0)
-          continue()
+    find_program(readelf readelf REQUIRED)
+    file(GLOB_RECURSE dynamic_objects LIST_DIRECTORIES FALSE "${root}/*" "${root}/lib/*.so*")
+    foreach(path IN LISTS dynamic_objects)
+      execute_process(COMMAND "${readelf}" -d "${path}"
+        RESULT_VARIABLE status OUTPUT_VARIABLE dynamic_metadata ERROR_QUIET)
+      if(NOT status EQUAL 0)
+        continue()
+      endif()
+      foreach(forbidden IN LISTS forbidden_paths)
+        if(dynamic_metadata MATCHES "${forbidden}")
+          message(FATAL_ERROR "artifact loader metadata retains ${forbidden} in ${path}")
         endif()
-        foreach(forbidden IN LISTS forbidden_paths)
-          if(dynamic_metadata MATCHES "${forbidden}")
-            message(FATAL_ERROR "artifact loader metadata retains ${forbidden} in ${path}")
-          endif()
-        endforeach()
       endforeach()
-    elseif(APPLE)
-      find_program(otool otool REQUIRED)
-      file(GLOB_RECURSE dynamic_objects LIST_DIRECTORIES FALSE
-        "${root}/conformance*" "${root}/*.dylib" "${root}/lib/*.dylib")
-      foreach(path IN LISTS dynamic_objects)
-        execute_process(COMMAND "${otool}" -L "${path}"
-          RESULT_VARIABLE status OUTPUT_VARIABLE dynamic_metadata ERROR_QUIET)
-        if(NOT status EQUAL 0)
-          continue()
-        endif()
-        foreach(forbidden IN LISTS forbidden_paths)
-          if(dynamic_metadata MATCHES "${forbidden}")
-            message(FATAL_ERROR "artifact loader metadata retains ${forbidden} in ${path}")
-          endif()
-        endforeach()
-      endforeach()
-    endif()
+    endforeach()
   endforeach()
 
-  if(WIN32 AND DEFINED ENV{TEMP} AND NOT "$ENV{TEMP}" STREQUAL "")
-    set(temporary_root "$ENV{TEMP}")
-  elseif(DEFINED ENV{TMPDIR} AND NOT "$ENV{TMPDIR}" STREQUAL "")
+  if(DEFINED ENV{TMPDIR} AND NOT "$ENV{TMPDIR}" STREQUAL "")
     set(temporary_root "$ENV{TMPDIR}")
   else()
     set(temporary_root "/tmp")
   endif()
   string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef relocation_id)
   set(relocated_root "${temporary_root}/gpu-conformance-relocation-${relocation_id}")
-  set(relocated_artifact "${relocated_root}/architecture")
+  cmake_path(GET support PARENT_PATH support_parent)
   cmake_path(GET support FILENAME support_name)
+  file(RELATIVE_PATH artifact_relative "${support_parent}" "${artifact}")
+  set(relocated_artifact "${relocated_root}/${artifact_relative}")
   set(relocated_support "${relocated_root}/${support_name}")
   file(MAKE_DIRECTORY "${relocated_artifact}")
   file(COPY "${artifact}/" DESTINATION "${relocated_artifact}")
@@ -86,24 +67,15 @@ function(conformance_verify_relocation artifact support)
     file(COPY "${support}/" DESTINATION "${relocated_support}")
   endif()
 
-  set(runtime_environment
-    "CONFORMANCE_SUPPORT_ROOT=${relocated_support}")
-  if(WIN32)
-    list(APPEND runtime_environment
-      "PATH=${relocated_artifact};${relocated_support}/lib;$ENV{PATH}")
-  elseif(APPLE)
-    list(APPEND runtime_environment "DYLD_LIBRARY_PATH=${relocated_support}/lib")
-  else()
-    set(loader_paths "${relocated_support}/lib")
-    # CUDA's libcuda is supplied by the host driver and must never be bundled.
-    # The toolchain image exposes its driver-compatible loader solely so
-    # inventory-only probes can start during relocation verification.
-    if(IS_DIRECTORY "/usr/local/cuda/compat")
-      list(APPEND loader_paths "/usr/local/cuda/compat")
-    endif()
-    list(JOIN loader_paths ":" loader_path)
-    list(APPEND runtime_environment "LD_LIBRARY_PATH=${loader_path}")
+  set(loader_paths "${relocated_support}/lib")
+  # CUDA's libcuda is supplied by the host driver and must never be bundled.
+  # The toolchain image exposes its driver-compatible loader solely so
+  # inventory-only probes can start during relocation verification.
+  if(IS_DIRECTORY "/usr/local/cuda/compat")
+    list(APPEND loader_paths "/usr/local/cuda/compat")
   endif()
+  list(JOIN loader_paths ":" loader_path)
+  set(runtime_environment "CONFORMANCE_SUPPORT_ROOT=${relocated_support}" "LD_LIBRARY_PATH=${loader_path}")
   if(NOT EXISTS "${relocated_artifact}/test-programs.txt")
     file(REMOVE_RECURSE "${relocated_root}")
     message(FATAL_ERROR "relocated artifact contains no test program manifest")
@@ -113,17 +85,17 @@ function(conformance_verify_relocation artifact support)
     string(REGEX REPLACE "\t.*$" "" program "${entry}")
     if(entry MATCHES "\tdeqp$")
       execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${runtime_environment}
-        "${relocated_artifact}/${program}${CMAKE_EXECUTABLE_SUFFIX}" --deqp-runmode=stdout-caselist --deqp-shadercache=disable
+        "${relocated_artifact}/${program}" --deqp-runmode=stdout-caselist --deqp-shadercache=disable
         --deqp-case=dEQP-VK.api.smoke.* "--deqp-archive-dir=${relocated_support}/data/vulkan"
         WORKING_DIRECTORY "${relocated_artifact}"
         RESULT_VARIABLE status OUTPUT_VARIABLE probe_output ERROR_VARIABLE probe_error)
     elseif(program MATCHES "^levelzero_cts_")
       execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${runtime_environment}
-        "${relocated_artifact}/${program}${CMAKE_EXECUTABLE_SUFFIX}" --gtest_list_tests
+        "${relocated_artifact}/${program}" --gtest_list_tests
         RESULT_VARIABLE status OUTPUT_VARIABLE probe_output ERROR_VARIABLE probe_error)
     else()
       execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${runtime_environment}
-        "${relocated_artifact}/${program}${CMAKE_EXECUTABLE_SUFFIX}" --list-tests --reporter json
+        "${relocated_artifact}/${program}" --list-tests --reporter json
         RESULT_VARIABLE status OUTPUT_VARIABLE probe_output ERROR_VARIABLE probe_error)
     endif()
     if(NOT status EQUAL 0)

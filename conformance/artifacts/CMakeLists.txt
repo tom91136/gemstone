@@ -13,15 +13,14 @@ if(NOT ROCM_VERSION)
   message(FATAL_ERROR "ROCM_VERSION is required; pass -DROCM_VERSION=<major.minor.patch>")
 endif()
 get_filename_component(CONFORMANCE_SOURCE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
-set(DEFAULT_ARTIFACT_DIRECTORY "${CMAKE_BINARY_DIR}/output")
-set(CONFORMANCE_ARTIFACT_DIRECTORY "${DEFAULT_ARTIFACT_DIRECTORY}" CACHE PATH "Conformance artifact output directory")
+set(CONFORMANCE_ARTIFACT_DIRECTORY "${CMAKE_BINARY_DIR}/output" CACHE PATH "Conformance artifact output directory")
 
 if(NOT ROCM_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
   message(FATAL_ERROR "Invalid ROCm version: ${ROCM_VERSION}")
 endif()
+include("${CMAKE_CURRENT_LIST_DIR}/Toolchains.cmake")
+container_identity(identity "${CONTAINER_EXECUTABLE}")
 
-# Public artifact entry points. Consumers invoke this project rather than
-# importing its CMake helpers or reaching into suite source directories.
 set(CONFORMANCE_ARTIFACT_KIND suite CACHE STRING "Artifact kind: suite, fixture, or command")
 set_property(CACHE CONFORMANCE_ARTIFACT_KIND PROPERTY STRINGS suite fixture command)
 if(NOT CONFORMANCE_ARTIFACT_KIND MATCHES "^(suite|fixture|command)$")
@@ -31,16 +30,7 @@ if(NOT CONFORMANCE_ARTIFACT_KIND STREQUAL "suite")
   set(CONFORMANCE_BACKEND "" CACHE STRING "Compiler toolchain for the artifact")
   set(CONFORMANCE_ARCHITECTURE "" CACHE STRING "Target architecture, when required")
   set_property(GLOBAL PROPERTY JOB_POOLS "container_build=1")
-  include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ToolchainImages.cmake")
-  include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ContainerBuild.cmake")
   file(MAKE_DIRECTORY "${CONFORMANCE_ARTIFACT_DIRECTORY}")
-  execute_process(COMMAND id -u OUTPUT_VARIABLE uid OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-  execute_process(COMMAND id -g OUTPUT_VARIABLE gid OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-  if(CONTAINER_EXECUTABLE MATCHES "(^|/)podman$")
-    set(identity "--userns keep-id --user ${uid}:${gid}")
-  else()
-    set(identity "--user ${uid}:${gid}")
-  endif()
 
   if(CONFORMANCE_ARTIFACT_KIND STREQUAL "fixture")
     set(CONFORMANCE_FIXTURE "" CACHE STRING "Fixture family: memory or vector-copy")
@@ -86,7 +76,7 @@ if(NOT CONFORMANCE_ARTIFACT_KIND STREQUAL "suite")
     set(commands)
     foreach(step IN ITEMS compile translate)
       if(${step})
-        conformance_container_command(command
+        container_command(command
           EXECUTABLE "${CONTAINER_EXECUTABLE}" IMAGE "${image}"
           SOURCE "${CONFORMANCE_SOURCE_DIRECTORY}" ARTIFACTS "${CONFORMANCE_ARTIFACT_DIRECTORY}"
           NETWORK none IDENTITY "${identity}" COMMAND ${${step}})
@@ -100,7 +90,7 @@ if(NOT CONFORMANCE_ARTIFACT_KIND STREQUAL "suite")
     add_custom_command(OUTPUT "${CONFORMANCE_ARTIFACT_DIRECTORY}/${filename}"
       ${commands} BYPRODUCTS ${byproducts}
       DEPENDS "${source}" "${toolchain_stamp}" "${CMAKE_CURRENT_LIST_FILE}"
-        "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ToolchainImages.cmake"
+        "${CMAKE_CURRENT_LIST_DIR}/Toolchains.cmake"
         "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ContainerBuild.cmake"
       JOB_POOL container_build VERBATIM)
     add_custom_target(artifacts ALL DEPENDS "${CONFORMANCE_ARTIFACT_DIRECTORY}/${filename}")
@@ -128,7 +118,7 @@ if(NOT CONFORMANCE_ARTIFACT_KIND STREQUAL "suite")
     foreach(input IN LISTS CONFORMANCE_COMMAND_INPUTS)
       list(APPEND inputs "${CONFORMANCE_COMMAND_SOURCE}/${input}")
     endforeach()
-    conformance_container_command(command
+    container_command(command
       EXECUTABLE "${CONTAINER_EXECUTABLE}" IMAGE "${image}"
       SOURCE "${CONFORMANCE_COMMAND_SOURCE}" SOURCE_TARGET /source
       ARTIFACTS "${CONFORMANCE_ARTIFACT_DIRECTORY}" WORK "${CMAKE_BINARY_DIR}"
@@ -156,12 +146,10 @@ file(GLOB directories /opt/intel/oneapi/compiler/*/lib /opt/intel/oneapi/umf/*/l
 file(GLOB plugins /opt/intel/oneapi/compiler/*/lib/libur_adapter*.so*
   /opt/intel/oneapi/compiler/*/lib/libur_loader.so*)
 bundle_runtime_dependencies(DESTINATION "${destination}"
-  EXECUTABLE_PATTERNS ${executables} SEARCH_DIRECTORIES ${directories} PLUGINS ${plugins}
-  EXCLUDE_REGEXES "ld-linux.*" "libc\\.so.*" "libm\\.so.*" "libpthread\\.so.*"
-    "libdl\\.so.*" "librt\\.so.*" "libgcc_s\\.so.*" "libstdc\\+\\+\\.so.*")
+  EXECUTABLE_PATTERNS ${executables} SEARCH_DIRECTORIES ${directories} PLUGINS ${plugins})
 file(TOUCH "${destination}/.complete")
 ]=])
-      conformance_container_command(bundle
+      container_command(bundle
         EXECUTABLE "${CONTAINER_EXECUTABLE}" IMAGE "${image}"
         ARTIFACTS "${CONFORMANCE_ARTIFACT_DIRECTORY}" WORK "${CMAKE_BINARY_DIR}"
         NETWORK none IDENTITY "${identity}" COMMAND cmake -P /work/bundle.cmake)
@@ -180,69 +168,52 @@ file(TOUCH "${destination}/.complete")
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/Targets.cmake")
-include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ToolchainImages.cmake")
 
 file(GLOB_RECURSE artifact_inputs CONFIGURE_DEPENDS
   RELATIVE "${CONFORMANCE_SOURCE_DIRECTORY}" "${CONFORMANCE_SOURCE_DIRECTORY}/*")
 list(FILTER artifact_inputs EXCLUDE REGEX "(^|/)(artifacts|build|profiles|target|tests|workloads)/")
 list(FILTER artifact_inputs EXCLUDE REGEX "(^|/)README\\.md$")
 set(artifact_scripts
-  "${CMAKE_CURRENT_LIST_DIR}/Jobserver.cmake"
-  "${CMAKE_CURRENT_LIST_DIR}/jobserver.sh"
   "${CMAKE_CURRENT_LIST_DIR}/Assemble.cmake"
+  "${CMAKE_CURRENT_LIST_DIR}/Toolchains.cmake"
   "${CMAKE_CURRENT_LIST_DIR}/Verify.cmake")
 
-# Bound active artifact pipelines; the shared jobserver bounds build commands.
-set(CONFORMANCE_ARTIFACT_PARALLELISM 1 CACHE STRING
+cmake_host_system_information(RESULT conformance_cores QUERY NUMBER_OF_LOGICAL_CORES)
+math(EXPR conformance_parallelism "${conformance_cores} / 8")
+if(conformance_parallelism LESS 1)
+  set(conformance_parallelism 1)
+elseif(conformance_parallelism GREATER 4)
+  set(conformance_parallelism 4)
+endif()
+set(CONFORMANCE_ARTIFACT_PARALLELISM ${conformance_parallelism} CACHE STRING
   "Number of artifact container builds to run concurrently")
 set_property(GLOBAL PROPERTY JOB_POOLS "container_build=${CONFORMANCE_ARTIFACT_PARALLELISM}")
 set(artifact_outputs)
 
-# Shared, toolchain-independent source cache for every fetched dependency.
 set(CONFORMANCE_DEPENDENCY_DIRECTORY "${CMAKE_BINARY_DIR}/deps" CACHE PATH
   "Shared source cache for conformance dependencies")
 option(CONFORMANCE_OFFLINE "Require cached dependencies and disable network fetches" OFF)
-# Persistent per-artifact build trees; empty disables reuse.
 set(CONFORMANCE_WORK_DIRECTORY "${CMAKE_BINARY_DIR}/work" CACHE PATH
   "Persistent per-artifact build directory")
-option(CONFORMANCE_CLEAN_WORK "Discard persistent artifact build trees first" OFF)
+option(CONFORMANCE_KEEP_WORK "Keep artifact build trees for incremental rebuilds" ON)
 option(SYCL_CTS_ENABLE_FULL_CONFORMANCE "Build the complete upstream SYCL CTS type and operation matrices" OFF)
 
 include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/DependencyCache.cmake")
-include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/Dependencies.cmake")
-include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ContainerBuild.cmake")
-
-set(conformance_dependency_stamp "${CONFORMANCE_DEPENDENCY_DIRECTORY}/.conformance-populated")
+set(dependency_manifest "${CONFORMANCE_SOURCE_DIRECTORY}/dependencies.cmake")
+set(conformance_dependency_stamp "${CONFORMANCE_DEPENDENCY_DIRECTORY}/.populated")
 if(CONFORMANCE_OFFLINE)
-  conformance_dependency_cache_ready("${CONFORMANCE_DEPENDENCY_SOURCES}" "${CONFORMANCE_DEPENDENCY_DIRECTORY}"
-    conformance_dependencies_ready)
-  if(NOT conformance_dependencies_ready)
-    message(FATAL_ERROR
-      "CONFORMANCE_OFFLINE is set but the dependency cache is incomplete: ${CONFORMANCE_DEPENDENCY_DIRECTORY}")
-  endif()
+  set(DEPENDENCY_CACHE "${CONFORMANCE_DEPENDENCY_DIRECTORY}")
+  set(DEPENDENCY_CACHE_MODE verify)
+  include("${dependency_manifest}")
 else()
   add_custom_command(
     OUTPUT "${conformance_dependency_stamp}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CONFORMANCE_DEPENDENCY_DIRECTORY}"
-    COMMAND "${CMAKE_COMMAND}" "-DCONFORMANCE_DEPENDENCY_CACHE=${CONFORMANCE_DEPENDENCY_DIRECTORY}"
-      -P "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/PopulateDependencies.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-DMANIFEST=${dependency_manifest}" "-DDEPENDENCY_CACHE=${CONFORMANCE_DEPENDENCY_DIRECTORY}"
+      -P "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/DependencyCache.cmake"
     COMMAND "${CMAKE_COMMAND}" -E touch "${conformance_dependency_stamp}"
-    DEPENDS "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/Dependencies.cmake"
-      "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/PopulateDependencies.cmake"
+    DEPENDS "${dependency_manifest}" "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/DependencyCache.cmake"
     COMMENT "Populating conformance dependency cache"
     VERBATIM)
-  add_custom_target(conformance-dependencies DEPENDS "${conformance_dependency_stamp}")
-endif()
-if(CONFORMANCE_CLEAN_WORK AND EXISTS "${CONFORMANCE_WORK_DIRECTORY}")
-  file(REMOVE_RECURSE "${CONFORMANCE_WORK_DIRECTORY}")
-endif()
-
-execute_process(COMMAND id -u OUTPUT_VARIABLE container_uid OUTPUT_STRIP_TRAILING_WHITESPACE)
-execute_process(COMMAND id -g OUTPUT_VARIABLE container_gid OUTPUT_STRIP_TRAILING_WHITESPACE)
-if(CONTAINER_EXECUTABLE MATCHES "(^|/)podman$")
-  set(container_identity "--userns keep-id --user ${container_uid}:${container_gid}")
-else()
-  set(container_identity "--user ${container_uid}:${container_gid}")
 endif()
 
 function(artifact_arguments backend architecture compiler output_mode result)
@@ -250,17 +221,12 @@ function(artifact_arguments backend architecture compiler output_mode result)
     "-DBACKEND=${backend}"
     "-DCONFORMANCE_COMPILER=${compiler}"
     "-DCONFORMANCE_OUTPUT=${output_mode}"
-    "-DROCM_VERSION=${ROCM_VERSION}")
+    "-DROCM_VERSION=${ROCM_VERSION}"
+    "-DCONFORMANCE_KEEP_WORK=${CONFORMANCE_KEEP_WORK}")
   if(backend STREQUAL "cuda")
-    if(compiler STREQUAL "gcc")
-      conformance_cuda_toolchain(sm_70 unused_image unused_package support)
-    else()
-      conformance_cuda_toolchain("${architecture}" unused_image unused_package support)
-    endif()
     list(APPEND arguments
       "-DCUDA_ARCHITECTURES=${architecture}"
-      "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}"
-      "-DCONFORMANCE_SUPPORT_KEY=${support}")
+      "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}")
   elseif(backend STREQUAL "openacc")
     list(APPEND arguments "-DCUDA_ARCHITECTURES=${architecture}"
       "-DCONFORMANCE_CUDA_CUBIN_ONLY=${CONFORMANCE_CUDA_CUBIN_ONLY}")
@@ -299,6 +265,7 @@ function(add_artifact backend architecture compiler output)
   artifact_arguments("${backend}" "${architecture}" "${compiler}" "${output}" arguments)
 
   list(APPEND arguments
+    "-DCONFORMANCE_SUPPORT_KEY=${support}"
     "-DCONFORMANCE_DEPENDENCY_CACHE=/conformance-deps"
     "-DCONFORMANCE_OFFLINE=ON"
     "-DCONFORMANCE_WORK_DIRECTORY=/work")
@@ -332,7 +299,7 @@ function(add_artifact backend architecture compiler output)
   endif()
   set(outputs "${metadata}")
   if(architecture)
-    set(support_executable "${CONFORMANCE_ARTIFACT_DIRECTORY}/${base}/${support}/support.stamp")
+    set(support_executable "${CONFORMANCE_ARTIFACT_DIRECTORY}/${backend}/${support}/support.stamp")
     if(output STREQUAL "both")
       list(APPEND outputs "${support_executable}")
     else()
@@ -340,7 +307,7 @@ function(add_artifact backend architecture compiler output)
     endif()
   endif()
 
-  conformance_container_command(container_command
+  container_command(container_command
     EXECUTABLE "${CONTAINER_EXECUTABLE}"
     IMAGE "${image}"
     SOURCE "${CONFORMANCE_SOURCE_DIRECTORY}"
@@ -349,7 +316,7 @@ function(add_artifact backend architecture compiler output)
     WORK "${work_directory}"
     NETWORK none
     CPU_SHARES 1024
-    IDENTITY "${container_identity}"
+    IDENTITY "${identity}"
     COMMAND cmake ${arguments} -P /source/conformance/artifacts/Assemble.cmake)
 
   add_custom_command(
@@ -363,8 +330,7 @@ function(add_artifact backend architecture compiler output)
   add_custom_target("${name}" DEPENDS "${metadata}")
   if(architecture AND output STREQUAL "both")
     string(REPLACE "." "-" support_target "${support}")
-    string(REPLACE "/" "-" support_backend "${base}")
-    add_custom_target("${support_backend}-${support_target}" DEPENDS "${support_executable}")
+    add_custom_target("${backend}-${support_target}" DEPENDS "${support_executable}")
   endif()
   list(APPEND artifact_outputs ${outputs})
   set(artifact_outputs "${artifact_outputs}" PARENT_SCOPE)
@@ -385,7 +351,7 @@ foreach(route IN LISTS conformance_routes)
   endif()
   if(architecture)
     conformance_toolchain("${backend}" "${architecture}" unused_image unused_stamp support "${compiler}")
-    set(support_key "${backend}/${compiler}/${support}")
+    set(support_key "${backend}/${support}")
     if(support_key IN_LIST built_supports)
       set(output overlay)
     else()
@@ -399,3 +365,4 @@ foreach(route IN LISTS conformance_routes)
 endforeach()
 
 add_custom_target(artifacts ALL DEPENDS ${artifact_outputs})
+container_prune_target(prune-images EXECUTABLE "${CONTAINER_EXECUTABLE}")

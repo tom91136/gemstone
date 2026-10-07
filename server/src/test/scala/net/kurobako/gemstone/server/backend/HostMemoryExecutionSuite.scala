@@ -7,11 +7,11 @@ import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
-import net.kurobako.gemstone.isa.spirv.v1_6.{ISA as SPIRVISA, SPIRV as _, *}
-import net.kurobako.gemstone.isa.spirv.v1_6 as spv
+import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 import scala.util.Using
@@ -20,7 +20,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
   private def encoded(value: Long, size: Int in 0 ~ 8): Vec[Byte] =
     LittleEndian.toVec(value, size)
   private def scalar(value: Long, size: Int in 0 ~ 8 = 8): KernelTask.Argument =
-    KernelTask.Argument.Scalar(encoded(value, size))
+    KernelTask.Argument.Scalar(encoded(value, size).unsafe)
   private def bytes(address: Long, value: Long, size: Int in 0 ~ 8): Map[Long, Byte] =
     encoded(value, size).zipWithIndex.map((byte, index) => (address + index.toLong) -> byte).toMap
 
@@ -32,11 +32,11 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
   }
 
   private def run(source: String, lanes: Int, arguments: Vec[KernelTask.Argument], host: Map[Long, Byte]) =
-    runImage(PTX.encoding, Vec.from(source.getBytes(StandardCharsets.UTF_8)), lanes, arguments, host)
+    runImage(ptx.PTXBackend.encoding, Vec.from(source.getBytes(StandardCharsets.UTF_8)), lanes, arguments, host)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def runImage(
-      encoding: String,
+      encoding: ProgramEncoding,
       image: Vec[Byte],
       lanes: Int,
       arguments: Vec[KernelTask.Argument],
@@ -54,10 +54,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       val allocations = mutable.Map.empty[Long, AllocationId]
       fragments.foreach { (address, contents) =>
         val allocation =
-          service.registerAllocation(
-            contents.size.toLong.unsafe[Long > 0],
-            AllocationKind.Shared
-          ).toOption.get
+          service.registerAllocation(contents.size.unsafe[Int > 0]).toOption.get
         assertEquals(service.registerAllocationAddress(allocation, GuestAddress(address), hostBacked), Right(()))
         assertEquals(service.write(allocation, 0L, contents), Right(()))
         allocations.update(address, allocation)
@@ -206,7 +203,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         ld.global.u64 %v, [%p]; st.global.u64 [%q], %v; ret;
       }"""
     val (reads, writes, batches) = runImage(
-      PTX.encoding,
+      ptx.PTXBackend.encoding,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec(scalar(0x1000), scalar(0x8000)),
@@ -229,7 +226,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }"""
     val syncs                    = mutable.ArrayBuffer.empty[HostMemorySync]
     val (reads, writes, batches) = runImage(
-      PTX.encoding,
+      ptx.PTXBackend.encoding,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec.empty,
@@ -245,7 +242,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     assertEquals(batches, 0)
   }
 
-  test("PTX device atomics linearize at native storage across lanes") {
+  test("PTX device atomics linearise at native storage across lanes") {
     val source                   = header + """
       .visible .entry probe(.param .u64 counter) {
         .reg .u64 %p; .reg .u32 %old;
@@ -263,7 +260,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
   } test(s"host atomic $width-bit hints avoid redundant RPCs and retry native changes, changed=$changed") {
     val initial     = if (width.raw == 32) 0xfffffffeL else Long.MinValue + 7L
     val replacement = if (width.raw == 32) 20L else 0x678900000014L
-    val size        = width.scalarByteWidth
+    val size        = width.toFloatByteWidth
     val source      = header + s"""
       .visible .entry probe(.param .u64 counter, .param .u64 output) {
         .reg .u64 %p, %q; .reg .u$width %first, %second;
@@ -277,7 +274,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     val requests       = mutable.ArrayBuffer.empty[HostMemoryAtomic]
     val replaced       = java.util.concurrent.atomic.AtomicBoolean(false)
     val (_, writes, _) = runImage(
-      PTX.encoding,
+      ptx.PTXBackend.encoding,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec(scalar(0x1000), scalar(0x8000)),
@@ -312,15 +309,15 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         ret;
       }"""
       val (_, writes, _) = runImage(
-        PTX.encoding,
+        ptx.PTXBackend.encoding,
         Vec.from(source.getBytes(StandardCharsets.UTF_8)),
         1,
         Vec(scalar(0x1000), scalar(0x8000)),
-        bytes(0x1000, 41, width.scalarByteWidth),
+        bytes(0x1000, 41, width.toFloatByteWidth),
         List(0x1000L -> encoded(0, 8), 0x8000L -> encoded(0, 8)),
         hostBacked = true
       )
-      assertEquals(writes, bytes(0x1000, 42, width.scalarByteWidth) ++ bytes(0x8000, 42, width.scalarByteWidth))
+      assertEquals(writes, bytes(0x1000, 42, width.toFloatByteWidth) ++ bytes(0x8000, 42, width.toFloatByteWidth))
     }
 
   for {
@@ -347,24 +344,24 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         ld.global.u$width %v, [%payload]; st.global.u$width [%output], %v; ret;
       }"""
     val (_, writes, _) = runImage(
-      PTX.encoding,
+      ptx.PTXBackend.encoding,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec.empty,
-      bytes(0x1000, 7, width.scalarByteWidth) ++ bytes(0x3000, 0, 4),
-      List(0x2000L -> encoded(1, width.scalarByteWidth)),
+      bytes(0x1000, 7, width.toFloatByteWidth) ++ bytes(0x3000, 0, 4),
+      List(0x2000L -> encoded(1, width.toFloatByteWidth)),
       beforeRead = (range, native) =>
         if (range.address.raw == 0x3000) {
           if (release) {
             assertEquals(
-              (0 until width.scalarByteWidth.raw).map(i => native(0x1000L + i)),
-              encoded(73, width.scalarByteWidth)
+              (0 until width.toFloatByteWidth.raw).map(i => native(0x1000L + i)),
+              encoded(73, width.toFloatByteWidth)
             )
             Map.empty
-          } else bytes(0x1000, 73, width.scalarByteWidth)
+          } else bytes(0x1000, 73, width.toFloatByteWidth)
         } else Map.empty
     )
-    assertEquals(writes.filter((address, _) => address >= 0x8000), bytes(0x8000, 73, width.scalarByteWidth))
+    assertEquals(writes.filter((address, _) => address >= 0x8000), bytes(0x8000, 73, width.toFloatByteWidth))
   }
 
   test("registered host memory fetches exact bytes, without reading poisoned allocation holes") {
@@ -375,7 +372,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         ld.global.u32 %v, [%p+12]; st.global.u32 [%q+4], %v; ret;
       }"""
     val (reads, writes, _) = runImage(
-      PTX.encoding,
+      ptx.PTXBackend.encoding,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec(scalar(0x1000), scalar(0x8000)),
@@ -397,7 +394,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }"""
     val syncs          = mutable.ArrayBuffer.empty[HostMemorySync]
     val (_, writes, _) = runImage(
-      PTX.encoding,
+      ptx.PTXBackend.encoding,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec.empty,
@@ -429,7 +426,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     val reads          = mutable.ArrayBuffer.empty[HostMemoryRange]
     val syncs          = mutable.ArrayBuffer.empty[HostMemorySync]
     val (_, writes, _) = runImage(
-      PTX.encoding,
+      ptx.PTXBackend.encoding,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec.empty,
@@ -460,7 +457,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }"""
     val reads          = mutable.ArrayBuffer.empty[HostMemoryRange]
     val (_, writes, _) = runImage(
-      PTX.encoding,
+      ptx.PTXBackend.encoding,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec(scalar(0x100001000L), scalar(0x100002000L)),
@@ -493,7 +490,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }"""
     val syncs              = mutable.ArrayBuffer.empty[HostMemorySync]
     val (reads, writes, _) = runImage(
-      PTX.encoding,
+      ptx.PTXBackend.encoding,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec(scalar(0x100001000L), scalar(0x100002000L)),
@@ -517,8 +514,9 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }"""
     Using.resource(ExecutionSession(Backends.default().programs, executionContext = Async)) { service =>
       assertEquals(service.enableHostMemory(), Right(()))
-      val program = service.load(PTX.encoding, Vec.from(source.getBytes(StandardCharsets.UTF_8))).toOption.get
-      val task    = KernelTask.validated(
+      val program =
+        service.load(ptx.PTXBackend.encoding, Vec.from(source.getBytes(StandardCharsets.UTF_8))).toOption.get
+      val task = KernelTask.validated(
         "probe",
         LaunchGeometry.Dimensions.One,
         LaunchGeometry.Dimensions.One,
@@ -544,7 +542,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         st.global.u32 [%q], %result; ret;
       }"""
     val (_, writes, _) = runImage(
-      PTX.encoding,
+      ptx.PTXBackend.encoding,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec(scalar(0x8000)),
@@ -553,13 +551,9 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     assertEquals(writes, bytes(0x8000, 73, 4))
   }
 
-  private def operand(kind: OperandKind, words: Int*): Operand =
-    Operand(kind, Vec.from(words.map(Word(_))).unsafe)
-  private def id(value: Int): Operand = operand(OperandKind.IdRef, value)
-
   // This oracle checks the interpreter's publication/cache boundary, independently of
   // atomics (whose stronger implementation could otherwise hide an ignored fence).
-  private def checkFence(encoding: String, image: Vec[Byte], writeBefore: Boolean): Unit = {
+  private def checkFence(encoding: ProgramEncoding, image: Vec[Byte], writeBefore: Boolean): Unit = {
     val fences             = mutable.ArrayBuffer.empty[Long]
     val (reads, writes, _) = runImage(
       encoding,
@@ -584,7 +578,11 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     fence       <- List("membar.sys", "fence.sc.sys", "fence.acq_rel.sys", "fence.acquire.sys", "fence.release.sys")
     writeBefore <- List(false, true)
   } test(s"PTX $fence refreshes host data, pending writes=$writeBefore") {
-    val source = header + s"""
+    // fence.acquire and fence.release need PTX ISA 8.6 and sm_90
+    val target = if (fence.startsWith("fence.acquire") || fence.startsWith("fence.release"))
+      ".version 8.6\n.target sm_90\n.address_size 64\n"
+    else header
+    val source = target + s"""
         .visible .entry probe(.param .u64 input, .param .u64 output) {
           .reg .u64 %p, %q; .reg .u32 %v;
           ld.param.u64 %p, [input]; ld.param.u64 %q, [output];
@@ -592,107 +590,66 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
           $fence;
           ld.global.u32 %v, [%p]; st.global.u32 [%q+4], %v; ret;
         }"""
-    checkFence(PTX.encoding, Vec.from(source.getBytes(StandardCharsets.UTF_8)), writeBefore)
+    checkFence(ptx.PTXBackend.encoding, Vec.from(source.getBytes(StandardCharsets.UTF_8)), writeBefore)
   }
 
   for (writeBefore <- List(false, true))
     test(s"SPIR-V memory barrier refreshes host data, pending writes=$writeBefore") {
-      import Instruction.*
-      val module = Module(
-        Header(SPIRVISA.version, Word(0), Word(40), Word(0)),
-        Vec[Instruction](
-          Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
-          MemoryModel(
-            operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
-            operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
-          ),
-          TypeVoid(id(1)),
-          TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
-          TypePointer(id(7), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
-          TypeFunction(id(9), id(1), Vec(id(7), id(7))),
-          Constant(id(2), id(10), operand(OperandKind.LiteralContextDependentNumber, 0)), // CrossDevice
-          Constant(
-            id(2),
-            id(11),
-            operand(
-              OperandKind.LiteralContextDependentNumber,
-              spv.MemorySemantics.CrossWorkgroupMemory | spv.MemorySemantics.AcquireRelease
-            )
-          ),
-          Constant(id(2), id(12), operand(OperandKind.LiteralContextDependentNumber, 1)),
-          EntryPoint(
-            operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
-            id(20),
-            operand(OperandKind.LiteralString, 0x626f7270, 0x65),
-            Vec.empty
-          ),
-          Function(id(1), id(20), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
-          FunctionParameter(id(7), id(21)),
-          FunctionParameter(id(7), id(22)),
-          Label(id(24)),
-          Load(id(2), id(25), id(21), None),
-          if (writeBefore) Store(id(22), id(25), None) else CopyObject(id(2), id(28), id(25)),
-          MemoryBarrier(id(10), id(11)),
-          Load(id(2), id(26), id(21), None),
-          PtrAccessChain(id(7), id(27), id(22), id(12), Vec.empty),
-          Store(id(27), id(26), None),
-          Return(),
-          FunctionEnd()
-        ),
-        Endianness.Little
-      )
-      checkFence(
-        SPIRV(Validation.Environment.OpenCLCompute).encoding,
-        SPIRVISA.encode(module).toOption.get,
-        writeBefore
-      )
+      val image = spirvAssembly.image(s"""
+        ${spirvAssembly.openCL}
+        OpEntryPoint Kernel %main "probe"
+        %void = OpTypeVoid
+        %uint = OpTypeInt 32 0
+        %uint_ptr = OpTypePointer CrossWorkgroup %uint
+        %fn = OpTypeFunction %void %uint_ptr %uint_ptr
+        %cross_device = OpConstant %uint 0
+        %acquire_release_cross_workgroup = OpConstant %uint 0x208
+        %one = OpConstant %uint 1
+        %main = OpFunction %void None %fn
+        %input = OpFunctionParameter %uint_ptr
+        %output = OpFunctionParameter %uint_ptr
+        %entry = OpLabel
+        %before = OpLoad %uint %input
+        ${if (writeBefore) "OpStore %output %before" else ""}
+        OpMemoryBarrier %cross_device %acquire_release_cross_workgroup
+        %after = OpLoad %uint %input
+        %second = OpPtrAccessChain %uint_ptr %output %one
+        OpStore %second %after
+        OpReturn
+        OpFunctionEnd
+      """)
+      checkFence(ProgramEncoding.SPIRVOpenCLCompute, image, writeBefore)
     }
 
   for {
     reload    <- List(false, true)
     relocated <- List(false, true)
-  } test(s"SPIR-V synchronized host pointer replacement stays authoritative, reload=$reload relocated=$relocated") {
-    import Instruction.*
-    val body: Vec[Instruction] = if (reload) Vec(
-      Load(id(7), id(26), id(21), None),
-      Load(id(2), id(27), id(26), None),
-      Store(id(23), id(27), None)
-    )
-    else Vec.empty
-    val module = Module(
-      Header(SPIRVISA.version, Word(0), Word(40), Word(0)),
-      Vec[Instruction](
-        Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
-        MemoryModel(
-          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
-          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
-        ),
-        TypeVoid(id(1)),
-        TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
-        TypePointer(id(7), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
-        TypePointer(id(8), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(7)),
-        TypeFunction(id(9), id(1), Vec(id(8), id(7), id(7))),
-        Constant(id(2), id(10), operand(OperandKind.LiteralContextDependentNumber, 0)),
-        Constant(id(2), id(11), operand(OperandKind.LiteralContextDependentNumber, 0x208)),
-        EntryPoint(
-          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
-          id(20),
-          operand(OperandKind.LiteralString, 0x626f7270, 0x65),
-          Vec.empty
-        ),
-        Function(id(1), id(20), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
-        FunctionParameter(id(8), id(21)),
-        FunctionParameter(id(7), id(22)),
-        FunctionParameter(id(7), id(23)),
-        Label(id(24)),
-        Store(id(21), id(22), None),
-        MemoryBarrier(id(10), id(11))
-      ) ++ body ++ Vec[Instruction](Return(), FunctionEnd()),
-      Endianness.Little
-    )
+  } test(s"SPIR-V synchronised host pointer replacement stays authoritative, reload=$reload relocated=$relocated") {
+    val reloading = "%reloaded = OpLoad %uint_ptr %slot\n%value = OpLoad %uint %reloaded\nOpStore %output %value"
+    val image     = spirvAssembly.image(s"""
+      ${spirvAssembly.openCL}
+      OpEntryPoint Kernel %main "probe"
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %uint_ptr = OpTypePointer CrossWorkgroup %uint
+      %uint_ptr_ptr = OpTypePointer CrossWorkgroup %uint_ptr
+      %fn = OpTypeFunction %void %uint_ptr_ptr %uint_ptr %uint_ptr
+      %cross_device = OpConstant %uint 0
+      %acquire_release_cross_workgroup = OpConstant %uint 0x208
+      %main = OpFunction %void None %fn
+      %slot = OpFunctionParameter %uint_ptr_ptr
+      %replacement = OpFunctionParameter %uint_ptr
+      %output = OpFunctionParameter %uint_ptr
+      %entry = OpLabel
+      OpStore %slot %replacement
+      OpMemoryBarrier %cross_device %acquire_release_cross_workgroup
+      ${if (reload) reloading else ""}
+      OpReturn
+      OpFunctionEnd
+    """)
     val (_, writes, _) = runImage(
-      SPIRV(Validation.Environment.OpenCLCompute).encoding,
-      SPIRVISA.encode(module).toOption.get,
+      ProgramEncoding.SPIRVOpenCLCompute,
+      image,
       1,
       Vec(
         KernelTask.Argument.Memory(AllocationId(1), 8L),
@@ -718,7 +675,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         assertEquals(
           values,
           Vec.empty[KernelTask.PointerRelocation],
-          "native pointer stores must not be replayed after host synchronization"
+          "native pointer stores must not be replayed after host synchronisation"
         )
     )
     if (reload) assertEquals(writes.filter((address, _) => address >= 0x8000), bytes(0x8000, 29, 4))
@@ -726,48 +683,34 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
 
   for (registered <- List(false, true))
     test(s"SPIR-V ByVal aggregate preserves native pointer bytes without relocation, registered=$registered") {
-      import Instruction.*
-      val module = Module(
-        Header(SPIRVISA.version, Word(0), Word(40), Word(0)),
-        Vec[Instruction](
-          Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
-          MemoryModel(
-            operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
-            operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
-          ),
-          TypeVoid(id(1)),
-          TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
-          TypeInt(id(3), operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
-          TypePointer(id(7), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
-          TypeStruct(id(4), Vec(id(3), id(7))),
-          TypePointer(id(6), operand(OperandKind.StorageClass, spv.StorageClass.Function), id(4)),
-          TypePointer(id(8), operand(OperandKind.StorageClass, spv.StorageClass.Function), id(7)),
-          TypeFunction(id(9), id(1), Vec(id(6))),
-          Constant(id(2), id(10), operand(OperandKind.LiteralContextDependentNumber, 1)),
-          Constant(id(2), id(12), operand(OperandKind.LiteralContextDependentNumber, 97)),
-          Decorate(id(21), operand(OperandKind.Decoration, spv.Decoration.FuncParamAttr, 2)), // FuncParamAttr ByVal
-          EntryPoint(
-            operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
-            id(20),
-            operand(OperandKind.LiteralString, 0x626f7270, 0x65),
-            Vec.empty
-          ),
-          Function(id(1), id(20), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
-          FunctionParameter(id(6), id(21)),
-          Label(id(24)),
-          AccessChain(id(8), id(25), id(21), Vec(id(10))),
-          Load(id(7), id(26), id(25), None),
-          Store(id(26), id(12), None),
-          Return(),
-          FunctionEnd()
-        ),
-        Endianness.Little
-      )
+      val image = spirvAssembly.image(s"""
+        ${spirvAssembly.openCL}
+        OpEntryPoint Kernel %main "probe"
+        OpDecorate %aggregate FuncParamAttr ByVal
+        %void = OpTypeVoid
+        %uint = OpTypeInt 32 0
+        %ulong = OpTypeInt 64 0
+        %uint_ptr = OpTypePointer CrossWorkgroup %uint
+        %pair = OpTypeStruct %ulong %uint_ptr
+        %pair_ptr = OpTypePointer Function %pair
+        %field_ptr = OpTypePointer Function %uint_ptr
+        %fn = OpTypeFunction %void %pair_ptr
+        %one = OpConstant %uint 1
+        %value = OpConstant %uint 97
+        %main = OpFunction %void None %fn
+        %aggregate = OpFunctionParameter %pair_ptr
+        %entry = OpLabel
+        %field = OpAccessChain %field_ptr %aggregate %one
+        %target = OpLoad %uint_ptr %field
+        OpStore %target %value
+        OpReturn
+        OpFunctionEnd
+      """)
       val (_, writes, _) = runImage(
-        SPIRV(Validation.Environment.OpenCLCompute).encoding,
-        SPIRVISA.encode(module).toOption.get,
+        ProgramEncoding.SPIRVOpenCLCompute,
+        image,
         1,
-        Vec(KernelTask.Argument.Scalar(encoded(123, 8) ++ encoded(0x4008, 8))),
+        Vec(KernelTask.Argument.Scalar((encoded(123, 8) ++ encoded(0x4008, 8)).refine[NonEmpty[Vec[Byte]]].value)),
         Map.empty,
         fragments = if (registered) List(0x4000L -> Vec.fill(16)(0.toByte)) else Nil,
         hostBacked = registered
@@ -779,47 +722,35 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     structure <- List(false, true)
     offset    <- List(0L, 8L)
   } test(s"SPIR-V typed external pointer argument reads native bytes, structure=$structure offset=$offset") {
-    import Instruction.*
-    val argumentType = if (structure) 6 else 8
-    val module       = Module(
-      Header(SPIRVISA.version, Word(0), Word(40), Word(0)),
-      Vec[Instruction](
-        Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
-        MemoryModel(
-          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
-          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
-        ),
-        TypeVoid(id(1)),
-        TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
-        TypePointer(id(7), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
-        TypePointer(id(8), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(7)),
-        TypeStruct(id(4), Vec(id(7))),
-        TypePointer(id(6), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(4)),
-        TypeFunction(id(9), id(1), Vec(id(argumentType))),
-        Constant(id(2), id(10), operand(OperandKind.LiteralContextDependentNumber, 0)),
-        Constant(id(2), id(12), operand(OperandKind.LiteralContextDependentNumber, 97)),
-        EntryPoint(
-          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
-          id(20),
-          operand(OperandKind.LiteralString, 0x626f7270, 0x65),
-          Vec.empty
-        ),
-        Function(id(1), id(20), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
-        FunctionParameter(id(argumentType), id(21)),
-        Label(id(24)),
-        if (structure) AccessChain(id(8), id(25), id(21), Vec(id(10))) else CopyObject(id(8), id(25), id(21)),
-        Load(id(7), id(26), id(25), None),
-        Store(id(26), id(12), None),
-        Return(),
-        FunctionEnd()
-      ),
-      Endianness.Little
-    )
+    val argument = if (structure) "%holder_ptr" else "%uint_ptr_ptr"
+    val slot     =
+      if (structure) "OpAccessChain %uint_ptr_ptr %argument %zero" else "OpCopyObject %uint_ptr_ptr %argument"
+    val image = spirvAssembly.image(s"""
+      ${spirvAssembly.openCL}
+      OpEntryPoint Kernel %main "probe"
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %uint_ptr = OpTypePointer CrossWorkgroup %uint
+      %uint_ptr_ptr = OpTypePointer CrossWorkgroup %uint_ptr
+      %holder = OpTypeStruct %uint_ptr
+      %holder_ptr = OpTypePointer CrossWorkgroup %holder
+      %fn = OpTypeFunction %void $argument
+      %zero = OpConstant %uint 0
+      %value = OpConstant %uint 97
+      %main = OpFunction %void None %fn
+      %argument = OpFunctionParameter $argument
+      %entry = OpLabel
+      %slot = $slot
+      %target = OpLoad %uint_ptr %slot
+      OpStore %target %value
+      OpReturn
+      OpFunctionEnd
+    """)
     val (reads, writes, _) = runImage(
-      SPIRV(Validation.Environment.OpenCLCompute).encoding,
-      SPIRVISA.encode(module).toOption.get,
+      ProgramEncoding.SPIRVOpenCLCompute,
+      image,
       1,
-      Vec(KernelTask.Argument.Memory(AllocationId(1), offset.unsafe[Long >= 0])),
+      Vec(KernelTask.Argument.Memory(AllocationId(1), offset.refine[Long >= 0].value)),
       bytes(0x1000 + offset, 0x8000, 8),
       List(0x1000L -> Vec.fill(24)(0.toByte)),
       hostBacked = true
@@ -830,55 +761,39 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
   }
 
   for (stride <- List(1, 3)) test(s"SPIR-V suspends active invocations and batches stride $stride") {
-    import Instruction.*
-    val module = Module(
-      Header(SPIRVISA.version, Word(0), Word(48), Word(0)),
-      Vec[Instruction](
-        Capability(operand(OperandKind.Capability, spv.Capability.Kernel)),
-        MemoryModel(
-          operand(OperandKind.AddressingModel, spv.AddressingModel.Physical64),
-          operand(OperandKind.MemoryModel, spv.MemoryModel.OpenCL)
-        ),
-        TypeVoid(id(1)),
-        TypeInt(id(2), operand(OperandKind.LiteralInteger, 32), operand(OperandKind.LiteralInteger, 0)),
-        TypeInt(id(3), operand(OperandKind.LiteralInteger, 64), operand(OperandKind.LiteralInteger, 0)),
-        TypeVector(id(5), id(3), operand(OperandKind.LiteralInteger, 3)),
-        TypePointer(id(6), operand(OperandKind.StorageClass, spv.StorageClass.Input), id(5)),
-        TypePointer(id(7), operand(OperandKind.StorageClass, spv.StorageClass.CrossWorkgroup), id(2)),
-        TypeFunction(id(9), id(1), Vec(id(7), id(7))),
-        Constant(id(3), id(10), operand(OperandKind.LiteralContextDependentNumber, stride, 0)),
-        Variable(id(6), id(15), operand(OperandKind.StorageClass, spv.StorageClass.Input), None),
-        Decorate(id(15), operand(OperandKind.Decoration, spv.Decoration.BuiltIn, spv.BuiltIn.GlobalInvocationId)),
-        EntryPoint(
-          operand(OperandKind.ExecutionModel, spv.ExecutionModel.Kernel),
-          id(20),
-          operand(OperandKind.LiteralString, 0x626f7270, 0x65),
-          Vec(id(15))
-        ),
-        Function(id(1), id(20), operand(OperandKind.FunctionControl, spv.FunctionControl.None), id(9)),
-        FunctionParameter(id(7), id(21)),
-        FunctionParameter(id(7), id(22)),
-        Label(id(24)),
-        Load(id(5), id(25), id(15), None),
-        CompositeExtract(id(3), id(28), id(25), Vec(operand(OperandKind.LiteralInteger, 0))),
-        IMul(id(3), id(29), id(28), id(10)),
-        PtrAccessChain(id(7), id(30), id(21), id(29), Vec.empty),
-        PtrAccessChain(id(7), id(31), id(22), id(29), Vec.empty),
-        Load(id(2), id(32), id(30), None),
-        Store(id(31), id(32), None),
-        Return(),
-        FunctionEnd()
-      ),
-      Endianness.Little
-    )
+    val image = spirvAssembly.image(s"""
+      ${spirvAssembly.openCL}
+      OpEntryPoint Kernel %main "probe" %global_id
+      OpDecorate %global_id BuiltIn GlobalInvocationId
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+      %ulong3 = OpTypeVector %ulong 3
+      %ulong3_ptr = OpTypePointer Input %ulong3
+      %uint_ptr = OpTypePointer CrossWorkgroup %uint
+      %fn = OpTypeFunction %void %uint_ptr %uint_ptr
+      %stride = OpConstant %ulong $stride
+      %global_id = OpVariable %ulong3_ptr Input
+      %main = OpFunction %void None %fn
+      %input = OpFunctionParameter %uint_ptr
+      %output = OpFunctionParameter %uint_ptr
+      %entry = OpLabel
+      %id = OpLoad %ulong3 %global_id
+      %x = OpCompositeExtract %ulong %id 0
+      %index = OpIMul %ulong %x %stride
+      %source = OpPtrAccessChain %uint_ptr %input %index
+      %target = OpPtrAccessChain %uint_ptr %output %index
+      %value = OpLoad %uint %source
+      OpStore %target %value
+      OpReturn
+      OpFunctionEnd
+    """)
     val host                     = (0 until 32).flatMap(i => bytes(0x1000L + i * stride * 4, i + 17, 4)).toMap
-    val encoding                 = SPIRV(Validation.Environment.OpenCLCompute).encoding
     val (reads, writes, batches) =
-      runImage(encoding, SPIRVISA.encode(module).toOption.get, 32, Vec(scalar(0x1000), scalar(0x8000)), host)
+      runImage(ProgramEncoding.SPIRVOpenCLCompute, image, 32, Vec(scalar(0x1000), scalar(0x8000)), host)
     assertEquals(batches, 1)
     assertEquals(reads.size, if (stride == 1) 1 else 32)
     assertEquals(reads.map(_.size.raw).sum, 128)
     assertEquals(writes, (0 until 32).flatMap(i => bytes(0x8000L + i * stride * 4, i + 17, 4)).toMap)
   }
-
 }

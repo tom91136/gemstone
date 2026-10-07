@@ -10,23 +10,18 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.amdgpu.*
 
-/** Repeated module initialization using a real AMDGPU code object. */
+/** Repeated module initialisation using a real AMDGPU code object. */
 object AMDGPUProgramLifecycleBenchmark {
-  private val name    = BenchmarkName("amdgpu-program-lifecycle")
-  private val options = (
-    Opts.option[String]("image", help = "AMDGPU ELF code-object file"),
-    Opts.option[Int]("iterations", help = "Module loads per sample").withDefault(10)
-      .refined[Int > 0]("iterations must be positive")
-  ).tupled
+  val benchmark: Case =
+    (Opts.option[String]("image", help = "AMDGPU ELF code-object file").map(Path.of(_)), iterations(10))
+      .mapN((image, iterations) => () => run(image, iterations))
 
-  def run(arguments: Array[String]): BenchmarkSample = {
-    val (path, iterations)  = BenchmarkArguments.parse(name, arguments.toSeq, options)
-    val image               = Vec.unsafeWrapArray(Files.readAllBytes(Path.of(path)))
+  private def run(path: Path, iterations: Int > 0): BenchmarkSample = {
+    val image               = Vec.unsafeWrapArray(Files.readAllBytes(path))
     def symbolCount(): Long = {
       val symbols = (for {
         program <- CodeObject.decode(image).leftMap(_.message)
-        loaded  <- LoadedProgram.load(program).leftMap(_.message)
-        symbols <- loaded.symbols.leftMap(_.message)
+        symbols <- LoadedProgram.load(program).symbols.leftMap(_.message)
       } yield symbols).fold(error => throw IllegalStateException(error), identity)
       symbols.kernels.size.toLong + symbols.globals.size
     }

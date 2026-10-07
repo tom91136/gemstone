@@ -1,23 +1,18 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import ELF.*
 import fixtures.*
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
-import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
-import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
@@ -37,54 +32,53 @@ class CrossWorkgroupSuite extends munit.FunSuite {
   private val tickets            = AllocationId(5)
   private val prefixes           = AllocationId(6)
   private def scalar(value: Int) =
-    KernelTask.Argument.Scalar(LittleEndian.toVec(value.toLong, 4))
-  private def pointer(region: AllocationId)                      = KernelTask.Argument.Memory(region, 0L)
-  private def prepared(name: String, size: Int, code: Vec[Long]) =
-    VMCompiler().compile(CodeObjectKernel(
+    KernelTask.Argument.Scalar(LittleEndian.toVec(value.toLong, 4).unsafe)
+  private def pointer(region: AllocationId)                                    = KernelTask.Argument.Memory(region, 0L)
+  private def prepared(name: NonEmpty[String], size: Int >= 0, code: Vec[Int]) =
+    VMCompiler().compile(codeKernel(
       name = name,
       target = Target("gfx1030"),
       kernargSize = size,
       groupSegmentSize = 512,
-      privateSegmentSize = 0,
       computePgmRsrc2 = 0x80,
       kernelCodeProperties = 0x8 | EncodingConstants.KernelCodeProperty.ENABLE_WAVEFRONT_SIZE32,
-      code = code.flatMap(word => LittleEndian.toVec(word, 4))
-    )).toOption.get
+      code = words(code*)
+    )).value
   // Write lane values through private group LDS; publish one marker before the group barrier.
   private lazy val publish = prepared(
     "publish",
     28,
-    Vec[Long](
-      0xf4080100L, 0xfa000000L, 0xf4040200L, 0xfa000010L, 0xf4000280L, 0xfa000018L,
-      0xbf8cc07fL, 0x93030902L, 0x4a020003L, 0xd4c1006aL, 0x00001101L, 0xbe8b3c6aL,
-      0x4a06020aL, 0x34040082L, 0xd8340000L, 0x00000302L, 0x7d840080L, 0xbe8c3c6aL,
-      0x7e0c0202L, 0x340c0c82L, 0xdc708000L, 0x00060306L, 0xbefe030cL, 0xbf8a0000L,
-      0xd8d80000L, 0x04000002L, 0xbd7d0000L, 0x340a0282L, 0xdc708000L, 0x00040405L,
-      0xbf810000L
+    Vec(
+      0xf4080100, 0xfa000000, 0xf4040200, 0xfa000010, 0xf4000280, 0xfa000018,
+      0xbf8cc07f, 0x93030902, 0x4a020003, 0xd4c1006a, 0x00001101, 0xbe8b3c6a,
+      0x4a06020a, 0x34040082, 0xd8340000, 0x00000302, 0x7d840080, 0xbe8c3c6a,
+      0x7e0c0202, 0x340c0c82, 0xdc708000, 0x00060306, 0xbefe030c, 0xbf8a0000,
+      0xd8d80000, 0x04000002, 0xbd7d0000, 0x340a0282, 0xdc708000, 0x00040405,
+      0xbf810000
     )
   )
   // One lane per group sums its completed input tile, publishes the partial, then takes an atomic ticket.
   private lazy val reduce = prepared(
     "reduce",
     40,
-    Vec[Long](
-      0xf4080100L, 0xfa000000L, 0xf4080200L, 0xfa000010L, 0xf4040300L, 0xfa000020L,
-      0xbf8cc07fL, 0x7d840080L, 0xbe8e3c6aL, 0x93030d02L, 0x808c030cL, 0x838c0d0cL,
-      0x7e020203L, 0x34020282L, 0x7e040280L, 0xdc308000L, 0x03040001L, 0xbf8c3f70L,
-      0x4a040702L, 0x4a020284L, 0x808c810cL, 0xbf07800cL, 0xbf85fff8L, 0x7e080202L,
-      0x34080882L, 0xdc708000L, 0x00060204L, 0x7e0a0280L, 0x7e0c0281L, 0xdcc98000L,
-      0x07080605L, 0xdc708000L, 0x000a0704L, 0xbf810000L
+    Vec(
+      0xf4080100, 0xfa000000, 0xf4080200, 0xfa000010, 0xf4040300, 0xfa000020,
+      0xbf8cc07f, 0x7d840080, 0xbe8e3c6a, 0x93030d02, 0x808c030c, 0x838c0d0c,
+      0x7e020203, 0x34020282, 0x7e040280, 0xdc308000, 0x03040001, 0xbf8c3f70,
+      0x4a040702, 0x4a020284, 0x808c810c, 0xbf07800c, 0xbf85fff8, 0x7e080202,
+      0x34080882, 0xdc708000, 0x00060204, 0x7e0a0280, 0x7e0c0281, 0xdcc98000,
+      0x07080605, 0xdc708000, 0x000a0704, 0xbf810000
     )
   )
   // Each group independently sums completed partials through its own index; no inter-group spin.
   private lazy val prefix = prepared(
     "prefix",
     16,
-    Vec[Long](
-      0xf4080100L, 0xfa000000L, 0xbf8cc07fL, 0x7d840080L, 0xbe883c6aL, 0x80038102L,
-      0x7e020280L, 0x7e040280L, 0xdc308000L, 0x03040001L, 0xbf8c3f70L, 0x4a040702L,
-      0x4a020284L, 0x80838103L, 0xbf078003L, 0xbf85fff8L, 0x7e080202L, 0x34080882L,
-      0xdc708000L, 0x00060204L, 0xbf810000L
+    Vec(
+      0xf4080100, 0xfa000000, 0xbf8cc07f, 0x7d840080, 0xbe883c6a, 0x80038102,
+      0x7e020280, 0x7e040280, 0xdc308000, 0x03040001, 0xbf8c3f70, 0x4a040702,
+      0x4a020284, 0x80838103, 0xbf078003, 0xbf85fff8, 0x7e080202, 0x34080882,
+      0xdc708000, 0x00060204, 0xbf810000
     )
   )
 
@@ -97,22 +91,19 @@ class CrossWorkgroupSuite extends munit.FunSuite {
     test(s"groups=$groupCount width=$widthCount tail=$tail parallel=$parallel publication-reduction-LDS") {
       val groups      = groupCount.raw
       val width       = widthCount.raw
-      val globalCount = (groups * width - tail).refine[Int > 0].fold(fail(_), identity)
+      val globalCount = (groups * width - tail).refine[Int > 0].value
       val n           = globalCount.raw
       val memory      = Memory(n, groups)
       Using.resource(Workers(memory)) { workers =>
         val policy = if (parallel) workers else Workgroups.Sequential
         def run(program: VMIR.Kernel, args: Vec[KernelTask.Argument]): Unit = {
           val dispatch = KernelTask.validated(
-            program.source.name.refine[NonEmpty[String]].fold(
-              fail(_),
-              value => value
-            ),
+            program.source.name,
             testDimensions(widthCount),
             testDimensions(groupCount),
             args,
             globalSize = Some(testDimensions(globalCount).toGlobalDimensions)
-          ).toOption.get
+          ).value
           assertEquals(
             executeKernel(
               program,
@@ -154,13 +145,13 @@ class CrossWorkgroupSuite extends munit.FunSuite {
   private lazy val ldsExchange = prepared(
     "lds_exchange",
     28,
-    Vec[Long](
-      0xf4080100L, 0xfa000000L, 0xf4040200L, 0xfa000010L, 0xf4000280L, 0xfa000018L,
-      0xbf8cc07fL, 0x93030902L, 0x4a020003L, 0x7e040280L, 0x808b8109L, 0x7d84000bL,
-      0xbe8c3c6aL, 0xd5250003L, 0x0000040aL, 0xd8340000L, 0x00000302L, 0x7e0c0202L,
-      0x340c0c82L, 0xdc708000L, 0x00060306L, 0xbefe030cL, 0xbf8cc07fL, 0xbf8a0000L,
-      0xd8d80000L, 0x04000002L, 0xbd7d0000L, 0x340a0282L, 0xdc708000L, 0x00040405L,
-      0xbf810000L
+    Vec(
+      0xf4080100, 0xfa000000, 0xf4040200, 0xfa000010, 0xf4000280, 0xfa000018,
+      0xbf8cc07f, 0x93030902, 0x4a020003, 0x7e040280, 0x808b8109, 0x7d84000b,
+      0xbe8c3c6a, 0xd5250003, 0x0000040a, 0xd8340000, 0x00000302, 0x7e0c0202,
+      0x340c0c82, 0xdc708000, 0x00060306, 0xbefe030c, 0xbf8cc07f, 0xbf8a0000,
+      0xd8d80000, 0x04000002, 0xbd7d0000, 0x340a0282, 0xdc708000, 0x00040405,
+      0xbf810000
     )
   )
 
@@ -179,14 +170,11 @@ class CrossWorkgroupSuite extends munit.FunSuite {
         for (epoch <- Vector(7, 29)) {
           memory.reset()
           val dispatch = KernelTask.validated(
-            ldsExchange.source.name.refine[NonEmpty[String]].fold(
-              fail(_),
-              value => value
-            ),
+            ldsExchange.source.name,
             testDimensions(widthCount),
             testDimensions(groupCount),
             Vec(pointer(output), pointer(markers), scalar(n), scalar(width), scalar(epoch))
-          ).toOption.get
+          ).value
           assertEquals(
             executeKernel(
               ldsExchange,
@@ -207,109 +195,55 @@ class CrossWorkgroupSuite extends munit.FunSuite {
       }
     }
 
-  // The marker gate is mutable coordination state confined to this final memory fixture.
+  // The marker gate is mutable coordination state confined to this memory fixture.
   private class Memory(n: Int, groups: Int)
-      extends vm.Memory with TestAddressSpace {
-    private val lock = ReentrantLock()
-    private val data = Map(
-      output   -> Array.ofDim[Byte]((n + 1) * 4),
-      markers  -> Array.ofDim[Byte](groups * 4),
-      partials -> Array.ofDim[Byte](groups * 4),
-      counter  -> Array.ofDim[Byte](4),
-      tickets  -> Array.ofDim[Byte](groups * 4),
-      prefixes -> Array.ofDim[Byte](groups * 4)
-    )
-    private val markerGate                                             = AtomicReference[Int => Unit](_ => ())
-    val publications: AtomicInteger                                    = AtomicInteger()
-    override protected def regionSizes: Iterable[(AllocationId, Long)] = data.view.mapValues(_.length.toLong)
-    def installMarkerGate(gate: Int => Unit): Unit                     = markerGate.set(gate)
-    def ints(id: AllocationId): Vector[Int]                            = lock.withLock {
-      Vector.tabulate(data(id).length / 4)(i =>
-        LittleEndian.decodeInt32(data(id), i * 4)
-      )
+      extends RegionMemory(
+        output   -> (n + 1) * 4,
+        markers  -> groups * 4,
+        partials -> groups * 4,
+        counter  -> 4,
+        tickets  -> groups * 4,
+        prefixes -> groups * 4
+      ) {
+    private val markerGate                         = AtomicReference[Int => Unit](_ => ())
+    val publications: AtomicInteger                = AtomicInteger()
+    def installMarkerGate(gate: Int => Unit): Unit = markerGate.set(gate)
+    def ints(id: AllocationId): Vector[Int]        = exclusive {
+      val bytes = array(id)
+      Vector.tabulate(bytes.length / 4)(i => LittleEndian.decodeInt32(bytes, i * 4))
     }
-    def reset(): Unit = lock.withLock {
-      data.foreach { case (id, bytes) =>
-        for (i <- 0 until bytes.length / 4)
-          LittleEndian.write(
-            if (id == counter) 0L else -777L,
-            bytes,
-            i * 4,
-            4
-          )
+    def reset(): Unit = exclusive {
+      Seq(output, markers, partials, counter, tickets, prefixes).foreach { id =>
+        val bytes = array(id)
+        for (i <- 0 until bytes.length / 4) LittleEndian.write(if (id == counter) 0L else -777L, bytes, i * 4, 4)
       }
       publications.set(0)
       markerGate.set(_ => ())
     }
-    override def read(
-        id: AllocationId,
-        offset: Long >= 0,
-        size: Int >= 0
-    ): Either[Fault, Vec[Byte]] =
-      lock.withLock {
-        val bytes = data(id)
-        if (!ByteRange.contains(bytes.length, offset.raw, size.raw.toLong))
-          Left(Fault.InvalidTask("read bounds"))
-        else
-          Right(Vec.unsafeWrapArray(
-            java.util.Arrays.copyOfRange(bytes, offset.raw.toInt, offset.raw.toInt + size.raw)
-          ))
+    // Observe payload at the publication operation itself, not just after dispatch completion.
+    private def observe(id: AllocationId): Unit =
+      if (id == counter) {
+        if (ints(partials).count(_ != -777) < LittleEndian.decodeInt32(array(counter), 0))
+          throw AssertionError("counter was published before its partial")
+        val _ = publications.incrementAndGet()
       }
-    override def write(
-        id: AllocationId,
-        offset: Long >= 0,
-        bytes: Vec[Byte]
-    ): Either[Fault, Unit] = {
-      val result = lock.withLock {
-        val destination = data(id)
-        if (!ByteRange.contains(destination.length, offset.raw, bytes.length.toLong))
-          Left(Fault.InvalidTask("write bounds"))
-        else {
-          val _ = bytes.copyToArray(destination, offset.raw.toInt, bytes.length)
-          if (id == counter) {
-            val published = LittleEndian.decodeInt32(destination, 0)
-            // Observe payload at the publication operation itself, not just after dispatch completion.
-            if (ints(partials).count(_ != -777) < published)
-              throw AssertionError("counter was published before its partial")
-            val _ = publications.incrementAndGet()
-          }
-          Right(())
-        }
-      }
+    override def write(id: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] = {
+      val result = exclusive(super.write(id, offset, bytes).map(_ => observe(id)))
       if (result.isRight && id == markers) markerGate.get()((offset.raw / 4).toInt)
       result
     }
-    override def atomicModifyValue(
-        id: AllocationId,
-        offset: Long >= 0,
-        size: Int in 1 ~ 8
-    )(update: Long => Long): Either[Fault, Long] = lock.withLock {
-      val destination = data(id)
-      val scalarWidth = size.scalarByteWidth
-      if (ByteRange.contains(destination.length, offset.raw, size.raw)) {
-        val arrayOffset = offset.raw.toInt
-        val previous    = LittleEndian.decode(destination, arrayOffset, scalarWidth)
-        LittleEndian.write(update(previous), destination, arrayOffset, scalarWidth)
-        if (id == counter) {
-          val published = LittleEndian.decodeInt32(destination, 0)
-          // Observe payload at the publication operation itself, not just after dispatch completion.
-          if (ints(partials).count(_ != -777) < published)
-            throw AssertionError("counter was published before its partial")
-          val _ = publications.incrementAndGet()
-        }
-        Right(previous)
-      } else Left(Fault.InvalidTask("atomic bounds"))
+    override def atomicModifyValue(id: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)(
+        update: Long => Long
+    ): Either[Fault, Long] = exclusive {
+      super.atomicModifyValue(id, offset, size)(update).map { previous =>
+        observe(id)
+        previous
+      }
     }
   }
 
-  private class Workers(memory: Memory) extends Workgroups with AutoCloseable {
-    val parallelism: Int > 0 = 4
-    val calls: AtomicInteger = AtomicInteger()
-    private val pool         = Executors.newFixedThreadPool(parallelism.raw)
-    override def shouldParallel(tasks: Long >= 0, lanes: Long >= 0): Boolean = tasks.raw > 1
-    override def parallelFor(tasks: Long >= 0)(task: Long >= 0 => Either[Fault, Unit])
-        : Either[Fault, Unit] = {
-      calls.incrementAndGet()
+  private class Workers(memory: Memory) extends PooledWorkgroups() {
+    override protected def run(tasks: Long >= 0)(task: Long >= 0 => Either[Fault, Unit]): Either[Fault, Unit] = {
       // Only each bounded resident cohort rendezvous in the test memory hook. The guest kernel never waits on another group.
       for (start <- 0 until tasks.raw.toInt by parallelism.raw) {
         val indices = (start until math.min(start + parallelism.raw, tasks.raw.toInt)).reverse
@@ -323,15 +257,11 @@ class CrossWorkgroupSuite extends munit.FunSuite {
         }
         val jobs = java.util.ArrayList[Callable[Either[Fault, Unit]]]()
         indices.foreach(i => jobs.add(() => task(i.toLong.unsafe[Long >= 0])))
-        pool.invokeAll(jobs, 15, TimeUnit.SECONDS).asScala.view.foreach { result =>
+        pool.executor.invokeAll(jobs, 15, TimeUnit.SECONDS).asScala.view.foreach { result =>
           assertEquals(result.get(), Right(()))
         }
       }
       Right(())
-    }
-    def close(): Unit = {
-      val _ = pool.shutdownNow()
-      assert(pool.awaitTermination(10, TimeUnit.SECONDS))
     }
   }
 }

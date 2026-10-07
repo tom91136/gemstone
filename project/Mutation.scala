@@ -3,7 +3,6 @@ import sbt.*
 import sbt.Keys.*
 import stryker4s.sbt.Stryker4sPlugin.autoImport.*
 
-/** Checks explicit mutation campaigns against the sources and suites discovered by sbt. */
 object Mutation {
   val mutationCheck = taskKey[Unit]("Validate mutation source patterns and test filters.")
 

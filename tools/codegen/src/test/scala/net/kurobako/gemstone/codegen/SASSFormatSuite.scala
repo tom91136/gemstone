@@ -66,7 +66,7 @@ class SASSFormatSuite extends munit.FunSuite {
     )
   }
 
-  test("recognizes short legacy binding names") {
+  test("recognises short legacy binding names") {
     val parsed = parse("Opcode /X:x /PO:po /ICOMP:icomp /LOP:lop")
       .fold(error => fail(error.message), identity)
     assertEquals(descendants(parsed).collect { case field: Field => field.binding }, Vector("x", "po", "icomp", "lop"))

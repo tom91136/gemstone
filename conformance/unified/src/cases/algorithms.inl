@@ -1,91 +1,86 @@
-// Include-twice declaration list for per-type algorithm cases. The includer
-// defines UNIFIED_ALGORITHM_TYPE, UNIFIED_ALGORITHM_NAME (string),
-// UNIFIED_ALGORITHM_MATRIX (string), and UNIFIED_ALGORITHM_SIZES first.
-#define UNIFIED_ALGORITHM_CASE(name, check)                                                                                                \
-  TEST_CASE("algorithms/" UNIFIED_ALGORITHM_NAME "/" UNIFIED_ALGORITHM_MATRIX "/" name,                                                    \
-            "[unified][" UNIFIED_ALGORITHM_MATRIX "-matrix][algorithm][" UNIFIED_ALGORITHM_NAME "]") {                                     \
-    const auto size = GENERATE(Catch::Generators::from_range(UNIFIED_ALGORITHM_SIZES));                                                    \
-    CAPTURE(size);                                                                                                                         \
-    unified::backend::Algorithms backend;                                                                                                  \
-    check<UNIFIED_ALGORITHM_TYPE>(backend, size);                                                                                          \
-  }
+#pragma once
 
-UNIFIED_ALGORITHM_CASE("copy", unified::algorithms::copy)
-UNIFIED_ALGORITHM_CASE("copy_if", unified::algorithms::copy_if)
-UNIFIED_ALGORITHM_CASE("copy_n", unified::algorithms::copy_n)
-UNIFIED_ALGORITHM_CASE("uninitialized_copy", unified::algorithms::uninitialized_copy)
-UNIFIED_ALGORITHM_CASE("uninitialized_fill", unified::algorithms::uninitialized_fill)
-UNIFIED_ALGORITHM_CASE("fill", unified::algorithms::fill)
-UNIFIED_ALGORITHM_CASE("generate", unified::algorithms::generate)
-UNIFIED_ALGORITHM_CASE("for_each", unified::algorithms::for_each)
-UNIFIED_ALGORITHM_CASE("transform_unary", unified::algorithms::transform_unary)
-UNIFIED_ALGORITHM_CASE("transform_binary", unified::algorithms::transform_binary)
-UNIFIED_ALGORITHM_CASE("replace_if", unified::algorithms::replace_if)
-UNIFIED_ALGORITHM_CASE("replace_copy_if", unified::algorithms::replace_copy_if)
-UNIFIED_ALGORITHM_CASE("remove_if", unified::algorithms::remove_if)
-UNIFIED_ALGORITHM_CASE("remove_copy_if", unified::algorithms::remove_copy_if)
-UNIFIED_ALGORITHM_CASE("reverse", unified::algorithms::reverse)
-UNIFIED_ALGORITHM_CASE("reverse_copy", unified::algorithms::reverse_copy)
-UNIFIED_ALGORITHM_CASE("shuffle", unified::algorithms::shuffle)
-UNIFIED_ALGORITHM_CASE("swap_ranges", unified::algorithms::swap_ranges)
-UNIFIED_ALGORITHM_CASE("reduce", unified::algorithms::reduce)
-UNIFIED_ALGORITHM_CASE("transform_reduce", unified::algorithms::transform_reduce)
-UNIFIED_ALGORITHM_CASE("inner_product", unified::algorithms::inner_product)
-UNIFIED_ALGORITHM_CASE("inclusive_scan", unified::algorithms::inclusive_scan)
-UNIFIED_ALGORITHM_CASE("exclusive_scan", unified::algorithms::exclusive_scan)
-UNIFIED_ALGORITHM_CASE("transform_inclusive_scan", unified::algorithms::transform_inclusive_scan)
-UNIFIED_ALGORITHM_CASE("transform_exclusive_scan", unified::algorithms::transform_exclusive_scan)
-UNIFIED_ALGORITHM_CASE("adjacent_difference", unified::algorithms::adjacent_difference)
-UNIFIED_ALGORITHM_CASE("sort", unified::algorithms::sort)
-UNIFIED_ALGORITHM_CASE("stable_sort", unified::algorithms::stable_sort)
-UNIFIED_ALGORITHM_CASE("sort_descending", unified::algorithms::sort_descending)
-UNIFIED_ALGORITHM_CASE("sort_by_key", unified::algorithms::sort_by_key)
-UNIFIED_ALGORITHM_CASE("stable_sort_by_key", unified::algorithms::stable_sort_by_key)
-UNIFIED_ALGORITHM_CASE("unique", unified::algorithms::unique)
-UNIFIED_ALGORITHM_CASE("unique_copy", unified::algorithms::unique_copy)
-UNIFIED_ALGORITHM_CASE("count", unified::algorithms::count)
-UNIFIED_ALGORITHM_CASE("count_if", unified::algorithms::count_if)
-UNIFIED_ALGORITHM_CASE("find", unified::algorithms::find)
-UNIFIED_ALGORITHM_CASE("find_if", unified::algorithms::find_if)
-UNIFIED_ALGORITHM_CASE("all_of", unified::algorithms::all_of)
-UNIFIED_ALGORITHM_CASE("any_of", unified::algorithms::any_of)
-UNIFIED_ALGORITHM_CASE("none_of", unified::algorithms::none_of)
-UNIFIED_ALGORITHM_CASE("equal", unified::algorithms::equal)
-UNIFIED_ALGORITHM_CASE("mismatch", unified::algorithms::mismatch)
-UNIFIED_ALGORITHM_CASE("lower_bound", unified::algorithms::lower_bound)
-UNIFIED_ALGORITHM_CASE("upper_bound", unified::algorithms::upper_bound)
-UNIFIED_ALGORITHM_CASE("binary_search", unified::algorithms::binary_search)
-UNIFIED_ALGORITHM_CASE("equal_range", unified::algorithms::equal_range)
-UNIFIED_ALGORITHM_CASE("merge", unified::algorithms::merge)
-UNIFIED_ALGORITHM_CASE("partition", unified::algorithms::partition)
-UNIFIED_ALGORITHM_CASE("stable_partition", unified::algorithms::stable_partition)
-UNIFIED_ALGORITHM_CASE("partition_copy", unified::algorithms::partition_copy)
-UNIFIED_ALGORITHM_CASE("is_partitioned", unified::algorithms::is_partitioned)
-UNIFIED_ALGORITHM_CASE("is_partitioned_false", unified::algorithms::is_partitioned_false)
-UNIFIED_ALGORITHM_CASE("partition_point", unified::algorithms::partition_point)
-UNIFIED_ALGORITHM_CASE("set_union", unified::algorithms::set_union)
-UNIFIED_ALGORITHM_CASE("set_intersection", unified::algorithms::set_intersection)
-UNIFIED_ALGORITHM_CASE("set_difference", unified::algorithms::set_difference)
-UNIFIED_ALGORITHM_CASE("set_symmetric_difference", unified::algorithms::set_symmetric_difference)
-UNIFIED_ALGORITHM_CASE("min_element", unified::algorithms::min_element)
-UNIFIED_ALGORITHM_CASE("max_element", unified::algorithms::max_element)
-UNIFIED_ALGORITHM_CASE("minmax_element", unified::algorithms::minmax_element)
-UNIFIED_ALGORITHM_CASE("is_sorted", unified::algorithms::is_sorted)
-UNIFIED_ALGORITHM_CASE("is_sorted_false", unified::algorithms::is_sorted_false)
-UNIFIED_ALGORITHM_CASE("is_sorted_until", unified::algorithms::is_sorted_until)
-UNIFIED_ALGORITHM_CASE("rotate", unified::algorithms::rotate)
-UNIFIED_ALGORITHM_CASE("rotate_copy", unified::algorithms::rotate_copy)
-UNIFIED_ALGORITHM_CASE("includes", unified::algorithms::includes)
-UNIFIED_ALGORITHM_CASE("includes_false", unified::algorithms::includes_false)
-UNIFIED_ALGORITHM_CASE("gather", unified::algorithms::gather)
-UNIFIED_ALGORITHM_CASE("scatter", unified::algorithms::scatter)
-UNIFIED_ALGORITHM_CASE("reduce_by_key", unified::algorithms::reduce_by_key)
-UNIFIED_ALGORITHM_CASE("inclusive_scan_by_key", unified::algorithms::inclusive_scan_by_key)
-UNIFIED_ALGORITHM_CASE("exclusive_scan_by_key", unified::algorithms::exclusive_scan_by_key)
-UNIFIED_ALGORITHM_CASE("unique_by_key", unified::algorithms::unique_by_key)
-UNIFIED_ALGORITHM_CASE("merge_by_key", unified::algorithms::merge_by_key)
-UNIFIED_ALGORITHM_CASE("partial_sort", unified::algorithms::partial_sort)
-UNIFIED_ALGORITHM_CASE("nth_element", unified::algorithms::nth_element)
-UNIFIED_ALGORITHM_CASE("inplace_merge", unified::algorithms::inplace_merge)
+#include "algorithm_cases.hpp"
+#include "cases/grid.inl"
 
-#undef UNIFIED_ALGORITHM_CASE
+#define UNIFIED_ALGORITHM_CASES(CASE, ...)                                                                                                 \
+  CASE(copy, copy, __VA_ARGS__)                                                                                                            \
+  CASE(copy_if, copyIf, __VA_ARGS__)                                                                                                       \
+  CASE(copy_n, copyN, __VA_ARGS__)                                                                                                         \
+  CASE(uninitialized_copy, uninitializedCopy, __VA_ARGS__)                                                                                 \
+  CASE(uninitialized_fill, uninitializedFill, __VA_ARGS__)                                                                                 \
+  CASE(fill, fill, __VA_ARGS__)                                                                                                            \
+  CASE(generate, generate, __VA_ARGS__)                                                                                                    \
+  CASE(for_each, forEach, __VA_ARGS__)                                                                                                     \
+  CASE(transform_unary, transformUnary, __VA_ARGS__)                                                                                       \
+  CASE(transform_binary, transformBinary, __VA_ARGS__)                                                                                     \
+  CASE(replace_if, replaceIf, __VA_ARGS__)                                                                                                 \
+  CASE(replace_copy_if, replaceCopyIf, __VA_ARGS__)                                                                                        \
+  CASE(remove_if, removeIf, __VA_ARGS__)                                                                                                   \
+  CASE(remove_copy_if, removeCopyIf, __VA_ARGS__)                                                                                          \
+  CASE(reverse, reverse, __VA_ARGS__)                                                                                                      \
+  CASE(reverse_copy, reverseCopy, __VA_ARGS__)                                                                                             \
+  CASE(shuffle, shuffle, __VA_ARGS__)                                                                                                      \
+  CASE(swap_ranges, swapRanges, __VA_ARGS__)                                                                                               \
+  CASE(reduce, reduce, __VA_ARGS__)                                                                                                        \
+  CASE(transform_reduce, transformReduce, __VA_ARGS__)                                                                                     \
+  CASE(inner_product, innerProduct, __VA_ARGS__)                                                                                           \
+  CASE(inclusive_scan, inclusiveScan, __VA_ARGS__)                                                                                         \
+  CASE(exclusive_scan, exclusiveScan, __VA_ARGS__)                                                                                         \
+  CASE(transform_inclusive_scan, transformInclusiveScan, __VA_ARGS__)                                                                      \
+  CASE(transform_exclusive_scan, transformExclusiveScan, __VA_ARGS__)                                                                      \
+  CASE(adjacent_difference, adjacentDifference, __VA_ARGS__)                                                                               \
+  CASE(sort, sort, __VA_ARGS__)                                                                                                            \
+  CASE(stable_sort, stableSort, __VA_ARGS__)                                                                                               \
+  CASE(sort_descending, sortDescending, __VA_ARGS__)                                                                                       \
+  CASE(sort_by_key, sortByKey, __VA_ARGS__)                                                                                                \
+  CASE(stable_sort_by_key, stableSortByKey, __VA_ARGS__)                                                                                   \
+  CASE(unique, unique, __VA_ARGS__)                                                                                                        \
+  CASE(unique_copy, uniqueCopy, __VA_ARGS__)                                                                                               \
+  CASE(count, count, __VA_ARGS__)                                                                                                          \
+  CASE(count_if, countIf, __VA_ARGS__)                                                                                                     \
+  CASE(find, find, __VA_ARGS__)                                                                                                            \
+  CASE(find_if, findIf, __VA_ARGS__)                                                                                                       \
+  CASE(all_of, allOf, __VA_ARGS__)                                                                                                         \
+  CASE(any_of, anyOf, __VA_ARGS__)                                                                                                         \
+  CASE(none_of, noneOf, __VA_ARGS__)                                                                                                       \
+  CASE(equal, equal, __VA_ARGS__)                                                                                                          \
+  CASE(mismatch, mismatch, __VA_ARGS__)                                                                                                    \
+  CASE(lower_bound, lowerBound, __VA_ARGS__)                                                                                               \
+  CASE(upper_bound, upperBound, __VA_ARGS__)                                                                                               \
+  CASE(binary_search, binarySearch, __VA_ARGS__)                                                                                           \
+  CASE(equal_range, equalRange, __VA_ARGS__)                                                                                               \
+  CASE(merge, merge, __VA_ARGS__)                                                                                                          \
+  CASE(partition, partition, __VA_ARGS__)                                                                                                  \
+  CASE(stable_partition, stablePartition, __VA_ARGS__)                                                                                     \
+  CASE(partition_copy, partitionCopy, __VA_ARGS__)                                                                                         \
+  CASE(is_partitioned, isPartitioned, __VA_ARGS__)                                                                                         \
+  CASE(is_partitioned_false, isPartitionedFalse, __VA_ARGS__)                                                                              \
+  CASE(partition_point, partitionPoint, __VA_ARGS__)                                                                                       \
+  CASE(set_union, setUnion, __VA_ARGS__)                                                                                                   \
+  CASE(set_intersection, setIntersection, __VA_ARGS__)                                                                                     \
+  CASE(set_difference, setDifference, __VA_ARGS__)                                                                                         \
+  CASE(set_symmetric_difference, setSymmetricDifference, __VA_ARGS__)                                                                      \
+  CASE(min_element, minElement, __VA_ARGS__)                                                                                               \
+  CASE(max_element, maxElement, __VA_ARGS__)                                                                                               \
+  CASE(minmax_element, minmaxElement, __VA_ARGS__)                                                                                         \
+  CASE(is_sorted, isSorted, __VA_ARGS__)                                                                                                   \
+  CASE(is_sorted_false, isSortedFalse, __VA_ARGS__)                                                                                        \
+  CASE(is_sorted_until, isSortedUntil, __VA_ARGS__)                                                                                        \
+  CASE(rotate, rotate, __VA_ARGS__)                                                                                                        \
+  CASE(rotate_copy, rotateCopy, __VA_ARGS__)                                                                                               \
+  CASE(includes, includes, __VA_ARGS__)                                                                                                    \
+  CASE(includes_false, includesFalse, __VA_ARGS__)                                                                                         \
+  CASE(gather, gather, __VA_ARGS__)                                                                                                        \
+  CASE(scatter, scatter, __VA_ARGS__)                                                                                                      \
+  CASE(reduce_by_key, reduceByKey, __VA_ARGS__)                                                                                            \
+  CASE(inclusive_scan_by_key, inclusiveScanByKey, __VA_ARGS__)                                                                             \
+  CASE(exclusive_scan_by_key, exclusiveScanByKey, __VA_ARGS__)                                                                             \
+  CASE(unique_by_key, uniqueByKey, __VA_ARGS__)                                                                                            \
+  CASE(merge_by_key, mergeByKey, __VA_ARGS__)                                                                                              \
+  CASE(partial_sort, partialSort, __VA_ARGS__)                                                                                             \
+  CASE(nth_element, nthElement, __VA_ARGS__)                                                                                               \
+  CASE(inplace_merge, inplaceMerge, __VA_ARGS__)
+
+#define UNIFIED_ALGORITHMS(T, TYPE, MATRIX)                                                                                                \
+  UNIFIED_ALGORITHM_CASES(UNIFIED_CASE, T, TYPE, MATRIX, algorithms, algorithm, AlgorithmSizes, Algorithms)

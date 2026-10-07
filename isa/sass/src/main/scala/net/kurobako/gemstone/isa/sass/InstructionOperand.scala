@@ -2,94 +2,45 @@ package net.kurobako.gemstone.isa.sass
 
 import scala.annotation.tailrec
 
-/** Operand refinements used by generated instruction forms. */
+/** Operand refinements used by generated instruction forms. Each accepts its leaf kind through unary flags and
+  * selectors, retaining the complete operand.
+  */
 object InstructionOperand {
+  class Kind[A <: Operand] private[InstructionOperand] (
+      description: String,
+      accepts: Operand => Boolean,
+      refined: Operand => A
+  ) {
+    def from(value: Operand): Either[String, A] =
+      Either.cond(accepts(leaf(value)), refined(value), s"expected $description operand")
+    def unapply(value: Operand): Option[A] = from(value).toOption
+  }
 
   @tailrec
   private def leaf(value: Operand): Operand = value match {
     case Operand.Unary(inner, _, _, _) => leaf(inner)
     case Operand.Qualified(inner, _)   => leaf(inner)
-    case Operand.Decorated(inner, _)   => leaf(inner)
     case other                         => other
   }
 
-  private def matches(value: Operand)(accepts: Operand => Boolean): Boolean = accepts(leaf(value))
-
-  object Register {
-    def from(value: Operand): Either[String, Register] =
-      Either.cond(
-        matches(value) { case Operand.Register(_, _) => true; case _ => false },
-        value,
-        "expected register operand"
-      )
-    def unapply(value: Operand): Option[Register] = from(value).toOption
-  }
-
-  object Predicate {
-    def from(value: Operand): Either[String, Predicate] =
-      Either.cond(
-        matches(value) { case Operand.Predicate(_, _, _) => true; case _ => false },
-        value,
-        "expected predicate operand"
-      )
-    def unapply(value: Operand): Option[Predicate] = from(value).toOption
-  }
-
-  object Immediate {
-    def from(value: Operand): Either[String, Immediate] =
-      Either.cond(
-        matches(value) {
-          case Operand.Integer(_) | Operand.Bits(_, _) | Operand.FloatingBits(_, _, _) |
-              Operand.Floating(_, _, _) | Operand.FloatingSymbol(_) => true
-          case _ => false
-        },
-        value,
-        "expected immediate operand"
-      )
-    def unapply(value: Operand): Option[Immediate] = from(value).toOption
-  }
-
-  object Address {
-    def from(value: Operand): Either[String, Address] =
-      Either.cond(
-        matches(value) { case Operand.Address(_, _, _, _, _, _) => true; case _ => false },
-        value,
-        "expected address operand"
-      )
-    def unapply(value: Operand): Option[Address] = from(value).toOption
-  }
-
-  object ConstantBank {
-    def from(value: Operand): Either[String, ConstantBank] =
-      Either.cond(
-        matches(value) { case Operand.ConstantBank(_, _) => true; case _ => false },
-        value,
-        "expected constant-bank operand"
-      )
-    def unapply(value: Operand): Option[ConstantBank] = from(value).toOption
-  }
-
-  object SpecialRegister {
-    def from(value: Operand): Either[String, SpecialRegister] =
-      Either.cond(
-        matches(value) { case Operand.SpecialRegister(_) => true; case _ => false },
-        value,
-        "expected special-register operand"
-      )
-    def unapply(value: Operand): Option[SpecialRegister] = from(value).toOption
-  }
-
-  object Group {
-    def from(value: Operand): Either[String, Group] =
-      Either.cond(matches(value) { case Operand.Group(_) => true; case _ => false }, value, "expected group operand")
-    def unapply(value: Operand): Option[Group] = from(value).toOption
-  }
-
-  object Symbol {
-    def from(value: Operand): Either[String, Symbol] =
-      Either.cond(matches(value) { case Operand.Symbol(_) => true; case _ => false }, value, "expected symbol operand")
-    def unapply(value: Operand): Option[Symbol] = from(value).toOption
-  }
+  val Register: Kind[Register]   = Kind("register", { case _: Operand.Register => true; case _ => false }, identity)
+  val Predicate: Kind[Predicate] = Kind("predicate", { case _: Operand.Predicate => true; case _ => false }, identity)
+  val Immediate: Kind[Immediate] = Kind(
+    "immediate",
+    {
+      case _: Operand.Integer | _: Operand.Bits | _: Operand.FloatingBits | _: Operand.Floating |
+          _: Operand.FloatingSymbol => true
+      case _ => false
+    },
+    identity
+  )
+  val Address: Kind[Address]           = Kind("address", { case _: Operand.Address => true; case _ => false }, identity)
+  val ConstantBank: Kind[ConstantBank] =
+    Kind("constant-bank", { case _: Operand.ConstantBank => true; case _ => false }, identity)
+  val SpecialRegister: Kind[SpecialRegister] =
+    Kind("special-register", { case _: Operand.SpecialRegister => true; case _ => false }, identity)
+  val Group: Kind[Group]   = Kind("group", { case _: Operand.Group => true; case _ => false }, identity)
+  val Symbol: Kind[Symbol] = Kind("symbol", { case _: Operand.Symbol => true; case _ => false }, identity)
 
   opaque type Register <: Operand        = Operand
   opaque type Predicate <: Operand       = Operand

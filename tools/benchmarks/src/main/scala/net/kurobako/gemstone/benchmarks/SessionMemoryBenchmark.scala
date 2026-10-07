@@ -11,7 +11,6 @@ import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.vm.*
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
@@ -19,23 +18,18 @@ import scala.util.Using
 /** Memory traffic through a real session and device heap, without instruction decoding or socket traffic. */
 object SessionMemoryBenchmark {
   private case class Options(iterations: Int > 0, allocations: Int > 0, workers: Int > 0, shared: Boolean)
-  private val name    = BenchmarkName("session-memory")
-  private val options = (
-    Opts.option[Int]("iterations", help = "Memory transactions per worker").withDefault(10000)
-      .refined[Int > 0]("iterations must be positive"),
-    Opts.option[Int]("allocations", help = "Registered allocations to rotate through").withDefault(128)
-      .refined[Int > 0]("allocations must be positive"),
-    Opts.option[Int]("workers", help = "Concurrent memory clients").withDefault(4)
-      .refined[Int > 0]("workers must be positive"),
+  val benchmark: Case = (
+    positive("iterations", "Memory transactions per worker", 10000),
+    positive("allocations", "Registered allocations to rotate through", 128),
+    positive("workers", "Concurrent memory clients", 4),
     Opts.flag("shared", help = "Contend on the same words instead of independent cache lines").orFalse
-  ).mapN(Options(_, _, _, _))
+  ).mapN(Options(_, _, _, _)).map(options => () => run(options))
 
   private def checked[E, A](result: Either[E, A]): A =
     result.fold(error => throw IllegalStateException(error.toString), identity)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(arguments: Array[String]): BenchmarkSample = {
-    val parsed = BenchmarkArguments.parse(name, arguments.toSeq, options)
+  private def run(parsed: Options): BenchmarkSample = {
     // Separate independent clients by one storage-lock stripe; shared mode deliberately uses the same word.
     val bytes     = Math.multiplyExact(parsed.workers.raw, 64).unsafe[Int > 0]
     val addresses = Array.tabulate(parsed.allocations.raw)(index =>
@@ -46,7 +40,7 @@ object SessionMemoryBenchmark {
       val backend = MemoryBackend(parsed, addresses, workers, completed)
       Using.resource(ExecutionSession(List(backend))) { session =>
         val allocations = addresses.map { address =>
-          val id = checked(session.registerAllocation(bytes.toLong, AllocationKind.Device))
+          val id = checked(session.registerAllocation(bytes))
           checked(session.registerAllocationAddress(id, address))
           id
         }
@@ -100,27 +94,23 @@ object SessionMemoryBenchmark {
       addresses: Array[GuestAddress],
       workers: Workgroups,
       completed: ConcurrentLinkedQueue[Measurement[Long]]
-  ) extends RuntimeBackend {
-    override val encoding: String                                                         = "benchmark-memory"
-    override def load(image: Vec[Byte]): Either[ExecutionFailure, RuntimeBackend.Program] = Right(Program())
+  ) extends Backend {
+    override val encoding: ProgramEncoding                              = ProgramEncoding.PTXText
+    override def load(image: Vec[Byte]): Either[Fault, Backend.Program] = Right(Program())
 
-    private class Program extends RuntimeBackend.Program {
-      override def symbols: Either[ExecutionFailure, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
-      override def kernel(name: NonEmpty[String]): Either[ExecutionFailure, KernelMetadata] =
-        KernelMetadata.validated(0, 0, Vec.empty).left.map(ExecutionFailure.InvalidRequest(_))
+    private class Program extends Backend.Program {
+      override def symbols: Either[Fault, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
+      override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] =
+        KernelMetadata.validated(0, 0, Vec.empty).left.map(Fault.InvalidRequest(_))
 
       @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
       override def execute(
           task: KernelTask,
-          memory: Memory,
+          memory: AddressSpace,
           control: TaskControl,
           handler: Event => Either[Fault, Unit]
-      ): Either[ExecutionFailure, Unit] = {
-        val addressSpace = memory match {
-          case value: AddressSpace => value
-          case _                   => throw IllegalStateException("session did not provide an address space")
-        }
-        val heap = DynamicAddressMemory(VMMemory(addressSpace))
+      ): Either[Fault, Unit] = {
+        val heap = DeviceHeap(memory)
         workers.parallelFor(options.workers.toLong) { worker =>
           val offset   = if (options.shared) 0L else worker.raw * 64L
           val ranges   = addresses.map(address => Vec((address.offset(offset), 8: Int >= 0)))
@@ -129,22 +119,22 @@ object SessionMemoryBenchmark {
             var index   = 0
             while (index < options.iterations.raw) {
               if (index % 4 == 0) {
-                val previous = checked(heap.readLittleEndian(scratch, 8))
-                checked(heap.writeLittleEndian(scratch, previous + 1L, 8))
+                val previous = checked(heap.readValue(scratch, 8))
+                checked(heap.writeValue(scratch, previous + 1L, 8))
               } else {
                 val selected = index % addresses.length
                 checked(heap.prepareReads(ranges(selected)))
-                val _ = checked(heap.atomicModifyLittleEndian(addresses(selected).offset(offset), 8)(_ + 1L))
+                val _ = checked(heap.atomicModifyValue(addresses(selected).offset(offset), 8)(_ + 1L))
               }
               index += 1
             }
-            val result = checked(heap.readLittleEndian(scratch, 8))
+            val result = checked(heap.readValue(scratch, 8))
             require(heap.free(scratch), "device allocation was lost")
             result
           }
           val _ = completed.add(measured)
           Right(())
-        }.left.map(ExecutionFailure.fromFault(_))
+        }
       }
     }
   }

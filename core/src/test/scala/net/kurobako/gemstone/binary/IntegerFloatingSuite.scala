@@ -5,6 +5,14 @@ import net.kurobako.gemstone.constraint.*
 import scala.util.Random
 
 class IntegerFloatingSuite extends munit.FunSuite {
+  private def exactParts(value: Double): (BigInt, Int) = {
+    val bits        = IEEE754.doubleToBinary64(value)
+    val encoded     = ((bits >>> 52) & 0x7ffL).toInt
+    val fraction    = bits & 0xfffffffffffffL
+    val significand = BigInt(if (encoded == 0) fraction else fraction | (1L << 52))
+    (if (bits < 0L) -significand else significand, if (encoded == 0) -1074 else encoded - 1075)
+  }
+
   test("integer conversion retains directed rounding at precision and unsigned boundaries") {
     val random = Random(0x754L)
     val inputs = Vec(
@@ -42,7 +50,7 @@ class IntegerFloatingSuite extends munit.FunSuite {
       val expected = if (width.raw == 32) IEEE754.floatToBinary32(adjusted.toFloat).toLong
       else IEEE754.doubleToBinary64(adjusted)
       assertEquals(
-        IEEE754.integerToBinary(value, unsigned, width, rounding),
+        IEEE754.integerToBinary(value, unsigned, width.widen[Int in (16, 32, 64)], rounding),
         expected,
         clues(value, unsigned, width, rounding)
       )
@@ -73,9 +81,15 @@ class IntegerFloatingSuite extends munit.FunSuite {
     inputs.foreach { (x, y) =>
       val expected = if (!x.isFinite || !y.isFinite || y == 0.0) 0
       else {
-        val quotient = BigInt(java.math.BigDecimal(x)
-          .divide(java.math.BigDecimal(y), 0, java.math.RoundingMode.HALF_EVEN).toBigIntegerExact)
-        (quotient.abs.toInt & 0x7f) * quotient.signum
+        val (xSignificand, xExponent) = exactParts(x)
+        val (ySignificand, yExponent) = exactParts(y)
+        val scale                     = math.min(xExponent, yExponent)
+        val numerator                 = xSignificand.abs << (xExponent - scale)
+        val denominator               = ySignificand.abs << (yExponent - scale)
+        val (truncated, remainder)    = numerator /% denominator
+        val order                     = (remainder << 1).compare(denominator)
+        val quotient                  = truncated + (if (order > 0 || (order == 0 && truncated.testBit(0))) 1 else 0)
+        (quotient.toInt & 0x7f) * xSignificand.signum * ySignificand.signum
       }
       assertEquals(IEEE754.remainderQuotient(x, y), expected, clues(x, y))
     }

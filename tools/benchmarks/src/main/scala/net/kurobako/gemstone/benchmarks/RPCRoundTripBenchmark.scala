@@ -1,12 +1,12 @@
 package net.kurobako.gemstone.benchmarks
 
 import cats.syntax.all.*
-import com.monovore.decline.Opts
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.rpc.*
@@ -16,21 +16,22 @@ import scala.util.Using
 
 /** Persistent RPC round trips; server startup and connection setup are outside the measurement. */
 object RPCRoundTripBenchmark {
-  private val options = (
-    Opts.option[String]("transport", help = "Transport: tcp or uds").withDefault("tcp")
-      .validate("transport must be tcp or uds")(value => value == "tcp" || value == "uds"),
-    Opts.option[Int]("iterations", help = "Verified ping round trips").withDefault(10000)
-      .mapValidated(value => value.refine[Int > 0].toValidatedNel)
-  ).tupled
+  private enum SocketKind {
+    case TCP, UDS
+  }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def run(arguments: Array[String]): BenchmarkSample = {
-    val (transport, iterations) = BenchmarkArguments.parse(BenchmarkName("rpc-roundtrip"), arguments.toSeq, options)
-    val directory               = Files.createTempDirectory("gemstone-rpc-benchmark-")
+  val benchmark: Case = (choice("transport", "tcp" -> SocketKind.TCP, "uds" -> SocketKind.UDS), iterations(10000))
+    .mapN((transport, iterations) => () => run(transport, iterations))
+
+  private def run(transport: SocketKind, iterations: Int > 0): BenchmarkSample = {
+    val directory = Files.createTempDirectory("gemstone-rpc-benchmark-")
     try Using.Manager { use =>
-        val bind    = if (transport == "uds") Bind.Unix(directory.resolve("rpc.sock")) else Bind.Tcp()
+        val bind = transport match {
+          case SocketKind.TCP => Bind.Tcp()
+          case SocketKind.UDS => Bind.Unix(directory.resolve("rpc.sock"))
+        }
         val server  = use(Server.start(Server.Settings(parallelism = 1, bind = bind)))
-        val channel = use(SocketTransport.connect(server.endpoint, 10000))
+        val channel = use(Transport.connect(server.endpoint, 10000))
         val input   = DataInputStream(channel.input)
         val output  = DataOutputStream(channel.output)
         protocol.hello(input, output)
@@ -39,7 +40,7 @@ object RPCRoundTripBenchmark {
           .fold(error => throw IllegalArgumentException(error), identity)
         val tag     = name.getBytes(StandardCharsets.UTF_8)
         val request = ByteBuffer.allocate(ExecutionRPC.RequestHeaderBytes.raw + tag.length + payload.length)
-          .putInt(ExecutionRPC.RequestMagic).putLong(server.client.toLong)
+          .putInt(ExecutionRPC.RequestMagic).putLong(server.client.raw)
           .putLong(1L).putLong(1L).putInt(tag.length).putInt(payload.length).put(tag).put(payload).array()
         val reply = operation.replyCodec.encode((), ExecutionRPC.Limits)
           .fold(error => throw IllegalArgumentException(error), identity)
@@ -54,13 +55,7 @@ object RPCRoundTripBenchmark {
             throw IllegalStateException("unexpected RPC ping response")
         }
         exchange()
-        Measurement.sample(iterations.toLong) {
-          var index = 0
-          while (index < iterations.raw) {
-            exchange()
-            index += 1
-          }
-        }
+        Measurement.repeat(iterations)(exchange())
       }.get
     finally Files.delete(directory)
   }

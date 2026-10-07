@@ -6,20 +6,18 @@ import java.io.EOFException
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.given
+import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.Transport.*
-import net.kurobako.gemstone.vm.*
 import scala.compiletime.error
 import scala.util.Using
 
 object protocol {
   type ClientId = ClientId.Type
-  object ClientId extends Newtype[Long > 0] {
-    extension (value: ClientId) def toLong: Long = value.raw
-  }
+  object ClientId extends PositiveId
 
   /** Reads exactly `size` bytes, failing with `failure` when the stream ends early. */
   def readExactly(input: DataInputStream, size: Int >= 0, failure: String => Throwable): Array[Byte] = {
@@ -33,20 +31,25 @@ object protocol {
 
   /** Parses a client identity, rejecting a non-positive wire value. */
   def clientId(value: Long): ClientId =
-    ClientId.either(value).fold(
+    value.refine[ClientId].fold(
       message => throw IllegalArgumentException(s"invalid client identity: $message"),
       identity
     )
   type SessionId = SessionId.Type
 
+  /** A client process: its PID and an incarnation that changes when the PID is reused. */
   object SessionId extends Newtype[(Long, Long)] {
-    override protected def validate(value: (Long, Long)): Unit =
-      require(value._1 != 0L || value._2 != 0L, "execution session identity cannot be the zero sentinel")
+    override protected def violation(value: (Long, Long)): Option[NonEmpty[String]] =
+      Option.when[NonEmpty[String]](value == (0L, 0L))("execution session identity cannot be the zero sentinel")
 
-    inline def apply(inline high: Long, inline low: Long): SessionId =
-      inline if (high == 0L && low == 0L) error("execution session identity cannot be the zero sentinel")
-      else apply((high, low))
+    inline def apply(inline process: Long, inline incarnation: Long): SessionId =
+      inline if (process == 0L && incarnation == 0L) error("execution session identity cannot be the zero sentinel")
+      else apply((process, incarnation))
 
+    extension (id: SessionId) {
+      def process: Long     = id.unwrap._1
+      def incarnation: Long = id.unwrap._2
+    }
   }
 
   object Frame {
@@ -106,10 +109,11 @@ object protocol {
 
   /** Reads the execution header after its magic. The stream is never marked or rewound. */
   def readHeader(input: DataInputStream): Header = {
-    val client  = clientId(input.readLong())
-    val high    = input.readLong()
-    val low     = input.readLong()
-    val session = SessionId.either((high, low)).fold(message => throw IllegalArgumentException(message), identity)
+    val client      = clientId(input.readLong())
+    val process     = input.readLong()
+    val incarnation = input.readLong()
+    val session     =
+      (process, incarnation).refine[SessionId].fold(message => throw IllegalArgumentException(message), identity)
     val tagSize = input.readInt().refine[Int > 0]
       .fold(message => throw IllegalArgumentException(s"invalid operation tag size: $message"), identity)
     require(tagSize.raw <= ExecutionRPC.MaximumTagBytes.raw, s"invalid operation tag size: $tagSize")
@@ -129,7 +133,7 @@ object protocol {
     val (status, payload) = result match {
       case Right(bytes) => 0 -> bytes
       case Left(error)  =>
-        val encoded = summon[Wire.Codec[ExecutionFailure]].encode(bounded(error), ExecutionRPC.Limits)
+        val encoded = summon[Wire.Codec[ExecutionFailure]].encode(error, ExecutionRPC.Limits)
           .fold(message => throw IllegalArgumentException(s"cannot encode execution failure: $message"), value => value)
         1 -> encoded
     }
@@ -166,50 +170,19 @@ object protocol {
     accepted
   }
 
-  private def bounded(error: ExecutionFailure): ExecutionFailure =
-    error.withDetail(truncateUtf8(error.message, ExecutionRPC.MaximumTextBytes.raw))
-
-  private def truncateUtf8(
-      value: String,
-      maximumBytes: Int
-  ): String =
-    if (value.getBytes(StandardCharsets.UTF_8).length <= maximumBytes) value
-    else {
-      val result = StringBuilder()
-      @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-      var index = 0
-      @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-      var bytes = 0
-      while (index < value.length) {
-        val codePoint = value.codePointAt(index)
-        val width     =
-          if (codePoint <= 0x7f) 1
-          else if (codePoint <= 0x7ff) 2
-          else if (codePoint <= 0xffff) 3
-          else 4
-        if (bytes + width > maximumBytes) index = value.length
-        else {
-          result.appendAll(Character.toChars(codePoint))
-          bytes += width
-          index += Character.charCount(codePoint)
-        }
-      }
-      result.result()
-    }
-
   object Control {
     val Magic          = 0x474d4331
     val RegisterClient = 1
-    val ReleaseClient  = 3
-    val Shutdown       = 4
-    val Finish         = 5
+    val ReleaseClient  = 2
+    val Shutdown       = 3
+    val Finish         = 4
     val ResponseMagic  = 0x474d5331
 
     private val TimeoutMillis: Int > 0 = 5000
 
     def register(endpoint: Endpoint, timeoutMillis: Int > 0 = TimeoutMillis): ClientId =
       exchange(endpoint, timeoutMillis, RegisterClient, None) { input =>
-        ClientId.either(input.readLong())
+        input.readLong().refine[ClientId]
           .fold(
             message => throw IOException(s"Gemstone server returned an invalid client identity: $message"),
             value => value
@@ -229,7 +202,7 @@ object protocol {
     private def exchange[A](endpoint: Endpoint, timeoutMillis: Int > 0, operation: Int, client: Option[ClientId])(
         read: DataInputStream => A
     ): A =
-      Using.resource(SocketTransport.connect(endpoint, timeoutMillis)) { channel =>
+      Using.resource(Transport.connect(endpoint, timeoutMillis)) { channel =>
         val output = DataOutputStream(channel.output)
         writeRequest(output, operation, client)
         val input   = DataInputStream(channel.input)
@@ -241,7 +214,7 @@ object protocol {
       output.writeInt(Magic)
       output.writeInt(operation)
       output.writeInt(if (client.isDefined) 8 else 0)
-      client.foreach(value => output.writeLong(value.toLong))
+      client.foreach(value => output.writeLong(value.raw))
       output.flush()
     }
 

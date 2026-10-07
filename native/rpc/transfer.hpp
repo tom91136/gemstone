@@ -1,9 +1,9 @@
-#ifndef GEMSTONE_EXECUTION_TRANSFER_HPP
-#define GEMSTONE_EXECUTION_TRANSFER_HPP
+#pragma once
 
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <vector>
 
 #include "gemstone_execution_rpc.hpp"
@@ -12,6 +12,16 @@ namespace gemstone::execution {
 
 /** Largest allocation payload a single RPC message may carry. */
 inline constexpr size_t TransferChunk = MaximumPayload / 2;
+
+/** Registers `size` bytes at native `address`; the id is released again when binding the address fails. */
+inline std::optional<AllocationId> registerAllocation(Client &client, uint64_t size, const void *address, bool hostBacked = false) {
+  const auto id = client.call(RegisterAllocation{{static_cast<int64_t>(size)}});
+  if (!id) return std::nullopt;
+  const GuestAddress base{static_cast<int64_t>(reinterpret_cast<uintptr_t>(address))};
+  if (client.call(RegisterAllocationAddress{id.value(), base, hostBacked})) return id.value();
+  (void)client.call(ReleaseAllocation{id.value()});
+  return std::nullopt;
+}
 
 /** Copies an allocation range between the client and the execution service in
  * bounded chunks. `upload` writes client bytes to the service; otherwise the
@@ -86,5 +96,3 @@ bool readDirtyRanges(Client &client, const std::vector<DirtyRange> &ranges, Appl
 }
 
 } // namespace gemstone::execution
-
-#endif

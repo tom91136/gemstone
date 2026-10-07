@@ -37,16 +37,14 @@ object GenerateAMDGPUOracle {
   )
 
   private object Corpus {
-    val empty: Corpus = Corpus(Set.empty, Set.empty, Chain.empty, Chain.empty, 0, 0)
+    val empty: Corpus = Corpus(Set.empty, Set.empty, Chain.empty, Chain.empty)
   }
 
   private case class Corpus(
       positiveSeen: Set[(NonEmpty[String], NonEmpty[String], Vector[Int in 0 ~ 255], Int in (32, 64))],
       diagnosticSeen: Set[(NonEmpty[String], NonEmpty[String], NonEmpty[String])],
       positives: Chain[Golden],
-      diagnostics: Chain[Diagnostic],
-      encodingChecks: Int,
-      diagnosticChecks: Int
+      diagnostics: Chain[Diagnostic]
   )
 
   private case class Selection(positives: Vector[Golden], diagnostics: Vector[Diagnostic])
@@ -99,7 +97,7 @@ object GenerateAMDGPUOracle {
       throw IllegalStateException(s"diagnostic selection is unexpectedly small: ${selected.diagnostics.size}")
     if (selected.diagnostics.size > 2000)
       throw IllegalStateException(s"diagnostic selection is unexpectedly large: ${selected.diagnostics.size}")
-    write(resourceRoot, output, files.size, corpus, selected)
+    write(resourceRoot, output, corpus, selected)
   }
 
   private def extract(root: Path, files: Vector[Path]): Corpus =
@@ -111,44 +109,42 @@ object GenerateAMDGPUOracle {
       lines.zipWithIndex.foldLeft(corpus) {
         case (state, (EncodingCheck(rawPrefix, assembly, encoded), index)) =>
           val source: NonEmpty[String] = s"$sourceFile:${index + 1}"
-          parseBytes(encoded).fold(state.copy(encodingChecks = state.encodingChecks + 1)) { bytes =>
-            prefixTargets.getOrElse(normalizePrefix(rawPrefix), Set.empty).toVector.sorted.foldLeft(
-              state.copy(encodingChecks = state.encodingChecks + 1)
-            ) { (current, context) =>
-              val (target, waveSize) = context
-              // LLVM printing loses swizzle bits and packed SDWA negation; use the original input for these checks.
-              val input = if (assembly.contains("offset:swizzle(") || assembly.startsWith("v_pk_fmac_f16_sdwa"))
-                lines.take(index).reverse.find(line => line.trim.nonEmpty && !line.trim.startsWith("//"))
-                  .filter(line =>
-                    line.trim.takeWhile(!_.isWhitespace) == assembly.trim.takeWhile(!_.isWhitespace)
-                  ).getOrElse(assembly)
-              else assembly
-              // LLVM omits the width suffix when printing these operand-free instructions.
-              (if (bytes.size == 8 && Set("v_nop", "v_clrexcp")(assembly.trim)) s"${assembly.trim}_e64"
-               else input.trim)
-                .refine[NonEmpty[String]].toOption.fold(current) { canonical =>
-                  val key = (target, canonical, bytes, waveSize)
-                  if (!containsFileCheckExpression(canonical) && !current.positiveSeen(key))
-                    current.copy(
-                      positiveSeen = current.positiveSeen + key,
-                      positives =
-                        current.positives.append(Golden(target, canonical, bytes, source, sourceFile, waveSize))
-                    )
-                  else current
-                }
+          parseBytes(encoded).fold(state) { bytes =>
+            prefixTargets.getOrElse(normalisePrefix(rawPrefix), Set.empty).toVector.sorted.foldLeft(state) {
+              (current, context) =>
+                val (target, waveSize) = context
+                // LLVM printing loses swizzle bits and packed SDWA negation; use the original input for these checks.
+                val input = if (assembly.contains("offset:swizzle(") || assembly.startsWith("v_pk_fmac_f16_sdwa"))
+                  lines.take(index).reverse.find(line => line.trim.nonEmpty && !line.trim.startsWith("//"))
+                    .filter(line =>
+                      line.trim.takeWhile(!_.isWhitespace) == assembly.trim.takeWhile(!_.isWhitespace)
+                    ).getOrElse(assembly)
+                else assembly
+                // LLVM omits the width suffix when printing these operand-free instructions.
+                (if (bytes.size == 8 && Set("v_nop", "v_clrexcp")(assembly.trim)) s"${assembly.trim}_e64"
+                 else input.trim)
+                  .refine[NonEmpty[String]].toOption.fold(current) { canonical =>
+                    val key = (target, canonical, bytes, waveSize)
+                    if (!containsFileCheckExpression(canonical) && !current.positiveSeen(key))
+                      current.copy(
+                        positiveSeen = current.positiveSeen + key,
+                        positives =
+                          current.positives.append(Golden(target, canonical, bytes, source, sourceFile, waveSize))
+                      )
+                    else current
+                  }
             }
           }
         case (state, (DiagnosticCheck(rawPrefix, check), index)) =>
-          val counted = state.copy(diagnosticChecks = state.diagnosticChecks + 1)
           referencedLine(
             check,
             index
           ).flatMap(lines.lift).map(stripComment(_)).filter(validDiagnosticSource(_)).flatMap { assembly =>
             assembly.refine[NonEmpty[String]].toOption
-          }.fold(counted) { assembly =>
+          }.fold(state) { assembly =>
             val message                  = check.drop(check.indexOf("error:") + "error:".length).trim
             val source: NonEmpty[String] = s"$sourceFile:${index + 1}"
-            prefixTargets.getOrElse(normalizePrefix(rawPrefix), Set.empty).toVector.sorted.foldLeft(counted) {
+            prefixTargets.getOrElse(normalisePrefix(rawPrefix), Set.empty).toVector.sorted.foldLeft(state) {
               (current, context) =>
                 val (target, _) = context
                 message.refine[NonEmpty[String]].toOption.fold(current) { diagnostic =>
@@ -261,7 +257,7 @@ object GenerateAMDGPUOracle {
   private def diagnosticCategory(message: NonEmpty[String]): String = {
     val withoutQuoted  = Quoted.replaceAllIn(message.toLowerCaseRoot, "<value>")
     val withoutGPUName = GPUName.replaceAllIn(withoutQuoted, "<gpu>")
-    Text.normalizeWhitespace(Number.replaceAllIn(withoutGPUName, "<number>"))
+    Text.normaliseWhitespace(Number.replaceAllIn(withoutGPUName, "<number>"))
   }
 
   @annotation.tailrec
@@ -276,7 +272,6 @@ object GenerateAMDGPUOracle {
   private def write(
       resourceRoot: Path,
       output: Path,
-      sourceFileCount: Int,
       corpus: Corpus,
       selected: Selection
   ): Unit = {
@@ -311,12 +306,7 @@ object GenerateAMDGPUOracle {
 
     val manifest =
       GeneratedHeader.line("#", "from pinned LLVM MC/AMDGPU checks") +
-        s"""|source-files=$sourceFileCount
-            |source-encoding-checks=${corpus.encodingChecks}
-          |source-diagnostic-checks=${corpus.diagnosticChecks}
-          |source-positive-cases=${corpus.positives.size}
-          |source-diagnostic-cases=${corpus.diagnostics.size}
-          |selected-positive-cases=${selected.positives.size}
+        s"""|selected-positive-cases=${selected.positives.size}
           |selected-diagnostic-cases=${selected.diagnostics.size}
           |${files.map { case (name, _) => s"file=$name" }.mkString("\n")}
           |""".stripMargin
@@ -349,7 +339,7 @@ object GenerateAMDGPUOracle {
                   if (command.contains("+wavefrontsize64") || command.contains("-wavefrontsize32")) 64
                   else if (command.contains("+wavefrontsize32") || command.contains("-wavefrontsize64")) 32
                   else if (familyForTarget(target).startsWith("gfx1")) 32 else 64
-                normalizePrefix(prefix) -> (target -> waveSize)
+                normalisePrefix(prefix) -> (target -> waveSize)
               }
           }
         }
@@ -377,7 +367,7 @@ object GenerateAMDGPUOracle {
     case _                                           => None
   }
 
-  private def normalizePrefix(prefix: String): String =
+  private def normalisePrefix(prefix: String): String =
     CheckDirective.replaceFirstIn(prefix.toUpperCaseRoot, "")
 
   private def referencedLine(check: String, checkIndex: Int): Option[Int] =

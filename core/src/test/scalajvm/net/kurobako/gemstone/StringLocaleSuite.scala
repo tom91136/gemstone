@@ -9,7 +9,7 @@ class StringLocaleSuite extends munit.FunSuite {
     try {
       Locale.setDefault(Locale.FRANCE)
       // Exercise the Java Formatter Object-argument boundary under a non-root locale.
-      @SuppressWarnings(Array("scalafix:GemstoneNoBoxedPrimitives"))
+      @SuppressWarnings(Array("scalafix:NoBoxedPrimitives"))
       val rendered = string.formatRoot("%.1f", java.lang.Double.valueOf(1.5))
       assertEquals(rendered, "1.5")
     } finally Locale.setDefault(previous)

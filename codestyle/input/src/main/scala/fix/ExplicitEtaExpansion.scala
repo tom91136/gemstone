@@ -1,5 +1,5 @@
 /*
-rule = GemstoneExplicitEtaExpansion
+rule = ExplicitEtaExpansion
  */
 package fix
 
@@ -22,14 +22,14 @@ object ExplicitEtaExpansion {
   def localMethod: List[Int] = {
     def localIncrement(value: Int): Int = value + 1
     // format: off
-    List(1).map(localIncrement)// assert: GemstoneExplicitEtaExpansion.method-value
+    List(1).map(localIncrement)// assert: ExplicitEtaExpansion.method-value
     // format: on
   }
 
   // format: off
-  val rejected: List[Int]          = List(1).map(increment)// assert: GemstoneExplicitEtaExpansion.method-value
-  val constructor: List[Box]       = List(1).map(Box.apply)// assert: GemstoneExplicitEtaExpansion.method-value
-  val extensionMethod: List[Int]   = List(1).map(1.plus)// assert: GemstoneExplicitEtaExpansion.method-value
+  val rejected: List[Int]          = List(1).map(increment)// assert: ExplicitEtaExpansion.method-value
+  val constructor: List[Box]       = List(1).map(Box.apply)// assert: ExplicitEtaExpansion.method-value
+  val extensionMethod: List[Int]   = List(1).map(1.plus)// assert: ExplicitEtaExpansion.method-value
   // format: on
   val accepted: List[Int]          = List(1).map(increment(_))
   val functionValue: List[Int]     = List(1).map(incrementFunction)

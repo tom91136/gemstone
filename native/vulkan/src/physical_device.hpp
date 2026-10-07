@@ -6,10 +6,10 @@
 #include <vulkan/vulkan.h>
 
 namespace gemstone::vulkan {
-constexpr VkDeviceSize maxAllocationSize = static_cast<VkDeviceSize>(std::numeric_limits<int32_t>::max());
-constexpr size_t memoryMapAlignment = 64;
+constexpr VkDeviceSize MaxAllocationSize = static_cast<VkDeviceSize>(std::numeric_limits<int32_t>::max());
+constexpr size_t MemoryMapAlignment = 64;
 // Image resource address-space bounds are distinct from the RPC allocation limit.
-constexpr VkDeviceSize maxImageResourceSize = VkDeviceSize{1} << 31;
+constexpr VkDeviceSize MaxImageResourceSize = VkDeviceSize{1} << 31;
 
 std::optional<uint32_t> configuredApiVersion();
 void fillProperties(VkPhysicalDeviceProperties *properties);

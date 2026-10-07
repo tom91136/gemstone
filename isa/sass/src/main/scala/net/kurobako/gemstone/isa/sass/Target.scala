@@ -9,15 +9,16 @@ object Target {
       case s"SM$value"  => value
       case _            => source
     }
-    for {
-      sm      <- number.toIntOption.toRight(s"invalid SASS target $source")
-      checked <- sm.refine[Int >= 35].left.map(_.raw)
-      target = Target(checked)
-      _ <- Either.cond(Metadata.catalogue.targets.exists(_.name == target.name), (), s"unsupported SASS target $source")
-    } yield target
+    number.toIntOption.flatMap(_.refine[Int >= 35].toOption).toRight(s"invalid SASS target $source").flatMap(of(_))
   }
+
+  def of(sm: Int >= 35): Either[String, Target] =
+    Either.cond(NVDisasm.supports(s"SM$sm"), Target(sm), s"unsupported SASS target sm_$sm")
 }
 
+/** An architecture with recovered decoding tables. */
 case class Target private (sm: Int >= 35) {
-  def name: String = s"SM$sm"
+  def name: String                = s"SM$sm"
+  def generation: Generation      = Generation.of(sm)
+  def database: NVDisasm.Database = NVDisasm.database(name)
 }

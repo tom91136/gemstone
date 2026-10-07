@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.codegen
 
 object Text {
-  def normalizeWhitespace(value: String): String = {
+  def normaliseWhitespace(value: String): String = {
     val result = StringBuilder()
     value.foreach { character =>
       if (character.isWhitespace) {

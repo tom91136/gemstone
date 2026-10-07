@@ -11,39 +11,30 @@
 namespace conformance::driver {
 using namespace aspartame;
 
-std::map<std::string, std::string> base_environment() {
+std::map<std::string, std::string> baseEnvironment() {
   std::map<std::string, std::string> result;
+  const auto inherit = [&](std::string_view name) {
+    if (const auto *value = std::getenv(std::string(name).c_str())) result[std::string(name)] = value;
+  };
   for (const auto *name :
-       {"HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "SystemRoot", "WINDIR", "COMSPEC", "DISPLAY",
-        "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "CONFORMANCE_OPENCL_CTS_ELEMENTS", "CONFORMANCE_OPENCL_CTS_WIMPY",
-        "CONFORMANCE_OPENCL_CTS_TIMEOUT", "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATIONS", "CONFORMANCE_OPENCL_CTS_ATOMIC_THREADS"}) {
-    if (const auto *value = std::getenv(name)) result[name] = value;
-  }
-#if defined(_WIN32)
-  const auto system = result.contains("SystemRoot") ? result.at("SystemRoot") : "C:\\Windows";
-  result["PATH"] = system + "\\System32;" + system;
-#else
+       {"HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"})
+    inherit(name);
+  for (const auto name : SuiteEnvironmentKeys)
+    inherit(name);
   result["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin";
-#endif
   return result;
 }
-void prepare_runtime_environment(std::map<std::string, std::string> &environment, const std::filesystem::path &artifact,
-                                 const std::filesystem::path &support, std::string_view backend) {
+void prepareRuntimeEnvironment(std::map<std::string, std::string> &environment, const std::filesystem::path &artifact,
+                               const std::filesystem::path &support, std::string_view backend) {
   environment["CONFORMANCE_SUPPORT_ROOT"] = support.string();
   // This map is used with env::empty, so absent variables really are absent.
   for (auto i = environment.begin(); i != environment.end();) {
     const auto &key = i->first;
-    if (reserved_environment_key(key) && !key.starts_with("CONFORMANCE_") && key != "PATH") i = environment.erase(i);
+    if (reservedEnvironmentKey(key) && !key.starts_with("CONFORMANCE_") && key != "PATH") i = environment.erase(i);
     else ++i;
   }
   environment["OMP_TARGET_OFFLOAD"] = "MANDATORY";
-#if defined(_WIN32)
-  environment["PATH"] = artifact.string() + ";" + (support / "lib").string() + ";" + base_environment().at("PATH");
-#elif defined(__APPLE__)
-  environment["DYLD_LIBRARY_PATH"] = (artifact / "lib").string() + ":" + (support / "lib").string();
-#else
   environment["LD_LIBRARY_PATH"] = (artifact / "lib").string() + ":" + (support / "lib").string();
-#endif
   if (std::filesystem::is_regular_file(support / "data/libdrm/amdgpu.ids"))
     environment["AMDGPU_ASIC_ID_TABLE_PATHS"] = (support / "data/libdrm").string();
   if (std::filesystem::is_directory(support / "lib/rocblas/library"))

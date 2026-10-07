@@ -21,7 +21,7 @@ struct Graph {
   std::unique_ptr<ggml_backend_buffer, decltype(&ggml_backend_buffer_free)> buffer{nullptr, ggml_backend_buffer_free};
 
   Graph() {
-    const auto &selection = conformance::device_selection();
+    const auto &selection = conformance::deviceSelection();
     const auto index = std::stoul(selection.environment.at("CONFORMANCE_VULKAN_DEVICE_ID")) - 1;
     // Restrict GGML to the selected device before its independent enumeration.
     REQUIRE(setenv("GGML_VK_VISIBLE_DEVICES", std::to_string(index).c_str(), 1) == 0);

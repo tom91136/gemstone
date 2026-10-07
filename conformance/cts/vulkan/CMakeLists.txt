@@ -1,12 +1,13 @@
 # dEQP assumes it owns CMAKE_SOURCE_DIR and CMAKE_BINARY_DIR. Configure it as
 # an independent project while retaining our pinned, offline dependency cache.
 include(ExternalProject)
-conformance_fetch_url(conformance_vulkan_cts vulkan_cts_source)
+FetchContent_MakeAvailable(vulkan_cts)
 set(staged_source "${CMAKE_CURRENT_BINARY_DIR}/source")
 file(MAKE_DIRECTORY "${staged_source}")
-file(COPY "${vulkan_cts_source}/" DESTINATION "${staged_source}")
+file(COPY "${vulkan_cts_SOURCE_DIR}/" DESTINATION "${staged_source}")
 foreach(dependency IN ITEMS spirv_tools glslang spirv_headers docs amber jsoncpp)
-  conformance_fetch_url("conformance_vulkan_${dependency}" dependency_source)
+  FetchContent_MakeAvailable(vulkan_${dependency})
+  set(dependency_source "${vulkan_${dependency}_SOURCE_DIR}")
   if(dependency STREQUAL "docs")
     set(directory vulkan-docs)
   else()
@@ -14,11 +15,11 @@ foreach(dependency IN ITEMS spirv_tools glslang spirv_headers docs amber jsoncpp
   endif()
   file(MAKE_DIRECTORY "${staged_source}/external/${directory}/src")
   file(COPY "${dependency_source}/" DESTINATION "${staged_source}/external/${directory}/src")
-  file(GLOB licenses LIST_DIRECTORIES FALSE "${dependency_source}/LICENSE*" "${dependency_source}/COPYING*")
+  file(GLOB licences LIST_DIRECTORIES FALSE "${dependency_source}/LICENSE*" "${dependency_source}/COPYING*")
   if(IS_DIRECTORY "${dependency_source}/LICENSES")
-    install(DIRECTORY "${dependency_source}/LICENSES/" DESTINATION "licenses/vulkan/${dependency}" COMPONENT support)
+    install(DIRECTORY "${dependency_source}/LICENSES/" DESTINATION "licences/vulkan/${dependency}" COMPONENT support)
   endif()
-  install(FILES ${licenses} DESTINATION "licenses/vulkan/${dependency}" COMPONENT support)
+  install(FILES ${licences} DESTINATION "licences/vulkan/${dependency}" COMPONENT support)
 endforeach()
 set(cts_build "${CMAKE_CURRENT_BINARY_DIR}/build")
 set(cts_program "${cts_build}/external/vulkancts/modules/vulkan/deqp-vk")
@@ -29,6 +30,7 @@ ExternalProject_Add(vulkan_cts_build
   UPDATE_COMMAND ""
   CMAKE_ARGS -DCMAKE_BUILD_TYPE=Release -DDEQP_TARGET=vulkan_headless
     -DDEQP_DISABLE_VK_VIDEO_TESTS=ON -DBUILD_TESTING=OFF
+    --log-level=WARNING
     -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
     -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
   BUILD_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --target deqp-vk
@@ -42,10 +44,10 @@ set_target_properties(vulkan_cts PROPERTIES IMPORTED_LOCATION "${cts_program}" O
 add_dependencies(vulkan_cts vulkan_cts_build)
 conformance_register_test_program(vulkan_cts ${CONFORMANCE_TIMEOUT_CTS} deqp)
 install(PROGRAMS "${cts_program}" DESTINATION . RENAME vulkan_cts COMPONENT architecture)
-install(DIRECTORY "${vulkan_cts_source}/external/vulkancts/data/"
+install(DIRECTORY "${vulkan_cts_SOURCE_DIR}/external/vulkancts/data/"
   DESTINATION data/vulkan COMPONENT support)
-install(DIRECTORY "${vulkan_cts_source}/external/vulkancts/mustpass/main/"
+install(DIRECTORY "${vulkan_cts_SOURCE_DIR}/external/vulkancts/mustpass/main/"
   DESTINATION data/vulkan/mustpass COMPONENT support)
-install(FILES "${vulkan_cts_source}/LICENSE" DESTINATION licenses
+install(FILES "${vulkan_cts_SOURCE_DIR}/LICENSE" DESTINATION licences
   RENAME Vulkan-CTS.txt COMPONENT support)
 add_custom_target(conformance_cts_artifact DEPENDS vulkan_cts_build)

@@ -5,77 +5,58 @@ import com.monovore.decline.Command
 import com.monovore.decline.Opts
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import scala.util.Using
 
 object BenchmarkRunner {
-  private sealed trait Action
-  private case object ListBenchmarks                              extends Action
-  private case class Run(options: BenchmarkOptions, jfr: Boolean) extends Action
+  case class Options(warmups: Int >= 0, samples: Int > 0, name: String, arguments: Vector[String], jfr: Boolean)
 
-  private val command = Command("benchmarks", "Run Gemstone microbenchmarks")(
+  enum Action {
+    case List
+    case Run(options: Options, measure: () => BenchmarkSample)
+  }
+
+  val command: Command[Action] = Command("benchmarks", "Run Gemstone microbenchmarks")(
     Opts.subcommands(
-      Command("list", "List available benchmark cases")(Opts(ListBenchmarks)),
+      Command("list", "List available benchmark cases")(Opts(Action.List)),
       Command("run", "Run one benchmark")((
-        Opts.argument[String]("case")
-          .validate("benchmark name must be non-empty and contain no NUL")(value =>
-            !value.contains('\u0000')
-          )
-          .refined[BenchmarkName]("benchmark name must be non-empty and contain no NUL")
-          .mapValidated { name =>
-            if (PlatformBenchmarks.names.contains(name)) name.validNel
-            else s"unknown benchmark: $name".invalidNel
-          },
-        Opts.option[Int]("warmup", help = "Warmup iterations").withDefault(1)
-          .refined[Int >= 0]("warmups must be non-negative"),
-        Opts.option[Int]("samples", help = "Measured samples").withDefault(5)
-          .refined[Int > 0]("samples must be positive"),
+        Opts.argument[String]("case"),
+        nonNegative("warmup", "Warmup iterations", 1),
+        positive("samples", "Measured samples", 5),
         Opts.flag("no-jfr", help = "Disable the default JVM flight recording").orFalse,
         Opts.arguments[String]("case-argument").orEmpty
-      ).mapN { (name, warmups, samples, noJfr, rest) =>
-        Run(options = BenchmarkOptions(warmups, samples, BenchmarkInvocation(name, rest.toVector)), jfr = !noJfr)
+      ).tupled.mapValidated { (name, warmups, samples, noJfr, arguments) =>
+        PlatformBenchmarks.parse(name, arguments)
+          .map(Action.Run(Options(warmups, samples, name, arguments.toVector, !noJfr), _)).toValidatedNel
       })
     )
   )
 
-  // Warmup and sample counters are deliberately excluded from measured case execution.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def main(arguments: Array[String]): Unit = parse(arguments.toSeq) match {
-    case ListBenchmarks    => PlatformBenchmarks.names.toVector.foreach(name => Console.out.println(name.raw))
-    case Run(options, jfr) => Using.resource(PlatformMetrics.startRunRecording(options.invocation.name, jfr)) { _ =>
-        var warmup = 0
-        while warmup < options.warmups.raw do {
-          val _ = PlatformBenchmarks.run(options.invocation)
-          warmup += 1
-        }
-        var sample: Int >= 0 = 0
-        while sample.raw < options.samples.raw do {
-          val started  = platform.epochMillis
-          val measured = PlatformBenchmarks.run(options.invocation)
-          Console.out.println(ujson.write(result(options, sample, measured, started)))
-          sample += 1
+  def main(arguments: Array[String]): Unit = command.parse(arguments.toSeq) match {
+    case Left(help) =>
+      Console.err.println(help)
+      if (help.errors.nonEmpty) sys.exit(2)
+    case Right(Action.List)                  => PlatformBenchmarks.cases.foreach((name, _) => Console.out.println(name))
+    case Right(Action.Run(options, measure)) =>
+      Using.resource(PlatformMetrics.startRecording(options.name, options.jfr)) { _ =>
+        (0 until options.warmups.raw).foreach(_ => measure())
+        Vec.indices(options.samples.widen[Int >= 0]).foreach { sample =>
+          val started = platform.epochMillis
+          Console.out.println(ujson.write(result(options, sample, measure(), started)))
         }
       }
   }
 
-  private def parse(arguments: Seq[String]): Action =
-    command.parse(arguments).fold(help => throw IllegalArgumentException(help.toString), value => value)
-
-  def parse(name: BenchmarkName, arguments: Vector[String]): BenchmarkOptions =
-    parse("run" +: name.raw +: arguments) match {
-      case Run(options, _) => options
-      case _               => throw IllegalArgumentException("expected benchmark run")
-    }
-
   def result(
-      options: BenchmarkOptions,
+      options: Options,
       sample: Int >= 0,
       measurement: BenchmarkSample,
       startedEpochMillis: Long = platform.epochMillis
   ): ujson.Obj = ujson.Obj(
     "schema"               -> "gemstone-benchmark-v2",
-    "case"                 -> options.invocation.name.raw,
-    "arguments"            -> ujson.Arr.from(options.invocation.arguments),
+    "case"                 -> options.name,
+    "arguments"            -> ujson.Arr.from(options.arguments),
     "platform"             -> PlatformMetrics.platform,
     "started_epoch_millis" -> startedEpochMillis.toString,
     "sample"               -> sample.raw,

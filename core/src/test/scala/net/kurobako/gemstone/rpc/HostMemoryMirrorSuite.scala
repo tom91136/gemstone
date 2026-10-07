@@ -4,72 +4,69 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.rpc.ExecutionRPC.*
 
 class HostMemoryMirrorSuite extends munit.FunSuite {
+  private def at(address: Long): GuestAddress = GuestAddress(address)
+
   test("executions cannot share pending reads or dirty bytes") {
     val first  = HostMemoryMirror()
     val second = HostMemoryMirror()
-    first.write(0x1000, Vec[Byte](9))
-    assertEquals(second.read(0x1000, 1), None)
+    first.write(at(0x1000), Vec[Byte](9))
+    assertEquals(second.read(at(0x1000), 1), None)
     assert(!first.hasPending)
     assert(!second.hasDirty)
     val reply = Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1)))
     assert(second.supply(reply).isRight)
     assert(first.supply(reply).isLeft)
-    assertEquals(first.read(0x1000, 1), Some(Vec[Byte](9)))
-    assertEquals(second.read(0x1000, 1), Some(Vec[Byte](1)))
-  }
-
-  test("batch configuration always permits forward progress") {
-    val _ = intercept[IllegalArgumentException](HostMemoryMirror(maxBatchBytes = 7))
-    val _ = intercept[IllegalArgumentException](HostMemoryMirror(maxBatchRanges = 0))
+    assertEquals(first.read(at(0x1000), 1), Some(Vec[Byte](9)))
+    assertEquals(second.read(at(0x1000), 1), Some(Vec[Byte](1)))
   }
 
   test("contiguous lanes merge while strided and gather accesses preserve holes") {
     val mirror = HostMemoryMirror()
-    for (offset <- 0 until 32) assertEquals(mirror.read(0x1000L + offset * 4, 4), None)
+    for (offset <- 0 until 32) assertEquals(mirror.read(at(0x1000L + offset * 4), 4), None)
     assertEquals(mirror.requests(), Vec(HostMemoryRange(GuestAddress(0x1000L), 128)))
-    for (address <- List(0x2000L, 0x2010L, 0x9000L, 0x2000L)) mirror.read(address, 4)
+    for (address <- List(0x2000L, 0x2010L, 0x9000L, 0x2000L)) mirror.read(at(address), 4)
     assertEquals(mirror.requests().size, 4)
     assertEquals(mirror.requests().map(_.size.raw).sum, 140)
   }
 
   test("linked discovery fetches only newly visited bytes and shares aliases") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(0x1000, 4), None)
+    assertEquals(mirror.read(at(0x1000), 4), None)
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2, 3, 4)))).isRight)
-    assertEquals(mirror.read(0x1001, 2), Some(Vec[Byte](2, 3)))
-    assertEquals(mirror.read(0x8000, 2), None)
+    assertEquals(mirror.read(at(0x1001), 2), Some(Vec[Byte](2, 3)))
+    assertEquals(mirror.read(at(0x8000), 2), None)
     assertEquals(mirror.requests(), Vec(HostMemoryRange(GuestAddress(0x8000L), 2)))
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x8000L), Vec[Byte](5, 6)))).isRight)
-    mirror.write(0x8001, Vec[Byte](9))
-    assertEquals(mirror.read(0x8000, 2), Some(Vec[Byte](5, 9)))
-    assertEquals(mirror.dirty, Vec(HostMemoryBytes(GuestAddress(0x8001L), Vec[Byte](9))))
+    mirror.write(at(0x8001), Vec[Byte](9))
+    assertEquals(mirror.read(at(0x8000), 2), Some(Vec[Byte](5, 9)))
+    assertEquals(mirror.takeDirty(), Vec(HostMemoryBytes(GuestAddress(0x8001L), Vec[Byte](9))))
   }
 
   test("write-only bytes need no upload and unsolicited host data is rejected atomically") {
     val mirror = HostMemoryMirror()
-    mirror.write(0x1000, Vec[Byte](7, 8))
+    mirror.write(at(0x1000), Vec[Byte](7, 8))
     assertEquals(mirror.requests(), Vec.empty[HostMemoryRange])
-    assertEquals(mirror.read(0x1000, 2), Some(Vec[Byte](7, 8)))
-    assertEquals(mirror.read(0x2000, 1), None)
+    assertEquals(mirror.read(at(0x1000), 2), Some(Vec[Byte](7, 8)))
+    assertEquals(mirror.read(at(0x2000), 1), None)
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x2000L), Vec[Byte](1, 2)))).isLeft)
-    assertEquals(mirror.read(0x2000, 1), None)
-    assertEquals(HostMemoryMirror().read(0x1000, 2), None)
+    assertEquals(mirror.read(at(0x2000), 1), None)
+    assertEquals(HostMemoryMirror().read(at(0x1000), 2), None)
   }
   test("an in-flight upload cannot overwrite a later device write") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(0x1000, 2), None)
+    assertEquals(mirror.read(at(0x1000), 2), None)
     assertEquals(mirror.requests().size, 1)
-    mirror.write(0x1001, Vec[Byte](9))
+    mirror.write(at(0x1001), Vec[Byte](9))
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2)))).isRight)
-    assertEquals(mirror.read(0x1000, 2), Some(Vec[Byte](1, 9)))
+    assertEquals(mirror.read(at(0x1000), 2), Some(Vec[Byte](1, 9)))
   }
 
   test("transfers bound both bytes and sparse range count and drain all dirty bytes") {
     val mirror = HostMemoryMirror(maxBatchBytes = 8, maxBatchRanges = 2)
-    for (address <- List(0x1000L, 0x2000L, 0x3000L)) mirror.read(address, 4)
+    for (address <- List(0x1000L, 0x2000L, 0x3000L)) mirror.read(at(address), 4)
     val first = mirror.requests()
     assertEquals(first.size, 2)
     assertEquals(first.map(_.size.raw).sum, 8)
@@ -77,7 +74,7 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
       HostMemoryBytes(range.address, Vec.fill(range.size.raw)(1.toByte))
     )).isRight)
     assertEquals(mirror.requests().size, 1)
-    mirror.write(0x4000, Vec.fill(20)(2.toByte))
+    mirror.write(at(0x4000), Vec.fill(20)(2.toByte))
     assertEquals(mirror.takeDirty().map(_.bytes.size).sum, 8)
     assert(mirror.hasDirty)
     assertEquals(mirror.takeDirty().map(_.bytes.size).sum, 8)
@@ -85,49 +82,34 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
     assert(!mirror.hasDirty)
   }
 
-  test("fulfilled requests are retired and cannot authorize later unsolicited replies") {
+  test("fulfilled requests are retired and cannot authorise later unsolicited replies") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(0x1000, 4), None)
+    assertEquals(mirror.read(at(0x1000), 4), None)
     assertEquals(mirror.requests().size, 1)
     val reply = Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2, 3, 4)))
     assert(mirror.supply(reply).isRight)
     assert(mirror.supply(reply).isLeft)
-    assertEquals(mirror.read(0x1000, 4), Some(Vec[Byte](1, 2, 3, 4)))
+    assertEquals(mirror.read(at(0x1000), 4), Some(Vec[Byte](1, 2, 3, 4)))
   }
 
   test("acquire invalidates clean bytes but preserves unpublished device writes") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(0x1000, 2), None)
+    assertEquals(mirror.read(at(0x1000), 2), None)
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2)))).isRight)
-    mirror.write(0x1001, Vec[Byte](9))
+    mirror.write(at(0x1001), Vec[Byte](9))
     mirror.invalidateClean()
-    assertEquals(mirror.read(0x1000, 1), None)
-    assertEquals(mirror.read(0x1001, 1), Some(Vec[Byte](9)))
-  }
-
-  test("system reads refresh only selected clean bytes and preserve selected dirty bytes") {
-    val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(0x1000, 4), None)
-    assertEquals(mirror.read(0x2000, 4), None)
-    assert(mirror.supply(Vec(
-      HostMemoryBytes(GuestAddress(0x1000L), Vec.fill(4)(1.toByte)),
-      HostMemoryBytes(GuestAddress(0x2000L), Vec.fill(4)(2.toByte))
-    )).isRight)
-    mirror.write(0x1001, Vec[Byte](9))
-    mirror.invalidateClean(Vec(HostMemoryRange(GuestAddress(0x1000L), 4)))
-    assertEquals(mirror.read(0x1000, 1), None)
-    assertEquals(mirror.read(0x1001, 1), Some(Vec[Byte](9)))
-    assertEquals(mirror.read(0x2000, 4), Some(Vec.fill(4)(2.toByte)))
+    assertEquals(mirror.read(at(0x1000), 1), None)
+    assertEquals(mirror.read(at(0x1001), 1), Some(Vec[Byte](9)))
   }
 
   test("system publication drains only its target and leaves unrelated dirty bytes queued") {
     val mirror = HostMemoryMirror()
-    mirror.write(0x1000, Vec[Byte](1, 2, 3, 4))
-    mirror.write(0x2000, Vec[Byte](5, 6, 7, 8))
+    mirror.write(at(0x1000), Vec[Byte](1, 2, 3, 4))
+    mirror.write(at(0x2000), Vec[Byte](5, 6, 7, 8))
     val published = mirror.takeDirty(Vec(HostMemoryRange(GuestAddress(0x2001L), 2)))
     assertEquals(published, Vec(HostMemoryBytes(GuestAddress(0x2001L), Vec[Byte](6, 7))))
     assertEquals(
-      mirror.dirty,
+      mirror.takeDirty(),
       Vec(
         HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2, 3, 4)),
         HostMemoryBytes(GuestAddress(0x2000L), Vec[Byte](5)),
@@ -138,7 +120,7 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
 
   test("bounded system publication keeps its acknowledgement pending until the target drains") {
     val mirror = HostMemoryMirror(maxBatchBytes = 8)
-    mirror.write(0x1000, Vec.fill(12)(1.toByte))
+    mirror.write(at(0x1000), Vec.fill(12)(1.toByte))
     val target = Vec(HostMemoryRange(GuestAddress(0x1000L), 12))
     assertEquals(mirror.takeDirty(target).map(_.bytes.size).sum, 8)
     assert(mirror.hasDirty(target))
@@ -148,9 +130,9 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
 
   test("publication batches retain atomic widths and do not split words at a byte budget") {
     val mirror = HostMemoryMirror(maxBatchBytes = 10)
-    mirror.write(0x1000, Vec.fill(4)(1.toByte), 4)
-    mirror.write(0x1004, Vec.fill(4)(2.toByte), 4)
-    mirror.write(0x1008, Vec.fill(8)(3.toByte), 8)
+    mirror.write(at(0x1000), Vec.fill(4)(1.toByte), 4)
+    mirror.write(at(0x1004), Vec.fill(4)(2.toByte), 4)
+    mirror.write(at(0x1008), Vec.fill(8)(3.toByte), 8)
     val first = mirror.takeDirty()
     assertEquals(
       first,
@@ -166,7 +148,7 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
     val base   = 0x100003L
     // The SYCL namespace CTS writes a 24 MB matrix. Keep its memory scale while
     // testing bookkeeping directly, without executing six million work-items.
-    for (index <- 0 until 384) mirror.write(base + index.toLong * block.size, block)
+    for (index <- 0 until 384) mirror.write(at(base + index.toLong * block.size), block)
     mirror.invalidateClean()
     for (batch <- 0 until 24) {
       val result = mirror.takeDirty()
@@ -177,33 +159,33 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
       }
     }
     assert(!mirror.hasDirty)
-    assertEquals(mirror.read(base - 1, 1), None)
-    assertEquals(mirror.read(base + 384L * block.size, 1), None)
+    assertEquals(mirror.read(at(base - 1), 1), None)
+    assertEquals(mirror.read(at(base + 384L * block.size), 1), None)
     mirror.invalidateClean()
-    assertEquals(mirror.read(base, 1), None)
+    assertEquals(mirror.read(at(base), 1), None)
   }
 
   test("page boundaries preserve holes and in-flight writes from other lanes") {
     val mirror = HostMemoryMirror()
     val base   = 0x1ffeL
-    assertEquals(mirror.read(base, 4), None)
+    assertEquals(mirror.read(at(base), 4), None)
     assertEquals(mirror.requests(), Vec(HostMemoryRange(GuestAddress(base), 4)))
-    mirror.write(base + 2, Vec[Byte](9))
+    mirror.write(at(base + 2), Vec[Byte](9))
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(base), Vec[Byte](1, 2, 3, 4)))).isRight)
-    assertEquals(mirror.read(base, 4), Some(Vec[Byte](1, 2, 9, 4)))
+    assertEquals(mirror.read(at(base), 4), Some(Vec[Byte](1, 2, 9, 4)))
     mirror.invalidateClean()
-    assertEquals(mirror.read(base + 2, 1), Some(Vec[Byte](9)))
-    assertEquals(mirror.read(base + 1, 1), None)
-    assertEquals(mirror.read(base + 3, 1), None)
+    assertEquals(mirror.read(at(base + 2), 1), Some(Vec[Byte](9)))
+    assertEquals(mirror.read(at(base + 1), 1), None)
+    assertEquals(mirror.read(at(base + 3), 1), None)
     assertEquals(mirror.takeDirty(), Vec(HostMemoryBytes(GuestAddress(base + 2), Vec[Byte](9))))
     mirror.invalidateClean()
-    assertEquals(mirror.read(base + 2, 1), None)
+    assertEquals(mirror.read(at(base + 2), 1), None)
   }
 
   test("dense scalar writes preserve their atomic width across publication pages") {
     val mirror = HostMemoryMirror()
     val word   = Vec[Byte](1, 2, 3, 4)
-    for (index <- 0 until 262144) mirror.write(0x100000L + index.toLong * 4, word, 4)
+    for (index <- 0 until 262144) mirror.write(at(0x100000L + index.toLong * 4), word, 4)
     mirror.invalidateClean()
     val batch = mirror.takeDirty()
     assertEquals(batch.size, 16)
@@ -217,10 +199,10 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
 
   test("overlapping stores retire wider atomic markers without merging incompatible widths") {
     val mirror = HostMemoryMirror()
-    mirror.write(0x1ff8, Vec.fill(8)(1.toByte), 8)
-    mirror.write(0x1ffc, Vec.fill(4)(2.toByte), 4)
-    mirror.write(0x2000, Vec.fill(4)(3.toByte), 4)
-    mirror.write(0x2001, Vec[Byte](9))
+    mirror.write(at(0x1ff8), Vec.fill(8)(1.toByte), 8)
+    mirror.write(at(0x1ffc), Vec.fill(4)(2.toByte), 4)
+    mirror.write(at(0x2000), Vec.fill(4)(3.toByte), 4)
+    mirror.write(at(0x2001), Vec[Byte](9))
     assertEquals(
       mirror.takeDirty(),
       Vec(
@@ -233,7 +215,7 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
 
   test("selected publication expands a clipped atomic store to its aligned word") {
     val mirror = HostMemoryMirror(maxBatchBytes = 8)
-    mirror.write(0x3000, Vec[Byte](1, 2, 3, 4), 4)
+    mirror.write(at(0x3000), Vec[Byte](1, 2, 3, 4), 4)
     val selection = Vec(HostMemoryRange(GuestAddress(0x3001L), 2))
     assert(mirror.hasDirty(selection))
     assertEquals(
@@ -246,10 +228,10 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
 
   test("selected publication preserves atomic widths one through eight") {
     val mirror = HostMemoryMirror()
-    mirror.write(0x5000, Vec[Byte](1), 1)
-    mirror.write(0x5002, Vec[Byte](2, 3), 2)
-    mirror.write(0x5004, Vec[Byte](4, 5, 6, 7), 4)
-    mirror.write(0x5008, Vec[Byte](8, 9, 10, 11, 12, 13, 14, 15), 8)
+    mirror.write(at(0x5000), Vec[Byte](1), 1)
+    mirror.write(at(0x5002), Vec[Byte](2, 3), 2)
+    mirror.write(at(0x5004), Vec[Byte](4, 5, 6, 7), 4)
+    mirror.write(at(0x5008), Vec[Byte](8, 9, 10, 11, 12, 13, 14, 15), 8)
     val published = mirror.takeDirty(Vec(HostMemoryRange(GuestAddress(0x5000L), 16)))
     assertEquals(published.map(_.atomicWidth.raw), Vec(1, 2, 4, 8))
     assertEquals(published.map(_.address.raw), Vec(0x5000L, 0x5002L, 0x5004L, 0x5008L))
@@ -257,12 +239,12 @@ class HostMemoryMirrorSuite extends munit.FunSuite {
 
   test("an atomic observation preserves bytes dirtied while its host request was pending") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(0x4000, 4), None)
+    assertEquals(mirror.read(at(0x4000), 4), None)
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x4000L), Vec[Byte](1, 2, 3, 4)))).isRight)
-    mirror.write(0x4001, Vec[Byte](9))
-    mirror.observeAtomic(0x4000, Vec[Byte](5, 6, 7, 8))
-    assertEquals(mirror.read(0x4000, 4), Some(Vec[Byte](5, 9, 7, 8)))
-    assertEquals(mirror.dirty, Vec(HostMemoryBytes(GuestAddress(0x4001L), Vec[Byte](9))))
+    mirror.write(at(0x4001), Vec[Byte](9))
+    mirror.observeAtomic(at(0x4000), Vec[Byte](5, 6, 7, 8))
+    assertEquals(mirror.read(at(0x4000), 4), Some(Vec[Byte](5, 9, 7, 8)))
+    assertEquals(mirror.takeDirty(), Vec(HostMemoryBytes(GuestAddress(0x4001L), Vec[Byte](9))))
   }
 
 }

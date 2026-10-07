@@ -8,8 +8,6 @@ type Binary32 = Binary32.Type
 object Binary32 extends Newtype[Long in 0L ~ 4294967295L] {
   inline val Mask = 0xffffffffL
 
-  def fromLow(value: Type): Type = value
-
   def low(value: Long): Type = apply((value & Mask).unsafe[Long in 0L ~ 4294967295L])
 
   extension (value: Type) {
@@ -17,6 +15,5 @@ object Binary32 extends Newtype[Long in 0L ~ 4294967295L] {
 
     /** Interpret these bits as a signed 32-bit integer. */
     inline def toInt: Int = value.toLong.toInt
-    def toBigInt: BigInt  = BigInt(value.toLong)
   }
 }

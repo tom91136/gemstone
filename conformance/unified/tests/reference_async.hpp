@@ -14,40 +14,15 @@ namespace unified::test {
 // exercise dependency handling without requiring a vendor SDK or device.
 class ReferenceAsync {
 public:
-  template <class T> bool supports_copy() const { return true; }
-
-  template <class T> bool supports_reduce() const { return true; }
-
-  template <class T> bool supports_scan() const { return true; }
-
-  template <class T> bool supports_sort() const { return true; }
-
-  template <class T> bool supports_future_chain() const { return true; }
-
-  template <class T> bool supports_event_chain() const { return true; }
-
-  template <class T> bool supports_interleaved_streams() const { return true; }
-  template <class T> bool supports_inclusive_counting() const { return true; }
-
-  template <class T> bool supports_exclusive_counting() const { return true; }
-
-  template <class T> bool supports_inclusive_discard() const { return true; }
-
-  template <class T> bool supports_exclusive_discard() const { return true; }
-
-  template <class T> bool supports_inclusive_stateful() const { return true; }
-
-  template <class T> bool supports_exclusive_stateful() const { return true; }
-
-  template <class T> std::vector<T> async_copy(const std::vector<T> &input) {
+  template <class T> std::vector<T> asyncCopy(const std::vector<T> &input) {
     return std::async(std::launch::async, [input] { return input; }).get();
   }
 
-  template <class T> T async_reduce(const std::vector<T> &input) {
+  template <class T> T asyncReduce(const std::vector<T> &input) {
     return std::async(std::launch::async, [input] { return std::accumulate(input.begin(), input.end(), T{}, support::Plus<T>{}); }).get();
   }
 
-  template <class T> std::vector<T> async_scan(const std::vector<T> &input) {
+  template <class T> std::vector<T> asyncScan(const std::vector<T> &input) {
     return std::async(std::launch::async,
                       [input] {
                         std::vector<T> output(input.size());
@@ -57,37 +32,37 @@ public:
         .get();
   }
 
-  template <class T> std::vector<T> async_inclusive_scan_counting(size_t size) {
-    return std::async(std::launch::async, [size] { return hip_async::counting_reference<T>(size, false); }).get();
+  template <class T> std::vector<T> asyncInclusiveScanCounting(size_t size) {
+    return std::async(std::launch::async, [size] { return hip_async::countingReference<T>(size, false); }).get();
   }
 
-  template <class T> std::vector<T> async_exclusive_scan_counting(size_t size) {
-    return std::async(std::launch::async, [size] { return hip_async::counting_reference<T>(size, true); }).get();
+  template <class T> std::vector<T> asyncExclusiveScanCounting(size_t size) {
+    return std::async(std::launch::async, [size] { return hip_async::countingReference<T>(size, true); }).get();
   }
 
-  template <class T> void async_inclusive_scan_discard(const std::vector<T> &input) {
+  template <class T> void asyncInclusiveScanDiscard(const std::vector<T> &input) {
     std::async(std::launch::async, [input] {
       std::vector<T> output(input.size());
       std::inclusive_scan(input.begin(), input.end(), output.begin(), support::Plus<T>{});
     }).get();
   }
 
-  template <class T> void async_exclusive_scan_discard(const std::vector<T> &input) {
+  template <class T> void asyncExclusiveScanDiscard(const std::vector<T> &input) {
     std::async(std::launch::async, [input] {
       std::vector<T> output(input.size());
       std::exclusive_scan(input.begin(), input.end(), output.begin(), T{}, support::Plus<T>{});
     }).get();
   }
 
-  template <class T> std::vector<T> async_inclusive_scan_stateful(size_t size) {
-    return std::async(std::launch::async, [size] { return hip_async::stateful_reference<T>(size, false); }).get();
+  template <class T> std::vector<T> asyncInclusiveScanStateful(size_t size) {
+    return std::async(std::launch::async, [size] { return hip_async::statefulReference<T>(size, false); }).get();
   }
 
-  template <class T> std::vector<T> async_exclusive_scan_stateful(size_t size) {
-    return std::async(std::launch::async, [size] { return hip_async::stateful_reference<T>(size, true); }).get();
+  template <class T> std::vector<T> asyncExclusiveScanStateful(size_t size) {
+    return std::async(std::launch::async, [size] { return hip_async::statefulReference<T>(size, true); }).get();
   }
 
-  template <class T> std::vector<T> async_sort(const std::vector<T> &input) {
+  template <class T> std::vector<T> asyncSort(const std::vector<T> &input) {
     return std::async(std::launch::async,
                       [input] {
                         std::vector<T> output = input;
@@ -97,7 +72,7 @@ public:
         .get();
   }
 
-  template <class T> std::vector<T> async_future_chain(const std::vector<T> &input) {
+  template <class T> std::vector<T> asyncFutureChain(const std::vector<T> &input) {
     auto first = std::async(std::launch::async, [input] {
       std::vector<T> output(input.size());
       std::transform(input.begin(), input.end(), output.begin(), support::Affine<T>{});
@@ -112,7 +87,7 @@ public:
     return second.get();
   }
 
-  template <class T> std::vector<T> async_event_chain(const std::vector<T> &input) {
+  template <class T> std::vector<T> asyncEventChain(const std::vector<T> &input) {
     auto left = std::async(std::launch::async, [input] {
       std::vector<T> output(input.size());
       std::transform(input.begin(), input.end(), output.begin(), support::Affine<T>{});
@@ -124,16 +99,16 @@ public:
       return output;
     });
     auto join = std::async(std::launch::async, [left = std::move(left), right = std::move(right)]() mutable {
-      const auto left_values = left.get();
-      const auto right_values = right.get();
-      std::vector<T> output(left_values.size());
-      std::transform(left_values.begin(), left_values.end(), right_values.begin(), output.begin(), support::Combine<T>{});
+      const auto leftValues = left.get();
+      const auto rightValues = right.get();
+      std::vector<T> output(leftValues.size());
+      std::transform(leftValues.begin(), leftValues.end(), rightValues.begin(), output.begin(), support::Combine<T>{});
       return output;
     });
     return join.get();
   }
 
-  template <class T> std::vector<T> async_interleaved_streams(const std::vector<T> &input) {
+  template <class T> std::vector<T> asyncInterleavedStreams(const std::vector<T> &input) {
     std::vector<T> even;
     std::vector<T> odd;
     even.reserve((input.size() + 1) / 2);
@@ -141,21 +116,21 @@ public:
     for (size_t index = 0; index < input.size(); ++index)
       (index % 2 == 0 ? even : odd).push_back(input[index]);
 
-    auto even_future = std::async(std::launch::async, [even = std::move(even)]() mutable {
+    auto evenFuture = std::async(std::launch::async, [even = std::move(even)]() mutable {
       std::transform(even.begin(), even.end(), even.begin(), support::Affine<T>{});
       return even;
     });
-    auto odd_future = std::async(std::launch::async, [odd = std::move(odd)]() mutable {
+    auto oddFuture = std::async(std::launch::async, [odd = std::move(odd)]() mutable {
       std::transform(odd.begin(), odd.end(), odd.begin(), support::Square<T>{});
       return odd;
     });
-    const auto transformed_even = even_future.get();
-    const auto transformed_odd = odd_future.get();
+    const auto transformedEven = evenFuture.get();
+    const auto transformedOdd = oddFuture.get();
     std::vector<T> output(input.size());
-    size_t even_index = 0;
-    size_t odd_index = 0;
+    size_t evenIndex = 0;
+    size_t oddIndex = 0;
     for (size_t index = 0; index < output.size(); ++index)
-      output[index] = index % 2 == 0 ? transformed_even[even_index++] : transformed_odd[odd_index++];
+      output[index] = index % 2 == 0 ? transformedEven[evenIndex++] : transformedOdd[oddIndex++];
     return output;
   }
 };

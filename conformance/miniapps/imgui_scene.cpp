@@ -18,11 +18,11 @@
 
 namespace imgui_scene {
 namespace {
-const uint32_t vertexShader[] =
+const uint32_t VertexShader[] =
 #include "imgui_vert.hpp"
 
     ;
-const uint32_t fragmentShader[] =
+const uint32_t FragmentShader[] =
 #include "imgui_frag.hpp"
 
     ;
@@ -50,7 +50,7 @@ public:
     vk::ApplicationInfo application("conformance-imgui", 1, "imgui", 1, VK_API_VERSION_1_1);
     instance = vk::createInstanceUnique(vk::InstanceCreateInfo({}, &application));
     auto devices = instance->enumeratePhysicalDevices();
-    const auto index = reference ? 0 : std::stoul(conformance::device_selection().environment.at("CONFORMANCE_VULKAN_DEVICE_ID")) - 1;
+    const auto index = reference ? 0 : std::stoul(conformance::deviceSelection().environment.at("CONFORMANCE_VULKAN_DEVICE_ID")) - 1;
     physical = devices.at(index);
     const auto families = physical.getQueueFamilyProperties();
     const auto graphics = std::find_if(families.begin(), families.end(),
@@ -62,15 +62,15 @@ public:
     device = physical.createDeviceUnique(vk::DeviceCreateInfo({}, queueInfo));
     queue = device->getQueue(family, 0);
     pool = device->createCommandPoolUnique({vk::CommandPoolCreateFlagBits::eResetCommandBuffer, family});
-    vk::AttachmentDescription color({}, vk::Format::eR8G8B8A8Unorm, vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear,
-                                    vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
-                                    vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferSrcOptimal);
+    vk::AttachmentDescription colour({}, vk::Format::eR8G8B8A8Unorm, vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear,
+                                     vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
+                                     vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferSrcOptimal);
     vk::AttachmentReference attachment(0, vk::ImageLayout::eColorAttachmentOptimal);
     vk::SubpassDescription subpass({}, vk::PipelineBindPoint::eGraphics, {}, attachment);
     vk::SubpassDependency dependency(0, VK_SUBPASS_EXTERNAL, vk::PipelineStageFlagBits::eColorAttachmentOutput,
                                      vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eColorAttachmentWrite,
                                      vk::AccessFlagBits::eTransferRead);
-    renderPass = device->createRenderPassUnique(vk::RenderPassCreateInfo({}, color, subpass, dependency));
+    renderPass = device->createRenderPassUnique(vk::RenderPassCreateInfo({}, colour, subpass, dependency));
     gui.reset(ImGui::CreateContext());
     auto &io = ImGui::GetIO();
     io.IniFilename = nullptr;
@@ -90,9 +90,9 @@ public:
     info.CheckVkResultFn = [](VkResult result) {
       if (result != VK_SUCCESS) throw std::runtime_error("ImGui Vulkan failure: " + std::to_string(result));
     };
-    info.CustomShaderVertCreateInfo = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, nullptr, 0, sizeof(vertexShader), vertexShader};
-    info.CustomShaderFragCreateInfo = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, nullptr, 0, sizeof(fragmentShader), fragmentShader};
-    if (!ImGui_ImplVulkan_Init(&info)) throw std::runtime_error("ImGui Vulkan initialization failed");
+    info.CustomShaderVertCreateInfo = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, nullptr, 0, sizeof(VertexShader), VertexShader};
+    info.CustomShaderFragCreateInfo = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, nullptr, 0, sizeof(FragmentShader), FragmentShader};
+    if (!ImGui_ImplVulkan_Init(&info)) throw std::runtime_error("ImGui Vulkan initialisation failed");
   }
   ~Renderer() {
     (void)vkDeviceWaitIdle(*device);
@@ -130,7 +130,7 @@ public:
     ImGui::SetNextWindowPos(ImVec2(8, 8), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - 16, io.DisplaySize.y - 16), ImGuiCond_Always);
     bool open = true;
-    if (scene == Scene::primitives) ShowExampleAppCustomRendering(&open);
+    if (scene == Scene::Primitives) ShowExampleAppCustomRendering(&open);
     else ShowExampleAppLayout(&open);
     ImGui::Render();
     const auto *draw = ImGui::GetDrawData();
@@ -162,6 +162,6 @@ Image render(Scene scene, bool reference) {
   // Warm up layout and fonts before capturing the third frame.
   renderer.frame(scene, 320, 240);
   renderer.frame(scene, 320, 240);
-  return renderer.frame(scene, scene == Scene::resize ? 384 : 320, scene == Scene::resize ? 256 : 240);
+  return renderer.frame(scene, scene == Scene::Resize ? 384 : 320, scene == Scene::Resize ? 256 : 240);
 }
 } // namespace imgui_scene

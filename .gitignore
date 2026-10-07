@@ -1,5 +1,5 @@
-# sbt, Scala, and IDE state
 **/target/
+/.cache/
 /.bloop/
 **/.bsp/
 /.metals/
@@ -12,7 +12,6 @@
 *.semanticdb
 *.iml
 
-# Native build products
 /native/**/build*/
 *.a
 *.dll
@@ -23,7 +22,6 @@
 *.pdb
 *.so
 
-# Tool and editor scratch files
 /command-*.stderr
 /command-*.stdout
 *.log
@@ -32,11 +30,9 @@
 *~
 .DS_Store
 
-# Local configuration and credentials
 .env
 .env.*
 !.env.example
 
-# Python helper bytecode
 __pycache__/
 *.py[cod]

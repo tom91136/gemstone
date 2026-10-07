@@ -6,8 +6,7 @@
 #include "resources.hpp"
 #include "submission.hpp"
 
-namespace gemstone::vulkan::adapter {
-namespace gx = gemstone::execution;
+namespace gemstone::vulkan {
 inline gx::GraphicsRect graphicsRect(VkRect2D area) {
   return {area.offset.x, area.offset.y, static_cast<int32_t>(area.extent.width), static_cast<int32_t>(area.extent.height)};
 }
@@ -28,7 +27,7 @@ template <typename Region> gx::GraphicsImageCopy graphicsCopy(const Region &copy
           graphicsOffset(copy.dstOffset), graphicsExtent(copy.extent)};
 }
 class GraphicsTransfer {
-  gemstone::vulkan::SubmissionResources resources{rpcExecutionMutex};
+  SubmissionResources resources{rpcExecutionMutex};
 
 public:
   gx::GraphicsRange range(VkDeviceMemory handle, VkDeviceSize offset, size_t size) {
@@ -44,15 +43,14 @@ public:
   }
 
   gx::GraphicsRange buffer(VkBuffer handle, VkDeviceSize offset = 0) {
-    const auto &value = buffers.at(handle);
-    const auto &bytes = memories.at(value.memory)->bytes;
-    if (value.offset > bytes.size() || value.size > bytes.size() - value.offset || offset >= value.size) {
+    const auto bound = bufferRange(handle, offset, VK_WHOLE_SIZE);
+    if (!bound) {
       resources.fail();
       return {};
     }
-    return range(value.memory, value.offset + offset, value.size - offset);
+    return range(bound->memory, bound->offset, bound->bytes.size());
   }
-  gx::GraphicsImage image(const gemstone::vulkan::Image &value) {
+  gx::GraphicsImage image(const Image &value) {
     const auto format = graphicsFormat(value.format);
     if (!format) {
       resources.fail();
@@ -67,8 +65,8 @@ public:
             value.type == VK_IMAGE_TYPE_3D};
   }
   // Stage resources must outlive this transfer and its synchronous submit.
-  gx::GraphicsShader shader(const gx::PreparedShader &stage, const gemstone::vulkan::StageResources &resources,
-                            const std::array<uint8_t, execution::GraphicsPushConstantBytes> &push) {
+  gx::GraphicsShader shader(const gx::PreparedShader &stage, const StageResources &resources,
+                            const std::array<uint8_t, gx::GraphicsPushConstantBytes> &push) {
     gx::GraphicsShader result{stage.image, stage.entry.value, stage.interfaces, {}, {}, {}, stage.earlyFragmentTests, stage.fragmentQuads};
     auto bound = bindStageResources(resources, [&](const StageResources::Allocation &allocation) {
       return allocation.memory ? range(allocation.memory, allocation.offset, allocation.size)
@@ -100,4 +98,4 @@ public:
   }
 };
 
-} // namespace gemstone::vulkan::adapter
+} // namespace gemstone::vulkan

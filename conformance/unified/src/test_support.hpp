@@ -26,40 +26,45 @@
 #endif
 
 namespace unified {
-enum class ScalarType { i8, i32, i64, f16, f32, f64 };
+enum class ScalarType { F16, F32, F64 };
 struct MatrixShape {
   size_t m, n, k;
   friend bool operator==(const MatrixShape &a, const MatrixShape &b) { return a.m == b.m && a.n == b.n && a.k == b.k; }
 };
-inline constexpr std::array<size_t, 17> algorithm_sizes{0, 1, 7, 15, 31, 32, 33, 63, 64, 65, 127, 128, 129, 257, 1023, 1024, 4096};
-inline constexpr std::array<size_t, 8> blas_sizes{1, 2, 7, 31, 32, 64, 257, 1024};
-inline constexpr std::array<size_t, 13> edge_sizes{0, 1, 2, 7, 15, 31, 32, 33, 63, 64, 257, 1023, 1024};
+// Compact and full workloads select separate native Catch cases. No environment-dependent inventory.
+namespace full {
+inline constexpr std::array<size_t, 17> AlgorithmSizes{0, 1, 7, 15, 31, 32, 33, 63, 64, 65, 127, 128, 129, 257, 1023, 1024, 4096};
+inline constexpr std::array<size_t, 8> BlasSizes{1, 2, 7, 31, 32, 64, 257, 1024};
+inline constexpr std::array<size_t, 13> EdgeSizes{0, 1, 2, 7, 15, 31, 32, 33, 63, 64, 257, 1023, 1024};
 // GEMM is cubic: 1024 already needs ~1.8e8 multiply-adds, which exhausts the
 // emulator instruction budget. Cap the padded layouts at a prime so the
 // non-power-of-two leading dimensions are still exercised.
-inline constexpr std::array<size_t, 12> gemm_edge_sizes{0, 1, 2, 7, 15, 31, 32, 33, 63, 64, 257, 509};
-inline constexpr std::array<size_t, 3> stress_sizes{257, 4096, 16384};
-inline constexpr std::array<MatrixShape, 5> matrix_shapes{{{1, 1, 1}, {2, 2, 3}, {3, 5, 7}, {7, 5, 9}, {17, 13, 19}}};
-// Compact and full workloads select separate native Catch cases. No environment-dependent inventory.
-inline constexpr std::array<size_t, 9> compact_algorithm_sizes{0, 1, 31, 32, 33, 63, 64, 65, 257};
-inline constexpr std::array<size_t, 4> compact_blas_sizes{1, 31, 64, 257};
-inline constexpr std::array<size_t, 7> compact_edge_sizes{0, 1, 7, 31, 32, 33, 257};
-inline constexpr std::array<size_t, 2> compact_stress_sizes{257, 4096};
-inline constexpr std::array<MatrixShape, 3> compact_matrix_shapes{{{1, 1, 1}, {2, 2, 3}, {7, 5, 9}}};
-inline constexpr std::array<size_t, 6> compact_hip_scan_sizes{0, 1, 7, 31, 32, 33};
-inline constexpr std::array<size_t, 8> hip_scan_sizes{0, 1, 2, 7, 15, 31, 32, 33};
+inline constexpr std::array<size_t, 12> GemmEdgeSizes{0, 1, 2, 7, 15, 31, 32, 33, 63, 64, 257, 509};
+inline constexpr std::array<size_t, 3> StressSizes{257, 4096, 16384};
+inline constexpr std::array<MatrixShape, 5> MatrixShapes{{{1, 1, 1}, {2, 2, 3}, {3, 5, 7}, {7, 5, 9}, {17, 13, 19}}};
+inline constexpr std::array<size_t, 8> HipScanSizes{0, 1, 2, 7, 15, 31, 32, 33};
+} // namespace full
+namespace compact {
+inline constexpr std::array<size_t, 9> AlgorithmSizes{0, 1, 31, 32, 33, 63, 64, 65, 257};
+inline constexpr std::array<size_t, 4> BlasSizes{1, 31, 64, 257};
+inline constexpr std::array<size_t, 7> EdgeSizes{0, 1, 7, 31, 32, 33, 257};
+inline constexpr auto &GemmEdgeSizes = EdgeSizes;
+inline constexpr std::array<size_t, 2> StressSizes{257, 4096};
+inline constexpr std::array<MatrixShape, 3> MatrixShapes{{{1, 1, 1}, {2, 2, 3}, {7, 5, 9}}};
+inline constexpr std::array<size_t, 6> HipScanSizes{0, 1, 7, 31, 32, 33};
+} // namespace compact
 namespace support {
-inline size_t checked_add(size_t left, size_t right, std::string_view where) {
+inline size_t checkedAdd(size_t left, size_t right, std::string_view where) {
   if (right > std::numeric_limits<size_t>::max() - left) throw std::invalid_argument(std::string(where) + " overflows size_t");
   return left + right;
 }
 
-inline size_t checked_multiply(size_t left, size_t right, std::string_view where) {
+inline size_t checkedMultiply(size_t left, size_t right, std::string_view where) {
   if (left != 0 && right > std::numeric_limits<size_t>::max() / left) throw std::invalid_argument(std::string(where) + " overflows size_t");
   return left * right;
 }
 
-inline int checked_int(size_t value, std::string_view where) {
+inline int checkedInt(size_t value, std::string_view where) {
   if (value > static_cast<size_t>(INT_MAX)) throw std::invalid_argument(std::string(where) + " exceeds the vendor BLAS integer ABI");
   return static_cast<int>(value);
 }
@@ -167,7 +172,7 @@ template <class T> struct Identity {
   UNIFIED_HOST_DEVICE T operator()(T value) const { return value; }
 };
 
-template <class T> inline std::vector<T> algorithm_values(size_t size, size_t salt = 0) {
+template <class T> inline std::vector<T> algorithmValues(size_t size, size_t salt = 0) {
   std::vector<T> result(size);
   for (size_t index = 0; index < size; ++index) {
     const auto value = static_cast<int64_t>((index * 17 + salt * 11) % 23) - 11;
@@ -176,14 +181,14 @@ template <class T> inline std::vector<T> algorithm_values(size_t size, size_t sa
   return result;
 }
 
-template <class T> inline std::vector<T> duplicate_keys(size_t size) {
+template <class T> inline std::vector<T> duplicateKeys(size_t size) {
   std::vector<T> result(size);
   for (size_t index = 0; index < size; ++index)
     result[index] = static_cast<T>((index * 7 + 3) % 11);
   return result;
 }
 
-template <class T> inline std::vector<T> sorted_values(size_t size, size_t stride) {
+template <class T> inline std::vector<T> sortedValues(size_t size, size_t stride) {
   std::vector<T> result(size);
   if constexpr (std::is_same_v<T, int8_t>) {
     constexpr int64_t minimum = -48;
@@ -200,14 +205,14 @@ template <class T> inline std::vector<T> sorted_values(size_t size, size_t strid
   return result;
 }
 
-template <class T> inline std::vector<T> edge_values(size_t size) {
+template <class T> inline std::vector<T> edgeValues(size_t size) {
   std::vector<T> result(size);
   for (size_t index = 0; index < size; ++index)
     result[index] = ValueAt<T>{}(index);
   return result;
 }
 
-template <class T> inline std::vector<T> async_input_values(size_t size) {
+template <class T> inline std::vector<T> asyncInputValues(size_t size) {
   std::vector<T> result(size);
   for (size_t index = 0; index < size; ++index)
     result[index] = ValueAt<T>{}(index + 3);
@@ -277,32 +282,32 @@ namespace unified::backend::blas_detail {
 template <class T, class Memory> class DeviceBuffer {
 public:
   DeviceBuffer() = default;
-  DeviceBuffer(T *data, size_t size) : data_(data), size_(size) {}
+  DeviceBuffer(T *data, size_t size) : storage(data), length(size) {}
   DeviceBuffer(const DeviceBuffer &) = delete;
   DeviceBuffer &operator=(const DeviceBuffer &) = delete;
-  DeviceBuffer(DeviceBuffer &&other) noexcept : data_(std::exchange(other.data_, nullptr)), size_(std::exchange(other.size_, 0)) {}
+  DeviceBuffer(DeviceBuffer &&other) noexcept : storage(std::exchange(other.storage, nullptr)), length(std::exchange(other.length, 0)) {}
   DeviceBuffer &operator=(DeviceBuffer &&other) noexcept {
     if (this != &other) {
       release();
-      data_ = std::exchange(other.data_, nullptr);
-      size_ = std::exchange(other.size_, 0);
+      storage = std::exchange(other.storage, nullptr);
+      length = std::exchange(other.length, 0);
     }
     return *this;
   }
   ~DeviceBuffer() { release(); }
 
-  T *data() { return data_; }
-  const T *data() const { return data_; }
-  size_t size() const { return size_; }
+  T *data() { return storage; }
+  const T *data() const { return storage; }
+  size_t size() const { return length; }
 
 private:
-  T *data_{};
-  size_t size_{};
+  T *storage{};
+  size_t length{};
 
   void release() {
-    if (data_) Memory::release(data_);
-    data_ = nullptr;
-    size_ = 0;
+    if (storage) Memory::release(storage);
+    storage = nullptr;
+    length = 0;
   }
 };
 
@@ -311,15 +316,15 @@ private:
 namespace unified::test_runtime {
 // Release acquired API objects in reverse order, including on assertion failure.
 class Cleanup {
-  std::vector<std::function<void()>> actions_;
+  std::vector<std::function<void()>> actions;
 
 public:
   Cleanup() = default;
   Cleanup(const Cleanup &) = delete;
   Cleanup &operator=(const Cleanup &) = delete;
-  template <class F> void add(F action) { actions_.emplace_back(std::move(action)); }
+  template <class F> void add(F action) { actions.emplace_back(std::move(action)); }
   ~Cleanup() noexcept {
-    for (auto it = actions_.rbegin(); it != actions_.rend(); ++it) {
+    for (auto it = actions.rbegin(); it != actions.rend(); ++it) {
       try {
         (*it)();
       } catch (...) {

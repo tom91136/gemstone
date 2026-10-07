@@ -11,6 +11,5 @@ private object VMAddressSpace {
 
   def isLocal(address: Long): Boolean   = (address & ~SegmentMask) == LocalBase
   def isPrivate(address: Long): Boolean = (address & ~SegmentMask) == PrivateBase
-  def isSegment(address: Long): Boolean = isLocal(address) || isPrivate(address)
   def offset(address: Long): Long       = address & SegmentMask
 }

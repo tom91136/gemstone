@@ -44,6 +44,12 @@ inline std::optional<execution::GraphicsFormat> graphicsFormat(VkFormat format, 
     case VK_FORMAT_A8B8G8R8_SRGB_PACK32: return execution::GraphicsFormat::Rgba8Srgb;
     case VK_FORMAT_B8G8R8A8_UNORM: return execution::GraphicsFormat::Bgra8Unorm;
     case VK_FORMAT_B8G8R8A8_SRGB: return execution::GraphicsFormat::Bgra8Srgb;
+    case VK_FORMAT_R16_UNORM: return execution::GraphicsFormat::R16;
+    case VK_FORMAT_R16_SNORM: return execution::GraphicsFormat::R16Snorm;
+    case VK_FORMAT_R16G16_UNORM: return execution::GraphicsFormat::Rg16;
+    case VK_FORMAT_R16G16_SNORM: return execution::GraphicsFormat::Rg16Snorm;
+    case VK_FORMAT_R16G16B16A16_UNORM: return execution::GraphicsFormat::Rgba16;
+    case VK_FORMAT_R16G16B16A16_SNORM: return execution::GraphicsFormat::Rgba16Snorm;
     case VK_FORMAT_B4G4R4A4_UNORM_PACK16: return execution::GraphicsFormat::B4G4R4A4Unorm;
     case VK_FORMAT_R5G6B5_UNORM_PACK16: return execution::GraphicsFormat::R5G6B5Unorm;
     case VK_FORMAT_A1R5G5B5_UNORM_PACK16: return execution::GraphicsFormat::A1R5G5B5Unorm;
@@ -90,6 +96,8 @@ inline uint32_t texelSize(VkFormat format) {
     case VK_FORMAT_R16_SINT:
     case VK_FORMAT_R8G8_UNORM:
     case VK_FORMAT_R8G8_SNORM:
+    case VK_FORMAT_R16_UNORM:
+    case VK_FORMAT_R16_SNORM:
     case VK_FORMAT_B4G4R4A4_UNORM_PACK16:
     case VK_FORMAT_R5G6B5_UNORM_PACK16:
     case VK_FORMAT_A1R5G5B5_UNORM_PACK16:
@@ -113,6 +121,8 @@ inline uint32_t texelSize(VkFormat format) {
     case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
     case VK_FORMAT_B8G8R8A8_UNORM:
     case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_R16G16_UNORM:
+    case VK_FORMAT_R16G16_SNORM:
     case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
     case VK_FORMAT_R16G16_SFLOAT:
     case VK_FORMAT_B10G11R11_UFLOAT_PACK32:
@@ -123,6 +133,8 @@ inline uint32_t texelSize(VkFormat format) {
     case VK_FORMAT_R16G16B16A16_SINT:
     case VK_FORMAT_R32G32_UINT:
     case VK_FORMAT_R32G32_SINT:
+    case VK_FORMAT_R16G16B16A16_UNORM:
+    case VK_FORMAT_R16G16B16A16_SNORM:
     case VK_FORMAT_R16G16B16A16_SFLOAT:
     case VK_FORMAT_D32_SFLOAT_S8_UINT:
     case VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK:
@@ -275,7 +287,7 @@ inline std::optional<CompressedImageFormat> compressedImageFormat(VkFormat forma
     default: return std::nullopt;
   }
 }
-inline bool colorFormat(VkFormat format) {
+inline bool colourFormat(VkFormat format) {
   switch (format) {
     case VK_FORMAT_R32_SFLOAT:
     case VK_FORMAT_R32G32_SFLOAT:
@@ -313,6 +325,12 @@ inline bool colorFormat(VkFormat format) {
     case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
     case VK_FORMAT_B8G8R8A8_UNORM:
     case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_R16_UNORM:
+    case VK_FORMAT_R16_SNORM:
+    case VK_FORMAT_R16G16_UNORM:
+    case VK_FORMAT_R16G16_SNORM:
+    case VK_FORMAT_R16G16B16A16_UNORM:
+    case VK_FORMAT_R16G16B16A16_SNORM:
     case VK_FORMAT_B4G4R4A4_UNORM_PACK16:
     case VK_FORMAT_R5G6B5_UNORM_PACK16:
     case VK_FORMAT_A1R5G5B5_UNORM_PACK16:
@@ -325,7 +343,7 @@ inline bool colorFormat(VkFormat format) {
     default: return false;
   }
 }
-inline bool integerColorFormat(VkFormat format) {
+inline bool integerColourFormat(VkFormat format) {
   switch (format) {
     case VK_FORMAT_A2B10G10R10_UINT_PACK32:
     case VK_FORMAT_R8_UINT:
@@ -351,7 +369,7 @@ inline bool integerColorFormat(VkFormat format) {
     default: return false;
   }
 }
-inline bool colorAttachmentFormat(VkFormat format) {
+inline bool colourAttachmentFormat(VkFormat format) {
   switch (format) {
     case VK_FORMAT_R32_SFLOAT:
     case VK_FORMAT_R32G32_SFLOAT:
@@ -389,6 +407,12 @@ inline bool colorAttachmentFormat(VkFormat format) {
     case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
     case VK_FORMAT_B8G8R8A8_UNORM:
     case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_R16_UNORM:
+    case VK_FORMAT_R16_SNORM:
+    case VK_FORMAT_R16G16_UNORM:
+    case VK_FORMAT_R16G16_SNORM:
+    case VK_FORMAT_R16G16B16A16_UNORM:
+    case VK_FORMAT_R16G16B16A16_SNORM:
     case VK_FORMAT_B4G4R4A4_UNORM_PACK16:
     case VK_FORMAT_R5G6B5_UNORM_PACK16:
     case VK_FORMAT_A1R5G5B5_UNORM_PACK16:
@@ -400,7 +424,7 @@ inline bool colorAttachmentFormat(VkFormat format) {
     default: return false;
   }
 }
-inline bool blendColorFormat(VkFormat format) {
+inline bool blendColourFormat(VkFormat format) {
   switch (format) {
     case VK_FORMAT_R32_SFLOAT:
     case VK_FORMAT_R32G32_SFLOAT:
@@ -413,6 +437,9 @@ inline bool blendColorFormat(VkFormat format) {
     case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
     case VK_FORMAT_B8G8R8A8_UNORM:
     case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_R16_UNORM:
+    case VK_FORMAT_R16G16_UNORM:
+    case VK_FORMAT_R16G16B16A16_UNORM:
     case VK_FORMAT_B4G4R4A4_UNORM_PACK16:
     case VK_FORMAT_R5G6B5_UNORM_PACK16:
     case VK_FORMAT_A1R5G5B5_UNORM_PACK16:
@@ -424,7 +451,7 @@ inline bool blendColorFormat(VkFormat format) {
     default: return false;
   }
 }
-inline bool storageColorFormat(VkFormat format) {
+inline bool storageColourFormat(VkFormat format) {
   switch (format) {
     case VK_FORMAT_R32_SFLOAT:
     case VK_FORMAT_R32G32_SFLOAT:
@@ -458,6 +485,12 @@ inline bool storageColorFormat(VkFormat format) {
     case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
     case VK_FORMAT_R8G8B8A8_SNORM:
     case VK_FORMAT_A8B8G8R8_SNORM_PACK32:
+    case VK_FORMAT_R16_UNORM:
+    case VK_FORMAT_R16_SNORM:
+    case VK_FORMAT_R16G16_UNORM:
+    case VK_FORMAT_R16G16_SNORM:
+    case VK_FORMAT_R16G16B16A16_UNORM:
+    case VK_FORMAT_R16G16B16A16_SNORM:
     case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
     case VK_FORMAT_R16_SFLOAT:
     case VK_FORMAT_R16G16_SFLOAT:

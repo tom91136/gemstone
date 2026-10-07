@@ -1,13 +1,26 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.binary.*
-import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 
 private object VMState {
   type Lane = Int where (AtLeast[0] & LessThan[64])
-  val LaneIndices: Vec[Lane] = Vec.range[0, 64]
+
+  /** MODE register fields that decide whether OMOD applies. */
+  object Mode {
+    inline val DenormalShift       = 4
+    val Denormal32Output: Int      = 1 << 5
+    val Denormal16And64Output: Int = 1 << 7
+    val IEEE: Int                  = 1 << 9
+
+    /** GFX12 retired IEEE mode, so its MODE bit 9 always reads as clear. */
+    def ieeeSupported(isa: ISA): Boolean = isa != ISA.RDNA4 && isa != ISA.CDNA5
+
+    /** Hardware ignores OMOD under IEEE mode or when the result width keeps output denormals. */
+    def outputModifierApplies(mode: Int, width: Int in (16, 32, 64)): Boolean =
+      (mode & (IEEE | (if (width.raw == 32) Denormal32Output else Denormal16And64Output))) == 0
+  }
 
   /** The two implicit RDNA4 workgroup barriers have independent arrival counts and per-wave completion bits. */
   class WorkgroupBarriers(waves: Int) {
@@ -64,18 +77,16 @@ private object VMState {
     private var bitCount = java.lang.Long.bitCount(value)
 
     def bits: Long               = value
-    def bits_=(next: Long): Unit = writeLanes(next)
+    def bits_=(next: Long): Unit = {
+      value = next & laneLimit
+      storage = (storage & ~laneLimit) | value
+      bitCount = java.lang.Long.bitCount(value)
+    }
 
     def register: Long               = storage
     def register_=(next: Long): Unit = {
       storage = next
       value = next & laneLimit
-      bitCount = java.lang.Long.bitCount(value)
-    }
-
-    private def writeLanes(next: Long): Unit = {
-      value = next & laneLimit
-      storage = (storage & ~laneLimit) | value
       bitCount = java.lang.Long.bitCount(value)
     }
 
@@ -129,7 +140,7 @@ private object VMState {
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
     def apply(lane: Lane): Array[Byte] = {
-      require(lane.raw < lanes.raw, s"lane ${lane.raw} exceeds the wave size ${lanes.raw}")
+      require(lane.raw < lanes.raw, s"lane ${lane.raw} exceeds wave size ${lanes.raw}")
       values(lane.raw) match {
         case null =>
           val allocated = Array.ofDim[Byte](bytesPerLane.raw)
@@ -139,15 +150,4 @@ private object VMState {
       }
     }
   }
-
-  case class WaveState(
-      scalar: Array[Long],
-      vector: VectorRegisters,
-      accumulator: VectorRegisters,
-      carry: LaneBits,
-      active: LaneBits,
-      scalarCarry: Boolean,
-      scratch: ScratchMemory,
-      nextInstruction: Int
-  )
 }

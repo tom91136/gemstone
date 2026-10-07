@@ -2,7 +2,7 @@
 package fix
 
 object RedundantCaseClassVal {
-  case class Plain( value: Int)
+  case class Plain(value: Int)
   case class Curried(value: Int)(val extra: Int)
   case class Hidden(private val value: Int)
   case class Mutable(var value: Int)

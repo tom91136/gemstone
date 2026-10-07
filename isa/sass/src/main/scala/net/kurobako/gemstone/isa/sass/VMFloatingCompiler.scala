@@ -1,738 +1,799 @@
 package net.kurobako.gemstone.isa.sass
 
+import ModifierSemantics.*
 import net.kurobako.gemstone.binary.*
+import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.Instruction.*
 import net.kurobako.gemstone.isa.sass.Instruction.*
 import net.kurobako.gemstone.isa.sass.Instruction as SASSInstruction
 
-/** Typed lowering for packed floating arithmetic and the associated SASS conversion forms. */
+/** Scalar, double and packed floating-point arithmetic, comparisons that produce registers, and conversions. */
 private object VMFloatingCompiler {
-  private val HalfMask = 0xffffL
+  private val roundings = Set(Modifier.RN, Modifier.RM, Modifier.RP, Modifier.RZ)
 
-  def compile(context: VMCompilationContext): Boolean = {
-    val instruction = context.instruction
-    val operands    = instruction.operands
-    val modifiers   = instruction.modifiers
-
-    instruction.operation match {
-      case _: SASSInstruction.Fadd2 => lowerFloatPairBinary(context, modifiers, operands, FloatOperation.Add)
-      case _: SASSInstruction.Fmul2 => lowerFloatPairBinary(context, modifiers, operands, FloatOperation.Multiply)
+  def lower(using context: VMCompilationContext): Boolean = {
+    import context.*
+    (operation: @unchecked) match {
+      case _: SASSInstruction.Fadd2 =>
+        floatPair(FloatOperation.Add)
+        true
+      case _: SASSInstruction.Fmul2 =>
+        floatPair(FloatOperation.Multiply)
+        true
       case _: SASSInstruction.Hadd2
-          if modifiers.isEmpty && operands.lift(1).exists(VMOperand.has(_, OperandSelector.`F32`)) =>
-        lowerScalarToHalf(context, operands)
+          if modifiers.isEmpty && operands.lift(1).exists(VMOperand.has(_, OperandSelector.F32)) =>
+        scalarToHalf()
+        true
       case _: SASSInstruction.Hadd2 if modifiers.isEmpty =>
-        lowerPackedBinary(context, operands, FloatOperation.Add, "HADD2")
-      case _: SASSInstruction.Hadd2 if modifiers == Vec(Modifier.`F32`) => lowerHalfToScalar(context, operands)
-      case _: SASSInstruction.Hadd2 => unsupported(s"unsupported HADD2 modifiers ${modifiers.mkString(".")}")
-      case _: SASSInstruction.Hmul2 if modifiers == Vec(Modifier.`F32`) => lowerHalfMultiplyToScalar(context, operands)
-      case _: SASSInstruction.Hmul2 if modifiers.isEmpty                =>
-        lowerPackedBinary(context, operands, FloatOperation.Multiply, "HMUL2")
-      case _: SASSInstruction.Hmul2  => unsupported(s"unsupported HMUL2 modifiers ${modifiers.mkString(".")}")
-      case _: SASSInstruction.Hfma2  => lowerPackedFma(context, modifiers, operands)
-      case _: SASSInstruction.Hsetp2 => lowerPackedCompare(context, modifiers, operands)
-      case _: SASSInstruction.Hmnmx2 => lowerPackedMinMax(context, modifiers, operands)
-      case _: SASSInstruction.F2f if modifiers == Vec(Modifier.`F16`, Modifier.`F32`) =>
-        lowerFloatToHalf(context, operands)
-      case _: SASSInstruction.F2fp => lowerPackHalves(context, modifiers, operands)
-      case _                       => false
+        packedBinary(FloatOperation.Add, "HADD2")
+        true
+      case _: SASSInstruction.Hadd2 if modifiers == Vec(Modifier.F32) =>
+        halfToScalar()
+        true
+      case _: SASSInstruction.Hmul2 if modifiers == Vec(Modifier.F32) =>
+        halfMultiplyToScalar()
+        true
+      case _: SASSInstruction.Hmul2 if modifiers.isEmpty =>
+        packedBinary(FloatOperation.Multiply, "HMUL2")
+        true
+      case _: SASSInstruction.Hadd2 | _: SASSInstruction.Hmul2 =>
+        unsupported(s"unsupported ${operation.mnemonic.raw} modifiers ${modifiers.mkString(".")}")
+        true
+      case _: SASSInstruction.Hfma2 =>
+        packedFma()
+        true
+      case _: SASSInstruction.Hsetp2 =>
+        packedCompare()
+        true
+      case _: SASSInstruction.Hmnmx2 =>
+        packedMinMax()
+        true
+      case _: SASSInstruction.F2f if modifiers == Vec(Modifier.F16, Modifier.F32) =>
+        floatToHalf()
+        true
+      case _: SASSInstruction.F2fp =>
+        packHalves()
+        true
+      case _: SASSInstruction.Fmnmx | _: SASSInstruction.Dmnmx =>
+        minMax()
+        true
+      case _: SASSInstruction.Fcmp =>
+        compareSelect()
+        true
+      case _: SASSInstruction.F2f if verifiedModern && modifiers == Vec(Modifier.F32, Modifier.F64) =>
+        if (operands.size != 2 || !VMOperand.isRegister(operands.head)) unsupported("invalid F2F.F32.F64 operands")
+        store(
+          operands.head,
+          convert(
+            doubleSource(operands(1)),
+            NumericFormat.IEEE(64),
+            NumericFormat.IEEE(32),
+            Some(ConversionRounding.RN)
+          )
+        )
+        true
+      case _: SASSInstruction.F2f if verifiedModern && modifiers == Vec(Modifier.F64, Modifier.F32) =>
+        if (operands.size != 2 || !VMOperand.isRegister(operands.head)) unsupported("invalid F2F.F64.F32 operands")
+        store(operands.head, convert(floatSource(operands(1)), NumericFormat.IEEE(32), NumericFormat.IEEE(64)), 64)
+        true
+      case _: SASSInstruction.Frnd if verifiedModern && modifiers.isEmpty =>
+        requireOperands(2, "invalid FRND operands")
+        store(
+          operands.head,
+          convert(
+            floatSource(operands(1)),
+            NumericFormat.IEEE(32),
+            NumericFormat.IEEE(32),
+            Some(ConversionRounding.RNI)
+          )
+        )
+        true
+      case _: SASSInstruction.I2f if modifiers == Vec(Modifier.F16) =>
+        requireOperands(2, "invalid I2F.F16 operands")
+        store(
+          operands.head,
+          convert(source(operands(1)), NumericFormat.Signed(32), NumericFormat.IEEE(16), Some(ConversionRounding.RN))
+        )
+        true
+      case _: SASSInstruction.I2f | _: SASSInstruction.I2fp | _: SASSInstruction.Ui2f =>
+        integerToFloat()
+        true
+      case _: SASSInstruction.F2i =>
+        floatToInteger()
+        true
+      case _: SASSInstruction.Mufu if modifiers.exists(Set(Modifier.RCP64H, Modifier.RSQ64H)) =>
+        doubleHighReciprocal()
+        true
+      case _: SASSInstruction.Rro =>
+        emit(Move(
+          reducedRadians.getOrElse(unsupported("unverified range reduction")).slot,
+          floatSource(operands(1)),
+          32
+        ))
+        true
+      case _: SASSInstruction.Mufu =>
+        special()
+        true
+      case _: SASSInstruction.Fchk =>
+        divisionCheck()
+        true
+      case _: SASSInstruction.Fset | _: SASSInstruction.Dset =>
+        set()
+        true
+      case _: SASSInstruction.Dfma | _: SASSInstruction.Dadd | _: SASSInstruction.Dmul =>
+        requireModifiers(roundings)
+        val inputs                             = operands.tail.map(doubleSource(_))
+        val result                             = temp()
+        val rounding                           = conversionRounding(modifiers.headOption.getOrElse(Modifier.RN))
+        def fused(right: Value, addend: Value) =
+          FusedMultiplyAdd(result.slot, inputs(0), right, addend, 64, rounding = rounding)
+        def immediate(value: Double) = Value.Immediate(IEEE754.doubleToBinary64(value))
+        // Directed sums and products round the exact result once through the fused form. A zero addend of this sign
+        // cannot flip the sign of an exact zero product under the rounding.
+        val zero = immediate(if (rounding == ConversionRounding.RM) 0.0 else -0.0)
+        emit(operation match {
+          case _: SASSInstruction.Dfma                                      => fused(inputs(1), inputs(2))
+          case _: SASSInstruction.Dadd if rounding != ConversionRounding.RN => fused(immediate(1.0), inputs(1))
+          case _: SASSInstruction.Dadd => FloatBinary(FloatOperation.Add, result.slot, inputs(0), inputs(1), 64)
+          case _ if rounding != ConversionRounding.RN => fused(inputs(1), zero)
+          case _ => FloatBinary(FloatOperation.Multiply, result.slot, inputs(0), inputs(1), 64)
+        })
+        store(operands.head, result, 64)
+        true
+      case _: SASSInstruction.Fmul
+          if modifiers.exists(Set(Modifier.RZ, Modifier.RP, Modifier.RM)) && !modifiers.contains(Modifier.FTZ) =>
+        requireModifiers(Set(Modifier.RZ, Modifier.RP, Modifier.RM))
+        // The product of two binary32 significands is exact in binary64.
+        def wide(operand: Operand) = convert(floatSource(operand), NumericFormat.IEEE(32), NumericFormat.IEEE(64))
+        val product                = temp()
+        emit(FloatBinary(FloatOperation.Multiply, product.slot, wide(operands(1)), wide(operands(2)), 64))
+        store(
+          operands.head,
+          convert(product, NumericFormat.IEEE(64), NumericFormat.IEEE(32), Some(conversionRounding(modifiers(0))))
+        )
+        true
+      case _: SASSInstruction.Ffma | _: SASSInstruction.Fadd | _: SASSInstruction.Ufadd | _: SASSInstruction.Fmul =>
+        val fma = VMOperand.is[SASSInstruction.Ffma](operation)
+        requireModifiers(if (fma) roundings + Modifier.FTZ else Set(Modifier.RN, Modifier.FTZ))
+        val flush  = modifiers.contains(Modifier.FTZ)
+        val inputs = operands.tail.map { raw =>
+          val value = floatSource(raw)
+          if (flush) flushFloat(value) else value
+        }
+        val result = temp()
+        emit(operation match {
+          case _ if fma =>
+            FusedMultiplyAdd(
+              result.slot,
+              inputs(0),
+              inputs(1),
+              inputs(2),
+              32,
+              rounding = conversionRounding(modifiers.find(roundings).getOrElse(Modifier.RN))
+            )
+          case _: SASSInstruction.Fadd | _: SASSInstruction.Ufadd =>
+            FloatBinary(FloatOperation.Add, result.slot, inputs(0), inputs(1), 32)
+          case _ => FloatBinary(FloatOperation.Multiply, result.slot, inputs(0), inputs(1), 32)
+        })
+        store(operands.head, if (flush) flushFloat(result) else result)
+        true
+      case _ => false
     }
   }
 
-  private def lowerFloatPairBinary(
-      context: VMCompilationContext,
-      modifiers: Vec[Modifier],
-      operands: Vec[Operand],
-      operation: FloatOperation
-  ): Boolean = {
-    if (!Set(100, 103)(context.sm)) unsupported("packed float32 requires sm_100 or sm_103")
+  /** The legacy FSET.CC form whose observed consumer reads only the zero flag. */
+  def zeroFlagFset(using context: VMCompilationContext): Boolean = {
+    import context.*
+    def input(value: Operand): Boolean = value match {
+      case Operand.Unary(inner, false, false, true)             => VMOperand.isRegister(inner)
+      case Operand.ConstantBank(bank, offset)                   => bank == 2 && VMOperand.integer(offset).exists(_ >= 0)
+      case Operand.FloatingBits(_, width, _) if width.raw == 32 => true
+      case other                                                => VMOperand.isRegister(other)
+    }
+    Set(35, 50, 60)(sm) && VMOperand.is[SASSInstruction.Fset](operation) &&
+    (modifiers.filterNot(_ == Modifier.FTZ) match {
+      case Vec(Modifier.GTU | Modifier.NEU, Modifier.AND) => true
+      case _                                              => false
+    }) && operands.size == 4 && operands.head == Operand.Qualified(VMOperand.Zero, Vec(OperandSelector.CC)) &&
+    input(operands(1)) && input(operands(2)) && VMOperand.isPredicate(operands(3), allowNegated = true)
+  }
+
+  private def minMax()(using context: VMCompilationContext): Unit = {
+    import context.*
+    val wide = VMOperand.is[SASSInstruction.Dmnmx](operation)
+    requireModifiers(if (wide) Set.empty else Set(Modifier.NAN))
+    if ((!wide && sm < 70) || operands.size != 4) unsupported("unsupported floating min/max form")
+    val bits: Int in (32, 64) = if (wide) 64 else 32
+    val format                = NumericFormat.IEEE(bits)
+    val extremum              = operands(3) match {
+      case Operand.Predicate(None, false, false) => FloatOperation.Minimum
+      case Operand.Predicate(None, false, true)  => FloatOperation.Maximum
+      case _                                     => unsupported("FMNMX selector must be PT or !PT")
+    }
+    val left      = if (wide) doubleSource(operands(1)) else floatSource(operands(1))
+    val right     = if (wide) doubleSource(operands(2)) else floatSource(operands(2))
+    val leftNan   = compare(Comparison.Unordered, format, left, left)
+    val rightNan  = compare(Comparison.Unordered, format, right, right)
+    val nanResult =
+      combine(
+        if (modifiers.contains(Modifier.NAN)) PredicateOperation.Or else PredicateOperation.And,
+        leftNan,
+        rightNan
+      )
+    val result = temp()
+    val nan    = if (wide) IEEE754.doubleToBinary64(Double.NaN) else VMArithmetic.CanonicalNaN32
+    emit(FloatBinary(extremum, result.slot, left, right, bits))
+    emit(Select(result.slot, left, result, rightNan.slot, bits))
+    emit(Select(result.slot, right, result, leftNan.slot, bits))
+    emit(Select(result.slot, Value.Immediate(nan), result, nanResult.slot, bits))
+    store(operands.head, result, bits)
+  }
+
+  private def compareSelect()(using context: VMCompilationContext): Unit = {
+    import context.*
+    requireModifiers(comparisons + Modifier.FTZ)
+    requireOperands(4, "FCMP requires a destination, two values and a condition")
+    val selected = modifiers.filterNot(_ == Modifier.FTZ)
+    if (selected.size > 1) unsupported("FCMP requires one comparison")
+    // The machine format's Test field defaults to GT.
+    val condition = floatSource(operands(3))
+    val holds     = compare(
+      comparisonCode(selected.headOption.getOrElse(Modifier.GT)),
+      NumericFormat.IEEE(32),
+      if (modifiers.contains(Modifier.FTZ)) flushFloat(condition) else condition,
+      Value.Immediate(0L)
+    )
+    emit(Select(destination(operands.head).slot, floatSource(operands(1)), floatSource(operands(2)), holds.slot, 32))
+  }
+
+  private def integerToFloat()(using context: VMCompilationContext): Unit = {
+    import context.*
+    requireModifiers(roundings ++
+      Set(Modifier.F32, Modifier.F64, Modifier.S32, Modifier.U32, Modifier.U64, Modifier.S64))
+    requireOperands(2, "invalid scalar integer-to-float operands")
+    if (
+      VMOperand.is[SASSInstruction.I2fp](operation) &&
+      (!modifiers.contains(Modifier.F32) || modifiers.exists(Set(Modifier.F64, Modifier.U64, Modifier.S64)))
+    ) unsupported("only scalar 32-bit I2FP conversion is implemented")
+    val rounding             = modifiers.find(roundings).getOrElse(Modifier.RN)
+    val kind                 = modifiers.find(Set(Modifier.U32, Modifier.U64, Modifier.S64)).getOrElse(Modifier.S32)
+    val bits: ScalarBitWidth = if (modifiers.contains(Modifier.F64)) 64 else 32
+    val inputWidth: ScalarBitWidth = if (Set(Modifier.U64, Modifier.S64)(kind)) 64 else 32
+    val (input, inputType)         = operands(1) match {
+      case Operand.Unary(inner, false, false, true) if Set(Modifier.S32, Modifier.S64)(kind) =>
+        val extended = convert(source(inner, inputWidth), integerConversion(kind), NumericFormat.Signed(64))
+        (unary(IntegerUnaryOperation.Absolute, extended, 64), NumericFormat.Unsigned(64))
+      case operand => (source(operand, inputWidth), integerConversion(kind))
+    }
+    store(
+      operands.head,
+      convert(input, inputType, NumericFormat.IEEE(if (bits.raw == 64) 64 else 32), Some(conversionRounding(rounding))),
+      bits
+    )
+  }
+
+  private def floatToInteger()(using context: VMCompilationContext): Unit = {
+    import context.*
+    requireModifiers(Set(
+      Modifier.FTZ,
+      Modifier.F32,
+      Modifier.F64,
+      Modifier.S32,
+      Modifier.U32,
+      Modifier.S64,
+      Modifier.U64,
+      Modifier.TRUNC,
+      Modifier.FLOOR,
+      Modifier.CEIL,
+      Modifier.ROUND,
+      Modifier.NTZ
+    ))
+    val kind     = modifiers.find(Set(Modifier.S32, Modifier.U32, Modifier.S64, Modifier.U64)).getOrElse(Modifier.S32)
+    val rounding =
+      if (modifiers.contains(Modifier.TRUNC)) ConversionRounding.RZI
+      else if (modifiers.contains(Modifier.FLOOR)) ConversionRounding.RMI
+      else if (modifiers.contains(Modifier.CEIL)) ConversionRounding.RPI
+      else ConversionRounding.RNI
+    val double = modifiers.contains(Modifier.F64)
+    if (double && modifiers.contains(Modifier.FTZ)) unsupported("F2I.F64.FTZ")
+    val input =
+      if (double) doubleSource(operands(1))
+      else if (modifiers.contains(Modifier.FTZ)) flushFloat(floatSource(operands(1)))
+      else floatSource(operands(1))
+    store(
+      operands.head,
+      convert(input, NumericFormat.IEEE(if (double) 64 else 32), integerConversion(kind), Some(rounding)),
+      if (Set(Modifier.U64, Modifier.S64)(kind)) 64 else 32
+    )
+  }
+
+  private def doubleHighReciprocal()(using context: VMCompilationContext): Unit = {
+    import context.*
+    requireModifiers(Set(Modifier.RCP64H, Modifier.RSQ64H))
+    def flushHigh(value: Value): Value = {
+      val exponent = binary(IntegerOperation.BitwiseAnd, value, Value.Immediate(0x7ff00000L))
+      val sign     = binary(IntegerOperation.BitwiseAnd, value, Value.Immediate(0x80000000L))
+      select(sign, value, compare(Comparison.Equal, NumericFormat.Unsigned(32), exponent, Value.Immediate(0L)))
+    }
+    def high(value: Value): Value = narrow(binary(IntegerOperation.ShiftRightLogical, value, Value.Immediate(32L), 64))
+    val raw                       = VMOperand.without(operands(1), OperandSelector.`reuse`)
+    val upper                     =
+      if (!VMOperand.numericFloating(raw)) floatSource(raw)
+      else
+        doubleSource(raw) match {
+          case Value.Immediate(bits) => Value.Immediate(bits >>> 32)
+          case value                 => high(value)
+        }
+    val input  = temp()
+    val result = temp()
+    emit(MoveCombine(input.slot, Vec(Value.Immediate(0L), flushHigh(upper)), 32))
+    emit(FloatUnary(
+      if (modifiers.contains(Modifier.RCP64H)) FloatUnaryOperation.Reciprocal
+      else FloatUnaryOperation.ReciprocalSquareRoot,
+      result.slot,
+      input,
+      64
+    ))
+    store(operands.head, flushHigh(high(result)))
+  }
+
+  private def special()(using context: VMCompilationContext): Unit = {
+    import context.*
+    requireModifiers(Set(
+      Modifier.RCP,
+      Modifier.RSQ,
+      Modifier.SQRT,
+      Modifier.EX2,
+      Modifier.LG2,
+      Modifier.SIN,
+      Modifier.COS,
+      Modifier.TANH
+    ))
+    val input    = flushFloat(reducedRadians.getOrElse(floatSource(operands(1))))
+    val argument =
+      if (reducedRadians.nonEmpty || !Set(Modifier.SIN, Modifier.COS)(modifiers(0))) input
+      else {
+        if (legacy) unsupported("legacy MUFU trigonometric range-reduction encoding")
+        // Volta and later MUFU trigonometric inputs are cycles, whereas PTX uses radians. Reduce before scaling so
+        // large exactly integral binary32 inputs remain periodic.
+        val integral = convert(input, NumericFormat.IEEE(32), NumericFormat.IEEE(32), Some(ConversionRounding.RNI))
+        val fraction = temp()
+        val radians  = temp()
+        emit(FloatBinary(FloatOperation.Subtract, fraction.slot, input, integral, 32))
+        emit(FloatBinary(FloatOperation.Multiply, radians.slot, fraction, Value.Immediate(0x40c90fdbL), 32))
+        emit(Select(
+          radians.slot,
+          input,
+          radians,
+          compare(Comparison.Equal, NumericFormat.IEEE(32), input, Value.Immediate(0L)).slot,
+          32
+        ))
+        radians
+      }
+    val result = temp()
+    emit(FloatUnary(floatUnaryOperation(modifiers(0)), result.slot, argument, 32))
+    store(operands.head, flushFloat(result))
+  }
+
+  private def divisionCheck()(using context: VMCompilationContext): Unit = {
+    import context.*
+    val legacyDivide = Set(35, 50, 60)(sm)
+    requireModifiers(if (legacyDivide) Set(Modifier.DIVIDE) else Set.empty)
+    if (legacyDivide && modifiers != Vec(Modifier.DIVIDE))
+      unsupported("legacy FCHK requires the explicit division mode")
+    if (!Set(35, 50, 60, 70, 75, 80, 86, 89, 90, 100, 103, 120)(sm))
+      unsupported("FCHK range check is not supported for this architecture")
+    requireOperands(3, "invalid FCHK operands")
+    if (
+      Set(70, 75)(sm) &&
+      (instruction.guard.nonEmpty || !VMOperand.isPredicate(operands.head) ||
+        !operands.tail.forall(VMOperand.isRegister(_)))
+    ) unsupported("unsupported sm_70/sm_75 FCHK operand or predicate form")
+    // The exponent boundaries were measured on sm_89. Earlier DIVIDE forms use the same documented operation;
+    // retaining these boundaries across generations is inferred. The predicate requests the slow path; signs and
+    // significands do not participate.
+    def exponent(operand: Operand): Value.Register = {
+      val result = temp()
+      emit(BitFieldExtract(result.slot, floatSource(operand), Value.Immediate(23L), Value.Immediate(8L), 32, false))
+      result
+    }
+    val numerator   = exponent(operands(1))
+    val denominator = exponent(operands(2))
+    val difference  = binary(IntegerOperation.Subtract, numerator, denominator)
+    val slowPath    = Vec(
+      (Comparison.LessThan, numerator, 25L),
+      (Comparison.GreaterThan, numerator, 254L),
+      (Comparison.LessThan, denominator, 2L),
+      (Comparison.GreaterThan, denominator, 251L),
+      (Comparison.LessThan, difference, -124L),
+      (Comparison.GreaterThan, difference, 126L)
+    ).map((comparison, value, boundary) =>
+      compare(comparison, NumericFormat.Signed(32), value, Value.Immediate(boundary))
+    ).reduceLeft { (left, right) =>
+      emit(PredicateBinary(PredicateOperation.Or, left.slot, left.slot, right.slot))
+      left
+    }
+    writePredicate(operands.head, slowPath)
+  }
+
+  private def set()(using context: VMCompilationContext): Unit = {
+    import context.*
+    requireOperands(4, s"${operation.mnemonic.raw} requires destination, two sources and a predicate")
+    val double   = VMOperand.is[SASSInstruction.Dset](operation)
+    val zeroFlag = !double && zeroFlagFset(using context)
+    if (VMOperand.has(operands.head, OperandSelector.CC) && !zeroFlag)
+      unsupported(s"${operation.mnemonic.raw} condition-code output is not implemented")
+    if (double && modifiers.contains(Modifier.FTZ)) unsupported("DSET does not support FTZ")
+    requireModifiers(comparisons ++ Set(Modifier.BF, Modifier.AND, Modifier.OR, Modifier.XOR, Modifier.FTZ))
+    def input(operand: Operand): Value = {
+      val value = if (double) doubleSource(operand) else floatSource(operand)
+      if (modifiers.contains(Modifier.FTZ)) flushFloat(value) else value
+    }
+    val left   = input(operands(1))
+    val right  = input(operands(2))
+    val format = NumericFormat.IEEE(if (double) 64 else 32)
+    val result = compare(comparisonCode(modifiers.find(comparisons).get), format, left, right)
+    emit(PredicateBinary(
+      predicateOperation(modifiers.find(Set(Modifier.AND, Modifier.OR, Modifier.XOR)).get),
+      result.slot,
+      result.slot,
+      predicateSource(operands(3)).slot
+    ))
+    // The observed consumer reads the zero flag, clear when the masked comparison is true.
+    if (zeroFlag) emit(PredicateUnary(VMRegisters.Predicate.Zero.slot, result.slot))
+    else {
+      val truth = if (modifiers.contains(Modifier.BF)) 0x3f800000L else 0xffffffffL
+      store(operands.head, select(Value.Immediate(truth), Value.Immediate(0L), result))
+    }
+  }
+
+  private def floatPair(kind: FloatOperation)(using context: VMCompilationContext): Unit = {
+    import context.*
+    if (!Set(100, 103)(sm)) unsupported("packed float32 requires sm_100 or sm_103")
     if (!modifiers.forall(Set(Modifier.RN, Modifier.FTZ)))
       unsupported("packed float32 supports RN rounding and optional FTZ")
-    requireSize(operands, 3, "packed float32 requires a register pair and two sources")
+    requireOperands(3, "packed float32 requires a register pair and two sources")
     val destination = operands.head match {
       case value @ Operand.Register(RegisterBank.R, _) => value
       case _ => unsupported("packed float32 destination must be an aligned register pair or RZ")
     }
-    validateFloatPairRegister(context, destination, 2)
-    val left   = floatPairOperand(context, operands(1))
-    val right  = floatPairOperand(context, operands(2))
-    val result = context.temp("wide")
-    context.emit(FloatBinaryPacked(
-      operation,
-      result.name,
+    validateFloatPairRegister(destination, 2)
+    val left   = floatPairOperand(operands(1))
+    val right  = floatPairOperand(operands(2))
+    val result = temp()
+    emit(FloatBinaryPacked(
+      kind,
+      result.slot,
       left,
       right,
       PackedFloatFormat.F32x2,
       FloatControl(flushSubnormal = modifiers.contains(Modifier.FTZ))
     ))
-    context.store(destination, result, 64)
-    true
+    store(destination, result, 64)
   }
 
-  private def floatPairOperand(context: VMCompilationContext, operand: Operand): Value = operand match {
-    case Operand.Unary(inner, negative, false, absolute) =>
-      val input  = floatPairOperand(context, inner)
-      val result = context.temp("wide")
-      val signs  = 0x8000000080000000L
-      context.emit(IntegerBinary(
-        IntegerOperation.BitwiseAnd,
-        result.name,
-        input,
-        Value.Immediate(if (absolute) ~signs else -1L),
-        64
-      ))
-      if (negative)
-        context.emit(IntegerBinary(IntegerOperation.BitwiseXor, result.name, result, Value.Immediate(signs), 64))
-      result
-    case _: Operand.Unary => unsupported("packed float32 does not support bitwise source inversion")
-    case _                =>
-      val selected = operandSelectors(operand)
-      val base     = VMOperand.base(VMOperand.without(operand, OperandSelector.reuse))
-      val scalar   = selected == Vec(OperandSelector.F32)
-      base match {
-        case register @ Operand.Register(RegisterBank.R | RegisterBank.UR, _) =>
-          if (
-            !scalar && selected != Vec(OperandSelector.F32x2) &&
-            selected != Vec(OperandSelector.F32x2, OperandSelector.LO_HI)
-          )
-            unsupported("packed float32 source requires F32, F32x2 or F32x2.LO_HI")
-          validateFloatPairRegister(context, register, if (scalar) 1 else 2)
-          val value = context.source(base, if (scalar) 32 else 64)
-          if (scalar) {
-            val result = context.temp("wide")
-            context.emit(MoveCombine(result.name, Vec(value, value), 32))
-            result
-          } else if (selected.contains(OperandSelector.LO_HI)) {
-            val words = Vec(context.temp(), context.temp())
-            context.emit(MoveSplit(words.map(_.name), value, 32))
-            val result = context.temp("wide")
-            context.emit(MoveCombine(result.name, words.reverse, 32))
-            result
-          } else value
-        case _ if selected.isEmpty && !VMOperand.hasUnknownDomain(operand) =>
-          val scalar = context.floatSource(operand)
-          val result = context.temp("wide")
-          context.emit(MoveCombine(result.name, Vec(scalar, scalar), 32))
+  private def floatPairOperand(operand: Operand)(using context: VMCompilationContext): Value = {
+    import context.*
+    operand match {
+      case Operand.Unary(inner, negative, false, absolute) =>
+        val signs  = 0x8000000080000000L
+        val mask   = Value.Immediate(if (absolute) ~signs else -1L)
+        val result = binary(IntegerOperation.BitwiseAnd, floatPairOperand(inner), mask, 64)
+        if (negative) emit(IntegerBinary(IntegerOperation.BitwiseXor, result.slot, result, Value.Immediate(signs), 64))
+        result
+      case _: Operand.Unary => unsupported("packed float32 does not support bitwise source inversion")
+      case _                =>
+        val selected                                 = VMOperand.qualifiers(operand)
+        val base                                     = VMOperand.base(VMOperand.without(operand, OperandSelector.reuse))
+        val scalar                                   = selected == Vec(OperandSelector.F32)
+        def duplicated(value: Value): Value.Register = {
+          val result = temp()
+          emit(MoveCombine(result.slot, Vec(value, value), 32))
           result
-        case _ => unsupported("unsupported packed float32 source")
-      }
+        }
+        base match {
+          case register @ Operand.Register(RegisterBank.R | RegisterBank.UR, _) =>
+            if (
+              !scalar && selected != Vec(OperandSelector.F32x2) &&
+              selected != Vec(OperandSelector.F32x2, OperandSelector.LO_HI)
+            ) unsupported("packed float32 source requires F32, F32x2 or F32x2.LO_HI")
+            validateFloatPairRegister(register, if (scalar) 1 else 2)
+            val value = source(base, if (scalar) 32 else 64)
+            if (scalar) duplicated(value)
+            else if (selected.contains(OperandSelector.LO_HI)) {
+              val words  = Vec(temp(), temp())
+              val result = temp()
+              emit(MoveSplit(words.map(word => Some(word.slot)), value, 32))
+              emit(MoveCombine(result.slot, words.reverse, 32))
+              result
+            } else value
+          case _ if selected.isEmpty && !VMOperand.hasUnknownDomain(operand) => duplicated(floatSource(operand))
+          case _ => unsupported("unsupported packed float32 source")
+        }
+    }
   }
 
-  private def validateFloatPairRegister(
-      context: VMCompilationContext,
-      register: Operand.Register,
-      words: Int in (1, 2)
+  private def validateFloatPairRegister(target: Operand.Register, words: Int in (1, 2))(using
+      context: VMCompilationContext
   ): Unit = {
-    val parameter = register.bank match {
+    import context.*
+    val parameter = target.bank match {
       case RegisterBank.R  => "MAX_REG_COUNT"
       case RegisterBank.UR => "MAX_UNIFORM_REG_COUNT"
       case _               => unsupported("packed float32 requires general or uniform registers")
     }
-    val capacity = NVDisasm.forTarget(s"SM${context.sm}").flatMap(_.parameters.get(parameter))
+    val capacity = Target.of(module.sm).toOption.flatMap(_.database.parameters.get(parameter))
       .getOrElse(unsupported(s"missing packed float32 register limit $parameter"))
     if (
-      !VMOperand.isZero(register) &&
-      (BigInt(register.index.raw) + words.raw > capacity || (words.raw == 2 && register.index.raw % 2 != 0))
-    )
-      unsupported("packed float32 source or destination exceeds its bank or is not an aligned register pair")
+      !VMOperand.isZero(target) &&
+      (BigInt(target.index.raw) + words.raw > capacity || (words.raw == 2 && target.index.raw % 2 != 0))
+    ) unsupported("packed float32 source or destination exceeds its bank or is not an aligned register pair")
   }
 
-  private def lowerPackedBinary(
-      context: VMCompilationContext,
-      operands: Vec[Operand],
-      operation: FloatOperation,
-      opcode: String
-  ): Boolean = {
-    requireSize(operands, 3, s"$opcode requires destination and two sources")
-    val result = context.temp()
-    context.emit(FloatBinaryPacked(
-      operation,
-      result.name,
-      packedOperand(context, operands(1), opcode),
-      packedOperand(context, operands(2), opcode),
+  private def packedBinary(kind: FloatOperation, opcode: String)(using context: VMCompilationContext): Unit = {
+    import context.*
+    requireOperands(3, s"$opcode requires destination and two sources")
+    val result = temp()
+    emit(FloatBinaryPacked(
+      kind,
+      result.slot,
+      packed(operands(1), opcode),
+      packed(operands(2), opcode),
       PackedFloatFormat.F16x2
     ))
-    context.store(operands.head, canonicalizeNaNs(context, result))
-    true
+    store(operands.head, result)
   }
 
-  private def lowerPackedFma(
-      context: VMCompilationContext,
-      modifiers: Vec[Modifier],
-      operands: Vec[Operand]
-  ): Boolean = {
-    val mmaUnitScaleAlias = modifiers == Vec(Modifier.`MMA`) && operands.size == 5 &&
-      isBareGeneralOrZero(operands(1)) && isBareGeneralOrZero(operands(4)) &&
-      isUnitOne(operands(2)) && isUnitOne(operands(3))
-
-    if (mmaUnitScaleAlias) {
-      val sum = context.temp()
-      context.emit(FloatBinaryPacked(
+  private def packedFma()(using context: VMCompilationContext): Unit = {
+    import context.*
+    val mmaUnitScale = modifiers == Vec(Modifier.MMA) && operands.size == 5 &&
+      bareRegister(operands(1), allowZero = true) &&
+      bareRegister(operands(4), allowZero = true) && unitOne(operands(2)) && unitOne(operands(3))
+    if (mmaUnitScale) {
+      val sum = temp()
+      emit(FloatBinaryPacked(
         FloatOperation.Add,
-        sum.name,
-        packedOperand(context, operands(1), "HFMA2.MMA"),
-        packedOperand(context, operands(4), "HFMA2.MMA"),
+        sum.slot,
+        packed(operands(1), "HFMA2.MMA"),
+        packed(operands(4), "HFMA2.MMA"),
         PackedFloatFormat.F16x2
       ))
-      context.store(operands.head, canonicalizeNaNs(context, sum))
-      true
+      store(operands.head, sum)
     } else if (
-      (modifiers.isEmpty || modifiers == Vec(Modifier.`MMA`)) && operands.size == 5 &&
-      isNegativeZero(operands(1)) && VMOperand.isZero(operands(2))
-    ) {
-      val high = halfConstant(operands(3))
-      val low  = halfConstant(operands(4))
-      context.store(operands.head, Value.Immediate((high << 16) | low))
-      true
-    } else {
-      requireSize(operands, 4, "HFMA2 requires destination and three sources")
-      val mmaAccumulatorAlias = modifiers == Vec(Modifier.`MMA`) && isBareGeneralOrZero(operands(1)) &&
+      (modifiers.isEmpty || modifiers == Vec(Modifier.MMA)) && operands.size == 5 && negativeZero(operands(1)) &&
+      VMOperand.isZero(operands(2))
+    ) store(operands.head, Value.Immediate((halfConstant(operands(3)) << 16) | halfConstant(operands(4))))
+    else {
+      requireOperands(4, "HFMA2 requires destination and three sources")
+      val mmaAccumulator = modifiers == Vec(Modifier.MMA) && bareRegister(operands(1), allowZero = true) &&
         VMOperand.isZero(operands(2)) && operands.head == operands.last
-      if (modifiers.nonEmpty && !mmaAccumulatorAlias)
-        unsupported(s"unsupported HFMA2 modifiers ${modifiers.mkString(".")}")
-
-      val product = context.temp()
-      context.emit(FusedMultiplyAddPacked(
-        product.name,
-        packedOperand(context, operands(1), "HFMA2"),
-        packedOperand(context, operands(2), "HFMA2"),
-        packedOperand(context, operands(3), "HFMA2"),
+      if (modifiers.nonEmpty && !mmaAccumulator) unsupported(s"unsupported HFMA2 modifiers ${modifiers.mkString(".")}")
+      val product = temp()
+      emit(FusedMultiplyAddPacked(
+        product.slot,
+        packed(operands(1), "HFMA2"),
+        packed(operands(2), "HFMA2"),
+        packed(operands(3), "HFMA2"),
         false,
         false
       ))
-      context.store(operands.head, canonicalizeNaNs(context, product))
-      true
+      store(operands.head, product)
     }
   }
 
-  private def lowerPackedCompare(
-      context: VMCompilationContext,
-      modifiers: Vec[Modifier],
-      operands: Vec[Operand]
-  ): Boolean = {
-    if (modifiers.size != 2 || !Set(Modifier.`GEU`, Modifier.`NE`)(modifiers.head) || modifiers(1) != Modifier.`AND`)
+  private def packedCompare()(using context: VMCompilationContext): Unit = {
+    import context.*
+    if (modifiers.size != 2 || !Set(Modifier.GEU, Modifier.NE)(modifiers.head) || modifiers(1) != Modifier.AND)
       unsupported(s"unsupported HSETP2 modifiers ${modifiers.mkString(".")}")
-    requireSize(operands, 5, "HSETP2 requires two predicate results, two sources and PT")
+    requireOperands(5, "HSETP2 requires two predicate results, two sources and PT")
     if (operands(4) != VMOperand.True) unsupported("HSETP2 requires a PT predicate input")
     if (!supportedHalfSource(operands(2)) || !supportedHalfSource(operands(3)))
       unsupported("HSETP2 supports only register or duplicated H0_H0/H1_H1 sources")
     val first  = predicateDestination(operands.head)
     val second = predicateDestination(operands(1))
-    if (second.nonEmpty && modifiers.head != Modifier.`GEU`)
-      unsupported("HSETP2 dual results are verified only for GEU")
-    if (second.nonEmpty && first == second)
-      unsupported("HSETP2 dual predicate results must be distinct")
-
-    val comparison =
-      if (modifiers.head == Modifier.`NE`) Comparison.NotEqual else Comparison.GreaterThanOrEqualUnordered
-    val low = context.temp("q")
-    context.emit(SetPredicate(
-      low.name,
+    if (second.nonEmpty && modifiers.head != Modifier.GEU) unsupported("HSETP2 dual results are verified only for GEU")
+    if (second.nonEmpty && first == second) unsupported("HSETP2 dual predicate results must be distinct")
+    val comparison = if (modifiers.head == Modifier.NE) Comparison.NotEqual else Comparison.GreaterThanOrEqualUnordered
+    def half(offset: Int): Value.Predicate = compare(
       comparison,
-      ConversionType.F32.format,
-      halfAsFloat(context, operands(2), 0),
-      halfAsFloat(context, operands(3), 0)
-    ))
-    first.foreach(destination => writePredicate(context, destination, low))
-    second.foreach { destination =>
-      val high = context.temp("q")
-      context.emit(SetPredicate(
-        high.name,
-        comparison,
-        ConversionType.F32.format,
-        halfAsFloat(context, operands(2), 16),
-        halfAsFloat(context, operands(3), 16)
-      ))
-      writePredicate(context, destination, high)
-    }
-    true
+      NumericFormat.IEEE(32),
+      halfAsFloat(packed(operands(2), "HSETP2"), offset),
+      halfAsFloat(packed(operands(3), "HSETP2"), offset)
+    )
+    val low = half(0)
+    first.foreach(copyPredicate(_, low))
+    second.foreach(copyPredicate(_, half(16)))
   }
 
-  private def lowerPackedMinMax(
-      context: VMCompilationContext,
-      modifiers: Vec[Modifier],
-      operands: Vec[Operand]
-  ): Boolean = {
+  private def packedMinMax()(using context: VMCompilationContext): Unit = {
+    import context.*
     if (modifiers.nonEmpty) unsupported(s"unsupported HMNMX2 modifiers ${modifiers.mkString(".")}")
-    requireSize(operands, 4, "HMNMX2 requires destination, two sources, and a predicate")
-    val isMin = operands(3) match {
+    requireOperands(4, "HMNMX2 requires destination, two sources, and a predicate")
+    val minimum = operands(3) match {
       case Operand.Predicate(None, false, false) => true
       case Operand.Predicate(None, false, true)  => false
       case _                                     => unsupported("HMNMX2 supports only PT and !PT selectors")
     }
-    if (operands.slice(1, 3).exists(VMOperand.has(_, OperandSelector.`H1_H1`)))
+    if (operands.slice(1, 3).exists(VMOperand.has(_, OperandSelector.H1_H1)))
       unsupported("HMNMX2 supports only raw packed registers and verified H0_H0 selectors")
-    val left   = packedOperand(context, operands(1), "HMNMX2")
-    val right  = packedOperand(context, operands(2), "HMNMX2")
-    val halves = Vec(0, 16).map { offset =>
-      val a       = halfAsFloat(context, left, offset)
-      val b       = halfAsFloat(context, right, offset)
-      val aNan    = context.temp("q")
-      val bNan    = context.temp("q")
-      val bothNan = context.temp("q")
-      context.emit(SetPredicate(aNan.name, Comparison.Unordered, ConversionType.F32.format, a, a))
-      context.emit(SetPredicate(bNan.name, Comparison.Unordered, ConversionType.F32.format, b, b))
-      context.emit(PredicateBinary(PredicateOperation.And, bothNan.name, aNan.name, bNan.name))
-      val value = context.temp()
-      context.emit(FloatBinary(
-        if (isMin) FloatOperation.Minimum else FloatOperation.Maximum,
-        value.name,
-        a,
-        b,
-        32
-      ))
-      context.emit(Select(value.name, a, value, bNan.name, 32))
-      context.emit(Select(value.name, b, value, aNan.name, 32))
-      val rounded = context.temp()
-      context.emit(Convert(
-        rounded.name,
-        value,
-        ConversionType.F32,
-        ConversionType.F16,
-        Some(ConversionRounding.RN)
-      ))
-      val canonical = context.temp()
-      context.emit(Select(canonical.name, Value.Immediate(0x7fffL), rounded, bothNan.name, 32))
-      val masked = context.temp()
-      context.emit(IntegerBinary(
-        IntegerOperation.BitwiseAnd,
-        masked.name,
-        canonical,
-        Value.Immediate(HalfMask),
-        32
-      ))
-      masked
-    }
-    val high = context.temp()
-    context.emit(IntegerBinary(IntegerOperation.ShiftLeft, high.name, halves(1), Value.Immediate(16L), 32))
-    val packed = context.temp()
-    context.emit(IntegerBinary(IntegerOperation.BitwiseOr, packed.name, halves.head, high, 32))
-    context.store(operands.head, packed)
-    true
+    val result = temp()
+    emit(FloatBinaryPacked(
+      if (minimum) FloatOperation.MinimumNumber else FloatOperation.MaximumNumber,
+      result.slot,
+      packed(operands(1), "HMNMX2"),
+      packed(operands(2), "HMNMX2"),
+      PackedFloatFormat.F16x2
+    ))
+    store(operands.head, result)
   }
 
-  private def lowerScalarToHalf(context: VMCompilationContext, operands: Vec[Operand]): Boolean = {
-    requireSm(context, 75, "HADD2 scalar-float conversion is supported only on sm_75")
-    if (context.instruction.guard.nonEmpty)
+  private def toHalf(value: Value)(using context: VMCompilationContext): Value.Register =
+    context.convert(value, NumericFormat.IEEE(32), NumericFormat.IEEE(16), Some(ConversionRounding.RN))
+
+  /** `high` in the upper and `low` in the lower half of one register. */
+  private def halves(high: Value, low: Value)(using context: VMCompilationContext): Value.Register =
+    context.binary(
+      IntegerOperation.BitwiseOr,
+      context.binary(IntegerOperation.ShiftLeft, high, Value.Immediate(16L)),
+      low
+    )
+
+  private def scalarToHalf()(using context: VMCompilationContext): Unit = {
+    import context.*
+    if (sm != 75) unsupported("HADD2 scalar-float conversion is supported only on sm_75")
+    if (instruction.guard.nonEmpty)
       unsupported("HADD2 scalar-float conversion is supported only as an unpredicated sm_75 form")
-    requireSize(operands, 3, "HADD2 scalar-float form requires destination and two sources")
-    if (!bareGeneralRegister(operands.head)) unsupported("HADD2 scalar-float destination must be a register")
-    val scalar = if (operandSelectors(operands(1)) == Vec(OperandSelector.F32) && VMOperand.isRegister(operands(1)))
-      operandBase(operands(1))
-    else unsupported("HADD2 scalar-float source must be an unmodified .F32 register")
-    if (!isNegativeZeroHalf(operands(2)))
+    requireOperands(3, "HADD2 scalar-float form requires destination and two sources")
+    if (!bareRegister(operands.head)) unsupported("HADD2 scalar-float destination must be a register")
+    if (VMOperand.qualifiers(operands(1)) != Vec(OperandSelector.F32) || !VMOperand.isRegister(operands(1)))
+      unsupported("HADD2 scalar-float source must be an unmodified .F32 register")
+    if (!negativeZeroHalf(operands(2)))
       unsupported("HADD2 scalar-float form requires the compiler-emitted -RZ.H0_H0 zero addend")
-    val value     = context.floatSource(scalar)
-    val converted = context.temp()
-    context.emit(Convert(
-      converted.name,
-      value,
-      ConversionType.F32,
-      ConversionType.F16,
-      Some(ConversionRounding.RN)
-    ))
-    val isNan = context.temp("q")
-    context.emit(SetPredicate(isNan.name, Comparison.Unordered, ConversionType.F32.format, value, value))
-    val canonical = context.temp()
-    context.emit(Select(canonical.name, Value.Immediate(0x7fffL), converted, isNan.name, 32))
-    val half = context.temp()
-    context.emit(IntegerBinary(
-      IntegerOperation.BitwiseAnd,
-      half.name,
-      canonical,
-      Value.Immediate(HalfMask),
-      32
-    ))
-    val upper = context.temp()
-    context.emit(IntegerBinary(IntegerOperation.ShiftLeft, upper.name, half, Value.Immediate(16L), 32))
-    val result = context.temp()
-    context.emit(IntegerBinary(IntegerOperation.BitwiseOr, result.name, upper, half, 32))
-    context.store(operands.head, result)
-    true
+    val converted = toHalf(floatSource(registerBase(operands(1), "HADD2 scalar-float source")))
+    store(operands.head, halves(converted, converted))
   }
 
-  private def lowerHalfToScalar(context: VMCompilationContext, operands: Vec[Operand]): Boolean = {
-    if (context.instruction.modifiers != Vec(Modifier.`F32`))
-      unsupported("unsupported HADD2 modifiers")
-    requireSize(operands, 3, "HADD2.F32 requires destination and two sources")
-    val selected = if (isAnyNegativeZero(operands(1))) operands(2)
-    else if (isAnyNegativeZero(operands(2))) operands(1)
-    else unsupported("HADD2.F32 supported forms require the compiler-emitted -RZ or -RZ.H0_H0 addend")
-    val (_, shift) = selectedHalf(selected, "HADD2.F32")
-    val input      = selectedBase(selected)
-    val extracted  = context.temp()
-    context.emit(BitFieldExtract(
-      extracted.name,
-      context.source(input),
-      Value.Immediate(shift.toLong),
-      Value.Immediate(16L),
-      32,
-      false
-    ))
-    val converted = context.temp()
-    context.emit(Convert(converted.name, extracted, ConversionType.F16, ConversionType.F32, None))
-    val magnitude = context.temp()
-    context.emit(IntegerBinary(
-      IntegerOperation.BitwiseAnd,
-      magnitude.name,
-      extracted,
-      Value.Immediate(0x7fffL),
-      32
-    ))
-    val isNan = context.temp("q")
-    context.emit(SetPredicate(
-      isNan.name,
-      Comparison.GreaterThan,
-      ConversionType.U32.format,
-      magnitude,
-      Value.Immediate(0x7c00L)
-    ))
-    val result = context.temp()
-    context.emit(Select(result.name, Value.Immediate(0x7fffffffL), converted, isNan.name, 32))
-    context.store(operands.head, result)
-    true
+  private def halfToScalar()(using context: VMCompilationContext): Unit = {
+    import context.*
+    requireOperands(3, "HADD2.F32 requires destination and two sources")
+    val selected =
+      if (negativeZero(operands(1)) || negativeZeroHalf(operands(1))) operands(2)
+      else if (negativeZero(operands(2)) || negativeZeroHalf(operands(2))) operands(1)
+      else unsupported("HADD2.F32 supported forms require the compiler-emitted -RZ or -RZ.H0_H0 addend")
+    store(operands.head, selectedHalfAsFloat(selected, "HADD2.F32"))
   }
 
-  private def lowerHalfMultiplyToScalar(context: VMCompilationContext, operands: Vec[Operand]): Boolean = {
-    requireSm(context, 75, "HMUL2.F32 is supported only on sm_75")
-    requireSize(operands, 3, "HMUL2.F32 requires destination and two sources")
-    if (context.instruction.guard.nonEmpty || !bareGeneralRegister(operands.head))
+  private def halfMultiplyToScalar()(using context: VMCompilationContext): Unit = {
+    import context.*
+    if (sm != 75) unsupported("HMUL2.F32 is supported only on sm_75")
+    requireOperands(3, "HMUL2.F32 requires destination and two sources")
+    if (instruction.guard.nonEmpty || !bareRegister(operands.head))
       unsupported("HMUL2.F32 supports only unpredicated sm_75 register destinations")
-    val left    = selectedHalfAsFloat(context, operands(1), "HMUL2.F32")
-    val right   = selectedHalfAsFloat(context, operands(2), "HMUL2.F32")
-    val product = context.temp()
-    context.emit(FloatBinary(FloatOperation.Multiply, product.name, left, right, 32))
-    val isNan = context.temp("q")
-    context.emit(SetPredicate(
-      isNan.name,
-      Comparison.Unordered,
-      ConversionType.F32.format,
-      product,
-      product
-    ))
-    val result = context.temp()
-    context.emit(Select(result.name, Value.Immediate(0x7fffffffL), product, isNan.name, 32))
-    context.store(operands.head, result)
-    true
-  }
-
-  private def lowerFloatToHalf(context: VMCompilationContext, operands: Vec[Operand]): Boolean = {
-    if (!Set(70, 75, 89)(context.sm)) unsupported("F2F.F16.F32 is not supported on this target")
-    requireSize(operands, 2, "F2F.F16.F32 requires destination and source")
-    if (!bareGeneralRegister(operands.head)) unsupported("F2F.F16.F32 destination must be a register")
-    if (!bareGeneralRegister(operands(1)))
-      unsupported("F2F.F16.F32 source must be a bare register")
-    val input     = context.floatSource(operands(1))
-    val converted = context.temp()
-    context.emit(Convert(
-      converted.name,
-      input,
-      ConversionType.F32,
-      ConversionType.F16,
-      Some(ConversionRounding.RN)
-    ))
-    val isNan = context.temp("q")
-    context.emit(SetPredicate(isNan.name, Comparison.Unordered, ConversionType.F32.format, input, input))
-    val canonical = context.temp()
-    context.emit(Select(canonical.name, Value.Immediate(0x7fffL), converted, isNan.name, 32))
-    val zeroExtended = context.temp()
-    context.emit(IntegerBinary(
-      IntegerOperation.BitwiseAnd,
-      zeroExtended.name,
-      canonical,
-      Value.Immediate(HalfMask),
+    val product = temp()
+    emit(FloatBinary(
+      FloatOperation.Multiply,
+      product.slot,
+      selectedHalfAsFloat(operands(1), "HMUL2.F32"),
+      selectedHalfAsFloat(operands(2), "HMUL2.F32"),
       32
     ))
-    context.store(operands.head, zeroExtended)
-    true
+    store(operands.head, product)
   }
 
-  private def lowerPackHalves(
-      context: VMCompilationContext,
-      modifiers: Vec[Modifier],
-      operands: Vec[Operand]
-  ): Boolean = {
-    if (modifiers != Vec(Modifier.`F16`, Modifier.`F32`, Modifier.`PACK_AB`) && modifiers != Vec(Modifier.`PACK_AB`))
+  private def floatToHalf()(using context: VMCompilationContext): Unit = {
+    import context.*
+    if (!Set(70, 75, 89)(sm)) unsupported("F2F.F16.F32 is not supported on this target")
+    requireOperands(2, "F2F.F16.F32 requires destination and source")
+    if (!bareRegister(operands.head) || !bareRegister(operands(1)))
+      unsupported("F2F.F16.F32 requires bare register operands")
+    store(operands.head, toHalf(floatSource(operands(1))))
+  }
+
+  private def packHalves()(using context: VMCompilationContext): Unit = {
+    import context.*
+    if (modifiers != Vec(Modifier.F16, Modifier.F32, Modifier.PACK_AB) && modifiers != Vec(Modifier.PACK_AB))
       unsupported(s"unsupported F2FP modifiers ${modifiers.mkString(".")}")
-    requireSize(operands, 3, "F2FP.PACK_AB requires destination and two sources")
-    val low   = convertScalarHalf(context, context.floatSource(operands(2)))
-    val high  = convertScalarHalf(context, context.floatSource(operands(1)))
-    val upper = context.temp()
-    context.emit(IntegerBinary(IntegerOperation.ShiftLeft, upper.name, high, Value.Immediate(16L), 32))
-    val result = context.temp()
-    context.emit(IntegerBinary(IntegerOperation.BitwiseOr, result.name, upper, low, 32))
-    context.store(operands.head, result)
-    true
+    requireOperands(3, "F2FP.PACK_AB requires destination and two sources")
+    val low  = toHalf(floatSource(operands(2)))
+    val high = toHalf(floatSource(operands(1)))
+    store(operands.head, halves(high, low))
   }
 
-  private def convertScalarHalf(context: VMCompilationContext, value: Value): Value = {
-    val converted = context.temp()
-    context.emit(Convert(
-      converted.name,
-      value,
-      ConversionType.F32,
-      ConversionType.F16,
-      Some(ConversionRounding.RN)
-    ))
-    val isNan = context.temp("q")
-    context.emit(SetPredicate(isNan.name, Comparison.Unordered, ConversionType.F32.format, value, value))
-    val canonical = context.temp()
-    context.emit(Select(canonical.name, Value.Immediate(0x7fffL), converted, isNan.name, 32))
-    val masked = context.temp()
-    context.emit(IntegerBinary(
-      IntegerOperation.BitwiseAnd,
-      masked.name,
-      canonical,
-      Value.Immediate(HalfMask),
-      32
-    ))
-    masked
-  }
-
-  private def packedOperand(context: VMCompilationContext, operand: Operand, opcode: String): Value =
-    if (
-      isNegativeZeroHalf(operand) &&
-      (context.instruction.operation match { case _: SASSInstruction.Hadd2 => true; case _ => false })
-    ) {
-      val negativeZero = context.temp()
-      context.emit(Move(negativeZero.name, Value.Immediate(0x80008000L), 32))
-      negativeZero
-    } else {
-      val selected = operandSelectors(operand)
-      if (selected.isEmpty) {
-        if (!VMOperand.isRegister(operandBase(operand), allowZero = true))
-          unsupported(s"unsupported $opcode half source")
-        context.source(operand)
-      } else {
-        val (base, shift) = selectedHalf(operand, opcode)
-        val input         = context.source(base)
-        val low           = context.temp()
-        context.emit(BitFieldExtract(
-          low.name,
-          input,
-          Value.Immediate(shift.toLong),
-          Value.Immediate(16L),
-          32,
-          false
-        ))
-        val high = context.temp()
-        context.emit(BitFieldExtract(
-          high.name,
-          input,
-          Value.Immediate(shift.toLong),
-          Value.Immediate(16L),
-          32,
-          false
-        ))
-        val upper = context.temp()
-        context.emit(IntegerBinary(IntegerOperation.ShiftLeft, upper.name, high, Value.Immediate(16L), 32))
-        val result = context.temp()
-        context.emit(IntegerBinary(IntegerOperation.BitwiseOr, result.name, low, upper, 32))
-        result
-      }
-    }
-
-  private def canonicalizeNaNs(context: VMCompilationContext, packed: Value): Value = {
-    val halves = Vec(0, 16).map { offset =>
-      val bits = context.temp()
-      context.emit(BitFieldExtract(
-        bits.name,
-        packed,
-        Value.Immediate(offset.toLong),
-        Value.Immediate(16L),
-        32,
-        false
-      ))
-      val exponent = context.temp()
-      context.emit(IntegerBinary(
-        IntegerOperation.BitwiseAnd,
-        exponent.name,
-        bits,
-        Value.Immediate(0x7c00L),
-        32
-      ))
-      val fraction = context.temp()
-      context.emit(IntegerBinary(
-        IntegerOperation.BitwiseAnd,
-        fraction.name,
-        bits,
-        Value.Immediate(0x03ffL),
-        32
-      ))
-      val special = context.temp("q")
-      val payload = context.temp("q")
-      val isNan   = context.temp("q")
-      context.emit(SetPredicate(
-        special.name,
-        Comparison.Equal,
-        ConversionType.U32.format,
-        exponent,
-        Value.Immediate(0x7c00L)
-      ))
-      context.emit(SetPredicate(
-        payload.name,
-        Comparison.NotEqual,
-        ConversionType.U32.format,
-        fraction,
-        Value.Immediate(0L)
-      ))
-      context.emit(PredicateBinary(PredicateOperation.And, isNan.name, special.name, payload.name))
-      val canonical = context.temp()
-      context.emit(Select(canonical.name, Value.Immediate(0x7fffL), bits, isNan.name, 32))
-      canonical
-    }
-    val high = context.temp()
-    context.emit(IntegerBinary(IntegerOperation.ShiftLeft, high.name, halves(1), Value.Immediate(16L), 32))
+  private def extractHalf(value: Value, shift: Int)(using context: VMCompilationContext): Value.Register = {
     val result = context.temp()
-    context.emit(IntegerBinary(IntegerOperation.BitwiseOr, result.name, halves.head, high, 32))
+    context.emit(BitFieldExtract(result.slot, value, Value.Immediate(shift.toLong), Value.Immediate(16L), 32, false))
     result
   }
 
-  private def halfAsFloat(context: VMCompilationContext, operand: Operand, offset: Int): Value = {
-    val packed = packedOperand(context, operand, "HSETP2")
-    halfAsFloat(context, packed, offset)
-  }
-
-  private def halfAsFloat(context: VMCompilationContext, packed: Value, offset: Int): Value = {
-    val bits = context.temp()
-    context.emit(BitFieldExtract(
-      bits.name,
-      packed,
-      Value.Immediate(offset.toLong),
-      Value.Immediate(16L),
-      32,
-      false
-    ))
-    val value = context.temp()
-    context.emit(Convert(value.name, bits, ConversionType.F16, ConversionType.F32, None))
-    value
-  }
-
-  private def selectedHalf(operand: Operand, opcode: String): (Operand, Int) = {
-    val selectors = operandSelectors(operand)
-    val shift     = selectors match {
-      case Vec(OperandSelector.H0_H0)                        => 0
-      case Vec(OperandSelector.H1_H1)                        => 16
-      case Vec(OperandSelector.H0_H0, OperandSelector.H0_H0) => 0
-      case Vec(OperandSelector.H1_H1, OperandSelector.H1_H1) => 16
-      case _ => unsupported(s"$opcode supports only duplicated H0_H0 or H1_H1 selectors")
+  private def packed(operand: Operand, opcode: String)(using context: VMCompilationContext): Value = {
+    import context.*
+    if (negativeZeroHalf(operand) && VMOperand.is[SASSInstruction.Hadd2](operation)) {
+      val negativeZero = temp()
+      emit(Move(negativeZero.slot, Value.Immediate(0x80008000L), 32))
+      negativeZero
+    } else if (VMOperand.qualifiers(operand).isEmpty) {
+      if (!VMOperand.isRegister(operand, allowZero = true)) unsupported(s"unsupported $opcode half source")
+      source(operand)
+    } else {
+      val (base, shift) = selectedHalf(operand, opcode)
+      val input         = source(base)
+      halves(extractHalf(input, shift), extractHalf(input, shift))
     }
-    val base = selectedBase(operand)
-    if (!VMOperand.isRegister(base, allowZero = true)) unsupported(s"unsupported $opcode selected-half source")
-    base -> shift
   }
 
-  private def selectedBase(operand: Operand): Operand.Register = operandBase(operand)
+  private def halfAsFloat(packed: Value, offset: Int)(using context: VMCompilationContext): Value.Register =
+    context.convert(extractHalf(packed, offset), NumericFormat.IEEE(16), NumericFormat.IEEE(32))
 
-  private def halfConstant(operand: Operand): Long = {
+  private def selectedHalfAsFloat(operand: Operand, opcode: String)(using
+      context: VMCompilationContext
+  ): Value.Register = {
+    val (base, shift) = selectedHalf(operand, opcode)
+    halfAsFloat(context.source(base), shift)
+  }
+
+  private def selectedHalf(operand: Operand, opcode: String)(using context: VMCompilationContext): (Operand, Int) = {
+    val shift = VMOperand.qualifiers(operand) match {
+      case Vec(OperandSelector.H0_H0) | Vec(OperandSelector.H0_H0, OperandSelector.H0_H0) => 0
+      case Vec(OperandSelector.H1_H1) | Vec(OperandSelector.H1_H1, OperandSelector.H1_H1) => 16
+      case _ => context.unsupported(s"$opcode supports only duplicated H0_H0 or H1_H1 selectors")
+    }
+    context.registerBase(operand, s"$opcode selected-half source", allowZero = true) -> shift
+  }
+
+  private def halfConstant(operand: Operand)(using context: VMCompilationContext): Long = {
     val bits = operand match {
-      case Operand.Integer(value) => IEEE754.floatToBinary16(value.toFloat).raw & HalfMask
+      case Operand.Integer(value) => IEEE754.floatToBinary16(value.toFloat).toLong
       case Operand.Floating(value, _, negativeZero) if value == BigDecimal(0) && negativeZero => 0x8000L
-      case Operand.Floating(value, _, _) => IEEE754.floatToBinary16(value.toFloat).raw & HalfMask
-      case Operand.FloatingSymbol(FloatingConstant.`INF` | FloatingConstant.`+INF`) => 0x7c00L
-      case Operand.FloatingSymbol(FloatingConstant.`-INF`)                          => 0xfc00L
-      case Operand.FloatingSymbol(
-            FloatingConstant.`QNAN` | FloatingConstant.`+QNAN` | FloatingConstant.`-QNAN` | FloatingConstant.`SNAN` | FloatingConstant.`+SNAN` | FloatingConstant.`-SNAN`
-          ) => 0x7fffL
-      case Operand.FloatingBits(_, width, bits) if width.raw == 16 => bits.toLong & HalfMask
-      case Operand.FloatingBits(_, width, bits) if width.raw == 32 =>
-        IEEE754.floatToBinary16(java.lang.Float.intBitsToFloat(bits.toInt)).raw & HalfMask
-      case Operand.FloatingBits(_, width, bits) if width.raw == 64 =>
-        IEEE754.doubleToBinary16(java.lang.Double.longBitsToDouble(bits.toLong)).raw & HalfMask
-      case Operand.Unary(inner, true, false, false) => inner match {
-          case Operand.FloatingSymbol(
-                FloatingConstant.`QNAN` | FloatingConstant.`+QNAN` | FloatingConstant.`-QNAN` | FloatingConstant.`SNAN` | FloatingConstant.`+SNAN` | FloatingConstant.`-SNAN` | FloatingConstant.`NAN`
-              ) => 0x7fffL
-          case _ => halfConstant(inner) ^ 0x8000L
-        }
-      case _ => unsupported("HFMA2.MMA constant form requires floating constants")
+      case Operand.Floating(value, _, _)                      => IEEE754.floatToBinary16(value.toFloat).toLong
+      case Operand.FloatingSymbol(FloatingConstant.INF)       => 0x7c00L
+      case Operand.FloatingSymbol(constant) if constant.isNaN => VMArithmetic.CanonicalNaN16
+      case Operand.FloatingBits(_, width, encoded)  => IEEE754.fromDouble(IEEE754.toDouble(encoded.toLong, width), 16)
+      case Operand.Unary(inner, true, false, false) => halfConstant(inner) ^ 0x8000L
+      case _ => context.unsupported("HFMA2.MMA constant form requires floating constants")
     }
-    if ((bits & 0x7c00L) == 0x7c00L && (bits & 0x03ffL) != 0) 0x7fffL else bits
+    if (IEEE754.isNaN(bits, 16)) VMArithmetic.CanonicalNaN16 else bits
   }
 
   @annotation.tailrec
-  private def isUnitOne(operand: Operand): Boolean = operand match {
+  private def unitOne(operand: Operand): Boolean = operand match {
     case Operand.Integer(value)                                  => value == 1
     case Operand.Floating(value, _, _)                           => value == BigDecimal(1)
     case Operand.FloatingBits(_, width, bits) if width.raw == 16 => bits == 0x3c00
     case Operand.FloatingBits(_, width, bits) if width.raw == 32 => bits == 0x3f800000
     case Operand.FloatingBits(_, width, bits) if width.raw == 64 => bits == BigInt("3ff0000000000000", 16)
-    case Operand.Unary(inner, false, false, false)               => isUnitOne(inner)
+    case Operand.Unary(inner, false, false, false)               => unitOne(inner)
     case _                                                       => false
   }
 
-  private def predicateDestination(operand: Operand): Option[Value.Register] = operand match {
-    case Operand.Predicate(None, false, false)        => None
-    case Operand.Predicate(Some(index), false, false) =>
-      Some(Value.Register(VMRegisters.predicate(index = index.raw, uniform = false)))
-    case _ => unsupported("HSETP2 result must be a predicate register or PT")
-  }
-
-  private def writePredicate(context: VMCompilationContext, destination: Value.Register, value: Value.Register): Unit =
-    context.emit(PredicateBinary(PredicateOperation.Or, destination.name, value.name, VMRegisters.Predicate.False.name))
+  private def predicateDestination(operand: Operand)(using context: VMCompilationContext): Option[Value.Predicate] =
+    operand match {
+      case Operand.Predicate(None, false, false)        => None
+      case Operand.Predicate(Some(index), false, false) =>
+        Some(Value.Predicate(VMRegisters.predicate(index = index, uniform = false)))
+      case _ => context.unsupported("HSETP2 result must be a predicate register or PT")
+    }
 
   private def supportedHalfSource(operand: Operand): Boolean =
     VMOperand.isRegister(operand, allowZero = true) ||
-      (operandSelectors(operand) match {
+      (VMOperand.qualifiers(operand) match {
         case Vec(OperandSelector.H0_H0) | Vec(OperandSelector.H1_H1) =>
-          VMOperand.isRegister(operandBase(operand), allowZero = true)
+          VMOperand.isRegister(VMOperand.base(VMOperand.without(operand, OperandSelector.reuse)), allowZero = true)
         case _ => false
       })
 
-  private def isBareGeneralOrZero(operand: Operand): Boolean =
-    VMOperand.isRegister(operand, allowZero = true) && operandSelectors(operand).isEmpty
-
-  private def bareGeneralRegister(operand: Operand): Boolean =
-    VMOperand.isRegister(operand) && operandSelectors(operand).isEmpty
-
-  private def isNegativeZeroHalf(operand: Operand): Boolean = operand match {
+  private def negativeZeroHalf(operand: Operand): Boolean = operand match {
     case Operand.Unary(inner, true, false, false) => VMOperand.isZero(inner) &&
-      operandSelectors(inner) == Vec(OperandSelector.H0_H0)
+      VMOperand.qualifiers(inner) == Vec(OperandSelector.H0_H0)
     case _ => false
   }
 
-  private def isNegativeZero(operand: Operand): Boolean = operand match {
-    case Operand.Unary(inner, true, false, false) => VMOperand.isZero(inner) && operandSelectors(inner).isEmpty
+  private def negativeZero(operand: Operand): Boolean = operand match {
+    case Operand.Unary(inner, true, false, false) => VMOperand.isZero(inner) && VMOperand.qualifiers(inner).isEmpty
     case _                                        => false
   }
-
-  private def isAnyNegativeZero(operand: Operand): Boolean =
-    isNegativeZero(operand) || isNegativeZeroHalf(operand)
-
-  private def selectedHalfAsFloat(context: VMCompilationContext, operand: Operand, opcode: String): Value = {
-    val (base, shift) = selectedHalf(operand, opcode)
-    val bits          = context.temp()
-    context.emit(BitFieldExtract(
-      bits.name,
-      context.source(base),
-      Value.Immediate(shift.toLong),
-      Value.Immediate(16L),
-      32,
-      false
-    ))
-    val value = context.temp()
-    context.emit(Convert(value.name, bits, ConversionType.F16, ConversionType.F32, None))
-    value
-  }
-
-  private def operandSelectors(operand: Operand): Vec[OperandSelector] =
-    VMOperand.selectors(VMOperand.without(operand, OperandSelector.`reuse`))
-
-  @annotation.tailrec
-  private def operandBase(operand: Operand): Operand.Register =
-    VMOperand.without(operand, OperandSelector.`reuse`) match {
-      case Operand.Qualified(inner, _) => operandBase(inner)
-      case value: Operand.Register     => value
-      case _                           => unsupported("expected a physical register operand")
-    }
-
-  private def requireSize(operands: Vec[Operand], size: Int, message: String): Unit =
-    if (operands.size != size) unsupported(message)
-
-  private def requireSm(context: VMCompilationContext, sm: Int, message: String): Unit =
-    if (context.sm != sm) unsupported(message)
-
-  private def unsupported(detail: String): Nothing = throw IllegalArgumentException(detail)
 }

@@ -3,9 +3,7 @@ package net.kurobako.gemstone.codegen
 import java.nio.file.Path
 import org.scalafmt.Scalafmt
 
-/** Applies the repository formatter before generated Scala is compared or written. Generators emit the final runtime
-  * vocabulary themselves; formatting is the only post-processing step.
-  */
+/** Applies the repository formatter before generated Scala is compared or written. */
 object GeneratedScalaFormatter {
   private val Config      = Path.of(".scalafmt.conf").toAbsolutePath.normalize
   private lazy val parsed = Scalafmt.parseHoconConfigFile(Config).toEither.fold(

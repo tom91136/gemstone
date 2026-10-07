@@ -32,8 +32,8 @@ class GenerateEnvironmentSuite extends munit.FunSuite {
 
   test("generation is stable and checks every output for drift without rewriting") {
     inDirectory { root =>
-      GenerateEnvironment.main((Vector(root.toString, "--write") ++ arguments).toArray)
-      GenerateEnvironment.main((Vector(root.toString, "--check") ++ arguments).toArray)
+      GenerateEnvironment.generate(root = root, entries = entries, check = false)
+      GenerateEnvironment.generate(root = root, entries = entries, check = true)
       val scala  = root.resolve("core/src/generated/main/scala/net/kurobako/gemstone/environment.scala")
       val native = root.resolve("native/generated/environment_keys.hpp")
       assert(Files.readString(scala).contains("TimeoutDefault: Long > 0 = 7L"))

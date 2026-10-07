@@ -1,13 +1,12 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import ELF.*
 import VMIR.*
 import fixtures.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 class VMAddressSpaceSuite extends munit.FunSuite {
   private def execute(
@@ -15,24 +14,16 @@ class VMAddressSpaceSuite extends munit.FunSuite {
       globals: Array[Byte],
       queueEnabled: Boolean = false
   ): Either[Fault, Unit] = {
-    val source = CodeObjectKernel(
-      name = "apertures",
+    val source = codeKernel(
       target = Target("gfx1036"),
-      kernargSize = 0,
       groupSegmentSize = 65536,
       privateSegmentSize = 4096,
-      computePgmRsrc2 = 0,
       kernelCodeProperties = if (queueEnabled) EncodingConstants.KernelCodeProperty.ENABLE_SGPR_QUEUE_PTR else 0,
-      code = Vec.empty,
       readOnlyAddress = 256L,
       readOnly = LittleEndian.toArray(0x78563412L, 4),
       globalMemory = Array(512L -> globals)
     )
-    val instructions = operations :+ Instruction.End
-    val offsets      = Vec.tabulate(instructions.size)(_ * 4)
-    val kernel       = Kernel(source, instructions, offsets.zipWithIndex.toMap, offsets, 0)
-    val task         = KernelTask.validated("apertures", Dimensions.One, Dimensions.One, Vec.empty).toOption.get
-    executeKernel(kernel, task, TestMemory())
+    runIR(operations :+ Instruction.End, RegionMemory(), source)
   }
 
   test("CDNA2 flat and global accumulator transfers preserve vector registers") {
@@ -53,7 +44,7 @@ class VMAddressSpaceSuite extends munit.FunSuite {
           if (global) 0xff.toByte else 0x80.toByte,
           0
         )
-        VMCompiler.decodeInstruction(bytes, Target("gfx90a")).fold(error => fail(error.raw), identity)
+        decoded(Target("gfx90a"), bytes)
       }
       val operations = Vec(
         Instruction.VMove64(0, InstructionSource.Constant(sentinel)),
@@ -63,8 +54,8 @@ class VMAddressSpaceSuite extends munit.FunSuite {
         decode(true),
         Instruction.VAccumulatorRead(2, 0),
         Instruction.VAccumulatorRead(3, 1),
-        Instruction.FlatStore(16, 2, 8, 8),
-        Instruction.FlatStore(16, 0, 8, 16)
+        Instruction.Store(2, MemoryAddress.Flat(16, 8), 8, false),
+        Instruction.Store(0, MemoryAddress.Flat(16, 16), 8, false)
       )
       assertEquals(execute(operations, globals), Right(()))
       assertEquals(
@@ -84,14 +75,13 @@ class VMAddressSpaceSuite extends munit.FunSuite {
       val replacement = 0x76543210fedcba98L
       LittleEndian.write(original, globals, 0, 8)
       // llvm-mc: flat_atomic_cmpswap_b64 v[8:9], v[2:3], v[4:7] glc.
-      val operation = VMCompiler.decodeInstruction(Vec[Byte](0, 0x40, 8, 0xdd.toByte, 2, 4, 0x7c, 8), target)
-        .fold(error => fail(error.raw), identity)
+      val operation  = decoded(target, 0, 0x40, 8, 0xdd, 2, 4, 0x7c, 8)
       val operations = Vec(
         Instruction.VMove64(2, InstructionSource.Constant(512)),
         Instruction.VMove64(4, InstructionSource.Constant(replacement)),
         Instruction.VMove64(6, InstructionSource.Constant(if (equal) original else original ^ (1L << 32))),
         operation,
-        Instruction.FlatStore(2, 8, 8, 8)
+        Instruction.Store(8, MemoryAddress.Flat(2, 8), 8, false)
       )
       assertEquals(execute(operations, globals), Right(()))
       assertEquals(LittleEndian.decode(globals, 0, 8), if (equal) replacement else original)
@@ -104,22 +94,22 @@ class VMAddressSpaceSuite extends munit.FunSuite {
     val operations = Vec(
       Instruction.VMove64(0, InstructionSource.Constant(VMAddressSpace.LocalBase + 256)),
       Instruction.VMove(2, InstructionSource.Constant(0x3333)),
-      Instruction.FlatStore(0, 2, 4, 0),
+      Instruction.Store(2, MemoryAddress.Flat(0, 0), 4, false),
       Instruction.VMove64(0, InstructionSource.Constant(VMAddressSpace.PrivateBase + 256)),
       Instruction.VMove(2, InstructionSource.Constant(0x4444)),
-      Instruction.FlatStore(0, 2, 4, 0),
+      Instruction.Store(2, MemoryAddress.Flat(0, 0), 4, false),
       Instruction.VMove64(0, InstructionSource.Constant(256)),
-      Instruction.FlatLoad(2, 0, 4, 0),
+      Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full),
       Instruction.VMove64(4, InstructionSource.Constant(512)),
-      Instruction.FlatStore(4, 2, 4, 0),
+      Instruction.Store(2, MemoryAddress.Flat(4, 0), 4, false),
       Instruction.VMove64(0, InstructionSource.Constant(VMAddressSpace.LocalBase + 256)),
-      Instruction.FlatLoad(2, 0, 4, 0, true),
-      Instruction.FlatStore(4, 2, 4, 4),
+      Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full, coherent = true),
+      Instruction.Store(2, MemoryAddress.Flat(4, 4), 4, false),
       Instruction.VMove64(0, InstructionSource.Constant(VMAddressSpace.PrivateBase + 256)),
-      Instruction.FlatLoad(2, 0, 4, 0),
-      Instruction.FlatStore(4, 2, 4, 8),
-      Instruction.FlatLoad(2, 4, 4, 0, true),
-      Instruction.FlatStore(4, 2, 4, 12)
+      Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full),
+      Instruction.Store(2, MemoryAddress.Flat(4, 8), 4, false),
+      Instruction.Load(2, MemoryAddress.Flat(4, 0), 4, false, LoadPlacement.Full, coherent = true),
+      Instruction.Store(2, MemoryAddress.Flat(4, 12), 4, false)
     )
     assertEquals(execute(operations, globals), Right(()))
     assertEquals(
@@ -134,13 +124,13 @@ class VMAddressSpaceSuite extends munit.FunSuite {
       val operations = Vec(
         Instruction.VMove64(0, InstructionSource.Constant(base + 256)),
         Instruction.VMove(2, InstructionSource.Constant(41)),
-        Instruction.FlatStore(0, 2, 4, 0),
+        Instruction.Store(2, MemoryAddress.Flat(0, 0), 4, false),
         Instruction.VMove(2, InstructionSource.Constant(1)),
-        Instruction.GlobalAtomicAdd(3, 0, None, 2, 4, 0, true),
-        Instruction.FlatLoad(2, 0, 4, 0),
+        Instruction.Atomic(AtomicOperation.Add, 3, MemoryAddress.Flat(0, 0), 2, 4, true),
+        Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full),
         Instruction.VMove64(4, InstructionSource.Constant(512)),
-        Instruction.FlatStore(4, 3, 4, 0),
-        Instruction.FlatStore(4, 2, 4, 4)
+        Instruction.Store(3, MemoryAddress.Flat(4, 0), 4, false),
+        Instruction.Store(2, MemoryAddress.Flat(4, 4), 4, false)
       )
       assertEquals(execute(operations, globals), Right(()))
       assertEquals(LittleEndian.decodeInt32(globals, 0), 41)
@@ -156,17 +146,17 @@ class VMAddressSpaceSuite extends munit.FunSuite {
       Instruction.VMove(0, InstructionSource.Constant(256)),
       Instruction.VMove(1, InstructionSource.Scalar(2)),
       Instruction.VMove(2, InstructionSource.Constant(0x3333)),
-      Instruction.FlatStore(0, 2, 4, 0),
+      Instruction.Store(2, MemoryAddress.Flat(0, 0), 4, false),
       Instruction.VMove(1, InstructionSource.Scalar(3)),
       Instruction.VMove(2, InstructionSource.Constant(0x4444)),
-      Instruction.FlatStore(0, 2, 4, 0),
+      Instruction.Store(2, MemoryAddress.Flat(0, 0), 4, false),
       Instruction.VMove64(4, InstructionSource.Constant(512)),
       Instruction.VMove64(0, InstructionSource.Constant(VMAddressSpace.LocalBase + 256)),
-      Instruction.FlatLoad(2, 0, 4, 0),
-      Instruction.FlatStore(4, 2, 4, 0),
+      Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full),
+      Instruction.Store(2, MemoryAddress.Flat(4, 0), 4, false),
       Instruction.VMove64(0, InstructionSource.Constant(VMAddressSpace.PrivateBase + 256)),
-      Instruction.FlatLoad(2, 0, 4, 0),
-      Instruction.FlatStore(4, 2, 4, 4)
+      Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full),
+      Instruction.Store(2, MemoryAddress.Flat(4, 4), 4, false)
     )
     assertEquals(execute(operations, globals, true), Right(()))
     assertEquals(LittleEndian.decodeInt32(globals, 0), 0x3333)
@@ -179,7 +169,7 @@ class VMAddressSpaceSuite extends munit.FunSuite {
       val globals    = Array.ofDim[Byte](8)
       val operations = Vec(
         Instruction.VMove64(0, InstructionSource.Constant(base + size - 2)),
-        Instruction.FlatLoad(2, 0, 4, 0)
+        Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full)
       )
       assert(execute(operations, globals).isLeft)
     }
@@ -196,14 +186,14 @@ class VMAddressSpaceSuite extends munit.FunSuite {
       val selector = fields(EncodingField.ID).field.put(BigInt(id)).get |
         fields(EncodingField.OFFSET).field.put(BigInt(offset)).get |
         fields(EncodingField.SIZE).field.put(BigInt(width - 1)).get
-      val word = layout.prefixes.head |
+      val word = layout.fixedPrefix |
         layout.byName(EncodingField.OP).put(BigInt(definition.opcode)).get |
         layout.byName(EncodingField.SDST).put(BigInt(22)).get |
         layout.byName(EncodingField.SIMM16).put(selector).get
       val expected = ((VMAddressSpace.HardwareBases >>> offset) & (-1L >>> (64 - width))).toInt
       assertEquals(
         VMCompiler.decodeInstruction(LittleEndian.toVec(word.toLong, 4), target),
-        Right(Instruction.SMoveImmediate(22, expected))
+        Right(Instruction.SMove(22, InstructionSource.Constant(expected)))
       )
     }
     assertEquals(VMAddressSpace.HardwareBases & 0xffffL, VMAddressSpace.PrivateBase >>> 48)

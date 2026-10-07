@@ -75,7 +75,7 @@ levelzero_cases = [
   "zeHostSystemMemoryDeviceTests.GivenHostSystemAllocationWhenAccessingMemoryOnDeviceOnImmediateCmdListThenCorrectDataIsRead",
   "zeMemFreeExtTests.AllocateDeviceMemoryAndThenFreeWithBlockingFreePolicy",
   "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.GivenSharedSystemMemoryAllocationsAsKernelArgumentsWhenKernelExecutesThenValuesAreCorrect/svm_to_usm_non_atomic_regular_128B",
-  # These exercise SPIR-V compilation, specialization and kernel arguments.
+  # These exercise SPIR-V compilation, specialisation and kernel arguments.
   "zeKernelCreateTests.GivenValidFunctionWhenSettingGroupSizeThenReturnSuccessful",
   "zeKernelCreateTests.GivenValidFunctionWhenGettingPropertiesThenReturnSuccessfulAndPropertiesAreValid",
   "zeKernelGetNameTests.*",

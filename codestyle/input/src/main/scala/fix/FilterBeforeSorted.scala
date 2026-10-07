@@ -1,5 +1,5 @@
 /*
-rule = GemstoneFilterBeforeSorted
+rule = CollectionIdioms
 */
 // format: off
 package fix
@@ -10,14 +10,14 @@ import scala.reflect.ClassTag
 object FilterBeforeSorted {
   val values = List(3, 1, 2)
 
-  val simple = values.sorted.filter(_ > 1)// assert: GemstoneFilterBeforeSorted.filter-before-sorted
-  val explicitOrdering = values.sorted(using Ordering.Int).filter(_ > 1)// assert: GemstoneFilterBeforeSorted.filter-before-sorted
-  val explicitType = values.sorted[Int].filter(_ > 1)// assert: GemstoneFilterBeforeSorted.filter-before-sorted
+  val simple = values.sorted.filter(_ > 1)// assert: CollectionIdioms.filter-before-sorted
+  val explicitOrdering = values.sorted(using Ordering.Int).filter(_ > 1)// assert: CollectionIdioms.filter-before-sorted
+  val explicitType = values.sorted[Int].filter(_ > 1)// assert: CollectionIdioms.filter-before-sorted
 
   type Vec[A] = ArraySeq[A]
   extension [A: ClassTag](input: IterableOnce[A]) def toVec: Vec[A] = ArraySeq.from(input)
   val encodedNames = List("z", "a", "m").toVec
-  val vecPipeline = encodedNames.sorted.filter(_.nonEmpty)// assert: GemstoneFilterBeforeSorted.filter-before-sorted
+  val vecPipeline = encodedNames.sorted.filter(_.nonEmpty)// assert: CollectionIdioms.filter-before-sorted
 
   val alreadyFiltered = values.filter(_ > 1).sorted
   val directSorted = values.sorted

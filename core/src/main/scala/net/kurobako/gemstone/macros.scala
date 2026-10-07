@@ -16,14 +16,14 @@ object macros {
     if (value < 0 && value % divisor != 0) quotient - 1 else quotient
   }
 
-  private def normalize(spans: List[Span]): List[Span] =
+  private def normalise(spans: List[Span]): List[Span] =
     spans.flatMap { span =>
       val low  = -floor(-span.low, span.step) * span.step
       val high = floor(span.high, span.step) * span.step
       Option.when(low <= high)(Span(low, high, span.step))
     }
 
-  private def intersect(left: List[Span], right: List[Span]): List[Span] = normalize(for {
+  private def intersect(left: List[Span], right: List[Span]): List[Span] = normalise(for {
     a <- left
     b <- right
   } yield Span(a.low.max(b.low), a.high.min(b.high), a.step / a.step.gcd(b.step) * b.step))
@@ -103,11 +103,11 @@ object macros {
     }
   }
 
-  /** Normalized numeric ranges used by serializers to describe the same predicates they validate. */
+  /** Normalised numeric ranges used by serialisers to describe the same predicates they validate. */
   def numericDomain[A: Type, P: Type](using Quotes): List[(BigInt, BigInt, BigInt)] =
     domain(quotes.reflect.TypeRepr.of[A], quotes.reflect.TypeRepr.of[P]).map(span => (span.low, span.high, span.step))
 
-  def prove[A: Type, P: Type, B: Type, Q: Type](using Quotes): Expr[Unit] = {
+  private def prove[A: Type, P: Type, B: Type, Q: Type](using Quotes): Unit = {
     import quotes.reflect.*
     val source   = domain(TypeRepr.of[A], TypeRepr.of[P])
     val target   = domain(TypeRepr.of[B], TypeRepr.of[Q])
@@ -117,36 +117,48 @@ object macros {
       report.errorAndAbort(
         s"Cannot prove ${Type.show[A]} where ${Type.show[P]} implies ${Type.show[B]} where ${Type.show[Q]}; retain the producer refinement, or validate the original boundary value with .refine after explicitly converting its carrier"
       )
-    '{ () }
   }
 
-  /** Explicit widening shares the same proofs and numeric conversions as implicit widening. */
+  /** The single proven conversion behind implicit widening, `.widen` and the refined `toShort`/`toInt`/`toLong`. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.asInstanceOf"))
+  def convert[A: Type, P: Type, B: Type, Q: Type](value: Expr[constraint.where[A, P]])(using
+      Quotes
+  ): Expr[constraint.where[B, Q]] = {
+    import quotes.reflect.*
+    import constraint.*
+    prove[A, P, B, Q]
+    val source    = '{ $value.raw }
+    val converted = (Type.of[A], Type.of[B]) match {
+      case _ if TypeRepr.of[A] =:= TypeRepr.of[B] => source
+      case ('[Byte], '[Short])                    => '{ ${ source.asExprOf[Byte] }.toShort }
+      case ('[Byte], '[Int])                      => '{ ${ source.asExprOf[Byte] }.toInt }
+      case ('[Byte], '[Long])                     => '{ ${ source.asExprOf[Byte] }.toLong }
+      case ('[Short], '[Int])                     => '{ ${ source.asExprOf[Short] }.toInt }
+      case ('[Short], '[Long])                    => '{ ${ source.asExprOf[Short] }.toLong }
+      case ('[Int], '[Long])                      => '{ ${ source.asExprOf[Int] }.toLong }
+      case _ => report.errorAndAbort(s"Cannot widen representation ${Type.show[A]} to ${Type.show[B]}")
+    }
+    // `where` is an opaque alias of its carrier, so this changes only the static type.
+    '{ ${ converted.asExprOf[B] }.asInstanceOf[B where Q] }
+  }
+
   def widen[A: Type, P: Type, R: Type](value: Expr[constraint.where[A, P]])(using Quotes): Expr[R] = {
     import quotes.reflect.*
     import constraint.*
     TypeRepr.of[R].dealias match {
       case AppliedType(base, List(b, q)) if base.typeSymbol == TypeRepr.of[where[Any, Any]].typeSymbol =>
-        q.asType match {
-          case '[q] =>
-            val result =
-              if (TypeRepr.of[A] =:= b) '{ auto.implication[A, P, q]($value) }
-              else (Type.of[A], b.asType) match {
-                case ('[Byte], '[Short]) => '{ auto.byteToShort[P, q](${ value.asExprOf[Byte where P] }) }
-                case ('[Byte], '[Int])   => '{ auto.byteToInt[P, q](${ value.asExprOf[Byte where P] }) }
-                case ('[Byte], '[Long])  => '{ auto.byteToLong[P, q](${ value.asExprOf[Byte where P] }) }
-                case ('[Short], '[Int])  => '{ auto.shortToInt[P, q](${ value.asExprOf[Short where P] }) }
-                case ('[Short], '[Long]) => '{ auto.shortToLong[P, q](${ value.asExprOf[Short where P] }) }
-                case ('[Int], '[Long])   => '{ auto.intToLong[P, q](${ value.asExprOf[Int where P] }) }
-                case _ => report.errorAndAbort(s"Cannot widen representation ${Type.show[A]} to ${b.show}")
-              }
-            result.asExprOf[R]
+        if (!(TypeRepr.of[A] =:= b) && !carrier(TypeRepr.of[A]).subsetOf(carrier(b)))
+          report.errorAndAbort(s"Cannot widen representation ${Type.show[A]} to ${b.show}")
+        // Quote the call so the target predicate is normalised before the proof runs.
+        b.asType match {
+          case '[b] => q.asType match { case '[q] => '{ constraint.convert[A, P, b, q]($value) }.asExprOf[R] }
         }
       case _ => report.errorAndAbort("Supply a complete numeric refinement target, for example value.widen[Int >= 0]")
     }
   }
 
   /** Peel only our wrappers; collection elements and unrelated opaque types remain intact. */
-  @SuppressWarnings(Array("scalafix:GemstoneNoTypeCasting"))
+  @SuppressWarnings(Array("scalafix:DisableSyntax.asInstanceOf"))
   def raw[A: Type](value: Expr[A])(using Quotes): Expr[Any] = {
     import quotes.reflect.*
     @annotation.tailrec
@@ -164,18 +176,18 @@ object macros {
     }
     val result = representation(TypeRepr.of[A])
     result.asType match {
-      // All recognized wrappers are opaque aliases of their carrier, so this changes only the static type.
+      // All recognised wrappers are opaque aliases of their carrier, so this changes only the static type.
       case '[b] => '{ $value.asInstanceOf[b] }
     }
   }
 
-  def newtypeValue[A: Type, C: Type](value: Expr[A])(using Quotes): Expr[C] = {
-    import quotes.reflect.*
-    if (TypeRepr.of[A].widen.dealias <:< TypeRepr.of[C]) value.asExprOf[C]
-    else unsafe[A, C](value)
-  }
+  def unsafe[A: Type, R: Type](value: Expr[A])(using Quotes): Expr[R] = check[A, R](value, throwing = true).asExprOf[R]
 
-  def unsafe[A: Type, R: Type](value: Expr[A])(using Quotes): Expr[R] = {
+  def refine[A: Type, R: Type](value: Expr[A])(using Quotes): Expr[Either[constraint.NonEmpty[String], R]] =
+    check[A, R](value, throwing = false).asExprOf[Either[constraint.NonEmpty[String], R]]
+
+  /** `.unsafe` is `.refine` with the failure thrown; both share the generated predicate and its description. */
+  private def check[A: Type, R: Type](value: Expr[A], throwing: Boolean)(using Quotes): Expr[Any] = {
     import quotes.reflect.*
     import constraint.*
     val source                    = TypeRepr.of[A].widen.dealias
@@ -189,7 +201,8 @@ object macros {
         (a.asType, p.asType) match {
           case ('[a], '[p]) =>
             compatible[a]
-            '{ where.validate[a, p](${ value.asExprOf[a] }) }.asExprOf[R]
+            if (throwing) '{ where.validate[a, p](${ value.asExprOf[a] }) }
+            else '{ where.check[a, p](${ value.asExprOf[a] }) }
           case _ => report.errorAndAbort("Unsupported refinement target")
         }
       case AppliedType(base, List(a)) if base.typeSymbol == TypeRepr.of[constraint.NonEmpty[Any]].typeSymbol =>
@@ -197,21 +210,34 @@ object macros {
           case '[a] =>
             compatible[a]
             Expr.summon[HasElements[a]] match {
-              case Some(check) => '{ NonEmpty.validate[a](${ value.asExprOf[a] })(using $check) }.asExprOf[R]
-              case None        => report.errorAndAbort(s"No immutable nonempty validation for ${Type.show[a]}")
+              case Some(elements) =>
+                if (throwing) '{ NonEmpty.validate[a](${ value.asExprOf[a] })(using $elements) }
+                else '{ NonEmpty.check[a](${ value.asExprOf[a] })(using $elements) }
+              case None => report.errorAndAbort(s"No immutable nonempty validation for ${Type.show[a]}")
             }
           case _ => report.errorAndAbort("Unsupported nonempty target")
         }
       case target: TypeRef if target.name == "Type" =>
+        val owner = target.qualifier match {
+          case owner: TermRef => Ref(owner.termSymbol)
+          case _              => report.errorAndAbort("Newtype must have a stable companion")
+        }
         target.qualifier.baseType(TypeRepr.of[Newtype[Any]].typeSymbol) match {
           case AppliedType(_, List(base)) =>
             base.asType match {
               case '[c] =>
-                val checked = newtypeValue[A, c](value)
-                target.qualifier match {
-                  case owner: TermRef =>
-                    Select.overloaded(Ref(owner.termSymbol), "apply", Nil, List(checked.asTerm)).asExprOf[R]
-                  case _ => report.errorAndAbort("Newtype must have a stable companion")
+                val carrier = TypeRepr.of[A].widen.dealias <:< TypeRepr.of[c]
+                if (throwing) {
+                  val checked = if (carrier) value.asExprOf[c] else check[A, c](value, throwing = true).asExprOf[c]
+                  Select.overloaded(owner, "apply", Nil, List(checked.asTerm)).asExpr
+                } else {
+                  def attempt(checked: Expr[c]): Expr[Either[NonEmpty[String], R]] =
+                    Select.unique(owner, "attempt").appliedTo(checked.asTerm).asExprOf[Either[NonEmpty[String], R]]
+                  if (carrier) attempt(value.asExprOf[c])
+                  else {
+                    val refined = check[A, c](value, throwing = false).asExprOf[Either[NonEmpty[String], c]]
+                    '{ $refined.flatMap(checked => ${ attempt('checked) }) }
+                  }
                 }
               case _ => report.errorAndAbort("Unsupported Newtype representation")
             }

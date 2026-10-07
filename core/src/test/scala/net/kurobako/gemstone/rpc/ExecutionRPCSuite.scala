@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.rpc
 
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -7,8 +8,8 @@ import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.graphics.ShaderMetadata.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.{given, *}
-import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.rpc.ExecutionRPC.{*, given}
+import net.kurobako.gemstone.rpc.Wire.*
 import net.kurobako.gemstone.vm.*
 
 class ExecutionRPCSuite extends munit.FunSuite {
@@ -39,7 +40,7 @@ class ExecutionRPCSuite extends munit.FunSuite {
       unnormalized = false,
       compareEnable = true,
       compareOp = GraphicsCompare.GreaterOrEqual,
-      borderColor = GraphicsBorderColor.FloatOpaqueWhite,
+      borderColour = GraphicsBorderColour.FloatOpaqueWhite,
       mipLodBias = -0.75f,
       minLod = 0f,
       maxLod = 4f,
@@ -108,13 +109,13 @@ class ExecutionRPCSuite extends munit.FunSuite {
     Operation.PollHostMemory(completion),
     Operation.SupplyHostMemory(completion, Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2)))),
     Operation.SupplyHostSync(completion, 71, -1L),
-    Operation.RegisterAllocation(AllocationKind.Shared, 64L),
+    Operation.RegisterAllocation(64L),
     Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L)),
     Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L), true),
     Operation.ReleaseAllocation(allocation),
     Operation.WriteAllocation(allocation, 4L, Vec[Byte](1, 2, 3)),
     Operation.ReadAllocation(allocation, 4L, 3),
-    Operation.LoadProgram("spirv-binary", Vec[Byte](3, 2, 35, 7)),
+    Operation.LoadProgram(ProgramEncoding.SPIRVOpenCLCompute, Vec[Byte](3, 2, 35, 7)),
     Operation.DescribeSpecialization(Vec[Byte](3, 2, 35, 7)),
     Operation.SpecializeImage(
       Vec[Byte](3, 2, 35, 7),
@@ -131,7 +132,7 @@ class ExecutionRPCSuite extends munit.FunSuite {
     Operation.UnloadProgram(program),
     Operation.DescribeProgram(program),
     Operation.DescribeKernel(program, "kernel"),
-    Operation.DescribeImage("spirv-binary", Vec[Byte](3, 2, 35, 7), "kernel"),
+    Operation.DescribeImage(ProgramEncoding.SPIRVOpenCLCompute, Vec[Byte](3, 2, 35, 7), "kernel"),
     Operation.DescribeGlobal(program, "global"),
     Operation.BindProgramGlobal(program, "global", allocation, 8L),
     Operation.WriteProgramGlobal(program, "global", 8L, Vec[Byte](4, 5)),
@@ -147,7 +148,7 @@ class ExecutionRPCSuite extends munit.FunSuite {
       groupSegmentBytes = 16,
       arguments = Vec(
         KernelTask.Argument.Memory(region, 0L),
-        KernelTask.Argument.Scalar(Vec[Byte](9))
+        KernelTask.Argument.Scalar(Vec[Byte](9).unsafe)
       ),
       pointerRelocations = Vec(KernelTask.PointerRelocation(
         source = KernelTask.RelocationSource.Memory(region),
@@ -157,7 +158,6 @@ class ExecutionRPCSuite extends munit.FunSuite {
       ))
     ),
     Operation.QueryCompletion(completion),
-    Operation.AwaitCompletion(completion),
     Operation.CompletionDirtyRanges(completion, 0),
     Operation.CompletionPointerRelocations(completion, 0),
     Operation.CompletionPointerRelocations(completion, 16384),
@@ -234,7 +234,7 @@ class ExecutionRPCSuite extends munit.FunSuite {
       0xbb
     )
     reply(Operation.Ping, (), 0x90)
-    reply(Operation.RegisterAllocation(AllocationKind.Shared, 8L), AllocationId(128L), 0xd1, 0, 0x80)
+    reply(Operation.RegisterAllocation(8L), AllocationId(128L), 0xd1, 0, 0x80)
     reply(Operation.ReadAllocation(allocation, 4L, 3), Vec[Byte](1, 2, 3), 0xc4, 3, 1, 2, 3)
   }
 
@@ -248,10 +248,6 @@ class ExecutionRPCSuite extends munit.FunSuite {
       ExecutionRPC.Schema.canonical
     )
     assert(ExecutionRPC.Schema.canonical.contains("alias(String,text)[minimum-length[1],not-contains[00]]"))
-    assertEquals(
-      ExecutionRPC.Identity,
-      "gemstone.execution/3"
-    )
   }
 
   test("operation decoding rejects unknown tags and trailing payload") {
@@ -261,15 +257,8 @@ class ExecutionRPCSuite extends munit.FunSuite {
     assert(Wire.Protocol[Operation].decodePayload(id, payload :+ 0.toByte, ExecutionRPC.Limits).isLeft)
   }
 
-  test("refined string codecs reject empty wire payloads") {
-    val invalidName = Wire.Codec[String].encode("", ExecutionRPC.Limits).flatMap(
-      Wire.Codec[NonEmpty[String]].decode(_, ExecutionRPC.Limits)
-    )
-    assert(invalidName.isLeft)
-  }
-
   test("encoding enforces total, text, and collection limits before producing bytes") {
-    val limits = Wire.Limits(
+    val limits = msgpack.Limits(
       maximumElements = 1,
       maximumBytes = 12,
       maximumTextBytes = 3
@@ -287,5 +276,200 @@ class ExecutionRPCSuite extends munit.FunSuite {
         .flatMap(Wire.Codec[Vec[Int]].decode(_, ExecutionRPC.Limits)),
       Right(values)
     )
+  }
+
+  private case class UncheckedHostAtomic(
+      address: GuestAddress,
+      size: Int,
+      expected: Long,
+      desired: Long,
+      operation: HostMemoryAtomicOperation
+  ) derives Codec
+
+  private case class UncheckedHostBytes(address: GuestAddress, bytes: Vec[Byte], atomicWidth: Int) derives Codec
+
+  test("host atomic widths are validated at the wire boundary while zero denotes ordinary bytes") {
+    def atomic(width: Int): Either[String, HostMemoryAtomic] =
+      Codec[UncheckedHostAtomic].encode(
+        UncheckedHostAtomic(GuestAddress(4096L), width, 0L, 1L, HostMemoryAtomicOperation.Store),
+        ExecutionRPC.Limits
+      ).flatMap(Codec[HostMemoryAtomic].decode(_, ExecutionRPC.Limits))
+    def bytes(width: Int): Either[String, HostMemoryBytes] =
+      Codec[UncheckedHostBytes].encode(
+        UncheckedHostBytes(GuestAddress(4096L), Vec[Byte](1), width),
+        ExecutionRPC.Limits
+      ).flatMap(Codec[HostMemoryBytes].decode(_, ExecutionRPC.Limits))
+    Vec(1, 2, 4, 8).foreach { width =>
+      assertEquals(atomic(width).map(_.size.raw), Right(width))
+      assertEquals(bytes(width).map(_.atomicWidth.raw), Right(width))
+    }
+    assert(atomic(0).isLeft)
+    assertEquals(bytes(0).map(_.atomicWidth.raw), Right(0))
+    Vec(-1, 3, 16).foreach { width =>
+      assert(atomic(width).isLeft)
+      assert(bytes(width).isLeft)
+    }
+  }
+
+  private case class UncheckedKernelMetadata(
+      argumentBlockSize: Int >= 0,
+      explicitParameterCount: Int >= 0,
+      parameters: Vec[KernelMetadata.Parameter],
+      requiredWorkGroupSize: Option[LaunchGeometry.Dimensions] = None,
+      workGroupSizeHint: Option[LaunchGeometry.Dimensions] = None,
+      bindingIndices: Vec[Int >= 0] = Vec.empty,
+      entryPointId: Option[Int >= 0] = None,
+      registerCount: Option[Int >= 0] = None
+  ) derives Codec
+
+  private case class UncheckedGlobalSymbol(
+      name: NonEmpty[String],
+      virtualAddress: Option[GuestAddress],
+      size: Long >= 0,
+      pointerOffsets: Vec[Int >= 0]
+  ) derives Codec
+
+  private case class UncheckedProgramGlobal(
+      size: Long >= 0,
+      initial: Vec[Byte],
+      alias: Option[ProgramGlobalAlias] = None
+  ) derives Codec
+
+  test("native symbol names reject empty and NUL-containing wire payloads") {
+    def symbol(value: String): Either[String, NonEmpty[String]] =
+      Codec[String].encode(value, ExecutionRPC.Limits).flatMap(Codec[NonEmpty[String]].decode(_, ExecutionRPC.Limits))
+    assert(symbol("").isLeft)
+    assert(symbol("bad\u0000name").isLeft)
+    assertEquals(symbol("global"), Right[Nothing, NonEmpty[String]]("global"))
+  }
+
+  test("NUL restrictions apply to native names at the RPC boundary, in both directions") {
+    val text: NonEmpty[String] = "bad\u0000name"
+    val generic                = Codec.nonEmpty[String]
+    assertEquals(generic.encode(text, ExecutionRPC.Limits).flatMap(generic.decode(_, ExecutionRPC.Limits)), Right(text))
+    assert(Codec[NonEmpty[String]].encode(text, ExecutionRPC.Limits).isLeft)
+    assert(Codec[KernelSymbol]
+      .encode(KernelSymbol(text, "valid"), ExecutionRPC.Limits).isLeft)
+    assert(Wire.Protocol[ExecutionRPC.Operation]
+      .encodePayload(ExecutionRPC.Operation.DescribeKernel(ProgramId(1L), text), ExecutionRPC.Limits).isLeft)
+  }
+
+  test("kernel metadata enforces its parameter layout at the wire boundary") {
+    val scalar = KernelMetadata.Parameter(
+      4,
+      0,
+      KernelMetadata.ParameterKind.Scalar,
+      containsPointers = false
+    )
+    val pointer = KernelMetadata.Parameter(
+      8,
+      4,
+      KernelMetadata.ParameterKind.Allocation,
+      containsPointers = true
+    )
+    assertEquals(
+      KernelMetadata.validated(
+        12,
+        2,
+        Vec(scalar, pointer)
+      ).map(_.parameters),
+      Right(Vec(scalar, pointer))
+    )
+    assert(KernelMetadata.validated(12, 3, Vec(scalar, pointer)).isLeft)
+    assert(KernelMetadata.validated(
+      12,
+      2,
+      Vec(scalar, pointer.copy(offset = 3))
+    ).isLeft)
+    assert(KernelMetadata.validated(8, 2, Vec(scalar, pointer)).isLeft)
+
+    val invalid = UncheckedKernelMetadata(12, 3, Vec(scalar, pointer))
+    val decoded = Codec[UncheckedKernelMetadata].encode(invalid, ExecutionRPC.Limits)
+      .flatMap(bytes => Codec[KernelMetadata].decode(bytes, ExecutionRPC.Limits))
+    assert(decoded.isLeft)
+  }
+
+  test("program-global metadata validates pointer slots at the wire boundary") {
+    assert(
+      GlobalSymbol
+        .validated(
+          "state",
+          Some(GuestAddress(0x1000L)),
+          24L,
+          Vec(0, 16)
+        )
+        .isRight
+    )
+    assert(GlobalSymbol.validated(
+      "state",
+      None,
+      24L,
+      Vec(8, 0)
+    ).isLeft)
+    assert(GlobalSymbol.validated(
+      "state",
+      None,
+      24L,
+      Vec(8, 8)
+    ).isLeft)
+    assert(GlobalSymbol.validated(
+      "state",
+      None,
+      16L,
+      Vec(9)
+    ).isLeft)
+
+    val invalid = UncheckedGlobalSymbol(
+      "state",
+      None,
+      16L,
+      Vec(9)
+    )
+    val decoded = Codec[UncheckedGlobalSymbol].encode(invalid, ExecutionRPC.Limits)
+      .flatMap(bytes => Codec[GlobalSymbol].decode(bytes, ExecutionRPC.Limits))
+    assert(decoded.isLeft)
+  }
+
+  test("program global aliases round-trip without independent initial contents") {
+    val alias  = Some(ProgramGlobalAlias("bank", 8L))
+    val global = ProgramGlobal.validated(4L, Vec.empty, alias).toOption.get
+    assertEquals(
+      Codec[ProgramGlobal].encode(global, ExecutionRPC.Limits)
+        .flatMap(bytes => Codec[ProgramGlobal].decode(bytes, ExecutionRPC.Limits)),
+      Right(global)
+    )
+    assert(ProgramGlobal.validated(4L, Vec[Byte](1), alias).isLeft)
+    val invalid = UncheckedProgramGlobal(4L, Vec[Byte](1), alias)
+    assert(Codec[UncheckedProgramGlobal].encode(invalid, ExecutionRPC.Limits)
+      .flatMap(bytes => Codec[ProgramGlobal].decode(bytes, ExecutionRPC.Limits)).isLeft)
+  }
+
+  test("program globals reject initial images larger than their extent") {
+    val global =
+      ProgramGlobal.validated(2L, Vec[Byte](1, 2)).fold(message => fail(message), identity)
+    assertEquals(
+      Codec[ProgramGlobal].encode(global, ExecutionRPC.Limits)
+        .flatMap(bytes => Codec[ProgramGlobal].decode(bytes, ExecutionRPC.Limits)),
+      Right(global)
+    )
+    assert(ProgramGlobal.validated(1L, Vec[Byte](1, 2)).isLeft)
+
+    val invalid = UncheckedProgramGlobal(1L, Vec[Byte](1, 2))
+    val decoded = Codec[UncheckedProgramGlobal].encode(invalid, ExecutionRPC.Limits)
+      .flatMap(bytes => Codec[ProgramGlobal].decode(bytes, ExecutionRPC.Limits))
+    assert(decoded.isLeft)
+  }
+
+  test("nested failure details fit the wire instead of failing to encode") {
+    val long    = "\u00e9" * ExecutionRPC.MaximumTextBytes.raw
+    val status  = CompletionStatus.Failed(ExecutionFailure.Failed(s"fault\u0000at $long"))
+    val decoded = Codec[CompletionStatus].encode(status, ExecutionRPC.Limits)
+      .flatMap(bytes => Codec[CompletionStatus].decode(bytes, ExecutionRPC.Limits))
+    decoded match {
+      case Right(CompletionStatus.Failed(ExecutionFailure.Failed(detail))) =>
+        assert(detail.raw.startsWith("fault?at \u00e9"))
+        assert(detail.raw.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= ExecutionRPC.MaximumTextBytes.raw)
+      case other => fail(s"unexpected decode: $other")
+    }
   }
 }

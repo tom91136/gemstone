@@ -1,0 +1,32 @@
+Checks: '-*,readability-identifier-naming'
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/(native|conformance)/.*'
+ExcludeHeaderFilterRegex: '.*/(target|generated|third_party)/.*'
+CheckOptions:
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.UnionCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.TypeAliasCase: CamelCase
+  readability-identifier-naming.TypedefCase: CamelCase
+  readability-identifier-naming.TemplateParameterCase: CamelCase
+  readability-identifier-naming.ConceptCase: CamelCase
+  readability-identifier-naming.EnumConstantCase: CamelCase
+  readability-identifier-naming.ScopedEnumConstantCase: CamelCase
+  readability-identifier-naming.GlobalConstantCase: CamelCase
+  readability-identifier-naming.GlobalConstexprVariableCase: CamelCase
+  readability-identifier-naming.GlobalConstexprVariableIgnoredRegexp: '^(value|format)$'
+  readability-identifier-naming.ClassConstantCase: CamelCase
+  readability-identifier-naming.StaticConstexprVariableCase: camelBack
+  readability-identifier-naming.LocalConstexprVariableCase: camelBack
+  readability-identifier-naming.LocalConstantCase: camelBack
+  readability-identifier-naming.FunctionCase: camelBack
+  readability-identifier-naming.FunctionIgnoredRegexp: '^(gemstone_[a-z0-9_]+|__(cuda|hip)[A-Za-z]+|cu[A-Za-z0-9]+_(v[0-9]+|ptds|ptsz)|enum_name)$'
+  readability-identifier-naming.MethodCase: camelBack
+  readability-identifier-naming.VariableCase: camelBack
+  readability-identifier-naming.ParameterCase: camelBack
+  readability-identifier-naming.MemberCase: camelBack
+  readability-identifier-naming.MemberIgnoredRegexp: '^structs_as_arrays$'
+  readability-identifier-naming.ConstantMemberCase: camelBack
+  readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^__[A-Z][A-Z0-9_]*$'

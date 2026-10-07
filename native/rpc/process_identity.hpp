@@ -1,5 +1,4 @@
-#ifndef GEMSTONE_PROCESS_IDENTITY_HPP
-#define GEMSTONE_PROCESS_IDENTITY_HPP
+#pragma once
 
 #include <array>
 #include <charconv>
@@ -12,10 +11,6 @@
 
 namespace gemstone::execution {
 namespace detail {
-
-struct FileCloser {
-  void operator()(std::FILE *file) const noexcept { std::fclose(file); }
-};
 
 inline uint64_t processStartTime(std::string_view stat) {
   const auto commandEnd = stat.rfind(')');
@@ -39,18 +34,12 @@ inline uint64_t processStartTime(std::string_view stat) {
 
 // PID plus Linux process start time is stable across DSOs and changes after PID reuse.
 inline uint64_t processIncarnation() {
-#ifdef __linux__
-  const std::unique_ptr<std::FILE, detail::FileCloser> stat(std::fopen("/proc/self/stat", "r"));
+  const auto close = [](std::FILE *file) { std::fclose(file); };
+  const std::unique_ptr<std::FILE, decltype(close)> stat(std::fopen("/proc/self/stat", "r"), close);
   if (!stat) return 0;
   std::array<char, 4096> text{};
   if (!std::fgets(text.data(), static_cast<int>(text.size()), stat.get())) return 0;
   return detail::processStartTime(text.data());
-#else
-  // No stable cross-DSO process-start identity: callers must fail closed.
-  return 0;
-#endif
 }
 
 } // namespace gemstone::execution
-
-#endif

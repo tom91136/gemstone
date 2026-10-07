@@ -2,6 +2,7 @@ package net.kurobako.gemstone.server
 
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.server.recording.*
 import net.kurobako.gemstone.vm.*
 
 class SettingsSuite extends munit.FunSuite {
@@ -45,10 +46,23 @@ class SettingsSuite extends munit.FunSuite {
       Left(s"${environment.ExecutionMaxInstructions} must be a positive integer: +1")
     )
     assertEquals(
-      Server.Settings.fromEnvironment(Map(environment.ExecutionParallelism -> Long.MaxValue.toString)),
-      Left(s"${environment.ExecutionParallelism} must be a positive integer: ${Long.MaxValue}")
+      Server.Settings.fromEnvironment(Map(environment.ExecutionParallelism -> Long.MaxValue.toString))
+        .left.map(_.startsWith(
+          s"${environment.ExecutionParallelism} must be a positive integer at most the host bound"
+        )),
+      Left(true)
     )
-    assert(Server.Settings.fromEnvironment(Map(environment.Record -> "bad\u0000path")).isLeft)
+    assertEquals(
+      Server.Settings.fromEnvironment(Map(environment.Record -> "bad\u0000path")),
+      Left(s"${environment.Record} must not contain a NUL character")
+    )
+  }
+
+  test("replay applies the recorded profile within the host bound and drops recording") {
+    def profile(parallelism: Int) = Journal.ExecutionProfile(17L, parallelism.unsafe[Int > 0])
+    val replayed                  = Server.Settings.replay(Map(environment.Record -> "capture.journal"), profile(1))
+    assertEquals(replayed.map(s => (s.limits.maxInstructions.raw, s.parallelism.raw, s.record)), Right((17L, 1, None)))
+    assert(Server.Settings.replay(Map.empty, profile(sys.runtime.availableProcessors() + 65)).isLeft)
   }
 
   test("performance tracing follows scope tokens and ignores unrelated categories") {

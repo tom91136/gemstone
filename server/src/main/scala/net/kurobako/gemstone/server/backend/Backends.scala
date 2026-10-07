@@ -1,27 +1,28 @@
 package net.kurobako.gemstone.server.backend
 
 import net.kurobako.gemstone.graphics.*
-import net.kurobako.gemstone.isa.spirv.v1_6.{SPIRV as _, *}
-import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.isa.spirv.*
+import net.kurobako.gemstone.isa.spirv.graphics.*
 import net.kurobako.gemstone.vm.*
 
 object Backends {
   def default(workgroups: Workgroups = Workgroups.Sequential): Backends = Backends(
     List(
-      PTX(workgroups),
-      Cubin(workgroups),
-      AMDGPU(workgroups),
-      SPIRV(environment = Validation.Environment.OpenCLCompute, workgroups = workgroups),
-      SPIRV(Validation.Environment.VulkanCompute, "spirv-vulkan-binary", workgroups),
-      SPIRV(Validation.Environment.VulkanGraphics, "spirv-vulkan-graphics-binary", workgroups)
+      ptx.PTXBackend(workgroups),
+      sass.CubinBackend(workgroups),
+      amdgpu.AMDGPUBackend(workgroups),
+      SPIRVBackend(Validation.Environment.OpenCLCompute, ProgramEncoding.SPIRVOpenCLCompute, workgroups),
+      SPIRVBackend(Validation.Environment.VulkanCompute, ProgramEncoding.SPIRVVulkanCompute, workgroups),
+      SPIRVBackend(Validation.Environment.VulkanGraphics, ProgramEncoding.SPIRVVulkanGraphics, workgroups)
     ),
-    Some(SPIRV),
-    Some(Graphics(workgroups))
+    Some(Specialization),
+    Some(GraphicsRuntime(workgroups))
   )
 }
 
 case class Backends(
-    programs: List[RuntimeBackend],
-    specialization: Option[RuntimeBackend.Specialization] = None,
+    programs: List[Backend],
+    specialization: Option[Backend.Specialization] = None,
     graphics: Option[GraphicsBackend] = None
 )

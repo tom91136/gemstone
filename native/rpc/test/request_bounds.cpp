@@ -78,7 +78,7 @@ TEST_CASE("native wire constraints reject invalid requests before opening a conn
   const gemstone_test::Environment endpoint(gemstone::environment::RpcEndpoint, nullptr);
   auto client = Client::fromEnvironment();
   REQUIRE(client);
-  const auto result = client->call(RegisterAllocation{AllocationKind::Device, -1});
+  const auto result = client->call(RegisterAllocation{{-1}});
   REQUIRE_FALSE(result);
   REQUIRE(result.error().detail.find("wire constraints") != std::string::npos);
   REQUIRE(wire::valid(AllocationId{1}));
@@ -101,11 +101,13 @@ TEST_CASE("native wire constraints reject invalid requests before opening a conn
 
 TEST_CASE("native wire validation rejects malformed replies and poisons the session", "[rpc]") {
   gemstone_test::RpcFixture fixture;
-  fixture.programCatalog({{"", "add.kd"}}, {});
+  fixture.programCatalogue({{"", "add.kd"}}, {});
   const gemstone_test::RpcEnvironment environment(fixture);
   auto client = Client::fromEnvironment();
   REQUIRE(client);
-  const auto reply = client->call(DescribeProgram{ProgramId{91}});
+  const auto program = client->call(LoadProgram{ProgramEncoding::SPIRVOpenCLCompute, {1}});
+  REQUIRE(program);
+  const auto reply = client->call(DescribeProgram{program.value()});
   REQUIRE_FALSE(reply);
   REQUIRE(reply.error().detail.find("payload is invalid") != std::string::npos);
   const auto next = client->call(Ping{});

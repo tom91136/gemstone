@@ -1,12 +1,11 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.pickler.given
-import scala.util.Using
 import upickle.default.ReadWriter
-import upickle.default.read
 
 object Metadata {
   case class Encoding(
@@ -31,13 +30,7 @@ object Metadata {
         processors: Vector[Int] = Vector.empty
     ) derives ReadWriter
 
-    private lazy val values: Vec[Metadata] = {
-      val stream = Option(getClass.getResourceAsStream("metadata.json"))
-        .getOrElse(throw IllegalStateException("missing AMDGPU metadata resource metadata.json"))
-      Using.resource(stream) { input =>
-        read[Catalogue](input).decode
-      }
-    }
+    private lazy val values: Vec[Metadata] = resources.json[Catalogue](getClass, "metadata.json").decode
 
     def metadata(id: Int): Metadata =
       if (id >= 0 && id < values.size) values(id)
@@ -47,18 +40,17 @@ object Metadata {
   /** The interned encoding catalogue emitted by the AMDGPU generator. */
   case class Catalogue(
       strings: Vector[NonEmpty[String]],
-      schemas: Vector[Vector[(Int, Int, Boolean, Int, Int, Boolean)]],
+      schemas: Vector[Vector[(Int, Int, Boolean, Int, Boolean)]],
       encodings: Vector[Catalogue.Row],
       metadata: Vector[(Int, Int)]
   ) derives ReadWriter {
     private def decode: Vec[Metadata] = {
-      val operands = schemas.map(_.map { case (field, kind, implicitOperand, bits, dataFormat, output) =>
+      val operands = schemas.map(_.map { case (field, kind, implicitOperand, bits, output) =>
         OperandInfo(
           field = Option.when(field >= 0)(EncodingField.valueOf(strings(field))),
           kind = OperandKind.valueOf(strings(kind)),
           implicitOperand = implicitOperand,
           bits = bits.unsafe[Int >= 0],
-          dataFormat = Option.when(dataFormat >= 0)(DataFormat.valueOf(strings(dataFormat))),
           output = output
         )
       }.toVec)
@@ -83,8 +75,4 @@ object Metadata {
 
 }
 
-case class Metadata(encodings: Vec[Metadata.Encoding]) {
-
-  /** Whether this catalog contains an encoding; exact processor availability may need further validation. */
-  def supports(isa: ISA): Boolean = encodings.exists(_.isa == isa)
-}
+case class Metadata(encodings: Vec[Metadata.Encoding])

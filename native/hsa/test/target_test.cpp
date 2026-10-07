@@ -1,27 +1,27 @@
-#include "gemstone/hsa/target.h"
+#include "gemstone/hsa/target.hpp"
 
 #include <cstdlib>
 #include <cstring>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "gemstone/hsa/trace.hpp"
+#include <gemstone/trace.hpp>
 
 #include <environment_keys.hpp>
 
 TEST_CASE("HSA target and trace environment", "[hsa]") {
   unsetenv(gemstone::environment::Trace);
-  REQUIRE((!gemstone::hsa::traceEnabled("api")));
+  REQUIRE((!gemstone::traceEnabled("hsa", "api")));
   REQUIRE((setenv(gemstone::environment::Trace, "hsa.api,hsa.packets", 1) == 0));
-  REQUIRE((gemstone::hsa::traceEnabled("api")));
-  REQUIRE((gemstone::hsa::traceEnabled("packets")));
-  REQUIRE((!gemstone::hsa::traceEnabled("memory")));
+  REQUIRE((gemstone::traceEnabled("hsa", "api")));
+  REQUIRE((gemstone::traceEnabled("hsa", "packets")));
+  REQUIRE((!gemstone::traceEnabled("hsa", "memory")));
   REQUIRE((setenv(gemstone::environment::Trace, "all", 1) == 0));
-  REQUIRE((gemstone::hsa::traceEnabled("loaders")));
+  REQUIRE((gemstone::traceEnabled("hsa", "loaders")));
   unsetenv(gemstone::environment::TargetArch);
   REQUIRE((std::strcmp(gemstone::hsa::targetArch(), "gfx900") == 0));
-  const auto default_version = gemstone::hsa::targetVersion();
-  REQUIRE((default_version.major == 9 && default_version.minor == 0));
+  const auto defaultVersion = gemstone::hsa::targetVersion();
+  REQUIRE((defaultVersion.major == 9 && defaultVersion.minor == 0));
 
   struct Expected {
     const char *name;

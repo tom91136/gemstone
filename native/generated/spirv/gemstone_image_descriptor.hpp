@@ -34,7 +34,7 @@ inline constexpr uint32_t AddressV = 3u;
 inline constexpr uint32_t Unnormalized = 4u;
 inline constexpr uint32_t CompareEnable = 5u;
 inline constexpr uint32_t CompareOp = 6u;
-inline constexpr uint32_t BorderColor = 7u;
+inline constexpr uint32_t BorderColour = 7u;
 inline constexpr uint32_t MipLodBias = 8u;
 inline constexpr uint32_t MinLod = 9u;
 inline constexpr uint32_t MaxLod = 10u;
@@ -90,14 +90,14 @@ inline constexpr uint32_t Nearest = 0u;
 inline constexpr uint32_t Linear = 1u;
 } // namespace MipmapMode
 
-namespace BorderColor {
+namespace BorderColour {
 inline constexpr uint32_t FloatTransparentBlack = 0u;
 inline constexpr uint32_t IntTransparentBlack = 1u;
 inline constexpr uint32_t FloatOpaqueBlack = 2u;
 inline constexpr uint32_t IntOpaqueBlack = 3u;
 inline constexpr uint32_t FloatOpaqueWhite = 4u;
 inline constexpr uint32_t IntOpaqueWhite = 5u;
-} // namespace BorderColor
+} // namespace BorderColour
 
 namespace Swizzle {
 inline constexpr uint32_t Identity = 0u;

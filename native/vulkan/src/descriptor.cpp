@@ -1,3 +1,5 @@
+#include "descriptor.hpp"
+
 #include <algorithm>
 #include <cstring>
 #include <functional>
@@ -5,9 +7,9 @@
 #include <numeric>
 #include <type_traits>
 
-#include "runtime.hpp"
+namespace gemstone::vulkan {
 
-GemstoneVulkanDescriptorState::Set::Set(const std::vector<VkDescriptorSetLayoutBinding> &bindings) {
+DescriptorState::Set::Set(const std::vector<VkDescriptorSetLayoutBinding> &bindings) {
   for (const auto &binding : bindings) {
     layout.emplace(binding.binding, binding);
     for (uint32_t element = 0; element < binding.descriptorCount; ++element) {
@@ -24,8 +26,7 @@ GemstoneVulkanDescriptorState::Set::Set(const std::vector<VkDescriptorSetLayoutB
   }
 }
 
-GemstoneVulkanDescriptorState::Set::Value *GemstoneVulkanDescriptorState::slot(VkDescriptorSet set, uint32_t binding, uint32_t element,
-                                                                               uint32_t offset) {
+DescriptorState::Set::Value *DescriptorState::slot(VkDescriptorSet set, uint32_t binding, uint32_t element, uint32_t offset) {
   uint64_t index = static_cast<uint64_t>(element) + offset;
   const auto record = sets.find(set);
   if (record == sets.end()) return nullptr;
@@ -39,8 +40,7 @@ GemstoneVulkanDescriptorState::Set::Value *GemstoneVulkanDescriptorState::slot(V
   return &record->second.slots.at({at->first, static_cast<uint32_t>(index)});
 }
 
-void GemstoneVulkanDescriptorState::updateTemplate(VkDescriptorSet set, std::span<const VkDescriptorUpdateTemplateEntry> entries,
-                                                   const void *data) {
+void DescriptorState::updateTemplate(VkDescriptorSet set, std::span<const VkDescriptorUpdateTemplateEntry> entries, const void *data) {
   for (const auto &entry : entries)
     for (uint32_t i = 0; i < entry.descriptorCount; ++i) {
       auto *destination = slot(set, entry.dstBinding, entry.dstArrayElement, i);
@@ -51,8 +51,8 @@ void GemstoneVulkanDescriptorState::updateTemplate(VkDescriptorSet set, std::spa
     }
 }
 
-void GemstoneVulkanDescriptorState::update(uint32_t writeCount, const VkWriteDescriptorSet *writes, uint32_t copyCount,
-                                           const VkCopyDescriptorSet *copies) {
+void DescriptorState::update(uint32_t writeCount, const VkWriteDescriptorSet *writes, uint32_t copyCount,
+                             const VkCopyDescriptorSet *copies) {
   // Runtime descriptor slots are reserved by vkAllocateDescriptorSets. Updates
   // therefore need no host allocation (this void API cannot report host OOM).
   for (uint32_t i = 0; i < writeCount; ++i) {
@@ -87,16 +87,15 @@ void GemstoneVulkanDescriptorState::update(uint32_t writeCount, const VkWriteDes
   }
 }
 
-std::optional<size_t> gemstoneVulkanDescriptorLength(VkDeviceSize bufferSize, VkDeviceSize offset, VkDeviceSize range) {
-  if (offset > bufferSize) return std::nullopt;
-  const VkDeviceSize length = range == VK_WHOLE_SIZE ? bufferSize - offset : range;
-  if (length > bufferSize - offset || length > std::numeric_limits<size_t>::max()) return std::nullopt;
+std::optional<size_t> rangeLength(VkDeviceSize size, VkDeviceSize offset, VkDeviceSize range) {
+  if (offset > size) return std::nullopt;
+  const VkDeviceSize length = range == VK_WHOLE_SIZE ? size - offset : range;
+  if (length > size - offset || length > std::numeric_limits<size_t>::max()) return std::nullopt;
   return static_cast<size_t>(length);
 }
 
-GemstoneVulkanDescriptorAllocationLayout
-gemstoneVulkanDescriptorAllocationLayout(const std::vector<GemstoneVulkanDescriptorRange> &ranges) {
-  GemstoneVulkanDescriptorAllocationLayout layout;
+DescriptorAllocationLayout descriptorAllocationLayout(const std::vector<DescriptorRange> &ranges) {
+  DescriptorAllocationLayout layout;
   layout.arguments.resize(ranges.size());
   std::vector<size_t> order(ranges.size());
   std::iota(order.begin(), order.end(), 0);
@@ -119,3 +118,4 @@ gemstoneVulkanDescriptorAllocationLayout(const std::vector<GemstoneVulkanDescrip
   }
   return layout;
 }
+} // namespace gemstone::vulkan

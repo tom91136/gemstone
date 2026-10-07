@@ -15,23 +15,23 @@ trait GraphicsBackend {
       entry: NonEmpty[String],
       stage: ShaderStageKind,
       constants: Vec[SpecializationConstant]
-  ): Either[ExecutionFailure, PreparedShader]
-  def validate(submission: GraphicsSubmission, size: AllocationId => Option[Long]): Either[String, Set[AllocationId]]
+  ): Either[Fault, PreparedShader]
+  def validate(submission: GraphicsSubmission, size: AllocationId => Option[Int > 0]): Either[String, Set[AllocationId]]
   def validateDescriptorBindings(
       bindings: Vec[DescriptorBinding],
-      argumentCount: Int,
-      size: AllocationId => Option[Long]
+      argumentCount: Int >= 0,
+      size: AllocationId => Option[Int > 0]
   ): Either[String, Set[AllocationId]]
   def withDescriptorBindings[A](
       bindings: Vec[DescriptorBinding],
-      memory: Memory,
+      memory: AddressSpace,
       control: TaskControl
-  )(execute: (Memory, Vec[GraphicsRange], Vec[KernelTask.PointerRelocation]) => Either[ExecutionFailure, A])
-      : Either[ExecutionFailure, A]
+  )(execute: (AddressSpace, Vec[GraphicsRange], Vec[KernelTask.PointerRelocation]) => Either[Fault, A])
+      : Either[Fault, A]
   def execute(
       submission: GraphicsSubmission,
-      memory: Memory,
+      memory: AddressSpace,
       control: TaskControl,
       handler: Event => Either[Fault, Unit]
-  ): Either[ExecutionFailure, GraphicsStatistics]
+  ): Either[Fault, GraphicsStatistics]
 }

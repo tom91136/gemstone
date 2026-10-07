@@ -10,6 +10,5 @@ FetchContent_Declare(glaze
 )
 FetchContent_MakeAvailable(glaze)
 
-# Glaze is header-only third-party code; keep its diagnostics out of -Werror.
 set_property(TARGET glaze_glaze APPEND PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
   "$<TARGET_PROPERTY:glaze_glaze,INTERFACE_INCLUDE_DIRECTORIES>")

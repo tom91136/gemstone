@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.nvidia
 
+import net.kurobako.gemstone.constraint.*
+
 object VMConditionCodes {
   enum Flag {
     case Carry
@@ -12,15 +14,13 @@ object VMConditionCodes {
 }
 
 /** Per-lane condition state used by NVIDIA instruction families. */
+@SuppressWarnings(Array("scalafix:DisableSyntax.var"))
 class VMConditionCodes {
   import VMConditionCodes.*
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private var defined = 0
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private var values = 0
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private var threeInputCarry: Option[Int] = None
+  private var defined                               = 0
+  private var values                                = 0
+  private var threeInputCarry: Option[Int in 0 ~ 2] = None
 
   def read(flag: Flag): Option[Boolean] = {
     val bit = 1 << flag.ordinal
@@ -38,14 +38,12 @@ class VMConditionCodes {
     }
   }
 
-  def readThreeInputCarry: Option[Int] = threeInputCarry
+  def readThreeInputCarry: Option[Int in 0 ~ 2] = threeInputCarry
 
-  def writeThreeInputCarry(value: Option[Int]): Unit =
-    threeInputCarry = value.map { count =>
-      require(count >= 0 && count <= 2, s"IADD3 carry count is out of range: $count")
-      defined &= ~(1 << Flag.Carry.ordinal)
-      count
-    }
+  def writeThreeInputCarry(value: Option[Int in 0 ~ 2]): Unit = {
+    if (value.nonEmpty) defined &= ~(1 << Flag.Carry.ordinal)
+    threeInputCarry = value
+  }
 
   def clear(): Unit = {
     defined = 0

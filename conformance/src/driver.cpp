@@ -3,15 +3,13 @@
 #include <algorithm>
 #include <atomic>
 #include <charconv>
+#include <condition_variable>
 #include <fstream>
 #include <iostream>
-#include <limits>
-#include <memory>
 #include <mutex>
 #include <ranges>
 #include <regex>
 #include <set>
-#include <sstream>
 #include <stdexcept>
 #include <syncstream>
 #include <thread>
@@ -23,7 +21,6 @@
 
 #include "conformance/device.hpp"
 
-#include "device_lock.hpp"
 #include "device_selector.hpp"
 #include "environment.hpp"
 #include "suite_policy.hpp"
@@ -35,13 +32,8 @@ namespace fs = std::filesystem;
 using namespace std::chrono_literals;
 // Program timeouts are recorded for a reference host; emulated work
 // parallelises across host cores, so a host with fewer cores gets more time and
-// one with more keeps at least the recorded budget.
+// one with more keeps the recorded budget.
 inline constexpr uint32_t TimeoutReferenceCores = 32;
-uint32_t scaled_timeout(uint32_t seconds) {
-  const auto cores = static_cast<uint32_t>(std::max(1u, std::thread::hardware_concurrency()));
-  const auto scale = std::clamp(static_cast<double>(TimeoutReferenceCores) / static_cast<double>(cores), 0.5, 4.0);
-  return std::max(1u, static_cast<uint32_t>(static_cast<double>(seconds) * scale + 0.5));
-}
 struct ArtifactMetadata {
   std::string backend, architecture, support;
   std::string compiler = "vendor";
@@ -49,7 +41,7 @@ struct ArtifactMetadata {
 struct TestProgram {
   std::string name;
   fs::path path;
-  uint32_t timeout_seconds;
+  uint32_t timeoutSeconds;
   std::string format;
 };
 struct CatchCase {
@@ -62,26 +54,32 @@ struct CatchReport {
   uint32_t version = 0;
   CatchListing listings;
 };
-
-namespace {
 struct WorkloadFields {
   std::string extends;
-  std::optional<std::vector<std::string>> specs, include_programs, levelzero_cases, vulkan_cases, exclude_programs;
-  std::optional<std::string> vulkan_mustpass;
+  std::optional<std::vector<std::string>> specs, includePrograms, levelzeroCases, vulkanCases, excludePrograms;
+  std::optional<std::string> vulkanMustpass;
 };
-bool valid_identifier(std::string_view value) {
+} // namespace conformance::driver
+
+template <> struct glz::meta<conformance::driver::WorkloadFields> : glz::snake_case {};
+
+namespace conformance::driver {
+namespace {
+bool validIdentifier(std::string_view value) {
   return !value.empty() && std::ranges::all_of(value, [](char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
   });
 }
-void validate_run_options(RunOptions &c) {
+// A single path component: an identifier that is not a directory reference.
+bool validName(std::string_view value) { return validIdentifier(value) && value != "." && value != ".."; }
+void validateRunOptions(RunOptions &c) {
   if (c.artifacts.empty() || c.output.empty()) throw std::invalid_argument("run requires --artifacts and --output");
   if (c.direct) {
     if (!c.profiles.empty() || c.machine) throw std::invalid_argument("--direct cannot use --profiles or --machine");
     if (c.workloads.empty()) throw std::invalid_argument("--direct requires --workloads");
   } else if (c.profiles.empty()) throw std::invalid_argument("profile runs require --profiles");
-  if (!valid_identifier(c.workload) || c.workload == "." || c.workload == "..") throw std::invalid_argument("invalid workload name");
-  if (c.isolated_launcher && c.launcher.empty()) throw std::invalid_argument("--isolated-launcher requires --launcher -- command ...");
+  if (!validName(c.workload)) throw std::invalid_argument("invalid workload name");
+  if (c.isolatedLauncher && c.launcher.empty()) throw std::invalid_argument("--isolated-launcher requires --launcher -- command ...");
   if (!c.profiles.empty()) c.profiles = fs::absolute(c.profiles).lexically_normal();
   if (c.workloads.empty()) c.workloads = c.profiles.parent_path() / "workloads";
   c.workloads = fs::absolute(c.workloads).lexically_normal();
@@ -89,15 +87,20 @@ void validate_run_options(RunOptions &c) {
   c.output = fs::absolute(c.output).lexically_normal();
 }
 } // namespace
-int32_t configured_jobs(std::optional<std::string_view> configured, uint32_t hardware_concurrency) {
-  if (!configured || configured->empty()) return static_cast<int32_t>(std::max(1u, hardware_concurrency));
+uint32_t scaledTimeout(uint32_t seconds, uint32_t hardwareConcurrency) {
+  const auto scale =
+      std::clamp(static_cast<double>(TimeoutReferenceCores) / static_cast<double>(std::max(1u, hardwareConcurrency)), 1.0, 4.0);
+  return static_cast<uint32_t>(static_cast<double>(seconds) * scale + 0.5);
+}
+int32_t configuredJobs(std::string_view configured, uint32_t hardwareConcurrency) {
+  if (configured.empty()) return static_cast<int32_t>(std::max(1u, hardwareConcurrency));
   uint32_t result = 0;
-  const auto [end, error] = std::from_chars(configured->data(), configured->data() + configured->size(), result);
-  if (error != std::errc{} || end != configured->data() + configured->size() || result == 0 || result > INT32_MAX)
+  const auto [end, error] = std::from_chars(configured.data(), configured.data() + configured.size(), result);
+  if (error != std::errc{} || end != configured.data() + configured.size() || result == 0 || result > INT32_MAX)
     throw std::invalid_argument("CONFORMANCE_JOBS must be a positive 32-bit integer");
   return static_cast<int32_t>(result);
 }
-std::vector<std::string> catch_case_names(std::string_view json, std::string_view program) {
+std::vector<std::string> catchCaseNames(std::string_view json, std::string_view program) {
   CatchReport inventory;
   constexpr auto options = [] {
     auto o = glz::opts{};
@@ -116,25 +119,21 @@ std::vector<std::string> catch_case_names(std::string_view json, std::string_vie
   }
   return result;
 }
-std::vector<std::string> deqp_case_names(std::string_view listing) {
-  std::istringstream input{std::string(listing)};
-  return deqp_case_names(input);
-}
-std::vector<std::string> deqp_case_names(std::istream &input) {
+std::vector<std::string> deqpCaseNames(std::istream &input) {
   std::set<std::string> names;
   std::string line;
   while (std::getline(input, line)) {
     if (!line.empty() && line.back() == '\r') line.pop_back();
     if (!line.starts_with("TEST: ")) continue;
     auto name = line.substr(6);
-    if (!name.starts_with("dEQP-VK.") || !valid_identifier(name) || !names.insert(name).second)
+    if (!name.starts_with("dEQP-VK.") || !validIdentifier(name) || !names.insert(name).second)
       throw std::runtime_error("invalid or duplicate dEQP case: " + name);
   }
   if (!input.eof()) throw std::runtime_error("cannot read dEQP inventory");
   if (names.empty()) throw std::runtime_error("empty dEQP inventory");
   return {names.begin(), names.end()};
 }
-int32_t deqp_result(std::string_view qpa, std::string_view identity) {
+DeqpResult deqpResult(std::string_view qpa, std::string_view identity) {
   // QPA is a framed stream of XML documents. A successful process exit also
   // covers zero tests and NotSupported, so require one complete matching case.
   const std::string begin = "#beginTestCaseResult " + std::string(identity) + "\n";
@@ -154,16 +153,15 @@ int32_t deqp_result(std::string_view qpa, std::string_view identity) {
   std::smatch match;
   if (!std::regex_search(document, match, result) || document.find("<Result ") != static_cast<size_t>(match.position()))
     throw std::runtime_error("invalid dEQP terminal result");
-  const auto status = match[1].str();
-  std::cout << "dEQP " << identity << ": " << status << '\n';
+  auto status = match[1].str();
   // Vulkan CTS explicitly permits quality and compatibility warnings. The
-  // original status stays in the QPA and console output for separate reporting.
-  if (status == "Pass" || status == "QualityWarning" || status == "CompatibilityWarning") return 0;
-  if (status == "NotSupported") return 4;
+  // original status stays in the QPA and case log for separate reporting.
+  if (status == "Pass" || status == "QualityWarning" || status == "CompatibilityWarning") return {std::move(status), 0};
+  if (status == "NotSupported") return {std::move(status), SkipReturnCode};
   // Do not apply waivers implicitly.
-  return 1;
+  return {std::move(status), 1};
 }
-std::vector<std::string> gtest_case_names(std::string_view listing, std::string_view program) {
+std::vector<std::string> gtestCaseNames(std::string_view listing, std::string_view program) {
   std::vector<std::string> result;
   std::set<std::string> unique;
   std::string suite;
@@ -189,19 +187,18 @@ std::vector<std::string> gtest_case_names(std::string_view listing, std::string_
   }
   return result;
 }
-std::vector<std::string> catch_shard_arguments(const std::vector<std::string> &specs, uint32_t index, uint32_t count) {
+std::vector<std::string> catchShardArguments(const std::vector<std::string> &specs, uint32_t index, uint32_t count) {
   if (count == 0 || index >= count) throw std::invalid_argument("invalid Catch shard");
   return concat(std::vector<std::string>{"--order", "lex", "--shard-count", fmt::to_string(count), "--shard-index", fmt::to_string(index)},
                 specs);
 }
-std::vector<std::string> launcher_arguments(bool enabled, std::span<char *const> arguments) {
-  if (!enabled) return {};
+std::vector<std::string> launcherArguments(std::span<char *const> arguments) {
   const auto separator = std::ranges::find(arguments, std::string_view("--"));
   if (separator == arguments.end() || separator + 1 == arguments.end())
     throw std::invalid_argument("--launcher requires -- command [arguments ...]");
   return {separator + 1, arguments.end()};
 }
-std::vector<profile::ResolvedTarget> unique_routes(const std::vector<profile::ResolvedTarget> &targets, bool isolated) {
+std::vector<profile::ResolvedTarget> uniqueRoutes(const std::vector<profile::ResolvedTarget> &targets, bool isolated) {
   std::vector<profile::ResolvedTarget> result;
   std::set<std::tuple<std::string, std::optional<std::string>, std::string, std::string>> seen;
   for (const auto &target : targets) {
@@ -210,23 +207,21 @@ std::vector<profile::ResolvedTarget> unique_routes(const std::vector<profile::Re
     const auto mode = target.backend == "cuda" && target.environment.contains("CONFORMANCE_CUDA_CODE")
                           ? target.environment.at("CONFORMANCE_CUDA_CODE")
                           : std::string{};
-    if (!isolated || seen.emplace(target.backend, target.architecture, mode, target.compiler).second) {
-      result.push_back(target);
-      if (isolated) result.back().deviceLock = false;
-    } else std::cout << "conformance: identical isolated route " << target.id << " omitted before discovery\n";
+    if (!isolated || seen.emplace(target.backend, target.architecture, mode, target.compiler).second) result.push_back(target);
+    else std::cout << "conformance: identical isolated route " << target.id << " omitted before discovery\n";
   }
   return result;
 }
-bool valid_artifact_key(std::string_view value) {
-  return !value.empty() && valid_identifier(value) && value.front() != '.' && value.front() != '_' && value.front() != '-';
+bool validArtifactKey(std::string_view value) {
+  return !value.empty() && validIdentifier(value) && value.front() != '.' && value.front() != '_' && value.front() != '-';
 }
-fs::path artifact_directory(const RunOptions &configuration, const conformance::profile::ResolvedTarget &target) {
+fs::path artifactDirectory(const RunOptions &configuration, const conformance::profile::ResolvedTarget &target) {
   auto result = configuration.artifacts / target.backend;
   if (target.compiler != "vendor") result /= target.compiler;
   if (target.architecture) result /= *target.architecture;
   return result;
 }
-ArtifactMetadata validate_artifact(const fs::path &artifact, const conformance::profile::ResolvedTarget &target) {
+ArtifactMetadata validateArtifact(const fs::path &artifact, const conformance::profile::ResolvedTarget &target) {
   const auto file = artifact / "artifact.toml";
   ArtifactMetadata metadata;
   std::string buffer;
@@ -235,15 +230,14 @@ ArtifactMetadata validate_artifact(const fs::path &artifact, const conformance::
   const auto architecture = target.architecture.value_or("");
   if (metadata.backend != target.backend || metadata.architecture != architecture || metadata.compiler != target.compiler)
     throw std::runtime_error("conformance artifact metadata does not match requested " + target.backend + ": " + file.string());
-  if (!metadata.support.empty() && !valid_artifact_key(metadata.support))
+  if (!metadata.support.empty() && !validArtifactKey(metadata.support))
     throw std::runtime_error("conformance artifact has an invalid support key: " + file.string());
   return metadata;
 }
-fs::path support_directory(const RunOptions &configuration, const conformance::profile::ResolvedTarget &target,
-                           const ArtifactMetadata &metadata) {
-  if (target.architecture)
-    return artifact_directory(configuration, target).parent_path() / (metadata.support.empty() ? "support" : metadata.support);
-  return artifact_directory(configuration, target);
+fs::path supportDirectory(const RunOptions &configuration, const conformance::profile::ResolvedTarget &target,
+                          const ArtifactMetadata &metadata) {
+  if (target.architecture) return configuration.artifacts / target.backend / (metadata.support.empty() ? "support" : metadata.support);
+  return artifactDirectory(configuration, target);
 }
 
 std::vector<std::string> launched(const std::vector<std::string> &launcher, std::vector<std::string> command) {
@@ -253,10 +247,10 @@ std::vector<std::string> launched(const std::vector<std::string> &launcher, std:
   result.insert(result.end(), std::make_move_iterator(command.begin()), std::make_move_iterator(command.end()));
   return result;
 }
-Workload load_workload(const RunOptions &configuration) {
+Workload loadWorkload(const RunOptions &configuration) {
   std::set<std::string> active;
   const auto read = [&](auto &&self, const std::string &name) -> Workload {
-    if (!valid_identifier(name) || name == "." || name == "..") throw std::invalid_argument("invalid workload name: " + name);
+    if (!validName(name)) throw std::invalid_argument("invalid workload name: " + name);
     if (!active.insert(name).second) throw std::invalid_argument("cyclic workload inheritance: " + name);
     const auto file = configuration.workloads / (name + ".toml");
     if (!fs::is_regular_file(file)) throw std::invalid_argument("conformance workload does not exist: " + file.string());
@@ -269,11 +263,11 @@ Workload load_workload(const RunOptions &configuration) {
       if (source) destination = std::move(*source);
     };
     replace(workload.specs, fields.specs);
-    replace(workload.include_programs, fields.include_programs);
-    replace(workload.levelzero_cases, fields.levelzero_cases);
-    replace(workload.vulkan_cases, fields.vulkan_cases);
-    replace(workload.vulkan_mustpass, fields.vulkan_mustpass);
-    replace(workload.exclude_programs, fields.exclude_programs);
+    replace(workload.includePrograms, fields.includePrograms);
+    replace(workload.levelzeroCases, fields.levelzeroCases);
+    replace(workload.vulkanCases, fields.vulkanCases);
+    replace(workload.vulkanMustpass, fields.vulkanMustpass);
+    replace(workload.excludePrograms, fields.excludePrograms);
     active.erase(name);
     return workload;
   };
@@ -281,7 +275,7 @@ Workload load_workload(const RunOptions &configuration) {
   if (workload.specs.empty()) throw std::invalid_argument("conformance workload needs at least one Catch test spec");
   return workload;
 }
-uint32_t parse_timeout(std::string_view value, const fs::path &manifest) {
+uint32_t parseTimeout(std::string_view value, const fs::path &manifest) {
 
   uint64_t result = 0;
   const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
@@ -289,7 +283,7 @@ uint32_t parse_timeout(std::string_view value, const fs::path &manifest) {
     throw std::runtime_error(fmt::format("invalid timeout in {}", manifest.string()));
   return static_cast<uint32_t>(result);
 }
-std::vector<TestProgram> test_programs(const fs::path &artifact, const Workload &workload) {
+std::vector<TestProgram> testPrograms(const fs::path &artifact, const Workload &workload) {
   const auto manifest = artifact / "test-programs.txt";
   std::ifstream input(manifest);
   if (!input) throw std::runtime_error("artifact has no test program manifest: " + manifest.string());
@@ -301,123 +295,68 @@ std::vector<TestProgram> test_programs(const fs::path &artifact, const Workload 
     const auto separator = line.find('\t');
     if (separator == std::string::npos) throw std::runtime_error("invalid test program manifest: " + manifest.string());
     auto name = line.substr(0, separator);
-    if (!valid_identifier(name) || !names.insert(name).second) throw std::runtime_error("invalid test program name: " + name);
-#if defined(_WIN32)
-    auto path = artifact / (name + ".exe");
-#else
+    if (!validIdentifier(name) || !names.insert(name).second) throw std::runtime_error("invalid test program name: " + name);
     auto path = artifact / name;
-#endif
     if (!fs::is_regular_file(path)) throw std::runtime_error("missing conformance test program: " + path.string());
     const auto formatAt = line.find('\t', separator + 1);
     if (formatAt == std::string::npos) throw std::runtime_error("missing test program format: " + manifest.string());
     const auto format = line.substr(formatAt + 1);
     if (format != "catch2" && format != "gtest" && format != "deqp") throw std::runtime_error("invalid test program format");
     result.push_back({std::move(name), std::move(path),
-                      parse_timeout(std::string_view(line).substr(separator + 1, formatAt - separator - 1), manifest), format});
+                      parseTimeout(std::string_view(line).substr(separator + 1, formatAt - separator - 1), manifest), format});
   }
   if (result.empty()) throw std::runtime_error("artifact contains no test programs: " + artifact.string());
   std::erase_if(result, [&](const TestProgram &program) {
-    return std::ranges::find(workload.exclude_programs, program.name) != workload.exclude_programs.end()
-           || (!workload.include_programs.empty() && std::ranges::none_of(workload.include_programs, [&](const std::string &pattern) {
-                return glob_matches(pattern.c_str(), program.name.c_str());
+    return std::ranges::find(workload.excludePrograms, program.name) != workload.excludePrograms.end()
+           || (!workload.includePrograms.empty() && std::ranges::none_of(workload.includePrograms, [&](const std::string &pattern) {
+                return globMatches(pattern.c_str(), program.name.c_str());
               }));
   });
   return result;
 }
-namespace {
-std::string bracket_quote(std::string_view value) {
-  for (size_t equals = 1;; ++equals) {
-    const std::string delimiter(equals, '=');
-    if (value.find("]" + delimiter + "]") == std::string_view::npos)
-      return "[" + delimiter + "[" + std::string(value) + "]" + delimiter + "]";
-  }
-}
-} // namespace
-void write_execution_config(const fs::path &path, const ExecutionConfig &configuration) {
-  std::string buffer;
-  if (const auto error = glz::write_file_json(configuration, path.string(), buffer); error)
-    throw std::runtime_error("cannot write execution configuration " + path.string() + ": " + glz::format_error(error, buffer));
-}
-ExecutionConfig read_execution_config(const fs::path &path) {
-  ExecutionConfig result;
-  std::string buffer;
-  if (const auto error = glz::read_file_json(result, path.string(), buffer); error)
-    throw std::runtime_error("cannot read execution configuration " + path.string() + ": " + glz::format_error(error, buffer));
-  if (!conformance::valid_physical_device_key(result.device)) throw std::runtime_error("invalid physical device in " + path.string());
-  return result;
-}
-
-std::vector<std::string> configured_skips(const std::map<std::string, std::string> &environment) {
-  const auto found = environment.find("CONFORMANCE_SKIPS");
-  if (found == environment.end()) return {};
-  auto result = split(found->second, '\n');
-  std::erase(result, std::string{});
-  return result;
-}
-void apply_device_probe(ExecutionConfig &configuration, const DeviceProbeResult &probe) {
-  if (!valid_physical_device_key(probe.device)) throw std::runtime_error("invalid device probe identity");
+void applyDeviceProbe(ExecutionConfig &configuration, const conformance::DeviceProbeResult &probe) {
+  if (!validPhysicalDeviceKey(probe.device)) throw std::runtime_error("invalid device probe identity");
   if (probe.environment.empty()) throw std::runtime_error("device probe returned no execution selection");
   for (const auto &[key, value] : probe.environment) {
-    if (!selection_environment_key(key) || value.find('\0') != std::string::npos)
+    if (!selectionEnvironmentKey(key) || value.find('\0') != std::string::npos)
       throw std::runtime_error("unexpected device probe environment key: " + key);
     configuration.environment[key] = value;
   }
   configuration.device = probe.device;
   configuration.environment["CONFORMANCE_PHYSICAL_DEVICE"] = probe.device;
 }
-DeviceProbeResult probe_device(const RunOptions &configuration, const fs::path &artifact,
-                               const std::map<std::string, std::string> &environment, const std::string &id) {
-  auto probe = artifact / "conformance-device";
-#ifdef _WIN32
-  probe += ".exe";
-#endif
+conformance::DeviceProbeResult probeDevice(const RunOptions &configuration, const fs::path &artifact,
+                                           const std::map<std::string, std::string> &environment, const std::string &id) {
+  const auto probe = artifact / "conformance-device";
   const auto result =
-      run_process(launched(configuration.launcher, {probe.string()}), artifact, environment, 2min, fmt::format("[{} device] ", id), true);
+      runProcess(launched(configuration.launcher, {probe.string()}), artifact, environment, 2min, fmt::format("[{} device] ", id), true);
   if (result.status != 0)
     throw std::runtime_error("device probe failed for " + id + " (including runtime/selector verification): " + result.error);
-  DeviceProbeResult parsed;
+  conformance::DeviceProbeResult parsed;
   if (const auto error = glz::read_json(parsed, result.output); error)
     throw std::runtime_error("invalid device probe JSON for " + id + ": " + glz::format_error(error, result.output));
   return parsed;
 }
-std::vector<std::string> deqp_case_selections(const std::vector<std::string> &patterns) {
-  constexpr size_t limit = 16 * 1024;
-  if (patterns.empty()) throw std::runtime_error("Vulkan CTS requires an explicit vulkan_cases selection");
-  std::vector<std::string> batches;
-  std::string batch;
-  for (const auto &pattern : patterns) {
-    if (pattern.empty() || pattern.size() > limit) throw std::runtime_error("invalid Vulkan CTS selector length");
-    if (!batch.empty() && batch.size() + 1 + pattern.size() > limit) {
-      batches.push_back(std::move(batch));
-      batch.clear();
-    }
-    if (!batch.empty()) batch += ',';
-    batch += pattern;
-  }
-  if (!batch.empty()) batches.push_back(std::move(batch));
-  return batches;
-}
-std::optional<std::string> deqp_exact_case_list(const std::vector<std::string> &patterns) {
-  if (patterns.empty()) throw std::runtime_error("Vulkan CTS requires an explicit vulkan_cases selection");
-  for (const auto &pattern : patterns)
-    if (pattern.empty() || pattern.size() > 16 * 1024) throw std::runtime_error("invalid Vulkan CTS selector length");
+std::string deqpExactCaseList(const std::vector<std::string> &names) {
+  if (names.empty()) throw std::runtime_error("Vulkan CTS requires an explicit vulkan_cases selection");
   // The CTS file parser accepts literal paths, not wildcard expressions. Restrict
   // file contents to path characters so a selector cannot introduce another line.
-  if (!std::ranges::all_of(patterns, valid_identifier)) return std::nullopt;
-  const std::set<std::string> names(patterns.begin(), patterns.end());
-  std::string result;
   for (const auto &name : names)
+    if (!validIdentifier(name))
+      throw std::runtime_error("Vulkan CTS selectors without vulkan_mustpass must be literal case names: " + name);
+  std::string result;
+  for (const auto &name : std::set<std::string>(names.begin(), names.end()))
     result += name + '\n';
   return result;
 }
-std::vector<std::string> deqp_mustpass_cases(const fs::path &root, const fs::path &manifest, const std::vector<std::string> &patterns) {
+std::vector<std::string> deqpMustpassCases(const fs::path &root, const fs::path &manifest, const std::vector<std::string> &patterns) {
   const auto base = fs::canonical(root);
   std::set<fs::path> active;
   std::set<std::string> selected, literals, matched;
   std::vector<std::string> globs;
   for (const auto &pattern : patterns) {
     if (pattern.empty()) throw std::runtime_error("empty Vulkan CTS selector");
-    if (valid_identifier(pattern)) literals.insert(pattern);
+    if (validIdentifier(pattern)) literals.insert(pattern);
     else globs.push_back(pattern);
   }
   const auto read = [&](auto &self, const fs::path &relative) -> void {
@@ -437,14 +376,14 @@ std::vector<std::string> deqp_mustpass_cases(const fs::path &root, const fs::pat
         self(self, within.parent_path() / line);
         continue;
       }
-      if (!valid_identifier(line)) throw std::runtime_error("invalid Vulkan mustpass case: " + line);
+      if (!validIdentifier(line)) throw std::runtime_error("invalid Vulkan mustpass case: " + line);
       bool keep = patterns.empty();
       if (literals.contains(line)) {
         matched.insert(line);
         keep = true;
       }
       for (const auto &pattern : globs)
-        if (glob_matches(pattern.c_str(), line.c_str())) {
+        if (globMatches(pattern.c_str(), line.c_str())) {
           matched.insert(pattern);
           keep = true;
         }
@@ -459,189 +398,122 @@ std::vector<std::string> deqp_mustpass_cases(const fs::path &root, const fs::pat
   if (selected.empty()) throw std::runtime_error("empty Vulkan mustpass selection");
   return {selected.begin(), selected.end()};
 }
-std::vector<ScheduledCase> discover_cases(const RunOptions &configuration, const Workload &workload, const fs::path &artifact,
-                                          const std::map<std::string, std::string> &environment, const std::string &id,
-                                          const fs::path &reports) {
+std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const Workload &workload, const fs::path &artifact,
+                                         const std::map<std::string, std::string> &environment, const std::string &id,
+                                         const fs::path &reports) {
   std::vector<ScheduledCase> tests;
-  for (const auto &program : test_programs(artifact, workload)) {
+  for (const auto &program : testPrograms(artifact, workload)) {
     const bool gtest = program.format == "gtest";
     const bool deqp = program.format == "deqp";
     auto command = gtest ? std::vector<std::string>{program.path.string(), "--gtest_list_tests"}
                          : std::vector<std::string>{program.path.string(), "--list-tests", "--reporter", "json", "--order", "lex"};
-    std::vector<std::vector<std::string>> discoveryCommands;
-    bool exactDeqpSelection = false;
-    auto vulkanCases = workload.vulkan_cases;
-    if (deqp && !workload.vulkan_mustpass.empty())
-      vulkanCases =
-          deqp_mustpass_cases(fs::path(environment.at("CONFORMANCE_SUPPORT_ROOT")) / "data/vulkan", workload.vulkan_mustpass, vulkanCases);
+    std::vector<std::string> vulkanCases;
     if (deqp) {
-      if (vulkanCases.empty()) throw std::runtime_error("Vulkan CTS requires an explicit vulkan_cases selection");
-      std::vector<std::string> selections;
-      std::vector<std::string> literals, patterns;
-      for (const auto &selection : vulkanCases)
-        (valid_identifier(selection) ? literals : patterns).push_back(selection);
-      exactDeqpSelection = patterns.empty();
-      if (!literals.empty()) {
-        const auto path = reports / (program.name + "-discovery-cases.txt");
-        std::ofstream file(path, std::ios::binary | std::ios::trunc);
-        file << *deqp_exact_case_list(literals);
-        file.close();
-        if (!file) throw std::runtime_error("cannot write Vulkan CTS selection: " + path.string());
-        selections.push_back("--deqp-caselist-file=" + path.string());
-      }
-      if (!patterns.empty())
-        for (const auto &selection : deqp_case_selections(patterns))
-          selections.push_back("--deqp-case=" + selection);
-      for (const auto &selection : selections)
-        discoveryCommands.push_back(
-            {program.path.string(), "--deqp-runmode=stdout-caselist", "--deqp-shadercache=disable", selection,
-             "--deqp-archive-dir=" + (fs::path(environment.at("CONFORMANCE_SUPPORT_ROOT")) / "data/vulkan").string()});
-    } else {
-      if (!gtest) command.insert(command.end(), workload.specs.begin(), workload.specs.end());
-      discoveryCommands.push_back(std::move(command));
-    }
-    std::vector<std::string> names;
-    std::set<std::string> discovered;
-    for (auto &discovery : discoveryCommands) {
-      // dEQP inventories can exceed hundreds of megabytes. Spool them to disk
-      // and parse line by line instead of keeping a capped process capture.
-      const auto listingPath = reports / (program.name + "-discovery.log");
-      std::ofstream log;
-      if (deqp) {
-        log.open(listingPath, std::ios::binary | std::ios::trunc);
-        if (!log) throw std::runtime_error("cannot write discovery log: " + listingPath.string());
-      }
-      const auto listing = run_process(launched(configuration.launcher, std::move(discovery)), artifact, environment, 10min,
-                                       fmt::format("[{}/{} discovery] ", id, program.name), !deqp, deqp ? &log : nullptr);
-      if (deqp) {
-        log.close();
-        if (!log) throw std::runtime_error("cannot write discovery log: " + listingPath.string());
-      }
-      if (listing.status != 0)
-        throw std::runtime_error(fmt::format("test discovery failed for {}/{} (exit {}): {}", id, program.name, listing.status,
-                                             deqp ? listingPath.string() : listing.error));
-      std::ifstream input;
-      if (deqp) input.open(listingPath);
-      const auto batch = deqp    ? deqp_case_names(input)
-                         : gtest ? gtest_case_names(listing.output, program.name)
-                                 : catch_case_names(listing.output, program.name);
-      for (const auto &name : batch)
-        if (discovered.insert(name).second) names.push_back(name);
-    }
+      const auto archive = fs::path(environment.at("CONFORMANCE_SUPPORT_ROOT")) / "data/vulkan";
+      vulkanCases = workload.vulkanMustpass.empty() ? workload.vulkanCases
+                                                    : deqpMustpassCases(archive, workload.vulkanMustpass, workload.vulkanCases);
+      const auto path = reports / (program.name + "-discovery-cases.txt");
+      std::ofstream file(path, std::ios::binary | std::ios::trunc);
+      file << deqpExactCaseList(vulkanCases);
+      file.close();
+      if (!file) throw std::runtime_error("cannot write Vulkan CTS selection: " + path.string());
+      command = {program.path.string(), "--deqp-runmode=stdout-caselist", "--deqp-shadercache=disable",
+                 "--deqp-caselist-file=" + path.string(), "--deqp-archive-dir=" + archive.string()};
+    } else if (!gtest) command.insert(command.end(), workload.specs.begin(), workload.specs.end());
+    // dEQP inventories can exceed hundreds of megabytes. Spool them to disk
+    // and parse line by line instead of keeping a capped process capture.
+    const auto listingPath = reports / (program.name + "-discovery.log");
+    std::ofstream log;
     if (deqp) {
-      if (exactDeqpSelection) {
-        const std::set<std::string> selected(vulkanCases.begin(), vulkanCases.end());
-        for (const auto &name : selected)
-          if (!discovered.contains(name)) throw std::runtime_error("Vulkan CTS selector matches no cases: " + name);
-        std::erase_if(names, [&](const auto &name) { return !selected.contains(name); });
-      } else {
-        for (const auto &pattern : vulkanCases)
-          if (std::ranges::none_of(names, [&](const auto &name) { return glob_matches(pattern.c_str(), name.c_str()); }))
-            throw std::runtime_error("Vulkan CTS selector matches no cases: " + pattern);
-        std::erase_if(names, [&](const auto &name) {
-          return std::ranges::none_of(vulkanCases, [&](const auto &pattern) { return glob_matches(pattern.c_str(), name.c_str()); });
-        });
-      }
+      log.open(listingPath, std::ios::binary | std::ios::trunc);
+      if (!log) throw std::runtime_error("cannot write discovery log: " + listingPath.string());
     }
-    if (gtest && !workload.levelzero_cases.empty())
+    const auto listing = runProcess(launched(configuration.launcher, std::move(command)), artifact, environment, 10min,
+                                    fmt::format("[{}/{} discovery] ", id, program.name), !deqp, deqp ? &log : nullptr);
+    if (deqp) {
+      log.close();
+      if (!log) throw std::runtime_error("cannot write discovery log: " + listingPath.string());
+    }
+    if (listing.status != 0)
+      throw std::runtime_error(fmt::format("test discovery failed for {}/{} (exit {}): {}", id, program.name, listing.status,
+                                           deqp ? listingPath.string() : listing.error));
+    std::ifstream input;
+    if (deqp) input.open(listingPath);
+    auto names = deqp    ? deqpCaseNames(input)
+                 : gtest ? gtestCaseNames(listing.output, program.name)
+                         : catchCaseNames(listing.output, program.name);
+    if (deqp) {
+      const std::set<std::string> selected(vulkanCases.begin(), vulkanCases.end());
+      const std::set<std::string> discovered(names.begin(), names.end());
+      for (const auto &name : selected)
+        if (!discovered.contains(name)) throw std::runtime_error("Vulkan CTS selector matches no cases: " + name);
+      std::erase_if(names, [&](const auto &name) { return !selected.contains(name); });
+    }
+    if (gtest && !workload.levelzeroCases.empty())
       std::erase_if(names, [&](const std::string &name) {
-        return std::ranges::none_of(workload.levelzero_cases,
-                                    [&](const std::string &pattern) { return glob_matches(pattern.c_str(), name.c_str()); });
+        return std::ranges::none_of(workload.levelzeroCases,
+                                    [&](const std::string &pattern) { return globMatches(pattern.c_str(), name.c_str()); });
       });
     if (names.size() > UINT32_MAX) throw std::runtime_error("test inventory is too large");
     const auto count = static_cast<uint32_t>(names.size());
-    auto timeout = scaled_timeout(suite_timeout(program.name, program.timeout_seconds, configuration.isolated_launcher));
-    if (const auto key = suite_timeout_environment(program.name); !key.empty()) {
+    // Physical device throughput does not depend on host cores.
+    const auto budget = [&](uint32_t seconds) {
+      return configuration.isolatedLauncher ? scaledTimeout(seconds, std::thread::hardware_concurrency()) : seconds;
+    };
+    auto timeout = budget(suiteTimeout(program.name, program.timeoutSeconds, configuration.isolatedLauncher));
+    if (const auto key = suiteTimeoutEnvironment(program.name); !key.empty()) {
       if (const auto found = environment.find(std::string(key)); found != environment.end())
-        timeout = scaled_timeout(parse_timeout(found->second, artifact / "test-programs.txt"));
+        timeout = budget(parseTimeout(found->second, artifact / "test-programs.txt"));
     }
     for (uint32_t index = 0; index < count; ++index)
       tests.push_back({std::move(names[index]), program.name, timeout, index, count});
   }
   return tests;
 }
-std::optional<TargetExecution> prepare_target(const RunOptions &configuration, const Workload &workload,
-                                              const profile::ResolvedTarget &target, const fs::path &run_directory) {
-  const auto artifact = artifact_directory(configuration, target);
-  const auto metadata = validate_artifact(artifact, target);
+std::optional<TargetExecution> prepareTarget(const RunOptions &configuration, const Workload &workload,
+                                             const profile::ResolvedTarget &target, const fs::path &runDirectory) {
+  const auto artifact = artifactDirectory(configuration, target);
+  const auto metadata = validateArtifact(artifact, target);
   // Program filters can exclude a backend without loading its runtime or probing a device.
-  if (test_programs(artifact, workload).empty()) return std::nullopt;
-  const auto support = support_directory(configuration, target, metadata);
+  if (testPrograms(artifact, workload).empty()) return std::nullopt;
+  const auto support = supportDirectory(configuration, target, metadata);
   if (!fs::is_directory(support)) throw std::runtime_error("missing artifact support: " + support.string());
-  auto environment = base_environment();
+  auto environment = baseEnvironment();
   for (const auto &[key, value] : target.environment)
     environment[key] = value;
   environment["CONFORMANCE_TARGET_BACKEND"] = target.backend;
   environment["CONFORMANCE_TARGET_ARCHITECTURE"] = target.architecture.value_or("");
-  if (configuration.isolated_launcher) apply_suite_isolated_environment(environment, target.backend);
-  prepare_runtime_environment(environment, artifact, support, target.backend);
-  const auto reports = run_directory / target.id;
+  if (configuration.isolatedLauncher) applySuiteIsolatedEnvironment(environment, target.backend);
+  prepareRuntimeEnvironment(environment, artifact, support, target.backend);
+  const auto reports = runDirectory / target.id;
   fs::create_directories(reports);
   ExecutionConfig exec{artifact.string(),
                        reports.string(),
                        {},
                        environment,
                        configuration.launcher,
-                       configuration.isolated_launcher ? std::vector<std::string>{} : configured_skips(environment),
+                       configuration.isolatedLauncher ? std::vector<std::string>{} : target.skips,
                        workload.specs,
-                       target.deviceLock,
-                       target.skipReason.value_or(""),
-                       target.routeSkips};
-  apply_device_probe(exec, probe_device(configuration, artifact, environment, target.id));
+                       !configuration.direct && !configuration.isolatedLauncher};
+  applyDeviceProbe(exec, probeDevice(configuration, artifact, environment, target.id));
   // Re-probe with the exact child environment: selection must survive visibility remapping.
-  const auto verified = probe_device(configuration, artifact, exec.environment, target.id);
+  const auto verified = probeDevice(configuration, artifact, exec.environment, target.id);
   if (verified.device != exec.device) throw std::runtime_error("device selection changed after propagation for " + target.id);
-  auto tests = discover_cases(configuration, workload, artifact, exec.environment, target.id, reports);
+  auto tests = discoverCases(configuration, workload, artifact, exec.environment, target.id, reports);
   if (tests.empty()) return std::nullopt;
-  const auto path = run_directory / "ctest/targets" / (target.id + ".json");
-  write_execution_config(path, exec);
-  return TargetExecution{target.id, target.backend, exec.deviceLock ? exec.device : "", path, std::move(tests)};
+  std::ofstream record(reports / "environment.txt", std::ios::binary | std::ios::trunc);
+  for (const auto &[key, value] : exec.environment)
+    record << key << '=' << value << '\n';
+  record.close();
+  if (!record) throw std::runtime_error("cannot record the environment of " + target.id);
+  return TargetExecution{target.id, std::move(exec), std::move(tests)};
 }
-void materialize_ctest(const fs::path &directory, const fs::path &driver, const std::vector<TargetExecution> &targets) {
-  std::ofstream file(directory / "CTestTestfile.cmake", std::ios::binary | std::ios::trunc);
-  if (!file) throw std::runtime_error("cannot write CTest inventory");
-  file << "cmake_policy(VERSION 3.25)\n";
-  std::map<std::pair<uint32_t, std::string>, std::vector<std::string>> properties;
-  size_t remaining = 0;
-  for (const auto &target : targets)
-    remaining += target.tests.size();
-  for (size_t i = 0; remaining; ++i)
-    for (const auto &target : targets) {
-      if (i >= target.tests.size()) continue;
-      const auto &test = target.tests[i];
-      const auto name = bracket_quote(target.id + "/" + test.program + "/" + test.identity);
-      file << "add_test(" << name << ' ' << bracket_quote(driver.string()) << " exec --config "
-           << bracket_quote(target.configuration.string()) << " --program " << bracket_quote(test.program) << " --test "
-           << bracket_quote(test.identity) << " --timeout " << test.timeout_seconds << " --index " << test.index << " --count "
-           << test.count << ")\n";
-      properties[{test.timeout_seconds, target.device}].push_back(name);
-      --remaining;
-    }
-  for (const auto &[property, names] : properties) {
-    const auto &[timeout, device] = property;
-    file << "set_tests_properties(";
-    for (const auto &name : names)
-      file << name << ' ';
-    file << "PROPERTIES SKIP_RETURN_CODE " << SkipReturnCode << " TIMEOUT " << (timeout + TimeoutMarginSeconds);
-    if (!device.empty()) file << " RESOURCE_LOCK " << bracket_quote(device);
-    file << ")\n";
-  }
-  file.close();
-  if (!file) throw std::runtime_error("cannot finish CTest inventory");
-}
-int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
-  const auto config = read_execution_config(path);
-  if (!valid_identifier(test.program) || test.program == "." || test.program == "..") throw std::invalid_argument("invalid test program");
-  const auto matches = [&](const std::vector<std::string> &patterns) {
-    return std::ranges::any_of(patterns, [&](const std::string &pattern) {
-      return glob_matches(pattern.c_str(), test.program.c_str()) || glob_matches(pattern.c_str(), test.identity.c_str());
-    });
-  };
-  if (matches(config.skips) || matches(config.routeSkips)) {
-    const auto reason = matches(config.routeSkips) && !config.skipReason.empty() ? config.skipReason : "machine profile";
-    std::cout << "SKIP " << test.identity << ": " << reason << '\n';
-    return SkipReturnCode;
-  }
+CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test) {
+  if (!validName(test.program)) throw std::invalid_argument("invalid test program");
+  if (std::ranges::any_of(config.skips, [&](const std::string &pattern) {
+        return globMatches(pattern.c_str(), test.program.c_str()) || globMatches(pattern.c_str(), test.identity.c_str());
+      }))
+    return {SkipReturnCode, "SKIP " + test.identity + ": machine profile\n"};
   const auto environmentValue = [&](const char *key) -> std::string_view {
     const auto entry = config.environment.find(key);
     return entry == config.environment.end() ? std::string_view{} : entry->second;
@@ -655,23 +527,20 @@ int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
       const auto library = root / "lib" / libraryName;
       if (!fs::is_regular_file(library)) continue;
       const auto reason =
-          suite_blas_skip(backend, environmentValue("CONFORMANCE_TARGET_ARCHITECTURE"), environmentValue("CONFORMANCE_CUDA_CODE"),
-                          fs::canonical(library).filename().string(), test.program, test.identity);
-      if (!reason.empty()) {
-        std::cout << "SKIP " << test.identity << ": " << reason << '\n';
-        return SkipReturnCode;
-      }
+          suiteBlasSkip(backend, environmentValue("CONFORMANCE_TARGET_ARCHITECTURE"), environmentValue("CONFORMANCE_CUDA_CODE"),
+                        fs::canonical(library).filename().string(), test.program, test.identity);
+      if (!reason.empty()) return {SkipReturnCode, fmt::format("SKIP {}: {}\n", test.identity, reason)};
       break;
     }
   }
-  const auto programs = test_programs(config.directory, Workload{});
+  const auto programs = testPrograms(config.directory, Workload{});
   const auto selected = std::ranges::find(programs, test.program, &TestProgram::name);
   if (selected == programs.end()) throw std::runtime_error("test program absent from manifest");
   const bool gtest = selected->format == "gtest";
   const bool deqp = selected->format == "deqp";
   const auto &program = selected->path;
   std::vector<std::string> arguments;
-  const auto report = fs::path(config.report_directory) / test.program / fmt::to_string(test.index);
+  const auto report = fs::path(config.reportDirectory) / test.program / fmt::to_string(test.index);
   fs::create_directories(report);
   auto environment = config.environment;
   if (deqp) {
@@ -687,56 +556,172 @@ int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
   } else {
     if (gtest) arguments = {"--gtest_filter=" + test.identity};
     else {
-      const bool sharded = suite_uses_catch_sharding(test.program);
-      arguments = catch_shard_arguments(config.specs, sharded ? test.index : 0, sharded ? test.count : 1);
+      const bool sharded = suiteUsesCatchSharding(test.program);
+      arguments = catchShardArguments(config.specs, sharded ? test.index : 0, sharded ? test.count : 1);
     }
     arguments.insert(arguments.begin(), program.string());
   }
   environment["CONFORMANCE_TEST_IDENTITY"] = test.identity;
   environment["CONFORMANCE_REPORT_DIRECTORY"] = report.string();
-  std::unique_ptr<DeviceLock> lock;
-  if (config.deviceLock) lock = std::make_unique<DeviceLock>(physical_device_from_key(config.device), 10min);
-  const auto output_path = report / "output.log";
-  std::ofstream output(output_path, std::ios::binary);
+  const auto outputPath = report / "output.log";
+  std::ofstream output(outputPath, std::ios::binary);
   output.exceptions(std::ios::failbit | std::ios::badbit);
-  std::cout << "conformance: full output: " << output_path << std::endl;
   // Save both streams as they arrive, including output preceding a timeout or crash.
-  const auto result = run_process(launched(config.launcher, std::move(arguments)), gtest ? fs::path(config.directory) : report, environment,
-                                  std::chrono::seconds(test.timeout_seconds), {}, false, &output);
-  output.close();
-  constexpr size_t ExcerptBytes = 8192;
-  const auto size = fs::file_size(output_path);
-  std::ifstream recorded(output_path, std::ios::binary);
-  std::string excerpt(static_cast<size_t>(std::min<uintmax_t>(size, ExcerptBytes * 2)), '\0');
-  if (size <= ExcerptBytes * 2) {
-    recorded.read(excerpt.data(), static_cast<std::streamsize>(excerpt.size()));
-    std::cout << excerpt;
-  } else {
-    recorded.read(excerpt.data(), ExcerptBytes);
-    recorded.seekg(-static_cast<std::streamoff>(ExcerptBytes), std::ios::end);
-    recorded.read(excerpt.data() + ExcerptBytes, ExcerptBytes);
-    std::cout << std::string_view(excerpt).substr(0, ExcerptBytes) << "\n... output abbreviated ...\n"
-              << std::string_view(excerpt).substr(ExcerptBytes);
+  const auto process = runProcess(launched(config.launcher, std::move(arguments)), gtest ? fs::path(config.directory) : report, environment,
+                                  std::chrono::seconds(test.timeoutSeconds), "[" + test.identity + "] ", false, &output);
+  auto status = process.status;
+  std::string record;
+  if (status == 0 && deqp) {
+    std::ifstream qpa(report / "result.qpa", std::ios::binary);
+    const auto result = deqpResult(std::string(std::istreambuf_iterator<char>(qpa), {}), test.identity);
+    record = fmt::format("dEQP {}: {}\n", test.identity, result.statusCode);
+    output << record;
+    status = result.status;
   }
-  if (result.status != 0 || size > ExcerptBytes * 2) std::cout << "\nconformance: exit status " << result.status << '\n';
-  if (result.status != 0 || !deqp) return result.status;
-  std::ifstream qpa(report / "result.qpa", std::ios::binary);
-  return deqp_result(std::string(std::istreambuf_iterator<char>(qpa), {}), test.identity);
+  output.close();
+  auto message = process.timedOut ? fmt::format("timed out after {} s (exit status {})", test.timeoutSeconds, status)
+                                  : fmt::format("exit status {}", status);
+  record += fmt::format("conformance: {}, full output: {}\n", message, outputPath.string());
+  return {status, std::move(record), std::move(message)};
 }
-int32_t run(RunOptions configuration, const fs::path &driver) {
-  validate_run_options(configuration);
+namespace {
+bool skipped(const CaseResult &result) { return result.status == SkipReturnCode; }
+bool failed(const CaseResult &result) { return result.status != 0 && !skipped(result); }
+std::string failureMessage(const CaseResult &result) {
+  return result.message.empty() ? fmt::format("exit status {}", result.status) : result.message;
+}
+std::string xmlEscaped(std::string_view value) {
+  std::string result;
+  result.reserve(value.size());
+  for (const char c : value)
+    switch (c) {
+      case '&': result += "&amp;"; break;
+      case '<': result += "&lt;"; break;
+      case '>': result += "&gt;"; break;
+      case '"': result += "&quot;"; break;
+      default: result += static_cast<unsigned char>(c) < 0x20 && c != '\t' && c != '\n' && c != '\r' ? '?' : c;
+    }
+  return result;
+}
+void writeJunit(const fs::path &path, const std::vector<CaseReport> &reports) {
+  const auto failures = std::ranges::count_if(reports, [](const CaseReport &report) { return failed(report.result); });
+  const auto skips = std::ranges::count_if(reports, [](const CaseReport &report) { return skipped(report.result); });
+  double seconds = 0;
+  for (const auto &report : reports)
+    seconds += report.result.elapsed.count();
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  file << fmt::format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                      "<testsuite name=\"conformance\" tests=\"{}\" failures=\"{}\" skipped=\"{}\" time=\"{:.3f}\">\n",
+                      reports.size(), failures, skips, seconds);
+  for (const auto &[name, result] : reports) {
+    file << fmt::format("  <testcase name=\"{}\" classname=\"{}\" time=\"{:.3f}\"", xmlEscaped(name),
+                        xmlEscaped(name.substr(0, name.find('/'))), result.elapsed.count());
+    if (result.status == 0) {
+      file << "/>\n";
+      continue;
+    }
+    file << ">\n    "
+         << (skipped(result) ? std::string("<skipped/>") : fmt::format("<failure message=\"{}\"/>", xmlEscaped(failureMessage(result))))
+         << "\n    <system-out>" << xmlEscaped(result.output) << "</system-out>\n  </testcase>\n";
+  }
+  file << "</testsuite>\n";
+  file.close();
+  if (!file) throw std::runtime_error("cannot write JUnit report " + path.string());
+}
+} // namespace
+std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, uint32_t jobs, const CaseExecutor &execute) {
+  const Interruption interruption;
+  size_t total = 0;
+  std::vector<std::vector<std::optional<CaseResult>>> results;
+  for (const auto &target : targets) {
+    total += target.tests.size();
+    results.emplace_back(target.tests.size());
+  }
+  // Cases on one physical device run one at a time; a device without an identity excludes every identified one.
+  const auto resource = [](const TargetExecution &target) {
+    return target.config.deviceLock ? std::string_view(target.config.device) : std::string_view{};
+  };
+  std::set<std::string_view> busy;
+  const auto available = [&](std::string_view device) {
+    return device.empty() || (!busy.contains("unknown") && (device == "unknown" ? busy.empty() : !busy.contains(device)));
+  };
+  std::vector<size_t> next(targets.size(), 0);
+  size_t cursor = 0, started = 0, finished = 0;
+  // Interleave targets so every route makes progress from the start.
+  const auto claim = [&]() -> std::optional<std::pair<size_t, size_t>> {
+    for (size_t step = 0; step < targets.size(); ++step) {
+      const auto index = (cursor + step) % targets.size();
+      const auto device = resource(targets[index]);
+      if (next[index] == targets[index].tests.size() || !available(device)) continue;
+      if (!device.empty()) busy.insert(device);
+      cursor = index + 1;
+      ++started;
+      return std::pair{index, next[index]++};
+    }
+    return std::nullopt;
+  };
+  std::mutex mutex;
+  std::condition_variable released;
+  const auto width = fmt::to_string(total).size();
+  {
+    std::vector<std::jthread> workers;
+    for (size_t worker = 0; worker < std::min<size_t>(jobs, total); ++worker)
+      workers.emplace_back([&] {
+        std::unique_lock lock(mutex);
+        for (;;) {
+          std::optional<std::pair<size_t, size_t>> claimed;
+          // The signal handler cannot notify, so waiting polls for interruption.
+          while (started < total && !Interruption::signal() && !(claimed = claim()))
+            released.wait_for(lock, 100ms);
+          if (!claimed) return;
+          const auto [index, position] = *claimed;
+          const auto &target = targets[index];
+          const auto &test = target.tests[position];
+          lock.unlock();
+          const auto begin = std::chrono::steady_clock::now();
+          CaseResult result;
+          try {
+            result = execute(target.config, test);
+          } catch (const std::exception &error) {
+            result = {2, fmt::format("conformance: {}\n", error.what())};
+          }
+          result.elapsed = std::chrono::steady_clock::now() - begin;
+          lock.lock();
+          if (const auto device = resource(target); !device.empty()) busy.erase(device);
+          const auto label = result.status == 0 ? "Passed" : skipped(result) ? "Skipped" : "***Failed";
+          std::osyncstream message(std::cout);
+          message << fmt::format("[{:>{}}/{}] {}/{}/{} ... {} {:.2f} s\n", ++finished, width, total, target.id, test.program, test.identity,
+                                 label, result.elapsed.count());
+          if (failed(result)) message << result.output;
+          message << std::flush;
+          results[index][position] = std::move(result);
+          released.notify_all();
+        }
+      });
+  }
+  std::vector<CaseReport> reports;
+  for (size_t index = 0; index < targets.size(); ++index)
+    for (size_t position = 0; position < targets[index].tests.size(); ++position)
+      if (auto &result = results[index][position]) {
+        const auto &test = targets[index].tests[position];
+        reports.push_back({fmt::format("{}/{}/{}", targets[index].id, test.program, test.identity), std::move(*result)});
+      }
+  return reports;
+}
+int32_t run(RunOptions configuration) {
+  validateRunOptions(configuration);
   std::vector<profile::ResolvedTarget> targets;
   std::string name = "direct";
-  if (configuration.direct) targets = profile::direct_targets(configuration.selectors);
+  if (configuration.direct) targets = profile::directTargets(configuration.selectors);
   else {
-    const auto resolved = profile::resolve_profile(configuration.profiles, configuration.machine);
+    const auto resolved = profile::resolveProfile(configuration.profiles, configuration.machine);
     name = resolved.name;
-    targets = unique_routes(profile::resolve_targets(resolved, configuration.selectors), configuration.isolated_launcher);
+    targets = uniqueRoutes(profile::resolveTargets(resolved, configuration.selectors), configuration.isolatedLauncher);
   }
   // Validate the complete requested inventory before probing or scheduling any target.
   for (const auto &target : targets)
-    (void)validate_artifact(artifact_directory(configuration, target), target);
-  const auto workload = load_workload(configuration);
+    (void)validateArtifact(artifactDirectory(configuration, target), target);
+  const auto workload = loadWorkload(configuration);
   const auto root = configuration.output / name;
   fs::create_directories(root);
   fs::path reports;
@@ -744,35 +729,36 @@ int32_t run(RunOptions configuration, const fs::path &driver) {
     reports = root / fmt::format("run-{}-{}", std::chrono::system_clock::now().time_since_epoch().count(), attempt);
     if (fs::create_directory(reports)) break;
   }
-  const auto ctest_directory = reports / "ctest";
-  fs::create_directories(ctest_directory / "targets");
+  if (std::string buffer; glz::write_file_toml(workload, (reports / (configuration.workload + ".toml")).string(), buffer))
+    throw std::runtime_error("cannot write resolved workload to " + reports.string());
   const auto *jobs = std::getenv("CONFORMANCE_JOBS");
-  const auto count =
-      configured_jobs(jobs && *jobs ? std::optional<std::string_view>(jobs) : std::nullopt, std::thread::hardware_concurrency());
+  const auto count = configuredJobs(jobs ? jobs : "", std::thread::hardware_concurrency());
   const auto workers = std::min(static_cast<size_t>(count), targets.size());
   const auto started = std::chrono::steady_clock::now();
   std::cout << "conformance reports: " << reports << std::endl;
+  std::cout << "conformance workload: " << configuration.workload << std::endl;
   std::cout << "conformance discovery: " << targets.size() << " routes, " << workers << " workers" << std::endl;
+  const Interruption interruption;
   std::vector<std::optional<TargetExecution>> discovered(targets.size());
   std::atomic<size_t> next{0};
-  std::atomic<bool> failed{false};
-  std::mutex failure_mutex;
+  std::atomic<bool> aborted{false};
+  std::mutex failureMutex;
   std::exception_ptr failure;
   {
     std::vector<std::jthread> threads;
     for (size_t worker = 0; worker < workers; ++worker) {
       threads.emplace_back([&] {
-        while (!failed.load()) {
+        while (!aborted.load() && !Interruption::signal()) {
           const auto index = next.fetch_add(1);
           if (index >= targets.size()) break;
           const auto &target = targets[index];
           try {
             std::osyncstream(std::cout) << "conformance discovering " << target.id << std::endl;
-            auto value = prepare_target(configuration, workload, target, reports);
+            auto value = prepareTarget(configuration, workload, target, reports);
             if (value) {
               std::osyncstream message(std::cout);
               message << "conformance target " << value->id;
-              if (!value->device.empty()) message << " resolved to " << value->device;
+              if (value->config.deviceLock) message << " resolved to " << value->config.device;
               message << " with " << value->tests.size() << " test(s)" << std::endl;
             } else {
               std::osyncstream(std::cout) << "conformance target " << target.id << " omitted: no tests match workload "
@@ -780,14 +766,15 @@ int32_t run(RunOptions configuration, const fs::path &driver) {
             }
             discovered[index] = std::move(value);
           } catch (...) {
-            const std::lock_guard lock(failure_mutex);
+            const std::lock_guard lock(failureMutex);
             if (!failure) failure = std::current_exception();
-            failed.store(true);
+            aborted.store(true);
           }
         }
       });
     }
   }
+  if (const auto signal = Interruption::signal()) return 128 + signal;
   if (failure) std::rethrow_exception(failure);
   std::vector<TargetExecution> prepared;
   for (auto &value : discovered)
@@ -795,15 +782,23 @@ int32_t run(RunOptions configuration, const fs::path &driver) {
   std::cout << "conformance discovery completed in " << std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()
             << "s" << std::endl;
   if (prepared.empty()) throw std::runtime_error("conformance workload selected no tests: " + configuration.workload);
-  materialize_ctest(ctest_directory, driver, prepared);
-  return run_process({configuration.ctest.string(), "--test-dir", ctest_directory.string(), "--parallel", fmt::to_string(count),
-                      "--output-on-failure", "--output-junit", (reports / "ctest.xml").string()},
-                     ctest_directory, base_environment(), 24h, {}, false, nullptr,
-                     [](std::string_view line) {
-                       // CTest expands --max-width to the longest name; shorten only its result padding.
-                       static const std::regex padding(R"(^( *[0-9]+/[0-9]+ Test +#[0-9]+: .* )\.{4,}((?:   |\*\*\*).*)$)");
-                       return std::regex_replace(std::string(line), padding, "$1...$2");
-                     })
-      .status;
+  const auto executed = std::chrono::steady_clock::now();
+  const auto results = runCases(prepared, static_cast<uint32_t>(count), executeCase);
+  writeJunit(reports / "junit.xml", results);
+  size_t total = 0;
+  for (const auto &target : prepared)
+    total += target.tests.size();
+  const auto skips = std::ranges::count_if(results, [](const CaseReport &report) { return skipped(report.result); });
+  std::vector<const CaseReport *> failures;
+  for (const auto &report : results)
+    if (failed(report.result)) failures.push_back(&report);
+  std::cout << fmt::format("conformance: {} passed, {} skipped, {} failed, {} not run of {} cases in {:.1f} s\n",
+                           results.size() - static_cast<size_t>(skips) - failures.size(), skips, failures.size(), total - results.size(),
+                           total, std::chrono::duration<double>(std::chrono::steady_clock::now() - executed).count());
+  for (const auto *report : failures)
+    std::cout << "  failed: " << report->name << " (" << failureMessage(report->result) << ")\n";
+  std::cout << "conformance JUnit report: " << (reports / "junit.xml").string() << std::endl;
+  if (const auto signal = Interruption::signal()) return 128 + signal;
+  return failures.empty() && results.size() == total ? 0 : 1;
 }
 } // namespace conformance::driver

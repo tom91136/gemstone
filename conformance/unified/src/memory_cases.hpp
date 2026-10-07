@@ -30,21 +30,21 @@ template <class Backend> struct AllocationScope {
 // Repeat over the same allocations, covering both one queue and two queues.
 template <class Backend> int ordered(Backend &backend, bool crossQueue, unsigned passes) {
   AllocationScope allocations(backend);
-  constexpr unsigned Items = 128;
-  auto *input = static_cast<uint32_t *>(allocations.allocate((Items + 2) * sizeof(uint32_t)));
-  auto *middle = static_cast<uint32_t *>(allocations.allocate((Items + 2) * sizeof(uint32_t)));
-  auto *output = static_cast<uint32_t *>(allocations.allocate((Items + 2) * sizeof(uint32_t)));
+  constexpr unsigned items = 128;
+  auto *input = static_cast<uint32_t *>(allocations.allocate((items + 2) * sizeof(uint32_t)));
+  auto *middle = static_cast<uint32_t *>(allocations.allocate((items + 2) * sizeof(uint32_t)));
+  auto *output = static_cast<uint32_t *>(allocations.allocate((items + 2) * sizeof(uint32_t)));
   for (unsigned pass = 0; pass < passes; ++pass) {
-    std::fill_n(middle, Items + 2, 0xa5a5a5a5U);
-    std::fill_n(output, Items + 2, 0xa5a5a5a5U);
-    for (unsigned i = 0; i < Items; ++i)
+    std::fill_n(middle, items + 2, 0xa5a5a5a5U);
+    std::fill_n(output, items + 2, 0xa5a5a5a5U);
+    for (unsigned i = 0; i < items; ++i)
       input[i + 1] = 1000 * pass + i;
-    backend.ordered(input + 1, middle + 1, output + 1, Items, crossQueue);
-    for (unsigned i = 0; i < Items; ++i) {
+    backend.ordered(input + 1, middle + 1, output + 1, items, crossQueue);
+    for (unsigned i = 0; i < items; ++i) {
       require(middle[i + 1] == 1000 * pass + i + 1, "producer result was not visible after event wait");
       require(output[i + 1] == 1000 * pass + i + 2, "consumer ran with stale producer data");
     }
-    require(middle[0] == 0xa5a5a5a5U && middle[Items + 1] == 0xa5a5a5a5U && output[0] == 0xa5a5a5a5U && output[Items + 1] == 0xa5a5a5a5U,
+    require(middle[0] == 0xa5a5a5a5U && middle[items + 1] == 0xa5a5a5a5U && output[0] == 0xa5a5a5a5U && output[items + 1] == 0xa5a5a5a5U,
             "ordered kernel changed guards");
     std::cout << "verified queue dependency pass=" << pass << " cross-queue=" << (crossQueue) << std::endl;
   }
@@ -134,26 +134,26 @@ template <class Backend> void pointerReplacement(Backend &backend) {
   allocations.release(second);
   allocations.release(first);
   allocations.release(table);
-  require(correct, "synchronized CPU pointer replacement was cached or overwritten");
+  require(correct, "synchronised CPU pointer replacement was cached or overwritten");
 }
 template <class Word, class Backend> void atomicValues(Backend &backend) {
   AllocationScope allocations(backend);
-  constexpr unsigned Lanes = 128;
+  constexpr unsigned lanes = 128;
   auto *input = static_cast<Word *>(allocations.allocate(128));
-  auto *output = static_cast<Word *>(allocations.allocate(Lanes * sizeof(Word)));
+  auto *output = static_cast<Word *>(allocations.allocate(lanes * sizeof(Word)));
   std::fill_n(input, 128 / sizeof(Word), Word{});
-  std::fill_n(output, Lanes, Word{});
+  std::fill_n(output, lanes, Word{});
   std::cout << "atomic-input " << reinterpret_cast<uintptr_t>(input) << " " << sizeof(Word) << std::endl;
-  backend.launch(input, reinterpret_cast<uint32_t *>(output), reinterpret_cast<uint32_t *>(input), sizeof(Word) == 4 ? 9 : 10, Lanes);
-  require(input[2] == Word(Lanes), "multi-workgroup RMW lost an update");
-  std::sort(output, output + Lanes);
-  for (unsigned lane = 0; lane < Lanes; ++lane)
+  backend.launch(input, reinterpret_cast<uint32_t *>(output), reinterpret_cast<uint32_t *>(input), sizeof(Word) == 4 ? 9 : 10, lanes);
+  require(input[2] == Word(lanes), "multi-workgroup RMW lost an update");
+  std::sort(output, output + lanes);
+  for (unsigned lane = 0; lane < lanes; ++lane)
     require(output[lane] == Word(lane), "multi-workgroup atomic returned a stale or duplicate old value");
   allocations.release(output);
   allocations.release(input);
   std::cout << "verified multi-workgroup atomics bits=" << sizeof(Word) * 8 << " lanes=128 groups=4" << std::endl;
 }
-// Both sides synchronize through the native atomic word during execution.
+// Both sides synchronise through the native atomic word during execution.
 // Repeated payload changes verify visibility after every acquire.
 template <class Word, class Backend> void atomicPublication(Backend &backend, bool fenced) {
   AllocationScope allocations(backend);

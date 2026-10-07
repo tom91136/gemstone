@@ -39,8 +39,6 @@ object Bits {
 
   inline def unsigned32(value: Int): Binary32 = Binary32.low(value.toLong)
 
-  inline def low8(value: Long): Long = value & Mask8
-
   inline def low8Int(value: Long): Int in 0 ~ 255 = (value & Mask8).toInt.unsafe[Int in 0 ~ 255]
 
   inline def low16(value: Long): Binary16 = Binary16.low(value)
@@ -59,6 +57,23 @@ object Bits {
   inline def signExtend(value: Long, width: Int in 1 ~ 64): Long =
     if (width.raw == 64) value else (value << (64 - width.raw)) >> (64 - width.raw)
 
-  inline def byteCount(width: Int where (Between[0, 64] & MultipleOf[8])): Int in 0 ~ 8 = (width.raw / 8).unsafe[Int in
-    0 ~ 8]
+  /** The low 32 bits of the 64-bit pair `high:low` shifted right by `shift` bits, for `shift` in 0 to 63. */
+  inline def funnelShiftRight(low: Long, high: Long, shift: Int): Long =
+    ((low32(low).toLong | (high << 32)) >>> shift) & Mask32
+
+  /** The high 32 bits of the 64-bit pair `high:low` shifted left by `shift` bits, for `shift` in 0 to 63. */
+  inline def funnelShiftLeft(low: Long, high: Long, shift: Int): Long =
+    (((low32(low).toLong | (high << 32)) << shift) >>> 32) & Mask32
+
+  inline def byteCount(width: Int where (Between[0, 64] & MultipleOf[8])): Int in 0 ~ 8 = width.raw match {
+    case 0  => 0
+    case 8  => 1
+    case 16 => 2
+    case 24 => 3
+    case 32 => 4
+    case 40 => 5
+    case 48 => 6
+    case 56 => 7
+    case _  => 8
+  }
 }

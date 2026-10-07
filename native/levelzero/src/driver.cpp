@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -16,7 +15,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -29,15 +27,13 @@
 #include <zet_ddi.h>
 
 #include "gemstone_execution_rpc.hpp"
-#include "gemstone_levelzero_ddi.hpp"
-#include <gemstone/bytes.hpp>
 #include <gemstone/copy_out.hpp>
+#include <gemstone/process.hpp>
 #include <gemstone/trace.hpp>
 
 #include "client.hpp"
 #include "completion.hpp"
 #include "objects.hpp"
-#include "process.hpp"
 #include "relocations.hpp"
 #include "transfer.hpp"
 #include <sys/mman.h>
@@ -48,8 +44,7 @@ namespace {
 using namespace gemstone::execution;
 using namespace gemstone::levelzero;
 
-// Handle constructors can allocate or start threads; neither a failed
-// allocation nor a throwing constructor may unwind through the C DDI.
+// A failed allocation or throwing handle constructor must not unwind through the C DDI.
 template <class T, class... Args> T *createHandle(Args &&...args) noexcept {
   try {
     return new T(std::forward<Args>(args)...);
@@ -72,8 +67,9 @@ std::unordered_map<void *, AllocationRef> allocations;
 std::mutex rpcTransactionMutex;
 
 struct PhysicalMemory final : Handle {
+  static constexpr Kind HandleKind = Kind::PhysicalMemory;
   PhysicalMemory(Context *owner, int file, size_t bytes, ze_physical_mem_flags_t flagsValue)
-      : Handle(Kind::PhysicalMemory), context(owner), fd(file), size(bytes), flags(flagsValue) {}
+      : Handle(HandleKind), context(owner), fd(file), size(bytes), flags(flagsValue) {}
   ~PhysicalMemory() override { close(fd); }
   HandleUse<Context> context;
   int fd;
@@ -97,39 +93,52 @@ struct VirtualReservation {
 std::mutex virtualMemoryMutex;
 std::map<uintptr_t, VirtualReservation> virtualReservations;
 
-struct RemoteExecution {
-  ClientMode mode;
-  Client *client;
-  std::string error;
-};
-
 ClientManager remote;
+
+std::mutex blockedEventsMutex;
+std::unordered_multiset<Event *> blockedEvents;
+std::atomic<bool> schedulerStopping{false};
+
+// The loader loads every installed driver, so workers start with the first submission. Teardown of layered runtimes
+// may call the driver after the workers stop, so the queue is never destroyed.
+gemstone::CommandQueue &scheduler() {
+  static auto *const queue = new gemstone::CommandQueue(ZE_RESULT_ERROR_UNKNOWN);
+  return *queue;
+}
+
+// Constructed with the library, so it stops the workers after teardown registered later and before the state above
+// is destroyed. Jobs must not keep waiting for events the host never signals.
+struct SchedulerShutdown {
+  ~SchedulerShutdown() {
+    std::vector<HandleUse<Event>> blocked;
+    {
+      std::lock_guard lock(blockedEventsMutex);
+      schedulerStopping.store(true, std::memory_order_release);
+      for (auto *event : blockedEvents)
+        blocked.emplace_back(event);
+    }
+    for (const auto &event : blocked) {
+      std::lock_guard lock(event->mutex);
+      event->changed.notify_all();
+    }
+    scheduler().shutdown();
+  }
+} schedulerShutdown;
 
 struct LaunchPerformance {
   uint64_t relocationScanBytes = 0;
   uint64_t relocationCount = 0;
 };
 
-RemoteExecution remoteExecution() { return {remote.mode(), remote.client(), remote.error()}; }
+// Launches run on their own connections, so the shared client's error can be stale.
+std::mutex lastRemoteErrorMutex;
+std::string lastRemoteError;
 
-std::string remoteError(const RemoteExecution &state) {
-  const auto value = remote.lastError();
-  if (!value.empty()) return value;
-  return state.error.empty() ? "Gemstone execution RPC failed" : state.error;
-}
-
-void rememberRemoteError(RemoteExecution &state, std::string message) {
-  state.error = std::move(message);
-  if (gemstone::traceEnabled("levelzero")) std::fprintf(stderr, "Gemstone Level Zero: %s\n", state.error.c_str());
-}
-
-AllocationKind rpcKind(ze_memory_type_t kind) {
-  switch (kind) {
-    case ZE_MEMORY_TYPE_DEVICE: return AllocationKind::Device;
-    case ZE_MEMORY_TYPE_SHARED: return AllocationKind::Shared;
-    case ZE_MEMORY_TYPE_HOST: return AllocationKind::Host;
-    default: return AllocationKind::Device;
-  }
+std::string recordRemoteError(std::string message) {
+  if (gemstone::traceEnabled("levelzero")) std::fprintf(stderr, "Gemstone Level Zero: %s\n", message.c_str());
+  std::lock_guard lock(lastRemoteErrorMutex);
+  lastRemoteError = message;
+  return message;
 }
 
 constexpr size_t PageSize = 4096U;
@@ -172,17 +181,14 @@ std::vector<PointerRelocation> collectPointerRelocations(const KernelLaunch &ker
     for (const auto &[base, source] : allocations) {
       if (source->type != ZE_MEMORY_TYPE_DEVICE || source->size < sizeof(uintptr_t)) continue;
       performance.relocationScanBytes += source->size;
-      const auto *bytes = static_cast<const uint8_t *>(base);
-      for (size_t offset = 0; offset <= source->size - sizeof(uintptr_t); offset += sizeof(uint32_t)) {
-        const auto pointer = gemstone::readNative<uintptr_t>(bytes, offset);
+      scanPointers(base, source->size, [&](size_t offset, uint64_t pointer) {
         uint64_t targetId = 0;
         uint64_t targetOffset = 0;
-        if (classifyPointerValueLocked(pointer, targetId, targetOffset)) {
+        if (classifyPointerValueLocked(pointer, targetId, targetOffset))
           result.push_back({RelocationSourceMemory{AllocationId{static_cast<int64_t>(source->id)}},
                             LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(targetId)},
                             LongPositive0{static_cast<int64_t>(targetOffset)}});
-        }
-      }
+      });
     }
   }
   {
@@ -192,16 +198,14 @@ std::vector<PointerRelocation> collectPointerRelocations(const KernelLaunch &ker
       if (input.local || input.bytes.size() < sizeof(uintptr_t)) continue;
       if (argument < kernel.parameters.size() && !kernel.parameters[argument].containsPointer) continue;
       performance.relocationScanBytes += input.bytes.size();
-      for (size_t offset = 0; offset <= input.bytes.size() - sizeof(uintptr_t); offset += sizeof(uint32_t)) {
-        const auto pointer = gemstone::readNative<uintptr_t>(input.bytes.data(), offset);
+      scanPointers(input.bytes.data(), input.bytes.size(), [&](size_t offset, uint64_t pointer) {
         uint64_t targetId = 0;
         uint64_t targetOffset = 0;
-        if (classifyPointerValueLocked(pointer, targetId, targetOffset)) {
+        if (classifyPointerValueLocked(pointer, targetId, targetOffset))
           result.push_back({RelocationSourceArgument{IntPositive0{static_cast<int32_t>(argument)}},
                             LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(targetId)},
                             LongPositive0{static_cast<int64_t>(targetOffset)}});
-        }
-      }
+      });
     }
   }
   performance.relocationCount = result.size();
@@ -234,27 +238,21 @@ std::vector<AllocationRef> retainKernelAllocations(const Kernel &kernel) {
     if (argument.local || argument.bytes.size() < sizeof(uintptr_t)
         || (index < kernel.parameters.size() && !kernel.parameters[index].containsPointer))
       continue;
-    for (size_t offset = 0; offset <= argument.bytes.size() - sizeof(uintptr_t); offset += sizeof(uint32_t)) {
-      const auto pointer = gemstone::readNative<uintptr_t>(argument.bytes.data(), offset);
+    scanPointers(argument.bytes.data(), argument.bytes.size(), [&](size_t, uint64_t pointer) {
       uint64_t allocationId = 0;
       uint64_t allocationOffset = 0;
-      if (classifyPointerValueLocked(pointer, allocationId, allocationOffset) && seen.insert(allocationId).second) {
-        const auto found =
-            std::find_if(allocations.begin(), allocations.end(), [&](const auto &entry) { return entry.second->id == allocationId; });
-        if (found != allocations.end()) retained.push_back(found->second);
-      }
-    }
+      if (!classifyPointerValueLocked(pointer, allocationId, allocationOffset) || !seen.insert(allocationId).second) return;
+      const auto found =
+          std::find_if(allocations.begin(), allocations.end(), [&](const auto &entry) { return entry.second->id == allocationId; });
+      if (found != allocations.end()) retained.push_back(found->second);
+    });
   }
   return retained;
 }
 
-template <class T, class H> T *cast(H handle, Kind expected) {
+template <class T, class H> T *cast(H handle) {
   auto *value = reinterpret_cast<T *>(handle);
-  if (!value) return nullptr;
-  return liveHandles.contains(value) && value->magic == gemstone::rpc::HandleMagic && value->kind == expected
-                 && !value->destroyRequested.load(std::memory_order_acquire)
-             ? value
-             : nullptr;
+  return liveHandles.contains(value, T::HandleKind) && !value->destroyRequested.load(std::memory_order_acquire) ? value : nullptr;
 }
 
 ze_result_t checkVersion(ze_api_version_t version, const void *table) {
@@ -268,12 +266,25 @@ ze_result_t waitEvent(Event *event, uint64_t timeout) {
   std::unique_lock lock(event->mutex);
   if (event->signalled) return event->completionResult;
   if (timeout == 0) return ZE_RESULT_NOT_READY;
-  if (timeout == std::numeric_limits<uint64_t>::max()) {
-    event->changed.wait(lock, [&] { return event->signalled; });
-    return event->completionResult;
-  }
-  return event->changed.wait_for(lock, std::chrono::nanoseconds(timeout), [&] { return event->signalled; }) ? event->completionResult
-                                                                                                            : ZE_RESULT_NOT_READY;
+  // Commands wait here for events that the host or a later submission may signal.
+  return scheduler().blocking([&] {
+    {
+      std::lock_guard guard(blockedEventsMutex);
+      if (schedulerStopping.load(std::memory_order_acquire)) return ZE_RESULT_ERROR_DEVICE_LOST;
+      blockedEvents.insert(event);
+    }
+    struct Registration {
+      Event *event;
+      ~Registration() {
+        std::lock_guard guard(blockedEventsMutex);
+        blockedEvents.erase(blockedEvents.find(event));
+      }
+    } registration{event};
+    const auto released = [&] { return event->signalled || schedulerStopping.load(std::memory_order_acquire); };
+    if (timeout == std::numeric_limits<uint64_t>::max()) event->changed.wait(lock, released);
+    else if (!event->changed.wait_until(lock, gemstone::deadlineAfter(timeout), released)) return ZE_RESULT_NOT_READY;
+    return event->signalled ? event->completionResult : ZE_RESULT_ERROR_DEVICE_LOST;
+  });
 }
 
 // The caller holds event->mutex while publishing completion state.
@@ -303,7 +314,7 @@ ze_result_t retainEvents(uint32_t count, ze_event_handle_t *events, EventUses &r
   if (count != 0 && !events) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   retained.reserve(count);
   for (uint32_t index = 0; index < count; ++index) {
-    auto *event = cast<Event>(events[index], Kind::Event);
+    auto *event = cast<Event>(events[index]);
     if (!event) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
     retained.emplace_back(event);
   }
@@ -312,7 +323,7 @@ ze_result_t retainEvents(uint32_t count, ze_event_handle_t *events, EventUses &r
 
 ze_result_t retainSignal(ze_event_handle_t handle, HandleUse<Event> &retained) {
   if (!handle) return ZE_RESULT_SUCCESS;
-  auto *event = cast<Event>(handle, Kind::Event);
+  auto *event = cast<Event>(handle);
   if (!event) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   retained = HandleUse<Event>(event);
   return ZE_RESULT_SUCCESS;
@@ -335,16 +346,9 @@ ze_result_t append(CommandList *list, CommandAction command, std::function<void(
                              (void)completeEvent(signal.get(), result);
                            }};
   if (list->immediate) {
-    if (list->worker.joinable()) {
-      {
-        std::lock_guard lock(list->mutex);
-        list->pending.push_back(std::move(recorded));
-        ++list->submitted;
-      }
-      list->changed.notify_one();
-      return ZE_RESULT_SUCCESS;
-    }
-    return recorded.execute();
+    if (!list->async.stream) return recorded.execute();
+    list->async.submit([recorded = std::move(recorded)](ze_result_t failure) mutable { return recorded.execute(failure); });
+    return ZE_RESULT_SUCCESS;
   }
   if (list->closed) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
   list->commands.push_back(std::move(recorded));
@@ -436,7 +440,7 @@ ze_result_t ZE_APICALL driverExtensions(ze_driver_handle_t, uint32_t *count, ze_
 }
 
 ze_result_t ZE_APICALL driverImportExternalPointer(ze_driver_handle_t handle, void *pointer, size_t size) {
-  if (cast<Driver>(handle, Kind::Driver) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (cast<Driver>(handle) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!pointer || size == 0) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   // Gemstone executes against a host-backed mirror, so external host memory
   // does not need a second device registration. Allocations made through the
@@ -445,7 +449,7 @@ ze_result_t ZE_APICALL driverImportExternalPointer(ze_driver_handle_t handle, vo
 }
 
 ze_result_t ZE_APICALL driverReleaseImportedPointer(ze_driver_handle_t handle, void *pointer) {
-  if (cast<Driver>(handle, Kind::Driver) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (cast<Driver>(handle) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   return ZE_RESULT_SUCCESS;
 }
@@ -469,11 +473,17 @@ ze_result_t ZE_APICALL driverExtensionAddress(ze_driver_handle_t, const char *na
 }
 
 ze_result_t ZE_APICALL driverLastError(ze_driver_handle_t handle, const char **description) {
-  if (cast<Driver>(handle, Kind::Driver) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (cast<Driver>(handle) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!description) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   static thread_local std::string text;
-  std::lock_guard rpcLock(rpcTransactionMutex);
-  text = remoteError(remoteExecution());
+  {
+    std::lock_guard lock(lastRemoteErrorMutex);
+    text = lastRemoteError;
+  }
+  if (text.empty()) {
+    std::lock_guard rpcLock(rpcTransactionMutex);
+    text = remote.error();
+  }
   *description = text.c_str();
   return ZE_RESULT_SUCCESS;
 }
@@ -618,7 +628,7 @@ ze_result_t ZE_APICALL deviceTimestamps(ze_device_handle_t, uint64_t *host, uint
 }
 
 ze_result_t ZE_APICALL devicePciProperties(ze_device_handle_t handle, ze_pci_ext_properties_t *properties) {
-  if (cast<Device>(handle, Kind::Device) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (cast<Device>(handle) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   properties->address = {0, 0, 1, 0};
   properties->maxSpeed = {-1, -1, -1};
@@ -626,7 +636,7 @@ ze_result_t ZE_APICALL devicePciProperties(ze_device_handle_t handle, ze_pci_ext
 }
 
 ze_result_t ZE_APICALL contextCreate(ze_driver_handle_t driver, const ze_context_desc_t *desc, ze_context_handle_t *result) {
-  if (cast<Driver>(driver, Kind::Driver) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (cast<Driver>(driver) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!desc || !result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   auto *created = createHandle<Context>();
   if (!created) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
@@ -637,23 +647,21 @@ ze_result_t ZE_APICALL contextCreateEx(ze_driver_handle_t driver, const ze_conte
                                        ze_device_handle_t *devices, ze_context_handle_t *result) {
   if (!devices && count != 0) return ZE_RESULT_ERROR_INVALID_SIZE;
   for (uint32_t index = 0; index < count; ++index)
-    if (cast<Device>(devices[index], Kind::Device) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+    if (cast<Device>(devices[index]) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   return contextCreate(driver, desc, result);
 }
-ze_result_t ZE_APICALL contextDestroy(ze_context_handle_t handle) { return destroyHandle(cast<Context>(handle, Kind::Context)); }
+ze_result_t ZE_APICALL contextDestroy(ze_context_handle_t handle) { return destroyHandle(cast<Context>(handle)); }
 ze_result_t ZE_APICALL contextStatus(ze_context_handle_t context) {
-  return cast<Context>(context, Kind::Context) == nullptr ? ZE_RESULT_ERROR_INVALID_NULL_HANDLE : ZE_RESULT_SUCCESS;
+  return cast<Context>(context) == nullptr ? ZE_RESULT_ERROR_INVALID_NULL_HANDLE : ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL contextMemory(ze_context_handle_t context, ze_device_handle_t device, void *, size_t) {
-  return cast<Context>(context, Kind::Context) == nullptr || cast<Device>(device, Kind::Device) == nullptr
-             ? ZE_RESULT_ERROR_INVALID_NULL_HANDLE
-             : ZE_RESULT_SUCCESS;
+  return cast<Context>(context) == nullptr || cast<Device>(device) == nullptr ? ZE_RESULT_ERROR_INVALID_NULL_HANDLE : ZE_RESULT_SUCCESS;
 }
 
 ze_result_t ZE_APICALL queueCreate(ze_context_handle_t context, ze_device_handle_t device, const ze_command_queue_desc_t *desc,
                                    ze_command_queue_handle_t *result) {
-  auto *owner = cast<Context>(context, Kind::Context);
-  auto *target = cast<Device>(device, Kind::Device);
+  auto *owner = cast<Context>(context);
+  auto *target = cast<Device>(device);
   if (!owner || !target) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!desc || !result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (desc->mode != ZE_COMMAND_QUEUE_MODE_DEFAULT && desc->mode != ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS
@@ -665,24 +673,20 @@ ze_result_t ZE_APICALL queueCreate(ze_context_handle_t context, ze_device_handle
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL queueDestroy(ze_command_queue_handle_t handle) {
-  auto *queue = cast<Queue>(handle, Kind::Queue);
+  auto *queue = cast<Queue>(handle);
   if (!queue) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
-  if (queue->worker.joinable()) {
-    std::unique_lock lock(queue->mutex);
-    if (!queue->changed.wait_for(lock, std::chrono::seconds(1), [&] { return queue->completed == queue->submitted; }))
-      return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
-  }
+  if (!queue->async.idle(1'000'000'000)) return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
   return destroyHandle(queue);
 }
 ze_result_t ZE_APICALL queueExecute(ze_command_queue_handle_t queueHandle, uint32_t count, ze_command_list_handle_t *handles,
                                     ze_fence_handle_t fenceHandle) {
-  auto *queue = cast<Queue>(queueHandle, Kind::Queue);
+  auto *queue = cast<Queue>(queueHandle);
   if (!queue) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (count != 0 && !handles) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   std::vector<HandleUse<CommandList>> lists;
   lists.reserve(count);
   for (uint32_t index = 0; index < count; ++index) {
-    auto *list = cast<CommandList>(handles[index], Kind::List);
+    auto *list = cast<CommandList>(handles[index]);
     if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
     if (list->context.get() != queue->context.get()) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     lists.emplace_back(list);
@@ -690,7 +694,7 @@ ze_result_t ZE_APICALL queueExecute(ze_command_queue_handle_t queueHandle, uint3
   HandleUse<Fence> fence;
   Fence *submittedFence = nullptr;
   if (fenceHandle) {
-    auto *value = cast<Fence>(fenceHandle, Kind::Fence);
+    auto *value = cast<Fence>(fenceHandle);
     if (!value) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
     if (value->queue.get() != queue) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     fence = HandleUse<Fence>(value);
@@ -721,41 +725,35 @@ ze_result_t ZE_APICALL queueExecute(ze_command_queue_handle_t queueHandle, uint3
     }
     return result;
   };
-  if (queue->worker.joinable()) {
-    {
-      std::lock_guard lock(queue->mutex);
-      queue->pending.push_back(std::move(submission));
-      ++queue->submitted;
-      if (submittedFence) submittedFence->completionSequence.store(queue->submitted, std::memory_order_release);
-    }
-    queue->changed.notify_one();
+  if (queue->async.stream) {
+    // The job completes the fence under its lock, so the ticket is published first.
+    std::unique_lock<std::mutex> fenceLock;
+    if (submittedFence) fenceLock = std::unique_lock(submittedFence->event.mutex);
+    auto ticket = queue->async.submit([submission = std::move(submission)](ze_result_t) mutable { return submission(); });
+    if (submittedFence) submittedFence->submission = std::move(ticket);
     return ZE_RESULT_SUCCESS;
   }
   const std::lock_guard synchronousLock(queue->synchronousMutex);
-  {
-    std::lock_guard lock(queue->mutex);
-    ++queue->submitted;
-    if (submittedFence) submittedFence->completionSequence.store(queue->submitted, std::memory_order_release);
+  const auto ticket = scheduler().pending();
+  if (submittedFence) {
+    std::lock_guard lock(submittedFence->event.mutex);
+    submittedFence->submission = ticket;
   }
   const auto result = submission();
   submission = {};
-  {
-    std::lock_guard lock(queue->mutex);
-    ++queue->completed;
-  }
-  queue->changed.notify_all();
+  scheduler().complete(ticket, 0);
   return result;
 }
 ze_result_t ZE_APICALL queueSync(ze_command_queue_handle_t handle, uint64_t timeout) {
-  auto *queue = cast<Queue>(handle, Kind::Queue);
+  auto *queue = cast<Queue>(handle);
   if (!queue) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
-  return queue->waitFor(timeout);
+  return queue->async.waitFor(timeout);
 }
 
 ze_result_t ZE_APICALL listCreate(ze_context_handle_t context, ze_device_handle_t device, const ze_command_list_desc_t *,
                                   ze_command_list_handle_t *result) {
-  auto *owner = cast<Context>(context, Kind::Context);
-  auto *target = cast<Device>(device, Kind::Device);
+  auto *owner = cast<Context>(context);
+  auto *target = cast<Device>(device);
   if (!owner || !target) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   auto *created = createHandle<CommandList>(false, owner, target);
@@ -765,8 +763,8 @@ ze_result_t ZE_APICALL listCreate(ze_context_handle_t context, ze_device_handle_
 }
 ze_result_t ZE_APICALL listCreateImmediate(ze_context_handle_t context, ze_device_handle_t device, const ze_command_queue_desc_t *desc,
                                            ze_command_list_handle_t *result) {
-  auto *owner = cast<Context>(context, Kind::Context);
-  auto *target = cast<Device>(device, Kind::Device);
+  auto *owner = cast<Context>(context);
+  auto *target = cast<Device>(device);
   if (!owner || !target) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!desc || !result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (desc->mode != ZE_COMMAND_QUEUE_MODE_DEFAULT && desc->mode != ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS
@@ -782,18 +780,18 @@ bool listUsesReleased(CommandList *list) {
   return list->usersChanged.wait_for(lock, std::chrono::seconds(1), [&] { return list->users.load(std::memory_order_acquire) == 0; });
 }
 ze_result_t ZE_APICALL listDestroy(ze_command_list_handle_t handle) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   return listUsesReleased(list) ? destroyHandle(list) : ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
 }
 ze_result_t ZE_APICALL listClose(ze_command_list_handle_t handle) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   list->closed = true;
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL listReset(ze_command_list_handle_t handle) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!listUsesReleased(list)) return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
   list->commands.clear();
@@ -805,7 +803,7 @@ ze_result_t ZE_APICALL listBarrier(ze_command_list_handle_t handle, ze_event_han
                                    ze_event_handle_t *waits) {
   HandleUse<Event> retainedSignal;
   EventUses retainedWaits;
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   const auto retained = retainCommandEvents(list->context.get(), signal, waitCount, waits, retainedSignal, retainedWaits);
   if (retained != ZE_RESULT_SUCCESS) return retained;
@@ -820,7 +818,7 @@ ze_result_t ZE_APICALL listBarrier(ze_command_list_handle_t handle, ze_event_han
 
 ze_result_t listCopyInContext(ze_command_list_handle_t handle, void *destination, Context *sourceContext, const void *source, size_t size,
                               ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!sourceContext) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if ((!destination || !source) && size != 0) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
@@ -856,7 +854,7 @@ ze_result_t listCopyInContext(ze_command_list_handle_t handle, void *destination
 
 ze_result_t ZE_APICALL listCopy(ze_command_list_handle_t handle, void *destination, const void *source, size_t size,
                                 ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   return listCopyInContext(handle, destination, list->context.get(), source, size, signal, waitCount, waits);
 }
@@ -864,14 +862,14 @@ ze_result_t ZE_APICALL listCopy(ze_command_list_handle_t handle, void *destinati
 ze_result_t ZE_APICALL listCopyFromContext(ze_command_list_handle_t handle, void *destination, ze_context_handle_t sourceContextHandle,
                                            const void *source, size_t size, ze_event_handle_t signal, uint32_t waitCount,
                                            ze_event_handle_t *waits) {
-  return listCopyInContext(handle, destination, cast<Context>(sourceContextHandle, Kind::Context), source, size, signal, waitCount, waits);
+  return listCopyInContext(handle, destination, cast<Context>(sourceContextHandle), source, size, signal, waitCount, waits);
 }
 
 ze_result_t ZE_APICALL listCopyRegion(ze_command_list_handle_t handle, void *destination, const ze_copy_region_t *destinationRegion,
                                       uint32_t destinationPitch, uint32_t destinationSlice, const void *source,
                                       const ze_copy_region_t *sourceRegion, uint32_t sourcePitch, uint32_t sourceSlice,
                                       ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!destination || !source || !destinationRegion || !sourceRegion) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   const auto dst = *destinationRegion;
@@ -960,7 +958,7 @@ ze_result_t ZE_APICALL listCopyRegion(ze_command_list_handle_t handle, void *des
 
 ze_result_t ZE_APICALL listFill(ze_command_list_handle_t handle, void *destination, const void *pattern, size_t patternSize, size_t size,
                                 ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!destination || !pattern || patternSize == 0) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (size > std::numeric_limits<uintptr_t>::max() - reinterpret_cast<uintptr_t>(destination)) return ZE_RESULT_ERROR_INVALID_SIZE;
@@ -990,7 +988,7 @@ ze_result_t ZE_APICALL listFill(ze_command_list_handle_t handle, void *destinati
 }
 
 ze_result_t ZE_APICALL listPrefetch(ze_command_list_handle_t handle, const void *pointer, size_t size) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   auto allocation = retainAllocation(pointer, size);
@@ -1001,8 +999,8 @@ ze_result_t ZE_APICALL listPrefetch(ze_command_list_handle_t handle, const void 
 
 ze_result_t ZE_APICALL listAdvise(ze_command_list_handle_t handle, ze_device_handle_t deviceHandle, const void *pointer, size_t size,
                                   ze_memory_advice_t advice) {
-  auto *list = cast<CommandList>(handle, Kind::List);
-  auto *device = cast<Device>(deviceHandle, Kind::Device);
+  auto *list = cast<CommandList>(handle);
+  auto *device = cast<Device>(deviceHandle);
   if (!list || !device) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (advice < ZE_MEMORY_ADVICE_SET_READ_MOSTLY || advice > ZE_MEMORY_ADVICE_CLEAR_SYSTEM_MEMORY_PREFERRED_LOCATION)
@@ -1014,7 +1012,7 @@ ze_result_t ZE_APICALL listAdvise(ze_command_list_handle_t handle, ze_device_han
 }
 
 ze_result_t ZE_APICALL listSignal(ze_command_list_handle_t handle, ze_event_handle_t signal) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   HandleUse<Event> retainedSignal;
   const auto retained = retainSignal(signal, retainedSignal);
@@ -1023,7 +1021,7 @@ ze_result_t ZE_APICALL listSignal(ze_command_list_handle_t handle, ze_event_hand
   return append(list, [] { return ZE_RESULT_SUCCESS; }, {}, retainedSignal);
 }
 ze_result_t ZE_APICALL listWait(ze_command_list_handle_t handle, uint32_t count, ze_event_handle_t *events) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   EventUses retainedEvents;
   const auto retained = retainEvents(count, events, retainedEvents);
@@ -1033,9 +1031,9 @@ ze_result_t ZE_APICALL listWait(ze_command_list_handle_t handle, uint32_t count,
   return append(list, [events = std::move(retainedEvents)] { return waitDependencies(events); });
 }
 ze_result_t ZE_APICALL listResetEvent(ze_command_list_handle_t handle, ze_event_handle_t eventHandle) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
-  auto *event = cast<Event>(eventHandle, Kind::Event);
+  auto *event = cast<Event>(eventHandle);
   if (!event) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (event->pool->contextId != list->context->id) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
   return append(list, [event = HandleUse<Event>(event)] {
@@ -1077,19 +1075,18 @@ bool copyBackDirtyRanges(Client &client, const std::vector<DirtyRange> &ranges) 
 }
 
 ze_result_t launchRpc(const KernelLaunch &kernel, const ze_group_count_t &groups) {
-  // Serialize metadata preparation and copy-back, but let independent queues
+  // Serialise metadata preparation and copy-back, but let independent queues
   // execute and pump host-memory exchanges on separate connections.
   std::unique_lock rpcLock(rpcTransactionMutex);
-  auto state = remoteExecution();
-  if (state.mode == ClientMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
-  if (state.mode != ClientMode::Ready) return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+  if (remote.mode() == ClientMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
+  if (remote.mode() != ClientMode::Ready) return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
   // Ordinary host pointers are serviced by exact interpreter accesses.
-  if (!state.client->call(EnableHostMemory{})) return ZE_RESULT_ERROR_DEVICE_LOST;
+  if (!remote.client()->call(EnableHostMemory{})) return ZE_RESULT_ERROR_DEVICE_LOST;
   const auto started = std::chrono::steady_clock::now();
   LaunchPerformance performance;
   const auto relocations = collectPointerRelocations(kernel, performance);
-  if (!uploadAllocations(*state.client, kernel, relocations, {})) {
-    rememberRemoteError(state, remoteError(state));
+  if (!uploadAllocations(*remote.client(), kernel, relocations, {})) {
+    recordRemoteError(remote.error());
     return ZE_RESULT_ERROR_DEVICE_LOST;
   }
 
@@ -1140,43 +1137,36 @@ ze_result_t launchRpc(const KernelLaunch &kernel, const ze_group_count_t &groups
   }
   const Coordinates offset{static_cast<int32_t>(kernel.offsetX), static_cast<int32_t>(kernel.offsetY),
                            static_cast<int32_t>(kernel.offsetZ)};
-  auto launched = state.client->call(Launch{ProgramId{static_cast<int64_t>(kernel.programId)}, kernel.name, groupSize, groupCount,
-                                            globalSize, 3, offset, 0, 0, std::move(arguments), std::move(launchRelocations)});
-  if (!launched) {
-    rememberRemoteError(state, launched.error().detail);
-    return ZE_RESULT_ERROR_DEVICE_LOST;
-  }
-
   // A command-list worker must not invent a kernel-duration limit. User-facing
-  // event/fence/queue synchronization owns the Level Zero timeout semantics;
+  // event/fence/queue synchronisation owns the Level Zero timeout semantics;
   // each RPC exchange still retains its independent transport-progress timeout.
   gemstone::execution::CompletionResult result;
   std::string completionError;
-  auto completionClient = Client::fromEnvironment();
-  rpcLock.unlock();
   const bool collected =
-      completionClient && gemstone::execution::collect_completion(*completionClient, launched.value(), result, completionError, true);
-  rpcLock.lock();
+      gemstone::execution::launchAndCollect(Launch{ProgramId{static_cast<int64_t>(kernel.programId)}, kernel.name, groupSize, groupCount,
+                                                   globalSize, 3, offset, 0, 0, std::move(arguments), std::move(launchRelocations)},
+                                            result, completionError, [&] { rpcLock.unlock(); });
+  if (!rpcLock.owns_lock()) rpcLock.lock();
   if (!collected) {
-    rememberRemoteError(state, completionError);
+    recordRemoteError(completionError);
     return ZE_RESULT_ERROR_DEVICE_LOST;
   }
   {
     std::string relocationError;
     const bool applied = applyPointerRelocations(
-        result.pointer_relocations,
+        result.pointerRelocations,
         [](uint64_t id) -> RelocationTarget {
           const auto allocation = findAllocationById(id);
           return allocation ? RelocationTarget{allocation->base, allocation->size} : RelocationTarget{};
         },
         [](uint64_t, uint64_t, uint64_t, uint64_t) {}, relocationError);
     if (!applied) {
-      rememberRemoteError(state, relocationError);
+      recordRemoteError(relocationError);
       return ZE_RESULT_ERROR_DEVICE_LOST;
     }
   }
-  if (!copyBackDirtyRanges(*state.client, result.dirty_ranges)) {
-    rememberRemoteError(state, remoteError(state));
+  if (!copyBackDirtyRanges(*remote.client(), result.dirtyRanges)) {
+    recordRemoteError(remote.error());
     return ZE_RESULT_ERROR_DEVICE_LOST;
   }
   if (gemstone::traceEnabled("perf")) {
@@ -1208,8 +1198,8 @@ KernelLaunch snapshotLaunch(Kernel *kernel) {
 
 ze_result_t recordLaunch(ze_command_list_handle_t handle, ze_kernel_handle_t kernelHandle, const ze_group_count_t *groups,
                          bool indirectGroups, ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
-  auto *kernel = cast<Kernel>(kernelHandle, Kind::Kernel);
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *kernel = cast<Kernel>(kernelHandle);
+  auto *list = cast<CommandList>(handle);
   if (!kernel || !list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!groups) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   const auto copiedGroups = indirectGroups ? ze_group_count_t{} : *groups;
@@ -1253,13 +1243,13 @@ ze_result_t ZE_APICALL listLaunchIndirect(ze_command_list_handle_t handle, ze_ke
 
 ze_result_t ZE_APICALL listImmediateAppendCommandLists(ze_command_list_handle_t handle, uint32_t count, ze_command_list_handle_t *lists,
                                                        ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
-  auto *target = cast<CommandList>(handle, Kind::List);
+  auto *target = cast<CommandList>(handle);
   if (!target) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (count == 0 || !lists) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   std::vector<HandleUse<CommandList>> sources;
   sources.reserve(count);
   for (uint32_t index = 0; index < count; ++index) {
-    auto *source = cast<CommandList>(lists[index], Kind::List);
+    auto *source = cast<CommandList>(lists[index]);
     if (!source) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
     sources.emplace_back(source);
   }
@@ -1289,14 +1279,14 @@ ze_result_t ZE_APICALL listImmediateAppendCommandLists(ze_command_list_handle_t 
 ze_result_t ZE_APICALL listLaunchMultipleIndirect(ze_command_list_handle_t handle, uint32_t maxCount, ze_kernel_handle_t *handles,
                                                   const uint32_t *count, const ze_group_count_t *groups, ze_event_handle_t signal,
                                                   uint32_t waitCount, ze_event_handle_t *waits) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!handles || !count || !groups) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   std::vector<KernelLaunch> launches;
   launches.reserve(maxCount);
   auto allocationLifetime = std::make_shared<std::vector<AllocationRef>>();
   for (uint32_t index = 0; index < maxCount; ++index) {
-    auto *kernel = cast<Kernel>(handles[index], Kind::Kernel);
+    auto *kernel = cast<Kernel>(handles[index]);
     if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
     if (kernel->module->context.get() != list->context.get()) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     launches.push_back(snapshotLaunch(kernel));
@@ -1345,34 +1335,26 @@ ze_result_t allocate(Context *context, size_t size, size_t alignment, ze_memory_
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (alignment != 0 && (alignment & (alignment - 1)) != 0) return ZE_RESULT_ERROR_UNSUPPORTED_ALIGNMENT;
-  auto state = remoteExecution();
-  if (state.mode == ClientMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
-  if (state.mode == ClientMode::Ready && size > static_cast<size_t>(std::numeric_limits<int32_t>::max()))
+  if (remote.mode() == ClientMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
+  if (remote.mode() == ClientMode::Ready && size > static_cast<size_t>(std::numeric_limits<int32_t>::max()))
     return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
   *result = alignedAllocate(size, alignment);
   if (!*result) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
-  // Device allocations are uninitialized by the Level Zero specification, but
+  // Device allocations are uninitialised by the Level Zero specification, but
   // deterministic zero-fill keeps empty-range kernels observable and mirrors
   // the fresh allocation behaviour of the physical oracle used by the suite.
   std::memset(*result, 0, std::max(size, size_t{1}));
   uint64_t allocationId = 0;
-  if (state.mode == ClientMode::Ready) {
+  if (remote.mode() == ClientMode::Ready) {
     std::lock_guard rpcLock(rpcTransactionMutex);
-    auto registered = state.client->call(RegisterAllocation{rpcKind(type), static_cast<int64_t>(size)});
+    const auto registered = registerAllocation(*remote.client(), size, *result, true);
     if (!registered) {
-      rememberRemoteError(state, remoteError(state));
+      recordRemoteError(remote.error());
       std::free(*result);
       *result = nullptr;
       return ZE_RESULT_ERROR_DEVICE_LOST;
     }
-    allocationId = static_cast<uint64_t>(registered.value().value);
-    if (!state.client->call(RegisterAllocationAddress{registered.value(),
-                                                      GuestAddress{static_cast<int64_t>(reinterpret_cast<uintptr_t>(*result))}, true})) {
-      (void)state.client->call(ReleaseAllocation{registered.value()});
-      std::free(*result);
-      *result = nullptr;
-      return ZE_RESULT_ERROR_DEVICE_LOST;
-    }
+    allocationId = static_cast<uint64_t>(registered->value);
   }
   std::lock_guard lock(allocationsMutex);
   allocations.emplace(*result, std::make_shared<Allocation>(Allocation{HandleUse<Context>(context), *result, size, type, allocationId}));
@@ -1381,18 +1363,18 @@ ze_result_t allocate(Context *context, size_t size, size_t alignment, ze_memory_
 
 ze_result_t ZE_APICALL memShared(ze_context_handle_t context, const ze_device_mem_alloc_desc_t *, const ze_host_mem_alloc_desc_t *,
                                  size_t size, size_t alignment, ze_device_handle_t, void **result) {
-  return allocate(cast<Context>(context, Kind::Context), size, alignment, ZE_MEMORY_TYPE_SHARED, result);
+  return allocate(cast<Context>(context), size, alignment, ZE_MEMORY_TYPE_SHARED, result);
 }
 ze_result_t ZE_APICALL memDevice(ze_context_handle_t context, const ze_device_mem_alloc_desc_t *, size_t size, size_t alignment,
                                  ze_device_handle_t, void **result) {
-  return allocate(cast<Context>(context, Kind::Context), size, alignment, ZE_MEMORY_TYPE_DEVICE, result);
+  return allocate(cast<Context>(context), size, alignment, ZE_MEMORY_TYPE_DEVICE, result);
 }
 ze_result_t ZE_APICALL memHost(ze_context_handle_t context, const ze_host_mem_alloc_desc_t *, size_t size, size_t alignment,
                                void **result) {
-  return allocate(cast<Context>(context, Kind::Context), size, alignment, ZE_MEMORY_TYPE_HOST, result);
+  return allocate(cast<Context>(context), size, alignment, ZE_MEMORY_TYPE_HOST, result);
 }
 ze_result_t ZE_APICALL memFree(ze_context_handle_t contextHandle, void *pointer) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
+  auto *context = cast<Context>(contextHandle);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!pointer) return ZE_RESULT_SUCCESS;
   {
@@ -1409,16 +1391,15 @@ ze_result_t ZE_APICALL memFree(ze_context_handle_t contextHandle, void *pointer)
     allocation = found->second;
     allocations.erase(found);
   }
-  auto state = remoteExecution();
   std::lock_guard rpcLock(rpcTransactionMutex);
-  const bool released = state.mode != ClientMode::Ready
-                        || static_cast<bool>(state.client->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(allocation->id)}}));
-  if (!released) rememberRemoteError(state, remoteError(state));
+  const bool released = remote.mode() != ClientMode::Ready
+                        || static_cast<bool>(remote.client()->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(allocation->id)}}));
+  if (!released) recordRemoteError(remote.error());
   std::free(pointer);
   return released ? ZE_RESULT_SUCCESS : ZE_RESULT_ERROR_DEVICE_LOST;
 }
 ze_result_t ZE_APICALL memFreeExt(ze_context_handle_t context, const ze_memory_free_ext_desc_t *desc, void *pointer) {
-  if (cast<Context>(context, Kind::Context) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (cast<Context>(context) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!desc || !pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   constexpr auto supportedPolicies = ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_BLOCKING_FREE | ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_DEFER_FREE;
   if ((desc->freePolicy & ~supportedPolicies) != 0) return ZE_RESULT_ERROR_INVALID_ENUMERATION;
@@ -1426,21 +1407,20 @@ ze_result_t ZE_APICALL memFreeExt(ze_context_handle_t context, const ze_memory_f
 }
 
 ze_result_t ZE_APICALL virtualQueryPageSize(ze_context_handle_t context, ze_device_handle_t device, size_t, size_t *pageSize) {
-  if (!cast<Context>(context, Kind::Context) || !cast<Device>(device, Kind::Device)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!cast<Context>(context) || !cast<Device>(device)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!pageSize) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   *pageSize = PageSize;
   return ZE_RESULT_SUCCESS;
 }
 
 ze_result_t ZE_APICALL virtualReserve(ze_context_handle_t contextHandle, const void *start, size_t size, void **result) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
+  auto *context = cast<Context>(contextHandle);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (size == 0 || size % PageSize != 0) return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
   if (start && reinterpret_cast<uintptr_t>(start) % PageSize != 0) return ZE_RESULT_ERROR_UNSUPPORTED_ALIGNMENT;
-  auto state = remoteExecution();
-  if (state.mode == ClientMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
-  if (state.mode == ClientMode::Ready && size > static_cast<size_t>(std::numeric_limits<int32_t>::max()))
+  if (remote.mode() == ClientMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
+  if (remote.mode() == ClientMode::Ready && size > static_cast<size_t>(std::numeric_limits<int32_t>::max()))
     return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
   void *address = MAP_FAILED;
   if (start)
@@ -1448,21 +1428,15 @@ ze_result_t ZE_APICALL virtualReserve(ze_context_handle_t contextHandle, const v
   if (address == MAP_FAILED) address = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (address == MAP_FAILED) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
   uint64_t allocationId = 0;
-  if (state.mode == ClientMode::Ready) {
+  if (remote.mode() == ClientMode::Ready) {
     std::lock_guard rpcLock(rpcTransactionMutex);
-    auto registered = state.client->call(RegisterAllocation{AllocationKind::Device, static_cast<int64_t>(size)});
+    const auto registered = registerAllocation(*remote.client(), size, address);
     if (!registered) {
-      rememberRemoteError(state, remoteError(state));
+      recordRemoteError(remote.error());
       munmap(address, size);
       return ZE_RESULT_ERROR_DEVICE_LOST;
     }
-    if (!state.client->call(
-            RegisterAllocationAddress{registered.value(), GuestAddress{static_cast<int64_t>(reinterpret_cast<uintptr_t>(address))}})) {
-      (void)state.client->call(ReleaseAllocation{registered.value()});
-      munmap(address, size);
-      return ZE_RESULT_ERROR_DEVICE_LOST;
-    }
-    allocationId = static_cast<uint64_t>(registered.value().value);
+    allocationId = static_cast<uint64_t>(registered->value);
   }
   {
     std::lock_guard allocationLock(allocationsMutex);
@@ -1479,7 +1453,7 @@ ze_result_t ZE_APICALL virtualReserve(ze_context_handle_t contextHandle, const v
 }
 
 ze_result_t ZE_APICALL virtualFree(ze_context_handle_t contextHandle, const void *pointer, size_t size) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
+  auto *context = cast<Context>(contextHandle);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   std::lock_guard lock(virtualMemoryMutex);
@@ -1492,11 +1466,10 @@ ze_result_t ZE_APICALL virtualFree(ze_context_handle_t contextHandle, const void
     auto allocation = allocations.find(const_cast<void *>(pointer));
     if (allocation == allocations.end() || allocation->second.use_count() != 1) return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
   }
-  auto state = remoteExecution();
-  if (state.mode == ClientMode::Ready) {
+  if (remote.mode() == ClientMode::Ready) {
     std::lock_guard rpcLock(rpcTransactionMutex);
-    if (!state.client->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(found->second.allocationId)}})) {
-      rememberRemoteError(state, remoteError(state));
+    if (!remote.client()->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(found->second.allocationId)}})) {
+      recordRemoteError(remote.error());
       return ZE_RESULT_ERROR_DEVICE_LOST;
     }
   }
@@ -1511,11 +1484,10 @@ ze_result_t ZE_APICALL virtualFree(ze_context_handle_t contextHandle, const void
 
 ze_result_t ZE_APICALL physicalCreate(ze_context_handle_t contextHandle, ze_device_handle_t deviceHandle, ze_physical_mem_desc_t *desc,
                                       ze_physical_mem_handle_t *result) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
+  auto *context = cast<Context>(contextHandle);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!desc || !result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  if (!(desc->flags & ZE_PHYSICAL_MEM_FLAG_ALLOCATE_ON_HOST) && !cast<Device>(deviceHandle, Kind::Device))
-    return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!(desc->flags & ZE_PHYSICAL_MEM_FLAG_ALLOCATE_ON_HOST) && !cast<Device>(deviceHandle)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if ((desc->flags & ~(ZE_PHYSICAL_MEM_FLAG_ALLOCATE_ON_HOST | ZE_PHYSICAL_MEM_FLAG_ALLOCATE_ON_DEVICE)) != 0
       || (desc->flags & ZE_PHYSICAL_MEM_FLAG_ALLOCATE_ON_HOST && desc->flags & ZE_PHYSICAL_MEM_FLAG_ALLOCATE_ON_DEVICE))
     return ZE_RESULT_ERROR_INVALID_ENUMERATION;
@@ -1536,8 +1508,8 @@ ze_result_t ZE_APICALL physicalCreate(ze_context_handle_t contextHandle, ze_devi
 }
 
 ze_result_t ZE_APICALL physicalDestroy(ze_context_handle_t contextHandle, ze_physical_mem_handle_t handle) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
-  auto *physical = cast<PhysicalMemory>(handle, Kind::PhysicalMemory);
+  auto *context = cast<Context>(contextHandle);
+  auto *physical = cast<PhysicalMemory>(handle);
   if (!context || !physical) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (physical->context.get() != context) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
   return destroyHandle(physical);
@@ -1545,8 +1517,8 @@ ze_result_t ZE_APICALL physicalDestroy(ze_context_handle_t contextHandle, ze_phy
 
 ze_result_t ZE_APICALL physicalProperties(ze_context_handle_t contextHandle, ze_physical_mem_handle_t handle,
                                           ze_physical_mem_properties_t *properties) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
-  auto *physical = cast<PhysicalMemory>(handle, Kind::PhysicalMemory);
+  auto *context = cast<Context>(contextHandle);
+  auto *physical = cast<PhysicalMemory>(handle);
   if (!context || !physical) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (physical->context.get() != context) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
@@ -1557,8 +1529,8 @@ ze_result_t ZE_APICALL physicalProperties(ze_context_handle_t contextHandle, ze_
 
 ze_result_t ZE_APICALL virtualMap(ze_context_handle_t contextHandle, const void *pointer, size_t size,
                                   ze_physical_mem_handle_t physicalHandle, size_t offset, ze_memory_access_attribute_t access) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
-  auto *physical = cast<PhysicalMemory>(physicalHandle, Kind::PhysicalMemory);
+  auto *context = cast<Context>(contextHandle);
+  auto *physical = cast<PhysicalMemory>(physicalHandle);
   if (!context || !physical) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (physical->context.get() != context) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
@@ -1588,7 +1560,7 @@ ze_result_t ZE_APICALL virtualMap(ze_context_handle_t contextHandle, const void 
 }
 
 ze_result_t ZE_APICALL virtualUnmap(ze_context_handle_t contextHandle, const void *pointer, size_t size) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
+  auto *context = cast<Context>(contextHandle);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   const auto address = reinterpret_cast<uintptr_t>(pointer);
@@ -1607,7 +1579,7 @@ ze_result_t ZE_APICALL virtualUnmap(ze_context_handle_t contextHandle, const voi
 
 ze_result_t ZE_APICALL virtualSetAccess(ze_context_handle_t contextHandle, const void *pointer, size_t size,
                                         ze_memory_access_attribute_t access) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
+  auto *context = cast<Context>(contextHandle);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (access > ZE_MEMORY_ACCESS_ATTRIBUTE_READONLY) return ZE_RESULT_ERROR_INVALID_ENUMERATION;
@@ -1624,7 +1596,7 @@ ze_result_t ZE_APICALL virtualSetAccess(ze_context_handle_t contextHandle, const
 
 ze_result_t ZE_APICALL virtualGetAccess(ze_context_handle_t contextHandle, const void *pointer, size_t size,
                                         ze_memory_access_attribute_t *access, size_t *outSize) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
+  auto *context = cast<Context>(contextHandle);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!pointer || !access || !outSize) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   std::lock_guard lock(virtualMemoryMutex);
@@ -1652,7 +1624,7 @@ ze_result_t ZE_APICALL virtualGetAccess(ze_context_handle_t contextHandle, const
 }
 ze_result_t ZE_APICALL memProperties(ze_context_handle_t contextHandle, const void *pointer, ze_memory_allocation_properties_t *properties,
                                      ze_device_handle_t *device) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
+  auto *context = cast<Context>(contextHandle);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (!pointer) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
@@ -1675,7 +1647,7 @@ ze_result_t ZE_APICALL memProperties(ze_context_handle_t contextHandle, const vo
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL memRange(ze_context_handle_t contextHandle, const void *pointer, void **base, size_t *size) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
+  auto *context = cast<Context>(contextHandle);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!base && !size) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   std::lock_guard lock(allocationsMutex);
@@ -1693,7 +1665,7 @@ ze_result_t ZE_APICALL memRange(ze_context_handle_t contextHandle, const void *p
 
 ze_result_t ZE_APICALL eventPoolCreate(ze_context_handle_t contextHandle, const ze_event_pool_desc_t *desc, uint32_t, ze_device_handle_t *,
                                        ze_event_pool_handle_t *result) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
+  auto *context = cast<Context>(contextHandle);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!desc || !result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   auto *created = createHandle<EventPool>(context, desc->flags);
@@ -1701,9 +1673,9 @@ ze_result_t ZE_APICALL eventPoolCreate(ze_context_handle_t contextHandle, const 
   *result = reinterpret_cast<ze_event_pool_handle_t>(created);
   return ZE_RESULT_SUCCESS;
 }
-ze_result_t ZE_APICALL eventPoolDestroy(ze_event_pool_handle_t handle) { return destroyHandle(cast<EventPool>(handle, Kind::EventPool)); }
+ze_result_t ZE_APICALL eventPoolDestroy(ze_event_pool_handle_t handle) { return destroyHandle(cast<EventPool>(handle)); }
 ze_result_t ZE_APICALL eventCreate(ze_event_pool_handle_t poolHandle, const ze_event_desc_t *, ze_event_handle_t *result) {
-  auto *pool = cast<EventPool>(poolHandle, Kind::EventPool);
+  auto *pool = cast<EventPool>(poolHandle);
   if (!pool) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   auto *created = createHandle<Event>(pool);
@@ -1712,7 +1684,7 @@ ze_result_t ZE_APICALL eventCreate(ze_event_pool_handle_t poolHandle, const ze_e
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL eventDestroy(ze_event_handle_t handle) {
-  auto *event = cast<Event>(handle, Kind::Event);
+  auto *event = cast<Event>(handle);
   if (!event) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   // Recorded lists may still refer to an event that the application destroys
   // before submission. Retire its public handle and defer reclamation until
@@ -1721,18 +1693,16 @@ ze_result_t ZE_APICALL eventDestroy(ze_event_handle_t handle) {
   event->destroyRequested.store(true, std::memory_order_release);
   return ZE_RESULT_SUCCESS;
 }
-ze_result_t ZE_APICALL eventSignal(ze_event_handle_t handle) { return signalEvent(cast<Event>(handle, Kind::Event)); }
-ze_result_t ZE_APICALL eventSync(ze_event_handle_t handle, uint64_t timeout) {
-  return waitEvent(cast<Event>(handle, Kind::Event), timeout);
-}
+ze_result_t ZE_APICALL eventSignal(ze_event_handle_t handle) { return signalEvent(cast<Event>(handle)); }
+ze_result_t ZE_APICALL eventSync(ze_event_handle_t handle, uint64_t timeout) { return waitEvent(cast<Event>(handle), timeout); }
 ze_result_t ZE_APICALL eventStatus(ze_event_handle_t handle) {
-  auto *event = cast<Event>(handle, Kind::Event);
+  auto *event = cast<Event>(handle);
   if (!event) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   std::lock_guard lock(event->mutex);
   return event->signalled ? event->completionResult : ZE_RESULT_NOT_READY;
 }
 ze_result_t ZE_APICALL eventReset(ze_event_handle_t handle) {
-  auto *event = cast<Event>(handle, Kind::Event);
+  auto *event = cast<Event>(handle);
   if (!event) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   std::lock_guard lock(event->mutex);
   event->signalled = false;
@@ -1743,7 +1713,7 @@ ze_result_t ZE_APICALL eventReset(ze_event_handle_t handle) {
 }
 
 ze_result_t ZE_APICALL eventKernelTimestamp(ze_event_handle_t handle, ze_kernel_timestamp_result_t *result) {
-  auto *event = cast<Event>(handle, Kind::Event);
+  auto *event = cast<Event>(handle);
   if (!event) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   std::lock_guard lock(event->mutex);
@@ -1755,7 +1725,7 @@ ze_result_t ZE_APICALL eventKernelTimestamp(ze_event_handle_t handle, ze_kernel_
 }
 
 ze_result_t ZE_APICALL fenceCreate(ze_command_queue_handle_t queueHandle, const ze_fence_desc_t *, ze_fence_handle_t *result) {
-  auto *queue = cast<Queue>(queueHandle, Kind::Queue);
+  auto *queue = cast<Queue>(queueHandle);
   if (!queue) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   auto *created = createHandle<Fence>(queue);
@@ -1764,7 +1734,7 @@ ze_result_t ZE_APICALL fenceCreate(ze_command_queue_handle_t queueHandle, const 
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL fenceDestroy(ze_fence_handle_t handle) {
-  auto *fence = cast<Fence>(handle, Kind::Fence);
+  auto *fence = cast<Fence>(handle);
   if (!fence) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   HandleUse<Fence> lifetime(fence);
   {
@@ -1777,7 +1747,7 @@ ze_result_t ZE_APICALL fenceDestroy(ze_fence_handle_t handle) {
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL fenceSync(ze_fence_handle_t handle, uint64_t timeout) {
-  auto *fence = cast<Fence>(handle, Kind::Fence);
+  auto *fence = cast<Fence>(handle);
   if (!fence) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   const auto started = std::chrono::steady_clock::now();
   const auto result = waitEvent(&fence->event, timeout);
@@ -1789,22 +1759,25 @@ ze_result_t ZE_APICALL fenceSync(ze_fence_handle_t handle, uint64_t timeout) {
     if (elapsedNanoseconds < 0 || static_cast<uint64_t>(elapsedNanoseconds) >= timeout) remaining = 0;
     else remaining -= static_cast<uint64_t>(elapsedNanoseconds);
   }
-  const auto retired = fence->queue->waitThrough(fence->completionSequence.load(std::memory_order_acquire), remaining);
-  if (retired != ZE_RESULT_SUCCESS) return retired;
+  gemstone::CommandQueue::Ticket submission;
+  {
+    std::lock_guard lock(fence->event.mutex);
+    submission = fence->submission;
+  }
+  if (!scheduler().waitFor(submission, remaining)) return ZE_RESULT_NOT_READY;
   std::lock_guard lock(fence->event.mutex);
   return fence->completionResult;
 }
 ze_result_t ZE_APICALL fenceStatus(ze_fence_handle_t handle) {
-  auto *fence = cast<Fence>(handle, Kind::Fence);
+  auto *fence = cast<Fence>(handle);
   if (!fence) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   std::lock_guard lock(fence->event.mutex);
   if (!fence->event.signalled) return ZE_RESULT_NOT_READY;
-  if (fence->queue->waitThrough(fence->completionSequence.load(std::memory_order_acquire), 0) != ZE_RESULT_SUCCESS)
-    return ZE_RESULT_NOT_READY;
+  if (!scheduler().ready(fence->submission)) return ZE_RESULT_NOT_READY;
   return fence->completionResult;
 }
 ze_result_t ZE_APICALL fenceReset(ze_fence_handle_t handle) {
-  auto *fence = cast<Fence>(handle, Kind::Fence);
+  auto *fence = cast<Fence>(handle);
   if (!fence) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   std::lock_guard lock(fence->event.mutex);
   fence->event.signalled = false;
@@ -1813,25 +1786,22 @@ ze_result_t ZE_APICALL fenceReset(ze_fence_handle_t handle) {
 }
 
 bool linkSpirvModules(const std::vector<std::vector<uint8_t>> &modules, std::vector<uint8_t> &linked, std::string &error) {
-  std::vector<gemstone::rpc::TemporaryFile> files;
-  files.reserve(modules.size() + 1);
-  files.emplace_back("gemstone-spirv-XXXXXX");
-  for (size_t index = 0; index < modules.size(); ++index)
-    files.emplace_back("gemstone-spirv-XXXXXX");
-  if (!files[0].valid()) {
+  const gemstone::TemporaryDirectory directory("gemstone-spirv-XXXXXX");
+  if (!directory) {
     error = "could not create temporary linked module";
     return false;
   }
+  const auto output = directory.file("linked.spv");
+  std::vector<std::string> arguments = {"spirv-link", "--use-highest-version", "--target-env", "opencl2.2", "-o", output};
   for (size_t index = 0; index < modules.size(); ++index) {
-    if (!files[index + 1].valid() || !files[index + 1].write(modules[index].data(), modules[index].size())) {
+    auto path = directory.file("input" + std::to_string(index) + ".spv");
+    if (!gemstone::writeFile(path, modules[index].data(), modules[index].size())) {
       error = "could not create temporary SPIR-V module";
       return false;
     }
+    arguments.push_back(std::move(path));
   }
-  std::vector<std::string> arguments = {"spirv-link", "--use-highest-version", "--target-env", "opencl2.2", "-o", files[0].path()};
-  for (size_t index = 0; index < modules.size(); ++index)
-    arguments.push_back(files[index + 1].path());
-  const auto result = gemstone::rpc::runProcess(arguments);
+  const auto result = gemstone::runProcess(arguments);
   if (result.status == 127) {
     error = "spirv-link is unavailable";
     return false;
@@ -1840,7 +1810,7 @@ bool linkSpirvModules(const std::vector<std::vector<uint8_t>> &modules, std::vec
     error = "spirv-link rejected the SPIR-V modules";
     return false;
   }
-  std::ifstream stream(files[0].path(), std::ios::binary);
+  std::ifstream stream(output, std::ios::binary);
   linked.assign(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
   const bool loaded = !stream.bad() && linked.size() >= 20;
   if (!loaded) error = "could not read linked SPIR-V module";
@@ -1851,7 +1821,7 @@ size_t spirvInstructionBytes(const std::vector<uint8_t> &bytes);
 
 ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device_handle_t, const ze_module_desc_t *desc,
                                     ze_module_handle_t *result, ze_module_build_log_handle_t *log) {
-  auto *context = cast<Context>(contextHandle, Kind::Context);
+  auto *context = cast<Context>(contextHandle);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!desc || !result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   // The remote service consumes SPIR-V in both cases. Returning the retained
@@ -1886,21 +1856,19 @@ ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device
   }
   std::vector<std::vector<uint8_t>> prepared;
   prepared.reserve(inputs.size());
-  auto state = remoteExecution();
   for (const auto &input : inputs) {
     std::vector<uint8_t> bytes(input.data, input.data + input.size);
     if (input.constants && input.constants->numConstants != 0) {
       const auto &constants = *input.constants;
       if (!constants.pConstantIds || !constants.pConstantValues) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-      if (state.mode != ClientMode::Ready) {
+      if (remote.mode() != ClientMode::Ready) {
         setBuildLog(log, "SPIR-V specialization requires the Gemstone execution service");
         return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
       }
       std::lock_guard rpcLock(rpcTransactionMutex);
-      auto described = state.client->call(DescribeSpecialization{bytes});
+      auto described = remote.client()->call(DescribeSpecialization{bytes});
       if (!described) {
-        rememberRemoteError(state, remoteError(state));
-        setBuildLog(log, state.error);
+        setBuildLog(log, recordRemoteError(remote.error()));
         return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
       }
       std::map<uint32_t, size_t> sizes;
@@ -1918,10 +1886,9 @@ ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device
         }
         values.push_back(SpecializationConstant{Binary32{static_cast<int64_t>(id)}, std::vector<uint8_t>(value, value + found->second)});
       }
-      auto specialized = state.client->call(SpecializeImage{bytes, values});
+      auto specialized = remote.client()->call(SpecializeImage{bytes, values});
       if (!specialized) {
-        rememberRemoteError(state, remoteError(state));
-        setBuildLog(log, state.error);
+        setBuildLog(log, recordRemoteError(remote.error()));
         return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
       }
       bytes = std::move(specialized.value());
@@ -1944,8 +1911,8 @@ ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device
     if (valid < bytes.size()) bytes.resize(valid);
   }
   uint64_t programId = 0;
-  if (state.mode != ClientMode::Ready) {
-    setBuildLog(log, state.mode == ClientMode::Misconfigured ? state.error : "Gemstone execution service is not configured");
+  if (remote.mode() != ClientMode::Ready) {
+    setBuildLog(log, remote.mode() == ClientMode::Misconfigured ? remote.error() : "Gemstone execution service is not configured");
     return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
   }
   {
@@ -1954,10 +1921,9 @@ ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device
       setBuildLog(log, "SPIR-V module is too large");
       return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
     }
-    auto loaded = state.client->call(LoadProgram{"spirv-binary", bytes});
+    auto loaded = remote.client()->call(LoadProgram{ProgramEncoding::SPIRVOpenCLCompute, bytes});
     if (!loaded) {
-      rememberRemoteError(state, remoteError(state));
-      setBuildLog(log, state.error);
+      setBuildLog(log, recordRemoteError(remote.error()));
       return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
     }
     programId = static_cast<uint64_t>(loaded.value().value);
@@ -1978,17 +1944,16 @@ ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device
 ze_result_t allocate(Context *context, size_t size, size_t alignment, ze_memory_type_t type, void **result);
 
 ze_result_t ZE_APICALL moduleFunctionPointer(ze_module_handle_t handle, const char *name, void **pointer) {
-  auto *module = cast<Module>(handle, Kind::Module);
+  auto *module = cast<Module>(handle);
   if (!module) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!name || !pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  auto state = remoteExecution();
-  if (state.mode != ClientMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
+  if (remote.mode() != ClientMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
   auto described = [&] {
     std::lock_guard rpcLock(rpcTransactionMutex);
-    return state.client->call(DescribeKernel{ProgramId{static_cast<int64_t>(module->programId)}, {name}});
+    return remote.client()->call(DescribeKernel{ProgramId{static_cast<int64_t>(module->programId)}, {name}});
   }();
   if (!described) {
-    rememberRemoteError(state, described.error().detail);
+    recordRemoteError(described.error().detail);
     return ZE_RESULT_ERROR_INVALID_FUNCTION_NAME;
   }
   const auto &metadata = described.value();
@@ -2000,7 +1965,7 @@ ze_result_t ZE_APICALL moduleFunctionPointer(ze_module_handle_t handle, const ch
 }
 
 ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char *name, size_t *size, void **pointer) {
-  auto *module = cast<Module>(handle, Kind::Module);
+  auto *module = cast<Module>(handle);
   if (!module) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!name || (!size && !pointer)) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   {
@@ -2012,14 +1977,13 @@ ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char
       return ZE_RESULT_SUCCESS;
     }
   }
-  auto state = remoteExecution();
-  if (state.mode != ClientMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
+  if (remote.mode() != ClientMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
   auto described = [&] {
     std::lock_guard rpcLock(rpcTransactionMutex);
-    return state.client->call(DescribeGlobal{ProgramId{static_cast<int64_t>(module->programId)}, name});
+    return remote.client()->call(DescribeGlobal{ProgramId{static_cast<int64_t>(module->programId)}, name});
   }();
   if (!described) {
-    rememberRemoteError(state, described.error().detail);
+    recordRemoteError(described.error().detail);
     return ZE_RESULT_ERROR_INVALID_GLOBAL_NAME;
   }
   const auto bytes = static_cast<size_t>(described.value().size.value);
@@ -2038,7 +2002,7 @@ ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char
     }
     if (id != 0) {
       std::lock_guard rpcLock(rpcTransactionMutex);
-      (void)state.client->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(id)}});
+      (void)remote.client()->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(id)}});
     }
     std::free(base);
   };
@@ -2055,9 +2019,9 @@ ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char
   bool bound = false;
   {
     std::lock_guard rpcLock(rpcTransactionMutex);
-    bound = static_cast<bool>(state.client->call(BindProgramGlobal{ProgramId{static_cast<int64_t>(module->programId)}, name,
-                                                                   AllocationId{static_cast<int64_t>(allocation->id)}, LongPositive0{0}}));
-    if (!bound) rememberRemoteError(state, remoteError(state));
+    bound = static_cast<bool>(remote.client()->call(BindProgramGlobal{
+        ProgramId{static_cast<int64_t>(module->programId)}, name, AllocationId{static_cast<int64_t>(allocation->id)}, LongPositive0{0}}));
+    if (!bound) recordRemoteError(remote.error());
   }
   if (!bound) {
     discard();
@@ -2072,14 +2036,13 @@ ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL moduleDestroy(ze_module_handle_t handle) {
-  auto *module = cast<Module>(handle, Kind::Module);
+  auto *module = cast<Module>(handle);
   if (!module) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (module->users.load(std::memory_order_acquire) != 0) return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
   {
-    auto state = remoteExecution();
     std::lock_guard rpcLock(rpcTransactionMutex);
-    if (!state.client->call(UnloadProgram{ProgramId{static_cast<int64_t>(module->programId)}})) {
-      rememberRemoteError(state, remoteError(state));
+    if (!remote.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(module->programId)}})) {
+      recordRemoteError(remote.error());
       return ZE_RESULT_ERROR_DEVICE_LOST;
     }
   }
@@ -2100,11 +2063,10 @@ ze_result_t ZE_APICALL moduleDestroy(ze_module_handle_t handle) {
       }
     }
     if (allocation) {
-      auto state = remoteExecution();
-      if (state.mode == ClientMode::Ready) {
+      if (remote.mode() == ClientMode::Ready) {
         std::lock_guard rpcLock(rpcTransactionMutex);
-        if (!state.client->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(allocation->id)}})) {
-          rememberRemoteError(state, remoteError(state));
+        if (!remote.client()->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(allocation->id)}})) {
+          recordRemoteError(remote.error());
           releasedAll = false;
         }
       }
@@ -2117,12 +2079,12 @@ ze_result_t ZE_APICALL moduleDestroy(ze_module_handle_t handle) {
 ze_result_t ZE_APICALL moduleDynamicLink(uint32_t count, ze_module_handle_t *modules, ze_module_build_log_handle_t *log) {
   if (count == 0 || !modules) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   for (uint32_t index = 0; index < count; ++index)
-    if (cast<Module>(modules[index], Kind::Module) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+    if (cast<Module>(modules[index]) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   setBuildLog(log, "Gemstone does not support dynamic linking of SPIR-V modules");
   return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
 }
 ze_result_t ZE_APICALL moduleProperties(ze_module_handle_t handle, ze_module_properties_t *properties) {
-  if (cast<Module>(handle, Kind::Module) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (cast<Module>(handle) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   properties->flags = 0;
   return ZE_RESULT_SUCCESS;
@@ -2161,7 +2123,7 @@ size_t spirvInstructionBytes(const std::vector<uint8_t> &bytes) {
 }
 
 ze_result_t ZE_APICALL moduleNativeBinary(ze_module_handle_t handle, size_t *size, uint8_t *binary) {
-  auto *module = cast<Module>(handle, Kind::Module);
+  auto *module = cast<Module>(handle);
   if (!module) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!size) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   // A compiled native binary carries the options it was built with. Append the
@@ -2187,29 +2149,26 @@ ze_result_t ZE_APICALL moduleNativeBinary(ze_module_handle_t handle, size_t *siz
   *size = required;
   return ZE_RESULT_SUCCESS;
 }
-ze_result_t ZE_APICALL buildLogDestroy(ze_module_build_log_handle_t handle) {
-  return destroyHandle(cast<BuildLog>(handle, Kind::BuildLog));
-}
+ze_result_t ZE_APICALL buildLogDestroy(ze_module_build_log_handle_t handle) { return destroyHandle(cast<BuildLog>(handle)); }
 ze_result_t ZE_APICALL buildLogString(ze_module_build_log_handle_t handle, size_t *size, char *text) {
-  auto *log = cast<BuildLog>(handle, Kind::BuildLog);
+  auto *log = cast<BuildLog>(handle);
   if (!log || !size) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   return gemstone::copyOut(*size, text, size, log->text.c_str(), log->text.size() + 1) ? ZE_RESULT_SUCCESS : ZE_RESULT_ERROR_INVALID_SIZE;
 }
 
 ze_result_t ZE_APICALL kernelGroup(ze_kernel_handle_t handle, uint32_t x, uint32_t y, uint32_t z);
 ze_result_t ZE_APICALL kernelCreate(ze_module_handle_t moduleHandle, const ze_kernel_desc_t *desc, ze_kernel_handle_t *result) {
-  auto *module = cast<Module>(moduleHandle, Kind::Module);
+  auto *module = cast<Module>(moduleHandle);
   if (!module || !desc || !result || !desc->pKernelName) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   auto *kernel = createHandle<Kernel>(module, desc->pKernelName);
   if (!kernel) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
-  auto state = remoteExecution();
-  if (state.mode != ClientMode::Ready) {
+  if (remote.mode() != ClientMode::Ready) {
     delete kernel;
     return ZE_RESULT_ERROR_DEVICE_LOST;
   }
-  auto described = state.client->call(DescribeKernel{ProgramId{static_cast<int64_t>(module->programId)}, kernel->name});
+  auto described = remote.client()->call(DescribeKernel{ProgramId{static_cast<int64_t>(module->programId)}, kernel->name});
   if (!described) {
-    rememberRemoteError(state, remoteError(state));
+    recordRemoteError(remote.error());
     delete kernel;
     return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
   }
@@ -2233,9 +2192,9 @@ ze_result_t ZE_APICALL kernelCreate(ze_module_handle_t moduleHandle, const ze_ke
   *result = reinterpret_cast<ze_kernel_handle_t>(kernel);
   return ZE_RESULT_SUCCESS;
 }
-ze_result_t ZE_APICALL kernelDestroy(ze_kernel_handle_t handle) { return destroyHandle(cast<Kernel>(handle, Kind::Kernel)); }
+ze_result_t ZE_APICALL kernelDestroy(ze_kernel_handle_t handle) { return destroyHandle(cast<Kernel>(handle)); }
 ze_result_t ZE_APICALL kernelGroup(ze_kernel_handle_t handle, uint32_t x, uint32_t y, uint32_t z) {
-  auto *kernel = cast<Kernel>(handle, Kind::Kernel);
+  auto *kernel = cast<Kernel>(handle);
   if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (x == 0 || y == 0 || z == 0 || x > MaxWorkItems || y > MaxWorkItems || z > MaxWorkItemsZ
       || static_cast<uint64_t>(x) * y * z > MaxWorkItems)
@@ -2248,7 +2207,7 @@ ze_result_t ZE_APICALL kernelGroup(ze_kernel_handle_t handle, uint32_t x, uint32
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL kernelGlobalOffset(ze_kernel_handle_t handle, uint32_t x, uint32_t y, uint32_t z) {
-  auto *kernel = cast<Kernel>(handle, Kind::Kernel);
+  auto *kernel = cast<Kernel>(handle);
   if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (x > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) || y > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())
       || z > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()))
@@ -2266,7 +2225,7 @@ uint32_t largestDivisorAtMost(uint32_t value, uint32_t limit) {
 
 ze_result_t ZE_APICALL kernelSuggest(ze_kernel_handle_t handle, uint32_t x, uint32_t y, uint32_t z, uint32_t *gx, uint32_t *gy,
                                      uint32_t *gz) {
-  auto *kernel = cast<Kernel>(handle, Kind::Kernel);
+  auto *kernel = cast<Kernel>(handle);
   if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!gx || !gy || !gz) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (x == 0 || y == 0 || z == 0) return ZE_RESULT_ERROR_INVALID_GLOBAL_WIDTH_DIMENSION;
@@ -2290,7 +2249,7 @@ ze_result_t ZE_APICALL kernelSuggest(ze_kernel_handle_t handle, uint32_t x, uint
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL kernelArgument(ze_kernel_handle_t handle, uint32_t index, size_t size, const void *value) {
-  auto *kernel = cast<Kernel>(handle, Kind::Kernel);
+  auto *kernel = cast<Kernel>(handle);
   if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (kernel->arguments.size() <= index) kernel->arguments.resize(index + 1);
   const auto *bytes = static_cast<const uint8_t *>(value);
@@ -2305,7 +2264,7 @@ ze_result_t ZE_APICALL kernelArgument(ze_kernel_handle_t handle, uint32_t index,
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL kernelProperties(ze_kernel_handle_t handle, ze_kernel_properties_t *properties) {
-  auto *kernel = cast<Kernel>(handle, Kind::Kernel);
+  auto *kernel = cast<Kernel>(handle);
   if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   properties->numKernelArgs = static_cast<uint32_t>(kernel->parameters.size());
@@ -2335,26 +2294,25 @@ ze_result_t ZE_APICALL kernelProperties(ze_kernel_handle_t handle, ze_kernel_pro
 }
 
 ze_result_t ZE_APICALL kernelSetIndirect(ze_kernel_handle_t handle, ze_kernel_indirect_access_flags_t flags) {
-  auto *kernel = cast<Kernel>(handle, Kind::Kernel);
+  auto *kernel = cast<Kernel>(handle);
   if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   kernel->indirect = flags;
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL kernelGetIndirect(ze_kernel_handle_t handle, ze_kernel_indirect_access_flags_t *flags) {
-  auto *kernel = cast<Kernel>(handle, Kind::Kernel);
+  auto *kernel = cast<Kernel>(handle);
   if (!kernel || !flags) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   *flags = kernel->indirect;
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL kernelSourceAttributes(ze_kernel_handle_t handle, uint32_t *size, char **attributes) {
-  auto *kernel = cast<Kernel>(handle, Kind::Kernel);
+  auto *kernel = cast<Kernel>(handle);
   if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!size) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  auto state = remoteExecution();
-  if (state.mode != ClientMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
-  auto described = state.client->call(DescribeKernel{ProgramId{static_cast<int64_t>(kernel->module->programId)}, kernel->name});
+  if (remote.mode() != ClientMode::Ready) return ZE_RESULT_ERROR_DEVICE_LOST;
+  auto described = remote.client()->call(DescribeKernel{ProgramId{static_cast<int64_t>(kernel->module->programId)}, kernel->name});
   if (!described) {
-    rememberRemoteError(state, remoteError(state));
+    recordRemoteError(remote.error());
     return ZE_RESULT_ERROR_DEVICE_LOST;
   }
   const auto &metadata = described.value();
@@ -2383,7 +2341,7 @@ ze_result_t ZE_APICALL kernelSourceAttributes(ze_kernel_handle_t handle, uint32_
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL kernelName(ze_kernel_handle_t handle, size_t *size, char *name) {
-  auto *kernel = cast<Kernel>(handle, Kind::Kernel);
+  auto *kernel = cast<Kernel>(handle);
   if (!kernel || !size) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   return gemstone::copyOut(*size, name, size, kernel->name.c_str(), kernel->name.size() + 1) ? ZE_RESULT_SUCCESS
                                                                                              : ZE_RESULT_ERROR_INVALID_SIZE;
@@ -2391,11 +2349,13 @@ ze_result_t ZE_APICALL kernelName(ze_kernel_handle_t handle, size_t *size, char 
 
 template <class T> ze_result_t emptyTable(ze_api_version_t version, T *table) {
   const auto checked = checkVersion(version, table);
-  if (checked == ZE_RESULT_SUCCESS) gemstone_levelzero_ddi::clear(table);
+  if (checked == ZE_RESULT_SUCCESS) *table = {};
   return checked;
 }
 
 } // namespace
+
+gemstone::CommandQueue &gemstone::levelzero::commandQueue() { return scheduler(); }
 
 extern "C" ZE_DLLEXPORT ze_result_t ZE_APICALL zeKernelSetGlobalOffsetExp(ze_kernel_handle_t handle, uint32_t x, uint32_t y, uint32_t z) {
   return kernelGlobalOffset(handle, x, y, z);
@@ -2478,9 +2438,9 @@ table->pfnImmediateAppendCommandListsWithParameters = [](ze_command_list_handle_
   return listImmediateAppendCommandLists(listHandle, count, lists, signal, waitCount, waits);
 };
 table->pfnHostSynchronize = [](ze_command_list_handle_t handle, uint64_t timeout) {
-  auto *list = cast<CommandList>(handle, Kind::List);
+  auto *list = cast<CommandList>(handle);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
-  return list->waitFor(timeout);
+  return list->async.waitFor(timeout);
 };
 TABLE_END
 TABLE_BEGIN(zeGetMemProcAddrTable, ze_mem_dditable_t);

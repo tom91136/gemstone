@@ -1,4 +1,4 @@
-/* Generated from GenerateVulkanAdapter. Regenerate with: sbt codegen */
+/* Generated from the official API manifest format 6. Regenerate with: sbt codegen */
 #include <cstdlib>
 #include <vulkan/vulkan.h>
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkAcquireDrmDisplayEXT(VkPhysicalDevice, int32_t, VkDisplayKHR) { return VK_ERROR_FEATURE_NOT_PRESENT; }

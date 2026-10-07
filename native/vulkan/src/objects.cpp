@@ -10,9 +10,9 @@
 #include "environment_keys.hpp"
 #include "resources.hpp"
 
-namespace gemstone::vulkan::adapter {
-VkResult impl_vkAllocateMemory(VkDevice, const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *, VkDeviceMemory *memory) {
-  if (!info || !memory || info->memoryTypeIndex != 0 || info->allocationSize > maxAllocationSize) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+namespace gemstone::vulkan {
+VkResult implVkAllocateMemory(VkDevice, const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *, VkDeviceMemory *memory) {
+  if (!info || !memory || info->memoryTypeIndex != 0 || info->allocationSize > MaxAllocationSize) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
   std::unique_ptr<Memory> object;
   try {
     object = std::make_unique<Memory>(static_cast<size_t>(std::max<VkDeviceSize>(1, info->allocationSize)));
@@ -25,7 +25,7 @@ VkResult impl_vkAllocateMemory(VkDevice, const VkMemoryAllocateInfo *info, const
   return VK_SUCCESS;
 }
 
-void impl_vkFreeMemory(VkDevice, VkDeviceMemory memory, const VkAllocationCallbacks *) {
+void implVkFreeMemory(VkDevice, VkDeviceMemory memory, const VkAllocationCallbacks *) {
   {
     std::lock_guard lock(stateMutex);
     memories.erase(memory);
@@ -33,14 +33,14 @@ void impl_vkFreeMemory(VkDevice, VkDeviceMemory memory, const VkAllocationCallba
   deleteHandle(memory);
 }
 
-void impl_vkGetDeviceMemoryCommitment(VkDevice, VkDeviceMemory memory, VkDeviceSize *committed) {
+void implVkGetDeviceMemoryCommitment(VkDevice, VkDeviceMemory memory, VkDeviceSize *committed) {
   if (!committed) return;
   std::lock_guard lock(stateMutex);
   const auto found = memories.find(memory);
   *committed = found == memories.end() ? 0 : found->second->bytes.size();
 }
 
-VkResult impl_vkMapMemory(VkDevice, VkDeviceMemory memory, VkDeviceSize offset, VkDeviceSize size, VkMemoryMapFlags, void **data) {
+VkResult implVkMapMemory(VkDevice, VkDeviceMemory memory, VkDeviceSize offset, VkDeviceSize size, VkMemoryMapFlags, void **data) {
   if (!data) return VK_ERROR_MEMORY_MAP_FAILED;
   std::lock_guard lock(stateMutex);
   const auto it = memories.find(memory);
@@ -51,12 +51,12 @@ VkResult impl_vkMapMemory(VkDevice, VkDeviceMemory memory, VkDeviceSize offset, 
   return VK_SUCCESS;
 }
 
-void impl_vkUnmapMemory(VkDevice, VkDeviceMemory) {}
+void implVkUnmapMemory(VkDevice, VkDeviceMemory) {}
 
-VkResult impl_vkFlushMappedMemoryRanges(VkDevice, uint32_t, const VkMappedMemoryRange *) { return VK_SUCCESS; }
-VkResult impl_vkInvalidateMappedMemoryRanges(VkDevice, uint32_t, const VkMappedMemoryRange *) { return VK_SUCCESS; }
+VkResult implVkFlushMappedMemoryRanges(VkDevice, uint32_t, const VkMappedMemoryRange *) { return VK_SUCCESS; }
+VkResult implVkInvalidateMappedMemoryRanges(VkDevice, uint32_t, const VkMappedMemoryRange *) { return VK_SUCCESS; }
 
-VkResult impl_vkCreateBuffer(VkDevice, const VkBufferCreateInfo *info, const VkAllocationCallbacks *, VkBuffer *buffer) {
+VkResult implVkCreateBuffer(VkDevice, const VkBufferCreateInfo *info, const VkAllocationCallbacks *, VkBuffer *buffer) {
   if (!info || !buffer || info->size == 0) return VK_ERROR_INITIALIZATION_FAILED;
   *buffer = makeHandle<VkBuffer>();
   std::lock_guard lock(stateMutex);
@@ -64,9 +64,9 @@ VkResult impl_vkCreateBuffer(VkDevice, const VkBufferCreateInfo *info, const VkA
   return VK_SUCCESS;
 }
 
-VkResult impl_vkCreateBufferView(VkDevice, const VkBufferViewCreateInfo *info, const VkAllocationCallbacks *, VkBufferView *view) {
+VkResult implVkCreateBufferView(VkDevice, const VkBufferViewCreateInfo *info, const VkAllocationCallbacks *, VkBufferView *view) {
   if (!info || !view) return VK_ERROR_INITIALIZATION_FAILED;
-  if (!storageColorFormat(info->format) && info->format != VK_FORMAT_B8G8R8A8_UNORM) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+  if (!storageColourFormat(info->format) && info->format != VK_FORMAT_B8G8R8A8_UNORM) return VK_ERROR_FORMAT_NOT_SUPPORTED;
   std::lock_guard lock(stateMutex);
   const auto buffer = buffers.find(info->buffer);
   if (buffer == buffers.end() || info->offset >= buffer->second.size) return VK_ERROR_INITIALIZATION_FAILED;
@@ -78,12 +78,12 @@ VkResult impl_vkCreateBufferView(VkDevice, const VkBufferViewCreateInfo *info, c
   bufferViews.emplace(*view, BufferView{info->buffer, info->format, info->offset, range});
   return VK_SUCCESS;
 }
-void impl_vkDestroyBufferView(VkDevice, VkBufferView view, const VkAllocationCallbacks *) {
+void implVkDestroyBufferView(VkDevice, VkBufferView view, const VkAllocationCallbacks *) {
   std::lock_guard lock(stateMutex);
   bufferViews.erase(view);
   deleteHandle(view);
 }
-void impl_vkDestroyBuffer(VkDevice, VkBuffer buffer, const VkAllocationCallbacks *) {
+void implVkDestroyBuffer(VkDevice, VkBuffer buffer, const VkAllocationCallbacks *) {
   {
     std::lock_guard lock(stateMutex);
     buffers.erase(buffer);
@@ -91,7 +91,7 @@ void impl_vkDestroyBuffer(VkDevice, VkBuffer buffer, const VkAllocationCallbacks
   deleteHandle(buffer);
 }
 
-void impl_vkGetBufferMemoryRequirements(VkDevice, VkBuffer buffer, VkMemoryRequirements *requirements) {
+void implVkGetBufferMemoryRequirements(VkDevice, VkBuffer buffer, VkMemoryRequirements *requirements) {
   if (!requirements) return;
   std::lock_guard lock(stateMutex);
   const auto it = buffers.find(buffer);
@@ -101,20 +101,15 @@ void impl_vkGetBufferMemoryRequirements(VkDevice, VkBuffer buffer, VkMemoryRequi
   requirements->memoryTypeBits = 1;
 }
 
-void impl_vkGetBufferMemoryRequirements2(VkDevice device, const VkBufferMemoryRequirementsInfo2 *info,
-                                         VkMemoryRequirements2 *requirements) {
+void implVkGetBufferMemoryRequirements2(VkDevice device, const VkBufferMemoryRequirementsInfo2 *info, VkMemoryRequirements2 *requirements) {
   if (info && requirements) {
     vkGetBufferMemoryRequirements(device, info->buffer, &requirements->memoryRequirements);
-    for (auto next = static_cast<VkBaseOutStructure *>(requirements->pNext); next; next = next->pNext)
-      if (next->sType == VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS) {
-        auto *dedicated = reinterpret_cast<VkMemoryDedicatedRequirements *>(next);
-        dedicated->prefersDedicatedAllocation = VK_FALSE;
-        dedicated->requiresDedicatedAllocation = VK_FALSE;
-      }
+    if (auto *dedicated = findChained<VkMemoryDedicatedRequirements>(requirements->pNext, VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS))
+      dedicated->prefersDedicatedAllocation = dedicated->requiresDedicatedAllocation = VK_FALSE;
   }
 }
 
-VkResult impl_vkBindBufferMemory(VkDevice, VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize offset) {
+VkResult implVkBindBufferMemory(VkDevice, VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize offset) {
   std::lock_guard lock(stateMutex);
   const auto size = buffers.find(buffer);
   const auto allocation = memories.find(memory);
@@ -125,7 +120,7 @@ VkResult impl_vkBindBufferMemory(VkDevice, VkBuffer buffer, VkDeviceMemory memor
   return VK_SUCCESS;
 }
 
-VkResult impl_vkBindBufferMemory2(VkDevice device, uint32_t count, const VkBindBufferMemoryInfo *infos) {
+VkResult implVkBindBufferMemory2(VkDevice device, uint32_t count, const VkBindBufferMemoryInfo *infos) {
   if (count && !infos) return VK_ERROR_INITIALIZATION_FAILED;
   for (uint32_t i = 0; i < count; ++i) {
     const auto result = vkBindBufferMemory(device, infos[i].buffer, infos[i].memory, infos[i].memoryOffset);
@@ -134,8 +129,8 @@ VkResult impl_vkBindBufferMemory2(VkDevice device, uint32_t count, const VkBindB
   return VK_SUCCESS;
 }
 
-VkResult impl_vkCreateDescriptorSetLayout(VkDevice, const VkDescriptorSetLayoutCreateInfo *info, const VkAllocationCallbacks *,
-                                          VkDescriptorSetLayout *layout) {
+VkResult implVkCreateDescriptorSetLayout(VkDevice, const VkDescriptorSetLayoutCreateInfo *info, const VkAllocationCallbacks *,
+                                         VkDescriptorSetLayout *layout) {
   if (!info || !layout || (info->bindingCount && !info->pBindings)) return VK_ERROR_INITIALIZATION_FAILED;
   DescriptorLayout bindings;
   if (info->bindingCount) bindings.assign(info->pBindings, info->pBindings + info->bindingCount);
@@ -153,21 +148,21 @@ VkResult impl_vkCreateDescriptorSetLayout(VkDevice, const VkDescriptorSetLayoutC
   descriptorLayouts.emplace(*layout, std::move(bindings));
   return VK_SUCCESS;
 }
-void impl_vkDestroyDescriptorSetLayout(VkDevice, VkDescriptorSetLayout layout, const VkAllocationCallbacks *) {
+void implVkDestroyDescriptorSetLayout(VkDevice, VkDescriptorSetLayout layout, const VkAllocationCallbacks *) {
   std::lock_guard lock(stateMutex);
   descriptorLayouts.erase(layout);
   deleteHandle(layout);
 }
 
-VkResult impl_vkCreateDescriptorPool(VkDevice, const VkDescriptorPoolCreateInfo *info, const VkAllocationCallbacks *,
-                                     VkDescriptorPool *pool) {
+VkResult implVkCreateDescriptorPool(VkDevice, const VkDescriptorPoolCreateInfo *info, const VkAllocationCallbacks *,
+                                    VkDescriptorPool *pool) {
   if (!info || !pool || info->maxSets == 0) return VK_ERROR_INITIALIZATION_FAILED;
   *pool = makeHandle<VkDescriptorPool>();
   std::lock_guard lock(stateMutex);
   descriptorPools.emplace(*pool, DescriptorPoolState{info->maxSets, {}});
   return VK_SUCCESS;
 }
-void impl_vkDestroyDescriptorPool(VkDevice, VkDescriptorPool pool, const VkAllocationCallbacks *) {
+void implVkDestroyDescriptorPool(VkDevice, VkDescriptorPool pool, const VkAllocationCallbacks *) {
   {
     std::lock_guard lock(stateMutex);
     const auto found = descriptorPools.find(pool);
@@ -181,7 +176,7 @@ void impl_vkDestroyDescriptorPool(VkDevice, VkDescriptorPool pool, const VkAlloc
   }
   deleteHandle(pool);
 }
-VkResult impl_vkResetDescriptorPool(VkDevice, VkDescriptorPool pool, VkDescriptorPoolResetFlags) {
+VkResult implVkResetDescriptorPool(VkDevice, VkDescriptorPool pool, VkDescriptorPoolResetFlags) {
   std::lock_guard lock(stateMutex);
   const auto found = descriptorPools.find(pool);
   if (found == descriptorPools.end()) return VK_ERROR_INITIALIZATION_FAILED;
@@ -193,7 +188,7 @@ VkResult impl_vkResetDescriptorPool(VkDevice, VkDescriptorPool pool, VkDescripto
   return VK_SUCCESS;
 }
 
-VkResult impl_vkAllocateDescriptorSets(VkDevice, const VkDescriptorSetAllocateInfo *info, VkDescriptorSet *sets) {
+VkResult implVkAllocateDescriptorSets(VkDevice, const VkDescriptorSetAllocateInfo *info, VkDescriptorSet *sets) {
   if (!info || (info->descriptorSetCount && !sets)) return VK_ERROR_INITIALIZATION_FAILED;
   std::lock_guard lock(stateMutex);
   const auto pool = descriptorPools.find(info->descriptorPool);
@@ -210,7 +205,7 @@ VkResult impl_vkAllocateDescriptorSets(VkDevice, const VkDescriptorSetAllocateIn
   }
   return VK_SUCCESS;
 }
-VkResult impl_vkFreeDescriptorSets(VkDevice, VkDescriptorPool pool, uint32_t count, const VkDescriptorSet *sets) {
+VkResult implVkFreeDescriptorSets(VkDevice, VkDescriptorPool pool, uint32_t count, const VkDescriptorSet *sets) {
   if (count && !sets) return VK_ERROR_INITIALIZATION_FAILED;
   std::lock_guard lock(stateMutex);
   const auto owner = descriptorPools.find(pool);
@@ -223,29 +218,28 @@ VkResult impl_vkFreeDescriptorSets(VkDevice, VkDescriptorPool pool, uint32_t cou
   }
   return VK_SUCCESS;
 }
-void impl_vkUpdateDescriptorSets(VkDevice, uint32_t writeCount, const VkWriteDescriptorSet *writes, uint32_t copyCount,
-                                 const VkCopyDescriptorSet *copies) {
+void implVkUpdateDescriptorSets(VkDevice, uint32_t writeCount, const VkWriteDescriptorSet *writes, uint32_t copyCount,
+                                const VkCopyDescriptorSet *copies) {
   std::lock_guard lock(stateMutex);
   descriptorSets.update(writeCount, writes, copyCount, copies);
 }
 
-VkResult impl_vkCreatePipelineLayout(VkDevice, const VkPipelineLayoutCreateInfo *, const VkAllocationCallbacks *,
-                                     VkPipelineLayout *layout) {
+VkResult implVkCreatePipelineLayout(VkDevice, const VkPipelineLayoutCreateInfo *, const VkAllocationCallbacks *, VkPipelineLayout *layout) {
   if (!layout) return VK_ERROR_INITIALIZATION_FAILED;
   *layout = makeHandle<VkPipelineLayout>();
   return VK_SUCCESS;
 }
-void impl_vkDestroyPipelineLayout(VkDevice, VkPipelineLayout layout, const VkAllocationCallbacks *) { deleteHandle(layout); }
+void implVkDestroyPipelineLayout(VkDevice, VkPipelineLayout layout, const VkAllocationCallbacks *) { deleteHandle(layout); }
 
-VkResult impl_vkCreatePipelineCache(VkDevice, const VkPipelineCacheCreateInfo *, const VkAllocationCallbacks *, VkPipelineCache *cache) {
+VkResult implVkCreatePipelineCache(VkDevice, const VkPipelineCacheCreateInfo *, const VkAllocationCallbacks *, VkPipelineCache *cache) {
   if (!cache) return VK_ERROR_INITIALIZATION_FAILED;
   *cache = makeHandle<VkPipelineCache>();
   return VK_SUCCESS;
 }
-void impl_vkDestroyPipelineCache(VkDevice, VkPipelineCache cache, const VkAllocationCallbacks *) { deleteHandle(cache); }
-VkResult impl_vkGetPipelineCacheData(VkDevice, VkPipelineCache, size_t *size, void *data) {
+void implVkDestroyPipelineCache(VkDevice, VkPipelineCache cache, const VkAllocationCallbacks *) { deleteHandle(cache); }
+VkResult implVkGetPipelineCacheData(VkDevice, VkPipelineCache, size_t *size, void *data) {
   if (!size) return VK_ERROR_INITIALIZATION_FAILED;
-  // There is no serialized compiled payload yet. Even an empty cache carries
+  // There is no serialised compiled payload yet. Even an empty cache carries
   // the standard little-endian header so applications can validate compatibility.
   std::array<uint8_t, 16 + VK_UUID_SIZE> header{};
   VkPhysicalDeviceProperties properties{};
@@ -268,12 +262,12 @@ VkResult impl_vkGetPipelineCacheData(VkDevice, VkPipelineCache, size_t *size, vo
   *size = header.size();
   return VK_SUCCESS;
 }
-VkResult impl_vkMergePipelineCaches(VkDevice, VkPipelineCache, uint32_t, const VkPipelineCache *) {
+VkResult implVkMergePipelineCaches(VkDevice, VkPipelineCache, uint32_t, const VkPipelineCache *) {
   // Empty caches have no compiled entries to merge.
   return VK_SUCCESS;
 }
 
-VkResult impl_vkCreateShaderModule(VkDevice, const VkShaderModuleCreateInfo *info, const VkAllocationCallbacks *, VkShaderModule *module) {
+VkResult implVkCreateShaderModule(VkDevice, const VkShaderModuleCreateInfo *info, const VkAllocationCallbacks *, VkShaderModule *module) {
   if (!info || !module || !info->pCode || info->codeSize < 20 || info->codeSize % sizeof(uint32_t) != 0) return VK_ERROR_INVALID_SHADER_NV;
   *module = makeHandle<VkShaderModule>();
   const auto *bytes = reinterpret_cast<const uint8_t *>(info->pCode);
@@ -281,7 +275,7 @@ VkResult impl_vkCreateShaderModule(VkDevice, const VkShaderModuleCreateInfo *inf
   modules[*module] = {bytes, bytes + info->codeSize};
   return VK_SUCCESS;
 }
-void impl_vkDestroyShaderModule(VkDevice, VkShaderModule module, const VkAllocationCallbacks *) {
+void implVkDestroyShaderModule(VkDevice, VkShaderModule module, const VkAllocationCallbacks *) {
   {
     std::lock_guard lock(stateMutex);
     modules.erase(module);
@@ -289,8 +283,8 @@ void impl_vkDestroyShaderModule(VkDevice, VkShaderModule module, const VkAllocat
   deleteHandle(module);
 }
 
-VkResult impl_vkCreateComputePipelines(VkDevice, VkPipelineCache, uint32_t count, const VkComputePipelineCreateInfo *infos,
-                                       const VkAllocationCallbacks *, VkPipeline *output) {
+VkResult implVkCreateComputePipelines(VkDevice, VkPipelineCache, uint32_t count, const VkComputePipelineCreateInfo *infos,
+                                      const VkAllocationCallbacks *, VkPipeline *output) {
   if ((count && (!infos || !output))) return VK_ERROR_INITIALIZATION_FAILED;
   std::lock_guard lock(stateMutex);
   for (uint32_t i = 0; i < count; ++i) {
@@ -299,8 +293,7 @@ VkResult impl_vkCreateComputePipelines(VkDevice, VkPipelineCache, uint32_t count
       if (gemstone::traceEnabled("vulkan")) std::fprintf(stderr, "Gemstone Vulkan: compute pipeline has no shader module or entry\n");
       return VK_ERROR_INVALID_SHADER_NV;
     }
-    auto prepared =
-        gemstone::vulkan::prepareShader(module->second, infos[i].stage.pName, ShaderStageKind::Compute, infos[i].stage.pSpecializationInfo);
+    auto prepared = prepareShader(module->second, infos[i].stage.pName, gx::ShaderStageKind::Compute, infos[i].stage.pSpecializationInfo);
     if (!prepared) return VK_ERROR_INVALID_SHADER_NV;
     if (const char *directory = gemstone::environment::value(gemstone::environment::VulkanDump)) {
       static std::atomic<unsigned> serial{0};
@@ -317,7 +310,7 @@ VkResult impl_vkCreateComputePipelines(VkDevice, VkPipelineCache, uint32_t count
   return VK_SUCCESS;
 }
 
-void impl_vkDestroyPipeline(VkDevice, VkPipeline pipeline, const VkAllocationCallbacks *) {
+void implVkDestroyPipeline(VkDevice, VkPipeline pipeline, const VkAllocationCallbacks *) {
   {
     std::lock_guard lock(stateMutex);
     pipelines.erase(pipeline);
@@ -326,8 +319,8 @@ void impl_vkDestroyPipeline(VkDevice, VkPipeline pipeline, const VkAllocationCal
   deleteHandle(pipeline);
 }
 
-VkResult impl_vkCreateDescriptorUpdateTemplate(VkDevice, const VkDescriptorUpdateTemplateCreateInfo *info, const VkAllocationCallbacks *,
-                                               VkDescriptorUpdateTemplate *handle) {
+VkResult implVkCreateDescriptorUpdateTemplate(VkDevice, const VkDescriptorUpdateTemplateCreateInfo *info, const VkAllocationCallbacks *,
+                                              VkDescriptorUpdateTemplate *handle) {
   if (!info || !handle || (info->descriptorUpdateEntryCount && !info->pDescriptorUpdateEntries)) return VK_ERROR_INITIALIZATION_FAILED;
   if (info->templateType != VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_DESCRIPTOR_SET) return VK_ERROR_FEATURE_NOT_PRESENT;
   std::vector<VkDescriptorUpdateTemplateEntry> entries;
@@ -346,13 +339,13 @@ VkResult impl_vkCreateDescriptorUpdateTemplate(VkDevice, const VkDescriptorUpdat
   descriptorTemplates.emplace(*handle, std::move(entries));
   return VK_SUCCESS;
 }
-void impl_vkDestroyDescriptorUpdateTemplate(VkDevice, VkDescriptorUpdateTemplate handle, const VkAllocationCallbacks *) {
+void implVkDestroyDescriptorUpdateTemplate(VkDevice, VkDescriptorUpdateTemplate handle, const VkAllocationCallbacks *) {
   std::lock_guard lock(stateMutex);
   descriptorTemplates.erase(handle);
   deleteHandle(handle);
 }
-void impl_vkUpdateDescriptorSetWithTemplate(VkDevice, VkDescriptorSet set, VkDescriptorUpdateTemplate handle, const void *data) {
+void implVkUpdateDescriptorSetWithTemplate(VkDevice, VkDescriptorSet set, VkDescriptorUpdateTemplate handle, const void *data) {
   std::lock_guard lock(stateMutex);
   descriptorSets.updateTemplate(set, descriptorTemplates.at(handle), data);
 }
-} // namespace gemstone::vulkan::adapter
+} // namespace gemstone::vulkan

@@ -3,20 +3,20 @@
 #include <array>
 #include <vector>
 
-#include "runtime.hpp"
+#include "descriptor.hpp"
 #include "shader.hpp"
 #include <vulkan/vulkan.h>
 
 namespace gemstone::vulkan {
-inline constexpr uint32_t maxColorAttachments = 8;
+inline constexpr uint32_t MaxColorAttachments = 8;
 struct GraphicsCommandState {
   VkPipeline pipeline = VK_NULL_HANDLE;
   std::array<VkDescriptorSet, MaxBoundDescriptorSets> descriptors{};
-  std::map<GemstoneVulkanDescriptorSlot, uint32_t> dynamicOffsets{};
+  std::map<DescriptorSlot, uint32_t> dynamicOffsets{};
   VkBuffer indexBuffer = VK_NULL_HANDLE;
   VkDeviceSize indexOffset = 0;
   VkIndexType indexType = VK_INDEX_TYPE_UINT16;
-  std::array<uint8_t, execution::GraphicsPushConstantBytes> vertexPush{}, fragmentPush{};
+  std::array<uint8_t, gx::GraphicsPushConstantBytes> vertexPush{}, fragmentPush{};
   std::array<VkBuffer, 16> vertexBuffers{};
   std::array<VkDeviceSize, 16> vertexOffsets{};
   VkViewport viewport{};
@@ -28,19 +28,19 @@ struct GraphicsCommandState {
   std::array<uint32_t, 2> stencilCompareMask{}, stencilWriteMask{}, stencilReference{};
 };
 struct GraphicsPipeline {
-  execution::PreparedShader vertex, fragment;
+  gx::PreparedShader vertex, fragment;
   std::vector<VkVertexInputBindingDescription> bindings;
-  std::vector<execution::GraphicsVertexAttribute> attributes;
+  std::vector<gx::GraphicsVertexAttribute> attributes;
   VkViewport viewport;
   VkRect2D scissor;
-  execution::GraphicsRasterState raster{};
-  execution::GraphicsDepthStencil depthStencil{};
-  std::vector<execution::GraphicsBlend> blends;
-  execution::GraphicsColor blendConstants{};
+  gx::GraphicsRasterState raster{};
+  gx::GraphicsDepthStencil depthStencil{};
+  std::vector<gx::GraphicsBlend> blends;
+  gx::GraphicsColour blendConstants{};
   bool dynamicDepthBias = false, dynamicBlendConstants = false;
   bool dynamicViewport = false, dynamicScissor = false, dynamicDepthBounds = false;
   bool dynamicStencilCompareMask = false, dynamicStencilWriteMask = false, dynamicStencilReference = false;
-  std::vector<uint32_t> colorAttachments;
+  std::vector<uint32_t> colourAttachments;
   uint32_t depthAttachment = VK_ATTACHMENT_UNUSED;
 };
 struct Image {
@@ -71,7 +71,7 @@ struct AttachmentReference {
 struct Subpass {
   uint32_t viewMask = 0;
   std::vector<AttachmentReference> inputs;
-  std::vector<AttachmentReference> colors;
+  std::vector<AttachmentReference> colours;
   std::vector<AttachmentReference> resolves;
   AttachmentReference depth{VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_UNDEFINED};
   AttachmentReference depthResolve;

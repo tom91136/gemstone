@@ -45,7 +45,7 @@ object ImageDescriptorABI {
         "Unnormalized"  -> 4L,
         "CompareEnable" -> 5L,
         "CompareOp"     -> 6L,
-        "BorderColor"   -> 7L,
+        "BorderColour"  -> 7L,
         "MipLodBias"    -> 8L,
         "MinLod"        -> 9L,
         "MaxLod"        -> 10L,
@@ -77,7 +77,7 @@ object ImageDescriptorABI {
     )
   ) ++ GraphicsEnums.descriptorGroups
 
-  def scalaSource(version: ScalaPackageVersion): String = {
+  def scalaSource: String = {
     val body = groups.map { case (group, tpe, values) =>
       val fields = values.map { case (name, value) =>
         val suffix = if (tpe == "Long") "L" else ""
@@ -86,7 +86,7 @@ object ImageDescriptorABI {
       s"  object $group {\n$fields\n  }"
     }.mkString("\n\n")
     GeneratedHeader.scala("from Gemstone ImageDescriptorABI") +
-      s"package net.kurobako.gemstone.isa.spirv.${version.raw}\n\n${GeneratedHeader.annotation()}object ImageDescriptor {\n$body\n}\n"
+      s"package net.kurobako.gemstone.isa.spirv\n\n${GeneratedHeader.annotation()}object ImageDescriptor {\n$body\n}\n"
   }
 
   def nativeSource: String = {

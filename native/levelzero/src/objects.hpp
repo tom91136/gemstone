@@ -1,17 +1,12 @@
-#ifndef GEMSTONE_LEVELZERO_OBJECTS_HPP
-#define GEMSTONE_LEVELZERO_OBJECTS_HPP
+#pragma once
 
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <condition_variable>
-#include <deque>
 #include <functional>
-#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -20,19 +15,18 @@
 
 #include <ze_api.h>
 
-#include "handles.hpp"
+#include <gemstone/command_queue.hpp>
+#include <gemstone/live_handles.hpp>
 
 namespace gemstone::levelzero {
 
 enum class Kind : uint32_t { Driver, Device, Context, Queue, List, EventPool, Event, Fence, Module, BuildLog, Kernel, PhysicalMemory };
 
-inline gemstone::rpc::LiveHandles liveHandles;
+inline gemstone::LiveHandles<Kind> liveHandles;
 
 struct Handle {
-  explicit Handle(Kind value) : kind(value) { liveHandles.insert(this); }
+  explicit Handle(Kind kind) { liveHandles.insert(this, kind); }
   virtual ~Handle() { liveHandles.erase(this); }
-  uint64_t magic = gemstone::rpc::HandleMagic;
-  Kind kind;
   std::atomic<uint32_t> users{0};
   std::atomic<bool> destroyRequested{false};
   std::mutex usersMutex;
@@ -42,34 +36,34 @@ struct Handle {
 template <class T> class HandleUse {
 public:
   HandleUse() = default;
-  explicit HandleUse(T *value) : value_(value) {
-    if (value_) value_->users.fetch_add(1, std::memory_order_relaxed);
+  explicit HandleUse(T *value) : handle(value) {
+    if (handle) handle->users.fetch_add(1, std::memory_order_relaxed);
   }
-  HandleUse(const HandleUse &other) : HandleUse(other.value_) {}
-  HandleUse(HandleUse &&other) noexcept : value_(std::exchange(other.value_, nullptr)) {}
+  HandleUse(const HandleUse &other) : HandleUse(other.handle) {}
+  HandleUse(HandleUse &&other) noexcept : handle(std::exchange(other.handle, nullptr)) {}
   HandleUse &operator=(HandleUse other) noexcept {
     swap(other);
     return *this;
   }
   ~HandleUse() {
-    if (!value_) return;
+    if (!handle) return;
     bool reclaim = false;
     {
-      std::lock_guard lock(value_->usersMutex);
-      const bool last = value_->users.fetch_sub(1, std::memory_order_acq_rel) == 1;
-      reclaim = last && value_->destroyRequested.load(std::memory_order_acquire);
+      std::lock_guard lock(handle->usersMutex);
+      const bool last = handle->users.fetch_sub(1, std::memory_order_acq_rel) == 1;
+      reclaim = last && handle->destroyRequested.load(std::memory_order_acquire);
       // A waiter may destroy the handle as soon as this lock is released.
-      value_->usersChanged.notify_all();
+      handle->usersChanged.notify_all();
     }
-    if (reclaim) delete value_;
+    if (reclaim) delete handle;
   }
-  T *get() const { return value_; }
-  T *operator->() const { return value_; }
-  explicit operator bool() const { return value_; }
-  void swap(HandleUse &other) noexcept { std::swap(value_, other.value_); }
+  T *get() const { return handle; }
+  T *operator->() const { return handle; }
+  explicit operator bool() const { return handle; }
+  void swap(HandleUse &other) noexcept { std::swap(handle, other.handle); }
 
 private:
-  T *value_ = nullptr;
+  T *handle = nullptr;
 };
 
 template <class T> ze_result_t destroyHandle(T *value) {
@@ -83,24 +77,29 @@ template <class T> ze_result_t destroyHandle(T *value) {
 }
 
 struct Driver final : Handle {
-  Driver() : Handle(Kind::Driver) {}
+  static constexpr Kind HandleKind = Kind::Driver;
+  Driver() : Handle(HandleKind) {}
 };
 struct Device final : Handle {
-  Device() : Handle(Kind::Device) {}
+  static constexpr Kind HandleKind = Kind::Device;
+  Device() : Handle(HandleKind) {}
 };
 inline std::atomic<uint64_t> nextContextId{1};
 struct Context final : Handle {
-  Context() : Handle(Kind::Context), id(nextContextId.fetch_add(1, std::memory_order_relaxed)) {}
+  static constexpr Kind HandleKind = Kind::Context;
+  Context() : Handle(HandleKind), id(nextContextId.fetch_add(1, std::memory_order_relaxed)) {}
   uint64_t id;
 };
 struct EventPool final : Handle {
-  EventPool(Context *contextValue, ze_event_pool_flags_t value) : Handle(Kind::EventPool), contextId(contextValue->id), flags(value) {}
+  static constexpr Kind HandleKind = Kind::EventPool;
+  EventPool(Context *contextValue, ze_event_pool_flags_t value) : Handle(HandleKind), contextId(contextValue->id), flags(value) {}
   uint64_t contextId;
   ze_event_pool_flags_t flags;
 };
 
 struct Event final : Handle {
-  explicit Event(EventPool *poolValue = nullptr) : Handle(Kind::Event), pool(poolValue) {}
+  static constexpr Kind HandleKind = Kind::Event;
+  explicit Event(EventPool *poolValue = nullptr) : Handle(HandleKind), pool(poolValue) {}
   HandleUse<EventPool> pool;
   std::mutex mutex;
   std::condition_variable changed;
@@ -138,138 +137,75 @@ struct RecordedCommand {
   }
 };
 
-/** Drains a `pending` queue on a worker thread, recording the first failure and the completed count. */
-template <class Derived, class Job> struct WorkerLoop {
-  void run() {
-    for (;;) {
-      Job job;
-      {
-        std::unique_lock lock(mutex);
-        changed.wait(lock, [this] { return stopping || !pending.empty(); });
-        if (stopping && pending.empty()) return;
-        job = std::move(pending.front());
-        pending.pop_front();
-      }
+gemstone::CommandQueue &commandQueue();
+
+/** FIFO execution on a shared-pool stream, reporting the first failure; without a stream the owner runs work inline. */
+struct AsyncStream {
+  explicit AsyncStream(bool asynchronous) : stream(asynchronous ? commandQueue().createStream(true) : nullptr) {}
+  ~AsyncStream() {
+    if (!stream) return;
+    commandQueue().wait(commandQueue().snapshot(stream));
+    commandQueue().destroyStream(stream);
+  }
+  AsyncStream(const AsyncStream &) = delete;
+  AsyncStream &operator=(const AsyncStream &) = delete;
+
+  /** `job` receives the first failure so far; its captures are released before the returned ticket completes. */
+  template <class Job> gemstone::CommandQueue::Ticket submit(Job job) {
+    return commandQueue().submit(stream, [this, job = std::move(job)]() mutable {
       ze_result_t result = ZE_RESULT_ERROR_UNKNOWN;
       try {
-        result = static_cast<Derived *>(this)->execute(job);
+        result = job(failure.load(std::memory_order_acquire));
       } catch (...) {
-        result = ZE_RESULT_ERROR_UNKNOWN;
       }
-      {
-        std::lock_guard lock(mutex);
-        if (result != ZE_RESULT_SUCCESS && failure == ZE_RESULT_SUCCESS) failure = result;
-        ++completed;
-      }
-      changed.notify_all();
-    }
+      auto expected = ZE_RESULT_SUCCESS;
+      if (result != ZE_RESULT_SUCCESS) failure.compare_exchange_strong(expected, result, std::memory_order_acq_rel);
+      return 0;
+    });
   }
 
-  /** Waits for the submitted work to drain, honouring `0` (poll) and `UINT64_MAX` (block) timeouts. */
-  ze_result_t waitFor(uint64_t timeout) {
-    if (!worker.joinable()) return ZE_RESULT_SUCCESS;
-    std::unique_lock lock(mutex);
-    const auto target = submitted;
-    const auto finished = [&] { return completed >= target; };
-    if (timeout == 0) {
-      if (!finished()) return ZE_RESULT_NOT_READY;
-    } else if (timeout == std::numeric_limits<uint64_t>::max()) {
-      changed.wait(lock, finished);
-    } else if (!changed.wait_for(
-                   lock, std::chrono::nanoseconds(static_cast<int64_t>(std::min(timeout, uint64_t{std::numeric_limits<int64_t>::max()}))),
-                   finished)) {
-      return ZE_RESULT_NOT_READY;
-    }
-    return failure;
-  }
+  /** Waits for work submitted so far; `0` polls and `UINT64_MAX` blocks. */
+  bool idle(uint64_t timeout) { return !stream || commandQueue().waitFor(commandQueue().snapshot(stream), timeout).has_value(); }
+  ze_result_t waitFor(uint64_t timeout) { return idle(timeout) ? failure.load(std::memory_order_acquire) : ZE_RESULT_NOT_READY; }
 
-  /** Waits until a specific submission has released its job captures. */
-  ze_result_t waitThrough(uint64_t target, uint64_t timeout) {
-    std::unique_lock lock(mutex);
-    const auto finished = [&] { return completed >= target; };
-    if (timeout == 0) {
-      if (!finished()) return ZE_RESULT_NOT_READY;
-    } else if (timeout == std::numeric_limits<uint64_t>::max()) {
-      changed.wait(lock, finished);
-    } else if (!changed.wait_for(
-                   lock, std::chrono::nanoseconds(static_cast<int64_t>(std::min(timeout, uint64_t{std::numeric_limits<int64_t>::max()}))),
-                   finished)) {
-      return ZE_RESULT_NOT_READY;
-    }
-    return ZE_RESULT_SUCCESS;
-  }
-
-  std::mutex mutex;
-  std::condition_variable changed;
-  std::deque<Job> pending;
-  std::thread worker;
-  uint64_t submitted = 0;
-  uint64_t completed = 0;
-  ze_result_t failure = ZE_RESULT_SUCCESS;
-  bool stopping = false;
+  void *const stream;
+  std::atomic<ze_result_t> failure{ZE_RESULT_SUCCESS};
 };
 
-struct CommandList final : Handle, WorkerLoop<CommandList, RecordedCommand> {
+struct CommandList final : Handle {
+  static constexpr Kind HandleKind = Kind::List;
   CommandList(bool immediateValue, Context *contextValue, Device *deviceValue,
               ze_command_queue_mode_t modeValue = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS)
-      : Handle(Kind::List), immediate(immediateValue), context(contextValue), device(deviceValue) {
-    if (immediate && modeValue != ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS) worker = std::thread([this] { run(); });
-  }
-  ~CommandList() override {
-    if (!worker.joinable()) return;
-    {
-      std::lock_guard lock(mutex);
-      stopping = true;
-    }
-    changed.notify_all();
-    worker.join();
-  }
-  ze_result_t execute(RecordedCommand &command) {
-    const auto result = command.execute(failure);
-    command = {};
-    return result;
-  }
+      : Handle(HandleKind), immediate(immediateValue), context(contextValue), device(deviceValue),
+        async(immediate && modeValue != ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS) {}
   bool immediate;
   bool closed = false;
   HandleUse<Context> context;
   Device *device;
   std::vector<RecordedCommand> commands;
+  // Declared last so outstanding work drains before the other members are destroyed.
+  AsyncStream async;
 };
 
-struct Queue final : Handle, WorkerLoop<Queue, std::function<ze_result_t()>> {
+struct Queue final : Handle {
+  static constexpr Kind HandleKind = Kind::Queue;
   Queue(Context *contextValue, Device *deviceValue, const ze_command_queue_desc_t &value)
-      : Handle(Kind::Queue), context(contextValue), device(deviceValue), desc(value) {
-    if (desc.mode != ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS) worker = std::thread([this] { run(); });
-  }
-  ~Queue() override {
-    if (!worker.joinable()) return;
-    {
-      std::lock_guard lock(mutex);
-      stopping = true;
-    }
-    changed.notify_all();
-    worker.join();
-  }
-  ze_result_t execute(std::function<ze_result_t()> &job) {
-    ze_result_t result = ZE_RESULT_ERROR_UNKNOWN;
-    try {
-      result = job();
-    } catch (...) {
-      result = ZE_RESULT_ERROR_UNKNOWN;
-    }
-    job = {};
-    return result;
+      : Handle(HandleKind), context(contextValue), device(deviceValue), desc(value), async(desc.mode != ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS) {
   }
   HandleUse<Context> context;
   Device *device;
   ze_command_queue_desc_t desc;
   std::mutex synchronousMutex;
+  // Declared last so outstanding work drains before the other members are destroyed.
+  AsyncStream async;
 };
 
 struct Fence final : Handle {
-  explicit Fence(Queue *queueValue) : Handle(Kind::Fence), queue(queueValue) {}
+  static constexpr Kind HandleKind = Kind::Fence;
+  explicit Fence(Queue *queueValue) : Handle(HandleKind), queue(queueValue) {}
   HandleUse<Queue> queue;
-  std::atomic<uint64_t> completionSequence{0};
+  // Guarded by `event.mutex`; completes once the submission has released its references.
+  gemstone::CommandQueue::Ticket submission;
   Event event;
   // Reset clears the signal, but a completed submission may still retain the
   // fence while its worker releases internal references.
@@ -278,13 +214,15 @@ struct Fence final : Handle {
 };
 
 struct BuildLog final : Handle {
-  explicit BuildLog(std::string value) : Handle(Kind::BuildLog), text(std::move(value)) {}
+  static constexpr Kind HandleKind = Kind::BuildLog;
+  explicit BuildLog(std::string value) : Handle(HandleKind), text(std::move(value)) {}
   std::string text;
 };
 
 struct Module final : Handle {
+  static constexpr Kind HandleKind = Kind::Module;
   Module(Context *contextValue, std::vector<uint8_t> value, uint64_t programValue, std::string buildFlagsValue = {})
-      : Handle(Kind::Module), context(contextValue), bytes(std::move(value)), programId(programValue),
+      : Handle(HandleKind), context(contextValue), bytes(std::move(value)), programId(programValue),
         buildFlags(std::move(buildFlagsValue)) {}
   HandleUse<Context> context;
   std::vector<uint8_t> bytes;
@@ -307,7 +245,8 @@ struct KernelParameterMetadata {
 };
 
 struct Kernel final : Handle {
-  Kernel(Module *moduleValue, std::string nameValue) : Handle(Kind::Kernel), module(moduleValue), name(std::move(nameValue)) {}
+  static constexpr Kind HandleKind = Kind::Kernel;
+  Kernel(Module *moduleValue, std::string nameValue) : Handle(HandleKind), module(moduleValue), name(std::move(nameValue)) {}
   HandleUse<Module> module;
   std::string name;
   uint32_t groupX = 1;
@@ -356,5 +295,3 @@ struct Allocation {
 };
 
 } // namespace gemstone::levelzero
-
-#endif

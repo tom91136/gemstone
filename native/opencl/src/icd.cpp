@@ -6,7 +6,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <deque>
 #include <functional>
 #include <limits>
 #include <map>
@@ -17,7 +16,6 @@
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -31,6 +29,7 @@
 #include "gemstone_opencl_dispatch.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/copy_out.hpp>
+#include <gemstone/live_handles.hpp>
 #include <gemstone/trace.hpp>
 
 #include "client.hpp"
@@ -48,16 +47,12 @@ using namespace gemstone::execution;
 
 using namespace gemstone::opencl;
 
-gemstone::rpc::LiveHandles liveObjects;
+gemstone::LiveHandles<Kind> liveObjects;
 
-void registerLiveObject(const void *value) { liveObjects.insert(value); }
+template <class T> void registerLiveObject(const T *value) { liveObjects.insert(value, T::ObjectKind); }
 void unregisterLiveObject(const void *value) { liveObjects.erase(value); }
 
-template <class T> T *checked(T *value, Kind kind) {
-  if (!value || !liveObjects.contains(value) || value->header.magic != gemstone::rpc::HandleMagic || value->header.kind != kind)
-    return nullptr;
-  return value;
-}
+template <class T> T *checked(T *value) { return liveObjects.contains(value, T::ObjectKind) ? value : nullptr; }
 
 template <class T> void retain(T *value) { value->header.references.fetch_add(1, std::memory_order_relaxed); }
 
@@ -72,20 +67,32 @@ std::mutex eventsMutex;
 std::condition_variable eventsCondition;
 std::map<uintptr_t, std::shared_ptr<Allocation>> allocations;
 std::map<uintptr_t, std::shared_ptr<BufferMapping>> svmMappings;
-std::once_flag dispatchInitialized;
+std::once_flag dispatchInitialised;
 cl_icd_dispatch dispatch{};
 _cl_platform_id platform;
 _cl_device_id device;
 std::atomic_uint64_t nextContextIdentity{1};
+bool schedulerStopping = false;
 
-constexpr const char *DeviceExtensionString = "cl_khr_icd cl_khr_il_program cl_khr_byte_addressable_store "
-                                              "cl_khr_fp16 cl_khr_fp64 cl_khr_pci_bus_info "
-                                              "cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics "
-                                              "cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics "
-                                              "cl_khr_int64_base_atomics cl_khr_int64_extended_atomics "
-                                              "cl_intel_subgroups cl_intel_spirv_subgroups cl_intel_device_attribute_query "
-                                              "cl_intel_required_subgroup_size "
-                                              "cl_intel_unified_shared_memory";
+// ICD loaders load every installed ICD, so workers start with the first submission. Teardown of layered runtimes may
+// call the ICD after the workers stop, so the queue is never destroyed.
+gemstone::CommandQueue &scheduler() {
+  static auto *const queue = new gemstone::CommandQueue(CL_OUT_OF_RESOURCES);
+  return *queue;
+}
+
+// Constructed with the library, so it stops the workers after teardown registered later and before the state above
+// is destroyed. Jobs must not keep waiting for events the host never completes.
+struct SchedulerShutdown {
+  ~SchedulerShutdown() {
+    {
+      std::lock_guard lock(eventsMutex);
+      schedulerStopping = true;
+    }
+    eventsCondition.notify_all();
+    scheduler().shutdown();
+  }
+} schedulerShutdown;
 
 constexpr cl_name_version DeviceExtensionVersions[] = {{CL_MAKE_VERSION(1, 0, 0), "cl_khr_icd"},
                                                        {CL_MAKE_VERSION(1, 0, 0), "cl_khr_il_program"},
@@ -109,6 +116,15 @@ constexpr cl_name_version DeviceILVersions[] = {{CL_MAKE_VERSION(1, 0, 0), "SPIR
                                                 {CL_MAKE_VERSION(1, 2, 0), "SPIR-V"}, {CL_MAKE_VERSION(1, 3, 0), "SPIR-V"},
                                                 {CL_MAKE_VERSION(1, 4, 0), "SPIR-V"}, {CL_MAKE_VERSION(1, 5, 0), "SPIR-V"},
                                                 {CL_MAKE_VERSION(1, 6, 0), "SPIR-V"}};
+
+const std::string DeviceExtensionString = [] {
+  std::string result;
+  for (const auto &extension : DeviceExtensionVersions) {
+    if (!result.empty()) result += ' ';
+    result += extension.name;
+  }
+  return result;
+}();
 
 const std::string DeviceILVersionString = [] {
   std::string result;
@@ -160,12 +176,6 @@ void notifyEventCallbacks(_cl_event *event) {
   }
   for (const auto &callback : ready)
     callback.function(reinterpret_cast<cl_event>(event), status, callback.user);
-}
-
-const char *remoteError() {
-  thread_local std::string message;
-  message = remote.error();
-  return message.c_str();
 }
 
 bool writeRemote(Client &client, uint64_t id, uint64_t offset, const void *bytes, size_t size) {
@@ -295,23 +305,13 @@ std::shared_ptr<Allocation> allocate(size_t size, cl_int *error, size_t requeste
   auto &state = remote;
   if (state.ready()) {
     std::lock_guard lock(remoteMutex);
-    auto registered = state.client()->call(RegisterAllocation{AllocationKind::Shared, static_cast<int64_t>(size)});
+    const auto registered = registerAllocation(*state.client(), size, base, hostBacked);
     if (!registered) {
-      if (gemstone::traceEnabled("opencl"))
-        std::fprintf(stderr, "Gemstone OpenCL allocation failed: %s\n", registered.error().detail.c_str());
+      if (gemstone::traceEnabled("opencl")) std::fprintf(stderr, "Gemstone OpenCL allocation failed: %s\n", remote.error().c_str());
       if (error) *error = CL_OUT_OF_RESOURCES;
       return {};
     }
-    result->id = static_cast<uint64_t>(registered.value().value);
-    const auto bound = state.client()->call(
-        RegisterAllocationAddress{registered.value(), GuestAddress{static_cast<int64_t>(reinterpret_cast<uintptr_t>(base))}, hostBacked});
-    if (!bound) {
-      if (gemstone::traceEnabled("opencl"))
-        std::fprintf(stderr, "Gemstone OpenCL allocation address failed: %s\n", bound.error().detail.c_str());
-      (void)state.client()->call(ReleaseAllocation{registered.value()});
-      if (error) *error = CL_OUT_OF_RESOURCES;
-      return {};
-    }
+    result->id = static_cast<uint64_t>(registered->value);
   }
   bool inserted = false;
   {
@@ -398,10 +398,10 @@ cl_int outputString(size_t capacity, void *output, size_t *written, const std::s
   return outputBytes(capacity, output, written, value.c_str(), value.size() + 1);
 }
 
-bool validPlatform(cl_platform_id value) { return checked(reinterpret_cast<_cl_platform_id *>(value), Kind::Platform) == &platform; }
-bool validDevice(cl_device_id value) { return checked(reinterpret_cast<_cl_device_id *>(value), Kind::Device) == &device; }
+bool validPlatform(cl_platform_id value) { return checked(value) == &platform; }
+bool validDevice(cl_device_id value) { return checked(value) == &device; }
 
-void initializeDispatch();
+void initialiseDispatch();
 
 size_t kernelCount(const std::string &names) {
   if (names.empty()) return 0;
@@ -468,7 +468,7 @@ bool expandHeaders(const std::string &source, cl_uint count, const cl_program *h
                    std::string *error) {
   *expanded = source;
   for (cl_uint index = 0; index < count; ++index) {
-    auto *header = checked(reinterpret_cast<_cl_program *>(headers[index]), Kind::Program);
+    auto *header = checked(headers[index]);
     if (!header || names[index] == nullptr) {
       if (error) *error = "invalid OpenCL embedded header";
       return false;
@@ -489,60 +489,43 @@ bool expandHeaders(const std::string &source, cl_uint count, const cl_program *h
   return true;
 }
 
-cl_int waitQueue(_cl_command_queue *queue) {
-  if (!queue) return CL_SUCCESS;
-  std::unique_lock lock(queue->pendingMutex);
-  queue->pendingCondition.wait(lock, [queue] { return queue->pendingCommands == 0; });
-  const bool failed = std::exchange(queue->unobservedFailures, size_t{0}) != 0;
-  return failed ? CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST : CL_SUCCESS;
-}
-
-cl_int waitList(_cl_command_queue *queue, cl_uint count, const cl_event *events) {
-  if (count != 0 && !events) return CL_INVALID_EVENT_WAIT_LIST;
-  if (count == 0 && events) return !queue ? CL_INVALID_VALUE : CL_INVALID_EVENT_WAIT_LIST;
-  const auto queueResult = waitQueue(queue);
-  if (queueResult != CL_SUCCESS) return queueResult;
-  std::vector<_cl_event *> checkedEvents;
-  checkedEvents.reserve(count);
-  for (cl_uint index = 0; index < count; ++index) {
-    auto *event = checked(reinterpret_cast<_cl_event *>(events[index]), Kind::Event);
-    if (!event) return !queue ? CL_INVALID_EVENT : CL_INVALID_EVENT_WAIT_LIST;
-    if (queue && event->context != queue->context) return CL_INVALID_CONTEXT;
-    checkedEvents.push_back(event);
-  }
-  bool failed = false;
-  std::vector<_cl_command_queue *> observedQueues;
-  {
-    std::unique_lock lock(eventsMutex);
-    for (auto *event : checkedEvents) {
-      eventsCondition.wait(lock, [event] { return event->status == CL_COMPLETE || event->status < 0; });
-      if (event->status < 0) {
-        failed = true;
-        if (event->queue && !event->failureObserved) {
-          event->failureObserved = true;
-          observedQueues.push_back(event->queue);
-        }
-      }
-    }
-  }
-  for (auto *observedQueue : observedQueues) {
-    std::lock_guard lock(observedQueue->pendingMutex);
-    if (observedQueue->unobservedFailures != 0) --observedQueue->unobservedFailures;
-  }
-  return failed ? CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST : CL_SUCCESS;
-}
-
 cl_int validateWaitList(_cl_command_queue *queue, cl_uint count, const cl_event *events) {
   if (count != 0 && !events) return CL_INVALID_EVENT_WAIT_LIST;
   if (count == 0 && events) return !queue ? CL_INVALID_VALUE : CL_INVALID_EVENT_WAIT_LIST;
   std::lock_guard lock(eventsMutex);
   for (cl_uint index = 0; index < count; ++index) {
-    auto *event = checked(reinterpret_cast<_cl_event *>(events[index]), Kind::Event);
+    auto *event = checked(events[index]);
     if (!event) return !queue ? CL_INVALID_EVENT : CL_INVALID_EVENT_WAIT_LIST;
     if (queue && event->context != queue->context) return CL_INVALID_CONTEXT;
     if (event->status < 0) return CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST;
   }
   return CL_SUCCESS;
+}
+
+cl_int waitForEvents(cl_uint count, const cl_event *events) {
+  if (count == 0 || !events) return CL_INVALID_VALUE;
+  std::vector<_cl_event *> checkedEvents;
+  checkedEvents.reserve(count);
+  for (cl_uint index = 0; index < count; ++index) {
+    auto *event = checked(events[index]);
+    if (!event) return CL_INVALID_EVENT;
+    checkedEvents.push_back(event);
+  }
+  bool failed = false;
+  std::unique_lock lock(eventsMutex);
+  for (auto *event : checkedEvents) {
+    if (event->status > CL_COMPLETE)
+      scheduler().blocking([&] { eventsCondition.wait(lock, [event] { return event->status <= CL_COMPLETE || schedulerStopping; }); });
+    if (event->status > CL_COMPLETE) failed = true;
+    else if (event->status < 0) {
+      failed = true;
+      if (event->queue && !event->failureObserved) {
+        event->failureObserved = true;
+        if (event->queue->unobservedFailures != 0) --event->queue->unobservedFailures;
+      }
+    }
+  }
+  return failed ? CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST : CL_SUCCESS;
 }
 
 _cl_event *makeEvent(_cl_command_queue *queue, cl_command_type command, cl_event *output) {
@@ -564,204 +547,101 @@ _cl_event *makeEvent(_cl_command_queue *queue, cl_command_type command, cl_event
   return event;
 }
 
-enum class PendingStep { Blocked, Progressed, Finished };
-
-PendingStep runPendingOnce(_cl_command_queue *queue) {
-  PendingCommand command;
-  {
-    std::lock_guard eventLock(eventsMutex);
-    std::lock_guard queueLock(queue->pendingMutex);
-    if (queue->commands.empty()) {
-      queue->workerRunning = false;
-      return PendingStep::Finished;
-    }
-    auto ready = queue->commands.end();
-    for (auto it = queue->commands.begin(); it != queue->commands.end(); ++it) {
-      if ((!it->waitPrior || it == queue->commands.begin())
-          && (it->dependencies ^ forall([](cl_event value) { return reinterpret_cast<_cl_event *>(value)->status <= CL_COMPLETE; }))) {
-        ready = it;
-        break;
-      }
-      if (it->fence || (queue->properties & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) == 0) break;
-    }
-    if (ready == queue->commands.end()) return PendingStep::Blocked;
-    command = std::move(*ready);
-    queue->commands.erase(ready);
+cl_int runGuarded(const std::function<cl_int()> &command) {
+  try {
+    return command();
+  } catch (const std::bad_alloc &) {
+    return CL_OUT_OF_HOST_MEMORY;
+  } catch (...) {
+    return CL_OUT_OF_RESOURCES;
   }
+}
+
+// A marker waits for all prior commands; a barrier also holds back later ones.
+enum class Sync { None, Marker, Barrier };
+
+struct PendingCommand {
+  std::vector<_cl_event *> dependencies;
+  _cl_event *completion = nullptr;
+  std::function<cl_int()> execute;
+  std::function<void(cl_int)> finish;
+  std::shared_ptr<AllocationUses> uses;
+};
+
+void runPending(_cl_command_queue *queue, PendingCommand &command) {
   cl_int result = CL_SUCCESS;
   {
     std::lock_guard lock(eventsMutex);
-    for (auto dependency : command.dependencies) {
-      const auto status = reinterpret_cast<_cl_event *>(dependency)->status;
-      if (status < 0) {
-        result = CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST;
-        break;
-      }
-    }
+    if (std::ranges::any_of(command.dependencies, [](const _cl_event *event) { return event->status < 0; }))
+      result = CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST;
   }
-  if (result == CL_SUCCESS) {
-    try {
-      result = command.execute();
-    } catch (const std::bad_alloc &) {
-      result = CL_OUT_OF_HOST_MEMORY;
-    } catch (...) {
-      result = CL_OUT_OF_RESOURCES;
-    }
-  }
+  if (result == CL_SUCCESS) result = runGuarded(command.execute);
   if (command.finish) command.finish(result);
   command.finish = {};
   // Release allocation leases before the retained memory objects: their final
   // release decides whether the registry's backing allocation can be reclaimed.
   command.uses.reset();
   command.execute = {};
-  for (auto dependency : command.dependencies)
-    clReleaseEvent(dependency);
-  if (result != CL_SUCCESS) {
-    std::lock_guard lock(queue->pendingMutex);
-    ++queue->unobservedFailures;
-  }
-  if (command.completion) {
-    std::lock_guard lock(eventsMutex);
-    auto *completion = reinterpret_cast<_cl_event *>(command.completion);
-    completion->status = result == CL_SUCCESS ? CL_COMPLETE : result;
-    completion->ended = nowNanos();
-  }
+  for (auto *dependency : command.dependencies)
+    clReleaseEvent(reinterpret_cast<cl_event>(dependency));
   {
-    std::lock_guard lock(queue->pendingMutex);
-    --queue->pendingCommands;
+    std::lock_guard lock(eventsMutex);
+    if (result != CL_SUCCESS) ++queue->unobservedFailures;
+    if (command.completion) {
+      command.completion->status = result == CL_SUCCESS ? CL_COMPLETE : result;
+      command.completion->ended = nowNanos();
+    }
   }
-  queue->pendingCondition.notify_all();
   eventsCondition.notify_all();
   if (command.completion) {
-    notifyEventCallbacks(reinterpret_cast<_cl_event *>(command.completion));
-    clReleaseEvent(command.completion);
+    notifyEventCallbacks(command.completion);
+    clReleaseEvent(reinterpret_cast<cl_event>(command.completion));
   }
-  return PendingStep::Progressed;
+  clReleaseCommandQueue(reinterpret_cast<cl_command_queue>(queue));
 }
 
-class QueueScheduler {
-public:
-  QueueScheduler() {
-    for (unsigned i = 0; i < 2; ++i)
-      workers_.emplace_back([this] { run(); });
-  }
-  ~QueueScheduler() {
-    {
-      std::lock_guard lock(mutex_);
-      stopping_ = true;
-    }
-    changed_.notify_all();
-    for (auto &worker : workers_)
-      worker.join();
-    for (auto *queue : queues_)
-      clReleaseCommandQueue(reinterpret_cast<cl_command_queue>(queue));
-  }
-  void submit(_cl_command_queue *queue) {
-    std::lock_guard lock(mutex_);
-    queues_.push_back(queue);
-    changed_.notify_one();
-  }
-
-private:
-  void run() {
-    size_t blocked = 0;
-    for (;;) {
-      _cl_command_queue *queue = nullptr;
-      size_t scheduled = 0;
-      {
-        std::unique_lock lock(mutex_);
-        changed_.wait(lock, [&] { return stopping_ || !queues_.empty(); });
-        if (stopping_) return;
-        queue = queues_.front();
-        queues_.pop_front();
-        scheduled = queues_.size() + 1;
-      }
-      const auto step = runPendingOnce(queue);
-      if (step == PendingStep::Finished) {
-        blocked = 0;
-        clReleaseCommandQueue(reinterpret_cast<cl_command_queue>(queue));
-      } else {
-        {
-          std::lock_guard lock(mutex_);
-          queues_.push_back(queue);
-        }
-        blocked = step == PendingStep::Blocked ? blocked + 1 : 0;
-        if (blocked >= scheduled) {
-          std::unique_lock lock(mutex_);
-          changed_.wait_for(lock, std::chrono::microseconds(100));
-          blocked = 0;
-        }
-      }
-    }
-  }
-
-  std::mutex mutex_;
-  std::condition_variable changed_;
-  std::deque<_cl_command_queue *> queues_;
-  bool stopping_ = false;
-  std::vector<std::thread> workers_;
-};
-
-QueueScheduler &queueScheduler() {
-  static QueueScheduler scheduler;
-  return scheduler;
-}
-
-cl_int enqueuePending(_cl_command_queue *queue, cl_command_type type, std::vector<cl_event> dependencies, std::function<cl_int()> execute,
-                      cl_event *output, bool waitPrior = false, bool fence = false, std::function<void(cl_int)> finish = {},
+cl_int enqueuePending(_cl_command_queue *queue, cl_command_type type, std::vector<_cl_event *> dependencies,
+                      std::function<cl_int()> execute, cl_event *output, Sync sync = Sync::None, std::function<void(cl_int)> finish = {},
                       std::shared_ptr<AllocationUses> uses = {}) {
   cl_event completion = nullptr;
-  if (output) {
-    auto *created = makeEvent(queue, type, &completion);
-    if (!created) {
-      if (finish) finish(CL_OUT_OF_HOST_MEMORY);
-      return CL_OUT_OF_HOST_MEMORY;
-    }
+  auto *created = output ? makeEvent(queue, type, &completion) : nullptr;
+  if (output && !created) {
+    if (finish) finish(CL_OUT_OF_HOST_MEMORY);
+    return CL_OUT_OF_HOST_MEMORY;
+  }
+  try {
+    auto command = std::make_shared<PendingCommand>(std::move(dependencies), created, std::move(execute), finish, std::move(uses));
+    const bool outOfOrder = (queue->properties & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) != 0;
+    const auto order =
+        outOfOrder && sync != Sync::Barrier ? gemstone::CommandQueue::Order::Unordered : gemstone::CommandQueue::Order::Ordered;
+    // The job starts by taking eventsMutex, so it cannot run before its references and ticket are published.
     std::lock_guard lock(eventsMutex);
-    created->status = CL_QUEUED;
-    retain(created); // Separate caller and worker references before publication.
-  }
-  for (auto dependency : dependencies)
-    clRetainEvent(dependency);
-  cl_int error = CL_SUCCESS;
-  {
-    std::lock_guard lock(queue->pendingMutex);
-    try {
-      queue->commands.push_back({dependencies, completion, std::move(execute), waitPrior, fence, finish, std::move(uses)});
-      ++queue->pendingCommands;
-      if (!queue->workerRunning) {
-        retain(queue);
-        queue->workerRunning = true;
-        try {
-          queueScheduler().submit(queue);
-        } catch (...) {
-          queue->workerRunning = false;
-          clReleaseCommandQueue(reinterpret_cast<cl_command_queue>(queue));
-          queue->commands.pop_back();
-          --queue->pendingCommands;
-          throw;
-        }
-      }
-    } catch (...) {
-      error = CL_OUT_OF_HOST_MEMORY;
+    std::vector<gemstone::CommandQueue::Ticket> tickets;
+    for (auto *dependency : command->dependencies)
+      tickets.push_back(dependency->ticket);
+    if (outOfOrder && sync == Sync::Marker) tickets.push_back(scheduler().snapshot(queue->stream));
+    auto ticket = scheduler().submit(
+        queue->stream,
+        [queue, command] {
+          runPending(queue, *command);
+          return 0;
+        },
+        std::move(tickets), order);
+    for (auto *dependency : command->dependencies)
+      retain(dependency);
+    retain(queue);
+    if (created) {
+      created->status = CL_QUEUED;
+      created->ticket = std::move(ticket);
+      retain(created);
+      *output = completion;
     }
+  } catch (...) {
+    if (finish) finish(CL_OUT_OF_HOST_MEMORY);
+    if (completion) clReleaseEvent(completion);
+    return CL_OUT_OF_HOST_MEMORY;
   }
-  if (error != CL_SUCCESS) {
-    if (finish) finish(error);
-    for (auto dependency : dependencies)
-      clReleaseEvent(dependency);
-    if (completion) {
-      clReleaseEvent(completion);
-      clReleaseEvent(completion);
-    }
-    return error;
-  }
-  // Acquire the same mutex as the readiness check to avoid lost notifications.
-  {
-    std::lock_guard lock(eventsMutex);
-    if (output) *output = completion;
-    eventsCondition.notify_all();
-  }
+  eventsCondition.notify_all();
   return CL_SUCCESS;
 }
 
@@ -779,8 +659,8 @@ std::shared_ptr<_cl_mem> retainMemory(_cl_mem *memory) {
 }
 
 cl_int submitCommand(_cl_command_queue *queue, cl_command_type type, bool blocking, cl_uint count, const cl_event *waits,
-                     std::function<cl_int()> execute, cl_event *output, bool waitPrior = false, bool fence = false,
-                     std::function<void(cl_int)> finish = {}, std::shared_ptr<AllocationUses> uses = {}) {
+                     std::function<cl_int()> execute, cl_event *output, std::function<void(cl_int)> finish = {},
+                     std::shared_ptr<AllocationUses> uses = {}, Sync sync = Sync::None) {
   if (!queue) {
     if (finish) finish(CL_INVALID_COMMAND_QUEUE);
     return CL_INVALID_COMMAND_QUEUE;
@@ -790,50 +670,33 @@ cl_int submitCommand(_cl_command_queue *queue, cl_command_type type, bool blocki
     if (finish) finish(result);
     return result;
   }
+  std::vector<_cl_event *> dependencies(count);
+  for (cl_uint index = 0; index < count; ++index)
+    dependencies[index] = reinterpret_cast<_cl_event *>(waits[index]);
   bool pending = false;
   {
     std::lock_guard lock(eventsMutex);
-    for (cl_uint index = 0; index < count; ++index)
-      pending = pending || reinterpret_cast<_cl_event *>(waits[index])->status > CL_COMPLETE;
+    pending = std::ranges::any_of(dependencies, [](const _cl_event *event) { return event->status > CL_COMPLETE; });
   }
-  {
-    std::lock_guard lock(queue->pendingMutex);
-    pending = pending || queue->pendingCommands != 0;
-  }
-  if (!pending) {
-    try {
-      result = execute();
-    } catch (const std::bad_alloc &) {
-      result = CL_OUT_OF_HOST_MEMORY;
-    } catch (...) {
-      result = CL_OUT_OF_RESOURCES;
-    }
+  if (!pending && scheduler().ready(scheduler().snapshot(queue->stream))) {
+    result = runGuarded(execute);
     if (finish) finish(result);
     if (result == CL_SUCCESS && output && makeEvent(queue, type, output) == nullptr) return CL_OUT_OF_HOST_MEMORY;
     return result;
   }
-  try {
-    std::vector<cl_event> dependencies;
-    for (cl_uint index = 0; index < count; ++index)
-      dependencies.push_back(waits[index]);
-    cl_event completion = nullptr;
-    result = enqueuePending(queue, type, std::move(dependencies), std::move(execute), blocking ? &completion : output, waitPrior, fence,
-                            finish, std::move(uses));
-    if (!blocking || result != CL_SUCCESS) return result;
-    result = clWaitForEvents(1, &completion);
-    if (output) *output = completion;
-    else clReleaseEvent(completion);
-    return result;
-  } catch (...) {
-    if (finish) finish(CL_OUT_OF_HOST_MEMORY);
-    return CL_OUT_OF_HOST_MEMORY;
-  }
+  cl_event completion = nullptr;
+  result = enqueuePending(queue, type, std::move(dependencies), std::move(execute), blocking ? &completion : output, sync,
+                          std::move(finish), std::move(uses));
+  if (!blocking || result != CL_SUCCESS) return result;
+  result = waitForEvents(1, &completion);
+  if (output) *output = completion;
+  else clReleaseEvent(completion);
+  return result;
 }
 
 cl_int completeEvent(_cl_command_queue *queue, cl_command_type command, cl_uint count, const cl_event *waits, cl_event *output) {
-  const bool marker = command == CL_COMMAND_MARKER;
-  const bool barrier = command == CL_COMMAND_BARRIER;
-  return submitCommand(queue, command, false, count, waits, [] { return CL_SUCCESS; }, output, (marker || barrier) && count == 0, barrier);
+  const auto sync = command == CL_COMMAND_BARRIER ? Sync::Barrier : command == CL_COMMAND_MARKER && count == 0 ? Sync::Marker : Sync::None;
+  return submitCommand(queue, command, false, count, waits, [] { return CL_SUCCESS; }, output, {}, {}, sync);
 }
 
 std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
@@ -867,18 +730,14 @@ std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
       if (value != static_cast<uint64_t>(targetAddress)) it = source->pointerRelocations.erase(it);
       else ++it;
     }
-    for (size_t offset = 0; offset + sizeof(uint64_t) <= source->size; offset += sizeof(uint32_t)) {
-      uint64_t value = 0;
-      std::memcpy(&value, bytes + offset, sizeof(value));
+    scanPointers(bytes, source->size, [&](size_t offset, uint64_t value) {
       size_t targetOffset = 0;
       const auto target = findPointer(reinterpret_cast<const void *>(static_cast<uintptr_t>(value)), &targetOffset);
-      if (target && targetOffset < target->size) {
-        source->pointerRelocations[offset] = {target, targetOffset};
-        result.push_back({RelocationSourceMemory{AllocationId{static_cast<int64_t>(source->id)}},
-                          LongPositive0{static_cast<int64_t>(offset)}, AllocationId{static_cast<int64_t>(target->id)},
-                          LongPositive0{static_cast<int64_t>(targetOffset)}});
-      }
-    }
+      if (!target || targetOffset >= target->size) return;
+      source->pointerRelocations[offset] = {target, targetOffset};
+      result.push_back({RelocationSourceMemory{AllocationId{static_cast<int64_t>(source->id)}}, LongPositive0{static_cast<int64_t>(offset)},
+                        AllocationId{static_cast<int64_t>(target->id)}, LongPositive0{static_cast<int64_t>(targetOffset)}});
+    });
   }
   std::set<std::pair<uint64_t, uint64_t>> emitted;
   for (const auto &relocation : result) {
@@ -896,8 +755,7 @@ std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
   return result;
 }
 
-cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDimension, const size_t *offset, const size_t *global,
-                    const size_t *local, cl_event *output) {
+cl_int finishRemote(_cl_kernel *kernel, size_t workDimension, const size_t *offset, const size_t *global, const size_t *local) {
   std::unique_lock submissionLock(kernelSubmissionMutex);
   const uint64_t started = nowNanos();
   uint64_t scannedBytes = 0;
@@ -953,65 +811,53 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
   const Dimensions groupCount{static_cast<int32_t>(count[0]), static_cast<int32_t>(count[1]), static_cast<int32_t>(count[2])};
   const GlobalDimensions globalSize{static_cast<int64_t>(exact[0]), static_cast<int64_t>(exact[1]), static_cast<int64_t>(exact[2])};
   const Coordinates globalOffset{static_cast<int32_t>(origin[0]), static_cast<int32_t>(origin[1]), static_cast<int32_t>(origin[2])};
-  CompletionId completion{};
-  int launched;
   std::string failureMessage;
-  {
-    std::unique_lock lock(remoteMutex);
-    auto launch = state.client()->call(Launch{ProgramId{static_cast<int64_t>(kernel->program->remoteId)}, kernel->name, groupSize,
-                                              groupCount, globalSize, static_cast<int32_t>(workDimension), globalOffset, 0, 0,
-                                              std::move(arguments), std::move(relocations), true});
-    launched = launch ? 0 : -1;
-    if (launch) completion = launch.value();
-    else failureMessage = launch.error().detail;
-    if (launched == 0) {
-      auto completionClient = Client::fromEnvironment();
-      gemstone::execution::CompletionResult result;
-      lock.unlock();
-      submissionLock.unlock();
-      if (!completionClient || !gemstone::execution::collect_completion(*completionClient, completion, result, failureMessage, true))
-        launched = -1;
-      submissionLock.lock();
-      lock.lock();
-      if (launched == 0 && !readDirtyRanges(*state.client(), result.dirty_ranges, [&](const DirtyRange &range, const uint8_t *bytes) {
-            const auto allocation = findAllocation(static_cast<uint64_t>(range.allocation.value));
-            const auto rangeOffset = static_cast<size_t>(range.offset.value);
-            const auto rangeSize = static_cast<size_t>(range.size.value);
-            if (!validRange(allocation, rangeOffset, rangeSize)) return false;
-            invalidatePointerRelocations(allocation, rangeOffset, rangeSize);
-            std::memcpy(static_cast<uint8_t *>(allocation->data()) + rangeOffset, bytes, rangeSize);
-            downloadedBytes += rangeSize;
-            return true;
-          }))
-        launched = -1;
-      {
-        std::string relocationError;
-        const bool applied = applyPointerRelocations(
-            result.pointer_relocations,
-            [](uint64_t id) -> RelocationTarget {
-              const auto allocation = findAllocation(id);
-              return allocation ? RelocationTarget{allocation->data(), allocation->size} : RelocationTarget{};
-            },
-            [](uint64_t sourceId, uint64_t targetId, uint64_t sourceOffset, uint64_t targetOffset) {
-              const auto source = findAllocation(sourceId);
-              const auto target = findAllocation(targetId);
-              std::lock_guard relocationsLock(pointerRelocationsMutex);
-              source->pointerRelocations[sourceOffset] = {target, targetOffset};
-            },
-            relocationError);
-        if (!applied) launched = -1;
-      }
-    }
-  }
-  if (launched != 0) {
-    std::fprintf(stderr, "Gemstone OpenCL launch failed: %s\n", failureMessage.empty() ? remoteError() : failureMessage.c_str());
+  const auto relocationCount = relocations.size();
+  std::unique_lock lock(remoteMutex);
+  gemstone::execution::CompletionResult result;
+  bool launched = gemstone::execution::launchAndCollect(Launch{ProgramId{static_cast<int64_t>(kernel->program->remoteId)}, kernel->name,
+                                                               groupSize, groupCount, globalSize, static_cast<int32_t>(workDimension),
+                                                               globalOffset, 0, 0, std::move(arguments), std::move(relocations), true},
+                                                        result, failureMessage, [&] {
+                                                          lock.unlock();
+                                                          submissionLock.unlock();
+                                                        });
+  if (!submissionLock.owns_lock()) submissionLock.lock();
+  if (!lock.owns_lock()) lock.lock();
+  if (launched && !readDirtyRanges(*state.client(), result.dirtyRanges, [&](const DirtyRange &range, const uint8_t *bytes) {
+        const auto allocation = findAllocation(static_cast<uint64_t>(range.allocation.value));
+        const auto rangeOffset = static_cast<size_t>(range.offset.value);
+        const auto rangeSize = static_cast<size_t>(range.size.value);
+        if (!validRange(allocation, rangeOffset, rangeSize)) return false;
+        invalidatePointerRelocations(allocation, rangeOffset, rangeSize);
+        std::memcpy(static_cast<uint8_t *>(allocation->data()) + rangeOffset, bytes, rangeSize);
+        downloadedBytes += rangeSize;
+        return true;
+      }))
+    launched = false;
+  if (launched)
+    launched = applyPointerRelocations(
+        result.pointerRelocations,
+        [](uint64_t id) -> RelocationTarget {
+          const auto allocation = findAllocation(id);
+          return allocation ? RelocationTarget{allocation->data(), allocation->size} : RelocationTarget{};
+        },
+        [](uint64_t sourceId, uint64_t targetId, uint64_t sourceOffset, uint64_t targetOffset) {
+          const auto source = findAllocation(sourceId);
+          const auto target = findAllocation(targetId);
+          std::lock_guard relocationsLock(pointerRelocationsMutex);
+          source->pointerRelocations[sourceOffset] = {target, targetOffset};
+        },
+        failureMessage);
+  lock.unlock();
+  if (!launched) {
+    std::fprintf(stderr, "Gemstone OpenCL launch failed: %s\n", (failureMessage.empty() ? remote.error() : failureMessage).c_str());
     return CL_OUT_OF_RESOURCES;
   }
   if (gemstone::traceEnabled("perf"))
     std::fprintf(stderr, "Gemstone OpenCL perf: kernel=%s download=%llu scan=%llu relocations=%llu elapsed_us=%llu\n", kernel->name.c_str(),
                  static_cast<unsigned long long>(downloadedBytes), static_cast<unsigned long long>(scannedBytes),
-                 static_cast<unsigned long long>(relocations.size()), static_cast<unsigned long long>((nowNanos() - started) / 1000));
-  if (output && makeEvent(queue, CL_COMMAND_NDRANGE_KERNEL, output) == nullptr) return CL_OUT_OF_HOST_MEMORY;
+                 static_cast<unsigned long long>(relocationCount), static_cast<unsigned long long>((nowNanos() - started) / 1000));
   return CL_SUCCESS;
 }
 
@@ -1023,7 +869,7 @@ CL_API_ENTRY void *CL_API_CALL clGetExtensionFunctionAddress(const char *name);
 CL_API_ENTRY void *CL_API_CALL clGetExtensionFunctionAddressForPlatform(cl_platform_id value, const char *name);
 
 CL_API_ENTRY cl_int CL_API_CALL clGetPlatformIDs(cl_uint entries, cl_platform_id *platforms, cl_uint *count) {
-  initializeDispatch();
+  initialiseDispatch();
   (void)remote.mode();
   if (!platforms && !count) return CL_INVALID_VALUE;
   if (entries == 0 && platforms) return CL_INVALID_VALUE;
@@ -1033,7 +879,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetPlatformIDs(cl_uint entries, cl_platform_id
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clIcdGetPlatformIDsKHR(cl_uint entries, cl_platform_id *platforms, cl_uint *count) {
-  initializeDispatch();
+  initialiseDispatch();
   return clGetPlatformIDs(entries, platforms, count);
 }
 
@@ -1100,10 +946,7 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseDevice(cl_device_id value) {
 CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_info name, size_t size, void *output, size_t *written) {
   if (!validDevice(value)) return CL_INVALID_DEVICE;
   static const auto workSizes = maxWorkItemSizes();
-  // The provider completes each enqueue synchronously through the execution
-  // RPC.  It therefore remains serialized even when an out-of-order queue is
-  // requested, but it can still honor the OpenCL queue property: out-of-order
-  // execution permits reordering; it does not require concurrent execution.
+  // Out-of-order execution permits reordering; it does not require concurrent execution.
   static const cl_command_queue_properties queueProperties = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
   static const cl_device_svm_capabilities svm = CL_DEVICE_SVM_COARSE_GRAIN_BUFFER | CL_DEVICE_SVM_FINE_GRAIN_BUFFER | CL_DEVICE_SVM_ATOMICS;
   static const cl_device_fp_config fp = CL_FP_INF_NAN | CL_FP_ROUND_TO_NEAREST | CL_FP_DENORM;
@@ -1568,13 +1411,13 @@ CL_API_ENTRY cl_context CL_API_CALL clCreateContextFromType(const cl_context_pro
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clRetainContext(cl_context value) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(value), Kind::Context);
+  auto *context = checked(value);
   if (!context) return CL_INVALID_CONTEXT;
   retain(context);
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clReleaseContext(cl_context value) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(value), Kind::Context);
+  auto *context = checked(value);
   if (!context) return CL_INVALID_CONTEXT;
   if (release(context)) {
     for (auto callback = context->destructorCallbacks.rbegin(); callback != context->destructorCallbacks.rend(); ++callback)
@@ -1587,7 +1430,7 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseContext(cl_context value) {
 
 CL_API_ENTRY cl_int CL_API_CALL clSetContextDestructorCallback(cl_context value, void(CL_CALLBACK *callback)(cl_context, void *),
                                                                void *user) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(value), Kind::Context);
+  auto *context = checked(value);
   if (!context) return CL_INVALID_CONTEXT;
   if (!callback) return CL_INVALID_VALUE;
   try {
@@ -1599,7 +1442,7 @@ CL_API_ENTRY cl_int CL_API_CALL clSetContextDestructorCallback(cl_context value,
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clGetContextInfo(cl_context value, cl_context_info name, size_t size, void *output, size_t *written) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(value), Kind::Context);
+  auto *context = checked(value);
   if (!context) return CL_INVALID_CONTEXT;
   switch (name) {
     case CL_CONTEXT_REFERENCE_COUNT: {
@@ -1622,7 +1465,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetContextInfo(cl_context value, cl_context_in
 
 CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueue(cl_context value, cl_device_id selected,
                                                                cl_command_queue_properties properties, cl_int *error) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(value), Kind::Context);
+  auto *context = checked(value);
   if (!context) {
     if (error) *error = CL_INVALID_CONTEXT;
     return nullptr;
@@ -1646,6 +1489,14 @@ CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueue(cl_context value,
   queue->context = context;
   queue->device = &device;
   queue->properties = properties;
+  try {
+    queue->stream = scheduler().createStream(true);
+  } catch (const std::bad_alloc &) {
+    unregisterLiveObject(queue);
+    delete queue;
+    if (error) *error = CL_OUT_OF_HOST_MEMORY;
+    return nullptr;
+  }
   retain(context);
   if (error) *error = CL_SUCCESS;
   return reinterpret_cast<cl_command_queue>(queue);
@@ -1653,7 +1504,7 @@ CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueue(cl_context value,
 
 CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_context context, cl_device_id deviceValue,
                                                                              const cl_queue_properties *properties, cl_int *error) {
-  if (!checked(reinterpret_cast<_cl_context *>(context), Kind::Context)) {
+  if (!checked(context)) {
     if (error) *error = CL_INVALID_CONTEXT;
     return nullptr;
   }
@@ -1689,24 +1540,25 @@ CL_API_ENTRY cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clSetDefaultDeviceCommandQueue(cl_context value, cl_device_id selected, cl_command_queue) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(value), Kind::Context);
+  auto *context = checked(value);
   if (!context) return CL_INVALID_CONTEXT;
   if (!validDevice(selected) || context->device != &device) return CL_INVALID_DEVICE;
   return CL_INVALID_OPERATION;
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clRetainCommandQueue(cl_command_queue value) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(value), Kind::Queue);
+  auto *queue = checked(value);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   retain(queue);
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clReleaseCommandQueue(cl_command_queue value) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(value), Kind::Queue);
+  auto *queue = checked(value);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   if (release(queue)) {
     auto *context = queue->context;
     unregisterLiveObject(queue);
+    scheduler().destroyStream(queue->stream);
     delete queue;
     clReleaseContext(reinterpret_cast<cl_context>(context));
   }
@@ -1714,11 +1566,11 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseCommandQueue(cl_command_queue value) {
 }
 CL_API_ENTRY cl_int CL_API_CALL clSetCommandQueueProperty(cl_command_queue value, cl_command_queue_properties, cl_bool,
                                                           cl_command_queue_properties *) {
-  return checked(reinterpret_cast<_cl_command_queue *>(value), Kind::Queue) == nullptr ? CL_INVALID_COMMAND_QUEUE : CL_INVALID_OPERATION;
+  return checked(value) == nullptr ? CL_INVALID_COMMAND_QUEUE : CL_INVALID_OPERATION;
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetCommandQueueInfo(cl_command_queue value, cl_command_queue_info name, size_t size, void *output,
                                                       size_t *written) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(value), Kind::Queue);
+  auto *queue = checked(value);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   switch (name) {
     case CL_QUEUE_CONTEXT: {
@@ -1746,7 +1598,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetCommandQueueInfo(cl_command_queue value, cl
 }
 
 CL_API_ENTRY cl_mem CL_API_CALL clCreateBuffer(cl_context value, cl_mem_flags flags, size_t size, void *host, cl_int *error) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(value), Kind::Context);
+  auto *context = checked(value);
   if (!context || size == 0) {
     if (error) *error = context ? CL_INVALID_BUFFER_SIZE : CL_INVALID_CONTEXT;
     return nullptr;
@@ -1780,7 +1632,7 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreateBuffer(cl_context value, cl_mem_flags fl
   if (remote.ready()) {
     std::lock_guard lock(remoteMutex);
     if (!writeRemote(*remote.client(), allocation->id, hostOffset, static_cast<uint8_t *>(allocation->data()) + hostOffset, size)) {
-      if (gemstone::traceEnabled("opencl")) std::fprintf(stderr, "Gemstone OpenCL buffer upload failed: %s\n", remoteError());
+      if (gemstone::traceEnabled("opencl")) std::fprintf(stderr, "Gemstone OpenCL buffer upload failed: %s\n", remote.error().c_str());
       writeResult = CL_OUT_OF_RESOURCES;
     }
   }
@@ -1823,7 +1675,7 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreateBufferWithProperties(cl_context value, c
 }
 
 CL_API_ENTRY cl_mem CL_API_CALL clCreatePipe(cl_context value, cl_mem_flags, cl_uint, cl_uint, const cl_pipe_properties *, cl_int *error) {
-  if (!checked(reinterpret_cast<_cl_context *>(value), Kind::Context)) {
+  if (!checked(value)) {
     if (error) *error = CL_INVALID_CONTEXT;
     return nullptr;
   }
@@ -1833,7 +1685,7 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreatePipe(cl_context value, cl_mem_flags, cl_
 
 CL_API_ENTRY cl_mem CL_API_CALL clCreateImage(cl_context value, cl_mem_flags, const cl_image_format *, const cl_image_desc *, void *,
                                               cl_int *error) {
-  if (!checked(reinterpret_cast<_cl_context *>(value), Kind::Context)) {
+  if (!checked(value)) {
     if (error) *error = CL_INVALID_CONTEXT;
     return nullptr;
   }
@@ -1849,18 +1701,18 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreateImageWithProperties(cl_context value, co
 CL_API_ENTRY cl_int CL_API_CALL clGetImageInfo(cl_mem, cl_image_info, size_t, void *, size_t *) { return CL_INVALID_MEM_OBJECT; }
 
 CL_API_ENTRY cl_int CL_API_CALL clGetPipeInfo(cl_mem value, cl_pipe_info, size_t, void *, size_t *) {
-  if (!checked(reinterpret_cast<_cl_mem *>(value), Kind::Memory)) return CL_INVALID_MEM_OBJECT;
+  if (!checked(value)) return CL_INVALID_MEM_OBJECT;
   return CL_INVALID_MEM_OBJECT;
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clRetainMemObject(cl_mem value) {
-  auto *mem = checked(reinterpret_cast<_cl_mem *>(value), Kind::Memory);
+  auto *mem = checked(value);
   if (!mem) return CL_INVALID_MEM_OBJECT;
   retain(mem);
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clReleaseMemObject(cl_mem value) {
-  auto *mem = checked(reinterpret_cast<_cl_mem *>(value), Kind::Memory);
+  auto *mem = checked(value);
   if (!mem) return CL_INVALID_MEM_OBJECT;
   if (release(mem)) {
     for (auto callback = mem->destructorCallbacks.rbegin(); callback != mem->destructorCallbacks.rend(); ++callback)
@@ -1879,7 +1731,7 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseMemObject(cl_mem value) {
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clSetMemObjectDestructorCallback(cl_mem value, void(CL_CALLBACK *callback)(cl_mem, void *), void *user) {
-  auto *mem = checked(reinterpret_cast<_cl_mem *>(value), Kind::Memory);
+  auto *mem = checked(value);
   if (!mem) return CL_INVALID_MEM_OBJECT;
   if (!callback) return CL_INVALID_VALUE;
   mem->destructorCallbacks.emplace_back(callback, user);
@@ -1887,7 +1739,7 @@ CL_API_ENTRY cl_int CL_API_CALL clSetMemObjectDestructorCallback(cl_mem value, v
 }
 CL_API_ENTRY cl_mem CL_API_CALL clCreateSubBuffer(cl_mem value, cl_mem_flags flags, cl_buffer_create_type type, const void *description,
                                                   cl_int *error) {
-  auto *parent = checked(reinterpret_cast<_cl_mem *>(value), Kind::Memory);
+  auto *parent = checked(value);
   if (!parent) {
     if (error) *error = CL_INVALID_MEM_OBJECT;
     return nullptr;
@@ -1927,7 +1779,7 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreateSubBuffer(cl_mem value, cl_mem_flags fla
   return reinterpret_cast<cl_mem>(result);
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetMemObjectInfo(cl_mem value, cl_mem_info name, size_t size, void *output, size_t *written) {
-  auto *mem = checked(reinterpret_cast<_cl_mem *>(value), Kind::Memory);
+  auto *mem = checked(value);
   if (!mem) return CL_INVALID_MEM_OBJECT;
   switch (name) {
     case CL_MEM_TYPE: {
@@ -1974,26 +1826,26 @@ cl_int loadProgramIL(_cl_program *program) {
   if (program->il.empty() || program->il.size() > std::numeric_limits<uint32_t>::max()) return CL_INVALID_BINARY;
   auto &state = remote;
   if (!state.ready()) {
-    program->buildLog = remoteError();
+    program->buildLog = remote.error();
     return CL_OUT_OF_RESOURCES;
   }
   std::lock_guard lock(remoteMutex);
-  auto loaded = state.client()->call(LoadProgram{"spirv-binary", program->il});
+  auto loaded = state.client()->call(LoadProgram{ProgramEncoding::SPIRVOpenCLCompute, program->il});
   if (!loaded) {
-    program->buildLog = remoteError();
+    program->buildLog = remote.error();
     return CL_INVALID_BINARY;
   }
   program->remoteId = static_cast<uint64_t>(loaded.value().value);
   std::vector<std::string> kernelNames;
-  auto catalog = state.client()->call(DescribeProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
-  if (!catalog) {
-    program->buildLog = remoteError();
+  auto catalogue = state.client()->call(DescribeProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+  if (!catalogue) {
+    program->buildLog = remote.error();
     (void)state.client()->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
     program->remoteId = 0;
     return CL_INVALID_BINARY;
   }
-  kernelNames.reserve(catalog.value().kernels.size());
-  for (const auto &kernel : catalog.value().kernels)
+  kernelNames.reserve(catalogue.value().kernels.size());
+  for (const auto &kernel : catalogue.value().kernels)
     kernelNames.push_back(kernel.name.value);
   program->kernelNames = kernelNames ^ mk_string(";");
   return CL_SUCCESS;
@@ -2004,7 +1856,7 @@ cl_int loadProgramIL(_cl_program *program) {
 extern "C" {
 
 CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithIL(cl_context value, const void *il, size_t length, cl_int *error) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(value), Kind::Context);
+  auto *context = checked(value);
   if (!context || !il || length == 0 || length > std::numeric_limits<uint32_t>::max()) {
     if (error) *error = context ? CL_INVALID_VALUE : CL_INVALID_CONTEXT;
     return nullptr;
@@ -2028,7 +1880,7 @@ CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithIL(cl_context value, cons
 CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithBinary(cl_context context, cl_uint count, const cl_device_id *devices,
                                                               const size_t *lengths, const unsigned char **binaries, cl_int *binaryStatus,
                                                               cl_int *error) {
-  auto *contextValue = checked(reinterpret_cast<_cl_context *>(context), Kind::Context);
+  auto *contextValue = checked(context);
   if (!contextValue) {
     if (error) *error = CL_INVALID_CONTEXT;
     return nullptr;
@@ -2095,7 +1947,7 @@ CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithBinary(cl_context context
 
 CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithSource(cl_context value, cl_uint count, const char **strings, const size_t *lengths,
                                                               cl_int *error) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(value), Kind::Context);
+  auto *context = checked(value);
   if (!context) {
     if (error) *error = CL_INVALID_CONTEXT;
     return nullptr;
@@ -2131,13 +1983,13 @@ CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithSource(cl_context value, 
   return reinterpret_cast<cl_program>(program);
 }
 CL_API_ENTRY cl_int CL_API_CALL clRetainProgram(cl_program value) {
-  auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
+  auto *program = checked(value);
   if (!program) return CL_INVALID_PROGRAM;
   retain(program);
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clReleaseProgram(cl_program value) {
-  auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
+  auto *program = checked(value);
   if (!program) return CL_INVALID_PROGRAM;
   if (release(program)) {
     auto &state = remote;
@@ -2154,7 +2006,7 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseProgram(cl_program value) {
 }
 CL_API_ENTRY cl_int CL_API_CALL clSetProgramSpecializationConstant(cl_program value, cl_uint specId, size_t specSize,
                                                                    const void *specValue) {
-  auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
+  auto *program = checked(value);
   if (!program || !program->createdWithIL) return CL_INVALID_PROGRAM;
   auto &state = remote;
   if (!state.ready()) return CL_OUT_OF_RESOURCES;
@@ -2175,7 +2027,7 @@ CL_API_ENTRY cl_int CL_API_CALL clSetProgramSpecializationConstant(cl_program va
 }
 CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, const cl_device_id *devices, const char *options,
                                                void(CL_CALLBACK *notify)(cl_program, void *), void *user) {
-  auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
+  auto *program = checked(value);
   if (!program) return CL_INVALID_PROGRAM;
   if (count != 0 && !devices) return CL_INVALID_VALUE;
   if (count > 1 || (count == 1 && !validDevice(devices[0]))) return CL_INVALID_DEVICE;
@@ -2198,7 +2050,7 @@ CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, 
       auto &state = remote;
       if (!state.ready()) {
         program->buildStatus = CL_BUILD_ERROR;
-        program->buildLog = remoteError();
+        program->buildLog = remote.error();
         if (notify) notify(value, user);
         return CL_BUILD_PROGRAM_FAILURE;
       }
@@ -2206,7 +2058,7 @@ CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, 
       auto specialized = state.client()->call(SpecializeImage{program->originalIL, constants});
       if (!specialized) {
         program->buildStatus = CL_BUILD_ERROR;
-        program->buildLog = remoteError();
+        program->buildLog = remote.error();
         if (notify) notify(value, user);
         return CL_BUILD_PROGRAM_FAILURE;
       }
@@ -2250,7 +2102,7 @@ CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, 
   }
   program->buildStatus = program->remoteId == 0 ? CL_BUILD_ERROR : CL_BUILD_SUCCESS;
   if (program->buildStatus != CL_BUILD_SUCCESS) {
-    if (program->buildLog.empty()) program->buildLog = remoteError();
+    if (program->buildLog.empty()) program->buildLog = remote.error();
     if (notify) notify(value, user);
     return CL_BUILD_PROGRAM_FAILURE;
   }
@@ -2265,7 +2117,7 @@ CL_API_ENTRY cl_int CL_API_CALL clUnloadPlatformCompiler(cl_platform_id value) {
 CL_API_ENTRY cl_int CL_API_CALL clCompileProgram(cl_program value, cl_uint count, const cl_device_id *devices, const char *options,
                                                  cl_uint inputHeaderCount, const cl_program *inputHeaders, const char **headerNames,
                                                  void(CL_CALLBACK *notify)(cl_program, void *), void *user) {
-  auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
+  auto *program = checked(value);
   if (!program) return CL_INVALID_PROGRAM;
   if (count != 0 && !devices) return CL_INVALID_VALUE;
   if (count > 1 || (count == 1 && !validDevice(devices[0]))) return CL_INVALID_DEVICE;
@@ -2323,7 +2175,7 @@ CL_API_ENTRY cl_int CL_API_CALL clCompileProgram(cl_program value, cl_uint count
 CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context contextValue, cl_uint count, const cl_device_id *devices, const char *options,
                                                   cl_uint inputCount, const cl_program *inputs,
                                                   void(CL_CALLBACK *notify)(cl_program, void *), void *user, cl_int *error) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(contextValue), Kind::Context);
+  auto *context = checked(contextValue);
   if (!context) {
     if (error) *error = CL_INVALID_CONTEXT;
     return nullptr;
@@ -2347,7 +2199,7 @@ CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context contextValue, cl_ui
   _cl_program *binaryInput = nullptr;
   std::vector<_cl_program *> binaryInputs;
   for (cl_uint index = 0; index < inputCount; ++index) {
-    auto *program = checked(reinterpret_cast<_cl_program *>(inputs[index]), Kind::Program);
+    auto *program = checked(inputs[index]);
     if (!program) {
       if (error) *error = CL_INVALID_PROGRAM;
       return nullptr;
@@ -2491,14 +2343,14 @@ CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context contextValue, cl_ui
 
 CL_API_ENTRY cl_int CL_API_CALL clGetSupportedImageFormats(cl_context value, cl_mem_flags, cl_mem_object_type, cl_uint entryCount,
                                                            cl_image_format *imageFormats, cl_uint *imageFormatCount) {
-  if (!checked(reinterpret_cast<_cl_context *>(value), Kind::Context)) return CL_INVALID_CONTEXT;
+  if (!checked(value)) return CL_INVALID_CONTEXT;
   if (imageFormats && entryCount == 0) return CL_INVALID_VALUE;
   if (imageFormatCount) *imageFormatCount = 0;
   return CL_SUCCESS;
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clGetProgramInfo(cl_program value, cl_program_info name, size_t size, void *output, size_t *written) {
-  auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
+  auto *program = checked(value);
   if (!program) return CL_INVALID_PROGRAM;
   switch (name) {
     case CL_PROGRAM_REFERENCE_COUNT: {
@@ -2555,7 +2407,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetProgramInfo(cl_program value, cl_program_in
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetProgramBuildInfo(cl_program value, cl_device_id selected, cl_program_build_info name, size_t size,
                                                       void *output, size_t *written) {
-  auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
+  auto *program = checked(value);
   if (!program || !validDevice(selected)) return CL_INVALID_PROGRAM;
   switch (name) {
     case CL_PROGRAM_BUILD_STATUS: return outputScalar(size, output, written, program->buildStatus);
@@ -2570,11 +2422,11 @@ CL_API_ENTRY cl_int CL_API_CALL clGetProgramBuildInfo(cl_program value, cl_devic
   }
 }
 CL_API_ENTRY cl_int CL_API_CALL clSetProgramReleaseCallback(cl_program value, void(CL_CALLBACK *)(cl_program, void *), void *) {
-  return checked(reinterpret_cast<_cl_program *>(value), Kind::Program) == nullptr ? CL_INVALID_PROGRAM : CL_INVALID_OPERATION;
+  return checked(value) == nullptr ? CL_INVALID_PROGRAM : CL_INVALID_OPERATION;
 }
 
 CL_API_ENTRY cl_kernel CL_API_CALL clCreateKernel(cl_program value, const char *name, cl_int *error) {
-  auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
+  auto *program = checked(value);
   if (!program || !name || name[0] == '\0') {
     if (error) *error = program ? CL_INVALID_KERNEL_NAME : CL_INVALID_PROGRAM;
     return nullptr;
@@ -2637,7 +2489,7 @@ CL_API_ENTRY cl_kernel CL_API_CALL clCreateKernel(cl_program value, const char *
 }
 CL_API_ENTRY cl_int CL_API_CALL clCreateKernelsInProgram(cl_program value, cl_uint kernelCapacity, cl_kernel *kernels,
                                                          cl_uint *kernelCountOutput) {
-  auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
+  auto *program = checked(value);
   if (!program) return CL_INVALID_PROGRAM;
   if (program->buildStatus != CL_BUILD_SUCCESS) return CL_INVALID_PROGRAM_EXECUTABLE;
   const size_t total = kernelCount(program->kernelNames);
@@ -2662,7 +2514,7 @@ CL_API_ENTRY cl_int CL_API_CALL clCreateKernelsInProgram(cl_program value, cl_ui
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_kernel CL_API_CALL clCloneKernel(cl_kernel value, cl_int *error) {
-  auto *source = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
+  auto *source = checked(value);
   if (!source) {
     if (error) *error = CL_INVALID_KERNEL;
     return nullptr;
@@ -2692,13 +2544,13 @@ CL_API_ENTRY cl_kernel CL_API_CALL clCloneKernel(cl_kernel value, cl_int *error)
   return reinterpret_cast<cl_kernel>(clone);
 }
 CL_API_ENTRY cl_int CL_API_CALL clRetainKernel(cl_kernel value) {
-  auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
+  auto *kernel = checked(value);
   if (!kernel) return CL_INVALID_KERNEL;
   retain(kernel);
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clReleaseKernel(cl_kernel value) {
-  auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
+  auto *kernel = checked(value);
   if (!kernel) return CL_INVALID_KERNEL;
   if (release(kernel)) {
     auto *program = kernel->program;
@@ -2709,7 +2561,7 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseKernel(cl_kernel value) {
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clSetKernelArg(cl_kernel value, cl_uint index, size_t size, const void *argument) {
-  auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
+  auto *kernel = checked(value);
   if (!kernel) return CL_INVALID_KERNEL;
   if (index >= kernel->expectedArguments) return CL_INVALID_ARG_INDEX;
   if (size == 0) return CL_INVALID_ARG_SIZE;
@@ -2743,7 +2595,7 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArg(cl_kernel value, cl_uint index, s
   if (size >= sizeof(cl_mem)) {
     cl_mem handle = nullptr;
     std::memcpy(&handle, argument, sizeof(handle));
-    auto *mem = checked(reinterpret_cast<_cl_mem *>(handle), Kind::Memory);
+    auto *mem = checked(handle);
     if (mem) {
       if (size != sizeof(cl_mem)) return CL_INVALID_ARG_SIZE;
       output.kind = ::KernelArgument::Kind::Allocation;
@@ -2788,7 +2640,7 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArg(cl_kernel value, cl_uint index, s
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clSetKernelArgSVMPointer(cl_kernel value, cl_uint index, const void *argument) {
-  auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
+  auto *kernel = checked(value);
   if (!kernel) return CL_INVALID_KERNEL;
   if (index >= kernel->expectedArguments) return CL_INVALID_ARG_INDEX;
   if (!argument) return clSetKernelArg(value, index, sizeof(void *), nullptr);
@@ -2811,7 +2663,7 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArgSVMPointer(cl_kernel value, cl_uin
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel value, cl_kernel_exec_info name, size_t size, const void *valueData) {
-  auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
+  auto *kernel = checked(value);
   if (!kernel) return CL_INVALID_KERNEL;
   if ((name == CL_KERNEL_EXEC_INFO_SVM_PTRS || name == CL_KERNEL_EXEC_INFO_USM_PTRS_INTEL) && size == 0 && !valueData) {
     kernel->indirectAllocations.erase(name);
@@ -2845,7 +2697,7 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel value, cl_kernel_e
   return CL_INVALID_VALUE;
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetKernelInfo(cl_kernel value, cl_kernel_info name, size_t size, void *output, size_t *written) {
-  auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
+  auto *kernel = checked(value);
   if (!kernel) return CL_INVALID_KERNEL;
   switch (name) {
     case CL_KERNEL_FUNCTION_NAME: return outputString(size, output, written, kernel->name);
@@ -2871,7 +2723,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelInfo(cl_kernel value, cl_kernel_info 
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetKernelArgInfo(cl_kernel value, cl_uint index, cl_kernel_arg_info name, size_t size, void *output,
                                                    size_t *written) {
-  auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
+  auto *kernel = checked(value);
   if (!kernel) return CL_INVALID_KERNEL;
   if (index >= kernel->arguments.size()) return CL_INVALID_ARG_INDEX;
   if (index >= kernel->argumentInfo.size()) return CL_KERNEL_ARG_INFO_NOT_AVAILABLE;
@@ -2887,7 +2739,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelArgInfo(cl_kernel value, cl_uint inde
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetKernelWorkGroupInfo(cl_kernel value, cl_device_id selected, cl_kernel_work_group_info name,
                                                          size_t size, void *output, size_t *written) {
-  auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
+  auto *kernel = checked(value);
   if (!kernel) return CL_INVALID_KERNEL;
   // OpenCL permits a null device when the kernel's program has one device.
   if (selected && !validDevice(selected)) return CL_INVALID_DEVICE;
@@ -2920,9 +2772,9 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelWorkGroupInfo(cl_kernel value, cl_dev
   }
 }
 
-CL_API_ENTRY cl_int CL_API_CALL clWaitForEvents(cl_uint count, const cl_event *events) { return waitList(nullptr, count, events); }
+CL_API_ENTRY cl_int CL_API_CALL clWaitForEvents(cl_uint count, const cl_event *events) { return waitForEvents(count, events); }
 CL_API_ENTRY cl_event CL_API_CALL clCreateUserEvent(cl_context value, cl_int *error) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(value), Kind::Context);
+  auto *context = checked(value);
   if (!context) {
     if (error) *error = CL_INVALID_CONTEXT;
     return nullptr;
@@ -2938,12 +2790,20 @@ CL_API_ENTRY cl_event CL_API_CALL clCreateUserEvent(cl_context value, cl_int *er
   event->command = CL_COMMAND_USER;
   event->status = CL_SUBMITTED;
   event->started = nowNanos();
+  try {
+    event->ticket = scheduler().pending();
+  } catch (const std::bad_alloc &) {
+    unregisterLiveObject(event);
+    delete event;
+    if (error) *error = CL_OUT_OF_HOST_MEMORY;
+    return nullptr;
+  }
   retain(context);
   if (error) *error = CL_SUCCESS;
   return reinterpret_cast<cl_event>(event);
 }
 CL_API_ENTRY cl_int CL_API_CALL clSetUserEventStatus(cl_event value, cl_int status) {
-  auto *event = checked(reinterpret_cast<_cl_event *>(value), Kind::Event);
+  auto *event = checked(value);
   if (!event) return CL_INVALID_EVENT;
   if (event->command != CL_COMMAND_USER) return CL_INVALID_OPERATION;
   if (status != CL_COMPLETE && status >= 0) return CL_INVALID_VALUE;
@@ -2953,13 +2813,14 @@ CL_API_ENTRY cl_int CL_API_CALL clSetUserEventStatus(cl_event value, cl_int stat
     event->status = status;
     event->ended = nowNanos();
   }
+  scheduler().complete(event->ticket, 0);
   eventsCondition.notify_all();
   notifyEventCallbacks(event);
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clSetEventCallback(cl_event value, cl_int trigger, void(CL_CALLBACK *callback)(cl_event, cl_int, void *),
                                                    void *user) {
-  auto *event = checked(reinterpret_cast<_cl_event *>(value), Kind::Event);
+  auto *event = checked(value);
   if (!event) return CL_INVALID_EVENT;
   if (!callback || (trigger != CL_SUBMITTED && trigger != CL_RUNNING && trigger != CL_COMPLETE)) return CL_INVALID_VALUE;
   bool ready = false;
@@ -2974,7 +2835,7 @@ CL_API_ENTRY cl_int CL_API_CALL clSetEventCallback(cl_event value, cl_int trigge
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetEventInfo(cl_event value, cl_event_info name, size_t size, void *output, size_t *written) {
-  auto *event = checked(reinterpret_cast<_cl_event *>(value), Kind::Event);
+  auto *event = checked(value);
   if (!event) return CL_INVALID_EVENT;
   switch (name) {
     case CL_EVENT_COMMAND_QUEUE: {
@@ -2998,13 +2859,13 @@ CL_API_ENTRY cl_int CL_API_CALL clGetEventInfo(cl_event value, cl_event_info nam
   }
 }
 CL_API_ENTRY cl_int CL_API_CALL clRetainEvent(cl_event value) {
-  auto *event = checked(reinterpret_cast<_cl_event *>(value), Kind::Event);
+  auto *event = checked(value);
   if (!event) return CL_INVALID_EVENT;
   retain(event);
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clReleaseEvent(cl_event value) {
-  auto *event = checked(reinterpret_cast<_cl_event *>(value), Kind::Event);
+  auto *event = checked(value);
   if (!event) return CL_INVALID_EVENT;
   if (release(event)) {
     auto *queue = event->queue;
@@ -3018,7 +2879,7 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseEvent(cl_event value) {
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetEventProfilingInfo(cl_event value, cl_profiling_info name, size_t size, void *output,
                                                         size_t *written) {
-  auto *event = checked(reinterpret_cast<_cl_event *>(value), Kind::Event);
+  auto *event = checked(value);
   if (!event) return CL_INVALID_EVENT;
   if (!event->queue || (event->queue->properties & CL_QUEUE_PROFILING_ENABLE) == 0) return CL_PROFILING_INFO_NOT_AVAILABLE;
   if (name == CL_PROFILING_COMMAND_QUEUED) return outputScalar(size, output, written, event->queued);
@@ -3027,13 +2888,13 @@ CL_API_ENTRY cl_int CL_API_CALL clGetEventProfilingInfo(cl_event value, cl_profi
   if (name == CL_PROFILING_COMMAND_END) return outputScalar(size, output, written, event->ended);
   return CL_INVALID_VALUE;
 }
-CL_API_ENTRY cl_int CL_API_CALL clFlush(cl_command_queue value) {
-  return checked(reinterpret_cast<_cl_command_queue *>(value), Kind::Queue) ? CL_SUCCESS : CL_INVALID_COMMAND_QUEUE;
-}
+CL_API_ENTRY cl_int CL_API_CALL clFlush(cl_command_queue value) { return checked(value) ? CL_SUCCESS : CL_INVALID_COMMAND_QUEUE; }
 CL_API_ENTRY cl_int CL_API_CALL clFinish(cl_command_queue value) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(value), Kind::Queue);
+  auto *queue = checked(value);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  return waitQueue(queue);
+  scheduler().waitCovered(scheduler().snapshot(queue->stream));
+  std::lock_guard lock(eventsMutex);
+  return std::exchange(queue->unobservedFailures, size_t{0}) != 0 ? CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST : CL_SUCCESS;
 }
 
 } // extern "C"
@@ -3073,16 +2934,13 @@ extern "C" {
 
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueReadBuffer(cl_command_queue queueValue, cl_mem memoryValue, cl_bool blocking, size_t offset,
                                                     size_t size, void *output, cl_uint count, const cl_event *waits, cl_event *event) {
-  return enqueueBufferTransfer(checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue),
-                               checked(reinterpret_cast<_cl_mem *>(memoryValue), Kind::Memory), true, blocking, offset, size, output, count,
-                               waits, event);
+  return enqueueBufferTransfer(checked(queueValue), checked(memoryValue), true, blocking, offset, size, output, count, waits, event);
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueWriteBuffer(cl_command_queue queueValue, cl_mem memoryValue, cl_bool blocking, size_t offset,
                                                      size_t size, const void *input, cl_uint count, const cl_event *waits,
                                                      cl_event *event) {
-  return enqueueBufferTransfer(checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue),
-                               checked(reinterpret_cast<_cl_mem *>(memoryValue), Kind::Memory), false, blocking, offset, size,
-                               const_cast<void *>(input), count, waits, event);
+  return enqueueBufferTransfer(checked(queueValue), checked(memoryValue), false, blocking, offset, size, const_cast<void *>(input), count,
+                               waits, event);
 }
 
 } // extern "C"
@@ -3261,9 +3119,8 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueReadBufferRect(cl_command_queue queueVa
                                                         size_t bufferRowPitch, size_t bufferSlicePitch, size_t hostRowPitch,
                                                         size_t hostSlicePitch, void *output, cl_uint count, const cl_event *waits,
                                                         cl_event *event) {
-  return enqueueReadBufferRect(checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue),
-                               checked(reinterpret_cast<_cl_mem *>(memoryValue), Kind::Memory), blocking, bufferOrigin, hostOrigin, region,
-                               bufferRowPitch, bufferSlicePitch, hostRowPitch, hostSlicePitch, output, count, waits, event);
+  return enqueueReadBufferRect(checked(queueValue), checked(memoryValue), blocking, bufferOrigin, hostOrigin, region, bufferRowPitch,
+                               bufferSlicePitch, hostRowPitch, hostSlicePitch, output, count, waits, event);
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueWriteBufferRect(cl_command_queue queueValue, cl_mem memoryValue, cl_bool blocking,
@@ -3271,27 +3128,24 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueWriteBufferRect(cl_command_queue queueV
                                                          size_t bufferRowPitch, size_t bufferSlicePitch, size_t hostRowPitch,
                                                          size_t hostSlicePitch, const void *input, cl_uint count, const cl_event *waits,
                                                          cl_event *event) {
-  return enqueueWriteBufferRect(checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue),
-                                checked(reinterpret_cast<_cl_mem *>(memoryValue), Kind::Memory), blocking, bufferOrigin, hostOrigin, region,
-                                bufferRowPitch, bufferSlicePitch, hostRowPitch, hostSlicePitch, input, count, waits, event);
+  return enqueueWriteBufferRect(checked(queueValue), checked(memoryValue), blocking, bufferOrigin, hostOrigin, region, bufferRowPitch,
+                                bufferSlicePitch, hostRowPitch, hostSlicePitch, input, count, waits, event);
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueCopyBufferRect(cl_command_queue queueValue, cl_mem sourceValue, cl_mem targetValue,
                                                         const size_t *sourceOrigin, const size_t *targetOrigin, const size_t *region,
                                                         size_t sourceRowPitch, size_t sourceSlicePitch, size_t targetRowPitch,
                                                         size_t targetSlicePitch, cl_uint count, const cl_event *waits, cl_event *event) {
-  return enqueueCopyBufferRect(checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue),
-                               checked(reinterpret_cast<_cl_mem *>(sourceValue), Kind::Memory),
-                               checked(reinterpret_cast<_cl_mem *>(targetValue), Kind::Memory), sourceOrigin, targetOrigin, region,
+  return enqueueCopyBufferRect(checked(queueValue), checked(sourceValue), checked(targetValue), sourceOrigin, targetOrigin, region,
                                sourceRowPitch, sourceSlicePitch, targetRowPitch, targetSlicePitch, count, waits, event);
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueCopyBuffer(cl_command_queue queueValue, cl_mem sourceValue, cl_mem destinationValue,
                                                     size_t sourceOffset, size_t destinationOffset, size_t size, cl_uint count,
                                                     const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
-  auto *src = checked(reinterpret_cast<_cl_mem *>(sourceValue), Kind::Memory);
-  auto *dst = checked(reinterpret_cast<_cl_mem *>(destinationValue), Kind::Memory);
+  auto *queue = checked(queueValue);
+  auto *src = checked(sourceValue);
+  auto *dst = checked(destinationValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
@@ -3317,8 +3171,8 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueCopyBuffer(cl_command_queue queueValue,
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueFillBuffer(cl_command_queue queueValue, cl_mem memoryValue, const void *pattern,
                                                     size_t patternSize, size_t offset, size_t size, cl_uint count, const cl_event *waits,
                                                     cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
-  auto *mem = checked(reinterpret_cast<_cl_mem *>(memoryValue), Kind::Memory);
+  auto *queue = checked(queueValue);
+  auto *mem = checked(memoryValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
@@ -3342,8 +3196,8 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueFillBuffer(cl_command_queue queueValue,
 CL_API_ENTRY void *CL_API_CALL clEnqueueMapBuffer(cl_command_queue queueValue, cl_mem memoryValue, cl_bool blocking, cl_map_flags flags,
                                                   size_t offset, size_t size, cl_uint count, const cl_event *waits, cl_event *event,
                                                   cl_int *error) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
-  auto *mem = checked(reinterpret_cast<_cl_mem *>(memoryValue), Kind::Memory);
+  auto *queue = checked(queueValue);
+  auto *mem = checked(memoryValue);
   if (!queue) {
     if (error) *error = CL_INVALID_COMMAND_QUEUE;
     return nullptr;
@@ -3397,7 +3251,7 @@ CL_API_ENTRY void *CL_API_CALL clEnqueueMapBuffer(cl_command_queue queueValue, c
                    ? CL_SUCCESS
                    : readAllocation(retained->allocation, mapping->offset, mapping->pointer, mapping->size);
       },
-      event, false, false,
+      event,
       [=](cl_int status) {
         if (status == CL_SUCCESS) return;
         std::lock_guard lock(allocationsMutex);
@@ -3411,8 +3265,8 @@ CL_API_ENTRY void *CL_API_CALL clEnqueueMapBuffer(cl_command_queue queueValue, c
 
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueUnmapMemObject(cl_command_queue queueValue, cl_mem memoryValue, void *pointer, cl_uint count,
                                                         const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
-  auto *mem = checked(reinterpret_cast<_cl_mem *>(memoryValue), Kind::Memory);
+  auto *queue = checked(queueValue);
+  auto *mem = checked(memoryValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   if (!mem || mem->context != queue->context || !pointer) return CL_INVALID_MEM_OBJECT;
   auto result = validateWaitList(queue, count, waits);
@@ -3430,7 +3284,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueUnmapMemObject(cl_command_queue queueVa
   auto retained = retainMemory(mem);
   return submitCommand(
       queue, CL_COMMAND_UNMAP_MEM_OBJECT, false, count, waits,
-      [=] { return writeAllocation(retained->allocation, mapping->offset, mapping->pointer, mapping->size); }, event, false, false,
+      [=] { return writeAllocation(retained->allocation, mapping->offset, mapping->pointer, mapping->size); }, event,
       [=](cl_int status) {
         std::lock_guard lock(allocationsMutex);
         const auto [begin, end] = retained->mappings.equal_range(key);
@@ -3445,12 +3299,12 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueUnmapMemObject(cl_command_queue queueVa
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueMigrateMemObjects(cl_command_queue queueValue, cl_uint count, const cl_mem *memoryObjects,
                                                            cl_mem_migration_flags, cl_uint waitCount, const cl_event *waits,
                                                            cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
+  auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   if (count == 0 || !memoryObjects) return CL_INVALID_VALUE;
   std::vector<std::shared_ptr<_cl_mem>> retained;
   for (cl_uint index = 0; index < count; ++index) {
-    auto *memory = checked(reinterpret_cast<_cl_mem *>(memoryObjects[index]), Kind::Memory);
+    auto *memory = checked(memoryObjects[index]);
     if (!memory) return CL_INVALID_MEM_OBJECT;
     if (memory->context != queue->context) return CL_INVALID_CONTEXT;
     retained.push_back(retainMemory(memory));
@@ -3467,8 +3321,8 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueMigrateMemObjects(cl_command_queue queu
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueValue, cl_kernel kernelValue, cl_uint workDimension,
                                                        const size_t *offset, const size_t *global, const size_t *local, cl_uint count,
                                                        const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
-  auto *kernel = checked(reinterpret_cast<_cl_kernel *>(kernelValue), Kind::Kernel);
+  auto *queue = checked(queueValue);
+  auto *kernel = checked(kernelValue);
   if (!queue || !kernel) return !queue ? CL_INVALID_COMMAND_QUEUE : CL_INVALID_KERNEL;
   if (workDimension == 0 || workDimension > 3) return CL_INVALID_WORK_DIMENSION;
   if (kernel->arguments.size() != kernel->expectedArguments || (kernel->argumentsSet ^ contains(false))) return CL_INVALID_KERNEL_ARGS;
@@ -3513,7 +3367,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueVal
   std::vector<_cl_event *> dependencies;
   dependencies.reserve(count);
   for (cl_uint index = 0; index < count; ++index) {
-    auto *dependency = checked(reinterpret_cast<_cl_event *>(waits[index]), Kind::Event);
+    auto *dependency = checked(waits[index]);
     if (!dependency) return CL_INVALID_EVENT_WAIT_LIST;
     if (dependency->context != queue->context) return CL_INVALID_CONTEXT;
     dependencies.push_back(dependency);
@@ -3566,16 +3420,13 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueVal
       deferredGlobal[index] = global[index];
       if (hasLocal) deferredLocal[index] = local[index];
     }
-    std::vector<cl_event> retainedWaits;
-    for (auto *dependency : dependencies)
-      retainedWaits.push_back(reinterpret_cast<cl_event>(dependency));
     return enqueuePending(
-        queue, CL_COMMAND_NDRANGE_KERNEL, std::move(retainedWaits),
-        [queue, snapshot, workDimension, hasOffset, hasLocal, deferredOffset, deferredGlobal, deferredLocal] {
-          return finishRemote(queue, snapshot.get(), workDimension, hasOffset ? deferredOffset.data() : nullptr, deferredGlobal.data(),
-                              hasLocal ? deferredLocal.data() : nullptr, nullptr);
+        queue, CL_COMMAND_NDRANGE_KERNEL, std::move(dependencies),
+        [snapshot, workDimension, hasOffset, hasLocal, deferredOffset, deferredGlobal, deferredLocal] {
+          return finishRemote(snapshot.get(), workDimension, hasOffset ? deferredOffset.data() : nullptr, deferredGlobal.data(),
+                              hasLocal ? deferredLocal.data() : nullptr);
         },
-        event, false, false, {}, allocationUses(std::move(used)));
+        event, Sync::None, {}, allocationUses(std::move(used)));
   } catch (...) {
     return CL_OUT_OF_HOST_MEMORY;
   }
@@ -3587,15 +3438,15 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueTask(cl_command_queue queue, cl_kernel 
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueMarkerWithWaitList(cl_command_queue queueValue, cl_uint count, const cl_event *waits,
                                                             cl_event *event) {
-  return completeEvent(checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue), CL_COMMAND_MARKER, count, waits, event);
+  return completeEvent(checked(queueValue), CL_COMMAND_MARKER, count, waits, event);
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueBarrierWithWaitList(cl_command_queue queueValue, cl_uint count, const cl_event *waits,
                                                              cl_event *event) {
-  return completeEvent(checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue), CL_COMMAND_BARRIER, count, waits, event);
+  return completeEvent(checked(queueValue), CL_COMMAND_BARRIER, count, waits, event);
 }
 
 CL_API_ENTRY void *CL_API_CALL clSVMAlloc(cl_context contextValue, cl_svm_mem_flags flags, size_t size, cl_uint alignment) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(contextValue), Kind::Context);
+  auto *context = checked(contextValue);
   if (!context) return nullptr;
   constexpr cl_svm_mem_flags access = CL_MEM_READ_WRITE | CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY;
   constexpr cl_svm_mem_flags allowed = access | CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS;
@@ -3630,7 +3481,7 @@ CL_API_ENTRY void CL_API_CALL clSVMFree(cl_context, void *pointer) {
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMFree(cl_command_queue queueValue, cl_uint count, void *pointers[],
                                                  void(CL_CALLBACK *callback)(cl_command_queue, cl_uint, void *[], void *), void *userData,
                                                  cl_uint waitCount, const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
+  auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   if ((count == 0) != (pointers == nullptr)) return CL_INVALID_VALUE;
   auto result = validateWaitList(queue, waitCount, waits);
@@ -3658,7 +3509,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMFree(cl_command_queue queueValue, cl
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMigrateMem(cl_command_queue queueValue, cl_uint count, const void **pointers,
                                                        const size_t *sizes, cl_mem_migration_flags flags, cl_uint waitCount,
                                                        const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
+  auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   if (count == 0 || !pointers || (flags & ~(CL_MIGRATE_MEM_OBJECT_HOST | CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED))) return CL_INVALID_VALUE;
   auto result = validateWaitList(queue, waitCount, waits);
@@ -3693,11 +3544,11 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMigrateMem(cl_command_queue queueVal
           }
         return CL_SUCCESS;
       },
-      event, false, false, {}, allocationUses(std::move(used)));
+      event, {}, allocationUses(std::move(used)));
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue queueValue, cl_bool blocking, void *dst, const void *src, size_t size,
                                                    cl_uint count, const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
+  auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
@@ -3736,11 +3587,11 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue queueValue, 
         }
         return CL_SUCCESS;
       },
-      event, false, false, {}, allocationUses({sourceAllocation, destinationAllocation}));
+      event, {}, allocationUses({sourceAllocation, destinationAllocation}));
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemFill(cl_command_queue queueValue, void *pointer, const void *pattern, size_t patternSize,
                                                     size_t size, cl_uint count, const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
+  auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   auto waited = validateWaitList(queue, count, waits);
   if (waited != CL_SUCCESS) return waited;
@@ -3759,11 +3610,11 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemFill(cl_command_queue queueValue,
         if (result != CL_SUCCESS) return result;
         return CL_SUCCESS;
       },
-      event, false, false, {}, allocationUses({allocation}));
+      event, {}, allocationUses({allocation}));
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue queueValue, cl_bool blocking, cl_map_flags, void *pointer, size_t size,
                                                 cl_uint count, const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
+  auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
@@ -3780,8 +3631,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue queueValue, cl_
     if (!svmMappings.emplace(key, mapping).second) return CL_INVALID_OPERATION;
   }
   return submitCommand(
-      queue, CL_COMMAND_SVM_MAP, blocking, count, waits, [=] { return readAllocation(allocation, offset, pointer, size); }, event, false,
-      false,
+      queue, CL_COMMAND_SVM_MAP, blocking, count, waits, [=] { return readAllocation(allocation, offset, pointer, size); }, event,
       [=](cl_int status) {
         if (status == CL_SUCCESS) return;
         std::lock_guard lock(allocationsMutex);
@@ -3792,7 +3642,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue queueValue, cl_
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue queueValue, void *pointer, cl_uint count, const cl_event *waits,
                                                   cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
+  auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
@@ -3810,7 +3660,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue queueValue, v
   }
   return submitCommand(
       queue, CL_COMMAND_SVM_UNMAP, false, count, waits,
-      [=] { return writeAllocation(allocation, mapping->offset, mapping->pointer, mapping->size); }, event, false, false,
+      [=] { return writeAllocation(allocation, mapping->offset, mapping->pointer, mapping->size); }, event,
       [=](cl_int status) {
         std::lock_guard lock(allocationsMutex);
         const auto found = svmMappings.find(key);
@@ -3822,10 +3672,11 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue queueValue, v
       allocationUses({allocation}));
 }
 
+} // extern "C"
 namespace {
 void *allocateUSM(cl_context contextValue, cl_device_id deviceValue, cl_unified_shared_memory_type_intel type, size_t size,
                   cl_uint alignment, cl_int *error) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(contextValue), Kind::Context);
+  auto *context = checked(contextValue);
   if (!context) {
     if (error) *error = CL_INVALID_CONTEXT;
     return nullptr;
@@ -3843,6 +3694,7 @@ void *allocateUSM(cl_context contextValue, cl_device_id deviceValue, cl_unified_
   return !allocation ? nullptr : allocation->data();
 }
 } // namespace
+extern "C" {
 
 CL_API_ENTRY void *CL_API_CALL clHostMemAllocINTEL(cl_context context, const cl_mem_properties_intel *, size_t size, cl_uint alignment,
                                                    cl_int *error) {
@@ -3856,9 +3708,10 @@ CL_API_ENTRY void *CL_API_CALL clSharedMemAllocINTEL(cl_context context, cl_devi
                                                      cl_uint alignment, cl_int *error) {
   return allocateUSM(context, device, CL_MEM_TYPE_SHARED_INTEL, size, alignment, error);
 }
+} // extern "C"
 namespace {
 cl_int freeUSM(cl_context contextValue, void *pointer, bool blocking) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(contextValue), Kind::Context);
+  auto *context = checked(contextValue);
   if (!context) return CL_INVALID_CONTEXT;
   if (!pointer) return CL_SUCCESS;
   auto allocation = findPointer(pointer);
@@ -3872,12 +3725,13 @@ cl_int freeUSM(cl_context contextValue, void *pointer, bool blocking) {
   return releaseAllocation(allocation, true);
 }
 } // namespace
+extern "C" {
 
 CL_API_ENTRY cl_int CL_API_CALL clMemFreeINTEL(cl_context context, void *pointer) { return freeUSM(context, pointer, false); }
 CL_API_ENTRY cl_int CL_API_CALL clMemBlockingFreeINTEL(cl_context context, void *pointer) { return freeUSM(context, pointer, true); }
 CL_API_ENTRY cl_int CL_API_CALL clGetMemAllocInfoINTEL(cl_context contextValue, const void *pointer, cl_mem_info_intel name, size_t size,
                                                        void *output, size_t *written) {
-  auto *context = checked(reinterpret_cast<_cl_context *>(contextValue), Kind::Context);
+  auto *context = checked(contextValue);
   if (!context) return CL_INVALID_CONTEXT;
   size_t offset = 0;
   auto allocation = findPointer(pointer, &offset);
@@ -3920,14 +3774,13 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueMemFillINTEL(cl_command_queue queueValu
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueMemAdviseINTEL(cl_command_queue queueValue, const void *pointer, size_t size, cl_mem_advice_intel,
                                                         cl_uint count, const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
+  auto *queue = checked(queueValue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   size_t offset = 0;
   auto allocation = findPointer(pointer, &offset);
   if (!validRange(allocation, offset, size)) return CL_INVALID_VALUE;
   return submitCommand(
-      queue, CL_COMMAND_MEMADVISE_INTEL, false, count, waits, [] { return CL_SUCCESS; }, event, false, false, {},
-      allocationUses({allocation}));
+      queue, CL_COMMAND_MEMADVISE_INTEL, false, count, waits, [] { return CL_SUCCESS; }, event, {}, allocationUses({allocation}));
 }
 
 CL_API_ENTRY void *CL_API_CALL clGetExtensionFunctionAddress(const char *name) {
@@ -3956,7 +3809,7 @@ CL_API_ENTRY void *CL_API_CALL clGetExtensionFunctionAddressForPlatform(cl_platf
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetKernelSubGroupInfo(cl_kernel value, cl_device_id selected, cl_kernel_sub_group_info name,
                                                         size_t inputSize, const void *input, size_t size, void *output, size_t *written) {
-  if (!checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel)) return CL_INVALID_KERNEL;
+  if (!checked(value)) return CL_INVALID_KERNEL;
   // OpenCL permits a null device when the kernel's program has one device.
   if (selected && !validDevice(selected)) return CL_INVALID_DEVICE;
   constexpr size_t subgroupSize = MaxSubgroupSize;
@@ -4013,8 +3866,8 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelSubGroupInfoKHR(cl_kernel value, cl_d
 
 namespace {
 
-void initializeDispatch() {
-  std::call_once(dispatchInitialized, [] {
+void initialiseDispatch() {
+  std::call_once(dispatchInitialised, [] {
     registerLiveObject(&platform);
     registerLiveObject(&device);
     platform.dispatch = &dispatch;

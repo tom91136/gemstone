@@ -1320,6 +1320,7 @@ inline constexpr uint32_t GlobalSize = 31u;
 inline constexpr uint32_t EnqueuedWorkgroupSize = 32u;
 inline constexpr uint32_t GlobalOffset = 33u;
 inline constexpr uint32_t GlobalLinearId = 34u;
+inline constexpr uint32_t WorkgroupLinearId = 35u;
 inline constexpr uint32_t SubgroupSize = 36u;
 inline constexpr uint32_t SubgroupMaxSize = 37u;
 inline constexpr uint32_t NumSubgroups = 38u;

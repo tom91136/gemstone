@@ -1,41 +1,26 @@
-// Include-twice declaration list for per-type edge and stress cases. The
-// includer defines UNIFIED_EDGE_TYPE, UNIFIED_EDGE_NAME (string),
-// UNIFIED_EDGE_MATRIX (string), UNIFIED_EDGE_SIZES, and UNIFIED_STRESS_SIZES
-// before including this file.
-#define UNIFIED_EDGE_CASE(name, check)                                                                                                     \
-  TEST_CASE("edge/" UNIFIED_EDGE_NAME "/" UNIFIED_EDGE_MATRIX "/" name,                                                                    \
-            "[unified][" UNIFIED_EDGE_MATRIX "-matrix][edge][" UNIFIED_EDGE_NAME "]") {                                                    \
-    const auto size = GENERATE(Catch::Generators::from_range(UNIFIED_EDGE_SIZES));                                                         \
-    CAPTURE(size);                                                                                                                         \
-    unified::backend::EdgeCases backend;                                                                                                   \
-    check<UNIFIED_EDGE_TYPE>(backend, size);                                                                                               \
-  }
+#pragma once
 
-UNIFIED_EDGE_CASE("composed_iterator_reduce", unified::edge::composed_iterator_reduce)
-UNIFIED_EDGE_CASE("biased_index_64", unified::edge::biased_index_64)
-UNIFIED_EDGE_CASE("segments_singleton", unified::edge::segments_singleton)
-UNIFIED_EDGE_CASE("segments_giant", unified::edge::segments_giant)
-UNIFIED_EDGE_CASE("segments_boundary", unified::edge::segments_boundary)
-UNIFIED_EDGE_CASE("inplace_scan_canary", unified::edge::inplace_scan_canary)
-UNIFIED_EDGE_CASE("stable_sort_payload", unified::edge::stable_sort_payload)
-UNIFIED_EDGE_CASE("dependency_diamond", unified::edge::dependency_diamond)
-UNIFIED_EDGE_CASE("numeric_edge_roundtrip", unified::edge::numeric_edge_roundtrip)
-UNIFIED_EDGE_CASE("primitive_block_scan", unified::edge::primitive_block_scan)
-UNIFIED_EDGE_CASE("runtime_error_recover", unified::edge::runtime_error_recover)
+#include "cases/grid.inl"
+#include "stress_cases.hpp"
 
-#undef UNIFIED_EDGE_CASE
+#define UNIFIED_EDGE_CASES(CASE, ...)                                                                                                      \
+  CASE(composed_iterator_reduce, composedIteratorReduce, __VA_ARGS__)                                                                      \
+  CASE(biased_index_64, biasedIndex64, __VA_ARGS__)                                                                                        \
+  CASE(segments_singleton, segmentsSingleton, __VA_ARGS__)                                                                                 \
+  CASE(segments_giant, segmentsGiant, __VA_ARGS__)                                                                                         \
+  CASE(segments_boundary, segmentsBoundary, __VA_ARGS__)                                                                                   \
+  CASE(inplace_scan_canary, inplaceScanCanary, __VA_ARGS__)                                                                                \
+  CASE(stable_sort_payload, stableSortPayload, __VA_ARGS__)                                                                                \
+  CASE(dependency_diamond, dependencyDiamond, __VA_ARGS__)                                                                                 \
+  CASE(numeric_edge_roundtrip, numericEdgeRoundtrip, __VA_ARGS__)                                                                          \
+  CASE(primitive_block_scan, primitiveBlockScan, __VA_ARGS__)                                                                              \
+  CASE(runtime_error_recover, runtimeErrorRecover, __VA_ARGS__)
 
-#define UNIFIED_STRESS_CASE(name, check)                                                                                                   \
-  TEST_CASE("stress/" UNIFIED_EDGE_NAME "/" UNIFIED_EDGE_MATRIX "/" name,                                                                  \
-            "[unified][" UNIFIED_EDGE_MATRIX "-matrix][stress][" UNIFIED_EDGE_NAME "]") {                                                  \
-    const auto size = GENERATE(Catch::Generators::from_range(UNIFIED_STRESS_SIZES));                                                       \
-    CAPTURE(size);                                                                                                                         \
-    unified::backend::EdgeCases backend;                                                                                                   \
-    check<UNIFIED_EDGE_TYPE>(backend, size);                                                                                               \
-  }
+#define UNIFIED_STRESS_CASES(CASE, ...)                                                                                                    \
+  CASE(dependency_diamond, dependencyDiamond, __VA_ARGS__)                                                                                 \
+  CASE(primitive_block_scan, primitiveBlockScan, __VA_ARGS__)                                                                              \
+  CASE(numeric_roundtrip, numericRoundtrip, __VA_ARGS__)
 
-UNIFIED_STRESS_CASE("dependency_diamond", unified::stress::dependency_diamond)
-UNIFIED_STRESS_CASE("primitive_block_scan", unified::stress::primitive_block_scan)
-UNIFIED_STRESS_CASE("numeric_roundtrip", unified::stress::numeric_roundtrip)
-
-#undef UNIFIED_STRESS_CASE
+#define UNIFIED_EDGE_STRESS(T, TYPE, MATRIX)                                                                                               \
+  UNIFIED_EDGE_CASES(UNIFIED_CASE, T, TYPE, MATRIX, edge, edge, EdgeSizes, EdgeCases)                                                      \
+  UNIFIED_STRESS_CASES(UNIFIED_CASE, T, TYPE, MATRIX, stress, stress, StressSizes, EdgeCases)

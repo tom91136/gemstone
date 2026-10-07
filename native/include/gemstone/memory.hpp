@@ -1,5 +1,4 @@
-#ifndef GEMSTONE_MEMORY_HPP
-#define GEMSTONE_MEMORY_HPP
+#pragma once
 
 #include <algorithm>
 #include <cstddef>
@@ -25,7 +24,7 @@ enum class MemoryOwnership { Borrowed, Owned };
 
 // API registrations are independent leases over backing bytes. Backing storage is
 // owned by each adapter; overlapping leases must never create duplicate mirrors.
-// Callers serialize transactions with their runtime lock.
+// Callers serialise transactions with their runtime lock.
 class MemoryRegistrations {
 public:
   struct View {
@@ -35,37 +34,43 @@ public:
   };
 
 private:
-  std::vector<View> views_;
+  std::vector<View> views;
 
 public:
-  const std::vector<View> &views() const { return views_; }
+  std::vector<MemoryRange> ranges() const {
+    std::vector<MemoryRange> result;
+    result.reserve(views.size());
+    for (const auto &view : views)
+      result.push_back(view.range);
+    return result;
+  }
   const View *exact(uintptr_t base, size_t size = 0) const {
-    for (auto it = views_.rbegin(); it != views_.rend(); ++it)
+    for (auto it = views.rbegin(); it != views.rend(); ++it)
       if (it->range.base == base && (size == 0 || it->range.size == size)) return &*it;
     return nullptr;
   }
   const View *find(uintptr_t address, size_t bytes = 1) const {
     const View *found = nullptr;
-    for (const auto &view : views_)
+    for (const auto &view : views)
       if (view.range.contains(address, bytes) && (!found || view.range.size < found->range.size)) found = &view;
     return found;
   }
   bool overlaps(MemoryRange range) const {
-    for (const auto &view : views_)
+    for (const auto &view : views)
       if (view.range.overlaps(range)) return true;
     return false;
   }
   bool add(MemoryRange range, MemoryOwnership ownership, uint64_t flags, bool allowOverlap = false) {
     if (!range.valid() || (!allowOverlap && overlaps(range))) return false;
-    views_.push_back({range, ownership, flags});
+    views.push_back({range, ownership, flags});
     return true;
   }
   bool remove(uintptr_t base, MemoryOwnership ownership, size_t size = 0) {
     // Repeated locks are independent leases; release one, never all of them.
-    for (auto it = views_.end(); it != views_.begin();) {
+    for (auto it = views.end(); it != views.begin();) {
       --it;
       if (it->range.base == base && it->ownership == ownership && (size == 0 || it->range.size == size)) {
-        views_.erase(it);
+        views.erase(it);
         return true;
       }
     }
@@ -102,4 +107,3 @@ inline std::vector<MemoryRange> missingMemoryRanges(MemoryRange requested, std::
   return result;
 }
 } // namespace gemstone
-#endif

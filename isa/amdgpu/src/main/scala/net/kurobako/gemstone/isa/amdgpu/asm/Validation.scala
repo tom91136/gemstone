@@ -26,16 +26,14 @@ object Validation {
 
   def validate(instruction: Instruction, target: Target): ValidationOutcome[Issue] = {
     // Symbol resolution belongs to the assembler. Check the remaining operands using a representable displacement.
-    val branch = Metadata.encodingsFor(instruction.definition, target).exists(encoding =>
-      encoding.format == EncodingFormat.SOPP && encoding.operands.exists(_.kind == OperandKind.LABEL)
-    )
+    val branch   = Instruction.branchesRelative(instruction.definition, target)
     val operands = instruction.operands.map {
       case Operand.Identifier(_) | Operand.Expression(_) if branch => Operand.IntegerLiteral(BigInt(0), 10)
       case other                                                   => other
     }
     Instruction.decode(instruction.definition, operands, instruction.mods) match {
-      case Vec(value) => result(instruction, target, Binary.encode(value, target))
-      case _          => incomplete(s"ambiguous operand form for ${instruction.opcode}")
+      case Right(value) => result(instruction, target, Binary.encode(value, target))
+      case Left(_)      => incomplete(s"invalid operand form for ${instruction.opcode}")
     }
   }
 
@@ -45,7 +43,7 @@ object Validation {
       encoded: Either[CodecError, Vec[Byte]]
   ): ValidationOutcome[Issue] = encoded match {
     case Right(_) =>
-      incomplete(s"exact processor availability is not normalized for ${instruction.opcode} on ${target.name}")
+      incomplete(s"exact processor availability is not normalised for ${instruction.opcode} on ${target.name}")
     case Left(CodecError.UnsupportedInstruction(opcode, target)) =>
       ValidationOutcome.Rejected(Vec.nonEmpty(Issue.UnsupportedInstruction(opcode, target)))
     case Left(CodecError.InvalidOperand(message)) =>

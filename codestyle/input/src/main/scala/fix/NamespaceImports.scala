@@ -1,5 +1,5 @@
 /*
-rule = GemstoneNamespaceImports
+rule = NamespaceImports
  */
 package net.kurobako.gemstone.importfixture {
   class Item
@@ -11,21 +11,21 @@ package net.kurobako.gemstone.importfixture {
 
 package fix {
   object NamespaceImports {
-    import net.kurobako.gemstone.importfixture.Item // assert: GemstoneNamespaceImports.namespace-import
+    import net.kurobako.gemstone.importfixture.Item // assert: NamespaceImports.namespace-import
     val item: Item = new Item
 
-    val typed: net.kurobako.gemstone.importfixture.Item = // assert: GemstoneNamespaceImports.qualified-reference
+    val typed: net.kurobako.gemstone.importfixture.Item = // assert: NamespaceImports.qualified-reference
       item
     val qualifiedValue =
-      net.kurobako.gemstone.importfixture.Items.value // assert: GemstoneNamespaceImports.qualified-reference
+      net.kurobako.gemstone.importfixture.Items.value // assert: NamespaceImports.qualified-reference
     val rooted =
-      new _root_.net.kurobako.gemstone.importfixture.Item // assert: GemstoneNamespaceImports.qualified-reference
+      new _root_.net.kurobako.gemstone.importfixture.Item // assert: NamespaceImports.qualified-reference
     val escaped =
-      `net`.kurobako.gemstone.importfixture.Items.value // assert: GemstoneNamespaceImports.qualified-reference
+      `net`.kurobako.gemstone.importfixture.Items.value // assert: NamespaceImports.qualified-reference
 
     // format: off
     object Grouped {
-      import net.kurobako.gemstone.importfixture.{Item, Items} // assert: GemstoneNamespaceImports.namespace-import
+      import net.kurobako.gemstone.importfixture.{Item, Items} // assert: NamespaceImports.namespace-import
       val pair = (new Item, Items.value)
     }
     // format: on
@@ -45,7 +45,7 @@ package fix {
     // format: off
     object Relative {
       import net.kurobako.gemstone.importfixture.*
-      import Items.value // assert: GemstoneNamespaceImports.namespace-import
+      import Items.value // assert: NamespaceImports.namespace-import
       val copy = value
     }
     // format: on

@@ -6,7 +6,6 @@ import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.asm.Instruction as AMDGPUInstruction
 
 object Program {
-
   enum Statement {
     case Comment(text: NonEmpty[String])
     case Instruction(value: AMDGPUInstruction)
@@ -17,27 +16,6 @@ object Program {
     case Label(name: String)
     case Directive(name: String, arguments: String)
   }
-
-  enum RegisterFile {
-    case Scalar, VectorRegister, Accumulator, TrapTemporary
-  }
-
-  enum Operand {
-    case Register(file: RegisterFile, first: Int, last: Int)
-    case SpecialRegister(name: String)
-    case IntegerLiteral(value: BigInt, radix: Int)
-    case DecimalLiteral(value: String)
-    case Identifier(name: String)
-    case Expression(text: String)
-    case Negated(value: Operand)
-    case Absolute(value: Operand)
-    case SignExtended(value: Operand)
-    case RegisterList(values: Vec[Operand])
-    case Half(value: Operand, high: Boolean)
-  }
-
-  case class Modifier(name: NonEmpty[String], value: Option[NonEmpty[String]] = None)
-
 }
 
 /** A parsed AMDGPU assembly program. Source locations are deliberately kept out of the semantic tree. */

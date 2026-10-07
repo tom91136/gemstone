@@ -6,8 +6,10 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.sass.Harness.*
+import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 class CubinTextRelocationSuite extends munit.FunSuite {
@@ -18,14 +20,12 @@ class CubinTextRelocationSuite extends munit.FunSuite {
     val parameterBase: Int >= 0 = if (sm == 35) 0x140 else 0x160
     val width                   = if (sm < 70) 8 else 16
     val mov                     = if (sm < 70) "MOV32I" else "MOV"
-    val body                    = Vec(
-      (mov, Vec("R6", "0")),
-      (mov, Vec("R7", "0")),
-      ("LDC.64", Vec("R4", s"c[0x0][0x${parameterBase.raw.toHexString}]")),
-      ("STG.E.64", Vec("[R4]", "R6")),
-      ("EXIT", Vec.empty[String])
-    ).zipWithIndex.map { case ((op, operands), index) =>
-      val instruction = SASSFixture.instruction(index * width, op, operands)
+    val listing                 = Listing.program(
+      s"$mov R6, 0; $mov R7, 0; LDC.64 R4, c[0x0][0x${parameterBase.raw.toHexString}]; STG.E.64 [R4], R6; EXIT",
+      "relocated"
+    ).value.instructions
+    val body = listing.zipWithIndex.map { (parsed, index) =>
+      val instruction = parsed.copy(address = (index * width).unsafe[Int >= 0])
       if (!binary || index >= 2) instruction
       else {
         // Compiler MOV32I/MOV encodings from the indirect-device-function cubins,
@@ -37,10 +37,10 @@ class CubinTextRelocationSuite extends munit.FunSuite {
         else if (sm >= 50) LittleEndian.toVec(if (index == 1) 0x7f5L else if (sm == 50) 0x7f1L else 0x7e1L, 3)
         else Vec.empty[Byte]
         val bytes = LittleEndian.toVec(word, 8) ++ control
-        InstructionDecoder.decodeTyped(instruction.address, bytes.toArray, s"SM$sm").fold(fail(_), identity)
+        InstructionDecoder.decode(instruction.address, bytes.toArray, target(sm)).fold(fail(_), identity)
       }
     }
-    val base   = SASSFixture.module(sm, Vec(SASSFixture.Kernel("relocated", parameterBase, Vec((0, 8)))))
+    val base   = Harness.module(sm, Vec(Entry("relocated", parameterBase, Vec(8))))
     val text   = base.sections.head.copy(size = 80, bytes = Vec.fill(80)(0.toByte))
     val global =
       Cubin.Section(base.sections.nonNegativeSize, ".nv.global.init", 1, 3L, 48, 0, 0, Vec.fill(48)(0.toByte))
@@ -78,16 +78,16 @@ class CubinTextRelocationSuite extends munit.FunSuite {
     binary <- Vec(false, true)
   } test(s"sm_$sm text address halves resolve bound globals with addend $addend, binary=$binary") {
     val (module, function) = fixture(sm, addend, binary)
-    val compiled           = LoadedProgram.compile(module, module.kernels.head, Vec(function), Map(symbol -> address))
-      .fold(error => fail(error.message), identity)
-    val memory = SASSFixture.Execution()
+    val compiled           = VMCompiler.compile(module, module.kernels.head, Vec(function), Map(symbol -> address))
+      .fold(error => fail(error.raw), identity)
+    val memory = Memory()
     val output = memory.allocate(8L)
-    val task   = SASSFixture.task(
+    val task   = KernelTask.validated(
       "relocated",
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
       Vec(KernelTask.Argument.Memory(output, 0L))
-    )
+    ).value
     memory.run(compiled, task).fold(error => fail(error.message), identity)
     val expected = address.raw + addend.getOrElse(0L)
     assertEquals(memory.readWords(output, 2), Vec(expected & 0xffffffffL, expected >>> 32))
@@ -116,7 +116,7 @@ class CubinTextRelocationSuite extends munit.FunSuite {
     )
     malformed.foreach { case (invalid, expected) =>
       assert(
-        VMCompiler.lower(invalid, invalid.kernels.head, Vec(function), Set(symbol))
+        VMCompiler.lower(invalid, invalid.kernels.head, Vec(function), Map(symbol -> address))
           .left.exists(_.raw.contains(expected)),
         clues(expected)
       )
@@ -125,25 +125,25 @@ class CubinTextRelocationSuite extends munit.FunSuite {
     val nonzero = function.copy(instructions =
       function.instructions.updated(
         0,
-        SASSFixture.instruction(0, "MOV32I", Vec("R6", "4"))
+        Listing.program("MOV32I R6, 4").value.instructions.head
       )
     )
-    assert(VMCompiler.lower(module, module.kernels.head, Vec(nonzero), Set(symbol))
+    assert(VMCompiler.lower(module, module.kernels.head, Vec(nonzero), Map(symbol -> address))
       .left.exists(_.raw.contains("implicit")))
     val wrongInstruction = function.copy(instructions =
       function.instructions.updated(
         0,
-        SASSFixture.instruction(0, "IADD", Vec("R6", "R6", "1"))
+        Listing.program("IADD R6, R6, 1").value.instructions.head
       )
     )
-    assert(VMCompiler.lower(module, module.kernels.head, Vec(wrongInstruction), Set(symbol))
+    assert(VMCompiler.lower(module, module.kernels.head, Vec(wrongInstruction), Map(symbol -> address))
       .left.exists(_.raw.contains("MOV")))
     val symbols = module.sections(table.link.raw)
     val bytes   = symbols.bytes.toArray
     ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).put(28, 2.toByte).putShort(30, 0.toShort)
     val external =
       module.copy(sections = module.sections.updated(symbols.index.raw, symbols.copy(bytes = Vec.from(bytes))))
-    assert(VMCompiler.lower(external, module.kernels.head, Vec(function), Set(symbol))
+    assert(VMCompiler.lower(external, module.kernels.head, Vec(function), Map(symbol -> address))
       .left.exists(_.raw.contains("target")))
   }
 }

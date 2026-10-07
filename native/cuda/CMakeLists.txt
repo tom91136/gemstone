@@ -2,17 +2,14 @@ find_package(Threads REQUIRED)
 if(NOT CUDA_INCLUDE_DIR OR NOT EXISTS "${CUDA_INCLUDE_DIR}/cuda.h")
   message(FATAL_ERROR "CUDA_INCLUDE_DIR must point at the pinned CUDA headers containing cuda.h")
 endif()
-# Generated ABI declarations are pinned to this API profile, including its ABI types.
 include(ValidateCUDAHeader.cmake)
 
 add_library(gemstone_cuda SHARED
   src/runtime.cpp
-  src/unsupported.cpp)
-set_target_properties(gemstone_cuda PROPERTIES OUTPUT_NAME cuda SOVERSION 1 CXX_STANDARD 17)
-target_include_directories(gemstone_cuda PRIVATE include "${CUDA_INCLUDE_DIR}")
+  ../generated/cuda/gemstone_cuda_unsupported.cpp)
+set_target_properties(gemstone_cuda PROPERTIES OUTPUT_NAME cuda SOVERSION 1)
+target_include_directories(gemstone_cuda PRIVATE "${CUDA_INCLUDE_DIR}")
 target_compile_options(gemstone_cuda PRIVATE -Wall -Wextra -Werror)
-set_source_files_properties(src/unsupported.cpp PROPERTIES
-  COMPILE_OPTIONS "-Wno-deprecated-declarations")
 target_link_libraries(gemstone_cuda PRIVATE
   gemstone_zstd
   gemstone_lz4
@@ -23,7 +20,6 @@ target_link_libraries(gemstone_cuda PRIVATE
 gemstone_require_abi_implementations(
   TARGET gemstone_cuda
   PLATFORM cuda)
-# The facade spells several ABI-compatible opaque types without vendor typedefs.
 set_target_properties(gemstone_cuda PROPERTIES C_VISIBILITY_PRESET default CXX_VISIBILITY_PRESET default)
 if(BUILD_TESTING)
   add_executable(cuda_process_exit_test test/process-exit.cpp)

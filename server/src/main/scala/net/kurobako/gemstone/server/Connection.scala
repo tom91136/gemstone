@@ -8,10 +8,10 @@ import java.io.EOFException
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.rpc.*
+import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
 import net.kurobako.gemstone.server.recording.*
-import net.kurobako.gemstone.vm.*
 import scala.util.Using
 import scala.util.control.NonFatal
 
@@ -33,32 +33,34 @@ object Connection {
         val input  = DataInputStream(recording.fold[java.io.InputStream](buffered)(_.input))
         val output = DataOutputStream(recording.fold[java.io.OutputStream](bufferedOutput)(_.output))
         @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-        var bound = Option.empty[(ClientId, SessionId)]
+        var identity = Option.empty[(ClientId, SessionId)]
         @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-        var acquired = Option.empty[clients.Lease]
-
+        var lease = Option.empty[clients.Lease]
         @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
         var negotiated = false
 
-        def accept(header: Header): Either[ExecutionFailure, AnyRef] =
-          if (bound.exists(_ != (header.client, header.session)))
-            Left(ExecutionFailure.InvalidRequest("a connection cannot change client or process identity"))
-          else clients.accept(header.client).map { owner =>
-            bound = Some((header.client, header.session))
-            owner
-          }
-
+        // The first accepted request binds the connection to its client and process session, as journalled.
         def session(header: Header): Either[ExecutionFailure, ExecutionSession] =
-          try {
-            val lease = acquired match {
-              case Some(lease) => Right(lease)
-              case None        => clients.acquire(header.client, header.session).map { lease =>
-                  acquired = Some(use(lease))
-                  lease
-                }
+          for {
+            _ <- Either.cond(
+              identity.forall(_ == (header.client, header.session)),
+              (),
+              ExecutionFailure.InvalidRequest("a connection cannot change client or process identity")
+            )
+            _ <- clients.accept(header.client)
+            _ = identity = Some((header.client, header.session))
+            _ = recording.foreach(_.accepted(header.client))
+            bound <- lease match {
+              case Some(existing) => Right(existing)
+              case None           =>
+                try clients.acquire(header.client, header.session).map { acquired =>
+                    lease = Some(use(acquired))
+                    acquired
+                  }
+                catch { case NonFatal(error) => Left(ExecutionFailure.Failed(throwables.detail(error))) }
             }
-            lease.flatMap(_.service)
-          } catch { case NonFatal(error) => Left(ExecutionFailure.Failed(throwables.detail(error))) }
+            service <- bound.service
+          } yield service
 
         def execution(): Boolean = {
           // Only malformed input is translated here. Output and recording failures leave the connection.
@@ -70,13 +72,10 @@ object Connection {
             case error: EOFException             => Left(ExecutionFailure.InvalidRequest(throwables.detail(error)))
           }
           val result = request.flatMap { (header, payload) =>
-            accept(header).flatMap { owner =>
-              recording.foreach(_.accepted(owner))
-              session(header).flatMap { service =>
-                Wire.Protocol[ExecutionRPC.Operation].decodePayload(header.operation, payload, ExecutionRPC.Limits)
-                  .left.map(ExecutionFailure.InvalidRequest(_))
-                  .flatMap(decoded => ExecutionHandler(decoded.value, service))
-              }
+            session(header).flatMap { service =>
+              Wire.Protocol[ExecutionRPC.Operation].decodePayload(header.operation, payload, ExecutionRPC.Limits)
+                .left.map(message => ExecutionFailure.InvalidRequest(s"invalid execution request: $message"))
+                .flatMap(decoded => ExecutionHandler(decoded.value, service))
             }
           }
           writeResponse(output, result)
@@ -91,7 +90,7 @@ object Connection {
           val first = input.read()
           if (first < 0) false
           else {
-            channel.readTimeout(timeoutMillis.raw)
+            channel.readTimeout(timeoutMillis.widen[Int >= 0])
             val magic = (first << 24) | (input.readUnsignedByte() << 16) | (input.readUnsignedByte() << 8) |
               input.readUnsignedByte()
             magic match {
@@ -100,14 +99,14 @@ object Connection {
                 val size      = input.readInt()
                 require(size == (if (operation == Control.ReleaseClient) 8 else 0), "invalid control request size")
                 operation match {
-                  case Control.RegisterClient => Control.writeResponse(output, operation, clients.register().toLong)
+                  case Control.RegisterClient => Control.writeResponse(output, operation, clients.register().raw)
                   case Control.ReleaseClient  =>
                     clients.release(clientId(input.readLong()))
                     Control.writeResponse(output, operation)
                   case Control.Shutdown => Control.writeResponse(output, operation); shutdown()
                   case Control.Finish   =>
-                    acquired.foreach(_.close())
-                    acquired = None
+                    lease.foreach(_.close())
+                    lease = None
                     recording.foreach(_.close())
                     Control.writeResponse(output, operation)
                   case other => throw IllegalArgumentException(s"unknown control operation $other")

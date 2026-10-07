@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.isa.sass.Targets.*
 import net.kurobako.gemstone.isa.sass.asm.*
 
 class MetadataSuite extends munit.FunSuite {
@@ -15,14 +16,10 @@ class MetadataSuite extends munit.FunSuite {
     assertEquals(Printer.print(vendor), Right("MOV.FUTURE R0, R1;"))
   }
 
-  test("target aliases share decoder data without erasing exact target identity") {
-    val sm90  = Metadata.catalogue.targets.find(_.name == "SM90").getOrElse(fail("missing SM90"))
-    val sm90a = Metadata.catalogue.targets.find(_.name == "SM90a").getOrElse(fail("missing SM90a"))
-    assertNotEquals(sm90, sm90a)
-    assertEquals(sm90.encodingKey, sm90a.encodingKey)
-    assertEquals(Metadata.catalogue.targets.size, 36)
-    assertEquals(Metadata.catalogue.targets.map(_.encodingKey).distinct.size, 16)
-    assertEquals(Metadata.catalogue.targets.find(_.name == "SM999"), None)
+  test("targets sharing a description share decoder data") {
+    assert(decoder(86) eq decoder(88))
+    assert(decoder(89) ne decoder(86))
+    assert(Target.parse("SM999").isLeft)
   }
 
   test("definitions are available without constructing an instruction") {
@@ -32,22 +29,17 @@ class MetadataSuite extends munit.FunSuite {
     assert(Instruction.Definition.forMnemonic("NO_SUCH_INSTRUCTION").isEmpty)
     assertEquals(Instruction.Definition.all.map(_.name).distinct.size, Instruction.Definition.all.size)
     val registerForm = Instruction.MovRegRegDefinition
-    assertEquals(
-      registerForm.slots.map(_.kind),
-      Vec(Instruction.OperandKind.Register, Instruction.OperandKind.Register)
-    )
-    Vec("SM35", "SM89").foreach { target =>
-      val database = NVDisasm.forTarget(target).getOrElse(fail(s"missing $target metadata"))
-      assert(database.forms.exists(form =>
+    Vec(35, 89).foreach { sm =>
+      assert(decoder(sm).forms.exists(form =>
         registerForm.forms.contains(form.name) && form.opcodes.exists(_.name == "MOV")
       ))
     }
   }
 
   test("decoder expansion shares assignments across targets and expressions across assignments") {
-    val sm80 = NVDisasm.forTarget("SM80").getOrElse(fail("missing SM80 decoder"))
-    val sm89 = NVDisasm.forTarget("SM89").getOrElse(fail("missing SM89 decoder"))
-    assertNotEquals(sm80.sha256, sm89.sha256)
+    val sm80 = decoder(80)
+    val sm89 = decoder(89)
+    assertNotEquals(sm80.digest, sm89.digest)
     val fields      = sm80.forms.flatMap(_.fields)
     val otherFields = sm89.forms.flatMap(_.fields).map(field => field -> field).toMap
     val shared      = fields.find(otherFields.contains(_)).getOrElse(fail("no common assignment"))
@@ -60,25 +52,31 @@ class MetadataSuite extends munit.FunSuite {
     assert(first.expression eq second.expression)
   }
 
-  test("every definition constructs its own closed instruction case") {
-    def sample(kind: Instruction.OperandKind): Operand = kind match {
-      case Instruction.OperandKind.Register  => Operand.Register(RegisterBank.R, 1)
-      case Instruction.OperandKind.Predicate => Operand.Predicate(Some(0), uniform = false, negated = false)
-      case Instruction.OperandKind.Immediate => Operand.Integer(1)
-      case Instruction.OperandKind.Address   =>
-        Operand.Address(Some(Operand.Register(RegisterBank.R, 1)), None, 0, 1, None, None)
-      case Instruction.OperandKind.ConstantBank    => Operand.ConstantBank(0, Operand.Integer(0))
-      case Instruction.OperandKind.SpecialRegister => Operand.SpecialRegister(SpecialRegister.SR_TID_X)
-      case Instruction.OperandKind.Group           =>
-        Operand.Group(Vec(Operand.Register(RegisterBank.R, 1), Operand.Register(RegisterBank.R, 2)))
-      case Instruction.OperandKind.Symbol => Operand.Symbol("CC")
-    }
+  test("every definition decodes its own operand shape and no earlier definition shadows it") {
+    val register = Operand.Register(RegisterBank.R, 1)
+    val kinds    = Map[String, Operand](
+      "Reg"     -> register,
+      "Pred"    -> Operand.Predicate(Some(0), uniform = false, negated = false),
+      "Imm"     -> Operand.Integer(1),
+      "Address" -> Operand.Address(Some(Operand.Register(RegisterBank.R, 1)), None, 0, 1, None, None),
+      "Const"   -> Operand.ConstantBank(0, Operand.Integer(0)),
+      "Special" -> Operand.SpecialRegister(SpecialRegister.SR_TID_X),
+      "Group"   -> Operand.Group(Vec(register, Operand.Register(RegisterBank.R, 2))),
+      "Symbol"  -> Operand.Symbol("CC")
+    )
+    val shape = s"(.*?)(NoOperands|(?:${kinds.keys.mkString("|")})+)".r
     Instruction.Definition.all.foreach { definition =>
-      val operands    = definition.slots.map(slot => sample(slot.kind))
+      val name: String = definition.name.raw
+      val operands     = name match {
+        case shape(prefix: String, suffix: String)
+            if prefix.filter(_.isLetterOrDigit).equalsIgnoreCase(definition.mnemonic.raw.filter(_.isLetterOrDigit)) =>
+          if (suffix == "NoOperands") Vec.empty[Operand]
+          else Vec.from(s"(${kinds.keys.mkString("|")})".r.findAllIn(suffix)).map(kinds)
+        case _ => fail(s"$name does not name its operand shape")
+      }
       val instruction = definition.decode(Vec.empty, operands, None).getOrElse(fail(definition.name.raw))
-      assert(instruction.definition eq definition)
-      assertEquals(instruction.operands, operands)
-      assertEquals(instruction.mnemonic, definition.mnemonic)
+      assert(instruction.definition eq definition, definition)
+      assertEquals(instruction.operands, operands, definition)
       assertEquals(Instruction.decode(definition.mnemonic.raw, Vec.empty, operands, None), Right(instruction))
     }
   }

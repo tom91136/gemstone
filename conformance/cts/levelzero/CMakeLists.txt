@@ -4,36 +4,22 @@ set(levelzero_cts_programs
   test_driver test_device test_context test_cmdqueue test_event test_fence
   test_memory test_module test_copy)
 
-conformance_fetch_url(conformance_levelzero_cts levelzero_cts_source)
-conformance_fetch_url(conformance_levelzero_gtest levelzero_gtest_source)
+FetchContent_MakeAvailable(levelzero_cts levelzero_gtest)
 
 set(staged_source "${CMAKE_CURRENT_BINARY_DIR}/source")
-file(REMOVE_RECURSE "${staged_source}")
-file(COPY "${levelzero_cts_source}/" DESTINATION "${staged_source}")
-file(MAKE_DIRECTORY "${staged_source}/third_party/googletest")
-file(COPY "${levelzero_gtest_source}/" DESTINATION "${staged_source}/third_party/googletest")
+set(staging "${staged_source}.staging")
+stage_source("${levelzero_cts_SOURCE_DIR}" "${staging}")
+file(MAKE_DIRECTORY "${staging}/third_party/googletest")
+file(COPY "${levelzero_gtest_SOURCE_DIR}/" DESTINATION "${staging}/third_party/googletest")
 
 # This upstream revision requires static Boost 1.92, while supported toolchains
 # ship a shared Boost 1.90. Neither choice affects the Level Zero API coverage.
-set(upstream_cmake "${staged_source}/CMakeLists.txt")
-file(READ "${upstream_cmake}" upstream_content)
-foreach(patch IN ITEMS
-    "set(Boost_USE_STATIC_LIBS ON)|set(Boost_USE_STATIC_LIBS OFF)"
-    "find_package(Boost 1.92|find_package(Boost 1.90")
-  string(REPLACE "|" ";" pair "${patch}")
-  list(GET pair 0 before)
-  list(GET pair 1 after)
-  string(FIND "${upstream_content}" "${before}" at)
-  if(at EQUAL -1)
-    message(FATAL_ERROR "Pinned Level Zero CTS integration point changed: ${before}")
-  endif()
-  string(REPLACE "${before}" "${after}" upstream_content "${upstream_content}")
-endforeach()
-file(WRITE "${upstream_cmake}" "${upstream_content}")
+patch_exact("${staging}/CMakeLists.txt" "set(Boost_USE_STATIC_LIBS ON)" "set(Boost_USE_STATIC_LIBS OFF)")
+patch_exact("${staging}/CMakeLists.txt" "find_package(Boost 1.92" "find_package(Boost 1.90")
 
 # Upstream configures every core subtree even when only a few executables are
 # built. Some unrelated subtrees fetch Vulkan headers at configure time.
-set(core_cmake "${staged_source}/conformance_tests/core/CMakeLists.txt")
+set(core_cmake "${staging}/conformance_tests/core/CMakeLists.txt")
 file(READ "${core_cmake}" core_content)
 foreach(program IN LISTS levelzero_cts_programs)
   string(FIND "${core_content}" "add_subdirectory(${program})" at)
@@ -53,22 +39,12 @@ file(WRITE "${core_cmake}" "${core_content}")
 # The pinned CTS gives a 16-element buffer to module_add_two_arrays but
 # launches 16 groups of 16 work items. Correct the group count so its multiple
 # indirect-launch assertion does not depend on out-of-bounds device writes.
-set(module_cpp "${staged_source}/conformance_tests/core/test_module/src/test_module.cpp")
-file(READ "${module_cpp}" module_content)
-set(invalid_group_count "mult_th_group_dim.groupCountX = 16;")
-string(FIND "${module_content}" "${invalid_group_count}" group_count_at)
-if(group_count_at EQUAL -1)
-  message(FATAL_ERROR "Pinned Level Zero CTS indirect-launch integration point changed")
-endif()
-string(REPLACE "${invalid_group_count}" "mult_th_group_dim.groupCountX = 1;"
-  module_content "${module_content}")
-file(WRITE "${module_cpp}" "${module_content}")
+patch_exact("${staging}/conformance_tests/core/test_module/src/test_module.cpp"
+  "mult_th_group_dim.groupCountX = 16;" "mult_th_group_dim.groupCountX = 1;")
 
-# The sampler guard accepts UNSUPPORTED_FEATURE and then uses an uninitialized image module.
+# The sampler guard accepts UNSUPPORTED_FEATURE and then uses an uninitialised image module.
 # Query capability instead; this also avoids leaking the guard's temporary sampler.
-set(args_cpp "${staged_source}/conformance_tests/core/test_module/src/test_kernel_args.cpp")
-file(READ "${args_cpp}" args_content)
-set(sampler_guard [=[bool sampler_support() {
+patch_exact("${staging}/conformance_tests/core/test_module/src/test_kernel_args.cpp" [=[bool sampler_support() {
   ze_sampler_desc_t descriptor = {};
   descriptor.stype = ZE_STRUCTURE_TYPE_SAMPLER_DESC;
   ze_sampler_handle_t sampler = nullptr;
@@ -79,34 +55,21 @@ set(sampler_guard [=[bool sampler_support() {
   } else {
     return true;
   }
-}]=])
-set(sampler_capability [=[bool sampler_support() {
+}]=] [=[bool sampler_support() {
   ze_device_image_properties_t properties{};
   properties.stype = ZE_STRUCTURE_TYPE_IMAGE_PROPERTIES;
   return zeDeviceGetImageProperties(lzt::zeDevice::get_instance()->get_device(), &properties) == ZE_RESULT_SUCCESS
       && properties.maxSamplers > 0;
 }]=])
-string(FIND "${args_content}" "${sampler_guard}" sampler_at)
-if(sampler_at EQUAL -1)
-  message(FATAL_ERROR "Pinned Level Zero CTS sampler guard integration point changed")
-endif()
-string(REPLACE "${sampler_guard}" "${sampler_capability}" args_content "${args_content}")
-file(WRITE "${args_cpp}" "${args_content}")
 
-# Upstream initializes a device before Google Test can list cases. Artifacts
+# Upstream initialises a device before Google Test can list cases. Artifacts
 # must expose their inventory during relocation checks without a GPU present.
+set(init_line "::testing::InitGoogleMock(&argc, argv);")
 foreach(program IN LISTS levelzero_cts_programs)
-  set(main_cpp "${staged_source}/conformance_tests/core/${program}/src/main.cpp")
-  file(READ "${main_cpp}" main_content)
-  set(init_line "::testing::InitGoogleMock(&argc, argv);")
-  string(FIND "${main_content}" "${init_line}" at)
-  if(at EQUAL -1)
-    message(FATAL_ERROR "Pinned Level Zero CTS inventory integration point changed: ${program}")
-  endif()
-  string(REPLACE "${init_line}" "${init_line}\n  if (GTEST_FLAG_GET(list_tests)) return RUN_ALL_TESTS();"
-    main_content "${main_content}")
-  file(WRITE "${main_cpp}" "${main_content}")
+  patch_exact("${staging}/conformance_tests/core/${program}/src/main.cpp"
+    "${init_line}" "${init_line}\n  if (GTEST_FLAG_GET(list_tests)) return RUN_ALL_TESTS();")
 endforeach()
+commit_staged_source("${staging}" "${staged_source}")
 
 set(GROUP "/conformance_tests/core")
 set(GTEST_ROOT "${staged_source}/third_party/googletest")
@@ -131,7 +94,7 @@ endforeach()
 install(FILES "${staged_source}/mediadata/internal/png/test_input.png"
   DESTINATION . COMPONENT architecture OPTIONAL)
 install(FILES "${staged_source}/LICENSE"
-  DESTINATION licenses RENAME Level-Zero-Tests.txt COMPONENT support)
+  DESTINATION licences RENAME Level-Zero-Tests.txt COMPONENT support)
 install(FILES "${staged_source}/third_party/googletest/LICENSE"
-  DESTINATION licenses RENAME GoogleTest.txt COMPONENT support)
+  DESTINATION licences RENAME GoogleTest.txt COMPONENT support)
 add_custom_target(conformance_cts_artifact DEPENDS ${levelzero_cts_programs} ${levelzero_device_helpers})

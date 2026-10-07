@@ -29,7 +29,7 @@ object CLI {
       case ("spirv", None)         => Assembly.Format.SPIRV.validNel
       case ("ptx", None)           => Assembly.Format.PTX.validNel
       case ("amdgpu", Some(value)) =>
-        Target.either(value).leftMap(_.toString).map(target =>
+        value.refine[Target].leftMap(_.toString).map(target =>
           Assembly.Format.AMDGPU(target, waveSize.getOrElse(32))
         ).toValidatedNel
       case ("sass", Some(value))      => sass.Target.parse(value).map(Assembly.Format.SASS(_)).toValidatedNel
@@ -81,13 +81,7 @@ object CLI {
             (Assembly.text(bytes).flatMap(Assembly.assemble(_, format)), Some(output))
           case Request.Disassemble(format, input, output, section) =>
             val bytes = Vec.unsafeWrapArray(Files.readAllBytes(input))
-            val text  = (format, section) match {
-              case (Assembly.Format.AMDGPU(target, waveSize), Some(section)) =>
-                Assembly.disassembleCodeObject(bytes, target, Some(section), waveSize)
-              case (Assembly.Format.SASS(target), Some(section)) =>
-                Assembly.disassembleCubin(bytes, target, Some(section))
-              case _ => Assembly.disassemble(bytes, format)
-            }
+            val text  = Assembly.disassemble(bytes, format, section)
             (text.flatMap(value => UTF8.encode(value + "\n").leftMap(Assembly.Error.TextEncoding(_))), output)
         }
         result match {

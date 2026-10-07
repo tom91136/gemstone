@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.sass.Instruction.*
+import net.kurobako.gemstone.vm.*
 
 /** Interpret modifier tokens only after the instruction family has validated its ordered form. */
 private object ModifierSemantics {
@@ -21,6 +22,33 @@ private object ModifierSemantics {
     case Modifier.`MAX`                                   => IntegerOperation.Maximum(signed)
     case _                                                => unsupported(s"unsupported SASS integer operation $raw")
   }
+  def atomicOperation(raw: Modifier, signed: Boolean): AtomicOperation = raw match {
+    case Modifier.`ADD`  => AtomicOperation.Add
+    case Modifier.`EXCH` => AtomicOperation.Exchange
+    case Modifier.`AND`  => AtomicOperation.And
+    case Modifier.`OR`   => AtomicOperation.Or
+    case Modifier.`XOR`  => AtomicOperation.Xor
+    case Modifier.`MIN`  => if (signed) AtomicOperation.MinimumSigned else AtomicOperation.MinimumUnsigned
+    case Modifier.`MAX`  => if (signed) AtomicOperation.MaximumSigned else AtomicOperation.MaximumUnsigned
+    case _               => unsupported(s"unsupported SASS atomic operation $raw")
+  }
+
+  /** The ordered and unordered relations a floating comparison selects with one modifier. */
+  val comparisons: Set[Modifier] = Set(
+    Modifier.EQ,
+    Modifier.NE,
+    Modifier.LT,
+    Modifier.LE,
+    Modifier.GT,
+    Modifier.GE,
+    Modifier.EQU,
+    Modifier.NEU,
+    Modifier.LTU,
+    Modifier.LEU,
+    Modifier.GTU,
+    Modifier.GEU
+  )
+
   def comparisonCode(raw: Modifier): Comparison = raw match {
     case Modifier.`EQ`  => Comparison.Equal
     case Modifier.`NE`  => Comparison.NotEqual
@@ -38,11 +66,11 @@ private object ModifierSemantics {
     case Modifier.`NAN` => Comparison.Unordered
     case _              => unsupported(s"unsupported SASS comparison $raw")
   }
-  def integerConversion(raw: Modifier): ConversionType = raw match {
-    case Modifier.`S32` => ConversionType.S32
-    case Modifier.`U32` => ConversionType.U32
-    case Modifier.`S64` => ConversionType.S64
-    case Modifier.`U64` => ConversionType.U64
+  def integerConversion(raw: Modifier): NumericFormat = raw match {
+    case Modifier.`S32` => NumericFormat.Signed(32)
+    case Modifier.`U32` => NumericFormat.Unsigned(32)
+    case Modifier.`S64` => NumericFormat.Signed(64)
+    case Modifier.`U64` => NumericFormat.Unsigned(64)
     case _              => unsupported(s"unsupported SASS integer conversion $raw")
   }
   def conversionRounding(raw: Modifier): ConversionRounding = raw match {

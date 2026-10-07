@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.server
 
-import java.nio.file.Files
 import java.nio.file.Path
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -9,12 +8,6 @@ import net.kurobako.gemstone.testing.*
 import scala.concurrent.duration.FiniteDuration
 
 private object native {
-  val root: Path = Iterator.unfold(Option(Path.of(sys.props("user.dir")).toAbsolutePath.normalize))(
-    _.map(path => path -> Option(path.getParent))
-  )
-    .find(path => Files.isRegularFile(path.resolve("build.sbt")))
-    .getOrElse(throw IllegalStateException("cannot locate Gemstone repository root"))
-
   lazy val directory: Path = Path.of(
     sys.env.getOrElse(
       env.NativeDirectory,
@@ -30,6 +23,15 @@ private object native {
     "ZE_ENABLE_LOADER_DEBUG_TRACE" -> "0",
     "OCL_ICD_FILENAMES"            -> directory.resolve(API.OpenCL.lib).toString
   )
+
+  /** A child environment that connects to the server at `endpoint` as `client`. */
+  def serverEnvironment(
+      endpoint: Transport.Endpoint,
+      client: protocol.ClientId,
+      set: Map[String, String] = Map.empty,
+      unset: Set[String] = Set.empty
+  ): Launch.Environment =
+    Launch.Environment(Map(env.RpcEndpoint -> endpoint.toString, env.RpcClient -> client.raw.toString) ++ set, unset)
 
   def run(
       command: NonEmpty[Vec[String]],

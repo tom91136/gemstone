@@ -11,7 +11,7 @@ import scala.util.Try
 object OperandPrinter {
   def print(operand: Operand): Either[String, String] =
     render(operand).flatMap { text =>
-      SASSOperandParser.parse(text).flatMap { parsed =>
+      OperandParser.parse(text).flatMap { parsed =>
         Either.cond(roundTrips(operand, parsed), text, s"operand has no lossless SASS spelling: $operand")
       }
     }
@@ -32,24 +32,6 @@ object OperandPrinter {
       if (identifier(value)) Right(value) else Left(s"invalid SASS symbol $value")
     case Operand.Group(values) =>
       values.toVec.traverse(render(_)).map(_.mkString("{", ", ", "}"))
-    case Operand.Decorated(value, attributes) =>
-      for {
-        _     <- Either.cond(attributes.nonEmpty, (), "empty SASS operand decoration has no textual form")
-        text  <- render(value)
-        flags <- attributes.toVec.traverse { (name, flag) =>
-          if (
-            Set(
-              OperandDecoration.Not,
-              OperandDecoration.Negate,
-              OperandDecoration.Invert,
-              OperandDecoration.Absolute
-            )(name)
-          )
-            truth(flag).map(value => name -> value)
-          else Left(s"unsupported SASS operand attribute $name")
-        }
-        result <- decorate(text, flags.toMap)
-      } yield result
     case Operand.Predicate(index, uniform, negated) =>
       val prefix = if (uniform) "UP" else "P"
       val name   = index.fold(if (uniform) "UPT" else "PT")(value => s"$prefix${value.raw}")
@@ -73,10 +55,8 @@ object OperandPrinter {
       }
     case Operand.FloatingSymbol(name) =>
       name match {
-        case FloatingConstant.INF | FloatingConstant.QNAN | FloatingConstant.SNAN | FloatingConstant.NAN |
-            FloatingConstant.`+INF` | FloatingConstant.`-INF` | FloatingConstant.`+QNAN` | FloatingConstant.`-QNAN` |
-            FloatingConstant.`+SNAN` | FloatingConstant.`-SNAN` | FloatingConstant.`-NAN` => Right(name.spelling)
-        case _ => Left(s"unsupported SASS floating symbol ${name.spelling}")
+        case _: FloatingConstant.Unknown => Left(s"unsupported SASS floating symbol ${name.spelling}")
+        case _                           => Right(name.spelling)
       }
     case Operand.ConstantBank(bank, offset) =>
       if (bank < 0) Left("constant-bank index must be nonnegative")
@@ -127,32 +107,14 @@ object OperandPrinter {
     }
   }
 
-  private def truth(value: Operand): Either[String, Boolean] = value match {
-    case Operand.Integer(0) | Operand.Bits(0, _) => Right(false)
-    case Operand.Integer(1) | Operand.Bits(1, _) => Right(true)
-    case _                                       => Left("SASS operand flags must be integer 0 or 1")
-  }
-
-  private def decorate(text: String, flags: Map[OperandDecoration, Boolean]): Either[String, String] =
-    if (flags.getOrElse(OperandDecoration.Not, false) && flags.getOrElse(OperandDecoration.Invert, false))
-      Left("SASS operand cannot combine not and invert decorations")
-    else Right(decorateUnary(
-      text,
-      flags.getOrElse(OperandDecoration.Negate, false),
-      flags.getOrElse(OperandDecoration.Not, false) || flags.getOrElse(OperandDecoration.Invert, false),
-      flags.getOrElse(OperandDecoration.Absolute, false)
-    ))
-
   private def decorateUnary(text: String, negative: Boolean, not: Boolean, absolute: Boolean): String =
     (if (not) "!" else "") + (if (negative) "-" else "") +
       (if (absolute) s"|$text|" else text)
 
   private def identifier(value: String): Boolean =
-    value.headOption.exists(character => character.isLetter || character == '_') &&
-      value.forall(character => character.isLetterOrDigit || "_$".contains(character))
+    value.headOption.exists(OperandParser.identifierStart(_)) && value.forall(OperandParser.identifierPart(_))
 
-  private def suffix(value: String): Boolean =
-    value.nonEmpty && value.forall(character => character.isLetterOrDigit || "_$".contains(character))
+  private def suffix(value: String): Boolean = value.nonEmpty && value.forall(OperandParser.identifierPart(_))
 
   private def specialRegister(value: String): Boolean =
     value.startsWith("SR") || value.startsWith("UR_TID") || value.startsWith("UR_CTAID")
@@ -170,34 +132,8 @@ object OperandPrinter {
             not = false,
             absolute = false
           )
-        case (Operand.FloatingSymbol(FloatingConstant.`+INF`), _) => actual ==
-            Operand.FloatingSymbol(FloatingConstant.INF)
-        case (Operand.FloatingSymbol(FloatingConstant.`-INF`), _) =>
-          actual ==
-            Operand.Unary(Operand.FloatingSymbol(FloatingConstant.INF), negative = true, not = false, absolute = false)
-        case (Operand.FloatingSymbol(FloatingConstant.`+QNAN`), _) => actual ==
-            Operand.FloatingSymbol(FloatingConstant.QNAN)
-        case (Operand.FloatingSymbol(FloatingConstant.`-QNAN`), _) =>
-          actual ==
-            Operand.Unary(Operand.FloatingSymbol(FloatingConstant.QNAN), negative = true, not = false, absolute = false)
-        case (Operand.FloatingSymbol(FloatingConstant.`+SNAN`), _) => actual ==
-            Operand.FloatingSymbol(FloatingConstant.SNAN)
-        case (Operand.FloatingSymbol(FloatingConstant.`-SNAN`), _) =>
-          actual ==
-            Operand.Unary(Operand.FloatingSymbol(FloatingConstant.SNAN), negative = true, not = false, absolute = false)
-        case (Operand.FloatingSymbol(FloatingConstant.`-NAN`), _) =>
-          actual ==
-            Operand.Unary(Operand.FloatingSymbol(FloatingConstant.NAN), negative = true, not = false, absolute = false)
         case (Operand.Unary(Operand.Predicate(index, uniform, negated), negative, not, false), _) =>
           actual == Operand.Predicate(index, uniform, negated ^ negative ^ not)
-        case (Operand.Decorated(value, attributes), _) =>
-          val flags = attributes.toVec.flatMap { (name, flag) =>
-            truth(flag).toOption.map(value => name -> value)
-          }.toMap
-          val negative = flags.getOrElse(OperandDecoration.Negate, false)
-          val not = flags.getOrElse(OperandDecoration.Not, false) || flags.getOrElse(OperandDecoration.Invert, false)
-          val absolute = flags.getOrElse(OperandDecoration.Absolute, false)
-          roundTrips(Operand.Unary(value, negative, not, absolute), actual)
         case (Operand.Group(left), Operand.Group(right)) =>
           left.size == right.size && left.zip(right).forall((a, b) => roundTrips(a, b))
         case (Operand.ConstantBank(leftBank, leftOffset), Operand.ConstantBank(rightBank, rightOffset)) =>

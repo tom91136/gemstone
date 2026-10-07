@@ -75,7 +75,7 @@ class LRUCacheSuite extends munit.FunSuite {
     val entered = CountDownLatch(8)
     val release = CountDownLatch(1)
     val calls   = AtomicInteger()
-    // MUnit serializes assertion condition evaluation. Worker waits must not hold that assertion lock.
+    // MUnit serialises assertion condition evaluation. Worker waits must not hold that assertion lock.
     Using.resource(threads.Pool(8)) { pool =>
       val workers = Vector.fill(8)(pool.executor.submit { () =>
         entered.countDown()

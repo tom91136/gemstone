@@ -1,30 +1,30 @@
 /*
-rule = GemstoneCompanionOrder
+rule = CompanionOrder
  */
 package fix
 
 class CompanionOrder
-object CompanionOrder { // assert: GemstoneCompanionOrder.companion-order
+object CompanionOrder { // assert: CompanionOrder.companion-order
   trait Newtype[A] {
     opaque type Type = A
   }
 
   class Record
-  object Record // assert: GemstoneCompanionOrder.companion-order
+  object Record // assert: CompanionOrder.companion-order
 
   trait Service
-  object Service // assert: GemstoneCompanionOrder.companion-order
+  object Service // assert: CompanionOrder.companion-order
 
   enum Mode { case First }
-  object Mode // assert: GemstoneCompanionOrder.companion-order
+  object Mode // assert: CompanionOrder.companion-order
 
   type Items = List[Int]
-  object Items // assert: GemstoneCompanionOrder.companion-order
+  object Items // assert: CompanionOrder.companion-order
 
-  object Id extends Newtype[Long] // assert: GemstoneCompanionOrder.companion-order
+  object Id extends Newtype[Long] // assert: CompanionOrder.companion-order
   type Id = Id.Type
 
-  object QualifiedId extends CompanionOrder.Newtype[Long] // assert: GemstoneCompanionOrder.companion-order
+  object QualifiedId extends CompanionOrder.Newtype[Long] // assert: CompanionOrder.companion-order
   type QualifiedId = QualifiedId.Type
 
   object GoodRecord
@@ -47,11 +47,11 @@ object CompanionOrder { // assert: GemstoneCompanionOrder.companion-order
 
   def local(): Unit = {
     class Local
-    object Local // assert: GemstoneCompanionOrder.companion-order
+    object Local // assert: CompanionOrder.companion-order
     ()
   }
 
   class Suppressed
-  @SuppressWarnings(Array("scalafix:GemstoneCompanionOrder"))
+  @SuppressWarnings(Array("scalafix:CompanionOrder"))
   object Suppressed
 }

@@ -8,7 +8,6 @@
 namespace memory_patterns {
 struct Backend {
   std::string kind;
-  std::string allocationKind() const { return kind; }
   decltype(&clHostMemAllocINTEL) clHostMemAllocINTELFn{};
   decltype(&clMemFreeINTEL) clMemFreeINTELFn{};
   decltype(&clSetKernelArgMemPointerINTEL) clSetKernelArgMemPointerINTELFn{};
@@ -20,8 +19,7 @@ struct Backend {
   cl_command_queue queue{};
   cl_program program{};
   cl_kernel kernel{};
-  explicit Backend(std::string kind = "svm", uint64_t selected = 0, bool atomics = true, const char *fixture = "kernel.spv")
-      : kind(std::move(kind)), atomicStorage(atomics) {
+  Backend(std::string kind, uint64_t selected, bool atomics, const char *fixture) : kind(std::move(kind)), atomicStorage(atomics) {
     cl_platform_id platform{};
     check(clGetPlatformIDs(1, &platform, nullptr));
     if (selected) {
@@ -35,7 +33,7 @@ struct Backend {
         clGetExtensionFunctionAddressForPlatform(platform, "clSetKernelArgMemPointerINTEL"));
     clSharedMemAllocINTELFn =
         reinterpret_cast<decltype(clSharedMemAllocINTELFn)>(clGetExtensionFunctionAddressForPlatform(platform, "clSharedMemAllocINTEL"));
-    if (allocationKind() == "usm_host" || allocationKind() == "usm_shared")
+    if (kind == "usm_host" || kind == "usm_shared")
       require(clHostMemAllocINTELFn && clSharedMemAllocINTELFn && clMemFreeINTELFn && clSetKernelArgMemPointerINTELFn,
               "advertised USM entry points missing");
     cl_int status{};
@@ -59,8 +57,8 @@ struct Backend {
   void *allocate(size_t size) {
     void *p{};
     cl_int status{};
-    if (allocationKind() == "usm_host") p = clHostMemAllocINTELFn(context, nullptr, size, 64, &status);
-    else if (allocationKind() == "usm_shared") p = clSharedMemAllocINTELFn(context, device, nullptr, size, 64, &status);
+    if (kind == "usm_host") p = clHostMemAllocINTELFn(context, nullptr, size, 64, &status);
+    else if (kind == "usm_shared") p = clSharedMemAllocINTELFn(context, device, nullptr, size, 64, &status);
     else p = clSVMAlloc(context, CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER | (atomicStorage ? CL_MEM_SVM_ATOMICS : 0), size, 64);
     check(status);
     require(p, "SVM allocation");
@@ -69,18 +67,16 @@ struct Backend {
   }
   void release(void *p) {
     allocations.erase(std::remove(allocations.begin(), allocations.end(), p), allocations.end());
-    if (allocationKind() == "usm_host" || allocationKind() == "usm_shared") check(clMemFreeINTELFn(context, p));
+    if (kind == "usm_host" || kind == "usm_shared") check(clMemFreeINTELFn(context, p));
     else clSVMFree(context, p);
   }
   void enqueue(void *input, uint32_t *output, uint32_t *indices, unsigned mode, unsigned count, cl_command_queue target, cl_uint waitCount,
                const cl_event *waits, cl_event *event) {
     if (!allocations.empty()) {
-      const auto info = allocationKind() == "usm_host" || allocationKind() == "usm_shared" ? CL_KERNEL_EXEC_INFO_USM_PTRS_INTEL
-                                                                                           : CL_KERNEL_EXEC_INFO_SVM_PTRS;
+      const auto info = kind == "usm_host" || kind == "usm_shared" ? CL_KERNEL_EXEC_INFO_USM_PTRS_INTEL : CL_KERNEL_EXEC_INFO_SVM_PTRS;
       check(clSetKernelExecInfo(kernel, info, allocations.size() * sizeof(void *), allocations.data()));
     }
-    auto setPointer =
-        allocationKind() == "usm_host" || allocationKind() == "usm_shared" ? clSetKernelArgMemPointerINTELFn : clSetKernelArgSVMPointer;
+    auto setPointer = kind == "usm_host" || kind == "usm_shared" ? clSetKernelArgMemPointerINTELFn : clSetKernelArgSVMPointer;
     check(setPointer(kernel, 0, input));
     check(setPointer(kernel, 1, output));
     check(setPointer(kernel, 2, indices));

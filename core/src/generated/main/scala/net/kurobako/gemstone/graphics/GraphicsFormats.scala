@@ -15,8 +15,9 @@ object GraphicsFormats {
   enum GraphicsShaderFormat {
     case R32f, Rg32f, Rgba32f, DecodedRgb32f, Rgb10a2ui, R8ui, R8i, Rg8ui, Rg8i, Rgba8ui, Rgba8i, R16ui, R16i, Rg16ui,
       Rg16i, Rgba16ui, Rgba16i, R32ui, R32i, Rg32ui, Rg32i, Rgba32ui, Rgba32i, R8, R8Snorm, Rg8, Rg8Snorm, Rgba8,
-      Rgba8Snorm, Rgba8Srgb, Bgra8Unorm, Bgra8Srgb, B4G4R4A4Unorm, R5G6B5Unorm, A1R5G5B5Unorm, Rgb10A2, R16f, Rg16f,
-      Rgba16f, R11fG11fB10f, E5B9G9R9Ufloat, D16Unorm, S8Uint, D32SfloatS8Depth, D32SfloatS8Stencil
+      Rgba8Snorm, Rgba8Srgb, Bgra8Unorm, Bgra8Srgb, R16, R16Snorm, Rg16, Rg16Snorm, Rgba16, Rgba16Snorm, B4G4R4A4Unorm,
+      R5G6B5Unorm, A1R5G5B5Unorm, Rgb10A2, R16f, Rg16f, Rgba16f, R11fG11fB10f, E5B9G9R9Ufloat, D16Unorm, S8Uint,
+      D32SfloatS8Depth, D32SfloatS8Stencil
   }
 
   /** Supported storage/view layouts. Metadata cannot be supplied independently of the format. */
@@ -283,6 +284,54 @@ object GraphicsFormats {
           -1,
           GraphicsCompression.None,
           true
+        )
+    case R16 extends GraphicsFormat(
+          GraphicsShaderFormat.R16,
+          2,
+          GraphicsDepthFormat.None,
+          -1,
+          GraphicsCompression.None,
+          false
+        )
+    case R16Snorm extends GraphicsFormat(
+          GraphicsShaderFormat.R16Snorm,
+          2,
+          GraphicsDepthFormat.None,
+          -1,
+          GraphicsCompression.None,
+          false
+        )
+    case Rg16 extends GraphicsFormat(
+          GraphicsShaderFormat.Rg16,
+          4,
+          GraphicsDepthFormat.None,
+          -1,
+          GraphicsCompression.None,
+          false
+        )
+    case Rg16Snorm extends GraphicsFormat(
+          GraphicsShaderFormat.Rg16Snorm,
+          4,
+          GraphicsDepthFormat.None,
+          -1,
+          GraphicsCompression.None,
+          false
+        )
+    case Rgba16 extends GraphicsFormat(
+          GraphicsShaderFormat.Rgba16,
+          8,
+          GraphicsDepthFormat.None,
+          -1,
+          GraphicsCompression.None,
+          false
+        )
+    case Rgba16Snorm extends GraphicsFormat(
+          GraphicsShaderFormat.Rgba16Snorm,
+          8,
+          GraphicsDepthFormat.None,
+          -1,
+          GraphicsCompression.None,
+          false
         )
     case B4G4R4A4Unorm extends GraphicsFormat(
           GraphicsShaderFormat.B4G4R4A4Unorm,

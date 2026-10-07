@@ -18,10 +18,6 @@ private object VMArithmetic {
     Math.scalb(chunk.toDouble, scale)
   }
 
-  def unsignedMultiplyHigh32(left: Long, right: Long): Long =
-    Bits.high32(Bits.low32(left).toLong * Bits.low32(right).toLong).toLong
-  def signedMultiplyHigh32(left: Long, right: Long): Long =
-    Bits.high32(Bits.signed32(left).toLong * Bits.signed32(right).toLong).toLong
   def unsignedMultiplyHigh24(left: Long, right: Long): Long =
     Bits.high32((left & 0xffffffL) * (right & 0xffffffL)).toLong
   def signedMultiplyImmediate(register: Long, immediate: Int): (Long, Boolean) = {
@@ -29,27 +25,12 @@ private object VMArithmetic {
     val overflow = product < Int.MinValue.toLong || product > Int.MaxValue.toLong
     (Bits.low32(product).toLong, overflow)
   }
-  def unsignedSubtract32(left: Long, right: Long): (Long, Boolean) = {
-    val unsignedLeft  = Bits.low32(left).toLong
-    val unsignedRight = Bits.low32(right).toLong
-    // AMD names the VCC result "carry", but V_SUB*_CO exposes the borrow
-    // bit: it is set when the unsigned minuend is smaller than the
-    // subtrahend.  V_SUBB then consumes that bit as its borrow-in.
-    (Bits.low32(unsignedLeft - unsignedRight).toLong, unsignedLeft < unsignedRight)
-  }
-  def unsignedSubtractWithBorrow32(left: Long, right: Long, borrowIn: Boolean): (Long, Boolean) = {
-    val unsignedLeft  = Bits.low32(left).toLong
-    val unsignedRight = Bits.low32(right).toLong + (if (borrowIn) 1L else 0L)
-    (Bits.low32(unsignedLeft - unsignedRight).toLong, unsignedLeft < unsignedRight)
-  }
   def unsignedMultiply24(left: Long, right: Long): Long =
     Bits.low32((left & 0xffffffL) * (right & 0xffffffL)).toLong
   def unsignedMultiplyAdd24(left: Long, right: Long, addend: Long): Long =
     Bits.low32(unsignedMultiply24(left, right) + Bits.low32(addend).toLong).toLong
   def unsignedSubtractReverse32(left: Long, right: Long): Long =
     Bits.low32(Bits.low32(right).toLong - Bits.low32(left).toLong).toLong
-  def unsignedMin32(left: Long, right: Long): Long =
-    math.min(Bits.low32(left).toLong, Bits.low32(right).toLong)
   def scalarMinMax(
       operation: ScalarMinMaxOperation,
       left: Long,
@@ -69,10 +50,6 @@ private object VMArithmetic {
   def mergeD16(existing: Long, value: Long, high: Boolean): Long =
     if (high) (Bits.low32(existing).toLong & 0x0000ffffL) | (Bits.low16(value).toLong << 16)
     else (Bits.low32(existing).toLong & 0xffff0000L) | Bits.low16(value).toLong
-  def andn2SaveExecMask(previous: Long, source: Long): Long =
-    // SAVEEXEC keeps the explicit source as ANDN2's first operand and the
-    // previous EXEC mask as its second operand: source & ~previous.
-    source & ~previous
   def signedFirstBitHigh32(value: Long): Long = {
     val signed = Bits.signed32(value)
     if (signed == 0 || signed == -1) 0xffffffffL
@@ -100,20 +77,50 @@ private object VMArithmetic {
       else if (negative) 3 else 8
     1L << classBit
   }
-  def minimumNumberF32(left: Float, right: Float): Float =
-    if (left.isNaN) right else if (right.isNaN) left else math.min(left, right)
-  def maximumNumberF32(left: Float, right: Float): Float =
-    if (left.isNaN) right else if (right.isNaN) left else math.max(left, right)
-  def minimumNumberF64(left: Double, right: Double): Double =
-    if (left.isNaN) right else if (right.isNaN) left else math.min(left, right)
-  def maximumNumberF64(left: Double, right: Double): Double =
-    if (left.isNaN) right else if (right.isNaN) left else math.max(left, right)
+
   def clampF32(value: Float): Float =
     if (value.isNaN) value else math.max(0.0f, math.min(1.0f, value))
+
+  /** OMOD runs with output denormals flushed: a denormal result flushes before and after scaling, and -0 becomes +0.
+    */
+  def outputModified(bits: Long, scale: OutputScale, width: Int in (16, 32, 64), clamp: Boolean): Long = {
+    val (value, minimum) = width.raw match {
+      case 64 => (IEEE754.binary64ToDouble(bits), java.lang.Double.MIN_NORMAL)
+      case 32 => (IEEE754.binary32ToFloat(Bits.low32(bits)).toDouble, java.lang.Float.MIN_NORMAL.toDouble)
+      case _  => (IEEE754.binary16ToFloat(Bits.low16(bits)).toDouble, Binary16MinNormal)
+    }
+    if (value.isNaN) bits
+    else {
+      // Scaling by a power of two is exact, so the double carries every width; adding +0 turns -0 into +0.
+      val scaled  = flushDenormal(flushDenormal(value, minimum) * scale.factor, minimum) + 0.0
+      val clamped = if (clamp) math.max(0.0, math.min(1.0, scaled)) else scaled
+      width.raw match {
+        case 64 => IEEE754.doubleToBinary64(clamped)
+        case 32 => IEEE754.floatToBinary32(clamped.toFloat).toLong
+        case _  => IEEE754.floatToBinary16(clamped.toFloat).toLong
+      }
+    }
+  }
+
+  def clampFloat(bits: Long, width: Int in (16, 32, 64)): Long = width.raw match {
+    case 64 =>
+      val value = IEEE754.binary64ToDouble(bits)
+      if (value.isNaN) bits else IEEE754.doubleToBinary64(math.max(0.0, math.min(1.0, value)))
+    case 32 =>
+      val value = IEEE754.binary32ToFloat(Bits.low32(bits))
+      if (value.isNaN) bits else IEEE754.floatToBinary32(clampF32(value)).toLong
+    case _ => Bits.low16(clampF16(bits, true)).toLong
+  }
+
+  private val Binary16MinNormal = 6.103515625e-5
+
+  private def flushDenormal(value: Double, minimum: Double): Double =
+    if (value != 0.0 && math.abs(value) < minimum) math.copySign(0.0, value) else value
+
+  def clampF16(bits: Long, clamp: Boolean): Long =
+    if (clamp) IEEE754.floatToBinary16(clampF32(IEEE754.binary16ToFloat(Bits.low16(bits)))).toLong else bits
   def trigF32(operation: VectorConvertOperation, value: Float): Float = operation match {
-    // AMD's scalarized sin/cos instructions use turns, not radians: one
-    // instruction unit is 2*pi radians.  HIP kernels commonly multiply
-    // radians by 1/(2*pi) before reaching these instructions.
+    // The operand is in turns: one unit is 2*pi radians.
     case VectorConvertOperation.SineF32   => math.sin(2.0 * math.Pi * value.toDouble).toFloat
     case VectorConvertOperation.CosineF32 => math.cos(2.0 * math.Pi * value.toDouble).toFloat
     case _ => throw IllegalArgumentException(s"$operation is not a trigonometric operation")
@@ -128,16 +135,12 @@ private object VMArithmetic {
       negateHigh: Int,
       clamp: Boolean
   ): Long = {
-    def half(source: Long, high: Boolean): Float =
-      IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(if (high) source >>> 16 else source)))
     def calculate(selection: Int, negate: Int): Long = {
-      def operand(source: Long, index: Int): Float = {
-        val value = half(source, (selection & (1 << index)) != 0)
-        if ((negate & (1 << index)) != 0) -value else value
+      def operand(source: Long, index: Int): Long = {
+        val value = Bits.low16(if ((selection & (1 << index)) != 0) source >>> 16 else source).toLong
+        if ((negate & (1 << index)) != 0) value ^ 0x8000L else value
       }
-      val result  = Math.fma(operand(srcA, 0), operand(srcB, 1), operand(srcC, 2))
-      val clamped = if (clamp) clampF32(result) else result
-      IEEE754.floatToBinary16(clamped).toLong
+      clampF16(IEEE754.fusedMultiplyAdd(operand(srcA, 0), operand(srcB, 1), operand(srcC, 2), 16), clamp)
     }
     calculate(lowSelection, negateLow) | (calculate(highSelection, negateHigh) << 16)
   }
@@ -152,8 +155,8 @@ private object VMArithmetic {
     val convertFromHalf = (selectionHi & (1 << index)) != 0
     val selectHigh      = (selection & (1 << index)) != 0
     val value           = if (convertFromHalf)
-      IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(if (selectHigh) source >>> 16 else source)))
-    else IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source)))
+      IEEE754.binary16ToFloat(Bits.low16(if (selectHigh) source >>> 16 else source))
+    else IEEE754.binary32ToFloat(Bits.low32(source))
     val magnitude = if ((absolute & (1 << index)) != 0) math.abs(value) else value
     if ((negate & (1 << index)) != 0) -magnitude else magnitude
   }
@@ -167,19 +170,16 @@ private object VMArithmetic {
       negate: Int,
       absolute: Int,
       clamp: Boolean,
-      high: Boolean
+      high: Boolean,
+      fused: Boolean
   ): Long = {
-    val rounded = IEEE754.floatToBinary16(Math.fma(
-      mixedOperand(srcA, 0, opSelection, opSelectionHi, negate, absolute),
-      mixedOperand(srcB, 1, opSelection, opSelectionHi, negate, absolute),
-      mixedOperand(srcC, 2, opSelection, opSelectionHi, negate, absolute)
-    ))
-    val value =
-      if (clamp) {
-        val converted = IEEE754.binary16ToFloat(rounded)
-        IEEE754.floatToBinary16(math.max(0.0f, math.min(1.0f, converted)))
-      } else rounded
-    mergeD16(existing, value.toLong, high)
+    val left    = mixedOperand(srcA, 0, opSelection, opSelectionHi, negate, absolute)
+    val right   = mixedOperand(srcB, 1, opSelection, opSelectionHi, negate, absolute)
+    val addend  = mixedOperand(srcC, 2, opSelection, opSelectionHi, negate, absolute).toDouble
+    val rounded =
+      if (fused) IEEE754.fusedMultiplyAddExact(left.toDouble, right.toDouble, addend, 16, IEEE754.Rounding.NearestEven)
+      else IEEE754.fusedMultiplyAddExact((left * right).toDouble, 1.0, addend, 16, IEEE754.Rounding.NearestEven)
+    mergeD16(existing, clampF16(rounded, clamp), high)
   }
   def fmaMixF32(
       srcA: Long,
@@ -189,23 +189,23 @@ private object VMArithmetic {
       opSelectionHi: Int,
       negate: Int,
       absolute: Int,
-      clamp: Boolean
+      clamp: Boolean,
+      fused: Boolean
   ): Long = {
-    val result = Math.fma(
-      mixedOperand(srcA, 0, opSelection, opSelectionHi, negate, absolute),
-      mixedOperand(srcB, 1, opSelection, opSelectionHi, negate, absolute),
-      mixedOperand(srcC, 2, opSelection, opSelectionHi, negate, absolute)
-    )
+    val left   = mixedOperand(srcA, 0, opSelection, opSelectionHi, negate, absolute)
+    val right  = mixedOperand(srcB, 1, opSelection, opSelectionHi, negate, absolute)
+    val addend = mixedOperand(srcC, 2, opSelection, opSelectionHi, negate, absolute)
+    val result = if (fused) Math.fma(left, right, addend) else left * right + addend
     IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).toLong
   }
   def dot2F32F16(left: Long, right: Long, accumulator: Long, accumulate: Boolean): Binary32 = {
-    val leftLow   = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left)))
-    val leftHigh  = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left >>> 16)))
-    val rightLow  = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right)))
-    val rightHigh = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right >>> 16)))
+    val leftLow   = IEEE754.binary16ToFloat(Bits.low16(left))
+    val leftHigh  = IEEE754.binary16ToFloat(Bits.low16(left >>> 16))
+    val rightLow  = IEEE754.binary16ToFloat(Bits.low16(right))
+    val rightHigh = IEEE754.binary16ToFloat(Bits.low16(right >>> 16))
     val products  = Math.fma(leftLow, rightLow, leftHigh * rightHigh)
     val result    =
-      if (accumulate) products + IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(accumulator))) else products
+      if (accumulate) products + IEEE754.binary32ToFloat(Bits.low32(accumulator)) else products
     IEEE754.floatToBinary32(result)
   }
   // Four packed lanes are accumulated without creating an intermediate collection.
@@ -222,17 +222,6 @@ private object VMArithmetic {
     result
   }
 
-  /** AMD's unsigned float-to-dword conversion returns the truncated magnitude for negative inputs.
-    *
-    * LLVM uses this defined device behavior while lowering signed float-to-64-bit conversions: it restores the sign
-    * with a subsequent XOR/subtract sequence. Converting a negative JVM Float directly to Long would instead produce
-    * the two's-complement low dword, which breaks that sequence (for example, -3.0f would feed 0xfffffffd instead of
-    * 3).
-    */
-  def unsignedFloatToInt32(value: Float): Long =
-    if (value.isNaN || value <= 0.0f) 0L
-    else if (value.toDouble >= 4294967295.0) 0xffffffffL
-    else value.toLong
   def doubleClassMask(value: Double): Long = {
     val bits     = IEEE754.doubleToBinary64(value)
     val exponent = (bits >>> 52) & 0x7ffL
@@ -264,29 +253,6 @@ private object VMArithmetic {
     else if (quotient.isNaN) numerator / denominator
     else Math.copySign(math.abs(quotient), sign)
   }
-
-  def fmaF32(
-      operation: VectorMadF32Operation,
-      leftBits: Long,
-      rightBits: Long,
-      addendBits: Long
-  ): Binary32 = {
-    val left   = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftBits)))
-    val right  = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(rightBits)))
-    val addend = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(addendBits)))
-    val result = operation match {
-      case VectorMadF32Operation.FusedMultiplyAdd => Math.fma(left, right, addend)
-      case VectorMadF32Operation.MultiplyAdd      => left * right + addend
-    }
-    IEEE754.floatToBinary32(result)
-  }
-  def minimumF16(left: Long, right: Long): Binary16 =
-    IEEE754.floatToBinary16(
-      math.min(
-        IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))),
-        IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right)))
-      )
-    )
   private def comparisonResult(
       relation: VectorComparisonRelation,
       less: Boolean,
@@ -358,56 +324,91 @@ private object VMArithmetic {
       case VectorComparisonKind.Unsigned64 => unsigned(left, right)
       case VectorComparisonKind.Float16    =>
         floating(
-          IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))).toDouble,
-          IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right))).toDouble
+          IEEE754.binary16ToFloat(Bits.low16(left)).toDouble,
+          IEEE754.binary16ToFloat(Bits.low16(right)).toDouble
         )
       case VectorComparisonKind.Float32 =>
         floating(
-          IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))).toDouble,
-          IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right))).toDouble
+          IEEE754.binary32ToFloat(Bits.low32(left)).toDouble,
+          IEEE754.binary32ToFloat(Bits.low32(right)).toDouble
         )
       case VectorComparisonKind.Float64 =>
         floating(IEEE754.binary64ToDouble(left), IEEE754.binary64ToDouble(right))
       case VectorComparisonKind.ClassFloat32 =>
-        (floatClassMask(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left)))) & Bits.low32(right).toLong) != 0L
+        (floatClassMask(IEEE754.binary32ToFloat(Bits.low32(left))) & Bits.low32(right).toLong) != 0L
       case VectorComparisonKind.ClassFloat64 =>
         (doubleClassMask(IEEE754.binary64ToDouble(left)) & Bits.low32(right).toLong) != 0L
     }
   }
   def floatingLiteralToDouble(raw: Long): Double =
     IEEE754.binary64ToDouble(Bits.join32(0L, Bits.low32(raw).toLong))
-  def bpermuteSourceLane(address: Long): Lane =
-    bpermuteSourceLane(address, 0L)
   def bpermuteSourceLane(address: Long, offset: Long): Lane = (((address + offset) >>> 2) & 63L).toInt.unsafe[Lane]
   def permuteDestinationLane(address: Long, offset: Long, waveSize: Int in (32, 64)): Lane =
     (((address + offset) >>> 2) & (waveSize.raw - 1L)).toInt.unsafe[Lane]
   def dppQuadSourceLane(lane: Lane, control: Int): Lane =
     ((lane.raw & ~3) | ((control >>> ((lane.raw & 3) * 2)) & 3)).unsafe[Lane]
+  private def dppWithin(control: Int, first: Int, last: Int): Boolean = control >= first && control <= last
+
+  /** The lane a DPP16 control reads for `lane`, or None when it names no lane; the decoder admits only valid controls.
+    */
   def dppSourceLane(lane: Lane, control: Int): Option[Lane] = {
-    val selected: Option[Int] =
-      if (control <= 0xff) Some(dppQuadSourceLane(lane, control).raw)
-      else if (control >= 0x100 && control <= 0x10f) {
-        val source = (lane.raw & 15) + (control & 15)
-        Option.when(source < 16)((lane.raw & ~15) | source)
-      } else if (control >= 0x110 && control <= 0x11f) {
-        val source = (lane.raw & 15) - (control & 15)
-        Option.when(source >= 0)((lane.raw & ~15) | source)
-      } else if (control >= 0x121 && control <= 0x12f) {
-        val rowBase = lane.raw & ~15
-        Some(rowBase | (((lane.raw & 15) - (control & 15)) & 15))
-      } else control match {
-        case 0x130 => Option.when(lane.raw < 63)(lane.raw + 1)
-        case 0x134 => Some((lane.raw + 1) & 63)
-        case 0x138 => Option.when(lane.raw > 0)(lane.raw - 1)
-        case 0x13c => Some((lane.raw - 1) & 63)
-        case 0x142 => Option.when(((lane.raw / 16) & 1) == 1)((lane.raw / 16 - 1) * 16 + 15)
-        case 0x143 => Option.when(lane.raw / 16 >= 2)(31)
-        case _     => None
+    import EncodingConstants.DPP.*
+    val rowBase  = lane.raw & ~15
+    val rowLane  = lane.raw & 15
+    val distance = control & 15
+    val selected =
+      if (dppWithin(control, QUAD_PERM_FIRST, QUAD_PERM_LAST)) Some(dppQuadSourceLane(lane, control).raw)
+      else if (dppWithin(control, ROW_SHL_FIRST, ROW_SHL_LAST))
+        Option.when(rowLane + distance < 16)(lane.raw + distance)
+      else if (dppWithin(control, ROW_SHR_FIRST, ROW_SHR_LAST)) Option.when(rowLane >= distance)(lane.raw - distance)
+      else if (dppWithin(control, ROW_ROR_FIRST, ROW_ROR_LAST)) Some(rowBase | ((rowLane - distance) & 15))
+      else if (dppWithin(control, ROW_SHARE_FIRST, ROW_SHARE_LAST)) Some(rowBase | distance)
+      else if (dppWithin(control, ROW_XMASK_FIRST, ROW_XMASK_LAST)) Some(rowBase | (rowLane ^ distance))
+      else control match {
+        case WAVE_SHL1       => Option.when(lane.raw < 63)(lane.raw + 1)
+        case WAVE_ROL1       => Some((lane.raw + 1) & 63)
+        case WAVE_SHR1       => Option.when(lane.raw > 0)(lane.raw - 1)
+        case WAVE_ROR1       => Some((lane.raw - 1) & 63)
+        case ROW_MIRROR      => Some(rowBase | (15 - rowLane))
+        case ROW_HALF_MIRROR => Some((lane.raw & ~7) | (7 - (lane.raw & 7)))
+        case BCAST15         => Option.when(rowBase > 0)(rowBase - 1)
+        case BCAST31         => Option.when(lane.raw >= 32)(31)
+        case _               => None
       }
     selected.map(_.unsafe[Lane])
   }
+
+  /** GCN keeps wave shifts and row broadcasts, which RDNA replaces with row share and XOR mask; CDNA2 onwards adds
+    * row_newbcast, which shares row share's encoding and routing.
+    */
+  def dppControlValid(control: Int, isa: ISA): Boolean = {
+    import EncodingConstants.DPP.*
+    val common = dppWithin(control, QUAD_PERM_FIRST, QUAD_PERM_LAST) ||
+      dppWithin(control, ROW_SHL_FIRST, ROW_SHL_LAST) ||
+      dppWithin(control, ROW_SHR_FIRST, ROW_SHR_LAST) || dppWithin(control, ROW_ROR_FIRST, ROW_ROR_LAST) ||
+      control == ROW_MIRROR || control == ROW_HALF_MIRROR
+    val gcn = common || control == WAVE_SHL1 || control == WAVE_ROL1 || control == WAVE_SHR1 ||
+      control == WAVE_ROR1 || control == BCAST15 || control == BCAST31
+    isa match {
+      case ISA.RDNA1 | ISA.RDNA2 | ISA.RDNA3 | ISA.RDNA3_5 | ISA.RDNA4 | ISA.GFX11_7 | ISA.CDNA5 =>
+        common || dppWithin(control, ROW_SHARE_FIRST, ROW_SHARE_LAST) ||
+        dppWithin(control, ROW_XMASK_FIRST, ROW_XMASK_LAST)
+      case _ if dppRowNewBroadcast(isa) => gcn || dppWithin(control, ROW_NEWBCAST_FIRST, ROW_NEWBCAST_LAST)
+      case _                            => gcn
+    }
+  }
+
+  def dppRowNewBroadcast(isa: ISA): Boolean = isa match {
+    case ISA.CDNA2 | ISA.CDNA3 | ISA.CDNA4 => true
+    case _                                 => false
+  }
+
+  def dpp8SourceLane(lane: Lane, selectors: Int): Lane =
+    ((lane.raw & ~7) | ((selectors >>> ((lane.raw & 7) * 3)) & 7)).unsafe[Lane]
+
+  /** Row and bank masks gate destination writes; a bank is four consecutive lanes of a row. */
   def dppLaneEnabled(lane: Lane, rowMask: Int, bankMask: Int): Boolean =
-    (rowMask & (1 << (lane.raw / 16))) != 0 && (bankMask & (1 << (lane.raw & 3))) != 0
+    (rowMask & (1 << (lane.raw / 16))) != 0 && (bankMask & (1 << ((lane.raw >>> 2) & 3))) != 0
   def waveConditionMask(mask: Long, lanes: Int in 1 ~ 64): Long =
     if (lanes.raw <= 32) Bits.low32(mask).toLong else mask
   def mbCount(mask: Long, executionMask: Long, lane: Lane, high: Boolean, base: Long): Long = {
@@ -454,9 +455,7 @@ private object VMArithmetic {
   def permuteBytes(srcA: Long, srcB: Long, selectors: Long): Long = {
     val sources = Bits.join32(srcB, srcA)
     (0 until 4).foldLeft(0L) { (result, byte) =>
-      // V_PERM uses the full four-bit selector.  Values 0..7 address the
-      // concatenated second/first sources; selectors 8..15 produce zero
-      // (in particular, 0xc is the canonical zero selector used by LLVM).
+      // Selectors 0-7 address the concatenated second and first sources; 8-15 produce zero.
       val selector = ((selectors >>> (byte * 8)) & 0xfL).toInt
       if (selector < 8)
         result | (((sources >>> (selector * 8)) & 0xffL) << (byte * 8))

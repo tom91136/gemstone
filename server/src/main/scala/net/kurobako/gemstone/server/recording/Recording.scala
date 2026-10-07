@@ -4,17 +4,18 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import net.kurobako.gemstone.server.protocol.*
 
 /** Capture consumed wire bytes above buffering, as the connection consumes each frame. Allocated only when enabled. */
 class Recording(writer: Journal.Writer, source: InputStream, destination: OutputStream)
     extends AutoCloseable {
-  private class Frame extends ByteArrayOutputStream {
+  private class FrameBuffer extends ByteArrayOutputStream {
     override def write(value: Int): Unit = {
-      if (count >= writer.header.limits.maxFrameBytes.toInt) throw IOException("recording frame limit exceeded")
+      if (count >= writer.header.limits.maxFrameBytes.raw) throw IOException("recording frame limit exceeded")
       super.write(value)
     }
     override def write(bytes: Array[Byte], offset: Int, size: Int): Unit = {
-      if (size > writer.header.limits.maxFrameBytes.toInt - count) throw IOException("recording frame limit exceeded")
+      if (size > writer.header.limits.maxFrameBytes.raw - count) throw IOException("recording frame limit exceeded")
       super.write(bytes, offset, size)
     }
     def take(): Array[Byte] = { val result = toByteArray; reset(); result }
@@ -28,8 +29,8 @@ class Recording(writer: Journal.Writer, source: InputStream, destination: Output
     finally capturing = true
   }
 
-  private val incoming = Frame()
-  private val outgoing = Frame()
+  private val incoming = FrameBuffer()
+  private val outgoing = FrameBuffer()
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var connection: Option[Journal.Connection] = None
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -54,11 +55,11 @@ class Recording(writer: Journal.Writer, source: InputStream, destination: Output
     override def flush(): Unit = destination.flush()
     override def close(): Unit = destination.close()
   }
-  val input: InputStream            = CapturedInput()
-  val output: OutputStream          = CapturedOutput()
-  def begin(): Unit                 = { incoming.reset(); outgoing.reset(); requestAccepted = false }
-  def accepted(owner: AnyRef): Unit = {
-    if (connection.isEmpty) connection = Some(writer.connection(owner))
+  val input: InputStream               = CapturedInput()
+  val output: OutputStream             = CapturedOutput()
+  def begin(): Unit                    = { incoming.reset(); outgoing.reset(); requestAccepted = false }
+  def accepted(client: ClientId): Unit = {
+    if (connection.isEmpty) connection = Some(writer.connection(client))
     connection.foreach(_.request(incoming.take()))
     requestAccepted = true
   }

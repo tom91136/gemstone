@@ -6,33 +6,25 @@ import net.kurobako.gemstone.isa.sass.NVDisasm.*
 /** Evaluates recovered operand constraints; unknown conditions never become permission to execute. */
 object Legality {
 
-  /** Add the kind aliases used by FORMAT conditions to the normalized encoding bindings. Decoder and assembler inputs
+  /** Add the kind aliases used by FORMAT conditions to the normalised encoding bindings. Decoder and assembler inputs
     * use encoded field names, while recovered constraints may refer to the field's declared FORMAT binding or kind.
     * Keep these aliases in one place so both paths evaluate the same condition against the same semantic values.
     */
-  def completeBindings(form: NVDisasm.Form, bindings: Map[String, BigInt]): Map[String, BigInt] = {
-    val declared     = SASSFormatBindings.fields(form.syntax)
-    val kindBindings = SASSFormatBindings.kindBindings(declared)
-    declared.foldLeft(bindings) { (current, field) =>
-      val value = current.get(field.binding).orElse {
-        Option.when(kindBindings.get(field.kind).contains(field.binding))(current.get(field.kind)).flatten
-      }
-      value.fold(current) { raw =>
+  def completeBindings(form: NVDisasm.Form, bindings: Map[String, BigInt]): Map[String, BigInt] =
+    form.declared.foldLeft(bindings) { (current, field) =>
+      val byKind = form.kindBindings.get(field.kind).contains(field.binding)
+      current.get(field.binding).orElse(Option.when(byKind)(current.get(field.kind)).flatten).fold(current) { raw =>
         val withBinding = current.updated(field.binding, raw)
-        if (kindBindings.get(field.kind).contains(field.binding)) withBinding.updated(field.kind, raw)
-        else withBinding
+        if (byKind) withBinding.updated(field.kind, raw) else withBinding
       }
     }
-  }
 
   def check(
       database: NVDisasm.Database,
       form: NVDisasm.Form,
       bindings: Map[String, BigInt]
   ): Either[NVDisasm.CandidateFailure, Unit] = {
-    val conditions = form.conditions
-      .filter(_.isError)
-      .filterNot(condition => condition.isScheduling || unobservableScoreboardEncoding(condition, bindings))
+    val conditions = form.conditions.filter(_.requires.forall(bindings.contains))
     conditions.foldLeft[Either[NVDisasm.CandidateFailure, Unit]](Right(())) { (result, condition) =>
       result.flatMap(_ =>
         evaluate(database, condition.expression, bindings).left.map(message =>
@@ -50,14 +42,6 @@ object Legality {
       )
     }
   }
-
-  /** The legacy MIO_RD_SCBD constraint refers to a pre-encoding scoreboard value that is not recoverable from these
-    * instruction bits: VarLatOperandEnc maps both 7 and 65535 to the same encoded value 7. When decoding a machine
-    * word, absence of dst_wr_sb is therefore expected. If a caller does provide that semantic value, keep checking the
-    * recovered constraint normally.
-    */
-  private def unobservableScoreboardEncoding(condition: NVDisasm.Condition, bindings: Map[String, BigInt]): Boolean =
-    condition.exception == NVDisasm.ConditionException.UnobservableScoreboardEncoding && !bindings.contains("dst_wr_sb")
 
   def evaluate(
       database: NVDisasm.Database,
@@ -79,7 +63,7 @@ object Legality {
       case Conditional(condition, whenTrue, whenFalse) =>
         eval(condition).flatMap(value => eval(if (value != 0) whenTrue else whenFalse))
       case Field(name, attribute) =>
-        val key = attribute.fold(name)(suffix => s"$name@$suffix")
+        val key = NVDisasm.bindingKey(name, attribute)
         bindings.get(key).orElse(
           Option.when(attribute.nonEmpty && bindings.contains(name))(BigInt(0))
         ).orElse(database.constants.get(key)).toRight(s"unsupported condition reference $key")
@@ -122,14 +106,12 @@ object Legality {
             case BinaryOperator.BitwiseXor                      => Right(a ^ b)
             case BinaryOperator.ShiftLeft if b >= 0 && b < 128  => Right(a << b.toInt)
             case BinaryOperator.ShiftRight if b >= 0 && b < 128 => Right(a >> b.toInt)
-            case BinaryOperator.Unsupported(operator)           => Left(s"unsupported condition operator $operator")
-            case _ => Left(s"unsupported condition operator ${operator.spelling}")
+            case BinaryOperator.Unsupported(spelling)           => Left(s"unsupported condition operator $spelling")
+            case _                                              => Left(s"undefined condition operation $operator")
           }
         } yield result
       case Call(BuiltinCall.Defined, Vec(Call(BuiltinCall.Table(name), arguments))) => for {
-          table <- database.byTable.get(name).toRight(s"unsupported condition table $name")
-          _     <-
-            Either.cond(table.issues.isEmpty, (), s"unsupported condition table $name: ${table.issues.mkString("; ")}")
+          table  <- database.byTable.get(name).toRight(s"unsupported condition table $name")
           inputs <- values(arguments)
         } yield truth(table.rows.exists(_.inputs == inputs))
       case Call(name, Vec(argument)) if name == BuiltinCall.IsEven || name == BuiltinCall.IsOdd =>
@@ -137,11 +119,9 @@ object Legality {
           truth(if (name == BuiltinCall.IsEven) value % 2 == 0 else value % 2 != 0)
         }
       case Call(BuiltinCall.Table(name), arguments) => for {
-          table <- database.byTable.get(name).toRight(s"unsupported condition call $name")
-          _     <-
-            Either.cond(table.issues.isEmpty, (), s"unsupported condition table $name: ${table.issues.mkString("; ")}")
+          table  <- database.byTable.get(name).toRight(s"unsupported condition call $name")
           inputs <- values(arguments)
-          matches = table.rows.filter(_.inputs == inputs).map(_.output).distinct
+          matches = table.lookup(inputs)
           result <- Either.cond(
             matches.size == 1,
             matches.headOption.getOrElse(BigInt(0)),

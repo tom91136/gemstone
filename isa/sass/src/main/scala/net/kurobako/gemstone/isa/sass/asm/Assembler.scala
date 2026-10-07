@@ -7,83 +7,82 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.*
-import net.kurobako.gemstone.isa.sass.SASSCodeWords.BundleControl as Control
+import net.kurobako.gemstone.isa.sass.CodeWords.BundleControl as Control
 import net.kurobako.gemstone.isa.sass.asm.Program.Statement.*
 
 /** Assembles generated instruction cases with the target's recovered encoding tables. */
 object Assembler {
   private type EncodedInstruction = (bytes: Vec[Byte], operation: Instruction)
 
-  def assemble(source: String, target: String, address: Int = 0): Either[String, Array[Byte]] = source match {
+  def assemble(source: String, target: Target, address: Int >= 0 = 0): Either[String, Array[Byte]] = source match {
     case s"$assembly// encoding: $annotationText" => for {
         annotation <- MachineSyntax.parse(annotationText)
         _          <- Either.cond(
-          annotation.target == target && annotation.address == address,
+          annotation.target == target.name && annotation.address == address.raw,
           (),
           "encoding annotation target/address differs from assembly context"
         )
         result <- MachineSyntax.decode(assembly, annotation)
       } yield result.bytes
-    case _ => for {
-        instruction <- Parser.parse(source)
-        bytes       <- encode(instruction, target, address)
-      } yield bytes
+    case _ => Parser.parse(source).flatMap(encode(_, target, address))
   }
 
-  def encode(instruction: Instruction, target: String, address: Int = 0): Either[String, Array[Byte]] =
-    address.refine[Int >= 0].left.map(_.raw).flatMap(encodeCanonical(instruction, target, _)).map(_.bytes.toArray)
+  def encode(instruction: Instruction, target: Target, address: Int >= 0 = 0): Either[String, Array[Byte]] =
+    encodeCanonical(instruction, target, address).map(_.bytes.toArray)
 
   private def encodeCanonical(
       instruction: Instruction,
-      target: String,
+      target: Target,
       address: Int >= 0
-  ): Either[String, EncodedInstruction] = for {
-    database <- NVDisasm.forTarget(target).toRight(s"unknown SASS target $target")
-    text     <- Printer.print(instruction)
-    forms = database.forms.filter(form =>
+  ): Either[String, EncodedInstruction] = {
+    val database = target.database
+    val forms    = database.forms.filter(form =>
       !form.alternate && instruction.definition.forms.contains(form.name) &&
         form.opcodes.exists(_.name.takeWhile(_ != '.') == instruction.mnemonic.raw)
     )
-    attempts = forms.map { form =>
-      for {
-        encodingText <-
-          if (
-            instruction.mnemonic == "P2R" && instruction.operands.size == 3 &&
-            SASSFormatBindings.fields(form.syntax, includeMarkedOptionals = false).exists(field =>
-              Set(
-                NVDisasm.FieldKind.ConditionRegisterBank,
-                NVDisasm.FieldKind.PredicateRegister
-              )(NVDisasm.fieldKind(field.kind))
+    for {
+      text <- Printer.print(instruction)
+      attempts = forms.map { form =>
+        for {
+          // P2R forms that spell the predicate bank expect it as the second operand.
+          encodingText <-
+            if (
+              instruction.mnemonic == "P2R" && instruction.operands.size == 3 &&
+              form.declared.exists(field =>
+                field.category == NVDisasm.FieldKind.ConditionRegisterBank ||
+                  field.category == NVDisasm.FieldKind.PredicateRegister
+              )
             )
+              Instruction.decode(
+                instruction.mnemonic.raw,
+                instruction.modifiers,
+                instruction.operands.patch(1, Vec(Operand.Symbol("PR")), 0),
+                instruction.guard
+              ).flatMap(Printer.print(_))
+            else Right(text)
+          bindings <- FormatParser.parse(database, form, address.raw, encodingText)
+          opcode   <- form.opcodes.find(value => bindings.get("Opcode").contains(value.value))
+            .toRight(s"missing opcode binding for ${form.name}")
+          bytes   <- Encoder.encode(database, form, opcode.name, bindings)
+          decoded <- InstructionDecoder.decode(address, bytes, target)
+          // Canonical FORMAT spellings can normalise signed immediates and omit defaults.
+          _ <- Either.cond(
+            equivalent(instruction, decoded.operation),
+            (),
+            s"encoded ${form.name} changes the requested operands"
           )
-            Instruction.decode(
-              instruction.mnemonic.raw,
-              instruction.modifiers,
-              instruction.operands.patch(1, Vec(Operand.Symbol("PR")), 0),
-              instruction.guard
-            ).flatMap(Printer.print(_))
-          else Right(text)
-        bindings <- SASSFormatParser.parse(database, form, address.raw, encodingText)
-        opcode   <- form.opcodes.find(value => bindings.get("Opcode").contains(value.value))
-          .toRight(s"missing opcode binding for ${form.name}")
-        bytes   <- Encoder.encode(database, form, opcode.name, bindings)
-        decoded <- InstructionDecoder.decodeTyped(address, bytes, target)
-        // Canonical FORMAT spellings can normalize signed immediates and omit defaults.
-        _ <- Either.cond(
-          equivalent(instruction, decoded.operation),
-          (),
-          s"encoded ${form.name} changes the requested operands"
-        )
-      } yield (bytes = bytes.toVec, operation = decoded.operation)
-    }
-    choices = attempts.flatMap(_.toOption).distinctBy(_.bytes)
-    encoded <- choices match {
-      case Vec(value)               => Right(value)
-      case values if values.isEmpty =>
-        Left(s"cannot assemble $target $text: ${attempts.flatMap(_.left.toOption).distinct.take(6).mkString("; ")}")
-      case _ => Left(s"ambiguous $target encoding for $text; select a form with an encoding annotation")
-    }
-  } yield encoded
+        } yield (bytes = bytes.toVec, operation = decoded.operation)
+      }
+      encoded <- attempts.flatMap(_.toOption).distinctBy(_.bytes) match {
+        case Vec(value)               => Right(value)
+        case values if values.isEmpty =>
+          Left(
+            s"cannot assemble ${target.name} $text: ${attempts.flatMap(_.left.toOption).distinct.take(6).mkString("; ")}"
+          )
+        case _ => Left(s"ambiguous ${target.name} encoding for $text; select a form with an encoding annotation")
+      }
+    } yield encoded
+  }
 
   def encode(instruction: DecodedInstruction): Either[String, Array[Byte]] =
     encodeCanonical(instruction).map(_.bytes.toArray)
@@ -93,7 +92,7 @@ object Assembler {
       for {
         annotation <- MachineSyntax.describe(instruction, machine)
         bytes      <- MachineSyntax.encode(annotation)
-        actual     <- Disassembler.decode(bytes, machine.target, instruction.address.raw)
+        actual     <- InstructionDecoder.decode(instruction.address, bytes, machine.target)
         _          <- Either.cond(
           actual.operation == instruction.operation,
           (),
@@ -104,35 +103,25 @@ object Assembler {
 
   private def equivalent(left: Instruction, right: Instruction): Boolean =
     left.mnemonic == right.mnemonic && left.modifiers == right.modifiers && equivalentGuard(left.guard, right.guard) &&
-      left.operands.size == right.operands.size && left.operands.zip(right.operands).forall { (a, b) =>
-        equivalentOperand(a, b)
-      }
+      left.operands.size == right.operands.size && left.operands.zip(right.operands).forall(equivalentOperand(_, _))
 
-  private def equivalentGuard(left: Option[Instruction.Guard], right: Option[Instruction.Guard]): Boolean =
+  private def equivalentGuard(left: Option[Instruction.Guard], right: Option[Instruction.Guard]): Boolean = {
+    val always = Some(Instruction.Guard(VMOperand.True))
+    left == right || (left == always && right.isEmpty) || (right == always && left.isEmpty)
+  }
+
+  private def equivalentOperand(left: Operand, right: Operand): Boolean =
     left == right ||
-      (left.exists(_.predicate == Operand.Predicate(None, uniform = false, negated = false)) && right.isEmpty) ||
-      (right.exists(_.predicate == Operand.Predicate(None, uniform = false, negated = false)) && left.isEmpty)
-
-  private def equivalentOperand(left: Operand, right: Operand): Boolean = if (left == right) true
-  else (integerValue(left), integerValue(right)) match {
-    case (Some(a), Some(b)) => a == b
-    case _                  =>
-      (floatingBits(left), floatingBits(right)) match {
-        case (Some((format, width, bits)), Some((otherFormat, otherWidth, otherBits))) =>
-          format == otherFormat && width == otherWidth && bits == otherBits
-        case (Some((format, width, bits)), None) => matchesFloating(right, format, width, bits)
-        case (None, Some((format, width, bits))) => matchesFloating(left, format, width, bits)
-        case _                                   => false
-      }
-  }
-
-  private def integerValue(operand: Operand): Option[BigInt] = operand match {
-    case Operand.Integer(value)                                    => Some(value)
-    case Operand.Bits(value, _)                                    => Some(value)
-    case Operand.Unary(Operand.Integer(value), true, false, false) => Some(-value)
-    case Operand.Unary(Operand.Bits(value, _), true, false, false) => Some(-value)
-    case _                                                         => None
-  }
+      ((VMOperand.integer(left), VMOperand.integer(right)) match {
+        case (Some(a), Some(b)) => a == b
+        case _                  =>
+          (floatingBits(left), floatingBits(right)) match {
+            case (Some(a), Some(b))                  => a == b
+            case (Some((format, width, bits)), None) => matchesFloating(right, format, width, bits)
+            case (None, Some((format, width, bits))) => matchesFloating(left, format, width, bits)
+            case _                                   => false
+          }
+      })
 
   private def floatingBits(operand: Operand): Option[(FloatEncoding, Int, BigInt)] = operand match {
     case Operand.FloatingBits(format, width, bits)                                    => Some((format, width.raw, bits))
@@ -142,42 +131,38 @@ object Assembler {
   }
 
   private def matchesFloating(operand: Operand, format: FloatEncoding, width: Int, bits: BigInt): Boolean = {
-    val signedValue = operand match {
-      case Operand.Floating(value, _, negativeZero) => Some(if (negativeZero) -0.0 else value.toDouble)
-      case Operand.Integer(value)                   => Some(value.toDouble)
-      case Operand.Bits(value, _)                   => Some(value.toDouble)
+    val value = operand match {
+      case Operand.Floating(value, _, negativeZero) =>
+        Some(if (negativeZero) -0.0 else value.toDouble)
       case Operand.Unary(Operand.Floating(value, _, negativeZero), true, false, false) =>
         Some(if (negativeZero) 0.0 else -value.toDouble)
-      case Operand.Unary(Operand.Integer(value), true, false, false) => Some(-value.toDouble)
-      case Operand.Unary(Operand.Bits(value, _), true, false, false) => Some(-value.toDouble)
-      case _                                                         => None
+      case other => VMOperand.integer(other).map(_.toDouble)
     }
-    signedValue.exists { value =>
-      val expected = format match {
-        case FloatEncoding.F16Imm if width == 16 => Some(BigInt(IEEE754.floatToBinary16(value.toFloat).raw & 0xffff))
-        case FloatEncoding.F32Imm if width == 32 =>
-          Some(BigInt(java.lang.Integer.toUnsignedLong(java.lang.Float.floatToRawIntBits(value.toFloat))))
-        case FloatEncoding.F64Imm if width == 64 =>
-          Some(BigInt(java.lang.Long.toUnsignedString(java.lang.Double.doubleToRawLongBits(value))))
-        case _ => None
+    value.exists { number =>
+      val expected = (format, width) match {
+        case (FloatEncoding.F16Imm, 16) => Some(IEEE754.fromDouble(number, 16))
+        case (FloatEncoding.F32Imm, 32) => Some(IEEE754.fromDouble(number, 32))
+        case (FloatEncoding.F64Imm, 64) => Some(IEEE754.doubleToBinary64(number))
+        case _                          => None
       }
-      expected.contains(bits)
+      expected.exists(encoded => (BigInt(encoded) & ((BigInt(1) << 64) - 1)) == bits)
     }
   }
 }
 
-class Assembler(target: Target) extends isa.Encoder[Program, Vec[Byte], Error] {
+class Assembler(target: Target) {
+  private val generation = target.generation
+
   private def assembly(value: String): Error = Error.Assembly(Error.detail(value))
 
-  override def encode(program: Program): Either[Error, Vec[Byte]] = for {
+  def encode(program: Program): Either[Error, Vec[Byte]] = for {
     _ <- program.target match {
-      case Some(actual) if actual.sm != target.sm => Left(Error.TargetMismatch(target, actual))
-      case _                                      => Right(())
+      case Some(actual) if actual != target => Left(Error.TargetMismatch(target, actual))
+      case _                                => Right(())
     }
-    _      <- Target.parse(target.name).left.map(assembly(_))
     layout <- locate(program)
     (operations, labels, controls) = layout
-    slots                          = if (target.sm.raw < 50) 7 else if (target.sm.raw < 70) 3 else 1
+    slots                          = generation.slots
     _ <- Either.cond(
       controls.isEmpty || operations.size % slots == 0,
       (),
@@ -195,7 +180,7 @@ class Assembler(target: Target) extends isa.Encoder[Program, Vec[Byte], Error] {
         encoded     <- operation.preserved match {
           case Some(decoded) => for {
               _ <- Either.cond(
-                operation.references.isEmpty && decoded.operation == instruction,
+                operation.reference.isEmpty && decoded.operation == instruction,
                 (),
                 assembly("preserved encoding does not match the instruction")
               )
@@ -205,13 +190,12 @@ class Assembler(target: Target) extends isa.Encoder[Program, Vec[Byte], Error] {
                 assembly("encoding annotation address differs from program layout")
               )
               machine <- decoded.machine.toRight(assembly("preserved instruction has no machine annotation"))
-              actual  <- Target.parse(machine.target).left.map(assembly(_))
-              _       <- Either.cond(actual.sm == target.sm, (), Error.TargetMismatch(target, actual))
+              _       <- Either.cond(machine.target == target, (), Error.TargetMismatch(target, machine.target))
               encoded <- Assembler.encodeCanonical(decoded).left.map(assembly(_))
             } yield encoded
-          case None => Assembler.encodeCanonical(instruction, target.name, address).left.map(assembly(_))
+          case None => Assembler.encodeCanonical(instruction, target, address).left.map(assembly(_))
         }
-        expected = if (target.sm.raw < 50) 8 else if (target.sm.raw < 70) 11 else 16
+        expected = if (generation == Generation.Maxwell) 11 else generation.instructionBytes.raw
         _ <- Either.cond(
           encoded.bytes.size == expected,
           (),
@@ -228,9 +212,11 @@ class Assembler(target: Target) extends isa.Encoder[Program, Vec[Byte], Error] {
       val first            = index * slots
       val control: Control = controls.getOrElse(
         first,
-        if (target.sm.raw < 50) Control.Kepler(Vec.fill(8)(0.toByte))
-        else if (target.sm.raw < 70) Control.Maxwell(words.map(word => controlOf(word.bytes)), 0)
-        else Control.Modern
+        generation match {
+          case Generation.Kepler  => Control.Kepler(Vec.fill(8)(0.toByte))
+          case Generation.Maxwell => Control.Maxwell(words.map(word => controlOf(word.bytes)), 0)
+          case Generation.Modern  => Control.Modern
+        }
       )
       for {
         _ <- control match {
@@ -248,49 +234,37 @@ class Assembler(target: Target) extends isa.Encoder[Program, Vec[Byte], Error] {
           for {
             address <- addressOf(first + slot)
             _       <- control match {
-              case Control.Maxwell(values, _) =>
-                validateControl(word.bytes, values(slot), address.raw, word.operation)
-              case _ => Right(())
+              case Control.Maxwell(values, _) => validateControl(word.bytes, values(slot), address, word.operation)
+              case _                          => Right(())
             }
-          } yield SASSCodeWords.CodeWord(
-            address,
-            word.bytes.take(if (slots == 1) 16 else 8)
-          )
+          } yield CodeWords.CodeWord(address, word.bytes.take(generation.instructionBytes.raw))
         }
-        base = index * (if (slots == 7) 64 else if (slots == 3) 32 else 16)
-      } yield SASSCodeWords.CodeBundle(base.unsafe[SASSCodeWords.Address], control, located)
+        base = index * generation.bundleBytes.raw
+      } yield CodeWords.CodeBundle(base.unsafe[CodeWords.Address], control, located)
     }
-    bytes <- SASSCodeWords.join(SASSCodeWords.CodeSection(target.sm, bundles)).left.map(assembly(_))
+    bytes <- CodeWords.join(CodeWords.Layout(generation, bundles)).left.map(assembly(_))
   } yield bytes.toVec
 
   private def validateControl(
       word: Vec[Byte],
-      control: SASSCodeWords.ControlWord,
-      address: Int,
+      control: CodeWords.ControlBits,
+      address: Int >= 0,
       canonical: Instruction
   ): Either[Error, Unit] =
     if (control == controlOf(word)) Right(())
-    else {
-      val suffix = Vec.tabulate[Byte](3)(index => (control.value.raw >>> (index * 8)).toByte)
-      for {
-        patched <- Disassembler.decode((word.take(8) ++ suffix).toArray, target.name, address).left.map(assembly(_))
-        _       <- Either.cond(
-          canonical == patched.operation,
-          (),
-          assembly("bundle control changes instruction semantics")
-        )
-      } yield ()
-    }
+    else for {
+      patched <- InstructionDecoder.decode(address, (word.take(8) ++ CodeWords.controlBytes(control)).toArray, target)
+        .left.map(assembly(_))
+      _ <- Either.cond(canonical == patched.operation, (), assembly("bundle control changes instruction semantics"))
+    } yield ()
 
-  private def controlOf(bytes: Vec[Byte]): SASSCodeWords.ControlWord =
-    SASSCodeWords.ControlWord(
-      ((bytes(8) & 255) | ((bytes(9) & 255) << 8) | ((bytes(10) & 31) << 16)).unsafe[SASSCodeWords.ControlBits]
-    )
+  private def controlOf(bytes: Vec[Byte]): CodeWords.ControlBits =
+    ((bytes(8) & 255) | ((bytes(9) & 255) << 8) | ((bytes(10) & 31) << 16)).unsafe[CodeWords.ControlBits]
 
   private def addressOf(index: Int): Either[Error, Int >= 0] = {
-    val address = if (target.sm.raw < 50) index.toLong / 7 * 64 + 8 + index % 7 * 8
-    else if (target.sm.raw < 70) index.toLong / 3 * 32 + 8 + index % 3 * 8
-    else index.toLong * 16
+    val slots   = generation.slots
+    val address = index.toLong / slots * generation.bundleBytes.raw + generation.controlBytes +
+      index % slots * generation.instructionBytes.raw
     Either.cond(
       address <= Int.MaxValue,
       address.toInt.unsafe[Int >= 0],
@@ -302,7 +276,6 @@ class Assembler(target: Target) extends isa.Encoder[Program, Vec[Byte], Error] {
       program: Program
   ): Either[Error, (Vec[Operation], Map[String, Int >= 0], Map[Int, Control])] = {
     val initial = (Vec.empty[Operation], Map.empty[String, Int >= 0], Map.empty[Int, Control])
-    val slots   = if (target.sm.raw < 50) 7 else if (target.sm.raw < 70) 3 else 1
     program.statements.foldLeft[Either[
       Error,
       (Vec[Operation], Map[String, Int >= 0], Map[Int, Control])
@@ -317,13 +290,14 @@ class Assembler(target: Target) extends isa.Encoder[Program, Vec[Byte], Error] {
                 (operations, labels.updated(name.raw, address), controls)
               )
             case Bundle(control) =>
-              if (operations.size % slots != 0 || controls.contains(operations.size))
+              if (operations.size % generation.slots != 0 || controls.contains(operations.size))
                 Left(assembly("bundle directive must precede a complete bundle"))
               else {
-                val valid = (target.sm.raw, control) match {
-                  case (sm, Control.Kepler(bytes))      => sm < 50 && bytes.size == 8
-                  case (sm, Control.Maxwell(values, _)) => sm >= 50 && sm < 70 && values.size == 3
-                  case (sm, Control.Modern)             => sm >= 70
+                val valid = (generation, control) match {
+                  case (Generation.Kepler, Control.Kepler(bytes))       => bytes.size == 8
+                  case (Generation.Maxwell, Control.Maxwell(values, _)) => values.size == 3
+                  case (Generation.Modern, Control.Modern)              => true
+                  case _                                                => false
                 }
                 Either.cond(
                   valid,
@@ -343,17 +317,17 @@ class Assembler(target: Target) extends isa.Encoder[Program, Vec[Byte], Error] {
   }
 
   private def resolve(operation: Operation, labels: Map[String, Int >= 0]): Either[Error, Instruction] =
-    if (operation.references.isEmpty) Right(operation.instruction)
-    else for {
-      reference <- Parser.symbolicReference(operation).left.map(assembly(_))
-      address   <- labels.get(reference.name.raw).toRight(Error.UndefinedLabel(reference.name))
-      instruction = operation.instruction
-      operands    = instruction.operands.updated(reference.operand.raw, Operand.Integer(BigInt(address.raw)))
-      resolved <- Instruction.decode(
-        instruction.mnemonic.raw,
-        instruction.modifiers,
-        operands,
-        instruction.guard
-      ).left.map(assembly(_))
-    } yield resolved
+    operation.reference.fold(Right(operation.instruction)) { reference =>
+      for {
+        _       <- Parser.symbolicReference(operation).left.map(assembly(_))
+        address <- labels.get(reference.name.raw).toRight(Error.UndefinedLabel(reference.name))
+        instruction = operation.instruction
+        resolved <- Instruction.decode(
+          instruction.mnemonic.raw,
+          instruction.modifiers,
+          instruction.operands.updated(reference.operand.raw, Operand.Integer(BigInt(address.raw))),
+          instruction.guard
+        ).left.map(assembly(_))
+      } yield resolved
+    }
 }

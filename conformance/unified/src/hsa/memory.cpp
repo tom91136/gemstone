@@ -9,7 +9,7 @@
 namespace {
 using namespace memory_patterns;
 void execute(const char *kind, unsigned scenario) {
-  const auto selected = conformance::device_selection().native_handle;
+  const auto selected = conformance::deviceSelection().nativeHandle;
   Backend backend(kind, selected);
   if (std::string(kind) == "pool") {
     if (!backend.pool.handle) SKIP("fine-grained host pool unavailable");
@@ -22,18 +22,8 @@ void execute(const char *kind, unsigned scenario) {
 }
 } // namespace
 
-#define UNIFIED_MEMORY_ALLOCATION "region"
-#define UNIFIED_MEMORY_TAGS ""
 #include "cases/memory.inl"
 
-#undef UNIFIED_MEMORY_ALLOCATION
-#undef UNIFIED_MEMORY_TAGS
-#define UNIFIED_MEMORY_ALLOCATION "pool"
-#define UNIFIED_MEMORY_TAGS "[full-matrix]"
-#include "cases/memory.inl"
-
-#undef UNIFIED_MEMORY_ALLOCATION
-#undef UNIFIED_MEMORY_TAGS
-#define UNIFIED_MEMORY_ALLOCATION "locked"
-#define UNIFIED_MEMORY_TAGS "[full-matrix]"
-#include "cases/memory.inl"
+UNIFIED_MEMORY_CASES("region", "")
+UNIFIED_MEMORY_CASES("pool", "[full-matrix]")
+UNIFIED_MEMORY_CASES("locked", "[full-matrix]")

@@ -26,9 +26,9 @@ namespace {
 
 using namespace gemstone::execution;
 
-constexpr uint64_t programId = 91;
-constexpr uint64_t completionId = 92;
-constexpr uint64_t clientId = 42;
+constexpr uint64_t TestProgramId = 91;
+constexpr uint64_t TestCompletionId = 92;
+constexpr uint64_t ClientId = 42;
 
 void receiveAll(int socket, void *output, size_t size) {
   auto *bytes = static_cast<uint8_t *>(output);
@@ -128,7 +128,7 @@ private:
       std::array<uint8_t, RequestHeaderBytes> header{};
       receiveAll(connection, header.data(), header.size());
       REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(header.data()) == RequestMagic));
-      REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(header.data() + RequestClientOffset) == clientId));
+      REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(header.data() + RequestClientOffset) == ClientId));
       REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(header.data() + RequestSessionHighOffset) != 0
                || gemstone_test::wire::readBigEndian<uint64_t>(header.data() + RequestSessionLowOffset) != 0));
       const auto tagSize = gemstone_test::wire::readBigEndian<uint32_t>(header.data() + RequestTagSizeOffset);
@@ -158,7 +158,7 @@ private:
         loadProgram(connection, payload);
       } else if (operationTag == operation::UnloadProgram) {
         const auto request = gemstone_test::decodePayload<UnloadProgram>(payload);
-        REQUIRE((request.program.value == static_cast<int64_t>(programId)));
+        REQUIRE((request.program.value == static_cast<int64_t>(TestProgramId)));
         respond(connection);
       } else if (operationTag == operation::DescribeKernel) {
         describeKernel(connection, payload);
@@ -166,25 +166,23 @@ private:
         launch(connection, payload);
       } else if (operationTag == operation::QueryCompletion) {
         queryCompletion(connection, payload);
-      } else if (operationTag == operation::AwaitCompletion) {
-        awaitCompletion(connection, payload);
       } else if (operationTag == operation::PollHostMemory) {
-        awaitCompletion(connection, payload, true);
+        pollHostMemory(connection, payload);
       } else if (operationTag == operation::ReleaseCompletion) {
         const auto request = gemstone_test::decodePayload<ReleaseCompletion>(payload);
-        REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
+        REQUIRE((request.completion.value == static_cast<int64_t>(TestCompletionId)));
         respond(connection);
       } else if (operationTag == operation::CompletionDirtyRanges) {
         dirtyRanges(connection, payload);
       } else if (operationTag == operation::CompletionPointerRelocations) {
         const auto request = gemstone_test::decodePayload<CompletionPointerRelocations>(payload);
-        REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
+        REQUIRE((request.completion.value == static_cast<int64_t>(TestCompletionId)));
         std::vector<uint8_t> response;
         gemstone_test::encodePayload(response, std::vector<PointerRelocation>{});
         respond(connection, response);
       } else if (operationTag == operation::CompletionPrints) {
         const auto request = gemstone_test::decodePayload<CompletionPrints>(payload);
-        REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
+        REQUIRE((request.completion.value == static_cast<int64_t>(TestCompletionId)));
         std::vector<uint8_t> response;
         gemstone_test::encodePayload(response, std::string{});
         respond(connection, response);
@@ -198,7 +196,6 @@ private:
 
   void registerAllocation(int connection, const std::vector<uint8_t> &payload) {
     const auto request = gemstone_test::decodePayload<RegisterAllocation>(payload);
-    REQUIRE((request.kind == AllocationKind::Device));
     const auto id = nextAllocationId++;
     if (allocationId == 0) {
       allocationId = id;
@@ -254,20 +251,20 @@ private:
 
   void loadProgram(int connection, const std::vector<uint8_t> &payload) {
     const auto request = gemstone_test::decodePayload<LoadProgram>(payload);
-    REQUIRE((request.encoding == "spirv-binary"));
+    REQUIRE((request.encoding == ProgramEncoding::SPIRVOpenCLCompute));
     REQUIRE((request.image.size() >= 4));
     REQUIRE((request.image[0] == 3 && request.image[1] == 2 && request.image[2] == 35 && request.image[3] == 7));
     std::vector<uint8_t> response;
-    gemstone_test::encodePayload(response, ProgramId{static_cast<int64_t>(programId)});
+    gemstone_test::encodePayload(response, ProgramId{static_cast<int64_t>(TestProgramId)});
     respond(connection, response);
   }
 
   void describeKernel(int connection, const std::vector<uint8_t> &payload) {
     const auto request = gemstone_test::decodePayload<DescribeKernel>(payload);
-    REQUIRE((request.program.value == static_cast<int64_t>(programId)));
+    REQUIRE((request.program.value == static_cast<int64_t>(TestProgramId)));
     if (request.name.value != "write") {
       std::vector<uint8_t> failure;
-      gemstone_test::encodePayload(failure, ExecutionFailure{ExecutionFailureNotFound{"unknown kernel"}});
+      gemstone_test::encodePayload(failure, ExecutionFailure{ExecutionFailureNotFound{{"unknown kernel"}}});
       respond(connection, failure, true);
       return;
     }
@@ -291,7 +288,7 @@ private:
 
   void launch(int connection, const std::vector<uint8_t> &payload) {
     const auto request = gemstone_test::decodePayload<Launch>(payload);
-    REQUIRE((request.program.value == static_cast<int64_t>(programId)));
+    REQUIRE((request.program.value == static_cast<int64_t>(TestProgramId)));
     REQUIRE((request.kernelName.value == "write"));
     REQUIRE((request.groupSize.x.value == 4 && request.groupSize.y.value == 1 && request.groupSize.z.value == 1));
     REQUIRE((request.groupCount.x.value == 2 && request.groupCount.y.value == 1 && request.groupCount.z.value == 1));
@@ -305,48 +302,45 @@ private:
     REQUIRE((memory->offset.value == 4));
     REQUIRE(!memory->range);
     const auto *seed = std::get_if<ArgumentScalar>(&request.arguments[1]);
-    REQUIRE((seed != nullptr && seed->bytes.size() == 4));
+    REQUIRE((seed != nullptr && seed->bytes.value.size() == 4));
     const auto *local = std::get_if<ArgumentLocal>(&request.arguments[2]);
     REQUIRE((local != nullptr && local->size.value == 64));
     const auto *tail = std::get_if<ArgumentScalar>(&request.arguments[3]);
-    REQUIRE((tail != nullptr && tail->bytes.size() == sizeof(uint32_t)));
+    REQUIRE((tail != nullptr && tail->bytes.value.size() == sizeof(uint32_t)));
     REQUIRE((request.pointerRelocations.empty()));
     REQUIRE((!request.discoverArgumentRelocations));
     lastLaunchByte8 = allocation[8];
-    std::memcpy(allocation.data() + 4, seed->bytes.data(), sizeof(uint32_t));
+    std::memcpy(allocation.data() + 4, seed->bytes.value.data(), sizeof(uint32_t));
     std::vector<uint8_t> response;
-    gemstone_test::encodePayload(response, CompletionId{static_cast<int64_t>(completionId)});
+    gemstone_test::encodePayload(response, CompletionId{static_cast<int64_t>(TestCompletionId)});
     respond(connection, response);
   }
 
   void queryCompletion(int connection, const std::vector<uint8_t> &payload) {
     const auto request = gemstone_test::decodePayload<QueryCompletion>(payload);
-    REQUIRE((request.completion.value == static_cast<int64_t>(completionId)));
+    REQUIRE((request.completion.value == static_cast<int64_t>(TestCompletionId)));
     std::vector<uint8_t> response;
     gemstone_test::encodePayload(response, CompletionStatus{CompletionStatusSucceeded{}});
     respond(connection, response);
   }
 
-  void awaitCompletion(int connection, const std::vector<uint8_t> &payload, bool hostMemory = false) {
-    const auto completion = hostMemory ? gemstone_test::decodePayload<PollHostMemory>(payload).completion
-                                       : gemstone_test::decodePayload<AwaitCompletion>(payload).completion;
-    REQUIRE((completion.value == static_cast<int64_t>(completionId)));
+  void pollHostMemory(int connection, const std::vector<uint8_t> &payload) {
+    const auto completion = gemstone_test::decodePayload<PollHostMemory>(payload).completion;
+    REQUIRE((completion.value == static_cast<int64_t>(TestCompletionId)));
     completionEntered = true;
     while (pauseCompletion.load())
       std::this_thread::yield();
     if (failNextCompletion.exchange(false)) {
       std::vector<uint8_t> failure;
-      gemstone_test::encodePayload(failure, ExecutionFailure{ExecutionFailureFailed{"completion failed"}});
+      gemstone_test::encodePayload(failure, ExecutionFailure{ExecutionFailureFailed{{"completion failed"}}});
       respond(connection, failure, true);
       return;
     }
-    if (hostMemory) {
-      HostMemoryBatch batch{};
-      batch.completed = true;
-      std::vector<uint8_t> response;
-      gemstone_test::encodePayload(response, batch);
-      respond(connection, response);
-    } else respond(connection);
+    HostMemoryBatch batch{};
+    batch.completed = true;
+    std::vector<uint8_t> response;
+    gemstone_test::encodePayload(response, batch);
+    respond(connection, response);
   }
 
   int listener = -1;
@@ -357,15 +351,15 @@ private:
 };
 
 ze_device_handle_t gemstoneDevice(ze_driver_handle_t *selectedDriver) {
-  uint32_t driver_count = 0;
-  REQUIRE((zeDriverGet(&driver_count, nullptr) == ZE_RESULT_SUCCESS));
-  std::vector<ze_driver_handle_t> drivers(driver_count);
-  REQUIRE((zeDriverGet(&driver_count, drivers.data()) == ZE_RESULT_SUCCESS));
+  uint32_t driverCount = 0;
+  REQUIRE((zeDriverGet(&driverCount, nullptr) == ZE_RESULT_SUCCESS));
+  std::vector<ze_driver_handle_t> drivers(driverCount);
+  REQUIRE((zeDriverGet(&driverCount, drivers.data()) == ZE_RESULT_SUCCESS));
   for (const auto driver : drivers) {
-    uint32_t device_count = 0;
-    REQUIRE((zeDeviceGet(driver, &device_count, nullptr) == ZE_RESULT_SUCCESS));
-    std::vector<ze_device_handle_t> devices(device_count);
-    REQUIRE((zeDeviceGet(driver, &device_count, devices.data()) == ZE_RESULT_SUCCESS));
+    uint32_t deviceCount = 0;
+    REQUIRE((zeDeviceGet(driver, &deviceCount, nullptr) == ZE_RESULT_SUCCESS));
+    std::vector<ze_device_handle_t> devices(deviceCount);
+    REQUIRE((zeDeviceGet(driver, &deviceCount, devices.data()) == ZE_RESULT_SUCCESS));
     for (const auto device : devices) {
       ze_device_properties_t properties{};
       properties.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
@@ -401,8 +395,8 @@ void crossWorkgroupApi() {
   ze_module_desc_t moduleDesc{};
   moduleDesc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
   moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
-  moduleDesc.inputSize = sizeof(server.spirv);
-  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(server.spirv);
+  moduleDesc.inputSize = sizeof(server.Spirv);
+  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(server.Spirv);
   ze_module_handle_t module = nullptr;
   REQUIRE((zeModuleCreate(context, device, &moduleDesc, &module, nullptr) == ZE_RESULT_SUCCESS));
   ze_kernel_desc_t kernelDesc{};
@@ -510,7 +504,7 @@ void crossWorkgroupApi() {
   REQUIRE((zeModuleDestroy(module) == ZE_RESULT_SUCCESS));
   REQUIRE((zeMemFree(context, memory) == ZE_RESULT_SUCCESS));
   REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
-  REQUIRE((server.launches() == 62));
+  REQUIRE((server.launches.load() == 62));
   server.check();
 }
 
@@ -734,6 +728,9 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   REQUIRE((zeFenceHostSynchronize(failedFence, 1'000'000'000ULL) == ZE_RESULT_ERROR_DEVICE_LOST));
   REQUIRE((zeFenceQueryStatus(failedFence) == ZE_RESULT_ERROR_DEVICE_LOST));
   REQUIRE((zeFenceDestroy(failedFence) == ZE_RESULT_SUCCESS));
+  const char *launchError = nullptr;
+  REQUIRE((zeDriverGetLastErrorDescription(driver, &launchError) == ZE_RESULT_SUCCESS));
+  CHECK((launchError && std::string(launchError).find("completion failed") != std::string::npos));
 
   REQUIRE((zeKernelSetGroupSize(kernel, 4, 1, 1) == ZE_RESULT_SUCCESS));
   REQUIRE((zeKernelSetArgumentValue(kernel, 1, sizeof(expected), &expected) == ZE_RESULT_SUCCESS));
@@ -785,8 +782,8 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
     std::array<ze_result_t, 3> statuses{};
     for (size_t index = 0; index < events.size(); ++index) {
       statuses[index] = zeEventHostSynchronize(events[index], 1'000'000'000ULL);
-      // Unblock the old implementation before reporting failures so the red
-      // regression can always clean up its worker threads.
+      // Unblock pending events before reporting failures so a regression can
+      // still clean up its worker threads.
       if (statuses[index] == ZE_RESULT_NOT_READY) REQUIRE((zeEventHostSignal(events[index]) == ZE_RESULT_SUCCESS));
     }
     CHECK((zeCommandQueueSynchronize(consumerQueue, 1'000'000'000ULL) == ZE_RESULT_ERROR_DEVICE_LOST));
@@ -844,8 +841,8 @@ void ordinaryHostPointer(unsigned storageKind, bool primeBase, bool requiredGrou
   moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
   // The Scala backend describes work-group requirements through the shared RPC metadata.
   if (requiredGroupSize) server.kernelWorkGroup({4, 1, 1});
-  moduleDesc.inputSize = sizeof(server.spirv);
-  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(server.spirv);
+  moduleDesc.inputSize = sizeof(server.Spirv);
+  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(server.Spirv);
   ze_module_handle_t module = nullptr;
   REQUIRE((zeModuleCreate(context, device, &moduleDesc, &module, nullptr) == ZE_RESULT_SUCCESS));
   ze_kernel_desc_t kernelDesc{};
@@ -903,7 +900,7 @@ void ordinaryHostPointer(unsigned storageKind, bool primeBase, bool requiredGrou
   REQUIRE((zeKernelDestroy(kernel) == ZE_RESULT_SUCCESS));
   REQUIRE((zeModuleDestroy(module) == ZE_RESULT_SUCCESS));
   REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
-  REQUIRE((server.launches() == (primeBase ? 2U : 1U)));
+  REQUIRE((server.launches.load() == (primeBase ? 2U : 1U)));
   server.check();
 }
 } // namespace

@@ -1,4 +1,3 @@
-// Frozen pre-migration reference, used only by differential tests.
 #pragma once
 
 #include <algorithm>
@@ -26,7 +25,7 @@ inline std::optional<VertexFormat> vertexFormat(VkFormat format) {
     return VertexFormat{encoding, {bits, bits, bits, bits}, components, static_cast<uint8_t>(bits / 8 * components), bgra};
   };
   const auto packed = [](VertexEncoding encoding, bool bgra) { return VertexFormat{encoding, {10, 10, 10, 2}, 4, 4, bgra}; };
-#define GEMSTONE_VERTEX_NORMALIZED(PREFIX, BITS, LANES, BGRA)                                                                              \
+#define GEMSTONE_VERTEX_NORMALISED(PREFIX, BITS, LANES, BGRA)                                                                              \
   case VK_FORMAT_##PREFIX##_UNORM: return uniform(VertexEncoding::Unorm, BITS, LANES, BGRA);                                               \
   case VK_FORMAT_##PREFIX##_SNORM: return uniform(VertexEncoding::Snorm, BITS, LANES, BGRA);                                               \
   case VK_FORMAT_##PREFIX##_UINT: return uniform(VertexEncoding::Uint, BITS, LANES, BGRA);                                                 \
@@ -45,16 +44,16 @@ inline std::optional<VertexFormat> vertexFormat(VkFormat format) {
   case VK_FORMAT_##PREFIX##_USCALED_PACK32: return packed(VertexEncoding::Uscaled, BGRA);                                                  \
   case VK_FORMAT_##PREFIX##_SSCALED_PACK32: return packed(VertexEncoding::Sscaled, BGRA)
   switch (format) {
-    GEMSTONE_VERTEX_NORMALIZED(R8, 8, 1, false);
-    GEMSTONE_VERTEX_NORMALIZED(R8G8, 8, 2, false);
-    GEMSTONE_VERTEX_NORMALIZED(R8G8B8, 8, 3, false);
-    GEMSTONE_VERTEX_NORMALIZED(R8G8B8A8, 8, 4, false);
-    GEMSTONE_VERTEX_NORMALIZED(B8G8R8, 8, 3, true);
-    GEMSTONE_VERTEX_NORMALIZED(B8G8R8A8, 8, 4, true);
-    GEMSTONE_VERTEX_NORMALIZED(R16, 16, 1, false);
-    GEMSTONE_VERTEX_NORMALIZED(R16G16, 16, 2, false);
-    GEMSTONE_VERTEX_NORMALIZED(R16G16B16, 16, 3, false);
-    GEMSTONE_VERTEX_NORMALIZED(R16G16B16A16, 16, 4, false);
+    GEMSTONE_VERTEX_NORMALISED(R8, 8, 1, false);
+    GEMSTONE_VERTEX_NORMALISED(R8G8, 8, 2, false);
+    GEMSTONE_VERTEX_NORMALISED(R8G8B8, 8, 3, false);
+    GEMSTONE_VERTEX_NORMALISED(R8G8B8A8, 8, 4, false);
+    GEMSTONE_VERTEX_NORMALISED(B8G8R8, 8, 3, true);
+    GEMSTONE_VERTEX_NORMALISED(B8G8R8A8, 8, 4, true);
+    GEMSTONE_VERTEX_NORMALISED(R16, 16, 1, false);
+    GEMSTONE_VERTEX_NORMALISED(R16G16, 16, 2, false);
+    GEMSTONE_VERTEX_NORMALISED(R16G16B16, 16, 3, false);
+    GEMSTONE_VERTEX_NORMALISED(R16G16B16A16, 16, 4, false);
     GEMSTONE_VERTEX_32(R32, 1);
     GEMSTONE_VERTEX_32(R32G32, 2);
     GEMSTONE_VERTEX_32(R32G32B32, 3);
@@ -74,7 +73,7 @@ inline std::optional<VertexFormat> vertexFormat(VkFormat format) {
     case VK_FORMAT_B10G11R11_UFLOAT_PACK32: return VertexFormat{VertexEncoding::Ufloat, {11, 11, 10, 0}, 3, 4};
     default: return std::nullopt;
   }
-#undef GEMSTONE_VERTEX_NORMALIZED
+#undef GEMSTONE_VERTEX_NORMALISED
 #undef GEMSTONE_VERTEX_32
 #undef GEMSTONE_VERTEX_PACKED
 }

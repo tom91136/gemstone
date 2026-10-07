@@ -24,12 +24,12 @@ class GenerateSPIRVConstantsSuite extends munit.FunSuite {
       val scalaRoot  = root.resolve("scala")
       val nativeRoot = root.resolve("native")
       val arguments  =
-        Array("instructions", grammar.toString, root.toString, scalaRoot.toString, nativeRoot.toString, "v1_6")
+        Array("instructions", grammar.toString, root.toString, scalaRoot.toString, nativeRoot.toString)
       GenerateSPIRVISA.main(arguments)
-      val scalaFile   = scalaRoot.resolve("net/kurobako/gemstone/isa/spirv/v1_6/SPIRV.scala")
+      val scalaFile   = scalaRoot.resolve("net/kurobako/gemstone/isa/spirv/SPIRV.scala")
       val nativeFile  = nativeRoot.resolve("gemstone_spirv_constants.hpp")
-      val scalaSource = Files.readString(scalaRoot.resolve("net/kurobako/gemstone/isa/spirv/v1_6/Dim.scala")) +
-        Files.readString(scalaRoot.resolve("net/kurobako/gemstone/isa/spirv/v1_6/ImageOperands.scala"))
+      val scalaSource = Files.readString(scalaRoot.resolve("net/kurobako/gemstone/isa/spirv/Dim.scala")) +
+        Files.readString(scalaRoot.resolve("net/kurobako/gemstone/isa/spirv/ImageOperands.scala"))
       val nativeSource = Files.readString(nativeFile)
       assert(scalaSource.contains("final val Value2D: Int = 1"))
       assert(scalaSource.contains("final val HighBit: Int = -2147483648"))
@@ -39,7 +39,7 @@ class GenerateSPIRVConstantsSuite extends munit.FunSuite {
         scalaFile,
         nativeFile,
         nativeRoot.resolve("gemstone_image_descriptor.hpp"),
-        scalaRoot.resolve("net/kurobako/gemstone/isa/spirv/v1_6/ImageDescriptor.scala")
+        scalaRoot.resolve("net/kurobako/gemstone/isa/spirv/ImageDescriptor.scala")
       )
       val before = outputs.map(path => Files.readString(path) -> Files.getLastModifiedTime(path))
       GenerateSPIRVISA.main(arguments)

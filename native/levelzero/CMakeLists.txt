@@ -2,20 +2,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(LEVEL_ZERO_INCLUDE_DIR "" CACHE PATH "Directory containing ze_api.h and ze_ddi.h")
 if(NOT EXISTS "${LEVEL_ZERO_INCLUDE_DIR}/ze_ddi.h")
-  include(FetchContent)
-  if(NOT LEVEL_ZERO_SOURCE_URL OR NOT LEVEL_ZERO_SOURCE_SHA256)
-    message(FATAL_ERROR "LEVEL_ZERO_SOURCE_URL and LEVEL_ZERO_SOURCE_SHA256 must be supplied by the build")
-  endif()
-  FetchContent_Declare(level_zero_headers
-    URL "${LEVEL_ZERO_SOURCE_URL}"
-    URL_HASH "SHA256=${LEVEL_ZERO_SOURCE_SHA256}"
-    SOURCE_SUBDIR gemstone-no-cmake-project
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-  )
-  FetchContent_MakeAvailable(level_zero_headers)
-  set(LEVEL_ZERO_INCLUDE_DIR "${level_zero_headers_SOURCE_DIR}/include")
+  message(FATAL_ERROR "LEVEL_ZERO_INCLUDE_DIR must point at the pinned Level Zero headers")
 endif()
 
 add_library(gemstone_levelzero SHARED src/driver.cpp)
@@ -63,5 +51,15 @@ if(BUILD_TESTING)
   gemstone_test_target(gemstone_levelzero_rpc_test)
   gemstone_discover_tests(gemstone_levelzero_rpc_test TEST_PREFIX "level-zero/" DISCOVERY_MODE PRE_TEST
     PROPERTIES TIMEOUT 30
+    ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>")
+
+  add_executable(gemstone_levelzero_process_exit test/process_exit.cpp)
+  target_include_directories(gemstone_levelzero_process_exit PRIVATE "${LEVEL_ZERO_INCLUDE_DIR}")
+  target_compile_definitions(gemstone_levelzero_process_exit PRIVATE GEMSTONE_LEVEL_ZERO_DRIVER="$<TARGET_FILE:gemstone_levelzero>")
+  target_link_libraries(gemstone_levelzero_process_exit PRIVATE ze_loader ${CMAKE_DL_LIBS})
+  add_dependencies(gemstone_levelzero_process_exit level_zero_loader gemstone_levelzero)
+  set_target_properties(gemstone_levelzero_process_exit PROPERTIES BUILD_RPATH "$ORIGIN")
+  add_test(NAME level-zero/process-exit COMMAND gemstone_levelzero_process_exit)
+  set_tests_properties(level-zero/process-exit PROPERTIES TIMEOUT 10
     ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>")
 endif()

@@ -23,14 +23,14 @@ namespace {
 void check(hsa_status_t status, const char *operation) {
   {
     INFO(fmt::format("{} returned {}", operation, static_cast<int>(status)));
-    REQUIRE((status == HSA_STATUS_SUCCESS));
+    REQUIRE(status == HSA_STATUS_SUCCESS);
   }
 }
 struct Agents {
   hsa_agent_t cpu{};
 };
 
-hsa_status_t collect_agents(hsa_agent_t agent, void *data) {
+hsa_status_t collectAgents(hsa_agent_t agent, void *data) {
   hsa_device_type_t type = HSA_DEVICE_TYPE_CPU;
   if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
   auto &agents = *static_cast<Agents *>(data);
@@ -38,7 +38,7 @@ hsa_status_t collect_agents(hsa_agent_t agent, void *data) {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t find_kernarg(hsa_region_t region, void *data) {
+hsa_status_t findKernarg(hsa_region_t region, void *data) {
   hsa_region_segment_t segment = HSA_REGION_SEGMENT_READONLY;
   hsa_region_global_flag_t flags{};
   if (hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment) != HSA_STATUS_SUCCESS || segment != HSA_REGION_SEGMENT_GLOBAL
@@ -51,19 +51,19 @@ hsa_status_t find_kernarg(hsa_region_t region, void *data) {
   return HSA_STATUS_SUCCESS;
 }
 
-void execute(bool asynchronous_copy) {
+void execute(bool asynchronousCopy) {
   unified::test_runtime::Cleanup cleanup;
   check(hsa_init(), "init");
   cleanup.add([] { hsa_shut_down(); });
   Agents agents;
-  check(hsa_iterate_agents(collect_agents, &agents), "agents");
-  const hsa_agent_t gpu{conformance::device_selection().native_handle};
+  check(hsa_iterate_agents(collectAgents, &agents), "agents");
+  const hsa_agent_t gpu{conformance::deviceSelection().nativeHandle};
   {
     INFO("HSA CPU/GPU agents absent");
     REQUIRE((agents.cpu.handle && gpu.handle));
   }
   hsa_region_t region{};
-  auto found = hsa_agent_iterate_regions(agents.cpu, find_kernarg, &region);
+  auto found = hsa_agent_iterate_regions(agents.cpu, findKernarg, &region);
   {
     INFO("kernarg region absent");
     REQUIRE(((found == HSA_STATUS_SUCCESS || found == HSA_STATUS_INFO_BREAK) && region.handle));
@@ -82,15 +82,15 @@ void execute(bool asynchronous_copy) {
   auto status = hsa_executable_get_symbol_by_name(executable, "vector_copy", &gpu, &symbol);
   if (status != HSA_STATUS_SUCCESS) status = hsa_executable_get_symbol_by_name(executable, "vector_copy.kd", &gpu, &symbol);
   check(status, "symbol");
-  uint64_t kernel_object = 0;
-  uint32_t argument_size = 0, group_size = 0, private_size = 0;
-  check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object), "kernel object");
-  check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &argument_size), "argument size");
-  check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &group_size), "group size");
-  check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &private_size), "private size");
+  uint64_t kernelObject = 0;
+  uint32_t argumentSize = 0, groupSize = 0, privateSize = 0;
+  check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernelObject), "kernel object");
+  check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &argumentSize), "argument size");
+  check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &groupSize), "group size");
+  check(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &privateSize), "private size");
   {
     INFO("invalid descriptor");
-    REQUIRE((kernel_object && argument_size >= 24));
+    REQUIRE((kernelObject && argumentSize >= 24));
   }
   auto allocate = [&](size_t size) {
     void *result = nullptr;
@@ -98,7 +98,7 @@ void execute(bool asynchronous_copy) {
     cleanup.add([=] { hsa_memory_free(result); });
     return result;
   };
-  auto *arguments = allocate(argument_size);
+  auto *arguments = allocate(argumentSize);
   auto *source = allocate(256);
   auto *destination = allocate(256);
   auto *guard = allocate(256);
@@ -106,7 +106,7 @@ void execute(bool asynchronous_copy) {
   check(hsa_memory_copy(source, expected.data(), 256), "upload");
   std::memset(destination, 0xa5, 256);
   std::memset(guard, 0x5a, 256);
-  std::memset(arguments, 0, argument_size);
+  std::memset(arguments, 0, argumentSize);
   std::memcpy(arguments, &source, 8);
   std::memcpy(static_cast<char *>(arguments) + 8, &destination, 8);
   std::memcpy(static_cast<char *>(arguments) + 16, &guard, 8);
@@ -124,11 +124,11 @@ void execute(bool asynchronous_copy) {
   packet->workgroup_size_y = packet->workgroup_size_z = 1;
   packet->grid_size_x = 64;
   packet->grid_size_y = packet->grid_size_z = 1;
-  packet->kernel_object = kernel_object;
+  packet->kernel_object = kernelObject;
   packet->kernarg_address = arguments;
   packet->completion_signal = completion;
-  packet->group_segment_size = group_size;
-  packet->private_segment_size = private_size;
+  packet->group_segment_size = groupSize;
+  packet->private_segment_size = privateSize;
   const uint16_t header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE)
                           | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE)
                           | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
@@ -139,32 +139,32 @@ void execute(bool asynchronous_copy) {
     std::this_thread::yield();
   {
     INFO("HSA dispatch failed or timed out");
-    REQUIRE((hsa_signal_load_scacquire(completion) == 0));
+    REQUIRE(hsa_signal_load_scacquire(completion) == 0);
   }
-  if (asynchronous_copy) {
+  if (asynchronousCopy) {
     std::memset(source, 0x93, 256); // A no-op copy must not pass using the original upload.
     hsa_signal_t copied{};
     check(hsa_signal_create(1, 0, nullptr, &copied), "copy signal");
     cleanup.add([=] { hsa_signal_destroy(copied); });
     check(hsa_amd_memory_async_copy(source, agents.cpu, destination, agents.cpu, 256, 1, &completion, copied),
           "dependent asynchronous copy");
-    const auto copy_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (hsa_signal_load_scacquire(copied) == 1 && std::chrono::steady_clock::now() < copy_deadline)
+    const auto copyDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (hsa_signal_load_scacquire(copied) == 1 && std::chrono::steady_clock::now() < copyDeadline)
       std::this_thread::yield();
     {
       INFO("dependent HSA copy failed or timed out");
-      REQUIRE((hsa_signal_load_scacquire(copied) == 0));
+      REQUIRE(hsa_signal_load_scacquire(copied) == 0);
     }
   }
   std::vector<int32_t> actual(64);
-  check(hsa_memory_copy(actual.data(), asynchronous_copy ? source : destination, 256), "download");
+  check(hsa_memory_copy(actual.data(), asynchronousCopy ? source : destination, 256), "download");
   {
     INFO("HSA dispatch result mismatch");
-    REQUIRE((actual == expected));
+    REQUIRE(actual == expected);
   }
   for (size_t i = 0; i < 256; ++i) {
     INFO("unused argument was modified");
-    REQUIRE((static_cast<uint8_t *>(guard)[i] == 0x5a));
+    REQUIRE(static_cast<uint8_t *>(guard)[i] == 0x5a);
   }
 }
 } // namespace

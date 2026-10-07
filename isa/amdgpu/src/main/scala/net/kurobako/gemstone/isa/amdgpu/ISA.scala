@@ -1,13 +1,10 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.collection.Vec.*
-
 object ISA {
   given upickle.default.ReadWriter[ISA] = upickle.default.readwriter[String].bimap(_.toString, ISA.valueOf(_))
 }
 
-/** Encoding catalogs represented by the pinned AMD XML and Mesa ACO inputs. Catalog availability does not imply
+/** Encoding catalogues represented by the pinned AMD XML and Mesa ACO inputs. Catalogue availability does not imply
   * complete processor validation or execution support.
   */
 enum ISA {
@@ -23,7 +20,4 @@ enum ISA {
     case CDNA1 | CDNA2 | CDNA3 | CDNA4 | CDNA5 => true
     case _                                     => false
   }
-
-  lazy val instructions: Vec[Opcode] =
-    Opcode.definitions.view.filter(_.meta.supports(this)).toVec
 }

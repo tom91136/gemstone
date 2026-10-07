@@ -17,23 +17,23 @@ TEST_CASE("execution RPC end-to-end smoke test", "[rpc][integration]") {
   auto executionClient = Client::fromEnvironment();
   REQUIRE((memoryClient && executionClient));
 
-  auto allocationResult = memoryClient->call(RegisterAllocation{AllocationKind::Shared, 8});
+  auto allocationResult = memoryClient->call(RegisterAllocation{{8}});
   REQUIRE((allocationResult));
   const auto allocation = allocationResult.value();
   REQUIRE((memoryClient->call(WriteAllocation{allocation, 0, {1, 2, 3, 4}})));
 
-  auto programResult = executionClient->call(LoadProgram{"spirv-binary", {3, 2, 35, 7}});
+  auto programResult = executionClient->call(LoadProgram{ProgramEncoding::SPIRVOpenCLCompute, {3, 2, 35, 7}});
   REQUIRE((programResult));
   const auto program = programResult.value();
-  auto catalog = executionClient->call(DescribeProgram{program});
-  REQUIRE((catalog));
-  REQUIRE((catalog.value().kernels.size() == 1));
-  REQUIRE((catalog.value().kernels[0].name.value == "add"));
-  REQUIRE((catalog.value().kernels[0].linkageName.value == "add.kd"));
+  auto catalogue = executionClient->call(DescribeProgram{program});
+  REQUIRE((catalogue));
+  REQUIRE((catalogue.value().kernels.size() == 1));
+  REQUIRE((catalogue.value().kernels[0].name.value == "add"));
+  REQUIRE((catalogue.value().kernels[0].linkageName.value == "add.kd"));
 
   std::vector<Argument> arguments{
       ArgumentMemory{AllocationId{allocation.value}, 2},
-      ArgumentScalar{{9, 8}},
+      ArgumentScalar{{{9, 8}}},
       ArgumentLocal{64},
   };
   auto completionResult = executionClient->call(Launch{
@@ -80,7 +80,7 @@ TEST_CASE("execution RPC end-to-end smoke test", "[rpc][integration]") {
   std::vector<uint8_t> expected(largeSize);
   for (size_t index = 0; index < expected.size(); ++index)
     expected[index] = static_cast<uint8_t>((index * 131U + 17U) & 0xffU);
-  auto largeAllocationResult = memoryClient->call(RegisterAllocation{AllocationKind::Shared, largeSize});
+  auto largeAllocationResult = memoryClient->call(RegisterAllocation{{largeSize}});
   REQUIRE((largeAllocationResult));
   const auto largeAllocation = largeAllocationResult.value();
   REQUIRE((executionClient->call(WriteAllocation{largeAllocation, 0, expected})));

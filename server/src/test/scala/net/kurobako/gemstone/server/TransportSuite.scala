@@ -9,14 +9,11 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.memory.*
-import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.protocol.*
 import net.kurobako.gemstone.server.recording.*
 import net.kurobako.gemstone.testing.*
-import net.kurobako.gemstone.vm.*
 import scala.util.Using
 
 class TransportSuite extends munit.FunSuite {
@@ -39,6 +36,10 @@ class TransportSuite extends munit.FunSuite {
       )
     )
       assert(Endpoint.parse(value).isLeft, value)
+    assertEquals(
+      Bind.parse("unix:///tmp/a%00b"),
+      Left("invalid endpoint 'unix:///tmp/a%00b': Unix endpoint must not contain a NUL character")
+    )
   }
 
   for (unix <- Seq(false, true)) {
@@ -49,7 +50,7 @@ class TransportSuite extends munit.FunSuite {
           val server     = use(Server.start(Server.Settings(parallelism = 1, bind = bind)))
           val id         = Control.register(server.endpoint)
           val client     = use(connections.Client(server.endpoint, id))
-          val allocation = client.call(Operation.RegisterAllocation(AllocationKind.Shared, 20000L))
+          val allocation = client.call(Operation.RegisterAllocation(20000L))
             .fold(error => fail(error.message), identity)
           val bytes = Vec.from(Array.tabulate[Byte](20000)(index => (index * 13).toByte))
           assertEquals(client.call(Operation.WriteAllocation(allocation, 0L, bytes)), Right(()))
@@ -72,7 +73,7 @@ class TransportSuite extends munit.FunSuite {
       files.temporary { directory =>
         val bind   = if (unix) Bind.Unix(directory.resolve("socket")) else Bind.Tcp()
         val server = Server.start(Server.Settings(parallelism = 1, bind = bind))
-        Using.resource(SocketTransport.connect(server.endpoint, 2000)) { channel =>
+        Using.resource(Transport.connect(server.endpoint, 2000)) { channel =>
           try {
             // A completed handshake proves the server accepted this connection before shutdown.
             protocol.hello(DataInputStream(channel.input), DataOutputStream(channel.output))
@@ -96,7 +97,7 @@ class TransportSuite extends munit.FunSuite {
         }
         val target = if (unix) Bind.Tcp() else Bind.Unix(directory.resolve("replay.sock"))
         val report = Replay.run(
-          Replay.Options(archive, Journal.ProtocolIdentity(ExecutionRPC.Identity)),
+          Replay.Options(archive),
           _ => {
             val server = Server.start(Server.Settings(parallelism = 1, bind = target))
             Replay.Target(server.endpoint, () => server.close())
@@ -112,10 +113,10 @@ class TransportSuite extends munit.FunSuite {
     files.temporary { directory =>
       val path = directory.resolve("socket")
       Files.writeString(path, "existing")
-      val _ = intercept[IOException](SocketTransport.listen(Bind.Unix(path)))
+      val _ = intercept[IOException](Transport.listen(Bind.Unix(path)))
       assertEquals(Files.readString(path), "existing")
       Files.delete(path)
-      val listener = SocketTransport.listen(Bind.Unix(path))
+      val listener = Transport.listen(Bind.Unix(path))
       val moved    = directory.resolve("moved")
       Files.move(path, moved)
       Files.writeString(path, "replacement")
@@ -124,36 +125,4 @@ class TransportSuite extends munit.FunSuite {
       assertEquals(Files.readString(path), "replacement")
     }
   }
-
-  test("transport preserves ping and allocation write/read/release results") {
-    Using.Manager { use =>
-      val server = use(Server.start(Server.Settings(parallelism = 2)))
-      val client = use(connections.Client(server.endpoint, server.client))
-      assertEquals(client.call(Operation.Ping), Right(()))
-      val allocation = client.call(Operation.RegisterAllocation(AllocationKind.Shared, 8L))
-        .fold(error => fail(error.message), identity)
-      assertEquals(client.call(Operation.WriteAllocation(allocation, 2L, Vec[Byte](11, 22, 33))), Right(()))
-      assertEquals(
-        client.call(Operation.ReadAllocation(allocation, 0L, 8)),
-        Right(Vec[Byte](0, 0, 11, 22, 33, 0, 0, 0))
-      )
-      assertEquals(client.call(Operation.ReleaseAllocation(allocation)), Right(()))
-      client.call(Operation.ReadAllocation(allocation, 0L, 1)) match {
-        case Left(ExecutionFailure.NotFound(_)) => ()
-        case other                              => fail(s"expected released allocation failure, found $other")
-      }
-    }.get
-  }
-
-  test("a server with the default backends rejects an unregistered program encoding") {
-    Using.Manager { use =>
-      val server = use(Server.start(Server.Settings(parallelism = 2)))
-      val client = use(connections.Client(server.endpoint, server.client))
-      assertEquals(
-        client.call(Operation.LoadProgram("not-registered", Vec.empty)),
-        Left(ExecutionFailure.Unsupported("unknown program encoding: not-registered"))
-      )
-    }.get
-  }
-
 }

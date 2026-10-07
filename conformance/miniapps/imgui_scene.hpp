@@ -4,7 +4,7 @@
 #include <vector>
 
 namespace imgui_scene {
-enum class Scene { primitives, layout, resize };
+enum class Scene { Primitives, Layout, Resize };
 struct Image {
   uint32_t width, height;
   std::vector<uint8_t> rgb;

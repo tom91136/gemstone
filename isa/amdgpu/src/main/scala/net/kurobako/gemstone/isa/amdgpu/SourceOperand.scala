@@ -4,6 +4,10 @@ import EncodingConstants.*
 import net.kurobako.gemstone.constraint.*
 
 object SourceOperand {
+
+  /** The hardware's binary64 1/(2*pi); the narrower widths round it to their own nearest value. */
+  private val InverseTwoPi = java.lang.Double.longBitsToDouble(0x3fc45f306dc9c882L)
+
   private def encoding(isa: ISA): OperandEncoding =
     OperandEncoding.Catalogue.forKind(isa, OperandKind.SRC)
       .getOrElse(throw IllegalStateException(s"missing generated source selectors for $isa"))
@@ -17,7 +21,9 @@ object SourceOperand {
     else if (code >= Source.VGPR_MIN && code <= Source.VGPR_MAX)
       (code - Source.VGPR_MIN).refine[Int in 0 ~ 255].toOption.map(VectorRegister(_))
     else table.integers.get(code).map(Integer(_))
-      .orElse(table.floating.get(code).map(Floating(_)))
+      .orElse(table.floating.get(code).map(value =>
+        Floating(if (code == Source.INLINE_FLOATING_C_MAX) InverseTwoPi else value)
+      ))
       .orElse(table.special.get(code).map(Special(_)))
       .orElse(table.literals.get(code).map(Literal(_)))
   }

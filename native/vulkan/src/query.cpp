@@ -4,10 +4,10 @@
 
 #include "state.hpp"
 
-namespace gemstone::vulkan::adapter {
+namespace gemstone::vulkan {
 // Queries use the same queue ordering and wait notifications as fences.
 
-VkResult impl_vkCreateQueryPool(VkDevice device, const VkQueryPoolCreateInfo *info, const VkAllocationCallbacks *, VkQueryPool *pool) {
+VkResult implVkCreateQueryPool(VkDevice device, const VkQueryPoolCreateInfo *info, const VkAllocationCallbacks *, VkQueryPool *pool) {
   if (!info || !pool || !info->queryCount) return VK_ERROR_INITIALIZATION_FAILED;
   if (info->queryType != VK_QUERY_TYPE_TIMESTAMP && info->queryType != VK_QUERY_TYPE_OCCLUSION) return VK_ERROR_FEATURE_NOT_PRESENT;
   auto state = std::make_shared<QueryPool>();
@@ -19,7 +19,7 @@ VkResult impl_vkCreateQueryPool(VkDevice device, const VkQueryPoolCreateInfo *in
   queryPools.emplace(*pool, std::move(state));
   return VK_SUCCESS;
 }
-void impl_vkDestroyQueryPool(VkDevice, VkQueryPool pool, const VkAllocationCallbacks *) {
+void implVkDestroyQueryPool(VkDevice, VkQueryPool pool, const VkAllocationCallbacks *) {
   std::lock_guard lock(stateMutex);
   queryPools.erase(pool);
   deleteHandle(pool);
@@ -32,25 +32,25 @@ bool resetQueryPool(VkQueryPool pool, uint32_t first, uint32_t count) {
   stateChanged.notify_all();
   return true;
 }
-void impl_vkResetQueryPool(VkDevice, VkQueryPool pool, uint32_t first, uint32_t count) { (void)resetQueryPool(pool, first, count); }
-void impl_vkCmdResetQueryPool(VkCommandBuffer command, VkQueryPool pool, uint32_t first, uint32_t count) {
+void implVkResetQueryPool(VkDevice, VkQueryPool pool, uint32_t first, uint32_t count) { (void)resetQueryPool(pool, first, count); }
+void implVkCmdResetQueryPool(VkCommandBuffer command, VkQueryPool pool, uint32_t first, uint32_t count) {
   std::lock_guard lock(stateMutex);
   commands.at(command).operations.emplace_back(recorded::ResetQuery{pool, first, count});
 }
-void impl_vkCmdBeginQuery(VkCommandBuffer command, VkQueryPool pool, uint32_t query, VkQueryControlFlags) {
+void implVkCmdBeginQuery(VkCommandBuffer command, VkQueryPool pool, uint32_t query, VkQueryControlFlags) {
   std::lock_guard lock(stateMutex);
   commands.at(command).operations.emplace_back(recorded::BeginQuery{pool, query});
 }
-void impl_vkCmdEndQuery(VkCommandBuffer command, VkQueryPool pool, uint32_t query) {
+void implVkCmdEndQuery(VkCommandBuffer command, VkQueryPool pool, uint32_t query) {
   std::lock_guard lock(stateMutex);
   commands.at(command).operations.emplace_back(recorded::EndQuery{pool, query});
 }
-void impl_vkCmdWriteTimestamp(VkCommandBuffer command, VkPipelineStageFlagBits, VkQueryPool pool, uint32_t query) {
+void implVkCmdWriteTimestamp(VkCommandBuffer command, VkPipelineStageFlagBits, VkQueryPool pool, uint32_t query) {
   std::lock_guard lock(stateMutex);
   commands.at(command).operations.emplace_back(recorded::WriteTimestamp{pool, query});
 }
-VkResult impl_vkGetQueryPoolResults(VkDevice, VkQueryPool pool, uint32_t first, uint32_t count, size_t size, void *data,
-                                    VkDeviceSize stride, VkQueryResultFlags flags) {
+VkResult implVkGetQueryPoolResults(VkDevice, VkQueryPool pool, uint32_t first, uint32_t count, size_t size, void *data, VkDeviceSize stride,
+                                   VkQueryResultFlags flags) {
   std::unique_lock lock(stateMutex);
   const auto found = queryPools.find(pool);
   if (found == queryPools.end() || (count && !data)) return VK_ERROR_INITIALIZATION_FAILED;
@@ -80,10 +80,10 @@ VkResult impl_vkGetQueryPoolResults(VkDevice, VkQueryPool pool, uint32_t first, 
   return result;
 }
 
-void impl_vkCmdCopyQueryPoolResults(VkCommandBuffer command, VkQueryPool pool, uint32_t first, uint32_t count, VkBuffer destination,
-                                    VkDeviceSize offset, VkDeviceSize stride, VkQueryResultFlags flags) {
+void implVkCmdCopyQueryPoolResults(VkCommandBuffer command, VkQueryPool pool, uint32_t first, uint32_t count, VkBuffer destination,
+                                   VkDeviceSize offset, VkDeviceSize stride, VkQueryResultFlags flags) {
   std::lock_guard lock(stateMutex);
   commands.at(command).operations.emplace_back(recorded::CopyQueryResults{pool, first, count, destination, offset, stride, flags});
 }
 
-} // namespace gemstone::vulkan::adapter
+} // namespace gemstone::vulkan
