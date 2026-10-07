@@ -193,6 +193,9 @@ set(artifact_outputs)
 set(CONFORMANCE_DEPENDENCY_DIRECTORY "${CMAKE_BINARY_DIR}/deps" CACHE PATH
   "Shared source cache for conformance dependencies")
 option(CONFORMANCE_OFFLINE "Require cached dependencies and disable network fetches" OFF)
+set(CONFORMANCE_CCACHE_DIRECTORY "${CMAKE_BINARY_DIR}/ccache" CACHE PATH
+  "Compiler cache shared by all artifact containers")
+file(MAKE_DIRECTORY "${CONFORMANCE_CCACHE_DIRECTORY}")
 set(CONFORMANCE_WORK_DIRECTORY "${CMAKE_BINARY_DIR}/work" CACHE PATH
   "Persistent per-artifact build directory")
 option(CONFORMANCE_KEEP_WORK "Keep artifact build trees for incremental rebuilds" ON)
@@ -313,6 +316,7 @@ function(add_artifact backend architecture compiler output)
     SOURCE "${CONFORMANCE_SOURCE_DIRECTORY}"
     ARTIFACTS "${CONFORMANCE_ARTIFACT_DIRECTORY}"
     DEPENDENCIES "${CONFORMANCE_DEPENDENCY_DIRECTORY}"
+    CCACHE "${CONFORMANCE_CCACHE_DIRECTORY}"
     WORK "${work_directory}"
     NETWORK none
     CPU_SHARES 1024

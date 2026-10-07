@@ -503,6 +503,7 @@ lazy val conformance = project.in(file("conformance"))
           s"-DCONFORMANCE_ARTIFACT_DIRECTORY=${conformanceDirectory.value / "artifacts"}",
           s"-DCONFORMANCE_DEPENDENCY_DIRECTORY=${(LocalRootProject / baseDirectory).value.toPath / ".cache/conformance"}",
           s"-DCONFORMANCE_WORK_DIRECTORY=${conformanceDirectory.value / "work"}",
+          s"-DCONFORMANCE_CCACHE_DIRECTORY=${(LocalRootProject / baseDirectory).value.toPath / ".cache/ccache"}",
           s"-DCONFORMANCE_OFFLINE=${if (offlineMode.value) "ON" else "OFF"}",
           s"-DSYCL_CTS_ENABLE_FULL_CONFORMANCE=${sys.env.getOrElse("SYCL_CTS_ENABLE_FULL_CONFORMANCE", "OFF")}"
         ) ++ sys.env.get("CONFORMANCE_ARTIFACT_PARALLELISM").map(value => s"-DCONFORMANCE_ARTIFACT_PARALLELISM=$value"),

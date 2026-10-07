@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
 
 function(container_command output)
-  cmake_parse_arguments(ARG "" "EXECUTABLE;IMAGE;SOURCE;SOURCE_TARGET;ARTIFACTS;DEPENDENCIES;WORK;NETWORK;CPU_SHARES;IDENTITY"
+  cmake_parse_arguments(ARG "" "EXECUTABLE;IMAGE;SOURCE;SOURCE_TARGET;ARTIFACTS;DEPENDENCIES;CCACHE;WORK;NETWORK;CPU_SHARES;IDENTITY"
     "COMMAND" ${ARGN})
   if(NOT ARG_EXECUTABLE OR NOT ARG_IMAGE)
     message(FATAL_ERROR "container_command requires EXECUTABLE and IMAGE")
@@ -30,6 +30,10 @@ function(container_command output)
   endif()
   if(ARG_DEPENDENCIES)
     list(APPEND command --mount "type=bind,source=${ARG_DEPENDENCIES},target=/conformance-deps,readonly")
+  endif()
+  if(ARG_CCACHE)
+    list(APPEND command --mount "type=bind,source=${ARG_CCACHE},target=/ccache"
+      --env CCACHE_DIR=/ccache --env CCACHE_MAXSIZE=30G --env CCACHE_COMPRESS=1)
   endif()
   if(ARG_WORK)
     list(APPEND command --mount "type=bind,source=${ARG_WORK},target=/work")

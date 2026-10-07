@@ -17,7 +17,7 @@ USER root
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
-       binutils build-essential ca-certificates cmake ninja-build patchelf \
+       binutils build-essential ca-certificates ccache cmake ninja-build patchelf \
     && rm -rf /var/lib/apt/lists/*
 
 # One static Ninja works across the different toolchain base distributions.
@@ -68,7 +68,7 @@ USER root
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
-       binutils build-essential ca-certificates cmake ninja-build patchelf \
+       binutils build-essential ca-certificates ccache cmake ninja-build patchelf \
        libboost-all-dev libpng-dev libva-dev libze-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -277,7 +277,7 @@ USER root
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
-       binutils build-essential ca-certificates cmake ninja-build patchelf \
+       binutils build-essential ca-certificates ccache cmake ninja-build patchelf \
        libdrm2 libhwloc15 libnuma1 libze1 python3 \
     && rm -rf /var/lib/apt/lists/*
 ENV PATH="/opt/intel/oneapi/compiler/latest/bin:${PATH}" \
@@ -304,7 +304,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG NVHPC_VERSION=26.5
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
-       binutils build-essential ca-certificates cmake ninja-build patchelf \
+       binutils build-essential ca-certificates ccache cmake ninja-build patchelf \
     && rm -rf /var/lib/apt/lists/*
 ENV NVHPC_ROOT="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}" \
     PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/bin:${PATH}" \
