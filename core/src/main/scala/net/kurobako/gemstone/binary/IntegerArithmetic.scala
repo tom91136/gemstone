@@ -34,6 +34,16 @@ object IntegerArithmetic {
     (Bits.truncate(result, width), overflow)
   }
 
+  /** The sum of two zero-extended dwords and a carry, with the carry out in bit 32; see [[carry32]]. */
+  inline def add32(left: Long, right: Long, carry: Boolean): Long = left + right + (if (carry) 1L else 0L)
+
+  inline def carry32(sum: Long): Boolean = sum > 0xffffffffL
+
+  /** The difference of two zero-extended dwords and a borrow, negative exactly when it borrows; see [[borrow32]]. */
+  inline def subtract32(left: Long, right: Long, borrow: Boolean): Long = left - right - (if (borrow) 1L else 0L)
+
+  inline def borrow32(difference: Long): Boolean = difference < 0L
+
   def subtractUnsigned(left: Long, right: Long, borrow: Boolean, width: Int in 1 ~ 64): (Long, Boolean) = {
     val a          = Bits.truncate(left, width)
     val b          = Bits.truncate(right, width)

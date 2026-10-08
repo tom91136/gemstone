@@ -27,6 +27,7 @@ private trait VMCompilationContext {
   def boundSymbols: Map[NonEmpty[String], GuestAddress]
   def reducedRadians: Option[Value.Register]
   def textRelocation: Option[Cubin.TextRelocation]
+  def registerLayout: VMRegisters.Layout
 
   /** Whether this instruction's `.CC` destination writes every condition flag. */
   def ccFlagsSupported: Boolean
@@ -105,9 +106,11 @@ private trait VMCompilationContext {
 
   final def destination(value: Operand, add: Int = 0): Value.Register = VMOperand.base(value) match {
     case Operand.Register(bank @ (RegisterBank.R | RegisterBank.UR), index) =>
-      val end = (index.raw + add).refine[Int in 0 ~ 254].toOption.filter(_ => add >= 0)
+      val general = bank == RegisterBank.R
+      val limit   = if (general) registerLayout.generalCount.raw else registerLayout.uniformCount.raw
+      val end     = (index.raw + add).refine[Int in 0 ~ 254].toOption.filter(end => add >= 0 && end.raw < limit)
         .getOrElse(unsupported(s"register range exceeds $bank bank: $value + $add")).widen[Int in 0 ~ 255]
-      Value.Register(if (bank == RegisterBank.R) VMRegisters.general(end) else VMRegisters.uniform(end))
+      Value.Register(if (general) registerLayout.general(end) else registerLayout.uniform(end))
     case _ => unsupported(s"expected writable register, found $value")
   }
 

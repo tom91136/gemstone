@@ -14,9 +14,13 @@ private object programs {
   def predicate(index: Int): Value  = Value.Predicate(p(index))
   def immediate(value: Long): Value = Value.Immediate(value)
 
+  val emptyRoutine: Routine = Routine("test", ExecutableProgram(Vec.empty), 0, 0)
+
+  def frame(laneCount: Int in 1 ~ 1024): VMLanes = VMFramePool(laneCount).acquire(emptyRoutine)
+
   def kernel(instructions: Vec[Instruction], parameters: Vec[KernelParameter] = Vec.empty): Kernel =
     Kernel(
-      Entry(Routine("test", ExecutableProgram(instructions.map(PredicatedInstruction(_, None)))), parameters),
+      Entry(Routine("test", ExecutableProgram(instructions.map(PredicatedInstruction(_, None))), 0, 0), parameters),
       "PTX"
     )
 

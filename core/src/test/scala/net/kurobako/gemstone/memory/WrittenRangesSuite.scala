@@ -87,4 +87,14 @@ class WrittenRangesSuite extends munit.FunSuite {
     assertEquals(actual.toSet, expected)
     assertEquals(actual.size, expected.size)
   }
+
+  test("sequential writes extend an interval up to, and then merge with, the next one") {
+    val ranges = WrittenRanges()
+    ranges.add(50, 10)
+    (0 until 12).foreach(index => ranges.add((index * 4).unsafe[Int >= 0], 4))
+    assertEquals(ranges.chunks(1024), Vec[(Int >= 0, Int > 0)]((0, 48), (50, 10)))
+    ranges.add(48, 2)
+    ranges.add(60, 4)
+    assertEquals(ranges.chunks(1024), Vec[(Int >= 0, Int > 0)]((0, 64)))
+  }
 }

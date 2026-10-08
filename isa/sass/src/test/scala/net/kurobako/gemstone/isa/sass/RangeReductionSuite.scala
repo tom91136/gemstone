@@ -32,23 +32,23 @@ class RangeReductionSuite extends munit.FunSuite {
     )
   ) test(s"opaque range reduction rejects $name") {
     val function = Listing.program(s"RRO.SINCOS R4, R4; $middle; MUFU.COS R4, R4; EXIT").value
-    intercept[IllegalArgumentException](LegacyRangeReduction.inputs(35, function))
+    intercept[IllegalArgumentException](LegacyRangeReduction.inputs(35, function, VMRegisters.Layout.Full))
   }
 
   test("incoming control flow after the final consumer does not expose the opaque result") {
     val function = Listing.program("RRO.SINCOS R4, R4; MUFU.COS R6, R4; MOV R4, RZ; BRA 0x20").value
-    assertEquals(LegacyRangeReduction.inputs(50, function).keySet, Set(0, 16))
+    assertEquals(LegacyRangeReduction.inputs(50, function, VMRegisters.Layout.Full).inputs.keySet, Set(0, 16))
   }
 
   for (middle <- Vec("@P0 BPT.TRAP 0x1", "@P0 KILL", "YIELD"))
     test(s"a non-branching $middle does not split a range reduction lifetime") {
       val function = Listing.program(s"RRO.SINCOS R4, R4; $middle; MUFU.COS R4, R4; EXIT").value
-      assertEquals(LegacyRangeReduction.inputs(50, function).keySet, Set(0, 32))
+      assertEquals(LegacyRangeReduction.inputs(50, function, VMRegisters.Layout.Full).inputs.keySet, Set(0, 32))
     }
 
   test("a branch cannot enter a fused reduction after its producer") {
     val function = Listing.program("BRA 0x20; RRO.SINCOS R4, R4; MUFU.COS R4, R4; EXIT").value
-    intercept[IllegalArgumentException](LegacyRangeReduction.inputs(35, function))
+    intercept[IllegalArgumentException](LegacyRangeReduction.inputs(35, function, VMRegisters.Layout.Full))
   }
 
   for (sm <- Vec(50, 60)) test(s"sm_$sm integer min/max ends a consumed range reduction lifetime") {

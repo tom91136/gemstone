@@ -75,10 +75,17 @@ private object LaneOps {
       else {
         val result = Array.ofDim[Long](math.max(left.length, right.length))
         var lane   = 0
-        while (lane < result.length) {
-          result(lane) = kernel(left(lane % left.length), right(lane % right.length))
-          lane += 1
-        }
+        // Equal lengths skip the broadcast division in every lane.
+        if (left.length == right.length)
+          while (lane < result.length) {
+            result(lane) = kernel(left(lane), right(lane))
+            lane += 1
+          }
+        else
+          while (lane < result.length) {
+            result(lane) = kernel(left(lane % left.length), right(lane % right.length))
+            lane += 1
+          }
         values.write(dest, resultType, result)
         execution.pc += 1
         Done
@@ -99,10 +106,16 @@ private object LaneOps {
       else {
         val result = Array.ofDim[Long](math.max(first.length, math.max(second.length, third.length)))
         var lane   = 0
-        while (lane < result.length) {
-          result(lane) = kernel(first(lane % first.length), second(lane % second.length), third(lane % third.length))
-          lane += 1
-        }
+        if (first.length == result.length && second.length == result.length && third.length == result.length)
+          while (lane < result.length) {
+            result(lane) = kernel(first(lane), second(lane), third(lane))
+            lane += 1
+          }
+        else
+          while (lane < result.length) {
+            result(lane) = kernel(first(lane % first.length), second(lane % second.length), third(lane % third.length))
+            lane += 1
+          }
         values.write(dest, resultType, result)
         execution.pc += 1
         Done

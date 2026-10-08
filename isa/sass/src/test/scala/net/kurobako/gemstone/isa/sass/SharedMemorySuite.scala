@@ -101,11 +101,15 @@ class SharedMemorySuite extends munit.FunSuite {
     }
 
   test("a shared-memory load into RZ still emits a real load and discards only its result") {
-    val loads = program(50, "MOV R4, RZ; LDS.U.32 RZ, [R4+0x4]; EXIT", 8).instructions(8, 4).collect {
+    val kernel = program(50, "MOV R4, RZ; LDS.U.32 RZ, [R4+0x4]; EXIT", 8)
+    val loads  = kernel.instructions(8, 4).collect {
       case VMInstruction.Load(destination, _, width, _, MemoryAccess.Shared) if width.raw == 32 => destination
     }
+    val image       = kernel.module(Vec(8, 4))
+    val layout      = VMRegisters.Layout.of(image.kernels.head, kernel.functions)
+    val temporaries = Vec.tabulate(VMRegisters.TemporaryCount)(layout.temporary(_))
     assertEquals(loads.size, 1)
-    assertNotEquals(loads.head, VMRegisters.general(255))
+    assert(temporaries.contains(loads.head), s"an RZ load must target a temporary: ${loads.head}")
   }
 
   for (sm <- Vec(50, 60))

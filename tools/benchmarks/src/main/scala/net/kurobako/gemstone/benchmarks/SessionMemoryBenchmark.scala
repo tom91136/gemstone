@@ -13,6 +13,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.vm.*
 import scala.jdk.CollectionConverters.*
+import scala.runtime.LongRef
 import scala.util.Using
 
 /** Memory traffic through a real session and device heap, without instruction decoding or socket traffic. */
@@ -103,7 +104,7 @@ object SessionMemoryBenchmark {
       override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] =
         KernelMetadata.validated(0, 0, Vec.empty).left.map(Fault.InvalidRequest(_))
 
-      @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+      @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
       override def execute(
           task: KernelTask,
           memory: AddressSpace,
@@ -112,14 +113,24 @@ object SessionMemoryBenchmark {
       ): Either[Fault, Unit] = {
         val heap = DeviceHeap(memory)
         workers.parallelFor(options.workers.toLong) { worker =>
-          val offset   = if (options.shared) 0L else worker.raw * 64L
-          val ranges   = addresses.map(address => Vec((address.offset(offset), 8: Int >= 0)))
+          val offset = if (options.shared) 0L else worker.raw * 64L
+          val ranges = addresses.map { address =>
+            val range = AddressSpace.ReadRangeBuffer(1)
+            range.add(address.offset(offset), 8)
+            range
+          }
+          val loaded                            = LongRef(0L)
+          def read(address: GuestAddress): Long = {
+            val fault = heap.readValueInto(address, 8, loaded)
+            if (fault != null) throw IllegalStateException(fault.toString)
+            loaded.elem
+          }
           val measured = Measurement {
             val scratch = checked(heap.allocate(8))
             var index   = 0
             while (index < options.iterations.raw) {
               if (index % 4 == 0) {
-                val previous = checked(heap.readValue(scratch, 8))
+                val previous = read(scratch)
                 checked(heap.writeValue(scratch, previous + 1L, 8))
               } else {
                 val selected = index % addresses.length
@@ -128,7 +139,7 @@ object SessionMemoryBenchmark {
               }
               index += 1
             }
-            val result = checked(heap.readValue(scratch, 8))
+            val result = read(scratch)
             require(heap.free(scratch), "device allocation was lost")
             result
           }

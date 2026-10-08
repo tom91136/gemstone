@@ -40,6 +40,21 @@ private object Completion {
 
   private val DirtyChunkBytes: Int > 0 = 65536
 
+  /** One worker's written intervals. Consecutive writes usually target the same allocation. */
+  private class DirtyWrites {
+    val ranges: mutable.HashMap[AllocationId, WrittenRanges] = mutable.HashMap.empty
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    private var last: Option[(AllocationId, WrittenRanges)] = None
+
+    def add(id: AllocationId, offset: Int >= 0, size: Int >= 0): Unit = last match {
+      case Some((lastId, target)) if lastId == id => target.add(offset, size)
+      case _                                      =>
+        val selected = ranges.getOrElseUpdate(id, WrittenRanges())
+        last = Some(id -> selected)
+        selected.add(offset, size)
+    }
+  }
+
   private def page[A](values: Vec[A], offset: Int >= 0, limit: Int > 0): Vec[A] =
     values.slice(offset.raw, offset.raw + math.min(limit.raw, values.length - offset.raw))
 }
@@ -91,8 +106,7 @@ private class Completion(
 
   val hostMemory: HostMemoryMirror = HostMemoryMirror()
   // Each worker owns its intervals; merge only after all workgroups complete.
-  private val dirtyWrites =
-    java.util.concurrent.ConcurrentHashMap[Thread, mutable.HashMap[AllocationId, WrittenRanges]]()
+  private val dirtyWrites = java.util.concurrent.ConcurrentHashMap[Thread, Completion.DirtyWrites]()
   private var exchange: Option[Completion.HostSync]   = None
   private var readWaiters                             = 0
   def hostSync: Option[Completion.HostSync]           = exchange
@@ -109,13 +123,20 @@ private class Completion(
   }
 
   def markDirty(id: AllocationId, offset: Int >= 0, size: Int >= 0): Unit =
-    dirtyWrites.computeIfAbsent(Thread.currentThread(), _ => mutable.HashMap.empty)
-      .getOrElseUpdate(id, WrittenRanges()).add(offset, size)
+    workerWrites().add(id, offset, size)
+
+  // A plain lookup first: computeIfAbsent locks the bin whenever the key is not its first node.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private def workerWrites(): Completion.DirtyWrites = {
+    val thread   = Thread.currentThread()
+    val existing = dirtyWrites.get(thread)
+    if (existing != null) existing else dirtyWrites.computeIfAbsent(thread, _ => Completion.DirtyWrites())
+  }
 
   private lazy val allDirtyRanges: Vec[DirtyRange] = {
     val merged = mutable.HashMap.empty[AllocationId, WrittenRanges]
     dirtyWrites.values().forEach { writes =>
-      writes.foreach { (id, ranges) =>
+      writes.ranges.foreach { (id, ranges) =>
         val target = merged.getOrElseUpdate(id, WrittenRanges())
         ranges.chunks(Completion.DirtyChunkBytes).foreach((offset, size) => target.add(offset, size))
       }

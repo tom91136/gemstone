@@ -42,11 +42,7 @@ private object checkpoints {
       */
     private class ContendedMemory(delegate: AddressSpace, launch: Int, counter: Long)
         extends ForwardingMemory(delegate) {
-      override def readValue(
-          region: AllocationId,
-          offset: Long >= 0,
-          size: Int in 1 ~ 8
-      ): Either[Fault, Long] =
+      override def readValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): Either[Fault, Long] =
         delegate.readValue(region, offset, size)
       override def writeValue(
           region: AllocationId,

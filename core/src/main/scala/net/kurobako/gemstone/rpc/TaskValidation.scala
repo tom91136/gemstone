@@ -14,19 +14,21 @@ import net.kurobako.gemstone.vm.*
 
 /** Launch checks against the session allocations, which only the session can resolve. */
 private object TaskValidation {
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def validate(
       task: KernelTask,
-      allocations: Map[AllocationId, StoredAllocation],
+      allocations: AllocationAddressIndex,
       descriptorBindings: Vec[DescriptorBinding]
   ): Either[ExecutionFailure, Unit] = {
     val word                                  = abi.MachineWordSize.toLong
-    def size(id: AllocationId): Long          = allocations(id).size.raw.toLong
+    def registered(id: AllocationId): Boolean = allocations.entry(id) != null
+    def size(id: AllocationId): Long          = allocations.entry(id).size.raw.toLong
     def lastScalarWord(index: Int >= 0): Long = task.arguments(index.raw) match {
       case KernelTask.Argument.Scalar(bytes) => bytes.length.toLong - word
       case _                                 => -1L
     }
     task.arguments.collectFirst {
-      case KernelTask.Argument.Memory(region, _, _) if !allocations.contains(region) =>
+      case KernelTask.Argument.Memory(region, _, _) if !registered(region) =>
         ExecutionFailure.NotFound(s"kernel argument refers to unregistered allocation $region")
       case KernelTask.Argument.Memory(region, offset, _) if offset.raw > size(region) =>
         ExecutionFailure.InvalidRequest(s"kernel argument offset $offset is outside allocation $region")
@@ -39,15 +41,15 @@ private object TaskValidation {
           ExecutionFailure.InvalidRequest(s"kernel argument $index has no descriptor binding")
       }
     }.orElse(task.argumentBuffer.collect {
-      case buffer if !allocations.contains(buffer.region) =>
+      case buffer if !registered(buffer.region) =>
         ExecutionFailure.NotFound(s"argument buffer refers to unregistered allocation ${buffer.region}")
       case buffer if buffer.offset.raw >= size(buffer.region) =>
         ExecutionFailure.InvalidRequest("argument buffer offset is outside its allocation")
     }).orElse(task.pointerRelocations.collectFirst {
       case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(source), _, _, _)
-          if !allocations.contains(source) =>
+          if !registered(source) =>
         ExecutionFailure.NotFound(s"pointer relocation refers to unregistered source allocation $source")
-      case KernelTask.PointerRelocation(_, _, target, _) if !allocations.contains(target) =>
+      case KernelTask.PointerRelocation(_, _, target, _) if !registered(target) =>
         ExecutionFailure.NotFound(s"pointer relocation refers to unregistered target allocation $target")
       case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(source), sourceOffset, _, _)
           if sourceOffset.raw > size(source) - word =>

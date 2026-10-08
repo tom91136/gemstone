@@ -21,7 +21,14 @@ private object Op {
 
   /** A step that writes its result and falls through to the next instruction. */
   def step(body: (InvocationState, MemoryState) => AddressSpace.ReadResult[Unit]): Op =
-    Dynamic((execution, memory) => body(execution, memory).map(_ => execution.pc += 1))
+    Dynamic { (execution, memory) =>
+      body(execution, memory) match {
+        case Right(_) =>
+          execution.pc += 1
+          Done
+        case failed => failed
+      }
+    }
 
   /** Suspends the invocation at a collective rendezvous built from its current position. */
   def suspend(

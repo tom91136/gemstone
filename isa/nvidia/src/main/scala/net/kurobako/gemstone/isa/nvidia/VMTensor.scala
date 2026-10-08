@@ -51,7 +51,7 @@ object VMTensor {
       bits: Int in (8, 16, 32, 64),
       value: Long
   ): Unit =
-    if (shared(space, address)) effects.stage(VMWrite.Shared(address, bits, value))
+    if (shared(space, address)) effects.stageShared(address, bits, value)
     else effects.stage(VMWrite.Memory(lane, GuestAddress(address), bits, value, false))
 
   private def uniform(
@@ -212,7 +212,7 @@ object VMTensor {
             halfwords.foreach { part =>
               val row = if (transpose) lane.raw % 4 * 2 + part.raw else lane.raw / 4
               val col = if (transpose) lane.raw / 4 else lane.raw % 4 * 2 + part.raw
-              effects.stage(VMWrite.Shared(addresses(matrix.raw * 8 + row) + col * 2L, 16, bits >>> (part.raw * 16)))
+              effects.stageShared(addresses(matrix.raw * 8 + row) + col * 2L, 16, bits >>> (part.raw * 16))
             }
           }
         }

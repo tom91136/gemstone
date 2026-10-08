@@ -2384,6 +2384,30 @@ class ExecutionOperandSuite extends munit.FunSuite {
     (SubDwordSelection.DWord, 0xffff8080L, 0xffff8080L, 0xffff8080L)
   )
 
+  test("SDWA subtraction writes VCC only in the carry forms") {
+    // LLVM: gfx900 v_subrev_u32_sdwa v2, v3, v4, v_subrev_co_u32_sdwa v2, vcc, v3, v4, and
+    // gfx803 v_subrev_u32_sdwa v2, vcc, v3, v4, each with src0_sel:BYTE_0.
+    for (
+      (target, bytes, written) <- Seq(
+        (Target("gfx900"), Vec(0xf9, 0x08, 0x04, 0x6c, 0x03, 0x16, 0x00, 0x06), false),
+        (Target("gfx900"), Vec(0xf9, 0x08, 0x04, 0x36, 0x03, 0x16, 0x00, 0x06), true),
+        (Target("gfx803"), Vec(0xf9, 0x08, 0x04, 0x36, 0x03, 0x16, 0x00, 0x06), true)
+      )
+    ) {
+      val vcc = runSequence(
+        target,
+        Vec(
+          Instruction.VMove(3, InstructionSource.Constant(2L)),
+          Instruction.VMove(4, InstructionSource.Constant(1L)),
+          Instruction.SMove(Fixed.VccLo, InstructionSource.Constant(0L)),
+          decoded(target, bytes*),
+          Instruction.VMove(2, InstructionSource.Scalar(Fixed.VccLo))
+        )
+      )
+      assertEquals(vcc & 1, if (written) 1 else 0, clues(target, bytes))
+    }
+  }
+
   for (target <- Seq(Target("gfx900"), Target("gfx1030"))) {
     test(s"$target SDWA destination placement pads, sign-extends, or preserves each selection") {
       for {
@@ -2424,6 +2448,31 @@ class ExecutionOperandSuite extends munit.FunSuite {
         false
       )
       assertEquals(run(target, instruction), -125)
+    }
+
+    test(s"$target SDWA carries and borrows on the sign-extended dword") {
+      def carryOut(operation: VectorSubDwordOperation, a: Long, b: Long): (Int, Int) = {
+        val instruction = Instruction.VBinarySubDword(
+          operation,
+          2,
+          InstructionSource.Constant(a),
+          InstructionSource.Constant(b),
+          SubDwordSelection.DWord,
+          SubDwordDestinationUnused.Pad,
+          SubDwordSelection.Byte0,
+          SubDwordSelection.DWord,
+          true,
+          false
+        )
+        (
+          run(target, instruction),
+          runSequence(target, Vec(instruction, Instruction.VMove(2, InstructionSource.Scalar(Fixed.VccLo)))) & 1
+        )
+      }
+      assertEquals(carryOut(VectorSubDwordOperation.AddCarryU32, 0xffL, 1L), (0, 1))
+      assertEquals(carryOut(VectorSubDwordOperation.AddCarryU32, 0x7fL, 1L), (0x80, 0))
+      assertEquals(carryOut(VectorSubDwordOperation.SubtractCarryU32, 0xffL, 1L), (-2, 0))
+      assertEquals(carryOut(VectorSubDwordOperation.SubtractReverseCarryU32, 0xffL, 1L), (2, 1))
     }
 
     test(s"$target narrow loads sign-extend and D16 loads preserve the other half") {

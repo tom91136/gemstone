@@ -662,10 +662,14 @@ object VMIR {
 
   case class ExecutableProgram(instructions: Vec[PredicatedInstruction])
 
-  /** Executable code with its frame-local storage and, when known, the source names of its predicate slots. */
+  /** Executable code, the register and predicate slots its lanes are sized for up front, its frame-local storage and,
+    * when known, the source names of its predicate slots.
+    */
   case class Routine(
       name: NonEmpty[String],
       program: ExecutableProgram,
+      registerCount: Int >= 0,
+      predicateCount: Int >= 0,
       localBytes: Int >= 0 = 0,
       predicateNames: Vec[NonEmpty[String]] = Vec.empty
   ) {

@@ -14,7 +14,10 @@ class VMKernelLaunchSuite extends munit.FunSuite {
 
   private def kernel(parameters: Vec[KernelParameter], instructions: Vec[Instruction]): Kernel =
     Kernel(
-      Entry(Routine("launch_test", ExecutableProgram(instructions.map(PredicatedInstruction(_, None)))), parameters),
+      Entry(
+        Routine("launch_test", ExecutableProgram(instructions.map(PredicatedInstruction(_, None))), 0, 0),
+        parameters
+      ),
       "SASS"
     )
 

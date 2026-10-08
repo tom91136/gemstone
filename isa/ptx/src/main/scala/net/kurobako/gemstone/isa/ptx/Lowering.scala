@@ -97,6 +97,8 @@ private object Lowering {
     }
 
     def predicateNames: Vec[NonEmpty[String]] = Vec.from(predicates.toVector.sortBy(_._2.raw).map(_._1))
+    def registerCount: Int >= 0               = slot(registers)
+    def predicateCount: Int >= 0              = slot(predicates)
 
     def predicate(operand: Operand): Either[Error, Predicate] = operand match {
       case Operand.Register(name, None) => Right(predicates.getOrElseUpdate(name, Predicate(slot(predicates))))

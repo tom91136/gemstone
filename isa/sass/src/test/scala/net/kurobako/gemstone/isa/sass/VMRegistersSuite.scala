@@ -5,14 +5,18 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 
 class VMRegistersSuite extends munit.FunSuite {
-  test("lowered general, uniform, temporary, barrier and reduction banks occupy distinct dense slots") {
-    val slots = Vec.range[0, 255].map(VMRegisters.general(_)) ++
-      Vec.range[0, 255].map(VMRegisters.uniform(_)) ++
-      Vec.tabulate(VMRegisters.TemporaryCount)(VMRegisters.temporary(_)) ++
-      Vec.range[0, 16].map(VMRegisters.barrier(_)) ++
-      Vec.tabulate(4)(VMRegisters.reduction(_))
-    assertEquals(slots.map(_.raw).distinct.size, slots.size, "physical banks and temporaries must not alias")
-  }
+  for (layout <- Vec(VMRegisters.Layout.Full, VMRegisters.Layout(24, 0), VMRegisters.Layout(32, 8)))
+    test(
+      s"lowered banks occupy distinct dense slots with ${layout.generalCount} general and ${layout.uniformCount} uniform"
+    ) {
+      val slots = Vec.range[0, 255].filter(_.raw < layout.generalCount.raw).map(layout.general(_)) ++
+        Vec.range[0, 255].filter(_.raw < layout.uniformCount.raw).map(layout.uniform(_)) ++
+        Vec.tabulate(VMRegisters.TemporaryCount)(layout.temporary(_)) ++
+        Vec.range[0, 16].map(layout.barrier(_)) ++
+        Vec.tabulate(4)(layout.reduction(_))
+      assertEquals(slots.map(_.raw).distinct.size, slots.size, "physical banks and temporaries must not alias")
+      assertEquals(slots.map(_.raw).max + 1, layout.registerCount(4).raw)
+    }
 
   test("physical predicates, temporary predicates and compiler flags do not alias") {
     val slots = Vec.range[0, 7].map(index => VMRegisters.predicate(index = index, uniform = false)) ++

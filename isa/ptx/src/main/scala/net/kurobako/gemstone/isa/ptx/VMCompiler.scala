@@ -377,7 +377,7 @@ private object VMCompiler {
     } yield {
       scope.directCalls.foreach(compilation.reference(_))
       scope.addressTaken.foreach(compilation.reference(_))
-      Routine(name, program, bytes, scope.predicateNames) -> scope
+      Routine(name, program, scope.registerCount, scope.predicateCount, bytes, scope.predicateNames) -> scope
     }
 
   private def declaredParameters(statements: Vec[Statement]): Vec[NonEmpty[String]] = statements.flatMap {

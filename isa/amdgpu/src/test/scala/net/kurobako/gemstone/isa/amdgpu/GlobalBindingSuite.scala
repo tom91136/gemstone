@@ -11,6 +11,9 @@ import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 class GlobalBindingSuite extends munit.FunSuite {
+  private def value(routing: VMDispatchMemory, address: Long, size: Int in 1 ~ 8): Either[Fault, Long] =
+    AddressSpace.scalar(routing.readValueInto(address, size, _))
+
   private def mapping(region: AllocationId): VMDispatchMemory.GlobalMapping =
     VMDispatchMemory.GlobalMapping(
       GuestAddress(0x3000L),
@@ -126,25 +129,25 @@ class GlobalBindingSuite extends munit.FunSuite {
       memory = memory,
       kernargAddress = VMDispatchMemory.KernargAddress
     )
-    assertEquals(routing.readValue(0x2000L, 1), Right(0x11L))
-    assertEquals(routing.readValue(0x200fL, 1), Right(0x11L))
-    assert(routing.readValue(0x200fL, 2).isLeft)
+    assertEquals(value(routing, 0x2000L, 1), Right(0x11L))
+    assertEquals(value(routing, 0x200fL, 1), Right(0x11L))
+    assert(value(routing, 0x200fL, 2).isLeft)
     assert(routing.isExternal(0x1fffL, 1))
     assert(routing.isExternal(0x2010L, 1))
     assert(routing.isExternal(0x2fffL, 1))
     assert(routing.isExternal(0x3010L, 1))
     assertEquals(routing.readBytes(0x2010L, 0), Right(Vec.empty[Byte]))
-    assertEquals(routing.readValue(Long.MaxValue, 1), Right(0x22L))
+    assertEquals(value(routing, Long.MaxValue, 1), Right(0x22L))
     assertEquals(routing.writeValue(0x3000L, 41L, 4), Right(()))
     assertEquals(routing.atomicModifyValue(0x2000L, 4)(_ + 1L), Right(0x11111111L))
-    assertEquals(routing.readValue(0x2000L, 1), Right(0x12L))
+    assertEquals(value(routing, 0x2000L, 1), Right(0x12L))
     assertEquals(routing.writeValue(0x3000L, 42L, 4), Right(()))
-    assertEquals(routing.readValue(0x3000L, 4), Right(42L))
+    assertEquals(value(routing, 0x3000L, 4), Right(42L))
     assertEquals(LittleEndian.decode(memory.array(global), 8, 4), 42L)
     assert(shadow.forall(_ == 0x55.toByte))
     val external = memory.address(global, 8L).value.raw
     assert(routing.isExternal(external, 4))
-    assertEquals(routing.readValue(external, 4), Right(42L))
+    assertEquals(value(routing, external, 4), Right(42L))
     assertEquals(routing.writeBytes(external, Array[Byte](7, 8)), Right(()))
     assertEquals(routing.readBytes(0x3000L, 2), Right(Vec[Byte](7, 8)))
   }

@@ -321,12 +321,12 @@ class VMMemoryAccessSuite extends munit.FunSuite {
     val next      = workgroup.allocateBuffer(Array[Byte](3, 4))
     assertEquals(block, VMAddressSpace.ParameterBase)
     assertEquals(workgroup.bufferBytes(block, 2).map(_.toSeq), Some(Seq[Byte](1, 2)))
-    assertEquals(workgroup.buffer(block + 1, 2), None)
-    assertEquals(workgroup.buffer(block + 2, 0).map(_._2), Some(2))
+    assertEquals(workgroup.withBuffer(block + 1, 2)((_, offset) => Option(offset))(None), None)
+    assertEquals(workgroup.withBuffer(block + 2, 0)((_, offset) => Option(offset))(None), Some(2))
     assertEquals(workgroup.bufferBytes(next, 2).map(_.toSeq), Some(Seq[Byte](3, 4)))
-    assertEquals(workgroup.buffer(Long.MaxValue, 1), None)
+    assertEquals(workgroup.withBuffer(Long.MaxValue, 1)((_, offset) => Option(offset))(None), None)
     workgroup.reset()
-    assertEquals(workgroup.buffer(next, 1), None)
+    assertEquals(workgroup.withBuffer(next, 1)((_, offset) => Option(offset))(None), None)
     assertEquals(workgroup.allocateBuffer(Array[Byte](7)), VMAddressSpace.ParameterBase)
   }
 
@@ -337,7 +337,7 @@ class VMMemoryAccessSuite extends munit.FunSuite {
   ): Either[Fault, Unit] =
     LaunchGeometry.forLaunch(Dimensions(threads, 1, 1), Dimensions.One).left.map(Fault.InvalidRequest(_)).flatMap(
       VMInterpreter.execute(
-        Kernel(Entry(Routine("test", ExecutableProgram(instructions)), Vec.empty), "PTX"),
+        Kernel(Entry(Routine("test", ExecutableProgram(instructions), 0, 0), Vec.empty), "PTX"),
         _,
         Map.empty,
         memory
@@ -368,9 +368,9 @@ class VMMemoryAccessSuite extends munit.FunSuite {
 
   test("a faulting read preparation reports the lane whose range faulted") {
     class PreparedMemory extends ObservedMemory {
-      override def prepareReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] =
-        ranges.foldLeft[Either[Fault, Unit]](Right(()))((result, range) =>
-          result.flatMap(_ => locate(range._1, range._2).map(_ => ()))
+      override def prepareReads(ranges: AddressSpace.ReadRanges): Either[Fault, Unit] =
+        (0 until ranges.length).foldLeft[Either[Fault, Unit]](Right(()))((result, index) =>
+          result.flatMap(_ => locate(ranges.address(index), ranges.size(index)).map(_ => ()))
         )
     }
     val memory  = PreparedMemory()

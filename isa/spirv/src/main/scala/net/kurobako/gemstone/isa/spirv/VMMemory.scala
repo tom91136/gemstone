@@ -93,7 +93,8 @@ private object VMMemory {
       reserve(image.length)
       Array.copy(image, 0, bytes, 0, image.length)
       top = image.length
-      pointers.clear()
+      // Clearing an empty LongMap still walks and reallocates its tables.
+      if (pointers.nonEmpty) pointers.clear()
     }
 
     def allocate(size: Int, alignment: Int): Either[Fault, Long] = {
@@ -155,24 +156,33 @@ private object VMMemory {
       case _                 => null
     }
 
-    private def start(bytes: Array[Byte], address: Long, size: Int): Either[Fault, Int] = {
+    private def extent(bytes: Array[Byte], address: Long): Int =
+      if (aperture(address) == PrivateAperture) invocation.top else bytes.length
+
+    /** The byte offset of `size` bytes at `address` within `bytes`, or -1 when they do not fit. */
+    private def offsetIn(bytes: Array[Byte], address: Long, size: Int): Int = {
       val offset = address & OffsetMask
-      val extent = if (aperture(address) == PrivateAperture) invocation.top else bytes.length
-      Either.cond(
-        offset <= extent && size.toLong <= extent - offset,
-        offset.toInt,
-        Fault.InvalidRequest(s"SPIR-V access at 0x${java.lang.Long.toHexString(address)} + $size exceeds $extent bytes")
-      )
+      val limit  = extent(bytes, address)
+      if (offset <= limit && size.toLong <= limit - offset) offset.toInt else -1
+    }
+
+    private def outOfRange(bytes: Array[Byte], address: Long, size: Int): Fault = Fault.InvalidRequest(
+      s"SPIR-V access at 0x${java.lang.Long.toHexString(address)} + $size exceeds ${extent(bytes, address)} bytes"
+    )
+
+    private def start(bytes: Array[Byte], address: Long, size: Int): Either[Fault, Int] = {
+      val offset = offsetIn(bytes, address, size)
+      if (offset >= 0) Right(offset) else Left(outOfRange(bytes, address, size))
     }
 
     private def guest(address: Long, size: Int >= 0, operation: String): Either[Fault, AddressSpace.Location] =
       if (address == 0L) Left(Fault.InvalidRequest(s"cannot $operation a null SPIR-V pointer"))
       else memory.locate(GuestAddress(address), size)
 
-    private def outsideBounds(pointer: Pointer, size: Long): Boolean =
-      pointer.bounds.exists { case (begin, end) =>
-        pointer.address < begin || pointer.address > end || size > end - pointer.address
-      }
+    private def outsideBounds(pointer: Pointer, size: Long): Boolean = pointer.bounds match {
+      case Some((begin, end)) => pointer.address < begin || pointer.address > end || size > end - pointer.address
+      case None               => false
+    }
 
     private def relocation(id: AllocationId, offset: Long): Option[(AllocationId, Long)] =
       if (shared.pointers.isEmpty || memory.hasNativePointers(id)) None
@@ -203,13 +213,29 @@ private object VMMemory {
           }
       }
 
+    /** Reads a scalar from dispatch-owned storage into `registers(slot)`; false leaves it to [[readScalar]]. */
+    def readLocalScalar(pointer: Pointer, size: Int in 1 ~ 8, registers: Array[Long], slot: Int): Boolean =
+      !outsideBounds(pointer, size.raw) && {
+        val bytes = storage(pointer.address)
+        bytes != null && {
+          val at = offsetIn(bytes, pointer.address, size.raw)
+          at >= 0 && {
+            registers(slot) = LittleEndian.decode(bytes, at, size.widen[Int in 0 ~ 8])
+            true
+          }
+        }
+      }
+
     def readScalar(pointer: Pointer, size: Int in 1 ~ 8): AddressSpace.ReadResult[Long] =
       if (outsideBounds(pointer, size.raw)) Right(0L) else load(pointer.address, size)
 
     private def load(address: Long, size: Int in 1 ~ 8): AddressSpace.ReadResult[Long] = {
       val bytes = storage(address)
-      if (bytes != null) start(bytes, address, size.raw).map(LittleEndian.decode(bytes, _, size.widen[Int in 0 ~ 8]))
-      else
+      if (bytes != null) {
+        val at = offsetIn(bytes, address, size.raw)
+        if (at >= 0) Right(LittleEndian.decode(bytes, at, size.widen[Int in 0 ~ 8]))
+        else Left(outOfRange(bytes, address, size.raw))
+      } else
         guest(address, size.widen[Int >= 0], "read through") match {
           case Left(fault)                                     => Left(fault)
           case Right(AddressSpace.Location.Within(id, offset)) =>
@@ -267,12 +293,17 @@ private object VMMemory {
       }
 
     def writeScalar(pointer: Pointer, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
-      if (suppressed(pointer) || outsideBounds(pointer, size.raw)) Right(())
+      if (suppressed(pointer) || outsideBounds(pointer, size.raw)) AddressSpace.Ready
       else {
         val target = storage(pointer.address)
-        if (target != null)
-          start(target, pointer.address, size.raw).map(LittleEndian.write(value, target, _, size.widen[Int in 0 ~ 8]))
-        else if (pointer.address == 0L) Left(nullWrite(pointer))
+        if (target != null) {
+          val at = offsetIn(target, pointer.address, size.raw)
+          if (at < 0) Left(outOfRange(target, pointer.address, size.raw))
+          else {
+            LittleEndian.write(value, target, at, size.widen[Int in 0 ~ 8])
+            AddressSpace.Ready
+          }
+        } else if (pointer.address == 0L) Left(nullWrite(pointer))
         else {
           forgetRelocations(pointer.address, size.widen)
           memory.writeValue(GuestAddress(pointer.address), value, size)

@@ -214,7 +214,7 @@ private object VMIR {
     case MaximumI16, MaximumF16, MinimumI16, MinimumU16, MinimumF16
     case MultiplyLowU16, MultiplyF16, MultiplyU24, MultiplyI24
     case SubtractU16, SubtractU32, SubtractCarryU32, SubtractWithBorrowU32
-    case SubtractReverseU32, SubtractReverseWithBorrowU32
+    case SubtractReverseU32, SubtractReverseCarryU32, SubtractReverseWithBorrowU32
   }
 
   enum VectorBinary64Operation {

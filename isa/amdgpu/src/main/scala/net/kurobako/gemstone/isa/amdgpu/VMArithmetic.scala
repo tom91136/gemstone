@@ -349,33 +349,42 @@ private object VMArithmetic {
     ((lane.raw & ~3) | ((control >>> ((lane.raw & 3) * 2)) & 3)).unsafe[Lane]
   private def dppWithin(control: Int, first: Int, last: Int): Boolean = control >= first && control <= last
 
-  /** The lane a DPP16 control reads for `lane`, or None when it names no lane; the decoder admits only valid controls.
-    */
-  def dppSourceLane(lane: Lane, control: Int): Option[Lane] = {
+  object DppSource {
+    inline def Invalid: DppSource = -1
+    extension (source: DppSource) {
+      inline def isValid: Boolean = source >= 0
+      inline def lane: Lane       = source.unsafe[Lane]
+    }
+  }
+
+  /** A DPP16 source lane, or [[DppSource.Invalid]] when the control reads past its row or the wave. */
+  opaque type DppSource = Int
+
+  /** The lane a DPP16 control reads for `lane`; the decoder admits only valid controls. */
+  def dppSourceLane(lane: Lane, control: Int): DppSource = {
     import EncodingConstants.DPP.*
     val rowBase  = lane.raw & ~15
     val rowLane  = lane.raw & 15
     val distance = control & 15
-    val selected =
-      if (dppWithin(control, QUAD_PERM_FIRST, QUAD_PERM_LAST)) Some(dppQuadSourceLane(lane, control).raw)
-      else if (dppWithin(control, ROW_SHL_FIRST, ROW_SHL_LAST))
-        Option.when(rowLane + distance < 16)(lane.raw + distance)
-      else if (dppWithin(control, ROW_SHR_FIRST, ROW_SHR_LAST)) Option.when(rowLane >= distance)(lane.raw - distance)
-      else if (dppWithin(control, ROW_ROR_FIRST, ROW_ROR_LAST)) Some(rowBase | ((rowLane - distance) & 15))
-      else if (dppWithin(control, ROW_SHARE_FIRST, ROW_SHARE_LAST)) Some(rowBase | distance)
-      else if (dppWithin(control, ROW_XMASK_FIRST, ROW_XMASK_LAST)) Some(rowBase | (rowLane ^ distance))
-      else control match {
-        case WAVE_SHL1       => Option.when(lane.raw < 63)(lane.raw + 1)
-        case WAVE_ROL1       => Some((lane.raw + 1) & 63)
-        case WAVE_SHR1       => Option.when(lane.raw > 0)(lane.raw - 1)
-        case WAVE_ROR1       => Some((lane.raw - 1) & 63)
-        case ROW_MIRROR      => Some(rowBase | (15 - rowLane))
-        case ROW_HALF_MIRROR => Some((lane.raw & ~7) | (7 - (lane.raw & 7)))
-        case BCAST15         => Option.when(rowBase > 0)(rowBase - 1)
-        case BCAST31         => Option.when(lane.raw >= 32)(31)
-        case _               => None
-      }
-    selected.map(_.unsafe[Lane])
+    if (dppWithin(control, QUAD_PERM_FIRST, QUAD_PERM_LAST)) dppQuadSourceLane(lane, control).raw
+    else if (dppWithin(control, ROW_SHL_FIRST, ROW_SHL_LAST))
+      if (rowLane + distance < 16) lane.raw + distance else DppSource.Invalid
+    else if (dppWithin(control, ROW_SHR_FIRST, ROW_SHR_LAST))
+      if (rowLane >= distance) lane.raw - distance else DppSource.Invalid
+    else if (dppWithin(control, ROW_ROR_FIRST, ROW_ROR_LAST)) rowBase | ((rowLane - distance) & 15)
+    else if (dppWithin(control, ROW_SHARE_FIRST, ROW_SHARE_LAST)) rowBase | distance
+    else if (dppWithin(control, ROW_XMASK_FIRST, ROW_XMASK_LAST)) rowBase | (rowLane ^ distance)
+    else control match {
+      case WAVE_SHL1       => if (lane.raw < 63) lane.raw + 1 else DppSource.Invalid
+      case WAVE_ROL1       => (lane.raw + 1) & 63
+      case WAVE_SHR1       => if (lane.raw > 0) lane.raw - 1 else DppSource.Invalid
+      case WAVE_ROR1       => (lane.raw - 1) & 63
+      case ROW_MIRROR      => rowBase | (15 - rowLane)
+      case ROW_HALF_MIRROR => (lane.raw & ~7) | (7 - (lane.raw & 7))
+      case BCAST15         => if (rowBase > 0) rowBase - 1 else DppSource.Invalid
+      case BCAST31         => if (lane.raw >= 32) 31 else DppSource.Invalid
+      case _               => DppSource.Invalid
+    }
   }
 
   /** GCN keeps wave shifts and row broadcasts, which RDNA replaces with row share and XOR mask; CDNA2 onwards adds

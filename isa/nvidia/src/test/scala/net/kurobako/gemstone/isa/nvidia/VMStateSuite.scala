@@ -9,7 +9,7 @@ import programs.*
 
 class VMStateSuite extends munit.FunSuite {
   test("lane registers and predicates grow on demand and distinguish undefined predicates") {
-    val lane = VMLane()
+    val lane = VMLane(0, 0)
     assertEquals(lane.register(r(6143)), 0L)
     lane.setRegister(r(6143), 42L)
     lane.setRegister(r(0), 7L)
@@ -29,6 +29,20 @@ class VMStateSuite extends munit.FunSuite {
     assertEquals(lane.predicate(p(64)), None)
   }
 
+  test("a reused lane holds no register written above a smaller routine's count") {
+    val pool   = VMFramePool(1)
+    val larger = VMIR.Routine("larger", VMIR.ExecutableProgram(Vec.empty), 16, 0)
+    val first  = pool.acquire(larger)
+    first(0).setRegister(r(12), 7L)
+    pool.release(first)
+    val smaller = pool.acquire(VMIR.Routine("smaller", VMIR.ExecutableProgram(Vec.empty), 4, 0))
+    smaller(0).setRegister(r(10), 5L)
+    pool.release(smaller)
+    val again = pool.acquire(larger)
+    assertEquals(again(0).register(r(10)), 0L)
+    assertEquals(again(0).register(r(12)), 0L)
+  }
+
   test("a program counter outside the routine faults") {
     for ((instruction, pc) <- Vec(VMIR.Instruction.Branch(VMIR.Pc(2)) -> 2, VMIR.Instruction.Fence -> 1))
       assertEquals(
@@ -39,7 +53,7 @@ class VMStateSuite extends munit.FunSuite {
   }
 
   test("parameter byte storage preserves overlap, growth, zero fill and clearing") {
-    val lane      = VMLane()
+    val lane      = VMLane(0, 0)
     val parameter = VMIR.Parameter(0)
     lane.writeParameter(parameter, 4, 32, 0x44332211L)
     assertEquals(lane.readParameter(parameter, 0, 8), 0x4433221100000000L)
@@ -56,19 +70,21 @@ class VMStateSuite extends munit.FunSuite {
 
   test("workgroup reset clears shared, local, convergence and lane state") {
     val workgroup = VMWorkgroup(1024)
-    val lanes     = VMLanes(1024)
+    val pool      = VMFramePool(1024)
+    val used      = pool.acquire(emptyRoutine)
     val last      = WorkgroupLane.fromIndex(1023)
-    lanes(last).setRegister(r(0), 42L)
-    lanes(last).setPredicate(p(0), true)
-    lanes(last).writeParameter(VMIR.Parameter(0), 0, 32, 7L)
-    lanes(last).conditionCodes.write(VMConditionCodes.Flag.Zero, Some(true))
-    lanes(last).carry = true
-    val _ = lanes(last).returnStack += 19L
+    used(last).setRegister(r(0), 42L)
+    used(last).setPredicate(p(0), true)
+    used(last).writeParameter(VMIR.Parameter(0), 0, 32, 7L)
+    used(last).conditionCodes.write(VMConditionCodes.Flag.Zero, Some(true))
+    used(last).carry = true
+    val _ = used(last).returnStack += 19L
     workgroup.writeLocal(last, 0L, 32, 11L)
     workgroup.writeShared(VMAddressSpace.SharedBase, 32, 13L)
     val token = workgroup.createConvergence(992, 1L)
     workgroup.reset()
-    lanes.clear()
+    pool.reset()
+    val lanes = pool.acquire(emptyRoutine)
     for (lane <- Vec[WorkgroupLane](0, 1023)) {
       assertEquals(lanes(lane).register(r(0)), 0L)
       assertEquals(lanes(lane).predicate(p(0)), None)
@@ -99,7 +115,7 @@ class VMStateSuite extends munit.FunSuite {
 
   test("an invalid memory write prevents staged register writes from committing") {
     val workgroup = VMWorkgroup(1)
-    val lanes     = VMLanes(1)
+    val lanes     = frame(1)
     val effects   = VMWriteBuffer()
     val memory    = RegionMemory(AllocationId(1) -> 4)
     effects.stageRegister(0, r(0), 42L)
@@ -111,7 +127,7 @@ class VMStateSuite extends munit.FunSuite {
 
   test("the reusable effect buffer grows and preserves write order for the highest lane") {
     val workgroup = VMWorkgroup(1024)
-    val lanes     = VMLanes(1024)
+    val lanes     = frame(1024)
     val effects   = VMWriteBuffer()
     val memory    = RegionMemory()
     (0 until 129).foreach(value => effects.stageRegister(1023, r(0), value.toLong))
@@ -126,7 +142,7 @@ class VMStateSuite extends munit.FunSuite {
 
   test("condition state is per lane and staged writes distinguish carry kinds") {
     val workgroup = VMWorkgroup(2)
-    val lanes     = VMLanes(2)
+    val lanes     = frame(2)
     val effects   = VMWriteBuffer()
     effects.stage(VMWrite.ConditionFlag(0, VMConditionCodes.Flag.Carry, Some(true)))
     effects.stage(VMWrite.AddThreeCarry(0, Some(2)))

@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.spirv
 
 import LaneOps.*
 import Op.*
+import VMInvocation.*
 import VMLowering.*
 import VMMemory.*
 import VMProgram.*
@@ -159,56 +160,109 @@ private object ConversionOps {
       }
     )
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def floatingToUnsigned(site: Site, resultType: Operand, dest: Operand, operand: Operand): Op =
     floatingToIntegerShapes(site, "OpConvertFToU", resultType, operand).fold(
       Fail(_),
       { (width, resultWidth) =>
-        val mode     = rounding(site, dest, IEEE754.Rounding.TowardZero)
-        val saturate = site.program.saturatedConversions.contains(id(dest))
-        val vulkan   = site.program.vulkan
-        step { (execution, _) =>
-          val values = execution.values
-          Option(values.lanes(id(operand))).toRight(undefined(id(operand))).flatMap { lanes =>
-            val converted = Array.ofDim[Long](lanes.length)
-            var index     = 0
-            var failure   = Option.empty[Fault]
-            while (index < lanes.length && failure.isEmpty) {
-              val value  = integral(IEEE754.toDouble(lanes(index), width), mode)
-              val result =
-                if (saturate && (value.isNaN || value <= 0.0)) Right(0L)
-                else if (saturate && value >= Math.scalb(1.0, resultWidth.raw)) Right(mask(resultWidth))
-                else truncated(value, resultWidth)
-              result match {
-                case Left(_) if vulkan => converted(index) = if (value.isNaN || value <= 0.0) 0L else mask(resultWidth)
-                case Left(detail)      =>
-                  failure = Some(Fault.InvalidRequest(
-                    s"OpConvertFToU source lane $index cannot be represented as an unsigned $resultWidth-bit integer: $detail"
-                  ))
-                case Right(bits) => converted(index) = bits
-              }
-              index += 1
-            }
-            failure.toLeft(values.write(id(dest), id(resultType), converted))
-          }
-        }
+        val conversion = UnsignedConversion(
+          width,
+          resultWidth,
+          rounding(site, dest, IEEE754.Rounding.TowardZero),
+          site.program.saturatedConversions.contains(id(dest)),
+          site.program.vulkan
+        )
+        if (site.program.scalarSlot(id(dest)) && site.program.scalarSlot(id(operand)))
+          UnsignedScalar(id(dest), id(operand), conversion)
+        else UnsignedLanes(id(dest), id(resultType), id(operand), conversion)
       }
     )
 
-  /** Truncates an integral binary64 value into an unsigned width without narrowing through a signed Long. */
-  private def truncated(value: Double, width: Int in 1 ~ 64): Either[String, Long] = {
+  /** Saturated and Vulkan conversions clamp an unrepresentable value; others fault on it. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private class UnsignedConversion(
+      width: Int in (16, 32, 64),
+      resultWidth: Int in 1 ~ 64,
+      mode: IEEE754.Rounding,
+      saturate: Boolean,
+      vulkan: Boolean
+  ) {
+    def integralValue(raw: Long): Double = integral(IEEE754.toDouble(raw, width), mode)
+
+    def faults(value: Double): Boolean = !saturate && !vulkan && truncationProblem(value, resultWidth) != null
+
+    def failure(lane: Int, value: Double): Fault = Fault.InvalidRequest(
+      s"OpConvertFToU source lane $lane cannot be represented as an unsigned $resultWidth-bit integer: " +
+        truncationProblem(value, resultWidth)
+    )
+
+    def bits(value: Double): Long =
+      if (saturate && (value.isNaN || value <= 0.0)) 0L
+      else if (saturate && value >= Math.scalb(1.0, resultWidth.raw)) mask(resultWidth)
+      else if (truncationProblem(value, resultWidth) == null) truncated(value, resultWidth)
+      else if (value.isNaN || value <= 0.0) 0L
+      else mask(resultWidth)
+  }
+
+  private class UnsignedScalar(dest: Int, a: Int, conversion: UnsignedConversion) extends Op {
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] = {
+      val registers = execution.values.scalars
+      val value     = conversion.integralValue(registers(a))
+      if (conversion.faults(value)) Left(conversion.failure(0, value))
+      else {
+        registers(dest) = conversion.bits(value)
+        execution.pc += 1
+        Done
+      }
+    }
+  }
+
+  private class UnsignedLanes(dest: Int, resultType: Int, a: Int, conversion: UnsignedConversion) extends Op {
+    @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
+    def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] = {
+      val values = execution.values
+      val source = values.lanes(a)
+      if (source == null) Left(undefined(a))
+      else {
+        val result                = Array.ofDim[Long](source.length)
+        var failure: Fault | Null = null
+        var lane                  = 0
+        while (lane < result.length && failure == null) {
+          val value = conversion.integralValue(source(lane))
+          if (conversion.faults(value)) failure = conversion.failure(lane, value)
+          else result(lane) = conversion.bits(value)
+          lane += 1
+        }
+        if (failure != null) Left(failure)
+        else {
+          values.write(dest, resultType, result)
+          execution.pc += 1
+          Done
+        }
+      }
+    }
+  }
+
+  /** Why an integral binary64 value has no unsigned `width`-bit representation, or null when it has one. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private def truncationProblem(value: Double, width: Int in 1 ~ 64): String | Null = {
     val bits     = IEEE754.doubleToBinary64(value)
-    val fraction = bits & 0xfffffffffffffL
     val exponent = ((bits >>> 52) & 0x7ffL).toInt
-    val negative = bits < 0L
-    if (exponent == 0x7ff) Left("NaN and infinity are not integers")
-    else if (exponent < 1023) Right(0L)
-    else if (negative) Left("negative values are outside the unsigned range")
-    else if (exponent - 1023 >= width.raw) Left("value exceeds the result width")
+    if (exponent == 0x7ff) "NaN and infinity are not integers"
+    else if (exponent < 1023) null
+    else if (bits < 0L) "negative values are outside the unsigned range"
+    else if (exponent - 1023 >= width.raw) "value exceeds the result width"
+    else null
+  }
+
+  /** Truncates a representable integral binary64 value into an unsigned width without narrowing through a Long. */
+  private def truncated(value: Double, width: Int in 1 ~ 64): Long = {
+    val bits     = IEEE754.doubleToBinary64(value)
+    val exponent = ((bits >>> 52) & 0x7ffL).toInt
+    if (exponent < 1023) 0L
     else {
       val shift       = exponent - 1023
-      val significand = (1L << 52) | fraction
-      Right((if (shift >= 52) significand << (shift - 52) else significand >>> (52 - shift)) & mask(width))
+      val significand = (1L << 52) | (bits & 0xfffffffffffffL)
+      (if (shift >= 52) significand << (shift - 52) else significand >>> (52 - shift)) & mask(width)
     }
   }
 

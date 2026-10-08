@@ -5,8 +5,8 @@ import net.kurobako.gemstone.collection.*
 
 object VMFrame {
 
-  /** A frame's return point and the caller parameters receiving its results. */
-  case class Continuation(caller: VMFrame, pc: Pc, results: Vec[(Parameter, Parameter)])
+  /** A frame's return point: caller parameter `targets(i)` receives callee return parameter `sources(i)`. */
+  case class Continuation(caller: VMFrame, pc: Pc, targets: Vec[Parameter], sources: Vec[Parameter])
 }
 
 /** One activation of a routine: its lanes' registers and the base of the thread-local window its explicit local

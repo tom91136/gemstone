@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.sass
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.Instruction.*
@@ -44,8 +45,11 @@ private object LegacyRangeReduction {
     else None
   }
 
-  def inputs(sm: Int, function: DecodedFunction): Map[Int, VMIR.Value.Register] =
-    if (sm >= 70) Map.empty
+  /** The shadow register each fused reduction's consumers read, by consumer address, and how many shadows there are. */
+  case class Reductions(inputs: Map[Int, VMIR.Value.Register], count: Int >= 0)
+
+  def inputs(sm: Int, function: DecodedFunction, layout: VMRegisters.Layout): Reductions =
+    if (sm >= 70) Reductions(Map.empty, 0)
     else {
       val reductions = function.instructions.zipWithIndex.filter((instruction, _) =>
         VMOperand.is[Instruction.Rro](instruction.operation)
@@ -54,7 +58,7 @@ private object LegacyRangeReduction {
       if (reductions.nonEmpty && transfers.exists(_.operands.exists(registers(_).nonEmpty)))
         throw IllegalArgumentException("legacy range reduction has indirect control flow")
       val targets = transfers.flatMap(_.operands.flatMap(VMOperand.integer(_))).toSet
-      reductions.zipWithIndex.foldLeft(Map.empty[Int, VMIR.Value.Register]) {
+      val mapped  = reductions.zipWithIndex.foldLeft(Map.empty[Int, VMIR.Value.Register]) {
         case (result, ((producer, index), ordinal)) =>
           def reject(detail: String = "unverified form"): Nothing = throw IllegalArgumentException(
             s"RRO at 0x${producer.address.raw.toHexString} requires a closed, straight-line MUFU trigonometric lifetime $detail"
@@ -63,7 +67,7 @@ private object LegacyRangeReduction {
             reject()
           val destination                 = scalarDestination(producer).getOrElse(reject())
           val register                    = registers(destination).head
-          val shadow: VMIR.Value.Register = VMIR.Value.Register(VMRegisters.reduction(ordinal))
+          val shadow: VMIR.Value.Register = VMIR.Value.Register(layout.reduction(ordinal))
           @annotation.tailrec
           def scan(
               position: Int,
@@ -116,5 +120,6 @@ private object LegacyRangeReduction {
           }
           scan(index + 1, result.updated(producer.address.raw, shadow), false)
       }
+      Reductions(mapped, reductions.nonNegativeSize)
     }
 }

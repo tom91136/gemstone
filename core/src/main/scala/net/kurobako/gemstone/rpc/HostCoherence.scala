@@ -34,17 +34,13 @@ private class HostCoherence(
 
   def enable(): Unit     = everything = true
   def enabled: Boolean   = everything
+  def isClosed: Boolean  = closed()
   def transfers: Boolean = everything || hostBackedAllocations()
 
   def accessible(address: GuestAddress, size: Int >= 0): Boolean = everything || hostBackedAt(address, size)
 
   private def available(address: GuestAddress, size: Int >= 0): Boolean =
     address.raw > 0 && address.raw <= Long.MaxValue - size.raw && accessible(address, size)
-
-  private def record(id: CompletionId): Completion =
-    completions(id).getOrElse(throw java.util.NoSuchElementException(s"completion $id does not exist"))
-
-  private def mirror(id: CompletionId): HostMemoryMirror = record(id).hostMemory
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def poll(id: CompletionId): Either[ExecutionFailure, HostMemoryBatch] = lock.withLock {
@@ -108,7 +104,11 @@ private class HostCoherence(
   // All host atomics linearise in the native process with CPU atomics. CAS also
   // supports arbitrary interpreter RMW functions without serialising Scala closures.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def atomic(id: CompletionId, address: GuestAddress, size: Int in 1 ~ 8)(update: Long => Long): Either[Fault, Long] =
+  def atomic(
+      completion: Completion,
+      address: GuestAddress,
+      size: Int in 1 ~ 8
+  )(update: Long => Long): Either[Fault, Long] =
     if ((size.raw != 4 && size.raw != 8) || address.raw % size.raw != 0)
       Left(Fault.Memory("host atomics require aligned 32- or 64-bit storage"))
     else if (!available(address, size.widen[Int >= 0]))
@@ -122,7 +122,7 @@ private class HostCoherence(
       var result: Option[Either[Fault, Long]] = None
       while (result.isEmpty) {
         val request  = HostMemoryAtomic(address, atomicSize, expected, update(expected) & mask)
-        val observed = synchronise(id, Some(request)).map(_ & mask)
+        val observed = synchronise(completion, Some(request)).map(_ & mask)
         observed match {
           case Left(error)                       => result = Some(Left(error))
           case Right(value) if value == expected =>
@@ -134,7 +134,7 @@ private class HostCoherence(
       result.get
     }
 
-  def atomicLoad(id: CompletionId, address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
+  def atomicLoad(completion: Completion, address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
     size.raw.refine[Int in (1, 2, 4, 8)].toOption.filter(width => address.raw % width.raw == 0)
       .toRight(Fault.Memory("host atomic loads require naturally aligned 8-, 16-, 32-, or 64-bit storage"))
       .flatMap { atomicSize =>
@@ -142,28 +142,31 @@ private class HostCoherence(
           Left(Fault.Memory("host atomic address is unavailable or overflows"))
         else syncLock.withLock {
           val request = HostMemoryAtomic(address, atomicSize, 0L, 0L, HostMemoryAtomicOperation.Load)
-          synchronise(id, Some(request), Vec(HostMemoryRange(address, size)), relaxed = true).map { observed =>
+          synchronise(completion, Some(request), Vec(HostMemoryRange(address, size)), relaxed = true).map { observed =>
             val value = observed & (if (size.raw == 8) -1L else (1L << (size.raw * 8)) - 1L)
-            lock.withLock(mirror(id).observeAtomic(address, LittleEndian.toVec(value, size.widen[Int in 0 ~ 8])))
+            lock.withLock(completion.hostMemory.observeAtomic(
+              address,
+              LittleEndian.toVec(value, size.widen[Int in 0 ~ 8])
+            ))
             value
           }
         }
       }
 
   /** Publish `ranges` and perform `stores` natively, then record the stored values as observed. */
-  def store(id: CompletionId, ranges: Vec[HostMemoryRange], stores: Vec[HostMemoryAtomic]): Either[Fault, Unit] =
+  def store(completion: Completion, ranges: Vec[HostMemoryRange], stores: Vec[HostMemoryAtomic]): Either[Fault, Unit] =
     syncLock.withLock {
-      synchronise(id, None, ranges, stores, relaxed = true).map { _ =>
+      synchronise(completion, None, ranges, stores, relaxed = true).map { _ =>
         lock.withLock(stores.foreach(atom =>
-          mirror(id).observeAtomic(atom.address, LittleEndian.toVec(atom.desired, atom.size))
+          completion.hostMemory.observeAtomic(atom.address, LittleEndian.toVec(atom.desired, atom.size))
         ))
       }
     }
 
-  def fence(id: CompletionId): Either[Fault, Unit] = syncLock.withLock(synchronise(id, None).map(_ => ()))
+  def fence(completion: Completion): Either[Fault, Unit] = syncLock.withLock(synchronise(completion, None).map(_ => ()))
 
   private def synchronise(
-      id: CompletionId,
+      completion: Completion,
       atomic: Option[HostMemoryAtomic],
       publish: Vec[HostMemoryRange] = Vec.empty,
       atomicStores: Vec[HostMemoryAtomic] = Vec.empty,
@@ -171,45 +174,45 @@ private class HostCoherence(
   ): Either[Fault, Long] = lock.withLock {
     val exchange =
       Completion.HostSync(HostMemorySync(nextTicket.incrementAndGet(), atomic, publish, atomicStores, relaxed))
-    record(id).beginHostSync(exchange)
+    completion.beginHostSync(exchange)
     changed.signalAll()
     while (!closed() && exchange.observed.isEmpty) changed.await()
-    record(id).endHostSync()
-    if (publish.isEmpty && !relaxed) mirror(id).invalidateClean()
+    completion.endHostSync()
+    if (publish.isEmpty && !relaxed) completion.hostMemory.invalidateClean()
     // A poller can consume the acknowledgement wakeup before this worker does.
     // Removing the exchange makes other workers' pending reads eligible again.
     changed.signalAll()
     if (closed()) Left(Fault.Cancelled) else exchange.observed.toRight(Fault.Cancelled)
   }
 
-  def flushWrites(id: CompletionId): Either[Fault, Unit] = syncLock.withLock {
-    if (lock.withLock(mirror(id).hasDirty)) synchronise(id, None).map(_ => ()) else Right(())
+  def flushWrites(completion: Completion): Either[Fault, Unit] = syncLock.withLock {
+    if (lock.withLock(completion.hostMemory.hasDirty)) synchronise(completion, None).map(_ => ()) else Right(())
   }
 
-  def flushReads(id: CompletionId): Either[Fault, Unit] = lock.withLock {
-    record(id).beginReadWait()
+  def flushReads(completion: Completion): Either[Fault, Unit] = lock.withLock {
+    completion.beginReadWait()
     changed.signalAll()
-    while (!closed() && mirror(id).hasPending) changed.await()
-    record(id).endReadWait()
+    while (!closed() && completion.hostMemory.hasPending) changed.await()
+    completion.endReadWait()
     if (closed()) Left(Fault.Cancelled) else Right(())
   }
 
-  def invalidate(id: CompletionId): Unit = lock.withLock(mirror(id).invalidateClean())
+  def invalidate(completion: Completion): Unit = lock.withLock(completion.hostMemory.invalidateClean())
 
-  def read(id: CompletionId, address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
+  def read(completion: Completion, address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
     lock.withLock {
       if (!available(address, size))
         Left(Fault.Memory(s"host memory read at ${address.show} (${size.raw} bytes) is unavailable or overflows"))
-      else mirror(id).read(address, size).toRight(AddressSpace.Pending)
+      else completion.hostMemory.read(address, size).toRight(AddressSpace.Pending)
     }
 
-  def write(id: CompletionId, address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] = lock.withLock {
+  def write(completion: Completion, address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] = lock.withLock {
     if (!available(address, bytes.nonNegativeSize))
       Left(Fault.Memory(s"host memory write at ${address.show} (${bytes.size} bytes) is unavailable or overflows"))
     else {
       val atomicWidth: Int in (0, 1, 2, 4, 8) = bytes.size.refine[Int in (1, 2, 4, 8)].toOption
         .filter(width => address.raw % width.raw == 0).fold[Int in (0, 1, 2, 4, 8)](0)(identity)
-      mirror(id).write(address, bytes, atomicWidth)
+      completion.hostMemory.write(address, bytes, atomicWidth)
       Right(())
     }
   }

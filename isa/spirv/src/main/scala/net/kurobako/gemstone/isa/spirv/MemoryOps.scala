@@ -238,9 +238,20 @@ private object MemoryOps {
 
   private class ScalarLoad(dest: Int, resultType: Int, pointer: Int, size: Int in 1 ~ 8) extends Op {
     def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] =
-      address(execution.values, pointer).flatMap(memory.readScalar(_, size)).map { loaded =>
-        execution.values.updateScalar(dest, resultType, loaded)
-        execution.pc += 1
+      address(execution.values, pointer) match {
+        case Left(error)   => Left(error)
+        case Right(target) =>
+          if (memory.readLocalScalar(target, size, execution.values.scalars, dest)) {
+            execution.pc += 1
+            Done
+          } else
+            memory.readScalar(target, size) match {
+              case Left(error)   => Left(error)
+              case Right(loaded) =>
+                execution.values.updateScalar(dest, resultType, loaded)
+                execution.pc += 1
+                Done
+            }
       }
   }
 
@@ -310,7 +321,7 @@ private object MemoryOps {
   }
 
   // Access chains walk nested types with a cursor and fail at the first invalid index.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   private def accessChain(
       site: Site,
       resultType: Int,
@@ -324,76 +335,95 @@ private object MemoryOps {
     val baseStride = program.arrayStrides.get(program.valueType(base))
     step { (execution, _) =>
       val values = execution.values
-      address(values, base).flatMap { start =>
-        element.fold[Either[Fault, Long]](Right(start.address))(value =>
-          scalar(values, value).map(index =>
-            start.address +
-              index * baseStride.fold(program.storageTypeSize(start.pointee, start.matrixLayout).raw)(_.raw)
-          )
-        ).flatMap { initial =>
-          var source       = start
-          var matrixLayout = start.matrixLayout
-          var offset       = initial
-          var typeId       = start.pointee
-          var position     = 0
-          var failure      = Option.empty[Fault]
-          while (position < indexes.size && failure.isEmpty) {
-            scalar(values, indexes(position)) match {
-              case Left(error)  => failure = Some(error)
-              case Right(index) =>
-                program.runtimeType(typeId) match {
-                  case Some(RuntimeType.Structure(members)) =>
-                    if (index < 0L || index >= members.size.toLong)
-                      failure = Some(Fault.InvalidRequest(s"structure member index $index is out of range"))
-                    else {
-                      offset += program.structMemberOffset(typeId, members, index.toInt).raw
-                      matrixLayout = program.memberMatrixLayouts.get(typeId -> index.toInt)
-                      typeId = members(index.toInt)
-                    }
-                  case Some(RuntimeType.Array(member, _)) =>
-                    source.descriptors match {
-                      case Some(descriptors) =>
-                        if (index < 0 || index >= descriptors.size || element.nonEmpty)
-                          failure = Some(Fault.InvalidRequest(s"descriptor array index $index is out of range"))
-                        else {
-                          source = descriptors(index.toInt)
-                          offset = source.address
-                        }
-                      case None =>
-                        offset += index * program.arrayStrides.get(typeId).fold(program.storageTypeSize(
-                          member,
-                          matrixLayout
-                        ).raw)(_.raw)
-                    }
-                    typeId = member
-                  case Some(RuntimeType.MatrixType(column, _)) =>
-                    val stride =
-                      if (matrixLayout.exists(_.rowMajor)) program.runtimeType(column) match {
-                        case Some(RuntimeType.VectorType(component, _)) => program.typeSize(component).raw
-                        case _                                          =>
-                          failure = Some(Fault.InvalidRequest("invalid matrix column type"))
-                          0
-                      }
-                      else matrixLayout.map(_.stride.raw).getOrElse(program.typeSize(column).raw)
-                    offset += index * stride
-                    matrixLayout = matrixLayout.filter(_.rowMajor)
-                    typeId = column
-                  case Some(RuntimeType.VectorType(component, _)) =>
-                    offset += index *
-                      matrixLayout.filter(_.rowMajor).map(_.stride.raw).getOrElse(program.typeSize(component).raw)
-                    matrixLayout = None
-                    typeId = component
-                  case Some(value) => failure = Some(Fault.InvalidRequest(s"cannot index through SPIR-V type $value"))
-                  case None        => failure = Some(Fault.InvalidRequest(s"SPIR-V type %$typeId is undefined"))
+      address(values, base) match {
+        case Left(error)  => Left(error)
+        case Right(start) =>
+          var source                = start
+          var matrixLayout          = start.matrixLayout
+          var offset                = start.address
+          var typeId                = start.pointee
+          var position              = 0
+          var failure: Fault | Null = null
+          element match {
+            case Some(value) =>
+              scalar(values, value) match {
+                case Left(error)  => failure = error
+                case Right(first) =>
+                  offset += first *
+                    (baseStride match {
+                      case Some(stride) => stride.raw
+                      case None         => program.storageTypeSize(start.pointee, start.matrixLayout).raw
+                    })
+              }
+            case None => ()
+          }
+          while (position < indexes.size && failure == null) {
+            // Scalar index slots are read unboxed rather than through `scalar`, which wraps each index in an Either.
+            val indexId = indexes(position)
+            val index   =
+              if (program.scalarSlot(indexId)) values.scalars(indexId)
+              else scalar(values, indexId) match {
+                case Right(value) => value
+                case Left(error)  =>
+                  failure = error
+                  0L
+              }
+            if (failure == null) program.runtimeType(typeId) match {
+              case Some(RuntimeType.Structure(members)) =>
+                if (index < 0L || index >= members.size.toLong)
+                  failure = Fault.InvalidRequest(s"structure member index $index is out of range")
+                else {
+                  offset += program.structMemberOffset(typeId, members, index.toInt).raw
+                  matrixLayout = program.memberMatrixLayouts.get(typeId -> index.toInt)
+                  typeId = members(index.toInt)
                 }
+              case Some(RuntimeType.Array(member, _)) =>
+                source.descriptors match {
+                  case Some(descriptors) =>
+                    if (index < 0 || index >= descriptors.size || element.nonEmpty)
+                      failure = Fault.InvalidRequest(s"descriptor array index $index is out of range")
+                    else {
+                      source = descriptors(index.toInt)
+                      offset = source.address
+                    }
+                  case None =>
+                    offset += index *
+                      (program.arrayStrides.get(typeId) match {
+                        case Some(stride) => stride.raw
+                        case None         => program.storageTypeSize(member, matrixLayout).raw
+                      })
+                }
+                typeId = member
+              case Some(RuntimeType.MatrixType(column, _)) =>
+                val stride =
+                  if (matrixLayout.exists(_.rowMajor)) program.runtimeType(column) match {
+                    case Some(RuntimeType.VectorType(component, _)) => program.typeSize(component).raw
+                    case _                                          =>
+                      failure = Fault.InvalidRequest("invalid matrix column type")
+                      0
+                  }
+                  else matrixLayout.map(_.stride.raw).getOrElse(program.typeSize(column).raw)
+                offset += index * stride
+                matrixLayout = matrixLayout.filter(_.rowMajor)
+                typeId = column
+              case Some(RuntimeType.VectorType(component, _)) =>
+                offset += index *
+                  matrixLayout.filter(_.rowMajor).map(_.stride.raw).getOrElse(program.typeSize(component).raw)
+                matrixLayout = None
+                typeId = component
+              case Some(value) => failure = Fault.InvalidRequest(s"cannot index through SPIR-V type $value")
+              case None        => failure = Fault.InvalidRequest(s"SPIR-V type %$typeId is undefined")
             }
             position += 1
           }
-          failure.toLeft(values.update(
-            dest,
-            VMValue.Address(resultType, source.copy(address = offset, pointee = pointee, matrixLayout = matrixLayout))
-          ))
-        }
+          if (failure != null) Left(failure)
+          else {
+            values.update(
+              dest,
+              VMValue.Address(resultType, source.copy(address = offset, pointee = pointee, matrixLayout = matrixLayout))
+            )
+            Done
+          }
       }
     }
   }

@@ -9,15 +9,15 @@ import net.kurobako.gemstone.vm.*
   * so they resolve through this wrapper and a region-level override intercepts them too.
   */
 class ForwardingMemory(delegate: AddressSpace) extends AddressSpace {
-  override def hasNativePointers(region: AllocationId): Boolean = delegate.hasNativePointers(region)
-  override def fenceHostMemory(): Either[Fault, Unit]           = delegate.fenceHostMemory()
-  override def flushHostWrites(): Either[Fault, Unit]           = delegate.flushHostWrites()
-  override def invalidateHostReads(): Unit                      = delegate.invalidateHostReads()
-  override def defersHostReads: Boolean                         = delegate.defersHostReads
-  override def flushHostReads(): Either[Fault, Unit]            = delegate.flushHostReads()
-  override def prepareReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] =
+  override def hasNativePointers(region: AllocationId): Boolean                   = delegate.hasNativePointers(region)
+  override def fenceHostMemory(): Either[Fault, Unit]                             = delegate.fenceHostMemory()
+  override def flushHostWrites(): Either[Fault, Unit]                             = delegate.flushHostWrites()
+  override def invalidateHostReads(): Unit                                        = delegate.invalidateHostReads()
+  override def defersHostReads: Boolean                                           = delegate.defersHostReads
+  override def flushHostReads(): Either[Fault, Unit]                              = delegate.flushHostReads()
+  override def prepareReads(ranges: AddressSpace.ReadRanges): Either[Fault, Unit] =
     delegate.prepareReads(ranges)
-  override def prepareSystemReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] =
+  override def prepareSystemReads(ranges: AddressSpace.ReadRanges): Either[Fault, Unit] =
     delegate.prepareSystemReads(ranges)
   override def address(region: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] =
     delegate.address(region, offset)

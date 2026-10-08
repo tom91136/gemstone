@@ -4,6 +4,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.vm.*
 
 class DeviceHeapSuite extends munit.FunSuite {
   private def allocate(heap: DeviceHeap, size: Int > 0)(using munit.Location): GuestAddress =
@@ -25,6 +26,46 @@ class DeviceHeapSuite extends munit.FunSuite {
     assert(heap.readValue(first, 4).isLeft)
   }
 
+  test("alternating accesses to neighbouring blocks each reach their own block") {
+    val heap   = DeviceHeap(RegionMemory())
+    val first  = allocate(heap, 8)
+    val second = allocate(heap, 8)
+    assertEquals(heap.writeValue(first, 1L, 8), Right(()))
+    assertEquals(heap.writeValue(second, 2L, 8), Right(()))
+    assertEquals(heap.readValue(first, 8), Right(1L))
+    assertEquals(heap.readValue(second, 8), Right(2L))
+    assertEquals(heap.readValue(first, 8), Right(1L))
+    assert(heap.writeValue(first.offset(4), 0L, 8).isLeft)
+    assert(heap.free(second))
+    assert(heap.readValue(second, 8).isLeft)
+    assertEquals(heap.readValue(first, 8), Right(1L))
+  }
+
+  test("concurrent atomics, stores and loads stay exact while other blocks are allocated and freed") {
+    val heap    = DeviceHeap(RegionMemory())
+    val counter = allocate(heap, 8)
+    val pair    = allocate(heap, 8)
+    val rounds  = 20000
+    val torn    = java.util.concurrent.atomic.AtomicBoolean(false)
+    val threads = Vec.tabulate(4) { worker =>
+      Thread.ofPlatform().start { () =>
+        (0 until rounds).foreach { round =>
+          val _ = heap.atomicModifyValue(counter, 8)(_ + 1L)
+          if (worker == 0) {
+            val _ = heap.writeValue(pair, if (round % 2 == 0) 0L else -1L, 8)
+          } else heap.readValue(pair, 8) match {
+            case Right(value) if value != 0L && value != -1L => torn.set(true)
+            case _                                           => ()
+          }
+          if (worker == 1) heap.allocate(16).foreach(block => assert(heap.free(block)))
+        }
+      }
+    }
+    threads.foreach(_.join())
+    assertEquals(heap.readValue(counter, 8), Right(4L * rounds))
+    assert(!torn.get())
+  }
+
   test("accesses outside heap blocks reach the backing address space") {
     val backing = RegionMemory(AllocationId(1) -> 8)
     val heap    = DeviceHeap(backing)
@@ -32,10 +73,10 @@ class DeviceHeapSuite extends munit.FunSuite {
     val outside = GuestAddress(RegionMemory.Base)
     assertEquals(heap.writeValue(outside, 42L, 4), Right(()))
     assertEquals(backing.getInt(AllocationId(1), 0), 42)
-    assertEquals(
-      heap.prepareReads(Vec((outside, 4: Int >= 0), (GuestAddress(DeviceHeap.Base), 4: Int >= 0))),
-      Right(())
-    )
+    val reads = AddressSpace.ReadRangeBuffer()
+    reads.add(outside, 4)
+    reads.add(GuestAddress(DeviceHeap.Base), 4)
+    assertEquals(heap.prepareReads(reads), Right(()))
     assertEquals(
       heap.writeSystemBatch(Vec((outside, 7L, 4: Int in 1 ~ 8), (GuestAddress(DeviceHeap.Base), 9L, 4: Int in 1 ~ 8))),
       Right(())

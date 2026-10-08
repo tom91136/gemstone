@@ -22,7 +22,7 @@ class WarpReductionSuite extends munit.FunSuite {
       )
       val kernel = Kernel(
         Entry(
-          Routine("invalid_reduction", ExecutableProgram(instructions.map(PredicatedInstruction(_, None)))),
+          Routine("invalid_reduction", ExecutableProgram(instructions.map(PredicatedInstruction(_, None))), 0, 0),
           Vec.empty
         ),
         "PTX"

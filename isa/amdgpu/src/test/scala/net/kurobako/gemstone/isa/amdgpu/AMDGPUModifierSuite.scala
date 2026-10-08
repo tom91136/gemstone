@@ -349,6 +349,12 @@ class AMDGPUModifierSuite extends munit.FunSuite {
         "v_cmp_lt_i16 SDWA source modifiers are not implemented"
       ),
       (
+        "negation on integer VOP3 binary operations",
+        Target("gfx900"),
+        Vec(0x00, 0x00, 0x34, 0xd1, 0x01, 0x05, 0x02, 0x20),
+        "v_add_u32 source modifiers are not implemented"
+      ),
+      (
         "absolute value on integer VOP3 sources",
         Target("gfx900"),
         Vec(0x00, 0x01, 0xff, 0xd1, 0x01, 0x05, 0x0e, 0x04),
@@ -410,17 +416,13 @@ class AMDGPUModifierSuite extends munit.FunSuite {
     assert(!VMArithmetic.dppLaneEnabled(0, 0xe, 0xf))
     assert(VMArithmetic.dppLaneEnabled(1, 0xf, 0xd))
     assert(!VMArithmetic.dppLaneEnabled(4, 0xf, 0xd))
-    assertEquals(
-      Vec[VMState.Lane](0, 4, 15, 16).map(lane => VMArithmetic.dppSourceLane(lane, 0x124).map(_.raw)),
-      Vec(Some(12), Some(0), Some(11), Some(28))
-    )
-    assertEquals(
-      Vec[VMState.Lane](0, 16, 32, 48).map(lane => VMArithmetic.dppSourceLane(lane, 0x142).map(_.raw)),
-      Vec(None, Some(15), Some(31), Some(47))
-    )
-    assertEquals(
-      Vec[VMState.Lane](0, 16, 32, 48).map(lane => VMArithmetic.dppSourceLane(lane, 0x143).map(_.raw)),
-      Vec(None, None, Some(31), Some(31))
-    )
+    def sources(lanes: Vec[VMState.Lane], control: Int): Vec[Option[Int]] =
+      lanes.map { lane =>
+        val source = VMArithmetic.dppSourceLane(lane, control)
+        Option.when(source.isValid)(source.lane.raw)
+      }
+    assertEquals(sources(Vec(0, 4, 15, 16), 0x124), Vec(Some(12), Some(0), Some(11), Some(28)))
+    assertEquals(sources(Vec(0, 16, 32, 48), 0x142), Vec(None, Some(15), Some(31), Some(47)))
+    assertEquals(sources(Vec(0, 16, 32, 48), 0x143), Vec(None, None, Some(31), Some(31)))
   }
 }

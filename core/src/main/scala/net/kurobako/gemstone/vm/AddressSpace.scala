@@ -5,11 +5,84 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
+import scala.runtime.LongRef
 
 object AddressSpace {
   enum Location {
     case Within(allocation: AllocationId, offset: Long >= 0)
     case Absolute(address: GuestAddress)
+  }
+
+  val Ready: Either[Fault, Unit] = Right(())
+
+  trait ReadRanges {
+    def length: Int
+    def address(index: Int): GuestAddress
+    def size(index: Int): Int >= 0
+
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    inline final def foreach(inline f: (GuestAddress, Int >= 0) => Unit): Unit = {
+      var index = 0
+      while (index < length) {
+        f(address(index), size(index))
+        index += 1
+      }
+    }
+
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    inline final def forall(inline p: (GuestAddress, Int >= 0) => Boolean): Boolean = {
+      var index = 0
+      while (index < length && p(address(index), size(index))) index += 1
+      index == length
+    }
+
+    /** The ranges `keep` accepts; this batch itself when it accepts every one. */
+    final def filter(keep: (GuestAddress, Int >= 0) => Boolean): ReadRanges =
+      if (forall(keep)) this
+      else {
+        val kept = ReadRangeBuffer()
+        foreach((address, size) => if (keep(address, size)) kept.add(address, size))
+        kept
+      }
+  }
+
+  /** Reused by one worker, cleared and refilled for each instruction. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  class ReadRangeBuffer(capacity: Int > 0 = 32) extends ReadRanges {
+    private var addresses = Array.ofDim[Long](capacity.raw)
+    private var sizes     = Array.ofDim[Int](capacity.raw)
+    private var count     = 0
+
+    def length: Int                       = count
+    def isEmpty: Boolean                  = count == 0
+    def address(index: Int): GuestAddress = GuestAddress(addresses(index))
+    def size(index: Int): Int >= 0        = sizes(index).unsafe[Int >= 0]
+    def clear(): Unit                     = count = 0
+
+    def add(address: GuestAddress, size: Int >= 0): Unit = {
+      if (count == addresses.length) {
+        addresses = java.util.Arrays.copyOf(addresses, count * 2)
+        sizes = java.util.Arrays.copyOf(sizes, count * 2)
+      }
+      addresses(count) = address.raw
+      sizes(count) = size.raw
+      count += 1
+    }
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  def store(into: LongRef, read: Either[Fault, Long]): Fault | Null = read match {
+    case Left(fault)  => fault
+    case Right(value) =>
+      into.elem = value
+      null
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  inline def scalar(inline read: LongRef => Fault | Null): Either[Fault, Long] = {
+    val cell  = LongRef(0L)
+    val fault = read(cell)
+    if (fault == null) Right(cell.elem) else Left(fault)
   }
 
   /** A deferred read has not failed; the owner must flush staged reads before retrying. */
@@ -36,6 +109,13 @@ trait AddressSpace {
   def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): ReadResult[Long] =
     readValue(region, offset, size)
 
+  def readValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): Either[Fault, Long] =
+    read(region, offset, size.widen[Int >= 0]).map(LittleEndian.decode(_, 0, size.widen[Int in 0 ~ 8]))
+
+  /** Allocation-free [[readValue]] for hot paths, null on success; memories on a hot path override both. */
+  def readValueInto(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8, into: LongRef): Fault | Null =
+    AddressSpace.store(into, readValue(region, offset, size))
+
   /** Pointer bytes use canonical addresses shared by all dispatches. Relocation metadata must not cache or replay them.
     */
   def hasNativePointers(region: AllocationId): Boolean = false
@@ -59,14 +139,6 @@ trait AddressSpace {
       bytes: Vec[Byte]
   ): Either[Fault, Unit]
 
-  def readValue(
-      region: AllocationId,
-      offset: Long >= 0,
-      size: Int in 1 ~ 8
-  ): Either[Fault, Long] =
-    read(region, offset, size.widen[Int >= 0])
-      .map(bytes => LittleEndian.decode(bytes, 0, size.widen[Int in 0 ~ 8]))
-
   def writeValue(
       region: AllocationId,
       offset: Long >= 0,
@@ -82,9 +154,9 @@ trait AddressSpace {
   )(@scala.annotation.unused update: Long => Long): Either[Fault, Long] =
     Left(Fault.Unsupported("memory does not support atomic modification"))
 
-  def prepareReads(@scala.annotation.unused ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] = Right(())
+  def prepareReads(@scala.annotation.unused ranges: ReadRanges): Either[Fault, Unit] = Ready
 
-  def prepareSystemReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] = prepareReads(ranges)
+  def prepareSystemReads(ranges: ReadRanges): Either[Fault, Unit] = prepareReads(ranges)
 
   def address(
       region: AllocationId,
@@ -119,12 +191,20 @@ trait AddressSpace {
   def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
     resolve(address, bytes.nonNegativeSize)(write(_, _, bytes))
 
-  /** Scalar form of [[read]], preserving a backing memory's allocation-free scalar implementation. */
   def readValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
-    resolve(address, size.widen[Int >= 0])(readValue(_, _, size))
+    locate(address, size.widen[Int >= 0]).flatMap {
+      case Location.Within(allocation, offset) => readValue(allocation, offset, size)
+      case Location.Absolute(absolute)         =>
+        Left(Fault.Unsupported(s"absolute address ${absolute.show} requires an address-backed memory"))
+    }
 
-  def readSystemValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
-    readValue(address, size)
+  def readValueInto(address: GuestAddress, size: Int in 1 ~ 8, into: LongRef): Fault | Null =
+    AddressSpace.store(into, readValue(address, size))
+
+  def readSystemValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] = readValue(address, size)
+
+  def readSystemValueInto(address: GuestAddress, size: Int in 1 ~ 8, into: LongRef): Fault | Null =
+    AddressSpace.store(into, readSystemValue(address, size))
 
   /** Scalar form of [[write]], preserving a backing memory's allocation-free scalar implementation. */
   def writeValue(

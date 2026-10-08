@@ -60,42 +60,55 @@ private object ControlOps {
     }
   }
 
-  /** The consecutive OpPhi instructions at one block entry read their predecessor values before any is written. */
+  /** The consecutive OpPhi instructions at one block entry read their predecessor values before any is written. A phi
+    * is scalar when its destination and every incoming value live in the scalar bank, so it stages bare bits.
+    */
   private class Phi(
       dests: Array[Int],
       types: Array[Int],
       parents: Array[Array[Int]],
       sources: Array[Array[Int]],
+      scalar: Array[Boolean],
       next: Int
   ) extends Op {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    private def edge(labels: Array[Int], predecessor: Int): Int = {
+      var index = labels.length - 1
+      while (index >= 0 && labels(index) != predecessor) index -= 1
+      index
+    }
+
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
     def run(execution: InvocationState, memory: MemoryState): AddressSpace.ReadResult[Unit] = {
-      val values  = execution.values
-      val staged  = Array.ofDim[VMValue](dests.length)
-      var index   = 0
-      var failure = Option.empty[Fault]
-      while (index < dests.length && failure.isEmpty) {
-        val edge = parents(index).indexOf(execution.predecessor)
-        val read = if (edge < 0) None else values.get(sources(index)(edge))
-        read match {
+      val values                = execution.values
+      val bits                  = execution.phiBits(dests.length)
+      val staged                = execution.phiValues(dests.length)
+      var index                 = 0
+      var missing: Fault | Null = null
+      while (index < dests.length && missing == null) {
+        val incoming = edge(parents(index), execution.predecessor)
+        if (incoming >= 0 && scalar(index)) bits(index) = values.scalars(sources(index)(incoming))
+        else (if (incoming < 0) None else values.get(sources(index)(incoming))) match {
           case Some(value) => staged(index) = retag(value, types(index))
           case None        =>
-            failure = Some(
+            missing =
               Fault.InvalidRequest(s"OpPhi %${dests(index)} has no incoming value for label %${execution.predecessor}")
-            )
         }
         index += 1
       }
-      failure match {
-        case Some(fault) => Left(fault)
-        case None        =>
-          index = 0
-          while (index < dests.length) {
-            values.update(dests(index), staged(index))
-            index += 1
+      if (missing != null) Left(missing)
+      else {
+        index = 0
+        while (index < dests.length) {
+          if (scalar(index)) values.scalars(dests(index)) = bits(index)
+          else {
+            values.update(dests(index), staged(index).nn)
+            staged(index) = null
           }
-          execution.pc = next
-          Done
+          index += 1
+        }
+        execution.pc = next
+        Done
       }
     }
   }
@@ -119,11 +132,15 @@ private object ControlOps {
         // A later pair for the same parent wins, as in a sequential scan.
         def edges(incoming: Vec[Operand]): Vector[(Int, Int)] =
           incoming.reverseIterator.map(pair => pair.words(1).raw -> pair.words(0).raw).toVector.distinctBy(_._1)
+        val sources = phis.map(phi => edges(phi._3).map(_._2).toArray).toArray
         Phi(
           phis.map(_._2).toArray,
           phis.map(_._1).toArray,
           phis.map(phi => edges(phi._3).map(_._1).toArray).toArray,
-          phis.map(phi => edges(phi._3).map(_._2).toArray).toArray,
+          sources,
+          phis.indices.map(index =>
+            site.program.scalarSlot(phis(index)._2) && sources(index).forall(site.program.scalarSlot)
+          ).toArray,
           site.pc + group.size
         )
     }

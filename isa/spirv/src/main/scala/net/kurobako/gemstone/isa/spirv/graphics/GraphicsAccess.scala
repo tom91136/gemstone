@@ -10,6 +10,7 @@ import net.kurobako.gemstone.graphics.GraphicsProtocol.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
+import scala.runtime.LongRef
 
 private object GraphicsAccess {
   case class Failure(fault: Fault) extends RuntimeException(fault.message)
@@ -84,14 +85,20 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
     else localRange(region, offset, bytes.nonNegativeSize).map { (target, start) =>
       val _ = bytes.copyToArray(target, start.raw)
     }
-  override def readValue(
+  override def readValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): Either[Fault, Long] =
+    AddressSpace.scalar(readValueInto(region, offset, size, _))
+  override def readValueInto(
       region: AllocationId,
       offset: Long >= 0,
-      size: Int in 1 ~ 8
-  ): Either[Fault, Long] =
-    if (index(region) < 0) backing.readValue(region, offset, size)
-    else localRange(region, offset, size).map((bytes, start) =>
-      LittleEndian.decode(bytes, start.raw, size.widen[Int in 0 ~ 8])
+      size: Int in 1 ~ 8,
+      into: LongRef
+  ): Fault | Null =
+    if (index(region) < 0) backing.readValueInto(region, offset, size, into)
+    else AddressSpace.store(
+      into,
+      localRange(region, offset, size).map((bytes, start) =>
+        LittleEndian.decode(bytes, start.raw, size.widen[Int in 0 ~ 8])
+      )
     )
   override def writeValue(
       region: AllocationId,
@@ -124,6 +131,9 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
     if (isScratch(address)) super.readDeferred(address, size) else backing.readDeferred(address, size)
   override def readValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
     if (isScratch(address)) super.readValue(address, size) else backing.readValue(address, size)
+  override def readValueInto(address: GuestAddress, size: Int in 1 ~ 8, into: LongRef): Fault | Null =
+    if (isScratch(address)) AddressSpace.store(into, super.readValue(address, size))
+    else backing.readValueInto(address, size, into)
   override def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
     if (isScratch(address)) super.write(address, bytes) else backing.write(address, bytes)
   override def writeValue(address: GuestAddress, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
@@ -146,8 +156,8 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
         localRange(region, offset, size).map(_ => AddressSpace.Location.Within(region, offset))
       }
     }
-  override def prepareReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] =
-    backing.prepareReads(ranges.filter { case (address, _) => !isScratch(address) })
+  override def prepareReads(ranges: AddressSpace.ReadRanges): Either[Fault, Unit] =
+    backing.prepareReads(ranges.filter((address, _) => !isScratch(address)))
   override def defersHostReads: Boolean               = backing.defersHostReads
   override def flushHostReads(): Either[Fault, Unit]  = backing.flushHostReads()
   override def flushHostWrites(): Either[Fault, Unit] = backing.flushHostWrites()
@@ -155,8 +165,9 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
   override def fenceHostMemory(): Either[Fault, Unit] = backing.fenceHostMemory()
 
   def prepare(ranges: IterableOnce[GraphicsRange]): Unit = {
-    val reads = Vec.from(ranges).distinct.map { range =>
-      GraphicsAccess.get(address(range.allocation, range.offset)) -> range.size.toIntExact.widen[Int >= 0]
+    val reads = AddressSpace.ReadRangeBuffer()
+    Vec.from(ranges).distinct.foreach { range =>
+      reads.add(GraphicsAccess.get(address(range.allocation, range.offset)), range.size.toIntExact.widen[Int >= 0])
     }
     GraphicsAccess.get(prepareReads(reads))
   }

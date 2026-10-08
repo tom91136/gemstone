@@ -16,7 +16,7 @@ private object VMControlCompiler {
     import context.*
     def barrier(operand: Operand): VMIR.Register = {
       if (!VMOperand.isRegister(operand, RegisterBank.B)) unsupported("invalid convergence barrier register")
-      VMRegisters.barrier(
+      registerLayout.barrier(
         VMOperand.registerIndex(operand).raw.refine[Int in 0 ~ 15].getOrElse(
           unsupported("convergence barrier register is outside B0-B15")
         )

@@ -52,12 +52,14 @@ private object VMCompiler {
       functions: Vec[DecodedFunction],
       globalSymbols: Map[NonEmpty[String], GuestAddress] = Map.empty
   ): Either[NonEmpty[String], VMIR.Kernel] =
-    lower(module, kernel, functions, globalSymbols).flatMap(VMAssembler.assemble).map { program =>
+    lowerKernel(module, kernel, functions, globalSymbols).flatMap { (statements, registerCount) =>
+      VMAssembler.assemble(statements).map(_ -> registerCount)
+    }.map { (program, registerCount) =>
       val constants = module.sections.find(_.name == s".nv.constant0.${kernel.name}").fold(Vec.empty[Byte])(_.bytes)
       val block     = constants.slice(kernel.parameterBase.raw, kernel.parameterBase.raw + kernel.parameterSize.raw)
       VMIR.Kernel(
         Entry(
-          Routine(kernel.name, program),
+          Routine(kernel.name, program, registerCount, VMRegisters.PredicateCount),
           kernel.parameters.map(parameter =>
             KernelParameter(s"param${parameter.ordinal}", parameter.offset, parameter.size)
           ),
@@ -72,7 +74,16 @@ private object VMCompiler {
       kernel: Cubin.Kernel,
       functions: Vec[DecodedFunction],
       boundSymbols: Map[NonEmpty[String], GuestAddress] = Map.empty
-  ): Either[NonEmpty[String], Vec[VMAssembler.Statement]] = try {
+  ): Either[NonEmpty[String], Vec[VMAssembler.Statement]] =
+    lowerKernel(module, kernel, functions, boundSymbols).map(_._1)
+
+  /** The kernel's statements and the register slots its lanes need. */
+  private def lowerKernel(
+      module: Cubin.Module,
+      kernel: Cubin.Kernel,
+      functions: Vec[DecodedFunction],
+      boundSymbols: Map[NonEmpty[String], GuestAddress]
+  ): Either[NonEmpty[String], (Vec[VMAssembler.Statement], Int >= 0)] = try {
     val generation = Generation.of(module.sm)
     if (kernel.requiredCluster != LaunchGeometry.Dimensions.One || kernel.explicitCluster)
       fail("kernel requires unsupported thread-block cluster launch geometry")
@@ -89,7 +100,8 @@ private object VMCompiler {
       .fold(error => fail(error.raw), identity)
     val function     = LegacyAddressRewrite(module.sm.raw, resolveLegacyTargets(generation, original))
     val instructions = function.instructions
-    val reductions   = LegacyRangeReduction.inputs(module.sm.raw, function)
+    val layout       = VMRegisters.Layout.of(kernel, functions)
+    val reductions   = LegacyRangeReduction.inputs(module.sm.raw, function, layout)
     def is[A <: SASSInstruction](instruction: DecodedInstruction)(using scala.reflect.TypeTest[SASSInstruction, A]) =
       VMOperand.is[A](instruction.operation)
     def at(address: Int): Option[DecodedInstruction] = instructions.find(_.address.raw == address)
@@ -152,7 +164,7 @@ private object VMCompiler {
         val branch = transfer.toVec.flatMap { token =>
           val predication = instruction.guard.map(_ => ExecutionPredicate(VMRegisters.Predicate.Guard.slot, false))
           val unwind      = legacyControl.toVec.flatMap(_.unwound(instruction)).map(enclosed =>
-            Execute(Convergence(VMRegisters.barrier(enclosed.slot), ConvergenceAction.Break), predication)
+            Execute(Convergence(layout.barrier(enclosed.slot), ConvergenceAction.Break), predication)
           )
           unwind :+ VMAssembler.Statement.Branch(s"L${token.target.raw.toHexString}", predication)
         }
@@ -166,11 +178,12 @@ private object VMCompiler {
               returnBases,
               addresses,
               boundSymbols,
-              reductions.get(instruction.address.raw),
-              textRelocations.get(instruction.address)
+              reductions.inputs.get(instruction.address.raw),
+              textRelocations.get(instruction.address),
+              layout
             ).compile() ++ branch
         val arrivals = legacyTokens.filter(_.target == instruction.address).reverse.map(token =>
-          Execute(Convergence(VMRegisters.barrier(token.slot), ConvergenceAction.Synchronise))
+          Execute(Convergence(layout.barrier(token.slot), ConvergenceAction.Synchronise))
         )
         statements.take(1) ++ arrivals ++ statements.drop(1)
       } catch {
@@ -180,16 +193,24 @@ private object VMCompiler {
       }
     }
     val zero = Value.Immediate(0L)
-    Right(Vec(
-      Execute(SetPredicate(VMRegisters.Predicate.True.slot, Comparison.Equal, NumericFormat.Unsigned(32), zero, zero)),
-      Execute(SetPredicate(
-        VMRegisters.Predicate.False.slot,
-        Comparison.NotEqual,
-        NumericFormat.Unsigned(32),
-        zero,
-        zero
-      ))
-    ) ++ lowered)
+    Right(
+      Vec(
+        Execute(SetPredicate(
+          VMRegisters.Predicate.True.slot,
+          Comparison.Equal,
+          NumericFormat.Unsigned(32),
+          zero,
+          zero
+        )),
+        Execute(SetPredicate(
+          VMRegisters.Predicate.False.slot,
+          Comparison.NotEqual,
+          NumericFormat.Unsigned(32),
+          zero,
+          zero
+        ))
+      ) ++ lowered -> layout.registerCount(reductions.count)
+    )
   } catch { case NonFatal(error) => Left(throwables.detail(error)) }
 
   private class InstructionCompiler(
@@ -200,7 +221,8 @@ private object VMCompiler {
       val addresses: Vec[Int],
       val boundSymbols: Map[NonEmpty[String], GuestAddress],
       val reducedRadians: Option[Value.Register],
-      val textRelocation: Option[Cubin.TextRelocation]
+      val textRelocation: Option[Cubin.TextRelocation],
+      val registerLayout: VMRegisters.Layout
   ) extends VMCompilationContext {
     private val code         = ArrayBuffer.empty[VMAssembler.Statement]
     private val writtenFlags = scala.collection.mutable.Set.empty[VMConditionCodes.Flag]
@@ -218,7 +240,7 @@ private object VMCompiler {
       temporaryCount += 1
       temporaryCount - 1
     }
-    def temp(): Value.Register           = Value.Register(VMRegisters.temporary(nextTemporary()))
+    def temp(): Value.Register           = Value.Register(registerLayout.temporary(nextTemporary()))
     def predicateTemp(): Value.Predicate = Value.Predicate(VMRegisters.temporaryPredicate(nextTemporary()))
 
     def emit(value: VMIR.Instruction): Unit = {

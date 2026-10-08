@@ -7,6 +7,10 @@ object VMLaneMask {
   val WordCount: Int    = MaximumLanes / java.lang.Long.SIZE
   val Empty: VMLaneMask = VMLaneMask(Array.fill(WordCount)(0L), 0, 0)
 
+  // Indexed by lane count so the per-instruction size query does not allocate.
+  private val PositiveSizes: Array[Option[Int in 1 ~ 1024]] =
+    Array.tabulate(MaximumLanes + 1)(count => Option.when(count > 0)(count.unsafe[Int in 1 ~ 1024]))
+
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def all(laneCount: Int in 1 ~ 1024): VMLaneMask = {
     val words = Array.fill(WordCount)(0L)
@@ -42,7 +46,7 @@ object VMLaneMask {
 }
 
 /** Compact immutable set of active lanes. */
-class VMLaneMask private (
+class VMLaneMask @scala.annotation.publicInBinary private (
     private val words: Array[Long],
     private val count: Int in 0 ~ 1024,
     private val limit: Int
@@ -50,9 +54,8 @@ class VMLaneMask private (
   def isEmpty: Boolean                      = count.raw == 0
   def nonEmpty: Boolean                     = count.raw != 0
   def size: Int in 0 ~ 1024                 = count
-  def positiveSize: Option[Int in 1 ~ 1024] =
-    Option.when(nonEmpty)(count.raw.unsafe[Int in 1 ~ 1024])
-  def headOption: Option[WorkgroupLane] = {
+  def positiveSize: Option[Int in 1 ~ 1024] = VMLaneMask.PositiveSizes(count.raw)
+  def headOption: Option[WorkgroupLane]     = {
     val wordIndex = words.indexWhere(_ != 0L)
     Option.when(wordIndex >= 0)(WorkgroupLane.fromIndex((wordIndex << 6) +
       java.lang.Long.numberOfTrailingZeros(words(wordIndex))))
@@ -81,7 +84,7 @@ class VMLaneMask private (
     else combine(other, (left, right) => left & ~right)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def filterLanes(predicate: WorkgroupLane => Boolean): VMLaneMask =
+  inline def filterLanes(inline predicate: WorkgroupLane => Boolean): VMLaneMask =
     if (count.raw == 0) VMLaneMask.Empty
     else {
       var filtered = words
@@ -117,7 +120,7 @@ class VMLaneMask private (
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def combine(other: VMLaneMask, operation: (Long, Long) => Long): VMLaneMask = {
+  private inline def combine(other: VMLaneMask, inline operation: (Long, Long) => Long): VMLaneMask = {
     var combined   = words
     var size       = 0
     var last       = 0
@@ -139,7 +142,7 @@ class VMLaneMask private (
   }
 
   override def equals(other: Any): Boolean = other match {
-    case that: VMLaneMask => count == that.count && java.util.Arrays.equals(words, that.words)
+    case that: VMLaneMask => count.raw == that.count.raw && java.util.Arrays.equals(words, that.words)
     case _                => false
   }
 

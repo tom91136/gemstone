@@ -13,40 +13,38 @@ import scala.collection.mutable
 private object VMLoader {
   import Operand.*
 
-  def tables(module: Module): Either[Fault, Tables] = Pass(module).tables()
+  // The tables stay locals: held as fields of a per-call object, they crash the Scala Native tests in HashMap lookups.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
+  def tables(module: Module): Either[Fault, Tables] = {
+    val types                   = mutable.HashMap.empty[Int, RuntimeType]
+    val constants               = mutable.HashMap.empty[Int, Constant]
+    val globals                 = mutable.HashMap.empty[Int, Global]
+    val descriptorSets          = mutable.HashMap.empty[Int, Int >= 0]
+    val descriptorSlots         = mutable.HashMap.empty[Int, Int >= 0]
+    val builtins                = mutable.HashMap.empty[Int, Int]
+    val arrayStrides            = mutable.HashMap.empty[Int, Int > 0]
+    val memberOffsets           = mutable.HashMap.empty[(Int, Int), Int >= 0]
+    val matrixStrides           = mutable.HashMap.empty[(Int, Int), Int > 0]
+    val rowMajorMatrices        = mutable.HashSet.empty[(Int, Int)]
+    val packedStructures        = mutable.HashSet.empty[Int]
+    val byValueParameters       = mutable.HashSet.empty[Int]
+    val saturatedConversions    = mutable.HashSet.empty[Int]
+    val roundingModes           = mutable.HashMap.empty[Int, Int]
+    val extendedInstructionSets = mutable.HashMap.empty[Int, NonEmpty[String]]
+    val entryPoints             = mutable.HashMap.empty[NonEmpty[String], Int]
+    val entryPointInterfaces    = mutable.HashMap.empty[NonEmpty[String], Set[Int]]
+    val vulkanEntries           = mutable.HashSet.empty[NonEmpty[String]]
+    val graphicsEntries         = mutable.HashSet.empty[NonEmpty[String]]
+    val subgroupSizes           = mutable.HashMap.empty[Int, Int > 0]
+    val workGroupSizes          = mutable.HashMap.empty[Int, LaunchGeometry.Dimensions]
+    val workGroupSizeHints      = mutable.HashMap.empty[Int, LaunchGeometry.Dimensions]
+    val localSizeIds            = mutable.ArrayBuffer.empty[(Int, Operand)]
+    val functions               = mutable.HashMap.empty[Int, Function]
+    val names                   = mutable.HashMap.empty[Int, String]
+    val valueTypes              = mutable.HashMap.empty[Int, Int]
+    var largestId               = 0
 
-  /** The mutable tables of one pass over a module's instruction stream. */
-  private class Pass(module: Module) {
-    private val types                   = mutable.HashMap.empty[Int, RuntimeType]
-    private val constants               = mutable.HashMap.empty[Int, Constant]
-    private val globals                 = mutable.HashMap.empty[Int, Global]
-    private val descriptorSets          = mutable.HashMap.empty[Int, Int >= 0]
-    private val descriptorSlots         = mutable.HashMap.empty[Int, Int >= 0]
-    private val builtins                = mutable.HashMap.empty[Int, Int]
-    private val arrayStrides            = mutable.HashMap.empty[Int, Int > 0]
-    private val memberOffsets           = mutable.HashMap.empty[(Int, Int), Int >= 0]
-    private val matrixStrides           = mutable.HashMap.empty[(Int, Int), Int > 0]
-    private val rowMajorMatrices        = mutable.HashSet.empty[(Int, Int)]
-    private val packedStructures        = mutable.HashSet.empty[Int]
-    private val byValueParameters       = mutable.HashSet.empty[Int]
-    private val saturatedConversions    = mutable.HashSet.empty[Int]
-    private val roundingModes           = mutable.HashMap.empty[Int, Int]
-    private val extendedInstructionSets = mutable.HashMap.empty[Int, NonEmpty[String]]
-    private val entryPoints             = mutable.HashMap.empty[NonEmpty[String], Int]
-    private val entryPointInterfaces    = mutable.HashMap.empty[NonEmpty[String], Set[Int]]
-    private val vulkanEntries           = mutable.HashSet.empty[NonEmpty[String]]
-    private val graphicsEntries         = mutable.HashSet.empty[NonEmpty[String]]
-    private val subgroupSizes           = mutable.HashMap.empty[Int, Int > 0]
-    private val workGroupSizes          = mutable.HashMap.empty[Int, LaunchGeometry.Dimensions]
-    private val workGroupSizeHints      = mutable.HashMap.empty[Int, LaunchGeometry.Dimensions]
-    private val localSizeIds            = mutable.ArrayBuffer.empty[(Int, Operand)]
-    private val functions               = mutable.HashMap.empty[Int, Function]
-    private val names                   = mutable.HashMap.empty[Int, String]
-    private val valueTypes              = mutable.HashMap.empty[Int, Int]
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private var largestId = 0
-
-    private def define(dest: Operand): Either[Fault, Int] = {
+    def define(dest: Operand): Either[Fault, Int] = {
       val value = id(dest)
       largestId = math.max(largestId, value)
       Either.cond(
@@ -57,7 +55,7 @@ private object VMLoader {
     }
 
     // Result ids follow the grammar's operand shapes; hand-built operands may carry any kind.
-    private def record(instruction: Instruction): Either[Fault, Unit] = {
+    def record(instruction: Instruction): Either[Fault, Unit] = {
       val shapes = instruction.definition.shapes
       if (shapes.size >= 2 && shapes(0).kind == OperandKind.IdResultType && shapes(1).kind == OperandKind.IdResult)
         define(instruction.operands(1)).map { value =>
@@ -68,125 +66,8 @@ private object VMLoader {
       else Right(())
     }
 
-    // Module decoding fills indexed tables in one pass and stops at the first malformed instruction.
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
-    def tables(): Either[Fault, Tables] = {
-      module.instructions.foreach {
-        case Instruction.Name(target, name) => names.update(id(target), LiteralString.decode(name))
-        // Optimised and linked modules may omit OpName for imported builtins but keep LinkageAttributes.
-        case Instruction.Decorate(target, decoration)
-            if decoration.words.length >= 2 && unsigned(decoration) == Decoration.LinkageAttributes =>
-          names.update(id(target), LiteralString.decode(decoration.words.drop(1)))
-        case _ => ()
-      }
-
-      var index = 0
-      while (index < module.instructions.size) {
-        val instruction = module.instructions(index)
-        record(instruction) match {
-          case Left(error) => return Left(error)
-          case Right(())   => ()
-        }
-        instruction match {
-          case Instruction.Function(_, dest, _, _) =>
-            function(dest, index) match {
-              case Left(error) => return Left(error)
-              case Right(end)  => index = end
-            }
-          case _ =>
-            declare(instruction).flatMap(_ => decorate(instruction)).flatMap(_ => entry(instruction)) match {
-              case Left(error) => return Left(error)
-              case Right(())   => ()
-            }
-        }
-        index += 1
-      }
-      // Constant builtins resolve after the complete stream, including forward declarations.
-      // OpenCL also uses WorkgroupSize on input variables; the dispatch supplies those.
-      val builtinSize = builtins.toSeq.collect {
-        case (variable, BuiltIn.WorkgroupSize) if constants.contains(variable) => variable
-      }.sorted.foldLeft[Either[Fault, Option[LaunchGeometry.Dimensions]]](Right(None)) { (result, variable) =>
-        result.flatMap { previous =>
-          constants(variable) match {
-            case Constant.Bits(_, lanes) if lanes.size == 3 =>
-              positiveTriple(lanes(0), lanes(1), lanes(2))
-                .toRight(
-                  Fault.InvalidRequest(
-                    s"SPIR-V WorkgroupSize %$variable has invalid dimensions: ${lanes.mkString(", ")}"
-                  )
-                )
-                .flatMap { size =>
-                  if (previous.exists(_ != size)) Left(Fault.InvalidRequest("SPIR-V WorkgroupSize constants disagree"))
-                  else Right(Some(size))
-                }
-            case _ => Left(Fault.InvalidRequest(s"SPIR-V WorkgroupSize %$variable must have three integer components"))
-          }
-        }
-      } match {
-        case Left(error)  => return Left(error)
-        case Right(value) => value
-      }
-
-      localSizeIds.foreach { case (entryPoint, mode) =>
-        localSizeId(constants, mode, entryPoint, workGroupSizes, workGroupSizeHints)
-      }
-      val invalidDescriptorArray = vulkanEntries.nonEmpty && descriptorSlots.keys.view.exists { variable =>
-        globals.get(variable).exists { global =>
-          types.get(global.pointerType) match {
-            case Some(RuntimeType.Pointer(_, pointee)) => types.get(pointee) match {
-                case Some(RuntimeType.Array(element, count)) =>
-                  count.raw <= 0 || count.raw > 4096 || types.get(element).exists {
-                    case RuntimeType.Array(_, _) => true
-                    case _                       => false
-                  }
-                case _ => false
-              }
-            case _ => false
-          }
-        }
-      }
-      if (invalidDescriptorArray)
-        return Left(Fault.Unsupported("descriptor arrays require one fixed dimension of at most 4096 elements"))
-      val definedFunctions = functions.toMap
-      val definedNames     = names.toMap
-      Right(Tables(
-        module = module,
-        types = types.toMap,
-        constantData = constants.toMap,
-        globals = globals.toMap,
-        descriptorBindings = descriptorSlots.view.flatMap { case (variable, slot) =>
-          descriptorSets.get(variable).map(set => variable -> (set -> slot))
-        }.toMap,
-        builtins = builtins.toMap,
-        arrayStrides = arrayStrides.toMap,
-        memberOffsets = memberOffsets.toMap,
-        memberMatrixLayouts = matrixStrides.map { case (key, stride) =>
-          key -> MatrixLayout(stride, rowMajorMatrices.contains(key))
-        }.toMap,
-        packedStructures = packedStructures.toSet,
-        byValueParameters = byValueParameters.toSet,
-        saturatedConversions = saturatedConversions.toSet,
-        roundingModes = roundingModes.toMap,
-        extendedInstructionSets = extendedInstructionSets.toMap,
-        entryPoints = entryPoints.toMap,
-        entryPointInterfaces = entryPointInterfaces.toMap,
-        vulkanEntries = vulkanEntries.toSet,
-        graphicsEntries = graphicsEntries.toSet,
-        subgroupSizes = subgroupSizes.toMap,
-        workGroupSizes = workGroupSizes.toMap,
-        builtinWorkGroupSize = builtinSize,
-        workGroupSizeHints = workGroupSizeHints.toMap,
-        functions = definedFunctions,
-        names = definedNames,
-        collectiveFunctions = collectiveFunctions(module, definedFunctions, definedNames),
-        valueTypes = valueTypes.toMap,
-        idBound = largestId + 1
-      ))
-    }
-
     // Types, constants and module-scope variables.
-    @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
-    private def declare(instruction: Instruction): Either[Fault, Unit] = {
+    def declare(instruction: Instruction): Either[Fault, Unit] = {
       instruction match {
         case Instruction.TypeVoid(dest)                   => types.update(id(dest), RuntimeType.Void)
         case Instruction.TypeBool(dest)                   => types.update(id(dest), RuntimeType.Bool)
@@ -304,8 +185,7 @@ private object VMLoader {
     }
 
     // Decorations that the tables record per id or structure member.
-    @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
-    private def decorate(instruction: Instruction): Either[Fault, Unit] = {
+    def decorate(instruction: Instruction): Either[Fault, Unit] = {
       instruction match {
         case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 =>
           val argument = decoration.words(1)
@@ -374,8 +254,7 @@ private object VMLoader {
     }
 
     // Extended instruction sets, entry points and their execution modes.
-    @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
-    private def entry(instruction: Instruction): Either[Fault, Unit] = {
+    def entry(instruction: Instruction): Either[Fault, Unit] = {
       instruction match {
         case Instruction.ExtInstImport(dest, name) =>
           LiteralString.decode(name).refine[NonEmpty[String]] match {
@@ -422,8 +301,7 @@ private object VMLoader {
     }
 
     /** Records the function starting at `start` and returns the index of its OpFunctionEnd. */
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
-    private def function(dest: Operand, start: Int): Either[Fault, Int] = {
+    def function(dest: Operand, start: Int): Either[Fault, Int] = {
       val functionId = id(dest)
       val parameters = mutable.ArrayBuilder.make[(Int, Int)]
       val labels     = mutable.HashMap.empty[Int, Int]
@@ -447,6 +325,118 @@ private object VMLoader {
       functions.update(functionId, Function(functionId, Vec.from(parameters.result()), start, index, labels.toMap))
       Right(index)
     }
+
+    module.instructions.foreach {
+      case Instruction.Name(target, name) => names.update(id(target), LiteralString.decode(name))
+      // Optimised and linked modules may omit OpName for imported builtins but keep LinkageAttributes.
+      case Instruction.Decorate(target, decoration)
+          if decoration.words.length >= 2 && unsigned(decoration) == Decoration.LinkageAttributes =>
+        names.update(id(target), LiteralString.decode(decoration.words.drop(1)))
+      case _ => ()
+    }
+
+    var index = 0
+    while (index < module.instructions.size) {
+      val instruction = module.instructions(index)
+      record(instruction) match {
+        case Left(error) => return Left(error)
+        case Right(())   => ()
+      }
+      instruction match {
+        case Instruction.Function(_, dest, _, _) =>
+          function(dest, index) match {
+            case Left(error) => return Left(error)
+            case Right(end)  => index = end
+          }
+        case _ =>
+          declare(instruction).flatMap(_ => decorate(instruction)).flatMap(_ => entry(instruction)) match {
+            case Left(error) => return Left(error)
+            case Right(())   => ()
+          }
+      }
+      index += 1
+    }
+    // Constant builtins resolve after the complete stream, including forward declarations.
+    // OpenCL also uses WorkgroupSize on input variables; the dispatch supplies those.
+    val builtinSize = builtins.toSeq.collect {
+      case (variable, BuiltIn.WorkgroupSize) if constants.contains(variable) => variable
+    }.sorted.foldLeft[Either[Fault, Option[LaunchGeometry.Dimensions]]](Right(None)) { (result, variable) =>
+      result.flatMap { previous =>
+        constants(variable) match {
+          case Constant.Bits(_, lanes) if lanes.size == 3 =>
+            positiveTriple(lanes(0), lanes(1), lanes(2))
+              .toRight(
+                Fault.InvalidRequest(
+                  s"SPIR-V WorkgroupSize %$variable has invalid dimensions: ${lanes.mkString(", ")}"
+                )
+              )
+              .flatMap { size =>
+                if (previous.exists(_ != size)) Left(Fault.InvalidRequest("SPIR-V WorkgroupSize constants disagree"))
+                else Right(Some(size))
+              }
+          case _ => Left(Fault.InvalidRequest(s"SPIR-V WorkgroupSize %$variable must have three integer components"))
+        }
+      }
+    } match {
+      case Left(error)  => return Left(error)
+      case Right(value) => value
+    }
+
+    localSizeIds.foreach { case (entryPoint, mode) =>
+      localSizeId(constants, mode, entryPoint, workGroupSizes, workGroupSizeHints)
+    }
+    val invalidDescriptorArray = vulkanEntries.nonEmpty && descriptorSlots.keys.view.exists { variable =>
+      globals.get(variable).exists { global =>
+        types.get(global.pointerType) match {
+          case Some(RuntimeType.Pointer(_, pointee)) => types.get(pointee) match {
+              case Some(RuntimeType.Array(element, count)) =>
+                count.raw <= 0 || count.raw > 4096 || types.get(element).exists {
+                  case RuntimeType.Array(_, _) => true
+                  case _                       => false
+                }
+              case _ => false
+            }
+          case _ => false
+        }
+      }
+    }
+    if (invalidDescriptorArray)
+      return Left(Fault.Unsupported("descriptor arrays require one fixed dimension of at most 4096 elements"))
+    val definedFunctions = functions.toMap
+    val definedNames     = names.toMap
+    Right(Tables(
+      module = module,
+      types = types.toMap,
+      constantData = constants.toMap,
+      globals = globals.toMap,
+      descriptorBindings = descriptorSlots.view.flatMap { case (variable, slot) =>
+        descriptorSets.get(variable).map(set => variable -> (set -> slot))
+      }.toMap,
+      builtins = builtins.toMap,
+      arrayStrides = arrayStrides.toMap,
+      memberOffsets = memberOffsets.toMap,
+      memberMatrixLayouts = matrixStrides.map { case (key, stride) =>
+        key -> MatrixLayout(stride, rowMajorMatrices.contains(key))
+      }.toMap,
+      packedStructures = packedStructures.toSet,
+      byValueParameters = byValueParameters.toSet,
+      saturatedConversions = saturatedConversions.toSet,
+      roundingModes = roundingModes.toMap,
+      extendedInstructionSets = extendedInstructionSets.toMap,
+      entryPoints = entryPoints.toMap,
+      entryPointInterfaces = entryPointInterfaces.toMap,
+      vulkanEntries = vulkanEntries.toSet,
+      graphicsEntries = graphicsEntries.toSet,
+      subgroupSizes = subgroupSizes.toMap,
+      workGroupSizes = workGroupSizes.toMap,
+      builtinWorkGroupSize = builtinSize,
+      workGroupSizeHints = workGroupSizeHints.toMap,
+      functions = definedFunctions,
+      names = definedNames,
+      collectiveFunctions = collectiveFunctions(module, definedFunctions, definedNames),
+      valueTypes = valueTypes.toMap,
+      idBound = largestId + 1
+    ))
   }
 
   private def image(

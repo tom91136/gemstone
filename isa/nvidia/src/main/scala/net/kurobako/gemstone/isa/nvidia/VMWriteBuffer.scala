@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.nvidia
 
+import VMExecution.*
 import VMIR.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.binary.Widths.*
@@ -11,6 +12,12 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
 object VMWriteBuffer {
+  private final val ObjectWrite                                 = 0
+  private final val RegisterWrite                               = 1
+  private final val MemoryWrite                                 = 2
+  private final val SharedWrite                                 = 3
+  private final val LocalWrite                                  = 4
+  private final val ParameterWrite                              = 5
   def located(fault: Fault, pc: Pc, lane: WorkgroupLane): Fault = fault match {
     case Fault.Memory(detail) => Fault.Memory(s"pc $pc, lane $lane: $detail")
     case other                => other
@@ -27,21 +34,22 @@ object VMWriteBuffer {
   * and ordinary memory writes use parallel arrays to avoid allocating a [[VMWrite]] per lane.
   */
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
-class VMWriteBuffer {
+class VMWriteBuffer(capacity: Int > 0 = 64) {
   import VMWriteBuffer.*
 
-  private val ObjectWrite   = 0.toByte
-  private val RegisterWrite = 1.toByte
-  private val MemoryWrite   = 2.toByte
-  private var kinds         = Array.ofDim[Byte](64)
-  private var writes        = Array.ofDim[VMWrite | Null](64)
-  private var lanes         = Array.ofDim[WorkgroupLane](64)
-  private var registers     = Array.ofDim[Register](64)
-  private var values        = Array.ofDim[Long](64)
-  private var addresses     = Array.ofDim[Long](64)
-  private var widths        = Array.ofDim[ScalarBitWidth](64)
-  private var pending       = 0
-  private var system        = false
+  private var kinds      = Array.ofDim[Byte](capacity.raw)
+  private var writes     = Array.ofDim[VMWrite | Null](capacity.raw)
+  private var lanes      = Array.ofDim[WorkgroupLane](capacity.raw)
+  private var registers  = Array.ofDim[Register](capacity.raw)
+  private var parameters = Array.ofDim[Parameter](capacity.raw)
+  private var offsets    = Array.ofDim[Int >= 0](capacity.raw)
+  private var values     = Array.ofDim[Long](capacity.raw)
+  private var addresses  = Array.ofDim[Long](capacity.raw)
+  private var widths     = Array.ofDim[ScalarBitWidth](capacity.raw)
+  private var pending    = 0
+  private var system     = false
+  // Object writes staged since the last clear; only they hold references that clearing must drop.
+  private var objects = 0
 
   def stage(write: VMWrite): Unit = {
     write match {
@@ -51,6 +59,7 @@ class VMWriteBuffer {
     ensureCapacity()
     kinds(pending) = ObjectWrite
     writes(pending) = write
+    objects += 1
     pending += 1
   }
 
@@ -70,7 +79,7 @@ class VMWriteBuffer {
     val duplicate = previous >= 0 && kinds(previous) == MemoryWrite &&
       (lanes(previous).raw >>> 5) ==
       (lane.raw >>> 5) &&
-      addresses(previous) == address.raw && widths(previous) == width && values(previous) == value
+      addresses(previous) == address.raw && widths(previous).raw == width.raw && values(previous) == value
     if (!duplicate) {
       ensureCapacity()
       kinds(pending) = MemoryWrite
@@ -82,6 +91,37 @@ class VMWriteBuffer {
     }
   }
 
+  def stageShared(address: Long, width: ScalarBitWidth, value: Long): Unit = {
+    ensureCapacity()
+    kinds(pending) = SharedWrite
+    addresses(pending) = address
+    widths(pending) = width
+    values(pending) = value
+    pending += 1
+  }
+
+  def stageLocal(lane: WorkgroupLane, address: Long, width: ScalarBitWidth, value: Long): Unit = {
+    ensureCapacity()
+    kinds(pending) = LocalWrite
+    lanes(pending) = lane
+    addresses(pending) = address
+    widths(pending) = width
+    values(pending) = value
+    pending += 1
+  }
+
+  def stageParameter(lane: WorkgroupLane, parameter: Parameter, offset: Int >= 0, width: ScalarBitWidth, value: Long)
+      : Unit = {
+    ensureCapacity()
+    kinds(pending) = ParameterWrite
+    lanes(pending) = lane
+    parameters(pending) = parameter
+    offsets(pending) = offset
+    widths(pending) = width
+    values(pending) = value
+    pending += 1
+  }
+
   def clear(): Unit = clear(pending)
 
   private def ensureCapacity(): Unit =
@@ -91,13 +131,18 @@ class VMWriteBuffer {
       writes = java.util.Arrays.copyOf(writes, capacity)
       lanes = Array.copyOf(lanes, capacity)
       registers = Array.copyOf(registers, capacity)
+      parameters = Array.copyOf(parameters, capacity)
+      offsets = Array.copyOf(offsets, capacity)
       values = java.util.Arrays.copyOf(values, capacity)
       addresses = java.util.Arrays.copyOf(addresses, capacity)
       widths = Array.copyOf(widths, capacity)
     }
 
   private def validate(memory: AddressSpace, address: Long, size: Int >= 0): Either[Fault, Unit] =
-    memory.locate(GuestAddress(address), size).map(_ => ())
+    memory.locate(GuestAddress(address), size) match {
+      case Left(fault) => Left(fault)
+      case _           => Completed
+    }
 
   private def validate(memory: AddressSpace, write: VMWrite, pc: Pc): Either[Fault, Unit] = write match {
     case VMWrite.Memory(lane, address, width, _, _) =>
@@ -106,34 +151,39 @@ class VMWriteBuffer {
       validate(memory, address.raw, bytes.nonNegativeSize).left.map(located(_, pc, lane))
     case VMWrite.Atomic(lane, _, address, width, false, _) =>
       validate(memory, address, width.toScalarByteWidth).left.map(located(_, pc, lane))
-    case _ => Right(())
+    case _ => Completed
   }
 
   private def apply(frame: VMLanes, workgroup: VMWorkgroup, memory: AddressSpace, write: VMWrite): Either[Fault, Unit] =
     write match {
-      case VMWrite.Register(lane, register, value)   => Right(frame(lane).setRegister(register, value))
-      case VMWrite.Predicate(lane, predicate, value) => Right(frame(lane).setPredicate(predicate, value))
-      case VMWrite.ConditionFlag(lane, flag, value)  => Right(frame(lane).conditionCodes.write(flag, value))
-      case VMWrite.AddThreeCarry(lane, value)        => Right(frame(lane).conditionCodes.writeThreeInputCarry(value))
-      case VMWrite.Parameter(lane, parameter, offset, width, value) =>
-        Right(frame(lane).writeParameter(parameter, offset, width, value))
-      case VMWrite.ParameterBuffer(address, width, value) =>
-        Right(workgroup.buffer(address, width.toScalarByteWidth.widen).foreach((bytes, offset) =>
-          LittleEndian.write(value, bytes, offset, width.toScalarByteWidth)
-        ))
-      case VMWrite.Shared(address, width, value)           => Right(workgroup.writeShared(address, width, value))
-      case VMWrite.Local(lane, address, width, value)      => Right(workgroup.writeLocal(lane, address, width, value))
       case VMWrite.Memory(_, address, width, value, false) => memory.writeValue(address, value, width.toScalarByteWidth)
-      case VMWrite.Memory(_, _, _, _, true)                => Right(())
       case VMWrite.MemoryBytes(_, address, bytes)          => memory.write(address, bytes)
-      case VMWrite.Atomic(lane, destination, address, width, true, change) =>
-        val previous = Bits.truncate(workgroup.readShared(address, width), width)
-        workgroup.writeShared(address, width, update(previous, width, change))
-        Right(destination.foreach(frame(lane).setRegister(_, previous)))
       case VMWrite.Atomic(lane, destination, address, width, false, change) =>
-        memory.atomicModifyValue(GuestAddress(address), width.toScalarByteWidth)(update(_, width, change))
-          .map(previous => destination.foreach(frame(lane).setRegister(_, Bits.truncate(previous, width))))
+        memory.atomicModifyValue(GuestAddress(address), width.toScalarByteWidth)(update(_, width, change)) match {
+          case Left(fault)     => Left(fault)
+          case Right(previous) =>
+            destination.foreach(frame(lane).setRegister(_, Bits.truncate(previous, width)))
+            Completed
+        }
+      case _ =>
+        applyOnChip(frame, workgroup, write)
+        Completed
     }
+
+  private def applyOnChip(frame: VMLanes, workgroup: VMWorkgroup, write: VMWrite): Unit = write match {
+    case VMWrite.Predicate(lane, predicate, value)      => frame(lane).setPredicate(predicate, value)
+    case VMWrite.ConditionFlag(lane, flag, value)       => frame(lane).conditionCodes.write(flag, value)
+    case VMWrite.AddThreeCarry(lane, value)             => frame(lane).conditionCodes.writeThreeInputCarry(value)
+    case VMWrite.ParameterBuffer(address, width, value) =>
+      workgroup.withBuffer(address, width.toScalarByteWidth.widen)((bytes, offset) =>
+        LittleEndian.write(value, bytes, offset, width.toScalarByteWidth)
+      )(())
+    case VMWrite.Atomic(lane, destination, address, width, true, change) =>
+      val previous = Bits.truncate(workgroup.readShared(address, width), width)
+      workgroup.writeShared(address, width, update(previous, width, change))
+      destination.foreach(frame(lane).setRegister(_, previous))
+    case VMWrite.Memory(_, _, _, _, _) | VMWrite.MemoryBytes(_, _, _) | VMWrite.Atomic(_, _, _, _, false, _) => ()
+  }
 
   /** Validates every memory destination before applying anything, so a faulting instruction has no effect. */
   def commit(frame: VMLanes, workgroup: VMWorkgroup, memory: AddressSpace, pc: Pc): Either[Fault, Unit] = {
@@ -144,19 +194,20 @@ class VMWriteBuffer {
       val result =
         if (kinds(index) == ObjectWrite) validate(memory, writes(index).nn, pc)
         else if (kinds(index) == MemoryWrite)
-          validate(memory, addresses(index), widths(index).toScalarByteWidth).left.map(located(_, pc, lanes(index)))
-        else Right(())
-      result match {
-        case Left(fault) =>
-          clear(count)
-          return Left(fault)
-        case Right(()) => ()
+          validate(memory, addresses(index), widths(index).toScalarByteWidth) match {
+            case Left(fault) => Left(located(fault, pc, lanes(index)))
+            case valid       => valid
+          }
+        else Completed
+      if (result.isLeft) {
+        clear(count)
+        return result
       }
       index += 1
     }
     // System-scope stores publish together before any other effect of the instruction.
     val systemWritten =
-      if (!system) Right(())
+      if (!system) Completed
       else memory.writeSystemBatch(Vec.from((0 until count).flatMap { position =>
         if (kinds(position) != ObjectWrite) None
         else writes(position).nn match {
@@ -168,10 +219,19 @@ class VMWriteBuffer {
     var result = systemWritten
     while (index < count && result.isRight) {
       result =
-        if (kinds(index) == RegisterWrite) Right(frame(lanes(index)).setRegister(registers(index), values(index)))
-        else if (kinds(index) == MemoryWrite)
+        if (kinds(index) == RegisterWrite) {
+          frame(lanes(index)).setRegister(registers(index), values(index))
+          Completed
+        } else if (kinds(index) == MemoryWrite)
           memory.writeValue(GuestAddress(addresses(index)), values(index), widths(index).toScalarByteWidth)
-        else apply(frame, workgroup, memory, writes(index).nn)
+        else if (kinds(index) == ObjectWrite) apply(frame, workgroup, memory, writes(index).nn)
+        else {
+          if (kinds(index) == SharedWrite) workgroup.writeShared(addresses(index), widths(index), values(index))
+          else if (kinds(index) == LocalWrite)
+            workgroup.writeLocal(lanes(index), addresses(index), widths(index), values(index))
+          else frame(lanes(index)).writeParameter(parameters(index), offsets(index), widths(index), values(index))
+          Completed
+        }
       index += 1
     }
     clear(count)
@@ -179,12 +239,16 @@ class VMWriteBuffer {
   }
 
   private def clear(count: Int): Unit = {
-    var index = 0
-    while (index < count) {
-      writes(index) = null
-      index += 1
+    if (objects > 0) {
+      var index = 0
+      while (index < count) {
+        writes(index) = null
+        index += 1
+      }
+      objects = 0
     }
     pending = 0
     system = false
   }
+
 }

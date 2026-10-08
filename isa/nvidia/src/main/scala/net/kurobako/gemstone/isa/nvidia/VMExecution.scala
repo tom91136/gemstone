@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.nvidia
 import VMIR.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.vm.*
 
 object VMExecution {
   type BarrierId    = Int in 0 ~ 15
@@ -18,6 +19,10 @@ object VMExecution {
   )
 
   case class DeviceCall(function: DeviceFunction, lanes: VMLaneMask)
+
+  // Shared results keep the per-instruction path from allocating one per step.
+  val Completed: Either[Fault, Unit] = Right(())
+  val Advanced: Either[Fault, Step]  = Right(Step.Advance)
 
   enum Step {
     case Advance

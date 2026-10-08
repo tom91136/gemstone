@@ -331,8 +331,9 @@ class CodeObjectExecutionSuite extends munit.FunSuite {
           size: Int >= 0
       ): AddressSpace.ReadResult[Vec[Byte]] =
         if (pending.get()) Left(AddressSpace.Pending) else memory.read(region, offset, size)
-      override def prepareReads(ranges: Vec[(GuestAddress, Int >= 0)]): Either[Fault, Unit] = {
-        batches += ranges; Right(())
+      override def prepareReads(ranges: AddressSpace.ReadRanges): Either[Fault, Unit] = {
+        batches += Vec.tabulate(ranges.length)(index => (ranges.address(index), ranges.size(index)))
+        Right(())
       }
     }
     val tracked                                            = TrackedMemory()

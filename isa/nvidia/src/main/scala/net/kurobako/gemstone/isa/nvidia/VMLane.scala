@@ -9,6 +9,7 @@ import scala.collection.mutable
 
 object VMLane {
   private val NoValues     = Array.emptyLongArray
+  private val NoParameters = Array.empty[Array[Byte] | Null]
   private val DefinedTrue  = Some(true)
   private val DefinedFalse = Some(false)
 }
@@ -17,14 +18,23 @@ object VMLane {
   * registers read as zero and unwritten predicates as undefined.
   */
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-class VMLane {
+class VMLane(registerCount: Int >= 0, predicateCount: Int >= 0) {
   private var registers: Array[Long] = VMLane.NoValues
+  // Reused lane storage: clearing zeroes registers only up to this high-water mark.
+  private var used = 0
   // Two words per 64 predicates: the defined bits, then their values.
   private var predicates: Array[Long]                   = VMLane.NoValues
-  private var parameters: Array[Array[Byte] | Null]     = Array.empty
+  private var parameters: Array[Array[Byte] | Null]     = VMLane.NoParameters
   private var codes: VMConditionCodes | Null            = null
   private var returns: mutable.ArrayBuffer[Long] | Null = null
   var carry: Boolean                                    = false
+  reserve(registerCount, predicateCount)
+
+  def reserve(registerCount: Int >= 0, predicateCount: Int >= 0): Unit = {
+    if (registerCount.raw > registers.length) registers = java.util.Arrays.copyOf(registers, registerCount.raw)
+    val words = ((predicateCount.raw + 63) >>> 6) * 2
+    if (words > predicates.length) predicates = java.util.Arrays.copyOf(predicates, words)
+  }
 
   def register(register: Register): Long = {
     val index = register.raw
@@ -35,6 +45,7 @@ class VMLane {
     val index = register.raw
     if (index >= registers.length)
       registers = java.util.Arrays.copyOf(registers, math.max(index + 1, registers.length * 2))
+    if (index >= used) used = index + 1
     registers(index) = value
   }
 
@@ -57,27 +68,38 @@ class VMLane {
 
   /** Unwritten parameter bytes have unspecified contents, like local memory; they read as zero. */
   def readParameter(parameter: Parameter, offset: Int >= 0, size: Int in 0 ~ 8): Long =
-    parameterBytes(parameter) match {
-      case None        => 0L
-      case Some(bytes) => LittleEndian.decode(size)(index =>
+    storedParameter(parameter) match {
+      case null               => 0L
+      case bytes: Array[Byte] => LittleEndian.decode(size)(index =>
           if (offset.raw + index < bytes.length) bytes(offset.raw + index) else 0.toByte
         )
     }
 
   def writeParameter(parameter: Parameter, offset: Int >= 0, width: ScalarBitWidth, value: Long): Unit = {
     val end   = Math.addExact(offset.raw, width.toScalarByteWidth.raw)
-    val bytes = parameterBytes(parameter) match {
-      case Some(existing) if existing.length >= end => existing
-      case existing                                 =>
-        val grown = existing.fold(Array.ofDim[Byte](end))(java.util.Arrays.copyOf(_, end))
+    val bytes = storedParameter(parameter) match {
+      case existing: Array[Byte] if existing.length >= end => existing
+      case existing                                        =>
+        val grown = existing match {
+          case null                 => Array.ofDim[Byte](end)
+          case present: Array[Byte] => java.util.Arrays.copyOf(present, end)
+        }
         setParameterBytes(parameter, grown)
         grown
     }
     LittleEndian.write(value, bytes, offset.raw, width.toScalarByteWidth)
   }
 
-  def parameterBytes(parameter: Parameter): Option[Array[Byte]] =
-    if (parameter.raw < parameters.length) Option(parameters(parameter.raw)) else None
+  def parameterBytes(parameter: Parameter): Option[Array[Byte]] = Option(storedParameter(parameter))
+
+  def copyParameter(parameter: Parameter, target: VMLane, destination: Parameter): Unit =
+    storedParameter(parameter) match {
+      case bytes: Array[Byte] => target.setParameterBytes(destination, bytes.clone())
+      case null               => ()
+    }
+
+  private def storedParameter(parameter: Parameter): Array[Byte] | Null =
+    if (parameter.raw < parameters.length) parameters(parameter.raw) else null
 
   def setParameterBytes(parameter: Parameter, bytes: Array[Byte]): Unit = {
     val index = parameter.raw
@@ -103,9 +125,14 @@ class VMLane {
   }
 
   def clear(): Unit = {
-    java.util.Arrays.fill(registers, 0L)
+    java.util.Arrays.fill(registers, 0, used, 0L)
+    used = 0
     java.util.Arrays.fill(predicates, 0L)
-    parameters.indices.foreach(index => parameters(index) = null)
+    var index = 0
+    while (index < parameters.length) {
+      parameters(index) = null
+      index += 1
+    }
     codes match {
       case null     => ()
       case existing => existing.clear()

@@ -4,6 +4,7 @@ import VMIR.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
+import scala.runtime.LongRef
 
 /** The machine state visible to one instruction issue: the dispatch, the workgroup and the issuing frame and lanes. */
 @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -21,13 +22,23 @@ class VMContext(
   var pc: Pc             = Pc.Entry
   var active: VMLaneMask = VMLaneMask.Empty
 
+  // Reused by one instruction at a time, so per-lane memory reads allocate nothing.
+  val scalar: LongRef                     = LongRef(0L)
+  val reads: AddressSpace.ReadRangeBuffer = AddressSpace.ReadRangeBuffer()
+
   def lane(lane: WorkgroupLane): VMLane = frame.lanes(lane)
 
-  /** Every operand is resolved when lowered, so reading a value cannot fail. */
+  /** Every operand is resolved when lowered, so reading a value cannot fail. Registers and immediates are kept in this
+    * small method so the JIT inlines it into each lane loop.
+    */
   def read(lane: WorkgroupLane, value: Value): Long = value match {
-    case Value.Register(register)    => frame.lanes(lane).register(register)
+    case Value.Register(register)   => frame.lanes(lane).register(register)
+    case Value.Immediate(immediate) => immediate
+    case other                      => readOther(lane, other)
+  }
+
+  private def readOther(lane: WorkgroupLane, value: Value): Long = (value: @unchecked) match {
     case Value.Predicate(predicate)  => if (frame.lanes(lane).predicate(predicate).getOrElse(false)) 1L else 0L
-    case Value.Immediate(immediate)  => immediate
     case Value.Address(base, offset) => read(lane, base) + offset
     case Value.LocalBase             => frame.localBase
     case Value.DynamicSharedBytes    => dynamicSharedBytes.raw.toLong

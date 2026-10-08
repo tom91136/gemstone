@@ -174,6 +174,20 @@ private object VMInvocation {
     var fragmentKilled                                                 = false
     var sampleMask: Option[Pointer]                                    = None
 
+    // An OpPhi group stages its incoming values here so the group's copies take effect together.
+    private var stagedBits   = Array.ofDim[Long](4)
+    private var stagedValues = Array.ofDim[VMValue | Null](4)
+
+    def phiBits(count: Int): Array[Long] = {
+      if (stagedBits.length < count) stagedBits = Array.ofDim[Long](count)
+      stagedBits
+    }
+
+    def phiValues(count: Int): Array[VMValue | Null] = {
+      if (stagedValues.length < count) stagedValues = Array.ofDim[VMValue | Null](count)
+      stagedValues
+    }
+
     def reset(nextInvocation: Invocation, function: Function): Unit = {
       invocation = nextInvocation
       currentFunction = function

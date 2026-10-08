@@ -73,10 +73,13 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
   private val changed                                            = Addresses()
   private def atomicWidth(address: Long): Int in (0, 1, 2, 4, 8) =
     pages.get(number(address)).fold[Int in (0, 1, 2, 4, 8)](0)(_.atomicWidth(offset(address)))
-  private def contains(address: Long): Boolean = pages.get(number(address)).exists(_.valid.get(offset(address)))
-  private def byte(address: Long): Byte        = pages(number(address)).bytes(offset(address))
-  private def bytes(address: Long, size: Int): Vec[Byte] =
-    Vec.from((0 until size).map(index => byte(address + index.toLong)))
+  private def bytes(address: Long, size: Int): Vec[Byte] = {
+    val result = Array.ofDim[Byte](size)
+    spans(address, size)((number, offset, length, consumed) =>
+      Array.copy(pages(number).bytes, offset, result, consumed, length)
+    )
+    Vec.unsafeWrapArray(result)
+  }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def selectedDirty(selected: Vec[HostMemoryRange]): Addresses = {
@@ -115,17 +118,28 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
     result
   }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   def read(address: GuestAddress, size: Int >= 0): Option[Vec[Byte]] = {
+    val result = Array.ofDim[Byte](size.raw)
     var absent = false
-    for (index <- 0 until size.raw) {
-      val target = address.raw + index.toLong
-      if (!contains(target)) {
-        missing.add(target)
+    spans(address.raw, size.raw) { (number, offset, length, consumed) =>
+      val page = pages.getOrNull(number)
+      val end  = offset + length
+      if (page == null) {
+        missing.add(address.raw + consumed.toLong, length)
         absent = true
+      } else {
+        var gap = page.valid.nextClearBit(offset)
+        while (gap < end) {
+          val filled = math.min(page.valid.nextSetBit(gap) match { case -1 => end; case next => next }, end)
+          missing.add((number << 12) + gap.toLong, filled - gap)
+          absent = true
+          gap = page.valid.nextClearBit(filled)
+        }
+        if (!absent) Array.copy(page.bytes, offset, result, consumed, length)
       }
     }
-    if (absent) None else Some(bytes(address.raw, size.raw))
+    if (absent) None else Some(Vec.unsafeWrapArray(result))
   }
 
   def write(at: GuestAddress, values: Vec[Byte], atomicWidth: Int in (0, 1, 2, 4, 8) = 0): Unit = {

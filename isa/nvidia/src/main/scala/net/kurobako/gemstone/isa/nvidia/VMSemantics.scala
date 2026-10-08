@@ -20,24 +20,24 @@ import scala.collection.mutable
 object VMSemantics {
 
   def execute(instruction: Instruction, context: VMContext, effects: VMWriteBuffer): Either[Fault, Step] =
-    if (executeInteger(instruction, context) || executeFloatAndPredicate(instruction, context)) Right(Step.Advance)
+    if (executeInteger(instruction, context) || executeFloatAndPredicate(instruction, context)) Advanced
     else executeStaged(instruction, context, effects)
 
   // Preserve the first lane fault without evaluating later lanes after failure.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private inline def forEveryLane(context: VMContext)(inline function: WorkgroupLane => Either[Fault, Unit])
       : Either[Fault, Unit] = {
-    var failure: Option[Fault] = None
+    var failure: Either[Fault, Unit] = Completed
     context.active.foreachLane { lane =>
-      if (failure.isEmpty) function(lane) match {
-        case Left(fault) => failure = Some(fault)
-        case Right(())   => ()
-      }
+      if (failure.isRight) failure = function(lane)
     }
-    failure.toLeft(())
+    failure
   }
 
-  private inline def advance(result: Either[Fault, Unit]): Either[Fault, Step] = result.map(_ => Step.Advance)
+  private inline def advance(result: Either[Fault, Unit]): Either[Fault, Step] = result match {
+    case Left(fault) => Left(fault)
+    case _           => Advanced
+  }
 
   /** Routes one access to the parameter buffers, the workgroup's shared or thread-local storage, or device memory.
     * Generic addresses select a window by aperture; explicit global accesses still see parameter buffers. Explicit
@@ -52,28 +52,46 @@ object VMSemantics {
     case MemoryAccess.Shared => shared
     case MemoryAccess.Local  => local(context.frame.localBase + address)
     case _                   =>
-      context.workgroup.buffer(address, size) match {
-        case Some((bytes, offset))                                                => buffer(bytes, offset)
-        case None if access.generic && VMAddressSpace.isShared(address, size.raw) => shared
-        case None if access.generic && VMAddressSpace.isLocal(address)            => local(address)
-        case None                                                                 => global
-      }
+      context.workgroup.withBuffer(address, size)(buffer)(
+        if (access.generic && VMAddressSpace.isShared(address, size.raw)) shared
+        else if (access.generic && VMAddressSpace.isLocal(address)) local(address)
+        else global
+      )
   }
 
-  private def load(
+  /** Loads one value into `destination` without boxing it for the parameter, shared and local routes. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private def loadRegister(
       context: VMContext,
+      effects: VMWriteBuffer,
       lane: WorkgroupLane,
       access: MemoryAccess,
       address: Long,
-      width: ScalarBitWidth
-  ): Either[Fault, Long] = {
-    val size = width.toScalarByteWidth
+      width: ScalarBitWidth,
+      signed: Boolean,
+      destination: Register
+  ): Either[Fault, Unit] = {
+    val size                     = width.toScalarByteWidth
+    def stage(value: Long): Unit = effects.stageRegister(lane, destination, loadBits(value, width, signed))
     route(context, access, address, size.widen)(
-      (bytes, offset) => Right(LittleEndian.decode(bytes, offset, size.widen[Int in 0 ~ 8])),
-      Right(context.workgroup.readShared(address, width)),
-      local => Right(context.workgroup.readLocal(lane, local, width)),
-      (if (access.systemScoped) context.memory.readSystemValue(GuestAddress(address), size)
-       else context.memory.readValue(GuestAddress(address), size)).leftMap(VMWriteBuffer.located(_, context.pc, lane))
+      (bytes, offset) => {
+        stage(LittleEndian.decode(bytes, offset, size.widen[Int in 0 ~ 8]))
+        Completed
+      }, {
+        stage(context.workgroup.readShared(address, width))
+        Completed
+      },
+      local => {
+        stage(context.workgroup.readLocal(lane, local, width))
+        Completed
+      },
+      (if (access.systemScoped) context.memory.readSystemValueInto(GuestAddress(address), size, context.scalar)
+       else context.memory.readValueInto(GuestAddress(address), size, context.scalar)) match {
+        case null =>
+          stage(context.scalar.elem)
+          Completed
+        case fault: Fault => Left(VMWriteBuffer.located(fault, context.pc, lane))
+      }
     )
   }
 
@@ -87,8 +105,8 @@ object VMSemantics {
       value: Long
   ): Unit = route(context, access, address, width.toScalarByteWidth.widen)(
     (_, _) => effects.stage(VMWrite.ParameterBuffer(address, width, value)),
-    effects.stage(VMWrite.Shared(address, width, value)),
-    local => effects.stage(VMWrite.Local(lane, local, width, value)),
+    effects.stageShared(address, width, value),
+    local => effects.stageLocal(lane, local, width, value),
     if (access.systemScoped) effects.stage(VMWrite.Memory(lane, GuestAddress(address), width, value, true))
     else effects.stageMemory(lane, GuestAddress(address), width, value)
   )
@@ -105,22 +123,21 @@ object VMSemantics {
 
   private def prepareReads(context: VMContext, access: MemoryAccess, address: Value, size: Int >= 0)
       : Either[Fault, Unit] = access match {
-    case MemoryAccess.Shared | MemoryAccess.Local => Right(())
+    case MemoryAccess.Shared | MemoryAccess.Local => Completed
     case _                                        =>
-      val ranges = Vec.newBuilder[(GuestAddress, Int >= 0)]
+      val ranges = context.reads
+      ranges.clear()
       context.active.foreachLane { lane =>
         val raw = context.read(lane, address)
         route(context, access, raw, size)(
           (_, _) => (),
           (),
-          _ => (), {
-            val _ = ranges += ((GuestAddress(raw), size))
-            ()
-          }
+          _ => (),
+          ranges.add(GuestAddress(raw), size)
         )
       }
-      (if (access.systemScoped) context.memory.prepareSystemReads(ranges.result())
-       else context.memory.prepareReads(ranges.result()))
+      (if (access.systemScoped) context.memory.prepareSystemReads(ranges)
+       else context.memory.prepareReads(ranges))
         .leftMap { fault =>
           // A batch fault names no lane, so attribute it to the first lane whose device range is unmapped.
           val faulting = context.active.filterLanes { lane =>
@@ -145,8 +162,9 @@ object VMSemantics {
       (size.raw & (size.raw - 1)) == 0 &&
       (address & (size.raw - 1).toLong) == 0L &&
       !VMAddressSpace.isShared(address) && !VMAddressSpace.isLocal(address) &&
-      context.workgroup.buffer(address, size).isEmpty
+      context.workgroup.withBuffer(address, size)((_, _) => false)(true)
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def loadVector(
       context: VMContext,
       effects: VMWriteBuffer,
@@ -158,30 +176,36 @@ object VMSemantics {
   ): Either[Fault, Unit] = {
     val elementBytes = width.toScalarByteWidth
     val totalBytes   = destinations.nonNegativeSize * elementBytes
-    prepareReads(context, access, address, totalBytes).flatMap(_ =>
-      forEveryLane(context) { lane =>
-        val base = context.read(lane, address)
-        if (coherentVector(context, access, base, totalBytes)) {
-          val loaded =
-            if (totalBytes.raw <= 8)
-              context.memory.readValue(GuestAddress(base), totalBytes.raw.unsafe[Int in 1 ~ 8]).map(packed =>
-                destinations.indices.map(index => packed >>> (index * width.raw))
-              )
-            else context.memory.read(GuestAddress(base), totalBytes).map(bytes =>
-              destinations.indices.map(index => LittleEndian.decode(bytes, index * elementBytes.raw, elementBytes))
+    val prepared     = prepareReads(context, access, address, totalBytes)
+    if (prepared.isLeft) prepared
+    else forEveryLane(context) { lane =>
+      val base = context.read(lane, address)
+      if (coherentVector(context, access, base, totalBytes)) {
+        val loaded =
+          if (totalBytes.raw <= 8)
+            context.memory.readValue(GuestAddress(base), totalBytes.raw.unsafe[Int in 1 ~ 8]).map(packed =>
+              destinations.indices.map(index => packed >>> (index * width.raw))
             )
-          loaded.leftMap(VMWriteBuffer.located(_, context.pc, lane)).map(_.zip(destinations).foreach {
-            (value, destination) => effects.stageRegister(lane, destination, loadBits(value, width, signed))
-          })
-        } else destinations.zipWithIndex.traverse_ { (destination, index) =>
-          load(context, lane, access, base + index.toLong * elementBytes.raw, width).map(value =>
-            effects.stageRegister(lane, destination, loadBits(value, width, signed))
+          else context.memory.read(GuestAddress(base), totalBytes).map(bytes =>
+            destinations.indices.map(index => LittleEndian.decode(bytes, index * elementBytes.raw, elementBytes))
           )
+        loaded.leftMap(VMWriteBuffer.located(_, context.pc, lane)).map(_.zip(destinations).foreach {
+          (value, destination) => effects.stageRegister(lane, destination, loadBits(value, width, signed))
+        })
+      } else {
+        var result = Completed
+        var index  = 0
+        while (index < destinations.size && result.isRight) {
+          val element = base + index.toLong * elementBytes.raw
+          result = loadRegister(context, effects, lane, access, element, width, signed, destinations(index))
+          index += 1
         }
+        result
       }
-    )
+    }
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def storeVector(
       context: VMContext,
       effects: VMWriteBuffer,
@@ -193,15 +217,20 @@ object VMSemantics {
     val elementBytes = width.toScalarByteWidth
     val totalBytes   = sources.nonNegativeSize * elementBytes
     context.active.foreachLane { lane =>
-      val base   = context.read(lane, address)
-      val values = sources.map(context.read(lane, _))
-      if (!coherentVector(context, access, base, totalBytes))
-        values.zipWithIndex.foreach((value, index) =>
-          stageStore(context, effects, lane, access, base + index.toLong * elementBytes.raw, width, value)
-        )
-      else if (totalBytes.raw <= 8) {
-        val packed = values.zipWithIndex.foldLeft(0L) { case (bits, (value, index)) =>
-          bits | (truncate(value, width) << (index * width.raw))
+      val base = context.read(lane, address)
+      if (!coherentVector(context, access, base, totalBytes)) {
+        var index = 0
+        while (index < sources.size) {
+          val element = base + index.toLong * elementBytes.raw
+          stageStore(context, effects, lane, access, element, width, context.read(lane, sources(index)))
+          index += 1
+        }
+      } else if (totalBytes.raw <= 8) {
+        var packed = 0L
+        var index  = 0
+        while (index < sources.size) {
+          packed |= truncate(context.read(lane, sources(index)), width) << (index * width.raw)
+          index += 1
         }
         effects.stage(
           VMWrite.Memory(lane, GuestAddress(base), (totalBytes.raw * 8).unsafe[ScalarBitWidth], packed, false)
@@ -210,7 +239,7 @@ object VMSemantics {
         effects.stage(VMWrite.MemoryBytes(
           lane,
           GuestAddress(base),
-          values.flatMap(LittleEndian.toVec(_, elementBytes))
+          sources.flatMap(source => LittleEndian.toVec(context.read(lane, source), elementBytes))
         ))
     }
   }
@@ -249,24 +278,69 @@ object VMSemantics {
       count: Option[Value],
       blocking: Boolean,
       reduction: Option[BarrierReduction]
+  ): Either[Fault, Step] = (id, count) match {
+    case (Value.Immediate(barrier), None) => uniformBarrier(context, barrier, 0L, blocking, reduction)
+    case (Value.Immediate(barrier), Some(Value.Immediate(expected))) =>
+      uniformBarrier(context, barrier, expected, blocking, reduction)
+    case _ => divergentBarrier(context, id, count, blocking, reduction)
+  }
+
+  private def barrierTarget(rawBarrier: Long, rawExpected: Long, blocking: Boolean)
+      : Either[Fault, (BarrierId, BarrierCount)] = {
+    val barrier  = rawBarrier & 0xffffffffL
+    val expected = rawExpected & 0xffffffffL
+    val id       = Option.when(barrier < 16L)(barrier.toInt).flatMap(_.refine[BarrierId].toOption)
+    val count    = Option.when(expected <= VMLaneMask.MaximumLanes && (blocking || expected > 0L))(expected.toInt)
+      .flatMap(_.refine[BarrierCount].toOption)
+    (id, count) match {
+      case (Some(id), Some(count)) => Right(id -> count)
+      case (None, _)               => Left(Fault.Backend(s"barrier id $barrier is outside 0..15"))
+      case _                       =>
+        Left(Fault.Backend(s"barrier thread count $expected must be a multiple of 32 within the workgroup limit"))
+    }
+  }
+
+  /** A barrier whose id and count are the same for every lane: lanes arrive grouped by warp, in warp order. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def uniformBarrier(
+      context: VMContext,
+      barrier: Long,
+      expected: Long,
+      blocking: Boolean,
+      reduction: Option[BarrierReduction]
+  ): Either[Fault, Step] = barrierTarget(barrier, expected, blocking).map { (id, count) =>
+    val arrivals = Vec.newBuilder[WorkgroupArrival]
+    var base     = 0
+    while (base < context.workgroup.laneCount.raw) {
+      var remaining = context.active.warpBits(base)
+      if (remaining != 0L) {
+        val lanes = VMLaneMask.Builder()
+        while (remaining != 0L) {
+          lanes.add(WorkgroupLane.fromIndex(base + java.lang.Long.numberOfTrailingZeros(remaining)))
+          remaining &= remaining - 1L
+        }
+        arrivals += WorkgroupArrival(id, count, lanes.result())
+      }
+      base += 32
+    }
+    Step.WorkgroupBarrier(arrivals.result(), blocking, reduction)
+  }
+
+  private def divergentBarrier(
+      context: VMContext,
+      id: Value,
+      count: Option[Value],
+      blocking: Boolean,
+      reduction: Option[BarrierReduction]
   ): Either[Fault, Step] = {
-    val arrivals = mutable.LinkedHashMap.empty[(Int, Int, Int), VMLaneMask.Builder]
+    val arrivals = mutable.LinkedHashMap.empty[(BarrierId, BarrierCount, Int), VMLaneMask.Builder]
     forEveryLane(context) { lane =>
-      val barrier  = context.read(lane, id) & 0xffffffffL
-      val expected = count.fold(0L)(context.read(lane, _) & 0xffffffffL)
-      for {
-        _ <- Either.cond(barrier < 16L, (), Fault.Backend(s"barrier id $barrier is outside 0..15"))
-        _ <- Either.cond(
-          expected <= VMLaneMask.MaximumLanes && expected % 32L == 0L && (blocking || expected > 0L),
-          (),
-          Fault.Backend(s"barrier thread count $expected must be a multiple of 32 within the workgroup limit")
-        )
-      } yield arrivals.getOrElseUpdate((barrier.toInt, expected.toInt, lane.raw & ~31), VMLaneMask.Builder()).add(lane)
+      barrierTarget(context.read(lane, id), count.fold(0L)(context.read(lane, _)), blocking).map((id, count) =>
+        arrivals.getOrElseUpdate((id, count, lane.raw & ~31), VMLaneMask.Builder()).add(lane)
+      )
     }.map(_ =>
       Step.WorkgroupBarrier(
-        Vec.from(arrivals).map { case ((barrier, expected, _), builder) =>
-          WorkgroupArrival(barrier.unsafe[BarrierId], expected.unsafe[BarrierCount], builder.result())
-        },
+        Vec.from(arrivals).map { case ((id, count, _), builder) => WorkgroupArrival(id, count, builder.result()) },
         blocking,
         reduction
       )
@@ -323,47 +397,54 @@ object VMSemantics {
     case other => Left(Fault.Backend(s"unhandled ${context.kernel.isaName} instruction $other"))
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def executeMemory(instruction: Instruction, context: VMContext, effects: VMWriteBuffer): Either[Fault, Step] =
     (instruction: @unchecked) match {
       case Instruction.Load(destination, address, width, signed, access) =>
-        advance(prepareReads(context, access, address, width.toScalarByteWidth.widen).flatMap(_ =>
-          forEveryLane(context)(lane =>
-            load(context, lane, access, context.read(lane, address), width).map(value =>
-              effects.stageRegister(lane, destination, loadBits(value, width, signed))
-            )
+        val prepared = prepareReads(context, access, address, width.toScalarByteWidth.widen)
+        advance(
+          if (prepared.isLeft) prepared
+          else forEveryLane(context)(lane =>
+            loadRegister(context, effects, lane, access, context.read(lane, address), width, signed, destination)
           )
-        ))
+        )
       case Instruction.LoadVector(destinations, address, width, signed, access) =>
         advance(loadVector(context, effects, destinations, address, width, signed, access))
       case Instruction.Store(address, source, width, access) =>
         context.active.foreachLane(lane =>
           stageStore(context, effects, lane, access, context.read(lane, address), width, context.read(lane, source))
         )
-        Right(Step.Advance)
+        Advanced
       case Instruction.StoreVector(address, sources, width, access) =>
         storeVector(context, effects, address, sources, width, access)
-        Right(Step.Advance)
+        Advanced
       case Instruction.LoadParameter(destinations, parameter, offset, elementWidth, signed) =>
         val elementBytes = elementWidth.toScalarByteWidth
         context.active.foreachLane { lane =>
           val storage = context.lane(lane)
-          destinations.zipWithIndex.foreach { (destination, index) =>
+          var index   = 0
+          while (index < destinations.size) {
             val loaded = storage.readParameter(
               parameter,
               (offset.raw + index * elementBytes.raw).unsafe[Int >= 0],
               elementBytes.widen[Int in 0 ~ 8]
             )
-            effects.stageRegister(lane, destination, loadBits(loaded, elementWidth, signed))
+            effects.stageRegister(lane, destinations(index), loadBits(loaded, elementWidth, signed))
+            index += 1
           }
         }
-        Right(Step.Advance)
+        Advanced
       case Instruction.StoreParameter(parameter, offset, source, elementWidth) =>
         context.active.foreachLane(lane =>
-          effects.stage(
-            VMWrite.Parameter(lane, parameter, offset, elementWidth, truncate(context.read(lane, source), elementWidth))
+          effects.stageParameter(
+            lane,
+            parameter,
+            offset,
+            elementWidth,
+            truncate(context.read(lane, source), elementWidth)
           )
         )
-        Right(Step.Advance)
+        Advanced
       case Instruction.Atomic(destination, address, source, width, space, operation) =>
         context.active.foreachLane { lane =>
           val raw = context.read(lane, address)
@@ -376,7 +457,7 @@ object VMSemantics {
             AtomicUpdate.Operation(operation, context.read(lane, source))
           ))
         }
-        Right(Step.Advance)
+        Advanced
       case Instruction.AtomicCompareExchange(destination, address, comparator, source, width, space) =>
         context.active.foreachLane { lane =>
           val raw = context.read(lane, address)
@@ -389,7 +470,7 @@ object VMSemantics {
             AtomicUpdate.CompareExchange(context.read(lane, comparator), context.read(lane, source))
           ))
         }
-        Right(Step.Advance)
+        Advanced
     }
 
   private def executeControl(
@@ -408,7 +489,7 @@ object VMSemantics {
         context.active.foreachLane { lane =>
           val _ = context.lane(lane).returnStack += address
         }
-        Right(Step.Advance)
+        Advanced
       case Instruction.ReturnStackPop(destination) =>
         advance(forEveryLane(context) { lane =>
           val stack = context.lane(lane).returnStack
@@ -428,7 +509,7 @@ object VMSemantics {
           warp -> context.workgroup.createConvergence(warp.toInt.unsafe[WorkgroupLane.WarpBase], mask)
         )
         context.active.foreachLane(lane => context.lane(lane).setRegister(token, tokens((lane.raw & ~31).toLong)))
-        Right(Step.Advance)
+        Advanced
       case Instruction.Convergence(token, ConvergenceAction.Break) =>
         context.active.foreachLane(lane =>
           context.workgroup.leaveConvergence(
@@ -437,7 +518,7 @@ object VMSemantics {
             (lane.raw & 31).unsafe[WarpLane]
           )
         )
-        Right(Step.Advance)
+        Advanced
       case Instruction.Convergence(token, ConvergenceAction.Synchronise) => Right(Step.ConvergenceSync(token))
       case Instruction.WarpBarrier(memberMask)                           =>
         val masks = context.active.headOption.fold(Set.empty[Long]) { _ =>
@@ -449,21 +530,16 @@ object VMSemantics {
         else if (masks.size > 1) Left(Fault.Backend("bar.warp.sync member mask differs across active lanes"))
         else Right(Step.WarpSync(masks.head))
       case Instruction.Fence => context.memory.fenceHostMemory().map(_ => Step.Advance)
-      case Instruction.NoOp  => Right(Step.Advance)
+      case Instruction.NoOp  => Advanced
+      case Instruction.Call(Value.Immediate(address), returnParameters, parameters) =>
+        deviceCall(context, address, context.active).map(call => Step.Call(Vec(call), parameters, returnParameters))
       case Instruction.Call(function, returnParameters, parameters) =>
         val groups = mutable.LinkedHashMap.empty[Long, VMLaneMask.Builder]
         context.active.foreachLane(lane =>
           groups.getOrElseUpdate(context.read(lane, function), VMLaneMask.Builder()).add(lane)
         )
-        groups.toVec.traverse { (address, lanes) =>
-          context.kernel.functionTable.name(address) match {
-            case None =>
-              Left(Fault.Backend(s"invalid function address 0x${java.lang.Long.toUnsignedString(address, 16)}"))
-            case Some(name) =>
-              context.kernel.functions.get(name).map(DeviceCall(_, lanes.result()))
-                .toRight(Fault.Backend(s"missing device function $name"))
-          }
-        }.map(Step.Call(_, parameters, returnParameters))
+        groups.toVec.traverse((address, lanes) => deviceCall(context, address, lanes.result()))
+          .map(Step.Call(_, parameters, returnParameters))
       case Instruction.CallBuiltin(builtin, returnParameters, parameters) =>
         advance(forEveryLane(context)(VMBuiltins.execute(context, _, builtin, returnParameters, parameters)))
       case Instruction.Trap =>
@@ -482,7 +558,7 @@ object VMSemantics {
         context.active.foreachLane(lane =>
           effects.stage(VMWrite.ConditionFlag(lane, flag, Some(context.read(lane, source) != 0L)))
         )
-        Right(Step.Advance)
+        Advanced
       case Instruction.ReadConditionFlag(destination, flag) =>
         advance(forEveryLane(context)(lane =>
           conditionFlag(context, lane, flag).map(value =>
@@ -495,10 +571,10 @@ object VMSemantics {
         ))
       case Instruction.InvalidateConditionFlag(flag) =>
         context.active.foreachLane(lane => effects.stage(VMWrite.ConditionFlag(lane, flag, None)))
-        Right(Step.Advance)
+        Advanced
       case Instruction.InvalidateAddThreeCarry =>
         context.active.foreachLane(lane => effects.stage(VMWrite.AddThreeCarry(lane, None)))
-        Right(Step.Advance)
+        Advanced
       case add: Instruction.IntegerAddThree => advance(forEveryLane(context)(addThree(context, effects, _, add)))
     }
 
@@ -515,7 +591,7 @@ object VMSemantics {
               .foreach(target => effects.stageRegister(WorkgroupLane.fromIndex(target), destination, value))
           }
         }
-        Right(Step.Advance)
+        Advanced
       case Instruction.Tensor(operation) => VMTensor.execute(operation, context, effects)
       case Instruction.Shuffle(mode, destination, validity, source, laneValue, clamp, _, width) =>
         val laneCount = context.workgroup.laneCount.raw
@@ -554,7 +630,7 @@ object VMSemantics {
           )
           validity.foreach(predicate => effects.stage(VMWrite.Predicate(lane, predicate, valid)))
         }
-        Right(Step.Advance)
+        Advanced
       case Instruction.Elect(destination, predicate, memberMask) =>
         advance(forEveryLane(context) { lane =>
           val mask     = context.read(lane, memberMask)
@@ -674,15 +750,15 @@ object VMSemantics {
           } yield {
             // The independent-workgroup scheduler reserves every CTA at launch, so none can be cancelled.
             // The opaque failed response still completes the requested asynchronous transaction.
-            effects.stage(VMWrite.Shared(responseAddress, 64, 0L))
-            effects.stage(VMWrite.Shared(responseAddress + 8L, 64, 0L))
+            effects.stageShared(responseAddress, 64, 0L)
+            effects.stageShared(responseAddress + 8L, 64, 0L)
           }
         })
       case Instruction.ClusterCancelStatus(destination, response) =>
         context.active.foreachLane(lane =>
           effects.stage(VMWrite.Predicate(lane, destination, (context.read(lane, response) & 1L) != 0L))
         )
-        Right(Step.Advance)
+        Advanced
       case Instruction.ClusterCancelCta(destination, low, high, axis) =>
         advance(forEveryLane(context) { lane =>
           val lowBits  = context.read(lane, low)
@@ -736,7 +812,7 @@ object VMSemantics {
             copied     <- readDeviceBytes(context, lane, origin, bytes.raw)
             _          <- completion.completeBytes(bytes)
           } yield copied.zipWithIndex.foreach((byte, offset) =>
-            effects.stage(VMWrite.Shared(target + offset.toLong, 8, byte.toLong))
+            effects.stageShared(target + offset.toLong, 8, byte.toLong)
           )
         })
       case Instruction.AsyncCopy(destination, source, size, sourceSize) =>
@@ -752,9 +828,19 @@ object VMSemantics {
             )
             copied <- readDeviceBytes(context, lane, origin, count)
           } yield (0 until size.raw).foreach(offset =>
-            effects.stage(VMWrite.Shared(target + offset.toLong, 8, copied.lift(offset).getOrElse(0.toByte).toLong))
+            effects.stageShared(target + offset.toLong, 8, copied.lift(offset).getOrElse(0.toByte).toLong)
           )
         })
+    }
+
+  private def deviceCall(context: VMContext, address: Long, lanes: VMLaneMask): Either[Fault, DeviceCall] =
+    context.kernel.functionTable.name(address) match {
+      case None => Left(Fault.Backend(s"invalid function address 0x${java.lang.Long.toUnsignedString(address, 16)}"))
+      case Some(name) =>
+        context.kernel.functions.get(name).map(DeviceCall(
+          _,
+          lanes
+        )).toRight(Fault.Backend(s"missing device function $name"))
     }
 
   private def conditionFlag(context: VMContext, lane: WorkgroupLane, flag: VMConditionCodes.Flag)

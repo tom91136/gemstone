@@ -158,6 +158,24 @@ class VMModelSuite extends munit.FunSuite {
     assertEquals(limited.checkpoint(), Right(()))
   }
 
+  test("a lease left by an idle worker is reclaimed before a charge is rejected") {
+    val control              = TaskControl(TaskControl.Limits(1000L))
+    def on[A](body: => A): A = {
+      val result = java.util.concurrent.FutureTask[A](() => body)
+      Thread(result).start()
+      result.get(5, TimeUnit.SECONDS)
+    }
+    assertEquals(on(control.checkpoint()), Right(()))
+    assertEquals(on((0 until 999).count(_ => control.checkpoint().isRight)), 999)
+    assertEquals(on(control.checkpoint()), Left(Fault.BudgetExceeded(1000L)))
+    assertEquals(control.usedInstructions.raw, 1000L)
+    val cancelled = TaskControl()
+    assertEquals(cancelled.checkpoint(), Right(()))
+    cancelled.cancel()
+    assertEquals(cancelled.checkpoint(), Left(Fault.Cancelled))
+    assertEquals(cancelled.usedInstructions.raw, 1L)
+  }
+
   test("default controls have independent cancellation flags") {
     val first  = TaskControl()
     val second = TaskControl()

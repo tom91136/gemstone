@@ -8,6 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
+import scala.runtime.LongRef
 
 private object VMDispatchMemory {
 
@@ -28,10 +29,14 @@ private object VMDispatchMemory {
 
   private def annotate[A](access: String, address: Long, size: Int, result: Either[Fault, A]): Either[Fault, A] =
     result match {
-      case Left(Fault.Memory(message)) =>
-        Left(Fault.Memory(s"AMDGPU $access address=0x${address.toHexString} size=$size: $message"))
-      case other => other
+      case Left(fault) => Left(annotated(access, address, size, fault))
+      case other       => other
     }
+
+  private def annotated(access: String, address: Long, size: Int, fault: Fault): Fault = fault match {
+    case Fault.Memory(message) => Fault.Memory(s"AMDGPU $access address=0x${address.toHexString} size=$size: $message")
+    case other                 => other
+  }
 }
 
 /** One dispatch's memory routing; global bytes and their locks remain owned by the loaded program. */
@@ -86,13 +91,19 @@ private class VMDispatchMemory(
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-  def readValue(address: Long, size: Int in 1 ~ 8): Either[Fault, Long] = {
+  def readValueInto(address: Long, size: Int in 1 ~ 8, into: LongRef): Fault | Null = {
     val binding = aliasedRegion(address)
-    if (binding != null) memory.readValue(binding.binding.region, binding.offsetOf(address), size)
+    if (binding != null) memory.readValueInto(binding.binding.region, binding.offsetOf(address), size, into)
     else {
       val image = localImage(address, size.raw)
-      if (image == null) annotate("memory read", address, size.raw, memory.readValue(GuestAddress(address), size))
-      else Right(LittleEndian.decode(image._2, (address - image._1).toInt, size))
+      if (image == null) memory.readValueInto(GuestAddress(address), size, into) match {
+        case null         => null
+        case fault: Fault => annotated("memory read", address, size.raw, fault)
+      }
+      else {
+        into.elem = LittleEndian.decode(image._2, (address - image._1).toInt, size)
+        null
+      }
     }
   }
 
