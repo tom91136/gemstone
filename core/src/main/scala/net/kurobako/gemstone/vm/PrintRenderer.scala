@@ -100,7 +100,7 @@ object PrintRenderer {
       }
     }
 
-    loop(0, 0) match {
+    loop(index = 0, argumentIndex = 0) match {
       case Left(message)        => Left(message)
       case Right(argumentIndex) =>
         if (argumentIndex != event.arguments.size) Left("device printf has unused arguments")
@@ -279,7 +279,13 @@ object PrintRenderer {
   private def formatted(specifier: String, conversion: Char, value: String): Either[String, String] =
     formatValue(specifier, conversion, value)
 
-  private def formatValue(specifier: String, conversion: Char, value: AnyRef): Either[String, String] =
+  // the boxed Integer passes straight through to the Formatter
+  @SuppressWarnings(Array("scalafix:NoBoxedPrimitives"))
+  private def formatValue(
+      specifier: String,
+      conversion: Char,
+      value: java.lang.Integer | String
+  ): Either[String, String] =
     try Right(string.formatRoot(s"%$specifier$conversion", value))
     catch { case _: java.util.IllegalFormatException => Left(s"device printf cannot format %$conversion") }
 

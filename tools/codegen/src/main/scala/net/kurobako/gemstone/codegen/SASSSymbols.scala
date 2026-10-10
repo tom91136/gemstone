@@ -20,7 +20,7 @@ object SASSSymbols {
     (Parser.charWhere(c => c.isLetter || c == '_') ~
       Parser.charWhere(c => c.isLetterOrDigit || c == '_' || c == '.').rep0).string
   private val quoted: Parser[String] = Parser.char('"') *> Parser.charWhere(_ != '"').rep0.string <* Parser.char('"')
-  private val name: Parser[String]   = quoted | word
+  private val symbol: Parser[String] = quoted | word
   private val number: Parser[BigInt] = {
     val hex = (Parser.string("0x") *> Parser.charWhere(c => c.isDigit || "abcdefABCDEF_".contains(c)).rep.string)
       .map(raw => BigInt(raw.replace("_", ""), 16))
@@ -34,8 +34,8 @@ object SASSSymbols {
   private val range: Parser[(BigInt, BigInt)] =
     Parser.char('(') *> whitespace *> ((number <* whitespace <* Parser.string("..") <* whitespace) ~ number) <*
       whitespace <* Parser.char(')')
-  private val entry: Parser[Entry] =
-    ((name <* whitespace) ~ (range <* whitespace).? ~ (Parser.char('*') <* whitespace).? ~
+  private val member: Parser[Entry] =
+    ((symbol <* whitespace) ~ (range <* whitespace).? ~ (Parser.char('*') <* whitespace).? ~
       (Parser.char('=') *> whitespace *> (range | number.map(value => value -> value)) <* whitespace).?).map {
       case (((name, indices), default), assigned) =>
         Entry(
@@ -52,8 +52,8 @@ object SASSSymbols {
         )
     }
   private val declaration: Parser0[Vocabulary] = (whitespace *> word <* whitespace).with1.flatMap { kind =>
-    (entry.repSep(whitespace *> Parser.char(',') <* whitespace) <* whitespace).map { entries =>
-      val (_, values) = entries.toList.foldLeft((BigInt(0), Vector.empty[Value])) { case ((next, values), entry) =>
+    (member.repSep(whitespace *> Parser.char(',') <* whitespace) <* whitespace).map { entries =>
+      val (_, values) = entries.toList.foldLeft((BigInt(0), Vector.empty[Value])) { case ((next, accumulated), entry) =>
         val names = entry.range.fold(Vector(entry.name)) { case (first, last) =>
           (first to last).toVector.map(index => s"${entry.name}$index")
         }
@@ -64,7 +64,7 @@ object SASSSymbols {
         val added = names.zipWithIndex.map { case (name, index) =>
           Value(name, first + index, entry.default)
         }
-        (first + names.size, values ++ added)
+        (first + names.size, accumulated ++ added)
       }
       Vocabulary(
         kind,
@@ -105,7 +105,7 @@ object SASSSymbols {
             Vocabulary(
               name,
               values,
-              values.filter(_.default).map(_.value).distinct match {
+              values.collect { case value if value.default => value.value }.distinct match {
                 case Vector(value) => Some(value)
                 case _             => None
               }

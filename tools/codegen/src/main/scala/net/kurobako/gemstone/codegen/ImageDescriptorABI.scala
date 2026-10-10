@@ -93,10 +93,7 @@ object ImageDescriptorABI {
   }
 
   def nativeSource: String = {
-    val body = groups.map { case (group, _, values) =>
-      val fields = values.map { case (name, value) => s"inline constexpr uint32_t $name = ${value}u;" }.mkString("\n")
-      s"namespace $group {\n$fields\n} // namespace $group"
-    }.mkString("\n\n")
+    val body = groups.map((group, _, values) => Emission.cppConstants(group, values)).mkString("\n\n")
     GeneratedHeader.cpp("from Gemstone ImageDescriptorABI") +
       s"#pragma once\n\n#include <cstdint>\n\nnamespace gemstone::spirv::ImageDescriptor {\n$body\n} // namespace gemstone::spirv::ImageDescriptor\n"
   }

@@ -42,6 +42,6 @@ object Backend {
 }
 
 trait Backend {
-  def encoding: ProgramEncoding
+  def format: ProgramFormat
   def load(image: Vec[Byte]): Either[Fault, Backend.Program]
 }

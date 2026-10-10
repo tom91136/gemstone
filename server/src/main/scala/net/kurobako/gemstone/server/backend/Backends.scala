@@ -12,9 +12,9 @@ object Backends {
       ptx.PTXBackend(workgroups),
       sass.CubinBackend(workgroups),
       amdgpu.AMDGPUBackend(workgroups),
-      SPIRVBackend(Validation.Environment.OpenCLCompute, ProgramEncoding.SPIRVOpenCLCompute, workgroups),
-      SPIRVBackend(Validation.Environment.VulkanCompute, ProgramEncoding.SPIRVVulkanCompute, workgroups),
-      SPIRVBackend(Validation.Environment.VulkanGraphics, ProgramEncoding.SPIRVVulkanGraphics, workgroups)
+      SPIRVBackend(Validation.Environment.OpenCLCompute, ProgramFormat.SPIRVOpenCLCompute, workgroups),
+      SPIRVBackend(Validation.Environment.VulkanCompute, ProgramFormat.SPIRVVulkanCompute, workgroups),
+      SPIRVBackend(Validation.Environment.VulkanGraphics, ProgramFormat.SPIRVVulkanGraphics, workgroups)
     ),
     Some(Specialization),
     Some(GraphicsRuntime(workgroups))

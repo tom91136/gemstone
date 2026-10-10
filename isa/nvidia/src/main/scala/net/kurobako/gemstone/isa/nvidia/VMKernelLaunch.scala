@@ -6,7 +6,7 @@ import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.vm.*
 
 /** Shared launch argument preparation and invocation for NVIDIA instruction sets. */
-object VMKernelLaunch {
+private[isa] object VMKernelLaunch {
   def execute(
       kernel: Kernel,
       task: KernelTask,

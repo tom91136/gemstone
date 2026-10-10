@@ -36,6 +36,7 @@ object ExecutionRPC {
 
   // Refined text in this protocol names native symbols. Keep the C-string restriction
   // here; ordinary nonempty strings and their codecs permit embedded NUL characters.
+  @SuppressWarnings(Array("scalafix:GivenPlacement"))
   given nativeName: Codec[NonEmpty[String]] = Codec.domain(
     "String",
     Codec[String],
@@ -46,16 +47,6 @@ object ExecutionRPC {
         .filterOrElse(!_.contains('\u0000'), "native symbol name must not contain a NUL character"),
     identity
   )
-
-  given Codec[ProgramEncoding] = Codec.derived
-
-  given Codec[LaunchGeometry.Dimensions]       = Codec.derived
-  given Codec[LaunchGeometry.Coordinates]      = Codec.derived
-  given Codec[LaunchGeometry.GlobalDimensions] = Codec.derived
-  given Codec[KernelTask.Argument]             = Codec.derived
-  given Codec[KernelTask.ArgumentBuffer]       = Codec.derived
-  given Codec[KernelTask.RelocationSource]     = Codec.derived
-  given Codec[KernelTask.PointerRelocation]    = Codec.derived
 
   case class HostMemoryRange(address: GuestAddress, size: Int > 0) derives Codec
   case class HostMemoryBytes(address: GuestAddress, bytes: Vec[Byte], atomicWidth: Int in (0, 1, 2, 4, 8) = 0)
@@ -86,6 +77,14 @@ object ExecutionRPC {
       sync: Option[HostMemorySync] = None
   ) derives Codec
 
+  object ExecutionFailure {
+    // Encoding fits every detail to the wire, so failures nested in replies cannot make a response unencodable.
+    given Codec[ExecutionFailure] = {
+      val derived = Codec.derived[ExecutionFailure]
+      Codec.mapped(derived.shape, derived)(Right(_), bounded(_))
+    }
+  }
+
   /** Details name no native symbols, but the client reads them as bounded C strings. */
   enum ExecutionFailure(val message: NonEmpty[String]) {
     case InvalidRequest(detail: NonEmpty[String]) extends ExecutionFailure(detail)
@@ -94,20 +93,14 @@ object ExecutionRPC {
     case Failed(detail: NonEmpty[String])         extends ExecutionFailure(detail)
   }
 
-  // Encoding fits every detail to the wire, so failures nested in replies cannot make a response unencodable.
-  given Codec[ExecutionFailure] = {
-    val derived = Codec.derived[ExecutionFailure]
-    Codec.mapped(derived.shape, derived)(Right(_), bounded(_))
-  }
-
   private def bounded(error: ExecutionFailure): ExecutionFailure = {
     val detail = truncateUtf8(error.message.replace('\u0000', '?'), MaximumTextBytes.raw)
       .refine[NonEmpty[String]].getOrElse[NonEmpty[String]]("execution failed")
     error match {
-      case _: ExecutionFailure.InvalidRequest => ExecutionFailure.InvalidRequest(detail)
-      case _: ExecutionFailure.NotFound       => ExecutionFailure.NotFound(detail)
-      case _: ExecutionFailure.Unsupported    => ExecutionFailure.Unsupported(detail)
-      case _: ExecutionFailure.Failed         => ExecutionFailure.Failed(detail)
+      case ExecutionFailure.InvalidRequest(_) => ExecutionFailure.InvalidRequest(detail)
+      case ExecutionFailure.NotFound(_)       => ExecutionFailure.NotFound(detail)
+      case ExecutionFailure.Unsupported(_)    => ExecutionFailure.Unsupported(detail)
+      case ExecutionFailure.Failed(_)         => ExecutionFailure.Failed(detail)
     }
   }
 
@@ -148,36 +141,22 @@ object ExecutionRPC {
       size: Int > 0
   ) derives Codec
 
-  given Codec[KernelMetadata.ParameterKind] = Codec.derived
-  given Codec[KernelMetadata.Parameter]     = Codec.derived
-
-  given Codec[KernelMetadata] = Codec.validated(Codec.derived[KernelMetadata])(value =>
-    KernelMetadata.validated(
-      value.argumentBlockSize,
-      value.explicitParameterCount,
-      value.parameters,
-      value.requiredWorkGroupSize,
-      value.workGroupSizeHint,
-      value.bindingIndices,
-      value.entryPointId,
-      value.registerCount
-    )
-  )
-
+  // Symbol codecs stay with the protocol so that their names derive through nativeName.
+  @SuppressWarnings(Array("scalafix:GivenPlacement"))
   given Codec[KernelSymbol] = Codec.derived
 
+  @SuppressWarnings(Array("scalafix:GivenPlacement"))
   given Codec[GlobalSymbol] = Codec.validated(Codec.derived[GlobalSymbol])(value =>
     GlobalSymbol.validated(value.name, value.virtualAddress, value.size, value.pointerOffsets)
   )
 
+  @SuppressWarnings(Array("scalafix:GivenPlacement"))
   given Codec[ProgramSymbols] = Codec.derived
 
-  given Codec[SpecializationConstant] = Codec.derived
-
-  given Codec[SpecializationInfo] = Codec.derived
-
+  @SuppressWarnings(Array("scalafix:GivenPlacement"))
   given Codec[ProgramGlobalAlias] = Codec.derived
 
+  @SuppressWarnings(Array("scalafix:GivenPlacement"))
   given Codec[ProgramGlobal] = Codec.validated(Codec.derived[ProgramGlobal])(value =>
     ProgramGlobal.validated(value.size, value.initial, value.alias)
   )

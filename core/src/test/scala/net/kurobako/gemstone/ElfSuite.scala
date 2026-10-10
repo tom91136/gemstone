@@ -17,7 +17,7 @@ class ElfSuite extends munit.FunSuite {
       elfImage.Section(
         ".text",
         1,
-        bytes.words(0x01234567, 0x7f, 0x11, 0x22, 0x33, 0x44),
+        Vec.unsafeWrapArray(bytes.words(0x01234567, 0x7f, 0x11, 0x22, 0x33, 0x44)),
         address = 0x1000L,
         flags = 6L
       ),
@@ -29,6 +29,67 @@ class ElfSuite extends munit.FunSuite {
   )
 
   private def parse(bytes: Array[Byte]) = elf.Image.parse(Vec.unsafeWrapArray(bytes))
+
+  test("patching a section replaces its contents in place and leaves every other byte and table intact") {
+    val bytes = Vec.unsafeWrapArray(elfImage.write(
+      190,
+      Seq(
+        elfImage.Section(".text", 1, Vec[Byte](1, 2, 3, 4), address = 0x1000L),
+        elfImage.Section(".data", 1, Vec[Byte](5, 6)),
+        elfImage.Section(".bss", 8, noBitsSize = 8)
+      )
+    ))
+    val image   = elf.Image.parse(bytes).value
+    val text    = image.section(".text").get
+    val patched = image.patched(text, Vec[Byte](9, 8, 7, 6)).value
+    assertEquals(patched.contents(patched.section(".text").get), Vec[Byte](9, 8, 7, 6))
+    assertEquals(patched.contents(patched.section(".data").get), Vec[Byte](5, 6))
+    assertEquals(patched.sections, image.sections)
+    assertEquals(patched.bytes.size, bytes.size)
+    assertEquals(
+      patched.bytes.indices.filter(index => patched.bytes(index) != bytes(index)).toVector,
+      Vector.range(text.offset.raw, text.offset.raw + 4)
+    )
+    assert(image.patched(text, Vec[Byte](1, 2, 3)).isLeft)
+    assert(image.patched(image.section(".bss").get, Vec.fill(8)(0.toByte)).isLeft)
+  }
+
+  private def layoutImage: Vec[Byte] = Vec.unsafeWrapArray(elfImage.write(
+    190,
+    Seq(
+      elfImage.Section(".text", 1, Vec[Byte](1, 2, 3, 4)),
+      elfImage.Section(".data", 1, Vec[Byte](5, 6, 7, 8, 9, 10, 11, 12)),
+      elfImage.Section(".strtab", 3, Vec[Byte](0, 'k', 0)),
+      elfImage.Section(
+        ".symtab",
+        2,
+        elfImage.symbols(Seq(elfImage.Symbol("k", 2, 1, 0L, 4L))).table,
+        link = 3,
+        entrySize = 24
+      )
+    )
+  ))
+
+  test("resizing a section moves the contents after it and keeps every table readable") {
+    val image = elf.Image.parse(layoutImage).value
+    val text  = image.section(".text").get
+    val grown = image.resized(text, Vec.tabulate(20)(_.toByte)).value
+    assertEquals(grown.contents(grown.section(".text").get), Vec.tabulate(20)(_.toByte))
+    assertEquals(grown.contents(grown.section(".data").get), Vec[Byte](5, 6, 7, 8, 9, 10, 11, 12))
+    assertEquals(grown.symbols.map(_.map(_.name.map(_.raw))), Some(Vec(None, Some("k"))))
+    assert(grown.sections.forall(section => section.alignment <= 1 || section.offset.raw % section.alignment == 0))
+    val shrunk = grown.resized(grown.section(".text").get, Vec[Byte](7)).value
+    assertEquals(shrunk.contents(shrunk.section(".text").get), Vec[Byte](7))
+    assertEquals(shrunk.contents(shrunk.section(".data").get), Vec[Byte](5, 6, 7, 8, 9, 10, 11, 12))
+  }
+
+  test("a symbol's value and size are rewritten in place") {
+    val image   = elf.Image.parse(layoutImage).value
+    val table   = image.section(".symtab").get
+    val updated = image.withSymbol(table, 1, 2L, 9L).value
+    assertEquals(updated.symbols.map(_(1)).map(symbol => (symbol.value, symbol.size.raw)), Some((2L, 9)))
+    assert(image.withSymbol(table, 2, 0L, 0L).isLeft)
+  }
 
   test("ELF64 images expose named sections, symbols, and section contents") {
     val parsed = parse(image()).value

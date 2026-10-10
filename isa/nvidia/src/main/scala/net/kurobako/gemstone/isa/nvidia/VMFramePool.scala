@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.nvidia
 import net.kurobako.gemstone.constraint.*
 import scala.collection.mutable
 
-object VMFramePool {
+private object VMFramePool {
   private val NoLists = Array.empty[mutable.ArrayBuffer[VMLane] | Null]
 }
 
@@ -11,7 +11,7 @@ object VMFramePool {
   * kept by lane index, so a frame reuses a lane whichever frame last held it.
   */
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-class VMFramePool(laneCount: Int in 1 ~ 1024) {
+private class VMFramePool(laneCount: Int in 1 ~ 1024) {
   private val idle        = java.util.Arrays.copyOf(VMFramePool.NoLists, laneCount.raw)
   private val spare       = mutable.ArrayBuffer.empty[VMLanes]
   private val all         = mutable.ArrayBuffer.empty[VMLanes]

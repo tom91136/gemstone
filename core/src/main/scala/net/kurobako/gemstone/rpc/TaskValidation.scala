@@ -49,7 +49,7 @@ private object TaskValidation {
       case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(source), _, _, _)
           if !registered(source) =>
         ExecutionFailure.NotFound(s"pointer relocation refers to unregistered source allocation $source")
-      case KernelTask.PointerRelocation(_, _, target, _) if !registered(target) =>
+      case KernelTask.PointerRelocation(target = target) if !registered(target) =>
         ExecutionFailure.NotFound(s"pointer relocation refers to unregistered target allocation $target")
       case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(source), sourceOffset, _, _)
           if sourceOffset.raw > size(source) - word =>

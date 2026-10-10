@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.nvidia
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 
-object MBarrier {
+private object MBarrier {
   type Count = Long in 0L ~ 1048575L
   val MaximumCount: Long = (1L << 20) - 1L
 
@@ -31,7 +31,7 @@ object MBarrier {
 
 /** One CTA-local mbarrier. Copies complete synchronously, but arrivals and transaction counts remain independent. */
 @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-class MBarrier private (expectedArrivals: Long in 1L ~ 1048575L) {
+private class MBarrier private (expectedArrivals: Long in 1L ~ 1048575L) {
   import MBarrier.*
 
   private var phase           = 0L

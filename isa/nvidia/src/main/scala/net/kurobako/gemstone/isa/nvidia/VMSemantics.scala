@@ -17,7 +17,7 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
 
-object VMSemantics {
+private object VMSemantics {
 
   def execute(instruction: Instruction, context: VMContext, effects: VMWriteBuffer): Either[Fault, Step] =
     if (executeInteger(instruction, context) || executeFloatAndPredicate(instruction, context)) Advanced
@@ -107,7 +107,7 @@ object VMSemantics {
     (_, _) => effects.stage(VMWrite.ParameterBuffer(address, width, value)),
     effects.stageShared(address, width, value),
     local => effects.stageLocal(lane, local, width, value),
-    if (access.systemScoped) effects.stage(VMWrite.Memory(lane, GuestAddress(address), width, value, true))
+    if (access.systemScoped) effects.stage(VMWrite.Memory(lane, GuestAddress(address), width, value, system = true))
     else effects.stageMemory(lane, GuestAddress(address), width, value)
   )
 
@@ -233,7 +233,7 @@ object VMSemantics {
           index += 1
         }
         effects.stage(
-          VMWrite.Memory(lane, GuestAddress(base), (totalBytes.raw * 8).unsafe[ScalarBitWidth], packed, false)
+          VMWrite.Memory(lane, GuestAddress(base), (totalBytes.raw * 8).unsafe[ScalarBitWidth], packed, system = false)
         )
       } else
         effects.stage(VMWrite.MemoryBytes(
@@ -293,9 +293,9 @@ object VMSemantics {
     val count    = Option.when(expected <= VMLaneMask.MaximumLanes && (blocking || expected > 0L))(expected.toInt)
       .flatMap(_.refine[BarrierCount].toOption)
     (id, count) match {
-      case (Some(id), Some(count)) => Right(id -> count)
-      case (None, _)               => Left(Fault.Backend(s"barrier id $barrier is outside 0..15"))
-      case _                       =>
+      case (Some(barrierId), Some(threadCount)) => Right(barrierId -> threadCount)
+      case (None, _)                            => Left(Fault.Backend(s"barrier id $barrier is outside 0..15"))
+      case _                                    =>
         Left(Fault.Backend(s"barrier thread count $expected must be a multiple of 32 within the workgroup limit"))
     }
   }
@@ -340,7 +340,9 @@ object VMSemantics {
       )
     }.map(_ =>
       Step.WorkgroupBarrier(
-        Vec.from(arrivals).map { case ((id, count, _), builder) => WorkgroupArrival(id, count, builder.result()) },
+        Vec.from(arrivals).map { case ((barrierId, threadCount, _), builder) =>
+          WorkgroupArrival(barrierId, threadCount, builder.result())
+        },
         blocking,
         reduction
       )
@@ -1089,7 +1091,7 @@ object VMSemantics {
         )
         storage.setRegister(destination, result)
         operation match {
-          case IntegerMultiplyAddOperation.Low(_, _, _, true) | IntegerMultiplyAddOperation.High(_, _, _, true) =>
+          case IntegerMultiplyAddOperation.Low(carryOut = true) | IntegerMultiplyAddOperation.High(carryOut = true) =>
             storage.carry = carry
           case _ => ()
         }
@@ -1196,7 +1198,7 @@ object VMSemantics {
             context.read(lane, left),
             context.read(lane, right),
             context.read(lane, addend),
-            false
+            saturate = false
           )
         )
       )

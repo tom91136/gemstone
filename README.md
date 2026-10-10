@@ -10,15 +10,17 @@ checks every instruction's availability against the module's `.version` and `.ta
 | Path | Contents |
 | --- | --- |
 | `core` | Refinement types, numerics, ELF and source text scanning, execution RPC and session, backend interface, VM scheduling |
-| `isa/{ptx,sass,amdgpu,spirv}` | Decoding, validation, semantic compilation, and each ISA's backend |
+| `isa/{ptx,sass,amdgpu,spirv}-asm` | Instruction model, decoding, encoding, assembly text, containers, and validation |
+| `isa/{ptx,sass,amdgpu,spirv}-vm` | Semantic compilation, execution, and each ISA's backend |
 | `isa/nvidia` | Shared NVIDIA execution IR for PTX and SASS |
 | `server` | Backend registry, client lifecycle, transport, recording and replay, launching |
 | `native` | CMake-built API facades and RPC client |
 | `tools/codegen` | Generators for checked-in sources under `src/generated` and `native/generated` |
 | `tools/conformance` | Conformance run and emulation orchestration |
 | `tools/{isa,benchmarks,test-support}` | ISA tools, benchmarks, shared test utilities |
-| `tools/codestyle` | C and C++ format, convention, and naming checks; terminology check |
-| `codestyle` | Scalafix rules, the acyclic compiler plugin (reports source cycles as warnings), and their tests |
+| `samples` | Library API samples: assemble, run, disassemble and edit a kernel for each ISA (`sbt samples/run`) |
+| `tools/codestyle` | C and C++ format, convention, and naming checks; terminology and binary file checks |
+| `codestyle/publicapi` | Compiler plugin that limits the server to the public API of core and the ISAs; sbt-baumkuchen provides the Scalafix rules and cycle checks |
 | `conformance` | Independent CMake conformance project, see [its README](conformance/README.md) |
 
 `build.sbt` holds project wiring, `project/` generic build utilities, and `tools/codegen` the pinned references
@@ -41,13 +43,19 @@ sbt native/build | native/test | native/format | native/lint
 sbt conformance/test | conformance/format | conformance/lint
 sbt serverNative/nativeLink
 sbt coverageJvm | 'coverageOnly <project> <suite-glob>'
-sbt core/stryker | amdgpu/stryker | spirv/stryker
+sbt core/stryker | amdgpuAsm/stryker | spirvAsm/stryker
 ```
 
 `test` includes native and conformance CTest; `testFull` forces every Scala test on JVM and Native. `codegen`
-regenerates checked-in outputs and CI fails if it changes the tree. `native/lint` and `conformance/lint` check
+regenerates checked-in outputs and CI fails if it changes the tree. `lint` rejects binary files: embed binary data as
+text at its use site, with the commands that produce it in a comment. `native/lint` and `conformance/lint` check
 `clang-format`, project conventions, and `.clang-tidy` identifier naming against each build's compile database. Coverage
 writes `target/coverage/`; mutation writes each module's `target/stryker4s-report/`.
+
+`codegen` recovers the SASS encoding tables from pinned NVIDIA `nvdisasm` releases, which needs Linux x86_64 and
+`gcc`; decoding and assembly use the checked-in tables and need no NVIDIA tools. PTX and SASS test fixtures record
+the recipe that produced them; `GEMSTONE_VERIFY_FIXTURES=1` reproduces each recipe with the pinned tools and compares
+the result.
 
 ## Running
 
@@ -69,6 +77,48 @@ sbt 'server/run inspect|replay <journal>'
 | `GEMSTONE_EXECUTION_PARALLELISM` | Execution workers (default: half the cores, at most 64) |
 | `GEMSTONE_VULKAN_API_VERSION=1.0\|1.2` | Vulkan version (default 1.2); not certified |
 
+## Library
+
+Each ISA is two artifacts on `gemstone-core`: `gemstone-isa-<isa>-asm` (instruction model, codecs, assembly text,
+containers, validation) and `gemstone-isa-<isa>-vm` (lowering, execution, backend), for `ptx`, `sass`, `amdgpu` and
+`spirv`. PTX and SASS execution also bring `gemstone-isa-nvidia`. Nothing is on Maven Central yet; `sbt publishLocal`
+installs the snapshot.
+
+```scala
+libraryDependencies += "net.kurobako" %% "gemstone-isa-ptx-vm" % "0.1.0-SNAPSHOT"
+```
+
+A `Device` loads programs through a `BackendRegistry` and runs them against one `AddressSpace`, such as the reference
+`ArrayMemory`:
+
+```scala
+import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.isa.ptx.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.*
+
+val memory = ArrayMemory()
+val output = memory.allocate(4L)
+val device = Device(BackendRegistry(Vec(PTXBackend())), memory)
+for {
+  program <- device.load(ProgramFormat.PTXText, image)
+  task    <- KernelTask.validated("answer", Dimensions.One, Dimensions.One, Vec(KernelTask.Argument.Memory(output, 0L)))
+               .left.map(detail => Fault.InvalidRequest(detail))
+  events  <- device.launch(program, task)
+} yield memory.getInt(output, 0)
+```
+
+- `Device.launch` takes an optional `LaunchObserver`, which sees every instruction with the ISA's view of its state
+  (`InvocationView`, `CohortView`, `WaveView`) and every device memory access; blocking it single-steps the launch.
+- Faults carry a `Fault.Location`: kernel, function, instruction address, workgroup and lane.
+- `ReplayDevice` resumes a launch from any observed instruction by deterministic replay.
+- `Cubin.patchKernel`/`replaceKernel` and `CodeObject.patchKernel`/`replaceKernel` write edited kernels back into
+  their containers, relinking when the code changes size.
+
+`samples/` assembles, runs, disassembles and edits a kernel for every ISA (`sbt samples/run`); `API.md` records the
+API's design and its known gaps. Versions follow early semantic versioning, and `lint` checks binary compatibility
+against `Publishing.previousRelease` with MiMa once a release exists.
+
 ## Conformance
 
 ```console
@@ -80,10 +130,9 @@ sbt 'conformance/emulate [--target-set <set>] [--workload <workload>] [all|<back
 - Workloads: `compact` (default), `full`, `miniapps`, `cts-bounded`, `opencl-cts[-bounded]`, `sycl-cts[-bounded]`,
   `vulkan-cts[-bounded]`, `vulkan-info`. The Vulkan workloads serve both API versions.
 - Profiles are `conformance/profiles/<profile>.toml`; `--machine` defaults to the local short hostname.
-- `build` and `emulate` default to `conformanceTargetSet` (`default`: 11 routes); `emulate --target-set complete` runs
-  what `build complete` built. `complete` adds every
-  CUDA and GFX architecture: 123 routes sharing 97 artifacts. `cuda` and `cuda/sm_89` select both code variants;
-  `cuda-ptx` and `cuda-sass` select one. Missing selected artifacts are errors.
+- `build` and `emulate` default to `conformanceTargetSet` (`default`: 11 routes); `emulate` builds its target set
+  first. `complete` adds every CUDA and GFX architecture: 123 routes sharing 97 artifacts. `cuda` and `cuda/sm_89`
+  select both code variants; `cuda-ptx` and `cuda-sass` select one.
 - Artifacts go to `target/conformance/artifacts`; reports to `target/conformance/{direct,emulated}`.
 - `emulate` runs one Gemstone server on a per-run Unix socket with an isolated client per test, and records JFR in
   `target/conformance/jfr/`, keeping the five newest recordings. Disable recording with
@@ -121,5 +170,4 @@ sbt 'isaTools/run assemble --isa spirv|ptx|amdgpu|sass [--target gfx<n>|sm_<n>] 
 ```
 
 `--target` is required for AMDGPU and SASS; `--wave-size` applies to AMDGPU only; `--section` disassembles an ELF or
-cubin section for AMDGPU and SASS. SASS round-trips exact bytes; PTX assembly emits canonical text. The `AsmBoundary`
-Scalafix rule keeps the PTX and SASS runtimes free of their `asm` packages.
+cubin section for AMDGPU and SASS. SASS round-trips exact bytes; PTX assembly emits canonical text.

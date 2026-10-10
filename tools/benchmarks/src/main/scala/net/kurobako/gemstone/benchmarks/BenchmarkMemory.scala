@@ -27,6 +27,7 @@ class BenchmarkMemory(sizes: Int*) extends AddressSpace {
     Vec.indices(allocations.length.unsafe[Int >= 0]).map(index => AllocationId((1L: Long > 0) + index.toLong))
 
   /** Live backing bytes for setup and verification. */
+  @SuppressWarnings(Array("scalafix:MutableExposure"))
   def array(id: AllocationId): Array[Byte] = allocations(id.raw.toInt - 1)
 
   def base(id: AllocationId): GuestAddress = GuestAddress(Base + (id.raw - 1L) * Stride)

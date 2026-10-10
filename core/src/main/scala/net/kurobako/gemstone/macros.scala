@@ -277,13 +277,13 @@ object macros {
       case Some(text) => text.nonEmpty
       case None       => expression match {
           case '{ StringContext(${ Varargs(parts) }*).s(${ Varargs(_) }*) } =>
-            interpolation(parts.map(part => StringContext.processEscapes(part.valueOrAbort)), false)
+            interpolation(parts.map(part => StringContext.processEscapes(part.valueOrAbort)), formatted = false)
           case '{ ($left: String) + ($right: String) } => nonEmpty(left) || nonEmpty(right)
           case _                                       => expression.asTerm.underlyingArgument match {
               case Apply(TypeApply(Select(context, "f"), _), _) =>
                 context.asExpr match {
                   case '{ StringContext(${ Varargs(parts) }*) } =>
-                    interpolation(parts.map(part => StringContext.processEscapes(part.valueOrAbort)), true)
+                    interpolation(parts.map(part => StringContext.processEscapes(part.valueOrAbort)), formatted = true)
                   case _ => false
                 }
               case _ => expression.asTerm.tpe.widen <:< TypeRepr.of[NonEmpty[String]]

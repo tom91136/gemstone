@@ -6,7 +6,11 @@ import scala.collection.mutable
 
 private object AllocationAddressIndex {
 
-  class Entry private[AllocationAddressIndex] (val id: AllocationId, val allocation: StoredAllocation) {
+  object Entry {
+    def apply(id: AllocationId, allocation: StoredAllocation): Entry = new Entry(id, allocation)
+  }
+
+  class Entry private (val id: AllocationId, val allocation: StoredAllocation) {
     def base: GuestAddress = allocation.base
     def size: Int > 0      = allocation.size
 
@@ -127,8 +131,8 @@ private class AllocationAddressIndex private (
       while (index < entries.length && bases(index) < end) {
         val start = bases(index)
         val limit = start + entries(index).size.raw
-        if (start > begin) into += start
-        if (limit > begin && limit < end) into += limit
+        if (start > begin) into.addOne(start)
+        if (limit > begin && limit < end) into.addOne(limit)
         index += 1
       }
     }

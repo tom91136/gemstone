@@ -1,7 +1,9 @@
 addSbtPlugin("ch.epfl.scala"      % "sbt-scalafix"     % "0.14.9")
+addSbtPlugin("com.typesafe"       % "sbt-mima-plugin"  % "1.2.1")
 addSbtPlugin("org.scalameta"      % "sbt-scalafmt"     % "2.6.2")
 addSbtPlugin("org.scala-native"   % "sbt-scala-native" % "0.5.12")
 addSbtPlugin("io.stryker-mutator" % "sbt-stryker4s"    % "1.1.1")
+addSbtPlugin("net.kurobako"       % "sbt-baumkuchen"   % "0.1.0-SNAPSHOT")
 
 val jacocoVersion = "0.8.14"
 

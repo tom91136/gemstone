@@ -20,7 +20,7 @@ import scala.util.control.NonFatal
 
 /** Recovers digest-pinned machine descriptions using the two version-specific nvdisasm capture hooks. */
 object ExtractSASS {
-  case class Tool(name: String, binary: Path, digest: String, packageInfo: ujson.Obj)
+  class Tool(val name: String, val binary: Path, val digest: String, val packageInfo: ujson.Obj)
 
   private val ResourceRoot            = "/net/kurobako/gemstone/codegen/sass/"
   private val MaximumDescriptionBytes = 64 * 1024 * 1024
@@ -55,10 +55,10 @@ object ExtractSASS {
     case (bundle, legacy, legacyDigest, modern, modernDigest, output) =>
       val tools = Vec(("legacy", legacy, legacyDigest), ("modern", modern, modernDigest)).map {
         (name, binary, digest) =>
-          val entries = Files.readString(bundle).linesIterator.toVec.map(_.split('\t').toVec).collect {
+          val entries = Files.readString(bundle).linesIterator.map(_.split('\t').toVec).collect {
             case Vec("artifact", id, filename, packageDigest, url) if id == s"nvidia-nvdisasm-$name" =>
               ujson.Obj("filename" -> filename, "url" -> url, "sha256" -> packageDigest, "nvdisasm_sha256" -> digest)
-          }
+          }.toVec
           require(entries.size == 1, s"expected one $name nvdisasm package in $bundle")
           Tool(name, binary.toAbsolutePath.normalize, digest, entries.head)
       }
@@ -94,7 +94,7 @@ object ExtractSASS {
     }
   }
 
-  private case class Output(status: Int, stdout: Array[Byte], stderr: Array[Byte])
+  private case class Output(status: Int, stdout: Vec[Byte], stderr: Vec[Byte])
 
   private def run(command: Vec[String], directory: Path, environment: Map[String, String] = Map.empty): Output = {
     val stdout  = directory.resolve("stdout.bin")
@@ -111,7 +111,11 @@ object ExtractSASS {
         Files.size(stdout) <= 2L * MaximumDescriptionBytes && Files.size(stderr) <= 2L * MaximumDescriptionBytes,
         "SASS capture exceeds size limit"
       )
-      Output(process.exitValue(), Files.readAllBytes(stdout), Files.readAllBytes(stderr))
+      Output(
+        process.exitValue(),
+        Vec.unsafeWrapArray(Files.readAllBytes(stdout)),
+        Vec.unsafeWrapArray(Files.readAllBytes(stderr))
+      )
     } finally
       if (process.isAlive) {
         val _ = process.destroyForcibly()
@@ -154,10 +158,13 @@ object ExtractSASS {
           val hook     = scratch.resolve(s"capture-${tool.name}.so")
           val compiled =
             run(Vec("gcc", "-shared", "-fPIC", "-O2", "-o", hook.toString, source.toString, "-ldl"), scratch)
-          require(compiled.status == 0, s"capture hook compilation failed: ${String(compiled.stderr, UTF_8)}")
+          require(
+            compiled.status == 0,
+            s"capture hook compilation failed: ${String(Vec.toArray(compiled.stderr), UTF_8)}"
+          )
           val version = run(Vec(tool.binary.toString, "--version"), scratch)
           require(version.status == 0, s"${tool.name} nvdisasm --version failed")
-          val lines = String(version.stdout ++ version.stderr, UTF_8).linesIterator.toVec
+          val lines = String(Vec.toArray(version.stdout ++ version.stderr), UTF_8).linesIterator.toVec
             .filter(line => line.contains("Cuda compilation tools") || line.startsWith("Build cuda_"))
           versions(tool.name) = ujson.Obj("sha256" -> tool.digest, "version" -> ujson.Arr.from(lines))
           expected(tool.name).toVec.sortBy { (name, _) =>
@@ -171,17 +178,17 @@ object ExtractSASS {
                 Map("LD_PRELOAD" -> hook.toString, "TMPDIR" -> scratch.toString)
               )
               val capture = if (tool.name == "legacy") {
-                require(result.status == 0, s"$target capture failed: ${String(result.stderr, UTF_8)}")
-                SASSCapture.legacy(result.stdout)
-              } else SASSCapture.modern(result.stderr)
+                require(result.status == 0, s"$target capture failed: ${String(Vec.toArray(result.stderr), UTF_8)}")
+                SASSCapture.legacy(Vec.toArray(result.stdout))
+              } else SASSCapture.modern(Vec.toArray(result.stderr))
               // The modern free hook can provoke a diagnostic after capturing a complete, digest-verified stream.
-              require(sha256(capture.bytes) == digest, s"$target unexpected table SHA256")
+              require(sha256(Vec.toArray(capture.bytes)) == digest, s"$target unexpected table SHA256")
               val detail = ujson.Obj.from(Vec("run" -> ujson.Num(number), "sha256" -> ujson.Str(digest)) ++
                 capture.detail.obj.toVec)
               (capture.bytes, detail)
             }
-            require(java.util.Arrays.equals(captures(0)._1, captures(1)._1), s"$target repeated captures differ")
-            val bytes = captures.head._1
+            require(captures(0)._1 == captures(1)._1, s"$target repeated captures differ")
+            val bytes = Vec.toArray(captures.head._1)
             GeneratedFiles.writeBytes(root.resolve(s"tables/$digest.txt.gz"), gzip(bytes))
             targets += ujson.Obj(
               "name"                       -> target,

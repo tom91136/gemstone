@@ -158,7 +158,10 @@ object GeneratePTXISA {
             |}
             |""".stripMargin
     }
-    Vector("Opcode" -> render("Opcode", opcodes, false), "Modifier" -> render("Modifier", modifiers, true))
+    Vector(
+      "Opcode"   -> render("Opcode", opcodes, unknown = false),
+      "Modifier" -> render("Modifier", modifiers, unknown = true)
+    )
   }
 
   private def checkedSections(input: Path): Vector[Section] = {
@@ -270,8 +273,8 @@ object GeneratePTXISA {
       TargetNote.findAllMatchIn(clause).map(_.group(1).toInt).minOption.toVector.flatMap { target =>
         val spellings = Spelling.findAllMatchIn(clause).toVector
           .map(matched => Option(matched.group(1)).exists(mnemonics) -> combinations(matched.group(2)))
-        val qualified  = spellings.filter(_._1).flatMap(_._2)
-        val standalone = spellings.filterNot(_._1).flatMap(_._2)
+        val qualified  = spellings.view.filter(_._1).flatMap(_._2).toVector
+        val standalone = spellings.view.filterNot(_._1).flatMap(_._2).toVector
         (if (qualified.isEmpty) standalone else qualified.map(_ ++ standalone.flatten)).map(_ -> target)
       }
     }.groupMapReduce(_._1)(_._2)(math.min)
@@ -335,12 +338,12 @@ object GeneratePTXISA {
   ).flatMap { block =>
     val definitions       = domainDefinitions(block)
     val opcodeDefinitions = OpcodeDefinition.findAllMatchIn(block).map { matched =>
-      val values = Text.splitWords(matched.group(2), Set(',', '|')).map(_.stripPrefix(".")).filter(value =>
+      val values = Text.splitWords(matched.group(2), Set(',', '|')).view.map(_.stripPrefix(".")).filter(value =>
         Mnemonic.matches(value)
-      )
+      ).toVector
       matched.group(1) -> values
     }.toMap
-    scopes(block).flatMap { scope =>
+    scopes(block).view.flatMap { scope =>
       val scoped = definitions ++ domainDefinitions(scope)
       syntaxFragments(scope).flatMap(fragment => normaliseForm(fragment, scoped))
     }.flatMap { form =>
@@ -355,9 +358,9 @@ object GeneratePTXISA {
     Definition.findAllMatchIn(block).flatMap { matched =>
       val values    = definitionValues(block.slice(matched.end, closingBrace(block, matched.end - 1)))
       val lineStart = block.lastIndexOf('\n', matched.start) + 1
-      val aliases   = block.substring(lineStart, matched.start).split('=').toVector.map(_.trim).collect {
+      val aliases   = block.substring(lineStart, matched.start).split('=').view.map(_.trim).collect {
         case s".$name" if ModifierName.matches(name) => name
-      }
+      }.toVector
       (aliases :+ matched.group(1)).map(_ -> values)
     }.toMap
 
@@ -421,9 +424,9 @@ object GeneratePTXISA {
         val (required, optional, modifierComplete) = normaliseModifiers(opcodeToken.drop(mnemonic.length), definitions)
         val operandText                            = if (space < 0) "" else normalised.drop(space).trim
         val operandNames                           = splitTopLevel(operandText).flatMap(expandOptionalOperand(_))
-        val operands                               = operandNames.zipWithIndex.map { case ((name, optional), index) =>
+        val operands = operandNames.zipWithIndex.map { case ((name, optionalOperand), index) =>
           val (constraint, complete) = operandConstraint(name, destination = index == 0)
-          FormOperand(name, constraint, optional, complete)
+          FormOperand(name, constraint, optionalOperand, complete)
         }
         val unordered = UnorderedQualifiers.getOrElse(mnemonic, Set.empty).flatMap(name =>
           definitions.getOrElse(name, Set(name))
@@ -457,7 +460,7 @@ object GeneratePTXISA {
     }._2.filter((start, end) => value.slice(start + 1, end).trim.startsWith(","))
     val head = groups.foldRight(value)((group, text) => text.patch(group._1, "", group._2 - group._1 + 1)).trim
     val tail = groups.flatMap((start, end) =>
-      splitTopLevel(value.slice(start + 1, end).trim.drop(1)).flatMap(expandOptionalOperand(_)).map(_._1 -> true)
+      splitTopLevel(value.slice(start + 1, end).trim.drop(1)).view.flatMap(expandOptionalOperand(_)).map(_._1 -> true)
     )
     (if (head.isEmpty) Vector.empty else Vector(head -> false)) ++ tail
   }
@@ -716,11 +719,11 @@ object GeneratePTXISA {
     val metadataHelpers                                 = Vector.newBuilder[String]
     def renderMetadata(shape: InstructionShape): String = {
       val entries = sections.zipWithIndex.flatMap { (section, sectionIndex) =>
-        val renderedForms = section.forms.flatMap(form => operationsFor(section, form)).flatMap {
+        val renderedForms = section.forms.view.flatMap(form => operationsFor(section, form)).flatMap {
           case (opcode, form) if opcode == shape.opcode                => renderForms(form, shape.operationModifiers)
           case (opcode, form) if spelledUnderBase(opcode, form, shape) => renderForms(form, Vector.empty)
           case _                                                       => Vector.empty
-        }.distinct
+        }.toVector.distinct
         // Large tensor tables exceed JVM method limits when initialised inline.
         val forms = if (renderedForms.mkString.length < 4000) renderedForms
         else renderedForms.zipWithIndex.map { (form, index) =>
@@ -728,10 +731,15 @@ object GeneratePTXISA {
           metadataHelpers += s"  private def $name(): InstructionForm = $form"
           s"$name()"
         }
-        val modifierTargets = section.modifierTargets.toVector.map((modifiers, target) =>
-          modifiers.toVector.sorted.map(modifier => s"Modifier.${scalaCaseName(modifier)}")
-            .mkString("_root_.scala.collection.immutable.Set(", ", ", s") -> Target($target)")
-        ).sorted.mkString("Map(", ", ", ")")
+        val modifierTargets = Emission.collection(
+          "Map",
+          section.modifierTargets.toVector.map((modifiers, target) =>
+            Emission.collection(
+              "_root_.scala.collection.immutable.Set",
+              modifiers.toVector.sorted.map(modifier => s"Modifier.${scalaCaseName(modifier)}")
+            ) + s" -> Target($target)"
+          ).sorted
+        )
         Option.when(forms.nonEmpty) {
           s"""|Metadata.Entry(
               |          Version(${section.introduced.major}, ${section.introduced.minor}),
@@ -933,8 +941,9 @@ object GeneratePTXISA {
   }
 
   private def sectionOperations(section: Section): Vector[String] = {
-    val dotted = TitleOpcode.findAllIn(section.title).map(_.toLowerCaseRoot).toVector
-      .filter(value => section.mnemonics.contains(value.takeWhile(_ != '.')))
+    val mnemonics = section.mnemonics.toSet
+    val dotted    = TitleOpcode.findAllIn(section.title).map(_.toLowerCaseRoot)
+      .filter(value => mnemonics(value.takeWhile(_ != '.'))).toVector
     if (dotted.nonEmpty) dotted.distinct else section.mnemonics
   }
 
@@ -1075,46 +1084,46 @@ object GeneratePTXISA {
 
   private val ShapeFieldOverrides: Map[String, Vector[InstructionField]] = Map(
     "call" -> Vector(
-      InstructionField("returnParameters", true),
-      InstructionField("function", false),
-      InstructionField("parameters", true),
-      InstructionField("targets", true)
+      InstructionField("returnParameters", optional = true),
+      InstructionField("function", optional = false),
+      InstructionField("parameters", optional = true),
+      InstructionField("targets", optional = true)
     ),
     "mbarrier.test_wait" -> Vector(
-      InstructionField("completion", false),
-      InstructionField("reportValue", true),
-      InstructionField("barrierAddress", false),
-      InstructionField("stateOrPhase", false)
+      InstructionField("completion", optional = false),
+      InstructionField("reportValue", optional = true),
+      InstructionField("barrierAddress", optional = false),
+      InstructionField("stateOrPhase", optional = false)
     ),
     "mbarrier.try_wait" -> Vector(
-      InstructionField("completion", false),
-      InstructionField("reportValue", true),
-      InstructionField("barrierAddress", false),
-      InstructionField("stateOrPhase", false),
-      InstructionField("timeHint", true)
+      InstructionField("completion", optional = false),
+      InstructionField("reportValue", optional = true),
+      InstructionField("barrierAddress", optional = false),
+      InstructionField("stateOrPhase", optional = false),
+      InstructionField("timeHint", optional = true)
     ),
     "tcgen05.mma" -> Vector(
-      InstructionField("destinationAddress", false),
-      InstructionField("sourceA", false),
-      InstructionField("sourceBDescriptor", false),
-      InstructionField("instructionDescriptor", false),
-      InstructionField("scaleAAddress", true),
-      InstructionField("scaleBAddress", true),
-      InstructionField("disabledOutputLanes", true),
-      InstructionField("enableInputD", false),
-      InstructionField("scaleInputD", true)
+      InstructionField("destinationAddress", optional = false),
+      InstructionField("sourceA", optional = false),
+      InstructionField("sourceBDescriptor", optional = false),
+      InstructionField("instructionDescriptor", optional = false),
+      InstructionField("scaleAAddress", optional = true),
+      InstructionField("scaleBAddress", optional = true),
+      InstructionField("disabledOutputLanes", optional = true),
+      InstructionField("enableInputD", optional = false),
+      InstructionField("scaleInputD", optional = true)
     ),
     "tcgen05.mma.sp" -> Vector(
-      InstructionField("destinationAddress", false),
-      InstructionField("sourceA", false),
-      InstructionField("sourceBDescriptor", false),
-      InstructionField("sparseMetadataAddress", false),
-      InstructionField("instructionDescriptor", false),
-      InstructionField("scaleAAddress", true),
-      InstructionField("scaleBAddress", true),
-      InstructionField("disabledOutputLanes", true),
-      InstructionField("enableInputD", false),
-      InstructionField("scaleInputD", true)
+      InstructionField("destinationAddress", optional = false),
+      InstructionField("sourceA", optional = false),
+      InstructionField("sourceBDescriptor", optional = false),
+      InstructionField("sparseMetadataAddress", optional = false),
+      InstructionField("instructionDescriptor", optional = false),
+      InstructionField("scaleAAddress", optional = true),
+      InstructionField("scaleBAddress", optional = true),
+      InstructionField("disabledOutputLanes", optional = true),
+      InstructionField("enableInputD", optional = false),
+      InstructionField("scaleInputD", optional = true)
     )
   )
 
@@ -1303,10 +1312,14 @@ object GeneratePTXISA {
           ")"
         )
     ).mkString("Vec(", ", ", ")")
-    val optional = form.optionalModifiers.toVector.sorted.map(value => s"Modifier.${scalaCaseName(value)}")
-      .mkString("_root_.scala.collection.immutable.Set(", ", ", ")")
-    val unordered = form.unorderedModifiers.toVector.sorted.map(value => s"Modifier.${scalaCaseName(value)}")
-      .mkString("_root_.scala.collection.immutable.Set(", ", ", ")")
+    val optional = Emission.collection(
+      "_root_.scala.collection.immutable.Set",
+      form.optionalModifiers.toVector.sorted.map(value => s"Modifier.${scalaCaseName(value)}")
+    )
+    val unordered = Emission.collection(
+      "_root_.scala.collection.immutable.Set",
+      form.unorderedModifiers.toVector.sorted.map(value => s"Modifier.${scalaCaseName(value)}")
+    )
     operands.map(values =>
       s"InstructionForm(${values.mkString("Vec(", ", ", ")")}, $required, $optional, $unordered, ${form.complete})"
     )

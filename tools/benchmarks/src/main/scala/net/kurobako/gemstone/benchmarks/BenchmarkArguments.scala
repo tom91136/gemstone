@@ -19,13 +19,13 @@ object BenchmarkArguments {
 
   def iterations(default: Int): Opts[Int > 0] = positive("iterations", "Measured operations per sample", default)
 
-  def workers(default: Int): Opts[Int > 0] = positive("workers", "Host execution workers", default)
+  val workers: Opts[Int > 0] = positive("workers", "Host execution workers", 1)
 
   /** The first choice is the default. */
-  def choice[A](name: String, first: (String, A), rest: (String, A)*): Opts[A] = {
+  def choice[A](name: String, first: (name: String, value: A), rest: (name: String, value: A)*): Opts[A] = {
     val choices = first +: rest
-    val names   = choices.map(_._1).mkString(", ")
-    Opts.option[String](name, s"One of $names").withDefault(first._1).mapValidated(value =>
+    val names   = choices.map(_.name).mkString(", ")
+    Opts.option[String](name, s"One of $names").withDefault(first.name).mapValidated(value =>
       choices.collectFirst { case (`value`, selected) => selected }.toValidNel(s"$name must be one of $names")
     )
   }

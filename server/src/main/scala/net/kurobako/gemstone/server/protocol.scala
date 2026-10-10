@@ -45,11 +45,6 @@ object protocol {
     inline def apply(inline process: Long, inline incarnation: Long): SessionId =
       inline if (process == 0L && incarnation == 0L) error("execution session identity cannot be the zero sentinel")
       else apply((process, incarnation))
-
-    extension (id: SessionId) {
-      def process: Long     = id.unwrap._1
-      def incarnation: Long = id.unwrap._2
-    }
   }
 
   object Frame {
@@ -202,7 +197,7 @@ object protocol {
     private def exchange[A](endpoint: Endpoint, timeoutMillis: Int > 0, operation: Int, client: Option[ClientId])(
         read: DataInputStream => A
     ): A =
-      Using.resource(Transport.connect(endpoint, timeoutMillis)) { channel =>
+      Using.resource(Sockets.connect(endpoint, timeoutMillis)) { channel =>
         val output = DataOutputStream(channel.output)
         writeRequest(output, operation, client)
         val input   = DataInputStream(channel.input)

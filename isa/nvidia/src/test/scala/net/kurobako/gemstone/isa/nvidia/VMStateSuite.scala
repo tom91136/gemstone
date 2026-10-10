@@ -21,7 +21,7 @@ class VMStateSuite extends munit.FunSuite {
       lane.setPredicate(p(index), index % 2 == 0)
       assertEquals(lane.predicate(p(index)), Some(index % 2 == 0))
     }
-    lane.setPredicate(p(64), true)
+    lane.setPredicate(p(64), value = true)
     assertEquals(lane.predicate(p(64)), Some(true))
     assertEquals(lane.predicate(p(65)), None)
     lane.clear()
@@ -74,7 +74,7 @@ class VMStateSuite extends munit.FunSuite {
     val used      = pool.acquire(emptyRoutine)
     val last      = WorkgroupLane.fromIndex(1023)
     used(last).setRegister(r(0), 42L)
-    used(last).setPredicate(p(0), true)
+    used(last).setPredicate(p(0), value = true)
     used(last).writeParameter(VMIR.Parameter(0), 0, 32, 7L)
     used(last).conditionCodes.write(VMConditionCodes.Flag.Zero, Some(true))
     used(last).carry = true

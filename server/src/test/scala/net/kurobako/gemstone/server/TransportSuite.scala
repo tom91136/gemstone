@@ -73,7 +73,7 @@ class TransportSuite extends munit.FunSuite {
       files.temporary { directory =>
         val bind   = if (unix) Bind.Unix(directory.resolve("socket")) else Bind.Tcp()
         val server = Server.start(Server.Settings(parallelism = 1, bind = bind))
-        Using.resource(Transport.connect(server.endpoint, 2000)) { channel =>
+        Using.resource(Sockets.connect(server.endpoint, 2000)) { channel =>
           try {
             // A completed handshake proves the server accepted this connection before shutdown.
             protocol.hello(DataInputStream(channel.input), DataOutputStream(channel.output))
@@ -113,10 +113,10 @@ class TransportSuite extends munit.FunSuite {
     files.temporary { directory =>
       val path = directory.resolve("socket")
       Files.writeString(path, "existing")
-      val _ = intercept[IOException](Transport.listen(Bind.Unix(path)))
+      val _ = intercept[IOException](Sockets.listen(Bind.Unix(path)))
       assertEquals(Files.readString(path), "existing")
       Files.delete(path)
-      val listener = Transport.listen(Bind.Unix(path))
+      val listener = Sockets.listen(Bind.Unix(path))
       val moved    = directory.resolve("moved")
       Files.move(path, moved)
       Files.writeString(path, "replacement")

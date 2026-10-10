@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.nvidia
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 
-object WorkgroupLane {
+private object WorkgroupLane {
   def fromIndex(index: Int): WorkgroupLane =
     index.unsafe[Int in 0 ~ 1023].toShortExact
 
@@ -16,4 +16,4 @@ object WorkgroupLane {
 }
 
 /** A physical thread index within a NVIDIA workgroup, rather than within a warp. */
-type WorkgroupLane = Short in 0 ~ 1023
+private type WorkgroupLane = Short in 0 ~ 1023

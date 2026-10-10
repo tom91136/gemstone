@@ -8,7 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 
 /** Lane-independent NVIDIA arithmetic on raw register bits. */
-object VMArithmetic {
+private[isa] object VMArithmetic {
 
   /** The encodings NVIDIA arithmetic produces for every binary16, bfloat16 and binary32 NaN result. */
   val CanonicalNaN16: Long = 0x7fffL
@@ -36,6 +36,8 @@ object VMArithmetic {
   // The wrap form takes the shift modulo 32; the clamp form saturates it at 32,
   // so a clamp of 32 selects the opposite half of the 64-bit pair rather than
   // leaving the input unchanged.
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def funnelShiftResult(low: Long, high: Long, amount: Long, left: Boolean, clamp: Boolean): Long = {
     val shift = if (clamp) Math.min(amount & 0xffffffffL, 32L).toInt else (amount & 31L).toInt
     if (left) Bits.funnelShiftLeft(low, high, shift) else Bits.funnelShiftRight(low, high, shift)
@@ -235,11 +237,15 @@ object VMArithmetic {
     }
   }
 
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def bfloat16FusedMultiplyAdd(left: Long, right: Long, addend: Long, saturate: Boolean): Long = {
     val result = Math.fma(bfloat16Value(left), bfloat16Value(right), bfloat16Value(addend))
     bfloat16Bits(if (!saturate) result else if (result.isNaN || result <= 0.0) 0.0 else math.min(result, 1.0))
   }
 
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def packedFmaBits(left: Long, right: Long, addend: Long, bf16: Boolean, saturate: Boolean): Long = {
     def lane(a: Long, b: Long, c: Long): Long =
       if (bf16) bfloat16FusedMultiplyAdd(a, b, c, saturate)
@@ -272,7 +278,8 @@ object VMArithmetic {
   }
 
   // Fixed-width packed dot product is a measured arithmetic hot loop.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:PublicSignatures.primitive-run"))
   def dotProduct4(
       left: Long,
       right: Long,
@@ -299,6 +306,8 @@ object VMArithmetic {
   def shuffleClamp(value: Long): Int =
     Math.min(value & 0xffffffffL, 31L).toInt
 
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def extractBits(
       source: Long,
       start: Long,
@@ -338,13 +347,15 @@ object VMArithmetic {
     truncate(mask0 & ~mask1, 32)
   }
 
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def integerMultiplyAdd(
       left: Long,
       right: Long,
       addend: Long,
       operation: IntegerMultiplyAddOperation,
       carryIn: Boolean
-  ): (Long, Boolean) = operation match {
+  ): (value: Long, carry: Boolean) = operation match {
     case IntegerMultiplyAddOperation.Low(operandWidth, resultWidth, usesCarry, _) =>
       val leftValue    = truncate(left, operandWidth)
       val rightValue   = truncate(right, operandWidth)
@@ -361,7 +372,7 @@ object VMArithmetic {
         if (resultWidth.raw == 64) overflowHigh != 0L
         else overflowHigh != 0L || (result >>> resultWidth.raw) != 0L
       truncate(result, resultWidth) -> overflow
-    case IntegerMultiplyAddOperation.High(operandWidth, resultWidth, usesCarry, _) =>
+    case IntegerMultiplyAddOperation.High(operandWidth, resultWidth, _) =>
       val leftValue   = truncate(left, operandWidth)
       val rightValue  = truncate(right, operandWidth)
       val productLow  = leftValue * rightValue
@@ -373,9 +384,11 @@ object VMArithmetic {
           operandWidth
         )
       val addendValue = truncate(addend, resultWidth)
-      IntegerArithmetic.addUnsigned(high, addendValue, usesCarry && carryIn, resultWidth)
+      IntegerArithmetic.addUnsigned(high, addendValue, carryIn, resultWidth)
   }
 
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def insertBits(
       insert: Long,
       base: Long,
@@ -394,6 +407,8 @@ object VMArithmetic {
     }
   }
 
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def permuteBytes(left: Long, right: Long, control: Long, mode: BytePermuteMode): Long = {
     val source = Array.tabulate(8) { index =>
       val value = if (index < 4) left else right
@@ -478,13 +493,13 @@ object VMArithmetic {
         )
       case NumericFormat.Signed(_) => compareOrder(
           java.lang.Long.compare(signExtend(leftValue, width), signExtend(rightValue, width)),
-          false,
+          unordered = false,
           comparison
         )
       case NumericFormat.Bits(_) | NumericFormat.Unsigned(_) => compareOrder(
           if (width.raw == 64) java.lang.Long.compareUnsigned(leftValue, rightValue)
           else java.lang.Long.compare(leftValue, rightValue),
-          false,
+          unordered = false,
           comparison
         )
     }
@@ -531,7 +546,7 @@ object VMArithmetic {
     val converted = sourceType match {
       case NumericFormat.IEEE(bits) =>
         convertFloating(IEEE754.toDouble(value, bits), bits.raw == 64, destinationType, rounding)
-      case NumericFormat.BF16 => convertFloating(bfloat16Value(value), false, destinationType, rounding)
+      case NumericFormat.BF16 => convertFloating(bfloat16Value(value), fromBinary64 = false, destinationType, rounding)
       case source: (NumericFormat.Bits | NumericFormat.Signed | NumericFormat.Unsigned) =>
         convertInteger(value, source, destinationType, rounding, clamp.contains(ConversionClamp.Saturate))
     }

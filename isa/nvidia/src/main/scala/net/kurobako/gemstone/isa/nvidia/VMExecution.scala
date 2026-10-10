@@ -5,7 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 
-object VMExecution {
+private object VMExecution {
   type BarrierId    = Int in 0 ~ 15
   type BarrierCount = Int where (Between[0, 1024] & MultipleOf[32])
 

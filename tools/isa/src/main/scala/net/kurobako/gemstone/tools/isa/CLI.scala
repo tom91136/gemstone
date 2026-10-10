@@ -18,7 +18,7 @@ object CLI {
     case Disassemble(format: Assembly.Format, input: Path, output: Option[Path], section: Option[String])
   }
 
-  private val format = (
+  private val formatOption = (
     Opts.option[String]("isa", help = "spirv, amdgpu, sass, or ptx (textual)"),
     Opts.option[String]("target", help = "AMDGPU or SASS processor, e.g. gfx1030 or sm_89").orNone,
     Opts.option[Int]("wave-size", help = "AMDGPU wave size: 32 (default) or 64")
@@ -40,20 +40,20 @@ object CLI {
     }
   }
 
-  private val input  = Opts.argument[String]("input").map(Path.of(_))
-  private val output = Opts.option[String]("output", short = "o", help = "Output file (required for assembly)")
+  private val inputArgument = Opts.argument[String]("input").map(Path.of(_))
+  private val outputOption  = Opts.option[String]("output", short = "o", help = "Output file (required for assembly)")
     .map(Path.of(_))
 
   private val assemble: Opts[Request] = (
-    format,
-    input,
-    output.orNone.mapValidated(_.toValidNel("assembly requires --output"))
+    formatOption,
+    inputArgument,
+    outputOption.orNone.mapValidated(_.toValidNel("assembly requires --output"))
   ).mapN(Request.Assemble(_, _, _))
 
   private val disassemble: Opts[Request] = (
-    format,
-    input,
-    output.orNone,
+    formatOption,
+    inputArgument,
+    outputOption.orNone,
     Opts.option[String]("section", help = "Executable ELF section to disassemble").orNone
   ).tupled.mapValidated { (format, input, output, section) =>
     (format, section) match {

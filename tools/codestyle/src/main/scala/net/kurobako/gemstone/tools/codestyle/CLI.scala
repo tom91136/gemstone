@@ -21,8 +21,10 @@ object CLI {
   private val NativeExtensions = Set("c", "cc", "cpp", "cxx", "cu", "h", "hh", "hip", "hpp", "hxx", "inc", "inl")
   private val TextExtensions   = NativeExtensions ++
     Set("cmake", "conf", "java", "json", "kt", "md", "py", "sbt", "scala", "sh", "toml", "txt", "yaml", "yml")
-  private val TextFileNames    = Set(".clang-format", ".scalafix.conf", ".scalafmt.conf", "CMakeLists.txt")
-  private val TestCaseMacro    = raw"^[A-Z_]*TEST_CASE[A-Z_]*\s*\(".r
+  private val TextFileNames = Set(".clang-format", ".scalafix.conf", ".scalafmt.conf", "CMakeLists.txt")
+  private val TestCaseMacro = raw"^[A-Z_]*TEST_CASE[A-Z_]*\s*\(".r
+  // git's own test: binary files have a NUL byte early on
+  private val BinaryProbeBytes = 8000
   private val IncludeDirective = raw"^\s*#\s*include\b".r
 
   private val NativeRules: Vector[Rule] = Vector(
@@ -62,8 +64,18 @@ object CLI {
         authoredSources(Path.of(root).toAbsolutePath.normalize),
         terms.map(term => forbidden(variants(term), _ => "prohibited vague terminology"))
       )
+    case Vector("binaries", root) =>
+      val base     = Path.of(root).toAbsolutePath.normalize
+      val binaries = repositoryFiles(base).filter(binary)
+      binaries.foreach(path =>
+        Console.err.println(
+          s"${base.relativize(path)}: binary file; embed it as text with the commands that produce it"
+        )
+      )
+      require(binaries.isEmpty, s"found ${binaries.size} binary files")
     case _ => throw IllegalArgumentException(
-        "usage: format <root>... | check [--compile-database <build>] <root>... | terminology <root> <term>..."
+        "usage: format <root>... | check [--compile-database <build>] <root>... | terminology <root> <term>... | " +
+          "binaries <root>"
       )
   }
 
@@ -144,10 +156,19 @@ object CLI {
       (TextFileNames(name) || extension(path).exists(TextExtensions))
     }.sortBy(_.toString)
 
+  private def binary(path: Path): Boolean = {
+    val stream = Files.newInputStream(path)
+    try stream.readNBytes(BinaryProbeBytes).contains(0.toByte)
+    finally stream.close()
+  }
+
   private def files(root: Path): Vector[Path] =
+    listed(root).filterNot(_.split('/').exists(ExcludedSegments)).map(root.resolve(_)).filter(Files.isRegularFile(_))
+
+  private def repositoryFiles(root: Path): Vector[Path] =
+    listed(root).map(root.resolve(_)).filter(Files.isRegularFile(_))
+
+  private def listed(root: Path): Vector[String] =
     Process(Vector("git", "-C", s"$root", "ls-files", "--cached", "--others", "--exclude-standard")).!!
       .linesIterator.toVector
-      .filterNot(_.split('/').exists(ExcludedSegments))
-      .map(root.resolve(_))
-      .filter(Files.isRegularFile(_))
 }

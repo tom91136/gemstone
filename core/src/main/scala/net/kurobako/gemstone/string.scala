@@ -107,7 +107,10 @@ object string {
     }
   }
 
-  def formatRoot(pattern: String, arguments: AnyRef*): String = PlatformString.format(pattern, arguments*)
+  // Java Formatter's Object varargs require boxed arguments at this boundary.
+  @SuppressWarnings(Array("scalafix:NoBoxedPrimitives"))
+  def formatRoot(pattern: String, arguments: (java.lang.Integer | java.lang.Double | String)*): String =
+    PlatformString.format(pattern, arguments*)
 
   /** Decode an encoded name without silently replacing malformed bytes. */
   def decodeUtf8(bytes: Array[Byte], offset: Int, length: Int): Either[CharacterCodingException, String] =

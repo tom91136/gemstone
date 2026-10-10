@@ -141,7 +141,8 @@ private class HostCoherence(
         if (!available(address, size.widen[Int >= 0]))
           Left(Fault.Memory("host atomic address is unavailable or overflows"))
         else syncLock.withLock {
-          val request = HostMemoryAtomic(address, atomicSize, 0L, 0L, HostMemoryAtomicOperation.Load)
+          val request =
+            HostMemoryAtomic(address, atomicSize, expected = 0L, desired = 0L, HostMemoryAtomicOperation.Load)
           synchronise(completion, Some(request), Vec(HostMemoryRange(address, size)), relaxed = true).map { observed =>
             val value = observed & (if (size.raw == 8) -1L else (1L << (size.raw * 8)) - 1L)
             lock.withLock(completion.hostMemory.observeAtomic(

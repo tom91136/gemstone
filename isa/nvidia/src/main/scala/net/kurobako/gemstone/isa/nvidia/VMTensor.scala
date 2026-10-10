@@ -17,7 +17,7 @@ import net.kurobako.gemstone.vm.*
   * capacity exceeds the matrix size. MMA and ldmatrix use the specified lane/register layouts, so compiler-generated
   * fragment operations work.
   */
-object VMTensor {
+private object VMTensor {
   private val halfwords = Vec.range[0, 2]
 
   private def invalid(detail: NonEmpty[String]): Fault = Fault.Backend(detail)

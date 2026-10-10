@@ -4,6 +4,7 @@ import LaunchGeometry.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.rpc.Wire.*
 
 object LaunchGeometry {
   object Dimensions {
@@ -14,7 +15,7 @@ object LaunchGeometry {
       x: Int > 0,
       y: Int > 0,
       z: Int > 0
-  ) {
+  ) derives Codec {
     def toGlobalDimensions: GlobalDimensions =
       GlobalDimensions(x.toLong, y.toLong, z.toLong)
 
@@ -44,13 +45,13 @@ object LaunchGeometry {
     val origin: Coordinates = Coordinates(0, 0, 0)
   }
 
-  case class Coordinates(x: Int >= 0, y: Int >= 0, z: Int >= 0)
+  case class Coordinates(x: Int >= 0, y: Int >= 0, z: Int >= 0) derives Codec
 
   case class GlobalDimensions(
       x: Long > 0,
       y: Long > 0,
       z: Long > 0
-  )
+  ) derives Codec
 
   case class LongCoordinates(x: Long >= 0, y: Long >= 0, z: Long >= 0)
 

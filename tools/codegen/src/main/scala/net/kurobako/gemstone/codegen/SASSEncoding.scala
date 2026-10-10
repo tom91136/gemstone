@@ -43,10 +43,8 @@ object SASSEncoding {
 
   private val whitespace: Parser0[Unit]  = Parser.charWhere(_.isWhitespace).rep0.void
   private val whitespace1: Parser[Unit]  = Parser.charWhere(_.isWhitespace).rep.void
-  private val identifier: Parser[String] =
-    (Parser.charWhere(c => c.isLetter || c == '_') ~
-      Parser.charWhere(c => c.isLetterOrDigit || "_.$-".contains(c)).rep0).string
-  private val hex: Parser[String] = (Parser.string("0x") | Parser.string("0X")) *>
+  private val identifier: Parser[String] = SASSFormat.identifier
+  private val hex: Parser[String]        = (Parser.string("0x") | Parser.string("0X")) *>
     Parser.charWhere(c => c.isDigit || "abcdefABCDEF_".contains(c)).rep.string
   private val binary: Parser[String] =
     (Parser.string("0b") | Parser.string("0B")) *> Parser.charWhere(c => c == '0' || c == '1' || c == '_').rep.string
@@ -133,7 +131,7 @@ object SASSEncoding {
       (Parser.char('`') *> identifier) ~ (Parser.char('@') *> (quotedLabel | identifier))
     val enumSelector: Parser[FloatSelector] =
       ((identifier <* whitespace <* Parser.string("==") <* whitespace) ~ enumReference).map {
-        case (reference, (table, value)) => FloatSelector(Some(reference), Some(table), Some(value), None)
+        case (field, (table, value)) => FloatSelector(Some(field), Some(table), Some(value), None)
       }
     val constantSelector: Parser[FloatSelector] =
       ((integer <* whitespace <* Parser.string("==") <* whitespace) ~ integer).map { case (left, right) =>
@@ -268,7 +266,8 @@ object SASSEncoding {
         vocabulary.name -> vocabulary.values.map(value => value.name -> value.value).toMap
       ).toMap
     } else Map.empty[String, Map[String, BigInt]]
-    val tables     = parseTables(description.preamble, enums ++ vocabularies)
+    val symbols    = enums ++ vocabularies
+    val tables     = parseTables(description.preamble, symbols)
     val tableNames = tables.map(_.name).toSet
     val forms      = description.classes.map { instruction =>
       val issues  = Vector.newBuilder[String]
@@ -282,7 +281,7 @@ object SASSEncoding {
         val encoded = section.entries.map { entry =>
           val positions = unitMasks.get(entry.name)
           if (positions.isEmpty) issues += s"${entry.name} has no matching FUNIT mask"
-          val value = parseExpression(entry.value, enums ++ vocabularies, tableNames)
+          val value = parseExpression(entry.value, symbols, tableNames)
           value match {
             case Expr.Unsupported(source) => issues += s"${entry.name} has unsupported expression: $source"
             case _                        => ()
@@ -290,7 +289,7 @@ object SASSEncoding {
           expressionIssues(value, tables).foreach(message => issues += s"${entry.name}: $message")
           Assignment(entry.name, positions.getOrElse(Vector.empty), value)
         }
-        val opaqueAssignments = section.body.split("\n", -1).toVector.flatMap { line =>
+        val opaqueAssignments = section.body.split("\n", -1).view.flatMap { line =>
           val text      = line.trim
           val separator = text.indexOf('=')
           Option.when(separator >= 0 && !text.startsWith("//")) {
@@ -315,15 +314,15 @@ object SASSEncoding {
               if (positions.isEmpty) issues += s"$name has no matching FUNIT mask"
               Vector(Assignment(name, positions.getOrElse(Vector.empty), Expr.Unsupported(value)))
           }
-        }
-        val unused = section.body.split("\n", -1).toVector.flatMap { line =>
+        }.toVector
+        val unused = section.body.split("\n", -1).view.flatMap { line =>
           val text = line.trim
           Option.when(text.startsWith("!") && text.endsWith(";"))(text.drop(1).dropRight(1).trim)
         }.map { name =>
           val positions = unitMasks.get(name)
           if (positions.isEmpty) issues += s"!$name has no matching FUNIT mask"
           Assignment(s"!$name", positions.getOrElse(Vector.empty), Expr.Constant(0, relaxed = true))
-        }
+        }.toVector
         encoded ++ opaqueAssignments ++ unused
       }
       Form(instruction.name, instruction.alternate, opcodes, assignments, issues.result())
@@ -444,13 +443,13 @@ object SASSEncoding {
           tableIssues ++ arityIssue
       }
       tableIssue ++ arguments.flatMap(expressionIssues(_, tables))
-    case Expr.Scale(value, _)              => expressionIssues(value, tables)
-    case Expr.Multiply(value, _)           => expressionIssues(value, tables)
-    case Expr.Identity(first, second)      => expressionIssues(first, tables) ++ expressionIssues(second, tables)
-    case Expr.FloatConvert(value, _, _, _) => expressionIssues(value, tables)
-    case Expr.FixedFloat(value, _)         => expressionIssues(value, tables)
-    case Expr.Relaxed(value)               => expressionIssues(value, tables)
-    case _                                 => Vector.empty
+    case Expr.Scale(value, _)             => expressionIssues(value, tables)
+    case Expr.Multiply(value, _)          => expressionIssues(value, tables)
+    case Expr.Identity(first, second)     => expressionIssues(first, tables) ++ expressionIssues(second, tables)
+    case Expr.FloatConvert(value = value) => expressionIssues(value, tables)
+    case Expr.FixedFloat(value, _)        => expressionIssues(value, tables)
+    case Expr.Relaxed(value)              => expressionIssues(value, tables)
+    case _                                => Vector.empty
   }
 
   private def parseCompound(

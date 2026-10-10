@@ -38,13 +38,11 @@ class SASSDescriptionSuite extends munit.FunSuite {
     assertEquals(parsed.preamble + parsed.classes.map(_.raw).mkString, source)
   }
 
-  test("unterminated literals and invalid field bindings fail rather than disappearing") {
+  test("unterminated literals fail rather than disappearing") {
     assert(SASSDescription.parse("CLASS \"unterminated").isLeft)
-    val parsed = SASSDescription.parse("CLASS \"x\"\nFORMAT Register:;\n").fold(e => fail(e.message), identity)
-    intercept[IllegalArgumentException](parsed.classes.head.fields)
   }
 
-  test("singular CONDITION and future sections cannot become FORMAT fields") {
+  test("singular CONDITION and future sections stay out of FORMAT") {
     val source = """CLASS "LEPC"
                    |FORMAT Register:Rd;
                    |CONDITION
@@ -53,7 +51,7 @@ class SASSDescriptionSuite extends munit.FunSuite {
                    | unknown: rule;
                    |""".stripMargin
     val cls = SASSDescription.parse(source).fold(e => fail(e.message), identity).classes.head
-    assertEquals(cls.fields.map(_.name), Vector("Rd"))
+    assertEquals(cls.section("FORMAT").map(_.body.trim), Some("Register:Rd;"))
     assert(cls.section("CONDITION").nonEmpty)
   }
 
@@ -79,7 +77,7 @@ class SASSDescriptionSuite extends munit.FunSuite {
     assertEquals(parsed.preamble + parsed.classes.map(_.raw).mkString, source)
   }
 
-  test("nested bindings retain dotted types, defaults and stars without absorbing adjacent bindings") {
+  test("quoted and dotted opcode names survive nested FORMAT groups") {
     val source = """CLASS "bindings"
                    |FORMAT Opcode $( Register:Ra/Partsel("32"):asel )$ ',' SImm(32)*:imm
                    | /F32.F16ONLY:dstfmt.srcfmt $( { '&' REQ:req '=' BITSET(6/0x0):req_bit_set } )$;
@@ -90,15 +88,10 @@ class SASSDescriptionSuite extends munit.FunSuite {
                    | Dest = Ra;
                    |""".stripMargin
     val parsed = SASSDescription.parse(source).fold(e => fail(e.message), identity)
-    val fields = parsed.classes.head.fields
-    assertEquals(fields.map(_.name), Vector("Ra", "asel", "imm", "dstfmt.srcfmt", "req", "req_bit_set"))
-    assertEquals(fields.map(_.kind), Vector("Register", "Partsel", "SImm", "F32.F16ONLY", "REQ", "BITSET"))
-    assertEquals(fields(1).raw, "Partsel(\"32\"):asel")
-    assertEquals(fields(2).raw, "SImm(32)*:imm")
     assertEquals(parsed.classes.head.opcodes, Vector("1D", "UIADD3.64"))
   }
 
-  test("reads classes, format fields, opcodes, and balanced encoding expressions") {
+  test("reads classes, opcodes, and balanced encoding expressions") {
     val source =
       """ARCHITECTURE "Test"
         |CONSTANTS
@@ -123,10 +116,6 @@ class SASSDescriptionSuite extends munit.FunSuite {
     assertEquals(parsed.classes.map(_.name), Vector("IADD3", "IADD3 immediate"))
     assertEquals(parsed.classes.map(_.alternate), Vector(false, true))
     val cls = parsed.classes.head
-    assertEquals(
-      cls.fields.map(f => f.name -> f.kind),
-      Vector("Pg" -> "Predicate", "Rd" -> "Register", "Ra" -> "Register", "uImm" -> "UImm")
-    )
     assertEquals(cls.opcodes, Vector("IADD3"))
     val encoding = cls.section("ENCODING").get
     assert(encoding.body.contains("(uImm & 0x1f) | (1 << 7)"))

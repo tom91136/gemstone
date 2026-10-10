@@ -83,6 +83,11 @@ object Connection {
           request.isRight
         }
 
+        def reject(detail: String): Unit = {
+          recording.foreach(_.failed(s"connection exchange failed: $detail"))
+          scribe.debug(s"RPC connection exchange failed: $detail")
+        }
+
         def exchange(): Boolean = try {
           recording.foreach(_.begin())
           // Idle connections have no deadline. Once the first byte arrives, bound all remaining frame reads.
@@ -109,7 +114,7 @@ object Connection {
                     lease = None
                     recording.foreach(_.close())
                     Control.writeResponse(output, operation)
-                  case other => throw IllegalArgumentException(s"unknown control operation $other")
+                  case other => reject(s"unknown control operation $other")
                 }
                 false
               case ExecutionRPC.HelloMagic =>
@@ -122,7 +127,7 @@ object Connection {
               case ExecutionRPC.RequestMagic =>
                 require(negotiated, "execution request precedes schema negotiation")
                 execution()
-              case value => throw IllegalArgumentException(f"invalid request magic: 0x$value%08x")
+              case value => reject(f"invalid request magic: 0x$value%08x"); false
             }
           }
         } catch {

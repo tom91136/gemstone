@@ -6,6 +6,7 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.backend.*
 import net.kurobako.gemstone.server.recording.*
@@ -50,7 +51,7 @@ class ServerLifecycleSuite extends munit.FunSuite {
       }
     }
     class WaitingBackend extends Backend {
-      override val encoding                                               = ProgramEncoding.PTXText
+      override val format                                                 = ProgramFormat.PTXText
       override def load(image: Vec[Byte]): Either[Fault, Backend.Program] = Right(WaitingProgram())
     }
     Using.resource(Server.start(Server.Settings(parallelism = 1), _ => Backends(List(WaitingBackend())))) { server =>

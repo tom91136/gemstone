@@ -2,10 +2,11 @@ package net.kurobako.gemstone.isa
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.rpc.Wire.*
 import net.kurobako.gemstone.vm.*
 
 object KernelMetadata {
-  enum ParameterKind {
+  enum ParameterKind derives Codec {
     case Scalar
     case Allocation
     case Local
@@ -16,6 +17,19 @@ object KernelMetadata {
       offset: Int >= 0,
       kind: ParameterKind,
       containsPointers: Boolean
+  ) derives Codec
+
+  given Codec[KernelMetadata] = Codec.validated(Codec.derived[KernelMetadata])(value =>
+    validated(
+      value.argumentBlockSize,
+      value.explicitParameterCount,
+      value.parameters,
+      value.requiredWorkGroupSize,
+      value.workGroupSizeHint,
+      value.bindingIndices,
+      value.entryPointId,
+      value.registerCount
+    )
   )
 
   def validated(

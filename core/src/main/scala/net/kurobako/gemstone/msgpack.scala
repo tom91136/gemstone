@@ -124,14 +124,15 @@ object msgpack {
       if (size.raw > limits.maximumElements.raw)
         reject(s"collection exceeds the ${limits.maximumElements}-element limit")
       else if (size.raw <= 15) writeRawByte(0x90 | size.raw)
-      else writeSized(size.raw, 0xdc, 0xdd)
+      else writeSized(size.raw, marker16 = 0xdc, marker32 = 0xdd)
 
     def writeString(value: String): Unit = {
       val bytes = value.getBytes(StandardCharsets.UTF_8)
       if (bytes.length > limits.maximumTextBytes.raw)
         reject(s"UTF-8 value exceeds the ${limits.maximumTextBytes}-byte text limit")
       else {
-        if (bytes.length <= 31) writeRawByte(0xa0 | bytes.length) else writeSized8(bytes.length, 0xd9, 0xda, 0xdb)
+        if (bytes.length <= 31) writeRawByte(0xa0 | bytes.length)
+        else writeSized8(bytes.length, marker8 = 0xd9, marker16 = 0xda, marker32 = 0xdb)
         writeRawBytes(bytes)
       }
     }
@@ -140,7 +141,7 @@ object msgpack {
       if (value.length > limits.maximumBytes.raw)
         reject(s"byte collection exceeds the ${limits.maximumBytes}-byte limit")
       else {
-        writeSized8(value.length, 0xc4, 0xc5, 0xc6)
+        writeSized8(value.length, marker8 = 0xc4, marker16 = 0xc5, marker32 = 0xc6)
         writeRawBytes(value)
       }
 

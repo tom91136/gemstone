@@ -44,12 +44,10 @@ object constraint {
     }
 
     // Quoted by macros; publicInBinary requires qualified visibility.
-    @SuppressWarnings(Array("scalafix:NoPackagePrivate"))
     @publicInBinary
     private[gemstone] inline def validate[A, P](value: A): A where P =
       if (accepts[A, P](value)) value else throw IllegalArgumentException(failure[A, P](value))
 
-    @SuppressWarnings(Array("scalafix:NoPackagePrivate"))
     @publicInBinary
     private[gemstone] inline def check[A, P](value: A): Either[NonEmpty[String], A where P] =
       if (accepts[A, P](value)) Right(value) else Left(failure[A, P](value))
@@ -122,9 +120,13 @@ object constraint {
     }
     inline def toLong: Long where (P & Between[-2147483648, 2147483647]) =
       convert[Int, P, Long, P & Between[-2147483648, 2147483647]](value)
-    def <[Q](other: Int where Q): Boolean  = value < other
+    @targetName("lessInt")
+    def <[Q](other: Int where Q): Boolean = value < other
+    @targetName("lessEqualInt")
     def <=[Q](other: Int where Q): Boolean = value <= other
-    def >[Q](other: Int where Q): Boolean  = value > other
+    @targetName("greaterInt")
+    def >[Q](other: Int where Q): Boolean = value > other
+    @targetName("greaterEqualInt")
     def >=[Q](other: Int where Q): Boolean = value >= other
   }
 
@@ -220,7 +222,6 @@ object constraint {
   private inline def description[A, P]: String        = ${ macros.description[A, P] }
 
   // Quoted by macros; publicInBinary requires qualified visibility.
-  @SuppressWarnings(Array("scalafix:NoPackagePrivate"))
   @publicInBinary
   private[gemstone] inline def convert[A, P, B, Q](value: A where P): B where Q =
     ${ macros.convert[A, P, B, Q]('value) }
@@ -250,12 +251,10 @@ object constraint {
     }
 
     // Quoted by macros; publicInBinary requires qualified visibility.
-    @SuppressWarnings(Array("scalafix:NoPackagePrivate"))
     @publicInBinary
     private[gemstone] def validate[A](value: A)(using HasElements[A]): NonEmpty[A] =
       check(value).fold(message => throw IllegalArgumentException(message), identity)
 
-    @SuppressWarnings(Array("scalafix:NoPackagePrivate"))
     @publicInBinary
     private[gemstone] def check[A](value: A)(using elements: HasElements[A]): Either[NonEmpty[String], NonEmpty[A]] =
       Either.cond(elements.nonEmpty(value), value, "value must not be empty")
@@ -299,7 +298,6 @@ object constraint {
     }
 
     // Quoted by macros; publicInBinary requires qualified visibility.
-    @SuppressWarnings(Array("scalafix:NoPackagePrivate"))
     @publicInBinary
     private[gemstone] def attempt(value: C): Either[NonEmpty[String], Type] = violation(value).toLeft(value)
 

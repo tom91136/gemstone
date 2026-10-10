@@ -13,14 +13,15 @@ import ujson.Value
 
 object GenerateSPIRVISA {
   private val MetadataChunkSize = 200
+  // keeps each operand-kind table method well under HotSpot's 8000-byte compilation limit
+  private val EnumerantChunkSize = 64
 
-  private sealed trait Request
   private case class Instructions(
       grammar: Path,
       extinst: Path,
       sourceRoot: Path,
       nativeRoot: Path
-  ) extends Request
+  )
   private case class ExtendedInstructionSet(name: String, objectName: String, instructions: Vector[(String, Int)])
   private case class Operand(
       kind: NonEmpty[String],
@@ -226,17 +227,36 @@ object GenerateSPIRVISA {
               |}
               |""".stripMargin)
     }
-    val aliases = grammar.entries.toVector.flatMap(entry =>
-      entry.aliases.map(name =>
-        s"${Emission.literal(name)} -> Definition.${normaliseCase(entry.name.stripPrefix("Op"))}"
+    val aliases = Emission.collection(
+      "Map",
+      grammar.entries.toVector.flatMap(entry =>
+        entry.aliases.map(name =>
+          s"${Emission.literal(name)} -> Definition.${normaliseCase(entry.name.stripPrefix("Op"))}"
+        )
       )
-    ).mkString("Map(", ", ", ")")
-    val kindValues =
+    )
+    val (enumerantChunks, kindValues) =
       grammar.kinds.toVector.filter(kind => kind.category == "ValueEnum" || kind.category == "BitEnum")
-        .map(renderKind(_))
-    val kindChunks = kindValues.grouped(8).zipWithIndex.map { case (values, index) =>
-      s"  private def operandKinds$index: Vec[OperandKindInfo] = Vec(\n${values.mkString(",\n")}\n  )"
-    }.toVector
+        .foldLeft((Vector.empty[String], Vector.empty[(String, Int)])) { case ((methods, values), kind) =>
+          if (kind.enumerants.size <= EnumerantChunkSize)
+            (methods, values :+ (renderKind(kind, renderEnumerantValues(kind.enumerants)) -> kind.enumerants.size))
+          else {
+            val chunks = kind.enumerants.grouped(EnumerantChunkSize).toVector
+            val names  = chunks.indices.map(index => s"operandEnumerants${methods.size + index}")
+            val bodies = chunks.zip(names).map { case (chunk, name) =>
+              s"  private def $name: Vec[OperandEnumerant] = ${renderEnumerantValues(chunk)}"
+            }
+            (methods ++ bodies, values :+ (renderKind(kind, names.mkString("Vec(", ", ", ").flatten")) -> chunks.size))
+          }
+        }
+    val kindChunks = kindValues.foldLeft(Vector.empty[Vector[(String, Int)]]) { (groups, value) =>
+      groups.lastOption match {
+        case Some(last) if last.map(_._2).sum + value._2 <= EnumerantChunkSize => groups.init :+ (last :+ value)
+        case _                                                                 => groups :+ Vector(value)
+      }
+    }.zipWithIndex.map { case (values, index) =>
+      s"  private def operandKinds$index: Vec[OperandKindInfo] = Vec(\n${values.map(_._1).mkString(",\n")}\n  )"
+    }
     val kindExpression = kindChunks.indices.map(index => s"operandKinds$index").mkString("Vec(", ", ", ").flatten")
     val instruction    = GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
       s"""|package net.kurobako.gemstone.isa.spirv
@@ -267,7 +287,7 @@ object GenerateSPIRVISA {
         |  )
         |  val definitions: Vec[Definition] = Definition.values.toVec
         |
-        |${kindChunks.mkString("\n\n")}
+        |${(enumerantChunks ++ kindChunks).mkString("\n\n")}
         |
         |  val operandKinds: Map[OperandKind, OperandKindInfo] =
         |    $kindExpression.view.map(value => value.kind -> value).toMap
@@ -288,8 +308,8 @@ object GenerateSPIRVISA {
         |    candidates match {
         |      case Vec() => Left(InstructionDecodeError.UnknownOpcode(raw.opcodeNumber))
         |      case Vec(definition) => definition.decoder(raw)
-        |      case definitions =>
-        |        val matches = definitions.flatMap(definition =>
+        |      case _ =>
+        |        val matches = candidates.flatMap(definition =>
         |          definition.decoder(raw).toOption.map(instruction => definition -> instruction)
         |        )
         |        matches match {
@@ -297,7 +317,7 @@ object GenerateSPIRVISA {
         |          case Vec() =>
         |            Left(InstructionDecodeError.NoMatchingDefinition(
         |              raw.opcodeNumber,
-        |              Vec.nonEmpty(definitions.head.opcode, definitions.tail.map(_.opcode)*)
+        |              Vec.nonEmpty(candidates.head.opcode, candidates.tail.map(_.opcode)*)
         |            ))
         |          case values =>
         |            Left(InstructionDecodeError.AmbiguousDefinition(
@@ -396,7 +416,7 @@ object GenerateSPIRVISA {
   private def renderOperandKinds(grammar: Grammar): String = {
     val categories = grammar.kinds.map(_.category).distinct.sorted.mkString(", ")
     val cases      = grammar.kinds.map { kind =>
-      val bases = kind.bases.map(value => s"OperandKind.$value").mkString("Vector(", ", ", ")")
+      val bases = Emission.collection("Vector", kind.bases.map(value => s"OperandKind.$value"))
       s"  case ${kind.kind} extends OperandKind(OperandKind.Category.${kind.category}, $bases)"
     }.mkString("\n")
     GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
@@ -412,15 +432,15 @@ object GenerateSPIRVISA {
           |""".stripMargin
   }
 
-  private def renderKind(kind: OperandKind): String = {
-    val enumerants = kind.enumerants.map { enumerant =>
-      val parameters = enumerant.parameters.map(value => s"OperandKind.$value")
-        .mkString("Vec(", ", ", ")")
-      val aliases = enumerant.aliases.map(Emission.literal(_)).mkString("Vec(", ", ", ")")
-      s"OperandEnumerant(${Emission.literal(enumerant.name)}, ${enumerant.value}L, $parameters, $aliases)"
-    }.mkString("Vec(", ", ", ")")
+  private def renderKind(kind: OperandKind, enumerants: String): String =
     s"    OperandKindInfo(OperandKind.${kind.kind}, $enumerants)"
-  }
+
+  private def renderEnumerantValues(enumerants: Vector[Enumerant]): String = enumerants.map { enumerant =>
+    val parameters = enumerant.parameters.map(value => s"OperandKind.$value")
+      .mkString("Vec(", ", ", ")")
+    val aliases = enumerant.aliases.map(Emission.literal(_)).mkString("Vec(", ", ", ")")
+    s"OperandEnumerant(${Emission.literal(enumerant.name)}, ${enumerant.value}L, $parameters, $aliases)"
+  }.mkString("Vec(", ", ", ")")
 
   private def construct(entry: Entry, fields: Vector[Field]): String = {
     val caseName  = normaliseCase(entry.name.stripPrefix("Op"))
@@ -667,10 +687,7 @@ object GenerateSPIRVISA {
   }
 
   private def renderNativeConstants(grammar: Grammar): String = {
-    val groups = constantGroups(grammar).map { case (kind, values) =>
-      val fields = values.map { case (name, value) => s"inline constexpr uint32_t $name = ${value}u;" }.mkString("\n")
-      s"namespace $kind {\n$fields\n} // namespace $kind"
-    }.mkString("\n\n")
+    val groups = constantGroups(grammar).map(Emission.cppConstants(_, _)).mkString("\n\n")
     GeneratedHeader.cpp("from the pinned Khronos SPIR-V core grammar") +
       s"#pragma once\n\n#include <cstdint>\n\nnamespace gemstone::spirv {\ninline constexpr uint32_t Magic = ${grammar.magic}u;\n$groups\n} // namespace gemstone::spirv\n"
   }

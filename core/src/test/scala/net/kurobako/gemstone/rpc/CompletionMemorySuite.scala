@@ -33,7 +33,7 @@ class CompletionMemorySuite extends munit.FunSuite {
   /** Loads the kernel body set for the next dispatch. */
   private class KernelBackend extends Backend {
     val body: AtomicReference[Kernel]                                   = AtomicReference(_ => Right(()))
-    override val encoding: ProgramEncoding                              = ProgramEncoding.PTXText
+    override val format: ProgramFormat                                  = ProgramFormat.PTXText
     override def load(image: Vec[Byte]): Either[Fault, Backend.Program] = Right(KernelProgram(body.get()))
   }
 
@@ -45,7 +45,7 @@ class CompletionMemorySuite extends munit.FunSuite {
   private def dispatch(session: ExecutionSession, backend: KernelBackend)(body: AddressSpace => Either[Fault, Unit])
       : Unit = {
     backend.body.set(body)
-    val program = checked(session.load(backend.encoding, Vec.empty))
+    val program = checked(session.load(ProgramEncoding.PTXText, Vec.empty))
     val task    = checked(
       KernelTask.validated("kernel", LaunchGeometry.Dimensions.One, LaunchGeometry.Dimensions.One, Vec.empty)
     )

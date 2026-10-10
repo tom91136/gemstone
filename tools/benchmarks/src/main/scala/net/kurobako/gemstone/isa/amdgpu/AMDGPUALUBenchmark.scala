@@ -7,7 +7,6 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
@@ -36,9 +35,6 @@ object AMDGPUALUBenchmark {
     val dispatch = KernelTask.validated("alu", Dimensions(64, 1, 1), Dimensions.One, Vec.empty)
       .fold(message => throw IllegalArgumentException(message), identity)
     val memory = BenchmarkMemory()
-    Measurement.repeat(iterations) {
-      VMInterpreter.execute(prepared, dispatch, memory, TaskControl(), Workgroups.Sequential, Vec.empty, _ => Right(()))
-        .fold(failure => throw RuntimeException(failure.message), _ => ())
-    }
+    SequentialDispatch.repeat(iterations, prepared, dispatch, memory)
   }
 }

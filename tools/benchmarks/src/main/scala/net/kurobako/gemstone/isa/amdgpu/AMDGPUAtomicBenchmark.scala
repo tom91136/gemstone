@@ -6,7 +6,6 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
@@ -35,7 +34,7 @@ object AMDGPUAtomicBenchmark {
       .fold(error => throw IllegalStateException(error.message), identity)
     val memory = BenchmarkMemory(24)
     val target = memory.ids(0)
-    memory.putInt(target, 0, 7)
+    memory.putInt(target, offset = 0, value = 7)
     val dispatch = KernelTask.validated(
       "atomic",
       Dimensions.One,
@@ -46,10 +45,7 @@ object AMDGPUAtomicBenchmark {
         KernelTask.Argument.Scalar(LittleEndian.toVec(7L, 8).unsafe)
       )
     ).fold(error => throw IllegalArgumentException(error), identity)
-    val sample = Measurement.repeat(iterations) {
-      VMInterpreter.execute(kernel, dispatch, memory, TaskControl(), Workgroups.Sequential, Vec.empty, _ => Right(()))
-        .fold(error => throw IllegalStateException(error.message), _ => ())
-    }
+    val sample   = SequentialDispatch.repeat(iterations, kernel, dispatch, memory)
     val observed = memory.getInt(target, 0).toLong & 0xffffffffL
     val expected = (7L + iterations.raw.toLong * 9L) & 0xffffffffL
     if (observed != expected) throw IllegalStateException(s"atomic benchmark result $observed != $expected")

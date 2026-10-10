@@ -38,9 +38,9 @@ private object StoredAllocation {
 
     /** Run `access` with whether the storage is live, holding every stripe the range covers. */
     inline def write[A](offset: Int, size: Int)(inline access: Boolean => A): A = {
-      stripes(offset, size, true)
+      stripes(offset, size, acquire = true)
       try access(live)
-      finally stripes(offset, size, false)
+      finally stripes(offset, size, acquire = false)
     }
 
     private def optimistic(offset: Int, size: Int): Int = {

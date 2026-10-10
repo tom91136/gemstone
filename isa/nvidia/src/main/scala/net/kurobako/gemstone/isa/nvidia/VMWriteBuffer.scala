@@ -11,7 +11,7 @@ import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
-object VMWriteBuffer {
+private object VMWriteBuffer {
   private final val ObjectWrite                                 = 0
   private final val RegisterWrite                               = 1
   private final val MemoryWrite                                 = 2
@@ -34,7 +34,7 @@ object VMWriteBuffer {
   * and ordinary memory writes use parallel arrays to avoid allocating a [[VMWrite]] per lane.
   */
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
-class VMWriteBuffer(capacity: Int > 0 = 64) {
+private class VMWriteBuffer(capacity: Int > 0 = 64) {
   import VMWriteBuffer.*
 
   private var kinds      = Array.ofDim[Byte](capacity.raw)
@@ -53,8 +53,8 @@ class VMWriteBuffer(capacity: Int > 0 = 64) {
 
   def stage(write: VMWrite): Unit = {
     write match {
-      case VMWrite.Memory(_, _, _, _, true) => system = true
-      case _                                => ()
+      case VMWrite.Memory(system = true) => system = true
+      case _                             => ()
     }
     ensureCapacity()
     kinds(pending) = ObjectWrite
@@ -182,7 +182,7 @@ class VMWriteBuffer(capacity: Int > 0 = 64) {
       val previous = Bits.truncate(workgroup.readShared(address, width), width)
       workgroup.writeShared(address, width, update(previous, width, change))
       destination.foreach(frame(lane).setRegister(_, previous))
-    case VMWrite.Memory(_, _, _, _, _) | VMWrite.MemoryBytes(_, _, _) | VMWrite.Atomic(_, _, _, _, false, _) => ()
+    case VMWrite.Memory(_, _, _, _, _) | VMWrite.MemoryBytes(_, _, _) | VMWrite.Atomic(shared = false) => ()
   }
 
   /** Validates every memory destination before applying anything, so a faulting instruction has no effect. */

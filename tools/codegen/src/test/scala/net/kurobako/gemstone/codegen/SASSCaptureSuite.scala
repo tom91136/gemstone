@@ -45,26 +45,28 @@ class SASSCaptureSuite extends munit.FunSuite {
     val branch    = ascii(" DEFINED(ARCH_SEMANTICS)\n FORMAT Register:Rd;\n##ENDIF\nEND;\n\u0000")
     val unrelated = ascii("not part of the description\u0000")
     val capture   = SASSCapture.legacy(
-      record(0x455203, 0x1000, 0x2000, first) ++
-        record(0x455c7c, 0x3000, 0x1000, unrelated) ++
-        record(0x455203, 0x4000, 0x5000, branch)
+      record(0x455203, destination = 0x1000, source = 0x2000, first) ++
+        record(0x455c7c, destination = 0x3000, source = 0x1000, unrelated) ++
+        record(0x455203, destination = 0x4000, source = 0x5000, branch)
     )
-    assertBytes(capture.bytes, first.dropRight(1) ++ branch.dropRight(1))
+    assertBytes(Vec.toArray(capture.bytes), first.dropRight(1) ++ branch.dropRight(1))
     assertEquals(capture.detail, ujson.Obj("records" -> 2, "source_pointers" -> 2, "callsite" -> "0x455203"))
   }
 
   test("legacy capture drops exactly the caller's final byte and permits trailing disassembly") {
-    val capture = SASSCapture.legacy(record(0x455203, 1, 2, ascii("ARCHITECTURE Test\nEND;\nX")) ++ ascii("listing"))
-    assertEquals(text(capture.bytes), "ARCHITECTURE Test\nEND;\n")
+    val capture =
+      SASSCapture.legacy(record(0x455203, destination = 1, source = 2, ascii("ARCHITECTURE Test\nEND;\nX")) ++
+        ascii("listing"))
+    assertEquals(text(Vec.toArray(capture.bytes)), "ARCHITECTURE Test\nEND;\n")
   }
 
   test("legacy capture rejects missing records, truncation, unexpected gaps and incomplete descriptions") {
-    val good = record(0x455203, 1, 2, ascii("ARCHITECTURE Test\nEND;\u0000"))
+    val good = record(0x455203, destination = 1, source = 2, ascii("ARCHITECTURE Test\nEND;\u0000"))
     Vec(
       Array.emptyByteArray,
       good.dropRight(1),
       good ++ ascii("unexpected") ++ good,
-      record(0x455203, 1, 2, ascii("ARCHITECTURE Test\nEND\u0000")),
+      record(0x455203, destination = 1, source = 2, ascii("ARCHITECTURE Test\nEND\u0000")),
       good ++ good,
       ascii("\n<P 0x455203 0x1 0x2 999999999999999>\n"),
       ascii("\n<P 0x455203 0x1 0x2 1>")
@@ -74,23 +76,23 @@ class SASSCaptureSuite extends munit.FunSuite {
   test("modern stream decodes literal blocks and ignores captured allocator padding") {
     val bytes   = ascii("abc")
     val capture = SASSCapture.modernStream(frame(bytes.length -> literals(bytes)) ++ Array.fill[Byte](7)(-1))
-    assertEquals(text(capture.bytes), "abc")
+    assertEquals(text(Vec.toArray(capture.bytes)), "abc")
     assertEquals(capture.detail, ujson.Obj("lz4_blocks" -> 1))
     val long = Array.tabulate[Byte](600)(index => (index % 127).toByte)
-    assertBytes(SASSCapture.modernStream(frame(long.length -> literals(long))).bytes, long)
+    assertBytes(Vec.toArray(SASSCapture.modernStream(frame(long.length -> literals(long))).bytes), long)
   }
 
   test("modern LZ4 match copies overlap within the current block") {
     // One literal 'a', a 20-byte match at distance one, then five terminal literals.
     val compressed = Array[Byte](0x1f, 'a'.toByte, 1, 0, 1, 0x50) ++ ascii("bcdef")
-    assertEquals(text(SASSCapture.modernStream(frame(26 -> compressed)).bytes), "a" * 21 + "bcdef")
+    assertEquals(text(Vec.toArray(SASSCapture.modernStream(frame(26 -> compressed)).bytes)), "a" * 21 + "bcdef")
   }
 
   test("modern LZ4 dictionary matches can continue into bytes produced by the current block") {
     val first   = ascii("abcdefghijklmnop")
     val second  = Array[Byte](0x0f, 4, 0, 1, 0x50) ++ ascii("12345")
     val capture = SASSCapture.modernStream(frame(first.length -> literals(first), 25 -> second))
-    assertEquals(text(capture.bytes), "abcdefghijklmnop" + "mnop" * 5 + "12345")
+    assertEquals(text(Vec.toArray(capture.bytes)), "abcdefghijklmnop" + "mnop" * 5 + "12345")
     assertEquals(capture.detail("lz4_blocks").num, 2.0)
   }
 
@@ -104,14 +106,15 @@ class SASSCaptureSuite extends munit.FunSuite {
       middle.length -> literals(middle),
       25            -> second
     ))
-    assertBytes(capture.bytes, expected)
+    assertBytes(Vec.toArray(capture.bytes), expected)
   }
 
   test("modern markers allow surrounding diagnostics but must be unique and correctly ordered") {
-    val start  = ascii("\nSTART_MACHINE_DESCRIPTION\n")
-    val end    = ascii("\nEND_MACHINE_DESCRIPTION\n")
-    val stream = frame(3 -> literals(ascii("abc")))
-    assertEquals(text(SASSCapture.modern(ascii("before") ++ start ++ stream ++ end ++ ascii("after")).bytes), "abc")
+    val start   = ascii("\nSTART_MACHINE_DESCRIPTION\n")
+    val end     = ascii("\nEND_MACHINE_DESCRIPTION\n")
+    val stream  = frame(3 -> literals(ascii("abc")))
+    val capture = SASSCapture.modern(ascii("before") ++ start ++ stream ++ end ++ ascii("after"))
+    assertEquals(text(Vec.toArray(capture.bytes)), "abc")
     Vec(
       start ++ stream,
       stream ++ end,

@@ -23,7 +23,7 @@ object IntegerArithmetic {
     if (width.raw == 64) high else ((a * b) >>> width.raw) | (high << (64 - width.raw))
   }
 
-  def addUnsigned(left: Long, right: Long, carry: Boolean, width: Int in 1 ~ 64): (Long, Boolean) = {
+  def addUnsigned(left: Long, right: Long, carry: Boolean, width: Int in 1 ~ 64): (value: Long, carry: Boolean) = {
     val a        = Bits.truncate(left, width)
     val b        = Bits.truncate(right, width)
     val first    = a + b
@@ -44,7 +44,12 @@ object IntegerArithmetic {
 
   inline def borrow32(difference: Long): Boolean = difference < 0L
 
-  def subtractUnsigned(left: Long, right: Long, borrow: Boolean, width: Int in 1 ~ 64): (Long, Boolean) = {
+  def subtractUnsigned(
+      left: Long,
+      right: Long,
+      borrow: Boolean,
+      width: Int in 1 ~ 64
+  ): (value: Long, borrow: Boolean) = {
     val a          = Bits.truncate(left, width)
     val b          = Bits.truncate(right, width)
     val comparison = java.lang.Long.compareUnsigned(a, b)
@@ -79,6 +84,8 @@ object IntegerArithmetic {
       if (borrow) 0L else difference
     }
 
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def multiplyAddSaturated(
       left: Long,
       right: Long,

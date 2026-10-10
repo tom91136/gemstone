@@ -31,7 +31,7 @@ object RPCRoundTripBenchmark {
           case SocketKind.UDS => Bind.Unix(directory.resolve("rpc.sock"))
         }
         val server  = use(Server.start(Server.Settings(parallelism = 1, bind = bind)))
-        val channel = use(Transport.connect(server.endpoint, 10000))
+        val channel = use(Sockets.connect(server.endpoint, 10000))
         val input   = DataInputStream(channel.input)
         val output  = DataOutputStream(channel.output)
         protocol.hello(input, output)

@@ -25,7 +25,7 @@ class WireConstraintSuite extends munit.FunSuite {
     assert(decode[Int in -2 ~ 5, Int](6).isLeft)
     assertEquals(
       Codec[Int in -2 ~ 5].shape,
-      Shape.Alias("Int", Shape.Int32, Vector(Constraint.IntInterval(-2, 5)))
+      Shape.Alias("Int", Shape.Int32, Vector(Constraint.IntInterval(minimum = -2, maximum = 5)))
     )
   }
 
@@ -112,7 +112,7 @@ class WireConstraintSuite extends munit.FunSuite {
     assertEquals(decode[Short, Int](-32768), Right((-32768).toShort))
     assertEquals(
       Codec[Byte in 0 ~ 31].shape,
-      Shape.Alias("Byte", Shape.Int8, Vector(Constraint.IntInterval(0, 31)))
+      Shape.Alias("Byte", Shape.Int8, Vector(Constraint.IntInterval(minimum = 0, maximum = 31)))
     )
     assertEquals(
       Codec[Short > 0].shape,

@@ -112,7 +112,7 @@ object Server {
           ),
         client => journal.foreach(_.clientClosed(client))
       ))
-      val listener = own(Transport.listen(settings.bind))
+      val listener = own(Sockets.listen(settings.bind))
       val server   =
         Server(listener, pool, clients, journal, settings.requestTimeoutMillis)
       server.acceptThread.start()

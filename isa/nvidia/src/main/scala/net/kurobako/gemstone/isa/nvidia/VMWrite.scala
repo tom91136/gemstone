@@ -6,7 +6,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 
 /** An effect staged by one instruction and applied once every lane has read its operands. */
-enum VMWrite {
+private enum VMWrite {
   case Predicate(lane: WorkgroupLane, predicate: VMIR.Predicate, value: Boolean)
   case ConditionFlag(lane: WorkgroupLane, flag: VMConditionCodes.Flag, value: Option[Boolean])
   case AddThreeCarry(lane: WorkgroupLane, value: Option[Int in 0 ~ 2])

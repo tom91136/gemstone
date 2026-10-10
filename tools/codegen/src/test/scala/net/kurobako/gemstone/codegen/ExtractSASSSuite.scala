@@ -21,7 +21,7 @@ class ExtractSASSSuite extends munit.FunSuite {
   private def gzip(path: Path, bytes: Array[Byte]): Unit =
     Using.resource(GZIPOutputStream(Files.newOutputStream(path)))(_.write(bytes))
 
-  private case class Bundle(root: Path, table: Path, tools: Vec[ExtractSASS.Tool], manifest: ujson.Obj) {
+  private class Bundle(val root: Path, val table: Path, val tools: Vec[ExtractSASS.Tool], val manifest: ujson.Obj) {
     def verify(): Unit = {
       val _ = Files.writeString(root.resolve("manifest.json"), ujson.write(manifest))
       ExtractSASS.verify(root, tools, pins)

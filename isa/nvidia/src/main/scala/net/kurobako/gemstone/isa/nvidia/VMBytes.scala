@@ -4,7 +4,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
 import scala.collection.mutable
 
-object VMBytes {
+private object VMBytes {
   private val PageBits = 12
   private val PageSize = 1 << PageBits
   private val PageMask = PageSize.toLong - 1L
@@ -14,7 +14,7 @@ object VMBytes {
   * zero. A one-page cache serves the common case of consecutive accesses to the same page.
   */
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-class VMBytes {
+private class VMBytes {
   import VMBytes.*
 
   private var pages = mutable.LongMap.empty[Array[Byte]]

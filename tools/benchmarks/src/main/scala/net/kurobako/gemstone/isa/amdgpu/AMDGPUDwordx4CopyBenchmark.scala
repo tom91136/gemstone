@@ -6,7 +6,6 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
@@ -45,10 +44,7 @@ object AMDGPUDwordx4CopyBenchmark {
       Dimensions.One,
       Vec(KernelTask.Argument.Memory(input, 0L), KernelTask.Argument.Memory(output, 0L))
     ).fold(error => throw IllegalStateException(error), identity)
-    val sample = Measurement.repeat(iterations) {
-      VMInterpreter.execute(kernel, dispatch, memory, TaskControl(), Workgroups.Sequential, Vec.empty, _ => Right(()))
-        .fold(error => throw IllegalStateException(error.toString), _ => ())
-    }
+    val sample = SequentialDispatch.repeat(iterations, kernel, dispatch, memory)
     if (!memory.array(input).sameElements(memory.array(output)))
       throw IllegalStateException("dwordx4 copy mismatch")
     sample

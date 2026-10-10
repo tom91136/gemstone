@@ -31,7 +31,7 @@ object OpenCLCTSCopyBenchmark {
     positive("local-size", "Work items per group", 8),
     positive("stride", "Element stride (1 is contiguous)", 2),
     iterations(3),
-    workers(1)
+    workers
   ).mapN(Options(_, _, _, _, _, _)).map(options => () => run(options))
 
   private val Unwritten = 0x5a.toByte
@@ -65,10 +65,7 @@ object OpenCLCTSCopyBenchmark {
     val sample = Using.resource(WorkerPool(options.workers, minGroups = 1L, minWorkItems = 1L)) { workgroups =>
       val program = SPIRVBackend(Validation.Environment.OpenCLCompute, workgroups = workgroups).load(image)
         .fold(error => throw IllegalArgumentException(error.message), identity)
-      Measurement.repeat(options.iterations) {
-        program.execute(task, memory, TaskControl(), _ => Right(()))
-          .fold(error => throw IllegalStateException(error.message), _ => ())
-      }
+      Measurement.repeatSucceeding(options.iterations)(program.execute(task, memory, TaskControl(), _ => Right(())))
     }
     val source      = memory.array(input)
     val destination = memory.array(output)

@@ -24,7 +24,8 @@ object WireCodecMacros {
         // Finite choices, or a divisor wider than Long (at most two representable multiples).
         val values = other.flatMap { (low, high, step) =>
           if (low == high) List(low.toLong)
-          else if (step > BigInt(Long.MaxValue)) List(low, low + step).filter(_ <= high).map(_.toLong)
+          else if (step > BigInt(Long.MaxValue))
+            List(low, low + step).collect { case value if value <= high => value.toLong }
           else report.errorAndAbort("unsupported disjoint wire predicate ranges")
         }.distinct.sorted
         val encoded = Expr.ofSeq(values.map(Expr(_)))

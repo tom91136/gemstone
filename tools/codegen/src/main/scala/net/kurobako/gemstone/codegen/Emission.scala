@@ -15,4 +15,14 @@ object Emission {
   }
 
   def literal(value: String): String = "\"" + escape(value) + "\""
+
+  /** A collection expression built by `companion`, written as `companion.empty` when it has no elements. */
+  def collection(companion: String, elements: Iterable[String]): String =
+    if (elements.isEmpty) s"$companion.empty" else elements.mkString(s"$companion(", ", ", ")")
+
+  /** A C++ namespace of `uint32_t` constants. */
+  def cppConstants(namespace: String, values: Iterable[(String, Long)]): String = {
+    val fields = values.map { case (name, value) => s"inline constexpr uint32_t $name = ${value}u;" }.mkString("\n")
+    s"namespace $namespace {\n$fields\n} // namespace $namespace"
+  }
 }

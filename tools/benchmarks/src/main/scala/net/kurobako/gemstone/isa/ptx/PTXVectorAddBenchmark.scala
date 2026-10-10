@@ -57,10 +57,7 @@ object PTXVectorAddBenchmark {
       ("input_b": NonEmpty[String]) -> Argument.fromLong(memory.base(b).raw),
       ("output": NonEmpty[String])  -> Argument.fromLong(memory.base(output).raw)
     )
-    val sample = Measurement.repeat(iterations) {
-      VMInterpreter.execute(kernel, geometry, parameters, memory)
-        .fold(error => throw IllegalStateException(error.message), _ => ())
-    }
+    val sample = Measurement.repeatSucceeding(iterations)(VMInterpreter.execute(kernel, geometry, parameters, memory))
     (0 until size).foreach { index =>
       if (memory.getInt(output, index * 4) != index * 100 - 4)
         throw IllegalStateException(s"unexpected result at index $index")

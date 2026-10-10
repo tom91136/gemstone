@@ -5,6 +5,7 @@ import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.environment as env
+import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.server.*
@@ -146,7 +147,7 @@ class MemoryCoherenceSuite extends munit.FunSuite {
           }
       }
       Using.resource(Journal.open(archive)) { journal =>
-        val hostAllocations = mutable.Set.empty[Long]
+        val hostAllocations = mutable.Set.empty[AllocationId]
         val requests        = journal.events.filter(_.kind == Journal.Kind.Request)
         assert(requests.nonEmpty, "recording contains no RPC requests")
         requests.foreach { event =>
@@ -157,7 +158,7 @@ class MemoryCoherenceSuite extends munit.FunSuite {
             .fold(message => fail(message), identity).value
           request match {
             case Operation.RegisterAllocationAddress(allocation, _, true) =>
-              val _ = hostAllocations.add(allocation.raw)
+              val _ = hostAllocations.add(allocation)
             case Operation.SupplyHostMemory(_, ranges) =>
               ranges.foreach { range =>
                 assert(
@@ -168,8 +169,8 @@ class MemoryCoherenceSuite extends munit.FunSuite {
                 )
               }
             case Operation.WriteAllocation(allocation, _, _) =>
-              assert(!hostAllocations.contains(allocation.raw), "host-backed storage was uploaded speculatively")
-            case Operation.ReleaseAllocation(allocation) => val _ = hostAllocations.remove(allocation.raw)
+              assert(!hostAllocations.contains(allocation), "host-backed storage was uploaded speculatively")
+            case Operation.ReleaseAllocation(allocation) => val _ = hostAllocations.remove(allocation)
             case _                                       => ()
           }
         }

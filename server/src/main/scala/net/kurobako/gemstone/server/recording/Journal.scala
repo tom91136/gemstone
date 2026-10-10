@@ -80,10 +80,10 @@ object Journal {
       schema: String = ExecutionRPC.Schema.canonical
   )
   enum Kind(val code: Int, val hasFrame: Boolean) {
-    case Request         extends Kind(1, true)
-    case Response        extends Kind(2, true)
-    case ConnectionClose extends Kind(3, false)
-    case ClientClose     extends Kind(4, false)
+    case Request         extends Kind(1, hasFrame = true)
+    case Response        extends Kind(2, hasFrame = true)
+    case ConnectionClose extends Kind(3, hasFrame = false)
+    case ClientClose     extends Kind(4, hasFrame = false)
   }
   case class Event(
       sequence: EventId,
@@ -169,6 +169,9 @@ object Journal {
       closed: Boolean = false
   )
 
+  private def failureReason(raw: String): FailureReason =
+    raw.refine[FailureReason].fold(message => invalid(s"invalid failure reason: $message"), value => value)
+
   private def invalid(message: String): Nothing                 = throw IOException(s"RPC journal: $message")
   private def ensure(condition: Boolean, message: String): Unit = if (!condition) invalid(message)
   private def crc32(bytes: Array[Byte]): Long                   = {
@@ -209,7 +212,6 @@ object Journal {
   }
 
   object Writer {
-    @SuppressWarnings(Array("scalafix:BannedSyntax.explicit-new"))
     def apply(file: Path, header: Header): Writer = {
       Option(file.getParent).foreach(Files.createDirectories(_))
       try Files.createFile(file)
@@ -322,8 +324,7 @@ object Journal {
       if (failure.isEmpty) {
         val sanitised = reason.filterNot(_ == '\u0000').take(FailureReasonMaxLength)
         val detail    = Option.when(sanitised.nonEmpty)(sanitised).getOrElse("unspecified recording failure")
-        failure = Some(detail.refine[FailureReason]
-          .fold(message => invalid(s"invalid failure reason: $message"), value => value))
+        failure = Some(failureReason(detail))
       }
     }
     private[Journal] def append(
@@ -381,8 +382,13 @@ object Journal {
     }
   }
 
+  object Connection {
+    def apply(writer: Writer, client: RecordedClientId, id: RecordedConnectionId): Connection =
+      new Connection(writer, client, id)
+  }
+
   /** One connection's request/response/close lifecycle, driven by its connection thread. */
-  class Connection private[Journal] (
+  class Connection private (
       writer: Writer,
       val client: RecordedClientId,
       val id: RecordedConnectionId
@@ -400,13 +406,17 @@ object Journal {
       }
   }
 
+  // a companion factory would expose the private RecordLocation its constructor takes
+  @SuppressWarnings(Array("scalafix:QualifiedPrivate.companion-factory"))
   class Reader private[Journal] (
       input: RandomAccessFile,
       val summary: Summary,
       val events: Vec[Event],
       locations: Map[EventId, RecordLocation]
   ) extends AutoCloseable {
-    private val lock                     = ReentrantLock()
+    private val lock = ReentrantLock()
+    // each call decodes a fresh copy from the archive
+    @SuppressWarnings(Array("scalafix:MutableExposure"))
     def frame(event: Event): Array[Byte] = lock.withLock {
       ensure(event.kind.hasFrame, "event has no frame")
       val location = locations.getOrElse(event.sequence, invalid("missing frame record"))
@@ -522,10 +532,7 @@ object Journal {
         case Some((location, FooterRecord(expectedEvents, expectedFrames, replayable, reason))) =>
           ensure(location.payloadBytes <= MetadataRecordLimit, "archive footer exceeds its byte limit")
           ensure(expectedEvents == count.raw && expectedFrames == frames.raw, "footer totals differ")
-          val failure: Option[FailureReason] = reason.map(raw =>
-            raw.refine[FailureReason]
-              .fold(message => invalid(s"invalid failure reason: $message"), value => value)
-          )
+          val failure: Option[FailureReason] = reason.map(failureReason(_))
           ensure(replayable == failure.isEmpty, "footer status and reason differ")
           ensure(input.getFilePointer == input.length(), "bytes follow archive footer")
           ensure(

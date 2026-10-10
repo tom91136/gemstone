@@ -34,8 +34,8 @@ class IntegerMultiplyAddSuite extends munit.FunSuite {
     val (operandWidth, resultWidth, usesCarry, high) = operation match {
       case IntegerMultiplyAddOperation.Low(operandWidth, resultWidth, usesCarry, _) =>
         (operandWidth, resultWidth, usesCarry, false)
-      case IntegerMultiplyAddOperation.High(operandWidth, resultWidth, usesCarry, _) =>
-        (operandWidth, resultWidth, usesCarry, true)
+      case IntegerMultiplyAddOperation.High(operandWidth, resultWidth, _) =>
+        (operandWidth, resultWidth, true, true)
     }
     val product  = unsigned(left, operandWidth) * unsigned(right, operandWidth)
     val selected = if (high) product >> operandWidth.raw else product
@@ -67,13 +67,11 @@ class IntegerMultiplyAddSuite extends munit.FunSuite {
       IntegerMultiplyAddOperation.High(
         operandWidth = 32,
         resultWidth = 32,
-        carryIn = true,
         carryOut = true
       ),
       IntegerMultiplyAddOperation.High(
         operandWidth = 64,
         resultWidth = 64,
-        carryIn = true,
         carryOut = true
       )
     )

@@ -65,7 +65,7 @@ class VMKernelLaunchSuite extends munit.FunSuite {
       Vec(
         load(0, 0, 32),
         load(1, 8, 64),
-        store(1, 0, 32),
+        store(address = 1, source = 0, 32),
         Instruction.Return
       )
     )
@@ -88,8 +88,8 @@ class VMKernelLaunchSuite extends munit.FunSuite {
         load(0, 0, 64),
         load(1, 8, 32),
         load(2, 16, 64),
-        store(0, 1, 32),
-        store(2, 0, 64),
+        store(address = 0, source = 1, 32),
+        store(address = 2, source = 0, 64),
         Instruction.Return
       )
     )

@@ -20,7 +20,8 @@ object SASSFormat {
   case class Optional(marker: Option[String], children: Vector[Node]) extends Node
   case class ParseError(message: String, offset: Int)
 
-  private val identifier: Parser[String] =
+  /** A field, kind or binding name. */
+  val identifier: Parser[String] =
     (Parser.charWhere(c => c.isLetter || c == '_') ~
       Parser.charWhere(c => c.isLetterOrDigit || "_.$-".contains(c)).rep0).string
   private val kindName: Parser[String]  = identifier
@@ -90,11 +91,11 @@ object SASSFormat {
 
   private def marker(nodes: Vector[Node]): Option[String] = {
     def rendered(node: Node): String = node match {
-      case Text(raw)                 => raw
-      case Literal(_, value)         => value
-      case Field(_, _, _, _, _, raw) => raw
-      case Group(_, _, children)     => children.map(rendered(_)).mkString
-      case Optional(_, children)     => children.map(rendered(_)).mkString
+      case Text(raw)             => raw
+      case Literal(_, value)     => value
+      case Field(raw = raw)      => raw
+      case Group(_, _, children) => children.map(rendered(_)).mkString
+      case Optional(_, children) => children.map(rendered(_)).mkString
     }
     val raw = nodes.map(rendered(_)).mkString
     Vector("'&'", "'?'", "&", "?").find(raw.contains(_))

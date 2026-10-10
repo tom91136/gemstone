@@ -156,7 +156,7 @@ object Wire {
       reader => reader.readBytes().map(Vec.unsafeWrapArray)
     )
 
-    given [A: ClassTag](using element: Codec[A], notByte: NotGiven[A =:= Byte]): Codec[Vec[A]] = instance(
+    given [A: ClassTag](using element: Codec[A])(using NotGiven[A =:= Byte]): Codec[Vec[A]] = instance(
       Shape.Sequence(element.shape),
       (writer, values) => {
         writer.writeArrayHeader(values.nonNegativeSize)
@@ -347,33 +347,31 @@ object Wire {
           case _            => report.errorAndAbort(s"${child.fullName} does not have one reply type")
         }
         reply.asType match {
-          case '[answer] if singleton =>
+          case '[answer] =>
             val replyCodec = Expr.summon[Codec[answer]].getOrElse(
               report.errorAndAbort(s"no wire codec for reply ${reply.show} of ${child.fullName}")
             )
-            val value = Ref(child).asExprOf[F[answer]]
-            val codec = '{
-              Codec.instance[F[answer]](
-                Shape.Product(${ Expr(child.name) }, Vector.empty),
-                (writer, _) => writer.writeArrayHeader(0),
-                reader =>
-                  reader.readArrayHeader().flatMap { count =>
-                    if (count.raw == 0) Right($value) else Left(s"expected empty operation array, got $count")
-                  }
-              )
-            }
-            '{
-              Protocol.protocolCase[F, answer, F[answer]](
-                ${ Expr(child.name) },
-                $codec,
-                $replyCodec.shape
-              )
-            }
-          case '[answer] => childType.asType match {
-              case '[child] =>
-                val replyCodec = Expr.summon[Codec[answer]].getOrElse(
-                  report.errorAndAbort(s"no wire codec for reply ${reply.show} of ${child.fullName}")
+            if (singleton) {
+              val value = Ref(child).asExprOf[F[answer]]
+              val codec = '{
+                Codec.instance[F[answer]](
+                  Shape.Product(${ Expr(child.name) }, Vector.empty),
+                  (writer, _) => writer.writeArrayHeader(0),
+                  reader =>
+                    reader.readArrayHeader().flatMap { count =>
+                      if (count.raw == 0) Right($value) else Left(s"expected empty operation array, got $count")
+                    }
                 )
+              }
+              '{
+                Protocol.protocolCase[F, answer, F[answer]](
+                  ${ Expr(child.name) },
+                  $codec,
+                  $replyCodec.shape
+                )
+              }
+            } else childType.asType match {
+              case '[child] =>
                 val mirror = Expr.summon[Mirror.ProductOf[child]].getOrElse(
                   report.errorAndAbort(s"cannot derive a wire codec for ${child.fullName}")
                 )
@@ -534,8 +532,8 @@ object Wire {
             case Constraint.OneOf(values)                  => s"one-of[${values.mkString(",")}]"
             case Constraint.MultipleOf(divisor)            => s"multiple-of[$divisor]"
             case Constraint.MinimumLength(minimum)         => s"minimum-length[$minimum]"
-            case Constraint.NotContains(value)             =>
-              val encoded = value.getBytes(StandardCharsets.UTF_8).map(byte => f"${byte & 0xff}%02x").mkString
+            case Constraint.NotContains(excluded)          =>
+              val encoded = excluded.getBytes(StandardCharsets.UTF_8).map(byte => f"${byte & 0xff}%02x").mkString
               s"not-contains[$encoded]"
           }.mkString(",")
           s"alias($alias,${render(value)})[$rendered]"

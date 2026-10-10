@@ -13,7 +13,7 @@ import scala.collection.mutable
 import scala.util.boundary
 import scala.util.boundary.break
 
-object VMInterpreter {
+private[isa] object VMInterpreter {
 
   private case class Cohort(pc: Pc, lanes: VMLaneMask, frame: VMFrame)
   private case class ClusterWaiting(cohort: Cohort, phase: Long, arrival: Boolean)
@@ -121,7 +121,7 @@ object VMInterpreter {
               workgroups,
               dynamicSharedBytes,
               block
-            ).run()
+            ).run().left.map(_.at(Fault.Location(kernel.name, None, None, Some(group), None)))
           finally release(block)
         }
       }
@@ -144,12 +144,12 @@ object VMInterpreter {
     }
 
   private def warpMemberMask(instruction: Instruction): Option[Value] = instruction match {
-    case Instruction.Shuffle(_, _, _, _, _, _, memberMask, _) => Some(memberMask)
-    case Instruction.VoteBallot(_, _, memberMask, _)          => Some(memberMask)
-    case Instruction.Elect(_, _, memberMask)                  => Some(memberMask)
-    case Instruction.VotePredicate(_, _, memberMask, _, _)    => Some(memberMask)
-    case Instruction.WarpReduce(_, _, memberMask, _, _)       => Some(memberMask)
-    case _                                                    => None
+    case Instruction.Shuffle(memberMask = memberMask)       => Some(memberMask)
+    case Instruction.VoteBallot(memberMask = memberMask)    => Some(memberMask)
+    case Instruction.Elect(_, _, memberMask)                => Some(memberMask)
+    case Instruction.VotePredicate(memberMask = memberMask) => Some(memberMask)
+    case Instruction.WarpReduce(memberMask = memberMask)    => Some(memberMask)
+    case _                                                  => None
   }
 
   private def inFunction(fault: Fault, name: NonEmpty[String]): Fault = fault match {
@@ -194,6 +194,39 @@ object VMInterpreter {
     private type Run = boundary.Label[Either[Fault, Unit]]
 
     private def fail(fault: Fault)(using Run): Nothing = break(Left(fault))
+
+    private val observing = control.observer.isDefined
+
+    private def observe(frame: VMFrame, pc: Pc, active: VMLaneMask)(using Run): Unit = control.observer.foreach {
+      observer =>
+        val at = location(frame, pc, active)
+        observer.instruction(at, View(frame, active)) match {
+          case Left(fault) => fail(fault.at(at))
+          case Right(())   => ()
+        }
+    }
+
+    private class View(frame: VMFrame, active: VMLaneMask) extends CohortView {
+      def function: NonEmpty[String] = frame.routine.name
+      def lanes: Vec[Int >= 0]       = {
+        val indices = Vec.newBuilder[Int >= 0]
+        active.foreachLane(lane => indices += lane.raw.toInt.unsafe[Int >= 0])
+        indices.result()
+      }
+      def register(lane: Int >= 0, slot: Int >= 0): Long =
+        frame.lanes(WorkgroupLane.fromIndex(lane.raw)).register(Register(slot))
+      def predicate(lane: Int >= 0, slot: Int >= 0): Option[Boolean] =
+        frame.lanes(WorkgroupLane.fromIndex(lane.raw)).predicate(Predicate(slot))
+    }
+
+    // A cohort executes its lanes together, so only a lone active lane identifies the faulting one.
+    private def location(frame: VMFrame, pc: Pc, active: VMLaneMask): Fault.Location = Fault.Location(
+      kernel.name,
+      Some(frame.routine.name),
+      frame.routine.program.source(pc),
+      Some(group),
+      active.positiveSize.filter(_.raw == 1).flatMap(_ => active.headOption).map(_.toInt.raw.unsafe[Int >= 0])
+    )
 
     private def check(result: Either[Fault, Unit])(using Run): Unit = result match {
       case Left(fault) => fail(fault)
@@ -450,7 +483,7 @@ object VMInterpreter {
       if (invalid) fail(Fault.Backend("cluster barrier requires one arrival before each wait"))
       if (arrival) {
         clusterArrived = clusterArrived.union(active)
-        clusterWaiting += ClusterWaiting(cohort.copy(lanes = active), clusterPhase, true)
+        clusterWaiting += ClusterWaiting(cohort.copy(lanes = active), clusterPhase, arrival = true)
       } else {
         val phases = mutable.Map.empty[Long, VMLaneMask.Builder]
         active.foreachLane(lane => phases.getOrElseUpdate(clusterLanePhase(lane.raw), VMLaneMask.Builder()).add(lane))
@@ -506,6 +539,7 @@ object VMInterpreter {
       context.frame = frame
       context.pc = cohort.pc
       context.active = active
+      if (observing && active.nonEmpty) observe(frame, cohort.pc, active)
       effects.clear()
       val outcome = if (active.isEmpty) Advanced else VMSemantics.execute(instruction.instruction, context, effects)
       val result  = outcome match {
@@ -517,7 +551,7 @@ object VMInterpreter {
         case failure => failure
       }
       result match {
-        case Left(fault)         => fail(inFunction(fault, frame.routine.name))
+        case Left(fault)         => fail(inFunction(fault, frame.routine.name).at(location(frame, cohort.pc, active)))
         case Right(Step.Advance) =>
           advance(cohort, cohort.lanes)
           instruction.instruction match {
@@ -538,7 +572,8 @@ object VMInterpreter {
           advance(cohort, skipped)
           byWarp(active)(_ => 0L).foreach { case ((base, _), lanes) =>
             val key = BarrierKey.Warp(base, cohort.pc, frame)
-            warpMembers(key) = memberMask
+            // One box per warp arrival, alongside the key allocated for it.
+            warpMembers(key) = memberMask: @scala.annotation.nowarn("msg=baumkuchen:loop-boxing")
             arriveWarp(cohort, lanes, key)
           }
         case Right(Step.ConvergenceSync(token)) =>

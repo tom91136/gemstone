@@ -51,8 +51,9 @@ object GenerateSASSISA {
     val manifest            = ujson.read(Files.readString(references.resolve("manifest.json")))
     val pinned              = manifest("targets").arr.toVector.map(target => target("name").str -> target("table").str)
     val (suffixed, targets) = pinned.partition(_._1.last.isLetter)
+    val known               = pinned.toSet
     suffixed.foreach { (name, digest) =>
-      require(pinned.contains(name.init -> digest), s"$name does not share the description of ${name.init}")
+      require(known(name.init -> digest), s"$name does not share the description of ${name.init}")
     }
     val tables = targets.map(_._2).distinct.sorted.map { digest =>
       val path  = references.resolve(s"tables/$digest.txt.gz")
@@ -74,10 +75,10 @@ object GenerateSASSISA {
   private def modifiers(tables: Vector[Table]): Vector[String] = tables.flatMap { table =>
     val kinds        = SASSInstructionModel.modifierKinds(table.description.classes)
     val vocabularies = SASSSymbols.compile(table.description)
-    val registers    = vocabularies.filter(vocabulary =>
+    val registers    = vocabularies.view.filter(vocabulary =>
       vocabulary.name.contains("Register") || vocabulary.name.contains("Predicate")
     ).flatMap(_.values.map(_.name)).toSet
-    vocabularies.filter(vocabulary =>
+    vocabularies.view.filter(vocabulary =>
       kinds(vocabulary.name) && !vocabulary.values.forall(value => registers(value.name))
     )
       .flatMap(_.values.map(_.name)) ++ table.description.classes.flatMap(_.opcodes.flatMap(_.split('.').drop(1)))
@@ -197,11 +198,11 @@ object GenerateSASSISA {
     val databases = bundle.tables.map { table =>
       val decoder = Decoder(table)
       Database(
-        strings(table.digest),
-        decoder.compiled.width.raw,
-        named(decoder.parameters),
-        named(decoder.constants),
-        decoder.forms.map { (form, format, legality) =>
+        digest = strings(table.digest),
+        width = decoder.compiled.width.raw,
+        parameters = named(decoder.parameters),
+        constants = named(decoder.constants),
+        forms = decoder.forms.map { (form, format, legality) =>
           forms(Form(
             strings(form.name),
             form.alternate,
@@ -215,10 +216,10 @@ object GenerateSASSISA {
             }
           ))
         },
-        decoder.lookups.map(lookup =>
+        lookups = decoder.lookups.map(lookup =>
           lookups(Lookup(strings(lookup.name), lookup.rows.map((inputs, output) => Row(inputs, output))))
         ),
-        decoder.vocabularies.map(vocabulary =>
+        vocabularies = decoder.vocabularies.map(vocabulary =>
           vocabularies(Vocabulary(
             strings(vocabulary.name),
             vocabulary.values.map(value => strings(value.name) -> value.value),
@@ -305,14 +306,14 @@ object GenerateSASSISA {
       }
 
     private def expressionLookups(value: SASSEncoding.Expr): Set[String] = value match {
-      case SASSEncoding.Expr.Lookup(name, arguments)      => Set(name) ++ arguments.flatMap(expressionLookups(_))
-      case SASSEncoding.Expr.Scale(inner, _)              => expressionLookups(inner)
-      case SASSEncoding.Expr.Multiply(inner, _)           => expressionLookups(inner)
-      case SASSEncoding.Expr.Identity(a, b)               => expressionLookups(a) ++ expressionLookups(b)
-      case SASSEncoding.Expr.FixedFloat(inner, _)         => expressionLookups(inner)
-      case SASSEncoding.Expr.FloatConvert(inner, _, _, _) => expressionLookups(inner)
-      case SASSEncoding.Expr.Relaxed(inner)               => expressionLookups(inner)
-      case _                                              => Set.empty
+      case SASSEncoding.Expr.Lookup(name, arguments)     => Set(name) ++ arguments.flatMap(expressionLookups(_))
+      case SASSEncoding.Expr.Scale(inner, _)             => expressionLookups(inner)
+      case SASSEncoding.Expr.Multiply(inner, _)          => expressionLookups(inner)
+      case SASSEncoding.Expr.Identity(a, b)              => expressionLookups(a) ++ expressionLookups(b)
+      case SASSEncoding.Expr.FixedFloat(inner, _)        => expressionLookups(inner)
+      case SASSEncoding.Expr.FloatConvert(value = inner) => expressionLookups(inner)
+      case SASSEncoding.Expr.Relaxed(inner)              => expressionLookups(inner)
+      case _                                             => Set.empty
     }
 
     private def conditionLookups(value: SASSConditions.Expr): Set[String] = value match {
@@ -339,10 +340,10 @@ object GenerateSASSISA {
     }
 
     private def syntaxKinds(value: SASSFormat.Node): Set[String] = value match {
-      case SASSFormat.Field(kind, _, _, _, _, _) => Set(kind)
-      case SASSFormat.Group(_, _, children)      => children.flatMap(syntaxKinds(_)).toSet
-      case SASSFormat.Optional(_, children)      => children.flatMap(syntaxKinds(_)).toSet
-      case _                                     => Set.empty
+      case SASSFormat.Field(kind = kind)    => Set(kind)
+      case SASSFormat.Group(_, _, children) => children.flatMap(syntaxKinds(_)).toSet
+      case SASSFormat.Optional(_, children) => children.flatMap(syntaxKinds(_)).toSet
+      case _                                => Set.empty
     }
 
     private val expressions = forms.flatMap(_._3).map(_._1.expression)

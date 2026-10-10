@@ -150,7 +150,7 @@ private object checkpoints {
     }
 
     private class CheckpointBackend(original: Backend) extends Backend {
-      override def encoding: ProgramEncoding                              = original.encoding
+      override def format: ProgramFormat                                  = original.format
       override def load(image: Vec[Byte]): Either[Fault, Backend.Program] = original.load(image).map(Program(_))
     }
 

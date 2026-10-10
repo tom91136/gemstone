@@ -221,8 +221,8 @@ object GenerateExecutionRPC {
       case Wire.Constraint.MinimumLength(min)  =>
         val size = if (underlying == Shape.Text) "textLength(value.value)" else "value.value.size()"
         s"$size >= ${min}U"
-      case Wire.Constraint.NotContains(value) =>
-        val bytes   = value.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+      case Wire.Constraint.NotContains(excluded) =>
+        val bytes   = excluded.getBytes(java.nio.charset.StandardCharsets.UTF_8)
         val literal = bytes.view.map(byte => f"\\x${byte & 0xff}%02x").mkString
         s"value.value.find(std::string_view(\"$literal\", ${bytes.length})) == std::string::npos"
     }

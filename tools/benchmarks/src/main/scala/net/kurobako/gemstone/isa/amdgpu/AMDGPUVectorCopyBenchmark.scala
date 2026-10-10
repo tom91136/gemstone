@@ -10,7 +10,6 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
@@ -60,10 +59,7 @@ object AMDGPUVectorCopyBenchmark {
       memory.ids.map(KernelTask.Argument.Memory(_, 0L)) ++
         hidden.refine[NonEmpty[Vec[Byte]]].toOption.map(KernelTask.Argument.Scalar(_))
     ).fold(message => throw IllegalArgumentException(message), identity)
-    val sample = Measurement.repeat(iterations) {
-      VMInterpreter.execute(prepared, dispatch, memory, TaskControl(), Workgroups.Sequential, Vec.empty, _ => Right(()))
-        .fold(failure => throw RuntimeException(failure.message), _ => ())
-    }
+    val sample = SequentialDispatch.repeat(iterations, prepared, dispatch, memory)
     (0 until elements).foreach { index =>
       val observed = memory.getInt(output, index * 4)
       if (observed != index * 97 - 11) throw IllegalStateException(s"copy mismatch at $index: $observed")

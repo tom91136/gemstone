@@ -8,7 +8,7 @@ import scala.collection.mutable
 
 /** Memory and synchronisation state of one workgroup, shared by every frame executing within it. */
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
+private class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
   private val shared                          = VMBytes()
   val mbarriers: mutable.LongMap[MBarrier]    = mutable.LongMap.empty
   val invalidatedMBarriers: mutable.Set[Long] = mutable.Set.empty

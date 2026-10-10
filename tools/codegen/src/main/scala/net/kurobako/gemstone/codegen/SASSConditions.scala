@@ -77,9 +77,9 @@ object SASSConditions {
   }
   private val punctuation: Parser[Token] =
     Parser.charWhere(c => "(),:".contains(c)).map(c => PunctuationToken(c.toString))
-  private val name: Parser[Token] = identifier.map(WordToken.apply(_))
+  private val word: Parser[Token] = identifier.map(WordToken.apply(_))
   private val atom: Parser[Token] = enumReference.orElse(quoted).orElse(parameter).orElse(constant)
-    .orElse(number).orElse(name).orElse(operator).orElse(punctuation)
+    .orElse(number).orElse(word).orElse(operator).orElse(punctuation)
   private val whitespace: Parser0[Unit]    = Parser.charWhere(_.isWhitespace).rep0.void
   private val tokens: Parser0[List[Token]] = (whitespace.with1 *> atom).backtrack.rep0 <* whitespace
 

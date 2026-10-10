@@ -188,6 +188,8 @@ class WorkerPool(
     else job.failure.toLeft(())
   }
 
+  // Callers reach this through ExecutionContext with a plain Runnable; a Task opts into rejection when the pool closes.
+  @scala.annotation.nowarn("msg=baumkuchen:open-type-test")
   override def execute(runnable: Runnable): Unit = {
     val _ = enqueue(
       1L,

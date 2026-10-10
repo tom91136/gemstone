@@ -328,16 +328,16 @@ object GenerateAMDGPUOracle {
 
   private def targetsByCheckPrefix(lines: Vector[String]): Map[String, Set[(NonEmpty[String], Int in (32, 64))]] = {
     val pairs = lines.flatMap {
-      case Run(command) if command.contains("llvm-mc") && !command.contains("-disassemble") =>
-        Mcpu.findFirstMatchIn(command).toVector.flatMap { targetMatch =>
+      case Run(invocation) if invocation.contains("llvm-mc") && !invocation.contains("-disassemble") =>
+        Mcpu.findFirstMatchIn(invocation).toVector.flatMap { targetMatch =>
           val rawTarget = targetMatch.group(1).toLowerCaseRoot
           familyForTargetOption(rawTarget).toVector.flatMap { _ =>
             val target = rawTarget.unsafe[NonEmpty[String]]
-            CheckPrefixes.findFirstMatchIn(command).map(_.group(1).split(',').toVector).getOrElse(Vector("CHECK"))
+            CheckPrefixes.findFirstMatchIn(invocation).map(_.group(1).split(',').toVector).getOrElse(Vector("CHECK"))
               .map { prefix =>
                 val waveSize: Int in (32, 64) =
-                  if (command.contains("+wavefrontsize64") || command.contains("-wavefrontsize32")) 64
-                  else if (command.contains("+wavefrontsize32") || command.contains("-wavefrontsize64")) 32
+                  if (invocation.contains("+wavefrontsize64") || invocation.contains("-wavefrontsize32")) 64
+                  else if (invocation.contains("+wavefrontsize32") || invocation.contains("-wavefrontsize64")) 32
                   else if (familyForTarget(target).startsWith("gfx1")) 32 else 64
                 normalisePrefix(prefix) -> (target -> waveSize)
               }

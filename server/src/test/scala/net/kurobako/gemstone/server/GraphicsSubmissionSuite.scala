@@ -202,7 +202,7 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
       }
     }
     class ConsumerBackend(reject: Boolean, standalone: Boolean) extends Backend {
-      override val encoding                                               = ProgramEncoding.SPIRVVulkanGraphics
+      override val format                                                 = ProgramFormat.SPIRVVulkanGraphics
       override def load(image: Vec[Byte]): Either[Fault, Backend.Program] =
         Right(Consumer(reject, standalone))
     }
@@ -215,7 +215,7 @@ class GraphicsSubmissionSuite extends munit.FunSuite {
         service =>
           val source      = right(service.registerAllocation(8))
           val placeholder = right(service.registerAllocation(8))
-          val program     = right(service.load(backend.encoding, Vec.empty))
+          val program     = right(service.load(ProgramEncoding.SPIRVVulkanGraphics, Vec.empty))
           val task        = KernelTask.validated(
             "sample",
             LaunchGeometry.Dimensions.One,

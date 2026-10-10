@@ -48,7 +48,17 @@ class SASSFormatSuite extends munit.FunSuite {
       .fold(error => fail(error.message), identity)
     val fields = descendants(parsed).collect { case field: Field => field }
     assertEquals(fields.map(_.binding), Vector("Pg", "pipe", "sync"))
-    assertEquals(fields(1), Field("Pipe2", "pipe", Some("HW"), Some("HW"), "@", "Pipe2(HW)@:pipe"))
+    assertEquals(
+      fields(1),
+      Field(
+        kind = "Pipe2",
+        binding = "pipe",
+        arguments = Some("HW"),
+        default = Some("HW"),
+        suffix = "@",
+        raw = "Pipe2(HW)@:pipe"
+      )
+    )
     assertEquals(fields(2).suffix, "")
   }
 

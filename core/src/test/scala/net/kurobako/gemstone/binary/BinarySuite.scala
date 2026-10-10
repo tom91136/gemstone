@@ -74,7 +74,7 @@ class BinarySuite extends munit.FunSuite {
     assertEquals(Bits.low32(0x123456789abcdef0L).toLong, 0x9abcdef0L)
     assertEquals(Bits.signed32(0x123456789abcdef0L), 0x9abcdef0)
     assertEquals(Bits.high32(0x123456789abcdef0L).toLong, 0x12345678L)
-    assertEquals(Bits.join32(0x9abcdef0L, 0x12345678L), 0x123456789abcdef0L)
+    assertEquals(Bits.join32(low = 0x9abcdef0L, high = 0x12345678L), 0x123456789abcdef0L)
   }
 
   test("IEEE-754 interchange encodings round trip representative values") {

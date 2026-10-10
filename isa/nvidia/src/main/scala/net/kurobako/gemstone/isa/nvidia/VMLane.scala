@@ -7,7 +7,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
 import scala.collection.mutable
 
-object VMLane {
+private object VMLane {
   private val NoValues     = Array.emptyLongArray
   private val NoParameters = Array.empty[Array[Byte] | Null]
   private val DefinedTrue  = Some(true)
@@ -18,7 +18,7 @@ object VMLane {
   * registers read as zero and unwritten predicates as undefined.
   */
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-class VMLane(registerCount: Int >= 0, predicateCount: Int >= 0) {
+private class VMLane(registerCount: Int >= 0, predicateCount: Int >= 0) {
   private var registers: Array[Long] = VMLane.NoValues
   // Reused lane storage: clearing zeroes registers only up to this high-water mark.
   private var used = 0
@@ -89,8 +89,6 @@ class VMLane(registerCount: Int >= 0, predicateCount: Int >= 0) {
     }
     LittleEndian.write(value, bytes, offset.raw, width.toScalarByteWidth)
   }
-
-  def parameterBytes(parameter: Parameter): Option[Array[Byte]] = Option(storedParameter(parameter))
 
   def copyParameter(parameter: Parameter, target: VMLane, destination: Parameter): Unit =
     storedParameter(parameter) match {

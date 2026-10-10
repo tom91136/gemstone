@@ -16,8 +16,9 @@ class IEEE754Suite extends munit.FunSuite {
       if ((bits & ~sign) == 0L) { if (up) 1L else sign | 1L }
       else if (((bits & sign) == 0L) == up) bits + 1L
       else bits - 1L
-    val candidates = Seq(next(next(nearest, false), false), next(nearest, false), nearest, next(nearest, true))
-      .filter(bits => IEEE754.toDouble(bits, width).isFinite)
+    val candidates =
+      Seq(next(next(nearest, up = false), up = false), next(nearest, up = false), nearest, next(nearest, up = true))
+        .filter(bits => IEEE754.toDouble(bits, width).isFinite)
     val below = candidates.filter(bits => decoded(bits).compareTo(value) <= 0).maxBy(bits => decoded(bits))
     val above = candidates.filter(bits => decoded(bits).compareTo(value) >= 0).minBy(bits => decoded(bits))
     rounding match {
@@ -72,12 +73,12 @@ class IEEE754Suite extends munit.FunSuite {
   }
 
   test("integer conversion to half and bfloat16 rounds once and saturates by direction") {
-    assertEquals(IEEE754.integerToBinary(2049L, false, 16), 0x6800L)
-    assertEquals(IEEE754.integerToBinary(2049L, false, 16, IEEE754.Rounding.Up), 0x6801L)
-    assertEquals(IEEE754.integerToBinary(-1L, true, 16), 0x7c00L)
-    assertEquals(IEEE754.integerToBinary(-1L, true, 16, IEEE754.Rounding.TowardZero), 0x7bffL)
-    assertEquals(IEEE754.integerToBfloat16(257L, false).toLong, 0x4380L)
-    assertEquals(IEEE754.integerToBfloat16(257L, false, IEEE754.Rounding.Up).toLong, 0x4381L)
+    assertEquals(IEEE754.integerToBinary(2049L, unsigned = false, 16), 0x6800L)
+    assertEquals(IEEE754.integerToBinary(2049L, unsigned = false, 16, IEEE754.Rounding.Up), 0x6801L)
+    assertEquals(IEEE754.integerToBinary(-1L, unsigned = true, 16), 0x7c00L)
+    assertEquals(IEEE754.integerToBinary(-1L, unsigned = true, 16, IEEE754.Rounding.TowardZero), 0x7bffL)
+    assertEquals(IEEE754.integerToBfloat16(257L, unsigned = false).toLong, 0x4380L)
+    assertEquals(IEEE754.integerToBfloat16(257L, unsigned = false, IEEE754.Rounding.Up).toLong, 0x4381L)
   }
 
   test("saturating float-to-integer conversion clamps, rounds by direction and maps NaN to zero") {
@@ -112,9 +113,9 @@ class IEEE754Suite extends munit.FunSuite {
     assert(IEEE754.isNaN(IEEE754.minimum(one, nan, 32), 32))
     assert(IEEE754.isNaN(IEEE754.maximum(0x7f800001L, one, 32), 32))
     assertEquals(IEEE754.maximum(0x7f800001L, one, 32), 0x7fc00001L)
-    assertEquals(IEEE754.minimum(0xc000L, 0x3c00L, 16), 0xc000L)
-    assertEquals(IEEE754.maxNum(0x7e00L, 0xbc00L, 16), 0xbc00L)
-    assertEquals(IEEE754.minNum(0xfff0000000000000L, 0x0L, 64), 0xfff0000000000000L)
+    assertEquals(IEEE754.minimum(left = 0xc000L, right = 0x3c00L, 16), 0xc000L)
+    assertEquals(IEEE754.maxNum(left = 0x7e00L, right = 0xbc00L, 16), 0xbc00L)
+    assertEquals(IEEE754.minNum(left = 0xfff0000000000000L, right = 0x0L, 64), 0xfff0000000000000L)
   }
 
   test("binary16 fma rounds once where a binary32 intermediate would double-round") {
@@ -175,10 +176,19 @@ class IEEE754Suite extends munit.FunSuite {
         )
     }
     assertEquals(
-      IEEE754.fusedMultiplyAdd(0x3f800000L, 0x3f800000L, 0xbf800000L, 32, IEEE754.Rounding.Down),
+      IEEE754.fusedMultiplyAdd(
+        left = 0x3f800000L,
+        right = 0x3f800000L,
+        addend = 0xbf800000L,
+        32,
+        IEEE754.Rounding.Down
+      ),
       0x80000000L
     )
-    assertEquals(IEEE754.fusedMultiplyAdd(0x3f800000L, 0x3f800000L, 0xbf800000L, 32, IEEE754.Rounding.Up), 0x0L)
+    assertEquals(
+      IEEE754.fusedMultiplyAdd(left = 0x3f800000L, right = 0x3f800000L, addend = 0xbf800000L, 32, IEEE754.Rounding.Up),
+      0x0L
+    )
   }
 
   test("directed fma handles overflow, subnormal, wide exponent gaps and exact zeros in every mode") {
@@ -242,9 +252,9 @@ class IEEE754Suite extends munit.FunSuite {
   }
 
   test("funnel shifts take 32 bits from the high:low pair") {
-    assertEquals(Bits.funnelShiftRight(0x89abcdefL, 0x01234567L, 8), 0x6789abcdL)
-    assertEquals(Bits.funnelShiftRight(0x89abcdefL, 0x01234567L, 32), 0x01234567L)
-    assertEquals(Bits.funnelShiftLeft(0x89abcdefL, 0x01234567L, 8), 0x23456789L)
-    assertEquals(Bits.funnelShiftLeft(0x89abcdefL, 0x01234567L, 32), 0x89abcdefL)
+    assertEquals(Bits.funnelShiftRight(low = 0x89abcdefL, high = 0x01234567L, 8), 0x6789abcdL)
+    assertEquals(Bits.funnelShiftRight(low = 0x89abcdefL, high = 0x01234567L, 32), 0x01234567L)
+    assertEquals(Bits.funnelShiftLeft(low = 0x89abcdefL, high = 0x01234567L, 8), 0x23456789L)
+    assertEquals(Bits.funnelShiftLeft(low = 0x89abcdefL, high = 0x01234567L, 32), 0x89abcdefL)
   }
 }

@@ -3,13 +3,14 @@ package net.kurobako.gemstone.testing
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
+import net.kurobako.gemstone.collection.*
 
 /** Little-endian ELF64 images assembled from the file-format layout, independent of the reader under test. */
 object elfImage {
   case class Section(
       name: String,
       sectionType: Int,
-      contents: Array[Byte] = Array.emptyByteArray,
+      contents: Vec[Byte] = Vec.empty,
       address: Long = 0L,
       flags: Long = 0L,
       link: Int = 0,
@@ -25,17 +26,17 @@ object elfImage {
   private val SectionNames = ".shstrtab"
 
   /** A string table and the offset of each name in it. */
-  def strings(names: Seq[String]): (Array[Byte], Map[String, Int]) = {
+  def strings(names: Seq[String]): (table: Vec[Byte], offsets: Map[String, Int]) = {
     val (bytes, offsets) = names.distinct.foldLeft((Vector[Byte](0), Map.empty[String, Int])) {
       case ((table, offsets), name) =>
         (table ++ name.getBytes(StandardCharsets.UTF_8) :+ 0.toByte) -> offsets.updated(name, table.size)
     }
-    bytes.toArray -> offsets.updated("", 0)
+    (table = Vec.from(bytes), offsets = offsets.updated("", 0))
   }
 
   /** `.strtab` and `.symtab` contents; the null symbol is prepended. */
-  def symbols(entries: Seq[Symbol]): (Array[Byte], Array[Byte]) = {
-    val (table, offsets) = strings(entries.map(_.name))
+  def symbols(entries: Seq[Symbol]): (names: Vec[Byte], table: Vec[Byte]) = {
+    val (names, offsets) = strings(entries.map(_.name))
     val buffer           = ByteBuffer.allocate((entries.size + 1) * 24).order(ByteOrder.LITTLE_ENDIAN)
     entries.zipWithIndex.foreach { case (symbol, index) =>
       val start = (index + 1) * 24
@@ -43,10 +44,10 @@ object elfImage {
         .putShort(start + 6, symbol.section.toShort).putLong(start + 8, symbol.value)
       val _ = buffer.putLong(start + 16, symbol.size)
     }
-    table -> buffer.array()
+    (names = names, table = Vec.unsafeWrapArray(buffer.array()))
   }
 
-  def relocations(entries: Seq[Relocation]): Array[Byte] = {
+  def relocations(entries: Seq[Relocation]): Vec[Byte] = {
     val width  = if (entries.exists(_.addend.nonEmpty)) 24 else 16
     val buffer = ByteBuffer.allocate(entries.size * width).order(ByteOrder.LITTLE_ENDIAN)
     entries.zipWithIndex.foreach { case (entry, index) =>
@@ -54,7 +55,7 @@ object elfImage {
       buffer.putLong(start, entry.offset).putLong(start + 8, (entry.symbol << 32) | (entry.kind & 0xffffffffL))
       entry.addend.foreach(addend => buffer.putLong(start + 16, addend))
     }
-    buffer.array()
+    Vec.unsafeWrapArray(buffer.array())
   }
 
   /** Sections are numbered from 1 in order; a section named `.shstrtab` receives the generated section names, and one
@@ -80,7 +81,7 @@ object elfImage {
       .putInt(48, flags).putShort(52, 64.toShort).putShort(58, 64.toShort).putShort(60, (resolved.size + 1).toShort)
       .putShort(62, (resolved.indexWhere(_.name == SectionNames) + 1).toShort)
     resolved.zip(offsets).zipWithIndex.foreach { case ((section, offset), index) =>
-      Array.copy(section.contents, 0, buffer.array(), offset, section.contents.length)
+      val _     = section.contents.copyToArray(buffer.array(), offset)
       val start = table + (index + 1) * 64
       buffer.putInt(
         start,
@@ -123,13 +124,13 @@ object elfImage {
         Section(SectionNames, 3),
         Section(".strtab", 3, symbolNames),
         Section(".symtab", 2, symbolTable, link = 2, entrySize = 24),
-        Section(".text", 1, code, address = 0x1000L),
-        Section(".rodata", 1, descriptor, address = 0x2000L),
+        Section(".text", 1, Vec.from(code), address = 0x1000L),
+        Section(".rodata", 1, Vec.unsafeWrapArray(descriptor), address = 0x2000L),
         Section(".bss", 8, address = 0x3000L, noBitsSize = 16)
       ) ++
         (if (globalPointer)
            Seq(
-             Section(".got", 1, Array.ofDim[Byte](8), address = 0x4000L),
+             Section(".got", 1, Vec.fill(8)(0.toByte), address = 0x4000L),
              Section(
                ".rela.dyn",
                4,

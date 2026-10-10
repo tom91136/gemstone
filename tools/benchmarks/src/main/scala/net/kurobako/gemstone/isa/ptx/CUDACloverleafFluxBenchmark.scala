@@ -33,10 +33,7 @@ object CUDACloverleafFluxBenchmark {
     )
     val geometry = LaunchGeometry.forLaunch(Dimensions(32, 1, 1), Dimensions(cells.ceilDiv(32), 1, 1))
       .fold(error => throw IllegalArgumentException(error), identity)
-    val sample = Measurement.repeat(iterations) {
-      VMInterpreter.execute(kernel, geometry, parameters, memory)
-        .fold(error => throw IllegalStateException(error.message), _ => ())
-    }
+    val sample = Measurement.repeatSucceeding(iterations)(VMInterpreter.execute(kernel, geometry, parameters, memory))
     CloverleafFluxFixture.verify(memory, cells)
     sample
   }

@@ -66,9 +66,9 @@ object SASSInstructionRenderer {
         )
       }.map(slots => (shape.opcode, slots, shape.forms.map(_.form)))
     }
-    val kinds =
+    val modelledKinds =
       Set("Register", "Predicate", "Immediate", "Address", "ConstantBank", "SpecialRegister", "Group", "Symbol")
-    require(expanded.forall(_._2.forall(slot => kinds(slot.kind))), "unmodelled SASS operand kind")
+    require(expanded.forall(_._2.forall(slot => modelledKinds(slot.kind))), "unmodelled SASS operand kind")
     expanded.groupBy((opcode, slots, _) => (opcode, slots.map(_.kind))).toVector
       .sortBy { case ((opcode, kinds), _) => (opcode, kinds.mkString("/")) }
       .map { case ((opcode, kinds), rows) =>
@@ -118,7 +118,7 @@ object SASSInstructionRenderer {
     val cases = model.map { entry =>
       val fields    = entry.slots.map(slot => s"${slot.name}: InstructionOperand.${slot.kind}")
       val arguments = (fields ++ Vector("mods: Vec[Modifier] = Vec.empty", "pred: Option[Guard] = None")).mkString(", ")
-      val operands  = entry.slots.map(_.name).map(", " + _).mkString
+      val operands  = entry.slots.map(slot => s", ${slot.name}").mkString
       s"case ${entry.name}($arguments) extends Instruction(Instruction.${entry.name}Definition, mods, pred$operands)"
     }.mkString("\n")
     s"""${GeneratedHeader.scala("SASS typed logical instruction forms from pinned NVIDIA descriptions")}

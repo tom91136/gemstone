@@ -20,7 +20,7 @@ object SPIRVExecutionBenchmark {
     iterations(20),
     positive("groups", "Workgroups per dispatch", 256),
     positive("instructions", "Integer additions or function calls per invocation", 64),
-    workers(1)
+    workers
   ).mapN((mode, iterations, groups, instructions, workers) =>
     () => run(mode, iterations, groups, instructions, workers)
   )
@@ -42,10 +42,7 @@ object SPIRVExecutionBenchmark {
         .flatMap(SPIRVBackend(Validation.Environment.OpenCLCompute, workgroups = workgroups).load(_))
         .fold(error => throw IllegalArgumentException(error.message), identity)
       val measurement = Measurement {
-        tasks.foreach(task =>
-          program.execute(task, memory, TaskControl(), _ => Right(()))
-            .fold(error => throw IllegalStateException(error.message), _ => ())
-        )
+        tasks.foreach(task => Measurement.succeeded(program.execute(task, memory, TaskControl(), _ => Right(()))))
       }
       measurement.sample(iterations.toLong)
     }

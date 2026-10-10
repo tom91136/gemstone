@@ -36,10 +36,10 @@ object ExecutionSession {
     GuestAddress(SyntheticAddressBase + (id.raw - 1L) * SyntheticAddressStride)
 
   private def failure(fault: Fault): ExecutionFailure = fault match {
-    case Fault.InvalidRequest(detail) => ExecutionFailure.InvalidRequest(detail)
-    case Fault.NotFound(detail)       => ExecutionFailure.NotFound(detail)
-    case Fault.Unsupported(detail)    => ExecutionFailure.Unsupported(detail)
-    case _                            => ExecutionFailure.Failed(fault.message)
+    case Fault.InvalidRequest(_) => ExecutionFailure.InvalidRequest(fault.description)
+    case Fault.NotFound(_)       => ExecutionFailure.NotFound(fault.description)
+    case Fault.Unsupported(_)    => ExecutionFailure.Unsupported(fault.description)
+    case _                       => ExecutionFailure.Failed(fault.description)
   }
 
   private def memoryFault(error: ExecutionFailure): Fault = Fault.Memory(s"memory operation failed: ${error.message}")
@@ -108,6 +108,8 @@ class ExecutionSession(
     maxPrintEvents: Int > 0 = 16384
 ) extends AutoCloseable {
   import ExecutionSession.*
+
+  private val registry = BackendRegistry(backends)
 
   private val state = AtomicReference(
     State(Map.empty, Map.empty, AllocationId(1L), ProgramId(1L), CompletionId(1L))
@@ -822,7 +824,9 @@ class ExecutionSession(
     stateLock.withLock(state.get().loaded(id).map(_.loaded))
 
   private def backendFor(encoding: ProgramEncoding): Either[ExecutionFailure, Backend] =
-    backends.find(_.encoding == encoding).toRight(ExecutionFailure.Unsupported(s"unknown program encoding: $encoding"))
+    registry.backend(encoding.format).left.map(_ =>
+      ExecutionFailure.Unsupported(s"unknown program encoding: $encoding")
+    )
 
   private def handleEvent(completion: CompletionId, event: Event): Either[Fault, Unit] = event match {
     case event: Event.Print =>

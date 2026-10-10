@@ -129,7 +129,7 @@ private object UnixTransport {
     private class ChannelInput extends InputStream {
       override def read(): Int = {
         val byte = Array.ofDim[Byte](1)
-        if (read(byte, 0, 1) < 0) -1 else byte(0) & 0xff
+        if (read(byte, offset = 0, length = 1) < 0) -1 else byte(0) & 0xff
       }
       override def read(bytes: Array[Byte], offset: Int, length: Int): Int = readable.operationLock.withLock {
         java.util.Objects.checkFromIndexSize(offset, length, bytes.length)
@@ -149,7 +149,7 @@ private object UnixTransport {
       override def close(): Unit = UnixChannel.this.close()
     }
     private class ChannelOutput extends OutputStream {
-      override def write(value: Int): Unit                                   = write(Array(value.toByte), 0, 1)
+      override def write(value: Int): Unit = write(Array(value.toByte), offset = 0, length = 1)
       override def write(bytes: Array[Byte], offset: Int, length: Int): Unit = writable.operationLock.withLock {
         val deadline = platform.monotonicNanos + writeTimeout.raw.toLong * 1000000L
         val buffer   = ByteBuffer.wrap(bytes, offset, length)

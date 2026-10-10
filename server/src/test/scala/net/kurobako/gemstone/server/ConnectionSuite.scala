@@ -26,7 +26,7 @@ class ConnectionSuite extends munit.FunSuite {
     output.writeInt(ExecutionRPC.HelloMagic)
     output.writeInt(schema.length)
     output.write(schema)
-    output.write(connections.requestFrame(1L, 1L, 1L, operation, payload))
+    output.write(connections.requestFrame(client = 1L, process = 1L, incarnation = 1L, operation, payload))
     bytes.toByteArray
   }
 
@@ -89,7 +89,7 @@ class ConnectionSuite extends munit.FunSuite {
     files.temporary { directory =>
       val bind = if (unix) Bind.Unix(directory.resolve("socket")) else Bind.Tcp()
       Using.resource(Server.start(Server.Settings(parallelism = 1, requestTimeoutMillis = 100, bind = bind))) { server =>
-        Using.resource(Transport.connect(server.endpoint, 5000)) { socket =>
+        Using.resource(Sockets.connect(server.endpoint, 5000)) { socket =>
           Thread.sleep(200)
           socket.output.write(frame)
           socket.output.flush()
@@ -118,7 +118,8 @@ class ConnectionSuite extends munit.FunSuite {
     }) { clients =>
       Connection.serve(
         StreamsChannel(
-          ByteArrayInputStream(frame ++ connections.requestFrame(1L, 2L, 1L, operation, payload)),
+          ByteArrayInputStream(frame ++
+            connections.requestFrame(client = 1L, process = 2L, incarnation = 1L, operation, payload)),
           output
         ),
         clients,

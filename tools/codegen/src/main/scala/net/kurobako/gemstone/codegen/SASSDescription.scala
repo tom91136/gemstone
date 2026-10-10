@@ -2,7 +2,6 @@ package net.kurobako.gemstone.codegen
 
 import cats.parse.Parser
 import cats.parse.Parser0
-import scala.annotation.tailrec
 
 /** Lossless structural reader for the description language embedded in nvdisasm.
   *
@@ -28,7 +27,6 @@ object SASSDescription {
       sections: Vector[Section]
   ) {
     def section(name: String): Option[Section] = sections.find(_.name == name)
-    def fields: Vector[FormatField]            = section("FORMAT").toVector.flatMap(_.fields)
 
     /** Scheduling-pipe aliases (`IADD3int_pipe`) repeat the value of the plain opcode they annotate. */
     def opcodeEntries: Vector[Entry] =
@@ -36,12 +34,9 @@ object SASSDescription {
     def opcodes: Vector[String] = opcodeEntries.map(_.name)
   }
 
-  case class Section(name: String, body: String, raw: String, entries: Vector[Entry]) {
-    lazy val fields: Vector[FormatField] = if (name == "FORMAT") SASSDescription.fields(body) else Vector.empty
-  }
+  case class Section(name: String, body: String, raw: String, entries: Vector[Entry])
 
   case class Entry(name: String, value: String, raw: String, start: Int, end: Int)
-  case class FormatField(name: String, kind: String, raw: String)
 
   private enum LexemeKind { case Word, Quoted, Comment, Group, Space, Symbol }
   private case class Lexeme(
@@ -57,10 +52,7 @@ object SASSDescription {
   // cats-parse handles the nested token grammar; exact token slices are retained.
   private val identifier: Parser[String] =
     (Parser.charWhere(c => c.isLetter || c == '_') ~ Parser.charWhere(c => c.isLetterOrDigit || c == '_').rep0).string
-  private val bindingName: Parser[String] =
-    (Parser.charWhere(c => c.isLetter || c == '_') ~
-      Parser.charWhere(c => c.isLetterOrDigit || "_.$-".contains(c)).rep0).string
-  private val formatBinding: Parser[String] = (Parser.char(':') ~ bindingName).map(_._2)
+  private val bindingName: Parser[String] = SASSFormat.identifier
 
   private val sassLexer: Parser0[List[Lexeme]] = Parser.recursive[Lexeme] { token =>
     def captured(parser: Parser[Any], kind: LexemeKind): Parser[Lexeme] =
@@ -143,10 +135,10 @@ object SASSDescription {
           header.alternate,
           conditional(header.start),
           raw,
-          parseSections(raw, header.end - header.start)
+          parseSections(raw, header.end - header.start, classSectionNames)
         )
       }
-      val globals = parseGlobalSections(preamble)
+      val globals = parseSections(preamble, 0, globalSectionNames)
       error.toLeft(Description(arch, preamble, globals, classes, ""))
     }
 
@@ -204,31 +196,16 @@ object SASSDescription {
     "SUBCLASSES"
   )
 
-  private def parseSections(raw: String, headerEnd: Int): Vector[Section] = {
+  private def parseSections(raw: String, headerEnd: Int, names: Set[String]): Vector[Section] = {
     val tokens      = lex(raw).fold(error => throw IllegalArgumentException(error.toString), identity)
     val wordOffsets = tokens.view.filter(_.kind == LexemeKind.Word).map(t => t.start -> t.raw).toMap
     val sections    = splitLines(raw).filter(_.start >= headerEnd).flatMap { line =>
       val t     = line.text.trim
-      val found = classSectionNames.find(n => t == n || t.startsWith(n + " "))
+      val found = names.find(n => t == n || t.startsWith(n + " "))
       found.filter(n => wordOffsets.get(line.start + line.text.indexOf(t)).contains(n)).map { n =>
         val relative = line.text.indexOf(n)
         (line.start, line.start + relative + n.length, n)
       }
-    }
-    buildSections(raw, sections)
-  }
-
-  private def parseGlobalSections(raw: String): Vector[Section] = {
-    val tokens      = lex(raw).fold(error => throw IllegalArgumentException(error.toString), identity)
-    val wordOffsets = tokens.view.filter(_.kind == LexemeKind.Word).map(t => t.start -> t.raw).toMap
-    val sections    = splitLines(raw).flatMap { line =>
-      val t = line.text.trim
-      globalSectionNames.find(n => t == n || t.startsWith(n + " "))
-        .filter(n => wordOffsets.get(line.start + line.text.indexOf(t)).contains(n))
-        .map { n =>
-          val relative = line.text.indexOf(n)
-          (line.start, line.start + relative + n.length, n)
-        }
     }
     buildSections(raw, sections)
   }
@@ -264,54 +241,5 @@ object SASSDescription {
     case LexemeKind.Word                            => identifier.parseAll(token.raw).toOption
     case LexemeKind.Quoted if token.raw.length >= 2 => Some(token.raw.substring(1, token.raw.length - 1))
     case _                                          => None
-  }
-
-  private def fields(format: String): Vector[FormatField] = {
-    def bindings(tokens: Vector[Lexeme]): Vector[(Int, FormatField)] =
-      tokens.zipWithIndex.flatMap { case (colon, index) =>
-        val binding = Option.when(colon.kind == LexemeKind.Symbol && colon.raw == ":") {
-          val suffix = tokens.drop(index + 1).takeWhile(t =>
-            t.kind == LexemeKind.Word ||
-              (t.kind == LexemeKind.Symbol && "_.$-".contains(t.raw))
-          )
-          val end  = suffix.lastOption.map(_.end).getOrElse(colon.end)
-          val name = formatBinding.parseAll(format.substring(colon.start, end)).fold(
-            _ =>
-              throw IllegalArgumentException(
-                s"invalid FORMAT binding at ${colon.start}: ${format.slice((colon.start - 60).max(0), (colon.start + 60).min(format.length))}"
-              ),
-            identity
-          )
-          @tailrec def beforeType(i: Int): Int =
-            if (
-              i >= 0 &&
-              (tokens(i).kind == LexemeKind.Space ||
-                (tokens(i).kind == LexemeKind.Symbol && Set("*", "@")(tokens(i).raw)))
-            ) beforeType(i - 1)
-            else i
-          val before    = beforeType(index - 1)
-          val typeIndex =
-            if (before >= 0 && tokens(before).kind == LexemeKind.Group && tokens(before).raw.startsWith("("))
-              beforeType(before - 1)
-            else before
-          require(
-            typeIndex >= 0 && tokens(typeIndex).kind == LexemeKind.Word,
-            s"missing FORMAT binding type at ${colon.start}"
-          )
-          @tailrec def firstType(i: Int): Int =
-            if (
-              i >= 2 && tokens(i - 1).raw == "." && tokens(i - 2).kind == LexemeKind.Word &&
-              tokens(i - 2).end == tokens(i - 1).start && tokens(i - 1).end == tokens(i).start
-            ) firstType(i - 2)
-            else i
-          val start = tokens(firstType(typeIndex)).start
-          colon.start -> FormatField(name, format.substring(start, tokens(typeIndex).end), format.substring(start, end))
-        }
-        binding.toVector ++ bindings(colon.children)
-      }
-    val tokens = lex(format).fold(error => throw IllegalArgumentException(error.toString), identity)
-    val end    = tokens.indexWhere(t => t.kind == LexemeKind.Symbol && t.raw == ";")
-    require(end >= 0, "unterminated FORMAT declaration")
-    bindings(tokens.take(end)).sortBy(_._1).map(_._2).distinct
   }
 }

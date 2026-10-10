@@ -21,6 +21,8 @@ class ConstraintSuite extends munit.FunSuite {
       Option.when[NonEmpty[String]](value == (0L, 0L))("zero pair")
   }
   private object Foreign {
+    // stands in for an opaque type owned by another library
+    @SuppressWarnings(Array("scalafix:TransparentOpaque"))
     opaque type Type = Int
     def apply(value: Int): Type = value
     def read(value: Type): Int  = value

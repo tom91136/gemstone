@@ -94,7 +94,7 @@ class StringSuite extends munit.FunSuite {
     val bytes  = text.getBytes(java.nio.charset.StandardCharsets.UTF_8)
     val padded = Array[Byte](0) ++ bytes ++ Array[Byte](0)
     assertEquals(decodeUtf8(padded, 1, bytes.length), Right(text))
-    assertEquals(decodeUtf8(Array.emptyByteArray, 0, 0), Right(""))
+    assertEquals(decodeUtf8(Array.emptyByteArray, offset = 0, length = 0), Right(""))
     Seq(Array(0xc0.toByte, 0xaf.toByte), Array(0xff.toByte), Array(0xe2.toByte, 0x82.toByte)).foreach { invalid =>
       assert(decodeUtf8(invalid, 0, invalid.length).isLeft)
     }

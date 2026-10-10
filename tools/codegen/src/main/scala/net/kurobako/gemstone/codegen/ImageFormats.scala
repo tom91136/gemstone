@@ -301,7 +301,8 @@ object ImageFormats {
       case Narrow(components, bytes, encoding, widths, shifts) =>
         (
           "Narrow",
-          s"$components, $bytes, NarrowEncoding.$encoding, Vector(${widths.mkString(", ")}), Vector(${shifts.mkString(", ")})"
+          s"$components, $bytes, NarrowEncoding.$encoding, ${Emission.collection("Vector", widths.map(_.toString))}, " +
+            Emission.collection("Vector", shifts.map(_.toString))
         )
     }
     val groups = Vector("Integer", "Normalised", "Narrow").map { family =>
@@ -364,20 +365,26 @@ object ImageFormats {
         prefix,
         bits,
         components,
-        false,
+        bgra = false,
         if (bits == 32) words else normalised ++ (if (bits == 16) Vector("SFLOAT" -> "Float") else Vector.empty)
       )
     } yield row
     val bgra = Vector("B8G8R8" -> 3, "B8G8R8A8" -> 4).flatMap { (prefix, components) =>
-      uniform(prefix, 8, components, true, normalised)
+      uniform(prefix, 8, components, bgra = true, normalised)
     }
     val packed = for {
       (prefix, bgra)     <- Vector("A2B10G10R10" -> false, "A2R10G10B10" -> true)
       (suffix, encoding) <- normalised
-    } yield Vertex(s"${prefix}_${suffix}_PACK32", encoding, Vector(10, 10, 10, 2), 4, 4, bgra)
+    } yield Vertex(s"${prefix}_${suffix}_PACK32", encoding, Vector(10, 10, 10, 2), components = 4, bytes = 4, bgra)
     plain ++ bgra ++ packed ++
-      uniform("A8B8G8R8", 8, 4, false, normalised.map((suffix, encoding) => s"${suffix}_PACK32" -> encoding)) :+
-      Vertex("B10G11R11_UFLOAT_PACK32", "Ufloat", Vector(11, 11, 10, 0), 3, 4)
+      uniform(
+        "A8B8G8R8",
+        bits = 8,
+        components = 4,
+        bgra = false,
+        normalised.map((suffix, encoding) => s"${suffix}_PACK32" -> encoding)
+      ) :+
+      Vertex("B10G11R11_UFLOAT_PACK32", "Ufloat", Vector(11, 11, 10, 0), components = 3, bytes = 4)
   }
   private case class Compressed(
       vulkan: String,
@@ -388,16 +395,37 @@ object ImageFormats {
       srgb: Boolean = false
   )
   private val compressed = Vector(
-    Compressed("ETC2_R8G8B8_UNORM_BLOCK", 8, 3, 1, "EtcRgb"),
-    Compressed("ETC2_R8G8B8_SRGB_BLOCK", 8, 3, 1, "EtcRgb", true),
-    Compressed("ETC2_R8G8B8A1_UNORM_BLOCK", 8, 4, 2, "EtcPunchthrough"),
-    Compressed("ETC2_R8G8B8A1_SRGB_BLOCK", 8, 4, 2, "EtcPunchthrough", true),
-    Compressed("ETC2_R8G8B8A8_UNORM_BLOCK", 16, 4, 3, "EtcRgba"),
-    Compressed("ETC2_R8G8B8A8_SRGB_BLOCK", 16, 4, 3, "EtcRgba", true),
-    Compressed("EAC_R11_UNORM_BLOCK", 8, 1, 4, "EacR"),
-    Compressed("EAC_R11_SNORM_BLOCK", 8, 1, 4, "EacSignedR"),
-    Compressed("EAC_R11G11_UNORM_BLOCK", 16, 2, 5, "EacRg"),
-    Compressed("EAC_R11G11_SNORM_BLOCK", 16, 2, 5, "EacSignedRg")
+    Compressed("ETC2_R8G8B8_UNORM_BLOCK", bytes = 8, components = 3, compatibility = 1, "EtcRgb"),
+    Compressed(
+      vulkan = "ETC2_R8G8B8_SRGB_BLOCK",
+      bytes = 8,
+      components = 3,
+      compatibility = 1,
+      encoding = "EtcRgb",
+      true
+    ),
+    Compressed("ETC2_R8G8B8A1_UNORM_BLOCK", bytes = 8, components = 4, compatibility = 2, "EtcPunchthrough"),
+    Compressed(
+      vulkan = "ETC2_R8G8B8A1_SRGB_BLOCK",
+      bytes = 8,
+      components = 4,
+      compatibility = 2,
+      encoding = "EtcPunchthrough",
+      true
+    ),
+    Compressed("ETC2_R8G8B8A8_UNORM_BLOCK", bytes = 16, components = 4, compatibility = 3, "EtcRgba"),
+    Compressed(
+      vulkan = "ETC2_R8G8B8A8_SRGB_BLOCK",
+      bytes = 16,
+      components = 4,
+      compatibility = 3,
+      encoding = "EtcRgba",
+      true
+    ),
+    Compressed("EAC_R11_UNORM_BLOCK", bytes = 8, components = 1, compatibility = 4, "EacR"),
+    Compressed("EAC_R11_SNORM_BLOCK", bytes = 8, components = 1, compatibility = 4, "EacSignedR"),
+    Compressed("EAC_R11G11_UNORM_BLOCK", bytes = 16, components = 2, compatibility = 5, "EacRg"),
+    Compressed("EAC_R11G11_SNORM_BLOCK", bytes = 16, components = 2, compatibility = 5, "EacSignedRg")
   )
   require(vertices.map(_.vulkan).distinct.size == vertices.size, "duplicate vertex format")
   require(compressed.map(_.vulkan).distinct.size == compressed.size, "duplicate compressed format")
@@ -421,14 +449,14 @@ object ImageFormats {
   }.mkString
   private val storage = rows.map { row =>
     val bytes = row.layout match {
-      case Floating(components)                  => components * 4
-      case Integer(components, bytes, _, packed) => if (packed) 4 else components * bytes
-      case Normalised(components, bits, _, _, _) => components * bits / 8
-      case Narrow(_, bytes, _, _, _)             => bytes
+      case Floating(components)                             => components * 4
+      case Integer(components, bytes, _, packed)            => if (packed) 4 else components * bytes
+      case Normalised(components = components, bits = bits) => components * bits / 8
+      case Narrow(bytes = bytes)                            => bytes
     }
     val srgb = row.layout match {
-      case Normalised(_, _, _, srgb, _) => srgb
-      case _                            => false
+      case Normalised(srgb = srgb) => srgb
+      case _                       => false
     }
     Storage(name = shaderName(row.shader), vulkan = row.vulkan, shader = row.shader, bytes = bytes, srgb = srgb)
   } ++ Vector(
@@ -547,15 +575,15 @@ $decoded
         case _                   => false
       }),
       capability("colourAttachmentFormat")(_.layout match {
-        case Narrow(_, _, Encoding.SharedExponent, _, _) => false
-        case _                                           => true
+        case Narrow(encoding = Encoding.SharedExponent) => false
+        case _                                          => true
       }),
       capability("blendColourFormat")(_.layout match {
         case Floating(_) => true
         // SNORM blending stays unadvertised; the CTS reference uses unclamped one-minus factors.
-        case Normalised(_, _, signed, _, _) => !signed
-        case Narrow(_, _, encoding, _, _)   => encoding != Encoding.SharedExponent
-        case _                              => false
+        case Normalised(signed = signed) => !signed
+        case Narrow(encoding = encoding) => encoding != Encoding.SharedExponent
+        case _                           => false
       }),
       capability("storageColourFormat")(row => row.shader.startsWith("ImageFormat."))
     ).mkString("\n")
@@ -576,7 +604,7 @@ $decoded
     def storageProperty(name: String, resultType: String, fallback: String)(value: Storage => String): String = {
       val cases =
         storageRows.filter(row => value(row) != fallback).groupBy(value).toVector.sortBy(_._1).map { (result, rows) =>
-          val labels = rows.flatMap(_.vulkan).map(name => s"    case VK_FORMAT_$name:").mkString("\n")
+          val labels = rows.view.flatMap(_.vulkan).map(name => s"    case VK_FORMAT_$name:").mkString("\n")
           s"$labels return $result;"
         }.mkString("\n")
       s"inline $resultType $name(VkFormat format) {\n  switch (format) {\n$cases\n    default: return $fallback;\n  }\n}"

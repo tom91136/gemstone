@@ -17,7 +17,7 @@ import scala.util.Using
 
 /** Replays recorded API frames; device execution can still vary with scheduling. */
 object Replay {
-  case class Target(endpoint: Endpoint, closeFn: () => Unit) extends AutoCloseable {
+  class Target(val endpoint: Endpoint, closeFn: () => Unit) extends AutoCloseable {
     override def close(): Unit = closeFn()
   }
   case class Options(
@@ -32,7 +32,7 @@ object Replay {
   )
 
   private def connect(target: Target, timeoutMillis: Int > 0): ReplayConnection = {
-    val channel = Transport.connect(target.endpoint, timeoutMillis)
+    val channel = Sockets.connect(target.endpoint, timeoutMillis)
     try {
       val input  = DataInputStream(channel.input)
       val output = DataOutputStream(channel.output)
@@ -53,9 +53,9 @@ object Replay {
     override def close(): Unit         = channel.close()
   }
   // The request paired with the next recorded response advances with the connection.
-  private case class Active(
-      wire: ReplayConnection,
-      client: Journal.RecordedClientId,
+  private class Active(
+      val wire: ReplayConnection,
+      val client: Journal.RecordedClientId,
       @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
       var request: Array[Byte]
   )

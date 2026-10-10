@@ -9,14 +9,14 @@ import scala.util.Using
 object NativeAPIs {
 
   /** `entryPointHeader` declares a `PFN_<name>_v<version>` typedef for each revision of a versioned entry point. */
-  case class Surface(
-      name: String,
-      headers: Vector[String],
-      include: Path => Path,
-      accepts: String => Boolean,
-      defines: Vector[String] = Vector.empty,
-      dispatchTable: Option[String] = None,
-      entryPointHeader: Option[String] = None
+  class Surface(
+      val name: String,
+      val headers: Vector[String],
+      val include: Path => Path,
+      val accepts: String => Boolean,
+      val defines: Vector[String] = Vector.empty,
+      val dispatchTable: Option[String] = None,
+      val entryPointHeader: Option[String] = None
   )
 
   /** A not-supported result; unimplemented functions returning `cType` alias the internal `stub`. */

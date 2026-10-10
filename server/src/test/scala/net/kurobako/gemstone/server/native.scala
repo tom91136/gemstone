@@ -44,6 +44,6 @@ private object native {
         name.startsWith("ZET_") || name.startsWith("OCL_ICD_") || name == "UR_ADAPTERS_FORCE_LOAD" ||
         name == "LD_PRELOAD"
     )
-    process.run(command.toSeq, directory, changes.set, inheritedOverrides ++ changes.unset, timeout)
+    process.run(command, directory, changes.set, inheritedOverrides ++ changes.unset, timeout)
   }
 }

@@ -29,8 +29,9 @@ class ProtocolSuite extends munit.FunSuite {
     test(s"header parsing preserves fragmented large consecutive frames readFully=$fully socket=$socket") {
       val client = ClientId(0x0102030405060708L)
       val body   = Array.tabulate[Byte](17003)(index => (index * 17 + 3).toByte)
-      val frame  = connections.requestFrame(client.raw, 1L, 2L, "Launch", body).drop(Integer.BYTES)
-      val data   = frame ++ frame
+      val frame  =
+        connections.requestFrame(client.raw, process = 1L, incarnation = 2L, "Launch", body).drop(Integer.BYTES)
+      val data                                     = frame ++ frame
       def withSource[A](read: InputStream => A): A =
         if (!socket) read(ByteArrayInputStream(data))
         else {

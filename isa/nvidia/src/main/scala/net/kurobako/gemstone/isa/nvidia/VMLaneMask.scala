@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.nvidia
 
 import net.kurobako.gemstone.constraint.*
 
-object VMLaneMask {
+private object VMLaneMask {
   val MaximumLanes: Int = 1024
   val WordCount: Int    = MaximumLanes / java.lang.Long.SIZE
   val Empty: VMLaneMask = VMLaneMask(Array.fill(WordCount)(0L), 0, 0)
@@ -46,14 +46,13 @@ object VMLaneMask {
 }
 
 /** Compact immutable set of active lanes. */
-class VMLaneMask @scala.annotation.publicInBinary private (
+private class VMLaneMask @scala.annotation.publicInBinary private (
     private val words: Array[Long],
     private val count: Int in 0 ~ 1024,
     private val limit: Int
 ) {
   def isEmpty: Boolean                      = count.raw == 0
   def nonEmpty: Boolean                     = count.raw != 0
-  def size: Int in 0 ~ 1024                 = count
   def positiveSize: Option[Int in 1 ~ 1024] = VMLaneMask.PositiveSizes(count.raw)
   def headOption: Option[WorkgroupLane]     = {
     val wordIndex = words.indexWhere(_ != 0L)

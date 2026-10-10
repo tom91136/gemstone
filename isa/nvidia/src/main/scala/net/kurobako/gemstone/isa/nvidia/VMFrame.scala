@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.nvidia
 import VMIR.*
 import net.kurobako.gemstone.collection.*
 
-object VMFrame {
+private object VMFrame {
 
   /** A frame's return point: caller parameter `targets(i)` receives callee return parameter `sources(i)`. */
   case class Continuation(caller: VMFrame, pc: Pc, targets: Vec[Parameter], sources: Vec[Parameter])
@@ -13,7 +13,7 @@ object VMFrame {
   * accesses are relative to.
   */
 @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-class VMFrame(
+private class VMFrame(
     val routine: Routine,
     val lanes: VMLanes,
     val localBase: Long,

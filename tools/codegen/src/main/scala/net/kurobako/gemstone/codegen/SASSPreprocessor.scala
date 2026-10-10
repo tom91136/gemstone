@@ -38,9 +38,9 @@ object SASSPreprocessor {
           Right((if (active) line else blank(line), branches, active))
         } else trimmed match {
           case "##IF DEFINED(ARCH_SEMANTICS)" =>
-            Right((blank(line), branches :+ Branch(active, false, false), false))
+            Right((blank(line), branches :+ Branch(active, condition = false, sawElse = false), false))
           case "##IF !DEFINED(ARCH_SEMANTICS)" =>
-            Right((blank(line), branches :+ Branch(active, true, false), active))
+            Right((blank(line), branches :+ Branch(active, condition = true, sawElse = false), active))
           case "##ELSE" => branches.lastOption match {
               case None                           => Left(ParseError("unmatched ##ELSE", trimOffset))
               case Some(branch) if branch.sawElse => Left(ParseError("duplicate ##ELSE", trimOffset))
@@ -67,6 +67,6 @@ object SASSPreprocessor {
         }
     }
 
-    loop(0, 0, Vector.empty, true, Vector.empty)
+    loop(index = 0, offset = 0, Vector.empty, true, Vector.empty)
   }
 }

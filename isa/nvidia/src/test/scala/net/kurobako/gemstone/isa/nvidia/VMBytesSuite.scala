@@ -10,9 +10,9 @@ class VMBytesSuite extends munit.FunSuite {
 
   test("values round trip within a page, across a page boundary and at the top of the range") {
     val bytes = VMBytes()
-    bytes.write(0x10L, 0x1122334455667788L, 8)
-    bytes.write(0x0ffdL, 0x0102030405060708L, 8)
-    bytes.write(-4L, 0xaabbccddL, 4)
+    bytes.write(address = 0x10L, value = 0x1122334455667788L, 8)
+    bytes.write(address = 0x0ffdL, value = 0x0102030405060708L, 8)
+    bytes.write(address = -4L, value = 0xaabbccddL, 4)
     assertEquals(bytes.read(0x10L, 8), 0x1122334455667788L)
     assertEquals(bytes.read(0x0ffdL, 8), 0x0102030405060708L)
     assertEquals(bytes.read(0x1000L, 1), 0x05L)
@@ -22,8 +22,8 @@ class VMBytesSuite extends munit.FunSuite {
 
   test("clearing zeroes every written byte") {
     val bytes = VMBytes()
-    bytes.write(0x2000L, -1L, 8)
-    bytes.write(0x0fffL, -1L, 2)
+    bytes.write(address = 0x2000L, value = -1L, 8)
+    bytes.write(address = 0x0fffL, value = -1L, 2)
     bytes.clear()
     assertEquals(bytes.read(0x2000L, 8), 0L)
     assertEquals(bytes.read(0x0fffL, 2), 0L)

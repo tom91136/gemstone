@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.nvidia
 
 /** Virtual-address apertures shared by the NVIDIA execution backend. */
-object VMAddressSpace {
+private[isa] object VMAddressSpace {
   inline val LocalLimit = 0x100000000L
   // PTX bounds a thread's local storage to 512 KiB, so frames this far apart keep literal local addresses private.
   inline val LocalFrameSize = 0x80000L

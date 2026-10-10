@@ -59,8 +59,11 @@ object elf {
       size: Int >= 0,
       link: Int >= 0,
       info: Int,
-      entrySize: Int >= 0
+      entrySize: Int >= 0,
+      alignment: Long = 0L
   ) {
+    def end: Int = offset.raw + size.raw
+
     def isRelocation: Boolean = sectionType == SectionType.RelocationWithAddend || sectionType == SectionType.Relocation
   }
 
@@ -73,6 +76,22 @@ object elf {
   )
 
   case class Relocation(offset: Long, symbol: Long >= 0, kind: Long >= 0, addend: Option[Long])
+
+  object SegmentType {
+    inline val Load = 1
+  }
+
+  /** A program header: how part of the file maps into memory. */
+  case class Segment(
+      index: Int >= 0,
+      segmentType: Int,
+      flags: Int,
+      offset: Long,
+      address: Long,
+      fileSize: Long,
+      memorySize: Long,
+      alignment: Long
+  )
 
   object Image {
     def parse(bytes: Vec[Byte]): Either[NonEmpty[String], Image] = for {
@@ -92,10 +111,12 @@ object elf {
               raw.size,
               link,
               raw.info,
-              raw.entrySize
+              raw.entrySize,
+              raw.alignment
             )
           )
       }
+      segments     <- programHeaders(bytes)
       symbolTables <- sections.filter(section =>
         section.sectionType == SectionType.SymbolTable || section.sectionType == SectionType.DynamicSymbolTable
       ).traverse { table =>
@@ -104,13 +125,14 @@ object elf {
           .flatMap(strings => symbols(slice(bytes, table), slice(bytes, strings), table.entrySize))
           .map(table.index.raw -> _)
       }
-    } yield Image(bytes, header, sections, symbolTables.toMap)
+    } yield Image(bytes, header, sections, segments, symbolTables.toMap)
   }
 
   case class Image private (
       bytes: Vec[Byte],
       header: Header,
       sections: Vec[Section],
+      segments: Vec[Segment],
       symbolTables: Map[Int, Vec[Symbol]]
   ) {
     def section(name: String): Option[Section] = sections.find(_.name == name)
@@ -140,6 +162,121 @@ object elf {
         s"symbol ${symbol.name.getOrElse("")} exceeds section ${section.name}": NonEmpty[String]
       )
     } yield section -> relative
+
+    /** This image with `section`'s contents replaced by as many bytes, reparsed. Offsets, symbols and relocations are
+      * unchanged, so contents they describe must still hold.
+      */
+    def patched(section: Section, contents: Vec[Byte]): Either[NonEmpty[String], Image] = for {
+      _ <- Either.cond(
+        sections.lift(section.index.raw).contains(section),
+        (),
+        s"section ${section.name} is not in this image": NonEmpty[String]
+      )
+      _ <- Either.cond(
+        section.sectionType != SectionType.NoBits,
+        (),
+        s"section ${section.name} has no contents in the file": NonEmpty[String]
+      )
+      _ <- Either.cond(
+        contents.size == section.size.raw,
+        (),
+        s"section ${section.name} holds ${section.size} bytes, not ${contents.size}": NonEmpty[String]
+      )
+      image <- Image.parse(bytes.patch(section.offset.raw, contents, contents.size))
+    } yield image
+
+    /** This image with `section` holding `contents` of any size, reparsed. The file contents after the section move by
+      * the growth rounded up to keep every later section's and segment's alignment; addresses do not move, so an
+      * allocated section can only grow into unused address space and must end its segment. Section, segment and table
+      * offsets follow the move; symbols, relocations and other contents that describe the section are the caller's.
+      */
+    def resized(section: Section, contents: Vec[Byte]): Either[NonEmpty[String], Image] = {
+      val growth = contents.size - section.size.raw
+      val later  = sections.filter(other => other.index != section.index && other.offset.raw >= section.end)
+      val shift  = if (growth <= 0) 0L
+      else {
+        val alignment = (later.map(_.alignment) ++ segments.filter(_.offset >= section.end).map(_.alignment) :+ 8L)
+          .filter(_ > 0).max
+        (growth + alignment - 1) / alignment * alignment
+      }
+      def contains(segment: Segment): Boolean = segment.offset <= section.offset.raw &&
+        segment.offset + segment.fileSize >= section.end
+      for {
+        _ <- Either.cond(
+          sections.lift(section.index.raw).contains(section) && section.sectionType != SectionType.NoBits,
+          (),
+          s"section ${section.name} has no contents in this image": NonEmpty[String]
+        )
+        _ <- Either.cond(
+          growth <= 0 || section.address == 0L || sections.forall(other =>
+            other.index == section.index ||
+              (other.flags & SectionFlag.Allocate) == 0 || other.address == 0L ||
+              other.address < section.address || other.address >= section.address + contents.size
+          ),
+          (),
+          s"section ${section.name} has no free address space to grow into": NonEmpty[String]
+        )
+        _ <- Either.cond(
+          growth <= 0 ||
+            segments.filter(contains(_)).forall(segment => segment.offset + segment.fileSize == section.end) ||
+            later.forall(other =>
+              other.address == 0L || segments.filter(contains(_)).forall(segment =>
+                other.offset.raw >= segment.offset + segment.fileSize
+              )
+            ),
+          (),
+          s"section ${section.name} does not end its segment": NonEmpty[String]
+        )
+        _     <- intValue(bytes.size.toLong + shift, "image size")
+        image <- Image.parse {
+          val result                    = Array.ofDim[Byte](bytes.size + shift.toInt)
+          val _                         = bytes.slice(0, section.offset.raw).copyToArray(result, 0)
+          val _                         = contents.copyToArray(result, section.offset.raw)
+          val _                         = bytes.drop(section.end).copyToArray(result, section.end + shift.toInt)
+          def moved(offset: Long): Long = if (offset >= section.end) offset + shift else offset
+          LittleEndian.write(moved(LittleEndian.decodeInt64(bytes, 32)), result, 32, 8)
+          LittleEndian.write(moved(LittleEndian.decodeInt64(bytes, 40)), result, 40, 8)
+          val sectionTable = moved(LittleEndian.decodeInt64(bytes, 40)).toInt
+          val sectionEntry = LittleEndian.decodeUInt16(bytes, 58).raw
+          sections.foreach { other =>
+            val start = sectionTable + other.index.raw * sectionEntry
+            if (other.index == section.index) LittleEndian.write(contents.size.toLong, result, start + 32, 8)
+            else LittleEndian.write(moved(other.offset.raw.toLong), result, start + 24, 8)
+          }
+          val segmentTable = moved(LittleEndian.decodeInt64(bytes, 32)).toInt
+          val segmentEntry = LittleEndian.decodeUInt16(bytes, 54).raw
+          segments.foreach { segment =>
+            val start = segmentTable + segment.index.raw * segmentEntry
+            if (segment.offset >= section.end) LittleEndian.write(segment.offset + shift, result, start + 8, 8)
+            else if (growth > 0 && contains(segment)) {
+              val extent = if (segment.offset + segment.fileSize == section.end) growth.toLong else shift
+              LittleEndian.write(segment.fileSize + extent, result, start + 32, 8)
+              LittleEndian.write(segment.memorySize + extent, result, start + 40, 8)
+            }
+          }
+          Vec.unsafeWrapArray(result)
+        }
+      } yield image
+    }
+
+    /** This image with symbol `index` of `table` given `value` and `size`, reparsed. */
+    def withSymbol(table: Section, index: Int, value: Long, size: Long): Either[NonEmpty[String], Image] = {
+      val stride = if (table.entrySize.raw == 0) SymbolEntrySize else table.entrySize.raw
+      for {
+        _ <- Either.cond(
+          symbolTables.contains(table.index.raw) && index >= 0 && index < symbolTables(table.index.raw).size,
+          (),
+          s"symbol $index is not in ${table.name}": NonEmpty[String]
+        )
+        image <- Image.parse {
+          val result = Vec.toArray(bytes)
+          val start  = table.offset.raw + index * stride
+          LittleEndian.write(value, result, start + 8, 8)
+          LittleEndian.write(size, result, start + 16, 8)
+          Vec.unsafeWrapArray(result)
+        }
+      } yield image
+    }
 
     def symbolBytes(symbol: Symbol): Either[NonEmpty[String], Vec[Byte]] =
       symbolOffset(symbol).map { case (section, relative) =>
@@ -224,8 +361,32 @@ object elf {
       size: Int >= 0,
       link: Int,
       info: Int,
-      entrySize: Int >= 0
+      entrySize: Int >= 0,
+      alignment: Long
   )
+
+  private def programHeaders(bytes: Vec[Byte]): Either[NonEmpty[String], Vec[Segment]] = {
+    val tableOffset = LittleEndian.decodeInt64(bytes, 32)
+    val entrySize   = LittleEndian.decodeUInt16(bytes, 54).raw
+    val count       = LittleEndian.decodeUInt16(bytes, 56)
+    if (count.raw == 0) Right(Vec.empty)
+    else if (entrySize < 56 || !ByteRange.contains(bytes.size, tableOffset, entrySize.toLong * count.raw.toLong))
+      Left("invalid ELF program header table")
+    else
+      Right(Vec.indices(count.widen[Int >= 0]).map { index =>
+        val start = Math.toIntExact(tableOffset + index.raw.toLong * entrySize)
+        Segment(
+          index = index,
+          segmentType = LittleEndian.decodeInt32(bytes, start),
+          flags = LittleEndian.decodeInt32(bytes, start + 4),
+          offset = LittleEndian.decodeInt64(bytes, start + 8),
+          address = LittleEndian.decodeInt64(bytes, start + 16),
+          fileSize = LittleEndian.decodeInt64(bytes, start + 32),
+          memorySize = LittleEndian.decodeInt64(bytes, start + 40),
+          alignment = LittleEndian.decodeInt64(bytes, start + 48)
+        )
+      })
+  }
 
   private def slice(bytes: Vec[Byte], section: Section): Vec[Byte] =
     if (section.sectionType == SectionType.NoBits) Vec.empty
@@ -270,15 +431,16 @@ object elf {
           )
         } yield RawSection(
           index,
-          LittleEndian.decodeInt32(bytes, start),
+          nameOffset = LittleEndian.decodeInt32(bytes, start),
           sectionType,
-          LittleEndian.decodeInt64(bytes, start + 8),
-          LittleEndian.decodeInt64(bytes, start + 16),
-          checkedOffset,
-          checkedSize,
-          LittleEndian.decodeInt32(bytes, start + 40),
-          LittleEndian.decodeInt32(bytes, start + 44),
-          checkedStride
+          flags = LittleEndian.decodeInt64(bytes, start + 8),
+          address = LittleEndian.decodeInt64(bytes, start + 16),
+          offset = checkedOffset,
+          size = checkedSize,
+          link = LittleEndian.decodeInt32(bytes, start + 40),
+          info = LittleEndian.decodeInt32(bytes, start + 44),
+          entrySize = checkedStride,
+          alignment = LittleEndian.decodeInt64(bytes, start + 48)
         )
       }
   }

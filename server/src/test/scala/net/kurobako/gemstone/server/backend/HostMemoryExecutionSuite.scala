@@ -7,12 +7,12 @@ import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
-import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.immutable.LongMap
 import scala.collection.mutable
 import scala.util.Using
 
@@ -32,7 +32,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
   }
 
   private def run(source: String, lanes: Int, arguments: Vec[KernelTask.Argument], host: Map[Long, Byte]) =
-    runImage(ptx.PTXBackend.encoding, Vec.from(source.getBytes(StandardCharsets.UTF_8)), lanes, arguments, host)
+    runImage(ProgramEncoding.PTXText, Vec.from(source.getBytes(StandardCharsets.UTF_8)), lanes, arguments, host)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def runImage(
@@ -43,15 +43,15 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       host: Map[Long, Byte],
       fragments: List[(Long, Vec[Byte])] = Nil,
       hostBacked: Boolean = false,
-      beforeSync: (HostMemorySync, Map[Long, Byte]) => Map[Long, Byte] = (_, _) => Map.empty,
-      beforeRead: (HostMemoryRange, scala.collection.Map[Long, Byte]) => Map[Long, Byte] = (_, _) => Map.empty,
+      beforeSync: (HostMemorySync, LongMap[Byte]) => Map[Long, Byte] = (_, _) => Map.empty,
+      beforeRead: (HostMemoryRange, mutable.LongMap[Byte]) => Map[Long, Byte] = (_, _) => Map.empty,
       relocations: Vec[KernelTask.PointerRelocation] = Vec.empty,
       afterCompletion: Vec[KernelTask.PointerRelocation] => Unit = _ => (),
       afterExecution: (ExecutionSession, Map[Long, AllocationId]) => Unit = (_, _) => ()
   ) =
     Using.resource(ExecutionSession(Backends.default().programs, executionContext = Async)) { service =>
       assertEquals(service.enableHostMemory(), Right(()))
-      val allocations = mutable.Map.empty[Long, AllocationId]
+      val allocations = mutable.LongMap.empty[AllocationId]
       fragments.foreach { (address, contents) =>
         val allocation =
           service.registerAllocation(contents.size.unsafe[Int > 0]).toOption.get
@@ -69,8 +69,8 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       ).toOption.get
       val completion = service.launch(program, task).toOption.get
       val reads      = mutable.ArrayBuffer.empty[HostMemoryRange]
-      val writes     = mutable.Map.empty[Long, Byte]
-      val native     = mutable.Map.from(host)
+      val writes     = mutable.LongMap.empty[Byte]
+      val native     = mutable.LongMap.from(host)
       var done       = false
       var batches    = 0
       while (!done && batches < 65536) {
@@ -83,7 +83,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
           range.bytes.zipWithIndex.foreach((byte, index) => native.update(range.address.raw + index, byte))
         )
         batch.sync.foreach { sync =>
-          native ++= beforeSync(sync, native.toMap)
+          native ++= beforeSync(sync, LongMap.from(native))
           val observed = sync.atomic.fold(0L) { request =>
             val size     = request.size
             val observed = (0 until size.raw).foldLeft(0L)((value, index) =>
@@ -203,7 +203,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         ld.global.u64 %v, [%p]; st.global.u64 [%q], %v; ret;
       }"""
     val (reads, writes, batches) = runImage(
-      ptx.PTXBackend.encoding,
+      ProgramEncoding.PTXText,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec(scalar(0x1000), scalar(0x8000)),
@@ -212,7 +212,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     )
     assertEquals(batches, 0)
     assertEquals(reads.size, 0)
-    assertEquals(writes, bytes(0x8000, 7, 4) ++ bytes(0x8004, 9, 4))
+    assertEquals(writes, bytes(address = 0x8000, value = 7, 4) ++ bytes(address = 0x8004, value = 9, 4))
   }
 
   test("relaxed system-scope access to device-backed allocations stays on device memory") {
@@ -226,7 +226,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }"""
     val syncs                    = mutable.ArrayBuffer.empty[HostMemorySync]
     val (reads, writes, batches) = runImage(
-      ptx.PTXBackend.encoding,
+      ProgramEncoding.PTXText,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec.empty,
@@ -251,7 +251,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     val (reads, writes, batches) = run(source, 32, Vec(scalar(0x1000)), bytes(0x1000, 7, 4))
     assertEquals(batches, 0)
     assertEquals(reads.map(_.size.raw).sum, 0)
-    assertEquals(writes, bytes(0x1000, 39, 4))
+    assertEquals(writes, bytes(address = 0x1000, value = 39, 4))
   }
 
   for {
@@ -274,7 +274,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     val requests       = mutable.ArrayBuffer.empty[HostMemoryAtomic]
     val replaced       = java.util.concurrent.atomic.AtomicBoolean(false)
     val (_, writes, _) = runImage(
-      ptx.PTXBackend.encoding,
+      ProgramEncoding.PTXText,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec(scalar(0x1000), scalar(0x8000)),
@@ -309,7 +309,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         ret;
       }"""
       val (_, writes, _) = runImage(
-        ptx.PTXBackend.encoding,
+        ProgramEncoding.PTXText,
         Vec.from(source.getBytes(StandardCharsets.UTF_8)),
         1,
         Vec(scalar(0x1000), scalar(0x8000)),
@@ -317,7 +317,11 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         List(0x1000L -> encoded(0, 8), 0x8000L -> encoded(0, 8)),
         hostBacked = true
       )
-      assertEquals(writes, bytes(0x1000, 42, width.toFloatByteWidth) ++ bytes(0x8000, 42, width.toFloatByteWidth))
+      assertEquals(
+        writes,
+        bytes(address = 0x1000, value = 42, width.toFloatByteWidth) ++
+          bytes(address = 0x8000, value = 42, width.toFloatByteWidth)
+      )
     }
 
   for {
@@ -344,7 +348,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         ld.global.u$width %v, [%payload]; st.global.u$width [%output], %v; ret;
       }"""
     val (_, writes, _) = runImage(
-      ptx.PTXBackend.encoding,
+      ProgramEncoding.PTXText,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec.empty,
@@ -358,10 +362,13 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
               encoded(73, width.toFloatByteWidth)
             )
             Map.empty
-          } else bytes(0x1000, 73, width.toFloatByteWidth)
+          } else bytes(address = 0x1000, value = 73, width.toFloatByteWidth)
         } else Map.empty
     )
-    assertEquals(writes.filter((address, _) => address >= 0x8000), bytes(0x8000, 73, width.toFloatByteWidth))
+    assertEquals(
+      writes.filter((address, _) => address >= 0x8000),
+      bytes(address = 0x8000, value = 73, width.toFloatByteWidth)
+    )
   }
 
   test("registered host memory fetches exact bytes, without reading poisoned allocation holes") {
@@ -372,7 +379,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         ld.global.u32 %v, [%p+12]; st.global.u32 [%q+4], %v; ret;
       }"""
     val (reads, writes, _) = runImage(
-      ptx.PTXBackend.encoding,
+      ProgramEncoding.PTXText,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec(scalar(0x1000), scalar(0x8000)),
@@ -381,7 +388,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       hostBacked = true
     )
     assertEquals(reads, Vector(HostMemoryRange(GuestAddress(0x100cL), 4)))
-    assertEquals(writes, bytes(0x8004, 73, 4))
+    assertEquals(writes, bytes(address = 0x8004, value = 73, 4))
   }
 
   test("relaxed.sys store publishes its target without flushing unrelated host writes") {
@@ -394,7 +401,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }"""
     val syncs          = mutable.ArrayBuffer.empty[HostMemorySync]
     val (_, writes, _) = runImage(
-      ptx.PTXBackend.encoding,
+      ProgramEncoding.PTXText,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec.empty,
@@ -411,7 +418,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }
     )
     assertEquals(syncs.size, 1)
-    assertEquals(writes, bytes(0x1000, 17, 4) ++ bytes(0x2000, 29, 4))
+    assertEquals(writes, bytes(address = 0x1000, value = 17, 4) ++ bytes(address = 0x2000, value = 29, 4))
   }
 
   test("relaxed.sys load refreshes only its requested range after a cached weak load") {
@@ -426,7 +433,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     val reads          = mutable.ArrayBuffer.empty[HostMemoryRange]
     val syncs          = mutable.ArrayBuffer.empty[HostMemorySync]
     val (_, writes, _) = runImage(
-      ptx.PTXBackend.encoding,
+      ProgramEncoding.PTXText,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec.empty,
@@ -434,18 +441,18 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       beforeRead = (range, _) =>
         if (range.address.raw == 0x1000L) {
           reads += range
-          bytes(0x1000, 11, 4)
+          bytes(address = 0x1000, value = 11, 4)
         } else Map.empty,
       beforeSync = (sync, _) => {
         syncs += sync
         assertEquals(sync.atomic.map(_.operation), Some(HostMemoryAtomicOperation.Load))
         assertEquals(sync.relaxed, true)
-        bytes(0x1000, 23, 4)
+        bytes(address = 0x1000, value = 23, 4)
       }
     )
     assertEquals(reads.toVector, Vector(HostMemoryRange(GuestAddress(0x1000L), 4)))
     assertEquals(syncs.size, 1)
-    assertEquals(writes, bytes(0x8000, 11, 4) ++ bytes(0x8004, 23, 4))
+    assertEquals(writes, bytes(address = 0x8000, value = 11, 4) ++ bytes(address = 0x8004, value = 23, 4))
   }
 
   test("generic relaxed.sys accesses classify host-backed addresses and publish the exact store") {
@@ -457,7 +464,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }"""
     val reads          = mutable.ArrayBuffer.empty[HostMemoryRange]
     val (_, writes, _) = runImage(
-      ptx.PTXBackend.encoding,
+      ProgramEncoding.PTXText,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec(scalar(0x100001000L), scalar(0x100002000L)),
@@ -477,7 +484,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }
     )
     assertEquals(reads.toVector, Vector.empty)
-    assertEquals(writes, bytes(0x100002000L, 41, 4))
+    assertEquals(writes, bytes(address = 0x100002000L, value = 41, 4))
   }
 
   test("relaxed.sys host scalars use native atomic operations at 8- and 16-bit widths") {
@@ -490,7 +497,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       }"""
     val syncs              = mutable.ArrayBuffer.empty[HostMemorySync]
     val (reads, writes, _) = runImage(
-      ptx.PTXBackend.encoding,
+      ProgramEncoding.PTXText,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec(scalar(0x100001000L), scalar(0x100002000L)),
@@ -501,7 +508,10 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     assertEquals(syncs.flatMap(_.atomic.map(_.size)).toVector, Vector[Int in (1, 2, 4, 8)](1, 2))
     assertEquals(syncs.flatMap(_.atomicStores.map(_.size)).toVector, Vector[Int in (1, 2, 4, 8)](1, 2))
     assert(syncs.forall(_.relaxed))
-    assertEquals(writes, bytes(0x100002000L, 0x33L, 1) ++ bytes(0x100002002L, 0x6655L, 2))
+    assertEquals(
+      writes,
+      bytes(address = 0x100002000L, value = 0x33L, 1) ++ bytes(address = 0x100002002L, value = 0x6655L, 2)
+    )
   }
 
   test("relaxed.sys host load rejects misaligned atomic-width addresses") {
@@ -515,7 +525,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     Using.resource(ExecutionSession(Backends.default().programs, executionContext = Async)) { service =>
       assertEquals(service.enableHostMemory(), Right(()))
       val program =
-        service.load(ptx.PTXBackend.encoding, Vec.from(source.getBytes(StandardCharsets.UTF_8))).toOption.get
+        service.load(ProgramEncoding.PTXText, Vec.from(source.getBytes(StandardCharsets.UTF_8))).toOption.get
       val task = KernelTask.validated(
         "probe",
         LaunchGeometry.Dimensions.One,
@@ -542,13 +552,13 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         st.global.u32 [%q], %result; ret;
       }"""
     val (_, writes, _) = runImage(
-      ptx.PTXBackend.encoding,
+      ProgramEncoding.PTXText,
       Vec.from(source.getBytes(StandardCharsets.UTF_8)),
       1,
       Vec(scalar(0x8000)),
       bytes(0x8000, 0, 4)
     )
-    assertEquals(writes, bytes(0x8000, 73, 4))
+    assertEquals(writes, bytes(address = 0x8000, value = 73, 4))
   }
 
   // This oracle checks the interpreter's publication/cache boundary, independently of
@@ -566,12 +576,16 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         if (writeBefore)
           assertEquals((0 until 4).map(i => native.get(0x8000L + i)), encoded(7, 4).map(Some(_)))
         fences += sync.ticket
-        bytes(0x1000, 9, 4)
+        bytes(address = 0x1000, value = 9, 4)
       }
     )
     assertEquals(fences.size, 1, "fence must publish preceding writes before execution proceeds")
     assertEquals(reads.count(_.address.raw == 0x1000L), 2, "fence must invalidate cached host reads")
-    assertEquals(writes, (if (writeBefore) bytes(0x8000, 7, 4) else Map.empty[Long, Byte]) ++ bytes(0x8004, 9, 4))
+    assertEquals(
+      writes,
+      (if (writeBefore) bytes(address = 0x8000, value = 7, 4) else Map.empty[Long, Byte]) ++
+        bytes(address = 0x8004, value = 9, 4)
+    )
   }
 
   for {
@@ -590,7 +604,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
           $fence;
           ld.global.u32 %v, [%p]; st.global.u32 [%q+4], %v; ret;
         }"""
-    checkFence(ptx.PTXBackend.encoding, Vec.from(source.getBytes(StandardCharsets.UTF_8)), writeBefore)
+    checkFence(ProgramEncoding.PTXText, Vec.from(source.getBytes(StandardCharsets.UTF_8)), writeBefore)
   }
 
   for (writeBefore <- List(false, true))
@@ -661,7 +675,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
       hostBacked = true,
       beforeSync = (_, native) => {
         assertEquals((0 until 8).map(i => native(0x1008L + i)), encoded(0x4000, 8))
-        bytes(0x1008, 0x5000, 8)
+        bytes(address = 0x1008, value = 0x5000, 8)
       },
       relocations = if (relocated)
         Vec(KernelTask.PointerRelocation(
@@ -678,7 +692,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
           "native pointer stores must not be replayed after host synchronisation"
         )
     )
-    if (reload) assertEquals(writes.filter((address, _) => address >= 0x8000), bytes(0x8000, 29, 4))
+    if (reload) assertEquals(writes.filter((address, _) => address >= 0x8000), bytes(address = 0x8000, value = 29, 4))
   }
 
   for (registered <- List(false, true))
@@ -715,7 +729,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
         fragments = if (registered) List(0x4000L -> Vec.fill(16)(0.toByte)) else Nil,
         hostBacked = registered
       )
-      assertEquals(writes, bytes(0x4008, 97, 4))
+      assertEquals(writes, bytes(address = 0x4008, value = 97, 4))
     }
 
   for {
@@ -757,7 +771,7 @@ class HostMemoryExecutionSuite extends munit.FunSuite {
     )
     assertEquals(reads.map(_.address.raw), Vector(0x1000 + offset))
     assertEquals(reads.map(_.size.raw), Vector(8))
-    assertEquals(writes, bytes(0x8000, 97, 4))
+    assertEquals(writes, bytes(address = 0x8000, value = 97, 4))
   }
 
   for (stride <- List(1, 3)) test(s"SPIR-V suspends active invocations and batches stride $stride") {

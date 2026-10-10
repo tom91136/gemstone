@@ -5,20 +5,25 @@ import net.kurobako.gemstone.string.*
 
 /** Vulkan translations for the supported execution enums; values come from the shared Scala types. */
 object GraphicsEnums {
-  private case class Mapping(name: String, vulkan: String, prefix: String, values: Array[? <: AnyRef]) {
-    def cases: Vector[String] = values.toVector.map(_.toString)
+  private case class Mapping(name: String, vulkan: String, prefix: String, values: Vector[AnyRef]) {
+    def cases: Vector[String] = values.map(_.toString)
   }
   private val mappings = Vector(
-    Mapping("GraphicsCompare", "VkCompareOp", "VK_COMPARE_OP_", GraphicsCompare.values),
-    Mapping("GraphicsStencilOp", "VkStencilOp", "VK_STENCIL_OP_", GraphicsStencilOp.values),
-    Mapping("GraphicsBlendOp", "VkBlendOp", "VK_BLEND_OP_", GraphicsBlendOp.values),
-    Mapping("GraphicsBlendFactor", "VkBlendFactor", "VK_BLEND_FACTOR_", GraphicsBlendFactor.values),
-    Mapping("GraphicsTopology", "VkPrimitiveTopology", "VK_PRIMITIVE_TOPOLOGY_", GraphicsTopology.values),
-    Mapping("GraphicsFilter", "VkFilter", "VK_FILTER_", GraphicsFilter.values),
-    Mapping("GraphicsAddressMode", "VkSamplerAddressMode", "VK_SAMPLER_ADDRESS_MODE_", GraphicsAddressMode.values),
-    Mapping("GraphicsMipmapMode", "VkSamplerMipmapMode", "VK_SAMPLER_MIPMAP_MODE_", GraphicsMipmapMode.values),
-    Mapping("GraphicsBorderColour", "VkBorderColor", "VK_BORDER_COLOR_", GraphicsBorderColour.values),
-    Mapping("GraphicsSwizzle", "VkComponentSwizzle", "VK_COMPONENT_SWIZZLE_", GraphicsSwizzle.values)
+    Mapping("GraphicsCompare", "VkCompareOp", "VK_COMPARE_OP_", GraphicsCompare.values.toVector),
+    Mapping("GraphicsStencilOp", "VkStencilOp", "VK_STENCIL_OP_", GraphicsStencilOp.values.toVector),
+    Mapping("GraphicsBlendOp", "VkBlendOp", "VK_BLEND_OP_", GraphicsBlendOp.values.toVector),
+    Mapping("GraphicsBlendFactor", "VkBlendFactor", "VK_BLEND_FACTOR_", GraphicsBlendFactor.values.toVector),
+    Mapping("GraphicsTopology", "VkPrimitiveTopology", "VK_PRIMITIVE_TOPOLOGY_", GraphicsTopology.values.toVector),
+    Mapping("GraphicsFilter", "VkFilter", "VK_FILTER_", GraphicsFilter.values.toVector),
+    Mapping(
+      "GraphicsAddressMode",
+      "VkSamplerAddressMode",
+      "VK_SAMPLER_ADDRESS_MODE_",
+      GraphicsAddressMode.values.toVector
+    ),
+    Mapping("GraphicsMipmapMode", "VkSamplerMipmapMode", "VK_SAMPLER_MIPMAP_MODE_", GraphicsMipmapMode.values.toVector),
+    Mapping("GraphicsBorderColour", "VkBorderColor", "VK_BORDER_COLOR_", GraphicsBorderColour.values.toVector),
+    Mapping("GraphicsSwizzle", "VkComponentSwizzle", "VK_COMPONENT_SWIZZLE_", GraphicsSwizzle.values.toVector)
   )
   val descriptorGroups: Vector[(String, String, Vector[(String, Long)])] = mappings.filter(mapping =>
     Set(

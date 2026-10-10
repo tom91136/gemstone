@@ -6,8 +6,6 @@ import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.isa.*
-import net.kurobako.gemstone.isa.ptx as PTX
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.memory.AllocationId.*
 import net.kurobako.gemstone.rpc.*
@@ -31,7 +29,7 @@ class ProgramGlobalBindingSuite extends munit.FunSuite {
   private def setup(service: ExecutionSession): ProgramId = {
     assertEquals(service.registerAllocation(32), Right(global))
     assertEquals(service.registerAllocation(16), Right(output))
-    service.load(amdgpu.AMDGPUBackend.encoding, Vec.from(image())).toOption.get
+    service.load(ProgramEncoding.HSACodeObject, Vec.from(image())).toOption.get
   }
   private def read(
       service: ExecutionSession,
@@ -143,7 +141,7 @@ class ProgramGlobalBindingSuite extends munit.FunSuite {
       assert(s.bindGlobal(p, "missing", output, 0L).isLeft)
       assertEquals(s.releaseAllocation(output), Right(()))
       val ptx = s.load(
-        PTX.PTXBackend.encoding,
+        ProgramEncoding.PTXText,
         Vec.from(
           ".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry k(){ret;}".getBytes(StandardCharsets.UTF_8)
         )
@@ -173,7 +171,7 @@ class ProgramGlobalBindingSuite extends munit.FunSuite {
       buffer.putLong(table + 6 * 64 + 24, table.toLong)
       Using.resource(service()) { s =>
         assertEquals(s.registerAllocation(32), Right(global))
-        val p = s.load(amdgpu.AMDGPUBackend.encoding, Vec.from(bytes)).toOption.get
+        val p = s.load(ProgramEncoding.HSACodeObject, Vec.from(bytes)).toOption.get
         assertEquals(
           s.bindGlobal(p, "device_global", global, 8L).isRight,
           allocated

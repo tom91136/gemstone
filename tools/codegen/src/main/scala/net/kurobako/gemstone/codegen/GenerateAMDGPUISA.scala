@@ -221,7 +221,7 @@ for name in sorted(module.instructions):
     )
   }
 
-  def renderTargetDefaults(tables: ujson.Value): (String, String) = {
+  def renderTargetDefaults(tables: ujson.Value): (scalaSource: String, nativeSource: String) = {
     val features    = tables("SubtargetFeature").obj
     val generations = tables("GCNSubtargetFeatureGeneration").obj.keySet.toSet
     @scala.annotation.tailrec
@@ -235,13 +235,13 @@ for name in sorted(module.instructions):
             val enabled = expand(processor("Features").arr.map(_("def").str).toSet)
             enabled("FeatureWavefrontSize32") || (enabled.exists(generations) && !enabled("FeatureWavefrontSize64"))
           } => processor("Name").str
-    }.distinct.sorted
-    require(wave32.contains("gfx1200"), "LLVM processor defaults lack RDNA wave32 metadata")
+    }.toSet
+    require(wave32("gfx1200"), "LLVM processor defaults lack RDNA wave32 metadata")
     // Accepted legacy/family aliases absent from LLVM's processor records.
     val aliases = Vector("gfx1001" -> "gfx1010", "gfx12" -> "gfx1200").collect {
-      case (alias, processor) if wave32.contains(processor) => alias
+      case (alias, processor) if wave32(processor) => alias
     }
-    val names       = (wave32 ++ aliases).sorted.map(Emission.literal)
+    val names       = (wave32.toVector ++ aliases).sorted.map(Emission.literal)
     val scalaSource = GeneratedHeader.scala("from LLVM processor wavefront defaults") +
       s"""|package net.kurobako.gemstone.isa.amdgpu
           |
@@ -354,12 +354,7 @@ for name in sorted(module.instructions):
     ujson.Obj("dimensions" -> ujson.Arr.from(dimensions), "instructions" -> ujson.Obj.from(instructions))
   }
 
-  def generate(references: Path): String = {
-    val result = extract(references)
-    renderConstants(result, references)
-  }
-
-  private def extract(references: Path, python: String = "python3"): Extracted = {
+  private def extract(references: Path, python: String): Extracted = {
     if (!Files.isRegularFile(references.resolve("MANIFEST.tsv")))
       throw IllegalArgumentException(s"not a prepared ISA reference directory: $references")
     val xmlRoot  = references.resolve("amd/xml")
@@ -488,19 +483,21 @@ for name in sorted(module.instructions):
     }
     val subwords = older.flatMap { record =>
       if (Set("GFX8", "GFX9")(record.isa) && Set("VOP1", "VOP2", "VOPC")(record.format))
-        official.filter(value =>
+        official.view.filter(value =>
           value.isa == "CDNA1" && value.name == record.name && value.format.startsWith(s"${record.format}_VOP_")
         )
           .map(value => record.copy(format = value.format, operands = value.operands))
       else Vector.empty
     }
     val nsa = older.filter(entry => entry.isa == "RDNA1" && entry.name.startsWith("image_bvh")).flatMap { entry =>
-      official.filter(value => value.isa == "RDNA2" && value.name == entry.name && value.format.startsWith("MIMG_NSA"))
-        .map(value => entry.copy(format = value.format, operands = value.operands))
+      official.collect {
+        case value if value.isa == "RDNA2" && value.name == entry.name && value.format.startsWith("MIMG_NSA") =>
+          entry.copy(format = value.format, operands = value.operands)
+      }
     }
     val gfx1170 = older.filter(_.isa == "GFX11_7").flatMap { record =>
       val base = if (record.format == "VOPD") "VOPDXY" else record.format
-      official.filter(value => value.isa == "RDNA4" && value.name == record.name).flatMap { value =>
+      official.view.filter(value => value.isa == "RDNA4" && value.name == record.name).flatMap { value =>
         val format = value.format.takeWhile(_ != '_')
         val opcode = if (format == base) Some(record.opcode)
         else if (format == "VOP3") base match {
@@ -513,8 +510,9 @@ for name in sorted(module.instructions):
         opcode.map(opcode => value.copy(isa = "GFX11_7", opcode = opcode))
       }
     }
-    val inherited = official.filterNot(value =>
-      value.isa == "GFX11_7" && (older ++ gfx1170).exists(record =>
+    val predecessors = older ++ gfx1170
+    val inherited    = official.filterNot(value =>
+      value.isa == "GFX11_7" && predecessors.exists(record =>
         record.isa == value.isa && record.format == value.format && record.opcode == value.opcode
       )
     )
@@ -658,7 +656,7 @@ for name in sorted(module.instructions):
       ).toVector
     }
     def arg(field: String, kind: String, bits: Int): Operand =
-      Operand(field, kind, !field.startsWith("VDST"), field.startsWith("VDST"), false, bits)
+      Operand(field, kind, !field.startsWith("VDST"), field.startsWith("VDST"), implicitOperand = false, bits)
     val compares = records("VOPCInstructions.td", "VOPCX?_Real_gfx6_gfx7").filter(_._1.startsWith("v_cmps")).flatMap {
       case (name, opcode) =>
         val bits = if (name.endsWith("f64")) 64 else 32
@@ -696,7 +694,7 @@ for name in sorted(module.instructions):
     }
     val gfx9Fmac = records("VOP2Instructions.td", "VOP2_Real_e32e64_vi").filter(_._1 == "v_fmac_f32")
       .flatMap { case (name, opcode) =>
-        existing.filter(entry => entry.name == name && entry.isa == "CDNA1" && Set("VOP2", "VOP3")(entry.format))
+        existing.view.filter(entry => entry.name == name && entry.isa == "CDNA1" && Set("VOP2", "VOP3")(entry.format))
           .map(entry => entry.copy(isa = "GFX9", opcode = if (entry.format == "VOP2") opcode else entry.opcode))
       }
     val packed = records("VOP3PInstructions.td", "VOP3P_Real_gfx1250").filter { case (name, _) =>
@@ -730,33 +728,27 @@ for name in sorted(module.instructions):
       case (name, opcode) =>
         Instruction(name, "CDNA4", "VOP3P", opcode, Vector(arg("SRC0", "SRC", 32), arg("SRC1", "SRC", 32)))
     }
+    def vectorVariant(entry: Instruction, format: String) = entry.copy(
+      format = format,
+      operands = entry.operands.map(operand =>
+        if (operand.field == "SRC0") operand.copy(field = "VSRC0", kind = "VGPR") else operand
+      )
+    )
     val subwords = existing.filter(entry =>
       (entry.name == "v_pk_fmac_f16" && Set("CDNA1", "CDNA2", "CDNA3", "CDNA4")(entry.isa) && entry.format == "VOP2") ||
         (entry.name == "v_rndne_f64" && Set("CDNA2", "CDNA3", "CDNA4")(entry.isa) && entry.format == "VOP1")
-    ).map { entry =>
-      entry.copy(
-        format = entry.format + (if (entry.name == "v_pk_fmac_f16") "_VOP_SDWA" else "_VOP_DPP"),
-        operands = entry.operands.map(operand =>
-          if (operand.field == "SRC0") operand.copy(field = "VSRC0", kind = "VGPR") else operand
-        )
-      )
-    }
+    ).map(entry =>
+      vectorVariant(entry, entry.format + (if (entry.name == "v_pk_fmac_f16") "_VOP_SDWA" else "_VOP_DPP"))
+    )
     val dots = existing.filter(entry =>
       (entry.isa == "RDNA1" && entry.name == "v_dot2c_f32_f16" && entry.format == "VOP2") ||
         (entry.isa == "GFX11_7" && entry.name == "v_dot4_f32_bf8_bf8" && entry.format == "VOP3P")
     ).flatMap { entry =>
-      Vector("DPP16", "DPP8").map(suffix =>
-        entry.copy(
-          format = s"${entry.format}_VOP_$suffix",
-          operands = entry.operands.map(operand =>
-            if (operand.field == "SRC0") operand.copy(field = "VSRC0", kind = "VGPR") else operand
-          )
-        )
-      )
+      Vector("DPP16", "DPP8").map(suffix => vectorVariant(entry, s"${entry.format}_VOP_$suffix"))
     }
     val signedDots = records("VOP3PInstructions.td", "VOP3P_Real_SignedDot_gfx11").flatMap { case (name, opcode) =>
       val unsigned = name.replace("_i8", "_iu8").replace("_i4", "_iu4")
-      existing.filter(entry =>
+      existing.view.filter(entry =>
         Set("RDNA3", "RDNA3_5", "GFX11_7", "RDNA4")(entry.isa) && entry.name == unsigned && entry.format == "VOP3P"
       )
         .map(_.copy(name = name, opcode = opcode))
@@ -934,10 +926,10 @@ for name in sorted(module.instructions):
         if ((isa == "GFX6" || isa == "GFX7") && layout.format == "VINTRP") {
           prefix(layout.copy(isa = isa), interpolation)
         } else if ((isa == "GFX6" || isa == "GFX7") && layout.format.startsWith("VOP3")) {
-          val fields = layout.fields.filterNot(_.name == "OP_SEL").map {
-            case field if field.name == "OP"    => llvmField(vop3, "OP", "op")
-            case field if field.name == "CLAMP" => llvmField(vop3, "CLAMP", "clamp")
-            case field                          => field
+          val fields = layout.fields.collect {
+            case field if field.name == "OP"     => llvmField(vop3, "OP", "op")
+            case field if field.name == "CLAMP"  => llvmField(vop3, "CLAMP", "clamp")
+            case field if field.name != "OP_SEL" => field
           }
           prefix(layout.copy(isa = isa, fields = fields), vop3)
         } else if (Set("GFX6", "GFX7", "GFX8")(isa) && layout.format == "MUBUF") {
@@ -994,7 +986,7 @@ for name in sorted(module.instructions):
     def children(value: Element): Vector[Element] =
       Vector.tabulate(value.getChildNodes.getLength)(value.getChildNodes.item(_)).collect {
         case element: Element if element.getTagName != "ty" => element
-      }.toVector
+      }
     val parts = children(expression)
     expression.getTagName match {
       case "lit" if expression.getAttribute("val") == "1" => Vector.empty
@@ -1034,16 +1026,7 @@ for name in sorted(module.instructions):
       }
       val fields =
         directChildren(requiredDirect(requiredDirect(encoding, "MicrocodeFormat"), "BitMap"), "Field").map { field =>
-          val ranges =
-            directChildren(requiredDirect(field, "BitLayout"), "Range").sortBy(_.getAttribute("Order").toInt).map {
-              range =>
-                ujson.Obj(
-                  "offset"  -> requiredText(range, "BitOffset").toInt,
-                  "bits"    -> requiredText(range, "BitCount").toInt,
-                  "padding" -> optionalDirect(range, "Padding").map(requiredText(_, "BitCount").toInt).getOrElse(0)
-                )
-            }
-          ujson.Obj("name" -> requiredText(field, "FieldName"), "ranges" -> ujson.Arr.from(ranges))
+          ujson.Obj("name" -> requiredText(field, "FieldName"), "ranges" -> ujson.Arr.from(bitRanges(field)))
         }
       def number(element: Element): String =
         BigInt(element.getTextContent.trim, element.getAttribute("Radix").toInt).toString(16)
@@ -1072,6 +1055,8 @@ for name in sorted(module.instructions):
     }
   }
 
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def enumValues(text: String, namespace: String, name: String): Vector[(String, Int)] = {
     val start = text.indexOf(s"namespace $namespace {")
     require(start >= 0, s"missing LLVM namespace $namespace")
@@ -1221,10 +1206,7 @@ for name in sorted(module.instructions):
         "kind"   -> "BUFFER_FORMAT",
         "fields" -> ujson.Arr.from(fields.map { case (name, bits, names) =>
           ujson.Obj(
-            "field" -> ujson.Obj(
-              "name"   -> name,
-              "ranges" -> ujson.Arr(ujson.Obj("offset" -> 0, "bits" -> bits, "padding" -> 0))
-            ),
+            "field" -> lowBitsField(name, bits),
             "names" -> ujson.Obj.from(names)
           )
         })
@@ -1236,8 +1218,7 @@ for name in sorted(module.instructions):
       ("SCALE_FMT", "MatrixScaleFmt", "MATRIX_SCALE_FMT_", 2)
     ).map { case (field, name, prefix, bits) =>
       ujson.Obj(
-        "field" ->
-          ujson.Obj("name" -> field, "ranges" -> ujson.Arr(ujson.Obj("offset" -> 0, "bits" -> bits, "padding" -> 0))),
+        "field" -> lowBitsField(field, bits),
         "names" -> ujson.Obj.from(enumeration("WMMA", name, prefix))
       )
     }
@@ -1299,37 +1280,45 @@ for name in sorted(module.instructions):
     }
   }
 
+  private def lowBitsField(name: String, bits: Int): ujson.Obj =
+    ujson.Obj("name" -> name, "ranges" -> ujson.Arr(ujson.Obj("offset" -> 0, "bits" -> bits, "padding" -> 0)))
+
+  private def bitRanges(field: Element): Vector[ujson.Obj] =
+    directChildren(requiredDirect(field, "BitLayout"), "Range").sortBy(_.getAttribute("Order").toInt).map { range =>
+      ujson.Obj(
+        "offset"  -> requiredText(range, "BitOffset").toInt,
+        "bits"    -> requiredText(range, "BitCount").toInt,
+        "padding" -> optionalDirect(range, "Padding").map(requiredText(_, "BitCount").toInt).getOrElse(0)
+      )
+    }
+
   private def parseOperandLayouts(input: Path): Vector[ujson.Value] = {
     val document = xmlDocument(input)
     val isa      = input.getFileName.toString.stripPrefix("amdgpu_isa_").stripSuffix(".xml").toUpperCaseRoot
     val nodes    = document.getElementsByTagName("OperandType")
     Vector.tabulate(nodes.getLength)(nodes.item(_)).collect { case element: Element => element }.flatMap { operand =>
       optionalDirect(operand, "OperandTypeName").map { name =>
-        val fields = optionalDirect(operand, "MicrocodeFormat").flatMap(optionalDirect(_, "BitMap")).toVector
-          .flatMap(directChildren(_, "Field")).map { field =>
-            val ranges =
-              directChildren(requiredDirect(field, "BitLayout"), "Range").sortBy(_.getAttribute("Order").toInt).map {
-                range =>
-                  ujson.Obj(
-                    "offset"  -> requiredText(range, "BitOffset").toInt,
-                    "bits"    -> requiredText(range, "BitCount").toInt,
-                    "padding" -> optionalDirect(range, "Padding").map(requiredText(_, "BitCount").toInt).getOrElse(0)
-                  )
-              }
+        val fields = optionalDirect(operand, "MicrocodeFormat").flatMap(optionalDirect(_, "BitMap"))
+          .fold(Vector.empty[Element])(directChildren(_, "Field")).map { field =>
             val names =
-              optionalDirect(field, "FieldPredefinedValues").toVector.flatMap(directChildren(_, "PredefinedValue"))
+              optionalDirect(field, "FieldPredefinedValues").fold(Vector.empty[Element])(
+                directChildren(_, "PredefinedValue")
+              )
                 .flatMap(value =>
                   scala.util.Try(BigInt(requiredText(value, "Value"))).toOption.map(number =>
                     requiredText(value, "Name") -> ujson.Str(number.toString)
                   )
                 )
             ujson.Obj(
-              "field" -> ujson.Obj("name" -> requiredText(field, "FieldName"), "ranges" -> ujson.Arr.from(ranges)),
+              "field" -> ujson.Obj(
+                "name"   -> requiredText(field, "FieldName"),
+                "ranges" -> ujson.Arr.from(bitRanges(field))
+              ),
               "names" -> ujson.Obj.from(names)
             )
           }
-        val values = optionalDirect(operand, "OperandPredefinedValues").toVector
-          .flatMap(directChildren(_, "PredefinedValue")).flatMap { value =>
+        val values = optionalDirect(operand, "OperandPredefinedValues")
+          .fold(Vector.empty[Element])(directChildren(_, "PredefinedValue")).flatMap { value =>
             scala.util.Try(BigInt(requiredText(value, "Value"))).toOption.map(number =>
               requiredText(value, "Name").toLowerCaseRoot -> ujson.Str(number.toString)
             )
@@ -1361,8 +1350,8 @@ for name in sorted(module.instructions):
         else if (Set("v_cvt_f32_bf8", "v_cvt_f32_fp8")(name)) originalFormat.replace("VOP3", "VOP3_BYTESEL")
         else originalFormat
         val opcode   = parseRadix(requiredDirect(encoding, "Opcode"))
-        val operands = optionalDirect(encoding, "Operands").toVector
-          .flatMap(value => directChildren(value, "Operand"))
+        val operands = optionalDirect(encoding, "Operands")
+          .fold(Vector.empty[Element])(directChildren(_, "Operand"))
           .map { operand =>
             Operand(
               field = optionalText(operand, "FieldName").getOrElse(""),
@@ -1389,7 +1378,7 @@ for name in sorted(module.instructions):
             optionalDirect(
               group,
               "FunctionalSubgroups"
-            ).toVector.flatMap(directChildren(_, "Subgroup")).map(_.getTextContent.trim)
+            ).fold(Vector.empty[Element])(directChildren(_, "Subgroup")).map(_.getTextContent.trim)
           )
         )
       }
@@ -1512,26 +1501,27 @@ for name in sorted(module.instructions):
     )
     domains.map { case (name, values) =>
       val names = values.filter(_.nonEmpty).distinct.sorted
+      val known = names.toSet
       val cases = names.map(value => s"  case `$value`").mkString("\n")
       def predicate(method: String)(accepts: String => Boolean): String = {
-        val selected = names.filter(accepts).map(value => s"`$value`").mkString(" | ")
+        val selected = names.view.filter(accepts).map(value => s"`$value`").mkString(" | ")
         if (selected.isEmpty) s"  def $method: Boolean = false"
         else s"  def $method: Boolean = this match { case $selected => true; case _ => false }"
       }
       def sourceModifier(method: String, prefix: String, suffix: String): String = {
-        val associations = names.filter(_.matches("VSRC[0-9]+")).flatMap { source =>
+        val associations = names.view.filter(_.matches("VSRC[0-9]+")).flatMap { source =>
           val modifier = prefix + source.stripPrefix("VSRC") + suffix
-          Option.when(names.contains(modifier))(s"case `$source` => Some(`$modifier`)")
+          Option.when(known(modifier))(s"case `$source` => Some(`$modifier`)")
         }.mkString("; ")
         s"  def $method: Option[EncodingField] = this match { $associations; case _ => None }"
       }
       val properties = if (name == "EncodingFormat") {
-        val bases = names.filter(value => value.contains('_') && names.contains(value.takeWhile(_ != '_'))).map(value =>
+        val bases = names.view.filter(value => value.contains('_') && known(value.takeWhile(_ != '_'))).map(value =>
           s"    case `$value` => `${value.takeWhile(_ != '_')}`"
         ).mkString("\n")
         val literals = names.flatMap { value =>
           Vector(4 -> "_INST_LITERAL", 8 -> "_INST_LITERAL64").collect {
-            case (bytes, suffix) if names.contains(value + suffix) =>
+            case (bytes, suffix) if known(value + suffix) =>
               s"case (`$value`, $bytes) => Some(`${value + suffix}`)"
           }
         }.mkString("\n")
@@ -1572,7 +1562,7 @@ for name in sorted(module.instructions):
         predicate("isScale")(_.startsWith("SCALE_")),
         predicate("isImageAddress")(_.startsWith("VADDR")),
         predicate("isWait")(_.startsWith("WAIT_")),
-        "  def index: Int = this match { " + names.filter(_.last.isDigit).map(value =>
+        "  def index: Int = this match { " + names.view.filter(_.last.isDigit).map(value =>
           s"case `$value` => ${value.last.asDigit}"
         ).mkString("; ") + "; case _ => -1 }"
       ).mkString("\n")

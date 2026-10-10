@@ -35,6 +35,6 @@ object Delimited {
           loop(index + 1, index + 1, open, segment(start, index) :: segments)
         case _ => loop(index + 1, start, open, segments)
       }
-    loop(0, 0, Nil, Nil)
+    loop(index = 0, start = 0, Nil, Nil)
   }
 }

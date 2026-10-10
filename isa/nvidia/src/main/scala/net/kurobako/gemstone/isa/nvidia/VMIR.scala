@@ -8,7 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
-object VMIR {
+private[isa] object VMIR {
 
   /** A dense general-register slot within one routine. */
   type Register = Register.Type
@@ -194,12 +194,9 @@ object VMIR {
         carryIn: Boolean,
         carryOut: Boolean
     )
-    case High(
-        operandWidth: ScalarBitWidth,
-        resultWidth: ScalarBitWidth,
-        carryIn: Boolean,
-        carryOut: Boolean
-    )
+
+    /** The high product half plus the addend and the carry flag, as `madc.hi` computes. */
+    case High(operandWidth: ScalarBitWidth, resultWidth: ScalarBitWidth, carryOut: Boolean)
   }
 
   /** Memory space of an atomic or matrix access: explicit global/shared, or generic resolved from the address. */
@@ -273,6 +270,8 @@ object VMIR {
     enum Role { case A, B, C }
 
     /** Element types, shape and layouts accepted by `mma` (or `wmma` with `wmma` set): D = A * B + C. */
+    // call sites name these arguments, which the argument checks enforce
+    @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
     def supportsMultiply(
         shape: Shape,
         a: Element,
@@ -327,7 +326,7 @@ object VMIR {
       else (rows * columns).widen[Int >= 0] / (element.packed * 32)
 
       // Return the logical matrix element held by a lane's unpacked fragment element.
-      def coordinate(lane: WarpLane, index: Int >= 0): (Int >= 0, Int >= 0) = {
+      def coordinate(lane: WarpLane, index: Int >= 0): (row: Int >= 0, column: Int >= 0) = {
         val laneIndex: Int >= 0 = lane
         if (mma884F16) {
           val thread         = laneIndex % 4
@@ -655,12 +654,18 @@ object VMIR {
   object Pc extends Newtype[Int >= 0] {
     val Entry: Pc = Pc(0)
     extension (pc: Pc) {
-      def toInt: Int       = pc.raw
-      def next: Option[Pc] = Option.when(pc.toInt != Int.MaxValue)(Pc(pc.unwrap + 1))
+      def toInt: Int = pc.raw
     }
   }
 
-  case class ExecutableProgram(instructions: Vec[PredicatedInstruction])
+  object ExecutableProgram {
+    val NoSource: Long = -1L
+  }
+
+  /** Lowered instructions and, when the lowering recorded them, the source ISA address each one came from. */
+  case class ExecutableProgram(instructions: Vec[PredicatedInstruction], sources: Vec[Long] = Vec.empty) {
+    def source(pc: Pc): Option[Long >= 0] = sources.lift(pc.toInt).flatMap(_.refine[Long >= 0].toOption)
+  }
 
   /** Executable code, the register and predicate slots its lanes are sized for up front, its frame-local storage and,
     * when known, the source names of its predicate slots.

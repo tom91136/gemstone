@@ -99,7 +99,7 @@ class SASSConditionsSuite extends munit.FunSuite {
     test(s"parses every condition block in $digest") {
       val table  = generator.sassReferences.tables.find(_.digest == digest).getOrElse(fail(s"missing $digest"))
       val parsed = table.description.classes.flatMap { klass =>
-        klass.sections.filter(section => Set("CONDITION", "CONDITIONS")(section.name)).map(section =>
+        klass.sections.view.filter(section => Set("CONDITION", "CONDITIONS")(section.name)).map(section =>
           parse(section.body).fold(error => fail(s"${klass.name}: ${error.message}"), identity)
         )
       }

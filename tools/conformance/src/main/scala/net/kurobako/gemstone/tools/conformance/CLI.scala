@@ -162,7 +162,8 @@ object CLI {
   private def endpoint(file: Path, server: Process): String = {
     val deadline             = 30.seconds.fromNow
     def read: Option[String] =
-      Option.when(Files.isRegularFile(file))(Try(ujson.read(Files.readString(file))("endpoint").str).toOption).flatten
+      Option.when(Files.isRegularFile(file))(Try(ujson.read(Files.readString(file))).toOption).flatten
+        .flatMap(_.objOpt).flatMap(_.get("endpoint")).flatMap(_.strOpt)
     LazyList.continually { Thread.sleep(25L); read }
       .takeWhile(_ => server.isAlive() && deadline.hasTimeLeft())
       .collectFirst { case Some(value) => value }

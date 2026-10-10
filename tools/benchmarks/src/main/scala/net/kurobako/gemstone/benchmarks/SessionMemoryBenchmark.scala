@@ -45,7 +45,7 @@ object SessionMemoryBenchmark {
           checked(session.registerAllocationAddress(id, address))
           id
         }
-        val program = checked(session.load(backend.encoding, Vec.empty))
+        val program = checked(session.load(ProgramEncoding.PTXText, Vec.empty))
         val task    = checked(KernelTask.validated(
           kernelName = "memory",
           groupSize = LaunchGeometry.Dimensions.One,
@@ -96,7 +96,7 @@ object SessionMemoryBenchmark {
       workers: Workgroups,
       completed: ConcurrentLinkedQueue[Measurement[Long]]
   ) extends Backend {
-    override val encoding: ProgramEncoding                              = ProgramEncoding.PTXText
+    override val format: ProgramFormat                                  = ProgramFormat.PTXText
     override def load(image: Vec[Byte]): Either[Fault, Backend.Program] = Right(Program())
 
     private class Program extends Backend.Program {

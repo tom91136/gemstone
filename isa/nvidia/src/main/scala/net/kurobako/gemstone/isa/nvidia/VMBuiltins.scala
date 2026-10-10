@@ -9,7 +9,7 @@ import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
 /** CUDA device-runtime calls, executed per lane on the caller's `.param` storage. */
-object VMBuiltins {
+private object VMBuiltins {
 
   // Attribute values of the emulated device, by cudaDeviceAttr ordinal.
   private def deviceAttribute(attribute: Int): Int = attribute match {
@@ -36,13 +36,13 @@ object VMBuiltins {
     def parameter(index: Int, size: Int in 0 ~ 8 = 8): Long =
       parameters.lift(index).fold(0L)(storage.readParameter(_, 0, size))
     def returnValue(value: Long): Unit = returnParameters.headOption.foreach(storage.writeParameter(_, 0, 64, value))
-    def output(index: Int, value: Long): Either[Fault, Unit] =
-      if (index < parameters.size) VMSemantics.storeGeneric(context, lane, parameter(index), 32, value) else Right(())
+    def output(value: Long): Either[Fault, Unit] =
+      if (parameters.nonEmpty) VMSemantics.storeGeneric(context, lane, parameter(0), 32, value) else Right(())
     builtin match {
-      case Builtin.GetDevice       => output(0, 0L).map(_ => returnValue(0L))
+      case Builtin.GetDevice       => output(0L).map(_ => returnValue(0L))
       case Builtin.DeviceAttribute =>
-        output(0, deviceAttribute(parameter(1, 4).toInt).toLong).map(_ => returnValue(0L))
-      case Builtin.Occupancy       => output(0, 1L).map(_ => returnValue(0L))
+        output(deviceAttribute(parameter(1, 4).toInt).toLong).map(_ => returnValue(0L))
+      case Builtin.Occupancy       => output(1L).map(_ => returnValue(0L))
       case Builtin.NoError         => Right(returnValue(0L))
       case Builtin.ParameterBuffer =>
         // The arguments are the requested alignment and the child launch's argument block size.

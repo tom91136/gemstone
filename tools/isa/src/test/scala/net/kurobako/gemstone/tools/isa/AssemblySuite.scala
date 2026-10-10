@@ -57,7 +57,7 @@ class AssemblySuite extends munit.FunSuite {
   private def executable(machine: Int, sections: Vec[(String, Vec[Byte])], sm: Option[Int] = None): Vec[Byte] =
     Vec.unsafeWrapArray(elfImage.write(
       machine,
-      sections.map((name, code) => elfImage.Section(name, 1, Vec.toArray(code), flags = 6L)),
+      sections.map((name, code) => elfImage.Section(name, 1, code, flags = 6L)),
       imageType = 1,
       abiVersion = if (sm.isDefined) 7 else 0,
       flags = sm.getOrElse(0)

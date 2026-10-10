@@ -6,7 +6,6 @@ import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 
@@ -70,10 +69,7 @@ object HIPCloverleafFluxBenchmark {
         KernelTask.Argument.Scalar(hidden.unsafe)
       )
     ).fold(error => throw IllegalArgumentException(error), identity)
-    val sample = Measurement.repeat(iterations) {
-      VMInterpreter.execute(prepared, task, memory, TaskControl(), Workgroups.Sequential, Vec.empty, _ => Right(()))
-        .fold(error => throw IllegalStateException(error.message), _ => ())
-    }
+    val sample = SequentialDispatch.repeat(iterations, prepared, task, memory)
     CloverleafFluxFixture.verify(memory, cells)
     sample
   }

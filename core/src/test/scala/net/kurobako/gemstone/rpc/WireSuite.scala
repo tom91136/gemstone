@@ -198,8 +198,7 @@ class WireSuite extends munit.FunSuite {
   }
 
   test("derived products and sums reject wrong arity, unknown tags, and invalid ordinals") {
-    import net.kurobako.gemstone.rpc.ExecutionRPC.given
-    assertEquals(decode[Pair](0x92, 7, 0xc3), Right(Pair(7, true)))
+    assertEquals(decode[Pair](0x92, 7, 0xc3), Right(Pair(7, flag = true)))
     assert(decode[Pair](0x91, 7, 0xc3).isLeft)
     assert(decode[Pair](0x93, 7, 0xc3).isLeft)
     import net.kurobako.gemstone.isa.*

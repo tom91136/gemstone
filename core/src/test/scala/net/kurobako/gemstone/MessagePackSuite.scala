@@ -20,7 +20,7 @@ class MessagePackSuite extends munit.FunSuite {
     assert(reader(0x91, 0x91, 0).skip(1).isLeft)
     assert(reader(0xc1).skip(4).isLeft)
     val bytes = Array[Byte](0, 0xd9.toByte, 2, 65, 66)
-    val input = msgpack.Reader(bytes, 1, 3)
+    val input = msgpack.Reader(bytes, start = 1, size = 3)
     assert(input.readString().isLeft)
   }
 

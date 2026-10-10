@@ -8,7 +8,7 @@ import scala.runtime.LongRef
 
 /** The machine state visible to one instruction issue: the dispatch, the workgroup and the issuing frame and lanes. */
 @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-class VMContext(
+private class VMContext(
     val kernel: Kernel,
     val geometry: LaunchGeometry,
     val group: Coordinates,

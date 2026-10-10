@@ -56,7 +56,15 @@ class GenerateAMDGPUISASuite extends munit.FunSuite {
 
   test("reject a directory which is not a prepared reference view") {
     generator.inDirectory { directory =>
-      intercept[IllegalArgumentException](GenerateAMDGPUISA.generate(directory))
+      val failure = intercept[IllegalArgumentException](GenerateAMDGPUISA.main(Array(
+        "--tablegen",
+        "llvm-tblgen",
+        directory.toString,
+        directory.toString,
+        directory.toString,
+        directory.toString
+      )))
+      assert(failure.getMessage.contains("not a prepared ISA reference directory"))
     }
   }
 
@@ -97,7 +105,15 @@ class GenerateAMDGPUISASuite extends munit.FunSuite {
       Vector(Operand("vdst", "VGPR", input = false, output = true, implicitOperand = false, bits = 32))
     val metadata = Vector(
       Vector(Instruction("v_add_f32", "GFX6", "VOP2", 17, operands, Vector("VALU"))),
-      Vector(Instruction("v_add_f32", "RDNA3", "VOP2", 17, operands, Vector("VALU", "ARITHMETIC"), Vector("gfx1100")))
+      Vector(Instruction(
+        name = "v_add_f32",
+        isa = "RDNA3",
+        format = "VOP2",
+        17,
+        operands,
+        groups = Vector("VALU", "ARITHMETIC"),
+        processors = Vector("gfx1100")
+      ))
     )
     val json    = ujson.read(GenerateAMDGPUISA.renderMetadataJson(metadata))
     val strings = json("strings").arr.map(_.str).toVector

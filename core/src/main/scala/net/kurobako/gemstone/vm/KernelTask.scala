@@ -4,9 +4,10 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.rpc.Wire.*
 
 object KernelTask {
-  enum Argument {
+  enum Argument derives Codec {
     case Scalar(bytes: NonEmpty[Vec[Byte]])
     case Memory(region: AllocationId, offset: Long >= 0, range: Option[Long > 0] = None)
     case Local(size: Long > 0)
@@ -15,9 +16,9 @@ object KernelTask {
     case Descriptor
   }
 
-  case class ArgumentBuffer(region: AllocationId, offset: Long >= 0)
+  case class ArgumentBuffer(region: AllocationId, offset: Long >= 0) derives Codec
 
-  enum RelocationSource {
+  enum RelocationSource derives Codec {
     case Memory(region: AllocationId)
     case Argument(index: Int >= 0)
   }
@@ -27,7 +28,7 @@ object KernelTask {
       sourceOffset: Long >= 0,
       target: AllocationId,
       targetOffset: Long >= 0
-  )
+  ) derives Codec
 
   def validated(
       kernelName: NonEmpty[String],

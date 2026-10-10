@@ -19,10 +19,10 @@ object IEEE754 {
     val quietBit: Long = 1L << (fractionBits - 1)
   }
 
-  private val Half     = Format(5, 10)
-  private val BFloat16 = Format(8, 7)
-  private val Single   = Format(8, 23)
-  private val Double64 = Format(11, 52)
+  private val Half     = Format(exponentBits = 5, fractionBits = 10)
+  private val BFloat16 = Format(exponentBits = 8, fractionBits = 7)
+  private val Single   = Format(exponentBits = 8, fractionBits = 23)
+  private val Double64 = Format(exponentBits = 11, fractionBits = 52)
 
   private def format(width: Int in (16, 32, 64)): Format = width.raw match {
     case 16 => Half
@@ -227,16 +227,20 @@ object IEEE754 {
   }
 
   /** IEEE 754-2008 minNum with -0 below +0: a NaN operand yields the other operand. */
-  def minNum(left: Long, right: Long, width: Int in (16, 32, 64)): Long = extremum(left, right, width, true, false)
+  def minNum(left: Long, right: Long, width: Int in (16, 32, 64)): Long =
+    extremum(left, right, width, smaller = true, propagate = false)
 
   /** IEEE 754-2008 maxNum with +0 above -0: a NaN operand yields the other operand. */
-  def maxNum(left: Long, right: Long, width: Int in (16, 32, 64)): Long = extremum(left, right, width, false, false)
+  def maxNum(left: Long, right: Long, width: Int in (16, 32, 64)): Long =
+    extremum(left, right, width, smaller = false, propagate = false)
 
   /** IEEE 754-2019 minimum: any NaN operand yields a quiet NaN, and -0 is below +0. */
-  def minimum(left: Long, right: Long, width: Int in (16, 32, 64)): Long = extremum(left, right, width, true, true)
+  def minimum(left: Long, right: Long, width: Int in (16, 32, 64)): Long =
+    extremum(left, right, width, smaller = true, propagate = true)
 
   /** IEEE 754-2019 maximum: any NaN operand yields a quiet NaN, and +0 is above -0. */
-  def maximum(left: Long, right: Long, width: Int in (16, 32, 64)): Long = extremum(left, right, width, false, true)
+  def maximum(left: Long, right: Long, width: Int in (16, 32, 64)): Long =
+    extremum(left, right, width, smaller = false, propagate = true)
 
   private def extremum(
       left: Long,
@@ -279,6 +283,8 @@ object IEEE754 {
     case _  => doubleToBinary64(binary64ToDouble(left) * binary64ToDouble(right))
   }
 
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def fusedMultiplyAdd(
       left: Long,
       right: Long,
@@ -304,6 +310,8 @@ object IEEE754 {
     }
 
   /** `left * right + addend` computed exactly and rounded once into `width`. */
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def fusedMultiplyAddExact(
       left: Double,
       right: Double,

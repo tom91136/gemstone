@@ -4,11 +4,12 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
+import net.kurobako.gemstone.collection.*
 import scala.collection.mutable
 
 /** Readers for the pinned nvdisasm capture hooks and their private compressed stream framing. */
 object SASSCapture {
-  case class Capture(bytes: Array[Byte], detail: ujson.Obj)
+  class Capture(val bytes: Vec[Byte], val detail: ujson.Obj)
 
   private val startMarker        = "\nSTART_MACHINE_DESCRIPTION\n"
   private val endMarker          = "\nEND_MACHINE_DESCRIPTION\n"
@@ -69,7 +70,10 @@ object SASSCapture {
       "caller records do not form one table stream"
     )
     check(logical.trim.endsWith(";"), "caller stream does not end at a complete table footer")
-    Capture(bytes, ujson.Obj("records" -> records, "source_pointers" -> sources.size, "callsite" -> "0x455203"))
+    Capture(
+      Vec.unsafeWrapArray(bytes),
+      ujson.Obj("records" -> records, "source_pointers" -> sources.size, "callsite" -> "0x455203")
+    )
   }
 
   def modern(stderr: Array[Byte]): Capture = {
@@ -117,7 +121,7 @@ object SASSCapture {
       position += 8 + compressedLength
       blocks += 1
     }
-    Capture(output.toByteArray, ujson.Obj("lz4_blocks" -> blocks))
+    Capture(Vec.unsafeWrapArray(output.toByteArray), ujson.Obj("lz4_blocks" -> blocks))
   }
 
   // https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md

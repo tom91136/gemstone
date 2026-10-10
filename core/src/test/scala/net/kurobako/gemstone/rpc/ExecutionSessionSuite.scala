@@ -33,7 +33,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
 
   private class TestBackend(execute: Execute = writeFirstArgument) extends Backend {
     val programClosed: AtomicBoolean                                    = AtomicBoolean()
-    override val encoding: ProgramEncoding                              = ExecutionSessionSuite.this.encoding
+    override val format: ProgramFormat                                  = ExecutionSessionSuite.this.encoding.format
     override def load(image: Vec[Byte]): Either[Fault, Backend.Program] = Right(Program(programClosed, execute))
   }
 
@@ -56,7 +56,7 @@ class ExecutionSessionSuite extends munit.FunSuite {
   }
 
   private class ProgramBackend(program: => Backend.Program) extends Backend {
-    override val encoding: ProgramEncoding                              = ExecutionSessionSuite.this.encoding
+    override val format: ProgramFormat                                  = ExecutionSessionSuite.this.encoding.format
     override def load(image: Vec[Byte]): Either[Fault, Backend.Program] = Right(program)
   }
 
@@ -87,6 +87,19 @@ class ExecutionSessionSuite extends munit.FunSuite {
           assertEquals(service.completion(completion), Right(CompletionStatus.Failed(failure)))
         }
       }
+    }
+  }
+
+  test("launch failures report where the fault arose") {
+    val where   = Fault.Location("probe", None, Some(8L), Some(LaunchGeometry.Coordinates.origin), Some(2))
+    val backend = TestBackend((_, _, _) => Left(Fault.Unsupported("opcode 7").at(where)))
+    Using.resource(ExecutionSession(List(backend))) { service =>
+      val program    = service.load(encoding, Vec[Byte](1)).toOption.get
+      val completion = service.launch(program, task("probe")).toOption.get
+      assertEquals(
+        service.awaitCompletion(completion).left.map(_.message: String),
+        Left("opcode 7 (kernel 'probe', instruction 0x8, workgroup (0, 0, 0), lane 2)")
+      )
     }
   }
 

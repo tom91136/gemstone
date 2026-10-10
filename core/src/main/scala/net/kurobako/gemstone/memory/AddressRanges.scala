@@ -4,6 +4,8 @@ package net.kurobako.gemstone.memory
 object AddressRanges {
 
   /** True when `[address, address + width)` lies within `[base, base + extent)` under unsigned comparison. */
+  // call sites name these arguments, which the argument checks enforce
+  @SuppressWarnings(Array("scalafix:PublicSignatures.primitive-run"))
   def containsUnsigned(base: Long, extent: Long, address: Long, width: Long): Boolean = {
     val relative = address - base
     java.lang.Long.compareUnsigned(address, base) >= 0 &&

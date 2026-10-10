@@ -2,13 +2,13 @@ package net.kurobako.gemstone.isa.nvidia
 
 import net.kurobako.gemstone.constraint.*
 
-object VMLanes {
+private object VMLanes {
   private val NoLanes = Array.empty[VMLane | Null]
 }
 
 /** Lane storage of one frame, taken per lane on first use from `pool`. */
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-class VMLanes(laneCount: Int in 1 ~ 1024, pool: VMFramePool) {
+private class VMLanes(laneCount: Int in 1 ~ 1024, pool: VMFramePool) {
   private val lanes          = java.util.Arrays.copyOf(VMLanes.NoLanes, laneCount.raw)
   private var registerCount  = 0: Int >= 0
   private var predicateCount = 0: Int >= 0

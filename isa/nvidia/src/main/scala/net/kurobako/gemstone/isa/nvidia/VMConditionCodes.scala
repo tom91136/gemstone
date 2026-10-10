@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.nvidia
 
 import net.kurobako.gemstone.constraint.*
 
-object VMConditionCodes {
+private[isa] object VMConditionCodes {
   enum Flag {
     case Carry
     case Zero
@@ -15,7 +15,7 @@ object VMConditionCodes {
 
 /** Per-lane condition state used by NVIDIA instruction families. */
 @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-class VMConditionCodes {
+private[isa] class VMConditionCodes {
   import VMConditionCodes.*
 
   private var defined                               = 0
@@ -31,10 +31,10 @@ class VMConditionCodes {
     val bit = 1 << flag.ordinal
     value match {
       case None        => defined &= ~bit
-      case Some(value) =>
+      case Some(state) =>
         if (flag == Flag.Carry) threeInputCarry = None
         defined |= bit
-        if (value) values |= bit else values &= ~bit
+        if (state) values |= bit else values &= ~bit
     }
   }
 

@@ -4,12 +4,10 @@ import cats.syntax.all.*
 import net.kurobako.gemstone.benchmarks.*
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
-import scala.util.Using
 
 /** Divergent nested device calls exchange per-lane results through shared memory and CTA barriers. */
 object PTXCallBenchmark {
@@ -19,7 +17,7 @@ object PTXCallBenchmark {
     positive("lanes", "Even lane count per group, at most 1024", 128)
       .validate("lanes must be even and at most 1024")(value => value.raw <= 1024 && value.raw % 2 == 0),
     positive("groups", "Workgroups per dispatch", 16),
-    workers(1)
+    workers
   ).mapN((iterations, calls, lanes, groups, workers) => () => run(iterations, calls, lanes, groups, workers))
 
   private def source(lanes: Int > 0): String = s""".version 8.0
@@ -111,18 +109,9 @@ object PTXCallBenchmark {
       ("output": NonEmpty[String]) -> Argument.fromLong(memory.base(output).raw),
       ("count": NonEmpty[String])  -> Argument.fromLong(calls.raw.toLong)
     )
-    val sample = Using.resource(WorkerPool(parallelism = workers, minGroups = 1, minWorkItems = 1)) { pool =>
-      Measurement.repeat(iterations) {
-        VMInterpreter.execute(
-          kernel = kernel,
-          geometry = geometry,
-          arguments = parameters,
-          memory = memory,
-          workgroups = pool
-        )
-          .fold(error => throw IllegalStateException(error.message), _ => ())
-      }
-    }
+    val sample = Measurement.repeatPooled(iterations, workers)(pool =>
+      VMInterpreter.execute(kernel, geometry, parameters, memory, workgroups = pool)
+    )
     val oddCalls = calls.raw & 1
     (0 until count).foreach { lane =>
       val actual   = memory.getLong(output, lane * 8)

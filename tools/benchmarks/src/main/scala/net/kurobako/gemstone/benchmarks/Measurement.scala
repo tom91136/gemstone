@@ -3,6 +3,8 @@ package net.kurobako.gemstone.benchmarks
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.vm.*
+import scala.util.Using
 
 object Measurement {
 
@@ -31,6 +33,20 @@ object Measurement {
         iteration += 1
       }
     }.sample(iterations.toLong)
+
+  /** A fault aborts the benchmark rather than timing the failure path. */
+  def succeeded(result: Either[Fault, ?]): Unit =
+    result.fold(fault => throw IllegalStateException(fault.message), _ => ())
+
+  /** Measure `iterations` runs of `body`, each of which must succeed. */
+  inline def repeatSucceeding(iterations: Int > 0)(inline body: Either[Fault, ?]): BenchmarkSample =
+    repeat(iterations)(succeeded(body))
+
+  /** Measure `iterations` runs on a dedicated pool of `workers`, each of which must succeed. */
+  def repeatPooled(iterations: Int > 0, workers: Int > 0)(run: Workgroups => Either[Fault, ?]): BenchmarkSample =
+    Using.resource(WorkerPool(parallelism = workers, minGroups = 1, minWorkItems = 1)) { pool =>
+      repeatSucceeding(iterations)(run(pool))
+    }
 }
 
 case class Measurement[A](value: A, elapsedNanos: Long >= 0, allocatedBytes: Option[Long >= 0]) {

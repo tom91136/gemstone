@@ -45,7 +45,7 @@ object SASSInstructionModel {
     val fields = allFields(nodes).filterNot(field => Set("Pg", "UPg")(field.binding))
     // R2P also accepts its bank as a qualifier (R2P.PR).
     fields.takeWhile(field => !isOperandField(field)).map(_.kind) ++
-      fields.filter(_.kind == "CCPR").map(_.kind)
+      fields.collect { case field if field.kind == "CCPR" => field.kind }
   }.toSet
 
   private def fieldKind(field: SASSFormat.Field): String = {

@@ -13,14 +13,14 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 import scala.runtime.LongRef
 
-object DeviceHeap {
+private[gemstone] object DeviceHeap {
   val Base: Long = 0x700000000000L
 }
 
 /** Storage for device-side `malloc`/`free`, private to one dispatch and layered over its address space. Accesses wholly
   * outside heap blocks reach the backing address space; an access straddling a block boundary faults.
   */
-class DeviceHeap(backing: AddressSpace, base: GuestAddress = GuestAddress(DeviceHeap.Base))
+private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = GuestAddress(DeviceHeap.Base))
     extends AddressSpace {
   // Blocks sorted by unsigned start, replaced whole under the exclusive lock so a lookup needs no lock of its own.
   private class Index(val starts: Array[Long], val blocks: Array[Array[Byte]])
@@ -193,6 +193,13 @@ class DeviceHeap(backing: AddressSpace, base: GuestAddress = GuestAddress(Device
         case Right(None) => delegated
       }
 
+  private inline def routeValueWrite(address: GuestAddress, value: Long, size: Int in 1 ~ 8)(
+      inline delegated: Either[Fault, Unit]
+  ): Either[Fault, Unit] =
+    route(address, size.widen[Int >= 0], mutating = true)((bytes, offset) =>
+      LittleEndian.write(value, bytes, offset, size.widen[Int in 0 ~ 8])
+    )(delegated)
+
   override def address(region: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] =
     backing.address(region, offset)
 
@@ -273,18 +280,10 @@ class DeviceHeap(backing: AddressSpace, base: GuestAddress = GuestAddress(Device
     routeValue(address, size, into)(backing.readSystemValueInto(address, size, into))
 
   override def writeValue(address: GuestAddress, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
-    route(address, size.widen[Int >= 0], mutating = true)((bytes, offset) =>
-      LittleEndian.write(value, bytes, offset, size.widen[Int in 0 ~ 8])
-    )(
-      backing.writeValue(address, value, size)
-    )
+    routeValueWrite(address, value, size)(backing.writeValue(address, value, size))
 
   override def writeSystemValue(address: GuestAddress, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] =
-    route(address, size.widen[Int >= 0], mutating = true)((bytes, offset) =>
-      LittleEndian.write(value, bytes, offset, size.widen[Int in 0 ~ 8])
-    )(
-      backing.writeSystemValue(address, value, size)
-    )
+    routeValueWrite(address, value, size)(backing.writeSystemValue(address, value, size))
 
   override def writeSystemBatch(writes: Vec[(GuestAddress, Long, Int in 1 ~ 8)]): Either[Fault, Unit] =
     if (writes.forall((address, _, size) => outside(address, size.raw.toLong))) backing.writeSystemBatch(writes)

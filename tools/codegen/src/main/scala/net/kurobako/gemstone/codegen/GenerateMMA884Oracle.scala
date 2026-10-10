@@ -25,10 +25,12 @@ object GenerateMMA884Oracle {
   }
 
   private def variants: Vec[Variant] =
-    for
-      accum <- Vec(Accumulator.F32, Accumulator.F16); a <- Vec(Layout.Row, Layout.Col);
-      b     <- Vec(Layout.Row, Layout.Col); mode        <- Vec(Mode.Plain, Mode.Alias, Mode.ZeroAlias)
-    yield Variant(accum, a, b, mode)
+    for {
+      accum <- Vec(Accumulator.F32, Accumulator.F16)
+      a     <- Vec(Layout.Row, Layout.Col)
+      b     <- Vec(Layout.Row, Layout.Col)
+      mode  <- Vec(Mode.Plain, Mode.Alias, Mode.ZeroAlias)
+    } yield Variant(accum, a, b, mode)
 
   private def render(items: Vec[Variant]): String = {
     val header  = Vec(".version 7.8", ".target sm_70", ".address_size 64")

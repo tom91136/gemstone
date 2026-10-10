@@ -55,8 +55,8 @@ private object UnixTransport {
   private def open(path: Path, listener: Boolean, timeout: Int): Descriptor = Zone {
     Descriptor(checked(Bindings.open(toCString(path.toString), if (listener) 1 else 0, timeout)))
   }
-  def connect(path: Path, timeout: Int > 0): Channel = UnixChannel(open(path, false, timeout.raw), timeout)
-  def listen(path: Path): Listener                   = UnixSocketListener(open(path, true, 0), path)
+  def connect(path: Path, timeout: Int > 0): Channel = UnixChannel(open(path, listener = false, timeout.raw), timeout)
+  def listen(path: Path): Listener                   = UnixSocketListener(open(path, listener = true, 0), path)
   private class UnixSocketListener(fd: Descriptor, path: Path) extends Listener {
     val endpoint: Endpoint = Endpoint.Unix(path)
     def isClosed: Boolean  = fd.isClosed
@@ -83,7 +83,7 @@ private object UnixTransport {
     private class ChannelInput extends InputStream {
       override def read(): Int = {
         val byte = Array.ofDim[Byte](1)
-        if (read(byte, 0, 1) < 0) -1 else byte(0) & 0xff
+        if (read(byte, offset = 0, length = 1) < 0) -1 else byte(0) & 0xff
       }
       override def read(bytes: Array[Byte], offset: Int, length: Int): Int = {
         java.util.Objects.checkFromIndexSize(offset, length, bytes.length)
@@ -96,7 +96,7 @@ private object UnixTransport {
       override def close(): Unit = fd.close()
     }
     private class ChannelOutput extends OutputStream {
-      override def write(value: Int): Unit                                   = write(Array(value.toByte), 0, 1)
+      override def write(value: Int): Unit = write(Array(value.toByte), offset = 0, length = 1)
       override def write(bytes: Array[Byte], offset: Int, length: Int): Unit = {
         java.util.Objects.checkFromIndexSize(offset, length, bytes.length)
         if (length > 0) fd.use { socket =>

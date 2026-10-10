@@ -75,7 +75,7 @@ class ReplaySuite extends munit.FunSuite {
               input.readLong(); released.incrementAndGet()
               Control.writeResponse(output, operation)
             case Control.Finish => Control.writeResponse(output, operation)
-            case value          => throw IOException(s"bad control operation $value")
+            case value          => fail(s"bad control operation $value")
           }
           output.flush(); active = false
         } else if (magic == ExecutionRPC.HelloMagic) {

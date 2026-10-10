@@ -29,6 +29,8 @@ class Clients(createSession: () => ExecutionSession, clientClosed: ClientId => U
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var closed = false
 
+  // a companion factory would expose the private Entry its constructor takes
+  @SuppressWarnings(Array("scalafix:QualifiedPrivate.companion-factory"))
   class Lease private[Clients] (id: ClientId, session: SessionId, client: Client, entry: Entry) extends AutoCloseable {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var released = false

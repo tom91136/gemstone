@@ -108,10 +108,10 @@ class ExecutionRPCSuite extends munit.FunSuite {
     Operation.EnableHostMemory,
     Operation.PollHostMemory(completion),
     Operation.SupplyHostMemory(completion, Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2)))),
-    Operation.SupplyHostSync(completion, 71, -1L),
+    Operation.SupplyHostSync(completion, ticket = 71, observed = -1L),
     Operation.RegisterAllocation(64L),
     Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L)),
-    Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L), true),
+    Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L), hostBacked = true),
     Operation.ReleaseAllocation(allocation),
     Operation.WriteAllocation(allocation, 4L, Vec[Byte](1, 2, 3)),
     Operation.ReadAllocation(allocation, 4L, 3),
@@ -291,7 +291,7 @@ class ExecutionRPCSuite extends munit.FunSuite {
   test("host atomic widths are validated at the wire boundary while zero denotes ordinary bytes") {
     def atomic(width: Int): Either[String, HostMemoryAtomic] =
       Codec[UncheckedHostAtomic].encode(
-        UncheckedHostAtomic(GuestAddress(4096L), width, 0L, 1L, HostMemoryAtomicOperation.Store),
+        UncheckedHostAtomic(GuestAddress(4096L), width, expected = 0L, desired = 1L, HostMemoryAtomicOperation.Store),
         ExecutionRPC.Limits
       ).flatMap(Codec[HostMemoryAtomic].decode(_, ExecutionRPC.Limits))
     def bytes(width: Int): Either[String, HostMemoryBytes] =

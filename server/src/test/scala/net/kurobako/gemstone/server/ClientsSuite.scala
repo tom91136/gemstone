@@ -10,19 +10,19 @@ class ClientsSuite extends munit.FunSuite {
   test("released clients revoke existing leases and reject delayed acquisition") {
     Using.resource(Clients(() => ExecutionSession(Nil))) { clients =>
       val id       = clients.register()
-      val existing = clients.acquire(id, SessionId(1, 1)).toOption.get
+      val existing = clients.acquire(id, SessionId(process = 1, incarnation = 1)).toOption.get
       assert(existing.service.isRight)
       clients.release(id)
       assert(existing.service.isLeft)
-      assert(clients.acquire(id, SessionId(2, 1)).isLeft)
+      assert(clients.acquire(id, SessionId(process = 2, incarnation = 1)).isLeft)
       existing.close()
     }
   }
 
   test("connections share a process session until its last lease closes") {
     Using.resource(Clients(() => ExecutionSession(Nil))) { clients =>
-      val first   = clients.acquire(Clients.Root, SessionId(1, 1)).toOption.get
-      val second  = clients.acquire(Clients.Root, SessionId(1, 1)).toOption.get
+      val first   = clients.acquire(Clients.Root, SessionId(process = 1, incarnation = 1)).toOption.get
+      val second  = clients.acquire(Clients.Root, SessionId(process = 1, incarnation = 1)).toOption.get
       val service = first.service.toOption.get
       assert(second.service.toOption.get eq service)
       first.close()
@@ -30,7 +30,7 @@ class ClientsSuite extends munit.FunSuite {
       assert(first.service.isLeft)
       assert(second.service.toOption.get eq service)
       second.close()
-      val next = clients.acquire(Clients.Root, SessionId(1, 1)).toOption.get
+      val next = clients.acquire(Clients.Root, SessionId(process = 1, incarnation = 1)).toOption.get
       assert(!(next.service.toOption.get eq service))
       next.close()
     }
@@ -46,12 +46,12 @@ class ClientsSuite extends munit.FunSuite {
       }
     )
     val ids     = List(Clients.Root, clients.register(), clients.register())
-    val leases  = ids.map(id => clients.acquire(id, SessionId(1, 1)).toOption.get)
+    val leases  = ids.map(id => clients.acquire(id, SessionId(process = 1, incarnation = 1)).toOption.get)
     val failure = intercept[IllegalStateException](clients.close())
     assertEquals(notifications.get(), 3)
     assertEquals(failure.getSuppressed.length, 2)
     assert(leases.forall(_.service.isLeft))
-    assert(ids.forall(id => clients.acquire(id, SessionId(2, 1)).isLeft))
+    assert(ids.forall(id => clients.acquire(id, SessionId(process = 2, incarnation = 1)).isLeft))
     leases.foreach(_.close())
     clients.close()
   }

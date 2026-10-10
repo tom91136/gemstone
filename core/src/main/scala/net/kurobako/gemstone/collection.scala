@@ -106,7 +106,6 @@ object collection {
   type Vec[+A] = ArraySeq[A]
 
   object LRUCache {
-    @SuppressWarnings(Array("scalafix:BannedSyntax.explicit-new"))
     def apply[K, V](capacity: Int > 0): LRUCache[K, V] = new LRUCache(capacity)
   }
 

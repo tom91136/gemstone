@@ -14,14 +14,14 @@ object Codegen {
     case CheckEnvironment(root: Path)
   }
 
-  private val root = Opts.option[String]("root", "Repository root").map(Path.of(_).toAbsolutePath.normalize)
+  private val rootOption = Opts.option[String]("root", "Repository root").map(Path.of(_).toAbsolutePath.normalize)
 
   private val command = Command("codegen", "Prepare pinned references and regenerate checked-in sources")(
     Opts.subcommand("prepare", "Prepare reference bundles and print their directories")(
-      (root, Opts.arguments[String]("bundle").map(_.toList.toVector)).mapN(Request.Prepare(_, _))
-    ).orElse(Opts.subcommand("generate", "Regenerate every checked-in source")(root.map(Request.Generate(_))))
+      (rootOption, Opts.arguments[String]("bundle").map(_.toList.toVector)).mapN(Request.Prepare(_, _))
+    ).orElse(Opts.subcommand("generate", "Regenerate every checked-in source")(rootOption.map(Request.Generate(_))))
       .orElse(Opts.subcommand("check-environment", "Check environment outputs and names")(
-        root.map(Request.CheckEnvironment(_))
+        rootOption.map(Request.CheckEnvironment(_))
       ))
   )
 
@@ -64,18 +64,18 @@ object Codegen {
     GeneratePTXISA.main(Array(
       "instructions",
       ptx,
-      path("isa/ptx/src/generated/main/scala"),
+      path("isa/ptx-asm/src/generated/main/scala"),
       References.PTXISAVersion
     ))
     GeneratePTXISA.main(Array(
       "tests",
       ptx,
-      path("isa/ptx/src/generated/test/scala"),
+      path("isa/ptx-asm/src/generated/test/scala"),
       References.PTXISAVersion
     ))
     GenerateMMA884Oracle.main(Array(
-      path("isa/ptx/src/generated/test/scala"),
-      path("isa/ptx/src/generated/test/resources"),
+      path("isa/ptx-vm/src/generated/test/scala"),
+      path("isa/ptx-vm/src/generated/test/resources"),
       path("conformance/unified/src/cuda")
     ))
 
@@ -94,8 +94,8 @@ object Codegen {
     )
     GenerateSASSISA.main(Array(
       s"$sass",
-      path("isa/sass/src/generated/main/scala"),
-      path("isa/sass/src/generated/main/resources")
+      path("isa/sass-asm/src/generated/main/scala"),
+      path("isa/sass-asm/src/generated/main/resources")
     ))
 
     val tablegen = References.tablegen(root.resolve(".cache/references"), references, offline)
@@ -106,11 +106,11 @@ object Codegen {
       "--tablegen",
       s"$tablegen",
       amdgpu,
-      path("isa/amdgpu/src/generated/main/scala"),
-      path("isa/amdgpu/src/generated/main/resources"),
+      path("isa/amdgpu-asm/src/generated/main/scala"),
+      path("isa/amdgpu-asm/src/generated/main/resources"),
       path("native/generated")
     ))
-    GenerateAMDGPUOracle.main(Array(amdgpu, path("isa/amdgpu/src/generated/test/resources")))
+    GenerateAMDGPUOracle.main(Array(amdgpu, path("isa/amdgpu-asm/src/generated/test/resources")))
 
     val spirv   = prepare(root, References.SPIRV)
     val unified = spirv.resolve("khronos/spirv-headers/include/spirv/unified1")
@@ -119,7 +119,7 @@ object Codegen {
       "instructions",
       grammar,
       s"$unified",
-      path("isa/spirv/src/generated/main/scala"),
+      path("isa/spirv-asm/src/generated/main/scala"),
       path("native/generated/spirv")
     ))
   }

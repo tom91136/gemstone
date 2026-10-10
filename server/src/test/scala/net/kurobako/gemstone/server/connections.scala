@@ -31,7 +31,7 @@ private object connections {
       process: Long = 42L,
       incarnation: Long = 17L
   ) extends AutoCloseable {
-    private val socket = Transport.connect(endpoint, 10000)
+    private val socket = Sockets.connect(endpoint, 10000)
     private val input  = DataInputStream(socket.input)
     private val output = DataOutputStream(socket.output)
 

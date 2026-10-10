@@ -20,8 +20,17 @@ lazy val upickleVersion      = "4.4.3"
 lazy val scalafmtVersion     = "3.11.5"
 lazy val rocmVersion         = "7.1.1"
 
-ThisBuild / organization      := projectOrganisation
-ThisBuild / version           := "0.1.0-SNAPSHOT"
+ThisBuild / organization         := projectOrganisation
+ThisBuild / version              := "0.1.0-SNAPSHOT"
+ThisBuild / versionScheme        := Some("early-semver")
+ThisBuild / mimaFailOnNoPrevious := false
+ThisBuild / licenses             := Seq(License.Apache2)
+ThisBuild / homepage             := Some(url("https://github.com/tom91136/gemstone"))
+ThisBuild / scmInfo              :=
+  Some(ScmInfo(url("https://github.com/tom91136/gemstone"), "scm:git:git@github.com:tom91136/gemstone.git"))
+ThisBuild / developers := List(
+  Developer("tom91136", "Tom Lin", "tom91136@gmail.com", url("https://github.com/tom91136"))
+)
 ThisBuild / scalaVersion      := scala3Version
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
@@ -37,6 +46,7 @@ lazy val nativeCompileDatabase   = taskKey[Path]("Configured CMake build directo
 lazy val nativeSourceDirectories =
   settingKey[Seq[Path]]("C and C++ source trees governed by the native codestyle checks.")
 lazy val terminologyCheck          = taskKey[Unit]("Verify repository-authored sources use precise terminology.")
+lazy val binaryCheck               = taskKey[Unit]("Reject binary files among checked-in and pending sources.")
 lazy val checkEnvironment          = taskKey[Unit]("Check environment output freshness and declared names.")
 lazy val codegen                   = taskKey[Unit]("Update and format every checked-in generated source and fixture.")
 lazy val generateBenchmarkFixtures =
@@ -53,6 +63,9 @@ Global / conformanceDirectory := (LocalRootProject / baseDirectory).value.toPath
 
 lazy val containerExecutable = sys.env.getOrElse("CONTAINER_EXECUTABLE", "podman")
 
+// Packages are imported whole, so a type keeps its package prefix to stay distinct from same-named types elsewhere.
+ThisBuild / baumkuchenDisabled += "PackageNaming"
+
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
     "-no-indent",
@@ -64,8 +77,7 @@ lazy val commonSettings = Seq(
     "-Wvalue-discard",
     "-Wunused:all",
     "-Yretain-trees",
-    "-language:noAutoTupling",
-    "-P:acyclic:warn"
+    "-language:noAutoTupling"
   ),
   libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
   Test / testOptions += Tests.Argument(TestFrameworks.MUnit, "--log=warn", "--logger=sbt"),
@@ -88,24 +100,22 @@ lazy val mutationSettings = Mutation.settings ++ Seq(
 
 def module(project: Project): Project = project
   .disablePlugins(Stryker4sPlugin)
-  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(commonSettings, publish / skip := true)
 
 def module(matrix: ProjectMatrix): ProjectMatrix = matrix
   .disablePlugins(Stryker4sPlugin)
   .dependsOn(testSupport % "test->compile")
-  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(commonSettings)
 
-lazy val acyclicPlugin = project.in(file("codestyle/acyclic"))
+def compilerPlugin(plugin: String): Project = Project(s"${plugin}Plugin", file(s"codestyle/$plugin"))
   .disablePlugins(Stryker4sPlugin, _root_.scalafix.sbt.ScalafixPlugin)
   .settings(
-    name                 := "gemstone-acyclic",
+    name                 := s"gemstone-$plugin",
     Compile / packageBin := {
       val packaged      = (Compile / packageBin).value
       val converter     = fileConverter.value
       val original      = converter.toPath(packaged)
-      val fingerprinted = original.resolveSibling(s"acyclic-${sbt.io.Hash.toHex(sbt.io.Hash(original.toFile))}.jar")
+      val fingerprinted = original.resolveSibling(s"$plugin-${sbt.io.Hash.toHex(sbt.io.Hash(original.toFile))}.jar")
       java.nio.file.Files.copy(original, fingerprinted, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
       val output = converter.toVirtualFile(fingerprinted)
       Def.declareOutput(output)
@@ -122,59 +132,24 @@ lazy val acyclicPlugin = project.in(file("codestyle/acyclic"))
     Test / javaOptions ++= {
       val converter = fileConverter.value
       Seq(
-        s"-Dgemstone.acyclic.jar=${converter.toPath((Compile / packageBin).value)}",
-        "-Dgemstone.acyclic.classpath=" + (Test / fullClasspath).value
+        s"-Dgemstone.$plugin.jar=${converter.toPath((Compile / packageBin).value)}",
+        s"-Dgemstone.$plugin.classpath=" + (Test / fullClasspath).value
           .map(entry => converter.toPath(entry.data).toString).mkString(java.io.File.pathSeparator)
       )
     }
   )
 
-lazy val codestyleRules = project.in(file("codestyle/rules"))
-  .dependsOn(acyclicPlugin % "plugin->compile")
-  .disablePlugins(Stryker4sPlugin, _root_.scalafix.sbt.ScalafixPlugin)
-  .settings(
-    name           := "gemstone-codestyle-rules",
-    publish / skip := true,
-    libraryDependencies +=
-      ("ch.epfl.scala" %% "scalafix-core" % _root_.scalafix.sbt.BuildInfo.scalafixVersion)
-        .cross(CrossVersion.for3Use2_13)
-  )
-
-lazy val codestyleInput = project.in(file("codestyle/input"))
-  .dependsOn(acyclicPlugin % "plugin->compile")
-  .disablePlugins(Stryker4sPlugin, _root_.scalafix.sbt.ScalafixPlugin)
-  .settings(publish / skip := true, libraryDependencies += "org.scalameta" %% "munit" % munitVersion)
-
-lazy val codestyleOutput = project.in(file("codestyle/output"))
-  .dependsOn(acyclicPlugin % "plugin->compile")
-  .disablePlugins(Stryker4sPlugin, _root_.scalafix.sbt.ScalafixPlugin)
-  .settings(publish / skip := true, libraryDependencies += "org.scalameta" %% "munit" % munitVersion)
-
-lazy val codestyleTests = project.in(file("codestyle/tests"))
-  .disablePlugins(Stryker4sPlugin)
-  .dependsOn(codestyleInput, codestyleRules)
-  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
-  .enablePlugins(_root_.scalafix.sbt.ScalafixTestkitPlugin)
-  .settings(
-    publish / skip := true,
-    scalacOptions += "-Wunused:all",
-    scalafixTestkitOutputSourceDirectories := (codestyleOutput / Compile / sourceDirectories).value,
-    scalafixTestkitInputSourceDirectories  := (codestyleInput / Compile / sourceDirectories).value,
-    scalafixTestkitInputClasspath          := (codestyleInput / Compile / fullClasspath).value,
-    scalafixTestkitInputScalacOptions      := (codestyleInput / Compile / scalacOptions).value,
-    scalafixTestkitInputScalaVersion       := (codestyleInput / Compile / scalaVersion).value
-  )
+lazy val publicapiPlugin = compilerPlugin("publicapi")
 
 lazy val codestyle = project.in(file("codestyle"))
   .disablePlugins(Stryker4sPlugin, _root_.scalafix.sbt.ScalafixPlugin)
-  .aggregate(acyclicPlugin, codestyleRules, codestyleInput, codestyleOutput, codestyleTests)
+  .aggregate(publicapiPlugin)
   .settings(name := "gemstone-codestyle", publish / skip := true)
 
 // No dependency on core: its own tests can use these utilities without a cycle. Fixtures that need core types
 // live in core test sources, which dependants consume through test->test.
 lazy val testSupport = projectMatrix.in(file("tools/test-support"))
   .disablePlugins(Stryker4sPlugin)
-  .dependsOn(codestyleRules % ScalafixConfig, acyclicPlugin % "plugin->compile")
   .settings(
     commonSettings,
     name                                   := "gemstone-test-support",
@@ -185,6 +160,9 @@ lazy val testSupport = projectMatrix.in(file("tools/test-support"))
   .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
 
 lazy val core = module(projectMatrix)
+  .settings(
+    Publishing.library("Gemstone core: devices, backends, address spaces, launch control and the execution RPC.")
+  )
   .settings(
     CheckedInSources.settings,
     name := "gemstone-core",
@@ -237,7 +215,12 @@ lazy val codegenProject = module(Project("codegen", file("tools/codegen")))
   )
 
 lazy val isaTools = module(project.in(file("tools/isa")))
-  .dependsOn(ptx.jvm(scala3Version), sass.jvm(scala3Version), amdgpu.jvm(scala3Version), spirv.jvm(scala3Version))
+  .dependsOn(
+    ptxAsm.jvm(scala3Version),
+    sassAsm.jvm(scala3Version),
+    amdgpuAsm.jvm(scala3Version),
+    spirvAsm.jvm(scala3Version)
+  )
   .dependsOn(core.jvm(scala3Version) % "test->test")
   .settings(
     name                                  := "gemstone-isa-tools",
@@ -245,43 +228,77 @@ lazy val isaTools = module(project.in(file("tools/isa")))
     libraryDependencies += "com.monovore" %% "decline" % declineVersion
   )
 
+lazy val samples = module(project.in(file("samples")))
+  .dependsOn(
+    ptxVm.jvm(scala3Version),
+    sassVm.jvm(scala3Version),
+    amdgpuVm.jvm(scala3Version),
+    spirvVm.jvm(scala3Version)
+  )
+  .settings(name := "gemstone-samples", publish / skip := true, Compile / mainClass := Some("samples.Samples"))
+
 lazy val nvidia = module(projectMatrix.in(file("isa/nvidia")))
+  .settings(Publishing.library("The execution VM PTX and SASS share."))
   .dependsOn(core % "compile->compile;test->test")
   .settings(name := "gemstone-isa-nvidia")
   .jvmPlatform(scalaVersions = Seq(scala3Version))
   .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
 
-lazy val sass = module(projectMatrix.in(file("isa/sass")))
-  .dependsOn(core % "compile->compile;test->test", nvidia % "compile->compile;test->test", ptx % "test->compile")
-  .settings(
-    CheckedInSources.settings,
-    name                                   := "gemstone-isa-sass",
-    libraryDependencies += "org.typelevel" %% "cats-core" % catsCoreVersion
-  )
-  .jvmPlatform(scalaVersions = Seq(scala3Version))
-  .nativePlatform(
-    scalaVersions = Seq(scala3Version),
-    settings = nativeTestSettings ++ Seq(Test / nativeConfig ~= (_.withEmbedResources(true)))
-  )
-
-lazy val ptx = module(projectMatrix.in(file("isa/ptx")))
-  .dependsOn(core % "compile->compile;test->test", nvidia % "compile->compile;test->test")
-  .settings(
-    CheckedInSources.settings,
-    name                                   := "gemstone-isa-ptx",
-    libraryDependencies += "org.typelevel" %% "cats-core" % catsCoreVersion
-  )
-  .jvmPlatform(scalaVersions = Seq(scala3Version))
-  .nativePlatform(
-    scalaVersions = Seq(scala3Version),
-    settings = nativeTestSettings ++ Seq(Test / nativeConfig ~= (_.withEmbedResources(true)))
-  )
-
-lazy val amdgpu = module(projectMatrix.in(file("isa/amdgpu")))
+lazy val sassAsm = module(projectMatrix.in(file("isa/sass-asm")))
+  .settings(Publishing.library("SASS instruction model, decoder, assembler, disassembler and cubin containers."))
   .dependsOn(core % "compile->compile;test->test")
   .settings(
     CheckedInSources.settings,
-    name := "gemstone-isa-amdgpu",
+    name                                   := "gemstone-isa-sass-asm",
+    libraryDependencies += "org.typelevel" %% "cats-core" % catsCoreVersion
+  )
+  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(
+    scalaVersions = Seq(scala3Version),
+    settings = nativeTestSettings ++ Seq(Test / nativeConfig ~= (_.withEmbedResources(true)))
+  )
+
+lazy val sassVm = module(projectMatrix.in(file("isa/sass-vm")))
+  .settings(Publishing.library("SASS execution on the shared NVIDIA VM."))
+  .dependsOn(
+    sassAsm % "compile->compile;test->test",
+    nvidia  % "compile->compile;test->test",
+    ptxVm   % "test->compile"
+  )
+  .settings(name := "gemstone-isa-sass-vm")
+  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(
+    scalaVersions = Seq(scala3Version),
+    settings = nativeTestSettings ++ Seq(Test / nativeConfig ~= (_.withEmbedResources(true)))
+  )
+
+lazy val ptxAsm = module(projectMatrix.in(file("isa/ptx-asm")))
+  .settings(Publishing.library("PTX instruction model, parser, printer and validation."))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    CheckedInSources.settings,
+    name                                   := "gemstone-isa-ptx-asm",
+    libraryDependencies += "org.typelevel" %% "cats-core" % catsCoreVersion
+  )
+  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
+
+lazy val ptxVm = module(projectMatrix.in(file("isa/ptx-vm")))
+  .settings(Publishing.library("PTX execution on the shared NVIDIA VM."))
+  .dependsOn(ptxAsm % "compile->compile;test->test", nvidia % "compile->compile;test->test")
+  .settings(CheckedInSources.settings, name := "gemstone-isa-ptx-vm")
+  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(
+    scalaVersions = Seq(scala3Version),
+    settings = nativeTestSettings ++ Seq(Test / nativeConfig ~= (_.withEmbedResources(true)))
+  )
+
+lazy val amdgpuAsm = module(projectMatrix.in(file("isa/amdgpu-asm")))
+  .settings(Publishing.library("AMDGPU instruction model, assembler, disassembler and HSA code objects."))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    CheckedInSources.settings,
+    name := "gemstone-isa-amdgpu-asm",
     libraryDependencies ++= Seq(
       "com.outr"      %% "scribe"    % scribeVersion,
       "org.typelevel" %% "cats-core" % catsCoreVersion
@@ -304,23 +321,49 @@ lazy val amdgpu = module(projectMatrix.in(file("isa/amdgpu")))
     )
   )
 
-lazy val spirv = module(projectMatrix.in(file("isa/spirv")))
+lazy val amdgpuVm = module(projectMatrix.in(file("isa/amdgpu-vm")))
+  .settings(Publishing.library("AMDGPU wave execution."))
+  .dependsOn(amdgpuAsm % "compile->compile;test->test")
+  .settings(name := "gemstone-isa-amdgpu-vm")
+  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(
+    scalaVersions = Seq(scala3Version),
+    settings = nativeTestSettings ++ Seq(
+      Compile / nativeConfig ~= (_.withEmbedResources(true)),
+      Test / nativeConfig ~= (_.withEmbedResources(true))
+    )
+  )
+
+lazy val spirvAsm = module(projectMatrix.in(file("isa/spirv-asm")))
+  .settings(Publishing.library("SPIR-V module model, binary codec, assembly text and validation."))
   .dependsOn(core % "compile->compile;test->test")
   .settings(
     CheckedInSources.settings,
-    name                                   := "gemstone-isa-spirv",
-    libraryDependencies += "org.typelevel" %% "cats-core" % catsCoreVersion,
-    Test / envVars += ("GEMSTONE_NATIVE_DIRECTORY" -> s"${(native / nativeArtifact).value}")
+    name                                   := "gemstone-isa-spirv-asm",
+    libraryDependencies += "org.typelevel" %% "cats-core" % catsCoreVersion
   )
   .jvmPlatform(
     scalaVersions = Seq(scala3Version),
     axisValues = Seq.empty,
     configure = _.enablePlugins(Stryker4sPlugin).settings(
       mutationSettings,
-      Test / fork       := true,
       strykerMutate     := Seq(s"src/main/scala/${rootPackage.replace('.', '/')}/isa/spirv/Binary.scala"),
       strykerTestFilter := Seq(s"$rootPackage.isa.spirv.BinarySuite")
     )
+  )
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = nativeTestSettings)
+
+lazy val spirvVm = module(projectMatrix.in(file("isa/spirv-vm")))
+  .settings(Publishing.library("SPIR-V compute and graphics execution."))
+  .dependsOn(spirvAsm % "compile->compile;test->test")
+  .settings(
+    name := "gemstone-isa-spirv-vm",
+    Test / envVars += ("GEMSTONE_NATIVE_DIRECTORY" -> s"${(native / nativeArtifact).value}")
+  )
+  .jvmPlatform(
+    scalaVersions = Seq(scala3Version),
+    axisValues = Seq.empty,
+    configure = _.settings(Test / fork := true)
   )
   .nativePlatform(
     scalaVersions = Seq(scala3Version),
@@ -328,9 +371,13 @@ lazy val spirv = module(projectMatrix.in(file("isa/spirv")))
   )
 
 lazy val server = module(projectMatrix.in(file("server")))
-  .dependsOn(core % "compile->compile;test->test", ptx, sass, amdgpu, spirv)
+  .dependsOn(core % "compile->compile;test->test", ptxVm, sassVm, amdgpuVm, spirvVm)
+  .dependsOn(publicapiPlugin % "plugin->compile")
   .settings(
-    name := "gemstone-server",
+    name           := "gemstone-server",
+    publish / skip := true,
+    Compile / scalacOptions += s"-P:publicapi:$rootPackage.server",
+    Test / scalacOptions -= s"-P:publicapi:$rootPackage.server",
     Test / envVars += ("GEMSTONE_NATIVE_DIRECTORY" -> s"${(native / nativeArtifact).value}"),
     libraryDependencies ++= Seq(
       "com.monovore"  %% "decline"   % declineVersion,
@@ -364,7 +411,7 @@ lazy val server = module(projectMatrix.in(file("server")))
   )
 
 lazy val benchmarks = module(projectMatrix.in(file("tools/benchmarks")))
-  .dependsOn(core, ptx, sass, amdgpu, spirv, server)
+  .dependsOn(core, ptxVm, sassVm, amdgpuVm, spirvVm, server)
   .settings(
     name           := "gemstone-benchmarks",
     publish / skip := true,
@@ -558,6 +605,7 @@ lazy val conformance = project.in(file("conformance"))
     emulate := Def.inputTaskDyn {
       val arguments = Def.spaceDelimited("[--target-set name] [--workload name] [backend[/architecture] ...]").parsed
       val targetSet = arguments.sliding(2).collectFirst { case Seq("--target-set", name) => name }
+        .getOrElse(conformanceTargetSet.value)
       val remaining = arguments.indexOf("--target-set") match {
         case -1    => arguments
         case index => arguments.patch(index, Nil, 2)
@@ -574,7 +622,7 @@ lazy val conformance = project.in(file("conformance"))
             "--executable",
             s"${conformanceHost.value / "bin/conformance"}",
             "--artifacts",
-            s"${conformanceDirectory.value / "artifacts"}",
+            s"${build.toTask(s" $targetSet").value}",
             "--output",
             s"${conformanceDirectory.value / "emulated"}",
             "--root",
@@ -592,7 +640,7 @@ lazy val conformance = project.in(file("conformance"))
             "--routes",
             s"${baseDirectory.value / "artifacts/Targets.cmake"}",
             "--target-set",
-            targetSet.getOrElse(conformanceTargetSet.value)
+            targetSet
           ) ++ (if (conformanceJfr.value) Seq("--jfr", s"${conformanceDirectory.value / "jfr"}") else Seq.empty) ++
             remaining
         }
@@ -604,18 +652,21 @@ lazy val conformance = project.in(file("conformance"))
 lazy val gemstone = project.in(file("."))
   .disablePlugins(Stryker4sPlugin)
   .aggregate(testSupport.projectRefs *)
-  .aggregate(codegenProject, isaTools, conformanceTool, codestyleTool)
+  .aggregate(codegenProject, isaTools, samples, conformanceTool, codestyleTool)
   .aggregate(core.projectRefs *)
   .aggregate(server.projectRefs *)
-  .aggregate(ptx.projectRefs *)
-  .aggregate(sass.projectRefs *)
+  .aggregate(ptxAsm.projectRefs *)
+  .aggregate(ptxVm.projectRefs *)
+  .aggregate(sassAsm.projectRefs *)
+  .aggregate(sassVm.projectRefs *)
   .aggregate(nvidia.projectRefs *)
-  .aggregate(amdgpu.projectRefs *)
-  .aggregate(spirv.projectRefs *)
+  .aggregate(amdgpuAsm.projectRefs *)
+  .aggregate(amdgpuVm.projectRefs *)
+  .aggregate(spirvAsm.projectRefs *)
+  .aggregate(spirvVm.projectRefs *)
   .aggregate(benchmarks.projectRefs *)
   .aggregate(codestyle)
   .aggregate(native, conformance)
-  .dependsOn(codestyleRules % ScalafixConfig)
   .settings(
     name           := "gemstone",
     publish / skip := true,
@@ -627,35 +678,42 @@ lazy val gemstone = project.in(file("."))
         Coverage.Entry(core.jvm(scala3Version).id),
         Coverage.Entry(nvidia.jvm(scala3Version).id),
         Coverage.Entry(
-          sass.jvm(scala3Version).id,
-          generated = Seq((sass.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
+          sassAsm.jvm(scala3Version).id,
+          generated = Seq((sassAsm.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
         ),
+        Coverage.Entry(sassVm.jvm(scala3Version).id),
         Coverage.Entry(
-          amdgpu.jvm(scala3Version).id,
-          generated = Seq((amdgpu.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
+          amdgpuAsm.jvm(scala3Version).id,
+          generated = Seq((amdgpuAsm.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
         ),
+        Coverage.Entry(amdgpuVm.jvm(scala3Version).id),
         Coverage.Entry(
-          ptx.jvm(scala3Version).id,
-          generated = Seq((ptx.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
+          ptxAsm.jvm(scala3Version).id,
+          generated = Seq((ptxAsm.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
         ),
+        Coverage.Entry(ptxVm.jvm(scala3Version).id),
         Coverage.Entry(
-          spirv.jvm(scala3Version).id,
-          generated = Seq((spirv.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
+          spirvAsm.jvm(scala3Version).id,
+          generated = Seq((spirvAsm.jvm(scala3Version) / Compile / checkedInGeneratedSourceDirectory).value.toFile)
         ),
+        Coverage.Entry(spirvVm.jvm(scala3Version).id),
         Coverage.Entry(server.jvm(scala3Version).id),
         Coverage.Entry(codegenProject.id),
         Coverage.Entry(isaTools.id),
-        Coverage.Entry(benchmarks.jvm(scala3Version).id),
-        Coverage.Entry(codestyleRules.id, tests = false),
-        Coverage.Entry(codestyleTests.id, measure = false)
+        Coverage.Entry(benchmarks.jvm(scala3Version).id)
       ),
-      includes = Seq(s"$rootPackage.*", "fix.*"),
+      includes = Seq(s"$rootPackage.*"),
       output = baseDirectory.value / "target" / "coverage"
     ),
     terminologyCheck := RunMain.main(
       codestyleTool,
       s"$rootPackage.tools.codestyle.CLI",
       Def.task(Seq("terminology", s"${baseDirectory.value}", "contract", "plan"))
+    ).value,
+    binaryCheck := RunMain.main(
+      codestyleTool,
+      s"$rootPackage.tools.codestyle.CLI",
+      Def.task(Seq("binaries", s"${baseDirectory.value}"))
     ).value,
     codegen := RunMain.main(
       codegenProject,
@@ -669,5 +727,5 @@ addCommandAlias("gemstoneRun", "server/run run")
 
 addCommandAlias(
   "lint",
-  ";terminologyCheck;codegen/checkEnvironment;scalafmtCheckAll;scalafmtSbtCheck;scalafixAll --check;native/lint;conformance/lint"
+  ";terminologyCheck;binaryCheck;codegen/checkEnvironment;scalafmtCheckAll;scalafmtSbtCheck;scalafixAll --check;mimaReportBinaryIssues;native/lint;conformance/lint"
 )

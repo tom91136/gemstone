@@ -14,7 +14,6 @@ import net.kurobako.gemstone.isa.ptx as PTX
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
-import scala.util.Using
 
 /** Equivalent PTX and encoded SASS kernels exercise divergent branches, predicate guards, loops and memory. */
 object NVIDIAControlFlowBenchmark {
@@ -28,7 +27,7 @@ object NVIDIAControlFlowBenchmark {
       _.raw.refine[Int in 1 ~ 1024].leftMap(_ => "lanes must be at most 1024").toValidatedNel
     ),
     positive("groups", "Workgroups per dispatch", 16),
-    workers(1)
+    workers
   ).mapN((isa, iterations, rounds, lanes, groups, workers) =>
     () => run(isa, iterations, rounds, lanes, groups, workers)
   )
@@ -137,18 +136,9 @@ object NVIDIAControlFlowBenchmark {
           ("param2": NonEmpty[String]) -> Argument(LittleEndian.toVec(lanes.raw.toLong, 4).unsafe)
         )
     }
-    val sample = Using.resource(WorkerPool(parallelism = workers, minGroups = 1, minWorkItems = 1)) { pool =>
-      Measurement.repeat(iterations) {
-        VMInterpreter.execute(
-          kernel = kernel,
-          geometry = geometry,
-          arguments = parameters,
-          memory = memory,
-          workgroups = pool
-        )
-          .fold(error => throw IllegalStateException(error.message), _ => ())
-      }
-    }
+    val sample = Measurement.repeatPooled(iterations, workers)(pool =>
+      VMInterpreter.execute(kernel, geometry, parameters, memory, workgroups = pool)
+    )
     (0 until count).foreach { lane =>
       val actual    = memory.getInt(output, (lane + 1) * 4)
       val increment = if ((lane % lanes.raw & 1) == 0) 1 else 2

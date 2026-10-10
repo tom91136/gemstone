@@ -23,13 +23,16 @@ object TaskControl {
   private val Lease  = 1024L
 }
 
-/** One execution's irreversible cancellation and shared instruction allowance. A rejected charge consumes nothing;
-  * cancellation is permanent. Already-running instructions stop at their next checkpoint.
+/** One execution's irreversible cancellation, shared instruction allowance and optional observer. A rejected charge
+  * consumes nothing; cancellation is permanent. Already-running instructions stop at their next checkpoint.
   *
   * Workers charge leases held in per-thread cells and refill them from the shared allowance in bounded chunks. A charge
   * the allowance cannot cover reclaims every unspent lease first, so rejection still means the whole allowance is used.
   */
-class TaskControl(val limits: TaskControl.Limits = TaskControl.Limits.Default) {
+class TaskControl(
+    val limits: TaskControl.Limits = TaskControl.Limits.Default,
+    val observer: Option[LaunchObserver] = None
+) {
   import TaskControl.*
 
   private val cancelled = AtomicBoolean()
